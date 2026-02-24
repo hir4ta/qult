@@ -1,0 +1,6 @@
+claude-buddy
+*.exe
+.DS_Store
+dist/
+*.db
+CLAUDE.md

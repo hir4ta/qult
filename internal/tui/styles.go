@@ -1,0 +1,179 @@
+package tui
+
+import "github.com/charmbracelet/lipgloss"
+
+var (
+	// Header area
+	headerStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#D0D0D0")).
+			Background(lipgloss.Color("#4A3A6B")).
+			Padding(0, 1)
+
+	statsStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#B0A8B8"))
+
+	// Message stream
+	userMsgStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6A9FB5")).
+			Bold(true)
+
+	toolUseStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#B5A06A"))
+
+	toolNameStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#B5A06A")).
+			Bold(true)
+
+	assistantTextStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#C0B8C0"))
+
+	// Task progress
+	taskPendingStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#908890"))
+
+	taskActiveStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#B5A06A")).
+			Bold(true)
+
+	taskDoneStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6A9A78"))
+
+	// Agent/team
+	agentStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#A0708A"))
+
+	messageStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#7090A0"))
+
+	// Feedback: situation line (dim gray)
+	feedbackSituationStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#908890"))
+
+	// Feedback: observation by level (left border + color)
+	feedbackInfoStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#6A9FB5")).
+				BorderLeft(true).
+				BorderStyle(lipgloss.ThickBorder()).
+				BorderForeground(lipgloss.Color("#405868")).
+				PaddingLeft(1)
+
+	feedbackInsightStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#A070B0")).
+				BorderLeft(true).
+				BorderStyle(lipgloss.ThickBorder()).
+				BorderForeground(lipgloss.Color("#704880")).
+				PaddingLeft(1)
+
+	feedbackWarningStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#C0A030")).
+				BorderLeft(true).
+				BorderStyle(lipgloss.ThickBorder()).
+				BorderForeground(lipgloss.Color("#806820")).
+				PaddingLeft(1)
+
+	feedbackActionStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#C07040")).
+				BorderLeft(true).
+				BorderStyle(lipgloss.ThickBorder()).
+				BorderForeground(lipgloss.Color("#904830")).
+				PaddingLeft(1)
+
+	// Feedback: suggestion line (green bold)
+	feedbackSuggestionStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#6A9A78")).
+				Bold(true)
+
+	// Tool summary in expanded assistant view
+	toolSummaryStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#B5A06A"))
+
+	toolSummaryDimStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#908890"))
+
+	// Separator
+	separatorStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#585060"))
+
+	// Dimmed text
+	dimStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#908890"))
+
+	// Plan mode badge
+	planModeStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#D0D0D0")).
+			Background(lipgloss.Color("#8A5A30")).
+			Padding(0, 1)
+
+	// AskUserQuestion answer
+	answerStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#8A70A0")).
+			Bold(true)
+
+	// Cursor
+	cursorStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#A0B0C0")).
+			Bold(true)
+
+	// Expanded text
+	expandedTextStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#A098A0"))
+
+	// Expanded text box (border around expanded content)
+	expandedBoxStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("#686068")).
+				PaddingLeft(1)
+
+	// Help line
+	helpStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#888090"))
+
+	// Shimmer effect (in_progress tasks)
+	shimmerHighStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#FFFFFF")).
+				Bold(true)
+
+	shimmerGlowStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#D0C8A0"))
+
+	// Pulsing activity indicator
+	pulseActiveStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#6A9A78")).
+				Bold(true)
+
+	pulseDimStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#709870"))
+
+	// Markdown rendering
+	mdHeaderStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#D0C0E0"))
+
+	mdCodeBlockStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#B0A070"))
+
+	mdBoldStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#D0C8D0"))
+
+	mdInlineCodeStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#B0A070"))
+
+	mdBulletStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#6A9A78"))
+
+	mdTableBorderStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#686068"))
+
+	mdTableHeaderStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#C0B8C0"))
+
+	mdTableCellStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#A098A0"))
+
+	mdHorizontalRuleStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#686068"))
+)

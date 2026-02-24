@@ -1,0 +1,37 @@
+version: 2
+
+builds:
+  - binary: claude-buddy
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+brews:
+  - repository:
+      owner: hir4ta
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/hir4ta/claude-buddy
+    description: "Real-time companion TUI for Claude Code with AI-powered usage feedback"
+    license: MIT
+    install: |
+      bin.install "claude-buddy"
+    caveats: |
+      AI feedback language is auto-detected from your system locale (LANG).
+      To override: LANG=ja_JP.UTF-8 claude-buddy
+
+      Requires 'claude' CLI for AI feedback features.
+    test: |
+      system "#{bin}/claude-buddy", "help"
+
+changelog:
+  sort: asc
