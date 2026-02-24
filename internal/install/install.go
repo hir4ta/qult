@@ -1,12 +1,15 @@
 package install
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/hir4ta/claude-buddy/internal/embedder"
+	"github.com/hir4ta/claude-buddy/internal/locale"
 	"github.com/hir4ta/claude-buddy/internal/store"
 )
 
@@ -36,6 +39,9 @@ func Run() error {
 	if err := initialSync(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: initial sync failed: %v\n", err)
 	}
+
+	// Step 5: Generate embeddings (if Ollama available)
+	generateEmbeddings()
 
 	return nil
 }
@@ -129,4 +135,35 @@ func initialSync() error {
 
 	fmt.Printf("✓ Initial sync complete (%d sessions, %d events)\n", sessionCount, eventCount)
 	return nil
+}
+
+func generateEmbeddings() {
+	lang := locale.Detect()
+	model := embedder.ModelForLocale(lang.Code)
+	emb := embedder.NewEmbedder("", model)
+
+	ctx := context.Background()
+	if !emb.EnsureAvailable(ctx) {
+		fmt.Println("ℹ Ollama not available — skipping embedding generation (FTS5 search only)")
+		return
+	}
+
+	fmt.Printf("⏳ Generating embeddings (%s)...\n", model)
+
+	st, err := store.OpenDefault()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: embedding generation failed: %v\n", err)
+		return
+	}
+	defer st.Close()
+
+	count, err := st.EmbedPending(func(text string) ([]float32, error) {
+		return emb.EmbedForStorage(ctx, text)
+	}, model)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: embedding generation failed: %v\n", err)
+		return
+	}
+
+	fmt.Printf("✓ Embeddings generated (%d patterns, model: %s)\n", count, model)
 }
