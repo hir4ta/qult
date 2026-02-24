@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -93,6 +94,7 @@ Please provide:
 Keep it concise and practical.`, lang.Name, string(reportJSON))
 
 	cmd := exec.CommandContext(ctx, "claude", "-p", prompt)
+	cmd.Dir = os.TempDir() // Avoid creating session files in the watched project
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("claude -p failed: %w", err)

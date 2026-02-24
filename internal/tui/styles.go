@@ -7,7 +7,7 @@ var (
 	headerStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("#D0D0D0")).
-			Background(lipgloss.Color("#4A3A6B")).
+			Background(lipgloss.Color("#C15F3C")).
 			Padding(0, 1)
 
 	statsStyle = lipgloss.NewStyle().
@@ -46,43 +46,13 @@ var (
 	messageStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#7090A0"))
 
-	// Feedback: situation line (dim gray)
-	feedbackSituationStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#908890"))
+	// Tip label (buddy MCP tool events)
+	tipLabelStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6A9A78")).
+			Bold(true)
 
-	// Feedback: observation by level (left border + color)
-	feedbackInfoStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#6A9FB5")).
-				BorderLeft(true).
-				BorderStyle(lipgloss.ThickBorder()).
-				BorderForeground(lipgloss.Color("#405868")).
-				PaddingLeft(1)
-
-	feedbackInsightStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#A070B0")).
-				BorderLeft(true).
-				BorderStyle(lipgloss.ThickBorder()).
-				BorderForeground(lipgloss.Color("#704880")).
-				PaddingLeft(1)
-
-	feedbackWarningStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#C0A030")).
-				BorderLeft(true).
-				BorderStyle(lipgloss.ThickBorder()).
-				BorderForeground(lipgloss.Color("#806820")).
-				PaddingLeft(1)
-
-	feedbackActionStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#C07040")).
-				BorderLeft(true).
-				BorderStyle(lipgloss.ThickBorder()).
-				BorderForeground(lipgloss.Color("#904830")).
-				PaddingLeft(1)
-
-	// Feedback: suggestion line (green bold)
-	feedbackSuggestionStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#6A9A78")).
-				Bold(true)
+	tipTextStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6A9A78"))
 
 	// Tool summary in expanded assistant view
 	toolSummaryStyle = lipgloss.NewStyle().
@@ -176,4 +146,13 @@ var (
 
 	mdHorizontalRuleStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#686068"))
+)
+
+// Nerd Fonts glyphs (Font Awesome set).
+// Requires a Nerd Font to render correctly.
+const (
+	nfLightbulb = "\uF0EB"
+	nfEye       = "\uF06E"
+	nfWrench    = "\uF0AD"
+	nfArrow     = "\uF061"
 )

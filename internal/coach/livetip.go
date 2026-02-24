@@ -3,6 +3,7 @@ package coach
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 )
 
 // GenerateFeedback calls claude -p with recent activity to get feedback.
+// It fetches the latest official best practices before generating feedback.
 func GenerateFeedback(ctx context.Context, events []parser.SessionEvent, stats analyzer.Stats, lang locale.Lang, prevFeedbacks []analyzer.Feedback) (analyzer.Feedback, error) {
 	if _, err := exec.LookPath("claude"); err != nil {
 		return analyzer.Feedback{}, fmt.Errorf("claude CLI not found: %w", err)
@@ -20,12 +22,16 @@ func GenerateFeedback(ctx context.Context, events []parser.SessionEvent, stats a
 
 	summary := buildSummary(events, stats, prevFeedbacks)
 
-	prompt := buildFeedbackPrompt(summary, lang)
+	// Fetch latest best practices (cached for 1 hour)
+	bestPractices, _ := FetchBestPractices()
+
+	prompt := buildFeedbackPrompt(summary, lang, bestPractices)
 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "claude", "-p", prompt)
+	cmd.Dir = os.TempDir() // Avoid creating session files in the watched project
 	out, err := cmd.Output()
 	if err != nil {
 		return analyzer.Feedback{}, err
@@ -34,19 +40,27 @@ func GenerateFeedback(ctx context.Context, events []parser.SessionEvent, stats a
 	return parseFeedbackOutput(string(out)), nil
 }
 
-func buildFeedbackPrompt(summary string, lang locale.Lang) string {
+func buildFeedbackPrompt(summary string, lang locale.Lang, bestPractices string) string {
+	bpSection := ""
+	if bestPractices != "" {
+		bpSection = fmt.Sprintf(`
+## Official Best Practices (from code.claude.com)
+%s
+`, bestPractices)
+	}
+
 	if lang.Code == "ja" {
 		return fmt.Sprintf(`あなたはClaude Codeのベストプラクティス専門コーチです。
 以下はユーザーのリアルタイムセッション状況です。
 
 %s
-
+%s
 以下のフォーマットで正確に4行出力してください:
 
 SITUATION: (ユーザーが今やろうとしていること。イベント列から推定)
 OBSERVATION: (セッションから気づいた事実・パターン)
 SUGGESTION: (具体的で実行可能なアクション提案)
-LEVEL: info|insight|warning|action
+LEVEL: low|info|insight|warning|action
 
 ## 重要ルール
 - 提案はユーザーが実行できるアクションに限定。Claude Code の内部動作への言及は禁止。
@@ -54,32 +68,24 @@ LEVEL: info|insight|warning|action
 - SITUATIONはイベント列からユーザーの意図を推定して記述する。
 - OBSERVATIONは統計や行動パターンから気づいた具体的な事実を書く。
 - SUGGESTIONは今すぐ実行できる具体的アクション1つ。
-- LEVELは info(一般), insight(非自明な発見), warning(潜在的問題), action(即時対応推奨) から選択。
+- LEVELは low(表示不要), info(一般), insight(非自明な発見), warning(潜在的問題), action(即時対応推奨) から選択。特に伝えるべきことがなければlowにする。
 - ラベル(SITUATION:/OBSERVATION:/SUGGESTION:/LEVEL:)は必ず英語のまま出力。内容は日本語で書く。
+- 上記の公式ベストプラクティスを評価基準として使用すること。ハードコードされた基準ではなく、最新の公式ドキュメントに基づいて評価する。
 
-## 評価基準（Claude Code公式ベストプラクティス）
-- CLAUDE.mdの活用: プロジェクトルールやビルドコマンドが定義されているか
-- .claude/の設定: settings.json、カスタムスキル(.claude/skills/)、カスタムエージェント(.claude/agents/)の活用
-- ツール選択: Bash grep/cat/find/sedではなく専用ツール(Grep/Read/Glob/Edit)を使用しているか
-- Plan Mode: 複雑なタスクでEnterPlanModeを使用しているか
-- サブエージェント: 並列探索にTask toolを活用しているか
-- セッション管理: 長いセッションで/compactを使っているか
-- プロンプト品質: 具体的なファイルパスや要件を含んでいるか
-
-SITUATION:、OBSERVATION:、SUGGESTION:、LEVEL:の4行のみ出力。他のテキストは不要。`, summary)
+SITUATION:、OBSERVATION:、SUGGESTION:、LEVEL:の4行のみ出力。他のテキストは不要。`, summary, bpSection)
 	}
 
 	return fmt.Sprintf(`You are a coach specializing in Claude Code official best practices.
 Below is the user's real-time session status.
 
 %s
-
+%s
 Output exactly 4 lines in this format:
 
 SITUATION: (What the user is currently trying to do — infer from the event stream)
 OBSERVATION: (A concrete fact or pattern you noticed from the session)
 SUGGESTION: (One specific, actionable improvement the user can make right now)
-LEVEL: info|insight|warning|action
+LEVEL: low|info|insight|warning|action
 
 ## CRITICAL RULES
 - Suggestions MUST be actions the USER can take. NEVER reference Claude Code's internal behavior.
@@ -87,19 +93,11 @@ LEVEL: info|insight|warning|action
 - SITUATION: infer what the user is trying to accomplish from the event stream.
 - OBSERVATION: state a concrete fact from statistics or behavior patterns.
 - SUGGESTION: one specific action the user can take RIGHT NOW.
-- LEVEL: info (general), insight (non-obvious finding), warning (potential issue), action (immediate action needed).
+- LEVEL: low (nothing notable), info (general), insight (non-obvious finding), warning (potential issue), action (immediate action needed). Use low when there is nothing meaningful to report.
 - Labels (SITUATION:/OBSERVATION:/SUGGESTION:/LEVEL:) must be in ASCII English.
+- Use the official best practices above as your evaluation criteria. Evaluate based on the latest official documentation, not hardcoded rules.
 
-## Evaluation criteria (Claude Code official best practices)
-- CLAUDE.md usage: Are project rules and build commands defined in CLAUDE.md?
-- .claude/ configuration: Are settings.json, custom skills (.claude/skills/), custom agents (.claude/agents/) being utilized?
-- Tool selection: Using dedicated tools (Grep/Read/Glob/Edit) instead of Bash grep/cat/find/sed?
-- Plan Mode: Using EnterPlanMode for complex tasks?
-- Sub-agents: Using Task tool for parallel exploration/research?
-- Session management: Using /compact for long sessions? Splitting tasks appropriately?
-- Prompt quality: Including specific file paths and requirements in instructions?
-
-Output ONLY the SITUATION:, OBSERVATION:, SUGGESTION:, and LEVEL: lines. No other text.`, summary)
+Output ONLY the SITUATION:, OBSERVATION:, SUGGESTION:, and LEVEL: lines. No other text.`, summary, bpSection)
 }
 
 func buildSummary(events []parser.SessionEvent, stats analyzer.Stats, prevFeedbacks []analyzer.Feedback) string {

@@ -116,7 +116,7 @@ func (m SelectModel) View() string {
 			sid = sid[:8]
 		}
 
-		age := humanizeAge(time.Since(s.ModTime), m.lang.Code == "ja")
+		age := humanizeAge(time.Since(s.ModTime))
 
 		project := s.Project
 		pad := maxProj - len([]rune(project))

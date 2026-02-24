@@ -1,18 +1,14 @@
 package tui
 
 import (
-	"context"
 	"strconv"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/hir4ta/claude-buddy/internal/analyzer"
-	"github.com/hir4ta/claude-buddy/internal/coach"
 	"github.com/hir4ta/claude-buddy/internal/locale"
 	"github.com/hir4ta/claude-buddy/internal/parser"
 )
-
-const feedbackInterval = 3 // turns between LLM feedback requests
 
 // TaskState tracks a single task's current state.
 type TaskState struct {
@@ -27,7 +23,6 @@ type TaskState struct {
 type Model struct {
 	events         []parser.SessionEvent
 	stats          analyzer.Stats
-	feedbacks      []analyzer.Feedback
 	tasks          []TaskState // ordered by creation
 	taskMap        map[string]int // taskID -> index in tasks
 	taskCounter    int
@@ -42,11 +37,8 @@ type Model struct {
 	autoFollow     bool         // cursor follows new events
 	inPlanMode     bool
 	awaitingAnswer bool // next user message is an AskUserQuestion response
-	llmTipPending  bool   // LLM tip request in flight
 	sessionEnded   bool   // event channel closed
-	feedbackErr    string // last feedback generation error
 	showHelp       bool   // help overlay visible
-	lastLLMTurnAt  int  // TurnCount when last LLM tip was triggered
 
 	// Locale
 	lang locale.Lang
@@ -68,6 +60,19 @@ func NewModel(initialEvents []parser.SessionEvent, eventCh <-chan parser.Session
 	for i := range initialEvents {
 		ev := &initialEvents[i]
 		stats.Update(*ev)
+
+		// Auto-compact boundary: reset displayed events to avoid duplicates.
+		// After compaction, Claude Code re-serializes context messages to the JSONL,
+		// so we only show events from the latest segment.
+		if ev.Type == parser.EventCompactBoundary {
+			events = events[:0]
+			tasks = tasks[:0]
+			taskMap = make(map[string]int)
+			taskCounter = 0
+			inPlanMode = false
+			awaitingAnswer = false
+			continue
+		}
 
 		// Deduplicate TaskUpdate events from repeated TaskList calls:
 		// skip if the task already exists with the same status.
@@ -109,7 +114,6 @@ func NewModel(initialEvents []parser.SessionEvent, eventCh <-chan parser.Session
 		inPlanMode:    inPlanMode,
 		awaitingAnswer: awaitingAnswer,
 		lang:          lang,
-		lastLLMTurnAt: stats.TurnCount,
 	}
 }
 
@@ -118,10 +122,6 @@ type newEventMsg parser.SessionEvent
 type sessionEndedMsg struct{}
 type tickMsg time.Time
 type animTickMsg time.Time
-type llmFeedbackMsg struct {
-	feedback analyzer.Feedback
-	err      error
-}
 
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
@@ -151,6 +151,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update stats and tasks always
 		m.stats.Update(ev)
 
+		// Auto-compact boundary: reset displayed events to avoid duplicates.
+		if ev.Type == parser.EventCompactBoundary {
+			m.events = m.events[:0]
+			m.tasks = m.tasks[:0]
+			m.taskMap = make(map[string]int)
+			m.taskCounter = 0
+			m.expanded = make(map[int]bool)
+			m.cursorIdx = 0
+			m.expandOffset = 0
+			return m, m.waitForEvent()
+		}
+
 		// Deduplicate TaskUpdate events from repeated TaskList calls:
 		// skip display if the task already exists with the same status.
 		if ev.Type == parser.EventTaskUpdate && ev.TaskID != "" {
@@ -170,29 +182,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursorIdx = m.lastVisibleIdx()
 		}
 
-		// Trigger LLM feedback periodically
-		cmds := []tea.Cmd{m.waitForEvent()}
-		if !m.llmTipPending && m.stats.TurnCount > 0 &&
-			m.stats.TurnCount-m.lastLLMTurnAt >= feedbackInterval {
-			m.llmTipPending = true
-			m.lastLLMTurnAt = m.stats.TurnCount
-			cmds = append(cmds, m.requestLLMFeedback())
-		}
-
-		return m, tea.Batch(cmds...)
-
-	case llmFeedbackMsg:
-		m.llmTipPending = false
-		if msg.err != nil {
-			m.feedbackErr = msg.err.Error()
-		} else {
-			m.feedbackErr = ""
-			m.feedbacks = append(m.feedbacks, msg.feedback)
-			if len(m.feedbacks) > 10 {
-				m.feedbacks = m.feedbacks[len(m.feedbacks)-10:]
-			}
-		}
-		return m, nil
+		return m, m.waitForEvent()
 
 	case animTickMsg:
 		m.animFrame++
@@ -358,10 +348,8 @@ func (m Model) fixedHeight() int {
 	// separator after messages: 1
 	h++
 
-	// feedback area: 1 line if pending/countdown, 3 lines if feedback (situation+observation+suggestion)
-	if len(m.feedbacks) > 0 && !m.llmTipPending {
-		h += 3
-	} else {
+	// session ended line (optional): 1
+	if m.sessionEnded {
 		h++
 	}
 
@@ -410,27 +398,6 @@ func (m Model) expandMaxOffset(eventIdx int) int {
 		return 0
 	}
 	return maxOff
-}
-
-// requestLLMFeedback runs claude -p in the background to generate feedback + tip.
-func (m Model) requestLLMFeedback() tea.Cmd {
-	events := m.events
-	stats := m.stats
-	lang := m.lang
-	// Pass last 3 feedbacks so the LLM avoids repetition
-	var prev []analyzer.Feedback
-	if n := len(m.feedbacks); n > 0 {
-		start := n - 3
-		if start < 0 {
-			start = 0
-		}
-		prev = make([]analyzer.Feedback, n-start)
-		copy(prev, m.feedbacks[start:])
-	}
-	return func() tea.Msg {
-		fb, err := coach.GenerateFeedback(context.Background(), events, stats, lang, prev)
-		return llmFeedbackMsg{feedback: fb, err: err}
-	}
 }
 
 // nextVisibleIdx returns the next event index that is visible in the event list.

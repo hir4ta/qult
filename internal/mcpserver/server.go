@@ -509,6 +509,8 @@ func decisionsHandler(st *store.Store) server.ToolHandlerFunc {
 
 func levelString(l analyzer.FeedbackLevel) string {
 	switch l {
+	case analyzer.LevelLow:
+		return "low"
 	case analyzer.LevelInsight:
 		return "insight"
 	case analyzer.LevelWarning:

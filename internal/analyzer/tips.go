@@ -6,7 +6,8 @@ import "strings"
 type FeedbackLevel int
 
 const (
-	LevelInfo    FeedbackLevel = iota // general observation
+	LevelLow     FeedbackLevel = iota // not worth showing
+	LevelInfo                         // general observation
 	LevelInsight                      // non-obvious finding
 	LevelWarning                      // potential issue
 	LevelAction                       // requires immediate action
@@ -23,13 +24,17 @@ type Feedback struct {
 // ParseLevel converts a string to FeedbackLevel.
 func ParseLevel(s string) FeedbackLevel {
 	switch strings.TrimSpace(strings.ToLower(s)) {
+	case "low":
+		return LevelLow
 	case "insight":
 		return LevelInsight
 	case "warning":
 		return LevelWarning
 	case "action":
 		return LevelAction
-	default:
+	case "info":
 		return LevelInfo
+	default:
+		return LevelLow
 	}
 }

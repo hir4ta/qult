@@ -5,7 +5,7 @@ A real-time companion TUI that runs alongside Claude Code, providing live sessio
 ## Install
 
 ```bash
-brew install user/tap/claude-buddy
+brew install hir4ta/tap/claude-buddy
 ```
 
 Or build from source:
@@ -16,30 +16,40 @@ cd claude-buddy
 go build -o claude-buddy .
 ```
 
-## Language
-
-claude-buddy automatically detects your system locale (`LANG` / `LC_ALL` / `LC_MESSAGES`) and generates AI feedback in your language. The UI labels remain in English.
-
-To explicitly set the language:
+## Setup
 
 ```bash
-# Japanese
+claude-buddy install
+```
+
+This registers the MCP server, updates `~/.claude/CLAUDE.md`, and syncs all existing sessions to the local SQLite database (`~/.claude-buddy/buddy.db`).
+
+## Language
+
+claude-buddy detects your system locale (`LANG` / `LC_ALL` / `LC_MESSAGES`) and generates AI feedback in your language. UI labels remain in English.
+
+To persist your language setting, add to your `~/.zshrc` (or `~/.bashrc`):
+
+```bash
+export LANG=ja_JP.UTF-8
+```
+
+Or set per-invocation:
+
+```bash
 LANG=ja_JP.UTF-8 claude-buddy
-
-# English
-LANG=en_US.UTF-8 claude-buddy
-
-# Korean
 LANG=ko_KR.UTF-8 claude-buddy
 ```
 
-Supported languages for AI feedback: English, Japanese, Chinese, Korean, Spanish, French, German, Portuguese, Russian, Italian, Arabic, Hindi, Thai, Vietnamese, Turkish, Polish, Dutch, Swedish.
+> **Note**: On macOS, the terminal may default to `en_US.UTF-8` even if the system language is set to Japanese. Set `LANG` explicitly if feedback appears in the wrong language.
+
+Supported languages: English, Japanese, Chinese, Korean, Spanish, French, German, Portuguese, Russian, Italian, Arabic, Hindi, Thai, Vietnamese, Turkish, Polish, Dutch, Swedish.
 
 ## Commands
 
-### `claude-buddy watch` (default)
+### `claude-buddy` / `claude-buddy watch`
 
-Monitor a Claude Code session in real-time. Run in a separate terminal or tmux pane alongside Claude Code.
+Monitor a Claude Code session in real-time. Run in a separate terminal or tmux pane.
 
 ```bash
 # Terminal 1
@@ -52,14 +62,13 @@ claude
 **Features:**
 
 - **Header**: Session ID, turn count, tool usage, elapsed time, pulsing activity indicator
-- **Task progress**: Detects TaskCreate/TaskUpdate events with shimmer effect on active tasks
+- **Task progress**: TaskCreate/TaskUpdate tracking with shimmer animation
   - `○` pending / `▶` in_progress (animated) / `✔` completed
-- **Message stream**: Live display of user input, tool usage, assistant responses
-  - `[user]` / `[answer]` / `[assistant]` / `[tool]` / `[task+]` / `[agent]` / `[msg]`
-  - Expand any message with Enter to see full content in a bordered box
-- **AI Feedback**: Every 3 turns, LLM evaluates your Claude Code usage against official best practices
-  - `FB:` Assessment of CLAUDE.md usage, tool selection, Plan Mode, sub-agents, etc.
-  - `Tip:` Concrete, actionable improvement suggestion
+- **Message stream**: Live display of user input, assistant responses, tool summaries
+  - `[user]` / `[answer]` / `[assistant]` / `[task+]` / `[agent]` / `[plan]` / `[msg]`
+  - Expand any message with Enter to view full content
+- **AI Feedback**: Every turn, LLM evaluates your session against official best practices
+  - Situation / Observation / Suggestion with severity levels (info, insight, warning, action)
 
 **Key bindings:**
 
@@ -70,15 +79,26 @@ claude
 | `↓` / `j` | Scroll down |
 | `Enter` | Expand/collapse message |
 | `g` / `G` | Jump to top/bottom |
+| `?` | Help overlay |
 
 ---
 
 ### `claude-buddy browse`
 
-Browse past session history.
+Browse past session history with the same expand/collapse interface.
 
 ```bash
 claude-buddy browse
+```
+
+---
+
+### `claude-buddy install`
+
+One-time setup: registers the MCP server, appends instructions to `~/.claude/CLAUDE.md`, and runs initial DB sync.
+
+```bash
+claude-buddy install
 ```
 
 ---
@@ -91,54 +111,45 @@ Run as an MCP server (stdio) for Claude Code integration.
 claude-buddy serve
 ```
 
-**Available tools:**
+**MCP Tools:**
 
 | Tool | Description |
 |------|-------------|
-| `buddy_stats` | Session usage statistics (turns, tool frequency, duration) |
-| `buddy_tips` | AI-powered feedback and tips for a session |
-| `buddy_sessions` | List recent sessions |
-
-**Integration** - Add to your project's `.mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "claude-buddy": {
-      "command": "claude-buddy",
-      "args": ["serve"]
-    }
-  }
-}
-```
+| `buddy_stats` | Session statistics (turns, tool frequency, duration) |
+| `buddy_tips` | AI-powered feedback and improvement suggestions |
+| `buddy_sessions` | List recent sessions with metadata |
+| `buddy_resume` | Restore previous session context (summary, files modified, decisions) |
+| `buddy_recall` | FTS5 full-text search across past session history |
+| `buddy_decisions` | Extract design decisions from past sessions |
 
 ---
 
 ### `claude-buddy analyze [session_id]`
 
-AI-powered session analysis via `claude -p` (no extra API cost).
+AI-powered session analysis via `claude -p`.
 
 ```bash
 claude-buddy analyze          # Latest session
 claude-buddy analyze de999fa4 # Specific session by ID prefix
 ```
 
-Requires `claude` CLI to be installed and in PATH.
+Requires `claude` CLI in PATH.
 
 ## Architecture
 
 ```
 claude-buddy/
-├── main.go                    # Entry point (subcommand routing)
+├── main.go                    # Entry point + subcommand routing
 ├── internal/
-│   ├── parser/                # JSONL parser
+│   ├── parser/                # JSONL parser (type definitions + parsing)
 │   ├── watcher/               # File watching (fsnotify + tail)
-│   ├── analyzer/              # Live stats + feedback types
-│   ├── coach/                 # AI feedback via claude -p
-│   ├── locale/                # Locale detection (LANG/LC_ALL)
-│   ├── tui/                   # Bubble Tea TUI (watch + browse)
-│   └── mcpserver/             # MCP server (stdio)
-├── CLAUDE.md
+│   ├── analyzer/              # Live stats + Feedback type
+│   ├── coach/                 # AI feedback generation via claude -p
+│   ├── locale/                # System locale detection (18 languages)
+│   ├── tui/                   # Bubble Tea TUI (watch / browse / select)
+│   ├── mcpserver/             # MCP server (stdio, 6 tools)
+│   ├── store/                 # SQLite persistence (FTS5 + incremental sync)
+│   └── install/               # MCP registration + CLAUDE.md + initial sync
 ├── go.mod
 └── go.sum
 ```
@@ -151,3 +162,4 @@ claude-buddy/
 | [charmbracelet/lipgloss](https://github.com/charmbracelet/lipgloss) | TUI styling |
 | [fsnotify/fsnotify](https://github.com/fsnotify/fsnotify) | File change watching |
 | [mark3labs/mcp-go](https://github.com/mark3labs/mcp-go) | MCP server SDK |
+| [ncruces/go-sqlite3](https://github.com/ncruces/go-sqlite3) | SQLite driver (FTS5 support) |

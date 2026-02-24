@@ -83,16 +83,19 @@ func ListSessions(claudeHome string) ([]SessionInfo, error) {
 }
 
 // LoadSessionDetail reads and parses a full session.
+// Events are filtered to only include those after the last auto-compact boundary,
+// since Claude Code re-serializes context messages after compaction.
 func LoadSessionDetail(si SessionInfo) (*SessionDetail, error) {
-	events, _, err := readExisting(si.Path)
+	allEvents, _, err := readExisting(si.Path)
 	if err != nil {
 		return nil, err
 	}
 
+	// Compute stats over all events (full session metrics).
 	stats := SessionStats{
 		ToolFreq: make(map[string]int),
 	}
-	for _, ev := range events {
+	for _, ev := range allEvents {
 		if !ev.Timestamp.IsZero() {
 			if stats.FirstTime.IsZero() || ev.Timestamp.Before(stats.FirstTime) {
 				stats.FirstTime = ev.Timestamp
@@ -107,6 +110,14 @@ func LoadSessionDetail(si SessionInfo) (*SessionDetail, error) {
 		case parser.EventToolUse:
 			stats.ToolUseCount++
 			stats.ToolFreq[ev.ToolName]++
+		}
+	}
+
+	// Filter events to post-last-compact segment to avoid duplicates.
+	events := allEvents
+	for i, ev := range allEvents {
+		if ev.Type == parser.EventCompactBoundary {
+			events = allEvents[i+1:]
 		}
 	}
 

@@ -14,9 +14,9 @@ const claudeMDMarker = "claude-buddy (session companion)"
 
 const claudeMDBlock = `
 ## claude-buddy (session companion)
-- セッション開始時に ` + "`buddy_resume`" + ` を呼んで前回のコンテキストを復元すること
-- auto-compact 後に詳細が必要なら ` + "`buddy_recall`" + ` で検索すること
-- 設計判断を確認するには ` + "`buddy_decisions`" + ` を使うこと
+- Call ` + "`buddy_resume`" + ` at session start to restore previous context
+- Use ` + "`buddy_recall`" + ` to search for details lost after auto-compact
+- Use ` + "`buddy_decisions`" + ` to review past design decisions
 `
 
 // Run executes the install command. All steps are idempotent.
@@ -96,8 +96,8 @@ func updateClaudeMDAt(path string) error {
 func printHooksInfo() {
 	fmt.Println(`
 ℹ Hooks setup (optional):
-  SessionStart 時に自動で buddy_resume を呼ぶには、
-  ~/.claude/settings.json に以下を追加してください:
+  To auto-call buddy_resume on SessionStart,
+  add the following to ~/.claude/settings.json:
 
   {
     "hooks": {

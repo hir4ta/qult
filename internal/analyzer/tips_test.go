@@ -7,6 +7,8 @@ func TestParseLevel(t *testing.T) {
 		input string
 		want  FeedbackLevel
 	}{
+		{"low", LevelLow},
+		{"LOW", LevelLow},
 		{"info", LevelInfo},
 		{"INFO", LevelInfo},
 		{"  info  ", LevelInfo},
@@ -16,8 +18,8 @@ func TestParseLevel(t *testing.T) {
 		{"Warning", LevelWarning},
 		{"action", LevelAction},
 		{"ACTION", LevelAction},
-		{"", LevelInfo},
-		{"unknown", LevelInfo},
+		{"", LevelLow},
+		{"unknown", LevelLow},
 		{"  Action  ", LevelAction},
 	}
 	for _, tt := range tests {

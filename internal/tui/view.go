@@ -3,9 +3,9 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/hir4ta/claude-buddy/internal/analyzer"
 	"github.com/hir4ta/claude-buddy/internal/parser"
 )
 
@@ -27,7 +27,9 @@ func (m Model) View() string {
 	sections = append(sections, m.renderSeparator())
 	sections = append(sections, m.renderMessages())
 	sections = append(sections, m.renderSeparator())
-	sections = append(sections, m.renderFeedback())
+	if m.sessionEnded {
+		sections = append(sections, dimStyle.Render("  Session ended"))
+	}
 	sections = append(sections, m.renderHelp())
 
 	return strings.Join(sections, "\n")
@@ -48,21 +50,13 @@ func (m Model) renderHeader() string {
 
 	sessionInfo := fmt.Sprintf("Session: %s", truncateID(m.sessionID))
 
-	elapsed := m.stats.Elapsed()
-	min := int(elapsed.Minutes())
 	statsText := fmt.Sprintf(
-		"Turns: %d | Tools: %d (%.1f/turn) | %dmin",
+		"Turns: %d | Tools: %d (%.1f/turn) | %s",
 		m.stats.TurnCount,
 		m.stats.ToolUseCount,
 		m.stats.ToolsPerTurn(),
-		min,
+		formatDuration(m.stats.Elapsed()),
 	)
-	if m.stats.LongestPause > 0 {
-		pauseMin := int(m.stats.LongestPause.Minutes())
-		if pauseMin > 0 {
-			statsText += fmt.Sprintf(" | Pause: %dm", pauseMin)
-		}
-	}
 
 	top := lipgloss.JoinHorizontal(lipgloss.Top, title, " ", pulseStyled, " ", dimStyle.Render(sessionInfo))
 	if m.inPlanMode {
@@ -270,47 +264,6 @@ func (m Model) renderMessages() string {
 	return strings.Join(result, "\n")
 }
 
-func (m Model) renderFeedback() string {
-	if m.sessionEnded {
-		return dimStyle.Render("  Session ended")
-	}
-
-	if m.feedbackErr != "" {
-		return dimStyle.Render("  Feedback error: " + parser.Truncate(m.feedbackErr, 50))
-	}
-
-	if m.llmTipPending {
-		dots := strings.Repeat(".", m.animFrame/5%4)
-		return dimStyle.Render("  Generating feedback" + dots)
-	}
-
-	if len(m.feedbacks) > 0 {
-		fb := m.feedbacks[len(m.feedbacks)-1]
-		sitLine := feedbackSituationStyle.Render("  \U0001F4A1 " + fb.Situation)
-
-		var obsStyle lipgloss.Style
-		switch fb.Level {
-		case analyzer.LevelInsight:
-			obsStyle = feedbackInsightStyle
-		case analyzer.LevelWarning:
-			obsStyle = feedbackWarningStyle
-		case analyzer.LevelAction:
-			obsStyle = feedbackActionStyle
-		default:
-			obsStyle = feedbackInfoStyle
-		}
-		obsLine := obsStyle.Render("\U0001F440 " + fb.Observation)
-		sugLine := feedbackSuggestionStyle.Render("  \u2192 " + fb.Suggestion)
-		return sitLine + "\n" + obsLine + "\n" + sugLine
-	}
-
-	// Show turns remaining until next feedback
-	remaining := feedbackInterval - (m.stats.TurnCount - m.lastLLMTurnAt)
-	if remaining <= 0 {
-		remaining = feedbackInterval
-	}
-	return dimStyle.Render(fmt.Sprintf("  Next feedback in %d turns", remaining))
-}
 
 func (m Model) renderHelp() string {
 	return helpStyle.Render("  q: quit | \u2191\u2193: select | Enter: expand/collapse | ?: help")
@@ -393,6 +346,18 @@ func formatEvent(ev parser.SessionEvent) string {
 		case "TaskList", "TaskGet", "TaskStop":
 			return ""
 		}
+		// buddy MCP tools shown as [tip]
+		if isBuddyTool(ev.ToolName) {
+			label := alignLabel(tipLabelStyle.Render("[tip]"), 5)
+			// Extract short tool name: "mcp__claude-buddy__buddy_tips" -> "buddy_tips"
+			shortName := ev.ToolName
+			if idx := strings.LastIndex(shortName, "buddy_"); idx >= 0 {
+				shortName = shortName[idx:]
+			}
+			name := tipLabelStyle.Render(shortName)
+			input := tipTextStyle.Render(parser.Truncate(ev.ToolInput, 45))
+			return fmt.Sprintf("  %s%s %s %s", ts, label, name, input)
+		}
 		label := alignLabel(toolUseStyle.Render("[tool]"), 6)
 		name := toolNameStyle.Render(ev.ToolName)
 		input := dimStyle.Render(parser.Truncate(ev.ToolInput, 45))
@@ -448,7 +413,7 @@ func formatEvent(ev parser.SessionEvent) string {
 		return fmt.Sprintf("  %s%s \u2192 %s: %s", ts, label, messageStyle.Render(target), summary)
 
 	case parser.EventPlanApproval:
-		label := alignLabel(planModeStyle.Render("[plan \u2714]"), 8)
+		label := alignLabel(taskActiveStyle.Render("[plan]"), 6)
 		title := parser.Truncate(ev.PlanTitle, 55)
 		return fmt.Sprintf("  %s%s %s", ts, label, title)
 
@@ -472,11 +437,16 @@ func eventFullText(ev parser.SessionEvent) string {
 	}
 }
 
+// isBuddyTool returns true if the tool name is a claude-buddy MCP tool.
+func isBuddyTool(name string) bool {
+	return strings.Contains(name, "buddy_")
+}
+
 // isVisibleEvent returns true if the event should appear as a row in the event list.
-// Tool-use events are hidden from the list; they are shown inside expanded assistant blocks.
+// Tool-use events are hidden from the list except for buddy MCP tools ([tip]).
 func isVisibleEvent(ev parser.SessionEvent) bool {
 	if ev.Type == parser.EventToolUse {
-		return false
+		return isBuddyTool(ev.ToolName)
 	}
 	return formatEvent(ev) != ""
 }
@@ -506,7 +476,7 @@ func formatToolSummary(ev parser.SessionEvent) string {
 	}
 	name := toolSummaryStyle.Render(ev.ToolName)
 	input := toolSummaryDimStyle.Render(parser.Truncate(ev.ToolInput, 60))
-	return fmt.Sprintf("  \U0001F527 %s \u2192 %s", name, input)
+	return fmt.Sprintf("  %s %s \u2192 %s", nfWrench, name, input)
 }
 
 func wrapText(s string, width int) []string {
@@ -570,6 +540,40 @@ func truncateID(s string) string {
 		return s[:8]
 	}
 	return s
+}
+
+// formatDuration formats a duration as human-readable compact text.
+// Examples: "3m", "1h08m", "2d5h", "1w3d"
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return "0m"
+	}
+	totalMin := int(d.Minutes())
+	switch {
+	case totalMin < 60:
+		return fmt.Sprintf("%dm", totalMin)
+	case totalMin < 60*24:
+		h := totalMin / 60
+		m := totalMin % 60
+		if m == 0 {
+			return fmt.Sprintf("%dh", h)
+		}
+		return fmt.Sprintf("%dh%02dm", h, m)
+	case totalMin < 60*24*7:
+		days := totalMin / (60 * 24)
+		hours := (totalMin % (60 * 24)) / 60
+		if hours == 0 {
+			return fmt.Sprintf("%dd", days)
+		}
+		return fmt.Sprintf("%dd%dh", days, hours)
+	default:
+		weeks := totalMin / (60 * 24 * 7)
+		days := (totalMin % (60 * 24 * 7)) / (60 * 24)
+		if days == 0 {
+			return fmt.Sprintf("%dw", weeks)
+		}
+		return fmt.Sprintf("%dw%dd", weeks, days)
+	}
 }
 
 func max(a, b int) int {

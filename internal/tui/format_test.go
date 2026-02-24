@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-func TestHumanizeAgeEn(t *testing.T) {
+func TestHumanizeAge(t *testing.T) {
 	tests := []struct {
 		d    time.Duration
 		want string
@@ -27,40 +27,16 @@ func TestHumanizeAgeEn(t *testing.T) {
 		{21 * 24 * time.Hour, "3w ago"},
 	}
 	for _, tt := range tests {
-		got := humanizeAge(tt.d, false)
+		got := humanizeAge(tt.d)
 		if got != tt.want {
-			t.Errorf("humanizeAge(%v, false) = %q, want %q", tt.d, got, tt.want)
+			t.Errorf("humanizeAge(%v) = %q, want %q", tt.d, got, tt.want)
 		}
 	}
 
 	// >= 30 days should return MM/DD format
-	got := humanizeAge(60*24*time.Hour, false)
+	got := humanizeAge(60 * 24 * time.Hour)
 	if len(got) != 5 || got[2] != '/' {
-		t.Errorf("humanizeAge(60d, false) = %q, want MM/DD format", got)
-	}
-}
-
-func TestHumanizeAgeJa(t *testing.T) {
-	tests := []struct {
-		d    time.Duration
-		want string
-	}{
-		{0, "たった今"},
-		{30 * time.Second, "たった今"},
-		{5 * time.Minute, "5分前"},
-		{59 * time.Minute, "59分前"},
-		{1 * time.Hour, "1時間前"},
-		{3 * time.Hour, "3時間前"},
-		{24 * time.Hour, "1日前"},
-		{3 * 24 * time.Hour, "3日前"},
-		{7 * 24 * time.Hour, "1週間前"},
-		{14 * 24 * time.Hour, "2週間前"},
-	}
-	for _, tt := range tests {
-		got := humanizeAge(tt.d, true)
-		if got != tt.want {
-			t.Errorf("humanizeAge(%v, true) = %q, want %q", tt.d, got, tt.want)
-		}
+		t.Errorf("humanizeAge(60d) = %q, want MM/DD format", got)
 	}
 }
 
