@@ -24,6 +24,14 @@ claude-buddy install
 
 This registers the MCP server, updates `~/.claude/CLAUDE.md`, and syncs all existing sessions to the local SQLite database (`~/.claude-buddy/buddy.db`).
 
+## Upgrade
+
+```bash
+brew update && brew upgrade claude-buddy
+```
+
+The MCP server uses the same binary path, so upgrading the binary automatically updates the server. No additional steps required.
+
 ## Language
 
 claude-buddy detects your system locale (`LANG` / `LC_ALL` / `LC_MESSAGES`) and generates AI feedback in your language. UI labels remain in English.
