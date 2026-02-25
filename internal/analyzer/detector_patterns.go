@@ -81,6 +81,7 @@ func MatchDestructiveCommand(command string) (observation, suggestion string, ma
 }
 
 // detectRetryLoop scans last 10 events for 3+ consecutive identical tool calls.
+// Threshold: 3 for proposal, 5 for warning, 7+ for action.
 func (d *Detector) detectRetryLoop() *Alert {
 	recent := d.getRecentFingerprints(10)
 	if len(recent) < 3 {
@@ -101,7 +102,7 @@ func (d *Detector) detectRetryLoop() *Alert {
 		}
 	}
 
-	if consecutiveCount < 2 {
+	if consecutiveCount < 3 {
 		return nil
 	}
 
@@ -113,11 +114,11 @@ func (d *Detector) detectRetryLoop() *Alert {
 	kind := KindAlert
 	level := LevelWarning
 	switch {
-	case consecutiveCount >= 5:
+	case consecutiveCount >= 7:
 		level = LevelAction
-	case consecutiveCount >= 3:
+	case consecutiveCount >= 5:
 		level = LevelWarning
-	default: // 2 retries
+	default: // 3-4 retries
 		kind = KindProposal
 		level = LevelInfo
 	}
@@ -219,63 +220,6 @@ func (d *Detector) detectCompactAmnesia() *Alert {
 	}
 }
 
-// detectExcessiveTools checks for too many tool calls without user input.
-func (d *Detector) detectExcessiveTools() *Alert {
-	if d.burst.toolCount < 25 {
-		return nil
-	}
-
-	level := LevelWarning
-	if d.burst.toolCount >= 40 {
-		level = LevelAction
-	}
-
-	fileCount := len(d.burst.uniqueFiles)
-	tc := itoa(d.burst.toolCount)
-	fc := itoa(fileCount)
-
-	var elapsed time.Duration
-	if !d.burst.startTime.IsZero() && !d.burst.lastToolTime.IsZero() {
-		elapsed = d.burst.lastToolTime.Sub(d.burst.startTime)
-	}
-
-	var obs, suggestion string
-	if d.isJa() {
-		obs = tc + "回のツール呼び出し（"
-		if d.burst.hasWrite {
-			obs += fc + "ファイル変更"
-		} else {
-			obs += fc + "ファイル読込、書込なし"
-		}
-		if elapsed >= time.Minute {
-			obs += "、" + itoa(int(elapsed.Minutes())) + "分経過"
-		}
-		obs += "）"
-		suggestion = d.excessiveToolsSuggestionJa(fileCount)
-	} else {
-		obs = tc + " tool calls ("
-		if d.burst.hasWrite {
-			obs += fc + " files modified"
-		} else {
-			obs += fc + " files read, no writes"
-		}
-		if elapsed >= time.Minute {
-			obs += ", " + itoa(int(elapsed.Minutes())) + "m elapsed"
-		}
-		obs += ")"
-		suggestion = d.excessiveToolsSuggestionEn(fileCount)
-	}
-
-	return &Alert{
-		Pattern:     PatternExcessiveTools,
-		Level:       level,
-		Situation:   "Long burst of tool calls without user input",
-		Observation: obs,
-		Suggestion:  suggestion,
-		EventCount:  d.burst.toolCount,
-	}
-}
-
 // detectDestructiveCmd checks for dangerous shell commands.
 func (d *Detector) detectDestructiveCmd(ev parser.SessionEvent) *Alert {
 	if ev.Type != parser.EventToolUse || ev.ToolName != "Bash" {
@@ -365,57 +309,6 @@ func (d *Detector) detectDestructiveCmd(ev parser.SessionEvent) *Alert {
 		Observation: obs,
 		Suggestion:  sugg,
 		EventCount:  1,
-	}
-}
-
-// detectFileReadLoop checks for the same file being read repeatedly.
-func (d *Detector) detectFileReadLoop() *Alert {
-	maxCount := 0
-	maxFile := ""
-	for f, c := range d.burst.fileReads {
-		if c > maxCount {
-			maxCount = c
-			maxFile = f
-		}
-	}
-
-	if maxCount < 5 {
-		return nil
-	}
-
-	level := LevelWarning
-	if maxCount >= 8 {
-		level = LevelAction
-	}
-
-	short := shortPath(maxFile)
-	count := itoa(maxCount)
-	highBurst := d.burst.toolCount > 15
-
-	var obs, suggestion string
-	if d.isJa() {
-		obs = short + " を" + count + "回読込済み（編集なし）"
-		if highBurst {
-			suggestion = "このファイルの何を変更すべきか、具体的に指示してください（例: 関数名、行番号）"
-		} else {
-			suggestion = "ファイルの内容を理解できていない可能性があります — 変更したい箇所を具体的に伝えてください"
-		}
-	} else {
-		obs = short + " read " + count + " times (no edits)"
-		if highBurst {
-			suggestion = "Tell Claude specifically what to change in this file (e.g. function name, line number)"
-		} else {
-			suggestion = "Claude may not understand the file — describe the specific change you want"
-		}
-	}
-
-	return &Alert{
-		Pattern:     PatternFileReadLoop,
-		Level:       level,
-		Situation:   "Same file read repeatedly without editing",
-		Observation: obs,
-		Suggestion:  suggestion,
-		EventCount:  maxCount,
 	}
 }
 
@@ -583,7 +476,11 @@ func (d *Detector) detectApologizeRetry(ev parser.SessionEvent) *Alert {
 }
 
 // detectExploreLoop detects prolonged read-only exploration without writes.
+// Suppressed during Plan Mode and when subagents are active.
 func (d *Detector) detectExploreLoop() *Alert {
+	if d.features.PlanModeActive || d.features.SubagentActive {
+		return nil
+	}
 	if d.burst.hasWrite {
 		return nil
 	}
@@ -595,12 +492,12 @@ func (d *Detector) detectExploreLoop() *Alert {
 	}
 
 	elapsed := d.burst.lastToolTime.Sub(d.burst.startTime)
-	if elapsed <= 5*time.Minute {
+	if elapsed <= 10*time.Minute {
 		return nil
 	}
 
 	level := LevelWarning
-	if elapsed > 7*time.Minute {
+	if elapsed > 15*time.Minute {
 		level = LevelAction
 	}
 
@@ -821,50 +718,3 @@ func (d *Detector) retrySuggestionEn(toolName string, kind FeedbackKind, level F
 	}
 }
 
-func (d *Detector) excessiveToolsSuggestionJa(fileCount int) string {
-	if !d.burst.hasWrite && fileCount > 5 {
-		s := "読込だけで書込がありません"
-		if !d.features.PlanModeUsed {
-			s += " — Plan Mode で方針を決めてから実装に入ると効率的です"
-		} else if !d.features.SubagentUsed {
-			s += " — 探索はサブエージェント (Task) に委任すると context を節約できます"
-		} else {
-			s += " — Esc で中断して進捗を確認してください"
-		}
-		return s
-	}
-	if fileCount > 10 {
-		s := "多数のファイルを変更中"
-		if !d.features.CLAUDEMDRead && !d.features.RulesRead {
-			s += " — CLAUDE.md や .claude/rules/ にプロジェクトルールを書いておくと一貫性が上がります"
-		} else {
-			s += " — Esc で中断して進捗を確認してください"
-		}
-		return s
-	}
-	return "Esc で中断して、期待する結果に近づいているか確認してください"
-}
-
-func (d *Detector) excessiveToolsSuggestionEn(fileCount int) string {
-	if !d.burst.hasWrite && fileCount > 5 {
-		s := "Read-only with no writes"
-		if !d.features.PlanModeUsed {
-			s += " — use Plan Mode to define the approach before implementation"
-		} else if !d.features.SubagentUsed {
-			s += " — delegate exploration to subagents (Task tool) to save context"
-		} else {
-			s += " — press Esc to check progress"
-		}
-		return s
-	}
-	if fileCount > 10 {
-		s := "Modifying many files"
-		if !d.features.CLAUDEMDRead && !d.features.RulesRead {
-			s += " — add project rules to CLAUDE.md or .claude/rules/ for consistency"
-		} else {
-			s += " — press Esc to check progress"
-		}
-		return s
-	}
-	return "Press Esc to check if Claude is making progress toward the goal"
-}

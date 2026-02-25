@@ -48,15 +48,15 @@ func TestDetectRetryLoop(t *testing.T) {
 	// Start with a user message
 	d.Update(makeUserEvent("do something", now))
 
-	// Feed 5 identical Bash events
+	// Feed 7 identical Bash events
 	var alerts []Alert
-	for i := range 5 {
+	for i := range 7 {
 		ts := now.Add(time.Duration(i+1) * time.Second)
 		result := d.Update(makeToolEvent("Bash", "ls -la", ts))
 		alerts = append(alerts, result...)
 	}
 
-	// Should get proposal at 2, warning at 3, action at 5
+	// Should get proposal at 3, warning at 5, action at 7
 	var hasProposal, hasWarning bool
 	for _, a := range alerts {
 		if a.Pattern == PatternRetryLoop {
@@ -69,10 +69,10 @@ func TestDetectRetryLoop(t *testing.T) {
 		}
 	}
 	if !hasProposal {
-		t.Error("expected proposal at 2 retries")
+		t.Error("expected proposal at 3 retries")
 	}
 	if !hasWarning {
-		t.Error("expected warning/action at 3+ retries")
+		t.Error("expected warning/action at 5+ retries")
 	}
 }
 
@@ -156,53 +156,6 @@ func TestDetectDestructiveCmdSafe(t *testing.T) {
 	}
 }
 
-func TestDetectExcessiveTools(t *testing.T) {
-	d := NewDetector("en")
-	now := time.Now()
-	d.Update(makeUserEvent("do something big", now))
-
-	var alerts []Alert
-	for i := range 30 {
-		ts := now.Add(time.Duration(i+1) * time.Second)
-		// Use different inputs to avoid triggering retry-loop
-		result := d.Update(makeToolEvent("Read", "/file"+itoa(i)+".go", ts))
-		alerts = append(alerts, result...)
-	}
-
-	found := false
-	for _, a := range alerts {
-		if a.Pattern == PatternExcessiveTools && a.Level >= LevelWarning {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected excessive-tools warning after 25+ tool calls")
-	}
-}
-
-func TestDetectFileReadLoop(t *testing.T) {
-	d := NewDetector("en")
-	now := time.Now()
-	d.Update(makeUserEvent("help me", now))
-
-	var alerts []Alert
-	for i := range 6 {
-		ts := now.Add(time.Duration(i+1) * time.Second)
-		result := d.Update(makeToolEvent("Read", "/same/file.go", ts))
-		alerts = append(alerts, result...)
-	}
-
-	found := false
-	for _, a := range alerts {
-		if a.Pattern == PatternFileReadLoop && a.Level >= LevelWarning {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected file-read-loop warning after 5+ reads of same file")
-	}
-}
-
 func TestDetectContextThrashing(t *testing.T) {
 	d := NewDetector("en")
 	now := time.Now()
@@ -242,9 +195,9 @@ func TestDetectExploreLoop(t *testing.T) {
 	d.Update(makeUserEvent("explore codebase", now))
 
 	var alerts []Alert
-	// 15 Read/Grep events over 6 minutes without Write
-	for i := range 15 {
-		ts := now.Add(time.Duration(i*24) * time.Second) // spread over 6 minutes
+	// 20 Read/Grep events over 11 minutes without Write
+	for i := range 20 {
+		ts := now.Add(time.Duration(i*33) * time.Second) // spread over ~11 minutes
 		toolName := "Read"
 		if i%3 == 0 {
 			toolName = "Grep"
@@ -260,7 +213,7 @@ func TestDetectExploreLoop(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("expected explore-loop warning after 5+ min of reads without writes")
+		t.Error("expected explore-loop warning after 10+ min of reads without writes")
 	}
 }
 
@@ -445,7 +398,7 @@ func TestRetryLoopMessageEditFile(t *testing.T) {
 	d.Update(makeUserEvent("fix this", now))
 
 	var alerts []Alert
-	for i := range 5 {
+	for i := range 7 {
 		ts := now.Add(time.Duration(i+1) * time.Second)
 		result := d.Update(makeToolEvent("Edit", "/proj/src/store.go", ts))
 		alerts = append(alerts, result...)
@@ -482,13 +435,13 @@ func TestRetryLoopMessageEditFile(t *testing.T) {
 		}
 	}
 	if !hasProposal {
-		t.Error("expected proposal at 2 retries")
+		t.Error("expected proposal at 3 retries")
 	}
 	if !hasWarning {
-		t.Error("expected warning at 3 retries")
+		t.Error("expected warning at 5 retries")
 	}
 	if !hasAction {
-		t.Error("expected action at 5 retries")
+		t.Error("expected action at 7 retries")
 	}
 }
 
@@ -499,7 +452,7 @@ func TestRetryLoopMessageBash(t *testing.T) {
 	d.Update(makeUserEvent("run it", now))
 
 	var alerts []Alert
-	for i := range 5 {
+	for i := range 7 {
 		ts := now.Add(time.Duration(i+1) * time.Second)
 		result := d.Update(makeToolEvent("Bash", "npm test", ts))
 		alerts = append(alerts, result...)
@@ -527,97 +480,11 @@ func TestRetryLoopMessageBash(t *testing.T) {
 		}
 	}
 	if !hasWarning {
-		t.Error("expected warning at 3 retries")
+		t.Error("expected warning at 5 retries")
 	}
 	if !hasAction {
-		t.Error("expected action at 5 retries")
+		t.Error("expected action at 7 retries")
 	}
-}
-
-func TestExcessiveToolsReadOnly(t *testing.T) {
-	t.Parallel()
-	d := NewDetector("en")
-	now := time.Now()
-	d.Update(makeUserEvent("explore", now))
-
-	var alerts []Alert
-	for i := range 30 {
-		ts := now.Add(time.Duration(i+1) * time.Second)
-		result := d.Update(makeToolEvent("Read", "/file"+itoa(i)+".go", ts))
-		alerts = append(alerts, result...)
-	}
-
-	for _, a := range alerts {
-		if a.Pattern == PatternExcessiveTools {
-			if !strings.Contains(a.Observation, "no writes") {
-				t.Errorf("Observation should indicate no writes, got: %s", a.Observation)
-			}
-			if !strings.Contains(a.Observation, "files read") {
-				t.Errorf("Observation should mention files read, got: %s", a.Observation)
-			}
-			if !strings.Contains(a.Suggestion, "Plan Mode") {
-				t.Errorf("Suggestion should recommend Plan Mode for read-only burst, got: %s", a.Suggestion)
-			}
-			return
-		}
-	}
-	t.Error("expected excessive-tools alert")
-}
-
-func TestExcessiveToolsWithWrites(t *testing.T) {
-	t.Parallel()
-	d := NewDetector("en")
-	now := time.Now()
-	d.Update(makeUserEvent("refactor", now))
-
-	var alerts []Alert
-	for i := range 30 {
-		ts := now.Add(time.Duration(i+1) * time.Second)
-		var result []Alert
-		if i%3 == 0 {
-			result = d.Update(makeToolEvent("Edit", "/file"+itoa(i)+".go", ts))
-		} else {
-			result = d.Update(makeToolEvent("Read", "/file"+itoa(i)+".go", ts))
-		}
-		alerts = append(alerts, result...)
-	}
-
-	for _, a := range alerts {
-		if a.Pattern == PatternExcessiveTools {
-			if !strings.Contains(a.Observation, "files modified") {
-				t.Errorf("Observation should mention files modified, got: %s", a.Observation)
-			}
-			return
-		}
-	}
-	t.Error("expected excessive-tools alert")
-}
-
-func TestFileReadLoopShortPath(t *testing.T) {
-	t.Parallel()
-	d := NewDetector("en")
-	now := time.Now()
-	d.Update(makeUserEvent("help", now))
-
-	var alerts []Alert
-	for i := range 6 {
-		ts := now.Add(time.Duration(i+1) * time.Second)
-		result := d.Update(makeToolEvent("Read", "/Users/user/Projects/foo/internal/store/store.go", ts))
-		alerts = append(alerts, result...)
-	}
-
-	for _, a := range alerts {
-		if a.Pattern == PatternFileReadLoop {
-			if strings.Contains(a.Observation, "/Users/user") {
-				t.Errorf("Observation should use short path, got: %s", a.Observation)
-			}
-			if !strings.Contains(a.Observation, "store.go") {
-				t.Errorf("Observation should contain 'store.go', got: %s", a.Observation)
-			}
-			return
-		}
-	}
-	t.Error("expected file-read-loop alert")
 }
 
 func TestExploreLoopTopFile(t *testing.T) {
@@ -627,8 +494,8 @@ func TestExploreLoopTopFile(t *testing.T) {
 	d.Update(makeUserEvent("explore", now))
 
 	var alerts []Alert
-	for i := range 15 {
-		ts := now.Add(time.Duration(i*24) * time.Second) // spread over 6 minutes
+	for i := range 20 {
+		ts := now.Add(time.Duration(i*33) * time.Second) // spread over ~11 minutes
 		var result []Alert
 		if i%2 == 0 {
 			result = d.Update(makeToolEvent("Read", "/proj/main.go", ts))
@@ -847,7 +714,7 @@ func TestRetryLoopMessageJa(t *testing.T) {
 	d.Update(makeUserEvent("直して", now))
 
 	var alerts []Alert
-	for i := range 5 {
+	for i := range 7 {
 		ts := now.Add(time.Duration(i+1) * time.Second)
 		result := d.Update(makeToolEvent("Edit", "/proj/src/store.go", ts))
 		alerts = append(alerts, result...)
@@ -881,38 +748,14 @@ func TestRetryLoopMessageJa(t *testing.T) {
 		}
 	}
 	if !hasProposal {
-		t.Error("expected proposal at 2 retries")
+		t.Error("expected proposal at 3 retries")
 	}
 	if !hasWarning {
-		t.Error("expected warning at 3 retries")
+		t.Error("expected warning at 5 retries")
 	}
 	if !hasAction {
-		t.Error("expected action at 5 retries")
+		t.Error("expected action at 7 retries")
 	}
-}
-
-func TestExcessiveToolsJa(t *testing.T) {
-	t.Parallel()
-	d := NewDetector("ja")
-	now := time.Now()
-	d.Update(makeUserEvent("探して", now))
-
-	var alerts []Alert
-	for i := range 30 {
-		ts := now.Add(time.Duration(i+1) * time.Second)
-		result := d.Update(makeToolEvent("Read", "/file"+itoa(i)+".go", ts))
-		alerts = append(alerts, result...)
-	}
-
-	for _, a := range alerts {
-		if a.Pattern == PatternExcessiveTools {
-			if !strings.Contains(a.Observation, "書込なし") {
-				t.Errorf("Observation should be in Japanese, got: %s", a.Observation)
-			}
-			return
-		}
-	}
-	t.Error("expected excessive-tools alert")
 }
 
 func TestDestructiveCmdJa(t *testing.T) {
@@ -1058,58 +901,6 @@ func TestFeatureTrackingSkill(t *testing.T) {
 
 // --- Feature-aware suggestion tests ---
 
-func TestExcessiveToolsSuggestsPlanMode(t *testing.T) {
-	t.Parallel()
-	d := NewDetector("en")
-	now := time.Now()
-	d.Update(makeUserEvent("explore", now))
-
-	// Generate read-only burst without Plan Mode used
-	var alerts []Alert
-	for i := range 30 {
-		ts := now.Add(time.Duration(i+1) * time.Second)
-		result := d.Update(makeToolEvent("Read", "/file"+itoa(i)+".go", ts))
-		alerts = append(alerts, result...)
-	}
-
-	for _, a := range alerts {
-		if a.Pattern == PatternExcessiveTools {
-			if !strings.Contains(a.Suggestion, "Plan Mode") {
-				t.Errorf("Should suggest Plan Mode when unused, got: %s", a.Suggestion)
-			}
-			return
-		}
-	}
-	t.Error("expected excessive-tools alert")
-}
-
-func TestExcessiveToolsSuggestsSubagentWhenPlanModeUsed(t *testing.T) {
-	t.Parallel()
-	d := NewDetector("en")
-	now := time.Now()
-	d.Update(makeUserEvent("explore", now))
-
-	// Mark Plan Mode as used
-	d.Update(makeToolEvent("EnterPlanMode", "", now.Add(500*time.Millisecond)))
-
-	var alerts []Alert
-	for i := range 30 {
-		ts := now.Add(time.Duration(i+1) * time.Second)
-		result := d.Update(makeToolEvent("Read", "/file"+itoa(i)+".go", ts))
-		alerts = append(alerts, result...)
-	}
-
-	for _, a := range alerts {
-		if a.Pattern == PatternExcessiveTools {
-			if !strings.Contains(a.Suggestion, "subagent") {
-				t.Errorf("Should suggest subagents when Plan Mode already used, got: %s", a.Suggestion)
-			}
-			return
-		}
-	}
-	t.Error("expected excessive-tools alert")
-}
-
 func TestContextThrashingSuggestsSubagent(t *testing.T) {
 	t.Parallel()
 	d := NewDetector("en")
@@ -1171,15 +962,15 @@ func TestSelectTopAlertsGroupDedup(t *testing.T) {
 	now := time.Now()
 	d.Update(makeUserEvent("do work", now))
 
-	// Feed 25+ identical tool calls → triggers both retry-loop AND excessive-tools
+	// Feed 7+ identical tool calls → triggers retry-loop
 	var allAlerts []Alert
-	for i := range 30 {
+	for i := range 10 {
 		ts := now.Add(time.Duration(i+1) * time.Second)
 		result := d.Update(makeToolEvent("Read", "/same/file.go", ts))
 		allAlerts = append(allAlerts, result...)
 	}
 
-	// Both should fire from the detector
+	// retry-loop should fire from the detector
 	hasRetryLoop := false
 	for _, a := range allAlerts {
 		if a.Pattern == PatternRetryLoop {
@@ -1200,31 +991,6 @@ func TestSelectTopAlertsGroupDedup(t *testing.T) {
 		if count > 1 {
 			t.Errorf("group %d has %d alerts, expected at most 1", g, count)
 		}
-	}
-}
-
-func TestExcessiveToolsNotSuppressedAlone(t *testing.T) {
-	t.Parallel()
-	d := NewDetector("en")
-	now := time.Now()
-	d.Update(makeUserEvent("explore", now))
-
-	// Feed 30 different files → excessive-tools fires but NOT retry-loop
-	var allAlerts []Alert
-	for i := range 30 {
-		ts := now.Add(time.Duration(i+1) * time.Second)
-		result := d.Update(makeToolEvent("Read", "/file"+itoa(i)+".go", ts))
-		allAlerts = append(allAlerts, result...)
-	}
-
-	hasExcessiveTools := false
-	for _, a := range allAlerts {
-		if a.Pattern == PatternExcessiveTools {
-			hasExcessiveTools = true
-		}
-	}
-	if !hasExcessiveTools {
-		t.Error("excessive-tools should fire when no specific pattern is active")
 	}
 }
 
@@ -1371,33 +1137,6 @@ func TestCompactAmnesiaJa(t *testing.T) {
 	t.Error("expected compact-amnesia alert in Japanese")
 }
 
-func TestFileReadLoopJa(t *testing.T) {
-	t.Parallel()
-	d := NewDetector("ja")
-	now := time.Now()
-	d.Update(makeUserEvent("見て", now))
-
-	var alerts []Alert
-	for i := range 6 {
-		ts := now.Add(time.Duration(i+1) * time.Second)
-		result := d.Update(makeToolEvent("Read", "/proj/store.go", ts))
-		alerts = append(alerts, result...)
-	}
-
-	for _, a := range alerts {
-		if a.Pattern == PatternFileReadLoop {
-			if !strings.Contains(a.Observation, "store.go") {
-				t.Errorf("Observation should contain file name, got: %s", a.Observation)
-			}
-			if !strings.Contains(a.Observation, "編集なし") {
-				t.Errorf("Japanese observation expected, got: %s", a.Observation)
-			}
-			return
-		}
-	}
-	t.Error("expected file-read-loop alert in Japanese")
-}
-
 func TestContextThrashingJa(t *testing.T) {
 	t.Parallel()
 	d := NewDetector("ja")
@@ -1475,8 +1214,8 @@ func TestExploreLoopJa(t *testing.T) {
 	d.Update(makeUserEvent("調べて", now))
 
 	var alerts []Alert
-	for i := range 15 {
-		ts := now.Add(time.Duration(i*24) * time.Second)
+	for i := range 20 {
+		ts := now.Add(time.Duration(i*33) * time.Second) // spread over ~11 minutes
 		toolName := "Read"
 		if i%3 == 0 {
 			toolName = "Grep"
@@ -1544,21 +1283,21 @@ func TestAlertOutcomePersistedEn(t *testing.T) {
 	now := time.Now()
 	d.Update(makeUserEvent("test", now))
 
-	// Trigger retry-loop: 3 identical calls → Warning at call 3
+	// Trigger retry-loop: 3 identical calls → Proposal at call 3
 	for i := range 3 {
 		d.Update(makeToolEvent("Bash", "ls -la", now.Add(time.Duration(i+1)*time.Second)))
 	}
-	// 2 more → escalation to Action at call 5 (same pattern fires again → recurrence)
-	for i := range 2 {
+	// 4 more → escalation to Warning at call 5, Action at call 7 (same pattern fires again → recurrence)
+	for i := range 4 {
 		d.Update(makeToolEvent("Bash", "ls -la", now.Add(time.Duration(i+4)*time.Second)))
 	}
-	// Fill events so eventsAfter >= 5 for the Warning-level pending
+	// Fill events so eventsAfter >= 5 for the Proposal-level pending
 	for i := range 3 {
-		d.Update(makeToolEvent("Read", "/file"+itoa(i)+".go", now.Add(time.Duration(i+7)*time.Second)))
+		d.Update(makeToolEvent("Read", "/file"+itoa(i)+".go", now.Add(time.Duration(i+8)*time.Second)))
 	}
 
-	// User message triggers checkResolutions: Warning pending sees Action recurrence → persisted
-	d.Update(makeUserEvent("continue", now.Add(11*time.Second)))
+	// User message triggers checkResolutions: Proposal pending sees Warning/Action recurrence → persisted
+	d.Update(makeUserEvent("continue", now.Add(12*time.Second)))
 
 	outcomes := d.RecentOutcomes()
 	found := false
@@ -1618,14 +1357,14 @@ func TestAlertOutcomePersistedJa(t *testing.T) {
 	for i := range 3 {
 		d.Update(makeToolEvent("Bash", "ls -la", now.Add(time.Duration(i+1)*time.Second)))
 	}
-	for i := range 2 {
+	for i := range 4 {
 		d.Update(makeToolEvent("Bash", "ls -la", now.Add(time.Duration(i+4)*time.Second)))
 	}
 	for i := range 3 {
-		d.Update(makeToolEvent("Read", "/file"+itoa(i)+".go", now.Add(time.Duration(i+7)*time.Second)))
+		d.Update(makeToolEvent("Read", "/file"+itoa(i)+".go", now.Add(time.Duration(i+8)*time.Second)))
 	}
 
-	d.Update(makeUserEvent("続けて", now.Add(11*time.Second)))
+	d.Update(makeUserEvent("続けて", now.Add(12*time.Second)))
 
 	outcomes := d.RecentOutcomes()
 	found := false

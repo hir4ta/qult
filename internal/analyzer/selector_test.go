@@ -56,9 +56,7 @@ func TestSelectTopAlertsSafetyFirst(t *testing.T) {
 
 func TestSelectTopAlertsGroupDeduplication(t *testing.T) {
 	t.Parallel()
-	// retry-loop and excessive-tools are different groups now
-	// (execution vs exploration), so both can appear
-	// But retry-loop and test-fail-cycle are same group (execution)
+	// retry-loop and test-fail-cycle are same group (execution)
 	alerts := []Alert{
 		{Pattern: PatternRetryLoop, Kind: KindAlert, Level: LevelWarning, Timestamp: time.Now()},
 		{Pattern: PatternTestFailCycle, Kind: KindAlert, Level: LevelWarning, Timestamp: time.Now()},
@@ -99,9 +97,7 @@ func TestGroupForAllPatterns(t *testing.T) {
 		{PatternRetryLoop, GroupExecution},
 		{PatternTestFailCycle, GroupExecution},
 		{PatternApologizeRetry, GroupExecution},
-		{PatternExcessiveTools, GroupExploration},
 		{PatternExploreLoop, GroupExploration},
-		{PatternFileReadLoop, GroupExploration},
 		{PatternContextThrashing, GroupContext},
 	}
 	for _, tc := range cases {

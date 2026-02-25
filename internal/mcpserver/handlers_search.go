@@ -80,26 +80,26 @@ func patternsHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandler
 		}
 
 		patternType := req.GetString("type", "")
-		project := req.GetString("project", "")
-		crossProject := req.GetBool("cross_project", false)
 		limit := req.GetInt("limit", 5)
 		if limit < 1 {
 			limit = 5
 		}
 
-		var queryVec []float32
-		if emb != nil && emb.Available() {
-			if vec, err := emb.EmbedForSearch(ctx, query); err == nil {
-				queryVec = vec
-			}
+		if emb == nil || !emb.Available() {
+			return mcp.NewToolResultError("embedder not available — ensure Ollama is running"), nil
 		}
 
-		patterns, searchMode, err := st.HybridSearchPatterns(query, queryVec, patternType, project, crossProject, limit)
+		queryVec, err := emb.EmbedForSearch(ctx, query)
+		if err != nil {
+			return mcp.NewToolResultError("embedding failed: " + err.Error()), nil
+		}
+
+		patterns, err := st.SearchPatternsByVector(queryVec, patternType, limit)
 		if err != nil {
 			return mcp.NewToolResultError("search failed: " + err.Error()), nil
 		}
 
-		total, _ := st.CountPatterns(query)
+		total, _ := st.CountPatterns()
 
 		patternList := make([]map[string]any, 0, len(patterns))
 		for _, p := range patterns {
@@ -108,10 +108,8 @@ func patternsHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandler
 
 		result := map[string]any{
 			"query":         query,
-			"search_mode":   searchMode,
 			"patterns":      patternList,
-			"total_matches": total,
-			"fallback":      searchMode != "hybrid",
+			"total_patterns": total,
 		}
 
 		data, _ := json.MarshalIndent(result, "", "  ")

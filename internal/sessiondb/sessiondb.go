@@ -56,6 +56,11 @@ CREATE TABLE IF NOT EXISTS nudge_outbox (
 	created_at   TEXT NOT NULL DEFAULT (datetime('now')),
 	delivered_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS session_context (
+	key   TEXT PRIMARY KEY,
+	value TEXT NOT NULL DEFAULT ''
+);
 `
 
 // HookEvent is a recorded tool event.
@@ -260,6 +265,26 @@ func (s *SessionDB) IsOnCooldown(pattern string) (bool, error) {
 	return time.Now().Before(t), nil
 }
 
+// TrySetCooldown atomically checks if a cooldown has expired and sets a new one.
+// Returns true if the cooldown was set (i.e., was not already active).
+func (s *SessionDB) TrySetCooldown(pattern string, duration time.Duration) (bool, error) {
+	now := time.Now().UTC()
+	expiry := now.Add(duration).Format(time.RFC3339)
+	nowStr := now.Format(time.RFC3339)
+
+	res, err := s.db.Exec(
+		`INSERT INTO cooldowns (pattern, expiry) VALUES (?, ?)
+		 ON CONFLICT(pattern) DO UPDATE SET expiry = ?
+		 WHERE expiry < ?`,
+		pattern, expiry, expiry, nowStr,
+	)
+	if err != nil {
+		return false, fmt.Errorf("sessiondb: try set cooldown: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 // RecordCompact records a compaction event.
 func (s *SessionDB) RecordCompact() error {
 	_, err := s.db.Exec(`INSERT INTO compact_events (timestamp) VALUES (datetime('now'))`)
@@ -394,4 +419,29 @@ func (s *SessionDB) BurstStartTime() (time.Time, error) {
 	}
 	t, _ := time.Parse("2006-01-02 15:04:05", ts)
 	return t, nil
+}
+
+// SetContext sets a session context key-value pair.
+func (s *SessionDB) SetContext(key, value string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO session_context (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?`,
+		key, value, value,
+	)
+	if err != nil {
+		return fmt.Errorf("sessiondb: set context %s: %w", key, err)
+	}
+	return nil
+}
+
+// GetContext returns the value for a session context key. Returns "" if not found.
+func (s *SessionDB) GetContext(key string) (string, error) {
+	var value string
+	err := s.db.QueryRow(`SELECT value FROM session_context WHERE key = ?`, key).Scan(&value)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("sessiondb: get context %s: %w", key, err)
+	}
+	return value, nil
 }

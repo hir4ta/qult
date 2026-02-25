@@ -22,6 +22,10 @@ type HookOutput struct {
 	Continue           *bool          `json:"continue,omitempty"`
 	StopReason         string         `json:"stopReason,omitempty"`
 	SuppressOutput     *bool          `json:"suppressOutput,omitempty"`
+	SystemMessage      string         `json:"systemMessage,omitempty"`
+	AdditionalContext  string         `json:"additionalContext,omitempty"`
+	Decision           string         `json:"decision,omitempty"`
+	Reason             string         `json:"reason,omitempty"`
 	HookSpecificOutput map[string]any `json:"hookSpecificOutput,omitempty"`
 }
 
@@ -47,6 +51,8 @@ func Run(eventName string) error {
 		output, err = handlePreCompact(input)
 	case "SessionEnd":
 		output, err = handleSessionEnd(input)
+	case "Stop":
+		output, err = handleStop(input)
 	default:
 		// Unknown event: no-op.
 		return nil
@@ -87,6 +93,20 @@ func makeDenyOutput(reason string) *HookOutput {
 			"permissionDecisionReason": reason,
 		},
 	}
+}
+
+// makeAsyncContextOutput returns output with top-level additionalContext for async hooks.
+// The context is delivered to Claude on the next conversation turn.
+func makeAsyncContextOutput(context string) *HookOutput {
+	if context == "" {
+		return nil
+	}
+	return &HookOutput{AdditionalContext: context}
+}
+
+// makeBlockStopOutput returns output that prevents Claude from stopping.
+func makeBlockStopOutput(reason string) *HookOutput {
+	return &HookOutput{Decision: "block", Reason: reason}
 }
 
 // formatNudges formats nudges into a compact text string for additionalContext.

@@ -11,7 +11,7 @@ func groupFor(p PatternType) AlertGroup {
 		return GroupRecovery
 	case PatternRetryLoop, PatternTestFailCycle, PatternApologizeRetry:
 		return GroupExecution
-	case PatternExcessiveTools, PatternExploreLoop, PatternFileReadLoop:
+	case PatternExploreLoop:
 		return GroupExploration
 	case PatternContextThrashing:
 		return GroupContext

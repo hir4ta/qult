@@ -48,7 +48,7 @@ func (s *Store) InsertEvent(e *EventRow) (int64, error) {
 	return res.LastInsertId()
 }
 
-// SearchEvents uses FTS5 to search events.
+// SearchEvents searches events using LIKE on text columns.
 // segment=0: pre-compact only, segment<0: all segments.
 // Returns matching rows and total count.
 func (s *Store) SearchEvents(query string, sessionID string, segment int, limit int) ([]EventRow, int, error) {
@@ -57,10 +57,15 @@ func (s *Store) SearchEvents(query string, sessionID string, segment int, limit 
 	}
 
 	var where []string
-	var args []interface{}
+	var args []any
 
-	where = append(where, "events_fts MATCH ?")
-	args = append(args, query)
+	// Split query into keywords and require all to match.
+	keywords := strings.Fields(query)
+	for _, kw := range keywords {
+		pat := "%" + kw + "%"
+		where = append(where, "(COALESCE(e.user_text,'') LIKE ? OR COALESCE(e.assistant_text,'') LIKE ? OR COALESCE(e.tool_input,'') LIKE ?)")
+		args = append(args, pat, pat, pat)
+	}
 
 	if sessionID != "" {
 		where = append(where, "e.session_id = ?")
@@ -71,13 +76,13 @@ func (s *Store) SearchEvents(query string, sessionID string, segment int, limit 
 		args = append(args, segment)
 	}
 
-	whereClause := strings.Join(where, " AND ")
+	whereClause := "1=1"
+	if len(where) > 0 {
+		whereClause = strings.Join(where, " AND ")
+	}
 
 	// Count
-	countSQL := fmt.Sprintf(`
-		SELECT count(*) FROM events e
-		JOIN events_fts ON events_fts.rowid = e.id
-		WHERE %s`, whereClause)
+	countSQL := fmt.Sprintf(`SELECT count(*) FROM events e WHERE %s`, whereClause)
 	var total int
 	if err := s.db.QueryRow(countSQL, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("store: search count: %w", err)
@@ -92,13 +97,14 @@ func (s *Store) SearchEvents(query string, sessionID string, segment int, limit 
 			COALESCE(e.agent_name,''), COALESCE(e.plan_title,''),
 			COALESCE(e.raw_json,''), COALESCE(e.byte_offset,0), e.compact_segment
 		FROM events e
-		JOIN events_fts ON events_fts.rowid = e.id
 		WHERE %s
 		ORDER BY e.id DESC
 		LIMIT ?`, whereClause)
-	args = append(args, limit)
+	fetchArgs := make([]any, len(args))
+	copy(fetchArgs, args)
+	fetchArgs = append(fetchArgs, limit)
 
-	rows, err := s.db.Query(fetchSQL, args...)
+	rows, err := s.db.Query(fetchSQL, fetchArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("store: search events: %w", err)
 	}

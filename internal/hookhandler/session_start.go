@@ -1,9 +1,13 @@
 package hookhandler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
+	"github.com/hir4ta/claude-buddy/internal/embedder"
+	"github.com/hir4ta/claude-buddy/internal/locale"
 	"github.com/hir4ta/claude-buddy/internal/sessiondb"
 	"github.com/hir4ta/claude-buddy/internal/store"
 )
@@ -27,6 +31,9 @@ func handleSessionStart(input []byte) (*HookOutput, error) {
 		return nil, fmt.Errorf("open session db: %w", err)
 	}
 	defer sdb.Close()
+
+	// Cache Ollama availability for fast embedding in later hooks.
+	cacheOllamaStatus(sdb)
 
 	switch in.Source {
 	case "startup", "resume":
@@ -59,6 +66,22 @@ func handleStartupResume(in sessionStartInput) (*HookOutput, error) {
 	}
 
 	return makeOutput("SessionStart", ctx), nil
+}
+
+// cacheOllamaStatus probes Ollama once and stores the result in sessiondb.
+// Later hooks read the cached status to skip repeated availability checks.
+func cacheOllamaStatus(sdb *sessiondb.SessionDB) {
+	lang := locale.Detect()
+	model := embedder.ModelForLocale(lang.Code)
+	emb := embedder.NewEmbedder("", model)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if emb.EnsureAvailable(ctx) {
+		_ = sdb.SetContext("ollama_available", "true")
+		_ = sdb.SetContext("ollama_model", model)
+	} else {
+		_ = sdb.SetContext("ollama_available", "false")
+	}
 }
 
 func handlePostCompactResume(sdb *sessiondb.SessionDB) (*HookOutput, error) {

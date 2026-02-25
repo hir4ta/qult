@@ -1,6 +1,8 @@
 package hookhandler
 
 import (
+	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/hir4ta/claude-buddy/internal/sessiondb"
@@ -11,19 +13,36 @@ type HookDetector struct {
 	sdb *sessiondb.SessionDB
 }
 
-// Detect runs lightweight pattern detection and enqueues nudges.
-func (d *HookDetector) Detect() {
-	d.detectRetryLoop()
-	d.detectExcessiveTools()
-	d.detectFileReadLoop()
-	d.detectExploreLoop()
+// Detect runs lightweight signal detection and returns a context string
+// for Claude to evaluate. Returns "" if no signal detected.
+func (d *HookDetector) Detect() string {
+	if sig := d.detectRetryLoop(); sig != "" {
+		return sig
+	}
+	if sig := d.detectNoProgress(); sig != "" {
+		return sig
+	}
+	return ""
 }
 
-// detectRetryLoop checks for 3+ consecutive identical tool calls.
-func (d *HookDetector) detectRetryLoop() {
-	events, err := d.sdb.RecentEvents(5)
+// inPlanMode returns true if the session is currently in Plan Mode.
+func (d *HookDetector) inPlanMode() bool {
+	v, _ := d.sdb.GetContext("plan_mode")
+	return v == "active"
+}
+
+// subagentActive returns true if a subagent (Task) is currently running.
+func (d *HookDetector) subagentActive() bool {
+	v, _ := d.sdb.GetContext("subagent_active")
+	return v == "true"
+}
+
+// detectRetryLoop checks for consecutive identical tool calls.
+// Fires a signal at 3 retries, stronger signal at 5+.
+func (d *HookDetector) detectRetryLoop() string {
+	events, err := d.sdb.RecentEvents(6)
 	if err != nil || len(events) < 3 {
-		return
+		return ""
 	}
 
 	consecutive := 1
@@ -37,116 +56,58 @@ func (d *HookDetector) detectRetryLoop() {
 	}
 
 	if consecutive < 3 {
-		return
+		return ""
 	}
 
-	on, _ := d.sdb.IsOnCooldown("retry_loop")
-	if on {
-		return
+	set, _ := d.sdb.TrySetCooldown("retry_loop", 5*time.Minute)
+	if !set {
+		return ""
 	}
 
-	_ = d.sdb.EnqueueNudge(
-		"retry-loop", "warn",
-		first.ToolName+" retried "+itoa(consecutive)+" times consecutively",
-		"The same operation keeps failing — describe the error cause or try a different approach",
+	return fmt.Sprintf(
+		"[buddy] Signal: %s has been called %d times with identical input. The last %d attempts produced the same result.",
+		first.ToolName, consecutive, consecutive,
 	)
-	_ = d.sdb.SetCooldown("retry_loop", 3*time.Minute)
 }
 
-// detectExcessiveTools checks for 25+ tool calls without user input.
-func (d *HookDetector) detectExcessiveTools() {
-	tc, _, _, err := d.sdb.BurstState()
-	if err != nil || tc < 25 {
-		return
+// detectNoProgress checks for prolonged activity without file modifications.
+// Suppressed during Plan Mode and subagent execution.
+func (d *HookDetector) detectNoProgress() string {
+	if d.inPlanMode() || d.subagentActive() {
+		return ""
 	}
 
-	// Only fire at thresholds to avoid repeated nudges.
-	if tc != 25 && tc != 40 {
-		return
-	}
-
-	on, _ := d.sdb.IsOnCooldown("excessive_tools")
-	if on {
-		return
-	}
-
-	level := "warn"
-	if tc >= 40 {
-		level = "action"
-	}
-
-	_ = d.sdb.EnqueueNudge(
-		"excessive-tools", level,
-		itoa(tc)+" tool calls without user input",
-		"Press Esc to check progress and provide direction",
-	)
-	_ = d.sdb.SetCooldown("excessive_tools", 5*time.Minute)
-}
-
-// detectFileReadLoop checks for the same file being read 5+ times.
-func (d *HookDetector) detectFileReadLoop() {
-	_, hasWrite, fileReads, err := d.sdb.BurstState()
-	if err != nil || hasWrite {
-		return
-	}
-
-	for path, count := range fileReads {
-		if count < 5 {
-			continue
-		}
-
-		key := "file_read_loop:" + path
-		on, _ := d.sdb.IsOnCooldown(key)
-		if on {
-			continue
-		}
-
-		_ = d.sdb.EnqueueNudge(
-			"file-read-loop", "warn",
-			path+" read "+itoa(count)+" times (no edits)",
-			"Tell Claude specifically what to change in this file",
-		)
-		_ = d.sdb.SetCooldown(key, 5*time.Minute)
-		return // One nudge per detection cycle.
-	}
-}
-
-// detectExploreLoop checks for prolonged read-only exploration.
-func (d *HookDetector) detectExploreLoop() {
-	tc, hasWrite, _, err := d.sdb.BurstState()
-	if err != nil || hasWrite || tc < 10 {
-		return
+	tc, hasWrite, fileReads, err := d.sdb.BurstState()
+	if err != nil || hasWrite || tc < 5 {
+		return ""
 	}
 
 	startTime, err := d.sdb.BurstStartTime()
 	if err != nil || startTime.IsZero() {
-		return
+		return ""
 	}
 
 	elapsed := time.Since(startTime)
-	if elapsed < 5*time.Minute {
-		return
+	if elapsed < 8*time.Minute {
+		return ""
 	}
 
-	on, _ := d.sdb.IsOnCooldown("explore_loop")
-	if on {
-		return
+	set, _ := d.sdb.TrySetCooldown("no_progress", 5*time.Minute)
+	if !set {
+		return ""
 	}
 
-	_ = d.sdb.EnqueueNudge(
-		"explore-loop", "tip",
-		itoa(int(elapsed.Minutes()))+"m exploring with no writes",
-		"Give a concrete action — specify target files and what to change",
-	)
-	_ = d.sdb.SetCooldown("explore_loop", 5*time.Minute)
-}
+	minutes := int(elapsed.Minutes())
+	topFile, topCount := "", 0
+	for f, c := range fileReads {
+		if c > topCount {
+			topFile, topCount = f, c
+		}
+	}
 
-func itoa(n int) string {
-	if n < 0 {
-		return "-" + itoa(-n)
+	msg := fmt.Sprintf("[buddy] Signal: %d minutes elapsed with %d tool calls and no file modifications.", minutes, tc)
+	if topFile != "" {
+		msg += fmt.Sprintf(" Most-read file: %s (%dx).", filepath.Base(topFile), topCount)
 	}
-	if n < 10 {
-		return string(rune('0' + n))
-	}
-	return itoa(n/10) + string(rune('0'+n%10))
+	return msg
 }

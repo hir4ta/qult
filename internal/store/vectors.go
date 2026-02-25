@@ -30,74 +30,16 @@ func (s *Store) GetEmbedding(source string, sourceID int64) ([]float32, error) {
 	return deserializeFloat32(blob), nil
 }
 
-// HybridSearchPatterns performs RRF (Reciprocal Rank Fusion) combining FTS5 and vector search.
-// If queryVec is nil, falls back to FTS5-only search.
-func (s *Store) HybridSearchPatterns(query string, queryVec []float32, patternType string, project string, crossProject bool, limit int) ([]PatternRow, string, error) {
+// SearchPatternsByVector performs vector-only search using cosine similarity.
+// Returns nil if queryVec is nil.
+func (s *Store) SearchPatternsByVector(queryVec []float32, patternType string, limit int) ([]PatternRow, error) {
+	if queryVec == nil {
+		return nil, nil
+	}
 	if limit <= 0 {
 		limit = 10
 	}
-
-	// FTS5 search.
-	ftsResults, err := s.SearchPatterns(query, patternType, project, crossProject, limit*2)
-	if err != nil {
-		return nil, "fts5", err
-	}
-
-	if queryVec == nil {
-		return ftsResults[:min(len(ftsResults), limit)], "fts5", nil
-	}
-
-	// Vector search: get all pattern embeddings and compute cosine similarity.
-	vecResults, err := s.vectorSearchPatterns(queryVec, patternType, limit*2)
-	if err != nil {
-		// Fallback to FTS5 if vector search fails.
-		return ftsResults[:min(len(ftsResults), limit)], "fts5_fallback", nil
-	}
-
-	// RRF fusion.
-	const k = 60
-	const ftsWeight = 1.2
-	const vecWeight = 1.0
-
-	scores := make(map[int64]float64)
-	patternMap := make(map[int64]PatternRow)
-
-	for rank, p := range ftsResults {
-		scores[p.ID] += ftsWeight / float64(k+rank+1)
-		patternMap[p.ID] = p
-	}
-	for rank, p := range vecResults {
-		scores[p.ID] += vecWeight / float64(k+rank+1)
-		if _, exists := patternMap[p.ID]; !exists {
-			patternMap[p.ID] = p
-		}
-	}
-
-	// Sort by RRF score.
-	type scoredPattern struct {
-		pattern PatternRow
-		score   float64
-	}
-	var ranked []scoredPattern
-	for id, score := range scores {
-		ranked = append(ranked, scoredPattern{pattern: patternMap[id], score: score})
-	}
-	// Simple insertion sort (small N).
-	for i := 1; i < len(ranked); i++ {
-		for j := i; j > 0 && ranked[j].score > ranked[j-1].score; j-- {
-			ranked[j], ranked[j-1] = ranked[j-1], ranked[j]
-		}
-	}
-
-	var result []PatternRow
-	for i, sp := range ranked {
-		if i >= limit {
-			break
-		}
-		result = append(result, sp.pattern)
-	}
-
-	return result, "hybrid", nil
+	return s.vectorSearchPatterns(queryVec, patternType, limit)
 }
 
 // vectorSearchPatterns retrieves all pattern embeddings and ranks by cosine similarity.
@@ -137,8 +79,8 @@ func (s *Store) vectorSearchPatterns(queryVec []float32, patternType string, lim
 
 	// Load pattern rows for top results.
 	var result []PatternRow
-	for i, c := range candidates {
-		if i >= limit {
+	for _, c := range candidates {
+		if len(result) >= limit {
 			break
 		}
 		p, err := s.getPatternByID(c.id)
@@ -255,9 +197,3 @@ func deserializeFloat32(blob []byte) []float32 {
 	return vec
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

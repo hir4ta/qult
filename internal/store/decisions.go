@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -171,37 +172,33 @@ func (s *Store) InsertDecision(d *DecisionRow) error {
 	return nil
 }
 
-// SearchDecisions searches decisions using FTS5 full-text search.
+// SearchDecisions searches decisions using LIKE on text columns.
 // If sessionID is non-empty, results are filtered to that session.
 func (s *Store) SearchDecisions(query string, sessionID string, limit int) ([]DecisionRow, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 
-	var rows []DecisionRow
-	var sqlStr string
+	var where []string
 	var args []any
 
+	pat := "%" + query + "%"
+	where = append(where, "(d.topic LIKE ? OR d.decision_text LIKE ? OR COALESCE(d.reasoning,'') LIKE ?)")
+	args = append(args, pat, pat, pat)
+
 	if sessionID != "" {
-		sqlStr = `
-			SELECT d.id, d.session_id, d.event_id, d.timestamp, d.topic, d.decision_text, d.reasoning, d.file_paths, d.compact_segment
-			FROM decisions d
-			JOIN decisions_fts f ON d.id = f.rowid
-			WHERE decisions_fts MATCH ?
-			  AND d.session_id = ?
-			ORDER BY rank
-			LIMIT ?`
-		args = []any{query, sessionID, limit}
-	} else {
-		sqlStr = `
-			SELECT d.id, d.session_id, d.event_id, d.timestamp, d.topic, d.decision_text, d.reasoning, d.file_paths, d.compact_segment
-			FROM decisions d
-			JOIN decisions_fts f ON d.id = f.rowid
-			WHERE decisions_fts MATCH ?
-			ORDER BY rank
-			LIMIT ?`
-		args = []any{query, limit}
+		where = append(where, "d.session_id = ?")
+		args = append(args, sessionID)
 	}
+
+	whereClause := strings.Join(where, " AND ")
+	sqlStr := fmt.Sprintf(`
+		SELECT d.id, d.session_id, d.event_id, d.timestamp, d.topic, d.decision_text, d.reasoning, d.file_paths, d.compact_segment
+		FROM decisions d
+		WHERE %s
+		ORDER BY d.timestamp DESC
+		LIMIT ?`, whereClause)
+	args = append(args, limit)
 
 	dbRows, err := s.db.Query(sqlStr, args...)
 	if err != nil {
@@ -209,6 +206,7 @@ func (s *Store) SearchDecisions(query string, sessionID string, limit int) ([]De
 	}
 	defer dbRows.Close()
 
+	var rows []DecisionRow
 	for dbRows.Next() {
 		var r DecisionRow
 		var filePaths, reasoning *string

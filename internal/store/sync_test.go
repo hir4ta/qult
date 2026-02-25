@@ -61,7 +61,7 @@ func TestInsertEventAndGetRecent(t *testing.T) {
 	}
 }
 
-func TestSearchEventsFTS(t *testing.T) {
+func TestSearchEvents(t *testing.T) {
 	s := newTestStore(t)
 
 	err := s.UpsertSession(&SessionRow{

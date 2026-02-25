@@ -2,7 +2,7 @@ package store
 
 import "database/sql"
 
-const schemaVersion = 2
+const schemaVersion = 3
 
 const ddlV1 = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -48,22 +48,6 @@ CREATE TABLE IF NOT EXISTS events (
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
-CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
-    user_text, assistant_text, tool_input, task_subject, plan_title,
-    content='events', content_rowid='id'
-);
-
--- FTS5 sync triggers for events
-CREATE TRIGGER IF NOT EXISTS events_ai AFTER INSERT ON events BEGIN
-    INSERT INTO events_fts(rowid, user_text, assistant_text, tool_input, task_subject, plan_title)
-    VALUES (new.id, new.user_text, new.assistant_text, new.tool_input, new.task_subject, new.plan_title);
-END;
-
-CREATE TRIGGER IF NOT EXISTS events_ad AFTER DELETE ON events BEGIN
-    INSERT INTO events_fts(events_fts, rowid, user_text, assistant_text, tool_input, task_subject, plan_title)
-    VALUES ('delete', old.id, old.user_text, old.assistant_text, old.tool_input, old.task_subject, old.plan_title);
-END;
-
 CREATE TABLE IF NOT EXISTS compact_events (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id      TEXT NOT NULL,
@@ -88,21 +72,6 @@ CREATE TABLE IF NOT EXISTS decisions (
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
-CREATE VIRTUAL TABLE IF NOT EXISTS decisions_fts USING fts5(
-    topic, decision_text, reasoning,
-    content='decisions', content_rowid='id'
-);
-
--- FTS5 sync triggers for decisions
-CREATE TRIGGER IF NOT EXISTS decisions_ai AFTER INSERT ON decisions BEGIN
-    INSERT INTO decisions_fts(rowid, topic, decision_text, reasoning)
-    VALUES (new.id, new.topic, new.decision_text, new.reasoning);
-END;
-
-CREATE TRIGGER IF NOT EXISTS decisions_ad AFTER DELETE ON decisions BEGIN
-    INSERT INTO decisions_fts(decisions_fts, rowid, topic, decision_text, reasoning)
-    VALUES ('delete', old.id, old.topic, old.decision_text, old.reasoning);
-END;
 `
 
 const ddlV2 = `
@@ -148,17 +117,6 @@ CREATE TABLE IF NOT EXISTS pattern_files (
     PRIMARY KEY (pattern_id, file_path),
     FOREIGN KEY (pattern_id) REFERENCES patterns(id) ON DELETE CASCADE
 );
-
-CREATE VIRTUAL TABLE IF NOT EXISTS patterns_fts USING fts5(
-    title, content,
-    content='patterns', content_rowid='id'
-);
-CREATE TRIGGER IF NOT EXISTS patterns_ai AFTER INSERT ON patterns BEGIN
-    INSERT INTO patterns_fts(rowid, title, content) VALUES (new.id, new.title, new.content);
-END;
-CREATE TRIGGER IF NOT EXISTS patterns_ad AFTER DELETE ON patterns BEGIN
-    INSERT INTO patterns_fts(patterns_fts, rowid, title, content) VALUES ('delete', old.id, old.title, old.content);
-END;
 
 -- ==========================================================
 -- alerts table (anti-pattern detection records)
@@ -215,6 +173,19 @@ CREATE INDEX IF NOT EXISTS idx_pattern_tags_tag ON pattern_tags(tag_id);
 CREATE INDEX IF NOT EXISTS idx_embeddings_source ON embeddings(source, source_id);
 `
 
+const ddlV3 = `
+-- Drop all FTS5 virtual tables and triggers (migrating to vector-only search).
+DROP TRIGGER IF EXISTS events_ai;
+DROP TRIGGER IF EXISTS events_ad;
+DROP TRIGGER IF EXISTS decisions_ai;
+DROP TRIGGER IF EXISTS decisions_ad;
+DROP TRIGGER IF EXISTS patterns_ai;
+DROP TRIGGER IF EXISTS patterns_ad;
+DROP TABLE IF EXISTS events_fts;
+DROP TABLE IF EXISTS decisions_fts;
+DROP TABLE IF EXISTS patterns_fts;
+`
+
 // Migrate applies all pending schema migrations to the database.
 func Migrate(db *sql.DB) error {
 	var current int
@@ -234,6 +205,11 @@ func Migrate(db *sql.DB) error {
 	}
 	if current < 2 {
 		if _, err := db.Exec(ddlV2); err != nil {
+			return err
+		}
+	}
+	if current < 3 {
+		if _, err := db.Exec(ddlV3); err != nil {
 			return err
 		}
 	}

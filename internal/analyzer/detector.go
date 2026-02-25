@@ -34,13 +34,13 @@ type PatternType int
 const (
 	PatternRetryLoop        PatternType = iota // same tool+input 3+ times consecutively
 	PatternCompactAmnesia                      // re-reading same files after compact
-	PatternExcessiveTools                      // 25+ tool calls without user turn
+	PatternExcessiveTools                      // deprecated: no longer detected
 	PatternDestructiveCmd                      // rm -rf, git push --force, etc.
-	PatternFileReadLoop                        // same file read 5+ times
+	PatternFileReadLoop                        // deprecated: no longer detected
 	PatternContextThrashing                    // 2+ compacts in 15 minutes
 	PatternTestFailCycle                       // test->edit->test fail 3+ cycles
 	PatternApologizeRetry                      // apologize + same approach 3+ times
-	PatternExploreLoop                         // 5+ min of Read/Grep only, no Write/Edit
+	PatternExploreLoop                         // 10+ min of Read/Grep only, no Write/Edit
 	PatternRateLimitStuck                      // rate limit text + no progress for 5 min
 )
 
@@ -88,12 +88,14 @@ type CompactionTracker struct {
 
 // FeatureTracker tracks which Claude Code features have been used in the session.
 type FeatureTracker struct {
-	PlanModeUsed bool
-	CLAUDEMDRead bool
-	SubagentUsed bool
-	SkillUsed    bool
-	RulesRead    bool // .claude/rules/ referenced
-	HooksUsed    bool // hooks-related events detected
+	PlanModeUsed   bool
+	PlanModeActive bool // currently in Plan Mode (toggled by Enter/ExitPlanMode)
+	SubagentActive bool // subagent currently running (toggled by Task/user message)
+	CLAUDEMDRead   bool
+	SubagentUsed   bool
+	SkillUsed      bool
+	RulesRead      bool // .claude/rules/ referenced
+	HooksUsed      bool // hooks-related events detected
 }
 
 // AlertOutcome records what happened after an alert was shown.
@@ -234,13 +236,7 @@ func (d *Detector) Update(ev parser.SessionEvent) []Alert {
 	if a := d.detectCompactAmnesia(); a != nil {
 		newAlerts = append(newAlerts, *a)
 	}
-	if a := d.detectExcessiveTools(); a != nil {
-		newAlerts = append(newAlerts, *a)
-	}
 	if a := d.detectDestructiveCmd(ev); a != nil {
-		newAlerts = append(newAlerts, *a)
-	}
-	if a := d.detectFileReadLoop(); a != nil {
 		newAlerts = append(newAlerts, *a)
 	}
 	if a := d.detectContextThrashing(); a != nil {
@@ -352,12 +348,19 @@ func (d *Detector) isJa() bool {
 // trackFeatures detects Claude Code feature usage from events.
 func (d *Detector) trackFeatures(ev parser.SessionEvent) {
 	switch ev.Type {
+	case parser.EventUserMessage:
+		// User turn resets subagent active state.
+		d.features.SubagentActive = false
 	case parser.EventToolUse:
 		switch ev.ToolName {
 		case "EnterPlanMode":
 			d.features.PlanModeUsed = true
+			d.features.PlanModeActive = true
+		case "ExitPlanMode":
+			d.features.PlanModeActive = false
 		case "Task":
 			d.features.SubagentUsed = true
+			d.features.SubagentActive = true
 		case "Skill":
 			d.features.SkillUsed = true
 		case "Read":
@@ -373,8 +376,10 @@ func (d *Detector) trackFeatures(ev parser.SessionEvent) {
 		}
 	case parser.EventAgentSpawn:
 		d.features.SubagentUsed = true
+		d.features.SubagentActive = true
 	case parser.EventPlanApproval:
 		d.features.PlanModeUsed = true
+		d.features.PlanModeActive = false
 	}
 }
 

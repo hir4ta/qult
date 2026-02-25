@@ -133,10 +133,10 @@ claude-buddy serve
 | `buddy_tips` | AI-powered feedback and improvement suggestions |
 | `buddy_sessions` | List recent sessions with metadata |
 | `buddy_resume` | Restore previous session context (goal, intent, compaction history, files changed/referenced, decisions) |
-| `buddy_recall` | FTS5 full-text search across past session history |
+| `buddy_recall` | Search across past session history |
 | `buddy_decisions` | Extract design decisions from past sessions |
 | `buddy_alerts` | Real-time anti-pattern detection (retry loops, context thrashing, etc.) |
-| `buddy_patterns` | Cross-project knowledge search with hybrid FTS5 + semantic search |
+| `buddy_patterns` | Cross-project knowledge search with vector semantic search (Ollama) |
 
 ---
 
@@ -204,7 +204,7 @@ claude-buddy/
 │   ├── locale/                # System locale detection (18 languages)
 │   ├── tui/                   # Bubble Tea TUI (watch / browse / select)
 │   ├── mcpserver/             # MCP server (stdio, 8 tools)
-│   ├── store/                 # SQLite persistence (FTS5 + vector search + incremental sync)
+│   ├── store/                 # SQLite persistence (vector search + LIKE search + incremental sync)
 │   └── install/               # Hook registration + MCP registration + initial sync
 ├── go.mod
 └── go.sum
@@ -218,11 +218,11 @@ claude-buddy/
 | [charmbracelet/lipgloss](https://github.com/charmbracelet/lipgloss) | TUI styling |
 | [fsnotify/fsnotify](https://github.com/fsnotify/fsnotify) | File change watching |
 | [mark3labs/mcp-go](https://github.com/mark3labs/mcp-go) | MCP server SDK |
-| [ncruces/go-sqlite3](https://github.com/ncruces/go-sqlite3) | SQLite driver (FTS5 support) |
+| [ncruces/go-sqlite3](https://github.com/ncruces/go-sqlite3) | SQLite driver (pure Go, WASM-based) |
 
-## Optional: Semantic Search
+## Ollama (Required for Knowledge Search)
 
-`buddy_patterns` supports hybrid FTS5 + vector search when [Ollama](https://ollama.com) is available. Without Ollama, FTS5 full-text search is used as fallback.
+`buddy_patterns` and hook-based knowledge injection use [Ollama](https://ollama.com) for vector semantic search. Ollama must be running for these features to work.
 
 ```bash
 # Install Ollama (macOS)
@@ -233,8 +233,10 @@ ollama serve &
 ollama pull kun432/cl-nagoya-ruri-large    # Japanese (recommended for JA locale)
 ollama pull nomic-embed-text               # English / multilingual
 
-# Re-sync to generate embeddings
+# Run setup to generate embeddings
 claude-buddy install
 ```
 
 The model is auto-selected based on your system locale: `kun432/cl-nagoya-ruri-large` (1024d) for Japanese, `nomic-embed-text` (768d) for other languages.
+
+Ollama availability is checked once at session start and cached — subsequent hook calls use a single HTTP round-trip for embedding.

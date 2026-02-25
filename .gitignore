@@ -4,3 +4,4 @@ claude-buddy
 dist/
 *.db
 CLAUDE.md
+.claude/

@@ -87,64 +87,6 @@ func TestTablesExist(t *testing.T) {
 			t.Errorf("table %s not found: %v", tbl, err)
 		}
 	}
-
-	// Check FTS virtual tables.
-	vtables := []string{"events_fts", "decisions_fts"}
-	for _, tbl := range vtables {
-		var name string
-		err := s.DB().QueryRow(
-			"SELECT name FROM sqlite_master WHERE type='table' AND name=?", tbl,
-		).Scan(&name)
-		if err != nil {
-			t.Errorf("virtual table %s not found: %v", tbl, err)
-		}
-	}
-}
-
-func TestFTSTriggers(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer s.Close()
-
-	// Insert a session first (foreign key).
-	_, err = s.DB().Exec(`INSERT INTO sessions (id, project_path, project_name, jsonl_path) VALUES ('s1', '/tmp', 'test', '/tmp/test.jsonl')`)
-	if err != nil {
-		t.Fatalf("insert session: %v", err)
-	}
-
-	// Insert an event and verify FTS is populated.
-	_, err = s.DB().Exec(`INSERT INTO events (session_id, event_type, timestamp, user_text) VALUES ('s1', 1, '2025-01-01T00:00:00Z', 'hello world')`)
-	if err != nil {
-		t.Fatalf("insert event: %v", err)
-	}
-
-	var count int
-	err = s.DB().QueryRow(`SELECT count(*) FROM events_fts WHERE events_fts MATCH 'hello'`).Scan(&count)
-	if err != nil {
-		t.Fatalf("FTS query: %v", err)
-	}
-	if count != 1 {
-		t.Errorf("events_fts match count = %d, want 1", count)
-	}
-
-	// Insert a decision and verify FTS.
-	_, err = s.DB().Exec(`INSERT INTO decisions (session_id, timestamp, topic, decision_text) VALUES ('s1', '2025-01-01T00:00:00Z', 'architecture', 'use sqlite')`)
-	if err != nil {
-		t.Fatalf("insert decision: %v", err)
-	}
-
-	err = s.DB().QueryRow(`SELECT count(*) FROM decisions_fts WHERE decisions_fts MATCH 'sqlite'`).Scan(&count)
-	if err != nil {
-		t.Fatalf("FTS query decisions: %v", err)
-	}
-	if count != 1 {
-		t.Errorf("decisions_fts match count = %d, want 1", count)
-	}
 }
 
 func TestGetAlertPatternFrequency(t *testing.T) {

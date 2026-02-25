@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
@@ -190,43 +191,22 @@ func (s *Store) InsertPattern(p *PatternRow) (int64, error) {
 	return id, nil
 }
 
-// SearchPatterns searches patterns using FTS5 full-text search.
-func (s *Store) SearchPatterns(query string, patternType string, project string, crossProject bool, limit int) ([]PatternRow, error) {
+// SearchPatternsByProject returns recent patterns for a given project path.
+func (s *Store) SearchPatternsByProject(projectPath string, limit int) ([]PatternRow, error) {
 	if limit <= 0 {
 		limit = 10
 	}
 
-	var where []string
-	var args []any
-
-	where = append(where, "patterns_fts MATCH ?")
-	args = append(args, query)
-
-	if patternType != "" {
-		where = append(where, "p.pattern_type = ?")
-		args = append(args, patternType)
-	}
-	if project != "" && !crossProject {
-		where = append(where, "s.project_name = ?")
-		args = append(args, project)
-	}
-
-	whereClause := strings.Join(where, " AND ")
-
-	sqlStr := fmt.Sprintf(`
+	rows, err := s.db.Query(`
 		SELECT p.id, p.session_id, p.pattern_type, p.title, p.content, p.embed_text,
 			COALESCE(p.language,''), p.scope, COALESCE(p.source_event_id,0), p.timestamp
 		FROM patterns p
-		JOIN patterns_fts ON patterns_fts.rowid = p.id
 		JOIN sessions s ON p.session_id = s.id
-		WHERE %s
-		ORDER BY rank
-		LIMIT ?`, whereClause)
-	args = append(args, limit)
-
-	rows, err := s.db.Query(sqlStr, args...)
+		WHERE s.project_path = ? OR s.project_name = ?
+		ORDER BY p.timestamp DESC
+		LIMIT ?`, projectPath, filepath.Base(projectPath), limit)
 	if err != nil {
-		return nil, fmt.Errorf("store: search patterns: %w", err)
+		return nil, fmt.Errorf("store: search patterns by project: %w", err)
 	}
 	defer rows.Close()
 
@@ -237,13 +217,10 @@ func (s *Store) SearchPatterns(query string, patternType string, project string,
 			&p.Language, &p.Scope, &p.SourceEventID, &p.Timestamp); err != nil {
 			continue
 		}
-		// Load tags.
 		p.Tags = s.getPatternTags(p.ID)
-		// Load files.
 		p.Files = s.getPatternFiles(p.ID)
 		result = append(result, p)
 	}
-
 	return result, rows.Err()
 }
 
@@ -282,17 +259,9 @@ func (s *Store) SearchPatternsByTag(tag string, limit int) ([]PatternRow, error)
 }
 
 // CountPatterns returns the total number of patterns in the store.
-func (s *Store) CountPatterns(query string) (int, error) {
+func (s *Store) CountPatterns() (int, error) {
 	var count int
-	var err error
-	if query != "" {
-		err = s.db.QueryRow(`
-			SELECT count(*) FROM patterns p
-			JOIN patterns_fts ON patterns_fts.rowid = p.id
-			WHERE patterns_fts MATCH ?`, query).Scan(&count)
-	} else {
-		err = s.db.QueryRow(`SELECT count(*) FROM patterns`).Scan(&count)
-	}
+	err := s.db.QueryRow(`SELECT count(*) FROM patterns`).Scan(&count)
 	return count, err
 }
 
@@ -358,6 +327,29 @@ func PatternJSON(p PatternRow) map[string]any {
 		m["files"] = p.Files
 	}
 	return m
+}
+
+// DeletePatternsBySession deletes all patterns (and their tag/file links) for a given session ID.
+func (s *Store) DeletePatternsBySession(sessionID string) error {
+	if _, err := s.db.Exec(
+		`DELETE FROM pattern_tags WHERE pattern_id IN (SELECT id FROM patterns WHERE session_id = ?)`,
+		sessionID,
+	); err != nil {
+		return fmt.Errorf("store: delete pattern tags for session %q: %w", sessionID, err)
+	}
+	if _, err := s.db.Exec(
+		`DELETE FROM pattern_files WHERE pattern_id IN (SELECT id FROM patterns WHERE session_id = ?)`,
+		sessionID,
+	); err != nil {
+		return fmt.Errorf("store: delete pattern files for session %q: %w", sessionID, err)
+	}
+	if _, err := s.db.Exec(
+		`DELETE FROM patterns WHERE session_id = ?`,
+		sessionID,
+	); err != nil {
+		return fmt.Errorf("store: delete patterns for session %q: %w", sessionID, err)
+	}
+	return nil
 }
 
 // PatternJSONList converts a slice of PatternRow to JSON bytes.

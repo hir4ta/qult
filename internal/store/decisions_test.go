@@ -157,7 +157,7 @@ func TestInsertAndSearchDecisions(t *testing.T) {
 		t.Error("expected non-zero ID after insert")
 	}
 
-	// Search by FTS.
+	// Search by LIKE.
 	results, err := s.SearchDecisions("sqlite", "", 10)
 	if err != nil {
 		t.Fatalf("SearchDecisions: %v", err)

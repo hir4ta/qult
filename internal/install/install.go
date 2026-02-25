@@ -14,6 +14,23 @@ import (
 	"github.com/hir4ta/claude-buddy/internal/store"
 )
 
+const jarvisStopPrompt = `You are evaluating whether Claude Code should stop working. [buddy]
+
+Context: $ARGUMENTS
+
+IMPORTANT: If stop_hook_active is true in the context, respond {"ok": true} immediately.
+
+Check:
+1. Were all user-requested tasks completed?
+2. Are there unresolved errors or failing tests?
+3. Was any placeholder code or TODO left behind?
+4. If the user asked for a build/test, was it run and did it pass?
+
+If work is complete: {"ok": true}
+If work is incomplete: {"ok": false, "reason": "Specific description of what remains"}
+
+Be strict on completeness, lenient on style.`
+
 // settingsPathFunc returns the path to ~/.claude/settings.json.
 // Package-level variable for test overrides.
 var settingsPathFunc = defaultSettingsPath
@@ -36,15 +53,25 @@ func Run() error {
 		fmt.Fprintf(os.Stderr, "Warning: hook registration failed: %v\n", err)
 	}
 
-	// Step 3: Initial sync.
+	// Step 3: Install buddy agent.
+	if err := installBuddyAgent(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: buddy agent install failed: %v\n", err)
+	}
+
+	// Step 4: Initial sync.
 	if err := initialSync(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: initial sync failed: %v\n", err)
 	}
 
-	// Step 4: Generate embeddings (if Ollama available).
+	// Step 5: Sync documentation knowledge.
+	if err := syncDocsToStore(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: docs knowledge sync failed: %v\n", err)
+	}
+
+	// Step 6: Generate embeddings (if Ollama available).
 	generateEmbeddings()
 
-	// Step 5: Print completion message.
+	// Step 7: Print completion message.
 	printInstructions()
 
 	return nil
@@ -78,7 +105,7 @@ func resolveBinPath() (string, error) {
 	return resolved, nil
 }
 
-// buddyHookEntries builds the 6 hook event entries keyed by event name.
+// buddyHookEntries builds hook event entries keyed by event name.
 func buddyHookEntries(binPath string) map[string]any {
 	makeEntry := func(event string, timeout int, async bool, matcher string) []any {
 		hook := map[string]any{
@@ -99,14 +126,34 @@ func buddyHookEntries(binPath string) map[string]any {
 		return []any{entry}
 	}
 
-	return map[string]any{
-		"SessionStart":    makeEntry("SessionStart", 5, false, "startup|resume|compact"),
-		"PreToolUse":      makeEntry("PreToolUse", 2, false, "Bash"),
-		"PostToolUse":     makeEntry("PostToolUse", 3, true, ""),
+	entries := map[string]any{
+		"SessionStart":     makeEntry("SessionStart", 5, false, "startup|resume|compact"),
+		"PreToolUse":       makeEntry("PreToolUse", 2, false, ""),
+		"PostToolUse":      makeEntry("PostToolUse", 5, true, ""),
 		"UserPromptSubmit": makeEntry("UserPromptSubmit", 2, false, ""),
-		"PreCompact":      makeEntry("PreCompact", 3, false, ""),
-		"SessionEnd":      makeEntry("SessionEnd", 5, true, ""),
+		"PreCompact":       makeEntry("PreCompact", 3, false, ""),
+		"SessionEnd":       makeEntry("SessionEnd", 5, true, ""),
 	}
+
+	// Stop: hybrid (command + prompt run in parallel).
+	entries["Stop"] = []any{
+		map[string]any{
+			"hooks": []any{
+				map[string]any{
+					"type":    "command",
+					"command": binPath + " hook-handler Stop",
+					"timeout": 5,
+				},
+				map[string]any{
+					"type":    "prompt",
+					"prompt":  jarvisStopPrompt,
+					"timeout": 30,
+				},
+			},
+		},
+	}
+
+	return entries
 }
 
 // registerHooks writes claude-buddy hooks to ~/.claude/settings.json.
@@ -183,7 +230,7 @@ func mergeEventHooks(existing any, buddyEntry any) any {
 }
 
 // isBuddyHookEntry checks if a hook entry belongs to claude-buddy
-// by inspecting its command string.
+// by inspecting command strings and prompt markers.
 func isBuddyHookEntry(entry any) bool {
 	m, ok := entry.(map[string]any)
 	if !ok {
@@ -198,8 +245,14 @@ func isBuddyHookEntry(entry any) bool {
 		if !ok {
 			continue
 		}
+		// Check command hooks.
 		cmd, _ := hm["command"].(string)
 		if strings.Contains(cmd, "claude-buddy") || strings.Contains(cmd, " hook-handler ") {
+			return true
+		}
+		// Check prompt hooks with [buddy] marker.
+		prompt, _ := hm["prompt"].(string)
+		if strings.Contains(prompt, "[buddy]") {
 			return true
 		}
 	}
@@ -225,7 +278,7 @@ func RemoveHooks() error {
 		return nil // no hooks section
 	}
 
-	events := []string{"SessionStart", "PreToolUse", "PostToolUse", "UserPromptSubmit", "PreCompact", "SessionEnd"}
+	events := []string{"SessionStart", "PreToolUse", "PostToolUse", "UserPromptSubmit", "PreCompact", "SessionEnd", "Stop"}
 	changed := false
 	for _, event := range events {
 		existing, ok := hooks[event].([]any)
@@ -284,6 +337,15 @@ func initialSync() error {
 	return nil
 }
 
+func syncDocsToStore() error {
+	st, err := store.OpenDefault()
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer st.Close()
+	return syncDocsKnowledge(st)
+}
+
 func generateEmbeddings() {
 	lang := locale.Detect()
 	model := embedder.ModelForLocale(lang.Code)
@@ -291,7 +353,7 @@ func generateEmbeddings() {
 
 	ctx := context.Background()
 	if !emb.EnsureAvailable(ctx) {
-		fmt.Println("ℹ Ollama not available — skipping embeddings (FTS5 search only)")
+		fmt.Println("⚠ Ollama not available — vector search will not work until Ollama is running")
 		return
 	}
 
