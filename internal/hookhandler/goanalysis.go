@@ -35,6 +35,9 @@ func GoASTCheck(filePath, content string) string {
 	if issue := checkDeferInLoop(fset, file); issue != "" {
 		return issue
 	}
+	if issue := checkCognitiveComplexity(fset, file); issue != "" {
+		return issue
+	}
 	return ""
 }
 
@@ -195,6 +198,120 @@ func checkGoroutineContext(fset *token.FileSet, file *ast.File) string {
 		return true
 	})
 	return issue
+}
+
+// checkCognitiveComplexity measures how hard a function is to understand.
+// Unlike cyclomatic complexity, nesting depth multiplies the cost of each
+// decision point. Warns if score exceeds threshold (20).
+func checkCognitiveComplexity(fset *token.FileSet, file *ast.File) string {
+	const threshold = 20
+	for _, decl := range file.Decls {
+		funcDecl, ok := decl.(*ast.FuncDecl)
+		if !ok || funcDecl.Body == nil {
+			continue
+		}
+
+		score := cognitiveWalk(funcDecl.Body, 0)
+		if score > threshold {
+			pos := fset.Position(funcDecl.Pos())
+			return fmt.Sprintf("Function %s has cognitive complexity %d (threshold: %d) at line %d — deeply nested logic is hard to follow",
+				funcDecl.Name.Name, score, threshold, pos.Line)
+		}
+	}
+	return ""
+}
+
+// cognitiveWalk recursively scores a block's cognitive complexity.
+// Each control structure adds 1, and nesting increments add the current depth.
+func cognitiveWalk(node ast.Node, depth int) int {
+	score := 0
+	ast.Inspect(node, func(n ast.Node) bool {
+		if n == nil {
+			return false
+		}
+		switch v := n.(type) {
+		case *ast.IfStmt:
+			score += 1 + depth
+			// Walk if-body at increased depth.
+			score += cognitiveWalkBlock(v.Body, depth+1)
+			// Handle else/else-if chain without extra nesting penalty.
+			if v.Else != nil {
+				if elseIf, ok := v.Else.(*ast.IfStmt); ok {
+					// else-if: +1 (no nesting increment), then recurse its body.
+					score++
+					score += cognitiveWalkBlock(elseIf.Body, depth+1)
+					// Continue the else chain if the else-if itself has an else.
+					if elseIf.Else != nil {
+						score += cognitiveWalkElseChain(elseIf.Else, depth)
+					}
+				} else if elseBlock, ok := v.Else.(*ast.BlockStmt); ok {
+					// else: +1, walk at same nesting as if-body.
+					score++
+					score += cognitiveWalkBlock(elseBlock, depth+1)
+				}
+			}
+			return false
+		case *ast.ForStmt:
+			score += 1 + depth
+			score += cognitiveWalkBlock(v.Body, depth+1)
+			return false
+		case *ast.RangeStmt:
+			score += 1 + depth
+			score += cognitiveWalkBlock(v.Body, depth+1)
+			return false
+		case *ast.SwitchStmt:
+			score += 1 + depth
+			score += cognitiveWalkBlock(v.Body, depth+1)
+			return false
+		case *ast.TypeSwitchStmt:
+			score += 1 + depth
+			score += cognitiveWalkBlock(v.Body, depth+1)
+			return false
+		case *ast.SelectStmt:
+			score += 1 + depth
+			score += cognitiveWalkBlock(v.Body, depth+1)
+			return false
+		case *ast.BinaryExpr:
+			if v.Op == token.LAND || v.Op == token.LOR {
+				score++
+			}
+		case *ast.FuncLit:
+			// Nested function literal increases depth.
+			score += cognitiveWalkBlock(v.Body, depth+1)
+			return false
+		}
+		return true
+	})
+	return score
+}
+
+// cognitiveWalkBlock walks the statements in a block at the given depth.
+func cognitiveWalkBlock(block *ast.BlockStmt, depth int) int {
+	if block == nil {
+		return 0
+	}
+	score := 0
+	for _, stmt := range block.List {
+		score += cognitiveWalk(stmt, depth)
+	}
+	return score
+}
+
+// cognitiveWalkElseChain handles else/else-if chains after the first else-if.
+// Each else-if adds +1 (no nesting increment) and its body is walked at depth+1.
+func cognitiveWalkElseChain(node ast.Node, depth int) int {
+	score := 0
+	if elseIf, ok := node.(*ast.IfStmt); ok {
+		score++
+		score += cognitiveWalkBlock(elseIf.Body, depth+1)
+		if elseIf.Else != nil {
+			score += cognitiveWalkElseChain(elseIf.Else, depth)
+		}
+	} else if elseBlock, ok := node.(*ast.BlockStmt); ok {
+		score++
+		score += cognitiveWalkBlock(elseBlock, depth+1)
+	}
+	return score
 }
 
 // checkDeferInLoop detects defer statements inside for/range loops.

@@ -57,6 +57,22 @@ func handlePreToolUse(input []byte) (*HookOutput, error) {
 		signals = append(signals, alts)
 	}
 
+	// High-failure-rate gate: ask user for confirmation on Edit/Write when
+	// the tool+file combination has historically high failure probability.
+	if in.ToolName == "Edit" || in.ToolName == "Write" {
+		var fi struct {
+			FilePath string `json:"file_path"`
+		}
+		if json.Unmarshal(in.ToolInput, &fi) == nil && fi.FilePath != "" {
+			prob, total, _ := sdb.FailureProbability(in.ToolName, fi.FilePath)
+			if prob >= 0.8 && total >= 5 {
+				reason := fmt.Sprintf("[buddy] High failure rate (%.0f%% over %d attempts) for %s on %s. Consider reading the file first to verify current content.",
+					prob*100, total, in.ToolName, filepath.Base(fi.FilePath))
+				return makeAskOutput(reason), nil
+			}
+		}
+	}
+
 	// Impact preview for Edit/Write (shows importers, test files).
 	if in.ToolName == "Edit" || in.ToolName == "Write" {
 		var ei struct {

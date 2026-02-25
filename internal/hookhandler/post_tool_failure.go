@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -210,10 +211,18 @@ func buildFixSuggestion(sdb *sessiondb.SessionDB, sessionID, failureType, filePa
 // tryLLMFixSuggestion attempts to generate a context-aware fix via Ollama.
 // Returns empty string on failure (caller keeps deterministic fallback).
 // Records the emission in suggestion_outcomes for effectiveness tracking.
+// Uses LLM response cache to avoid redundant calls for similar errors.
 func tryLLMFixSuggestion(sdb *sessiondb.SessionDB, sessionID, failureType, errorMsg, filePath string) string {
 	advisor := advice.NewFromSessionDB(sdb)
 	if advisor == nil {
 		return ""
+	}
+
+	// Check LLM cache first (30 minute TTL).
+	errSig := extractErrorSignature(errorMsg)
+	cacheKey := computeLLMCacheKey(failureType, filePath, errSig)
+	if cached, ok := sdb.GetCachedLLMResponse(cacheKey, 30*time.Minute); ok {
+		return cached
 	}
 
 	recentContext := buildRecentContext(sdb)
@@ -238,10 +247,15 @@ func tryLLMFixSuggestion(sdb *sessiondb.SessionDB, sessionID, failureType, error
 		fmt.Fprintf(&b, "\n→ [LLM] Suggestion: %s", fix.Suggestion)
 	}
 
-	// Track LLM suggestion for effectiveness measurement.
-	recordLLMSuggestionDelivery(sdb, sessionID, failureType, b.String())
+	result := b.String()
 
-	return b.String()
+	// Cache LLM response for deduplication.
+	_ = sdb.SetCachedLLMResponse(cacheKey, result, "")
+
+	// Track LLM suggestion for effectiveness measurement.
+	recordLLMSuggestionDelivery(sdb, sessionID, failureType, result)
+
+	return result
 }
 
 // recordLLMSuggestionDelivery records an LLM-generated suggestion in the persistent store.
@@ -362,6 +376,14 @@ func searchPastSolutions(sdb *sessiondb.SessionDB, failureType, errorMsg string)
 		return ""
 	}
 	return formatSolution(solutions[0])
+}
+
+// computeLLMCacheKey builds a FNV-1a hash key for LLM response caching.
+func computeLLMCacheKey(failureType, filePath, errorSig string) string {
+	h := fmt.Sprintf("%s:%s:%s", failureType, filePath, errorSig)
+	fnvHash := fnv.New64a()
+	fnvHash.Write([]byte(h))
+	return fmt.Sprintf("%016x", fnvHash.Sum64())
 }
 
 // recordFailureSequence records a tool sequence ending in failure.

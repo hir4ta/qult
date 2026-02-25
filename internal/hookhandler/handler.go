@@ -55,6 +55,18 @@ func Run(eventName string) error {
 		output, err = handlePostToolUseFailure(input)
 	case "Stop":
 		output, err = handleStop(input)
+	case "SubagentStart":
+		output, err = handleSubagentStart(input)
+	case "SubagentStop":
+		output, err = handleSubagentStop(input)
+	case "Notification":
+		output, err = handleNotification(input)
+	case "TeammateIdle":
+		output, err = handleQualityGate(input, "TeammateIdle")
+	case "TaskCompleted":
+		output, err = handleQualityGate(input, "TaskCompleted")
+	case "PermissionRequest":
+		output, err = handlePermissionRequest(input)
 	default:
 		// Unknown event: no-op.
 		return nil
@@ -106,9 +118,31 @@ func makeAsyncContextOutput(context string) *HookOutput {
 	return &HookOutput{AdditionalContext: context}
 }
 
+// makeAskOutput creates a PreToolUse "ask" response that prompts the user for confirmation.
+func makeAskOutput(reason string) *HookOutput {
+	return &HookOutput{
+		HookSpecificOutput: map[string]any{
+			"hookEventName":            "PreToolUse",
+			"permissionDecision":       "ask",
+			"permissionDecisionReason": reason,
+		},
+	}
+}
+
 // makeBlockStopOutput returns output that prevents Claude from stopping.
 func makeBlockStopOutput(reason string) *HookOutput {
 	return &HookOutput{Decision: "block", Reason: reason}
+}
+
+// makeAllowOutput creates a PreToolUse "allow" response.
+func makeAllowOutput(reason string) *HookOutput {
+	return &HookOutput{
+		HookSpecificOutput: map[string]any{
+			"hookEventName":            "PreToolUse",
+			"permissionDecision":       "allow",
+			"permissionDecisionReason": reason,
+		},
+	}
 }
 
 // formatNudges formats nudges into a compact text string for additionalContext.

@@ -132,6 +132,16 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 		recordFailureSolution(sdb, in.SessionID, filePath, in.ToolInput)
 	}
 
+	// File change tracking for oscillation/revert detection.
+	if isWrite && filePath != "" {
+		trackFileChange(sdb, filePath, in.CWD)
+	}
+
+	// External linter checks on write operations.
+	if isWrite && filePath != "" {
+		lintAfterWrite(sdb, filePath, in.CWD)
+	}
+
 	// Code quality heuristics on write operations.
 	if isWrite && filePath != "" {
 		if hint := runCodeHeuristics(filePath, in.ToolInput); hint != "" {

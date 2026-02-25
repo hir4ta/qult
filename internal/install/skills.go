@@ -98,6 +98,95 @@ Pre-commit quality gate.
 - Never block the commit yourself — just advise
 `,
 	},
+	{
+		Dir: "buddy-impact",
+		Content: `---
+name: buddy-impact
+description: >
+  Analyze the blast radius of planned changes before editing. Shows importers,
+  test coverage, and co-change history for a file.
+user-invocable: true
+allowed-tools: mcp__claude-buddy__buddy_patterns, mcp__claude-buddy__buddy_decisions, Read, Grep, Glob, Bash
+---
+
+Analyze the impact of changing a specific file or module.
+
+## Steps
+
+1. Identify the target file from the user's request
+2. Call buddy_patterns to find related past changes and issues
+3. Call buddy_decisions to check for architectural constraints
+4. Use Grep to find importers/references to this file
+5. Use Glob to find related test files
+
+## Output
+
+- Blast radius: number of files that reference this module
+- Test coverage: which test files exist for this code
+- Past issues: any known problems from pattern DB
+- Recommendations: suggested approach for the change
+
+Keep output under 10 lines. Be specific about file paths.
+`,
+	},
+	{
+		Dir: "buddy-review",
+		Content: `---
+name: buddy-review
+description: >
+  Review recent changes against pattern DB knowledge. Checks for known
+  anti-patterns, past failures with similar code, and architectural decisions.
+user-invocable: true
+allowed-tools: mcp__claude-buddy__buddy_patterns, mcp__claude-buddy__buddy_alerts, mcp__claude-buddy__buddy_decisions, Bash, Read
+---
+
+Review recent code changes using pattern database knowledge.
+
+## Steps
+
+1. Run 'git diff --stat' to see what files changed
+2. Call buddy_patterns for each changed file to find related past issues
+3. Call buddy_decisions to check if changes align with past architectural choices
+4. Call buddy_alerts to check session health
+
+## Output
+
+- List specific issues found (max 5)
+- Reference past patterns or decisions that are relevant
+- Suggest concrete fixes if issues found
+- If clean, say "No issues found" and summarize what was reviewed
+`,
+	},
+	{
+		Dir: "buddy-estimate",
+		Content: `---
+name: buddy-estimate
+description: >
+  Estimate task complexity based on historical workflow data. Shows expected
+  tool count, success rate, and recommended workflow.
+user-invocable: true
+allowed-tools: mcp__claude-buddy__buddy_estimate, mcp__claude-buddy__buddy_patterns
+---
+
+Estimate the complexity of a task using historical data.
+
+## Steps
+
+1. Determine the task type from the user's description (bugfix, feature, refactor, research, review)
+2. Call buddy_estimate with the task type
+3. Call buddy_patterns to find similar past tasks if available
+
+## Output
+
+- Task type classification
+- Expected tool count (median from past sessions)
+- Success rate for this type of task
+- Recommended workflow steps
+- Any relevant patterns from past sessions
+
+Keep it concise — 5-8 lines max.
+`,
+	},
 }
 
 // installSkills writes buddy skills to ~/.claude/skills/.

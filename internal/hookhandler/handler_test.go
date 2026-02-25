@@ -510,7 +510,7 @@ func TestCheckCompleteness(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			issues := checkCompleteness(tt.msg)
+			issues := checkCompleteness(tt.msg, true)
 			if tt.wantIssue && len(issues) == 0 {
 				t.Errorf("checkCompleteness(%q) = no issues, want at least 1", tt.msg)
 			}

@@ -122,6 +122,12 @@ func buddyHookEntries(binPath string) map[string]any {
 		"UserPromptSubmit":    makeEntry("UserPromptSubmit", 2, false, ""),
 		"PreCompact":          makeEntry("PreCompact", 3, false, ""),
 		"SessionEnd":          makeEntry("SessionEnd", 5, true, ""),
+		"SubagentStart":       makeEntry("SubagentStart", 3, false, ""),
+		"SubagentStop":        makeEntry("SubagentStop", 3, false, ""),
+		"Notification":        makeEntry("Notification", 2, false, ""),
+		"TeammateIdle":        makeEntry("TeammateIdle", 3, true, ""),
+		"TaskCompleted":       makeEntry("TaskCompleted", 3, false, ""),
+		"PermissionRequest":   makeEntry("PermissionRequest", 1, false, "buddy_*"),
 	}
 
 	// Stop: command hook (deterministic checks) + prompt hook (LLM verification).
@@ -269,7 +275,12 @@ func RemoveHooks() error {
 		return nil // no hooks section
 	}
 
-	events := []string{"SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure", "UserPromptSubmit", "PreCompact", "SessionEnd", "Stop"}
+	events := []string{
+		"SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure",
+		"UserPromptSubmit", "PreCompact", "SessionEnd", "Stop",
+		"SubagentStart", "SubagentStop", "Notification",
+		"TeammateIdle", "TaskCompleted", "PermissionRequest",
+	}
 	changed := false
 	for _, event := range events {
 		existing, ok := hooks[event].([]any)

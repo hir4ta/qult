@@ -4,14 +4,74 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/hir4ta/claude-buddy/internal/ollama"
 	"github.com/hir4ta/claude-buddy/internal/sessiondb"
 )
 
-// DefaultModel is the default generation model.
-const DefaultModel = "qwen2.5-coder:1.5b"
+// ModelTier selects the LLM tier for different use cases.
+type ModelTier int
+
+const (
+	// TierFast is for classification tasks (< 1s).
+	TierFast ModelTier = iota
+	// TierSmart is for analysis tasks (2-4s).
+	TierSmart
+	// TierDeep is for session summaries (async, 5-10s).
+	TierDeep
+)
+
+// Default model names per tier.
+const (
+	FastModel  = "qwen2.5-coder:1.5b"
+	SmartModel = "qwen3:4b"
+	DeepModel  = "qwen2.5-coder:7b"
+)
+
+// DefaultModel is the primary generation model (smart tier).
+const DefaultModel = SmartModel
+
+// ModelForTier returns the model name for a given tier,
+// respecting BUDDY_GEN_MODEL override for the smart tier.
+func ModelForTier(tier ModelTier) string {
+	switch tier {
+	case TierFast:
+		return FastModel
+	case TierSmart:
+		return ModelFromEnv()
+	case TierDeep:
+		if env := os.Getenv("BUDDY_DEEP_MODEL"); env != "" {
+			return env
+		}
+		return DeepModel
+	default:
+		return ModelFromEnv()
+	}
+}
+
+// ModelFromEnv returns the generation model from BUDDY_GEN_MODEL env var,
+// falling back to DefaultModel.
+func ModelFromEnv() string {
+	if env := os.Getenv("BUDDY_GEN_MODEL"); env != "" {
+		return env
+	}
+	return DefaultModel
+}
+
+// AllModels returns all model names for warmup.
+func AllModels() []string {
+	seen := make(map[string]bool)
+	var models []string
+	for _, m := range []string{FastModel, ModelFromEnv(), ModelForTier(TierDeep)} {
+		if !seen[m] {
+			seen[m] = true
+			models = append(models, m)
+		}
+	}
+	return models
+}
 
 // Advisor provides LLM-augmented advice via Ollama /api/generate.
 // It includes circuit breaker logic and graceful fallback.
@@ -26,6 +86,11 @@ func NewAdvisor(client *ollama.Client, model string) *Advisor {
 		model = DefaultModel
 	}
 	return &Advisor{client: client, model: model}
+}
+
+// NewAdvisorForTier creates a new Advisor using the specified model tier.
+func NewAdvisorForTier(client *ollama.Client, tier ModelTier) *Advisor {
+	return &Advisor{client: client, model: ModelForTier(tier)}
 }
 
 // NewFromSessionDB creates an Advisor using cached Ollama settings from sessiondb.
@@ -71,16 +136,42 @@ type FixSuggestion struct {
 var fixSuggestionSchema = map[string]any{
 	"type": "object",
 	"properties": map[string]any{
-		"root_cause":  map[string]any{"type": "string"},
-		"suggestion":  map[string]any{"type": "string"},
-		"confidence":  map[string]any{"type": "string", "enum": []string{"high", "medium", "low"}},
+		"root_cause": map[string]any{"type": "string"},
+		"suggestion": map[string]any{"type": "string"},
+		"confidence": map[string]any{"type": "string", "enum": []string{"high", "medium", "low"}},
 	},
 	"required": []string{"root_cause", "suggestion", "confidence"},
+}
+
+// fewShotExamples provides failure-type-specific examples for the LLM prompt.
+var fewShotExamples = map[string]string{
+	"edit_mismatch": `Example 1: {"root_cause":"Whitespace mismatch — file uses tabs but old_string used spaces","suggestion":"Read the file with exact line range to get current indentation, then retry Edit","confidence":"high"}
+Example 2: {"root_cause":"File was modified by a concurrent Edit since last Read","suggestion":"Re-read the file to get current content before retrying the Edit","confidence":"high"}
+Example 3: {"root_cause":"Function signature changed after a previous refactor","suggestion":"Read the file to find the current function signature, then update old_string accordingly","confidence":"medium"}`,
+
+	"compile_error": `Example 1: {"root_cause":"Missing import for a newly used package","suggestion":"Add the missing import statement at the top of the file","confidence":"high"}
+Example 2: {"root_cause":"Type was renamed in a dependency but caller still uses old name","suggestion":"Check the dependency's exported types and update the reference","confidence":"medium"}
+Example 3: {"root_cause":"Syntax error from incomplete edit — missing closing brace","suggestion":"Read the file around the error line and fix the syntax","confidence":"high"}`,
+
+	"test_failure": `Example 1: {"root_cause":"Test assertion uses old expected value after behavior change","suggestion":"Update the test's expected value to match the new behavior","confidence":"high"}
+Example 2: {"root_cause":"Test fixture references a renamed file or function","suggestion":"Update the test fixture to use the current name","confidence":"medium"}
+Example 3: {"root_cause":"Race condition in concurrent test — shared state not protected","suggestion":"Add proper synchronization or use t.Parallel() with isolated state","confidence":"medium"}`,
+
+	"bash_error": `Example 1: {"root_cause":"Command not found — tool not installed in this environment","suggestion":"Check if the tool exists with 'which <tool>' or install it first","confidence":"high"}
+Example 2: {"root_cause":"Permission denied on file or directory","suggestion":"Check file permissions with 'ls -la' and fix with chmod if appropriate","confidence":"high"}`,
+
+	"generic": `Example 1: {"root_cause":"File path has a typo — wrong directory or extension","suggestion":"Use Glob to find the correct file path","confidence":"high"}
+Example 2: {"root_cause":"Operation timed out due to large file or slow network","suggestion":"Retry with a smaller scope or increase timeout","confidence":"medium"}`,
 }
 
 // GenerateFixSuggestion uses the LLM to generate a context-aware fix suggestion.
 // Returns nil if the LLM call fails or times out.
 func (a *Advisor) GenerateFixSuggestion(ctx context.Context, failureType, errorMsg, filePath, recentContext string) (*FixSuggestion, error) {
+	examples := fewShotExamples[failureType]
+	if examples == "" {
+		examples = fewShotExamples["generic"]
+	}
+
 	prompt := fmt.Sprintf(`A Claude Code tool failed. Analyze and suggest a fix.
 
 Failure type: %s
@@ -88,15 +179,19 @@ File: %s
 Error: %s
 Recent context: %s
 
+Examples of good responses:
+%s
+
 Respond with root_cause (1 sentence), suggestion (1 specific action), and confidence.`,
-		failureType, filePath, truncate(errorMsg, 500), truncate(recentContext, 300))
+		failureType, filePath, truncate(errorMsg, 500), truncate(recentContext, 300), examples)
 
 	resp, err := a.client.Generate(ctx, &ollama.GenerateRequest{
-		Model:   a.model,
-		Prompt:  prompt,
-		System:  "You are a concise debugging advisor for Claude Code. Always respond in valid JSON.",
-		Format:  fixSuggestionSchema,
-		Options: map[string]any{"temperature": 0, "num_predict": 150},
+		Model:     a.model,
+		Prompt:    prompt,
+		System:    "You are a concise debugging advisor for Claude Code. Always respond in valid JSON.",
+		Format:    fixSuggestionSchema,
+		Options:   map[string]any{"temperature": 0, "num_predict": 150},
+		KeepAlive: -1,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("advice: generate: %w", err)
@@ -141,11 +236,12 @@ Respond with: summary (2-3 sentences), key_decisions (list), open_questions (lis
 		truncate(workingSetDump, 1500))
 
 	resp, err := a.client.Generate(ctx, &ollama.GenerateRequest{
-		Model:   a.model,
-		Prompt:  prompt,
-		System:  "You are a session summarizer. Be concise and factual. Respond in valid JSON.",
-		Format:  sessionSummarySchema,
-		Options: map[string]any{"temperature": 0, "num_predict": 300},
+		Model:     a.model,
+		Prompt:    prompt,
+		System:    "You are a session summarizer. Be concise and factual. Respond in valid JSON.",
+		Format:    sessionSummarySchema,
+		Options:   map[string]any{"temperature": 0, "num_predict": 300},
+		KeepAlive: -1,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("advice: generate summary: %w", err)
@@ -188,3 +284,4 @@ func truncate(s string, maxRunes int) string {
 	}
 	return string(runes[:maxRunes]) + "..."
 }
+

@@ -9,6 +9,31 @@ import (
 	"github.com/hir4ta/claude-buddy/internal/store"
 )
 
+const serverInstructions = `claude-buddy is a real-time session advisor for Claude Code. It monitors your session, detects anti-patterns, and provides proactive workflow guidance.
+
+## Available Tools
+
+- buddy_stats: Get session statistics (turn counts, tool usage, duration). Use to understand session patterns.
+- buddy_suggest: Get prioritized workflow recommendations with health score, alerts, and feature utilization.
+- buddy_current_state: Quick pulse check — session health, burst state, predictions, and active alerts.
+- buddy_sessions: List recent sessions by project or date.
+- buddy_resume: Recover context from a previous session (summary, decisions, files modified).
+- buddy_recall: Search pre-compact conversation history for lost details (topics, file paths, decisions).
+- buddy_alerts: Detect active anti-patterns and get session health score.
+- buddy_decisions: List past design decisions. Use before making related changes to check architectural history.
+- buddy_patterns: Search knowledge patterns (error solutions, architecture, decisions) from past sessions.
+- buddy_estimate: Estimate task complexity based on historical workflow data.
+
+## Usage Guidelines
+
+- Call buddy_current_state at session start for a health baseline.
+- Call buddy_alerts when health score drops below 0.7.
+- Call buddy_patterns when encountering errors to find past solutions.
+- Call buddy_decisions before architectural changes.
+- Call buddy_recall after context compaction to recover lost details.
+- Call buddy_estimate before starting complex tasks to set expectations.
+`
+
 // New creates a new MCP server with all tools registered.
 // emb may be nil if Ollama is not available.
 func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Embedder) *server.MCPServer {
@@ -16,6 +41,10 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 		"claude-buddy",
 		"0.2.0",
 		server.WithToolCapabilities(true),
+		server.WithResourceCapabilities(true, true),
+		server.WithPromptCapabilities(true),
+		server.WithInstructions(serverInstructions),
+		server.WithLogging(),
 	)
 
 	s.AddTools(
@@ -177,7 +206,29 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 			),
 			Handler: patternsHandler(st, emb),
 		},
+		server.ServerTool{
+			Tool: mcp.NewTool("buddy_estimate",
+				mcp.WithDescription("Estimate task complexity based on historical workflow data. Returns median tool count, success rate, and common workflow pattern."),
+				mcp.WithTitleAnnotation("Task Estimation"),
+				mcp.WithReadOnlyHintAnnotation(true),
+				mcp.WithDestructiveHintAnnotation(false),
+				mcp.WithIdempotentHintAnnotation(true),
+				mcp.WithOpenWorldHintAnnotation(false),
+				mcp.WithString("task_type",
+					mcp.Description("Task type: bugfix, feature, refactor, research, review"),
+					mcp.Required(),
+				),
+				mcp.WithString("project",
+					mcp.Description("Project path to filter estimates (optional)"),
+				),
+			),
+			Handler: estimateHandler(st),
+		},
 	)
+
+	// Register resources and prompts.
+	registerResources(s, claudeHome, lang, st)
+	registerPrompts(s, claudeHome, lang, st)
 
 	return s
 }

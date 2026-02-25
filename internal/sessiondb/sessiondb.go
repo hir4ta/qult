@@ -111,6 +111,24 @@ CREATE TABLE IF NOT EXISTS session_phases (
 	tool_name TEXT NOT NULL DEFAULT '',
 	timestamp TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS file_change_tracking (
+	id            INTEGER PRIMARY KEY AUTOINCREMENT,
+	file_path     TEXT    NOT NULL,
+	event_seq     INTEGER NOT NULL,
+	lines_added   INTEGER NOT NULL DEFAULT 0,
+	lines_removed INTEGER NOT NULL DEFAULT 0,
+	net_change    INTEGER NOT NULL DEFAULT 0,
+	diff_hash     TEXT    NOT NULL DEFAULT '',
+	timestamp     TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS llm_cache (
+	prompt_hash TEXT PRIMARY KEY,
+	response    TEXT NOT NULL,
+	model       TEXT NOT NULL DEFAULT '',
+	created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `
 
 // HookEvent is a recorded tool event.
@@ -900,4 +918,115 @@ func (s *SessionDB) PredictOutcome(prevTool, currentTool string) (outcome string
 		return "", 0, fmt.Errorf("sessiondb: predict outcome: %w", err)
 	}
 	return outcome, count, nil
+}
+
+// --- File Change Tracking ---
+
+// RecordFileChange records a file change event for oscillation/revert detection.
+func (s *SessionDB) RecordFileChange(filePath string, eventSeq, linesAdded, linesRemoved int64, diffHash string) error {
+	netChange := linesAdded - linesRemoved
+	_, err := s.db.Exec(
+		`INSERT INTO file_change_tracking (file_path, event_seq, lines_added, lines_removed, net_change, diff_hash)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		filePath, eventSeq, linesAdded, linesRemoved, netChange, diffHash,
+	)
+	if err != nil {
+		return fmt.Errorf("sessiondb: record file change: %w", err)
+	}
+	return nil
+}
+
+// DetectOscillation checks if a file's net_change sign has alternated 3+ times,
+// indicating the file is being changed back and forth.
+func (s *SessionDB) DetectOscillation(filePath string) (bool, error) {
+	rows, err := s.db.Query(
+		`SELECT net_change FROM file_change_tracking
+		 WHERE file_path = ? ORDER BY id DESC LIMIT 6`, filePath,
+	)
+	if err != nil {
+		return false, fmt.Errorf("sessiondb: detect oscillation: %w", err)
+	}
+	defer rows.Close()
+
+	var changes []int64
+	for rows.Next() {
+		var nc int64
+		if err := rows.Scan(&nc); err != nil {
+			continue
+		}
+		changes = append(changes, nc)
+	}
+	if len(changes) < 3 {
+		return false, nil
+	}
+
+	alternations := 0
+	for i := 1; i < len(changes); i++ {
+		if changes[i-1] != 0 && changes[i] != 0 &&
+			(changes[i-1] > 0) != (changes[i] > 0) {
+			alternations++
+		}
+	}
+	return alternations >= 3, nil
+}
+
+// DetectRevert checks if any diff_hash within a window repeats,
+// indicating the same change was applied and then reverted.
+func (s *SessionDB) DetectRevert(filePath string, windowSize int) (bool, error) {
+	rows, err := s.db.Query(
+		`SELECT diff_hash FROM file_change_tracking
+		 WHERE file_path = ? AND diff_hash != '' ORDER BY id DESC LIMIT ?`,
+		filePath, windowSize,
+	)
+	if err != nil {
+		return false, fmt.Errorf("sessiondb: detect revert: %w", err)
+	}
+	defer rows.Close()
+
+	seen := make(map[string]bool)
+	for rows.Next() {
+		var h string
+		if err := rows.Scan(&h); err != nil {
+			continue
+		}
+		if seen[h] {
+			return true, nil
+		}
+		seen[h] = true
+	}
+	return false, nil
+}
+
+// --- LLM Cache ---
+
+// GetCachedLLMResponse returns a cached LLM response if it exists and is within maxAge.
+func (s *SessionDB) GetCachedLLMResponse(promptHash string, maxAge time.Duration) (string, bool) {
+	var response, createdAt string
+	err := s.db.QueryRow(
+		`SELECT response, created_at FROM llm_cache WHERE prompt_hash = ?`, promptHash,
+	).Scan(&response, &createdAt)
+	if err != nil {
+		return "", false
+	}
+	t, err := time.Parse("2006-01-02 15:04:05", createdAt)
+	if err != nil {
+		return "", false
+	}
+	if time.Since(t) > maxAge {
+		return "", false
+	}
+	return response, true
+}
+
+// SetCachedLLMResponse stores an LLM response in the cache.
+func (s *SessionDB) SetCachedLLMResponse(promptHash, response, model string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO llm_cache (prompt_hash, response, model) VALUES (?, ?, ?)
+		 ON CONFLICT(prompt_hash) DO UPDATE SET response = ?, model = ?, created_at = datetime('now')`,
+		promptHash, response, model, response, model,
+	)
+	if err != nil {
+		return fmt.Errorf("sessiondb: set llm cache: %w", err)
+	}
+	return nil
 }

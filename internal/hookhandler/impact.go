@@ -15,9 +15,12 @@ import (
 
 // ImpactInfo holds the results of an impact analysis for a file.
 type ImpactInfo struct {
-	Importers []string // files that import/reference this file
-	TestFiles []string // test files covering this file
-	Risk      string   // "low", "medium", "high"
+	Importers  []string // files that import/reference this file
+	TestFiles  []string // test files covering this file
+	CoChanges  []string // files frequently changed together (from git log)
+	ExportedN  int      // number of exported symbols (Go only)
+	BlastScore int      // composite risk score (0-100)
+	Risk       string   // "low", "medium", "high"
 }
 
 // analyzeImpact runs a lightweight impact analysis for a file being edited.
@@ -29,11 +32,14 @@ func analyzeImpact(filePath, cwd string) *ImpactInfo {
 	switch ext {
 	case ".go":
 		analyzeGoImpact(info, filePath, cwd)
+		info.ExportedN = len(GoExportedSymbols(filePath))
 	default:
 		analyzeGenericImpact(info, filePath, cwd)
 	}
 
 	findTestFiles(info, filePath, cwd)
+	findCoChanges(info, filePath, cwd)
+	info.BlastScore = computeBlastScore(info)
 	info.Risk = assessRisk(info)
 	return info
 }
@@ -186,15 +192,81 @@ func findTestFiles(info *ImpactInfo, filePath, cwd string) {
 	}
 }
 
-// assessRisk determines the risk level based on impact analysis.
-func assessRisk(info *ImpactInfo) string {
-	importerCount := len(info.Importers)
-	hasTests := len(info.TestFiles) > 0
+// findCoChanges uses git log to find files frequently changed alongside the target file.
+func findCoChanges(info *ImpactInfo, filePath, cwd string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
 
-	if importerCount >= 3 && !hasTests {
+	// Get files that changed in the same commits as filePath (last 20 commits).
+	relPath, err := filepath.Rel(cwd, filePath)
+	if err != nil {
+		relPath = filePath
+	}
+
+	out, err := execGit(ctx, cwd, "log", "--pretty=format:", "--name-only", "--follow", "-20", "--", relPath)
+	if err != nil || strings.TrimSpace(out) == "" {
+		return
+	}
+
+	// Count co-occurrence of each file.
+	freq := make(map[string]int)
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || line == relPath {
+			continue
+		}
+		freq[line]++
+	}
+
+	// Collect files that appeared in 3+ commits (strong co-change signal).
+	for f, count := range freq {
+		if count >= 3 && len(info.CoChanges) < 5 {
+			info.CoChanges = append(info.CoChanges, f)
+		}
+	}
+}
+
+// computeBlastScore computes a composite risk score (0-100) from impact signals.
+func computeBlastScore(info *ImpactInfo) int {
+	score := 0
+	// Importers: each adds 10 points (max 50).
+	importerPts := len(info.Importers) * 10
+	if importerPts > 50 {
+		importerPts = 50
+	}
+	score += importerPts
+
+	// No tests: +20 points.
+	if len(info.TestFiles) == 0 {
+		score += 20
+	}
+
+	// Co-changes: each adds 5 points (max 15).
+	coChangePts := len(info.CoChanges) * 5
+	if coChangePts > 15 {
+		coChangePts = 15
+	}
+	score += coChangePts
+
+	// Exported symbols: each adds 2 points (max 15).
+	exportPts := info.ExportedN * 2
+	if exportPts > 15 {
+		exportPts = 15
+	}
+	score += exportPts
+
+	if score > 100 {
+		score = 100
+	}
+	return score
+}
+
+// assessRisk determines the risk level based on blast score and impact analysis.
+func assessRisk(info *ImpactInfo) string {
+	if info.BlastScore >= 50 {
 		return "high"
 	}
-	if importerCount >= 3 || (importerCount >= 1 && !hasTests) {
+	if info.BlastScore >= 25 {
 		return "medium"
 	}
 	return "low"
@@ -205,7 +277,7 @@ func formatImpact(info *ImpactInfo) string {
 	if info == nil {
 		return ""
 	}
-	if len(info.Importers) == 0 && len(info.TestFiles) == 0 {
+	if len(info.Importers) == 0 && len(info.TestFiles) == 0 && len(info.CoChanges) == 0 && info.BlastScore == 0 {
 		return ""
 	}
 
@@ -216,6 +288,12 @@ func formatImpact(info *ImpactInfo) string {
 	}
 	if len(info.TestFiles) > 0 {
 		parts = append(parts, fmt.Sprintf("Tests: %s", strings.Join(info.TestFiles, ", ")))
+	}
+	if len(info.CoChanges) > 0 {
+		parts = append(parts, fmt.Sprintf("Co-changes: %s", strings.Join(info.CoChanges, ", ")))
+	}
+	if info.BlastScore > 0 {
+		parts = append(parts, fmt.Sprintf("Blast radius: %d/100 (%s)", info.BlastScore, info.Risk))
 	}
 	return strings.Join(parts, "; ")
 }

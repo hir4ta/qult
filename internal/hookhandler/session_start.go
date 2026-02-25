@@ -46,6 +46,9 @@ func handleSessionStart(input []byte) (*HookOutput, error) {
 	// Capture git context (branch, dirty files) for later hooks.
 	captureGitContext(sdb, in.CWD)
 
+	// Detect available external linters for PostToolUse checks.
+	detectAvailableLinters(sdb)
+
 	switch in.Source {
 	case "startup", "resume":
 		return handleStartupResume(in)
@@ -98,26 +101,44 @@ func cacheOllamaStatus(sdb *sessiondb.SessionDB) {
 	warmupGenModel(sdb)
 }
 
-// warmupGenModel checks if a generation model is available and warms it up.
+// warmupGenModel checks if generation models are available and warms them up.
+// Warms all tiers: fast (classification), smart (analysis), deep (summaries).
 func warmupGenModel(sdb *sessiondb.SessionDB) {
 	client := ollama.NewClient("")
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
 
-	model := advice.DefaultModel
-	if !client.HasModel(ctx, model) {
+	primaryModel := advice.ModelFromEnv()
+	var availableModel string
+
+	for _, model := range advice.AllModels() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if !client.HasModel(ctx, model) {
+			cancel()
+			continue
+		}
+		if err := client.Warmup(ctx, model); err != nil {
+			cancel()
+			continue
+		}
+		cancel()
+		if availableModel == "" {
+			availableModel = model
+		}
+		// Cache availability per tier.
+		_ = sdb.SetContext("ollama_model_"+model, "available")
+	}
+
+	if availableModel == "" {
 		_ = sdb.SetContext("ollama_gen_available", "false")
 		return
 	}
 
-	// Warm up: keep model loaded with keep_alive=-1.
-	if err := client.Warmup(ctx, model); err != nil {
-		_ = sdb.SetContext("ollama_gen_available", "false")
-		return
+	// Use the primary (smart) model if available, otherwise fall back.
+	if m, _ := sdb.GetContext("ollama_model_" + primaryModel); m == "available" {
+		availableModel = primaryModel
 	}
 
 	_ = sdb.SetContext("ollama_gen_available", "true")
-	_ = sdb.SetContext("ollama_gen_model", model)
+	_ = sdb.SetContext("ollama_gen_model", availableModel)
 	_ = sdb.SetContext("ollama_gen_breaker", "closed")
 	_ = sdb.SetContext("ollama_gen_failures", "0")
 }

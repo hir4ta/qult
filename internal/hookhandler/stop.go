@@ -29,7 +29,21 @@ func handleStop(input []byte) (*HookOutput, error) {
 		return nil, nil
 	}
 
-	issues := checkCompleteness(in.LastAssistantMessage)
+	// Session-aware pre-check: skip completeness checks if no code was modified.
+	hasCodeChanges := false
+	if in.SessionID != "" {
+		if sdb, err := sessiondb.Open(in.SessionID); err == nil {
+			files, _ := sdb.GetWorkingSetFiles()
+			hasCodeChanges = len(files) > 0
+			sdb.Close()
+		}
+	}
+
+	var issues []string
+
+	// Always check for explicit TODO/FIXME markers and incomplete work in assistant message.
+	// These indicate unfinished intent regardless of whether code was modified.
+	issues = checkCompleteness(in.LastAssistantMessage, hasCodeChanges)
 
 	// Session-aware checks using sessiondb.
 	issues = append(issues, checkSessionIssues(in.SessionID)...)
@@ -47,9 +61,10 @@ func handleStop(input []byte) (*HookOutput, error) {
 }
 
 // checkCompleteness scans assistant message for signs of incomplete work.
-// Only checks for high-signal deterministic patterns. Error detection is
-// left to the LLM prompt hook to avoid false positives on explanatory text.
-func checkCompleteness(msg string) []string {
+// TODO/FIXME markers and incomplete-work phrases are always checked.
+// Test/build failure reports are only checked when hasCodeChanges is true,
+// to avoid false positives on explanatory text about detection features.
+func checkCompleteness(msg string, hasCodeChanges bool) []string {
 	if msg == "" {
 		return nil
 	}
@@ -57,9 +72,16 @@ func checkCompleteness(msg string) []string {
 	lower := strings.ToLower(msg)
 	var issues []string
 
-	// TODO/FIXME markers.
+	// TODO/FIXME markers — require colon to avoid matching the word in descriptions.
 	for _, p := range []string{"todo:", "fixme:", "hack:", "xxx:"} {
 		if strings.Contains(lower, p) {
+			// Exclude cases where TODO/FIXME is part of a feature description.
+			surrounding := extractSurrounding(lower, p, 30)
+			if containsAnyWord(surrounding, []string{
+				"detect", "check", "pattern", "heuristic", "検出", "チェック",
+			}) {
+				continue
+			}
 			issues = append(issues, "TODO/FIXME marker found in last response")
 			break
 		}
@@ -69,39 +91,70 @@ func checkCompleteness(msg string) []string {
 	for _, p := range []string{
 		"i'll finish", "i'll complete", "remaining work",
 		"not yet implemented", "placeholder",
-		"まだ完了していません", "残りの作業", "未実装",
+		"まだ完了していません", "残りの作業",
 	} {
 		if strings.Contains(lower, p) {
+			// Exclude feature descriptions.
+			surrounding := extractSurrounding(lower, p, 30)
+			if containsAnyWord(surrounding, []string{
+				"detect", "check", "pattern", "heuristic", "検出", "チェック",
+				"gate", "ゲート", "pipeline",
+			}) {
+				continue
+			}
 			issues = append(issues, "Incomplete work mentioned in last response")
 			break
 		}
 	}
 
-	// Test failures mentioned without resolution.
-	// Exclude compound words like "テスト失敗予測" (test failure prediction) and
-	// feature descriptions like "テスト未実行チェック" that describe functionality.
-	if containsFailureReport(lower, []string{
-		"test fail", "tests fail", "test failed", "tests failed", "failing test",
-		"テストが失敗", "テスト失敗",
-	}, []string{
-		"予測", "チェック", "検出", "detect", "prediction", "check for", "heuristic",
-		"パターン", "pattern", "ゲート", "gate", "pipeline",
-	}) {
-		issues = append(issues, "Unresolved test failure mentioned in last response")
-	}
+	// Test and build failure checks only when code was actually modified,
+	// to avoid false positives on messages describing detection features.
+	if hasCodeChanges {
+		if containsFailureReport(lower, []string{
+			"test fail", "tests fail", "test failed", "tests failed", "failing test",
+			"テストが失敗", "テスト失敗",
+		}, []string{
+			"予測", "チェック", "検出", "detect", "prediction", "check for", "heuristic",
+			"パターン", "pattern", "ゲート", "gate", "pipeline",
+		}) {
+			issues = append(issues, "Unresolved test failure mentioned in last response")
+		}
 
-	// Build failures mentioned without resolution.
-	if containsFailureReport(lower, []string{
-		"build failed", "compilation error", "compile error", "does not compile",
-		"ビルド失敗", "コンパイルエラー",
-	}, []string{
-		"予測", "チェック", "検出", "detect", "prediction", "check for", "heuristic",
-		"パターン", "pattern", "ゲート", "gate", "pipeline",
-	}) {
-		issues = append(issues, "Unresolved build failure mentioned in last response")
+		if containsFailureReport(lower, []string{
+			"build failed", "compilation error", "compile error", "does not compile",
+			"ビルド失敗", "コンパイルエラー",
+		}, []string{
+			"予測", "チェック", "検出", "detect", "prediction", "check for", "heuristic",
+			"パターン", "pattern", "ゲート", "gate", "pipeline",
+		}) {
+			issues = append(issues, "Unresolved build failure mentioned in last response")
+		}
 	}
 
 	return issues
+}
+
+// extractSurrounding returns up to radius characters around the first occurrence of pattern.
+func extractSurrounding(text, pattern string, radius int) string {
+	idx := strings.Index(text, pattern)
+	if idx < 0 {
+		return ""
+	}
+	runes := []rune(text)
+	runeIdx := len([]rune(text[:idx]))
+	start := max(0, runeIdx-radius)
+	end := min(len(runes), runeIdx+len([]rune(pattern))+radius)
+	return string(runes[start:end])
+}
+
+// containsAnyWord checks if text contains any of the given words.
+func containsAnyWord(text string, words []string) bool {
+	for _, w := range words {
+		if strings.Contains(text, w) {
+			return true
+		}
+	}
+	return false
 }
 
 // containsFailureReport checks if text contains a failure keyword but filters out
@@ -155,6 +208,12 @@ func checkSessionIssues(sessionID string) []string {
 	}
 	defer sdb.Close()
 
+	// Skip checks if working_set has no files (no code changes in this session).
+	files, _ := sdb.GetWorkingSetFiles()
+	if len(files) == 0 {
+		return nil
+	}
+
 	var issues []string
 
 	// Check for unresolved failures (recent failure with no subsequent fix).
@@ -166,9 +225,9 @@ func checkSessionIssues(sessionID string) []string {
 		if f.FilePath == "" {
 			continue
 		}
-		unresolved, _, _ := sdb.HasUnresolvedFailure(f.FilePath)
-		if unresolved {
-			issues = append(issues, fmt.Sprintf("Unresolved %s in %s", f.FailureType, filepath.Base(f.FilePath)))
+		unresolved, failType, _ := sdb.HasUnresolvedFailure(f.FilePath)
+		if unresolved && failType != "generic" {
+			issues = append(issues, fmt.Sprintf("Unresolved %s in %s", failType, filepath.Base(f.FilePath)))
 			break // report only the most recent
 		}
 	}
@@ -177,8 +236,7 @@ func checkSessionIssues(sessionID string) []string {
 	taskType, _ := sdb.GetWorkingSet("task_type")
 	if taskType == "bugfix" || taskType == "feature" || taskType == "refactor" {
 		hasTestRun, _ := sdb.GetContext("has_test_run")
-		files, _ := sdb.GetWorkingSetFiles()
-		if hasTestRun != "true" && len(files) > 0 {
+		if hasTestRun != "true" {
 			issues = append(issues, "Code was modified but tests were not run in this session")
 		}
 	}
