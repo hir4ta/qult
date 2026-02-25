@@ -21,6 +21,9 @@ import (
 	"github.com/hir4ta/claude-buddy/internal/watcher"
 )
 
+// version is set at build time via ldflags (-X main.version=...).
+var version = "dev"
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -52,6 +55,9 @@ func run() error {
 			return fmt.Errorf("usage: claude-buddy hook-handler <EventName>")
 		}
 		return hookhandler.Run(os.Args[2])
+	case "version", "--version", "-v":
+		fmt.Printf("claude-buddy %s\n", version)
+		return nil
 	case "help", "-h", "--help":
 		printUsage()
 		return nil

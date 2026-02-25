@@ -127,6 +127,16 @@ var docsEntries = []docsEntry{
 }
 
 func syncDocsKnowledge(st *store.Store) error {
+	// Ensure the synthetic session exists (FK on patterns.session_id).
+	if err := st.UpsertSession(&store.SessionRow{
+		ID:          docsSessionID,
+		ProjectPath: "claude-buddy-docs",
+		ProjectName: "claude-buddy-docs",
+		JSONLPath:   "",
+	}); err != nil {
+		return fmt.Errorf("upsert docs session: %w", err)
+	}
+
 	if err := st.DeletePatternsBySession(docsSessionID); err != nil {
 		return fmt.Errorf("delete old docs: %w", err)
 	}
