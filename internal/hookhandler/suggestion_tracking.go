@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/hir4ta/claude-buddy/internal/sessiondb"
 	"github.com/hir4ta/claude-buddy/internal/store"
@@ -47,7 +48,7 @@ func recordNudgeDelivery(sdb *sessiondb.SessionDB, sessionID string, nudges []se
 //   - workflow: test command executed → resolved
 //   - stale-read: Read tool used → resolved
 //   - test-correlation: test re-run → resolved
-func checkNudgeResolution(sdb *sessiondb.SessionDB, sessionID, toolName string) {
+func checkNudgeResolution(sdb *sessiondb.SessionDB, toolName string) {
 	pattern, _ := sdb.GetContext("last_nudge_pattern")
 	if pattern == "" {
 		return
@@ -74,6 +75,11 @@ func checkNudgeResolution(sdb *sessiondb.SessionDB, sessionID, toolName string) 
 	case "file-knowledge", "past-solution":
 		// Informational nudges — resolved if any action follows.
 		resolved = true
+	default:
+		// LLM fix suggestions (llm-fix:*) — resolved if Edit/Write succeeds after.
+		if strings.HasPrefix(pattern, "llm-fix:") {
+			resolved = toolName == "Edit" || toolName == "Write"
+		}
 	}
 
 	if !resolved {
@@ -85,6 +91,34 @@ func checkNudgeResolution(sdb *sessiondb.SessionDB, sessionID, toolName string) 
 	_ = sdb.SetContext("last_nudge_outcome_id", "")
 
 	outcomeID, err := strconv.ParseInt(outcomeIDStr, 10, 64)
+	if err != nil {
+		return
+	}
+
+	st, err := store.OpenDefault()
+	if err != nil {
+		return
+	}
+	defer st.Close()
+
+	_ = st.ResolveSuggestion(outcomeID)
+}
+
+// checkLLMSuggestionResolution checks if a successful Edit/Write resolves a prior LLM fix suggestion.
+func checkLLMSuggestionResolution(sdb *sessiondb.SessionDB, toolName string) {
+	if toolName != "Edit" && toolName != "Write" {
+		return
+	}
+
+	idStr, _ := sdb.GetContext("last_llm_outcome_id")
+	if idStr == "" {
+		return
+	}
+
+	// Clear to avoid double-resolution.
+	_ = sdb.SetContext("last_llm_outcome_id", "")
+
+	outcomeID, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		return
 	}

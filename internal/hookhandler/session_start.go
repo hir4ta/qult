@@ -9,8 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hir4ta/claude-buddy/internal/advice"
 	"github.com/hir4ta/claude-buddy/internal/embedder"
 	"github.com/hir4ta/claude-buddy/internal/locale"
+	"github.com/hir4ta/claude-buddy/internal/ollama"
 	"github.com/hir4ta/claude-buddy/internal/sessiondb"
 	"github.com/hir4ta/claude-buddy/internal/store"
 )
@@ -91,6 +93,33 @@ func cacheOllamaStatus(sdb *sessiondb.SessionDB) {
 	} else {
 		_ = sdb.SetContext("ollama_available", "false")
 	}
+
+	// Warm up generation model for /api/generate (advisory LLM).
+	warmupGenModel(sdb)
+}
+
+// warmupGenModel checks if a generation model is available and warms it up.
+func warmupGenModel(sdb *sessiondb.SessionDB) {
+	client := ollama.NewClient("")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	model := advice.DefaultModel
+	if !client.HasModel(ctx, model) {
+		_ = sdb.SetContext("ollama_gen_available", "false")
+		return
+	}
+
+	// Warm up: keep model loaded with keep_alive=-1.
+	if err := client.Warmup(ctx, model); err != nil {
+		_ = sdb.SetContext("ollama_gen_available", "false")
+		return
+	}
+
+	_ = sdb.SetContext("ollama_gen_available", "true")
+	_ = sdb.SetContext("ollama_gen_model", model)
+	_ = sdb.SetContext("ollama_gen_breaker", "closed")
+	_ = sdb.SetContext("ollama_gen_failures", "0")
 }
 
 func handlePostCompactResume(sdb *sessiondb.SessionDB) (*HookOutput, error) {

@@ -80,6 +80,30 @@ CREATE TABLE IF NOT EXISTS working_set (
 	value      TEXT NOT NULL DEFAULT '',
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS failure_log (
+	id              INTEGER PRIMARY KEY AUTOINCREMENT,
+	tool_name       TEXT    NOT NULL,
+	failure_type    TEXT    NOT NULL,
+	error_signature TEXT    NOT NULL DEFAULT '',
+	file_path       TEXT    NOT NULL DEFAULT '',
+	timestamp       TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS tool_outcomes (
+	tool_name     TEXT    NOT NULL,
+	file_path     TEXT    NOT NULL DEFAULT '',
+	success_count INTEGER NOT NULL DEFAULT 0,
+	failure_count INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (tool_name, file_path)
+);
+
+CREATE TABLE IF NOT EXISTS tool_sequences (
+	bigram_hash  TEXT NOT NULL,
+	next_outcome TEXT NOT NULL,
+	count        INTEGER NOT NULL DEFAULT 1,
+	PRIMARY KEY (bigram_hash, next_outcome)
+);
 `
 
 // HookEvent is a recorded tool event.
@@ -89,6 +113,15 @@ type HookEvent struct {
 	InputHash uint64
 	IsWrite   bool
 	Timestamp time.Time
+}
+
+// FailureEntry represents a recorded tool failure.
+type FailureEntry struct {
+	ToolName    string
+	FailureType string
+	ErrorSig    string
+	FilePath    string
+	Timestamp   time.Time
 }
 
 // Nudge is a queued feedback message for context injection.
@@ -653,4 +686,163 @@ func (s *SessionDB) GetWorkingSetDecisions() ([]string, error) {
 		return nil, nil // corrupted data, treat as empty
 	}
 	return decisions, nil
+}
+
+// --- Failure Log ---
+
+// RecordFailure records a tool failure in the failure log.
+func (s *SessionDB) RecordFailure(toolName, failureType, errorSig, filePath string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO failure_log (tool_name, failure_type, error_signature, file_path) VALUES (?, ?, ?, ?)`,
+		toolName, failureType, errorSig, filePath,
+	)
+	if err != nil {
+		return fmt.Errorf("sessiondb: record failure: %w", err)
+	}
+	return nil
+}
+
+// RecentFailures returns the most recent N failures (newest first).
+func (s *SessionDB) RecentFailures(n int) ([]FailureEntry, error) {
+	rows, err := s.db.Query(
+		`SELECT tool_name, failure_type, error_signature, file_path, timestamp
+		 FROM failure_log ORDER BY id DESC LIMIT ?`, n,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("sessiondb: recent failures: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []FailureEntry
+	for rows.Next() {
+		var f FailureEntry
+		var ts string
+		if err := rows.Scan(&f.ToolName, &f.FailureType, &f.ErrorSig, &f.FilePath, &ts); err != nil {
+			continue
+		}
+		f.Timestamp, _ = time.Parse("2006-01-02 15:04:05", ts)
+		entries = append(entries, f)
+	}
+	return entries, rows.Err()
+}
+
+// RecentFailuresForFile returns recent failures for a specific file path.
+func (s *SessionDB) RecentFailuresForFile(filePath string, n int) ([]FailureEntry, error) {
+	rows, err := s.db.Query(
+		`SELECT tool_name, failure_type, error_signature, file_path, timestamp
+		 FROM failure_log WHERE file_path = ? ORDER BY id DESC LIMIT ?`, filePath, n,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("sessiondb: recent failures for file: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []FailureEntry
+	for rows.Next() {
+		var f FailureEntry
+		var ts string
+		if err := rows.Scan(&f.ToolName, &f.FailureType, &f.ErrorSig, &f.FilePath, &ts); err != nil {
+			continue
+		}
+		f.Timestamp, _ = time.Parse("2006-01-02 15:04:05", ts)
+		entries = append(entries, f)
+	}
+	return entries, rows.Err()
+}
+
+// HasUnresolvedFailure checks if there's a failure for this file with no subsequent success.
+func (s *SessionDB) HasUnresolvedFailure(filePath string) (bool, string, error) {
+	var failureType string
+	err := s.db.QueryRow(
+		`SELECT failure_type FROM failure_log
+		 WHERE file_path = ? AND timestamp > COALESCE(
+		   (SELECT MAX(he.timestamp) FROM hook_events he
+		    WHERE he.tool_name IN ('Edit','Write') AND he.is_write = 1),
+		   '2000-01-01'
+		 )
+		 ORDER BY id DESC LIMIT 1`, filePath,
+	).Scan(&failureType)
+	if err == sql.ErrNoRows {
+		return false, "", nil
+	}
+	if err != nil {
+		return false, "", fmt.Errorf("sessiondb: unresolved failure: %w", err)
+	}
+	return true, failureType, nil
+}
+
+// --- Tool Outcomes ---
+
+// RecordToolOutcome records a success or failure for a tool+file combination.
+func (s *SessionDB) RecordToolOutcome(toolName, filePath string, succeeded bool) error {
+	col := "success_count"
+	if !succeeded {
+		col = "failure_count"
+	}
+	_, err := s.db.Exec(
+		fmt.Sprintf(
+			`INSERT INTO tool_outcomes (tool_name, file_path, %s) VALUES (?, ?, 1)
+			 ON CONFLICT(tool_name, file_path) DO UPDATE SET %s = %s + 1`,
+			col, col, col,
+		),
+		toolName, filePath,
+	)
+	if err != nil {
+		return fmt.Errorf("sessiondb: record tool outcome: %w", err)
+	}
+	return nil
+}
+
+// FailureProbability returns the failure rate for a tool+file combination.
+// Returns 0 if no data. Only meaningful when total count > minSamples.
+func (s *SessionDB) FailureProbability(toolName, filePath string) (prob float64, total int, err error) {
+	var sc, fc int
+	err = s.db.QueryRow(
+		`SELECT success_count, failure_count FROM tool_outcomes WHERE tool_name = ? AND file_path = ?`,
+		toolName, filePath,
+	).Scan(&sc, &fc)
+	if err == sql.ErrNoRows {
+		return 0, 0, nil
+	}
+	if err != nil {
+		return 0, 0, fmt.Errorf("sessiondb: failure probability: %w", err)
+	}
+	total = sc + fc
+	if total == 0 {
+		return 0, 0, nil
+	}
+	return float64(fc) / float64(total), total, nil
+}
+
+// --- Tool Sequences ---
+
+// RecordSequence records a tool bigram with its outcome.
+func (s *SessionDB) RecordSequence(prevTool, currentTool, outcome string) error {
+	hash := prevTool + "→" + currentTool
+	_, err := s.db.Exec(
+		`INSERT INTO tool_sequences (bigram_hash, next_outcome, count) VALUES (?, ?, 1)
+		 ON CONFLICT(bigram_hash, next_outcome) DO UPDATE SET count = count + 1`,
+		hash, outcome,
+	)
+	if err != nil {
+		return fmt.Errorf("sessiondb: record sequence: %w", err)
+	}
+	return nil
+}
+
+// PredictOutcome returns the most common outcome for a tool bigram.
+// Returns ("", 0) if no data.
+func (s *SessionDB) PredictOutcome(prevTool, currentTool string) (outcome string, count int, err error) {
+	hash := prevTool + "→" + currentTool
+	err = s.db.QueryRow(
+		`SELECT next_outcome, count FROM tool_sequences
+		 WHERE bigram_hash = ? ORDER BY count DESC LIMIT 1`, hash,
+	).Scan(&outcome, &count)
+	if err == sql.ErrNoRows {
+		return "", 0, nil
+	}
+	if err != nil {
+		return "", 0, fmt.Errorf("sessiondb: predict outcome: %w", err)
+	}
+	return outcome, count, nil
 }

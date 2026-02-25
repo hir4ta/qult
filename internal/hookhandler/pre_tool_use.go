@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -49,46 +50,58 @@ func handlePreToolUse(input []byte) (*HookOutput, error) {
 	defer sdb.Close()
 
 	// --- JARVIS advisor signals (proactive, before action) ---
+	// Collect all applicable signals and return them combined.
+	var signals []string
 
 	// Bash: past failure warning.
 	if in.ToolName == "Bash" {
 		if warning := pastFailureWarning(sdb, in.ToolInput); warning != "" {
-			return makeOutput("PreToolUse", warning), nil
+			signals = append(signals, warning)
 		}
 	}
 
-	// Edit/Write: stale read check + git dirty warning + related decision surfacing.
+	// Edit/Write: failure prediction + stale read + git dirty + related decisions.
 	if in.ToolName == "Edit" || in.ToolName == "Write" {
+		if warning := editFailurePrediction(sdb, in.ToolInput); warning != "" {
+			signals = append(signals, warning)
+		}
 		if guidance := staleReadCheck(sdb, in.ToolInput); guidance != "" {
-			return makeOutput("PreToolUse", guidance), nil
+			signals = append(signals, guidance)
 		}
 		if warning := preExistingChangesWarning(sdb, in.ToolInput); warning != "" {
-			return makeOutput("PreToolUse", warning), nil
+			signals = append(signals, warning)
 		}
 		if decision := relatedDecisionSurfacing(sdb, in.ToolInput); decision != "" {
-			return makeOutput("PreToolUse", decision), nil
+			signals = append(signals, decision)
+		}
+	}
+
+	// Bash: compile/test failure prediction.
+	if in.ToolName == "Bash" {
+		if warning := bashFailurePrediction(sdb, in.ToolInput); warning != "" {
+			signals = append(signals, warning)
 		}
 	}
 
 	// Dequeue pending nudges as additionalContext.
 	nudges, _ := sdb.DequeueNudges(1)
-	if len(nudges) == 0 {
+	if len(nudges) == 0 && len(signals) == 0 {
 		return nil, nil
 	}
 
 	// Record delivery for effectiveness tracking.
 	recordNudgeDelivery(sdb, in.SessionID, nudges)
 
-	entries := make([]nudgeEntry, len(nudges))
-	for i, n := range nudges {
-		entries[i] = nudgeEntry{
-			Pattern:     n.Pattern,
-			Level:       n.Level,
-			Observation: n.Observation,
-			Suggestion:  n.Suggestion,
-		}
+	// Combine advisor signals and nudges into a single context string.
+	var parts []string
+	parts = append(parts, signals...)
+
+	for _, n := range nudges {
+		parts = append(parts, fmt.Sprintf("[buddy] %s (%s): %s\n→ %s",
+			n.Pattern, n.Level, n.Observation, n.Suggestion))
 	}
-	return makeOutput("PreToolUse", formatNudges(entries)), nil
+
+	return makeOutput("PreToolUse", strings.Join(parts, "\n")), nil
 }
 
 // staleReadCheck warns when an Edit/Write targets a file whose last Read
@@ -218,6 +231,124 @@ func preExistingChangesWarning(sdb *sessiondb.SessionDB, toolInput json.RawMessa
 	}
 
 	return ""
+}
+
+// editFailurePrediction warns when a file has a history of edit failures in this session.
+func editFailurePrediction(sdb *sessiondb.SessionDB, toolInput json.RawMessage) string {
+	var ei struct {
+		FilePath string `json:"file_path"`
+	}
+	if json.Unmarshal(toolInput, &ei) != nil || ei.FilePath == "" {
+		return ""
+	}
+
+	key := "edit_predict:" + filepath.Base(ei.FilePath)
+	on, _ := sdb.IsOnCooldown(key)
+	if on {
+		return ""
+	}
+
+	// Check failure probability from tool outcomes.
+	prob, total, _ := sdb.FailureProbability("Edit", ei.FilePath)
+	if total >= 3 && prob > 0.5 {
+		_ = sdb.SetCooldown(key, 5*time.Minute)
+		return fmt.Sprintf(
+			"[buddy] Edit on this file has failed %.0f%% of the time (%d attempts). Read the file first to get exact content.",
+			prob*100, total,
+		)
+	}
+
+	// Check recent failure log for this specific file.
+	failures, _ := sdb.RecentFailuresForFile(ei.FilePath, 3)
+	mismatchCount := 0
+	for _, f := range failures {
+		if f.FailureType == "edit_mismatch" && time.Since(f.Timestamp) < 10*time.Minute {
+			mismatchCount++
+		}
+	}
+	if mismatchCount >= 2 {
+		_ = sdb.SetCooldown(key, 5*time.Minute)
+		return fmt.Sprintf(
+			"[buddy] %d recent edit mismatches on this file. The content may have changed — Read the file before editing.",
+			mismatchCount,
+		)
+	}
+
+	return ""
+}
+
+// bashFailurePrediction warns when a Bash command is likely to fail based on session history.
+func bashFailurePrediction(sdb *sessiondb.SessionDB, toolInput json.RawMessage) string {
+	var bi struct {
+		Command string `json:"command"`
+	}
+	if json.Unmarshal(toolInput, &bi) != nil || bi.Command == "" {
+		return ""
+	}
+
+	// Check if the last failure was a compile error and the file hasn't been edited.
+	failures, _ := sdb.RecentFailures(1)
+	if len(failures) > 0 {
+		f := failures[0]
+		if f.FailureType == "compile_error" && time.Since(f.Timestamp) < 5*time.Minute && f.FilePath != "" {
+			// Check if the file was edited since the failure.
+			unresolved, _, _ := sdb.HasUnresolvedFailure(f.FilePath)
+			if unresolved && isCompileCommand(bi.Command) {
+				key := "compile_predict:" + f.FilePath
+				on, _ := sdb.IsOnCooldown(key)
+				if !on {
+					_ = sdb.SetCooldown(key, 3*time.Minute)
+					return fmt.Sprintf(
+						"[buddy] Last compile failed in %s and it hasn't been edited yet. Fix the file first.",
+						filepath.Base(f.FilePath),
+					)
+				}
+			}
+		}
+
+		if f.FailureType == "test_failure" && time.Since(f.Timestamp) < 5*time.Minute {
+			// Check if any related file was edited since the test failure.
+			files, _ := sdb.GetWorkingSetFiles()
+			if len(files) == 0 && isTestCommand(bi.Command) {
+				key := "test_predict"
+				on, _ := sdb.IsOnCooldown(key)
+				if !on {
+					_ = sdb.SetCooldown(key, 3*time.Minute)
+					return "[buddy] Tests failed recently and no files have been edited since. Fix the code first, then re-run tests."
+				}
+			}
+		}
+	}
+
+	// Check tool sequence prediction.
+	prevTool, _ := sdb.GetContext("prev_tool")
+	if prevTool != "" {
+		outcome, count, _ := sdb.PredictOutcome(prevTool, "Bash")
+		if outcome == "failure" && count >= 5 {
+			key := "seq_predict:" + prevTool
+			on, _ := sdb.IsOnCooldown(key)
+			if !on {
+				_ = sdb.SetCooldown(key, 5*time.Minute)
+				return fmt.Sprintf(
+					"[buddy] The pattern %s→Bash has failed %d times in this session. Consider a different approach.",
+					prevTool, count,
+				)
+			}
+		}
+	}
+
+	return ""
+}
+
+var compileCmdPattern = regexp.MustCompile(`\b(go build|go install|make|gcc|g\+\+|cargo build|npm run build|tsc)\b`)
+
+func isCompileCommand(cmd string) bool {
+	return compileCmdPattern.MatchString(cmd)
+}
+
+// isTestCommand reuses testCmdPattern from intent.go.
+func isTestCommand(cmd string) bool {
+	return testCmdPattern.MatchString(cmd)
 }
 
 // relatedDecisionSurfacing checks for past design decisions related to the target file.

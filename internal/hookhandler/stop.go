@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -29,13 +30,16 @@ func handleStop(input []byte) (*HookOutput, error) {
 
 	issues := checkCompleteness(in.LastAssistantMessage)
 
-	// Check for uncommitted changes (informational, adds to issues if any exist).
-	if gitIssue := checkUncommittedChanges(in.SessionID, in.CWD); gitIssue != "" {
-		issues = append(issues, gitIssue)
-	}
+	// Session-aware checks using sessiondb.
+	issues = append(issues, checkSessionIssues(in.SessionID)...)
 
 	if len(issues) > 0 {
 		return makeBlockStopOutput(strings.Join(issues, "; ")), nil
+	}
+
+	// Uncommitted changes are informational only — never block stop.
+	if gitInfo := checkUncommittedChanges(in.SessionID, in.CWD); gitInfo != "" {
+		return makeOutput("Stop", "[buddy] "+gitInfo), nil
 	}
 
 	return nil, nil
@@ -73,24 +77,108 @@ func checkCompleteness(msg string) []string {
 	}
 
 	// Test failures mentioned without resolution.
-	for _, p := range []string{
+	// Exclude compound words like "テスト失敗予測" (test failure prediction) and
+	// feature descriptions like "テスト未実行チェック" that describe functionality.
+	if containsFailureReport(lower, []string{
 		"test fail", "tests fail", "test failed", "tests failed", "failing test",
 		"テストが失敗", "テスト失敗",
-	} {
-		if strings.Contains(lower, p) {
-			issues = append(issues, "Unresolved test failure mentioned in last response")
-			break
-		}
+	}, []string{
+		"予測", "チェック", "検出", "detect", "prediction", "check for", "heuristic",
+		"パターン", "pattern", "ゲート", "gate", "pipeline",
+	}) {
+		issues = append(issues, "Unresolved test failure mentioned in last response")
 	}
 
 	// Build failures mentioned without resolution.
-	for _, p := range []string{
+	if containsFailureReport(lower, []string{
 		"build failed", "compilation error", "compile error", "does not compile",
 		"ビルド失敗", "コンパイルエラー",
-	} {
-		if strings.Contains(lower, p) {
-			issues = append(issues, "Unresolved build failure mentioned in last response")
-			break
+	}, []string{
+		"予測", "チェック", "検出", "detect", "prediction", "check for", "heuristic",
+		"パターン", "pattern", "ゲート", "gate", "pipeline",
+	}) {
+		issues = append(issues, "Unresolved build failure mentioned in last response")
+	}
+
+	return issues
+}
+
+// containsFailureReport checks if text contains a failure keyword but filters out
+// compound words that describe functionality (e.g., "テスト失敗予測") rather than
+// actual failure reports.
+func containsFailureReport(text string, patterns, exclusions []string) bool {
+	runes := []rune(text)
+	for _, p := range patterns {
+		pRunes := []rune(p)
+		// Search all occurrences, not just the first.
+		searchText := text
+		byteOffset := 0
+		for {
+			idx := strings.Index(searchText, p)
+			if idx < 0 {
+				break
+			}
+			// Convert byte offset to rune offset for safe slicing.
+			runeIdx := len([]rune(text[:byteOffset+idx]))
+			start := max(0, runeIdx-15)
+			end := min(len(runes), runeIdx+len(pRunes)+15)
+			surrounding := string(runes[start:end])
+			excluded := false
+			for _, ex := range exclusions {
+				if strings.Contains(surrounding, ex) {
+					excluded = true
+					break
+				}
+			}
+			if !excluded {
+				return true
+			}
+			// Advance past this occurrence.
+			byteOffset += idx + len(p)
+			searchText = text[byteOffset:]
+		}
+	}
+	return false
+}
+
+// checkSessionIssues uses the session database to detect unresolved failures
+// and untested code modifications.
+func checkSessionIssues(sessionID string) []string {
+	if sessionID == "" {
+		return nil
+	}
+
+	sdb, err := sessiondb.Open(sessionID)
+	if err != nil {
+		return nil
+	}
+	defer sdb.Close()
+
+	var issues []string
+
+	// Check for unresolved failures (recent failure with no subsequent fix).
+	failures, _ := sdb.RecentFailures(3)
+	for _, f := range failures {
+		if time.Since(f.Timestamp) > 10*time.Minute {
+			continue
+		}
+		if f.FilePath == "" {
+			continue
+		}
+		unresolved, _, _ := sdb.HasUnresolvedFailure(f.FilePath)
+		if unresolved {
+			issues = append(issues, fmt.Sprintf("Unresolved %s in %s", f.FailureType, filepath.Base(f.FilePath)))
+			break // report only the most recent
+		}
+	}
+
+	// Check if tests were run when code was modified.
+	taskType, _ := sdb.GetWorkingSet("task_type")
+	if taskType == "bugfix" || taskType == "feature" || taskType == "refactor" {
+		hasTestRun, _ := sdb.GetContext("has_test_run")
+		files, _ := sdb.GetWorkingSetFiles()
+		if hasTestRun != "true" && len(files) > 0 {
+			issues = append(issues, "Code was modified but tests were not run in this session")
 		}
 	}
 

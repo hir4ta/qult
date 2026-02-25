@@ -41,6 +41,11 @@ func Run() error {
 		fmt.Fprintf(os.Stderr, "Warning: buddy agent install failed: %v\n", err)
 	}
 
+	// Step 3b: Install buddy skills.
+	if err := installSkills(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: skills install failed: %v\n", err)
+	}
+
 	// Step 4: Initial sync.
 	if err := initialSync(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: initial sync failed: %v\n", err)
@@ -110,15 +115,34 @@ func buddyHookEntries(binPath string) map[string]any {
 	}
 
 	entries := map[string]any{
-		"SessionStart":     makeEntry("SessionStart", 5, false, "startup|resume|compact"),
-		"PreToolUse":       makeEntry("PreToolUse", 2, false, ""),
-		"PostToolUse":      makeEntry("PostToolUse", 5, true, ""),
-		"UserPromptSubmit": makeEntry("UserPromptSubmit", 2, false, ""),
-		"PreCompact":       makeEntry("PreCompact", 3, false, ""),
-		"SessionEnd":       makeEntry("SessionEnd", 5, true, ""),
+		"SessionStart":        makeEntry("SessionStart", 5, false, "startup|resume|compact"),
+		"PreToolUse":          makeEntry("PreToolUse", 2, false, ""),
+		"PostToolUse":         makeEntry("PostToolUse", 5, true, ""),
+		"PostToolUseFailure":  makeEntry("PostToolUseFailure", 5, false, ""),
+		"UserPromptSubmit":    makeEntry("UserPromptSubmit", 2, false, ""),
+		"PreCompact":          makeEntry("PreCompact", 3, false, ""),
+		"SessionEnd":          makeEntry("SessionEnd", 5, true, ""),
 	}
 
-	entries["Stop"] = makeEntry("Stop", 5, false, "")
+	// Stop: command hook (deterministic checks) + prompt hook (LLM verification).
+	stopCommandEntry := makeEntry("Stop", 5, false, "")
+	stopPromptEntry := []any{
+		map[string]any{
+			"hooks": []any{
+				map[string]any{
+					"type": "prompt",
+					"prompt": "[buddy] Review the last assistant message. Check for:\n" +
+						"(1) Unresolved errors mentioned but not fixed\n" +
+						"(2) TODO items that should have been completed\n" +
+						"(3) Tests mentioned but not run\n" +
+						"(4) Compilation errors not addressed\n" +
+						"If all work appears complete, allow stopping. Otherwise block with the specific issue.",
+					"timeout": 10,
+				},
+			},
+		},
+	}
+	entries["Stop"] = append(stopCommandEntry, stopPromptEntry...)
 
 	return entries
 }
@@ -245,7 +269,7 @@ func RemoveHooks() error {
 		return nil // no hooks section
 	}
 
-	events := []string{"SessionStart", "PreToolUse", "PostToolUse", "UserPromptSubmit", "PreCompact", "SessionEnd", "Stop"}
+	events := []string{"SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure", "UserPromptSubmit", "PreCompact", "SessionEnd", "Stop"}
 	changed := false
 	for _, event := range events {
 		existing, ok := hooks[event].([]any)

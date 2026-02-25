@@ -42,8 +42,9 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 	isWrite := writeTools[in.ToolName]
 	inputHash := hashInput(in.ToolName, in.ToolInput)
 
-	// Check if this action resolves a previously delivered nudge.
-	checkNudgeResolution(sdb, in.SessionID, in.ToolName)
+	// Check if this action resolves a previously delivered nudge or LLM suggestion.
+	checkNudgeResolution(sdb, in.ToolName)
+	checkLLMSuggestionResolution(sdb, in.ToolName)
 
 	if err := sdb.RecordEvent(in.ToolName, inputHash, isWrite); err != nil {
 		fmt.Fprintf(os.Stderr, "[buddy] PostToolUse: record event: %v\n", err)
@@ -105,29 +106,37 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 		}
 	}
 
+	// Record tool outcome for prediction intelligence.
+	filePath := extractFilePath(in.ToolInput)
+	_ = sdb.RecordToolOutcome(in.ToolName, filePath, true) // success path
+
+	// Record tool sequence for bigram prediction.
+	prevTool, _ := sdb.GetContext("prev_tool")
+	if prevTool != "" {
+		_ = sdb.RecordSequence(prevTool, in.ToolName, "success")
+	}
+	_ = sdb.SetContext("prev_tool", in.ToolName)
+
 	// Track files being edited in working set.
 	if isWrite {
-		var fi struct {
-			FilePath string `json:"file_path"`
-		}
-		if json.Unmarshal(in.ToolInput, &fi) == nil && fi.FilePath != "" {
-			_ = sdb.AddWorkingSetFile(fi.FilePath)
+		if filePath != "" {
+			_ = sdb.AddWorkingSetFile(filePath)
 		}
 	}
 
+	// Failure→solution pipeline: record fix when Edit/Write succeeds after a failure.
+	if isWrite && filePath != "" {
+		recordFailureSolution(sdb, in.SessionID, filePath, in.ToolInput)
+	}
+
 	// Code quality heuristics on write operations.
-	if isWrite {
-		var fi2 struct {
-			FilePath string `json:"file_path"`
-		}
-		if json.Unmarshal(in.ToolInput, &fi2) == nil && fi2.FilePath != "" {
-			if hint := runCodeHeuristics(fi2.FilePath, in.ToolInput); hint != "" {
-				cooldownKey := "code_hint:" + filepath.Base(fi2.FilePath)
-				set, _ := sdb.TrySetCooldown(cooldownKey, 5*time.Minute)
-				if set && !shouldSuppressNudge("code-quality") {
-					_ = sdb.EnqueueNudge("code-quality", "info",
-						"Code quality observation", hint)
-				}
+	if isWrite && filePath != "" {
+		if hint := runCodeHeuristics(filePath, in.ToolInput); hint != "" {
+			cooldownKey := "code_hint:" + filepath.Base(filePath)
+			set, _ := sdb.TrySetCooldown(cooldownKey, 5*time.Minute)
+			if set && !shouldSuppressNudge("code-quality") {
+				_ = sdb.EnqueueNudge("code-quality", "info",
+					"Code quality observation", hint)
 			}
 		}
 	}
@@ -140,6 +149,9 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 			}
 		}
 	}
+
+	// Periodic checkpoint: every 20 tool calls, check session health.
+	checkPeriodicHealth(sdb)
 
 	// Run lightweight signal detection → deliver via additionalContext.
 	det := &HookDetector{sdb: sdb}
@@ -191,6 +203,55 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 	}
 
 	return nil, nil
+}
+
+// checkPeriodicHealth enqueues a health checkpoint nudge every 20 tool calls.
+// This replaces the buddy-checkpoint skill logic with hook-driven intelligence.
+func checkPeriodicHealth(sdb *sessiondb.SessionDB) {
+	tc, _, _, _ := sdb.BurstState()
+	if tc == 0 || tc%20 != 0 {
+		return
+	}
+
+	on, _ := sdb.IsOnCooldown("periodic_health")
+	if on {
+		return
+	}
+	_ = sdb.SetCooldown("periodic_health", 10*time.Minute)
+
+	// Check for unresolved failures.
+	failures, _ := sdb.RecentFailures(3)
+	unresolvedCount := 0
+	for _, f := range failures {
+		if time.Since(f.Timestamp) > 10*time.Minute {
+			continue
+		}
+		if f.FilePath == "" {
+			continue
+		}
+		unresolved, _, _ := sdb.HasUnresolvedFailure(f.FilePath)
+		if unresolved {
+			unresolvedCount++
+		}
+	}
+
+	if unresolvedCount > 0 {
+		_ = sdb.EnqueueNudge("checkpoint", "info",
+			fmt.Sprintf("Session checkpoint at %d tool calls", tc),
+			fmt.Sprintf("%d unresolved failure(s) detected. Consider fixing before continuing.", unresolvedCount),
+		)
+		return
+	}
+
+	// Check if tests need running.
+	hasTestRun, _ := sdb.GetContext("has_test_run")
+	files, _ := sdb.GetWorkingSetFiles()
+	if hasTestRun != "true" && len(files) > 3 {
+		_ = sdb.EnqueueNudge("checkpoint", "info",
+			fmt.Sprintf("Session checkpoint at %d tool calls", tc),
+			fmt.Sprintf("%d files modified but tests not yet run. Consider running tests.", len(files)),
+		)
+	}
 }
 
 // checkWorkflowForCurrentTask checks workflow order based on stored task type.
@@ -281,6 +342,51 @@ func matchPastErrorSolutions(sdb *sessiondb.SessionDB, response string) {
 		formatSolution(solutions[0]),
 	)
 	_ = sdb.SetCooldown("past_solution", 5*time.Minute)
+}
+
+// recordFailureSolution checks if a recent failure exists for this file and records
+// the current successful edit as a solution.
+func recordFailureSolution(sdb *sessiondb.SessionDB, sessionID, filePath string, toolInput json.RawMessage) {
+	failures, _ := sdb.RecentFailuresForFile(filePath, 1)
+	if len(failures) == 0 {
+		return
+	}
+	f := failures[0]
+	if time.Since(f.Timestamp) > 15*time.Minute {
+		return
+	}
+
+	// Build solution description from the successful edit.
+	var solution string
+	var edit struct {
+		OldString string `json:"old_string"`
+		NewString string `json:"new_string"`
+	}
+	if json.Unmarshal(toolInput, &edit) == nil && edit.NewString != "" {
+		solution = fmt.Sprintf("Fixed %s by editing %s", f.FailureType, filepath.Base(filePath))
+		if len([]rune(edit.NewString)) <= 200 {
+			solution += fmt.Sprintf(": %s", edit.NewString)
+		}
+	} else {
+		solution = fmt.Sprintf("Fixed %s by rewriting %s", f.FailureType, filepath.Base(filePath))
+	}
+
+	st, err := store.OpenDefault()
+	if err != nil {
+		return
+	}
+	defer st.Close()
+
+	_ = st.InsertFailureSolution(sessionID, f.FailureType, f.ErrorSig, filePath, solution)
+
+	// If a past solution was surfaced before this fix, mark it as effective.
+	if idStr, _ := sdb.GetContext("last_surfaced_solution_id"); idStr != "" {
+		var solutionID int
+		if _, err := fmt.Sscanf(idStr, "%d", &solutionID); err == nil && solutionID > 0 {
+			_ = st.IncrementTimesEffective(solutionID)
+		}
+		_ = sdb.SetContext("last_surfaced_solution_id", "")
+	}
 }
 
 func hashInput(toolName string, toolInput json.RawMessage) uint64 {

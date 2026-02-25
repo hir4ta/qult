@@ -2,7 +2,7 @@ package store
 
 import "database/sql"
 
-const schemaVersion = 4
+const schemaVersion = 5
 
 const ddlV1 = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -202,6 +202,26 @@ CREATE INDEX IF NOT EXISTS idx_so_pattern ON suggestion_outcomes(pattern);
 CREATE INDEX IF NOT EXISTS idx_so_session ON suggestion_outcomes(session_id);
 `
 
+const ddlV5 = `
+-- ==========================================================
+-- failure_solutions: cross-session failure→fix knowledge
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS failure_solutions (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id       TEXT NOT NULL,
+    failure_type     TEXT NOT NULL,
+    error_signature  TEXT NOT NULL,
+    file_path        TEXT NOT NULL DEFAULT '',
+    solution_text    TEXT NOT NULL,
+    times_surfaced   INTEGER NOT NULL DEFAULT 0,
+    times_effective  INTEGER NOT NULL DEFAULT 0,
+    timestamp        TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+CREATE INDEX IF NOT EXISTS idx_fs_sig ON failure_solutions(error_signature);
+CREATE INDEX IF NOT EXISTS idx_fs_type ON failure_solutions(failure_type);
+`
+
 // Migrate applies all pending schema migrations to the database.
 func Migrate(db *sql.DB) error {
 	var current int
@@ -231,6 +251,11 @@ func Migrate(db *sql.DB) error {
 	}
 	if current < 4 {
 		if _, err := db.Exec(ddlV4); err != nil {
+			return err
+		}
+	}
+	if current < 5 {
+		if _, err := db.Exec(ddlV5); err != nil {
 			return err
 		}
 	}

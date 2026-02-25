@@ -25,7 +25,20 @@ func Uninstall() error {
 		fmt.Println("✓ MCP server removed")
 	}
 
-	// Step 3: Clean up legacy plugin bundle.
+	// Step 3: Remove buddy skills.
+	removeSkills()
+	fmt.Println("✓ Skills removed")
+
+	// Step 4: Remove buddy agent.
+	if home, err := os.UserHomeDir(); err == nil {
+		agentPath := filepath.Join(home, ".claude", "agents", "buddy.md")
+		if _, err := os.Stat(agentPath); err == nil {
+			_ = os.Remove(agentPath)
+			fmt.Println("✓ Buddy agent removed")
+		}
+	}
+
+	// Step 5: Clean up legacy plugin bundle.
 	home, err := os.UserHomeDir()
 	if err == nil {
 		pluginDir := filepath.Join(home, ".claude-buddy", "plugin")

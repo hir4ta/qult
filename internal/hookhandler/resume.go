@@ -53,6 +53,8 @@ func BuildResumeData(st *store.Store, sessionID, projectPath string) (*ResumeDat
 	}
 
 	var briefing []briefingItem
+
+	// Anti-pattern frequency from past sessions.
 	patternFreqs, err := st.GetAlertPatternFrequency(sess.ProjectPath)
 	if err == nil {
 		for _, pf := range patternFreqs {
@@ -62,6 +64,28 @@ func BuildResumeData(st *store.Store, sessionID, projectPath string) (*ResumeDat
 					Message:  fmt.Sprintf("%s has occurred %d times (last: %s)", pf.PatternType, pf.Count, pf.LastSeen),
 				})
 			}
+		}
+	}
+
+	// Frequent failures for this project.
+	freqFailures, _ := st.FrequentFailures(sess.ProjectPath, 3)
+	for _, ff := range freqFailures {
+		if ff.Count >= 2 {
+			briefing = append(briefing, briefingItem{
+				Category: "frequent_failure",
+				Message:  fmt.Sprintf("%s in %s (%dx)", ff.FailureType, filepath.Base(ff.FilePath), ff.Count),
+			})
+		}
+	}
+
+	// Unresolved issues from previous session.
+	if sess.ParentSessionID != "" {
+		unresolved, _ := st.UnresolvedFromSession(sess.ParentSessionID)
+		for _, u := range unresolved {
+			briefing = append(briefing, briefingItem{
+				Category: "unresolved",
+				Message:  fmt.Sprintf("Previous session had unresolved %s in %s", u.FailureType, filepath.Base(u.FilePath)),
+			})
 		}
 	}
 

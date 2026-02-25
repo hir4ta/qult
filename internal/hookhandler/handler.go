@@ -51,6 +51,8 @@ func Run(eventName string) error {
 		output, err = handlePreCompact(input)
 	case "SessionEnd":
 		output, err = handleSessionEnd(input)
+	case "PostToolUseFailure":
+		output, err = handlePostToolUseFailure(input)
 	case "Stop":
 		output, err = handleStop(input)
 	default:
