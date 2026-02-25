@@ -9,8 +9,6 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/hir4ta/claude-buddy/internal/analyzer"
-	"github.com/hir4ta/claude-buddy/internal/coach"
-	"github.com/hir4ta/claude-buddy/internal/locale"
 	"github.com/hir4ta/claude-buddy/internal/watcher"
 )
 
@@ -72,57 +70,6 @@ func statsHandler(claudeHome string) server.ToolHandlerFunc {
 		}
 
 		data, _ := json.MarshalIndent(results, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
-	}
-}
-
-func tipsHandler(claudeHome string, lang locale.Lang) server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		sessions, err := watcher.ListSessions(claudeHome)
-		if err != nil || len(sessions) == 0 {
-			return mcp.NewToolResultError("no sessions found"), nil
-		}
-
-		sessionID := req.GetString("session_id", "")
-		var target watcher.SessionInfo
-		if sessionID != "" {
-			for _, s := range sessions {
-				if strings.HasPrefix(s.SessionID, sessionID) {
-					target = s
-					break
-				}
-			}
-			if target.Path == "" {
-				return mcp.NewToolResultError("session not found: " + sessionID), nil
-			}
-		} else {
-			target = sessions[0]
-		}
-
-		detail, err := watcher.LoadSessionDetail(target)
-		if err != nil {
-			return mcp.NewToolResultError("failed to load session: " + err.Error()), nil
-		}
-
-		stats := analyzer.NewStats()
-		det := analyzer.NewDetector(lang.Code)
-		for _, ev := range detail.Events {
-			stats.Update(ev)
-			det.Update(ev)
-		}
-
-		fb, err := coach.GenerateFeedback(ctx, detail.Events, stats, det.ActiveAlerts(), det.SessionHealth(), lang, nil)
-		if err != nil {
-			return mcp.NewToolResultError("AI feedback generation failed: " + err.Error()), nil
-		}
-
-		result := map[string]any{
-			"situation":   fb.Situation,
-			"observation": fb.Observation,
-			"suggestion":  fb.Suggestion,
-			"level":       levelString(fb.Level),
-		}
-		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
 }

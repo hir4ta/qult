@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/hir4ta/claude-buddy/internal/analyzer"
 )
 
 // Layout:
@@ -34,15 +33,6 @@ func (m Model) View() string {
 
 	// Title area (always shown)
 	sections = append(sections, m.renderHeader())
-
-	// Feedback section
-	sections = append(sections, m.renderLabeledSeparator("Feedback"))
-	if len(m.alerts) > 0 {
-		sections = append(sections, m.renderAlerts())
-	}
-	if m.outcome != nil {
-		sections = append(sections, m.renderOutcome())
-	}
 
 	// Tasks section
 	taskLines := m.renderTasks()
@@ -119,81 +109,40 @@ func (m Model) renderScoreLine() string {
 	default:
 		style = scorePoorStyle
 	}
-	return style.Render(text)
-}
 
-func (m Model) renderAlerts() string {
-	var lines []string
-	for _, a := range m.alerts {
-		patternName := analyzer.PatternName(a.Pattern)
+	line := style.Render(text)
 
-		contentWidth := m.width - 4
-		if contentWidth < 40 {
-			contentWidth = 40
+	// Breakdown: show only non-zero components
+	bd := score.Components
+	var parts []string
+	type comp struct {
+		label string
+		value int
+	}
+	for _, c := range []comp{
+		{"Alerts", bd.AlertPenalty},
+		{"Tools", bd.ToolEfficiency},
+		{"Plan", bd.PlanMode},
+		{"CLAUDE.md", bd.CLAUDEMD},
+		{"Subagent", bd.Subagent},
+		{"Context", bd.ContextMgmt},
+		{"Instructions", bd.InstructionQual},
+	} {
+		if c.value == 0 {
+			continue
 		}
-
-		// Style and icon based on Kind/Level
-		var style lipgloss.Style
-		var icon string
-		switch {
-		case a.Kind == analyzer.KindProposal:
-			style = alertProposalStyle
-			icon = "\u25b8" // ▸ Proposal
-		case a.Level >= analyzer.LevelAction:
-			style = alertActionStyle
-			icon = "\u25b2" // ▲ Action
-		default:
-			style = alertWarningStyle
-			icon = "\u26a0" // ⚠ Warning
-		}
-
-		firstLine := fmt.Sprintf(" %s [%s] %s", icon, patternName, a.Observation)
-		contLine := fmt.Sprintf("   \u2192 %s ", a.Suggestion)
-
-		for _, text := range []string{firstLine, contLine} {
-			wrapped := wrapText(text, contentWidth)
-			for _, wl := range wrapped {
-				pad := contentWidth - lipgloss.Width(wl)
-				if pad > 0 {
-					wl += strings.Repeat(" ", pad)
-				}
-				lines = append(lines, "  "+style.Render(wl))
-			}
+		label := fmt.Sprintf("%+d %s", c.value, c.label)
+		if c.value > 0 {
+			parts = append(parts, scoreBonusStyle.Render(label))
+		} else {
+			parts = append(parts, scorePenaltyStyle.Render(label))
 		}
 	}
-	return strings.Join(lines, "\n")
-}
-
-func (m Model) renderOutcome() string {
-	if m.outcome == nil {
-		return ""
+	if len(parts) > 0 {
+		line += "\n  " + strings.Join(parts, dimStyle.Render(" | "))
 	}
-	return "  " + alertOutcomeStyle.Render("\u2714 "+m.outcome.Description)
-}
 
-// alertLineCount returns the number of rendered lines the alerts section will occupy.
-func (m Model) alertLineCount() int {
-	count := 0
-	for _, a := range m.alerts {
-		contentWidth := m.width - 4
-		if contentWidth < 40 {
-			contentWidth = 40
-		}
-		var icon string
-		switch {
-		case a.Kind == analyzer.KindProposal:
-			icon = "\u25b8"
-		case a.Level >= analyzer.LevelAction:
-			icon = "\u25b2"
-		default:
-			icon = "\u26a0"
-		}
-		firstLine := fmt.Sprintf(" %s [%s] %s", icon, analyzer.PatternName(a.Pattern), a.Observation)
-		contLine := fmt.Sprintf("   \u2192 %s ", a.Suggestion)
-		count += len(wrapText(firstLine, contentWidth))
-		count += len(wrapText(contLine, contentWidth))
-	}
-	return count
+	return line
 }
 
 func (m Model) renderTasks() string {

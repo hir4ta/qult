@@ -74,6 +74,11 @@ func FindRecentSessions(claudeHome string, maxResults int) ([]RecentSession, err
 		all[i].FirstPrompt = extractFirstPrompt(all[i].Path)
 	}
 
+	// Deduplicate resumed sessions: within the same project, sessions sharing
+	// the same FirstPrompt are likely resume chains. Keep only the most recent
+	// (already sorted newest-first).
+	all = deduplicateByPrompt(all)
+
 	return all, nil
 }
 
@@ -105,6 +110,43 @@ func extractFirstPrompt(path string) string {
 		}
 	}
 	return ""
+}
+
+// deduplicateByPrompt removes resumed session duplicates.
+// When Claude Code resumes a session, it creates a new JSONL file with the same
+// first user message. This function merges sessions that share the same
+// (project, FirstPrompt) and have ModTimes within 30 minutes of each other.
+// Input must be sorted newest-first; the most recent entry per group is kept.
+func deduplicateByPrompt(sessions []RecentSession) []RecentSession {
+	// Resume creates a new JSONL within seconds of the previous one.
+	// 5 minutes is generous enough for resume while avoiding false merges.
+	const resumeWindow = 5 * time.Minute
+
+	type key struct {
+		project string
+		prompt  string
+	}
+	// Track the last-seen ModTime per group to propagate resume chains.
+	// Updated on every session (not just kept ones) so that A→B→C chains
+	// where each hop is < 5min are fully collapsed even if A-to-C > 5min.
+	lastSeen := make(map[key]time.Time)
+	result := make([]RecentSession, 0, len(sessions))
+
+	for _, s := range sessions {
+		if s.FirstPrompt == "" {
+			result = append(result, s)
+			continue
+		}
+		k := key{project: s.Project, prompt: s.FirstPrompt}
+		if prev, ok := lastSeen[k]; ok && prev.Sub(s.ModTime) < resumeWindow {
+			// Close in time to a newer session with same prompt — resume duplicate.
+			lastSeen[k] = s.ModTime // propagate chain
+			continue
+		}
+		lastSeen[k] = s.ModTime
+		result = append(result, s)
+	}
+	return result
 }
 
 // DefaultClaudeHome returns the default path for ~/.claude.

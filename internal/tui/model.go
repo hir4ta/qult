@@ -24,7 +24,6 @@ type Model struct {
 	events         []parser.SessionEvent
 	stats          analyzer.Stats
 	detector       *analyzer.Detector
-	alerts         []analyzer.Alert
 	tasks          []TaskState // ordered by creation
 	taskMap        map[string]int // taskID -> index in tasks
 	taskCounter    int
@@ -47,9 +46,6 @@ type Model struct {
 
 	// Usage score
 	scoreCalc *analyzer.ScoreCalculator
-
-	// Alert outcome (positive feedback line)
-	outcome *analyzer.AlertOutcome
 
 	// Animation state
 	animFrame    int  // increments every animTick (for shimmer, pulse, etc.)
@@ -112,15 +108,11 @@ func NewModel(initialEvents []parser.SessionEvent, eventCh <-chan parser.Session
 		}
 	}
 
-	// Populate alerts from detector's active alerts (for --continue / resume).
-	alerts := analyzer.SelectTopAlerts(det.ActiveAlerts(), 3)
-
 	return Model{
 		events:        events,
 		stats:         stats,
 		detector:      det,
 		scoreCalc:     sc,
-		alerts:        alerts,
 		tasks:         tasks,
 		taskMap:       taskMap,
 		taskCounter:   taskCounter,
@@ -170,24 +162,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.stats.Update(ev)
 		newAlerts := m.detector.Update(ev)
 		m.scoreCalc.Update(ev, newAlerts)
-		// Collect new alerts (proposals + warnings + actions)
-		for _, a := range newAlerts {
-			if a.Kind == analyzer.KindProposal || a.Level >= analyzer.LevelWarning {
-				m.alerts = append(m.alerts, a)
-			}
-		}
-		// Group dedup + priority selection, max 3
-		m.alerts = analyzer.SelectTopAlerts(m.alerts, 3)
-
-		// Check for resolved outcomes (positive feedback)
-		if outcomes := m.detector.PopNewOutcomes(); len(outcomes) > 0 {
-			for i := len(outcomes) - 1; i >= 0; i-- {
-				if outcomes[i].Resolved {
-					m.outcome = &outcomes[i]
-					break
-				}
-			}
-		}
 
 		// Auto-compact boundary: reset displayed events to avoid duplicates.
 		if ev.Type == parser.EventCompactBoundary {
@@ -374,18 +348,13 @@ func applyModeFlags(ev *parser.SessionEvent, inPlanMode *bool, awaitingAnswer *b
 
 // fixedHeight returns the number of lines consumed by non-message areas.
 func (m Model) fixedHeight() int {
-	// header: 3 lines (title + stats + score)
+	// header: 3 lines (title + stats + score) + optional breakdown line
 	h := 3
-
-	// ─── Feedback ─── separator: 1
-	h++
-
-	// alerts: actual rendered line count (each alert = 2+ lines with wrapping)
-	h += m.alertLineCount()
-
-	// outcome line (resolved alert positive feedback)
-	if m.outcome != nil {
-		h++
+	score := m.scoreCalc.Score()
+	bd := score.Components
+	if bd.AlertPenalty != 0 || bd.ToolEfficiency != 0 || bd.PlanMode != 0 ||
+		bd.CLAUDEMD != 0 || bd.Subagent != 0 || bd.ContextMgmt != 0 || bd.InstructionQual != 0 {
+		h++ // breakdown line
 	}
 
 	// tasks section

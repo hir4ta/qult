@@ -10,7 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/hir4ta/claude-buddy/internal/coach"
+	"github.com/hir4ta/claude-buddy/internal/analyzer"
 	"github.com/hir4ta/claude-buddy/internal/embedder"
 	"github.com/hir4ta/claude-buddy/internal/hookhandler"
 	"github.com/hir4ta/claude-buddy/internal/install"
@@ -163,13 +163,13 @@ func runServe() error {
 
 func runAnalyze() error {
 	claudeHome := watcher.DefaultClaudeHome()
+	lang := locale.Detect()
 
 	sessions, err := watcher.ListSessions(claudeHome)
 	if err != nil || len(sessions) == 0 {
 		return fmt.Errorf("no sessions found")
 	}
 
-	// Optional: analyze specific session by ID prefix
 	var target watcher.SessionInfo
 	if len(os.Args) > 2 {
 		prefix := os.Args[2]
@@ -186,37 +186,28 @@ func runAnalyze() error {
 		target = sessions[0]
 	}
 
-	fmt.Printf("Analyzing session %s (%s)...\n", target.SessionID[:8], target.Project)
-
-	report, err := coach.BuildReport(target)
+	detail, err := watcher.LoadSessionDetail(target)
 	if err != nil {
-		return fmt.Errorf("build report: %w", err)
+		return fmt.Errorf("load session: %w", err)
 	}
 
-	fmt.Printf("Turns: %d | Tools: %d | %dmin\n", report.TurnCount, report.ToolUseCount, report.DurationMin)
-	fmt.Println()
-
-	fmt.Println("Running AI analysis via claude -p ...")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		cancel()
-		os.Exit(0)
-	}()
-
-	lang := locale.Detect()
-	analysis, err := coach.Analyze(ctx, report, lang)
-	if err != nil {
-		return fmt.Errorf("AI analysis failed: %w\nMake sure 'claude' CLI is installed and available in PATH", err)
+	stats := analyzer.NewStats()
+	det := analyzer.NewDetector(lang.Code)
+	for _, ev := range detail.Events {
+		stats.Update(ev)
+		det.Update(ev)
 	}
 
-	fmt.Println()
-	fmt.Println(analysis)
+	sid := target.SessionID
+	if len(sid) > 8 {
+		sid = sid[:8]
+	}
 
+	features := mcpserver.TrackFeatures(detail.Events)
+	hints := mcpserver.ComputeUsageHints(detail.Events, stats)
+	recs := mcpserver.BuildRecommendations(hints, features, det.ActiveAlerts())
+
+	fmt.Print(mcpserver.FormatAnalyzeReport(sid, stats, det, features, hints, recs))
 	return nil
 }
 
@@ -233,10 +224,10 @@ Commands:
   hook-handler  Handle Claude Code hook events (stdin/stdout JSON)
   install       Register MCP server, hooks, and sync sessions
   uninstall     Remove hooks and MCP server registration
-  analyze       AI-powered session analysis via claude -p (no extra cost)
+  analyze       Session analysis report (structured, no LLM call)
   help          Show this help
 
 Language:
-  AI feedback is generated in your system language (detected from LANG).
+  Feedback is generated in your system language (detected from LANG).
   To override: LANG=ja_JP.UTF-8 claude-buddy`)
 }

@@ -22,6 +22,15 @@ func (d *HookDetector) Detect() string {
 	if sig := d.detectNoProgress(); sig != "" {
 		return sig
 	}
+	if sig := d.detectFileHotspot(); sig != "" {
+		return sig
+	}
+	if sig := d.detectPlanModeOpportunity(); sig != "" {
+		return sig
+	}
+	if sig := d.detectCompactionRisk(); sig != "" {
+		return sig
+	}
 	return ""
 }
 
@@ -110,4 +119,121 @@ func (d *HookDetector) detectNoProgress() string {
 		msg += fmt.Sprintf(" Most-read file: %s (%dx).", filepath.Base(topFile), topCount)
 	}
 	return msg
+}
+
+// detectFileHotspot warns when the same file has been modified 3+ times in the current burst.
+func (d *HookDetector) detectFileHotspot() string {
+	events, err := d.sdb.RecentEvents(20)
+	if err != nil || len(events) < 3 {
+		return ""
+	}
+
+	_, _, fileReads, err := d.sdb.BurstState()
+	if err != nil {
+		return ""
+	}
+
+	// Check recent write events for repeated modification of same input hash.
+	fileWrites := make(map[uint64]int)
+	var hotHash uint64
+	maxWrites := 0
+	hotTool := ""
+	for _, ev := range events {
+		if !ev.IsWrite {
+			continue
+		}
+		fileWrites[ev.InputHash]++
+		if fileWrites[ev.InputHash] > maxWrites {
+			maxWrites = fileWrites[ev.InputHash]
+			hotHash = ev.InputHash
+			hotTool = ev.ToolName
+		}
+	}
+	_ = hotHash
+
+	if maxWrites < 3 {
+		return ""
+	}
+
+	set, _ := d.sdb.TrySetCooldown("file_hotspot", 5*time.Minute)
+	if !set {
+		return ""
+	}
+
+	// Find the most-read file as likely hotspot context.
+	topFile := ""
+	topCount := 0
+	for f, c := range fileReads {
+		if c > topCount {
+			topFile = f
+			topCount = c
+		}
+	}
+
+	msg := fmt.Sprintf("[buddy] Signal: Same target modified %d times via %s in this burst.", maxWrites, hotTool)
+	if topFile != "" {
+		msg += fmt.Sprintf(" Hotspot file: %s (read %dx). Consider running tests to validate changes before further edits.", filepath.Base(topFile), topCount)
+	}
+	return msg
+}
+
+// detectPlanModeOpportunity suggests Plan Mode when 3+ distinct files are modified without it.
+func (d *HookDetector) detectPlanModeOpportunity() string {
+	if d.inPlanMode() || d.subagentActive() {
+		return ""
+	}
+
+	events, err := d.sdb.RecentEvents(30)
+	if err != nil {
+		return ""
+	}
+
+	distinctFiles := make(map[uint64]bool)
+	for _, ev := range events {
+		if ev.IsWrite {
+			distinctFiles[ev.InputHash] = true
+		}
+	}
+
+	if len(distinctFiles) < 3 {
+		return ""
+	}
+
+	set, _ := d.sdb.TrySetCooldown("plan_mode_opportunity", 10*time.Minute)
+	if !set {
+		return ""
+	}
+
+	return fmt.Sprintf(
+		"[buddy] Signal: %d distinct files modified in this burst without Plan Mode. Consider using EnterPlanMode to outline approach before continuing multi-file changes.",
+		len(distinctFiles),
+	)
+}
+
+// detectCompactionRisk warns when the session shows signs of approaching context limits.
+func (d *HookDetector) detectCompactionRisk() string {
+	compacts, err := d.sdb.CompactsInWindow(60)
+	if err != nil || compacts == 0 {
+		return ""
+	}
+
+	tc, _, _, err := d.sdb.BurstState()
+	if err != nil {
+		return ""
+	}
+
+	// High risk: multiple compacts and large current burst.
+	if compacts < 2 || tc < 15 {
+		return ""
+	}
+
+	set, _ := d.sdb.TrySetCooldown("compaction_risk", 15*time.Minute)
+	if !set {
+		return ""
+	}
+
+	return fmt.Sprintf(
+		"[buddy] Signal: %d compactions in the last hour with %d tools in current burst. Context pressure is high. Consider summarizing key decisions and splitting the session if the task has natural breakpoints.",
+		compacts, tc,
+	)
 }
