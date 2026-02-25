@@ -96,15 +96,18 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 			tc, hasWrite, _, _ := sdb.BurstState()
 			if (taskTypeStr == "bugfix" || taskTypeStr == "refactor") && !hasWrite && tc <= 3 {
 				set, _ := sdb.TrySetCooldown("test_first_ack", 30*time.Minute)
-				if set && !shouldSuppressNudge("test-first") {
-					_ = sdb.EnqueueNudge("test-first", "info",
+				if set {
+					Deliver(sdb, "test-first", "info",
 						"Good practice: running tests before editing",
 						"Test-first approach established. This gives a baseline to verify changes against.",
-					)
+						PriorityMedium)
 				}
 			}
 		}
 	}
+
+	// Record workflow phase for adaptive learning.
+	recordPhase(sdb, in.ToolName, in.ToolInput)
 
 	// Record tool outcome for prediction intelligence.
 	filePath := extractFilePath(in.ToolInput)
@@ -134,9 +137,9 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 		if hint := runCodeHeuristics(filePath, in.ToolInput); hint != "" {
 			cooldownKey := "code_hint:" + filepath.Base(filePath)
 			set, _ := sdb.TrySetCooldown(cooldownKey, 5*time.Minute)
-			if set && !shouldSuppressNudge("code-quality") {
-				_ = sdb.EnqueueNudge("code-quality", "info",
-					"Code quality observation", hint)
+			if set {
+				Deliver(sdb, "code-quality", "info",
+					"Code quality observation", hint, PriorityMedium)
 			}
 		}
 	}
@@ -144,9 +147,7 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 	// Workflow order check — enqueue nudge if write doesn't match expected workflow.
 	if isWrite {
 		if nudge := checkWorkflowForCurrentTask(sdb); nudge != "" {
-			if !shouldSuppressNudge("workflow") {
-				_ = sdb.EnqueueNudge("workflow", "info", "Workflow suggestion", nudge)
-			}
+			Deliver(sdb, "workflow", "info", "Workflow suggestion", nudge, PriorityMedium)
 		}
 	}
 
@@ -184,9 +185,9 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 			failures := extractTestFailures(resp)
 			if correlation := correlateWithRecentEdits(sdb, failures); correlation != "" {
 				set, _ := sdb.TrySetCooldown("test_correlation", 3*time.Minute)
-				if set && !shouldSuppressNudge("test-correlation") {
-					_ = sdb.EnqueueNudge("test-correlation", "info",
-						"Test failure correlated with recent edits", correlation)
+				if set {
+					Deliver(sdb, "test-correlation", "info",
+						"Test failure correlated with recent edits", correlation, PriorityMedium)
 				}
 			}
 		}
@@ -236,10 +237,10 @@ func checkPeriodicHealth(sdb *sessiondb.SessionDB) {
 	}
 
 	if unresolvedCount > 0 {
-		_ = sdb.EnqueueNudge("checkpoint", "info",
+		Deliver(sdb, "checkpoint", "info",
 			fmt.Sprintf("Session checkpoint at %d tool calls", tc),
 			fmt.Sprintf("%d unresolved failure(s) detected. Consider fixing before continuing.", unresolvedCount),
-		)
+			PriorityMedium)
 		return
 	}
 
@@ -247,10 +248,10 @@ func checkPeriodicHealth(sdb *sessiondb.SessionDB) {
 	hasTestRun, _ := sdb.GetContext("has_test_run")
 	files, _ := sdb.GetWorkingSetFiles()
 	if hasTestRun != "true" && len(files) > 3 {
-		_ = sdb.EnqueueNudge("checkpoint", "info",
+		Deliver(sdb, "checkpoint", "info",
 			fmt.Sprintf("Session checkpoint at %d tool calls", tc),
 			fmt.Sprintf("%d files modified but tests not yet run. Consider running tests.", len(files)),
-		)
+			PriorityMedium)
 	}
 }
 
@@ -313,10 +314,9 @@ func matchFileContextKnowledge(sdb *sessiondb.SessionDB, filePath string) {
 		msg += fmt.Sprintf("\n  [%s] %s", p.PatternType, content)
 	}
 
-	_ = sdb.EnqueueNudge("file-knowledge", "info",
+	Deliver(sdb, "file-knowledge", "info",
 		fmt.Sprintf("Past knowledge found for %s", filepath.Base(filePath)),
-		msg,
-	)
+		msg, PriorityLow)
 }
 
 // matchPastErrorSolutions checks Bash output for errors and searches past solutions.
@@ -336,11 +336,9 @@ func matchPastErrorSolutions(sdb *sessiondb.SessionDB, response string) {
 		return
 	}
 
-	_ = sdb.EnqueueNudge(
-		"past-solution", "info",
+	Deliver(sdb, "past-solution", "info",
 		"Similar error found in past sessions",
-		formatSolution(solutions[0]),
-	)
+		formatSolution(solutions[0]), PriorityMedium)
 	_ = sdb.SetCooldown("past_solution", 5*time.Minute)
 }
 
@@ -386,6 +384,33 @@ func recordFailureSolution(sdb *sessiondb.SessionDB, sessionID, filePath string,
 			_ = st.IncrementTimesEffective(solutionID)
 		}
 		_ = sdb.SetContext("last_surfaced_solution_id", "")
+	}
+}
+
+// recordPhase maps a tool call to a workflow phase and records it in sessiondb.
+func recordPhase(sdb *sessiondb.SessionDB, toolName string, toolInput json.RawMessage) {
+	var phase string
+	switch toolName {
+	case "Read", "Grep", "Glob":
+		phase = "read"
+	case "Edit", "Write", "NotebookEdit":
+		phase = "write"
+	case "EnterPlanMode":
+		phase = "plan"
+	case "Bash":
+		var bi struct {
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(toolInput, &bi) == nil && bi.Command != "" {
+			if testCmdPattern.MatchString(bi.Command) {
+				phase = "test"
+			} else if isCompileCommand(bi.Command) {
+				phase = "compile"
+			}
+		}
+	}
+	if phase != "" {
+		_ = sdb.RecordPhase(phase, toolName)
 	}
 }
 

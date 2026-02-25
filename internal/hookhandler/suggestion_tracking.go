@@ -90,6 +90,11 @@ func checkNudgeResolution(sdb *sessiondb.SessionDB, toolName string) {
 	_ = sdb.SetContext("last_nudge_pattern", "")
 	_ = sdb.SetContext("last_nudge_outcome_id", "")
 
+	// Update user preference with resolution signal.
+	// Estimate tools since delivery from burst state.
+	tc, _, _, _ := sdb.BurstState()
+	updatePreferenceOnResolution(pattern, tc)
+
 	outcomeID, err := strconv.ParseInt(outcomeIDStr, 10, 64)
 	if err != nil {
 		return
@@ -132,14 +137,15 @@ func checkLLMSuggestionResolution(sdb *sessiondb.SessionDB, toolName string) {
 	_ = st.ResolveSuggestion(outcomeID)
 }
 
-// shouldSuppressNudge checks if a nudge pattern has poor effectiveness
-// and should be suppressed to reduce noise.
-func shouldSuppressNudge(pattern string) bool {
+// updatePreferenceOnResolution updates the user_preferences table when a nudge is resolved.
+func updatePreferenceOnResolution(pattern string, toolsSinceDelivery int) {
 	st, err := store.OpenDefault()
 	if err != nil {
-		return false
+		return
 	}
 	defer st.Close()
 
-	return st.ShouldSuppressPattern(pattern)
+	// Compute response time proxy from tool count (approximate seconds).
+	responseTimeSec := float64(toolsSinceDelivery) * 3.0
+	_ = st.UpsertUserPreference(pattern, true, responseTimeSec)
 }

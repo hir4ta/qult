@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -37,9 +38,9 @@ func handleStop(input []byte) (*HookOutput, error) {
 		return makeBlockStopOutput(strings.Join(issues, "; ")), nil
 	}
 
-	// Uncommitted changes are informational only — never block stop.
+	// Uncommitted changes are informational only — log to stderr, don't block.
 	if gitInfo := checkUncommittedChanges(in.SessionID, in.CWD); gitInfo != "" {
-		return makeOutput("Stop", "[buddy] "+gitInfo), nil
+		fmt.Fprintf(os.Stderr, "[buddy] %s\n", gitInfo)
 	}
 
 	return nil, nil

@@ -66,7 +66,21 @@ func handleUserPromptSubmit(input []byte) (*HookOutput, error) {
 	// Record delivery for effectiveness tracking.
 	recordNudgeDelivery(sdb, in.SessionID, nudges)
 
-	entries := make([]nudgeEntry, 0, len(nudges)+1)
+	entries := make([]nudgeEntry, 0, len(nudges)+2)
+
+	// Generate task playbook if we have a task type.
+	taskTypeStr, _ := sdb.GetContext("task_type")
+	if taskTypeStr != "" {
+		if playbook := generatePlaybook(sdb, TaskType(taskTypeStr), in.CWD); playbook != "" {
+			entries = append(entries, nudgeEntry{
+				Pattern:     "playbook",
+				Level:       "info",
+				Observation: "Task workflow recommendation",
+				Suggestion:  playbook,
+			})
+		}
+	}
+
 	for _, n := range nudges {
 		entries = append(entries, nudgeEntry{
 			Pattern:     n.Pattern,
@@ -117,9 +131,13 @@ func matchRelevantKnowledge(sdb *sessiondb.SessionDB, prompt string) string {
 		return ""
 	}
 
+	// Prioritize knowledge types based on task type.
+	taskTypeStr, _ := sdb.GetContext("task_type")
+	ordered := prioritizeKnowledgeTypes(TaskType(taskTypeStr))
+
 	// Check at least one knowledge type is off cooldown.
 	var activeTypes []string
-	for _, t := range knowledgeTypes {
+	for _, t := range ordered {
 		on, _ := sdb.IsOnCooldown(t.cooldown)
 		if !on {
 			activeTypes = append(activeTypes, t.name)
@@ -176,6 +194,33 @@ func matchRelevantKnowledge(sdb *sessiondb.SessionDB, prompt string) string {
 		fmt.Fprintf(&b, "  - [%s] %s\n", p.PatternType, content)
 	}
 	return b.String()
+}
+
+// prioritizeKnowledgeTypes reorders knowledge types based on task type.
+// bugfix → error_solution first, feature → architecture first, refactor → decision first.
+func prioritizeKnowledgeTypes(taskType TaskType) []knowledgeType {
+	switch taskType {
+	case TaskBugfix:
+		return []knowledgeType{
+			{"error_solution", "knowledge_error"},
+			{"decision", "knowledge_decision"},
+			{"architecture", "knowledge_arch"},
+		}
+	case TaskFeature:
+		return []knowledgeType{
+			{"architecture", "knowledge_arch"},
+			{"decision", "knowledge_decision"},
+			{"error_solution", "knowledge_error"},
+		}
+	case TaskRefactor:
+		return []knowledgeType{
+			{"decision", "knowledge_decision"},
+			{"architecture", "knowledge_arch"},
+			{"error_solution", "knowledge_error"},
+		}
+	default:
+		return knowledgeTypes
+	}
 }
 
 // recentFileKeywords extracts searchable keywords from recent file paths

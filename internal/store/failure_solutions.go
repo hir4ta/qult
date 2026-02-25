@@ -75,6 +75,37 @@ func (s *Store) SearchFailureSolutions(failureType, errorSig string, limit int) 
 	return results, rows.Err()
 }
 
+// SearchFailureSolutionsByFile finds solutions for a specific file path.
+// Returns effective solutions first, newest second.
+func (s *Store) SearchFailureSolutionsByFile(filePath string, limit int) ([]FailureSolution, error) {
+	rows, err := s.db.Query(
+		`SELECT id, session_id, failure_type, error_signature, file_path, solution_text,
+		        times_surfaced, times_effective, timestamp
+		 FROM failure_solutions
+		 WHERE file_path = ?
+		 ORDER BY times_effective DESC, timestamp DESC
+		 LIMIT ?`,
+		filePath, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store: search failure solutions by file: %w", err)
+	}
+	defer rows.Close()
+
+	var results []FailureSolution
+	for rows.Next() {
+		var fs FailureSolution
+		var ts string
+		if err := rows.Scan(&fs.ID, &fs.SessionID, &fs.FailureType, &fs.ErrorSignature,
+			&fs.FilePath, &fs.SolutionText, &fs.TimesSurfaced, &fs.TimesEffective, &ts); err != nil {
+			continue
+		}
+		fs.Timestamp, _ = time.Parse("2006-01-02 15:04:05", ts)
+		results = append(results, fs)
+	}
+	return results, rows.Err()
+}
+
 // IncrementTimesSurfaced increments the surfaced counter for a solution.
 func (s *Store) IncrementTimesSurfaced(solutionID int) error {
 	_, err := s.db.Exec(

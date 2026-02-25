@@ -2,7 +2,7 @@ package store
 
 import "database/sql"
 
-const schemaVersion = 5
+const schemaVersion = 6
 
 const ddlV1 = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -222,6 +222,38 @@ CREATE INDEX IF NOT EXISTS idx_fs_sig ON failure_solutions(error_signature);
 CREATE INDEX IF NOT EXISTS idx_fs_type ON failure_solutions(failure_type);
 `
 
+const ddlV6 = `
+-- ==========================================================
+-- workflow_sequences: learned workflow patterns per task type
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS workflow_sequences (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id     TEXT NOT NULL,
+    task_type      TEXT NOT NULL,
+    phase_sequence TEXT NOT NULL,
+    success        INTEGER NOT NULL DEFAULT 0,
+    tool_count     INTEGER NOT NULL DEFAULT 0,
+    duration_sec   INTEGER NOT NULL DEFAULT 0,
+    timestamp      TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+CREATE INDEX IF NOT EXISTS idx_wseq_task ON workflow_sequences(task_type);
+
+-- ==========================================================
+-- user_preferences: adaptive suggestion effectiveness tracking
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS user_preferences (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern               TEXT NOT NULL UNIQUE,
+    delivery_count        INTEGER NOT NULL DEFAULT 0,
+    resolution_count      INTEGER NOT NULL DEFAULT 0,
+    ignore_count          INTEGER NOT NULL DEFAULT 0,
+    avg_response_time_sec REAL NOT NULL DEFAULT 0,
+    effectiveness_score   REAL NOT NULL DEFAULT 0.5,
+    updated_at            TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`
+
 // Migrate applies all pending schema migrations to the database.
 func Migrate(db *sql.DB) error {
 	var current int
@@ -256,6 +288,11 @@ func Migrate(db *sql.DB) error {
 	}
 	if current < 5 {
 		if _, err := db.Exec(ddlV5); err != nil {
+			return err
+		}
+	}
+	if current < 6 {
+		if _, err := db.Exec(ddlV6); err != nil {
 			return err
 		}
 	}

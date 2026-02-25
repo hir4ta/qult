@@ -104,6 +104,13 @@ CREATE TABLE IF NOT EXISTS tool_sequences (
 	count        INTEGER NOT NULL DEFAULT 1,
 	PRIMARY KEY (bigram_hash, next_outcome)
 );
+
+CREATE TABLE IF NOT EXISTS session_phases (
+	id        INTEGER PRIMARY KEY AUTOINCREMENT,
+	phase     TEXT NOT NULL,
+	tool_name TEXT NOT NULL DEFAULT '',
+	timestamp TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `
 
 // HookEvent is a recorded tool event.
@@ -828,6 +835,54 @@ func (s *SessionDB) RecordSequence(prevTool, currentTool, outcome string) error 
 		return fmt.Errorf("sessiondb: record sequence: %w", err)
 	}
 	return nil
+}
+
+// --- Session Phases ---
+
+// RecordPhase records a workflow phase transition.
+func (s *SessionDB) RecordPhase(phase, toolName string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO session_phases (phase, tool_name) VALUES (?, ?)`,
+		phase, toolName,
+	)
+	if err != nil {
+		return fmt.Errorf("sessiondb: record phase: %w", err)
+	}
+	return nil
+}
+
+// GetPhaseSequence returns the ordered list of phases recorded in this session.
+// Adjacent duplicate phases are collapsed (e.g., read,read,write → read,write).
+func (s *SessionDB) GetPhaseSequence() ([]string, error) {
+	rows, err := s.db.Query(`SELECT phase FROM session_phases ORDER BY id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("sessiondb: get phase sequence: %w", err)
+	}
+	defer rows.Close()
+
+	var phases []string
+	var prev string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			continue
+		}
+		if p != prev {
+			phases = append(phases, p)
+			prev = p
+		}
+	}
+	return phases, rows.Err()
+}
+
+// PhaseCount returns the total number of phase records in this session.
+func (s *SessionDB) PhaseCount() (int, error) {
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM session_phases`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("sessiondb: phase count: %w", err)
+	}
+	return count, nil
 }
 
 // PredictOutcome returns the most common outcome for a tool bigram.

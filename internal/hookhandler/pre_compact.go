@@ -39,8 +39,8 @@ func handlePreCompact(input []byte) (*HookOutput, error) {
 	if count >= 2 {
 		onCooldown, _ := sdb.IsOnCooldown("context_thrashing")
 		if !onCooldown {
-			_ = sdb.EnqueueNudge(
-				"context_thrashing", "warn",
+			// PreCompact cannot return output, so enqueue directly for next hook.
+			_ = sdb.EnqueueNudge("context_thrashing", "warn",
 				fmt.Sprintf("%d compacts in the last 15 minutes — context is being consumed rapidly", count),
 				"Summarize the current goal and constraints in 2-3 bullets, then continue with focused steps",
 			)
@@ -99,6 +99,7 @@ func serializeWorkingSetForCompact(sdb *sessiondb.SessionDB) {
 		b.WriteString("\n")
 	}
 
+	// compact_context is always critical — it must be delivered for context restoration.
 	_ = sdb.EnqueueNudge("compact_context", "info",
 		"Session context preserved for post-compact restoration",
 		b.String(),

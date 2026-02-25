@@ -688,7 +688,7 @@ func TestPostCompactResume_WithWorkingSet(t *testing.T) {
 	}
 }
 
-func TestPreExistingChangesWarning(t *testing.T) {
+func TestAlternativesGitDirtyWarning(t *testing.T) {
 	t.Parallel()
 
 	sessionID := "test-git-dirty-warn"
@@ -702,28 +702,21 @@ func TestPreExistingChangesWarning(t *testing.T) {
 	_ = sdb.SetWorkingSet("git_dirty_files", "internal/auth/handler.go\ninternal/auth/middleware.go")
 	_ = sdb.SetWorkingSet("git_branch", "feature/auth")
 
-	// Editing a dirty file should warn.
+	// Editing a dirty file should include commit/stash alternative.
 	input := json.RawMessage(`{"file_path":"/project/internal/auth/handler.go"}`)
-	warning := preExistingChangesWarning(sdb, input)
-	if warning == "" {
-		t.Error("preExistingChangesWarning() = empty, want warning for dirty file")
+	result := presentAlternatives(sdb, "Edit", input)
+	if result == "" {
+		t.Error("presentAlternatives() = empty, want alternative for dirty file")
 	}
-	if !strings.Contains(warning, "handler.go") {
-		t.Errorf("warning missing filename, got: %s", warning)
+	if !strings.Contains(result, "handler.go") {
+		t.Errorf("alternative missing filename, got: %s", result)
 	}
-	if !strings.Contains(warning, "feature/auth") {
-		t.Errorf("warning missing branch, got: %s", warning)
-	}
-
-	// Editing a clean file should not warn.
-	input = json.RawMessage(`{"file_path":"/project/internal/store/store.go"}`)
-	warning = preExistingChangesWarning(sdb, input)
-	if warning != "" {
-		t.Errorf("preExistingChangesWarning() for clean file = %q, want empty", warning)
+	if !strings.Contains(result, "feature/auth") {
+		t.Errorf("alternative missing branch, got: %s", result)
 	}
 }
 
-func TestPreExistingChangesWarning_NoDirtyFiles(t *testing.T) {
+func TestAlternativesNoDirtyFiles(t *testing.T) {
 	t.Parallel()
 
 	sessionID := "test-git-no-dirty"
@@ -733,10 +726,12 @@ func TestPreExistingChangesWarning_NoDirtyFiles(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = sdb.Destroy() })
 
+	// No dirty files set — editing any file should not produce git-related alternatives.
+	// (May still produce stale-read alternative since file hasn't been Read.)
 	input := json.RawMessage(`{"file_path":"/project/main.go"}`)
-	warning := preExistingChangesWarning(sdb, input)
-	if warning != "" {
-		t.Errorf("preExistingChangesWarning() with no dirty files = %q, want empty", warning)
+	result := presentAlternatives(sdb, "Edit", input)
+	if strings.Contains(result, "Commit/stash") {
+		t.Errorf("presentAlternatives() with no dirty files should not suggest commit/stash, got: %s", result)
 	}
 }
 

@@ -36,11 +36,21 @@ var codeHeuristics = []codeHeuristic{
 
 // runCodeHeuristics checks edited/written content against code quality patterns.
 // Returns an observation string, or "" if no issues found.
+// For Go files, runs AST-based analysis first (more accurate), then falls back
+// to regex checks for issues AST doesn't cover.
 func runCodeHeuristics(filePath string, toolInput json.RawMessage) string {
 	ext := fileExtFromPath(filePath)
 	content := extractWriteContent(toolInput)
 	if content == "" {
 		return ""
+	}
+
+	// Go files: try AST-based analysis for Write (complete file).
+	// Edit provides only a snippet (new_string), which can't be parsed as a full Go file.
+	if ext == "go" && isFullFileContent(toolInput) {
+		if issue := GoASTCheck(filePath, content); issue != "" {
+			return issue
+		}
 	}
 
 	for _, h := range codeHeuristics {
@@ -328,6 +338,15 @@ func checkLargeFunction(_, content string) string {
 }
 
 // --- Helpers ---
+
+// isFullFileContent returns true if the tool input is a Write (complete file),
+// not an Edit (snippet). AST analysis requires a complete Go source file.
+func isFullFileContent(toolInput json.RawMessage) bool {
+	var write struct {
+		Content string `json:"content"`
+	}
+	return json.Unmarshal(toolInput, &write) == nil && write.Content != ""
+}
 
 // extractWriteContent extracts the new content from Edit or Write tool input.
 func extractWriteContent(toolInput json.RawMessage) string {
