@@ -39,6 +39,47 @@ var apologyKeywords = []string{
 // Rate-limit keywords.
 var rateLimitKeywords = []string{"rate limit", "overloaded", "429", "529"}
 
+// MatchDestructiveCommand checks if a Bash command matches destructive patterns.
+// Returns observation, suggestion, and whether a match was found.
+func MatchDestructiveCommand(command string) (observation, suggestion string, matched bool) {
+	switch {
+	case rmRFPattern.MatchString(command):
+		return "rm -rf command detected",
+			"Verify the target path — use git checkout to restore if unintended",
+			true
+	case gitPushForcePattern.MatchString(command) && !strings.Contains(command, "--force-with-lease"):
+		return "git push --force detected",
+			"Remote changes will be overwritten — use --force-with-lease instead",
+			true
+	case gitResetHardPattern.MatchString(command):
+		return "git reset --hard detected",
+			"Uncommitted changes will be lost — use git stash or git reflog instead",
+			true
+	case gitCheckoutDot.MatchString(command):
+		return "git checkout -- . will discard all working directory changes",
+			"Use git stash to save changes before discarding",
+			true
+	case gitRestoreDot.MatchString(command):
+		return "git restore . will discard all working directory changes",
+			"Use git stash to save changes before discarding",
+			true
+	case gitCleanF.MatchString(command):
+		return "git clean -f will remove untracked files permanently",
+			"Use git clean -n to preview first",
+			true
+	case gitBranchD.MatchString(command):
+		return "git branch -D will force-delete a branch",
+			"Use git branch -d (lowercase) for safe deletion, or git reflog to recover",
+			true
+	case chmod777.MatchString(command):
+		return "chmod 777 grants world-writable permissions",
+			"Security risk — use minimal permissions (644 or 755)",
+			true
+	default:
+		return "", "", false
+	}
+}
+
 // detectRetryLoop scans last 10 events for 3+ consecutive identical tool calls.
 func (d *Detector) detectRetryLoop() *Alert {
 	recent := d.getRecentFingerprints(10)

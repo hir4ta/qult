@@ -21,7 +21,7 @@ brews:
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: https://github.com/hir4ta/claude-buddy
-    description: "Real-time companion TUI for Claude Code with AI-powered usage feedback"
+    description: "Proactive session companion for Claude Code — anti-pattern detection, destructive command blocking, and usage coaching"
     license: MIT
     install: |
       bin.install "claude-buddy"

@@ -12,6 +12,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/hir4ta/claude-buddy/internal/coach"
 	"github.com/hir4ta/claude-buddy/internal/embedder"
+	"github.com/hir4ta/claude-buddy/internal/hookhandler"
 	"github.com/hir4ta/claude-buddy/internal/install"
 	"github.com/hir4ta/claude-buddy/internal/locale"
 	"github.com/hir4ta/claude-buddy/internal/mcpserver"
@@ -44,6 +45,11 @@ func run() error {
 		return install.Run()
 	case "analyze":
 		return runAnalyze()
+	case "hook-handler":
+		if len(os.Args) < 3 {
+			return fmt.Errorf("usage: claude-buddy hook-handler <EventName>")
+		}
+		return hookhandler.Run(os.Args[2])
 	case "help", "-h", "--help":
 		printUsage()
 		return nil
@@ -213,12 +219,13 @@ Usage:
   claude-buddy [command]
 
 Commands:
-  watch      Monitor active Claude Code session in real-time (default)
-  browse     Browse past session history
-  serve      Run as MCP server (stdio) for Claude Code integration
-  install    Register MCP server, update CLAUDE.md, and sync sessions
-  analyze    AI-powered session analysis via claude -p (no extra cost)
-  help       Show this help
+  watch         Monitor active Claude Code session in real-time (default)
+  browse        Browse past session history
+  serve         Run as MCP server (stdio) for Claude Code integration
+  hook-handler  Handle Claude Code hook events (stdin/stdout JSON)
+  install       Register plugin bundle, MCP server, and sync sessions
+  analyze       AI-powered session analysis via claude -p (no extra cost)
+  help          Show this help
 
 Language:
   AI feedback is generated in your system language (detected from LANG).

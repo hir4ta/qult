@@ -1,6 +1,6 @@
 # claude-buddy
 
-A real-time companion TUI that runs alongside Claude Code, providing live session monitoring and AI-powered usage feedback based on official best practices.
+A proactive session companion for Claude Code — real-time anti-pattern detection, destructive command blocking, automatic context recovery, and AI-powered usage coaching. Works as both a standalone TUI and a Claude Code plugin with hooks.
 
 ## Install
 
@@ -22,7 +22,21 @@ go build -o claude-buddy .
 claude-buddy install
 ```
 
-This registers the MCP server, updates `~/.claude/CLAUDE.md`, and syncs all existing sessions to the local SQLite database (`~/.claude-buddy/buddy.db`).
+This generates the plugin bundle (`~/.claude-buddy/plugin/`), registers the MCP server, and syncs all existing sessions to the local SQLite database (`~/.claude-buddy/buddy.db`).
+
+To enable plugin hooks and skills:
+
+```bash
+claude plugin install ~/.claude-buddy/plugin --scope user
+```
+
+Or manually add to `~/.claude/settings.json`:
+
+```json
+{
+  "plugins": [{"path": "~/.claude-buddy/plugin"}]
+}
+```
 
 ## Upgrade
 
@@ -105,7 +119,7 @@ claude-buddy browse
 
 ### `claude-buddy install`
 
-One-time setup: registers the MCP server, appends instructions to `~/.claude/CLAUDE.md`, and runs initial DB sync.
+One-time setup: generates the plugin bundle, registers the MCP server, syncs sessions, and generates embeddings (if Ollama available).
 
 ```bash
 claude-buddy install
@@ -147,6 +161,35 @@ claude-buddy analyze de999fa4 # Specific session by ID prefix
 
 Requires `claude` CLI in PATH.
 
+## Plugin & Hooks
+
+When installed as a Claude Code plugin, claude-buddy actively monitors your session through lifecycle hooks:
+
+| Hook Event | Behavior |
+|---|---|
+| **SessionStart** | Auto-restores previous session context (project, decisions, modified files) |
+| **PreToolUse** | Blocks destructive Bash commands (`rm -rf`, `git push --force`, `git reset --hard`, etc.) |
+| **PostToolUse** | Tracks tool usage patterns, detects anti-patterns in the background |
+| **UserPromptSubmit** | Injects proactive warnings as `additionalContext` |
+| **PreCompact** | Detects context thrashing (rapid compaction cycles) |
+| **SessionEnd** | Cleans up ephemeral session state |
+
+**Anti-pattern detectors** (hook-based, real-time):
+
+- **RetryLoop**: 3+ consecutive identical tool calls
+- **ExcessiveTools**: 25+ tool calls without user input
+- **FileReadLoop**: Same file read 5+ times with no edits
+- **ExploreLoop**: 10+ tools, no writes, 5+ minutes elapsed
+- **Destructive commands**: `rm -rf`, `git push --force`, `git reset --hard`, `git checkout -- .`, `chmod 777`, etc.
+
+**Skills** (invocable via `/health`, `/review`, `/patterns`):
+
+| Skill | Description |
+|---|---|
+| `/health` | Session health score + active alerts |
+| `/review` | End-of-session usage review with stats and tips |
+| `/patterns` | Search past error solutions, architecture decisions |
+
 ## Architecture
 
 ```
@@ -157,12 +200,14 @@ claude-buddy/
 │   ├── watcher/               # File watching (fsnotify + tail)
 │   ├── analyzer/              # Live stats + Feedback type + anti-pattern detector
 │   ├── coach/                 # AI feedback generation via claude -p
+│   ├── hookhandler/           # Claude Code hook event handlers (stdin/stdout JSON)
+│   ├── sessiondb/             # Ephemeral per-session SQLite (hook state sharing)
 │   ├── embedder/              # Ollama integration for semantic search
 │   ├── locale/                # System locale detection (18 languages)
 │   ├── tui/                   # Bubble Tea TUI (watch / browse / select)
 │   ├── mcpserver/             # MCP server (stdio, 8 tools)
 │   ├── store/                 # SQLite persistence (FTS5 + vector search + incremental sync)
-│   └── install/               # MCP registration + CLAUDE.md + initial sync
+│   └── install/               # Plugin bundle generation + MCP registration + initial sync
 ├── go.mod
 └── go.sum
 ```

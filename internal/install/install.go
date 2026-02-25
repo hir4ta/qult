@@ -13,36 +13,80 @@ import (
 	"github.com/hir4ta/claude-buddy/internal/store"
 )
 
-const claudeMDMarker = "claude-buddy (session companion)"
-
-const claudeMDBlock = `
-## claude-buddy (session companion)
-- Call ` + "`buddy_resume`" + ` at session start to restore previous context
-- Use ` + "`buddy_recall`" + ` to search for details lost after auto-compact
-- Use ` + "`buddy_decisions`" + ` to review past design decisions
-`
-
 // Run executes the install command. All steps are idempotent.
 func Run() error {
-	// Step 1: MCP registration
-	registerMCP()
-
-	// Step 2: CLAUDE.md update
-	if err := updateClaudeMD(); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: CLAUDE.md update failed: %v\n", err)
+	// Step 1: Generate plugin bundle.
+	if err := generatePluginBundle(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: plugin bundle generation failed: %v\n", err)
 	}
 
-	// Step 3: Hooks setup info
-	printHooksInfo()
+	// Step 2: MCP registration.
+	registerMCP()
 
-	// Step 4: Initial sync
+	// Step 3: Initial sync.
 	if err := initialSync(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: initial sync failed: %v\n", err)
 	}
 
-	// Step 5: Generate embeddings (if Ollama available)
+	// Step 4: Generate embeddings (if Ollama available).
 	generateEmbeddings()
 
+	// Step 5: Print plugin instructions.
+	printPluginInstructions()
+
+	return nil
+}
+
+// pluginDirFunc is a package-level variable for test overrides.
+var pluginDirFunc = pluginDir
+
+func pluginDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	return filepath.Join(home, ".claude-buddy", "plugin")
+}
+
+func generatePluginBundle() error {
+	dir := pluginDirFunc()
+
+	dirs := []string{
+		filepath.Join(dir, ".claude-plugin"),
+		filepath.Join(dir, "hooks"),
+		filepath.Join(dir, "skills", "health"),
+		filepath.Join(dir, "skills", "review"),
+		filepath.Join(dir, "skills", "patterns"),
+		filepath.Join(dir, "scripts"),
+	}
+	for _, d := range dirs {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			return fmt.Errorf("mkdir %s: %w", d, err)
+		}
+	}
+
+	files := map[string]string{
+		filepath.Join(dir, ".claude-plugin", "plugin.json"): pluginJSON,
+		filepath.Join(dir, ".mcp.json"):                     mcpJSON,
+		filepath.Join(dir, "hooks", "hooks.json"):           hooksJSON,
+		filepath.Join(dir, "skills", "health", "SKILL.md"):  skillHealth,
+		filepath.Join(dir, "skills", "review", "SKILL.md"):  skillReview,
+		filepath.Join(dir, "skills", "patterns", "SKILL.md"): skillPatterns,
+		filepath.Join(dir, "scripts", "buddy"):               launcherScript,
+	}
+
+	for path, content := range files {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", path, err)
+		}
+	}
+
+	// Make launcher executable.
+	if err := os.Chmod(filepath.Join(dir, "scripts", "buddy"), 0o755); err != nil {
+		return fmt.Errorf("chmod launcher: %w", err)
+	}
+
+	fmt.Println("✓ Plugin bundle generated")
 	return nil
 }
 
@@ -59,60 +103,6 @@ func registerMCP() {
 	} else {
 		fmt.Println("✓ MCP server registered")
 	}
-}
-
-func updateClaudeMD() error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("get home dir: %w", err)
-	}
-	return updateClaudeMDAt(filepath.Join(home, ".claude", "CLAUDE.md"))
-}
-
-func updateClaudeMDAt(path string) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", dir, err)
-	}
-
-	existing, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("read %s: %w", path, err)
-	}
-
-	if strings.Contains(string(existing), claudeMDMarker) {
-		fmt.Println("✓ CLAUDE.md already configured")
-		return nil
-	}
-
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("open %s: %w", path, err)
-	}
-	defer f.Close()
-
-	if _, err := f.WriteString(claudeMDBlock); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-
-	fmt.Println("✓ CLAUDE.md updated")
-	return nil
-}
-
-func printHooksInfo() {
-	fmt.Println(`
-ℹ Hooks setup (optional):
-  To auto-call buddy_resume on SessionStart,
-  add the following to ~/.claude/settings.json:
-
-  {
-    "hooks": {
-      "SessionStart": [{
-        "type": "tool_call",
-        "tool": "buddy_resume"
-      }]
-    }
-  }`)
 }
 
 func initialSync() error {
@@ -175,15 +165,37 @@ func generateEmbeddings() {
 	}
 }
 
+func printPluginInstructions() {
+	dir := pluginDirFunc()
+	fmt.Printf(`
+✓ Installation complete!
+
+Plugin bundle: %s
+
+To enable the plugin (hooks + skills):
+  claude plugin install %s --scope user
+
+Or manually add to ~/.claude/settings.json:
+  {
+    "plugins": [{"path": "%s"}]
+  }
+
+Hooks enabled:
+  SessionStart   → Auto-restore previous session context
+  PreToolUse     → Block destructive Bash commands
+  PostToolUse    → Track anti-patterns in background
+  UserPromptSubmit → Inject proactive warnings
+  PreCompact     → Detect context thrashing
+  SessionEnd     → Cleanup session state
+`, dir, dir, dir)
+}
+
 func renderProgress(prefix string, done, total int) {
 	if total == 0 {
 		return
 	}
 	const barWidth = 25
-	filled := barWidth * done / total
-	if filled > barWidth {
-		filled = barWidth
-	}
+	filled := min(barWidth*done/total, barWidth)
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
 	fmt.Printf("\r⏳ %s [%s] %d/%d", prefix, bar, done, total)
 }
@@ -191,3 +203,155 @@ func renderProgress(prefix string, done, total int) {
 func clearLine() {
 	fmt.Print("\r\033[K")
 }
+
+// --- Embedded plugin content ---
+
+const pluginJSON = `{
+  "name": "claude-buddy",
+  "description": "Proactive session companion — anti-pattern detection, context recovery, and usage coaching",
+  "version": "0.4.0",
+  "author": {
+    "name": "hir4ta"
+  },
+  "repository": "https://github.com/hir4ta/claude-buddy"
+}
+`
+
+const mcpJSON = `{
+  "mcpServers": {
+    "claude-buddy": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/buddy",
+      "args": ["serve"]
+    }
+  }
+}
+`
+
+const hooksJSON = `{
+  "description": "claude-buddy proactive session monitoring",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/buddy hook-handler SessionStart",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/buddy hook-handler PreToolUse",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/buddy hook-handler PostToolUse",
+            "timeout": 3,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/buddy hook-handler UserPromptSubmit",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/buddy hook-handler PreCompact",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/buddy hook-handler SessionEnd",
+            "timeout": 5,
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}
+`
+
+const skillHealth = `---
+name: health
+description: Check session health — detects anti-patterns and shows active alerts with suggestions. Use when you want to assess the current session quality.
+---
+
+Check the current session health by calling the ` + "`buddy_alerts`" + ` MCP tool.
+Present the results as a clear summary:
+1. Health score (0-100%)
+2. Active alerts with level, observation, and suggestion
+3. If health is below 70%, recommend specific actions
+`
+
+const skillReview = `---
+name: review
+description: End-of-session usage review with stats and improvement tips. Use at the end of a coding session.
+---
+
+Generate an end-of-session review:
+1. Call ` + "`buddy_stats`" + ` to get session statistics
+2. Call ` + "`buddy_tips`" + ` to get AI-powered improvement suggestions
+3. Present a concise summary: duration, turns, tool usage, key suggestions, score
+`
+
+const skillPatterns = `---
+name: patterns
+description: Search past error solutions, architecture decisions, and reusable knowledge. Use when facing a problem that may have been solved before.
+argument-hint: <search query>
+---
+
+Search for relevant patterns from past sessions using ` + "`buddy_patterns`" + ` with query "$ARGUMENTS".
+If no arguments provided, ask what topic or problem to search for.
+Present results grouped by type (error_solution, architecture, decision).
+`
+
+const launcherScript = `#!/bin/bash
+set -euo pipefail
+
+BUDDY=""
+if command -v claude-buddy &>/dev/null; then
+  BUDDY="claude-buddy"
+elif [ -x "$HOME/.claude-buddy/bin/claude-buddy" ]; then
+  BUDDY="$HOME/.claude-buddy/bin/claude-buddy"
+fi
+
+if [ -z "$BUDDY" ]; then
+  echo "claude-buddy binary not found" >&2
+  exit 1
+fi
+
+exec "$BUDDY" "$@"
+`
