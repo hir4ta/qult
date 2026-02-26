@@ -30,6 +30,8 @@ func defaultSettingsPath() string {
 func Run() error {
 	if isPluginActive() {
 		fmt.Println("Plugin mode detected — skipping hook/skill/agent registration")
+		// Clean up legacy files that conflict with plugin-provided ones.
+		cleanupLegacyInstall()
 	} else {
 		// Step 1: MCP registration.
 		registerMCP()
@@ -92,6 +94,19 @@ func isPluginActive() bool {
 		}
 	}
 	return false
+}
+
+// cleanupLegacyInstall removes skills, agent, and hooks that were installed
+// directly to ~/.claude/ by the legacy install flow. When the plugin is active,
+// these files are provided by the plugin cache and the legacy copies are redundant.
+func cleanupLegacyInstall() {
+	removeSkills()
+	if home, err := os.UserHomeDir(); err == nil {
+		agentPath := filepath.Join(home, ".claude", "agents", "buddy.md")
+		_ = os.Remove(agentPath)
+	}
+	_ = RemoveHooks()
+	fmt.Println("✓ Cleaned up legacy skills/agent/hooks from ~/.claude/")
 }
 
 func registerMCP() {
