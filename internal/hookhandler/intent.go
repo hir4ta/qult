@@ -1,10 +1,14 @@
 package hookhandler
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
+	"github.com/hir4ta/claude-buddy/internal/advice"
+	"github.com/hir4ta/claude-buddy/internal/sessiondb"
 	"github.com/hir4ta/claude-buddy/internal/store"
 )
 
@@ -18,6 +22,50 @@ const (
 	TaskTest     TaskType = "test"
 	TaskUnknown  TaskType = ""
 )
+
+// classifyIntentLLM attempts LLM-based intent classification via TierFast,
+// falling back to keyword matching on failure or low confidence.
+func classifyIntentLLM(sdb *sessiondb.SessionDB, prompt string) TaskType {
+	if sdb == nil {
+		return classifyIntent(prompt)
+	}
+	advisor := advice.NewFromSessionDB(sdb)
+	if advisor == nil {
+		return classifyIntent(prompt)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
+	defer cancel()
+
+	result, err := advisor.ClassifyIntent(ctx, prompt)
+	if err != nil {
+		advisor.RecordFailure(sdb)
+		return classifyIntent(prompt)
+	}
+	advisor.RecordSuccess(sdb)
+
+	validated := validateTaskType(result.TaskType)
+
+	if result.Confidence == "low" || validated == TaskUnknown {
+		// Low confidence — prefer keyword match if it finds something.
+		if kw := classifyIntent(prompt); kw != TaskUnknown {
+			return kw
+		}
+		return validated
+	}
+
+	return validated
+}
+
+// validateTaskType checks if a string is a known TaskType, returning TaskUnknown if not.
+func validateTaskType(s string) TaskType {
+	switch TaskType(s) {
+	case TaskBugfix, TaskFeature, TaskRefactor, TaskTest:
+		return TaskType(s)
+	default:
+		return TaskUnknown
+	}
+}
 
 // classifyIntent classifies user intent using keyword matching.
 // Returns TaskUnknown if no clear classification.

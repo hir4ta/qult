@@ -40,6 +40,17 @@ func handlePreToolUse(input []byte) (*HookOutput, error) {
 		}
 	}
 
+	// Safety check: inject -i for bare rm commands, warn for git stash drop.
+	var safetyWarning string
+	if in.ToolName == "Bash" {
+		if sr := checkBashSafety(in.ToolInput); sr != nil {
+			if sr.UpdatedInput != nil {
+				return makeUpdatedInputOutput(sr.UpdatedInput, sr.Warning), nil
+			}
+			safetyWarning = sr.Warning
+		}
+	}
+
 	// Open session DB for context-aware checks and nudge delivery.
 	sdb, err := sessiondb.Open(in.SessionID)
 	if err != nil {
@@ -49,9 +60,10 @@ func handlePreToolUse(input []byte) (*HookOutput, error) {
 	defer sdb.Close()
 
 	// --- JARVIS advisor: present alternatives before action ---
-	// Structured alternatives subsume individual stale-read, failure-prediction,
-	// git-dirty, and decision-surfacing signals into numbered options.
 	var signals []string
+	if safetyWarning != "" {
+		signals = append(signals, safetyWarning)
+	}
 
 	if alts := presentAlternatives(sdb, in.ToolName, in.ToolInput); alts != "" {
 		signals = append(signals, alts)
@@ -82,7 +94,7 @@ func handlePreToolUse(input []byte) (*HookOutput, error) {
 			impactKey := "impact:" + filepath.Base(ei.FilePath)
 			on, _ := sdb.IsOnCooldown(impactKey)
 			if !on {
-				if info := analyzeImpact(ei.FilePath, in.CWD); info != nil {
+				if info := analyzeImpact(sdb, ei.FilePath, in.CWD); info != nil {
 					if text := formatImpact(info); text != "" {
 						_ = sdb.SetCooldown(impactKey, 15*time.Minute)
 						signals = append(signals, fmt.Sprintf("[buddy] Impact: %s", text))

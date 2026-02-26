@@ -11,21 +11,25 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/hir4ta/claude-buddy/internal/sessiondb"
 )
 
 // ImpactInfo holds the results of an impact analysis for a file.
 type ImpactInfo struct {
-	Importers  []string // files that import/reference this file
-	TestFiles  []string // test files covering this file
-	CoChanges  []string // files frequently changed together (from git log)
-	ExportedN  int      // number of exported symbols (Go only)
-	BlastScore int      // composite risk score (0-100)
-	Risk       string   // "low", "medium", "high"
+	Importers            []string // files that import/reference this file
+	TransitiveImporterN  int      // count of transitive importers (via dep graph)
+	TestFiles            []string // test files covering this file
+	CoChanges            []string // files frequently changed together (from git log)
+	ExportedN            int      // number of exported symbols (Go only)
+	BlastScore           int      // composite risk score (0-100)
+	Risk                 string   // "low", "medium", "high"
 }
 
 // analyzeImpact runs a lightweight impact analysis for a file being edited.
 // Uses go/ast for Go files, grep-based for others. Total budget: ~1 second.
-func analyzeImpact(filePath, cwd string) *ImpactInfo {
+// sdb is optional; when non-nil, transitive dependency graph analysis is included.
+func analyzeImpact(sdb *sessiondb.SessionDB, filePath, cwd string) *ImpactInfo {
 	info := &ImpactInfo{}
 
 	ext := filepath.Ext(filePath)
@@ -33,6 +37,17 @@ func analyzeImpact(filePath, cwd string) *ImpactInfo {
 	case ".go":
 		analyzeGoImpact(info, filePath, cwd)
 		info.ExportedN = len(GoExportedSymbols(filePath))
+		// Transitive impact via dep graph (requires sdb for caching).
+		if sdb != nil {
+			if graph := buildGoDepGraph(sdb, cwd); graph != nil {
+				pkgDir := filepath.Dir(filePath)
+				relDir, _ := filepath.Rel(cwd, pkgDir)
+				if modPath := goModulePath(cwd); modPath != "" && relDir != "." {
+					importPath := modPath + "/" + relDir
+					info.TransitiveImporterN = len(transitiveImporters(graph, importPath, 3))
+				}
+			}
+		}
 	default:
 		analyzeGenericImpact(info, filePath, cwd)
 	}
@@ -42,6 +57,20 @@ func analyzeImpact(filePath, cwd string) *ImpactInfo {
 	info.BlastScore = computeBlastScore(info)
 	info.Risk = assessRisk(info)
 	return info
+}
+
+// goModulePath reads go.mod and returns the module path (e.g. "github.com/user/repo").
+func goModulePath(cwd string) string {
+	data, err := os.ReadFile(filepath.Join(cwd, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "module ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "module "))
+		}
+	}
+	return ""
 }
 
 // analyzeGoImpact uses go/ast to find exported symbols, then greps for importers.
@@ -255,6 +284,13 @@ func computeBlastScore(info *ImpactInfo) int {
 	}
 	score += exportPts
 
+	// Transitive importers: each adds 3 points (max 15).
+	transitPts := info.TransitiveImporterN * 3
+	if transitPts > 15 {
+		transitPts = 15
+	}
+	score += transitPts
+
 	if score > 100 {
 		score = 100
 	}
@@ -285,6 +321,9 @@ func formatImpact(info *ImpactInfo) string {
 	if len(info.Importers) > 0 {
 		parts = append(parts, fmt.Sprintf("%d file(s) reference this: %s",
 			len(info.Importers), strings.Join(info.Importers, ", ")))
+	}
+	if info.TransitiveImporterN > 0 {
+		parts = append(parts, fmt.Sprintf("%d transitive importer(s)", info.TransitiveImporterN))
 	}
 	if len(info.TestFiles) > 0 {
 		parts = append(parts, fmt.Sprintf("Tests: %s", strings.Join(info.TestFiles, ", ")))

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -51,7 +52,7 @@ func handleSessionStart(input []byte) (*HookOutput, error) {
 
 	switch in.Source {
 	case "startup", "resume":
-		return handleStartupResume(in)
+		return handleStartupResume(in, sdb)
 	case "compact":
 		// Record compact in session DB.
 		_ = sdb.RecordCompact()
@@ -61,7 +62,7 @@ func handleSessionStart(input []byte) (*HookOutput, error) {
 	}
 }
 
-func handleStartupResume(in sessionStartInput) (*HookOutput, error) {
+func handleStartupResume(in sessionStartInput, sdb *sessiondb.SessionDB) (*HookOutput, error) {
 	st, err := store.OpenDefault()
 	if err != nil {
 		// No store available — skip resume.
@@ -79,7 +80,107 @@ func handleStartupResume(in sessionStartInput) (*HookOutput, error) {
 		return nil, nil
 	}
 
+	// Proactive briefing: blast radius, playbook, LLM session summary.
+	if briefing := generateStartupBriefing(sdb, data, in.CWD); briefing != "" {
+		ctx += "\n" + briefing
+	}
+
 	return makeOutput("SessionStart", ctx), nil
+}
+
+// generateStartupBriefing assembles a proactive session briefing.
+// Includes blast radius for recently modified files, a task playbook,
+// and an LLM-generated session narrative when Ollama is available.
+// Returns "" if no useful briefing can be assembled.
+func generateStartupBriefing(sdb *sessiondb.SessionDB, data *ResumeData, cwd string) string {
+	var parts []string
+
+	// 1. Blast radius for recently modified files.
+	if data != nil && len(data.Files) > 0 {
+		var impactLines []string
+		limit := min(3, len(data.Files))
+		for i := range limit {
+			f := data.Files[i]
+			info := analyzeImpact(sdb, f.Path, cwd)
+			if info == nil || info.BlastScore < 25 {
+				continue
+			}
+			impactLines = append(impactLines, fmt.Sprintf(
+				"  - %s: blast %d/100 (%s), %d importers, tests: %v",
+				filepath.Base(f.Path), info.BlastScore, info.Risk,
+				len(info.Importers), info.TestFiles))
+		}
+		if len(impactLines) > 0 {
+			parts = append(parts, "Impact overview:\n"+strings.Join(impactLines, "\n"))
+		}
+	}
+
+	// 2. Task playbook from last session's task type.
+	if data != nil && data.Session != nil {
+		taskType := inferTaskType(data)
+		if taskType != TaskUnknown {
+			_ = sdb.SetContext("task_type", string(taskType))
+			if playbook := generatePlaybook(sdb, taskType, cwd); playbook != "" {
+				parts = append(parts, playbook)
+			}
+		}
+	}
+
+	// 3. LLM-powered session narrative (TierDeep, 3s timeout).
+	if narrative := generateLLMNarrative(sdb); narrative != "" {
+		parts = append(parts, narrative)
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	return "[buddy] Proactive briefing:\n" + strings.Join(parts, "\n")
+}
+
+// inferTaskType attempts to classify the task type from resume data.
+func inferTaskType(data *ResumeData) TaskType {
+	if data.Intent != "" {
+		return classifyIntent(data.Intent)
+	}
+	return TaskUnknown
+}
+
+// generateLLMNarrative uses the Ollama advisor to produce a session summary.
+// Returns "" on failure or when Ollama is unavailable.
+func generateLLMNarrative(sdb *sessiondb.SessionDB) string {
+	advisor := advice.NewFromSessionDB(sdb)
+	if advisor == nil {
+		return ""
+	}
+
+	ws, _ := sdb.GetAllWorkingSet()
+	if len(ws) == 0 {
+		return ""
+	}
+
+	var dump strings.Builder
+	for k, v := range ws {
+		fmt.Fprintf(&dump, "%s: %s\n", k, v)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	summary, err := advisor.GenerateSessionSummary(ctx, dump.String())
+	if err != nil {
+		advisor.RecordFailure(sdb)
+		return ""
+	}
+	advisor.RecordSuccess(sdb)
+
+	var b strings.Builder
+	if summary.Summary != "" {
+		fmt.Fprintf(&b, "Session narrative: %s", summary.Summary)
+	}
+	if len(summary.NextSteps) > 0 {
+		fmt.Fprintf(&b, "\nSuggested next: %s", strings.Join(summary.NextSteps, "; "))
+	}
+	return b.String()
 }
 
 // cacheOllamaStatus probes Ollama once and stores the result in sessiondb.

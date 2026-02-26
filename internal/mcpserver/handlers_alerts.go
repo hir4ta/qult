@@ -10,6 +10,7 @@ import (
 
 	"github.com/hir4ta/claude-buddy/internal/analyzer"
 	"github.com/hir4ta/claude-buddy/internal/locale"
+	"github.com/hir4ta/claude-buddy/internal/sessiondb"
 	"github.com/hir4ta/claude-buddy/internal/watcher"
 )
 
@@ -68,7 +69,46 @@ func alertsHandler(claudeHome string, lang locale.Lang) server.ToolHandlerFunc {
 			"total_detected": totalDetected,
 		}
 
+		// Enrich with EWMA flow metrics and anomaly status from sessiondb.
+		if sdb, err := sessiondb.Open(target.SessionID); err == nil {
+			defer sdb.Close()
+			enrichAlertsFromSessionDB(sdb, result)
+		}
+
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+// enrichAlertsFromSessionDB adds EWMA flow metrics and anomaly status to alerts output.
+func enrichAlertsFromSessionDB(sdb *sessiondb.SessionDB, result map[string]any) {
+	flowMetrics := map[string]any{}
+
+	if vel, _ := sdb.GetContext("ewma_tool_velocity"); vel != "" {
+		flowMetrics["tool_velocity"] = vel
+	}
+	if errRate, _ := sdb.GetContext("ewma_error_rate"); errRate != "" {
+		flowMetrics["error_rate"] = errRate
+	}
+	if accRate, _ := sdb.GetContext("ewma_acceptance_rate"); accRate != "" {
+		flowMetrics["acceptance_rate"] = accRate
+	}
+
+	if len(flowMetrics) > 0 {
+		result["flow_metrics"] = flowMetrics
+	}
+
+	// Check for anomalies from recent phases.
+	phases, err := sdb.GetRawPhaseSequence(20)
+	if err == nil && len(phases) >= 10 {
+		recent := phases
+		if len(recent) > 10 {
+			recent = recent[len(recent)-10:]
+		}
+		counts := make(map[string]int)
+		for _, p := range recent {
+			counts[p]++
+		}
+		result["recent_phase_distribution"] = counts
 	}
 }

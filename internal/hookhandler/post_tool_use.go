@@ -7,6 +7,7 @@ import (
 	"hash/fnv"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/hir4ta/claude-buddy/internal/sessiondb"
@@ -106,6 +107,9 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 		}
 	}
 
+	// Update EWMA flow metrics (velocity, error rate).
+	updateFlowMetrics(sdb, false)
+
 	// Record workflow phase for adaptive learning.
 	recordPhase(sdb, in.ToolName, in.ToolInput)
 
@@ -118,6 +122,13 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 	if prevTool != "" {
 		_ = sdb.RecordSequence(prevTool, in.ToolName, "success")
 	}
+
+	// Record trigram for 3-tool sequence prediction.
+	prevPrevTool, _ := sdb.GetContext("prev_prev_tool")
+	if prevPrevTool != "" && prevTool != "" {
+		_ = sdb.RecordTrigram(prevPrevTool, prevTool, in.ToolName, "success")
+	}
+	_ = sdb.SetContext("prev_prev_tool", prevTool)
 	_ = sdb.SetContext("prev_tool", in.ToolName)
 
 	// Track files being edited in working set.
@@ -213,7 +224,43 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 		}
 	}
 
+	// Enrich MCP tool output with session context for buddy tools.
+	if strings.HasPrefix(in.ToolName, "mcp__claude-buddy__") {
+		if enrichment := buildMCPEnrichment(sdb); enrichment != "" {
+			return &HookOutput{
+				HookSpecificOutput: map[string]any{
+					"hookEventName":         "PostToolUse",
+					"updatedMCPToolOutput":  string(in.ToolResponse) + "\n\n" + enrichment,
+				},
+			}, nil
+		}
+	}
+
 	return nil, nil
+}
+
+// buildMCPEnrichment builds session context to append to MCP tool output.
+func buildMCPEnrichment(sdb *sessiondb.SessionDB) string {
+	var parts []string
+
+	if intent, _ := sdb.GetWorkingSet("intent"); intent != "" {
+		parts = append(parts, "Current task: "+intent)
+	}
+	if taskType, _ := sdb.GetContext("task_type"); taskType != "" {
+		parts = append(parts, "Task type: "+taskType)
+	}
+	if branch, _ := sdb.GetWorkingSet("git_branch"); branch != "" {
+		parts = append(parts, "Branch: "+branch)
+	}
+	tc, _, _, _ := sdb.BurstState()
+	if tc > 0 {
+		parts = append(parts, fmt.Sprintf("Tool calls this burst: %d", tc))
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	return "[buddy session context] " + strings.Join(parts, " | ")
 }
 
 // checkPeriodicHealth enqueues a health checkpoint nudge every 20 tool calls.
@@ -262,6 +309,11 @@ func checkPeriodicHealth(sdb *sessiondb.SessionDB) {
 			fmt.Sprintf("Session checkpoint at %d tool calls", tc),
 			fmt.Sprintf("%d files modified but tests not yet run. Consider running tests.", len(files)),
 			PriorityMedium)
+	}
+
+	// Anomaly detection: explore/debug spiral.
+	if alert := checkAnomaly(sdb); alert != "" {
+		Deliver(sdb, "anomaly", "warning", "Behavioral pattern detected", alert, PriorityHigh)
 	}
 }
 

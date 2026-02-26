@@ -134,6 +134,17 @@ func makeBlockStopOutput(reason string) *HookOutput {
 	return &HookOutput{Decision: "block", Reason: reason}
 }
 
+// makeUpdatedInputOutput creates a PreToolUse response with updatedInput.
+func makeUpdatedInputOutput(updatedInput json.RawMessage, context string) *HookOutput {
+	return &HookOutput{
+		HookSpecificOutput: map[string]any{
+			"hookEventName":     "PreToolUse",
+			"updatedInput":      json.RawMessage(updatedInput),
+			"additionalContext": context,
+		},
+	}
+}
+
 // makeAllowOutput creates a PreToolUse "allow" response.
 func makeAllowOutput(reason string) *HookOutput {
 	return &HookOutput{

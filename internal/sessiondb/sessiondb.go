@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	_ "github.com/ncruces/go-sqlite3/driver"
@@ -103,6 +104,13 @@ CREATE TABLE IF NOT EXISTS tool_sequences (
 	next_outcome TEXT NOT NULL,
 	count        INTEGER NOT NULL DEFAULT 1,
 	PRIMARY KEY (bigram_hash, next_outcome)
+);
+
+CREATE TABLE IF NOT EXISTS tool_trigrams (
+	trigram_hash TEXT NOT NULL,
+	next_outcome TEXT NOT NULL,
+	count        INTEGER NOT NULL DEFAULT 1,
+	PRIMARY KEY (trigram_hash, next_outcome)
 );
 
 CREATE TABLE IF NOT EXISTS session_phases (
@@ -855,6 +863,39 @@ func (s *SessionDB) RecordSequence(prevTool, currentTool, outcome string) error 
 	return nil
 }
 
+// --- Tool Trigrams ---
+
+// RecordTrigram records a tool trigram (3-tool sequence) with its outcome.
+func (s *SessionDB) RecordTrigram(prevPrev, prev, current, outcome string) error {
+	hash := prevPrev + "→" + prev + "→" + current
+	_, err := s.db.Exec(
+		`INSERT INTO tool_trigrams (trigram_hash, next_outcome, count) VALUES (?, ?, 1)
+		 ON CONFLICT(trigram_hash, next_outcome) DO UPDATE SET count = count + 1`,
+		hash, outcome,
+	)
+	if err != nil {
+		return fmt.Errorf("sessiondb: record trigram: %w", err)
+	}
+	return nil
+}
+
+// PredictFromTrigram returns the most common outcome for a tool trigram.
+// Returns ("", 0) if no data.
+func (s *SessionDB) PredictFromTrigram(prevPrev, prev, current string) (outcome string, count int, err error) {
+	hash := prevPrev + "→" + prev + "→" + current
+	err = s.db.QueryRow(
+		`SELECT next_outcome, count FROM tool_trigrams
+		 WHERE trigram_hash = ? ORDER BY count DESC LIMIT 1`, hash,
+	).Scan(&outcome, &count)
+	if err == sql.ErrNoRows {
+		return "", 0, nil
+	}
+	if err != nil {
+		return "", 0, fmt.Errorf("sessiondb: predict from trigram: %w", err)
+	}
+	return outcome, count, nil
+}
+
 // --- Session Phases ---
 
 // RecordPhase records a workflow phase transition.
@@ -893,6 +934,28 @@ func (s *SessionDB) GetPhaseSequence() ([]string, error) {
 	return phases, rows.Err()
 }
 
+// GetRawPhaseSequence returns the most recent N phases without collapsing duplicates.
+func (s *SessionDB) GetRawPhaseSequence(limit int) ([]string, error) {
+	rows, err := s.db.Query(
+		`SELECT phase FROM (SELECT phase, id FROM session_phases ORDER BY id DESC LIMIT ?) ORDER BY id ASC`,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("sessiondb: get raw phase sequence: %w", err)
+	}
+	defer rows.Close()
+
+	var phases []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			continue
+		}
+		phases = append(phases, p)
+	}
+	return phases, rows.Err()
+}
+
 // PhaseCount returns the total number of phase records in this session.
 func (s *SessionDB) PhaseCount() (int, error) {
 	var count int
@@ -918,6 +981,50 @@ func (s *SessionDB) PredictOutcome(prevTool, currentTool string) (outcome string
 		return "", 0, fmt.Errorf("sessiondb: predict outcome: %w", err)
 	}
 	return outcome, count, nil
+}
+
+// PredictNextTool returns the most likely successful next tool after currentTool,
+// optionally filtered by task type from session context.
+// Returns ("", 0) if no prediction is available.
+func (s *SessionDB) PredictNextTool(currentTool string) (nextTool string, count int, err error) {
+	rows, err := s.db.Query(
+		`SELECT bigram_hash, count FROM tool_sequences
+		 WHERE bigram_hash LIKE ? AND next_outcome = 'success'
+		 ORDER BY count DESC LIMIT 3`,
+		currentTool+"→%",
+	)
+	if err != nil {
+		return "", 0, fmt.Errorf("sessiondb: predict next tool: %w", err)
+	}
+	defer rows.Close()
+
+	var bestTool string
+	var bestCount int
+	for rows.Next() {
+		var hash string
+		var c int
+		if err := rows.Scan(&hash, &c); err != nil {
+			continue
+		}
+		parts := splitBigram(hash)
+		if parts == "" {
+			continue
+		}
+		if c > bestCount {
+			bestTool = parts
+			bestCount = c
+		}
+	}
+	return bestTool, bestCount, rows.Err()
+}
+
+// splitBigram extracts the second tool name from a "prev→current" bigram hash.
+func splitBigram(hash string) string {
+	_, after, ok := strings.Cut(hash, "→")
+	if !ok || after == "" {
+		return ""
+	}
+	return after
 }
 
 // --- File Change Tracking ---

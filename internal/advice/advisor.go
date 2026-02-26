@@ -277,6 +277,55 @@ func (a *Advisor) RecordFailure(sdb *sessiondb.SessionDB) {
 	}
 }
 
+// IntentClassification is the structured output for task type classification.
+type IntentClassification struct {
+	TaskType   string `json:"task_type"`   // "bugfix", "feature", "refactor", "test", ""
+	Confidence string `json:"confidence"`  // "high", "medium", "low"
+}
+
+var intentSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"task_type":  map[string]any{"type": "string", "enum": []string{"bugfix", "feature", "refactor", "test", ""}},
+		"confidence": map[string]any{"type": "string", "enum": []string{"high", "medium", "low"}},
+	},
+	"required": []string{"task_type", "confidence"},
+}
+
+// ClassifyIntent uses TierFast to classify user task intent from a prompt.
+// Returns nil on failure or timeout.
+func (a *Advisor) ClassifyIntent(ctx context.Context, prompt string) (*IntentClassification, error) {
+	p := fmt.Sprintf(`Classify this developer task prompt into one category.
+
+Prompt: "%s"
+
+Categories:
+- "bugfix": fixing errors, bugs, crashes
+- "feature": adding new functionality
+- "refactor": reorganizing, cleaning, simplifying code
+- "test": writing or updating tests
+- "": unclear or none of the above
+
+Respond with task_type and confidence.`, truncate(prompt, 200))
+
+	resp, err := a.client.Generate(ctx, &ollama.GenerateRequest{
+		Model:   ModelForTier(TierFast),
+		Prompt:  p,
+		System:  "Classify developer task intent. Respond in valid JSON only.",
+		Format:  intentSchema,
+		Options: map[string]any{"temperature": 0, "num_predict": 50},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("advice: classify intent: %w", err)
+	}
+
+	var result IntentClassification
+	if err := json.Unmarshal([]byte(resp.Response), &result); err != nil {
+		return nil, fmt.Errorf("advice: parse intent: %w", err)
+	}
+	return &result, nil
+}
+
 func truncate(s string, maxRunes int) string {
 	runes := []rune(s)
 	if len(runes) <= maxRunes {

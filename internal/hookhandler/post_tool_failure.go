@@ -41,6 +41,9 @@ func handlePostToolUseFailure(input []byte) (*HookOutput, error) {
 	filePath := extractFilePath(in.ToolInput)
 	failureType := classifyFailure(in.ToolName, in.Error)
 
+	// Update EWMA flow metrics (failure path).
+	updateFlowMetrics(sdb, true)
+
 	// Record failure for prediction (Phase 1B / 4A).
 	_ = sdb.RecordFailure(in.ToolName, failureType, extractErrorSignature(in.Error), filePath)
 	_ = sdb.RecordToolOutcome(in.ToolName, filePath, false)
@@ -386,11 +389,19 @@ func computeLLMCacheKey(failureType, filePath, errorSig string) string {
 	return fmt.Sprintf("%016x", fnvHash.Sum64())
 }
 
-// recordFailureSequence records a tool sequence ending in failure.
+// recordFailureSequence records a tool sequence ending in failure (bigram + trigram)
+// and advances the sequence pointers so the next tool call has correct predecessors.
 func recordFailureSequence(sdb *sessiondb.SessionDB, toolName string) {
 	prevTool, _ := sdb.GetContext("prev_tool")
 	if prevTool != "" {
 		_ = sdb.RecordSequence(prevTool, toolName, "failure")
 	}
+	prevPrevTool, _ := sdb.GetContext("prev_prev_tool")
+	if prevPrevTool != "" && prevTool != "" {
+		_ = sdb.RecordTrigram(prevPrevTool, prevTool, toolName, "failure")
+	}
+	// Advance sequence pointers (same as success path in post_tool_use.go).
+	_ = sdb.SetContext("prev_prev_tool", prevTool)
+	_ = sdb.SetContext("prev_tool", toolName)
 }
 

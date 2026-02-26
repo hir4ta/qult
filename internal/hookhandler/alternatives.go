@@ -140,7 +140,21 @@ func editAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 		})
 	}
 
-	// 7. Pre-existing git changes.
+	// 7. Intent-aware: editing without tests for bugfix/refactor tasks.
+	taskType, _ := sdb.GetContext("task_type")
+	hasTestRun, _ := sdb.GetContext("has_test_run")
+	if (taskType == "bugfix" || taskType == "refactor") && hasTestRun != "true" {
+		_, hasWrite, _, _ := sdb.BurstState()
+		if hasWrite {
+			alts = append(alts, Alternative{
+				Label:     "Run tests first",
+				Rationale: fmt.Sprintf("Multiple edits for %s task without running tests.", taskType),
+				Priority:  55,
+			})
+		}
+	}
+
+	// 8. Pre-existing git changes.
 	dirtyFiles, _ := sdb.GetWorkingSet("git_dirty_files")
 	if dirtyFiles != "" {
 		target := ei.FilePath
@@ -235,15 +249,39 @@ func bashAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 		}
 	}
 
-	// 4. Tool sequence prediction.
+	// 4. Tool sequence prediction (trigram preferred, bigram fallback).
 	prevTool, _ := sdb.GetContext("prev_tool")
-	if prevTool != "" {
+	prevPrevTool, _ := sdb.GetContext("prev_prev_tool")
+	trigramMatched := false
+	if prevPrevTool != "" && prevTool != "" {
+		outcome, count, _ := sdb.PredictFromTrigram(prevPrevTool, prevTool, "Bash")
+		if outcome == "failure" && count >= 3 {
+			trigramMatched = true
+			alts = append(alts, Alternative{
+				Label:     "Try different approach",
+				Rationale: fmt.Sprintf("The pattern %s→%s→Bash has failed %d times this session.", prevPrevTool, prevTool, count),
+				Priority:  75,
+			})
+		}
+	}
+	if !trigramMatched && prevTool != "" {
 		outcome, count, _ := sdb.PredictOutcome(prevTool, "Bash")
 		if outcome == "failure" && count >= 5 {
 			alts = append(alts, Alternative{
 				Label:     "Try different approach",
 				Rationale: fmt.Sprintf("The pattern %s→Bash has failed %d times this session.", prevTool, count),
 				Priority:  70,
+			})
+		}
+	}
+
+	// 5. Next tool prediction from past successful sequences.
+	if nextTool, count, _ := sdb.PredictNextTool("Bash"); nextTool != "" && count >= 3 {
+		if nextTool == "Read" {
+			alts = append(alts, Alternative{
+				Label:     "Read after run",
+				Rationale: fmt.Sprintf("In past sessions, Bash→Read was the successful pattern (%d times).", count),
+				Priority:  35,
 			})
 		}
 	}

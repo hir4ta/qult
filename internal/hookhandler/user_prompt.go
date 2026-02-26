@@ -42,7 +42,7 @@ func handleUserPromptSubmit(input []byte) (*HookOutput, error) {
 		}
 		_ = sdb.SetContext("last_user_intent", intent)
 
-		taskType := classifyIntent(in.Prompt)
+		taskType := classifyIntentLLM(sdb, in.Prompt)
 		if taskType != TaskUnknown {
 			_ = sdb.SetContext("task_type", string(taskType))
 		}

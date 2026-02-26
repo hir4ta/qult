@@ -29,20 +29,33 @@ var codeHeuristics = []codeHeuristic{
 	{Name: "js_console_log", Language: "js", Check: checkJSConsoleLog},
 	{Name: "js_loose_equality", Language: "js", Check: checkJSLooseEquality},
 	{Name: "js_async_no_await", Language: "js", Check: checkJSAsyncNoAwait},
+	{Name: "rs_unwrap", Language: "rs", Check: checkRustUnwrap},
+	{Name: "rs_todo_macro", Language: "rs", Check: checkRustTodoMacro},
+	{Name: "rs_unsafe_no_comment", Language: "rs", Check: checkRustUnsafeNoComment},
 	{Name: "hardcoded_secret", Language: "", Check: checkHardcodedSecret},
 	{Name: "sql_injection", Language: "", Check: checkSQLInjection},
 	{Name: "large_function", Language: "go", Check: checkLargeFunction},
 }
 
+// sharedMultiAnalyzer is the multi-language CodeAnalyzer singleton.
+var sharedMultiAnalyzer = NewMultiAnalyzer()
+
 // runCodeHeuristics checks edited/written content against code quality patterns.
 // Returns an observation string, or "" if no issues found.
-// For Go files, runs AST-based analysis first (more accurate), then falls back
-// to regex checks for issues AST doesn't cover.
+// First tries CodeAnalyzer (AST-backed for Go, enhanced regex for Python/JS/Rust),
+// then falls back to regex heuristics for issues CodeAnalyzer doesn't cover.
 func runCodeHeuristics(filePath string, toolInput json.RawMessage) string {
 	ext := fileExtFromPath(filePath)
 	content := extractWriteContent(toolInput)
 	if content == "" {
 		return ""
+	}
+
+	// Multi-language CodeAnalyzer: try full-file analysis first.
+	if isFullFileContent(toolInput) {
+		if findings := sharedMultiAnalyzer.Analyze(filePath, []byte(content)); len(findings) > 0 {
+			return findings[0].Message
+		}
 	}
 
 	// Go files: try AST-based analysis for Write (complete file).
@@ -373,10 +386,10 @@ func fileExtFromPath(path string) string {
 	}
 	ext = ext[1:] // remove leading dot
 	switch ext {
-	case "tsx", "jsx":
+	case "tsx", "jsx", "ts":
 		return "js"
-	case "ts":
-		return "js"
+	case "rust":
+		return "rs"
 	}
 	return ext
 }

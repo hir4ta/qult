@@ -46,6 +46,11 @@ type DeliveryDecision struct {
 // 2. Number of suggestions already delivered in this burst.
 // 3. Standard suppression check.
 func RouteDelivery(sdb *sessiondb.SessionDB, pattern string, priority SuggestionPriority) DeliveryDecision {
+	// Suppress non-critical suggestions during productive flow or suggestion fatigue.
+	if priority > PriorityCritical && (isInFlow(sdb) || suggestionFatigue(sdb)) {
+		return DeliveryDecision{Channel: ChannelDefer, Priority: priority}
+	}
+
 	// Apply adaptive priority adjustment based on user preference data.
 	adjusted := adjustPriority(pattern, priority)
 	if adjusted >= PrioritySuppressed {
@@ -74,7 +79,10 @@ func RouteDelivery(sdb *sessiondb.SessionDB, pattern string, priority Suggestion
 	}
 }
 
-// adjustPriority applies the learned effectiveness score to adjust a suggestion's priority.
+// adjustPriority uses Thompson Sampling to adaptively adjust suggestion priority.
+// For patterns with UserPref data, it uses the weighted effectiveness score.
+// For patterns with only delivery/resolution counts, it samples from a Beta distribution
+// to naturally balance exploration (new patterns) and exploitation (proven patterns).
 // Returns PrioritySuppressed if the pattern should not be delivered at all.
 func adjustPriority(pattern string, base SuggestionPriority) SuggestionPriority {
 	st, err := store.OpenDefault()
@@ -83,25 +91,43 @@ func adjustPriority(pattern string, base SuggestionPriority) SuggestionPriority 
 	}
 	defer st.Close()
 
+	// Check UserPref first (has weighted moving average from past sessions).
 	pref, err := st.UserPreference(pattern)
-	if err != nil || pref == nil {
-		// No data yet — also check legacy suppression.
+	if err == nil && pref != nil {
+		return adjustFromUserPref(pref, base)
+	}
+
+	// No UserPref — try Thompson Sampling from raw delivery/resolution counts.
+	delivered, resolved, err := st.PatternEffectiveness(pattern)
+	if err != nil || delivered == 0 {
+		// No data at all — also check legacy suppression.
 		if st.ShouldSuppressPattern(pattern) {
 			return PrioritySuppressed
 		}
-		return base
+		return base // prior Beta(1,1) = 0.5, explore at assigned priority
 	}
 
-	score := pref.EffectivenessScore
+	// Thompson Sampling: estimate true effectiveness via Beta posterior.
+	estimate := betaExpectation(float64(resolved)+1, float64(delivered-resolved)+1)
+	return adjustFromEstimate(estimate, base)
+}
+
+// adjustFromUserPref uses the weighted effectiveness score from UserPref.
+func adjustFromUserPref(pref *store.UserPref, base SuggestionPriority) SuggestionPriority {
+	return adjustFromEstimate(pref.EffectivenessScore, base)
+}
+
+// adjustFromEstimate maps an effectiveness estimate [0,1] to a priority adjustment.
+func adjustFromEstimate(estimate float64, base SuggestionPriority) SuggestionPriority {
 	switch {
-	case score > 0.7:
-		return base // deliver at assigned priority
-	case score > 0.4:
+	case estimate > 0.5:
+		return base // likely effective, deliver as-is
+	case estimate > 0.25:
 		if base < PriorityLow {
 			return base + 1 // downgrade by 1 level
 		}
 		return base
-	case score > 0.2:
+	case estimate > 0.10:
 		if base+2 < PrioritySuppressed {
 			return base + 2 // downgrade by 2 levels
 		}
@@ -109,6 +135,14 @@ func adjustPriority(pattern string, base SuggestionPriority) SuggestionPriority 
 	default:
 		return PrioritySuppressed
 	}
+}
+
+// betaExpectation returns the mean of a Beta(alpha, beta) distribution.
+// This is the deterministic analog of Thompson Sampling — it produces the same
+// priority ordering as random sampling in expectation, without adding randomness
+// to hook output (which should be deterministic for reproducibility).
+func betaExpectation(alpha, beta float64) float64 {
+	return alpha / (alpha + beta)
 }
 
 // Deliver routes a suggestion through the appropriate channel.

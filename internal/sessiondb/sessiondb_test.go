@@ -379,3 +379,97 @@ func TestDestroy(t *testing.T) {
 	_ = sdb2.Destroy()
 	_ = path // used for documentation
 }
+
+func TestSplitBigram(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		hash string
+		want string
+	}{
+		{"Edit→Bash", "Bash"},
+		{"Read→Edit", "Edit"},
+		{"Bash→Read", "Read"},
+		{"nope", ""},
+		{"→", ""},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.hash, func(t *testing.T) {
+			t.Parallel()
+			got := splitBigram(tt.hash)
+			if got != tt.want {
+				t.Errorf("splitBigram(%q) = %q, want %q", tt.hash, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPredictNextTool(t *testing.T) {
+	t.Parallel()
+	sdb := openTestDB(t)
+
+	// Seed sequence data: Edit→Bash success x5, Edit→Read success x2.
+	for range 5 {
+		_ = sdb.RecordSequence("Edit", "Bash", "success")
+	}
+	for range 2 {
+		_ = sdb.RecordSequence("Edit", "Read", "success")
+	}
+	// Some failures should not affect prediction.
+	for range 3 {
+		_ = sdb.RecordSequence("Edit", "Bash", "failure")
+	}
+
+	next, count, err := sdb.PredictNextTool("Edit")
+	if err != nil {
+		t.Fatalf("PredictNextTool(Edit) error: %v", err)
+	}
+	if next != "Bash" {
+		t.Errorf("PredictNextTool(Edit) = %q, want Bash", next)
+	}
+	if count != 5 {
+		t.Errorf("PredictNextTool(Edit) count = %d, want 5", count)
+	}
+
+	// No data for Grep.
+	next, count, err = sdb.PredictNextTool("Grep")
+	if err != nil {
+		t.Fatalf("PredictNextTool(Grep) error: %v", err)
+	}
+	if next != "" || count != 0 {
+		t.Errorf("PredictNextTool(Grep) = (%q, %d), want (\"\", 0)", next, count)
+	}
+}
+
+func TestRecordAndPredictTrigram(t *testing.T) {
+	t.Parallel()
+	sdb := openTestDB(t)
+
+	// Seed: Read→Edit→Bash failure x4, Read→Edit→Bash success x2.
+	for range 4 {
+		_ = sdb.RecordTrigram("Read", "Edit", "Bash", "failure")
+	}
+	for range 2 {
+		_ = sdb.RecordTrigram("Read", "Edit", "Bash", "success")
+	}
+
+	outcome, count, err := sdb.PredictFromTrigram("Read", "Edit", "Bash")
+	if err != nil {
+		t.Fatalf("PredictFromTrigram error: %v", err)
+	}
+	if outcome != "failure" {
+		t.Errorf("PredictFromTrigram = %q, want failure", outcome)
+	}
+	if count != 4 {
+		t.Errorf("PredictFromTrigram count = %d, want 4", count)
+	}
+
+	// No data.
+	outcome, count, err = sdb.PredictFromTrigram("Grep", "Glob", "Read")
+	if err != nil {
+		t.Fatalf("PredictFromTrigram no data error: %v", err)
+	}
+	if outcome != "" || count != 0 {
+		t.Errorf("PredictFromTrigram no data = (%q, %d), want (\"\", 0)", outcome, count)
+	}
+}
