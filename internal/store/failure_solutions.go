@@ -185,3 +185,80 @@ type FailureSummary struct {
 	FilePath       string
 	Count          int
 }
+
+// FailureHistoryForFile returns cross-session failure statistics for a file.
+// Unlike session-local FailureProbability, this queries the persistent store.
+func (s *Store) FailureHistoryForFile(filePath string, limit int) ([]FailureSolution, int, error) {
+	if limit <= 0 {
+		limit = 3
+	}
+
+	var total int
+	err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM failure_solutions WHERE file_path = ?`, filePath,
+	).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("store: failure history count: %w", err)
+	}
+	if total == 0 {
+		return nil, 0, nil
+	}
+
+	rows, err := s.db.Query(
+		`SELECT id, session_id, failure_type, error_signature, file_path, solution_text,
+		        times_surfaced, times_effective, timestamp
+		 FROM failure_solutions
+		 WHERE file_path = ?
+		 ORDER BY times_effective DESC, timestamp DESC
+		 LIMIT ?`,
+		filePath, limit,
+	)
+	if err != nil {
+		return nil, total, fmt.Errorf("store: failure history for file: %w", err)
+	}
+	defer rows.Close()
+
+	var results []FailureSolution
+	for rows.Next() {
+		var fs FailureSolution
+		var ts string
+		if err := rows.Scan(&fs.ID, &fs.SessionID, &fs.FailureType, &fs.ErrorSignature,
+			&fs.FilePath, &fs.SolutionText, &fs.TimesSurfaced, &fs.TimesEffective, &ts); err != nil {
+			continue
+		}
+		fs.Timestamp, _ = time.Parse("2006-01-02 15:04:05", ts)
+		results = append(results, fs)
+	}
+	return results, total, rows.Err()
+}
+
+// FailureHistoryForDirectory returns frequent failures in files within a directory.
+func (s *Store) FailureHistoryForDirectory(dirPath string, limit int) ([]FailureSummary, error) {
+	if limit <= 0 {
+		limit = 3
+	}
+	escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(dirPath)
+	rows, err := s.db.Query(
+		`SELECT failure_type, error_signature, file_path, COUNT(*) as cnt
+		 FROM failure_solutions
+		 WHERE file_path LIKE ? || '%' ESCAPE '\'
+		 GROUP BY failure_type, error_signature, file_path
+		 ORDER BY cnt DESC
+		 LIMIT ?`,
+		escaped, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store: failure history for directory: %w", err)
+	}
+	defer rows.Close()
+
+	var results []FailureSummary
+	for rows.Next() {
+		var fs FailureSummary
+		if err := rows.Scan(&fs.FailureType, &fs.ErrorSignature, &fs.FilePath, &fs.Count); err != nil {
+			continue
+		}
+		results = append(results, fs)
+	}
+	return results, rows.Err()
+}

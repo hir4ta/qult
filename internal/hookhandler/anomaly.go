@@ -37,19 +37,22 @@ func detectAnomaly(sdb *sessiondb.SessionDB) (AnomalyType, string) {
 
 	dist := phaseDist(recent)
 
-	// Explore spiral: >70% read phases in the window.
-	if readPct := dist["read"]; readPct > 0.7 {
+	// Explore spiral: read phases exceed adaptive threshold (default 70%).
+	readThreshold := adaptiveThreshold("explore_read_pct", 2.0, 0.7)
+	if readPct := dist["read"]; readPct > readThreshold {
 		return AnomalyExploreSpiral, fmt.Sprintf(
 			"%.0f%% of recent actions are reads without edits — consider narrowing the search scope or starting implementation.",
 			readPct*100)
 	}
 
 	// Debug spiral: high error rate + Edit→Bash loop.
+	errThreshold := adaptiveThreshold("debug_error_rate", 2.0, 0.3)
 	errRate := getFloat(sdb, "ewma_error_rate")
-	if errRate > 0.3 {
+	if errRate > errThreshold {
 		editBashCount := countTransitions(recent, "write", "compile")
 		editBashCount += countTransitions(recent, "write", "test")
-		if editBashCount >= 3 {
+		cycleThreshold := int(adaptiveThreshold("debug_edit_cycles", 2.0, 3.0))
+		if editBashCount >= cycleThreshold {
 			return AnomalyDebugSpiral, fmt.Sprintf(
 				"Error rate %.0f%% with %d edit→run cycles — consider stepping back: read the error carefully, check a different approach, or ask for help.",
 				errRate*100, editBashCount)

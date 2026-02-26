@@ -1,0 +1,70 @@
+{
+  "name": "claude-buddy",
+  "version": "0.1.0",
+  "description": "Proactive session advisor for Claude Code — anti-pattern detection, adaptive thresholds, phase tracking, and cross-session learning",
+  "homepage": "https://github.com/hir4ta/claude-buddy",
+  "license": "MIT",
+  "author": "hir4ta",
+  "install": {
+    "type": "binary",
+    "platforms": {
+      "darwin-arm64": {
+        "url": "https://github.com/hir4ta/claude-buddy/releases/latest/download/claude-buddy_darwin_arm64.tar.gz",
+        "binary": "claude-buddy"
+      },
+      "darwin-amd64": {
+        "url": "https://github.com/hir4ta/claude-buddy/releases/latest/download/claude-buddy_darwin_amd64.tar.gz",
+        "binary": "claude-buddy"
+      },
+      "linux-arm64": {
+        "url": "https://github.com/hir4ta/claude-buddy/releases/latest/download/claude-buddy_linux_arm64.tar.gz",
+        "binary": "claude-buddy"
+      },
+      "linux-amd64": {
+        "url": "https://github.com/hir4ta/claude-buddy/releases/latest/download/claude-buddy_linux_amd64.tar.gz",
+        "binary": "claude-buddy"
+      }
+    }
+  },
+  "mcp": {
+    "command": "claude-buddy",
+    "args": ["serve"]
+  },
+  "hooks": {
+    "command": "claude-buddy",
+    "args": ["hook-handler"],
+    "events": [
+      "SessionStart",
+      "PreToolUse",
+      "PostToolUse",
+      "UserPromptSubmit",
+      "PreCompact",
+      "Stop",
+      "SessionEnd"
+    ]
+  },
+  "capabilities": {
+    "mcp_tools": [
+      "buddy_stats",
+      "buddy_suggest",
+      "buddy_current_state",
+      "buddy_sessions",
+      "buddy_resume",
+      "buddy_recall",
+      "buddy_alerts",
+      "buddy_decisions",
+      "buddy_patterns",
+      "buddy_estimate",
+      "buddy_next_step",
+      "buddy_skill_context"
+    ],
+    "skills": [
+      "buddy-unstuck",
+      "buddy-checkpoint",
+      "buddy-before-commit",
+      "buddy-impact",
+      "buddy-review",
+      "buddy-estimate"
+    ]
+  }
+}

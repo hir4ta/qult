@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/hir4ta/claude-buddy/internal/sessiondb"
+	"github.com/hir4ta/claude-buddy/internal/store"
 )
 
 // HookDetector is a lightweight detector backed by session DB state.
@@ -64,7 +65,8 @@ func (d *HookDetector) detectRetryLoop() string {
 		}
 	}
 
-	if consecutive < 3 {
+	threshold := int(adaptiveThreshold("retry_loop_consecutive", 2.0, 3.0))
+	if consecutive < threshold {
 		return ""
 	}
 
@@ -87,7 +89,8 @@ func (d *HookDetector) detectNoProgress() string {
 	}
 
 	tc, hasWrite, fileReads, err := d.sdb.BurstState()
-	if err != nil || hasWrite || tc < 5 {
+	toolThreshold := int(adaptiveThreshold("no_progress_tools", 2.0, 5.0))
+	if err != nil || hasWrite || tc < toolThreshold {
 		return ""
 	}
 
@@ -97,7 +100,8 @@ func (d *HookDetector) detectNoProgress() string {
 	}
 
 	elapsed := time.Since(startTime)
-	if elapsed < 8*time.Minute {
+	minuteThreshold := adaptiveThreshold("no_progress_minutes", 2.0, 8.0)
+	if elapsed < time.Duration(minuteThreshold)*time.Minute {
 		return ""
 	}
 
@@ -151,7 +155,8 @@ func (d *HookDetector) detectFileHotspot() string {
 	}
 	_ = hotHash
 
-	if maxWrites < 3 {
+	writeThreshold := int(adaptiveThreshold("file_hotspot_writes", 2.0, 3.0))
+	if maxWrites < writeThreshold {
 		return ""
 	}
 
@@ -195,7 +200,8 @@ func (d *HookDetector) detectPlanModeOpportunity() string {
 		}
 	}
 
-	if len(distinctFiles) < 3 {
+	fileThreshold := int(adaptiveThreshold("plan_mode_files", 2.0, 3.0))
+	if len(distinctFiles) < fileThreshold {
 		return ""
 	}
 
@@ -223,7 +229,8 @@ func (d *HookDetector) detectCompactionRisk() string {
 	}
 
 	// High risk: multiple compacts and large current burst.
-	if compacts < 2 || tc < 15 {
+	burstThreshold := int(adaptiveThreshold("compaction_burst_tools", 2.0, 15.0))
+	if compacts < 2 || tc < burstThreshold {
 		return ""
 	}
 
@@ -236,4 +243,20 @@ func (d *HookDetector) detectCompactionRisk() string {
 		"[buddy] Signal: %d compactions in the last hour with %d tools in current burst. Context pressure is high. Consider summarizing key decisions and splitting the session if the task has natural breakpoints.",
 		compacts, tc,
 	)
+}
+
+// adaptiveThreshold returns the adaptive threshold for a metric from the
+// persistent store, falling back to hardcodedDefault when data is insufficient.
+func adaptiveThreshold(metricName string, k float64, hardcodedDefault float64) float64 {
+	st, err := store.OpenDefault()
+	if err != nil {
+		return hardcodedDefault
+	}
+	defer st.Close()
+
+	threshold, err := st.GetAdaptiveThreshold(metricName, k, hardcodedDefault, 10)
+	if err != nil {
+		return hardcodedDefault
+	}
+	return threshold
 }

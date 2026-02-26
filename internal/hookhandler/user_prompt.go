@@ -100,10 +100,83 @@ func handleUserPromptSubmit(input []byte) (*HookOutput, error) {
 		})
 	}
 
+	// Inject session context summary for rich situational awareness.
+	if summary := buildSessionContextSummary(sdb); summary != "" {
+		entries = append([]nudgeEntry{{
+			Pattern:     "session-context",
+			Level:       "info",
+			Observation: "Session context",
+			Suggestion:  summary,
+		}}, entries...)
+	}
+
 	if len(entries) == 0 {
 		return nil, nil
 	}
 	return makeOutput("UserPromptSubmit", formatNudges(entries)), nil
+}
+
+// buildSessionContextSummary creates a compact session context string.
+func buildSessionContextSummary(sdb *sessiondb.SessionDB) string {
+	on, _ := sdb.IsOnCooldown("session_context_summary")
+	if on {
+		return ""
+	}
+
+	var parts []string
+
+	// Working files.
+	files, _ := sdb.GetWorkingSetFiles()
+	if len(files) > 0 {
+		names := make([]string, 0, min(len(files), 3))
+		for i, f := range files {
+			if i >= 3 {
+				break
+			}
+			names = append(names, filepath.Base(f))
+		}
+		suffix := ""
+		if len(files) > 3 {
+			suffix = fmt.Sprintf(" +%d more", len(files)-3)
+		}
+		parts = append(parts, "Files: "+strings.Join(names, ", ")+suffix)
+	}
+
+	// Task type + phase progress.
+	if progress := GetPhaseProgress(sdb); progress != nil {
+		phaseStr := fmt.Sprintf("Phase: %s (%d%%)", progress.CurrentPhase, progress.ProgressPct)
+		if progress.ExpectedPhase != PhaseUnknown && progress.ExpectedPhase != progress.CurrentPhase {
+			phaseStr += fmt.Sprintf(" → next: %s", progress.ExpectedPhase)
+		}
+		parts = append(parts, phaseStr)
+	} else if taskType, _ := sdb.GetContext("task_type"); taskType != "" {
+		parts = append(parts, "Task: "+taskType)
+	}
+
+	// Git branch.
+	if branch, _ := sdb.GetWorkingSet("git_branch"); branch != "" {
+		parts = append(parts, "Branch: "+branch)
+	}
+
+	// Velocity health.
+	vel := getFloat(sdb, "ewma_tool_velocity")
+	errRate := getFloat(sdb, "ewma_error_rate")
+	if vel > 0 || errRate > 0 {
+		health := "healthy"
+		if errRate > 0.3 {
+			health = "high error rate"
+		} else if vel < 2 && vel > 0 {
+			health = "slow velocity"
+		}
+		parts = append(parts, "Health: "+health)
+	}
+
+	if len(parts) < 2 {
+		return "" // not enough context to be useful
+	}
+
+	_ = sdb.SetCooldown("session_context_summary", 5*time.Minute)
+	return strings.Join(parts, " | ")
 }
 
 // knowledgeType pairs a pattern type with its cooldown key.

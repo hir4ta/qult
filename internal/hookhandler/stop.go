@@ -76,9 +76,12 @@ func handleStop(input []byte) (*HookOutput, error) {
 		return makeBlockStopOutput(strings.Join(issues, "; ")), nil
 	}
 
-	// Uncommitted changes are informational only — log to stderr, don't block.
+	// Uncommitted changes: log to stderr. Suggest commit if tests passed.
 	if gitInfo := checkUncommittedChanges(in.SessionID, in.CWD); gitInfo != "" {
 		fmt.Fprintf(os.Stderr, "[buddy] %s\n", gitInfo)
+	}
+	if suggestion := suggestCommitAction(in.SessionID, in.CWD); suggestion != "" {
+		fmt.Fprintf(os.Stderr, "[buddy] %s\n", suggestion)
 	}
 
 	return nil, nil
@@ -292,7 +295,55 @@ func checkSessionIssues(sessionID string) []string {
 		}
 	}
 
+	// Check test coverage: modified source files should have corresponding test files.
+	if issue := checkTestCoverage(sdb, files); issue != "" {
+		issues = append(issues, issue)
+	}
+
 	return issues
+}
+
+// checkTestCoverage checks if modified source files have corresponding test files
+// in the working set. Only flags when 3+ source files lack tests.
+func checkTestCoverage(sdb *sessiondb.SessionDB, files []string) string {
+	hasTestRun, _ := sdb.GetContext("has_test_run")
+	if hasTestRun != "true" {
+		return "" // already flagged by "tests not run" check
+	}
+
+	untested := 0
+	for _, f := range files {
+		base := filepath.Base(f)
+		ext := filepath.Ext(f)
+
+		// Skip test files themselves.
+		if strings.Contains(base, "_test") || strings.Contains(base, ".test.") || strings.Contains(base, ".spec.") {
+			continue
+		}
+		// Skip non-code files.
+		if ext == "" || ext == ".md" || ext == ".json" || ext == ".yaml" || ext == ".yml" || ext == ".toml" {
+			continue
+		}
+
+		// Check if a test file exists in the working set.
+		hasTest := false
+		nameNoExt := strings.TrimSuffix(base, ext)
+		for _, other := range files {
+			otherBase := filepath.Base(other)
+			if strings.Contains(otherBase, nameNoExt) && (strings.Contains(otherBase, "_test") || strings.Contains(otherBase, ".test.") || strings.Contains(otherBase, ".spec.")) {
+				hasTest = true
+				break
+			}
+		}
+		if !hasTest {
+			untested++
+		}
+	}
+
+	if untested >= 3 {
+		return fmt.Sprintf("%d modified source files have no corresponding test files in this session", untested)
+	}
+	return ""
 }
 
 // checkBuildStatus returns a blocking message if the last build/compile failed.
@@ -343,4 +394,52 @@ func checkUncommittedChanges(sessionID, cwd string) string {
 
 	lines := strings.Split(strings.TrimSpace(status), "\n")
 	return fmt.Sprintf("%d uncommitted file(s) in working directory", len(lines))
+}
+
+// suggestCommitAction suggests committing when tests passed and files were modified.
+func suggestCommitAction(sessionID, cwd string) string {
+	if sessionID == "" {
+		return ""
+	}
+
+	sdb, err := sessiondb.Open(sessionID)
+	if err != nil {
+		return ""
+	}
+	defer sdb.Close()
+
+	files, _ := sdb.GetWorkingSetFiles()
+	if len(files) == 0 {
+		return ""
+	}
+
+	hasTestRun, _ := sdb.GetContext("has_test_run")
+	lastTestPassed, _ := sdb.GetContext("last_test_passed")
+	lastBuildPassed, _ := sdb.GetContext("last_build_passed")
+
+	if hasTestRun != "true" || lastTestPassed != "true" {
+		return ""
+	}
+
+	if lastBuildPassed == "false" {
+		return ""
+	}
+
+	// Check if there are actually uncommitted changes in git.
+	if cwd == "" {
+		cwd, _ = sdb.GetContext("cwd")
+	}
+	if cwd == "" {
+		return ""
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	status, err := execGit(ctx, cwd, "status", "--porcelain")
+	if err != nil || strings.TrimSpace(status) == "" {
+		return ""
+	}
+
+	return fmt.Sprintf("Tests passed and %d file(s) modified — consider committing your changes", len(files))
 }

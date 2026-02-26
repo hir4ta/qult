@@ -11,6 +11,7 @@ import (
 
 	"github.com/hir4ta/claude-buddy/internal/analyzer"
 	"github.com/hir4ta/claude-buddy/internal/sessiondb"
+	"github.com/hir4ta/claude-buddy/internal/store"
 )
 
 type preToolUseInput struct {
@@ -104,6 +105,19 @@ func handlePreToolUse(input []byte) (*HookOutput, error) {
 		}
 	}
 
+	// Pattern-based contextual guidance: search for relevant patterns
+	// using FTS5 when intent + tool context are available.
+	if sig := buildContextQuery(sdb, in.ToolName, in.ToolInput); sig != "" {
+		ctxKey := "pattern-ctx:" + sig
+		on, _ := sdb.IsOnCooldown(ctxKey)
+		if !on {
+			if ctx := searchContextualPatterns(sig); ctx != "" {
+				_ = sdb.SetCooldown(ctxKey, 10*time.Minute)
+				signals = append(signals, ctx)
+			}
+		}
+	}
+
 	// Dequeue pending nudges as additionalContext.
 	nudges, _ := sdb.DequeueNudges(1)
 	if len(nudges) == 0 && len(signals) == 0 {
@@ -143,5 +157,76 @@ var compileCmdPattern = regexp.MustCompile(`\b(go build|go install|make|gcc|g\+\
 
 func isCompileCommand(cmd string) bool {
 	return compileCmdPattern.MatchString(cmd)
+}
+
+// buildContextQuery builds a search query string from tool context.
+// Combines session intent with file/command keywords for targeted pattern search.
+func buildContextQuery(sdb *sessiondb.SessionDB, toolName string, toolInput json.RawMessage) string {
+	intent, _ := sdb.GetWorkingSet("intent")
+
+	var fileKeyword string
+	switch toolName {
+	case "Edit", "Write", "Read":
+		var fi struct {
+			FilePath string `json:"file_path"`
+		}
+		if json.Unmarshal(toolInput, &fi) == nil && fi.FilePath != "" {
+			fileKeyword = filepath.Base(fi.FilePath)
+		}
+	case "Bash":
+		var bi struct {
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(toolInput, &bi) == nil && bi.Command != "" {
+			fileKeyword = extractCmdSignature(bi.Command)
+		}
+	}
+
+	parts := make([]string, 0, 2)
+	if intent != "" {
+		// Take first few words of intent to avoid overly broad queries.
+		words := strings.Fields(intent)
+		if len(words) > 5 {
+			words = words[:5]
+		}
+		parts = append(parts, strings.Join(words, " "))
+	}
+	if fileKeyword != "" {
+		parts = append(parts, fileKeyword)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " ")
+}
+
+// searchContextualPatterns searches for relevant patterns using FTS5 with
+// keyword fallback and formats them as a concise context string.
+func searchContextualPatterns(query string) string {
+	st, err := store.OpenDefault()
+	if err != nil {
+		return ""
+	}
+	defer st.Close()
+
+	// Try FTS5 first, then keyword fallback.
+	results, _ := st.SearchPatternsByFTS(query, "", 2)
+	if len(results) == 0 {
+		results, _ = st.SearchPatternsByKeyword(query, "", 2)
+	}
+	if len(results) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("[buddy] Relevant context:")
+	for _, p := range results {
+		text := p.Content
+		if len([]rune(text)) > 100 {
+			text = string([]rune(text)[:100]) + "..."
+		}
+		fmt.Fprintf(&b, "\n  - [%s] %s", p.PatternType, text)
+	}
+	return b.String()
 }
 

@@ -257,6 +257,39 @@ func (s *Store) SearchDecisionsByFile(filePath string, limit int) ([]DecisionRow
 	return rows, dbRows.Err()
 }
 
+// SearchDecisionsByDirectory returns decisions whose file_paths JSON contains
+// any file in the given directory.
+func (s *Store) SearchDecisionsByDirectory(dirPath string, limit int) ([]DecisionRow, error) {
+	if limit <= 0 {
+		limit = 3
+	}
+	dirBase := filepath.Base(dirPath)
+	pat := "%" + dirBase + "/%"
+
+	dbRows, err := s.db.Query(`
+		SELECT d.id, d.session_id, COALESCE(d.event_id,0), d.timestamp, d.topic,
+			   d.decision_text, COALESCE(d.reasoning,''), COALESCE(d.file_paths,'[]'), d.compact_segment
+		FROM decisions d
+		WHERE d.file_paths LIKE ?
+		ORDER BY d.timestamp DESC
+		LIMIT ?`, pat, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: search decisions by directory: %w", err)
+	}
+	defer dbRows.Close()
+
+	var rows []DecisionRow
+	for dbRows.Next() {
+		var r DecisionRow
+		if err := dbRows.Scan(&r.ID, &r.SessionID, &r.EventID, &r.Timestamp, &r.Topic,
+			&r.DecisionText, &r.Reasoning, &r.FilePaths, &r.CompactSegment); err != nil {
+			continue
+		}
+		rows = append(rows, r)
+	}
+	return rows, dbRows.Err()
+}
+
 // GetDecisions returns decisions, optionally filtered by session ID or project name.
 func (s *Store) GetDecisions(sessionID string, project string, limit int) ([]DecisionRow, error) {
 	if limit <= 0 {

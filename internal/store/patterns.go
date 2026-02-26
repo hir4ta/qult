@@ -296,6 +296,46 @@ func (s *Store) SearchPatternsByFile(filePath string, limit int) ([]PatternRow, 
 	return result, rows.Err()
 }
 
+// SearchPatternsByDirectory returns patterns linked to files in the given directory.
+func (s *Store) SearchPatternsByDirectory(dirPath string, patternType string, limit int) ([]PatternRow, error) {
+	if limit <= 0 {
+		limit = 3
+	}
+	dirBase := filepath.Base(dirPath)
+	query := `
+		SELECT DISTINCT p.id, p.session_id, p.pattern_type, p.title, p.content, p.embed_text,
+			COALESCE(p.language,''), p.scope, COALESCE(p.source_event_id,0), p.timestamp
+		FROM patterns p
+		JOIN pattern_files pf ON p.id = pf.pattern_id
+		WHERE pf.file_path LIKE ?`
+	args := []any{"%" + dirBase + "/%"}
+	if patternType != "" {
+		query += ` AND p.pattern_type = ?`
+		args = append(args, patternType)
+	}
+	query += ` ORDER BY p.timestamp DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: search patterns by directory: %w", err)
+	}
+	defer rows.Close()
+
+	var result []PatternRow
+	for rows.Next() {
+		var p PatternRow
+		if err := rows.Scan(&p.ID, &p.SessionID, &p.PatternType, &p.Title, &p.Content, &p.EmbedText,
+			&p.Language, &p.Scope, &p.SourceEventID, &p.Timestamp); err != nil {
+			continue
+		}
+		p.Tags = s.getPatternTags(p.ID)
+		p.Files = s.getPatternFiles(p.ID)
+		result = append(result, p)
+	}
+	return result, rows.Err()
+}
+
 // CountPatterns returns the total number of patterns in the store.
 func (s *Store) CountPatterns() (int, error) {
 	var count int

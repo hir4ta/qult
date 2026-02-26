@@ -7,6 +7,7 @@ type Finding struct {
 	Severity string // "error", "warning", "info"
 	Rule     string // rule identifier
 	Message  string // human-readable description
+	Category string // "error_handling", "security", "complexity", "style"
 }
 
 // CodeAnalyzer is the interface for language-aware code analysis.

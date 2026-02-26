@@ -242,6 +242,24 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 			),
 			Handler: nextStepHandler(claudeHome),
 		},
+		server.ServerTool{
+			Tool: mcp.NewTool("buddy_skill_context",
+				mcp.WithDescription("Get aggregated session context tailored for a specific skill. Returns session health, modified files, alerts, and skill-specific data in one call. Use at the start of a skill to get all needed context without multiple tool calls."),
+				mcp.WithTitleAnnotation("Skill Dynamic Context"),
+				mcp.WithReadOnlyHintAnnotation(true),
+				mcp.WithDestructiveHintAnnotation(false),
+				mcp.WithIdempotentHintAnnotation(true),
+				mcp.WithOpenWorldHintAnnotation(false),
+				mcp.WithString("skill_name",
+					mcp.Required(),
+					mcp.Description("Name of the skill requesting context (e.g., buddy-review, buddy-before-commit, buddy-unstuck, buddy-checkpoint)"),
+				),
+				mcp.WithString("session_id",
+					mcp.Description("Session ID (optional, defaults to latest)"),
+				),
+			),
+			Handler: skillContextHandler(claudeHome),
+		},
 	)
 
 	// Register resources and prompts.

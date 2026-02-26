@@ -2,8 +2,11 @@ package hookhandler
 
 import (
 	"fmt"
+	"math"
+	"math/rand/v2"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/hir4ta/claude-buddy/internal/sessiondb"
 	"github.com/hir4ta/claude-buddy/internal/store"
@@ -51,8 +54,9 @@ func RouteDelivery(sdb *sessiondb.SessionDB, pattern string, priority Suggestion
 		return DeliveryDecision{Channel: ChannelDefer, Priority: priority}
 	}
 
-	// Apply adaptive priority adjustment based on user preference data.
-	adjusted := adjustPriority(pattern, priority)
+	// Apply adaptive priority adjustment using Thompson Sampling.
+	rng := getSessionRNG(sdb)
+	adjusted := adjustPriority(rng, pattern, priority)
 	if adjusted >= PrioritySuppressed {
 		return DeliveryDecision{Channel: ChannelSuppress, Priority: adjusted}
 	}
@@ -80,11 +84,11 @@ func RouteDelivery(sdb *sessiondb.SessionDB, pattern string, priority Suggestion
 }
 
 // adjustPriority uses Thompson Sampling to adaptively adjust suggestion priority.
-// For patterns with UserPref data, it uses the weighted effectiveness score.
-// For patterns with only delivery/resolution counts, it samples from a Beta distribution
+// For patterns with UserPref data, it uses the weighted effectiveness score (deterministic).
+// For patterns with only delivery/resolution counts, it draws from a Beta distribution
 // to naturally balance exploration (new patterns) and exploitation (proven patterns).
 // Returns PrioritySuppressed if the pattern should not be delivered at all.
-func adjustPriority(pattern string, base SuggestionPriority) SuggestionPriority {
+func adjustPriority(rng *rand.Rand, pattern string, base SuggestionPriority) SuggestionPriority {
 	st, err := store.OpenDefault()
 	if err != nil {
 		return base
@@ -97,19 +101,24 @@ func adjustPriority(pattern string, base SuggestionPriority) SuggestionPriority 
 		return adjustFromUserPref(pref, base)
 	}
 
-	// No UserPref — try Thompson Sampling from raw delivery/resolution counts.
-	delivered, resolved, err := st.PatternEffectiveness(pattern)
-	if err != nil || delivered == 0 {
-		// No data at all — also check legacy suppression.
-		if st.ShouldSuppressPattern(pattern) {
-			return PrioritySuppressed
-		}
-		return base // prior Beta(1,1) = 0.5, explore at assigned priority
+	// Hard suppression safety net for truly dead patterns.
+	if st.ShouldSuppressPattern(pattern) {
+		return PrioritySuppressed
 	}
 
-	// Thompson Sampling: estimate true effectiveness via Beta posterior.
-	estimate := betaExpectation(float64(resolved)+1, float64(delivered-resolved)+1)
-	return adjustFromEstimate(estimate, base)
+	// Thompson Sampling from time-decayed delivery/resolution counts.
+	delivered, resolved, err := st.DecayedPatternEffectiveness(pattern)
+	if err != nil || delivered < 0.5 {
+		// No data — uniform prior Beta(1,1), sample for exploration.
+		sample := betaSample(rng, 1, 1)
+		return adjustFromEstimate(sample, base)
+	}
+
+	// Draw from Beta posterior for exploration-exploitation balance.
+	alpha := resolved + 1
+	beta := delivered - resolved + 1
+	sample := betaSample(rng, alpha, beta)
+	return adjustFromEstimate(sample, base)
 }
 
 // adjustFromUserPref uses the weighted effectiveness score from UserPref.
@@ -150,6 +159,11 @@ func betaExpectation(alpha, beta float64) float64 {
 // For ChannelNudge, the suggestion is enqueued to nudge_outbox.
 // For ChannelDefer and ChannelSuppress, nothing is delivered.
 func Deliver(sdb *sessiondb.SessionDB, pattern, level, observation, suggestion string, priority SuggestionPriority) (immediate string) {
+	// Phase-aware gating: suppress suggestions inappropriate for current phase.
+	if shouldGateForPhase(sdb, pattern) {
+		return ""
+	}
+
 	decision := RouteDelivery(sdb, pattern, priority)
 
 	switch decision.Channel {
@@ -177,5 +191,64 @@ func incrementBurstSuggestionCount(sdb *sessiondb.SessionDB) {
 	count := getBurstSuggestionCount(sdb) + 1
 	if err := sdb.SetContext("suggestions_this_burst", strconv.Itoa(count)); err != nil {
 		fmt.Fprintf(os.Stderr, "[buddy] increment burst suggestion count: %v\n", err)
+	}
+}
+
+// getSessionRNG returns a per-session RNG seeded from a stored seed.
+// Each hook invocation within a session gets a fresh RNG from the same seed,
+// providing cross-session exploration diversity while being debuggable.
+func getSessionRNG(sdb *sessiondb.SessionDB) *rand.Rand {
+	seedStr, _ := sdb.GetContext("thompson_seed")
+	if seedStr == "" {
+		seed := uint64(time.Now().UnixNano())
+		seedStr = strconv.FormatUint(seed, 10)
+		_ = sdb.SetContext("thompson_seed", seedStr)
+	}
+	seedVal, _ := strconv.ParseUint(seedStr, 10, 64)
+	return rand.New(rand.NewPCG(seedVal, seedVal>>32))
+}
+
+// betaSample draws a random sample from a Beta(alpha, beta) distribution
+// using the Gamma variate method: Beta(a,b) = X/(X+Y) where X~Gamma(a,1), Y~Gamma(b,1).
+func betaSample(rng *rand.Rand, alpha, beta float64) float64 {
+	if alpha <= 0 {
+		alpha = 1
+	}
+	if beta <= 0 {
+		beta = 1
+	}
+	x := gammaSample(rng, alpha)
+	y := gammaSample(rng, beta)
+	if x+y == 0 {
+		return 0.5
+	}
+	return x / (x + y)
+}
+
+// gammaSample draws from Gamma(shape, 1) using Marsaglia and Tsang's method.
+// For shape < 1, uses the boost: Gamma(a) = Gamma(a+1) * U^(1/a).
+func gammaSample(rng *rand.Rand, shape float64) float64 {
+	if shape < 1 {
+		return gammaSample(rng, shape+1) * math.Pow(rng.Float64(), 1.0/shape)
+	}
+	d := shape - 1.0/3.0
+	c := 1.0 / math.Sqrt(9.0*d)
+	for {
+		var x, v float64
+		for {
+			x = rng.NormFloat64()
+			v = 1.0 + c*x
+			if v > 0 {
+				break
+			}
+		}
+		v = v * v * v
+		u := rng.Float64()
+		if u < 1.0-0.0331*(x*x)*(x*x) {
+			return d * v
+		}
+		if math.Log(u) < 0.5*x*x+d*(1.0-v+math.Log(v)) {
+			return d * v
+		}
 	}
 }

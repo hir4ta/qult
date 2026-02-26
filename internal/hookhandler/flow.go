@@ -40,6 +40,22 @@ func updateFlowMetrics(sdb *sessiondb.SessionDB, isFailure bool) {
 	newVel := ewmaUpdate(prevVel, velocity, ewmaAlpha)
 	_ = sdb.SetContext("ewma_tool_velocity", strconv.FormatFloat(newVel, 'f', 4, 64))
 
+	// Velocity delta tracking: snapshot every 5 events, detect sudden drops.
+	flowEventCount := int(getFloat(sdb, "flow_event_count")) + 1
+	_ = sdb.SetContext("flow_event_count", strconv.Itoa(flowEventCount))
+	if flowEventCount%5 == 0 {
+		prevSnapshot := getFloat(sdb, "prev_velocity_snapshot")
+		_ = sdb.SetContext("prev_velocity_snapshot", strconv.FormatFloat(newVel, 'f', 4, 64))
+		if prevSnapshot > 0 {
+			delta := newVel - prevSnapshot
+			_ = sdb.SetContext("velocity_delta", strconv.FormatFloat(delta, 'f', 4, 64))
+			// Wall detection: sharp velocity drop from productive state.
+			if delta < -3.0 && prevSnapshot > 5.0 {
+				_ = sdb.SetContext("wall_detected", "true")
+			}
+		}
+	}
+
 	// Update EWMA error rate.
 	var errVal float64
 	if isFailure {
@@ -79,6 +95,22 @@ func updateAcceptanceRate(sdb *sessiondb.SessionDB, accepted bool) {
 	prev := getFloat(sdb, "ewma_acceptance_rate")
 	newRate := ewmaUpdate(prev, val, ewmaAlpha)
 	_ = sdb.SetContext("ewma_acceptance_rate", strconv.FormatFloat(newRate, 'f', 4, 64))
+}
+
+// IsWallDetected returns true if a velocity wall was detected.
+func IsWallDetected(sdb *sessiondb.SessionDB) bool {
+	v, _ := sdb.GetContext("wall_detected")
+	return v == "true"
+}
+
+// ClearWallDetected resets the wall detection flag.
+func ClearWallDetected(sdb *sessiondb.SessionDB) {
+	_ = sdb.SetContext("wall_detected", "")
+}
+
+// VelocityDelta returns the most recent velocity change between snapshots.
+func VelocityDelta(sdb *sessiondb.SessionDB) float64 {
+	return getFloat(sdb, "velocity_delta")
 }
 
 func getFloat(sdb *sessiondb.SessionDB, key string) float64 {

@@ -22,15 +22,15 @@ description: >
   approach keeps failing. Analyzes root cause and suggests alternative
   approaches based on past session knowledge.
 user-invocable: false
-allowed-tools: mcp__claude-buddy__buddy_patterns, mcp__claude-buddy__buddy_recall, mcp__claude-buddy__buddy_alerts
+allowed-tools: mcp__claude-buddy__buddy_skill_context, mcp__claude-buddy__buddy_patterns, mcp__claude-buddy__buddy_recall, mcp__claude-buddy__buddy_alerts
 ---
 
 You are a debugging advisor. The user (Claude Code) is stuck in a failure loop.
 
 ## Steps
 
-1. Call buddy_alerts to see active anti-patterns and session health
-2. Call buddy_patterns with a query describing the current error to find past solutions
+1. Call buddy_skill_context with skill_name="buddy-unstuck" to get session health, recent failures, and past solutions in one call
+2. If more detail needed, call buddy_patterns with a query describing the current error
 3. If the pattern involves a specific file, call buddy_recall to find what worked before
 
 ## Output
@@ -53,15 +53,15 @@ description: >
   status on progress. Especially important before git commits or when
   working on complex multi-file changes.
 user-invocable: false
-allowed-tools: mcp__claude-buddy__buddy_current_state, mcp__claude-buddy__buddy_alerts
+allowed-tools: mcp__claude-buddy__buddy_skill_context, mcp__claude-buddy__buddy_current_state, mcp__claude-buddy__buddy_alerts
 ---
 
 Quick session health check.
 
 ## Steps
 
-1. Call buddy_current_state to get session snapshot
-2. Call buddy_alerts if health score < 0.7
+1. Call buddy_skill_context with skill_name="buddy-checkpoint" to get session snapshot, health score, and alerts in one call
+2. Only call buddy_alerts separately if health score < 0.7 and you need more detail
 
 ## Output
 
@@ -80,16 +80,16 @@ description: >
   status. Checks for active anti-patterns, unrun tests, and ensures no
   obvious issues will be committed.
 user-invocable: false
-allowed-tools: mcp__claude-buddy__buddy_alerts, mcp__claude-buddy__buddy_current_state, Bash, Read
+allowed-tools: mcp__claude-buddy__buddy_skill_context, mcp__claude-buddy__buddy_alerts, mcp__claude-buddy__buddy_current_state, Bash, Read
 ---
 
 Pre-commit quality gate.
 
 ## Steps
 
-1. Call buddy_alerts to check for active anti-patterns
-2. Call buddy_current_state to check if tests were run
-3. If tests were not run in this session and the project has tests, suggest running them
+1. Call buddy_skill_context with skill_name="buddy-before-commit" to get test/build status, unresolved failures, and quality summary in one call
+2. If alerts are present, investigate and suggest fixes
+3. If tests were not run and the project has tests, suggest running them
 
 ## Output
 
@@ -137,17 +137,17 @@ description: >
   Review recent changes against pattern DB knowledge. Checks for known
   anti-patterns, past failures with similar code, and architectural decisions.
 user-invocable: true
-allowed-tools: mcp__claude-buddy__buddy_patterns, mcp__claude-buddy__buddy_alerts, mcp__claude-buddy__buddy_decisions, Bash, Read
+allowed-tools: mcp__claude-buddy__buddy_skill_context, mcp__claude-buddy__buddy_patterns, mcp__claude-buddy__buddy_alerts, mcp__claude-buddy__buddy_decisions, Bash, Read
 ---
 
 Review recent code changes using pattern database knowledge.
 
 ## Steps
 
-1. Run 'git diff --stat' to see what files changed
-2. Call buddy_patterns for each changed file to find related past issues
-3. Call buddy_decisions to check if changes align with past architectural choices
-4. Call buddy_alerts to check session health
+1. Call buddy_skill_context with skill_name="buddy-review" to get modified files, test status, and related patterns in one call
+2. Run 'git diff --stat' to see detailed changes
+3. Call buddy_patterns for specific files if more detail needed
+4. Call buddy_decisions to check if changes align with past architectural choices
 
 ## Output
 

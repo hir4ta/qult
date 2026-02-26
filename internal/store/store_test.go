@@ -289,21 +289,23 @@ func TestShouldSuppressPattern(t *testing.T) {
 	}
 	defer s.Close()
 
-	// Below threshold: should not suppress.
-	for i := 0; i < 19; i++ {
+	// Below decayed threshold (~15): should not suppress.
+	for i := 0; i < 14; i++ {
 		s.InsertSuggestionOutcome("sess-1", "noisy", "msg")
 	}
 	if s.ShouldSuppressPattern("noisy") {
-		t.Error("ShouldSuppressPattern(19 delivered) = true, want false")
+		t.Error("ShouldSuppressPattern(14 delivered) = true, want false")
 	}
 
-	// At threshold with 0% resolution: should suppress.
-	s.InsertSuggestionOutcome("sess-1", "noisy", "msg")
+	// Above threshold with 0% resolution: should suppress.
+	for i := 0; i < 6; i++ {
+		s.InsertSuggestionOutcome("sess-1", "noisy", "msg")
+	}
 	if !s.ShouldSuppressPattern("noisy") {
 		t.Error("ShouldSuppressPattern(20 delivered, 0 resolved) = false, want true")
 	}
 
-	// Good pattern should not suppress.
+	// Good pattern (50% resolved) should not suppress.
 	for i := 0; i < 20; i++ {
 		id, _ := s.InsertSuggestionOutcome("sess-1", "useful", "msg")
 		if i%2 == 0 {
@@ -312,6 +314,44 @@ func TestShouldSuppressPattern(t *testing.T) {
 	}
 	if s.ShouldSuppressPattern("useful") {
 		t.Error("ShouldSuppressPattern(50% resolved) = true, want false")
+	}
+}
+
+func TestDecayedPatternEffectiveness(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	s, err := Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	// No data should return zeros.
+	d, r, err := s.DecayedPatternEffectiveness("empty")
+	if err != nil {
+		t.Fatalf("DecayedPatternEffectiveness: %v", err)
+	}
+	if d != 0 || r != 0 {
+		t.Errorf("empty pattern: delivered=%v, resolved=%v, want 0, 0", d, r)
+	}
+
+	// Recent outcomes should contribute ~1.0 each.
+	for i := 0; i < 10; i++ {
+		id, _ := s.InsertSuggestionOutcome("sess-1", "recent", "msg")
+		if i < 3 {
+			s.ResolveSuggestion(id)
+		}
+	}
+	d, r, err = s.DecayedPatternEffectiveness("recent")
+	if err != nil {
+		t.Fatalf("DecayedPatternEffectiveness: %v", err)
+	}
+	// Recent records should have weight close to 1.0 each.
+	if d < 9.5 || d > 10.5 {
+		t.Errorf("recent delivered=%v, want ~10", d)
+	}
+	if r < 2.5 || r > 3.5 {
+		t.Errorf("recent resolved=%v, want ~3", r)
 	}
 }
 

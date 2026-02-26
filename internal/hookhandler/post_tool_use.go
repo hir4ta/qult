@@ -130,6 +130,18 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 	// Update EWMA flow metrics (velocity, error rate).
 	updateFlowMetrics(sdb, false)
 
+	// Wall detection: velocity dropped sharply — deliver intervention.
+	if IsWallDetected(sdb) {
+		ClearWallDetected(sdb)
+		if msg := buildWallIntervention(sdb); msg != "" {
+			set, _ := sdb.TrySetCooldown("wall_intervention", 10*time.Minute)
+			if set {
+				Deliver(sdb, "wall-detected", "warning",
+					"Productivity drop detected", msg, PriorityHigh)
+			}
+		}
+	}
+
 	// Record workflow phase for adaptive learning.
 	recordPhase(sdb, in.ToolName, in.ToolInput)
 

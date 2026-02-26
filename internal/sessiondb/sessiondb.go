@@ -1235,3 +1235,120 @@ func (s *SessionDB) SetCachedLLMResponse(promptHash, response, model string) err
 	}
 	return nil
 }
+
+// BigramEntry represents an aggregated tool bigram for cross-session export.
+type BigramEntry struct {
+	FromTool     string
+	ToTool       string
+	Count        int
+	SuccessCount int
+}
+
+// AllToolSequences returns all tool bigrams aggregated by from→to pair.
+func (s *SessionDB) AllToolSequences() ([]BigramEntry, error) {
+	rows, err := s.db.Query(
+		`SELECT bigram_hash, next_outcome, count FROM tool_sequences`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("sessiondb: all tool sequences: %w", err)
+	}
+	defer rows.Close()
+
+	// Aggregate by bigram_hash across outcomes.
+	type bigramAgg struct {
+		total   int
+		success int
+	}
+	agg := make(map[string]*bigramAgg)
+	for rows.Next() {
+		var hash, outcome string
+		var count int
+		if err := rows.Scan(&hash, &outcome, &count); err != nil {
+			continue
+		}
+		if agg[hash] == nil {
+			agg[hash] = &bigramAgg{}
+		}
+		agg[hash].total += count
+		if outcome == "success" {
+			agg[hash].success += count
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sessiondb: all tool sequences rows: %w", err)
+	}
+
+	var entries []BigramEntry
+	for hash, a := range agg {
+		from, to, ok := strings.Cut(hash, "→")
+		if !ok {
+			continue
+		}
+		entries = append(entries, BigramEntry{
+			FromTool:     from,
+			ToTool:       to,
+			Count:        a.total,
+			SuccessCount: a.success,
+		})
+	}
+	return entries, nil
+}
+
+// TrigramEntry represents an aggregated tool trigram for cross-session export.
+type TrigramEntry struct {
+	Tool1        string
+	Tool2        string
+	Tool3        string
+	Count        int
+	SuccessCount int
+}
+
+// AllToolTrigrams returns all tool trigrams aggregated by tool1→tool2→tool3.
+func (s *SessionDB) AllToolTrigrams() ([]TrigramEntry, error) {
+	rows, err := s.db.Query(
+		`SELECT trigram_hash, next_outcome, count FROM tool_trigrams`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("sessiondb: all tool trigrams: %w", err)
+	}
+	defer rows.Close()
+
+	type trigramAgg struct {
+		total   int
+		success int
+	}
+	agg := make(map[string]*trigramAgg)
+	for rows.Next() {
+		var hash, outcome string
+		var count int
+		if err := rows.Scan(&hash, &outcome, &count); err != nil {
+			continue
+		}
+		if agg[hash] == nil {
+			agg[hash] = &trigramAgg{}
+		}
+		agg[hash].total += count
+		if outcome == "success" {
+			agg[hash].success += count
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sessiondb: all tool trigrams rows: %w", err)
+	}
+
+	var entries []TrigramEntry
+	for hash, a := range agg {
+		parts := strings.SplitN(hash, "→", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		entries = append(entries, TrigramEntry{
+			Tool1:        parts[0],
+			Tool2:        parts[1],
+			Tool3:        parts[2],
+			Count:        a.total,
+			SuccessCount: a.success,
+		})
+	}
+	return entries, nil
+}

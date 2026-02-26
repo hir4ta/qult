@@ -1,6 +1,7 @@
 package hookhandler
 
 import (
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -13,12 +14,16 @@ type multiAnalyzer struct {
 
 // NewMultiAnalyzer creates a CodeAnalyzer that delegates to per-language analyzers.
 func NewMultiAnalyzer() CodeAnalyzer {
+	js := &jsAnalyzer{}
 	return &multiAnalyzer{
 		analyzers: map[string]CodeAnalyzer{
-			"go": NewGoAnalyzer(),
-			"py": &pyAnalyzer{},
-			"js": &jsAnalyzer{},
-			"rs": &rsAnalyzer{},
+			"go":  NewGoAnalyzer(),
+			"py":  &pyAnalyzer{},
+			"js":  js,
+			"ts":  js, // TypeScript shares JS analyzer with extra checks
+			"tsx": js,
+			"jsx": js,
+			"rs":  &rsAnalyzer{},
 		},
 	}
 }
@@ -53,6 +58,16 @@ func (p *pyAnalyzer) Analyze(filePath string, content []byte) []Finding {
 			Severity: "warning",
 			Rule:     "py-bare-except",
 			Message:  "Bare `except:` catches all exceptions including KeyboardInterrupt — specify the exception type",
+			Category: "error_handling",
+		})
+	}
+	if pyBroadExceptPattern.MatchString(src) {
+		findings = append(findings, Finding{
+			File:     filePath,
+			Severity: "info",
+			Rule:     "py-broad-exception",
+			Message:  "`except Exception` is very broad — consider catching specific exception types",
+			Category: "error_handling",
 		})
 	}
 	if pyMutableDefaultPattern.MatchString(src) {
@@ -61,6 +76,7 @@ func (p *pyAnalyzer) Analyze(filePath string, content []byte) []Finding {
 			Severity: "warning",
 			Rule:     "py-mutable-default",
 			Message:  "Mutable default argument `[]` — use `None` and assign inside the function body",
+			Category: "style",
 		})
 	}
 	if pyStarImportPattern.MatchString(src) {
@@ -69,6 +85,7 @@ func (p *pyAnalyzer) Analyze(filePath string, content []byte) []Finding {
 			Severity: "warning",
 			Rule:     "py-star-import",
 			Message:  "`from module import *` pollutes namespace — import specific names",
+			Category: "style",
 		})
 	}
 	if pyDictDefaultPattern.MatchString(src) {
@@ -77,15 +94,41 @@ func (p *pyAnalyzer) Analyze(filePath string, content []byte) []Finding {
 			Severity: "warning",
 			Rule:     "py-mutable-default-dict",
 			Message:  "Mutable default argument `{}` — use `None` and assign inside the function body",
+			Category: "style",
 		})
 	}
+	if pyAssertInProdPattern.MatchString(src) && !strings.Contains(filePath, "test") {
+		findings = append(findings, Finding{
+			File:     filePath,
+			Severity: "info",
+			Rule:     "py-assert-in-prod",
+			Message:  "`assert` in non-test code — stripped with `python -O`, use explicit checks",
+			Category: "error_handling",
+		})
+	}
+
+	// Cognitive complexity estimate.
+	if cc := estimateCognitiveComplexity(src); cc > 15 {
+		findings = append(findings, Finding{
+			File:     filePath,
+			Severity: "info",
+			Rule:     "complexity",
+			Message:  fmt.Sprintf("Estimated cognitive complexity: %d (high) — consider breaking into smaller functions", cc),
+			Category: "complexity",
+		})
+	}
+
 	return findings
 }
 
 func (p *pyAnalyzer) SupportedLanguages() []string { return []string{"py"} }
 
-// Additional Python pattern.
-var pyDictDefaultPattern = regexp.MustCompile(`def\s+\w+\s*\([^)]*=\s*\{\s*\}`)
+// Additional Python patterns.
+var (
+	pyDictDefaultPattern  = regexp.MustCompile(`def\s+\w+\s*\([^)]*=\s*\{\s*\}`)
+	pyBroadExceptPattern  = regexp.MustCompile(`except\s+Exception\s*:`)
+	pyAssertInProdPattern = regexp.MustCompile(`(?m)^\s*assert\s+`)
+)
 
 // --- JS/TS analyzer ---
 
@@ -93,7 +136,9 @@ type jsAnalyzer struct{}
 
 func (j *jsAnalyzer) Analyze(filePath string, content []byte) []Finding {
 	base := filepath.Base(filePath)
+	ext := fileExtFromPath(filePath)
 	isTest := strings.Contains(base, ".test.") || strings.Contains(base, ".spec.") || strings.Contains(base, "_test.")
+	isTS := ext == "ts" || ext == "tsx"
 	src := string(content)
 	var findings []Finding
 
@@ -103,6 +148,7 @@ func (j *jsAnalyzer) Analyze(filePath string, content []byte) []Finding {
 			Severity: "warning",
 			Rule:     "js-console-log",
 			Message:  "console.log detected — remove debug logs before committing",
+			Category: "style",
 		})
 	}
 	if !isTest && jsLooseEqualityPattern.MatchString(src) {
@@ -113,16 +159,57 @@ func (j *jsAnalyzer) Analyze(filePath string, content []byte) []Finding {
 				Severity: "warning",
 				Rule:     "js-loose-equality",
 				Message:  "`==` used instead of `===` — prefer strict equality to avoid type coercion",
+				Category: "style",
 			})
 		}
 	}
 	if jsUnusedImportPattern.MatchString(src) {
 		findings = append(findings, findUnusedImports(filePath, src)...)
 	}
+
+	// TypeScript-specific checks.
+	if isTS {
+		if tsAnyTypePattern.MatchString(src) {
+			findings = append(findings, Finding{
+				File:     filePath,
+				Severity: "info",
+				Rule:     "ts-any-type",
+				Message:  "`any` type weakens type safety — use `unknown` or a specific type",
+				Category: "style",
+			})
+		}
+		if tsAsyncNoAwaitPattern.MatchString(src) {
+			findings = append(findings, Finding{
+				File:     filePath,
+				Severity: "warning",
+				Rule:     "ts-async-no-await",
+				Message:  "`async` function without `await` — remove `async` or add awaited calls",
+				Category: "error_handling",
+			})
+		}
+	}
+
+	// Cognitive complexity estimate.
+	if cc := estimateCognitiveComplexity(src); cc > 15 {
+		findings = append(findings, Finding{
+			File:     filePath,
+			Severity: "info",
+			Rule:     "complexity",
+			Message:  fmt.Sprintf("Estimated cognitive complexity: %d (high) — consider breaking into smaller functions", cc),
+			Category: "complexity",
+		})
+	}
+
 	return findings
 }
 
-func (j *jsAnalyzer) SupportedLanguages() []string { return []string{"js"} }
+func (j *jsAnalyzer) SupportedLanguages() []string { return []string{"js", "ts", "tsx", "jsx"} }
+
+// TypeScript patterns.
+var (
+	tsAnyTypePattern     = regexp.MustCompile(`:\s*any\b`)
+	tsAsyncNoAwaitPattern = regexp.MustCompile(`(?s)async\s+function\s+\w+[^}]*\{[^}]*\}`)
+)
 
 // jsUnusedImportPattern matches ES import statements for candidate detection.
 var jsUnusedImportPattern = regexp.MustCompile(`import\s+\{([^}]+)\}\s+from\s+['"]`)
@@ -175,6 +262,7 @@ func (r *rsAnalyzer) Analyze(filePath string, content []byte) []Finding {
 			Severity: "warning",
 			Rule:     "rs-unwrap",
 			Message:  "`.unwrap()` on Result/Option — use `?` operator or handle the error explicitly",
+			Category: "error_handling",
 		})
 	}
 	if !isTest && rsTodoPattern.MatchString(src) {
@@ -183,10 +271,10 @@ func (r *rsAnalyzer) Analyze(filePath string, content []byte) []Finding {
 			Severity: "warning",
 			Rule:     "rs-todo-macro",
 			Message:  "`todo!()` macro in non-test code — will panic at runtime",
+			Category: "error_handling",
 		})
 	}
 	if rsUnsafePattern.MatchString(src) {
-		// Check if unsafe block has a SAFETY comment nearby.
 		locs := rsUnsafePattern.FindAllStringIndex(src, -1)
 		for _, loc := range locs {
 			start := max(0, loc[0]-100)
@@ -197,15 +285,42 @@ func (r *rsAnalyzer) Analyze(filePath string, content []byte) []Finding {
 					Severity: "info",
 					Rule:     "rs-unsafe-no-safety",
 					Message:  "`unsafe` block without `// SAFETY:` comment — document the invariants",
+					Category: "security",
 				})
 				break
 			}
 		}
 	}
+	if !isTest && rsCloneOverusePattern.MatchString(src) {
+		count := len(rsCloneOverusePattern.FindAllStringIndex(src, -1))
+		if count >= 5 {
+			findings = append(findings, Finding{
+				File:     filePath,
+				Severity: "info",
+				Rule:     "rs-clone-overuse",
+				Message:  fmt.Sprintf("`.clone()` used %d times — consider borrowing or using references", count),
+				Category: "style",
+			})
+		}
+	}
+
+	// Cognitive complexity estimate.
+	if cc := estimateCognitiveComplexity(src); cc > 15 {
+		findings = append(findings, Finding{
+			File:     filePath,
+			Severity: "info",
+			Rule:     "complexity",
+			Message:  fmt.Sprintf("Estimated cognitive complexity: %d (high) — consider breaking into smaller functions", cc),
+			Category: "complexity",
+		})
+	}
+
 	return findings
 }
 
 func (r *rsAnalyzer) SupportedLanguages() []string { return []string{"rs"} }
+
+var rsCloneOverusePattern = regexp.MustCompile(`\.clone\(\)`)
 
 // Rust patterns.
 var (
@@ -246,4 +361,45 @@ func checkRustUnsafeNoComment(_, content string) string {
 		}
 	}
 	return ""
+}
+
+// complexityPatterns match control flow structures that increase cognitive complexity.
+var complexityPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`\b(if|else if|elif)\b`),
+	regexp.MustCompile(`\b(for|while|loop)\b`),
+	regexp.MustCompile(`\b(switch|match|case)\b`),
+	regexp.MustCompile(`\b(catch|except|rescue)\b`),
+	regexp.MustCompile(`\?\?|&&|\|\|`),
+	regexp.MustCompile(`\?[^:]*:`), // ternary
+}
+
+// estimateCognitiveComplexity provides a regex-based estimate of cognitive complexity.
+// Each nesting level and control flow structure increments the score.
+// This is a heuristic approximation — not a formal metric.
+func estimateCognitiveComplexity(src string) int {
+	score := 0
+	nesting := 0
+	for _, line := range strings.Split(src, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+
+		// Track nesting via braces (approximate).
+		opens := strings.Count(trimmed, "{")
+		closes := strings.Count(trimmed, "}")
+
+		for _, pat := range complexityPatterns {
+			if pat.MatchString(trimmed) {
+				score += 1 + nesting
+				break
+			}
+		}
+
+		nesting += opens - closes
+		if nesting < 0 {
+			nesting = 0
+		}
+	}
+	return score
 }

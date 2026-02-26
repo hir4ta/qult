@@ -122,6 +122,45 @@ func editAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 				})
 			}
 		}
+
+		// 5b. Cross-session failure history for this file.
+		_, totalCross, _ := st.FailureHistoryForFile(ei.FilePath, 2)
+		if totalCross >= 3 {
+			alts = append(alts, Alternative{
+				Label:     "Cross-session failures",
+				Rationale: fmt.Sprintf("This file has had %d failures across sessions.", totalCross),
+				Priority:  75,
+			})
+		}
+
+		// 5c. Directory-level architecture patterns.
+		dirPath := filepath.Dir(ei.FilePath)
+		dirPatterns, _ := st.SearchPatternsByDirectory(dirPath, "architecture", 1)
+		for _, p := range dirPatterns {
+			text := p.Content
+			if len([]rune(text)) > 100 {
+				text = string([]rune(text)[:100]) + "..."
+			}
+			alts = append(alts, Alternative{
+				Label:     "Package architecture",
+				Rationale: text,
+				Priority:  45,
+			})
+		}
+
+		// 5d. Directory-level decisions.
+		dirDecisions, _ := st.SearchDecisionsByDirectory(dirPath, 1)
+		for _, d := range dirDecisions {
+			text := d.DecisionText
+			if len([]rune(text)) > 100 {
+				text = string([]rune(text)[:100]) + "..."
+			}
+			alts = append(alts, Alternative{
+				Label:     "Package decision",
+				Rationale: text,
+				Priority:  42,
+			})
+		}
 	}
 
 	// 6. File hotspot — edited too many times this session.
@@ -250,32 +289,56 @@ func bashAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 	}
 
 	// 4. Tool sequence prediction (trigram preferred, bigram fallback).
+	// Combines session-local (2x weight) + global data for better prediction.
 	prevTool, _ := sdb.GetContext("prev_tool")
 	prevPrevTool, _ := sdb.GetContext("prev_prev_tool")
 	trigramMatched := false
 	if prevPrevTool != "" && prevTool != "" {
 		outcome, count, _ := sdb.PredictFromTrigram(prevPrevTool, prevTool, "Bash")
-		if outcome == "failure" && count >= 3 {
+		// Also check global trigrams.
+		globalCount := 0
+		if st, stErr := store.OpenDefault(); stErr == nil {
+			preds, _ := st.PredictFromTrigramGlobal(prevPrevTool, prevTool, 1)
+			st.Close()
+			for _, p := range preds {
+				if p.Tool == "Bash" && p.SuccessRate < 0.3 {
+					globalCount = p.Count
+				}
+			}
+		}
+		combinedCount := count*2 + globalCount // session-local weighted 2x
+		if outcome == "failure" && combinedCount >= 3 {
 			trigramMatched = true
 			alts = append(alts, Alternative{
 				Label:     "Try different approach",
-				Rationale: fmt.Sprintf("The pattern %s→%s→Bash has failed %d times this session.", prevPrevTool, prevTool, count),
+				Rationale: fmt.Sprintf("The pattern %s→%s→Bash has failed %d times (session: %d, global: %d).", prevPrevTool, prevTool, combinedCount, count, globalCount),
 				Priority:  75,
 			})
 		}
 	}
 	if !trigramMatched && prevTool != "" {
 		outcome, count, _ := sdb.PredictOutcome(prevTool, "Bash")
-		if outcome == "failure" && count >= 5 {
+		globalCount := 0
+		if st, stErr := store.OpenDefault(); stErr == nil {
+			preds, _ := st.PredictNextToolGlobal(prevTool, 3)
+			st.Close()
+			for _, p := range preds {
+				if p.Tool == "Bash" && p.SuccessRate < 0.3 {
+					globalCount = p.Count
+				}
+			}
+		}
+		combinedCount := count*2 + globalCount
+		if outcome == "failure" && combinedCount >= 5 {
 			alts = append(alts, Alternative{
 				Label:     "Try different approach",
-				Rationale: fmt.Sprintf("The pattern %s→Bash has failed %d times this session.", prevTool, count),
+				Rationale: fmt.Sprintf("The pattern %s→Bash has failed %d times (session: %d, global: %d).", prevTool, combinedCount, count, globalCount),
 				Priority:  70,
 			})
 		}
 	}
 
-	// 5. Next tool prediction from past successful sequences.
+	// 5. Next tool prediction from combined session + global sequences.
 	if nextTool, count, _ := sdb.PredictNextTool("Bash"); nextTool != "" && count >= 3 {
 		if nextTool == "Read" {
 			alts = append(alts, Alternative{
@@ -283,6 +346,42 @@ func bashAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 				Rationale: fmt.Sprintf("In past sessions, Bash→Read was the successful pattern (%d times).", count),
 				Priority:  35,
 			})
+		}
+	} else if st, stErr := store.OpenDefault(); stErr == nil {
+		preds, _ := st.PredictNextToolGlobal("Bash", 1)
+		st.Close()
+		for _, p := range preds {
+			if p.Tool == "Read" && p.Count >= 5 && p.SuccessRate > 0.5 {
+				alts = append(alts, Alternative{
+					Label:     "Read after run",
+					Rationale: fmt.Sprintf("Across sessions, Bash→Read was successful %d times (%.0f%% success).", p.Count, p.SuccessRate*100),
+					Priority:  35,
+				})
+			}
+		}
+	}
+
+	// 6. Workflow deviation warning.
+	taskType, _ := sdb.GetContext("task_type")
+	if taskType != "" {
+		currentPhase := classifyBashPhase(bi.Command)
+		if currentPhase != "" {
+			st, stErr := store.OpenDefault()
+			if stErr == nil {
+				defer st.Close()
+				expectedPhases, wfCount, _ := st.MostCommonWorkflow("", taskType, 3)
+				if len(expectedPhases) > 0 && wfCount >= 3 {
+					recentPhases := getRecentPhases(sdb, 5)
+					nextExpected := findNextExpectedPhase(recentPhases, expectedPhases)
+					if nextExpected != "" && nextExpected != currentPhase {
+						alts = append(alts, Alternative{
+							Label:     "Workflow deviation",
+							Rationale: fmt.Sprintf("For %s tasks, next step is usually '%s' (%d sessions). Currently doing '%s'.", taskType, nextExpected, wfCount, currentPhase),
+							Priority:  40,
+						})
+					}
+				}
+			}
 		}
 	}
 
@@ -335,4 +434,57 @@ func formatAlternatives(sdb *sessiondb.SessionDB, cooldownKey, target string, al
 		fmt.Fprintf(&b, "\n  %d. %s — %s", i+1, a.Label, a.Rationale)
 	}
 	return b.String()
+}
+
+// classifyBashPhase maps a bash command to a workflow phase name.
+func classifyBashPhase(command string) string {
+	cmd := strings.ToLower(command)
+	switch {
+	case strings.Contains(cmd, "test") || strings.Contains(cmd, "pytest") || strings.Contains(cmd, "jest"):
+		return "test"
+	case strings.Contains(cmd, "build") || strings.Contains(cmd, "compile") || strings.Contains(cmd, "tsc"):
+		return "build"
+	case strings.Contains(cmd, "run") || strings.Contains(cmd, "exec"):
+		return "run"
+	case strings.Contains(cmd, "lint") || strings.Contains(cmd, "vet") || strings.Contains(cmd, "check"):
+		return "lint"
+	default:
+		return ""
+	}
+}
+
+// getRecentPhases returns the last N phase names from sessiondb session_phases.
+func getRecentPhases(sdb *sessiondb.SessionDB, n int) []string {
+	phases, _ := sdb.GetRawPhaseSequence(n)
+	return phases
+}
+
+// findNextExpectedPhase finds the expected next phase given current progress.
+// Walks expectedWorkflow, finds the furthest matching phase from recentPhases,
+// and returns the next phase in the expected sequence.
+func findNextExpectedPhase(recentPhases, expectedWorkflow []string) string {
+	if len(expectedWorkflow) == 0 {
+		return ""
+	}
+
+	// Find the furthest phase in expectedWorkflow that appears in recentPhases.
+	furthestIdx := -1
+	for _, recent := range recentPhases {
+		for i, expected := range expectedWorkflow {
+			if recent == expected && i > furthestIdx {
+				furthestIdx = i
+			}
+		}
+	}
+
+	// Return the next phase after the furthest match.
+	if furthestIdx >= 0 && furthestIdx+1 < len(expectedWorkflow) {
+		return expectedWorkflow[furthestIdx+1]
+	}
+
+	// No match found — suggest the first phase.
+	if furthestIdx < 0 && len(expectedWorkflow) > 0 {
+		return expectedWorkflow[0]
+	}
+	return ""
 }

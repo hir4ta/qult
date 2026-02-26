@@ -2,7 +2,7 @@ package store
 
 import "database/sql"
 
-const schemaVersion = 7
+const schemaVersion = 8
 
 const ddlV1 = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -286,6 +286,45 @@ CREATE TRIGGER IF NOT EXISTS patterns_fts_au AFTER UPDATE ON patterns BEGIN
 END;
 `
 
+const ddlV8 = `
+-- ==========================================================
+-- adaptive_baselines: Welford online algorithm running stats
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS adaptive_baselines (
+    metric_name  TEXT PRIMARY KEY,
+    count        INTEGER NOT NULL DEFAULT 0,
+    mean         REAL NOT NULL DEFAULT 0.0,
+    m2           REAL NOT NULL DEFAULT 0.0,
+    last_updated TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ==========================================================
+-- global_tool_sequences: cross-session Markov chain (bigrams)
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS global_tool_sequences (
+    from_tool     TEXT NOT NULL,
+    to_tool       TEXT NOT NULL,
+    count         INTEGER NOT NULL DEFAULT 0,
+    success_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (from_tool, to_tool)
+);
+
+-- ==========================================================
+-- global_tool_trigrams: cross-session Markov chain (trigrams)
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS global_tool_trigrams (
+    tool1         TEXT NOT NULL,
+    tool2         TEXT NOT NULL,
+    tool3         TEXT NOT NULL,
+    count         INTEGER NOT NULL DEFAULT 0,
+    success_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (tool1, tool2, tool3)
+);
+
+CREATE INDEX IF NOT EXISTS idx_gts_from ON global_tool_sequences(from_tool);
+CREATE INDEX IF NOT EXISTS idx_gtt_t1t2 ON global_tool_trigrams(tool1, tool2);
+`
+
 // Migrate applies all pending schema migrations to the database.
 func Migrate(db *sql.DB) error {
 	var current int
@@ -330,6 +369,11 @@ func Migrate(db *sql.DB) error {
 	}
 	if current < 7 {
 		if _, err := db.Exec(ddlV7); err != nil {
+			return err
+		}
+	}
+	if current < 8 {
+		if _, err := db.Exec(ddlV8); err != nil {
 			return err
 		}
 	}
