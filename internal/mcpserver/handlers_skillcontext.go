@@ -117,22 +117,24 @@ func computeHealthScore(sdb *sessiondb.SessionDB) float64 {
 		}
 	}
 
-	// Deductions for unresolved failures.
+	// Deductions for unresolved failures (cap total failure deductions at 0.3).
 	failures, _ := sdb.RecentFailures(3)
+	failureDeduction := 0.0
 	for _, f := range failures {
 		if f.FilePath == "" || time.Since(f.Timestamp) > 10*time.Minute {
 			continue
 		}
 		unresolved, _, _ := sdb.HasUnresolvedFailure(f.FilePath)
 		if unresolved {
-			score -= 0.15
+			failureDeduction += 0.15
 		}
 	}
-
-	if score < 0 {
-		score = 0
+	if failureDeduction > 0.3 {
+		failureDeduction = 0.3
 	}
-	return score
+	score -= failureDeduction
+
+	return max(0, score)
 }
 
 func enrichForReview(sdb *sessiondb.SessionDB) (map[string]string, []string, []string) {

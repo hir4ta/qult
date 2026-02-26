@@ -325,15 +325,26 @@ func checkTestCoverage(sdb *sessiondb.SessionDB, files []string) string {
 			continue
 		}
 
-		// Check if a test file exists in the working set.
+		// Check if a corresponding test file exists in the working set.
+		// Match by language-specific naming conventions:
+		//   Go: foo.go → foo_test.go
+		//   JS/TS: foo.ts → foo.test.ts or foo.spec.ts
+		//   Python: foo.py → test_foo.py or foo_test.py
 		hasTest := false
 		nameNoExt := strings.TrimSuffix(base, ext)
 		for _, other := range files {
 			otherBase := filepath.Base(other)
-			if strings.Contains(otherBase, nameNoExt) && (strings.Contains(otherBase, "_test") || strings.Contains(otherBase, ".test.") || strings.Contains(otherBase, ".spec.")) {
-				hasTest = true
-				break
+			otherExt := filepath.Ext(other)
+			otherNoExt := strings.TrimSuffix(otherBase, otherExt)
+			switch {
+			case otherNoExt == nameNoExt+"_test":                                  // Go: foo_test.go
+			case otherNoExt == nameNoExt+".test" || otherNoExt == nameNoExt+".spec": // JS: foo.test.ts
+			case otherNoExt == "test_"+nameNoExt:                                   // Python: test_foo.py
+			default:
+				continue
 			}
+			hasTest = true
+			break
 		}
 		if !hasTest {
 			untested++

@@ -301,14 +301,17 @@ func (s *Store) SearchPatternsByDirectory(dirPath string, patternType string, li
 	if limit <= 0 {
 		limit = 3
 	}
-	dirBase := filepath.Base(dirPath)
+	// Use full directory path for LIKE to avoid matching same-named dirs elsewhere.
+	// Ensure trailing slash for precise prefix matching.
+	dirPrefix := strings.TrimRight(dirPath, "/") + "/"
+	escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(dirPrefix)
 	query := `
 		SELECT DISTINCT p.id, p.session_id, p.pattern_type, p.title, p.content, p.embed_text,
 			COALESCE(p.language,''), p.scope, COALESCE(p.source_event_id,0), p.timestamp
 		FROM patterns p
 		JOIN pattern_files pf ON p.id = pf.pattern_id
-		WHERE pf.file_path LIKE ?`
-	args := []any{"%" + dirBase + "/%"}
+		WHERE pf.file_path LIKE ? ESCAPE '\'`
+	args := []any{escaped + "%"}
 	if patternType != "" {
 		query += ` AND p.pattern_type = ?`
 		args = append(args, patternType)

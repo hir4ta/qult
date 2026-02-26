@@ -263,14 +263,16 @@ func (s *Store) SearchDecisionsByDirectory(dirPath string, limit int) ([]Decisio
 	if limit <= 0 {
 		limit = 3
 	}
-	dirBase := filepath.Base(dirPath)
-	pat := "%" + dirBase + "/%"
+	// Use full directory path for LIKE to avoid matching same-named dirs elsewhere.
+	dirPrefix := strings.TrimRight(dirPath, "/") + "/"
+	escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(dirPrefix)
+	pat := escaped + "%"
 
 	dbRows, err := s.db.Query(`
 		SELECT d.id, d.session_id, COALESCE(d.event_id,0), d.timestamp, d.topic,
 			   d.decision_text, COALESCE(d.reasoning,''), COALESCE(d.file_paths,'[]'), d.compact_segment
 		FROM decisions d
-		WHERE d.file_paths LIKE ?
+		WHERE d.file_paths LIKE ? ESCAPE '\'
 		ORDER BY d.timestamp DESC
 		LIMIT ?`, pat, limit)
 	if err != nil {

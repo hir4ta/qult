@@ -1,5 +1,7 @@
 package hookhandler
 
+import "strings"
+
 // Finding represents a single code analysis issue.
 type Finding struct {
 	File     string // file path
@@ -34,11 +36,18 @@ func (g *goAnalyzer) Analyze(filePath string, content []byte) []Finding {
 	if issue == "" {
 		return nil
 	}
+	category := "error_handling"
+	if strings.Contains(issue, "fmt.Print") || strings.Contains(issue, "log.Print") {
+		category = "style"
+	} else if strings.Contains(issue, "secret") || strings.Contains(issue, "password") || strings.Contains(issue, "token") {
+		category = "security"
+	}
 	return []Finding{{
 		File:     filePath,
 		Severity: "warning",
 		Rule:     "go-ast",
 		Message:  issue,
+		Category: category,
 	}}
 }
 

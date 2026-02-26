@@ -178,7 +178,7 @@ func (j *jsAnalyzer) Analyze(filePath string, content []byte) []Finding {
 				Category: "style",
 			})
 		}
-		if tsAsyncNoAwaitPattern.MatchString(src) {
+		if hasAsyncWithoutAwait(src) {
 			findings = append(findings, Finding{
 				File:     filePath,
 				Severity: "warning",
@@ -207,9 +207,49 @@ func (j *jsAnalyzer) SupportedLanguages() []string { return []string{"js", "ts",
 
 // TypeScript patterns.
 var (
-	tsAnyTypePattern     = regexp.MustCompile(`:\s*any\b`)
-	tsAsyncNoAwaitPattern = regexp.MustCompile(`(?s)async\s+function\s+\w+[^}]*\{[^}]*\}`)
+	tsAnyTypePattern      = regexp.MustCompile(`:\s*any\b`)
+	tsAsyncFuncPattern    = regexp.MustCompile(`async\s+(?:function\s+\w+|(?:\w+|\([^)]*\))\s*=>)`)
 )
+
+// hasAsyncWithoutAwait uses brace counting to extract async function bodies
+// and checks if any body lacks an await keyword.
+func hasAsyncWithoutAwait(src string) bool {
+	locs := tsAsyncFuncPattern.FindAllStringIndex(src, -1)
+	for _, loc := range locs {
+		// Find the opening brace after the async declaration.
+		rest := src[loc[1]:]
+		braceIdx := strings.Index(rest, "{")
+		if braceIdx < 0 {
+			continue
+		}
+		// Extract the function body via brace counting.
+		bodyStart := loc[1] + braceIdx
+		depth := 0
+		bodyEnd := -1
+		for i := bodyStart; i < len(src); i++ {
+			switch src[i] {
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					bodyEnd = i + 1
+				}
+			}
+			if bodyEnd >= 0 {
+				break
+			}
+		}
+		if bodyEnd < 0 {
+			continue
+		}
+		body := src[bodyStart:bodyEnd]
+		if !strings.Contains(body, "await ") && !strings.Contains(body, "await(") {
+			return true
+		}
+	}
+	return false
+}
 
 // jsUnusedImportPattern matches ES import statements for candidate detection.
 var jsUnusedImportPattern = regexp.MustCompile(`import\s+\{([^}]+)\}\s+from\s+['"]`)
@@ -375,30 +415,57 @@ var complexityPatterns = []*regexp.Regexp{
 
 // estimateCognitiveComplexity provides a regex-based estimate of cognitive complexity.
 // Each nesting level and control flow structure increments the score.
+// Uses brace counting for C-style languages and indentation for Python.
 // This is a heuristic approximation — not a formal metric.
 func estimateCognitiveComplexity(src string) int {
+	useBraces := strings.Contains(src, "{")
 	score := 0
 	nesting := 0
+	baseIndent := -1
+
 	for _, line := range strings.Split(src, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
 
-		// Track nesting via braces (approximate).
-		opens := strings.Count(trimmed, "{")
-		closes := strings.Count(trimmed, "}")
+		if useBraces {
+			// Track nesting via braces (C-style languages).
+			opens := strings.Count(trimmed, "{")
+			closes := strings.Count(trimmed, "}")
 
-		for _, pat := range complexityPatterns {
-			if pat.MatchString(trimmed) {
-				score += 1 + nesting
-				break
+			for _, pat := range complexityPatterns {
+				if pat.MatchString(trimmed) {
+					score += 1 + nesting
+					break
+				}
 			}
-		}
 
-		nesting += opens - closes
-		if nesting < 0 {
-			nesting = 0
+			nesting += opens - closes
+			if nesting < 0 {
+				nesting = 0
+			}
+		} else {
+			// Track nesting via indentation (Python and similar).
+			indent := len(line) - len(strings.TrimLeft(line, " \t"))
+			tabWidth := 4
+			indent = strings.Count(line[:len(line)-len(strings.TrimLeft(line, " \t"))], "\t")*tabWidth +
+				strings.Count(line[:len(line)-len(strings.TrimLeft(line, " \t"))], " ")
+
+			if baseIndent < 0 {
+				baseIndent = indent
+			}
+			nesting = (indent - baseIndent) / tabWidth
+			if nesting < 0 {
+				nesting = 0
+			}
+
+			for _, pat := range complexityPatterns {
+				if pat.MatchString(trimmed) {
+					score += 1 + nesting
+					break
+				}
+			}
 		}
 	}
 	return score

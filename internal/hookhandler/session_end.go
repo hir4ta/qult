@@ -3,6 +3,7 @@ package hookhandler
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/hir4ta/claude-buddy/internal/sessiondb"
 	"github.com/hir4ta/claude-buddy/internal/store"
@@ -120,12 +121,21 @@ func persistSessionMetrics(sdb *sessiondb.SessionDB) {
 		_ = st.UpdateBaseline("plan_mode_files", float64(len(distinctFiles)))
 	}
 
-	// No-progress and burst metrics.
+	// No-progress metrics: tools in burst + elapsed minutes since burst start.
 	tc, _, _, _ := sdb.BurstState()
 	_ = st.UpdateBaseline("no_progress_tools", float64(tc))
 
-	// Compaction burst tools.
-	_ = st.UpdateBaseline("compaction_burst_tools", float64(tc))
+	if startTime, err := sdb.BurstStartTime(); err == nil && !startTime.IsZero() {
+		elapsed := time.Since(startTime).Minutes()
+		_ = st.UpdateBaseline("no_progress_minutes", elapsed)
+	}
+
+	// Compaction burst: record burst tool count at session end as proxy for
+	// typical burst size when compaction risk is evaluated.
+	compacts, _ := sdb.CompactsInWindow(60)
+	if compacts > 0 {
+		_ = st.UpdateBaseline("compaction_burst_tools", float64(tc))
+	}
 
 	// EWMA error rate.
 	errRate := getFloat(sdb, "ewma_error_rate")

@@ -237,7 +237,9 @@ func (s *Store) FailureHistoryForDirectory(dirPath string, limit int) ([]Failure
 	if limit <= 0 {
 		limit = 3
 	}
-	escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(dirPath)
+	// Ensure trailing slash for precise directory prefix matching.
+	dirPrefix := strings.TrimRight(dirPath, "/") + "/"
+	escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(dirPrefix)
 	rows, err := s.db.Query(
 		`SELECT failure_type, error_signature, file_path, COUNT(*) as cnt
 		 FROM failure_solutions
