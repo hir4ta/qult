@@ -2,7 +2,7 @@ package store
 
 import "database/sql"
 
-const schemaVersion = 6
+const schemaVersion = 7
 
 const ddlV1 = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -254,6 +254,38 @@ CREATE TABLE IF NOT EXISTS user_preferences (
 );
 `
 
+const ddlV7 = `
+-- ==========================================================
+-- FTS5 full-text search for patterns (BM25 fallback when Ollama unavailable)
+-- ==========================================================
+CREATE VIRTUAL TABLE IF NOT EXISTS patterns_fts USING fts5(
+    title, content, embed_text,
+    content='patterns', content_rowid='id'
+);
+
+-- Populate FTS index from existing patterns.
+INSERT OR IGNORE INTO patterns_fts(rowid, title, content, embed_text)
+    SELECT id, title, content, embed_text FROM patterns;
+
+-- Auto-sync triggers.
+CREATE TRIGGER IF NOT EXISTS patterns_fts_ai AFTER INSERT ON patterns BEGIN
+    INSERT INTO patterns_fts(rowid, title, content, embed_text)
+    VALUES (new.id, new.title, new.content, new.embed_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS patterns_fts_ad AFTER DELETE ON patterns BEGIN
+    INSERT INTO patterns_fts(patterns_fts, rowid, title, content, embed_text)
+    VALUES ('delete', old.id, old.title, old.content, old.embed_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS patterns_fts_au AFTER UPDATE ON patterns BEGIN
+    INSERT INTO patterns_fts(patterns_fts, rowid, title, content, embed_text)
+    VALUES ('delete', old.id, old.title, old.content, old.embed_text);
+    INSERT INTO patterns_fts(rowid, title, content, embed_text)
+    VALUES (new.id, new.title, new.content, new.embed_text);
+END;
+`
+
 // Migrate applies all pending schema migrations to the database.
 func Migrate(db *sql.DB) error {
 	var current int
@@ -293,6 +325,11 @@ func Migrate(db *sql.DB) error {
 	}
 	if current < 6 {
 		if _, err := db.Exec(ddlV6); err != nil {
+			return err
+		}
+	}
+	if current < 7 {
+		if _, err := db.Exec(ddlV7); err != nil {
 			return err
 		}
 	}

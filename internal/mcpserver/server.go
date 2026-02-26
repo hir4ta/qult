@@ -23,6 +23,7 @@ const serverInstructions = `claude-buddy is a real-time session advisor for Clau
 - buddy_decisions: List past design decisions. Use before making related changes to check architectural history.
 - buddy_patterns: Search knowledge patterns (error solutions, architecture, decisions) from past sessions.
 - buddy_estimate: Estimate task complexity based on historical workflow data.
+- buddy_next_step: Get recommended next actions based on session context. Call when unsure what to do next or after encountering errors.
 
 ## Usage Guidelines
 
@@ -223,6 +224,23 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 				),
 			),
 			Handler: estimateHandler(st),
+		},
+		server.ServerTool{
+			Tool: mcp.NewTool("buddy_next_step",
+				mcp.WithDescription("Get recommended next actions based on session context. Returns up to 3 prioritized suggestions considering recent tool history, failures, working set, and task type. Call when unsure what to do next or after encountering errors."),
+				mcp.WithTitleAnnotation("Next Step Recommendations"),
+				mcp.WithReadOnlyHintAnnotation(true),
+				mcp.WithDestructiveHintAnnotation(false),
+				mcp.WithIdempotentHintAnnotation(true),
+				mcp.WithOpenWorldHintAnnotation(false),
+				mcp.WithString("session_id",
+					mcp.Description("Session ID (optional, defaults to latest)"),
+				),
+				mcp.WithString("context",
+					mcp.Description("Optional additional context about what you're trying to achieve"),
+				),
+			),
+			Handler: nextStepHandler(claudeHome),
 		},
 	)
 

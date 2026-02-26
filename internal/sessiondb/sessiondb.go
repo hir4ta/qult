@@ -1027,6 +1027,92 @@ func splitBigram(hash string) string {
 	return after
 }
 
+// ToolPrediction represents a predicted next tool with its occurrence count and success rate.
+type ToolPrediction struct {
+	Tool        string
+	Count       int
+	SuccessRate float64
+}
+
+// PredictNextTools returns the most likely next tools after prevTool,
+// ranked by occurrence count with success rate. Returns up to limit results.
+func (s *SessionDB) PredictNextTools(prevTool string, limit int) ([]ToolPrediction, error) {
+	if prevTool == "" || limit <= 0 {
+		return nil, nil
+	}
+
+	rows, err := s.db.Query(
+		`SELECT bigram_hash, next_outcome, SUM(count) as total
+		 FROM tool_sequences
+		 WHERE bigram_hash LIKE ?
+		 GROUP BY bigram_hash, next_outcome
+		 ORDER BY total DESC`,
+		prevTool+"→%",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("sessiondb: predict next tools: %w", err)
+	}
+	defer rows.Close()
+
+	// Aggregate success/total per tool.
+	type toolStats struct {
+		total   int
+		success int
+	}
+	stats := make(map[string]*toolStats)
+	for rows.Next() {
+		var hash, outcome string
+		var count int
+		if err := rows.Scan(&hash, &outcome, &count); err != nil {
+			continue
+		}
+		tool := splitBigram(hash)
+		if tool == "" {
+			continue
+		}
+		st, ok := stats[tool]
+		if !ok {
+			st = &toolStats{}
+			stats[tool] = st
+		}
+		st.total += count
+		if outcome == "success" {
+			st.success += count
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sessiondb: predict next tools scan: %w", err)
+	}
+
+	// Convert to sorted slice.
+	predictions := make([]ToolPrediction, 0, len(stats))
+	for tool, st := range stats {
+		rate := 0.0
+		if st.total > 0 {
+			rate = float64(st.success) / float64(st.total)
+		}
+		predictions = append(predictions, ToolPrediction{
+			Tool:        tool,
+			Count:       st.total,
+			SuccessRate: rate,
+		})
+	}
+
+	// Sort by count descending.
+	for i := 0; i < len(predictions); i++ {
+		for j := i + 1; j < len(predictions); j++ {
+			if predictions[j].Count > predictions[i].Count {
+				predictions[i], predictions[j] = predictions[j], predictions[i]
+			}
+		}
+	}
+
+	if len(predictions) > limit {
+		predictions = predictions[:limit]
+	}
+	return predictions, nil
+}
+
 // --- File Change Tracking ---
 
 // RecordFileChange records a file change event for oscillation/revert detection.
@@ -1041,6 +1127,18 @@ func (s *SessionDB) RecordFileChange(filePath string, eventSeq, linesAdded, line
 		return fmt.Errorf("sessiondb: record file change: %w", err)
 	}
 	return nil
+}
+
+// FileEditCount returns the number of recorded edits for a file in this session.
+func (s *SessionDB) FileEditCount(filePath string) (int, error) {
+	var count int
+	err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM file_change_tracking WHERE file_path = ?`, filePath,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("sessiondb: file edit count: %w", err)
+	}
+	return count, nil
 }
 
 // DetectOscillation checks if a file's net_change sign has alternated 3+ times,

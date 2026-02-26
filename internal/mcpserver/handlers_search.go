@@ -3,6 +3,8 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -85,18 +87,40 @@ func patternsHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandler
 			limit = 5
 		}
 
-		if emb == nil || !emb.Available() {
-			return mcp.NewToolResultError("embedder not available — ensure Ollama is running"), nil
+		var patterns []store.PatternRow
+		var searchMethod string
+
+		if emb != nil && emb.Available() {
+			queryVec, err := emb.EmbedForSearch(ctx, query)
+			if err == nil && queryVec != nil {
+				patterns, err = st.SearchPatternsByVector(queryVec, patternType, limit)
+				if err == nil {
+					searchMethod = "vector"
+				} else {
+					fmt.Fprintf(os.Stderr, "[buddy] vector search failed, falling back: %v\n", err)
+				}
+			}
 		}
 
-		queryVec, err := emb.EmbedForSearch(ctx, query)
-		if err != nil {
-			return mcp.NewToolResultError("embedding failed: " + err.Error()), nil
+		// FTS5 BM25 fallback when vector search unavailable or failed.
+		if searchMethod == "" {
+			var err error
+			patterns, err = st.SearchPatternsByFTS(query, patternType, limit)
+			if err == nil && len(patterns) > 0 {
+				searchMethod = "fts5"
+			} else if err != nil {
+				fmt.Fprintf(os.Stderr, "[buddy] fts5 search failed, falling back: %v\n", err)
+			}
 		}
 
-		patterns, err := st.SearchPatternsByVector(queryVec, patternType, limit)
-		if err != nil {
-			return mcp.NewToolResultError("search failed: " + err.Error()), nil
+		// LIKE fallback as last resort.
+		if searchMethod == "" {
+			var err error
+			patterns, err = st.SearchPatternsByKeyword(query, patternType, limit)
+			if err != nil {
+				return mcp.NewToolResultError("search failed: " + err.Error()), nil
+			}
+			searchMethod = "keyword"
 		}
 
 		total, _ := st.CountPatterns()
@@ -107,9 +131,10 @@ func patternsHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandler
 		}
 
 		result := map[string]any{
-			"query":         query,
-			"patterns":      patternList,
+			"query":          query,
+			"patterns":       patternList,
 			"total_patterns": total,
+			"search_method":  searchMethod,
 		}
 
 		data, _ := json.MarshalIndent(result, "", "  ")

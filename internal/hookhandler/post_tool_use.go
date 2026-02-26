@@ -84,24 +84,44 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 		_ = sdb.SetContext("subagent_active", "true")
 	}
 
-	// Track test command execution for workflow guidance.
+	// Track test and build command execution for workflow guidance.
 	if in.ToolName == "Bash" {
 		var bi struct {
 			Command string `json:"command"`
 		}
-		if json.Unmarshal(in.ToolInput, &bi) == nil && testCmdPattern.MatchString(bi.Command) {
-			_ = sdb.SetContext("has_test_run", "true")
+		if json.Unmarshal(in.ToolInput, &bi) == nil {
+			hasError := len(in.ToolResponse) > 0 && containsError(string(in.ToolResponse))
 
-			// Positive signal: test-first recognition for bugfix/refactor.
-			taskTypeStr, _ := sdb.GetContext("task_type")
-			tc, hasWrite, _, _ := sdb.BurstState()
-			if (taskTypeStr == "bugfix" || taskTypeStr == "refactor") && !hasWrite && tc <= 3 {
-				set, _ := sdb.TrySetCooldown("test_first_ack", 30*time.Minute)
-				if set {
-					Deliver(sdb, "test-first", "info",
-						"Good practice: running tests before editing",
-						"Test-first approach established. This gives a baseline to verify changes against.",
-						PriorityMedium)
+			if testCmdPattern.MatchString(bi.Command) {
+				_ = sdb.SetContext("has_test_run", "true")
+
+				// Track test pass/fail status from tool response.
+				if hasError {
+					_ = sdb.SetContext("last_test_passed", "false")
+				} else {
+					_ = sdb.SetContext("last_test_passed", "true")
+				}
+
+				// Positive signal: test-first recognition for bugfix/refactor.
+				taskTypeStr, _ := sdb.GetContext("task_type")
+				tc, hasWrite, _, _ := sdb.BurstState()
+				if (taskTypeStr == "bugfix" || taskTypeStr == "refactor") && !hasWrite && tc <= 3 {
+					set, _ := sdb.TrySetCooldown("test_first_ack", 30*time.Minute)
+					if set {
+						Deliver(sdb, "test-first", "info",
+							"Good practice: running tests before editing",
+							"Test-first approach established. This gives a baseline to verify changes against.",
+							PriorityMedium)
+					}
+				}
+			}
+
+			// Track build/compile success.
+			if isCompileCommand(bi.Command) {
+				if hasError {
+					_ = sdb.SetContext("last_build_passed", "false")
+				} else {
+					_ = sdb.SetContext("last_build_passed", "true")
 				}
 			}
 		}

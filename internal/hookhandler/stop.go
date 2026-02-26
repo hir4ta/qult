@@ -29,12 +29,19 @@ func handleStop(input []byte) (*HookOutput, error) {
 		return nil, nil
 	}
 
-	// Session-aware pre-check: skip completeness checks if no code was modified.
+	// Session-aware pre-check: read ground truth from sessiondb.
 	hasCodeChanges := false
+	var testsPassed, buildPassed bool
 	if in.SessionID != "" {
 		if sdb, err := sessiondb.Open(in.SessionID); err == nil {
 			files, _ := sdb.GetWorkingSetFiles()
 			hasCodeChanges = len(files) > 0
+			if v, _ := sdb.GetContext("last_test_passed"); v == "true" {
+				testsPassed = true
+			}
+			if v, _ := sdb.GetContext("last_build_passed"); v == "true" {
+				buildPassed = true
+			}
 			sdb.Close()
 		}
 	}
@@ -44,6 +51,23 @@ func handleStop(input []byte) (*HookOutput, error) {
 	// Always check for explicit TODO/FIXME markers and incomplete work in assistant message.
 	// These indicate unfinished intent regardless of whether code was modified.
 	issues = checkCompleteness(in.LastAssistantMessage, hasCodeChanges)
+
+	// Filter out text-based failure detections when sessiondb confirms actual state.
+	// This prevents false positives from feature descriptions, examples, and summaries
+	// that mention failure keywords in a non-failure context.
+	if testsPassed || buildPassed {
+		filtered := issues[:0]
+		for _, issue := range issues {
+			if testsPassed && strings.Contains(issue, "test failure") {
+				continue
+			}
+			if buildPassed && strings.Contains(issue, "build failure") {
+				continue
+			}
+			filtered = append(filtered, issue)
+		}
+		issues = filtered
+	}
 
 	// Session-aware checks using sessiondb.
 	issues = append(issues, checkSessionIssues(in.SessionID)...)
@@ -110,23 +134,30 @@ func checkCompleteness(msg string, hasCodeChanges bool) []string {
 	// Test and build failure checks only when code was actually modified,
 	// to avoid false positives on messages describing detection features.
 	if hasCodeChanges {
+		// Exclusion words: terms that appear near failure keywords in feature
+		// descriptions, summaries, and documentation rather than actual failure reports.
+		featureExclusions := []string{
+			// English
+			"detect", "prediction", "check for", "heuristic", "pattern", "gate",
+			"pipeline", "hook", "block", "implement", "track", "monitor",
+			"quality", "feature", "summary", "effect",
+			// Japanese
+			"予測", "チェック", "検出", "パターン", "ゲート", "ブロック",
+			"実装", "追跡", "監視", "品質", "機能", "効果", "強化", "状態で",
+			"サマリ", "完了",
+		}
+
 		if containsFailureReport(lower, []string{
 			"test fail", "tests fail", "test failed", "tests failed", "failing test",
 			"テストが失敗", "テスト失敗",
-		}, []string{
-			"予測", "チェック", "検出", "detect", "prediction", "check for", "heuristic",
-			"パターン", "pattern", "ゲート", "gate", "pipeline",
-		}) {
+		}, featureExclusions) {
 			issues = append(issues, "Unresolved test failure mentioned in last response")
 		}
 
 		if containsFailureReport(lower, []string{
 			"build failed", "compilation error", "compile error", "does not compile",
 			"ビルド失敗", "コンパイルエラー",
-		}, []string{
-			"予測", "チェック", "検出", "detect", "prediction", "check for", "heuristic",
-			"パターン", "pattern", "ゲート", "gate", "pipeline",
-		}) {
+		}, featureExclusions) {
 			issues = append(issues, "Unresolved build failure mentioned in last response")
 		}
 	}
@@ -195,8 +226,8 @@ func containsFailureReport(text string, patterns, exclusions []string) bool {
 	return false
 }
 
-// checkSessionIssues uses the session database to detect unresolved failures
-// and untested code modifications.
+// checkSessionIssues uses the session database to detect unresolved failures,
+// untested code modifications, build failures, and test failures.
 func checkSessionIssues(sessionID string) []string {
 	if sessionID == "" {
 		return nil
@@ -232,6 +263,16 @@ func checkSessionIssues(sessionID string) []string {
 		}
 	}
 
+	// Check build status: block if last build failed.
+	if issue := checkBuildStatus(sdb); issue != "" {
+		issues = append(issues, issue)
+	}
+
+	// Check test results: block if tests ran but failed.
+	if issue := checkTestResults(sdb); issue != "" {
+		issues = append(issues, issue)
+	}
+
 	// Check if tests were run when code was modified.
 	taskType, _ := sdb.GetWorkingSet("task_type")
 	if taskType == "bugfix" || taskType == "feature" || taskType == "refactor" {
@@ -241,7 +282,39 @@ func checkSessionIssues(sessionID string) []string {
 		}
 	}
 
+	// Promote uncommitted changes to a blocking issue when many files modified.
+	if len(files) >= 5 {
+		hasTestRun, _ := sdb.GetContext("has_test_run")
+		lastTestPassed, _ := sdb.GetContext("last_test_passed")
+		// Only block if tests passed (don't double-report with test failure).
+		if hasTestRun == "true" && lastTestPassed == "true" {
+			issues = append(issues, fmt.Sprintf("%d files modified — consider committing before stopping", len(files)))
+		}
+	}
+
 	return issues
+}
+
+// checkBuildStatus returns a blocking message if the last build/compile failed.
+func checkBuildStatus(sdb *sessiondb.SessionDB) string {
+	lastBuild, _ := sdb.GetContext("last_build_passed")
+	if lastBuild == "false" {
+		return "Last build failed — fix compilation errors before stopping"
+	}
+	return ""
+}
+
+// checkTestResults returns a blocking message if tests were run but failed.
+func checkTestResults(sdb *sessiondb.SessionDB) string {
+	hasTestRun, _ := sdb.GetContext("has_test_run")
+	if hasTestRun != "true" {
+		return ""
+	}
+	lastTestPassed, _ := sdb.GetContext("last_test_passed")
+	if lastTestPassed == "false" {
+		return "Tests were run but failed — fix failing tests before stopping"
+	}
+	return ""
 }
 
 // checkUncommittedChanges checks if there are uncommitted git changes when stopping.

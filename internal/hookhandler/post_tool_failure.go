@@ -48,6 +48,15 @@ func handlePostToolUseFailure(input []byte) (*HookOutput, error) {
 	_ = sdb.RecordFailure(in.ToolName, failureType, extractErrorSignature(in.Error), filePath)
 	_ = sdb.RecordToolOutcome(in.ToolName, filePath, false)
 
+	// Track test/build failure status for Stop hook quality gate.
+	if failureType == failTestFailure {
+		_ = sdb.SetContext("has_test_run", "true")
+		_ = sdb.SetContext("last_test_passed", "false")
+	}
+	if failureType == failCompileError {
+		_ = sdb.SetContext("last_build_passed", "false")
+	}
+
 	// Record tool sequence with failure outcome.
 	recordFailureSequence(sdb, in.ToolName)
 
