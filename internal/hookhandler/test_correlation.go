@@ -2,6 +2,7 @@ package hookhandler
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -50,6 +51,7 @@ func extractTestFailures(output string) []testFailure {
 }
 
 // correlateWithRecentEdits finds recently edited files that may relate to test failures.
+// When a coverage map is available, provides precise function-level correlation.
 func correlateWithRecentEdits(sdb *sessiondb.SessionDB, failures []testFailure) string {
 	if len(failures) == 0 {
 		return ""
@@ -60,6 +62,15 @@ func correlateWithRecentEdits(sdb *sessiondb.SessionDB, failures []testFailure) 
 		return ""
 	}
 
+	// Try coverage map for precise function-level correlation.
+	cm := LoadCoverageMap(sdb)
+	if cm != nil && len(cm.FuncToTests) > 0 {
+		if correlation := correlateViaCoverageMap(cm, failures, files); correlation != "" {
+			return correlation
+		}
+	}
+
+	// Fall back to file-list based correlation.
 	var b strings.Builder
 	f := failures[0] // focus on first failure
 	fmt.Fprintf(&b, "Test %s failed", f.TestName)
@@ -77,6 +88,43 @@ func correlateWithRecentEdits(sdb *sessiondb.SessionDB, failures []testFailure) 
 	}
 
 	return b.String()
+}
+
+// correlateViaCoverageMap uses the coverage map to find precise causal links
+// between test failures and recently edited functions.
+func correlateViaCoverageMap(cm *CoverageMap, failures []testFailure, editedFiles []string) string {
+	editedBases := make(map[string]string) // base name → full path
+	for _, f := range editedFiles {
+		editedBases[filepath.Base(f)] = f
+	}
+
+	for _, f := range failures {
+		// Reverse lookup: find which functions this test covers.
+		for key, tests := range cm.FuncToTests {
+			for _, t := range tests {
+				if t != f.TestName {
+					continue
+				}
+				// key = "relative/path.go:FuncName"
+				parts := strings.SplitN(key, ":", 2)
+				if len(parts) != 2 {
+					continue
+				}
+				srcFile := parts[0]
+				funcName := parts[1]
+				// Check if source file was recently edited.
+				if _, edited := editedBases[filepath.Base(srcFile)]; edited {
+					var b strings.Builder
+					fmt.Fprintf(&b, "Cause: %s covers %s in %s (which you edited)", f.TestName, funcName, filepath.Base(srcFile))
+					if cmd := SuggestTestCommand(cm, editedBases[filepath.Base(srcFile)], []string{funcName}, ""); cmd != "" {
+						fmt.Fprintf(&b, "\n→ Run: %s", cmd)
+					}
+					return b.String()
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // extractNearbyError extracts the error message near a failure marker in test output.

@@ -2,6 +2,7 @@ package hookhandler
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -93,7 +94,7 @@ func generatePlaybook(sdb *sessiondb.SessionDB, taskType TaskType, projectPath s
 		phases, count, _ := st.MostCommonWorkflow(projectPath, string(taskType), 3)
 		if len(phases) > 0 {
 			_ = sdb.SetCooldown(key, 30*time.Minute)
-			return formatLearnedPlaybook(taskType, phases, count)
+			return formatLearnedPlaybook(sdb, taskType, phases, count)
 		}
 	}
 
@@ -108,15 +109,41 @@ func generatePlaybook(sdb *sessiondb.SessionDB, taskType TaskType, projectPath s
 	return formatDefaultPlaybook(taskType, steps, currentStep)
 }
 
-func formatLearnedPlaybook(taskType TaskType, phases []string, sessionCount int) string {
+func formatLearnedPlaybook(sdb *sessiondb.SessionDB, taskType TaskType, phases []string, sessionCount int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[buddy] Recommended approach for %s (based on %d past sessions):", taskType, sessionCount)
+
+	// Get working set files and coverage map for concrete step details.
+	wsFiles, _ := sdb.GetWorkingSetFiles()
+	cm := LoadCoverageMap(sdb)
+
 	for i, phase := range phases {
 		step := phaseToStep[phase]
 		if step == "" {
 			step = phase
 		}
 		fmt.Fprintf(&b, "\n  %d. %s", i+1, step)
+
+		// Add concrete details based on phase.
+		switch phase {
+		case "write":
+			if len(wsFiles) > 0 {
+				limit := min(3, len(wsFiles))
+				names := make([]string, limit)
+				for j := 0; j < limit; j++ {
+					names[j] = filepath.Base(wsFiles[len(wsFiles)-limit+j])
+				}
+				fmt.Fprintf(&b, " (%s)", strings.Join(names, ", "))
+			}
+		case "test":
+			if cm != nil && len(wsFiles) > 0 {
+				// Suggest specific test command for the most recently edited file.
+				lastFile := wsFiles[len(wsFiles)-1]
+				if cmd := SuggestTestCommand(cm, lastFile, nil, ""); cmd != "" {
+					fmt.Fprintf(&b, " → %s", cmd)
+				}
+			}
+		}
 	}
 	return b.String()
 }

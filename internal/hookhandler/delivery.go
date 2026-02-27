@@ -273,26 +273,23 @@ func Deliver(sdb *sessiondb.SessionDB, pattern, level, observation, suggestion s
 	return ""
 }
 
-// contextualPatternKey builds a contextual key from (pattern, task_type, velocity_state, user_cluster).
+// contextualPatternKey builds a contextual key from (pattern, task_type, user_cluster).
 // This allows Thompson Sampling to learn that e.g. "workflow" suggestions are effective
-// during bugfix+slow+conservative but not during feature+fast+aggressive.
+// during bugfix+conservative but not during feature+aggressive.
+// Velocity state is intentionally excluded to increase data density per context (~3x).
 func contextualPatternKey(pattern string) string {
 	taskType := currentTaskType()
-	velState := currentVelocityState()
 	cluster := currentUserCluster()
-	if taskType == "" && velState == "" && cluster == "" {
+	if taskType == "" && cluster == "" {
 		return pattern
 	}
 	if taskType == "" {
 		taskType = "unknown"
 	}
-	if velState == "" {
-		velState = "normal"
-	}
 	if cluster == "" {
 		cluster = "balanced"
 	}
-	return pattern + ":" + taskType + ":" + velState + ":" + cluster
+	return pattern + ":" + taskType + ":" + cluster
 }
 
 // currentTaskType reads the task_type from the current sessiondb.
@@ -302,13 +299,10 @@ func currentTaskType() string {
 	return ctxTaskType
 }
 
-// currentVelocityState classifies current velocity into fast/normal/slow.
-func currentVelocityState() string {
-	return ctxVelocityState
-}
-
-// SetDeliveryContext caches task_type, velocity, and user cluster for contextual Thompson Sampling.
+// SetDeliveryContext caches task_type and user cluster for contextual Thompson Sampling.
 // Called once per hook invocation before any Deliver calls.
+// Velocity state is computed and cached for use by velocity wall detection (Phase 2),
+// but excluded from the contextual pattern key to increase data density.
 func SetDeliveryContext(sdb *sessiondb.SessionDB) {
 	ctxTaskType, _ = sdb.GetContext("task_type")
 	vel := getFloat(sdb, "ewma_tool_velocity")

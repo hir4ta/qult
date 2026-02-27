@@ -46,6 +46,12 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 	isWrite := writeTools[in.ToolName]
 	inputHash := hashInput(in.ToolName, in.ToolInput)
 
+	// Verify pending resolution from previous tool call (success path).
+	verifyPendingResolution(sdb, true)
+
+	// Check nudge timeout: 4+ tools without resolution → negative signal.
+	checkNudgeTimeout(sdb)
+
 	// Check if this action resolves a previously delivered nudge or LLM suggestion.
 	checkNudgeResolution(sdb, in.ToolName)
 	checkLLMSuggestionResolution(sdb, in.ToolName)

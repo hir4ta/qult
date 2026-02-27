@@ -138,6 +138,44 @@ func (s *Store) AllFeedbackStats() (*FeedbackStats, error) {
 	return stats, nil
 }
 
+// CheckFeedbackContradiction compares the most recent auto-feedback and explicit feedback
+// for a pattern. Returns true if they contradict (e.g., auto=helpful but explicit=misleading),
+// indicating auto-feedback inference is unreliable for this pattern.
+func (s *Store) CheckFeedbackContradiction(pattern string) bool {
+	// Get the most recent auto feedback (comment starts with "auto:").
+	var autoRating string
+	err := s.db.QueryRow(
+		`SELECT rating FROM feedbacks
+		 WHERE pattern = ? AND comment LIKE 'auto:%'
+		 ORDER BY created_at DESC LIMIT 1`, pattern,
+	).Scan(&autoRating)
+	if err != nil {
+		return false
+	}
+
+	// Get the most recent explicit feedback (no "auto:" comment).
+	var explicitRating string
+	err = s.db.QueryRow(
+		`SELECT rating FROM feedbacks
+		 WHERE pattern = ? AND (comment IS NULL OR comment = '' OR comment NOT LIKE 'auto:%')
+		 ORDER BY created_at DESC LIMIT 1`, pattern,
+	).Scan(&explicitRating)
+	if err != nil {
+		return false
+	}
+
+	// Contradiction: auto says positive but explicit says negative, or vice versa.
+	autoPositive := autoRating == string(RatingHelpful) || autoRating == string(RatingPartiallyHelpful)
+	explicitNegative := explicitRating == string(RatingNotHelpful) || explicitRating == string(RatingMisleading)
+	if autoPositive && explicitNegative {
+		return true
+	}
+
+	autoNegative := autoRating == string(RatingNotHelpful) || autoRating == string(RatingMisleading)
+	explicitPositive := explicitRating == string(RatingHelpful) || explicitRating == string(RatingPartiallyHelpful)
+	return autoNegative && explicitPositive
+}
+
 // RecentFeedbacks returns the most recent feedbacks, optionally filtered by pattern.
 func (s *Store) RecentFeedbacks(pattern string, limit int) ([]map[string]any, error) {
 	if limit < 1 {

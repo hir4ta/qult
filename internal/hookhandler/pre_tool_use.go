@@ -66,6 +66,30 @@ func handlePreToolUse(input []byte) (*HookOutput, error) {
 		return out, nil
 	}
 
+	// Auto-apply high-confidence code fixes (>=0.9) on Edit for Go files.
+	if out := autoApplyCodeFix(sdb, in.ToolName, in.ToolInput); out != nil {
+		return out, nil
+	}
+
+	// Episode early-warning: detect emerging anti-patterns BEFORE tool execution.
+	det := &HookDetector{sdb: sdb}
+	if sig := det.detectEpisodes(); sig != "" {
+		return makeOutput("PreToolUse", sig), nil
+	}
+
+	// Velocity wall look-ahead: warn when velocity variance is high and health declining.
+	// Gated by ewmv_velocity_var > 4.0 to avoid unnecessary PredictHealthTrend calls (~4ms).
+	if ewmvVar := getFloat(sdb, "ewmv_velocity_var"); ewmvVar > 4.0 {
+		if trend := PredictHealthTrend(sdb); trend != nil && trend.Trend == "declining" && trend.ToolsToThreshold > 0 && trend.ToolsToThreshold < 30 {
+			set, _ := sdb.TrySetCooldown("velocity_wall_warn", 10*time.Minute)
+			if set {
+				return makeOutput("PreToolUse", fmt.Sprintf(
+					"[buddy] Signal: Velocity variance high (%.1f). Health declining — ~%d tool calls until threshold. Consider pausing to reassess approach.",
+					ewmvVar, trend.ToolsToThreshold)), nil
+			}
+		}
+	}
+
 	// --- JARVIS advisor: present alternatives before action ---
 	var signals []string
 	if safetyWarning != "" {
@@ -298,7 +322,97 @@ func autoCorrectTool(sdb *sessiondb.SessionDB, toolName string, toolInput json.R
 		return makeUpdatedInputOutput(updated, ctx)
 	}
 
+	// go test -race → add -count=1 to disable test caching.
+	if corrected, ctx := fixGoTestRaceCache(bi.Command); corrected != "" {
+		updated, _ := json.Marshal(map[string]string{"command": corrected})
+		return makeUpdatedInputOutput(updated, ctx)
+	}
+
 	return nil
+}
+
+// fixGoTestRaceCache adds -count=1 to go test -race commands to disable test caching,
+// which can mask race conditions.
+func fixGoTestRaceCache(cmd string) (string, string) {
+	if !strings.Contains(cmd, "go test") || !strings.Contains(cmd, "-race") {
+		return "", ""
+	}
+	if strings.Contains(cmd, "-count") {
+		return "", "" // already has -count flag
+	}
+	corrected := strings.Replace(cmd, "-race", "-race -count=1", 1)
+	return corrected, "[buddy] Added -count=1 to disable test caching with -race"
+}
+
+// autoApplyCodeFix runs high-confidence Go code fixers on Edit operations.
+// Only applies fixes with confidence >= 0.9 (nil-error-wrap, defer-in-loop).
+// Lower-confidence fixes (empty-error-return 0.85, error-shadow 0.7) are excluded.
+func autoApplyCodeFix(sdb *sessiondb.SessionDB, toolName string, toolInput json.RawMessage) *HookOutput {
+	if toolName != "Edit" {
+		return nil
+	}
+
+	var edit struct {
+		FilePath   string `json:"file_path"`
+		OldString  string `json:"old_string"`
+		NewString  string `json:"new_string"`
+		ReplaceAll bool   `json:"replace_all,omitempty"`
+	}
+	if json.Unmarshal(toolInput, &edit) != nil || edit.FilePath == "" {
+		return nil
+	}
+	if filepath.Ext(edit.FilePath) != ".go" || strings.HasSuffix(edit.FilePath, "_test.go") {
+		return nil
+	}
+
+	// Read file and simulate the edit result for AST analysis.
+	content, err := os.ReadFile(edit.FilePath)
+	if err != nil {
+		return nil
+	}
+	simulated := strings.Replace(string(content), edit.OldString, edit.NewString, 1)
+
+	// Run high-confidence fixers on simulated content.
+	fixer := &goFixer{}
+	fixedNew := edit.NewString
+	var fixes []string
+
+	for _, check := range []struct {
+		rule    string
+		message string
+	}{
+		{"go_nil_error_wrap", "wrapping nil"},
+		{"go_defer_in_loop", "defer` inside loop"},
+	} {
+		finding := Finding{File: edit.FilePath, Rule: check.rule, Message: check.message}
+		fix := fixer.Fix(finding, []byte(simulated))
+		if fix == nil || fix.Confidence < 0.9 {
+			continue
+		}
+		// Only apply if the fix's Before is within the new_string region.
+		if !strings.Contains(fixedNew, fix.Before) {
+			continue
+		}
+		fixedNew = strings.Replace(fixedNew, fix.Before, fix.After, 1)
+		fixes = append(fixes, check.rule)
+	}
+
+	if len(fixes) == 0 {
+		return nil
+	}
+
+	// Track auto-fix for revert detection in subsequent edits.
+	_ = sdb.SetContext("last_auto_fix_pattern", strings.Join(fixes, ","))
+	_ = sdb.SetContext("last_auto_fix_file", edit.FilePath)
+
+	updated, _ := json.Marshal(struct {
+		FilePath   string `json:"file_path"`
+		OldString  string `json:"old_string"`
+		NewString  string `json:"new_string"`
+		ReplaceAll bool   `json:"replace_all,omitempty"`
+	}{edit.FilePath, edit.OldString, fixedNew, edit.ReplaceAll})
+	return makeUpdatedInputOutput(updated,
+		fmt.Sprintf("[buddy] Auto-applied code fix: %s", strings.Join(fixes, ", ")))
 }
 
 // narrowTestScope replaces go test ./... with specific changed packages.
@@ -443,15 +557,36 @@ func proactiveSolutionLookup(sdb *sessiondb.SessionDB, _ string, toolInput json.
 	sol := solutions[0]
 	var b strings.Builder
 	fmt.Fprintf(&b, "[buddy] Past resolution for %s (%s)", filepath.Base(filePath), failureType)
+
+	// Parse and display the exact resolution diff when available.
+	diffShown := false
 	if sol.ResolutionDiff != "" {
-		b.WriteString(" [has diff]")
+		var diff struct {
+			Old string `json:"old"`
+			New string `json:"new"`
+		}
+		if json.Unmarshal([]byte(sol.ResolutionDiff), &diff) == nil && diff.Old != "" {
+			old := truncate(diff.Old, 60)
+			new_ := truncate(diff.New, 60)
+			fmt.Fprintf(&b, "\n→ Previous fix: `%s` → `%s`", old, new_)
+			diffShown = true
+		}
 	}
-	b.WriteString("\n→ ")
-	text := sol.SolutionText
-	if len([]rune(text)) > 150 {
-		text = string([]rune(text)[:150]) + "..."
+
+	// Search for solution chains (multi-step playbooks) for this failure.
+	chainSig := failureType + ":" + errorSig
+	chains, _ := st.SearchSolutionChains(chainSig, 1)
+	if len(chains) > 0 {
+		fmt.Fprintf(&b, "\n→ Playbook (%d steps): %s", chains[0].StepCount, chains[0].ToolSequence)
+	} else if !diffShown {
+		// Fall back to solution text when neither diff nor chain is available.
+		text := sol.SolutionText
+		if len([]rune(text)) > 150 {
+			text = string([]rune(text)[:150]) + "..."
+		}
+		b.WriteString("\n→ ")
+		b.WriteString(text)
 	}
-	b.WriteString(text)
 
 	// Track surfaced solution for effectiveness measurement.
 	_ = sdb.SetContext("last_surfaced_solution_id", fmt.Sprintf("%d", sol.ID))

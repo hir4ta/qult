@@ -40,6 +40,9 @@ func handlePostToolUseFailure(input []byte) (*HookOutput, error) {
 	// Cache task_type and velocity for contextual Thompson Sampling.
 	SetDeliveryContext(sdb)
 
+	// Verify pending resolution from previous tool call (failure path → false positive).
+	verifyPendingResolution(sdb, false)
+
 	// Classify the failure type.
 	filePath := extractFilePath(in.ToolInput)
 	failureType := classifyFailure(in.ToolName, in.Error)
@@ -171,6 +174,7 @@ func buildFixSuggestion(sdb *sessiondb.SessionDB, sessionID, failureType, filePa
 	switch failureType {
 	case failEditMismatch:
 		b.WriteString("[buddy] Edit failed — old_string not found in file.\n")
+		b.WriteString("  WHY: The file content changed since your last Read. Another edit or auto-formatter may have modified it.\n")
 		b.WriteString("→ Read the file first to get the exact current content, then retry with the correct old_string.")
 
 		// Check how many times this file has had edit mismatches.
@@ -187,6 +191,7 @@ func buildFixSuggestion(sdb *sessiondb.SessionDB, sessionID, failureType, filePa
 
 	case failFileNotFound:
 		b.WriteString("[buddy] File not found.\n")
+		b.WriteString("  WHY: The path does not exist on disk. It may have been moved, renamed, or never created.\n")
 		if filePath != "" {
 			if similar := findSimilarPaths(sdb, filePath); similar != "" {
 				fmt.Fprintf(&b, "→ Did you mean: %s", similar)
@@ -197,11 +202,15 @@ func buildFixSuggestion(sdb *sessiondb.SessionDB, sessionID, failureType, filePa
 
 	case failPermission:
 		fmt.Fprintf(&b, "[buddy] Permission denied for %s.\n", filepath.Base(filePath))
+		b.WriteString("  WHY: The process lacks write permission. The file may be read-only, owned by another user, or in a protected directory.\n")
 		b.WriteString("→ Check if the file is read-only or if the directory exists.")
 
 	case failCompileError:
 		b.WriteString("[buddy] Compilation error detected.\n")
-		if loc := extractCompileLocation(errorMsg); loc != "" {
+		b.WriteString("  WHY: Recent edits likely introduced a syntax or type error.\n")
+		if goFix := matchGoCompileError(errorMsg); goFix != "" {
+			fmt.Fprintf(&b, "→ %s", goFix)
+		} else if loc := extractCompileLocation(errorMsg); loc != "" {
 			fmt.Fprintf(&b, "→ Error location: %s — Read that file to see the context.", loc)
 		} else {
 			needsLLM = true
@@ -210,6 +219,13 @@ func buildFixSuggestion(sdb *sessiondb.SessionDB, sessionID, failureType, filePa
 
 	case failTestFailure:
 		b.WriteString("[buddy] Test failure detected.\n")
+		if wsFiles, _ := sdb.GetWorkingSetFiles(); len(wsFiles) > 0 {
+			limit := min(3, len(wsFiles))
+			fmt.Fprintf(&b, "  WHY: You recently edited %s. The change likely broke an assumption in the test.\n",
+				strings.Join(wsFiles[len(wsFiles)-limit:], ", "))
+		} else {
+			b.WriteString("  WHY: A test assertion failed, indicating behavior diverged from expected output.\n")
+		}
 		failures := extractTestFailures(errorMsg)
 		if correlation := correlateWithRecentEdits(sdb, failures); correlation != "" {
 			fmt.Fprintf(&b, "→ %s", correlation)
@@ -220,6 +236,7 @@ func buildFixSuggestion(sdb *sessiondb.SessionDB, sessionID, failureType, filePa
 
 	case failBashError:
 		b.WriteString("[buddy] Command failed.\n")
+		b.WriteString("  WHY: The shell command returned a non-zero exit code. Check if prerequisites are installed and paths are correct.\n")
 		if solution := searchPastSolutions(sdb, failBashError, errorMsg); solution != "" {
 			fmt.Fprintf(&b, "→ Past solution found: %s", solution)
 		} else {
@@ -381,6 +398,50 @@ func findSimilarPaths(sdb *sessiondb.SessionDB, targetPath string) string {
 		matches = matches[:3]
 	}
 	return strings.Join(matches, ", ")
+}
+
+// goCompilePatterns are deterministic Go compile error patterns with specific fixes.
+// Checked before LLM fallback for instant, reliable suggestions (<1ms).
+var goCompilePatterns = []struct {
+	re  *regexp.Regexp
+	fix string // %s placeholders filled from submatch groups
+}{
+	{regexp.MustCompile(`undefined: (\w+)`),
+		"Identifier `%s` is not defined. Check spelling, imports, or if it needs to be exported (capitalized)."},
+	{regexp.MustCompile(`imported and not used: "([^"]+)"`),
+		"Import `%s` is unused. Remove it or use the package."},
+	{regexp.MustCompile(`(\w+) declared (?:and )?not used`),
+		"Variable `%s` is declared but not used. Use it or replace with `_`."},
+	{regexp.MustCompile(`too many arguments in call to (\w+)`),
+		"Too many arguments in call to `%s`. Check the function signature."},
+	{regexp.MustCompile(`not enough arguments in call to (\w+)`),
+		"Not enough arguments in call to `%s`. Check the function signature."},
+	{regexp.MustCompile(`missing return at end of function`),
+		"Missing return statement. Add a return at the end of the function."},
+	{regexp.MustCompile(`cannot use (.+?) \(.*?(?:type |value of type )(.+?)\) as (?:type )?(.+?) `),
+		"Type mismatch: `%s` is type `%s` but expected `%s`. Add a type conversion or fix the expression."},
+	{regexp.MustCompile(`cannot assign to (.+)`),
+		"Cannot assign to `%s`. Check if the target is addressable (not a map value, unexported field, etc.)."},
+	{regexp.MustCompile(`syntax error: unexpected (.+?)(?:,|$)`),
+		"Syntax error near `%s`. Check for missing braces, parentheses, or semicolons."},
+}
+
+// matchGoCompileError tries deterministic Go compile error patterns.
+// Returns a specific fix suggestion or "" if no pattern matches.
+func matchGoCompileError(errorMsg string) string {
+	for _, p := range goCompilePatterns {
+		m := p.re.FindStringSubmatch(errorMsg)
+		if m == nil {
+			continue
+		}
+		// Build args from captured groups (skip full match at m[0]).
+		args := make([]any, len(m)-1)
+		for i := 1; i < len(m); i++ {
+			args[i-1] = m[i]
+		}
+		return fmt.Sprintf(p.fix, args...)
+	}
+	return ""
 }
 
 // extractCompileLocation extracts file:line from compiler error output.

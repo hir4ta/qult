@@ -6,7 +6,8 @@ import (
 )
 
 // SearchPatternsByFTS performs full-text search using FTS5 with BM25 ranking.
-// Returns patterns matching the query, ordered by relevance.
+// For multi-word queries, tries phrase match first, then falls back to OR.
+// Results are reordered to prioritize title matches.
 func (s *Store) SearchPatternsByFTS(query string, patternType string, limit int) ([]PatternRow, error) {
 	if query == "" {
 		return nil, nil
@@ -15,11 +16,34 @@ func (s *Store) SearchPatternsByFTS(query string, patternType string, limit int)
 		limit = 10
 	}
 
+	words := strings.Fields(query)
+
+	// Phase 1: Multi-word queries try phrase match first (higher precision).
+	if len(words) > 1 {
+		phraseQuery := buildFTSPhraseQuery(query)
+		if phraseQuery != "" {
+			results, err := s.executeFTSSearch(phraseQuery, patternType, limit)
+			if err == nil && len(results) > 0 {
+				return reorderByTitleMatch(results, query), nil
+			}
+		}
+	}
+
+	// Phase 2: Fall back to OR matching (broader recall).
 	ftsQuery := buildFTSQuery(query)
 	if ftsQuery == "" {
 		return nil, nil
 	}
 
+	results, err := s.executeFTSSearch(ftsQuery, patternType, limit)
+	if err != nil {
+		return nil, err
+	}
+	return reorderByTitleMatch(results, query), nil
+}
+
+// executeFTSSearch runs an FTS5 MATCH query and returns matching patterns.
+func (s *Store) executeFTSSearch(ftsQuery, patternType string, limit int) ([]PatternRow, error) {
 	var sqlQuery string
 	var args []any
 
@@ -131,6 +155,63 @@ func (s *Store) SearchPatternsByKeyword(query string, patternType string, limit 
 	return results, nil
 }
 
+// buildFTSPhraseQuery builds a phrase-match FTS5 expression: "word1 word2".
+// Returns empty string if the query has fewer than 2 words.
+func buildFTSPhraseQuery(query string) string {
+	words := strings.Fields(query)
+	if len(words) < 2 {
+		return ""
+	}
+
+	var cleaned []string
+	for _, w := range words {
+		clean := stripFTSSpecialChars(w)
+		if clean != "" {
+			cleaned = append(cleaned, clean)
+		}
+	}
+	if len(cleaned) < 2 {
+		return ""
+	}
+	return `"` + strings.Join(cleaned, " ") + `"`
+}
+
+// reorderByTitleMatch reorders results to prioritize those whose title contains
+// the query keywords. BM25 ranks by overall relevance; this ensures title matches
+// appear first since they're typically more relevant.
+func reorderByTitleMatch(results []PatternRow, query string) []PatternRow {
+	if len(results) <= 1 {
+		return results
+	}
+
+	queryLower := strings.ToLower(query)
+	titleMatches := make([]PatternRow, 0, len(results))
+	others := make([]PatternRow, 0, len(results))
+
+	for _, r := range results {
+		if strings.Contains(strings.ToLower(r.Title), queryLower) {
+			titleMatches = append(titleMatches, r)
+		} else {
+			others = append(others, r)
+		}
+	}
+
+	return append(titleMatches, others...)
+}
+
+// stripFTSSpecialChars removes FTS5 syntax characters from a word.
+func stripFTSSpecialChars(w string) string {
+	clean := strings.Map(func(r rune) rune {
+		switch r {
+		case '"', '*', '(', ')', '{', '}', ':', '^', '+', '-', '\\':
+			return -1
+		default:
+			return r
+		}
+	}, w)
+	return strings.TrimSpace(clean)
+}
+
 // buildFTSQuery converts a user query into an FTS5 MATCH expression.
 // Each word is joined with OR for broad matching.
 // Special FTS5 characters are escaped.
@@ -142,16 +223,7 @@ func buildFTSQuery(query string) string {
 
 	var escaped []string
 	for _, w := range words {
-		// Strip FTS5 special characters to prevent syntax errors.
-		clean := strings.Map(func(r rune) rune {
-			switch r {
-			case '"', '*', '(', ')', '{', '}', ':', '^', '+', '-', '\\':
-				return -1
-			default:
-				return r
-			}
-		}, w)
-		clean = strings.TrimSpace(clean)
+		clean := stripFTSSpecialChars(w)
 		if clean != "" {
 			escaped = append(escaped, `"`+clean+`"`)
 		}

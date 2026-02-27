@@ -211,10 +211,10 @@ func TestContextualPatternKey(t *testing.T) {
 		want     string
 	}{
 		{"no context", "", "", "", "workflow", "workflow"},
-		{"task only", "bugfix", "", "", "workflow", "workflow:bugfix:normal:balanced"},
-		{"velocity only", "", "fast", "", "workflow", "workflow:unknown:fast:balanced"},
-		{"full context", "feature", "slow", "", "checkpoint", "checkpoint:feature:slow:balanced"},
-		{"with cluster", "bugfix", "fast", "conservative", "workflow", "workflow:bugfix:fast:conservative"},
+		{"task only", "bugfix", "", "", "workflow", "workflow:bugfix:balanced"},
+		{"velocity_ignored", "", "fast", "", "workflow", "workflow"},
+		{"full context", "feature", "slow", "", "checkpoint", "checkpoint:feature:balanced"},
+		{"with cluster", "bugfix", "fast", "conservative", "workflow", "workflow:bugfix:conservative"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -78,42 +78,74 @@ func classifyIntent(intent string) TaskType {
 	lower := strings.ToLower(intent)
 
 	// Order matters: test before feature (since "add test" should be test, not feature).
-	for _, kw := range []string{"test", "coverage", "spec", "テスト", "カバレッジ"} {
+	for _, kw := range []string{
+		"test", "coverage", "spec", "unittest", "e2e", "acceptance",
+		"assert", "mock", "stub", "snapshot", "benchmark",
+		"テスト", "カバレッジ", "単体テスト", "結合テスト", "受入テスト",
+	} {
 		if strings.Contains(lower, kw) {
 			return TaskTest
 		}
 	}
-	for _, kw := range []string{"fix", "bug", "error", "broken", "crash", "修正", "バグ", "エラー", "壊れ"} {
+	for _, kw := range []string{
+		"fix", "bug", "error", "broken", "crash", "regression", "revert",
+		"rollback", "hotfix", "patch", "workaround", "panic", "nil pointer",
+		"修正", "バグ", "エラー", "壊れ", "不具合", "デグレ", "回避策",
+	} {
 		if strings.Contains(lower, kw) {
 			return TaskBugfix
 		}
 	}
-	for _, kw := range []string{"refactor", "clean", "reorganize", "simplify", "リファクタ", "整理"} {
+	for _, kw := range []string{
+		"refactor", "clean", "reorganize", "simplify", "deprecate",
+		"migrate", "upgrade", "modernize", "optimize", "decouple", "extract", "inline",
+		"リファクタ", "整理", "最適化", "移行", "分離",
+	} {
 		if strings.Contains(lower, kw) {
 			return TaskRefactor
 		}
 	}
-	for _, kw := range []string{"add", "implement", "create", "build", "new", "追加", "実装", "作成"} {
+	for _, kw := range []string{
+		"add", "implement", "create", "build", "new", "endpoint",
+		"integration", "api", "plugin", "extension", "handler", "middleware", "route",
+		"追加", "実装", "作成", "機能", "エンドポイント", "ハンドラ",
+	} {
 		if strings.Contains(lower, kw) {
 			return TaskFeature
 		}
 	}
-	for _, kw := range []string{"explore", "investigate", "understand", "how does", "what is", "where is", "調査", "理解", "探索"} {
+	for _, kw := range []string{
+		"explore", "investigate", "understand", "how does", "what is", "where is",
+		"how to", "poc", "analyze", "research", "spike", "prototype",
+		"調査", "理解", "探索", "分析", "調べ", "確認方法",
+	} {
 		if strings.Contains(lower, kw) {
 			return TaskExplore
 		}
 	}
-	for _, kw := range []string{"debug", "trace", "breakpoint", "inspect", "デバッグ", "追跡"} {
+	for _, kw := range []string{
+		"debug", "trace", "breakpoint", "inspect", "step through",
+		"print debug", "verbose", "logging", "stack trace", "profile",
+		"デバッグ", "追跡", "ログ", "プロファイル", "スタックトレース",
+	} {
 		if strings.Contains(lower, kw) {
 			return TaskDebug
 		}
 	}
-	for _, kw := range []string{"review", "check", "audit", "レビュー", "確認", "監査"} {
+	for _, kw := range []string{
+		"review", "check", "audit", "approve", "feedback",
+		"pull request", "pr", "diff", "merge request",
+		"レビュー", "確認", "監査", "レビュー依頼", "差分確認",
+	} {
 		if strings.Contains(lower, kw) {
 			return TaskReview
 		}
 	}
-	for _, kw := range []string{"document", "readme", "comment", "jsdoc", "godoc", "ドキュメント", "説明"} {
+	for _, kw := range []string{
+		"document", "readme", "comment", "jsdoc", "godoc",
+		"changelog", "api doc", "swagger", "openapi", "docstring",
+		"ドキュメント", "説明", "変更履歴",
+	} {
 		if strings.Contains(lower, kw) {
 			return TaskDocs
 		}

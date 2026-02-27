@@ -1,6 +1,6 @@
 # claude-buddy
 
-A proactive session companion for Claude Code — real-time anti-pattern detection, destructive command blocking, automatic context recovery, AST-based code quality analysis, git awareness, cross-project knowledge sharing, and AI-powered usage coaching. Works as a Claude Code plugin with hooks, MCP tools, skills, and agents.
+A proactive session companion for Claude Code — real-time anti-pattern detection, predictive health monitoring, causal failure diagnosis, automatic context recovery, AST-based code quality analysis with auto-fix, coverage-aware test correlation, adaptive personalization, and cross-project knowledge sharing. Works as a Claude Code plugin with hooks, MCP tools, skills, and agents.
 
 ## Install
 
@@ -234,12 +234,12 @@ Hooks actively monitor your session through Claude Code's lifecycle events:
 | Hook Event | Behavior |
 |---|---|
 | **SessionStart** | Auto-restores session context (working set, decisions, git branch), captures git state |
-| **PreToolUse** | Blocks destructive commands; warns on stale reads, git-dirty files, past failures; surfaces related decisions |
-| **PostToolUse** | Tracks tool/file patterns, code quality heuristics, test failure correlation, suggestion effectiveness |
+| **PreToolUse** | Blocks destructive commands; episode early-warning (retry cascade, explore stuck, etc.); velocity wall look-ahead; auto-applies high-confidence code fixes; warns on stale reads, git-dirty files, past failures; surfaces related decisions with resolution diffs |
+| **PostToolUse** | Tracks tool/file patterns, code quality heuristics, coverage-aware test failure correlation, suggestion effectiveness with pending verification |
 | **UserPromptSubmit** | Classifies intent/task type, injects relevant past knowledge, delivers queued nudges |
 | **PreCompact** | Serializes working set (files, intent, decisions, git branch) for automatic restoration |
 | **Stop** | Detects incomplete work (TODO/FIXME, unresolved failures), warns about uncommitted git changes |
-| **PostToolUseFailure** | Tracks failure cascades, searches past solutions, starts resolution chains |
+| **PostToolUseFailure** | Causal WHY explanations for failures, deterministic Go compile error patterns, tracks failure cascades, searches past solutions, starts resolution chains, false-positive detection for nudge resolution |
 | **SubagentStart** | Injects session context into subagent launches |
 | **SubagentStop** | Records subagent outcomes and delivery context |
 | **SessionEnd** | Persists user profile, co-change data, workflow sequences; cleans up session state |
@@ -254,14 +254,19 @@ Hooks actively monitor your session through Claude Code's lifecycle events:
 
 **Proactive advisor signals** (context-injected via `additionalContext`):
 
+- **Episode early-warning**: Detects emerging anti-patterns (retry cascade, explore stuck, edit-fail spiral, test-fixup fail, context overload) *before* tool execution, not after
+- **Velocity wall look-ahead**: Predicts health decline using EWMV variance gating + OLS trend regression, warns ~30 tool calls before threshold breach
+- **Auto-apply code fixes**: High-confidence (>=0.9) AST-based patches auto-applied on Edit for Go files (nil-error-wrap, defer-in-loop). Revert tracking for dynamic confidence adjustment
+- **Causal WHY explanations**: Every failure diagnostic includes a WHY line explaining the root cause with causal links to recently edited files
+- **Deterministic compile error patterns**: 9 Go-specific regex patterns (undefined, type mismatch, unused import, missing return, etc.) checked before LLM fallback (<1ms)
 - **Stale read warning**: File not re-read before editing, or last Read was 8+ tool calls ago
-- **Past failure warning**: Similar Bash command failed earlier in the session
+- **Past failure warning**: Similar Bash command failed earlier in the session, with resolution diff display showing previous `old→new` fixes
 - **Git dirty file warning**: Editing a file with pre-existing uncommitted changes
 - **Code quality analysis**: Go via `go/ast`, Python/JS/TS/Rust via tree-sitter AST — detects unchecked errors, debug prints, bare excepts, mutable defaults, loose equality, hardcoded secrets, TODO without ticket numbers, and more. Includes concrete fix patch generation via CodeFixer
-- **Test coverage mapping**: AST-based function→test mapping generates specific `go test -run TestName ./pkg/` suggestions instead of generic "run tests"
-- **Test failure correlation**: Connects test failures to recently edited files
-- **Workflow guidance**: Suggests test-first approach for bugfix/refactor tasks
-- **Past knowledge surfacing**: Surfaces related decisions and error solutions from previous sessions
+- **Test coverage mapping**: AST-based function→test mapping generates specific `go test -run TestName ./pkg/` suggestions instead of generic "run tests". Coverage map used for causal test failure correlation
+- **Test failure correlation**: Connects test failures to recently edited files via coverage map (function-level precision) with fallback to file-list heuristics
+- **Workflow guidance**: Learned playbooks from past sessions with concrete file names and test commands; suggests test-first approach for bugfix/refactor tasks
+- **Past knowledge surfacing**: Surfaces related decisions, error solutions, and resolution chains (tool sequences) from previous sessions
 - **Cross-project learning**: Patterns and decisions are synced to a global DB (`~/.claude-buddy/global.db`) for reuse across projects
 
 **Automatic context recovery** (survives compaction):
@@ -270,7 +275,7 @@ Working set (currently edited files, intent, task type, key decisions, git branc
 
 **Suggestion effectiveness tracking**:
 
-Nudge delivery and resolution are tracked across sessions. Patterns delivered 20+ times with <10% resolution rate are automatically suppressed to reduce noise. Explicit feedback via `buddy_feedback` MCP tool is integrated into Thompson Sampling with KL regularization for priority adjustment.
+Nudge delivery and resolution are tracked across sessions with two-step pending verification (mark pending on resolution action → confirm on next tool success/failure) to reduce false positives. Implicit negative signals are recorded when 4+ tools elapse without resolution. Patterns delivered 20+ times with <10% resolution rate are automatically suppressed. Auto-feedback is skipped when it contradicts explicit user feedback. Explicit feedback via `buddy_feedback` MCP tool is integrated into Thompson Sampling with KL regularization for priority adjustment.
 
 **Deep intent model**:
 
@@ -278,7 +283,7 @@ Nudge delivery and resolution are tracked across sessions. Patterns delivered 20
 
 **User profiling and personalization**:
 
-Behavioral clustering (conservative/balanced/aggressive) based on read-write ratio, test frequency, and session velocity. Profile influences suggestion priority and delivery timing via phase-aware gating.
+Behavioral clustering (conservative/balanced/aggressive) based on read-write ratio, test frequency, and session velocity. Profile influences anti-pattern detection thresholds (conservative: 0.7x for earlier warnings, aggressive: 1.5x for higher tolerance), suggestion priority, and delivery timing via phase-aware gating.
 
 ## Architecture
 
@@ -326,4 +331,4 @@ Ollama powers `buddy_patterns` and hook-based knowledge injection via vector sem
 
 Ollama availability is checked once at session start and cached — subsequent hook calls use a single HTTP round-trip for embedding.
 
-Without Ollama, knowledge search falls back to FTS5 BM25 / LIKE — all features work, just without semantic matching.
+Without Ollama, knowledge search falls back to FTS5 BM25 / LIKE — all features work, just without semantic matching. FTS5 uses phrase-first search for multi-word queries (higher precision), falling back to OR-based search, with title-match reordering for relevance.
