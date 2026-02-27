@@ -57,13 +57,16 @@ func handleUserPromptSubmit(input []byte) (*HookOutput, error) {
 			_ = sdb.SetWorkingSet("task_type", string(taskType))
 		}
 
-		// Deep intent analysis: domain, workflow phase, risk profile.
+		// Deep intent analysis: domain, workflow phase, risk profile, implicit goal.
 		di := AnalyzeDeepIntent(sdb, in.Prompt, taskType)
 		_ = sdb.SetWorkingSet("domain", di.Domain)
 		if di.WorkflowPhase != PhaseUnknown {
 			_ = sdb.SetWorkingSet("workflow_phase", string(di.WorkflowPhase))
 		}
 		_ = sdb.SetWorkingSet("risk_profile", di.RiskProfile)
+		if di.ImplicitGoal != nil {
+			_ = sdb.SetWorkingSet("implicit_goal", di.ImplicitGoal.Goal)
+		}
 
 		// Track decisions from user prompts.
 		if containsDecisionKeyword(in.Prompt) {
@@ -268,6 +271,13 @@ func matchRelevantKnowledge(sdb *sessiondb.SessionDB, prompt string) string {
 	if len(allResults) == 0 {
 		return ""
 	}
+
+	// Re-rank by task-type and domain affinity.
+	domain, _ := sdb.GetWorkingSet("domain")
+	allResults = store.RankPatterns(allResults, &store.RankContext{
+		TaskType: taskTypeStr,
+		Domain:   domain,
+	})
 
 	// Set cooldowns for matched types.
 	matchedTypes := make(map[string]bool)

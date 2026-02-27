@@ -123,6 +123,16 @@ func patternsHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandler
 			searchMethod = "keyword"
 		}
 
+		// Re-rank by task-type and domain affinity if context is provided.
+		taskType := req.GetString("task_type", "")
+		domain := req.GetString("domain", "")
+		if taskType != "" || domain != "" {
+			patterns = store.RankPatterns(patterns, &store.RankContext{
+				TaskType: taskType,
+				Domain:   domain,
+			})
+		}
+
 		total, _ := st.CountPatterns()
 
 		patternList := make([]map[string]any, 0, len(patterns))

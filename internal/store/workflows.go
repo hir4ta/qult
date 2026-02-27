@@ -81,6 +81,90 @@ func (s *Store) GetSuccessfulWorkflows(projectPath, taskType string, limit int) 
 	return results, rows.Err()
 }
 
+// GetFailedWorkflows returns failed workflow sequences for a task type.
+func (s *Store) GetFailedWorkflows(taskType string, limit int) ([]WorkflowSequence, error) {
+	rows, err := s.db.Query(`
+		SELECT ws.id, ws.session_id, ws.task_type, ws.phase_sequence, ws.tool_count, ws.duration_sec
+		FROM workflow_sequences ws
+		WHERE ws.task_type = ? AND ws.success = 0
+		ORDER BY ws.timestamp DESC
+		LIMIT ?`, taskType, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: get failed workflows: %w", err)
+	}
+	defer rows.Close()
+
+	var results []WorkflowSequence
+	for rows.Next() {
+		var ws WorkflowSequence
+		var phasesJSON string
+		if err := rows.Scan(&ws.ID, &ws.SessionID, &ws.TaskType, &phasesJSON, &ws.ToolCount, &ws.DurationSec); err != nil {
+			continue
+		}
+		if err := json.Unmarshal([]byte(phasesJSON), &ws.PhaseSequence); err != nil {
+			continue
+		}
+		results = append(results, ws)
+	}
+	return results, rows.Err()
+}
+
+// MatchesWorkflowTrajectory checks if the given phase sequence is similar to
+// any past failed workflow. Returns the best-matching failed session ID and
+// the similarity score (0.0-1.0). Uses Jaccard similarity on phase bigrams.
+func (s *Store) MatchesWorkflowTrajectory(taskType string, currentPhases []string) (string, float64, error) {
+	failed, err := s.GetFailedWorkflows(taskType, 10)
+	if err != nil || len(failed) == 0 {
+		return "", 0, err
+	}
+
+	currentBigrams := phaseBigrams(currentPhases)
+	if len(currentBigrams) == 0 {
+		return "", 0, nil
+	}
+
+	var bestSession string
+	var bestSim float64
+
+	for _, ws := range failed {
+		failedBigrams := phaseBigrams(ws.PhaseSequence)
+		sim := jaccardSimilarity(currentBigrams, failedBigrams)
+		if sim > bestSim {
+			bestSim = sim
+			bestSession = ws.SessionID
+		}
+	}
+
+	return bestSession, bestSim, nil
+}
+
+// phaseBigrams returns the set of consecutive phase pairs.
+func phaseBigrams(phases []string) map[string]bool {
+	bigrams := make(map[string]bool)
+	for i := 0; i < len(phases)-1; i++ {
+		bigrams[phases[i]+"→"+phases[i+1]] = true
+	}
+	return bigrams
+}
+
+// jaccardSimilarity computes |A∩B| / |A∪B| for two sets.
+func jaccardSimilarity(a, b map[string]bool) float64 {
+	if len(a) == 0 && len(b) == 0 {
+		return 0
+	}
+	intersection := 0
+	for k := range a {
+		if b[k] {
+			intersection++
+		}
+	}
+	union := len(a) + len(b) - intersection
+	if union == 0 {
+		return 0
+	}
+	return float64(intersection) / float64(union)
+}
+
 // MostCommonWorkflow returns the most frequent phase ordering from successful workflows.
 // Returns nil if fewer than minExamples successful sequences exist.
 func (s *Store) MostCommonWorkflow(projectPath, taskType string, minExamples int) ([]string, int, error) {
@@ -111,7 +195,7 @@ func (s *Store) MostCommonWorkflow(projectPath, taskType string, minExamples int
 
 	var phases []string
 	if err := json.Unmarshal([]byte(bestKey), &phases); err != nil {
-		return nil, len(workflows), nil
+		return nil, 0, nil
 	}
-	return phases, len(workflows), nil
+	return phases, bestCount, nil
 }

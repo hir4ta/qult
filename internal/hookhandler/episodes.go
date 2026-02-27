@@ -48,6 +48,17 @@ func (d *HookDetector) detectEpisodes() string {
 			return sig.Message
 		}
 	}
+
+	// Check dynamically learned episodes from past sessions.
+	if msg := d.detectLearnedEpisodes(); msg != "" {
+		return msg
+	}
+
+	// Check if current session trajectory matches a past failed session.
+	if msg := d.detectTrajectoryMatch(); msg != "" {
+		return msg
+	}
+
 	return ""
 }
 

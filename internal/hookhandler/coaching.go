@@ -14,6 +14,7 @@ type coachingEntry struct {
 	situation  string
 	reasoning  string
 	suggestion string
+	command    string // optional copy-pasteable command (e.g., "go test ./...")
 }
 
 // coachingTable maps TaskType → Phase → coaching template.
@@ -175,6 +176,10 @@ func generateCoaching(sdb *sessiondb.SessionDB) string {
 	// Fall back to generic coaching table.
 	if taskMap, ok := coachingTable[taskType]; ok {
 		if entry, ok := taskMap[phase]; ok {
+			// Enrich test-phase coaching with concrete test command.
+			if phase == PhaseTest || phase == PhaseVerify {
+				entry = enrichWithTestCommand(sdb, entry)
+			}
 			return formatCoaching(entry)
 		}
 	}
@@ -182,10 +187,35 @@ func generateCoaching(sdb *sessiondb.SessionDB) string {
 	return ""
 }
 
+// enrichWithTestCommand adds a concrete test command to coaching entries
+// when coverage map and working set files are available.
+func enrichWithTestCommand(sdb *sessiondb.SessionDB, entry coachingEntry) coachingEntry {
+	if entry.command != "" {
+		return entry
+	}
+	cm := LoadCoverageMap(sdb)
+	if cm == nil {
+		return entry
+	}
+	files, _ := sdb.GetWorkingSetFiles()
+	if len(files) == 0 {
+		return entry
+	}
+	lastFile := files[len(files)-1]
+	if cmd := SuggestTestCommand(cm, lastFile, nil, ""); cmd != "" {
+		entry.command = cmd
+	}
+	return entry
+}
+
 // formatCoaching formats a coaching entry for display.
 func formatCoaching(entry coachingEntry) string {
-	return fmt.Sprintf("[buddy] coaching: %s\n  WHY: %s\n→ %s",
+	msg := fmt.Sprintf("[buddy] coaching: %s\n  WHY: %s\n→ %s",
 		entry.situation, entry.reasoning, entry.suggestion)
+	if entry.command != "" {
+		msg += "\n  Run: " + entry.command
+	}
+	return msg
 }
 
 // mapRawPhaseStr maps raw phase strings from recordPhase() to Phase constants.

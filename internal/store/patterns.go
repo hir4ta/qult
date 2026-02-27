@@ -103,7 +103,9 @@ func ExtractPatterns(events []EventRow, sessionID string, lang string) []Pattern
 }
 
 // classifySentence returns the pattern type for a sentence, or "" if not a pattern.
+// Uses keyword matching first (high confidence), then signal-based heuristics (medium confidence).
 func classifySentence(lower string) string {
+	// Phase 1: Keyword matching (existing, high confidence).
 	for _, kw := range errorKeywords {
 		if strings.Contains(lower, strings.ToLower(kw)) {
 			return "error_solution"
@@ -117,6 +119,49 @@ func classifySentence(lower string) string {
 	for _, kw := range allKeywords {
 		if strings.Contains(lower, strings.ToLower(kw)) {
 			return "decision"
+		}
+	}
+
+	// Phase 2: Signal-based heuristics (captures implicit knowledge without keywords).
+	return classifySentenceBySignals(lower)
+}
+
+// signalPatterns define structural cues that indicate knowledge patterns
+// without requiring explicit keywords like "architecture" or "trade-off".
+var signalPatterns = []struct {
+	patternType string
+	cues        []string
+}{
+	// Error solutions: statements about fixes/workarounds.
+	{"error_solution", []string{
+		"solved by", "caused by", "happens when", "occurs when",
+		"needs to be", "must be", "should be", "fails if",
+		"returns nil", "returns null", "returns empty",
+	}},
+	// Decisions: statements about choosing between alternatives.
+	{"decision", []string{
+		"instead of", "rather than", "better than", "prefer ",
+		"chose ", "picked ", "switched to", "moved to",
+		"not using", "avoided ", "rejected ",
+		"ではなく", "の代わりに", "より良い",
+	}},
+	// Architecture: statements about how/why things are structured.
+	{"architecture", []string{
+		"responsible for", "handles ", "validates ",
+		"prevents ", "ensures ", "guarantees ",
+		"separates ", "decouples ", "isolates ",
+		"delegates to", "wraps ", "proxies ",
+		"を担当", "を処理", "を検証", "を防ぐ",
+	}},
+}
+
+// classifySentenceBySignals uses structural cues to detect implicit knowledge.
+func classifySentenceBySignals(lower string) string {
+	for _, sp := range signalPatterns {
+		for _, cue := range sp.cues {
+			if strings.Contains(lower, cue) {
+				return sp.patternType
+			}
 		}
 	}
 	return ""

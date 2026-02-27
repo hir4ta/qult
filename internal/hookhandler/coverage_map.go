@@ -209,6 +209,21 @@ func suggestFallbackTestCommand(filePath, cwd string) string {
 	return "go test " + pkg + "/..."
 }
 
+// UntestedFunctions returns exported function names that have no matching test.
+func (cm *CoverageMap) UntestedFunctions(relPath string, funcs []string) []string {
+	if cm == nil {
+		return nil
+	}
+	var untested []string
+	for _, fn := range funcs {
+		key := relPath + ":" + fn
+		if len(cm.FuncToTests[key]) == 0 {
+			untested = append(untested, fn)
+		}
+	}
+	return untested
+}
+
 // SaveCoverageMap serializes the coverage map to sessiondb.
 func SaveCoverageMap(sdb *sessiondb.SessionDB, cm *CoverageMap) {
 	data, err := json.Marshal(cm)

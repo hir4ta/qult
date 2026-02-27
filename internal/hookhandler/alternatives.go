@@ -173,7 +173,57 @@ func editAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 		}
 	}
 
-	// 6. File hotspot — edited too many times this session.
+	// 6. Concrete test command for this file.
+	cm := LoadCoverageMap(sdb)
+	if cm != nil {
+		if cmd := SuggestTestCommand(cm, ei.FilePath, nil, ""); cmd != "" {
+			alts = append(alts, Alternative{
+				Label:     "Run related tests",
+				Rationale: cmd,
+				Why:       "Running tests for the file you're editing catches regressions immediately.",
+				Priority:  50,
+			})
+		}
+		// Test gap detection.
+		relPath := ei.FilePath
+		sourceFuncs := extractSourceFunctions(ei.FilePath)
+		if len(sourceFuncs) > 0 {
+			untested := cm.UntestedFunctions(relPath, sourceFuncs)
+			if len(untested) > 0 {
+				names := strings.Join(untested, ", ")
+				if len([]rune(names)) > 80 {
+					names = string([]rune(names)[:80]) + "..."
+				}
+				alts = append(alts, Alternative{
+					Label:     "Untested functions",
+					Rationale: fmt.Sprintf("%d function(s) lack tests: %s", len(untested), names),
+					Priority:  35,
+				})
+			}
+		}
+	}
+
+	// 6b. File co-change suggestions.
+	if st != nil {
+		coChanges, _ := st.CoChangedFiles(ei.FilePath, 3)
+		for _, cc := range coChanges {
+			if cc.SessionCount < 3 {
+				continue
+			}
+			other := cc.FileB
+			if other == ei.FilePath {
+				other = cc.FileA
+			}
+			alts = append(alts, Alternative{
+				Label:     "Co-changed file",
+				Rationale: fmt.Sprintf("%s is often changed with this file (%d sessions).", filepath.Base(other), cc.SessionCount),
+				Why:       "Files that change together may have implicit coupling. Review the related file to avoid inconsistencies.",
+				Priority:  38,
+			})
+		}
+	}
+
+	// 8. File hotspot — edited too many times this session.
 	files, _ := sdb.GetWorkingSetFiles()
 	editCount := 0
 	for _, f := range files {
@@ -189,7 +239,7 @@ func editAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 		})
 	}
 
-	// 7. Intent-aware: editing without tests for bugfix/refactor tasks.
+	// 9. Intent-aware: editing without tests for bugfix/refactor tasks.
 	taskType, _ := sdb.GetContext("task_type")
 	hasTestRun, _ := sdb.GetContext("has_test_run")
 	if (taskType == "bugfix" || taskType == "refactor") && hasTestRun != "true" {
@@ -203,7 +253,7 @@ func editAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 		}
 	}
 
-	// 8. Pre-existing git changes.
+	// 10. Pre-existing git changes.
 	dirtyFiles, _ := sdb.GetWorkingSet("git_dirty_files")
 	if dirtyFiles != "" {
 		target := ei.FilePath

@@ -23,6 +23,8 @@ type CodeFixer interface {
 
 var fixerRegistry = map[string]CodeFixer{
 	"go": &goFixer{},
+	"py": &pythonFixer{},
+	"js": &jsFixer{},
 }
 
 // GetFixer returns the CodeFixer for the given file path, or nil.

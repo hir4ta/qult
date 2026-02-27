@@ -212,6 +212,110 @@ func stripFTSSpecialChars(w string) string {
 	return strings.TrimSpace(clean)
 }
 
+// RankContext provides context for re-ranking search results by task affinity.
+type RankContext struct {
+	TaskType string // bugfix, feature, refactor, test, etc.
+	Domain   string // auth, database, ui, api, etc.
+}
+
+// RankPatterns re-ranks search results using task-type affinity and domain affinity.
+// Results are sorted by computed score (descending).
+func RankPatterns(results []PatternRow, ctx *RankContext) []PatternRow {
+	if len(results) <= 1 || ctx == nil {
+		return results
+	}
+
+	type scored struct {
+		pattern PatternRow
+		score   float64
+	}
+
+	scored_ := make([]scored, len(results))
+	for i, r := range results {
+		score := 1.0
+
+		// Task-type affinity: boost patterns whose type aligns with the current task.
+		score *= taskTypeAffinity(ctx.TaskType, r.PatternType)
+
+		// Domain affinity: boost patterns from files in the same domain.
+		score *= domainAffinity(ctx.Domain, r)
+
+		scored_[i] = scored{pattern: r, score: score}
+	}
+
+	// Stable sort by score descending.
+	for i := 1; i < len(scored_); i++ {
+		for j := i; j > 0 && scored_[j].score > scored_[j-1].score; j-- {
+			scored_[j], scored_[j-1] = scored_[j-1], scored_[j]
+		}
+	}
+
+	ranked := make([]PatternRow, len(scored_))
+	for i, s := range scored_ {
+		ranked[i] = s.pattern
+	}
+	return ranked
+}
+
+// taskTypeAffinity returns a multiplier based on how well a pattern type
+// matches the current task type.
+func taskTypeAffinity(taskType, patternType string) float64 {
+	switch taskType {
+	case "bugfix", "debug":
+		switch patternType {
+		case "error_solution":
+			return 2.0
+		case "decision":
+			return 1.2
+		}
+	case "feature":
+		switch patternType {
+		case "architecture":
+			return 1.5
+		case "decision":
+			return 1.3
+		}
+	case "refactor":
+		switch patternType {
+		case "decision":
+			return 1.5
+		case "architecture":
+			return 1.3
+		}
+	case "test":
+		switch patternType {
+		case "error_solution":
+			return 1.3
+		}
+	}
+	return 1.0
+}
+
+// domainAffinity returns a multiplier based on pattern-domain overlap.
+// Checks if any of the pattern's files or tags suggest the same domain.
+func domainAffinity(domain string, p PatternRow) float64 {
+	if domain == "" || domain == "general" {
+		return 1.0
+	}
+
+	// Check tags for domain match.
+	for _, tag := range p.Tags {
+		if strings.EqualFold(tag, domain) {
+			return 1.3
+		}
+	}
+
+	// Check file paths for domain hints.
+	domainLower := strings.ToLower(domain)
+	for _, f := range p.Files {
+		if strings.Contains(strings.ToLower(f), domainLower) {
+			return 1.2
+		}
+	}
+
+	return 1.0
+}
+
 // buildFTSQuery converts a user query into an FTS5 MATCH expression.
 // Each word is joined with OR for broad matching.
 // Special FTS5 characters are escaped.

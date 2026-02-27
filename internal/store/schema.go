@@ -2,7 +2,7 @@ package store
 
 import "database/sql"
 
-const schemaVersion = 10
+const schemaVersion = 11
 
 const ddlV1 = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -391,6 +391,24 @@ CREATE INDEX IF NOT EXISTS idx_feedbacks_pattern ON feedbacks(pattern);
 CREATE INDEX IF NOT EXISTS idx_feedbacks_session ON feedbacks(session_id);
 `
 
+const ddlV11 = `
+-- ==========================================================
+-- learned_episodes: dynamically learned anti-pattern episodes
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS learned_episodes (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id      TEXT NOT NULL,
+    name            TEXT NOT NULL UNIQUE,
+    tool_sequence   TEXT NOT NULL,
+    total_steps     INTEGER NOT NULL,
+    outcome         TEXT NOT NULL DEFAULT 'failure',
+    occurrences     INTEGER NOT NULL DEFAULT 1,
+    timestamp       TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+CREATE INDEX IF NOT EXISTS idx_learned_ep_name ON learned_episodes(name);
+`
+
 // Migrate applies all pending schema migrations to the database.
 func Migrate(db *sql.DB) error {
 	var current int
@@ -450,6 +468,11 @@ func Migrate(db *sql.DB) error {
 	}
 	if current < 10 {
 		if _, err := db.Exec(ddlV10); err != nil {
+			return err
+		}
+	}
+	if current < 11 {
+		if _, err := db.Exec(ddlV11); err != nil {
 			return err
 		}
 	}
