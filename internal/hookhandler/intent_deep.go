@@ -35,6 +35,11 @@ func AnalyzeDeepIntent(sdb *sessiondb.SessionDB, prompt string, taskType TaskTyp
 		Confidence:  0.5,
 	}
 
+	// Fallback: if prompt doesn't reveal domain, infer from working set files.
+	if di.Domain == "general" && sdb != nil {
+		di.Domain = inferDomainFromFiles(sdb)
+	}
+
 	// Level 3: reuse existing phase detection.
 	if progress := GetPhaseProgress(sdb); progress != nil {
 		di.WorkflowPhase = progress.CurrentPhase
@@ -42,6 +47,9 @@ func AnalyzeDeepIntent(sdb *sessiondb.SessionDB, prompt string, taskType TaskTyp
 
 	// Level 5: infer implicit goal from session signals + prompt cues.
 	di.ImplicitGoal = inferImplicitGoal(sdb, prompt, di.Domain)
+
+	// Level 6 (enrichment): session history signals refine confidence.
+	enrichFromSessionHistory(sdb, di)
 
 	// Confidence: higher when more layers are populated.
 	populated := 0
@@ -63,6 +71,81 @@ func AnalyzeDeepIntent(sdb *sessiondb.SessionDB, prompt string, taskType TaskTyp
 	di.Confidence = float64(populated) / 5.0
 
 	return di
+}
+
+// inferDomainFromFiles determines domain from recently touched files
+// when the prompt text alone doesn't reveal it.
+func inferDomainFromFiles(sdb *sessiondb.SessionDB) string {
+	files, _ := sdb.GetWorkingSetFiles()
+	if len(files) == 0 {
+		return "general"
+	}
+
+	scores := make(map[string]int)
+	for _, f := range files {
+		fl := strings.ToLower(f)
+		for domain, keywords := range domainKeywords {
+			for _, kw := range keywords {
+				if strings.Contains(fl, kw) {
+					scores[domain]++
+				}
+			}
+		}
+	}
+
+	best := "general"
+	bestScore := 0
+	for domain, score := range scores {
+		if score > bestScore {
+			bestScore = score
+			best = domain
+		}
+	}
+	return best
+}
+
+// enrichFromSessionHistory refines the DeepIntent with cross-session signals.
+// Boosts confidence when the task/domain combo has prior history, and adjusts
+// implicit goal when recurring struggles are detected.
+func enrichFromSessionHistory(sdb *sessiondb.SessionDB, di *DeepIntent) {
+	if sdb == nil || di.TaskType == TaskUnknown {
+		return
+	}
+
+	st, err := store.OpenDefault()
+	if err != nil {
+		return
+	}
+	defer st.Close()
+
+	// Check if this task type has frequently failed in this project.
+	projectPath, _ := sdb.GetWorkingSet("project_path")
+	if projectPath == "" {
+		return
+	}
+
+	failed, _ := st.GetFailedWorkflows(string(di.TaskType), 10)
+	successful, _ := st.GetSuccessfulWorkflows(projectPath, string(di.TaskType), 10)
+
+	if len(failed)+len(successful) < 3 {
+		return
+	}
+
+	// If failure rate is high for this task type, boost toward caution.
+	total := len(failed) + len(successful)
+	failRate := float64(len(failed)) / float64(total)
+
+	if failRate > 0.5 && di.RiskProfile == "aggressive" {
+		di.RiskProfile = "balanced"
+	}
+
+	// Boost confidence when we have solid history for this task type.
+	if total >= 5 {
+		di.Confidence += 0.1
+		if di.Confidence > 1.0 {
+			di.Confidence = 1.0
+		}
+	}
 }
 
 // promptGoalCues maps prompt keywords to candidate implicit goals.

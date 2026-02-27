@@ -1,13 +1,43 @@
 package mcpserver
 
 import (
+	"context"
+
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/hir4ta/claude-buddy/internal/embedder"
+	"github.com/hir4ta/claude-buddy/internal/hookhandler"
 	"github.com/hir4ta/claude-buddy/internal/locale"
+	"github.com/hir4ta/claude-buddy/internal/sessiondb"
 	"github.com/hir4ta/claude-buddy/internal/store"
 )
+
+// withBuddyTracker wraps a handler to reset the silence-as-signal counter
+// whenever a buddy MCP tool is invoked. This signals to the Thompson Sampling
+// system that the user is actively engaging with buddy suggestions.
+func withBuddyTracker(st *store.Store, h server.ToolHandlerFunc) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		resetBuddyTracker(st)
+		return h(ctx, req)
+	}
+}
+
+func resetBuddyTracker(st *store.Store) {
+	if st == nil {
+		return
+	}
+	sid := latestSessionID(st)
+	if sid == "" || sid == "unknown" {
+		return
+	}
+	sdb, err := sessiondb.Open(sid)
+	if err != nil {
+		return
+	}
+	defer sdb.Close()
+	hookhandler.ResetBuddyCallTracker(sdb)
+}
 
 const serverInstructions = `claude-buddy is a real-time session advisor for Claude Code. It monitors your session, detects anti-patterns, and provides proactive workflow guidance.
 
@@ -31,6 +61,7 @@ const serverInstructions = `claude-buddy is a real-time session advisor for Clau
 - buddy_session_outlook: Get a holistic session outlook with health, phase progress, risk assessment, and recommendations.
 - buddy_task_progress: Track multi-session progress with session chains, decisions, workflows, and failure patterns.
 - buddy_strategic_plan: Generate optimal workflow plan for a task type based on historical data and user style.
+- buddy_pending_nudges: Get pending and recently delivered nudges from hook system. Bridges proactive hooks and on-demand MCP.
 
 ## Usage Guidelines
 
@@ -72,7 +103,7 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 					mcp.Description("Number of recent sessions to include (default: 1)"),
 				),
 			),
-			Handler: statsHandler(claudeHome),
+			Handler: withBuddyTracker(st, statsHandler(claudeHome)),
 		},
 		server.ServerTool{
 			Tool: mcp.NewTool("buddy_suggest",
@@ -86,7 +117,7 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 					mcp.Description("Session ID to analyze (optional, defaults to most recent)"),
 				),
 			),
-			Handler: suggestHandler(claudeHome, lang),
+			Handler: withBuddyTracker(st, suggestHandler(claudeHome, lang)),
 		},
 		server.ServerTool{
 			Tool: mcp.NewTool("buddy_current_state",
@@ -100,7 +131,7 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 					mcp.Description("Session ID (optional, defaults to latest)"),
 				),
 			),
-			Handler: currentStateHandler(claudeHome, lang),
+			Handler: withBuddyTracker(st, currentStateHandler(claudeHome, lang)),
 		},
 		server.ServerTool{
 			Tool: mcp.NewTool("buddy_sessions",
@@ -114,7 +145,7 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 					mcp.Description("Maximum number of sessions to return (default: 10)"),
 				),
 			),
-			Handler: sessionsHandler(claudeHome),
+			Handler: withBuddyTracker(st, sessionsHandler(claudeHome)),
 		},
 		server.ServerTool{
 			Tool: mcp.NewTool("buddy_resume",
@@ -131,7 +162,7 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 					mcp.Description("Project name or path to filter sessions (optional)"),
 				),
 			),
-			Handler: resumeHandler(st),
+			Handler: withBuddyTracker(st, resumeHandler(st)),
 		},
 		server.ServerTool{
 			Tool: mcp.NewTool("buddy_recall",
@@ -155,7 +186,7 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 					mcp.Description("Maximum number of results to return (default: 10)"),
 				),
 			),
-			Handler: recallHandler(st),
+			Handler: withBuddyTracker(st, recallHandler(st)),
 		},
 		server.ServerTool{
 			Tool: mcp.NewTool("buddy_alerts",
@@ -169,7 +200,7 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 					mcp.Description("Session ID (optional, defaults to latest)"),
 				),
 			),
-			Handler: alertsHandler(claudeHome, lang),
+			Handler: withBuddyTracker(st, alertsHandler(claudeHome, lang)),
 		},
 		server.ServerTool{
 			Tool: mcp.NewTool("buddy_decisions",
@@ -192,7 +223,7 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 					mcp.Description("Maximum number of decisions to return (default: 20)"),
 				),
 			),
-			Handler: decisionsHandler(st),
+			Handler: withBuddyTracker(st, decisionsHandler(st)),
 		},
 		server.ServerTool{
 			Tool: mcp.NewTool("buddy_patterns",
@@ -213,7 +244,7 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 					mcp.Description("Maximum results (default: 5)"),
 				),
 			),
-			Handler: patternsHandler(st, emb),
+			Handler: withBuddyTracker(st, patternsHandler(st, emb)),
 		},
 		server.ServerTool{
 			Tool: mcp.NewTool("buddy_estimate",
@@ -231,7 +262,7 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 					mcp.Description("Project path to filter estimates (optional)"),
 				),
 			),
-			Handler: estimateHandler(st),
+			Handler: withBuddyTracker(st, estimateHandler(st)),
 		},
 		server.ServerTool{
 			Tool: mcp.NewTool("buddy_next_step",
@@ -248,7 +279,7 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 					mcp.Description("Optional additional context about what you're trying to achieve"),
 				),
 			),
-			Handler: nextStepHandler(claudeHome),
+			Handler: withBuddyTracker(st, nextStepHandler(claudeHome)),
 		},
 		server.ServerTool{
 			Tool: mcp.NewTool("buddy_feedback",
@@ -273,7 +304,7 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 					mcp.Description("Additional feedback details (optional)"),
 				),
 			),
-			Handler: feedbackHandler(st),
+			Handler: withBuddyTracker(st, feedbackHandler(st)),
 		},
 		server.ServerTool{
 			Tool: mcp.NewTool("buddy_skill_context",
@@ -291,7 +322,7 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 					mcp.Description("Session ID (optional, defaults to latest)"),
 				),
 			),
-			Handler: skillContextHandler(claudeHome),
+			Handler: withBuddyTracker(st, skillContextHandler(claudeHome)),
 		},
 		server.ServerTool{
 			Tool: mcp.NewTool("buddy_cross_project",
@@ -312,7 +343,7 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 					mcp.Description("Maximum results (default: 5)"),
 				),
 			),
-			Handler: crossProjectHandler(),
+			Handler: withBuddyTracker(st, crossProjectHandler()),
 		},
 		server.ServerTool{
 			Tool: mcp.NewTool("buddy_fix",
@@ -336,7 +367,7 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 					mcp.Description("Line number of the finding (1-indexed)"),
 				),
 			),
-			Handler: fixHandler(),
+			Handler: withBuddyTracker(st, fixHandler()),
 		},
 		server.ServerTool{
 			Tool: mcp.NewTool("buddy_diagnose",
@@ -357,7 +388,7 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 					mcp.Description("File path related to the error"),
 				),
 			),
-			Handler: diagnoseHandler(st),
+			Handler: withBuddyTracker(st, diagnoseHandler(st)),
 		},
 		server.ServerTool{
 			Tool: mcp.NewTool("buddy_session_outlook",
@@ -368,7 +399,7 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 				mcp.WithIdempotentHintAnnotation(true),
 				mcp.WithOpenWorldHintAnnotation(false),
 			),
-			Handler: sessionOutlookHandler(claudeHome, lang, st),
+			Handler: withBuddyTracker(st, sessionOutlookHandler(claudeHome, lang, st)),
 		},
 		server.ServerTool{
 			Tool: mcp.NewTool("buddy_task_progress",
@@ -388,7 +419,7 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 					mcp.Description("Task type for workflow analysis (bugfix/feature/refactor/test/explore)"),
 				),
 			),
-			Handler: taskProgressHandler(st),
+			Handler: withBuddyTracker(st, taskProgressHandler(st)),
 		},
 		server.ServerTool{
 			Tool: mcp.NewTool("buddy_strategic_plan",
@@ -406,7 +437,21 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 					mcp.Description("Project path for project-specific patterns (optional)"),
 				),
 			),
-			Handler: strategicPlanHandler(st),
+			Handler: withBuddyTracker(st, strategicPlanHandler(st)),
+		},
+		server.ServerTool{
+			Tool: mcp.NewTool("buddy_pending_nudges",
+				mcp.WithDescription("Get pending and recently delivered nudges from the hook system. Bridges the gap between proactive hook signals and on-demand MCP queries. Call this to discover advice that hooks generated but you may have missed."),
+				mcp.WithTitleAnnotation("Pending Nudges"),
+				mcp.WithReadOnlyHintAnnotation(true),
+				mcp.WithDestructiveHintAnnotation(false),
+				mcp.WithIdempotentHintAnnotation(true),
+				mcp.WithOpenWorldHintAnnotation(false),
+				mcp.WithString("session_id",
+					mcp.Description("Session ID (optional, defaults to latest)"),
+				),
+			),
+			Handler: withBuddyTracker(st, pendingNudgesHandler(st)),
 		},
 	)
 

@@ -34,7 +34,24 @@ var codeHeuristics = []codeHeuristic{
 	{Name: "rs_unsafe_no_comment", Language: "rs", Check: checkRustUnsafeNoComment},
 	{Name: "hardcoded_secret", Language: "", Check: checkHardcodedSecret},
 	{Name: "sql_injection", Language: "", Check: checkSQLInjection},
+	{Name: "command_injection", Language: "", Check: checkCommandInjection},
+	{Name: "weak_crypto", Language: "", Check: checkWeakCrypto},
 	{Name: "large_function", Language: "go", Check: checkLargeFunction},
+	// Security: SSRF, path traversal, regex DoS, unsafe deserialization
+	{Name: "ssrf", Language: "", Check: checkSSRF},
+	{Name: "path_traversal", Language: "", Check: checkPathTraversal},
+	{Name: "regex_dos", Language: "", Check: checkRegexDoS},
+	{Name: "unsafe_deserialization", Language: "", Check: checkUnsafeDeserialization},
+	// Go: resource leak, context.Background misuse
+	{Name: "go_unclosed_resource", Language: "go", Check: checkGoUnclosedResource},
+	{Name: "go_context_background", Language: "go", Check: checkGoContextBackground},
+	// Python: print in non-test, pickle untrusted, f-string injection
+	{Name: "py_print_debug", Language: "py", Check: checkPyPrintDebug},
+	{Name: "py_pickle_untrusted", Language: "py", Check: checkPyPickleUntrusted},
+	// JS/TS: floating promise, unhandled rejection
+	{Name: "js_floating_promise", Language: "js", Check: checkJSFloatingPromise},
+	// Rust: panic outside test
+	{Name: "rs_panic_outside_test", Language: "rs", Check: checkRustPanicOutsideTest},
 }
 
 // sharedMultiAnalyzer is the multi-language CodeAnalyzer singleton.
@@ -319,6 +336,48 @@ func checkSQLInjection(_, content string) string {
 	return ""
 }
 
+// --- Command injection via string concatenation ---
+
+var commandInjectionPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`os\.system\s*\(\s*["'].*\+`),
+	regexp.MustCompile(`os\.popen\s*\(\s*["'].*\+`),
+	regexp.MustCompile(`subprocess\.\w+\s*\(\s*["'].*\+`),
+	regexp.MustCompile(`subprocess\.\w+\s*\(\s*f["']`),
+	regexp.MustCompile(`exec\.Command\s*\(\s*["'].*\+`),
+	regexp.MustCompile(`child_process\.\w+\s*\(\s*["'].*\+`),
+	regexp.MustCompile(`(?i)\bexec\s*\(\s*["'].*\$\{`),
+	regexp.MustCompile(`Runtime\.getRuntime\(\)\.exec\s*\(\s*["'].*\+`),
+}
+
+func checkCommandInjection(_, content string) string {
+	for _, p := range commandInjectionPatterns {
+		if p.MatchString(content) {
+			return "Potential command injection — use parameterized commands or allowlisted inputs, not string concatenation"
+		}
+	}
+	return ""
+}
+
+// --- Weak cryptographic hash ---
+
+var weakCryptoPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`crypto/(md5|sha1)\b`),
+	regexp.MustCompile(`hashlib\.(md5|sha1)\s*\(`),
+	regexp.MustCompile(`\bMD5\.(Create|New)\b`),
+	regexp.MustCompile(`\bSHA1\.(Create|New)\b`),
+	regexp.MustCompile(`MessageDigest\.getInstance\(\s*["'](MD5|SHA-1)["']\s*\)`),
+	regexp.MustCompile(`createHash\(\s*["'](md5|sha1)["']\s*\)`),
+}
+
+func checkWeakCrypto(_, content string) string {
+	for _, p := range weakCryptoPatterns {
+		if p.MatchString(content) {
+			return "Weak hash algorithm (MD5/SHA1) detected — use SHA-256 or better for security-sensitive contexts"
+		}
+	}
+	return ""
+}
+
 // --- Large function (>80 lines) ---
 
 // checkLargeFunction detects individual functions exceeding 80 lines by tracking
@@ -352,6 +411,201 @@ func checkLargeFunction(_, content string) string {
 		}
 	}
 	return ""
+}
+
+// --- Security: SSRF ---
+
+var ssrfPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`requests\.(get|post|put|delete|head|patch)\s*\(\s*\w`),
+	regexp.MustCompile(`http\.Get\s*\(\s*\w`),
+	regexp.MustCompile(`http\.Post\s*\(\s*\w`),
+	regexp.MustCompile(`fetch\s*\(\s*\w`),
+	regexp.MustCompile(`urllib\.request\.urlopen\s*\(\s*\w`),
+	regexp.MustCompile(`HttpClient\.\w+\s*\(\s*\w`),
+}
+
+func checkSSRF(_, content string) string {
+	for _, p := range ssrfPatterns {
+		if p.MatchString(content) {
+			return "Potential SSRF — HTTP request with variable URL. Validate/allowlist URLs before making requests"
+		}
+	}
+	return ""
+}
+
+// --- Security: Path traversal ---
+
+var pathTraversalPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)(open|read_?file|write_?file)\s*\(\s*["']?.*\+\s*\w`),
+	regexp.MustCompile(`os\.path\.join\s*\(.*,\s*\w+\s*\)`),
+	regexp.MustCompile(`filepath\.Join\s*\(.*,\s*\w+\s*\)`),
+	regexp.MustCompile(`Path\s*\(\s*\w+\s*\)`),
+}
+
+func checkPathTraversal(_, content string) string {
+	for _, p := range pathTraversalPatterns {
+		if p.MatchString(content) {
+			if strings.Contains(content, "sanitize") || strings.Contains(content, "Clean") ||
+				strings.Contains(content, "filepath.Abs") || strings.Contains(content, "os.path.abspath") {
+				return ""
+			}
+			return "Potential path traversal — validate file paths against directory traversal (../) before use"
+		}
+	}
+	return ""
+}
+
+// --- Security: Regex DoS ---
+
+var regexDoSPattern = regexp.MustCompile(`(?:\([^)]*[+*]\)[+*]|\([^)]*\|[^)]*\)[+*]{2})`)
+
+func checkRegexDoS(_, content string) string {
+	if !strings.Contains(content, "Compile") && !strings.Contains(content, "re.") &&
+		!strings.Contains(content, "new RegExp") && !strings.Contains(content, "regex") {
+		return ""
+	}
+	if regexDoSPattern.MatchString(content) {
+		return "Potential ReDoS — nested quantifiers `(a+)+` cause catastrophic backtracking. Simplify or use RE2/linear-time engine"
+	}
+	return ""
+}
+
+// --- Security: Unsafe deserialization ---
+
+var unsafeDeserializationPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`pickle\.loads?\s*\(`),
+	regexp.MustCompile(`yaml\.load\s*\([^)]*\)(?:.*Loader)?`),
+	regexp.MustCompile(`marshal\.Unmarshal\s*\(\s*\w`),
+	regexp.MustCompile(`ObjectInputStream\s*\(`),
+	regexp.MustCompile(`unserialize\s*\(`),
+}
+
+// yaml.safe_load and yaml.load(..., Loader=SafeLoader) are safe.
+var safeYAMLPattern = regexp.MustCompile(`yaml\.(safe_load|load\s*\([^)]*SafeLoader)`)
+
+func checkUnsafeDeserialization(_, content string) string {
+	for _, p := range unsafeDeserializationPatterns {
+		if p.MatchString(content) {
+			if safeYAMLPattern.MatchString(content) {
+				continue
+			}
+			return "Unsafe deserialization detected — deserializing untrusted data can lead to remote code execution"
+		}
+	}
+	return ""
+}
+
+// --- Go: unclosed resource ---
+
+var goOpenResourcePattern = regexp.MustCompile(`(\w+)\s*(?:,\s*\w+\s*)?[:=]+\s*(?:os\.(?:Open|Create)|sql\.Open|net\.(?:Dial|Listen)|http\.Get)\s*\(`)
+
+func checkGoUnclosedResource(filePath, content string) string {
+	if strings.HasSuffix(filePath, "_test.go") {
+		return ""
+	}
+	locs := goOpenResourcePattern.FindAllStringSubmatch(content, -1)
+	for _, loc := range locs {
+		varName := loc[1]
+		// Check if the resource is closed via defer or explicit Close().
+		if strings.Contains(content, varName+".Close()") || strings.Contains(content, "defer "+varName+".Close()") {
+			continue
+		}
+		return "Opened resource (`" + varName + "`) without corresponding Close() — use `defer " + varName + ".Close()` after error check"
+	}
+	return ""
+}
+
+// --- Go: context.Background misuse ---
+
+func checkGoContextBackground(filePath, content string) string {
+	if strings.HasSuffix(filePath, "_test.go") {
+		return ""
+	}
+	if !strings.Contains(content, "context.Background()") {
+		return ""
+	}
+	// Allow in main() and init().
+	if strings.Contains(content, "func main()") || strings.Contains(content, "func init()") {
+		return ""
+	}
+	// context.Background without timeout is suspicious in non-main code.
+	if !strings.Contains(content, "WithTimeout") && !strings.Contains(content, "WithDeadline") &&
+		!strings.Contains(content, "WithCancel") {
+		return "`context.Background()` without timeout/deadline — use `context.WithTimeout` for bounded operations"
+	}
+	return ""
+}
+
+// --- Python: print in non-test ---
+
+var pyPrintPattern = regexp.MustCompile(`\bprint\s*\(`)
+
+func checkPyPrintDebug(filePath, content string) string {
+	if strings.Contains(filePath, "test") || strings.Contains(filePath, "__main__") {
+		return ""
+	}
+	if !pyPrintPattern.MatchString(content) {
+		return ""
+	}
+	return "`print()` in non-test code — use `logging` module for production output"
+}
+
+// --- Python: pickle untrusted data ---
+
+var pyPicklePattern = regexp.MustCompile(`pickle\.loads?\s*\(`)
+
+func checkPyPickleUntrusted(_, content string) string {
+	if !pyPicklePattern.MatchString(content) {
+		return ""
+	}
+	return "`pickle.load()` can execute arbitrary code — use `json` or a safe serialization format for untrusted data"
+}
+
+// --- JS/TS: floating promise ---
+
+// Detects patterns like `someAsyncFunc()` on its own line without await, .then, .catch, or assignment.
+var jsFloatingPromisePattern = regexp.MustCompile(`(?m)^\s*\w+\([^)]*\)\s*;?\s*$`)
+
+func checkJSFloatingPromise(filePath, content string) string {
+	base := filepath.Base(filePath)
+	if strings.Contains(base, ".test.") || strings.Contains(base, ".spec.") {
+		return ""
+	}
+	// Only flag if the file has async patterns.
+	if !strings.Contains(content, "async") && !strings.Contains(content, "Promise") {
+		return ""
+	}
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !jsFloatingPromisePattern.MatchString(line) {
+			continue
+		}
+		// Skip lines that are already handled.
+		if strings.Contains(trimmed, "await") || strings.Contains(trimmed, ".then") ||
+			strings.Contains(trimmed, ".catch") || strings.Contains(trimmed, "=") ||
+			strings.Contains(trimmed, "return") || strings.HasPrefix(trimmed, "//") ||
+			strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "void ") {
+			continue
+		}
+		// Likely a floating promise.
+		return "Possible floating Promise — add `await`, `.catch()`, or `void` to explicitly handle or ignore the result"
+	}
+	return ""
+}
+
+// --- Rust: panic!() outside test ---
+
+var rustPanicPattern = regexp.MustCompile(`\bpanic!\s*\(`)
+
+func checkRustPanicOutsideTest(filePath, content string) string {
+	if strings.HasSuffix(filePath, "_test.rs") || strings.Contains(content, "#[cfg(test)]") {
+		return ""
+	}
+	if !rustPanicPattern.MatchString(content) {
+		return ""
+	}
+	return "`panic!()` in non-test code — return `Result` instead, or use `unreachable!()` for truly impossible cases"
 }
 
 // --- Helpers ---

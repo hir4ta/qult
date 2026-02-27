@@ -2,7 +2,6 @@ package mcpserver
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 
@@ -74,8 +73,7 @@ func sessionOutlookHandler(claudeHome string, lang locale.Lang, st *store.Store)
 			result["user_style"] = cluster
 		}
 
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
+		return marshalResult(result)
 	}
 }
 
@@ -176,8 +174,7 @@ func taskProgressHandler(st *store.Store) server.ToolHandlerFunc {
 			result["common_failures"] = failures
 		}
 
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
+		return marshalResult(result)
 	}
 }
 
@@ -267,8 +264,7 @@ func strategicPlanHandler(st *store.Store) server.ToolHandlerFunc {
 			result["after_read_predictions"] = predList
 		}
 
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
+		return marshalResult(result)
 	}
 }
 

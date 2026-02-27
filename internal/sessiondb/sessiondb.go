@@ -174,6 +174,7 @@ type Nudge struct {
 	Observation string
 	Suggestion  string
 	CreatedAt   time.Time
+	Delivered   bool // true if already delivered via hook
 }
 
 // SessionDB wraps an ephemeral per-session SQLite database for hook state.
@@ -475,6 +476,38 @@ func (s *SessionDB) DequeueNudges(maxN int) ([]Nudge, error) {
 	}
 	committed = true
 	return nudges, nil
+}
+
+// PeekNudges returns pending (undelivered) nudges without marking them as delivered.
+// Also returns recently delivered nudges (within the last 5 minutes) for context.
+func (s *SessionDB) PeekNudges(maxN int) ([]Nudge, error) {
+	rows, err := s.db.Query(
+		`SELECT id, pattern, level, observation, suggestion, created_at,
+		        CASE WHEN delivered_at IS NULL THEN 0 ELSE 1 END as is_delivered
+		 FROM nudge_outbox
+		 WHERE delivered_at IS NULL
+		    OR delivered_at > datetime('now', '-5 minutes')
+		 ORDER BY delivered_at IS NULL DESC, id DESC
+		 LIMIT ?`, maxN,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("sessiondb: peek nudges: %w", err)
+	}
+	defer rows.Close()
+
+	var nudges []Nudge
+	for rows.Next() {
+		var n Nudge
+		var ts string
+		var delivered int
+		if err := rows.Scan(&n.ID, &n.Pattern, &n.Level, &n.Observation, &n.Suggestion, &ts, &delivered); err != nil {
+			continue
+		}
+		n.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", ts)
+		n.Delivered = delivered == 1
+		nudges = append(nudges, n)
+	}
+	return nudges, rows.Err()
 }
 
 // RecentEvents returns the most recent N hook events (newest first).

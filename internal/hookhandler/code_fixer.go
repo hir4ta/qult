@@ -3,15 +3,18 @@ package hookhandler
 import (
 	"path/filepath"
 	"strings"
+
+	"github.com/hir4ta/claude-buddy/internal/store"
 )
 
 // CodeFix represents an auto-generated fix for a code quality finding.
 type CodeFix struct {
-	Finding     Finding
-	Before      string  // original code snippet
-	After       string  // fixed code snippet
-	Confidence  float64 // [0.5, 1.0] — higher means safer
-	Explanation string  // human-readable why this fix is suggested
+	Finding              Finding
+	Before               string  // original code snippet
+	After                string  // fixed code snippet
+	Confidence           float64 // [0.3, 0.95] — higher means safer
+	ConfidenceAdjustment float64 // feedback-driven adjustment applied (0 if none)
+	Explanation          string  // human-readable why this fix is suggested
 }
 
 // CodeFixer generates concrete fix patches for findings.
@@ -25,6 +28,7 @@ var fixerRegistry = map[string]CodeFixer{
 	"go": &goFixer{},
 	"py": &pythonFixer{},
 	"js": &jsFixer{},
+	"rs": &rustFixer{},
 }
 
 // GetFixer returns the CodeFixer for the given file path, or nil.
@@ -41,6 +45,7 @@ func GetFixer(filePath string) CodeFixer {
 }
 
 // TryFix runs the fixer for the file and returns a formatted suggestion, or "".
+// Adjusts confidence based on historical feedback for the finding's rule.
 func TryFix(finding Finding, content []byte) string {
 	fixer := GetFixer(finding.File)
 	if fixer == nil {
@@ -50,7 +55,42 @@ func TryFix(finding Finding, content []byte) string {
 	if fix == nil {
 		return ""
 	}
+	adjustConfidence(fix)
 	return formatCodeFix(fix)
+}
+
+// adjustConfidence modifies a fix's confidence based on historical user feedback.
+// Boosts confidence for rules with high helpful rate, reduces for high misleading rate.
+// No-op if the store is unavailable or has insufficient data.
+func adjustConfidence(fix *CodeFix) {
+	st, err := store.OpenDefault()
+	if err != nil {
+		return
+	}
+	defer st.Close()
+
+	rule := fix.Finding.Rule
+	if rule == "" {
+		return
+	}
+
+	stats, err := st.PatternFeedbackStats("code_fix:" + rule)
+	if err != nil || stats.TotalCount < 3 {
+		return
+	}
+
+	// WeightedScore is in [-1, 1]. Scale to [-0.1, +0.1] adjustment.
+	adjustment := stats.WeightedScore * 0.1
+	fix.Confidence += adjustment
+	fix.ConfidenceAdjustment = adjustment
+
+	// Clamp to valid range.
+	if fix.Confidence < 0.3 {
+		fix.Confidence = 0.3
+	}
+	if fix.Confidence > 0.95 {
+		fix.Confidence = 0.95
+	}
 }
 
 // formatCodeFix formats a CodeFix into a human-readable suggestion string.
@@ -75,4 +115,16 @@ func truncate(s string, maxRunes int) string {
 		return string(r[:maxRunes]) + "..."
 	}
 	return string(r)
+}
+
+// getLine returns the content of a specific line (1-indexed), or "".
+func getLine(content []byte, lineNum int) string {
+	if lineNum <= 0 {
+		return ""
+	}
+	lines := strings.Split(string(content), "\n")
+	if lineNum > len(lines) {
+		return ""
+	}
+	return lines[lineNum-1]
 }

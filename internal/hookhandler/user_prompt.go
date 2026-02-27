@@ -126,6 +126,21 @@ func handleUserPromptSubmit(input []byte) (*HookOutput, error) {
 		})
 	}
 
+	// Strategic insight: cross-session behavioral guidance (the "JARVIS upper body").
+	// Delivers personal, data-driven insights that no static template can provide.
+	if insight := generateStrategicInsight(sdb, in.CWD); insight != "" {
+		entries = append(entries, nudgeEntry{
+			Pattern:     "strategic",
+			Level:       "insight",
+			Observation: "Strategic insight",
+			Suggestion:  insight,
+		})
+	}
+
+	// Track implicit feedback: if Claude hasn't called buddy MCP tools recently,
+	// record as a signal that current suggestions may not be valuable enough.
+	trackImplicitFeedback(sdb, in.SessionID)
+
 	// Inject coaching at the top of entries (high visibility, but doesn't block nudges).
 	if coachingEntry != nil {
 		entries = append([]nudgeEntry{*coachingEntry}, entries...)

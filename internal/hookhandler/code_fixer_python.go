@@ -56,7 +56,7 @@ func (p *pythonFixer) fixMutableDefault(finding Finding, content []byte) *CodeFi
 	}
 
 	loc := mutableDefaultPattern.FindStringSubmatchIndex(line)
-	if loc == nil {
+	if loc == nil || len(loc) < 6 {
 		return nil
 	}
 	before := strings.TrimSpace(line)
@@ -74,7 +74,8 @@ func (p *pythonFixer) fixMutableDefault(finding Finding, content []byte) *CodeFi
 	}
 }
 
-// fixBroadException narrows `except Exception` to suggest specificity.
+// fixBroadException suggests narrowing `except Exception` to specific types.
+// Does NOT suggest concrete types since the correct types depend on the try block.
 func (p *pythonFixer) fixBroadException(finding Finding, content []byte) *CodeFix {
 	line := getLine(content, finding.Line)
 	if line == "" {
@@ -82,12 +83,24 @@ func (p *pythonFixer) fixBroadException(finding Finding, content []byte) *CodeFi
 	}
 	before := strings.TrimSpace(line)
 
+	// Extract the variable name if present (e.g., "except Exception as e").
+	asName := ""
+	if _, after, ok := strings.Cut(before, " as "); ok {
+		asName = strings.TrimSuffix(strings.TrimSpace(after), ":")
+	}
+
+	after := "except (<SpecificError1>, <SpecificError2>)"
+	if asName != "" {
+		after += " as " + asName
+	}
+	after += ":"
+
 	return &CodeFix{
 		Finding:     finding,
 		Before:      before,
-		After:       strings.Replace(before, "except Exception", "except (ValueError, TypeError)", 1),
-		Confidence:  0.6,
-		Explanation: "Narrow exception type — catching broad Exception masks bugs. Specify expected exceptions",
+		After:       after,
+		Confidence:  0.35, // low: correct types depend on the try block content
+		Explanation: "Catching broad `Exception` masks bugs — narrow to specific types raised by the try block",
 	}
 }
 
@@ -113,16 +126,4 @@ func (p *pythonFixer) fixStarImport(finding Finding, content []byte) *CodeFix {
 		Confidence:  0.7,
 		Explanation: "Star imports pollute namespace and hide where names come from",
 	}
-}
-
-// getLine returns the content of a specific line (1-indexed), or "".
-func getLine(content []byte, lineNum int) string {
-	if lineNum <= 0 {
-		return ""
-	}
-	lines := strings.Split(string(content), "\n")
-	if lineNum > len(lines) {
-		return ""
-	}
-	return lines[lineNum-1]
 }

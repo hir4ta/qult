@@ -2,7 +2,6 @@ package mcpserver
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -139,8 +138,7 @@ func currentStateHandler(claudeHome string, lang locale.Lang) server.ToolHandler
 			"features":    featuresMap,
 		}
 
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
+		return marshalResult(result)
 	}
 }
 

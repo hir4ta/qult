@@ -2,7 +2,6 @@ package mcpserver
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -69,8 +68,7 @@ func statsHandler(claudeHome string) server.ToolHandlerFunc {
 			})
 		}
 
-		data, _ := json.MarshalIndent(results, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
+		return marshalResult(results)
 	}
 }
 
@@ -100,8 +98,7 @@ func sessionsHandler(claudeHome string) server.ToolHandlerFunc {
 			})
 		}
 
-		data, _ := json.MarshalIndent(results, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
+		return marshalResult(results)
 	}
 }
 

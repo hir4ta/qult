@@ -65,8 +65,7 @@ func decisionsHandler(st *store.Store) server.ToolHandlerFunc {
 			"decisions":       decisionList,
 		}
 
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
+		return marshalResult(result)
 	}
 }
 
@@ -147,7 +146,6 @@ func patternsHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandler
 			"search_method":  searchMethod,
 		}
 
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
+		return marshalResult(result)
 	}
 }

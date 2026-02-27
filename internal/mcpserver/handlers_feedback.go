@@ -71,12 +71,21 @@ func feedbackHandler(st *store.Store) server.ToolHandlerFunc {
 			}
 		}
 
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
+		return marshalResult(result)
 	}
 }
 
 // latestSessionID returns the most recent session ID from the store.
+// marshalResult converts a value to indented JSON and returns an MCP tool result.
+// On encoding failure, returns an MCP error result instead of silently dropping the error.
+func marshalResult(v any) (*mcp.CallToolResult, error) {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError("failed to encode result: " + err.Error()), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
 func latestSessionID(st *store.Store) string {
 	var id string
 	err := st.DB().QueryRow(

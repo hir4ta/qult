@@ -2,7 +2,6 @@ package mcpserver
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -110,8 +109,7 @@ func skillContextHandler(claudeHome string) server.ToolHandlerFunc {
 			sc.Context = map[string]string{"note": "generic context"}
 		}
 
-		data, _ := json.MarshalIndent(sc, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
+		return marshalResult(sc)
 	}
 }
 

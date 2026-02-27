@@ -2,7 +2,6 @@ package mcpserver
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -61,7 +60,6 @@ func crossProjectHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultText(fmt.Sprintf("No cross-project patterns found for %q", query)), nil
 		}
 
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
+		return marshalResult(result)
 	}
 }

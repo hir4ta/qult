@@ -25,8 +25,7 @@ func diagnoseHandler(st *store.Store) server.ToolHandlerFunc {
 
 		diag := buildDiagnosis(st, errorMsg, toolName, filePath)
 
-		data, _ := json.MarshalIndent(diag, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
+		return marshalResult(diag)
 	}
 }
 

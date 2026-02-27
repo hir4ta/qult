@@ -38,7 +38,66 @@ func GoASTCheck(filePath, content string) string {
 	if issue := checkCognitiveComplexity(fset, file); issue != "" {
 		return issue
 	}
+	if issue := checkTypeAssertionWithoutOk(fset, file); issue != "" {
+		return issue
+	}
 	return ""
+}
+
+// checkTypeAssertionWithoutOk detects bare type assertions x.(Type) that panic
+// on type mismatch instead of using the comma-ok pattern x, ok := v.(Type).
+func checkTypeAssertionWithoutOk(fset *token.FileSet, file *ast.File) string {
+	// First pass: collect positions of type assertions that ARE in comma-ok assignments.
+	safe := make(map[token.Pos]bool)
+	ast.Inspect(file, func(n ast.Node) bool {
+		assign, ok := n.(*ast.AssignStmt)
+		if !ok || len(assign.Lhs) < 2 {
+			return true
+		}
+		for _, rhs := range assign.Rhs {
+			if ta, ok := rhs.(*ast.TypeAssertExpr); ok {
+				safe[ta.Pos()] = true
+			}
+		}
+		return true
+	})
+
+	// Also mark type assertions in value specs with 2+ names: var v, ok = x.(T)
+	ast.Inspect(file, func(n ast.Node) bool {
+		vs, ok := n.(*ast.ValueSpec)
+		if !ok || len(vs.Names) < 2 || len(vs.Values) == 0 {
+			return true
+		}
+		for _, val := range vs.Values {
+			if ta, ok := val.(*ast.TypeAssertExpr); ok {
+				safe[ta.Pos()] = true
+			}
+		}
+		return true
+	})
+
+	// Second pass: find type assertions NOT in the safe set.
+	var issue string
+	ast.Inspect(file, func(n ast.Node) bool {
+		if issue != "" {
+			return false
+		}
+		ta, ok := n.(*ast.TypeAssertExpr)
+		if !ok {
+			return true
+		}
+		// ta.Type == nil means type switch: x.(type) — skip.
+		if ta.Type == nil {
+			return true
+		}
+		if safe[ta.Pos()] {
+			return true
+		}
+		pos := fset.Position(ta.Pos())
+		issue = fmt.Sprintf("Type assertion without comma-ok at line %d — panics on mismatch, use `v, ok := x.(Type)`", pos.Line)
+		return false
+	})
+	return issue
 }
 
 // checkErrorShadow detects re-declaration of `err` with := inside an

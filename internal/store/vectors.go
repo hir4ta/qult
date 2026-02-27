@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"sort"
 )
 
 // InsertEmbedding stores a vector embedding as a BLOB.
@@ -42,12 +43,26 @@ func (s *Store) SearchPatternsByVector(queryVec []float32, patternType string, l
 	return s.vectorSearchPatterns(queryVec, patternType, limit)
 }
 
-// vectorSearchPatterns retrieves all pattern embeddings and ranks by cosine similarity.
+// minSimilarity is the cosine similarity threshold below which candidates are discarded.
+const minSimilarity = 0.3
+
+// vectorSearchPatterns ranks pattern embeddings by cosine similarity.
+// When patternType is specified, a JOIN pre-filters embeddings at the SQL level
+// so only relevant vectors are loaded into memory.
 func (s *Store) vectorSearchPatterns(queryVec []float32, patternType string, limit int) ([]PatternRow, error) {
-	// Load all pattern embeddings.
-	rows, err := s.db.Query(`
-		SELECT e.source_id, e.vector FROM embeddings e
-		WHERE e.source = 'patterns'`)
+	var query string
+	var args []any
+	if patternType != "" {
+		query = `SELECT e.source_id, e.vector FROM embeddings e
+			JOIN patterns p ON p.id = e.source_id
+			WHERE e.source = 'patterns' AND p.pattern_type = ?`
+		args = append(args, patternType)
+	} else {
+		query = `SELECT e.source_id, e.vector FROM embeddings e
+			WHERE e.source = 'patterns'`
+	}
+
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -67,15 +82,15 @@ func (s *Store) vectorSearchPatterns(queryVec []float32, patternType string, lim
 		}
 		vec := deserializeFloat32(blob)
 		sim := cosineSimilarity(queryVec, vec)
+		if sim < minSimilarity {
+			continue
+		}
 		candidates = append(candidates, scored{id: sourceID, score: sim})
 	}
 
-	// Sort by similarity (descending).
-	for i := 1; i < len(candidates); i++ {
-		for j := i; j > 0 && candidates[j].score > candidates[j-1].score; j-- {
-			candidates[j], candidates[j-1] = candidates[j-1], candidates[j]
-		}
-	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].score > candidates[j].score
+	})
 
 	// Load pattern rows for top results.
 	var result []PatternRow
@@ -85,9 +100,6 @@ func (s *Store) vectorSearchPatterns(queryVec []float32, patternType string, lim
 		}
 		p, err := s.getPatternByID(c.id)
 		if err != nil {
-			continue
-		}
-		if patternType != "" && p.PatternType != patternType {
 			continue
 		}
 		result = append(result, *p)

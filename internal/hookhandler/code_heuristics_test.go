@@ -211,6 +211,371 @@ func TestFileExtFromPath(t *testing.T) {
 	}
 }
 
+func TestCheckCommandInjection(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"python os.system concat", `os.system("rm " + user_input)`, true},
+		{"python subprocess concat", `subprocess.run("echo " + msg)`, true},
+		{"python subprocess fstring", `subprocess.run(f"echo {msg}")`, true},
+		{"go exec.Command concat", `exec.Command("sh " + cmd)`, true},
+		{"node child_process concat", `child_process.exec("ls " + dir)`, true},
+		{"template literal injection", `exec("SELECT " + "${val}")`, true},
+		{"safe parameterized", `subprocess.run(["echo", msg])`, false},
+		{"safe exec.Command", `exec.Command("ls", "-la")`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := checkCommandInjection("test.py", tt.content)
+			if (got != "") != tt.want {
+				t.Errorf("checkCommandInjection(%q) = %q, wantMatch=%v", tt.content, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckWeakCrypto(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"go crypto/md5", `import "crypto/md5"`, true},
+		{"go crypto/sha1", `import "crypto/sha1"`, true},
+		{"python hashlib.md5", `hashlib.md5(data)`, true},
+		{"python hashlib.sha1", `hashlib.sha1(data)`, true},
+		{"node createHash md5", `createHash("md5")`, true},
+		{"node createHash sha1", `createHash('sha1')`, true},
+		{"java MD5", `MessageDigest.getInstance("MD5")`, true},
+		{"safe sha256", `import "crypto/sha256"`, false},
+		{"safe hashlib sha256", `hashlib.sha256(data)`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := checkWeakCrypto("test.go", tt.content)
+			if (got != "") != tt.want {
+				t.Errorf("checkWeakCrypto(%q) = %q, wantMatch=%v", tt.content, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGoASTCheck_TypeAssertion(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{
+			"bare type assertion",
+			`package main
+func foo(v interface{}) {
+	s := v.(string)
+	_ = s
+}`,
+			true,
+		},
+		{
+			"comma-ok type assertion",
+			`package main
+func foo(v interface{}) {
+	s, ok := v.(string)
+	_ = s
+	_ = ok
+}`,
+			false,
+		},
+		{
+			"type switch",
+			`package main
+func foo(v interface{}) {
+	switch v.(type) {
+	case string:
+	}
+}`,
+			false,
+		},
+		{
+			"test file skipped",
+			`package main
+func foo(v interface{}) {
+	s := v.(string)
+	_ = s
+}`,
+			false, // test file is skipped
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			filePath := "pkg.go"
+			if tt.name == "test file skipped" {
+				filePath = "pkg_test.go"
+			}
+			got := GoASTCheck(filePath, tt.content)
+			if (got != "") != tt.want {
+				t.Errorf("GoASTCheck(%q) = %q, wantMatch=%v", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckSSRF(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"python requests.get", `requests.get(url)`, true},
+		{"go http.Get", `http.Get(target)`, true},
+		{"js fetch", `fetch(userURL)`, true},
+		{"safe literal url", `requests.get("https://example.com")`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := checkSSRF("test.py", tt.content)
+			if (got != "") != tt.want {
+				t.Errorf("checkSSRF(%q) = %q, wantMatch=%v", tt.content, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckPathTraversal(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"python open concat", `open("/data/" + user_input)`, true},
+		{"go filepath.Join", `filepath.Join(baseDir, userPath)`, true},
+		{"sanitized", `filepath.Join(baseDir, filepath.Clean(userPath))`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := checkPathTraversal("test.go", tt.content)
+			if (got != "") != tt.want {
+				t.Errorf("checkPathTraversal(%q) = %q, wantMatch=%v", tt.content, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckRegexDoS(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"nested quantifier", `re.Compile("(a+)+b")`, true},
+		{"safe pattern", `re.Compile("[a-z]+")`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := checkRegexDoS("test.py", tt.content)
+			if (got != "") != tt.want {
+				t.Errorf("checkRegexDoS(%q) = %q, wantMatch=%v", tt.content, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckUnsafeDeserialization(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"pickle.load", `data = pickle.load(f)`, true},
+		{"yaml.load", `config = yaml.load(data)`, true},
+		{"yaml.safe_load", `config = yaml.safe_load(data)`, false},
+		{"json.load", `data = json.load(f)`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := checkUnsafeDeserialization("test.py", tt.content)
+			if (got != "") != tt.want {
+				t.Errorf("checkUnsafeDeserialization(%q) = %q, wantMatch=%v", tt.content, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckGoUnclosedResource(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"unclosed file", `f, err := os.Open("data.txt")
+if err != nil { return err }
+// no close`, true},
+		{"closed file", `f, err := os.Open("data.txt")
+if err != nil { return err }
+defer f.Close()`, false},
+		{"test file", `f, err := os.Open("data.txt")`, false}, // test file excluded
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			filePath := "main.go"
+			if tt.name == "test file" {
+				filePath = "main_test.go"
+			}
+			got := checkGoUnclosedResource(filePath, tt.content)
+			if (got != "") != tt.want {
+				t.Errorf("checkGoUnclosedResource(%q) = %q, wantMatch=%v", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckGoContextBackground(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"bare background", `ctx := context.Background()
+db.QueryContext(ctx, query)`, true},
+		{"with timeout", `ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)`, false},
+		{"in main", `func main() {
+ctx := context.Background()
+}`, false},
+		{"test file", `ctx := context.Background()`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			filePath := "handler.go"
+			if tt.name == "test file" {
+				filePath = "handler_test.go"
+			}
+			got := checkGoContextBackground(filePath, tt.content)
+			if (got != "") != tt.want {
+				t.Errorf("checkGoContextBackground(%q) = %q, wantMatch=%v", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckPyPrintDebug(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		filePath string
+		content  string
+		want     bool
+	}{
+		{"print in source", "app.py", `print("debug")`, true},
+		{"print in test", "test_app.py", `print("debug")`, false},
+		{"no print", "app.py", `logging.info("debug")`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := checkPyPrintDebug(tt.filePath, tt.content)
+			if (got != "") != tt.want {
+				t.Errorf("checkPyPrintDebug(%q, %q) = %q, wantMatch=%v", tt.filePath, tt.content, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckPyPickleUntrusted(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"pickle.load", `data = pickle.load(f)`, true},
+		{"pickle.loads", `obj = pickle.loads(raw)`, true},
+		{"json.load", `data = json.load(f)`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := checkPyPickleUntrusted("app.py", tt.content)
+			if (got != "") != tt.want {
+				t.Errorf("checkPyPickleUntrusted(%q) = %q, wantMatch=%v", tt.content, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckRustPanicOutsideTest(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		filePath string
+		content  string
+		want     bool
+	}{
+		{"panic in source", "lib.rs", `panic!("something went wrong")`, true},
+		{"panic in test", "lib_test.rs", `panic!("expected")`, false},
+		{"panic in cfg test", "lib.rs", `#[cfg(test)] panic!("ok")`, false},
+		{"no panic", "lib.rs", `eprintln!("error")`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := checkRustPanicOutsideTest(tt.filePath, tt.content)
+			if (got != "") != tt.want {
+				t.Errorf("checkRustPanicOutsideTest(%q, %q) = %q, wantMatch=%v", tt.filePath, tt.content, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckJSFloatingPromise(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		filePath string
+		content  string
+		want     bool
+	}{
+		{"floating promise", "app.js", "async function run() {\n  fetchData();\n}\n", true},
+		{"awaited promise", "app.js", "async function run() {\n  await fetchData();\n}\n", false},
+		{"with then", "app.js", "async function run() {\n  fetchData().then(handleResult);\n}\n", false},
+		{"assigned", "app.js", "async function run() {\n  const p = fetchData();\n}\n", false},
+		{"test file excluded", "app.test.js", "async function run() {\n  fetchData();\n}\n", false},
+		{"no async context", "app.js", "function run() {\n  doSomething();\n}\n", false},
+		{"void prefix", "app.js", "async function run() {\n  void fetchData();\n}\n", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := checkJSFloatingPromise(tt.filePath, tt.content)
+			if (got != "") != tt.want {
+				t.Errorf("checkJSFloatingPromise(%q, ...) = %q, wantMatch=%v", tt.filePath, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRunCodeHeuristics_Integration(t *testing.T) {
 	t.Parallel()
 

@@ -2,7 +2,6 @@ package mcpserver
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -10,6 +9,21 @@ import (
 
 	"github.com/hir4ta/claude-buddy/internal/hookhandler"
 )
+
+// FixResponse is the typed response for the buddy_fix MCP tool.
+type FixResponse struct {
+	Success              bool    `json:"success"`
+	FilePath             string  `json:"file_path,omitempty"`
+	Line                 int     `json:"line,omitempty"`
+	Rule                 string  `json:"rule,omitempty"`
+	Message              string  `json:"message,omitempty"`
+	Confidence           float64 `json:"confidence,omitempty"`
+	ConfidenceAdjustment float64 `json:"confidence_adjustment,omitempty"`
+	Before               string  `json:"before,omitempty"`
+	After                string  `json:"after,omitempty"`
+	Explanation          string  `json:"explanation,omitempty"`
+	Reason               string  `json:"reason,omitempty"`
+}
 
 func fixHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -38,48 +52,32 @@ func fixHandler() server.ToolHandlerFunc {
 
 		fixer := hookhandler.GetFixer(filePath)
 		if fixer == nil {
-			return mcp.NewToolResultText(noFixerResult(filePath)), nil
+			return marshalResult(FixResponse{
+				Reason:   "no fixer available for this file type",
+				FilePath: filePath,
+			})
 		}
 
 		fix := fixer.Fix(finding, content)
 		if fix == nil {
-			return mcp.NewToolResultText(noFixResult(filePath, rule, message)), nil
+			return marshalResult(FixResponse{
+				Reason:   "no fix available for this finding",
+				FilePath: filePath,
+				Rule:     rule,
+				Message:  message,
+			})
 		}
 
-		result := map[string]any{
-			"success":     true,
-			"file_path":   filePath,
-			"line":        line,
-			"rule":        rule,
-			"confidence":  fix.Confidence,
-			"before":      fix.Before,
-			"after":       fix.After,
-			"explanation": fix.Explanation,
-		}
-
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
+		return marshalResult(FixResponse{
+			Success:              true,
+			FilePath:             filePath,
+			Line:                 line,
+			Rule:                 rule,
+			Confidence:           fix.Confidence,
+			ConfidenceAdjustment: fix.ConfidenceAdjustment,
+			Before:               fix.Before,
+			After:                fix.After,
+			Explanation:          fix.Explanation,
+		})
 	}
-}
-
-func noFixerResult(filePath string) string {
-	result := map[string]any{
-		"success": false,
-		"reason":  "no fixer available for this file type",
-		"file":    filePath,
-	}
-	data, _ := json.MarshalIndent(result, "", "  ")
-	return string(data)
-}
-
-func noFixResult(filePath, rule, message string) string {
-	result := map[string]any{
-		"success": false,
-		"reason":  "no fix available for this finding",
-		"file":    filePath,
-		"rule":    rule,
-		"message": message,
-	}
-	data, _ := json.MarshalIndent(result, "", "  ")
-	return string(data)
 }

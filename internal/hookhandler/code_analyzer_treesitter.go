@@ -184,6 +184,28 @@ func analyzePython(filePath string, src []byte, root *gotreesitter.Node, lang *g
 					Category: "error_handling",
 				})
 			}
+
+		case "call":
+			if !isTest && isPyDangerousCall(n, lang, src) {
+				findings = append(findings, Finding{
+					File:     filePath,
+					Line:     int(n.StartPoint().Row) + 1,
+					Severity: "warning",
+					Rule:     "py-eval-exec",
+					Message:  "`eval()`/`exec()` detected — potential code injection risk, use `ast.literal_eval()` or safer alternatives",
+					Category: "security",
+				})
+			}
+			if !isTest && isPyPrintCall(n, lang, src) {
+				findings = append(findings, Finding{
+					File:     filePath,
+					Line:     int(n.StartPoint().Row) + 1,
+					Severity: "info",
+					Rule:     "py-print-debug",
+					Message:  "`print()` in non-test code — use `logging` module for production output",
+					Category: "style",
+				})
+			}
 		}
 
 		// Python bare except fallback: the gotreesitter Python grammar sometimes
@@ -269,6 +291,25 @@ func pyMutableDefaultType(n *gotreesitter.Node, lang *gotreesitter.Language) str
 	return ""
 }
 
+// isPyDangerousCall checks if a call node invokes eval() or exec().
+func isPyDangerousCall(n *gotreesitter.Node, lang *gotreesitter.Language, src []byte) bool {
+	fn := namedChildByType(n, lang, "identifier")
+	if fn == nil {
+		return false
+	}
+	name := fn.Text(src)
+	return name == "eval" || name == "exec"
+}
+
+// isPyPrintCall checks if a call node invokes print().
+func isPyPrintCall(n *gotreesitter.Node, lang *gotreesitter.Language, src []byte) bool {
+	fn := namedChildByType(n, lang, "identifier")
+	if fn == nil {
+		return false
+	}
+	return fn.Text(src) == "print"
+}
+
 // --- JavaScript/TypeScript analysis ---
 
 func analyzeJS(filePath string, src []byte, root *gotreesitter.Node, lang *gotreesitter.Language, isTS bool) []Finding {
@@ -329,6 +370,18 @@ func analyzeJS(filePath string, src []byte, root *gotreesitter.Node, lang *gotre
 					Severity: "info",
 					Rule:     "ts-any-type",
 					Message:  "`any` type weakens type safety — use `unknown` or a specific type",
+					Category: "style",
+				})
+			}
+
+		case "as_expression":
+			if isTS && tsIsAsAny(n, lang, src) {
+				findings = append(findings, Finding{
+					File:     filePath,
+					Line:     int(n.StartPoint().Row) + 1,
+					Severity: "warning",
+					Rule:     "ts-as-any",
+					Message:  "`as any` bypasses type checking entirely — use `as unknown` or a specific type",
 					Category: "style",
 				})
 			}
@@ -422,6 +475,20 @@ func tsContainsAnyType(n *gotreesitter.Node, lang *gotreesitter.Language, src []
 	return found
 }
 
+// tsIsAsAny checks if an as_expression casts to `any`.
+// Matches patterns like `value as any`.
+func tsIsAsAny(n *gotreesitter.Node, lang *gotreesitter.Language, src []byte) bool {
+	found := false
+	gotreesitter.Walk(n, func(child *gotreesitter.Node, _ int) gotreesitter.WalkAction {
+		if child.Type(lang) == "predefined_type" && child.Text(src) == "any" {
+			found = true
+			return gotreesitter.WalkStop
+		}
+		return gotreesitter.WalkContinue
+	})
+	return found
+}
+
 // jsCheckUnusedImports checks named imports for references in the rest of the file.
 func jsCheckUnusedImports(filePath string, n *gotreesitter.Node, lang *gotreesitter.Language, src []byte) []Finding {
 	var findings []Finding
@@ -501,15 +568,28 @@ func analyzeRust(filePath string, src []byte, root *gotreesitter.Node, lang *got
 			}
 
 		case "macro_invocation":
-			// macro_invocation → identifier("todo") + token_tree
 			id := namedChildByType(n, lang, "identifier")
-			if id != nil && id.Text(src) == "todo" && !isTest {
+			if id == nil || isTest {
+				break
+			}
+			macroName := id.Text(src)
+			if macroName == "todo" {
 				findings = append(findings, Finding{
 					File:     filePath,
 					Line:     int(n.StartPoint().Row) + 1,
 					Severity: "warning",
 					Rule:     "rs-todo-macro",
 					Message:  "`todo!()` macro in non-test code — will panic at runtime",
+					Category: "error_handling",
+				})
+			}
+			if macroName == "panic" {
+				findings = append(findings, Finding{
+					File:     filePath,
+					Line:     int(n.StartPoint().Row) + 1,
+					Severity: "warning",
+					Rule:     "rs-panic-outside-test",
+					Message:  "`panic!()` in non-test code — return `Result` instead, or use `unreachable!()` for impossible cases",
 					Category: "error_handling",
 				})
 			}

@@ -22,7 +22,7 @@ func (j *jsFixer) Fix(finding Finding, content []byte) *CodeFix {
 	return nil
 }
 
-// fixConsoleLog suggests removing debug console.log statements.
+// fixConsoleLog suggests deleting debug console.log statements.
 func (j *jsFixer) fixConsoleLog(finding Finding, content []byte) *CodeFix {
 	line := getLine(content, finding.Line)
 	if line == "" || !strings.Contains(line, "console.log") {
@@ -33,8 +33,8 @@ func (j *jsFixer) fixConsoleLog(finding Finding, content []byte) *CodeFix {
 	return &CodeFix{
 		Finding:     finding,
 		Before:      before,
-		After:       "// " + before + "  // TODO: remove debug log",
-		Confidence:  0.7,
+		After:       "(delete this line)",
+		Confidence:  0.75,
 		Explanation: "Remove debug console.log before committing — use a proper logger for production output",
 	}
 }
@@ -70,8 +70,9 @@ func (j *jsFixer) fixLooseEquality(finding Finding, content []byte) *CodeFix {
 	}
 }
 
-// fixVarUsage changes `var` to `const` (or `let` if reassigned).
+// fixVarUsage changes `var` to `const` or `let` depending on reassignment.
 var varDeclPattern = regexp.MustCompile(`^(\s*)var\s+`)
+var varNamePattern = regexp.MustCompile(`^var\s+(\w+)`)
 
 func (j *jsFixer) fixVarUsage(finding Finding, content []byte) *CodeFix {
 	line := getLine(content, finding.Line)
@@ -80,14 +81,32 @@ func (j *jsFixer) fixVarUsage(finding Finding, content []byte) *CodeFix {
 	}
 
 	before := strings.TrimSpace(line)
-	after := strings.Replace(before, "var ", "const ", 1)
+
+	// Extract variable name and check for reassignment in the rest of the content.
+	replacement := "const"
+	if m := varNamePattern.FindStringSubmatch(before); len(m) > 1 {
+		varName := m[1]
+		lines := strings.Split(string(content), "\n")
+		rest := ""
+		if finding.Line > 0 && finding.Line < len(lines) {
+			rest = strings.Join(lines[finding.Line:], "\n")
+		}
+		// Check for reassignment patterns: varName =, varName++, varName--, varName +=, etc.
+		// Use [^=>] to exclude == and => (arrow functions). Go RE2 has no lookahead.
+		reassignPattern, err := regexp.Compile(`\b` + regexp.QuoteMeta(varName) + `\s*(\+\+|--|\+=|-=|\*=|/=|%=|&=|\|=|\^=|=[^=>])`)
+		if err == nil && reassignPattern.MatchString(rest) {
+			replacement = "let"
+		}
+	}
+
+	after := strings.Replace(before, "var ", replacement+" ", 1)
 
 	return &CodeFix{
 		Finding:     finding,
 		Before:      before,
 		After:       after,
-		Confidence:  0.75,
-		Explanation: "Use `const` (or `let` if reassigned) instead of `var` — var has function scope and hoisting issues",
+		Confidence:  0.8,
+		Explanation: "Use `" + replacement + "` instead of `var` — var has function scope and hoisting issues",
 	}
 }
 

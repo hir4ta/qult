@@ -2,7 +2,6 @@ package mcpserver
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -100,8 +99,7 @@ func suggestHandler(claudeHome string, lang locale.Lang) server.ToolHandlerFunc 
 			"recommendations":     recs,
 		}
 
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
+		return marshalResult(result)
 	}
 }
 

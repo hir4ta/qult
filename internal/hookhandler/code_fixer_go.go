@@ -111,6 +111,7 @@ func (g *goFixer) fixNilErrorWrap(finding Finding, content []byte) *CodeFix {
 }
 
 // fixEmptyErrorReturn changes `return nil` to `return err` inside `if err != nil`.
+// Only applies when the enclosing function returns `error` as its sole return type.
 // Before: if err != nil { return nil }
 // After:  if err != nil { return err }
 var emptyErrReturnFixPattern = regexp.MustCompile(`(if\s+err\s*!=\s*nil\s*\{\s*return\s+)nil(\s*\})`)
@@ -124,16 +125,69 @@ func (g *goFixer) fixEmptyErrorReturn(finding Finding, content []byte) *CodeFix 
 	before := src[loc[0]:loc[1]]
 	after := emptyErrReturnFixPattern.ReplaceAllString(before, `${1}err${2}`)
 
+	// Try AST-based validation: confirm the enclosing function returns error.
+	confidence := 0.65 // default for snippets where AST parsing fails
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, finding.File, src, 0)
+	if err == nil {
+		pos := fset.File(file.Pos()).Pos(loc[0])
+		retType := enclosingFuncReturnType(file, pos)
+		switch retType {
+		case "error":
+			confidence = 0.9
+		case "":
+			// Could not determine (snippet or no enclosing func)
+		default:
+			// Function returns non-error type (e.g., *Foo) — fix would break compilation
+			return nil
+		}
+	}
+
 	return &CodeFix{
 		Finding:     finding,
 		Before:      before,
 		After:       after,
-		Confidence:  0.85,
+		Confidence:  confidence,
 		Explanation: "Return the error instead of swallowing it — callers need to know about failures",
 	}
 }
 
+// enclosingFuncReturnType finds the function containing pos and returns its
+// return type as a string. Returns "" if the function has no results or
+// multiple return values, and the type name for single-return functions.
+func enclosingFuncReturnType(file *ast.File, pos token.Pos) string {
+	var result string
+	ast.Inspect(file, func(n ast.Node) bool {
+		fn, ok := n.(*ast.FuncDecl)
+		if !ok {
+			return true
+		}
+		if fn.Pos() > pos || pos > fn.End() {
+			return true
+		}
+		if fn.Type.Results == nil || len(fn.Type.Results.List) != 1 {
+			return false
+		}
+		// Single return value — extract its type name.
+		switch t := fn.Type.Results.List[0].Type.(type) {
+		case *ast.Ident:
+			result = t.Name
+		case *ast.StarExpr:
+			if id, ok := t.X.(*ast.Ident); ok {
+				result = "*" + id.Name
+			}
+		case *ast.SelectorExpr:
+			if id, ok := t.X.(*ast.Ident); ok {
+				result = id.Name + "." + t.Sel.Name
+			}
+		}
+		return false
+	})
+	return result
+}
+
 // fixErrorShadow changes `:=` to `=` for `err` re-declarations inside if err != nil blocks.
+// Only safe when all LHS variables (except err) are already declared.
 // Before: result, err := doSomething()
 // After:  result, err = doSomething()
 func (g *goFixer) fixErrorShadow(finding Finding, content []byte) *CodeFix {
@@ -147,7 +201,6 @@ func (g *goFixer) fixErrorShadow(finding Finding, content []byte) *CodeFix {
 	}
 	line := lines[finding.Line-1]
 
-	// Only fix if the line has `:=` with `err` on the left side.
 	if !strings.Contains(line, ":=") || !strings.Contains(line, "err") {
 		return nil
 	}
@@ -155,11 +208,28 @@ func (g *goFixer) fixErrorShadow(finding Finding, content []byte) *CodeFix {
 	before := strings.TrimSpace(line)
 	after := strings.Replace(before, ":=", "=", 1)
 
+	// Check if there are non-err, non-_ variables on the LHS.
+	// If so, := → = may fail because those variables need declaration.
+	confidence := 0.7
+	lhs, _, ok := strings.Cut(before, ":=")
+	if !ok {
+		return nil
+	}
+	for _, v := range strings.Split(lhs, ",") {
+		v = strings.TrimSpace(v)
+		if v == "err" || v == "_" {
+			continue
+		}
+		// New variable on LHS — changing := to = would break its declaration.
+		confidence = 0.4
+		break
+	}
+
 	return &CodeFix{
 		Finding:     finding,
 		Before:      before,
 		After:       after,
-		Confidence:  0.7, // lower confidence — may need var declaration elsewhere
+		Confidence:  confidence,
 		Explanation: "Use `=` instead of `:=` to avoid shadowing the outer `err` variable",
 	}
 }

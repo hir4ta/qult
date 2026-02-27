@@ -109,8 +109,7 @@ func resumeHandler(st *store.Store) server.ToolHandlerFunc {
 			"briefing":               briefing,
 		}
 
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
+		return marshalResult(result)
 	}
 }
 
@@ -287,8 +286,7 @@ func recallHandler(st *store.Store) server.ToolHandlerFunc {
 			"total_matches":   total,
 		}
 
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
+		return marshalResult(result)
 	}
 }
 

@@ -87,6 +87,42 @@ func TestGenerateCoaching(t *testing.T) {
 			domain:   "database",
 			wantSub:  "existing migration files",
 		},
+		{
+			name:     "explore explore phase",
+			taskType: "explore",
+			phase:    "read",
+			changed:  "true",
+			wantSub:  "entry points",
+		},
+		{
+			name:     "debug reproduce phase",
+			taskType: "debug",
+			phase:    "read",
+			changed:  "true",
+			wantSub:  "runtime evidence",
+		},
+		{
+			name:     "review explore phase",
+			taskType: "review",
+			phase:    "read",
+			changed:  "true",
+			wantSub:  "PR description",
+		},
+		{
+			name:     "docs implement phase",
+			taskType: "docs",
+			phase:    "write",
+			changed:  "true",
+			wantSub:  "what",
+		},
+		{
+			name:     "domain override api feature",
+			taskType: "feature",
+			phase:    "write",
+			changed:  "true",
+			domain:   "api",
+			wantSub:  "request/response schema",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

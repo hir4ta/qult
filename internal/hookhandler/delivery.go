@@ -485,6 +485,50 @@ func enrichIfRepeated(sdb *sessiondb.SessionDB, pattern, suggestion string) stri
 	return suggestion
 }
 
+// trackImplicitFeedback records implicit negative signals when buddy MCP tools
+// haven't been called in a while. If Claude doesn't ask buddy for help across
+// multiple user turns, the current suggestions likely aren't valuable enough.
+// This feeds into Thompson Sampling to improve future suggestion relevance.
+func trackImplicitFeedback(sdb *sessiondb.SessionDB, sessionID string) {
+	// Count user turns since last buddy MCP tool call.
+	turnsStr, _ := sdb.GetContext("turns_since_buddy_call")
+	turns := 0
+	if turnsStr != "" {
+		turns, _ = strconv.Atoi(turnsStr)
+	}
+	turns++
+	_ = sdb.SetContext("turns_since_buddy_call", strconv.Itoa(turns))
+
+	// After 5+ turns without a buddy call, record as implicit negative signal.
+	// This suggests suggestions aren't compelling enough to trigger MCP usage.
+	if turns < 5 {
+		return
+	}
+
+	// Only fire once per silence period (reset after recording).
+	on, _ := sdb.IsOnCooldown("implicit_silence_feedback")
+	if on {
+		return
+	}
+	_ = sdb.SetCooldown("implicit_silence_feedback", 15*time.Minute)
+
+	st, err := store.OpenDefault()
+	if err != nil {
+		return
+	}
+	defer st.Close()
+
+	// Record as auto-feedback against recently delivered patterns.
+	_ = st.InsertFeedback(sessionID, "auto:silence", store.RatingNotHelpful,
+		"auto: no buddy MCP calls in 5+ user turns", 0)
+}
+
+// ResetBuddyCallTracker resets the turns-since-buddy-call counter.
+// Called from MCP tool handlers when buddy_* tools are invoked.
+func ResetBuddyCallTracker(sdb *sessiondb.SessionDB) {
+	_ = sdb.SetContext("turns_since_buddy_call", "0")
+}
+
 // gammaSample draws from Gamma(shape, 1) using Marsaglia and Tsang's method.
 // For shape < 1, uses the boost: Gamma(a) = Gamma(a+1) * U^(1/a).
 func gammaSample(rng *rand.Rand, shape float64) float64 {
