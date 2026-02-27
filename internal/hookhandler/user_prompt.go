@@ -71,6 +71,18 @@ func handleUserPromptSubmit(input []byte) (*HookOutput, error) {
 		}
 	}
 
+	// Phase-transition coaching: inject as high-priority entry (not early return,
+	// so queued nudges are still delivered alongside coaching).
+	var coachingEntry *nudgeEntry
+	if coaching := generateCoaching(sdb); coaching != "" {
+		coachingEntry = &nudgeEntry{
+			Pattern:     "coaching",
+			Level:       "info",
+			Observation: "Phase transition coaching",
+			Suggestion:  coaching,
+		}
+	}
+
 	// Dequeue pending nudges (max 2).
 	nudges, _ := sdb.DequeueNudges(2)
 
@@ -109,6 +121,11 @@ func handleUserPromptSubmit(input []byte) (*HookOutput, error) {
 			Observation: "Relevant past knowledge found",
 			Suggestion:  knowledge,
 		})
+	}
+
+	// Inject coaching at the top of entries (high visibility, but doesn't block nudges).
+	if coachingEntry != nil {
+		entries = append([]nudgeEntry{*coachingEntry}, entries...)
 	}
 
 	// Inject session context summary for rich situational awareness.

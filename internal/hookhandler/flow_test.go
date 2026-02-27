@@ -55,17 +55,59 @@ func TestIsInFlow(t *testing.T) {
 		t.Error("isInFlow() = true on fresh session, want false")
 	}
 
-	// Set high velocity, low error rate → flow.
+	// Set high velocity, low error rate, success streak → flow.
 	_ = sdb.SetContext("ewma_tool_velocity", "8.0")
 	_ = sdb.SetContext("ewma_error_rate", "0.05")
+	_ = sdb.SetContext("success_streak", "5")
 	if !isInFlow(sdb) {
-		t.Error("isInFlow() = false with vel=8.0 err=0.05, want true")
+		t.Error("isInFlow() = false with vel=8.0 err=0.05 streak=5, want true")
 	}
 
 	// High error rate → not in flow.
 	_ = sdb.SetContext("ewma_error_rate", "0.2")
 	if isInFlow(sdb) {
 		t.Error("isInFlow() = true with err=0.2, want false")
+	}
+}
+
+func TestClassifyFlowState(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		vel        string
+		errRate    string
+		acceptance string
+		streak     string
+		want       FlowState
+	}{
+		{"fresh session", "", "", "", "", FlowNormal},
+		{"productive", "8.0", "0.05", "", "5", FlowProductive},
+		{"productive needs streak", "8.0", "0.05", "", "1", FlowNormal},
+		{"thrashing", "8.0", "0.30", "", "0", FlowThrashing},
+		{"stalled", "1.5", "0.05", "", "0", FlowStalled},
+		{"fatigued", "5.0", "0.1", "0.05", "0", FlowFatigued},
+		{"normal mid velocity", "4.0", "0.1", "", "0", FlowNormal},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			sdb := openFlowTestDB(t)
+			if tt.vel != "" {
+				_ = sdb.SetContext("ewma_tool_velocity", tt.vel)
+			}
+			if tt.errRate != "" {
+				_ = sdb.SetContext("ewma_error_rate", tt.errRate)
+			}
+			if tt.acceptance != "" {
+				_ = sdb.SetContext("ewma_acceptance_rate", tt.acceptance)
+			}
+			if tt.streak != "" {
+				_ = sdb.SetContext("success_streak", tt.streak)
+			}
+			if got := classifyFlowState(sdb); got != tt.want {
+				t.Errorf("classifyFlowState() = %d, want %d", got, tt.want)
+			}
+		})
 	}
 }
 

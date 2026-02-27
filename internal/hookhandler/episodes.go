@@ -42,6 +42,9 @@ func (d *HookDetector) detectEpisodes() string {
 			if !set {
 				continue
 			}
+			// Enrich with domain-specific advice when available.
+			domain, _ := d.sdb.GetWorkingSet("domain")
+			sig.Message += domainAdvice(sig.Name, domain)
 			return sig.Message
 		}
 	}
@@ -218,6 +221,46 @@ func (d *HookDetector) episodeContextOverload(events []sessiondb.HookEvent) *epi
 		}
 	}
 	return nil
+}
+
+// domainAdvice returns domain-specific guidance to append to episode warnings.
+// Returns empty string if no domain-specific advice is available.
+func domainAdvice(episodeName, domain string) string {
+	if domain == "" || domain == "general" {
+		return ""
+	}
+	tips := map[string]map[string]string{
+		"retry_cascade": {
+			"database": "For database operations, check connection state and transaction isolation before retrying.",
+			"auth":     "For auth failures, verify token expiry and credential validity before retrying.",
+			"api":      "For API failures, check rate limits, request payload, and endpoint availability.",
+			"ui":       "For UI render failures, check component props and state management.",
+			"config":   "For config failures, validate syntax and check for environment-specific overrides.",
+			"infra":    "For infra failures, check service health, resource limits, and deployment state.",
+		},
+		"edit_fail_spiral": {
+			"database": "Migration files have strict formatting. Read the exact schema before editing.",
+			"config":   "Config files are whitespace-sensitive. Read with exact line range.",
+			"auth":     "Auth files often have security constraints. Verify the exact token/key format.",
+			"infra":    "Infrastructure files (YAML/Dockerfile) are indentation-sensitive. Re-read before editing.",
+		},
+		"test_fail_fixup": {
+			"database": "Database test failures often stem from stale fixtures or migration state. Check test setup.",
+			"auth":     "Auth test failures may need token refresh or mock credential updates.",
+			"api":      "API test failures — check if the endpoint contract changed or if mock responses are stale.",
+		},
+		"explore_to_stuck": {
+			"database": "For database exploration, focus on the schema and migrations first, then query code.",
+			"auth":     "For auth exploration, trace the authentication flow from entry point to token validation.",
+			"api":      "For API exploration, start with the route definitions, then trace to handlers.",
+		},
+	}
+	if episodeTips, ok := tips[episodeName]; ok {
+		if tip, ok := episodeTips[domain]; ok {
+			return "\n  Domain note: " + tip
+		}
+	}
+	return ""
 }
 
 // isReadTool returns true for tools that read but don't modify.

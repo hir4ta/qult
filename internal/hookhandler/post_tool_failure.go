@@ -50,6 +50,9 @@ func handlePostToolUseFailure(input []byte) (*HookOutput, error) {
 	// Update EWMA flow metrics (failure path).
 	updateFlowMetrics(sdb, true)
 
+	// Reset success streak on failure.
+	_ = sdb.SetContext("success_streak", "0")
+
 	// Record failure for prediction (Phase 1B / 4A).
 	_ = sdb.RecordFailure(in.ToolName, failureType, extractErrorSignature(in.Error), filePath)
 	_ = sdb.RecordToolOutcome(in.ToolName, filePath, false)

@@ -59,7 +59,8 @@ func trackFileChange(sdb *sessiondb.SessionDB, filePath, cwd string) {
 			Deliver(sdb, "oscillation", "warning",
 				fmt.Sprintf("File %s is oscillating — edits keep going back and forth", filepath.Base(filePath)),
 				"Step back and re-read the file to understand the current state before making more changes.",
-				PriorityHigh)
+				PriorityHigh,
+				"Oscillating edits indicate the file's current state isn't well understood; re-reading resets your mental model.")
 		}
 	}
 
@@ -71,7 +72,8 @@ func trackFileChange(sdb *sessiondb.SessionDB, filePath, cwd string) {
 			Deliver(sdb, "revert-detected", "warning",
 				fmt.Sprintf("Changes to %s appear to be reverting a previous edit", filepath.Base(filePath)),
 				"The same diff pattern was seen before. Consider a different approach.",
-				PriorityHigh)
+				PriorityHigh,
+				"Reverting to a previous state suggests the current approach has a fundamental issue — a different strategy is needed.")
 		}
 	}
 }

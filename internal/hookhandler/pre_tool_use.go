@@ -100,6 +100,13 @@ func handlePreToolUse(input []byte) (*HookOutput, error) {
 		signals = append(signals, alts)
 	}
 
+	// Pre-action coaching: risk-aware guidance before specific tool invocations.
+	var inputMap map[string]any
+	_ = json.Unmarshal(in.ToolInput, &inputMap)
+	if coaching := preActionCoaching(sdb, in.ToolName, inputMap); coaching != "" {
+		signals = append(signals, coaching)
+	}
+
 	// Suggest dedicated tools when CLI equivalents used in Bash.
 	if in.ToolName == "Bash" {
 		on, _ := sdb.IsOnCooldown("cli_tool_hint")
@@ -180,6 +187,13 @@ func handlePreToolUse(input []byte) (*HookOutput, error) {
 				_ = sdb.SetCooldown(ctxKey, 10*time.Minute)
 				signals = append(signals, ctx)
 			}
+		}
+	}
+
+	// Domain-aware risk warnings for high-risk operations.
+	if domain, _ := sdb.GetWorkingSet("domain"); domain != "" && domain != "general" {
+		if risk := domainRiskCheck(sdb, domain, in.ToolName, in.ToolInput); risk != "" {
+			signals = append(signals, risk)
 		}
 	}
 
@@ -592,4 +606,70 @@ func proactiveSolutionLookup(sdb *sessiondb.SessionDB, _ string, toolInput json.
 	_ = sdb.SetContext("last_surfaced_solution_id", fmt.Sprintf("%d", sol.ID))
 
 	return b.String()
+}
+
+// domainRiskCheck returns a domain-specific risk warning for high-risk operations.
+// Only fires for combinations where the domain + action is genuinely risky.
+func domainRiskCheck(sdb *sessiondb.SessionDB, domain, toolName string, toolInput json.RawMessage) string {
+	cooldownKey := "domain_risk:" + domain + ":" + toolName
+	on, _ := sdb.IsOnCooldown(cooldownKey)
+	if on {
+		return ""
+	}
+
+	filePath := extractFilePath(toolInput)
+	baseName := strings.ToLower(filepath.Base(filePath))
+
+	var warning string
+
+	switch domain {
+	case "auth":
+		if (toolName == "Edit" || toolName == "Write") && filePath != "" {
+			if containsAny(baseName, "password", "secret", "credential", "token", "key", "auth") {
+				warning = "[buddy] domain-risk (auth): Editing security-sensitive file. Verify no credentials are hardcoded and secrets use environment variables.\n  WHY: Auth file changes can expose credentials or break authentication for all users."
+			}
+		}
+	case "database":
+		if toolName == "Bash" {
+			var bi struct {
+				Command string `json:"command"`
+			}
+			if json.Unmarshal(toolInput, &bi) == nil {
+				cmd := strings.ToLower(bi.Command)
+				if containsAny(cmd, "migrate", "drop", "alter table", "truncate", "delete from") {
+					warning = "[buddy] domain-risk (database): Running a schema-modifying or destructive database command. Ensure you have a backup or rollback plan.\n  WHY: Database schema changes are often irreversible in production. Verify on a test database first."
+				}
+			}
+		}
+	case "infra":
+		if (toolName == "Edit" || toolName == "Write") && filePath != "" {
+			ext := strings.ToLower(filepath.Ext(filePath))
+			if ext == ".yml" || ext == ".yaml" || baseName == "dockerfile" || strings.HasSuffix(baseName, ".tf") {
+				warning = "[buddy] domain-risk (infra): Editing infrastructure configuration. Changes may affect deployment pipelines or production services.\n  WHY: Infrastructure misconfigurations can cause outages. Review the change scope and test in a staging environment."
+			}
+		}
+	case "api":
+		if (toolName == "Edit" || toolName == "Write") && filePath != "" {
+			if containsAny(baseName, "route", "handler", "endpoint", "middleware", "controller") {
+				warning = "[buddy] domain-risk (api): Editing an API endpoint handler. Consider backward compatibility for existing clients.\n  WHY: Breaking API contracts affects all downstream consumers. Check if the endpoint is versioned."
+			}
+		}
+	}
+
+	if warning == "" {
+		return ""
+	}
+
+	_ = sdb.SetCooldown(cooldownKey, 15*time.Minute)
+	return warning
+}
+
+// containsAny returns true if s contains any of the substrings.
+func containsAny(s string, subs ...string) bool {
+	for _, sub := range subs {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
 }

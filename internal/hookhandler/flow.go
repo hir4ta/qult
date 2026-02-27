@@ -96,23 +96,76 @@ func updateFlowMetrics(sdb *sessiondb.SessionDB, isFailure bool) {
 	_ = sdb.SetContext("ewmv_error_var", strconv.FormatFloat(newErrVar, 'f', 6, 64))
 }
 
-// isInFlow returns true if the session is in a productive flow state:
-// high velocity (>5 tools/min) and low error rate (<0.1).
-func isInFlow(sdb *sessiondb.SessionDB) bool {
+// FlowState represents the session's current productivity state.
+// Used for graduated suggestion suppression instead of binary on/off.
+type FlowState int
+
+const (
+	// FlowNormal: deliver all suggestions at their base priority.
+	FlowNormal FlowState = iota
+	// FlowProductive: high velocity + low errors + success streak.
+	// Defer Medium and below; keep High and Critical.
+	FlowProductive
+	// FlowThrashing: high velocity but high error rate.
+	// User is active but struggling — promote warnings, suppress info.
+	FlowThrashing
+	// FlowStalled: low velocity. Deliver everything, especially next-step.
+	FlowStalled
+	// FlowFatigued: user ignoring suggestions. Reduce to Critical/High only.
+	FlowFatigued
+)
+
+// classifyFlowState determines the session's current flow state
+// from multiple signals: velocity, error rate, acceptance rate, and success streak.
+func classifyFlowState(sdb *sessiondb.SessionDB) FlowState {
 	vel := getFloat(sdb, "ewma_tool_velocity")
 	errRate := getFloat(sdb, "ewma_error_rate")
-	return vel > 5 && errRate < 0.1
+	acceptance := getFloat(sdb, "ewma_acceptance_rate")
+	streak := getInt(sdb, "success_streak")
+
+	// Fatigue overrides other states — user is ignoring suggestions.
+	if acceptance > 0 && acceptance < 0.1 {
+		return FlowFatigued
+	}
+
+	// High velocity + low errors + success streak = genuine productivity.
+	if vel > 5 && errRate < 0.1 && streak >= 3 {
+		return FlowProductive
+	}
+
+	// High velocity + high errors = thrashing, not real flow.
+	if vel > 5 && errRate > 0.25 {
+		return FlowThrashing
+	}
+
+	// Low velocity = stalled.
+	if vel > 0 && vel < 2 {
+		return FlowStalled
+	}
+
+	return FlowNormal
+}
+
+// isInFlow returns true if the session is in a productive flow state.
+// Kept for backward compatibility with MCP tools (buddy_current_state).
+func isInFlow(sdb *sessiondb.SessionDB) bool {
+	return classifyFlowState(sdb) == FlowProductive
 }
 
 // suggestionFatigue returns true if the user is ignoring most suggestions,
 // indicated by a very low acceptance rate.
 func suggestionFatigue(sdb *sessiondb.SessionDB) bool {
-	rate := getFloat(sdb, "ewma_acceptance_rate")
-	// Only consider fatigue if we have enough data (rate will be 0 initially).
-	if rate == 0 {
-		return false
+	return classifyFlowState(sdb) == FlowFatigued
+}
+
+// getInt reads an integer value from sessiondb context.
+func getInt(sdb *sessiondb.SessionDB, key string) int {
+	s, _ := sdb.GetContext(key)
+	if s == "" {
+		return 0
 	}
-	return rate < 0.1
+	v, _ := strconv.Atoi(s)
+	return v
 }
 
 // updateAcceptanceRate updates the EWMA acceptance rate when a suggestion

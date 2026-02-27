@@ -192,7 +192,8 @@ func deliverLintResults(sdb *sessiondb.SessionDB, results []LinterResult) {
 	if set {
 		Deliver(sdb, "lint", "info",
 			fmt.Sprintf("External linter found %d issue(s) in %s", len(results), file),
-			b.String(), PriorityMedium)
+			b.String(), PriorityMedium,
+			"Linter issues caught now are cheaper to fix than after they propagate to other files or CI.")
 	}
 }
 

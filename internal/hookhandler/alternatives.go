@@ -15,6 +15,7 @@ import (
 type Alternative struct {
 	Label     string // e.g., "Read first", "Use past solution"
 	Rationale string // Why this alternative is suggested
+	Why       string // Deep reasoning — explains WHY this matters, not just WHAT
 	Priority  int    // Higher = more relevant, used for ordering
 }
 
@@ -26,8 +27,14 @@ func presentAlternatives(sdb *sessiondb.SessionDB, toolName string, toolInput js
 		return editAlternatives(sdb, toolInput)
 	case "Bash":
 		return bashAlternatives(sdb, toolInput)
+	case "Read":
+		return readAlternatives(sdb, toolInput)
+	case "Grep":
+		return grepAlternatives(sdb, toolInput)
+	case "Task":
+		return taskAlternatives(sdb, toolInput)
 	default:
-		return ""
+		return genericAlternatives(sdb, toolName)
 	}
 }
 
@@ -54,6 +61,7 @@ func editAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 		alts = append(alts, Alternative{
 			Label:     "Read first (recommended)",
 			Rationale: fmt.Sprintf("%.0f%% edit failure rate (%d attempts). Re-read to get exact content.", prob*100, total),
+			Why:       "Edit operations match old_string against current file content. If the content changed since your last Read, the match always fails.",
 			Priority:  90,
 		})
 	}
@@ -65,12 +73,14 @@ func editAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 		alts = append(alts, Alternative{
 			Label:     "Read first (recommended)",
 			Rationale: "This file has not been Read in this session.",
+			Why:       "Editing a file you haven't read risks using stale assumptions about its content.",
 			Priority:  85,
 		})
 	} else if currentSeq-lastSeq >= 8 {
 		alts = append(alts, Alternative{
 			Label:     "Re-read file",
 			Rationale: fmt.Sprintf("Last Read was %d tool calls ago — content may have changed.", currentSeq-lastSeq),
+			Why:       "Other edits or auto-formatters may have modified the file since your last read.",
 			Priority:  80,
 		})
 	}
@@ -432,8 +442,214 @@ func formatAlternatives(sdb *sessiondb.SessionDB, cooldownKey, target string, al
 	fmt.Fprintf(&b, "[buddy] Before this action on %s, consider:", displayTarget)
 	for i, a := range deduped {
 		fmt.Fprintf(&b, "\n  %d. %s — %s", i+1, a.Label, a.Rationale)
+		if a.Why != "" {
+			fmt.Fprintf(&b, "\n     Why: %s", a.Why)
+		}
 	}
 	return b.String()
+}
+
+// readAlternatives generates alternatives before Read operations.
+func readAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) string {
+	var ri struct {
+		FilePath string `json:"file_path"`
+	}
+	if json.Unmarshal(toolInput, &ri) != nil || ri.FilePath == "" {
+		return ""
+	}
+
+	key := "alternatives:read:" + filepath.Base(ri.FilePath)
+	on, _ := sdb.IsOnCooldown(key)
+	if on {
+		return ""
+	}
+
+	var alts []Alternative
+
+	// 1. Unresolved failure on this file — suggest fixing before re-reading.
+	unresolved, failType, _ := sdb.HasUnresolvedFailure(ri.FilePath)
+	if unresolved {
+		alts = append(alts, Alternative{
+			Label:     "Fix the failure first",
+			Rationale: fmt.Sprintf("Unresolved %s in %s.", failType, filepath.Base(ri.FilePath)),
+			Why:       "Re-reading without fixing the root cause leads to an explore loop. Address the failure, then verify.",
+			Priority:  70,
+		})
+	}
+
+	// 2. File read 3+ times — suggest Grep for targeted search.
+	_, _, fileReads, _ := sdb.BurstState()
+	readCount := fileReads[ri.FilePath]
+	if readCount >= 3 {
+		alts = append(alts, Alternative{
+			Label:     "Use Grep instead",
+			Rationale: fmt.Sprintf("This file has been Read %d times. A targeted Grep may be faster.", readCount),
+			Why:       "Repeatedly reading the same file suggests you're searching for something specific. Grep finds it in one call.",
+			Priority:  55,
+		})
+	}
+
+	// 3. Task type is test/bugfix but reading a non-test file first.
+	taskType, _ := sdb.GetContext("task_type")
+	if taskType == "bugfix" || taskType == "test" {
+		base := filepath.Base(ri.FilePath)
+		if !strings.Contains(base, "test") && !strings.Contains(base, "spec") {
+			tc, _, _, _ := sdb.BurstState()
+			if tc <= 2 {
+				testFile := strings.TrimSuffix(base, filepath.Ext(base)) + "_test" + filepath.Ext(base)
+				alts = append(alts, Alternative{
+					Label:     "Start with the test file",
+					Rationale: fmt.Sprintf("For %s tasks, reading %s first shows expected behavior.", taskType, testFile),
+					Why:       "Test files define the contract. Understanding expectations before reading implementation prevents misinterpreting the code.",
+					Priority:  60,
+				})
+			}
+		}
+	}
+
+	return formatAlternatives(sdb, key, filepath.Base(ri.FilePath), alts)
+}
+
+// grepAlternatives generates alternatives before Grep operations.
+func grepAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) string {
+	var gi struct {
+		Pattern string `json:"pattern"`
+		Path    string `json:"path"`
+	}
+	if json.Unmarshal(toolInput, &gi) != nil || gi.Pattern == "" {
+		return ""
+	}
+
+	key := "alternatives:grep:" + gi.Pattern
+	on, _ := sdb.IsOnCooldown(key)
+	if on {
+		return ""
+	}
+
+	var alts []Alternative
+
+	// 1. If path is a single file, suggest Read instead.
+	if gi.Path != "" {
+		ext := filepath.Ext(gi.Path)
+		if ext != "" && !strings.Contains(gi.Path, "*") && !strings.Contains(gi.Path, "...") {
+			alts = append(alts, Alternative{
+				Label:     "Read the file directly",
+				Rationale: fmt.Sprintf("Grep on a single file (%s). Read gives full context.", filepath.Base(gi.Path)),
+				Why:       "Reading the whole file lets you see the pattern in context. Grep only shows matching lines, missing surrounding logic.",
+				Priority:  45,
+			})
+		}
+	}
+
+	// 2. Coverage map — suggest specific test command for function names.
+	cm := LoadCoverageMap(sdb)
+	if cm != nil && looksLikeFunctionName(gi.Pattern) {
+		wsFiles, _ := sdb.GetWorkingSetFiles()
+		for _, f := range wsFiles {
+			if cmd := SuggestTestCommand(cm, f, []string{gi.Pattern}, ""); cmd != "" {
+				alts = append(alts, Alternative{
+					Label:     "Run the test directly",
+					Rationale: fmt.Sprintf("Test for %s: %s", gi.Pattern, cmd),
+					Why:       "If you're searching for a function to understand it, running its test shows expected behavior faster than reading all matches.",
+					Priority:  50,
+				})
+				break
+			}
+		}
+	}
+
+	return formatAlternatives(sdb, key, gi.Pattern, alts)
+}
+
+// taskAlternatives generates alternatives before Task (subagent) operations.
+func taskAlternatives(sdb *sessiondb.SessionDB, _ json.RawMessage) string {
+	key := "alternatives:task"
+	on, _ := sdb.IsOnCooldown(key)
+	if on {
+		return ""
+	}
+
+	var alts []Alternative
+
+	// 1. Unresolved failures — fix before delegating.
+	failures, _ := sdb.RecentFailures(3)
+	unresolvedCount := 0
+	for _, f := range failures {
+		if f.FilePath == "" {
+			continue
+		}
+		unresolved, _, _ := sdb.HasUnresolvedFailure(f.FilePath)
+		if unresolved {
+			unresolvedCount++
+		}
+	}
+	if unresolvedCount > 0 {
+		alts = append(alts, Alternative{
+			Label:     "Fix failures first",
+			Rationale: fmt.Sprintf("%d unresolved failure(s). Subagent may hit the same issues.", unresolvedCount),
+			Why:       "Subagents inherit the same codebase state. Unresolved compile or test failures will cascade into the subagent's work.",
+			Priority:  80,
+		})
+	}
+
+	// 2. Bugfix task without reproduction.
+	taskType, _ := sdb.GetContext("task_type")
+	hasTestRun, _ := sdb.GetContext("has_test_run")
+	if taskType == "bugfix" && hasTestRun != "true" {
+		alts = append(alts, Alternative{
+			Label:     "Reproduce the bug first",
+			Rationale: "Delegating a bugfix without a reproduction makes it harder for the subagent to verify the fix.",
+			Why:       "A subagent without a failing test has no way to confirm the bug is fixed. Reproduce first, then delegate.",
+			Priority:  65,
+		})
+	}
+
+	return formatAlternatives(sdb, key, "subagent", alts)
+}
+
+// genericAlternatives provides fallback alternatives for any tool type.
+func genericAlternatives(sdb *sessiondb.SessionDB, toolName string) string {
+	key := "alternatives:generic:" + toolName
+	on, _ := sdb.IsOnCooldown(key)
+	if on {
+		return ""
+	}
+
+	var alts []Alternative
+
+	// 1. Check for unresolved failures in working set.
+	files, _ := sdb.GetWorkingSetFiles()
+	for _, f := range files {
+		unresolved, failType, _ := sdb.HasUnresolvedFailure(f)
+		if unresolved {
+			alts = append(alts, Alternative{
+				Label:     "Fix unresolved failure",
+				Rationale: fmt.Sprintf("Unresolved %s in %s.", failType, filepath.Base(f)),
+				Why:       "Continuing without fixing known failures compounds the problem. Each subsequent change may mask the original issue.",
+				Priority:  70,
+			})
+			break
+		}
+	}
+
+	return formatAlternatives(sdb, key, toolName, alts)
+}
+
+// looksLikeFunctionName returns true if the pattern looks like a function/method name
+// (starts with a letter, contains only word characters, not too long).
+func looksLikeFunctionName(pattern string) bool {
+	if len(pattern) < 3 || len(pattern) > 50 {
+		return false
+	}
+	for i, r := range pattern {
+		if i == 0 && !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '_') {
+			return false
+		}
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 // classifyBashPhase maps a bash command to a workflow phase name.

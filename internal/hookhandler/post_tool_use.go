@@ -7,6 +7,7 @@ import (
 	"hash/fnv"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -120,7 +121,8 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 						Deliver(sdb, "test-first", "info",
 							"Good practice: running tests before editing",
 							"Test-first approach established. This gives a baseline to verify changes against.",
-							PriorityMedium)
+							PriorityMedium,
+							"Running tests before editing creates a verifiable baseline; without it, you can't distinguish pre-existing failures from ones you introduced.")
 					}
 				}
 			}
@@ -139,6 +141,10 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 	// Update EWMA flow metrics (velocity, error rate).
 	updateFlowMetrics(sdb, false)
 
+	// Track success streak for FlowState classification.
+	streak := getInt(sdb, "success_streak")
+	_ = sdb.SetContext("success_streak", strconv.Itoa(streak+1))
+
 	// Record health snapshot every 10 tool calls for trend prediction.
 	recordHealthSnapshot(sdb)
 
@@ -149,7 +155,8 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 			set, _ := sdb.TrySetCooldown("wall_intervention", 10*time.Minute)
 			if set {
 				Deliver(sdb, "wall-detected", "warning",
-					"Productivity drop detected", msg, PriorityHigh)
+					"Productivity drop detected", msg, PriorityHigh,
+					"Velocity drops often indicate a blocker — addressing it early prevents cascade failures.")
 			}
 		}
 	}
@@ -225,7 +232,8 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 	// Workflow order check — enqueue nudge if write doesn't match expected workflow.
 	if isWrite {
 		if nudge := checkWorkflowForCurrentTask(sdb); nudge != "" {
-			Deliver(sdb, "workflow", "info", "Workflow suggestion", nudge, PriorityMedium)
+			Deliver(sdb, "workflow", "info", "Workflow suggestion", nudge, PriorityMedium,
+			"Following the established workflow order (read→plan→edit→test) reduces rework by catching issues earlier.")
 		}
 	}
 
@@ -265,7 +273,8 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 				set, _ := sdb.TrySetCooldown("test_correlation", 3*time.Minute)
 				if set {
 					Deliver(sdb, "test-correlation", "info",
-						"Test failure correlated with recent edits", correlation, PriorityMedium)
+						"Test failure correlated with recent edits", correlation, PriorityMedium,
+						"Knowing which edit caused a test failure lets you focus the fix instead of guessing.")
 				}
 			}
 		}
@@ -354,7 +363,8 @@ func checkPeriodicHealth(sdb *sessiondb.SessionDB) {
 		Deliver(sdb, "checkpoint", "info",
 			fmt.Sprintf("Session checkpoint at %d tool calls", tc),
 			fmt.Sprintf("%d unresolved failure(s) detected. Consider fixing before continuing.", unresolvedCount),
-			PriorityMedium)
+			PriorityMedium,
+			"Unresolved failures can compound — each new edit may mask or worsen the original issue.")
 		return
 	}
 
@@ -365,12 +375,14 @@ func checkPeriodicHealth(sdb *sessiondb.SessionDB) {
 		Deliver(sdb, "checkpoint", "info",
 			fmt.Sprintf("Session checkpoint at %d tool calls", tc),
 			fmt.Sprintf("%d files modified but tests not yet run. Consider running tests.", len(files)),
-			PriorityMedium)
+			PriorityMedium,
+			"The longer you go without testing, the harder it is to isolate which change broke something.")
 	}
 
 	// Anomaly detection: explore/debug spiral.
 	if alert := checkAnomaly(sdb); alert != "" {
-		Deliver(sdb, "anomaly", "warning", "Behavioral pattern detected", alert, PriorityHigh)
+		Deliver(sdb, "anomaly", "warning", "Behavioral pattern detected", alert, PriorityHigh,
+			"Anomalous behavioral patterns correlate with declining session outcomes — early intervention saves time.")
 	}
 
 	// Health trend prediction: warn if declining toward threshold.
@@ -380,7 +392,8 @@ func checkPeriodicHealth(sdb *sessiondb.SessionDB) {
 			Deliver(sdb, "health-trend", "warning",
 				fmt.Sprintf("Session health declining (%.0f%%)", trend.CurrentHealth*100),
 				fmt.Sprintf("At current pace, health will drop below 50%% in ~%d tool calls. Consider taking a step back, running tests, or breaking the task into smaller steps.", trend.ToolsToThreshold),
-				PriorityHigh)
+				PriorityHigh,
+				"Declining health correlates with increasing rework; pausing now saves more time than continuing.")
 		}
 	}
 }
@@ -468,7 +481,8 @@ func matchPastErrorSolutions(sdb *sessiondb.SessionDB, response string) {
 
 	Deliver(sdb, "past-solution", "info",
 		"Similar error found in past sessions",
-		formatSolution(solutions[0]), PriorityMedium)
+		formatSolution(solutions[0]), PriorityMedium,
+		"Past solutions for the same error signature succeeded before — applying them first is faster than debugging from scratch.")
 	_ = sdb.SetCooldown("past_solution", 5*time.Minute)
 }
 
@@ -567,6 +581,7 @@ func recordPhase(sdb *sessiondb.SessionDB, toolName string, toolInput json.RawMe
 	prevPhase, _ := sdb.GetContext("prev_phase")
 	if prevPhase != "" && prevPhase != phase {
 		_ = sdb.SetContext("at_workflow_boundary", "true")
+		_ = sdb.SetContext("coaching_phase_changed", "true")
 	}
 	_ = sdb.SetContext("prev_phase", phase)
 
@@ -652,7 +667,8 @@ func suggestTestForEdit(sdb *sessiondb.SessionDB, filePath string, toolInput jso
 	Deliver(sdb, "test-suggest", "info",
 		fmt.Sprintf("Changed functions: %s", strings.Join(changedFuncs, ", ")),
 		fmt.Sprintf("Run: %s", cmd),
-		PriorityMedium)
+		PriorityMedium,
+		"Running targeted tests for changed functions catches regressions without the overhead of the full test suite.")
 }
 
 func hashInput(toolName string, toolInput json.RawMessage) uint64 {
@@ -714,5 +730,6 @@ func surfaceCoChanges(sdb *sessiondb.SessionDB, filePath string) {
 	Deliver(sdb, "co-change", "info",
 		fmt.Sprintf("%s is often changed with: %s", filepath.Base(filePath), strings.Join(missing, ", ")),
 		"Consider reviewing these files for related changes.",
-		PriorityMedium)
+		PriorityMedium,
+		"Files that historically change together often share assumptions — updating one without the other causes subtle bugs.")
 }

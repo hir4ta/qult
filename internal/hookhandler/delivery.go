@@ -50,20 +50,46 @@ type DeliveryDecision struct {
 // 3. Standard suppression check.
 // 4. Workflow boundary boost (phase transitions, commits, task switches).
 func RouteDelivery(sdb *sessiondb.SessionDB, pattern string, priority SuggestionPriority) DeliveryDecision {
-	// Suppress non-critical suggestions during productive flow or suggestion fatigue.
-	if priority > PriorityCritical && (isInFlow(sdb) || suggestionFatigue(sdb)) {
-		return DeliveryDecision{Channel: ChannelDefer, Priority: priority}
+	// Critical priority bypasses all flow checks and Thompson Sampling.
+	if priority == PriorityCritical {
+		return DeliveryDecision{Channel: ChannelImmediate, Priority: priority}
+	}
+
+	// Graduated suppression based on multi-signal flow state.
+	flow := classifyFlowState(sdb)
+	switch flow {
+	case FlowProductive:
+		// Genuine productivity — only High+ gets through immediately.
+		if priority > PriorityHigh {
+			return DeliveryDecision{Channel: ChannelDefer, Priority: priority}
+		}
+	case FlowThrashing:
+		// Active but struggling — promote Medium warnings to immediate, suppress Low.
+		if priority == PriorityLow {
+			return DeliveryDecision{Channel: ChannelSuppress, Priority: priority}
+		}
+		if priority == PriorityMedium {
+			priority = PriorityHigh // promote warnings so they reach the user
+		}
+	case FlowFatigued:
+		// User ignoring suggestions — reduce to High only, 1 per burst.
+		if priority > PriorityHigh {
+			return DeliveryDecision{Channel: ChannelSuppress, Priority: priority}
+		}
+		if priority == PriorityHigh && getBurstSuggestionCount(sdb) >= 1 {
+			return DeliveryDecision{Channel: ChannelNudge, Priority: priority}
+		}
+	case FlowStalled:
+		// Low velocity — deliver everything to help unstick.
+		// No suppression; fall through to normal routing.
+	default:
+		// FlowNormal — standard routing.
 	}
 
 	// Workflow boundary boost: promote Medium → High at phase transitions,
 	// commits, and task switches (52% engagement vs 31% mid-task).
 	if priority == PriorityMedium && isAtWorkflowBoundary(sdb) {
 		priority = PriorityHigh
-	}
-
-	// Critical priority bypasses Thompson Sampling — always deliver immediately.
-	if priority == PriorityCritical {
-		return DeliveryDecision{Channel: ChannelImmediate, Priority: priority}
 	}
 
 	// Apply adaptive priority adjustment using Thompson Sampling.
@@ -154,11 +180,19 @@ func adjustPriority(rng *rand.Rand, pattern string, base SuggestionPriority) Sug
 		return PrioritySuppressed
 	}
 
-	// Thompson Sampling: try contextual key first, fall back to base pattern.
+	// Thompson Sampling: 3-tier fallback for data density.
+	// 1. Full contextual key (pattern:taskType:cluster:domain)
+	// 2. Base contextual key without domain (pattern:taskType:cluster)
+	// 3. Base pattern only
 	delivered, resolved, err := st.DecayedPatternEffectiveness(ctxKey)
 	if err != nil || delivered < 3.0 {
-		// Insufficient contextual data — fall back to base pattern.
-		delivered, resolved, err = st.DecayedPatternEffectiveness(pattern)
+		baseCtxKey := baseContextualPatternKey(pattern)
+		if baseCtxKey != ctxKey {
+			delivered, resolved, err = st.DecayedPatternEffectiveness(baseCtxKey)
+		}
+		if err != nil || delivered < 3.0 {
+			delivered, resolved, err = st.DecayedPatternEffectiveness(pattern)
+		}
 	}
 	if err != nil || delivered < 0.5 {
 		// No data at all — uniform prior Beta(1,1), sample for exploration.
@@ -250,7 +284,8 @@ func betaExpectation(alpha, beta float64) float64 {
 // For ChannelImmediate, the caller should include the returned string in the hook output.
 // For ChannelNudge, the suggestion is enqueued to nudge_outbox.
 // For ChannelDefer and ChannelSuppress, nothing is delivered.
-func Deliver(sdb *sessiondb.SessionDB, pattern, level, observation, suggestion string, priority SuggestionPriority) (immediate string) {
+// The optional reasoning parameter adds a WHY line explaining the deeper rationale.
+func Deliver(sdb *sessiondb.SessionDB, pattern, level, observation, suggestion string, priority SuggestionPriority, reasoning ...string) (immediate string) {
 	// Phase-aware gating: suppress suggestions inappropriate for current phase.
 	if shouldGateForPhase(sdb, pattern) {
 		return ""
@@ -259,13 +294,26 @@ func Deliver(sdb *sessiondb.SessionDB, pattern, level, observation, suggestion s
 	// Enrichment: if this pattern was previously unresolved, add richer context.
 	suggestion = enrichIfRepeated(sdb, pattern, suggestion)
 
+	why := ""
+	if len(reasoning) > 0 && reasoning[0] != "" {
+		why = reasoning[0]
+	}
+
 	decision := RouteDelivery(sdb, pattern, priority)
 
 	switch decision.Channel {
 	case ChannelImmediate:
-		return fmt.Sprintf("[buddy] %s (%s): %s\n→ %s", pattern, level, observation, suggestion)
+		msg := fmt.Sprintf("[buddy] %s (%s): %s\n→ %s", pattern, level, observation, suggestion)
+		if why != "" {
+			msg += "\n  WHY: " + why
+		}
+		return msg
 	case ChannelNudge:
-		_ = sdb.EnqueueNudge(pattern, level, observation, suggestion)
+		nudgeSuggestion := suggestion
+		if why != "" {
+			nudgeSuggestion += "\n  WHY: " + why
+		}
+		_ = sdb.EnqueueNudge(pattern, level, observation, nudgeSuggestion)
 		return ""
 	case ChannelDefer, ChannelSuppress:
 		return ""
@@ -273,11 +321,33 @@ func Deliver(sdb *sessiondb.SessionDB, pattern, level, observation, suggestion s
 	return ""
 }
 
-// contextualPatternKey builds a contextual key from (pattern, task_type, user_cluster).
+// contextualPatternKey builds a contextual key from (pattern, task_type, user_cluster, domain).
 // This allows Thompson Sampling to learn that e.g. "workflow" suggestions are effective
-// during bugfix+conservative but not during feature+aggressive.
-// Velocity state is intentionally excluded to increase data density per context (~3x).
+// during bugfix+conservative+auth but not during feature+aggressive+ui.
+// Velocity state is intentionally excluded to increase data density per context.
+// Domain is included only when non-empty and non-"general" to avoid sparse keys.
 func contextualPatternKey(pattern string) string {
+	taskType := currentTaskType()
+	cluster := currentUserCluster()
+	domain := currentDomain()
+	if taskType == "" && cluster == "" {
+		return pattern
+	}
+	if taskType == "" {
+		taskType = "unknown"
+	}
+	if cluster == "" {
+		cluster = "balanced"
+	}
+	key := pattern + ":" + taskType + ":" + cluster
+	if domain != "" && domain != "general" {
+		key += ":" + domain
+	}
+	return key
+}
+
+// baseContextualPatternKey builds a key without domain for the middle-tier fallback.
+func baseContextualPatternKey(pattern string) string {
 	taskType := currentTaskType()
 	cluster := currentUserCluster()
 	if taskType == "" && cluster == "" {
@@ -299,12 +369,13 @@ func currentTaskType() string {
 	return ctxTaskType
 }
 
-// SetDeliveryContext caches task_type and user cluster for contextual Thompson Sampling.
+// SetDeliveryContext caches task_type, domain, and user cluster for contextual Thompson Sampling.
 // Called once per hook invocation before any Deliver calls.
-// Velocity state is computed and cached for use by velocity wall detection (Phase 2),
+// Velocity state is computed and cached for use by velocity wall detection,
 // but excluded from the contextual pattern key to increase data density.
 func SetDeliveryContext(sdb *sessiondb.SessionDB) {
 	ctxTaskType, _ = sdb.GetContext("task_type")
+	ctxDomain, _ = sdb.GetWorkingSet("domain")
 	vel := getFloat(sdb, "ewma_tool_velocity")
 	switch {
 	case vel > 8.0:
@@ -327,11 +398,17 @@ func currentUserCluster() string {
 	return ctxUserCluster
 }
 
+// currentDomain returns the cached domain classification.
+func currentDomain() string {
+	return ctxDomain
+}
+
 // Process-level cache for contextual delivery (set once per hook invocation).
 var (
 	ctxTaskType      string
 	ctxVelocityState string
 	ctxUserCluster   string
+	ctxDomain        string
 )
 
 func getBurstSuggestionCount(sdb *sessiondb.SessionDB) int {
