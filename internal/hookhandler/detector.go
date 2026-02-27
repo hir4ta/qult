@@ -18,8 +18,8 @@ type HookDetector struct {
 // for Claude to evaluate. Returns "" if no signal detected.
 func (d *HookDetector) Detect() string {
 	// Episode-based early warnings fire first (predict before full pattern).
-	if sig := d.detectEpisodes(); sig != "" {
-		return sig
+	if sig := d.detectEpisodes(); sig != nil {
+		return sig.Message
 	}
 	if sig := d.detectRetryLoop(); sig != "" {
 		return sig

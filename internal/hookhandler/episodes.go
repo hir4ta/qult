@@ -21,10 +21,10 @@ type episodeSignal struct {
 // anti-pattern episodes. Returns a signal when 60-70% of the episode
 // steps have been matched but the full pattern has not yet completed.
 // This enables "JARVIS-style" warnings BEFORE the anti-pattern fully manifests.
-func (d *HookDetector) detectEpisodes() string {
+func (d *HookDetector) detectEpisodes() *episodeSignal {
 	events, err := d.sdb.RecentEvents(15)
 	if err != nil || len(events) < 2 {
-		return ""
+		return nil
 	}
 
 	// Try each episode template; return the first signal found.
@@ -45,21 +45,21 @@ func (d *HookDetector) detectEpisodes() string {
 			// Enrich with domain-specific advice when available.
 			domain, _ := d.sdb.GetWorkingSet("domain")
 			sig.Message += domainAdvice(sig.Name, domain)
-			return sig.Message
+			return sig
 		}
 	}
 
 	// Check dynamically learned episodes from past sessions.
 	if msg := d.detectLearnedEpisodes(); msg != "" {
-		return msg
+		return &episodeSignal{Name: "learned", Message: msg}
 	}
 
 	// Check if current session trajectory matches a past failed session.
 	if msg := d.detectTrajectoryMatch(); msg != "" {
-		return msg
+		return &episodeSignal{Name: "trajectory", Message: msg}
 	}
 
-	return ""
+	return nil
 }
 
 // episodeRetryCascade detects the early stage of a retry loop:

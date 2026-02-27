@@ -266,16 +266,10 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 			matchPastErrorSolutions(sdb, resp)
 		}
 
-		// Test failure correlation: connect failures to recently edited files.
+		// Test failure: synchronous feedback with correlation + past solutions + re-run command.
 		if bi.Command != "" && testCmdPattern.MatchString(bi.Command) && containsError(resp) {
-			failures := extractTestFailures(resp)
-			if correlation := correlateWithRecentEdits(sdb, failures); correlation != "" {
-				set, _ := sdb.TrySetCooldown("test_correlation", 3*time.Minute)
-				if set {
-					Deliver(sdb, "test-correlation", "info",
-						"Test failure correlated with recent edits", correlation, PriorityMedium,
-						"Knowing which edit caused a test failure lets you focus the fix instead of guessing.")
-				}
+			if msg := buildTestFailureGuidance(sdb, in.SessionID, bi.Command, resp, in.CWD); msg != "" {
+				return makeAsyncContextOutput(msg), nil
 			}
 		}
 	}
@@ -669,6 +663,84 @@ func suggestTestForEdit(sdb *sessiondb.SessionDB, filePath string, toolInput jso
 		fmt.Sprintf("Run: %s", cmd),
 		PriorityMedium,
 		"Running targeted tests for changed functions catches regressions without the overhead of the full test suite.")
+}
+
+// buildTestFailureGuidance builds a synchronous context message when tests fail.
+// Combines: (1) test-to-edit correlation, (2) past resolution chains, (3) specific re-run command.
+func buildTestFailureGuidance(sdb *sessiondb.SessionDB, sessionID, cmd, resp, cwd string) string {
+	var b strings.Builder
+	b.WriteString("[buddy] TEST FAILURE — fix before continuing:")
+
+	// 1. Correlate failures with recent edits.
+	failures := extractTestFailures(resp)
+	if correlation := correlateWithRecentEdits(sdb, failures); correlation != "" {
+		fmt.Fprintf(&b, "\n  Correlation: %s", correlation)
+	}
+
+	// 2. Search past resolution chains for this failure signature.
+	errSig := extractErrorSignature(resp)
+	if errSig != "" {
+		st, err := store.OpenDefault()
+		if err == nil {
+			chains, _ := st.SearchSolutionChains("test:"+errSig, 1)
+			if len(chains) > 0 {
+				fmt.Fprintf(&b, "\n  Past fix (%d steps): %s", chains[0].StepCount, chains[0].ToolSequence)
+			}
+			solutions, _ := st.SearchFailureSolutionsWithDiff("test", errSig, 1)
+			if len(solutions) > 0 && solutions[0].ResolutionDiff != "" {
+				var diff struct {
+					Old string `json:"old"`
+					New string `json:"new"`
+				}
+				if json.Unmarshal([]byte(solutions[0].ResolutionDiff), &diff) == nil && diff.Old != "" {
+					old := truncate(diff.Old, 60)
+					new_ := truncate(diff.New, 60)
+					fmt.Fprintf(&b, "\n  Previous fix: `%s` → `%s`", old, new_)
+				}
+			}
+			st.Close()
+		}
+	}
+
+	// 3. Suggest specific re-run command.
+	if len(failures) > 0 {
+		var names []string
+		for _, f := range failures {
+			if f.TestName != "" && len(names) < 5 {
+				names = append(names, f.TestName)
+			}
+		}
+		if len(names) > 0 {
+			fmt.Fprintf(&b, "\n  Re-run: go test -run '%s' -count=1 -v", strings.Join(names, "|"))
+			// Extract package from the original command if possible.
+			if pkg := extractTestPackage(cmd); pkg != "" {
+				fmt.Fprintf(&b, " %s", pkg)
+			}
+		}
+	} else {
+		// No parsed failures — suggest re-running the same command.
+		fmt.Fprintf(&b, "\n  Re-run: %s", cmd)
+	}
+
+	// Start solution chain tracking for this failure.
+	if errSig != "" {
+		_ = sdb.SetContext("chain_failure_sig", "test:"+errSig)
+		_ = sdb.SetContext("chain_tool_seq", "")
+		_ = sdb.SetContext("chain_step_count", "0")
+	}
+
+	return b.String()
+}
+
+// extractTestPackage extracts the Go package path from a test command.
+func extractTestPackage(cmd string) string {
+	fields := strings.Fields(cmd)
+	for _, f := range fields {
+		if strings.HasPrefix(f, "./") || strings.HasPrefix(f, ".") {
+			return f
+		}
+	}
+	return ""
 }
 
 func hashInput(toolName string, toolInput json.RawMessage) uint64 {

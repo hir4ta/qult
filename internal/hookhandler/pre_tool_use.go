@@ -72,9 +72,15 @@ func handlePreToolUse(input []byte) (*HookOutput, error) {
 	}
 
 	// Episode early-warning: detect emerging anti-patterns BEFORE tool execution.
+	// retry_cascade and edit_fail_spiral are blocked (deny); others are advisory.
 	det := &HookDetector{sdb: sdb}
-	if sig := det.detectEpisodes(); sig != "" {
-		return makeOutput("PreToolUse", sig), nil
+	if sig := det.detectEpisodes(); sig != nil {
+		switch sig.Name {
+		case "retry_cascade", "edit_fail_spiral":
+			return makeDenyOutput(sig.Message), nil
+		default:
+			return makeOutput("PreToolUse", sig.Message), nil
+		}
 	}
 
 	// Velocity wall look-ahead: warn when velocity variance is high and health declining.
@@ -342,7 +348,25 @@ func autoCorrectTool(sdb *sessiondb.SessionDB, toolName string, toolInput json.R
 		return makeUpdatedInputOutput(updated, ctx)
 	}
 
+	// git push --force → --force-with-lease (safer).
+	if corrected, ctx := fixForcePush(bi.Command); corrected != "" {
+		updated, _ := json.Marshal(map[string]string{"command": corrected})
+		return makeUpdatedInputOutput(updated, ctx)
+	}
+
 	return nil
+}
+
+// fixForcePush replaces git push --force with --force-with-lease.
+func fixForcePush(cmd string) (string, string) {
+	if !strings.Contains(cmd, "git push") {
+		return "", ""
+	}
+	if !strings.Contains(cmd, "--force") || strings.Contains(cmd, "--force-with-lease") {
+		return "", ""
+	}
+	corrected := strings.Replace(cmd, "--force", "--force-with-lease", 1)
+	return corrected, "[buddy] Replaced --force with --force-with-lease to prevent overwriting others' work"
 }
 
 // fixGoTestRaceCache adds -count=1 to go test -race commands to disable test caching,

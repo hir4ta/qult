@@ -27,18 +27,18 @@ func TestEpisodeRetryCascade(t *testing.T) {
 	// 1 event: no signal.
 	_ = sdb.RecordEvent("Edit", 0xAABB, true)
 	sig := det.detectEpisodes()
-	if sig != "" {
-		t.Errorf("1 event: got signal %q, want empty", sig)
+	if sig != nil {
+		t.Errorf("1 event: got signal %q, want nil", sig.Message)
 	}
 
 	// 2 identical events: early warning.
 	_ = sdb.RecordEvent("Edit", 0xAABB, true)
 	sig = det.detectEpisodes()
-	if sig == "" {
+	if sig == nil {
 		t.Error("2 identical events: got no signal, want retry_cascade warning")
 	}
-	if sig != "" && !strings.Contains(sig, "retry_cascade") {
-		t.Errorf("got %q, want retry_cascade", sig)
+	if sig != nil && !strings.Contains(sig.Message, "retry_cascade") {
+		t.Errorf("got %q, want retry_cascade", sig.Message)
 	}
 
 	// 3rd identical event: episode should NOT fire (full pattern, let main detector handle).
@@ -47,8 +47,8 @@ func TestEpisodeRetryCascade(t *testing.T) {
 	_ = sdb.SetCooldown("episode:retry_cascade", -1*time.Second)
 	sig = det.detectEpisodes()
 	// Should not fire since full pattern (3+) is now present.
-	if sig != "" && strings.Contains(sig, "retry_cascade") {
-		t.Errorf("3 identical events: episode should not fire, got %q", sig)
+	if sig != nil && strings.Contains(sig.Message, "retry_cascade") {
+		t.Errorf("3 identical events: episode should not fire, got %q", sig.Message)
 	}
 }
 
@@ -62,14 +62,14 @@ func TestEpisodeRetryCascadeCooldown(t *testing.T) {
 
 	// First detection fires.
 	sig := det.detectEpisodes()
-	if sig == "" {
-		t.Fatal("first detection should fire, got empty")
+	if sig == nil {
+		t.Fatal("first detection should fire, got nil")
 	}
 
 	// Second detection within cooldown does not fire.
 	sig = det.detectEpisodes()
-	if sig != "" {
-		t.Errorf("within cooldown should not fire, got %q", sig)
+	if sig != nil {
+		t.Errorf("within cooldown should not fire, got %q", sig.Message)
 	}
 }
 
@@ -83,15 +83,19 @@ func TestEpisodeExploreToStuck(t *testing.T) {
 		_ = sdb.RecordEvent("Read", uint64(i), false)
 	}
 	sig := det.detectEpisodes()
-	if sig != "" && strings.Contains(sig, "explore_to_stuck") {
-		t.Errorf("6 reads: should not fire, got %q", sig)
+	if sig != nil && strings.Contains(sig.Message, "explore_to_stuck") {
+		t.Errorf("6 reads: should not fire, got %q", sig.Message)
 	}
 
 	// 7th read: early warning.
 	_ = sdb.RecordEvent("Read", 0x07, false)
 	sig = det.detectEpisodes()
-	if !strings.Contains(sig, "explore_to_stuck") {
-		t.Errorf("7 reads: got %q, want explore_to_stuck warning", sig)
+	if sig == nil || !strings.Contains(sig.Message, "explore_to_stuck") {
+		msg := ""
+		if sig != nil {
+			msg = sig.Message
+		}
+		t.Errorf("7 reads: got %q, want explore_to_stuck warning", msg)
 	}
 }
 
@@ -110,8 +114,12 @@ func TestEpisodeExploreToStuckSuppressedByWrite(t *testing.T) {
 	// Actually, with DESC: reads come first (most recent), then the write.
 	// So we'll count 8 reads until the write breaks it.
 	sig := det.detectEpisodes()
-	if !strings.Contains(sig, "explore_to_stuck") {
-		t.Errorf("8 reads after write: got %q, want explore_to_stuck", sig)
+	if sig == nil || !strings.Contains(sig.Message, "explore_to_stuck") {
+		msg := ""
+		if sig != nil {
+			msg = sig.Message
+		}
+		t.Errorf("8 reads after write: got %q, want explore_to_stuck", msg)
 	}
 }
 
@@ -126,8 +134,8 @@ func TestEpisodeExploreToStuckSuppressedByPlanMode(t *testing.T) {
 	}
 	sig := det.detectEpisodes()
 	// explore_to_stuck is suppressed during plan mode.
-	if strings.Contains(sig, "explore_to_stuck") {
-		t.Errorf("plan mode: should not fire explore_to_stuck, got %q", sig)
+	if sig != nil && strings.Contains(sig.Message, "explore_to_stuck") {
+		t.Errorf("plan mode: should not fire explore_to_stuck, got %q", sig.Message)
 	}
 }
 
@@ -143,8 +151,12 @@ func TestEpisodeEditFailSpiral(t *testing.T) {
 	_ = sdb.RecordEvent("Edit", 0xAB, true) // failed attempt 2 (needs >= 2 events for detectEpisodes)
 
 	sig := det.detectEpisodes()
-	if !strings.Contains(sig, "edit_fail_spiral") {
-		t.Errorf("2 edit failures + recent edit: got %q, want edit_fail_spiral", sig)
+	if sig == nil || !strings.Contains(sig.Message, "edit_fail_spiral") {
+		msg := ""
+		if sig != nil {
+			msg = sig.Message
+		}
+		t.Errorf("2 edit failures + recent edit: got %q, want edit_fail_spiral", msg)
 	}
 }
 
@@ -161,8 +173,12 @@ func TestEpisodeTestFailFixup(t *testing.T) {
 	_ = sdb.RecordEvent("Bash", 0xCC, false) // test run 2
 
 	sig := det.detectEpisodes()
-	if !strings.Contains(sig, "test_fail_fixup") {
-		t.Errorf("2 test failures with edit: got %q, want test_fail_fixup", sig)
+	if sig == nil || !strings.Contains(sig.Message, "test_fail_fixup") {
+		msg := ""
+		if sig != nil {
+			msg = sig.Message
+		}
+		t.Errorf("2 test failures with edit: got %q, want test_fail_fixup", msg)
 	}
 }
 
@@ -180,8 +196,12 @@ func TestEpisodeContextOverload(t *testing.T) {
 	}
 
 	sig := det.detectEpisodes()
-	if !strings.Contains(sig, "context_overload") {
-		t.Errorf("1 compact + 12 tools: got %q, want context_overload", sig)
+	if sig == nil || !strings.Contains(sig.Message, "context_overload") {
+		msg := ""
+		if sig != nil {
+			msg = sig.Message
+		}
+		t.Errorf("1 compact + 12 tools: got %q, want context_overload", msg)
 	}
 }
 

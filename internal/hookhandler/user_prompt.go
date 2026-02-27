@@ -213,6 +213,34 @@ func buildSessionContextSummary(sdb *sessiondb.SessionDB) string {
 		parts = append(parts, "Branch: "+branch)
 	}
 
+	// Unresolved failures: critical signal.
+	failures, _ := sdb.RecentFailures(5)
+	unresolvedCount := 0
+	for _, f := range failures {
+		if time.Since(f.Timestamp) > 10*time.Minute || f.FilePath == "" {
+			continue
+		}
+		if unresolved, _, _ := sdb.HasUnresolvedFailure(f.FilePath); unresolved {
+			unresolvedCount++
+		}
+	}
+	if unresolvedCount > 0 {
+		parts = append(parts, fmt.Sprintf("UNRESOLVED: %d failure(s)", unresolvedCount))
+	}
+
+	// Test status.
+	hasTestRun, _ := sdb.GetContext("has_test_run")
+	lastTestPassed, _ := sdb.GetContext("last_test_passed")
+	if hasTestRun == "true" {
+		if lastTestPassed == "false" {
+			parts = append(parts, "Tests: FAILING")
+		} else {
+			parts = append(parts, "Tests: passing")
+		}
+	} else if len(files) > 0 {
+		parts = append(parts, "Tests: not run yet")
+	}
+
 	// Velocity health.
 	vel := getFloat(sdb, "ewma_tool_velocity")
 	errRate := getFloat(sdb, "ewma_error_rate")
@@ -226,12 +254,61 @@ func buildSessionContextSummary(sdb *sessiondb.SessionDB) string {
 		parts = append(parts, "Health: "+health)
 	}
 
+	// Co-change candidates: files frequently changed together but not yet modified.
+	if len(files) > 0 && len(files) <= 5 {
+		if coHint := coChangeCandidates(files); coHint != "" {
+			parts = append(parts, coHint)
+		}
+	}
+
 	if len(parts) < 2 {
 		return "" // not enough context to be useful
 	}
 
-	_ = sdb.SetCooldown("session_context_summary", 5*time.Minute)
+	_ = sdb.SetCooldown("session_context_summary", 2*time.Minute)
 	return strings.Join(parts, " | ")
+}
+
+// coChangeCandidates checks if any working set files have frequent co-change partners
+// that haven't been modified yet. Returns a compact hint or "".
+func coChangeCandidates(files []string) string {
+	st, err := store.OpenDefault()
+	if err != nil {
+		return ""
+	}
+	defer st.Close()
+
+	wsSet := make(map[string]bool, len(files))
+	for _, f := range files {
+		wsSet[f] = true
+	}
+
+	var missing []string
+	seen := make(map[string]bool)
+	for _, f := range files {
+		coFiles, err := st.CoChangedFiles(f, 2)
+		if err != nil {
+			continue
+		}
+		for _, co := range coFiles {
+			peer := co.FileA
+			if peer == f {
+				peer = co.FileB
+			}
+			if !wsSet[peer] && !seen[peer] {
+				seen[peer] = true
+				missing = append(missing, filepath.Base(peer))
+			}
+		}
+		if len(missing) >= 3 {
+			break
+		}
+	}
+
+	if len(missing) == 0 {
+		return ""
+	}
+	return "Co-change: also check " + strings.Join(missing, ", ")
 }
 
 // knowledgeType pairs a pattern type with its cooldown key.

@@ -276,12 +276,17 @@ func checkSessionIssues(sessionID string) []string {
 		issues = append(issues, issue)
 	}
 
-	// Non-blocking warnings: log to stderr instead of blocking.
+	// Block stopping when code was changed but tests were never run.
 	taskType, _ := sdb.GetWorkingSet("task_type")
 	if taskType == "bugfix" || taskType == "feature" || taskType == "refactor" {
 		hasTestRun, _ := sdb.GetContext("has_test_run")
 		if hasTestRun != "true" {
-			fmt.Fprintln(os.Stderr, "[buddy] Code was modified but tests were not run in this session")
+			msg := "Code was modified but tests were not run"
+			cwd, _ := sdb.GetContext("cwd")
+			if cmd := suggestTestsForFiles(files, cwd); cmd != "" {
+				msg += " — run: " + cmd
+			}
+			issues = append(issues, msg)
 		}
 	}
 
@@ -370,6 +375,40 @@ func checkTestResults(sdb *sessiondb.SessionDB) string {
 		return "Tests were run but failed — fix failing tests before stopping"
 	}
 	return ""
+}
+
+// suggestTestsForFiles returns a concrete test command based on modified Go source files.
+func suggestTestsForFiles(files []string, cwd string) string {
+	if cwd == "" {
+		return "go test ./..."
+	}
+	pkgs := make(map[string]bool)
+	for _, f := range files {
+		if !strings.HasSuffix(f, ".go") || strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		rel, _ := filepath.Rel(cwd, f)
+		if rel == "" || strings.HasPrefix(rel, "..") {
+			continue
+		}
+		pkg := "./" + filepath.Dir(rel)
+		if pkg == "./" || pkg == "./." {
+			pkgs["./..."] = true
+		} else {
+			pkgs[pkg+"/..."] = true
+		}
+	}
+	if len(pkgs) == 0 {
+		return "go test ./..."
+	}
+	if len(pkgs) > 3 {
+		return "go test ./..."
+	}
+	var result []string
+	for pkg := range pkgs {
+		result = append(result, pkg)
+	}
+	return "go test " + strings.Join(result, " ")
 }
 
 // checkUncommittedChanges checks if there are uncommitted git changes when stopping.

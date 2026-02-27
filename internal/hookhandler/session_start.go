@@ -120,7 +120,28 @@ func handleStartupResume(in sessionStartInput, sdb *sessiondb.SessionDB) (*HookO
 func generateStartupBriefing(sdb *sessiondb.SessionDB, data *ResumeData, cwd string) string {
 	var parts []string
 
-	// 1. Blast radius for recently modified files.
+	// 1. Unresolved failures: count + first action.
+	if data != nil {
+		unresolvedCount := 0
+		var firstUnresolved string
+		for _, item := range data.Briefing {
+			if item.Category == "unresolved" {
+				unresolvedCount++
+				if firstUnresolved == "" {
+					firstUnresolved = item.Message
+				}
+			}
+		}
+		if unresolvedCount > 0 {
+			msg := fmt.Sprintf("UNRESOLVED from previous session: %d issue(s)", unresolvedCount)
+			if firstUnresolved != "" {
+				msg += fmt.Sprintf(". Priority: %s", firstUnresolved)
+			}
+			parts = append(parts, msg)
+		}
+	}
+
+	// 2. Blast radius for recently modified files.
 	if data != nil && len(data.Files) > 0 {
 		var impactLines []string
 		limit := min(3, len(data.Files))
@@ -140,7 +161,7 @@ func generateStartupBriefing(sdb *sessiondb.SessionDB, data *ResumeData, cwd str
 		}
 	}
 
-	// 2. Task playbook from last session's task type.
+	// 3. Task playbook from last session's task type.
 	if data != nil && data.Session != nil {
 		taskType := inferTaskType(data)
 		if taskType != TaskUnknown {
@@ -151,7 +172,14 @@ func generateStartupBriefing(sdb *sessiondb.SessionDB, data *ResumeData, cwd str
 		}
 	}
 
-	// 3. LLM-powered session narrative (TierDeep, 3s timeout).
+	// 4. Concrete first action recommendation.
+	if data != nil {
+		if action := recommendFirstAction(data, cwd); action != "" {
+			parts = append(parts, "START HERE: "+action)
+		}
+	}
+
+	// 5. LLM-powered session narrative (TierDeep, 3s timeout).
 	if narrative := generateLLMNarrative(sdb); narrative != "" {
 		parts = append(parts, narrative)
 	}
@@ -160,6 +188,35 @@ func generateStartupBriefing(sdb *sessiondb.SessionDB, data *ResumeData, cwd str
 		return ""
 	}
 	return "[buddy] Proactive briefing:\n" + strings.Join(parts, "\n")
+}
+
+// recommendFirstAction analyzes resume data and produces a concrete "do this first" recommendation.
+func recommendFirstAction(data *ResumeData, cwd string) string {
+	// Priority 1: Unresolved failures → fix them first.
+	for _, item := range data.Briefing {
+		if item.Category == "unresolved" {
+			return "Fix unresolved failure before new work — " + item.Message
+		}
+	}
+
+	// Priority 2: Frequent failures → run tests to verify baseline.
+	for _, item := range data.Briefing {
+		if item.Category == "frequent_failure" {
+			return "Run tests first to establish baseline — previous frequent failure: " + item.Message
+		}
+	}
+
+	// Priority 3: Files modified but no test mention → verify with tests.
+	if len(data.Files) > 3 {
+		return fmt.Sprintf("Previous session modified %d files. Run tests to verify current state before continuing.", len(data.Files))
+	}
+
+	// Priority 4: Continue from intent.
+	if data.Intent != "" {
+		return "Continue from: " + data.Intent
+	}
+
+	return ""
 }
 
 // inferTaskType attempts to classify the task type from resume data.

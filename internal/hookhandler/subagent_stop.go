@@ -85,11 +85,11 @@ func handleSubagentStop(input []byte) (*HookOutput, error) {
 		return nil, nil
 	}
 
-	msg := fmt.Sprintf("[buddy] Subagent %q quality check: %s. Review before proceeding.",
+	reason := fmt.Sprintf("[buddy] Subagent %q quality check failed: %s. Fix these issues before completing.",
 		in.AgentName, strings.Join(issues, "; "))
 	Deliver(sdb, "subagent-quality", "warning",
-		"Subagent output quality check", msg, PriorityHigh,
+		"Subagent output quality check", reason, PriorityHigh,
 		"Subagent output without test coverage risks propagating untested code into your codebase.")
 
-	return makeAsyncContextOutput(msg), nil
+	return makeBlockStopOutput(reason), nil
 }
