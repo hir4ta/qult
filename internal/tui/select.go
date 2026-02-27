@@ -6,7 +6,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/hir4ta/claude-buddy/internal/locale"
 	"github.com/hir4ta/claude-buddy/internal/watcher"
 )
 
@@ -17,15 +16,13 @@ type SelectModel struct {
 	selected int // -1 = no selection yet
 	width    int
 	height   int
-	lang     locale.Lang
 }
 
 // NewSelectModel creates a session selector model.
-func NewSelectModel(sessions []watcher.RecentSession, lang locale.Lang) SelectModel {
+func NewSelectModel(sessions []watcher.RecentSession) SelectModel {
 	return SelectModel{
 		sessions: sessions,
 		selected: -1,
-		lang:     lang,
 	}
 }
 

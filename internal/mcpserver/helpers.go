@@ -2,7 +2,6 @@ package mcpserver
 
 import (
 	"github.com/hir4ta/claude-buddy/internal/analyzer"
-	"github.com/hir4ta/claude-buddy/internal/locale"
 	"github.com/hir4ta/claude-buddy/internal/watcher"
 )
 
@@ -49,13 +48,13 @@ func findLatestSession(claudeHome string) *watcher.SessionInfo {
 }
 
 // computeAlertsAndScore loads a session's events, runs the detector, and returns alerts + health score.
-func computeAlertsAndScore(session *watcher.SessionInfo, lang locale.Lang) ([]alertInfo, float64) {
+func computeAlertsAndScore(session *watcher.SessionInfo) ([]alertInfo, float64) {
 	detail, err := watcher.LoadSessionDetail(*session)
 	if err != nil {
 		return nil, 1.0
 	}
 
-	det := analyzer.NewDetector(lang.Code)
+	det := analyzer.NewDetector()
 	for _, ev := range detail.Events {
 		det.Update(ev)
 	}

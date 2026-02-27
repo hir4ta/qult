@@ -502,7 +502,7 @@ func TestCheckCompleteness(t *testing.T) {
 		{name: "error explanation", msg: "I got an unexpected result from the API call", wantIssue: false},
 		{name: "build failed", msg: "The build failed with 3 errors", wantIssue: true},
 		{name: "todo marker", msg: "Added a TODO: fix this later", wantIssue: true},
-		{name: "incomplete ja", msg: "まだ完了していませんが、ここまで進めました", wantIssue: true},
+		{name: "incomplete phrase", msg: "I'll finish the rest later, not yet implemented", wantIssue: true},
 		{name: "placeholder", msg: "I left a placeholder for the auth logic", wantIssue: true},
 	}
 
@@ -639,7 +639,7 @@ func TestContainsDecisionKeyword(t *testing.T) {
 		{"Let's go with JWT for auth", true},
 		{"I decided to use PostgreSQL", true},
 		{"Going with the simpler approach", true},
-		{"JWTを採用", true},
+		{"I opted for JWT tokens", true},
 		{"Fix the bug in auth.go", false},
 		{"Read the file first", false},
 	}

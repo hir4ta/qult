@@ -151,12 +151,12 @@ func enrichFromSessionHistory(sdb *sessiondb.SessionDB, di *DeepIntent) {
 // promptGoalCues maps prompt keywords to candidate implicit goals.
 // Each cue can produce different goals depending on session context.
 var promptGoalCues = map[string][]string{
-	"profiling": {"faster", "slow", "performance", "latency", "throughput", "速く", "遅い", "パフォーマンス", "レイテンシ"},
-	"caching":   {"cache", "memoize", "precompute", "キャッシュ", "メモ化"},
-	"cleanup":   {"clean", "tidy", "remove", "delete", "unused", "dead code", "掃除", "削除", "不要"},
-	"refactor":  {"simplify", "reorganize", "decouple", "extract", "シンプル", "分離", "切り出"},
-	"security":  {"secure", "vulnerability", "inject", "xss", "csrf", "sanitize", "セキュリティ", "脆弱性"},
-	"scaling":   {"scale", "concurrent", "parallel", "batch", "queue", "スケール", "並行", "並列"},
+	"profiling": {"faster", "slow", "performance", "latency", "throughput"},
+	"caching":   {"cache", "memoize", "precompute"},
+	"cleanup":   {"clean", "tidy", "remove", "delete", "unused", "dead code"},
+	"refactor":  {"simplify", "reorganize", "decouple", "extract"},
+	"security":  {"secure", "vulnerability", "inject", "xss", "csrf", "sanitize"},
+	"scaling":   {"scale", "concurrent", "parallel", "batch", "queue"},
 }
 
 // inferImplicitGoal derives an implicit goal from session signals and prompt cues.
@@ -208,7 +208,7 @@ func inferImplicitGoal(sdb *sessiondb.SessionDB, prompt string, domain string) *
 		failCount, _ := sdb.GetContext("unresolved_failure_count")
 		if failCount != "" && failCount != "0" {
 			hasErrorCue := strings.Contains(lower, "fix") || strings.Contains(lower, "error") ||
-				strings.Contains(lower, "fail") || strings.Contains(lower, "直") || strings.Contains(lower, "修正")
+				strings.Contains(lower, "fail")
 			if hasErrorCue {
 				candidates = append(candidates, candidate{
 					goal:       "hotfix",
@@ -282,13 +282,13 @@ func inferImplicitGoal(sdb *sessiondb.SessionDB, prompt string, domain string) *
 
 // domainKeywords maps domain names to detection keywords.
 var domainKeywords = map[string][]string{
-	"auth":     {"auth", "login", "logout", "password", "token", "jwt", "oauth", "session", "credential", "認証", "ログイン"},
-	"database": {"database", "db", "sql", "query", "migration", "schema", "table", "index", "postgres", "sqlite", "mysql", "データベース"},
-	"ui":       {"ui", "component", "button", "form", "modal", "layout", "css", "style", "render", "display", "画面", "表示"},
-	"api":      {"api", "endpoint", "handler", "route", "request", "response", "rest", "grpc", "middleware", "エンドポイント"},
-	"config":   {"config", "setting", "env", "environment", "yaml", "toml", "json config", "設定", "環境"},
-	"infra":    {"deploy", "docker", "ci", "cd", "pipeline", "kubernetes", "k8s", "terraform", "nginx", "デプロイ", "インフラ"},
-	"test":     {"test", "spec", "mock", "stub", "fixture", "assertion", "coverage", "テスト", "カバレッジ"},
+	"auth":     {"auth", "login", "logout", "password", "token", "jwt", "oauth", "session", "credential"},
+	"database": {"database", "db", "sql", "query", "migration", "schema", "table", "index", "postgres", "sqlite", "mysql"},
+	"ui":       {"ui", "component", "button", "form", "modal", "layout", "css", "style", "render", "display"},
+	"api":      {"api", "endpoint", "handler", "route", "request", "response", "rest", "grpc", "middleware"},
+	"config":   {"config", "setting", "env", "environment", "yaml", "toml", "json config"},
+	"infra":    {"deploy", "docker", "ci", "cd", "pipeline", "kubernetes", "k8s", "terraform", "nginx"},
+	"test":     {"test", "spec", "mock", "stub", "fixture", "assertion", "coverage"},
 }
 
 // detectDomain classifies the task domain from the user prompt using keyword matching.

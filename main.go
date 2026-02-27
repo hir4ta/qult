@@ -14,7 +14,6 @@ import (
 	"github.com/hir4ta/claude-buddy/internal/embedder"
 	"github.com/hir4ta/claude-buddy/internal/hookhandler"
 	"github.com/hir4ta/claude-buddy/internal/install"
-	"github.com/hir4ta/claude-buddy/internal/locale"
 	"github.com/hir4ta/claude-buddy/internal/mcpserver"
 	"github.com/hir4ta/claude-buddy/internal/store"
 	"github.com/hir4ta/claude-buddy/internal/tui"
@@ -87,15 +86,13 @@ func runWatch() error {
 
 	claudeHome := watcher.DefaultClaudeHome()
 
-	lang := locale.Detect()
-
 	sessions, err := watcher.FindRecentSessions(claudeHome, 10)
 	if err != nil || len(sessions) == 0 {
 		return fmt.Errorf("no sessions found")
 	}
 
 	// Interactive session selector
-	selectModel := tui.NewSelectModel(sessions, lang)
+	selectModel := tui.NewSelectModel(sessions)
 	selectProg := tea.NewProgram(selectModel, tea.WithAltScreen())
 	finalModel, err := selectProg.Run()
 	if err != nil {
@@ -119,7 +116,7 @@ func runWatch() error {
 	}
 	fmt.Printf("Watching session: %s (%d existing events)\n", sid, len(result.InitialEvents))
 
-	model := tui.NewModel(result.InitialEvents, result.EventCh, selected.SessionID, lang)
+	model := tui.NewModel(result.InitialEvents, result.EventCh, selected.SessionID)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {
@@ -149,7 +146,6 @@ func runBrowse() error {
 
 func runServe() error {
 	claudeHome := watcher.DefaultClaudeHome()
-	lang := locale.Detect()
 
 	st, err := store.OpenDefault()
 	if err != nil {
@@ -157,19 +153,17 @@ func runServe() error {
 	}
 	defer st.Close()
 
-	// Try to initialize embedder (graceful degradation if Ollama not available).
-	model := embedder.ModelForLocale(lang.Code)
-	emb := embedder.NewEmbedder("", model)
+	// Try to initialize embedder (graceful degradation if VOYAGE_API_KEY not set).
+	emb := embedder.NewEmbedder()
 	ctx := context.Background()
 	emb.EnsureAvailable(ctx)
 
-	s := mcpserver.New(claudeHome, lang, st, emb)
+	s := mcpserver.New(claudeHome, st, emb)
 	return server.ServeStdio(s)
 }
 
 func runAnalyze() error {
 	claudeHome := watcher.DefaultClaudeHome()
-	lang := locale.Detect()
 
 	sessions, err := watcher.ListSessions(claudeHome)
 	if err != nil || len(sessions) == 0 {
@@ -198,7 +192,7 @@ func runAnalyze() error {
 	}
 
 	stats := analyzer.NewStats()
-	det := analyzer.NewDetector(lang.Code)
+	det := analyzer.NewDetector()
 	for _, ev := range detail.Events {
 		stats.Update(ev)
 		det.Update(ev)
@@ -230,11 +224,11 @@ Commands:
   hook-handler  Handle Claude Code hook events (stdin/stdout JSON)
   install       Sync sessions and generate embeddings
   uninstall     Remove hooks and MCP server registration
-  analyze       Session analysis report (structured, no LLM call)
+  analyze       Session analysis report
   plugin-bundle Generate plugin directory from Go sources
+  version       Show version
   help          Show this help
 
-Language:
-  Feedback is generated in your system language (detected from LANG).
-  To override: LANG=ja_JP.UTF-8 claude-buddy`)
+Options:
+  VOYAGE_API_KEY  Enable vector search for pattern matching`)
 }

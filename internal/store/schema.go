@@ -256,7 +256,7 @@ CREATE TABLE IF NOT EXISTS user_preferences (
 
 const ddlV7 = `
 -- ==========================================================
--- FTS5 full-text search for patterns (BM25 fallback when Ollama unavailable)
+-- FTS5 full-text search for patterns (BM25 fallback when VOYAGE_API_KEY unset)
 -- ==========================================================
 CREATE VIRTUAL TABLE IF NOT EXISTS patterns_fts USING fts5(
     title, content, embed_text,

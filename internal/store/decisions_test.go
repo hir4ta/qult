@@ -33,31 +33,14 @@ func TestExtractDecisions_English(t *testing.T) {
 	}
 }
 
-func TestExtractDecisions_Japanese(t *testing.T) {
-	assistant := "SQLiteを採用します。WALモードで並行処理を行う方針です。"
-	user := "どのデータベースを使いますか？"
+func TestExtractDecisions_MultipleKeywords(t *testing.T) {
+	assistant := "I decided to use SQLite. We opted for WAL mode for concurrent access. Going with embedded storage instead of client-server."
+	user := "What database approach?"
 
 	decisions := ExtractDecisions(assistant, user, "2025-01-01T00:00:00Z")
 
-	if len(decisions) == 0 {
-		t.Fatal("expected at least one decision from Japanese text, got 0")
-	}
-
-	foundAdopt := false
-	foundPolicy := false
-	for _, d := range decisions {
-		if containsStr(d.DecisionText, "を採用") {
-			foundAdopt = true
-		}
-		if containsStr(d.DecisionText, "方針") {
-			foundPolicy = true
-		}
-	}
-	if !foundAdopt {
-		t.Errorf("expected decision containing 'を採用', got: %+v", decisions)
-	}
-	if !foundPolicy {
-		t.Errorf("expected decision containing '方針', got: %+v", decisions)
+	if len(decisions) < 2 {
+		t.Fatalf("expected at least 2 decisions, got %d: %+v", len(decisions), decisions)
 	}
 }
 

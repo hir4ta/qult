@@ -42,7 +42,7 @@ func makeCompactEvent(ts time.Time) parser.SessionEvent {
 }
 
 func TestDetectRetryLoop(t *testing.T) {
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 
 	// Start with a user message
@@ -77,7 +77,7 @@ func TestDetectRetryLoop(t *testing.T) {
 }
 
 func TestDetectRetryLoopFalsePositive(t *testing.T) {
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 
 	d.Update(makeUserEvent("do something", now))
@@ -122,7 +122,7 @@ func TestDetectDestructiveCmd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := NewDetector("en")
+			d := NewDetector()
 			now := time.Now()
 			d.Update(makeUserEvent("test", now))
 
@@ -144,7 +144,7 @@ func TestDetectDestructiveCmd(t *testing.T) {
 }
 
 func TestDetectDestructiveCmdSafe(t *testing.T) {
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("test", now))
 
@@ -157,7 +157,7 @@ func TestDetectDestructiveCmdSafe(t *testing.T) {
 }
 
 func TestDetectContextThrashing(t *testing.T) {
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("start", now))
 
@@ -190,7 +190,7 @@ func TestDetectContextThrashing(t *testing.T) {
 }
 
 func TestDetectExploreLoop(t *testing.T) {
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("explore codebase", now))
 
@@ -218,7 +218,7 @@ func TestDetectExploreLoop(t *testing.T) {
 }
 
 func TestDetectCompactAmnesia(t *testing.T) {
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("start", now))
 
@@ -255,7 +255,7 @@ func TestDetectCompactAmnesia(t *testing.T) {
 }
 
 func TestCooldown(t *testing.T) {
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("test", now))
 
@@ -275,7 +275,7 @@ func TestCooldown(t *testing.T) {
 }
 
 func TestSessionHealth(t *testing.T) {
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("test", now))
 
@@ -322,7 +322,7 @@ func TestPatternName(t *testing.T) {
 }
 
 func TestNewDetectorInitialization(t *testing.T) {
-	d := NewDetector("en")
+	d := NewDetector()
 	if d == nil {
 		t.Fatal("NewDetector returned nil")
 	}
@@ -338,7 +338,7 @@ func TestNewDetectorInitialization(t *testing.T) {
 }
 
 func TestDetectApologizeRetry(t *testing.T) {
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("fix this bug", now))
 
@@ -366,7 +366,7 @@ func TestDetectApologizeRetry(t *testing.T) {
 }
 
 func TestDetectTestFailCycle(t *testing.T) {
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("fix test", now))
 
@@ -389,11 +389,11 @@ func TestDetectTestFailCycle(t *testing.T) {
 	}
 }
 
-// --- Contextual message content tests (English locale) ---
+// --- Contextual message content tests ---
 
 func TestRetryLoopMessageEditFile(t *testing.T) {
 	t.Parallel()
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("fix this", now))
 
@@ -447,7 +447,7 @@ func TestRetryLoopMessageEditFile(t *testing.T) {
 
 func TestRetryLoopMessageBash(t *testing.T) {
 	t.Parallel()
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("run it", now))
 
@@ -489,7 +489,7 @@ func TestRetryLoopMessageBash(t *testing.T) {
 
 func TestExploreLoopTopFile(t *testing.T) {
 	t.Parallel()
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("explore", now))
 
@@ -521,7 +521,7 @@ func TestExploreLoopTopFile(t *testing.T) {
 
 func TestCompactAmnesiaFileList(t *testing.T) {
 	t.Parallel()
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("start", now))
 
@@ -579,7 +579,7 @@ func TestDestructiveCmdSpecificSuggestions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			d := NewDetector("en")
+			d := NewDetector()
 			now := time.Now()
 			d.Update(makeUserEvent("test", now))
 
@@ -602,7 +602,7 @@ func TestDestructiveCmdSpecificSuggestions(t *testing.T) {
 
 func TestContextThrashingSuggestion(t *testing.T) {
 	t.Parallel()
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("start", now))
 
@@ -629,7 +629,7 @@ func TestContextThrashingSuggestion(t *testing.T) {
 
 func TestApologizeRetryMessage(t *testing.T) {
 	t.Parallel()
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("fix bug", now))
 
@@ -667,7 +667,7 @@ func TestApologizeRetryMessage(t *testing.T) {
 
 func TestTestFailCycleMessage(t *testing.T) {
 	t.Parallel()
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("fix test", now))
 
@@ -705,117 +705,12 @@ func TestTestFailCycleMessage(t *testing.T) {
 	}
 }
 
-// --- Japanese locale tests ---
-
-func TestRetryLoopMessageJa(t *testing.T) {
-	t.Parallel()
-	d := NewDetector("ja")
-	now := time.Now()
-	d.Update(makeUserEvent("直して", now))
-
-	var alerts []Alert
-	for i := range 7 {
-		ts := now.Add(time.Duration(i+1) * time.Second)
-		result := d.Update(makeToolEvent("Edit", "/proj/src/store.go", ts))
-		alerts = append(alerts, result...)
-	}
-
-	// Check each escalation stage: Proposal → Warning → Action
-	var hasProposal, hasWarning, hasAction bool
-	for _, a := range alerts {
-		if a.Pattern != PatternRetryLoop {
-			continue
-		}
-		if !strings.Contains(a.Observation, "連続リトライ中") {
-			t.Errorf("Observation should be in Japanese, got: %s", a.Observation)
-		}
-		switch {
-		case a.Kind == KindProposal:
-			hasProposal = true
-			if !strings.Contains(a.Suggestion, "同じ Edit") {
-				t.Errorf("Proposal suggestion should mention 同じ Edit, got: %s", a.Suggestion)
-			}
-		case a.Level == LevelWarning:
-			hasWarning = true
-			if !strings.Contains(a.Suggestion, "指定テキスト") {
-				t.Errorf("Warning suggestion should mention 指定テキスト, got: %s", a.Suggestion)
-			}
-		case a.Level == LevelAction:
-			hasAction = true
-			if !strings.Contains(a.Suggestion, "行目") {
-				t.Errorf("Action suggestion should mention 行目, got: %s", a.Suggestion)
-			}
-		}
-	}
-	if !hasProposal {
-		t.Error("expected proposal at 3 retries")
-	}
-	if !hasWarning {
-		t.Error("expected warning at 5 retries")
-	}
-	if !hasAction {
-		t.Error("expected action at 7 retries")
-	}
-}
-
-func TestDestructiveCmdJa(t *testing.T) {
-	t.Parallel()
-	d := NewDetector("ja")
-	now := time.Now()
-	d.Update(makeUserEvent("test", now))
-
-	alerts := d.Update(makeToolEvent("Bash", "rm -rf /tmp/foo", now.Add(time.Second)))
-	for _, a := range alerts {
-		if a.Pattern == PatternDestructiveCmd {
-			if !strings.Contains(a.Observation, "rm -rf が実行されました") {
-				t.Errorf("Observation should be in Japanese, got: %s", a.Observation)
-			}
-			if !strings.Contains(a.Suggestion, "git checkout で復元") {
-				t.Errorf("Suggestion should be in Japanese, got: %s", a.Suggestion)
-			}
-			return
-		}
-	}
-	t.Error("expected destructive-cmd alert")
-}
-
-func TestApologizeRetryMessageJa(t *testing.T) {
-	t.Parallel()
-	d := NewDetector("ja")
-	now := time.Now()
-	d.Update(makeUserEvent("修正して", now))
-
-	var alerts []Alert
-	texts := []string{
-		"I apologize for the confusion.",
-		"Sorry about that, let me try again.",
-		"My mistake, I should have done it differently.",
-	}
-	for i, text := range texts {
-		ts := now.Add(time.Duration(i+1) * time.Second)
-		result := d.Update(makeAssistantEvent(text, ts))
-		alerts = append(alerts, result...)
-	}
-
-	for _, a := range alerts {
-		if a.Pattern == PatternApologizeRetry {
-			if !strings.Contains(a.Observation, "回謝罪") {
-				t.Errorf("Observation should be in Japanese, got: %s", a.Observation)
-			}
-			if !strings.Contains(a.Suggestion, "/clear") {
-				t.Errorf("Suggestion should mention /clear, got: %s", a.Suggestion)
-			}
-			return
-		}
-	}
-	t.Error("expected apologize-retry alert")
-}
 
 // --- Feature tracking tests ---
 
 func TestFeatureTrackingPlanMode(t *testing.T) {
 	t.Parallel()
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 
 	if d.Features().PlanModeUsed {
@@ -832,7 +727,7 @@ func TestFeatureTrackingPlanMode(t *testing.T) {
 
 func TestFeatureTrackingSubagent(t *testing.T) {
 	t.Parallel()
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 
 	d.Update(makeUserEvent("research", now))
@@ -845,7 +740,7 @@ func TestFeatureTrackingSubagent(t *testing.T) {
 
 func TestFeatureTrackingAgentSpawn(t *testing.T) {
 	t.Parallel()
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 
 	d.Update(makeUserEvent("delegate", now))
@@ -862,7 +757,7 @@ func TestFeatureTrackingAgentSpawn(t *testing.T) {
 
 func TestFeatureTrackingCLAUDEMD(t *testing.T) {
 	t.Parallel()
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 
 	d.Update(makeUserEvent("start", now))
@@ -875,7 +770,7 @@ func TestFeatureTrackingCLAUDEMD(t *testing.T) {
 
 func TestFeatureTrackingRules(t *testing.T) {
 	t.Parallel()
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 
 	d.Update(makeUserEvent("start", now))
@@ -888,7 +783,7 @@ func TestFeatureTrackingRules(t *testing.T) {
 
 func TestFeatureTrackingSkill(t *testing.T) {
 	t.Parallel()
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 
 	d.Update(makeUserEvent("commit", now))
@@ -903,7 +798,7 @@ func TestFeatureTrackingSkill(t *testing.T) {
 
 func TestContextThrashingSuggestsSubagent(t *testing.T) {
 	t.Parallel()
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("start", now))
 
@@ -928,7 +823,7 @@ func TestContextThrashingSuggestsSubagent(t *testing.T) {
 
 func TestRetryLoopSuggestsSubagentForGrep(t *testing.T) {
 	t.Parallel()
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("find it", now))
 
@@ -958,7 +853,7 @@ func TestRetryLoopSuggestsSubagentForGrep(t *testing.T) {
 
 func TestSelectTopAlertsGroupDedup(t *testing.T) {
 	t.Parallel()
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("do work", now))
 
@@ -998,7 +893,7 @@ func TestSelectTopAlertsGroupDedup(t *testing.T) {
 
 func TestDetectRateLimitStuck(t *testing.T) {
 	t.Parallel()
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("do work", now))
 
@@ -1035,7 +930,7 @@ func TestDetectRateLimitStuck(t *testing.T) {
 
 func TestDetectRateLimitStuckNotTriggeredWithProgress(t *testing.T) {
 	t.Parallel()
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("do work", now))
 
@@ -1054,7 +949,7 @@ func TestDetectRateLimitStuckNotTriggeredWithProgress(t *testing.T) {
 
 func TestDetectRateLimitStuckNotTriggeredEarly(t *testing.T) {
 	t.Parallel()
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("do work", now))
 
@@ -1072,174 +967,12 @@ func TestDetectRateLimitStuckNotTriggeredEarly(t *testing.T) {
 	}
 }
 
-func TestDetectRateLimitStuckJa(t *testing.T) {
-	t.Parallel()
-	d := NewDetector("ja")
-	now := time.Now()
-	d.Update(makeUserEvent("作業", now))
-
-	for i := range 10 {
-		d.Update(makeToolEvent("Read", "/file"+itoa(i)+".go", now.Add(time.Duration(i+1)*time.Second)))
-	}
-
-	alerts := d.Update(makeAssistantEvent("Got 429 rate limit error", now.Add(6*time.Minute)))
-
-	for _, a := range alerts {
-		if a.Pattern == PatternRateLimitStuck {
-			if !strings.Contains(a.Observation, "レート制限") {
-				t.Errorf("Japanese observation expected, got: %s", a.Observation)
-			}
-			if !strings.Contains(a.Suggestion, "Esc") {
-				t.Errorf("Suggestion should mention Esc, got: %s", a.Suggestion)
-			}
-			return
-		}
-	}
-	t.Error("expected rate-limit-stuck alert in Japanese")
-}
-
-// --- Missing Japanese locale tests ---
-
-func TestCompactAmnesiaJa(t *testing.T) {
-	t.Parallel()
-	d := NewDetector("ja")
-	now := time.Now()
-	d.Update(makeUserEvent("開始", now))
-
-	d.Update(makeToolEvent("Read", "/proj/alpha.go", now.Add(1*time.Second)))
-	d.Update(makeToolEvent("Read", "/proj/beta.go", now.Add(2*time.Second)))
-	d.Update(makeToolEvent("Read", "/proj/gamma.go", now.Add(3*time.Second)))
-
-	d.Update(makeCompactEvent(now.Add(4 * time.Second)))
-
-	d.Update(makeToolEvent("Read", "/proj/alpha.go", now.Add(5*time.Second)))
-	d.Update(makeToolEvent("Read", "/proj/beta.go", now.Add(6*time.Second)))
-	d.Update(makeToolEvent("Read", "/proj/gamma.go", now.Add(7*time.Second)))
-
-	var alerts []Alert
-	for i := range 27 {
-		ts := now.Add(time.Duration(8+i) * time.Second)
-		result := d.Update(makeToolEvent("Bash", "echo "+itoa(i), ts))
-		alerts = append(alerts, result...)
-	}
-
-	for _, a := range alerts {
-		if a.Pattern == PatternCompactAmnesia {
-			if !strings.Contains(a.Observation, "compact 後に") {
-				t.Errorf("Japanese observation expected, got: %s", a.Observation)
-			}
-			if !strings.Contains(a.Suggestion, "buddy_recall") {
-				t.Errorf("Suggestion should mention buddy_recall, got: %s", a.Suggestion)
-			}
-			return
-		}
-	}
-	t.Error("expected compact-amnesia alert in Japanese")
-}
-
-func TestContextThrashingJa(t *testing.T) {
-	t.Parallel()
-	d := NewDetector("ja")
-	now := time.Now()
-	d.Update(makeUserEvent("開始", now))
-
-	var alerts []Alert
-	for i := range 3 {
-		ts := now.Add(time.Duration(i*4) * time.Minute)
-		result := d.Update(makeCompactEvent(ts))
-		alerts = append(alerts, result...)
-	}
-
-	for _, a := range alerts {
-		if a.Pattern == PatternContextThrashing && a.Level == LevelAction {
-			if !strings.Contains(a.Observation, "context compact") {
-				t.Errorf("Japanese observation expected, got: %s", a.Observation)
-			}
-			if !strings.Contains(a.Suggestion, "/clear") {
-				t.Errorf("Suggestion should mention /clear, got: %s", a.Suggestion)
-			}
-			return
-		}
-	}
-	t.Error("expected context-thrashing action alert in Japanese")
-}
-
-func TestTestFailCycleJa(t *testing.T) {
-	t.Parallel()
-	d := NewDetector("ja")
-	now := time.Now()
-	d.Update(makeUserEvent("テスト直して", now))
-
-	var alerts []Alert
-	for i := range 3 {
-		offset := time.Duration(i*3) * time.Second
-		d.Update(makeToolEvent("Edit", "/test.go", now.Add(offset+1*time.Second)))
-		result := d.Update(makeToolEvent("Bash", "go test ./...", now.Add(offset+2*time.Second)))
-		alerts = append(alerts, result...)
-	}
-
-	var hasProposal, hasWarning bool
-	for _, a := range alerts {
-		if a.Pattern != PatternTestFailCycle {
-			continue
-		}
-		if !strings.Contains(a.Observation, "テスト→編集→再テスト") {
-			t.Errorf("Japanese observation expected, got: %s", a.Observation)
-		}
-		if a.Kind == KindProposal {
-			hasProposal = true
-			if !strings.Contains(a.Suggestion, "繰り返し失敗") {
-				t.Errorf("Proposal should mention 繰り返し失敗, got: %s", a.Suggestion)
-			}
-		}
-		if a.Kind == KindAlert && a.Level == LevelWarning {
-			hasWarning = true
-			if !strings.Contains(a.Suggestion, "根本原因") {
-				t.Errorf("Warning should mention 根本原因, got: %s", a.Suggestion)
-			}
-		}
-	}
-	if !hasProposal {
-		t.Error("expected proposal at 2 cycles")
-	}
-	if !hasWarning {
-		t.Error("expected warning at 3 cycles")
-	}
-}
-
-func TestExploreLoopJa(t *testing.T) {
-	t.Parallel()
-	d := NewDetector("ja")
-	now := time.Now()
-	d.Update(makeUserEvent("調べて", now))
-
-	var alerts []Alert
-	for i := range 20 {
-		ts := now.Add(time.Duration(i*33) * time.Second) // spread over ~11 minutes
-		toolName := "Read"
-		if i%3 == 0 {
-			toolName = "Grep"
-		}
-		result := d.Update(makeToolEvent(toolName, "/file"+itoa(i)+".go", ts))
-		alerts = append(alerts, result...)
-	}
-
-	for _, a := range alerts {
-		if a.Pattern == PatternExploreLoop {
-			if !strings.Contains(a.Observation, "書込なし") {
-				t.Errorf("Japanese observation expected, got: %s", a.Observation)
-			}
-			return
-		}
-	}
-	t.Error("expected explore-loop alert in Japanese")
-}
 
 // --- Alert outcome / effect tracking tests ---
 
 func TestAlertOutcomeResolved(t *testing.T) {
 	t.Parallel()
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("test", now))
 
@@ -1279,7 +1012,7 @@ func TestAlertOutcomeResolved(t *testing.T) {
 
 func TestAlertOutcomePersistedEn(t *testing.T) {
 	t.Parallel()
-	d := NewDetector("en")
+	d := NewDetector()
 	now := time.Now()
 	d.Update(makeUserEvent("test", now))
 
@@ -1314,69 +1047,3 @@ func TestAlertOutcomePersistedEn(t *testing.T) {
 	}
 }
 
-func TestAlertOutcomeResolvedJa(t *testing.T) {
-	t.Parallel()
-	d := NewDetector("ja")
-	now := time.Now()
-	d.Update(makeUserEvent("テスト", now))
-
-	// Trigger destructive cmd alert
-	d.Update(makeToolEvent("Bash", "rm -rf /tmp", now.Add(1*time.Second)))
-
-	// Several events pass
-	for i := range 6 {
-		ts := now.Add(time.Duration(i+3) * time.Second)
-		d.Update(makeToolEvent("Read", "/file"+itoa(i)+".go", ts))
-	}
-
-	// User message AFTER cooldown → resolved in Japanese
-	d.Update(makeUserEvent("続けて", now.Add(11*time.Minute)))
-
-	outcomes := d.RecentOutcomes()
-	found := false
-	for _, o := range outcomes {
-		if o.Pattern == PatternDestructiveCmd && o.Resolved {
-			found = true
-			if !strings.Contains(o.Description, "解消しました") {
-				t.Errorf("Japanese outcome should contain 解消, got: %s", o.Description)
-			}
-		}
-	}
-	if !found {
-		t.Error("expected resolved destructive-cmd outcome in Japanese")
-	}
-}
-
-func TestAlertOutcomePersistedJa(t *testing.T) {
-	t.Parallel()
-	d := NewDetector("ja")
-	now := time.Now()
-	d.Update(makeUserEvent("テスト", now))
-
-	// Same escalation pattern as English test
-	for i := range 3 {
-		d.Update(makeToolEvent("Bash", "ls -la", now.Add(time.Duration(i+1)*time.Second)))
-	}
-	for i := range 4 {
-		d.Update(makeToolEvent("Bash", "ls -la", now.Add(time.Duration(i+4)*time.Second)))
-	}
-	for i := range 3 {
-		d.Update(makeToolEvent("Read", "/file"+itoa(i)+".go", now.Add(time.Duration(i+8)*time.Second)))
-	}
-
-	d.Update(makeUserEvent("続けて", now.Add(12*time.Second)))
-
-	outcomes := d.RecentOutcomes()
-	found := false
-	for _, o := range outcomes {
-		if o.Pattern == PatternRetryLoop && !o.Resolved {
-			found = true
-			if !strings.Contains(o.Description, "継続中") {
-				t.Errorf("Japanese persisted should contain 継続中, got: %s", o.Description)
-			}
-		}
-	}
-	if !found {
-		t.Error("expected persisted retry-loop outcome in Japanese")
-	}
-}

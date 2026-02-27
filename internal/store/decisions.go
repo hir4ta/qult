@@ -33,17 +33,7 @@ var enKeywords = []string{
 	"strategy:",
 }
 
-// Japanese keywords that indicate a design decision.
-var jaKeywords = []string{
-	"に決定",
-	"を採用",
-	"方針",
-	"ではなく",
-	"にしました",
-	"を選択",
-}
-
-var allKeywords = append(append([]string{}, enKeywords...), jaKeywords...)
+var allKeywords = enKeywords
 
 // Regex patterns for extracting file paths from text.
 var (

@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/hir4ta/claude-buddy/internal/embedder"
-	"github.com/hir4ta/claude-buddy/internal/locale"
 	"github.com/hir4ta/claude-buddy/internal/store"
 )
 
@@ -378,13 +377,11 @@ func syncDocsToStore() error {
 }
 
 func generateEmbeddings() {
-	lang := locale.Detect()
-	model := embedder.ModelForLocale(lang.Code)
-	emb := embedder.NewEmbedder("", model)
+	emb := embedder.NewEmbedder()
 
 	ctx := context.Background()
 	if !emb.EnsureAvailable(ctx) {
-		fmt.Println("⚠ Ollama not available — vector search will not work until Ollama is running")
+		fmt.Println("⚠ VOYAGE_API_KEY not set — vector search will use text-based fallback")
 		return
 	}
 
@@ -395,6 +392,7 @@ func generateEmbeddings() {
 	}
 	defer st.Close()
 
+	model := emb.Model()
 	count, err := st.EmbedPending(func(text string) ([]float32, error) {
 		return emb.EmbedForStorage(ctx, text)
 	}, model, func(done, total int) {

@@ -243,18 +243,6 @@ func (m Model) renderHelpOverlay() string {
 		{"q / Ctrl+C", "Quit"},
 	}
 
-	if m.lang.Code == "ja" {
-		keys = []struct{ key, desc string }{
-			{"\u2191 / k", "\u30ab\u30fc\u30bd\u30eb\u3092\u4e0a\u3078"},
-			{"\u2193 / j", "\u30ab\u30fc\u30bd\u30eb\u3092\u4e0b\u3078"},
-			{"Enter", "\u30a4\u30d9\u30f3\u30c8\u8a73\u7d30\u3092\u5c55\u958b / \u6298\u308a\u305f\u305f\u307f"},
-			{"g", "\u5148\u982d\u3078\u30b8\u30e3\u30f3\u30d7"},
-			{"G", "\u6700\u65b0\u3078\u30b8\u30e3\u30f3\u30d7"},
-			{"?", "\u3053\u306e\u30d8\u30eb\u30d7\u3092\u8868\u793a / \u975e\u8868\u793a"},
-			{"q / Ctrl+C", "\u7d42\u4e86"},
-		}
-	}
-
 	var lines []string
 	for _, k := range keys {
 		keyStyled := lipgloss.NewStyle().

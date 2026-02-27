@@ -115,7 +115,6 @@ type Detector struct {
 	pos        int
 	count      int
 
-	lang     string // locale code ("en", "ja", etc.)
 	features FeatureTracker
 
 	burst      BurstTracker
@@ -154,15 +153,10 @@ const (
 )
 
 // NewDetector creates a Detector with initialized state.
-// lang is the locale code (e.g. "en", "ja"). Empty defaults to "en".
-func NewDetector(lang string) *Detector {
-	if lang == "" {
-		lang = "en"
-	}
+func NewDetector() *Detector {
 	return &Detector{
 		window:     make([]EventFingerprint, windowCapacity),
 		windowSize: windowCapacity,
-		lang:       lang,
 		cooldowns:  make(map[PatternType]time.Time),
 		burst: BurstTracker{
 			fileReads:   make(map[string]int),
@@ -340,10 +334,6 @@ func (d *Detector) PopNewOutcomes() []AlertOutcome {
 	return out
 }
 
-// isJa returns true if the detector locale is Japanese.
-func (d *Detector) isJa() bool {
-	return d.lang == "ja"
-}
 
 // trackFeatures detects Claude Code feature usage from events.
 func (d *Detector) trackFeatures(ev parser.SessionEvent) {
@@ -414,18 +404,10 @@ func (d *Detector) checkResolutions(ts time.Time) {
 
 		if recurred {
 			outcome.Resolved = false
-			if d.isJa() {
-				outcome.Description = PatternName(pr.alert.Pattern) + " が継続中"
-			} else {
-				outcome.Description = PatternName(pr.alert.Pattern) + " persisted"
-			}
+			outcome.Description = PatternName(pr.alert.Pattern) + " persisted"
 		} else {
 			outcome.Resolved = true
-			if d.isJa() {
-				outcome.Description = PatternName(pr.alert.Pattern) + " が解消しました"
-			} else {
-				outcome.Description = PatternName(pr.alert.Pattern) + " resolved"
-			}
+			outcome.Description = PatternName(pr.alert.Pattern) + " resolved"
 		}
 
 		d.outcomes = append(d.outcomes, outcome)

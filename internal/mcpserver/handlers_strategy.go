@@ -9,7 +9,6 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/hir4ta/claude-buddy/internal/analyzer"
-	"github.com/hir4ta/claude-buddy/internal/locale"
 	"github.com/hir4ta/claude-buddy/internal/sessiondb"
 	"github.com/hir4ta/claude-buddy/internal/store"
 	"github.com/hir4ta/claude-buddy/internal/watcher"
@@ -17,7 +16,7 @@ import (
 
 // sessionOutlookHandler provides a holistic view of the current session:
 // health score, phase progress, risk assessment, and actionable next steps.
-func sessionOutlookHandler(claudeHome string, lang locale.Lang, st *store.Store) server.ToolHandlerFunc {
+func sessionOutlookHandler(claudeHome string, st *store.Store) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		sessions, err := watcher.ListSessions(claudeHome)
 		if err != nil || len(sessions) == 0 {
@@ -31,7 +30,7 @@ func sessionOutlookHandler(claudeHome string, lang locale.Lang, st *store.Store)
 		}
 
 		stats := analyzer.NewStats()
-		det := analyzer.NewDetector(lang.Code)
+		det := analyzer.NewDetector()
 		for _, ev := range detail.Events {
 			stats.Update(ev)
 			det.Update(ev)

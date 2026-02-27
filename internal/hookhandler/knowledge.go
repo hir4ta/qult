@@ -7,7 +7,6 @@ import (
 	"unicode"
 
 	"github.com/hir4ta/claude-buddy/internal/embedder"
-	"github.com/hir4ta/claude-buddy/internal/locale"
 	"github.com/hir4ta/claude-buddy/internal/sessiondb"
 	"github.com/hir4ta/claude-buddy/internal/store"
 )
@@ -66,27 +65,21 @@ func extractErrorSignature(text string) string {
 	return ""
 }
 
-// embedQuery creates a query embedding using cached Ollama status.
-// Returns nil if Ollama is unavailable or the request times out.
+// embedQuery creates a query embedding using cached Voyage API status.
+// Returns nil if the embedder is unavailable or the request times out.
 func embedQuery(sdb *sessiondb.SessionDB, text string, timeout time.Duration) []float32 {
-	avail, _ := sdb.GetContext("ollama_available")
+	avail, _ := sdb.GetContext("embedder_available")
 	if avail != "true" {
 		return nil
 	}
 
-	model, _ := sdb.GetContext("ollama_model")
-	if model == "" {
-		lang := locale.Detect()
-		model = embedder.ModelForLocale(lang.Code)
-	}
-
-	client := embedder.NewOllamaClient("", model)
+	emb := embedder.NewEmbedder()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	vec, err := client.EmbedForSearch(ctx, text)
+	vec, err := emb.EmbedForSearch(ctx, text)
 	if err != nil {
-		_ = sdb.SetContext("ollama_available", "false")
+		_ = sdb.SetContext("embedder_available", "false")
 		return nil
 	}
 	return vec
@@ -158,10 +151,6 @@ var stopWords = map[string]bool{
 	"than": true, "its": true, "over": true, "such": true, "into": true,
 	"just": true, "also": true, "more": true, "other": true, "then": true,
 	"does": true, "here": true, "how": true, "use": true, "let": true,
-	// Japanese particles (common in mixed text)
-	"する": true, "ある": true, "いる": true, "なる": true, "れる": true,
-	"です": true, "ます": true, "した": true, "ない": true, "から": true,
-	"して": true, "ている": true, "こと": true, "もの": true, "ため": true,
 }
 
 func isStopWord(w string) bool {

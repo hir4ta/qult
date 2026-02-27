@@ -9,13 +9,12 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/hir4ta/claude-buddy/internal/hookhandler"
-	"github.com/hir4ta/claude-buddy/internal/locale"
 	"github.com/hir4ta/claude-buddy/internal/sessiondb"
 	"github.com/hir4ta/claude-buddy/internal/store"
 )
 
 // registerResources adds MCP resources to the server.
-func registerResources(s *server.MCPServer, claudeHome string, lang locale.Lang, st *store.Store) {
+func registerResources(s *server.MCPServer, claudeHome string, st *store.Store) {
 	s.AddResources(
 		server.ServerResource{
 			Resource: mcp.Resource{
@@ -24,7 +23,7 @@ func registerResources(s *server.MCPServer, claudeHome string, lang locale.Lang,
 				Description: "Current session health score and alert count",
 				MIMEType:    "application/json",
 			},
-			Handler: healthResource(claudeHome, lang),
+			Handler: healthResource(claudeHome),
 		},
 		server.ServerResource{
 			Resource: mcp.Resource{
@@ -33,7 +32,7 @@ func registerResources(s *server.MCPServer, claudeHome string, lang locale.Lang,
 				Description: "Active anti-pattern alerts with observations and suggestions",
 				MIMEType:    "application/json",
 			},
-			Handler: alertsResource(claudeHome, lang),
+			Handler: alertsResource(claudeHome),
 		},
 		server.ServerResource{
 			Resource: mcp.Resource{
@@ -56,7 +55,7 @@ func registerResources(s *server.MCPServer, claudeHome string, lang locale.Lang,
 	)
 }
 
-func healthResource(claudeHome string, lang locale.Lang) server.ResourceHandlerFunc {
+func healthResource(claudeHome string) server.ResourceHandlerFunc {
 	return func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 		session := findLatestSession(claudeHome)
 		if session == nil {
@@ -67,7 +66,7 @@ func healthResource(claudeHome string, lang locale.Lang) server.ResourceHandlerF
 			})
 		}
 
-		alerts, score := computeAlertsAndScore(session, lang)
+		alerts, score := computeAlertsAndScore(session)
 		return jsonResource("buddy://health", map[string]any{
 			"health_score": score,
 			"alert_count":  len(alerts),
@@ -76,14 +75,14 @@ func healthResource(claudeHome string, lang locale.Lang) server.ResourceHandlerF
 	}
 }
 
-func alertsResource(claudeHome string, lang locale.Lang) server.ResourceHandlerFunc {
+func alertsResource(claudeHome string) server.ResourceHandlerFunc {
 	return func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 		session := findLatestSession(claudeHome)
 		if session == nil {
 			return jsonResource("buddy://alerts", []any{})
 		}
 
-		alerts, _ := computeAlertsAndScore(session, lang)
+		alerts, _ := computeAlertsAndScore(session)
 		var result []map[string]string
 		for _, a := range alerts {
 			result = append(result, map[string]string{

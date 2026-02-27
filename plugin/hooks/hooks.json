@@ -4,7 +4,7 @@
       {
         "hooks": [
           {
-            "command": "claude-buddy hook-handler Notification",
+            "command": "/bin/sh \"$HOME/.claude/plugins/claude-buddy/bin/run.sh\" hook-handler Notification",
             "timeout": 2,
             "type": "command"
           }
@@ -15,7 +15,7 @@
       {
         "hooks": [
           {
-            "command": "claude-buddy hook-handler PermissionRequest",
+            "command": "/bin/sh \"$HOME/.claude/plugins/claude-buddy/bin/run.sh\" hook-handler PermissionRequest",
             "timeout": 1,
             "type": "command"
           }
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "claude-buddy hook-handler PostToolUse",
+            "command": "/bin/sh \"$HOME/.claude/plugins/claude-buddy/bin/run.sh\" hook-handler PostToolUse",
             "timeout": 5,
             "type": "command"
           }
@@ -38,7 +38,7 @@
       {
         "hooks": [
           {
-            "command": "claude-buddy hook-handler PostToolUseFailure",
+            "command": "/bin/sh \"$HOME/.claude/plugins/claude-buddy/bin/run.sh\" hook-handler PostToolUseFailure",
             "timeout": 5,
             "type": "command"
           }
@@ -49,7 +49,7 @@
       {
         "hooks": [
           {
-            "command": "claude-buddy hook-handler PreCompact",
+            "command": "/bin/sh \"$HOME/.claude/plugins/claude-buddy/bin/run.sh\" hook-handler PreCompact",
             "timeout": 3,
             "type": "command"
           }
@@ -60,7 +60,7 @@
       {
         "hooks": [
           {
-            "command": "claude-buddy hook-handler PreToolUse",
+            "command": "/bin/sh \"$HOME/.claude/plugins/claude-buddy/bin/run.sh\" hook-handler PreToolUse",
             "timeout": 2,
             "type": "command"
           }
@@ -72,7 +72,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "claude-buddy hook-handler SessionEnd",
+            "command": "/bin/sh \"$HOME/.claude/plugins/claude-buddy/bin/run.sh\" hook-handler SessionEnd",
             "timeout": 5,
             "type": "command"
           }
@@ -83,7 +83,7 @@
       {
         "hooks": [
           {
-            "command": "claude-buddy hook-handler SessionStart",
+            "command": "/bin/sh \"$HOME/.claude/plugins/claude-buddy/bin/run.sh\" hook-handler SessionStart",
             "timeout": 5,
             "type": "command"
           }
@@ -95,7 +95,7 @@
       {
         "hooks": [
           {
-            "command": "claude-buddy hook-handler SubagentStart",
+            "command": "/bin/sh \"$HOME/.claude/plugins/claude-buddy/bin/run.sh\" hook-handler SubagentStart",
             "timeout": 3,
             "type": "command"
           }
@@ -106,7 +106,7 @@
       {
         "hooks": [
           {
-            "command": "claude-buddy hook-handler SubagentStop",
+            "command": "/bin/sh \"$HOME/.claude/plugins/claude-buddy/bin/run.sh\" hook-handler SubagentStop",
             "timeout": 3,
             "type": "command"
           }
@@ -117,7 +117,7 @@
       {
         "hooks": [
           {
-            "command": "claude-buddy hook-handler TaskCompleted",
+            "command": "/bin/sh \"$HOME/.claude/plugins/claude-buddy/bin/run.sh\" hook-handler TaskCompleted",
             "timeout": 3,
             "type": "command"
           }
@@ -129,7 +129,7 @@
         "hooks": [
           {
             "async": true,
-            "command": "claude-buddy hook-handler TeammateIdle",
+            "command": "/bin/sh \"$HOME/.claude/plugins/claude-buddy/bin/run.sh\" hook-handler TeammateIdle",
             "timeout": 3,
             "type": "command"
           }
@@ -140,7 +140,7 @@
       {
         "hooks": [
           {
-            "command": "claude-buddy hook-handler UserPromptSubmit",
+            "command": "/bin/sh \"$HOME/.claude/plugins/claude-buddy/bin/run.sh\" hook-handler UserPromptSubmit",
             "timeout": 2,
             "type": "command"
           }

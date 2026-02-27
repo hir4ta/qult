@@ -8,19 +8,18 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/hir4ta/claude-buddy/internal/locale"
 	"github.com/hir4ta/claude-buddy/internal/store"
 )
 
 // registerPrompts adds MCP prompts to the server.
-func registerPrompts(s *server.MCPServer, claudeHome string, lang locale.Lang, st *store.Store) {
+func registerPrompts(s *server.MCPServer, claudeHome string, st *store.Store) {
 	s.AddPrompts(
 		server.ServerPrompt{
 			Prompt: mcp.Prompt{
 				Name:        "health_check",
 				Description: "Run a comprehensive session health diagnostic",
 			},
-			Handler: healthCheckPrompt(claudeHome, lang),
+			Handler: healthCheckPrompt(claudeHome),
 		},
 		server.ServerPrompt{
 			Prompt: mcp.Prompt{
@@ -46,7 +45,7 @@ func registerPrompts(s *server.MCPServer, claudeHome string, lang locale.Lang, s
 	)
 }
 
-func healthCheckPrompt(claudeHome string, lang locale.Lang) server.PromptHandlerFunc {
+func healthCheckPrompt(claudeHome string) server.PromptHandlerFunc {
 	return func(ctx context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 		session := findLatestSession(claudeHome)
 		if session == nil {
@@ -58,7 +57,7 @@ func healthCheckPrompt(claudeHome string, lang locale.Lang) server.PromptHandler
 			}, nil
 		}
 
-		alerts, score := computeAlertsAndScore(session, lang)
+		alerts, score := computeAlertsAndScore(session)
 		var b strings.Builder
 		fmt.Fprintf(&b, "Session Health Score: %.2f/1.0\n", score)
 		fmt.Fprintf(&b, "Active Alerts: %d\n\n", len(alerts))

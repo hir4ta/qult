@@ -8,7 +8,6 @@ import (
 
 	"github.com/hir4ta/claude-buddy/internal/embedder"
 	"github.com/hir4ta/claude-buddy/internal/hookhandler"
-	"github.com/hir4ta/claude-buddy/internal/locale"
 	"github.com/hir4ta/claude-buddy/internal/sessiondb"
 	"github.com/hir4ta/claude-buddy/internal/store"
 )
@@ -75,8 +74,8 @@ const serverInstructions = `claude-buddy is a real-time session advisor for Clau
 `
 
 // New creates a new MCP server with all tools registered.
-// emb may be nil if Ollama is not available.
-func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Embedder) *server.MCPServer {
+// emb may be nil if VOYAGE_API_KEY is not set.
+func New(claudeHome string, st *store.Store, emb *embedder.Embedder) *server.MCPServer {
 	s := server.NewMCPServer(
 		"claude-buddy",
 		"0.2.0",
@@ -117,7 +116,7 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 					mcp.Description("Session ID to analyze (optional, defaults to most recent)"),
 				),
 			),
-			Handler: withBuddyTracker(st, suggestHandler(claudeHome, lang)),
+			Handler: withBuddyTracker(st, suggestHandler(claudeHome)),
 		},
 		server.ServerTool{
 			Tool: mcp.NewTool("buddy_current_state",
@@ -131,7 +130,7 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 					mcp.Description("Session ID (optional, defaults to latest)"),
 				),
 			),
-			Handler: withBuddyTracker(st, currentStateHandler(claudeHome, lang)),
+			Handler: withBuddyTracker(st, currentStateHandler(claudeHome)),
 		},
 		server.ServerTool{
 			Tool: mcp.NewTool("buddy_sessions",
@@ -200,7 +199,7 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 					mcp.Description("Session ID (optional, defaults to latest)"),
 				),
 			),
-			Handler: withBuddyTracker(st, alertsHandler(claudeHome, lang)),
+			Handler: withBuddyTracker(st, alertsHandler(claudeHome)),
 		},
 		server.ServerTool{
 			Tool: mcp.NewTool("buddy_decisions",
@@ -399,7 +398,7 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 				mcp.WithIdempotentHintAnnotation(true),
 				mcp.WithOpenWorldHintAnnotation(false),
 			),
-			Handler: withBuddyTracker(st, sessionOutlookHandler(claudeHome, lang, st)),
+			Handler: withBuddyTracker(st, sessionOutlookHandler(claudeHome, st)),
 		},
 		server.ServerTool{
 			Tool: mcp.NewTool("buddy_task_progress",
@@ -456,8 +455,8 @@ func New(claudeHome string, lang locale.Lang, st *store.Store, emb *embedder.Emb
 	)
 
 	// Register resources and prompts.
-	registerResources(s, claudeHome, lang, st)
-	registerPrompts(s, claudeHome, lang, st)
+	registerResources(s, claudeHome, st)
+	registerPrompts(s, claudeHome, st)
 
 	return s
 }

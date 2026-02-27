@@ -105,7 +105,7 @@ func checkCompleteness(msg string, hasCodeChanges bool) []string {
 			// Exclude cases where TODO/FIXME is part of a feature description.
 			surrounding := extractSurrounding(lower, p, 30)
 			if containsAnyWord(surrounding, []string{
-				"detect", "check", "pattern", "heuristic", "検出", "チェック",
+				"detect", "check", "pattern", "heuristic",
 			}) {
 				continue
 			}
@@ -118,14 +118,13 @@ func checkCompleteness(msg string, hasCodeChanges bool) []string {
 	for _, p := range []string{
 		"i'll finish", "i'll complete", "remaining work",
 		"not yet implemented", "placeholder",
-		"まだ完了していません", "残りの作業",
 	} {
 		if strings.Contains(lower, p) {
 			// Exclude feature descriptions.
 			surrounding := extractSurrounding(lower, p, 30)
 			if containsAnyWord(surrounding, []string{
-				"detect", "check", "pattern", "heuristic", "検出", "チェック",
-				"gate", "ゲート", "pipeline",
+				"detect", "check", "pattern", "heuristic",
+				"gate", "pipeline",
 			}) {
 				continue
 			}
@@ -140,26 +139,19 @@ func checkCompleteness(msg string, hasCodeChanges bool) []string {
 		// Exclusion words: terms that appear near failure keywords in feature
 		// descriptions, summaries, and documentation rather than actual failure reports.
 		featureExclusions := []string{
-			// English
 			"detect", "prediction", "check for", "heuristic", "pattern", "gate",
 			"pipeline", "hook", "block", "implement", "track", "monitor",
 			"quality", "feature", "summary", "effect",
-			// Japanese
-			"予測", "チェック", "検出", "パターン", "ゲート", "ブロック",
-			"実装", "追跡", "監視", "品質", "機能", "効果", "強化", "状態で",
-			"サマリ", "完了",
 		}
 
 		if containsFailureReport(lower, []string{
 			"test fail", "tests fail", "test failed", "tests failed", "failing test",
-			"テストが失敗", "テスト失敗",
 		}, featureExclusions) {
 			issues = append(issues, "Unresolved test failure mentioned in last response")
 		}
 
 		if containsFailureReport(lower, []string{
 			"build failed", "compilation error", "compile error", "does not compile",
-			"ビルド失敗", "コンパイルエラー",
 		}, featureExclusions) {
 			issues = append(issues, "Unresolved build failure mentioned in last response")
 		}
@@ -192,7 +184,7 @@ func containsAnyWord(text string, words []string) bool {
 }
 
 // containsFailureReport checks if text contains a failure keyword but filters out
-// compound words that describe functionality (e.g., "テスト失敗予測") rather than
+// compound words that describe functionality (e.g., "test failure prediction") rather than
 // actual failure reports.
 func containsFailureReport(text string, patterns, exclusions []string) bool {
 	runes := []rune(text)

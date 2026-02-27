@@ -10,7 +10,6 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/hir4ta/claude-buddy/internal/analyzer"
-	"github.com/hir4ta/claude-buddy/internal/locale"
 	"github.com/hir4ta/claude-buddy/internal/sessiondb"
 	"github.com/hir4ta/claude-buddy/internal/watcher"
 )
@@ -48,7 +47,7 @@ type AlertsResponse struct {
 	RecentPhaseCounts []PhaseCount `json:"recent_phase_counts,omitempty"`
 }
 
-func alertsHandler(claudeHome string, lang locale.Lang) server.ToolHandlerFunc {
+func alertsHandler(claudeHome string) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		sessions, err := watcher.ListSessions(claudeHome)
 		if err != nil || len(sessions) == 0 {
@@ -76,7 +75,7 @@ func alertsHandler(claudeHome string, lang locale.Lang) server.ToolHandlerFunc {
 			return mcp.NewToolResultError("failed to load session: " + err.Error()), nil
 		}
 
-		det := analyzer.NewDetector(lang.Code)
+		det := analyzer.NewDetector()
 		totalDetected := 0
 		for _, ev := range detail.Events {
 			alerts := det.Update(ev)

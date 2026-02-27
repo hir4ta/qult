@@ -22,7 +22,6 @@ var placeholderPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\bFIXME\b`),
 	regexp.MustCompile(`(?i)\bplaceholder\b`),
 	regexp.MustCompile(`(?i)\bnot yet implemented\b`),
-	regexp.MustCompile(`(?i)\b未実装\b`),
 }
 
 var errorPatterns = []*regexp.Regexp{

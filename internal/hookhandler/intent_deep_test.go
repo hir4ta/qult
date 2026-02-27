@@ -17,8 +17,6 @@ func TestDetectDomain(t *testing.T) {
 		{"infra", "fix the docker deployment pipeline", "infra"},
 		{"test", "add test coverage for parser", "test"},
 		{"general", "make this better", "general"},
-		{"japanese auth", "認証モジュールのログインを修正", "auth"},
-		{"japanese db", "データベースのクエリを最適化", "database"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -98,8 +96,6 @@ func TestInferImplicitGoal_PromptCues(t *testing.T) {
 		{"refactor test", "simplify the test setup", "test", "test_refactor"},
 		{"security", "fix xss vulnerability in form", "general", "security"},
 		{"scaling", "make this handle concurrent requests", "general", "scaling"},
-		{"japanese performance", "このクエリを速くして", "database", "indexing"},
-		{"japanese cleanup", "不要なコードを削除して", "general", "cleanup"},
 		{"no match", "hello world", "general", ""},
 	}
 	for _, tt := range tests {

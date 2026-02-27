@@ -27,14 +27,12 @@ type PatternRow struct {
 var errorKeywords = []string{
 	"fixed by", "resolved by", "the fix was", "the error was", "the issue was",
 	"workaround:", "root cause",
-	"エラー", "解決", "修正", "原因",
 }
 
 // Architecture keywords (extends decision keywords).
 var architectureKeywords = []string{
 	"architecture", "pattern", "approach", "design",
 	"trade-off", "tradeoff",
-	"アーキテクチャ", "設計",
 }
 
 // ExtractPatterns extracts knowledge patterns from events.
@@ -143,7 +141,6 @@ var signalPatterns = []struct {
 		"instead of", "rather than", "better than", "prefer ",
 		"chose ", "picked ", "switched to", "moved to",
 		"not using", "avoided ", "rejected ",
-		"ではなく", "の代わりに", "より良い",
 	}},
 	// Architecture: statements about how/why things are structured.
 	{"architecture", []string{
@@ -151,7 +148,6 @@ var signalPatterns = []struct {
 		"prevents ", "ensures ", "guarantees ",
 		"separates ", "decouples ", "isolates ",
 		"delegates to", "wraps ", "proxies ",
-		"を担当", "を処理", "を検証", "を防ぐ",
 	}},
 }
 

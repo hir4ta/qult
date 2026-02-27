@@ -1,17 +1,13 @@
 package hookhandler
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"hash/fnv"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 
-	"github.com/hir4ta/claude-buddy/internal/advice"
 	"github.com/hir4ta/claude-buddy/internal/sessiondb"
 	"github.com/hir4ta/claude-buddy/internal/store"
 )
@@ -169,10 +165,8 @@ func classifyFailure(toolName, errorMsg string) string {
 }
 
 // buildFixSuggestion creates a context-aware fix suggestion based on failure type.
-// Uses deterministic rules first, then augments with LLM when available and useful.
 func buildFixSuggestion(sdb *sessiondb.SessionDB, sessionID, failureType, filePath, errorMsg string, toolInput json.RawMessage) string {
 	var b strings.Builder
-	needsLLM := false // Flag: deterministic suggestion was generic, LLM could help.
 
 	switch failureType {
 	case failEditMismatch:
@@ -218,8 +212,7 @@ func buildFixSuggestion(sdb *sessiondb.SessionDB, sessionID, failureType, filePa
 		} else if loc := extractCompileLocation(errorMsg); loc != "" {
 			fmt.Fprintf(&b, "→ Error location: %s — Read that file to see the context.", loc)
 		} else {
-			needsLLM = true
-			b.WriteString("→ Read the error output carefully and fix the referenced file.")
+				b.WriteString("→ Read the error output carefully and fix the referenced file.")
 		}
 
 	case failTestFailure:
@@ -235,7 +228,6 @@ func buildFixSuggestion(sdb *sessiondb.SessionDB, sessionID, failureType, filePa
 		if correlation := correlateWithRecentEdits(sdb, failures); correlation != "" {
 			fmt.Fprintf(&b, "→ %s", correlation)
 		} else {
-			needsLLM = true
 			b.WriteString("→ Check the test output for the specific failing assertion.")
 		}
 
@@ -254,7 +246,6 @@ func buildFixSuggestion(sdb *sessiondb.SessionDB, sessionID, failureType, filePa
 					_ = sdb.RecordBashFailure(sig, extractErrorSignature(errorMsg))
 				}
 			}
-			needsLLM = true
 			b.WriteString("→ Review the error message and try an alternative approach.")
 		}
 
@@ -262,99 +253,7 @@ func buildFixSuggestion(sdb *sessiondb.SessionDB, sessionID, failureType, filePa
 		return ""
 	}
 
-	// LLM augmentation: when deterministic suggestion was generic, try Ollama.
-	if needsLLM {
-		if llmSuggestion := tryLLMFixSuggestion(sdb, sessionID, failureType, errorMsg, filePath); llmSuggestion != "" {
-			b.WriteString("\n")
-			b.WriteString(llmSuggestion)
-		}
-	}
-
 	return b.String()
-}
-
-// tryLLMFixSuggestion attempts to generate a context-aware fix via Ollama.
-// Returns empty string on failure (caller keeps deterministic fallback).
-// Records the emission in suggestion_outcomes for effectiveness tracking.
-// Uses LLM response cache to avoid redundant calls for similar errors.
-func tryLLMFixSuggestion(sdb *sessiondb.SessionDB, sessionID, failureType, errorMsg, filePath string) string {
-	advisor := advice.NewFromSessionDB(sdb)
-	if advisor == nil {
-		return ""
-	}
-
-	// Check LLM cache first (30 minute TTL).
-	errSig := extractErrorSignature(errorMsg)
-	cacheKey := computeLLMCacheKey(failureType, filePath, errSig)
-	if cached, ok := sdb.GetCachedLLMResponse(cacheKey, 30*time.Minute); ok {
-		return cached
-	}
-
-	recentContext := buildRecentContext(sdb)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-	defer cancel()
-
-	fix, err := advisor.GenerateFixSuggestion(ctx, failureType, errorMsg, filePath, recentContext)
-	if err != nil {
-		advisor.RecordFailure(sdb)
-		return ""
-	}
-	advisor.RecordSuccess(sdb)
-
-	if fix.Confidence == "low" {
-		return ""
-	}
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "→ [LLM] Root cause: %s", fix.RootCause)
-	if fix.Suggestion != "" && fix.Suggestion != fix.RootCause {
-		fmt.Fprintf(&b, "\n→ [LLM] Suggestion: %s", fix.Suggestion)
-	}
-
-	result := b.String()
-
-	// Cache LLM response for deduplication.
-	_ = sdb.SetCachedLLMResponse(cacheKey, result, "")
-
-	// Track LLM suggestion for effectiveness measurement.
-	recordLLMSuggestionDelivery(sdb, sessionID, failureType, result)
-
-	return result
-}
-
-// recordLLMSuggestionDelivery records an LLM-generated suggestion in the persistent store.
-func recordLLMSuggestionDelivery(sdb *sessiondb.SessionDB, sessionID, failureType, suggestion string) {
-	st, err := store.OpenDefault()
-	if err != nil {
-		return
-	}
-	defer st.Close()
-
-	pattern := "llm-fix:" + failureType
-	id, err := st.InsertSuggestionOutcome(sessionID, pattern, suggestion)
-	if err != nil {
-		return
-	}
-	_ = sdb.SetContext("last_llm_outcome_id", fmt.Sprintf("%d", id))
-}
-
-// buildRecentContext assembles recent session context for LLM prompts.
-func buildRecentContext(sdb *sessiondb.SessionDB) string {
-	var parts []string
-
-	if intent, _ := sdb.GetWorkingSet("intent"); intent != "" {
-		parts = append(parts, "Task: "+intent)
-	}
-	if branch, _ := sdb.GetWorkingSet("git_branch"); branch != "" {
-		parts = append(parts, "Branch: "+branch)
-	}
-	if files, _ := sdb.GetWorkingSetFiles(); len(files) > 0 {
-		limit := min(5, len(files))
-		parts = append(parts, "Editing: "+strings.Join(files[:limit], ", "))
-	}
-
-	return strings.Join(parts, "; ")
 }
 
 // extractFilePath extracts file_path from tool input JSON.
@@ -521,14 +420,6 @@ func formatResolutionDiff(fs store.FailureSolution) string {
 	}
 	return fmt.Sprintf("Past fix for %s in %s: change `%s` to `%s`",
 		fs.FailureType, filepath.Base(fs.FilePath), old, new)
-}
-
-// computeLLMCacheKey builds a FNV-1a hash key for LLM response caching.
-func computeLLMCacheKey(failureType, filePath, errorSig string) string {
-	h := fmt.Sprintf("%s:%s:%s", failureType, filePath, errorSig)
-	fnvHash := fnv.New64a()
-	fnvHash.Write([]byte(h))
-	return fmt.Sprintf("%016x", fnvHash.Sum64())
 }
 
 // predictFailureCascade checks if the next likely tools (based on session bigrams)

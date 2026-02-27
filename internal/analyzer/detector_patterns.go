@@ -32,8 +32,6 @@ var apologyKeywords = []string{
 	"my mistake",
 	"i'm sorry",
 	"my apologies",
-	"申し訳",
-	"すみません",
 }
 
 // Rate-limit keywords.
@@ -123,22 +121,12 @@ func (d *Detector) detectRetryLoop() *Alert {
 		level = LevelInfo
 	}
 
-	var obs, suggestion string
-	if d.isJa() {
-		obs = toolName
-		if filePath != "" {
-			obs += " → " + short
-		}
-		obs += " を" + count + "回連続リトライ中"
-		suggestion = d.retrySuggestionJa(toolName, kind, level)
-	} else {
-		obs = toolName
-		if filePath != "" {
-			obs += " → " + short
-		}
-		obs += " retried " + count + " times consecutively"
-		suggestion = d.retrySuggestionEn(toolName, kind, level)
+	obs := toolName
+	if filePath != "" {
+		obs += " → " + short
 	}
+	obs += " retried " + count + " times consecutively"
+	suggestion := d.retrySuggestion(toolName, kind, level)
 
 	return &Alert{
 		Pattern:     PatternRetryLoop,
@@ -185,30 +173,15 @@ func (d *Detector) detectCompactAmnesia() *Alert {
 	fileList := strings.Join(files, ", ")
 	n := itoa(overlap)
 
-	var obs, suggestion string
-	if d.isJa() {
-		obs = "compact 後に "
-		if len(files) > 0 {
-			obs += fileList
-			if overlap > len(files) {
-				obs += " など"
-			}
-			obs += " " + n + "ファイルを再読込中"
-		} else {
-			obs += n + "ファイルを再読込中"
+	obs := "Re-reading " + n + " files after compact"
+	if len(files) > 0 {
+		obs += " (" + fileList
+		if overlap > len(files) {
+			obs += " etc."
 		}
-		suggestion = "buddy_recall でキーワード検索すると compact 前の文脈を復元できます — 再読込より高速です"
-	} else {
-		obs = "Re-reading " + n + " files after compact"
-		if len(files) > 0 {
-			obs += " (" + fileList
-			if overlap > len(files) {
-				obs += " etc."
-			}
-			obs += ")"
-		}
-		suggestion = "Use buddy_recall to search for pre-compact context — faster than re-reading files"
+		obs += ")"
 	}
+	suggestion := "Use buddy_recall to search for pre-compact context — faster than re-reading files"
 
 	return &Alert{
 		Pattern:     PatternCompactAmnesia,
@@ -231,83 +204,60 @@ func (d *Detector) detectDestructiveCmd(ev parser.SessionEvent) *Alert {
 		return nil
 	}
 
-	type cmdMsg struct{ obsJa, obsEn, suggJa, suggEn string }
+	type cmdMsg struct{ obs, sugg string }
 
 	var m cmdMsg
 	switch {
 	case rmRFPattern.MatchString(input):
 		m = cmdMsg{
-			"rm -rf が実行されました",
 			"rm -rf command executed",
-			"削除対象のパスを確認してください — 誤って実行された場合 git checkout で復元できます",
 			"Verify the target path — use git checkout to restore if unintended",
 		}
 	case gitPushForcePattern.MatchString(input) && !strings.Contains(input, "--force-with-lease"):
 		m = cmdMsg{
-			"git push --force が実行されました",
 			"git push --force executed",
-			"リモートの変更が上書きされます — --force-with-lease の方が安全です",
 			"Remote changes will be overwritten — use --force-with-lease instead",
 		}
 	case gitResetHardPattern.MatchString(input):
 		m = cmdMsg{
-			"git reset --hard が実行されました",
 			"git reset --hard executed",
-			"コミットしていない変更は失われます — git reflog で直前の状態を確認できます",
 			"Uncommitted changes are lost — use git reflog to find previous state",
 		}
 	case gitCheckoutDot.MatchString(input):
 		m = cmdMsg{
-			"作業ディレクトリの全変更が破棄されました",
 			"All working directory changes discarded",
-			"git stash で変更を一時保存してから操作する方が安全です",
 			"Use git stash to save changes before discarding",
 		}
 	case gitRestoreDot.MatchString(input):
 		m = cmdMsg{
-			"作業ディレクトリの全変更が破棄されました",
 			"All working directory changes discarded",
-			"git stash で変更を一時保存してから操作する方が安全です",
 			"Use git stash to save changes before discarding",
 		}
 	case gitCleanF.MatchString(input):
 		m = cmdMsg{
-			"git clean -f で未追跡ファイルが削除されました",
 			"git clean -f removed untracked files",
-			"削除されたファイルは復元できません — 事前に git clean -n で確認してください",
 			"Removed files cannot be recovered — use git clean -n to preview first",
 		}
 	case gitBranchD.MatchString(input):
 		m = cmdMsg{
-			"git branch -D でブランチが強制削除されました",
 			"git branch -D force-deleted a branch",
-			"マージ前のブランチなら git reflog からコミットを復元できます",
 			"If unmerged, use git reflog to recover the branch's commits",
 		}
 	case chmod777.MatchString(input):
 		m = cmdMsg{
-			"chmod 777 で全ユーザーに書込/実行権限が付与されました",
 			"chmod 777 granted world-writable permissions",
-			"セキュリティリスクがあります — 最小限の権限（644 or 755）を使ってください",
 			"Security risk — use minimal permissions (644 or 755)",
 		}
 	default:
 		return nil
 	}
 
-	var obs, sugg string
-	if d.isJa() {
-		obs, sugg = m.obsJa, m.suggJa
-	} else {
-		obs, sugg = m.obsEn, m.suggEn
-	}
-
 	return &Alert{
 		Pattern:     PatternDestructiveCmd,
 		Level:       LevelAction,
 		Situation:   "Destructive shell command executed",
-		Observation: obs,
-		Suggestion:  sugg,
+		Observation: m.obs,
+		Suggestion:  m.sugg,
 		EventCount:  1,
 	}
 }
@@ -337,26 +287,13 @@ func (d *Detector) detectContextThrashing() *Alert {
 
 	if compactsInWindow >= 3 {
 		level = LevelAction
-		if d.isJa() {
-			obs = "15分間に" + n + "回の context compact が発生"
-			suggestion = "/clear で新しいセッションを開始してください — タスクを1つに絞り、CLAUDE.md に方針を書いておくと効果的です"
-		} else {
-			obs = n + " context compactions in 15 minutes"
-			suggestion = "Start a new session with /clear — focus on one task and document the approach in CLAUDE.md"
-		}
+		obs = n + " context compactions in 15 minutes"
+		suggestion = "Start a new session with /clear — focus on one task and document the approach in CLAUDE.md"
 	} else {
-		if d.isJa() {
-			obs = "15分間に" + n + "回の context compact が発生"
-			suggestion = "コンテキストが急速に消費されています — 不要なファイルの読込を避け、スコープを絞ってください"
-			if !d.features.SubagentUsed {
-				suggestion += "。複雑な調査はサブエージェント (Task) に委任すると本体の context を節約できます"
-			}
-		} else {
-			obs = n + " context compactions in 15 minutes"
-			suggestion = "Context filling fast — avoid unnecessary file reads and narrow the scope"
-			if !d.features.SubagentUsed {
-				suggestion += ". Delegate research to subagents (Task tool) to save main context"
-			}
+		obs = n + " context compactions in 15 minutes"
+		suggestion = "Context filling fast — avoid unnecessary file reads and narrow the scope"
+		if !d.features.SubagentUsed {
+			suggestion += ". Delegate research to subagents (Task tool) to save main context"
 		}
 	}
 
@@ -400,21 +337,12 @@ func (d *Detector) detectTestFailCycle(ev parser.SessionEvent) *Alert {
 	}
 
 	count := itoa(d.testCycleCount)
-	var obs, suggestion string
-	if d.isJa() {
-		obs = "テスト→編集→再テストを" + count + "回繰り返してもパスしていません"
-		if kind == KindProposal {
-			suggestion = "テストが繰り返し失敗しています — 次も失敗したら期待値と実際の出力を貼り付けてみてください"
-		} else {
-			suggestion = "テストの期待値と実際の出力の差分を貼り付けて、根本原因を特定するよう指示してください"
-		}
+	obs := count + " test-edit-retest cycles without passing"
+	var suggestion string
+	if kind == KindProposal {
+		suggestion = "Tests failing repeatedly — if the next attempt fails too, paste the expected vs actual output"
 	} else {
-		obs = count + " test-edit-retest cycles without passing"
-		if kind == KindProposal {
-			suggestion = "Tests failing repeatedly — if the next attempt fails too, paste the expected vs actual output"
-		} else {
-			suggestion = "Paste the expected vs actual output diff and ask Claude to find the root cause"
-		}
+		suggestion = "Paste the expected vs actual output diff and ask Claude to find the root cause"
 	}
 
 	return &Alert{
@@ -456,14 +384,8 @@ func (d *Detector) detectApologizeRetry(ev parser.SessionEvent) *Alert {
 	turns := itoa(d.assistantTurnsSinceReset)
 	apologies := itoa(d.recentApologies)
 
-	var obs, suggestion string
-	if d.isJa() {
-		obs = "直近" + turns + "ターンで" + apologies + "回謝罪 — 同じアプローチを繰り返しています"
-		suggestion = "/clear で仕切り直すか、「期待する結果」と「現在の問題」を分けて伝え直してください"
-	} else {
-		obs = apologies + " apologies in " + turns + " turns — repeating the same approach"
-		suggestion = "Start fresh with /clear, or separately restate the expected outcome and the actual problem"
-	}
+	obs := apologies + " apologies in " + turns + " turns — repeating the same approach"
+	suggestion := "Start fresh with /clear, or separately restate the expected outcome and the actual problem"
 
 	return &Alert{
 		Pattern:     PatternApologizeRetry,
@@ -508,37 +430,20 @@ func (d *Detector) detectExploreLoop() *Alert {
 	topShort := shortPath(topFile)
 	wideScope := fileCount > 8
 
-	var obs, suggestion string
-	if d.isJa() {
-		obs = minutes + "分間で" + fc + "ファイルを読込中"
-		if topFile != "" {
-			obs += "（最多: " + topShort + "）"
-		}
-		obs += " — 書込なし"
+	obs := minutes + "m exploring " + fc + " files"
+	if topFile != "" {
+		obs += " (most: " + topShort + ")"
+	}
+	obs += " — no writes"
 
-		if wideScope {
-			suggestion = "探索範囲が広すぎます — 変更対象のファイルを指定して、具体的な作業を指示してください"
-			if !d.features.PlanModeUsed {
-				suggestion += "。Plan Mode で方針を決めてから実装に入ると効率的です"
-			}
-		} else {
-			suggestion = "調査が長引いています — 「まず○○を修正して」のように具体的なアクションを指示してください"
+	var suggestion string
+	if wideScope {
+		suggestion = "Too many files being explored — specify target files and give concrete instructions"
+		if !d.features.PlanModeUsed {
+			suggestion += ". Use Plan Mode to define the approach before implementation"
 		}
 	} else {
-		obs = minutes + "m exploring " + fc + " files"
-		if topFile != "" {
-			obs += " (most: " + topShort + ")"
-		}
-		obs += " — no writes"
-
-		if wideScope {
-			suggestion = "Too many files being explored — specify target files and give concrete instructions"
-			if !d.features.PlanModeUsed {
-				suggestion += ". Use Plan Mode to define the approach before implementation"
-			}
-		} else {
-			suggestion = "Exploration taking too long — give a concrete action like \"first fix X in Y\""
-		}
+		suggestion = "Exploration taking too long — give a concrete action like \"first fix X in Y\""
 	}
 
 	return &Alert{
@@ -589,14 +494,8 @@ func (d *Detector) detectRateLimitStuck(ev parser.SessionEvent) *Alert {
 	}
 
 	minutes := itoa(int(elapsed.Minutes()))
-	var obs, suggestion string
-	if d.isJa() {
-		obs = "レート制限が発生し、" + minutes + "分間進捗がありません"
-		suggestion = "Esc で中断して数分待ってから再開してください — リトライを続けても解消しません"
-	} else {
-		obs = "Rate limited with no progress for " + minutes + " minutes"
-		suggestion = "Press Esc and wait a few minutes before resuming — continued retries won't help"
-	}
+	obs := "Rate limited with no progress for " + minutes + " minutes"
+	suggestion := "Press Esc and wait a few minutes before resuming — continued retries won't help"
 
 	return &Alert{
 		Pattern:     PatternRateLimitStuck,
@@ -646,43 +545,7 @@ func (d *Detector) overlapFiles(n int) []string {
 
 // --- Feature-aware suggestion builders ---
 
-func (d *Detector) retrySuggestionJa(toolName string, kind FeedbackKind, level FeedbackLevel) string {
-	if kind == KindProposal {
-		switch toolName {
-		case "Edit", "Write":
-			return "同じ Edit が繰り返されています — 次も失敗したら行番号で指定すると確実です"
-		case "Bash":
-			return "同じコマンドを再試行中 — 別のアプローチも検討してみてください"
-		default:
-			return "同じ操作が繰り返されています — 次も失敗したらアプローチを変えてみてください"
-		}
-	}
-	switch toolName {
-	case "Edit", "Write":
-		if level >= LevelAction {
-			return "Esc で中断して「○行目付近の△△を××に変更して」と具体的に指示してください"
-		}
-		return "Edit の指定テキストがファイル内容と一致していない可能性があります — 変更箇所を行番号で指定すると確実です"
-	case "Bash":
-		if level >= LevelAction {
-			return "Esc で中断して、別のコマンドか手動での対処を検討してください"
-		}
-		return "コマンドがエラーを返しています — エラーの原因（パス、権限、依存関係）を伝えてください"
-	case "Read", "Grep", "Glob":
-		if level >= LevelAction {
-			return "Esc で中断して、探しているものの手がかり（ファイル名、関数名）を具体的に伝えてください"
-		}
-		s := "探しているものを具体的に説明してください（例: 関数名、パターン）"
-		if !d.features.SubagentUsed {
-			s += "。広範な検索にはサブエージェント (Task) の方が効率的です"
-		}
-		return s
-	default:
-		return "Esc で中断して、別のアプローチを指示してください"
-	}
-}
-
-func (d *Detector) retrySuggestionEn(toolName string, kind FeedbackKind, level FeedbackLevel) string {
+func (d *Detector) retrySuggestion(toolName string, kind FeedbackKind, level FeedbackLevel) string {
 	if kind == KindProposal {
 		switch toolName {
 		case "Edit", "Write":

@@ -19,14 +19,12 @@ func TestClassifySentenceBySignals(t *testing.T) {
 		{"instead of", "we use redis instead of memcached for better persistence", "decision"},
 		{"rather than", "chose polling rather than websockets for simplicity", "decision"},
 		{"switched to", "switched to jwt tokens for stateless auth", "decision"},
-		{"japanese decision", "memcachedではなくredisを使用", "decision"},
 
 		// Architecture via signals.
 		{"responsible for", "the gateway is responsible for rate limiting", "architecture"},
 		{"validates", "middleware validates all incoming requests", "architecture"},
 		{"prevents", "this guard prevents duplicate submissions", "architecture"},
 		{"delegates to", "the handler delegates to the service layer", "architecture"},
-		{"japanese arch", "ゲートウェイがリクエストを処理する", "architecture"},
 
 		// No match.
 		{"generic code", "const maxRetries = 3", ""},

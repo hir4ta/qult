@@ -12,10 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hir4ta/claude-buddy/internal/advice"
 	"github.com/hir4ta/claude-buddy/internal/embedder"
-	"github.com/hir4ta/claude-buddy/internal/locale"
-	"github.com/hir4ta/claude-buddy/internal/ollama"
 	"github.com/hir4ta/claude-buddy/internal/sessiondb"
 	"github.com/hir4ta/claude-buddy/internal/store"
 )
@@ -43,8 +40,8 @@ func handleSessionStart(input []byte) (*HookOutput, error) {
 	// Store CWD for later hooks (PostCompactResume, git context, etc.).
 	_ = sdb.SetContext("cwd", in.CWD)
 
-	// Cache Ollama availability for fast embedding in later hooks.
-	cacheOllamaStatus(sdb)
+	// Cache embedder (Voyage API) availability for fast embedding in later hooks.
+	cacheEmbedderStatus(sdb)
 
 	// Capture git context (branch, dirty files) for later hooks.
 	captureGitContext(sdb, in.CWD)
@@ -114,8 +111,7 @@ func handleStartupResume(in sessionStartInput, sdb *sessiondb.SessionDB) (*HookO
 }
 
 // generateStartupBriefing assembles a proactive session briefing.
-// Includes blast radius for recently modified files, a task playbook,
-// and an LLM-generated session narrative when Ollama is available.
+// Includes blast radius for recently modified files and a task playbook.
 // Returns "" if no useful briefing can be assembled.
 func generateStartupBriefing(sdb *sessiondb.SessionDB, data *ResumeData, cwd string) string {
 	var parts []string
@@ -179,11 +175,6 @@ func generateStartupBriefing(sdb *sessiondb.SessionDB, data *ResumeData, cwd str
 		}
 	}
 
-	// 5. LLM-powered session narrative (TierDeep, 3s timeout).
-	if narrative := generateLLMNarrative(sdb); narrative != "" {
-		parts = append(parts, narrative)
-	}
-
 	if len(parts) == 0 {
 		return ""
 	}
@@ -227,103 +218,17 @@ func inferTaskType(data *ResumeData) TaskType {
 	return TaskUnknown
 }
 
-// generateLLMNarrative uses the Ollama advisor to produce a session summary.
-// Returns "" on failure or when Ollama is unavailable.
-func generateLLMNarrative(sdb *sessiondb.SessionDB) string {
-	advisor := advice.NewFromSessionDB(sdb)
-	if advisor == nil {
-		return ""
-	}
-
-	ws, _ := sdb.GetAllWorkingSet()
-	if len(ws) == 0 {
-		return ""
-	}
-
-	var dump strings.Builder
-	for k, v := range ws {
-		fmt.Fprintf(&dump, "%s: %s\n", k, v)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	summary, err := advisor.GenerateSessionSummary(ctx, dump.String())
-	if err != nil {
-		advisor.RecordFailure(sdb)
-		return ""
-	}
-	advisor.RecordSuccess(sdb)
-
-	var b strings.Builder
-	if summary.Summary != "" {
-		fmt.Fprintf(&b, "Session narrative: %s", summary.Summary)
-	}
-	if len(summary.NextSteps) > 0 {
-		fmt.Fprintf(&b, "\nSuggested next: %s", strings.Join(summary.NextSteps, "; "))
-	}
-	return b.String()
-}
-
-// cacheOllamaStatus probes Ollama once and stores the result in sessiondb.
+// cacheEmbedderStatus probes the Voyage API once and stores the result in sessiondb.
 // Later hooks read the cached status to skip repeated availability checks.
-func cacheOllamaStatus(sdb *sessiondb.SessionDB) {
-	lang := locale.Detect()
-	model := embedder.ModelForLocale(lang.Code)
-	emb := embedder.NewEmbedder("", model)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+func cacheEmbedderStatus(sdb *sessiondb.SessionDB) {
+	emb := embedder.NewEmbedder()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if emb.EnsureAvailable(ctx) {
-		_ = sdb.SetContext("ollama_available", "true")
-		_ = sdb.SetContext("ollama_model", model)
+		_ = sdb.SetContext("embedder_available", "true")
 	} else {
-		_ = sdb.SetContext("ollama_available", "false")
+		_ = sdb.SetContext("embedder_available", "false")
 	}
-
-	// Warm up generation model for /api/generate (advisory LLM).
-	warmupGenModel(sdb)
-}
-
-// warmupGenModel checks if generation models are available and warms them up.
-// Warms all tiers: fast (classification), smart (analysis), deep (summaries).
-func warmupGenModel(sdb *sessiondb.SessionDB) {
-	client := ollama.NewClient("")
-
-	primaryModel := advice.ModelFromEnv()
-	var availableModel string
-
-	for _, model := range advice.AllModels() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		if !client.HasModel(ctx, model) {
-			cancel()
-			continue
-		}
-		if err := client.Warmup(ctx, model); err != nil {
-			cancel()
-			continue
-		}
-		cancel()
-		if availableModel == "" {
-			availableModel = model
-		}
-		// Cache availability per tier.
-		_ = sdb.SetContext("ollama_model_"+model, "available")
-	}
-
-	if availableModel == "" {
-		_ = sdb.SetContext("ollama_gen_available", "false")
-		return
-	}
-
-	// Use the primary (smart) model if available, otherwise fall back.
-	if m, _ := sdb.GetContext("ollama_model_" + primaryModel); m == "available" {
-		availableModel = primaryModel
-	}
-
-	_ = sdb.SetContext("ollama_gen_available", "true")
-	_ = sdb.SetContext("ollama_gen_model", availableModel)
-	_ = sdb.SetContext("ollama_gen_breaker", "closed")
-	_ = sdb.SetContext("ollama_gen_failures", "0")
 }
 
 func handlePostCompactResume(sdb *sessiondb.SessionDB) (*HookOutput, error) {

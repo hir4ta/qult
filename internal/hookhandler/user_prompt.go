@@ -46,7 +46,7 @@ func handleUserPromptSubmit(input []byte) (*HookOutput, error) {
 		}
 		_ = sdb.SetContext("last_user_intent", intent)
 
-		taskType := classifyIntentLLM(sdb, in.Prompt)
+		taskType := classifyIntent(in.Prompt)
 		if taskType != TaskUnknown {
 			// Detect intent transition: track when task_type changes mid-session.
 			prevTaskType, _ := sdb.GetContext("task_type")

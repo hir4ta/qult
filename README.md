@@ -4,11 +4,34 @@ A proactive session companion for Claude Code — real-time anti-pattern detecti
 
 ## Install
 
-```bash
-brew install hir4ta/tap/claude-buddy
+Install the plugin inside Claude Code:
+
+```
+/plugin marketplace add hir4ta/claude-buddy
+/plugin install claude-buddy@claude-buddy
 ```
 
-Or build from source:
+The binary is automatically downloaded from GitHub Releases on first hook invocation. No manual binary installation required.
+
+### Sync sessions and embeddings
+
+```bash
+claude-buddy install
+```
+
+Syncs past sessions to the local SQLite database (`~/.claude-buddy/buddy.db`) and generates embeddings. Hook/skill/agent registration is managed by the plugin.
+
+### Optional: Voyage AI for semantic search
+
+Set `VOYAGE_API_KEY` to enable vector-based knowledge search across sessions. Without it, search falls back to FTS5 BM25 / LIKE.
+
+```bash
+export VOYAGE_API_KEY=your-api-key
+```
+
+Uses `voyage-4-large` (2048 dimensions) for maximum retrieval accuracy.
+
+### Building from source
 
 ```bash
 git clone https://github.com/hir4ta/claude-buddy
@@ -16,76 +39,19 @@ cd claude-buddy
 go build -o claude-buddy .
 ```
 
-## Setup
-
-### 1. Install the plugin (inside Claude Code)
-
-```
-/plugin marketplace add hir4ta/claude-buddy
-/plugin install claude-buddy@claude-buddy
-```
-
-This registers hooks, MCP server, skills, and the buddy agent via the plugin system. Skills are available as `/claude-buddy:buddy-*` commands.
-
-### 2. Sync sessions and embeddings
-
-```bash
-claude-buddy install
-```
-
-When the plugin is active, this only syncs sessions to the local SQLite database (`~/.claude-buddy/buddy.db`) and generates embeddings. Hook/skill/agent registration is skipped (managed by the plugin).
-
-### 3. Optional: Ollama for semantic search
-
-[Ollama](https://ollama.com) powers vector-based knowledge search across sessions. Without it, search falls back to FTS5 BM25 / LIKE.
-
-```bash
-brew install ollama
-ollama serve &
-
-# Pull embedding model (choose one)
-ollama pull kun432/cl-nagoya-ruri-large    # Japanese
-ollama pull nomic-embed-text               # English / other languages
-```
-
 ## Upgrade
 
-```bash
-# 1. Update the binary
-brew update && brew upgrade claude-buddy
-
-# 2. Re-sync sessions and embeddings
-claude-buddy install
-```
-
-Then update the plugin inside Claude Code:
+Update the plugin inside Claude Code:
 
 ```
 /plugin marketplace update
 ```
 
-Both steps are needed — `brew upgrade` updates the binary (hook handler, MCP server), while `/plugin marketplace update` updates the plugin configuration (hooks, skills, agents).
-
-## Language
-
-claude-buddy detects your system locale (`LANG` / `LC_ALL` / `LC_MESSAGES`) and generates AI feedback in your language. UI labels remain in English.
-
-To persist your language setting, add to your `~/.zshrc` (or `~/.bashrc`):
+The wrapper script automatically downloads the new binary version on next hook invocation. Then re-sync sessions:
 
 ```bash
-export LANG=ja_JP.UTF-8
+claude-buddy install
 ```
-
-Or set per-invocation:
-
-```bash
-LANG=ja_JP.UTF-8 claude-buddy
-LANG=ko_KR.UTF-8 claude-buddy
-```
-
-> **Note**: On macOS, the terminal may default to `en_US.UTF-8` even if the system language is set to Japanese. Set `LANG` explicitly if feedback appears in the wrong language.
-
-Supported languages: English, Japanese, Chinese, Korean, Spanish, French, German, Portuguese, Russian, Italian, Arabic, Hindi, Thai, Vietnamese, Turkish, Polish, Dutch, Swedish.
 
 ## Commands
 
@@ -167,7 +133,7 @@ claude-buddy serve
 | `buddy_recall` | Search across past session history |
 | `buddy_alerts` | Real-time anti-pattern detection (retry loops, context thrashing, etc.) |
 | `buddy_decisions` | Extract design decisions from past sessions |
-| `buddy_patterns` | Cross-project knowledge search with vector semantic search (Ollama) |
+| `buddy_patterns` | Cross-project knowledge search with vector semantic search |
 | `buddy_estimate` | Task complexity estimation based on historical workflow data |
 | `buddy_next_step` | Recommended next actions based on session context and recent tool history |
 | `buddy_feedback` | Explicit feedback channel for suggestion effectiveness (helpful/not_helpful/misleading) |
@@ -178,14 +144,12 @@ claude-buddy serve
 
 ### `claude-buddy analyze [session_id]`
 
-AI-powered session analysis via `claude -p`.
+Session analysis report.
 
 ```bash
 claude-buddy analyze          # Latest session
 claude-buddy analyze de999fa4 # Specific session by ID prefix
 ```
-
-Requires `claude` CLI in PATH.
 
 ### `claude-buddy uninstall`
 
@@ -258,7 +222,7 @@ Hooks actively monitor your session through Claude Code's lifecycle events:
 - **Velocity wall look-ahead**: Predicts health decline using EWMV variance gating + OLS trend regression, warns ~30 tool calls before threshold breach
 - **Auto-apply code fixes**: High-confidence (>=0.9) AST-based patches auto-applied on Edit for Go files (nil-error-wrap, defer-in-loop). Revert tracking for dynamic confidence adjustment
 - **Causal WHY explanations**: Every failure diagnostic includes a WHY line explaining the root cause with causal links to recently edited files
-- **Deterministic compile error patterns**: 9 Go-specific regex patterns (undefined, type mismatch, unused import, missing return, etc.) checked before LLM fallback (<1ms)
+- **Deterministic compile error patterns**: 9 Go-specific regex patterns (undefined, type mismatch, unused import, missing return, etc.) matched in <1ms
 - **Stale read warning**: File not re-read before editing, or last Read was 8+ tool calls ago
 - **Past failure warning**: Similar Bash command failed earlier in the session, with resolution diff display showing previous `old→new` fixes
 - **Git dirty file warning**: Editing a file with pre-existing uncommitted changes
@@ -293,6 +257,7 @@ claude-buddy/
 ├── plugin/                    # Claude Code plugin (generated by plugin-bundle)
 │   ├── .claude-plugin/        # Plugin manifest
 │   ├── hooks/                 # Hook definitions (14 events)
+│   ├── bin/                   # Auto-download wrapper script
 │   ├── skills/                # 10 buddy skills
 │   ├── agents/                # Buddy agent
 │   └── .mcp.json              # MCP server config
@@ -304,12 +269,11 @@ claude-buddy/
 │   ├── coach/                 # AI feedback generation via claude -p
 │   ├── hookhandler/           # Hook handlers (advisor signals, code heuristics, test correlation)
 │   ├── sessiondb/             # Ephemeral per-session SQLite (working set, burst state, nudges)
-│   ├── embedder/              # Ollama integration for semantic search
-│   ├── locale/                # System locale detection (18 languages)
+│   ├── embedder/              # Voyage AI integration for semantic search
 │   ├── tui/                   # Bubble Tea TUI (watch / browse / select)
 │   ├── mcpserver/             # MCP server (stdio, 14 tools)
 │   ├── store/                 # SQLite persistence (vector search + LIKE search + incremental sync + global DB)
-│   └── install/               # Plugin bundle + hook registration + initial sync
+│   └── install/               # Plugin bundle + auto-download wrapper + initial sync
 ├── go.mod
 └── go.sum
 ```
@@ -325,10 +289,8 @@ claude-buddy/
 | [ncruces/go-sqlite3](https://github.com/ncruces/go-sqlite3) | SQLite driver (pure Go, WASM-based) |
 | [odvcencio/gotreesitter](https://github.com/odvcencio/gotreesitter) | Pure Go tree-sitter runtime for multi-language AST analysis |
 
-## Ollama
+## Semantic Search
 
-Ollama powers `buddy_patterns` and hook-based knowledge injection via vector semantic search. The embedding model is auto-selected based on your system locale: `kun432/cl-nagoya-ruri-large` (1024d) for Japanese, `nomic-embed-text` (768d) for other languages.
+Voyage AI (`voyage-4-large`, 2048 dimensions) powers `buddy_patterns` and hook-based knowledge injection via vector semantic search. Set `VOYAGE_API_KEY` to enable.
 
-Ollama availability is checked once at session start and cached — subsequent hook calls use a single HTTP round-trip for embedding.
-
-Without Ollama, knowledge search falls back to FTS5 BM25 / LIKE — all features work, just without semantic matching. FTS5 uses phrase-first search for multi-word queries (higher precision), falling back to OR-based search, with title-match reordering for relevance.
+Without `VOYAGE_API_KEY`, knowledge search falls back to FTS5 BM25 / LIKE — all features work, just without semantic matching. FTS5 uses phrase-first search for multi-word queries (higher precision), falling back to OR-based search, with title-match reordering for relevance.

@@ -2,32 +2,36 @@ package embedder
 
 import (
 	"context"
+	"os"
 	"sync"
 )
 
-// DefaultJAModel is the default embedding model for Japanese locale.
-const DefaultJAModel = "kun432/cl-nagoya-ruri-large"
-
-// DefaultENModel is the default embedding model for other locales.
-const DefaultENModel = "nomic-embed-text"
-
-// Embedder wraps an OllamaClient with availability state.
+// Embedder wraps a Voyage client with availability state.
+// When no API key is configured, all operations gracefully degrade (Available() returns false).
 type Embedder struct {
-	client    *OllamaClient
+	client    *voyageClient
 	available bool
-	dims      int
 	mu        sync.RWMutex
 }
 
-// NewEmbedder creates an Embedder that gracefully degrades when Ollama is unavailable.
-func NewEmbedder(baseURL, model string) *Embedder {
+// NewEmbedder creates an Embedder that reads the Voyage API key from VOYAGE_API_KEY.
+// If the key is empty, the embedder is inert — Available() will always return false.
+func NewEmbedder() *Embedder {
+	apiKey := os.Getenv("VOYAGE_API_KEY")
+	if apiKey == "" {
+		return &Embedder{}
+	}
 	return &Embedder{
-		client: NewOllamaClient(baseURL, model),
+		client: newVoyageClient(apiKey),
 	}
 }
 
-// EnsureAvailable checks Ollama availability and caches the result.
+// EnsureAvailable checks Voyage API availability and caches the result.
 func (e *Embedder) EnsureAvailable(ctx context.Context) bool {
+	if e.client == nil {
+		return false
+	}
+
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -35,12 +39,8 @@ func (e *Embedder) EnsureAvailable(ctx context.Context) bool {
 		return true
 	}
 
-	if e.client.IsAvailable(ctx) {
+	if e.client.isAvailable(ctx) {
 		e.available = true
-		// Cache dims.
-		if dims, err := e.client.Dims(ctx); err == nil {
-			e.dims = dims
-		}
 	}
 	return e.available
 }
@@ -52,37 +52,36 @@ func (e *Embedder) Available() bool {
 	return e.available
 }
 
-// Dims returns cached embedding dimensions.
+// Dims returns the embedding dimensions (fixed for voyage-3.5).
 func (e *Embedder) Dims() int {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.dims
+	return voyageDims
 }
 
 // Model returns the model name.
 func (e *Embedder) Model() string {
-	return e.client.Model()
+	return voyageModel
 }
 
 // EmbedBatch generates embeddings for multiple texts.
 func (e *Embedder) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
-	return e.client.Embed(ctx, texts)
+	if e.client == nil {
+		return nil, nil
+	}
+	return e.client.embed(ctx, texts, "document")
 }
 
 // EmbedForSearch generates a search query embedding.
 func (e *Embedder) EmbedForSearch(ctx context.Context, query string) ([]float32, error) {
-	return e.client.EmbedForSearch(ctx, query)
+	if e.client == nil {
+		return nil, nil
+	}
+	return e.client.embedForSearch(ctx, query)
 }
 
 // EmbedForStorage generates a document embedding.
 func (e *Embedder) EmbedForStorage(ctx context.Context, text string) ([]float32, error) {
-	return e.client.EmbedForStorage(ctx, text)
-}
-
-// ModelForLocale returns the recommended model for a locale code.
-func ModelForLocale(localeCode string) string {
-	if localeCode == "ja" {
-		return DefaultJAModel
+	if e.client == nil {
+		return nil, nil
 	}
-	return DefaultENModel
+	return e.client.embedForStorage(ctx, text)
 }

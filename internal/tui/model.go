@@ -6,7 +6,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/hir4ta/claude-buddy/internal/analyzer"
-	"github.com/hir4ta/claude-buddy/internal/locale"
 	"github.com/hir4ta/claude-buddy/internal/parser"
 )
 
@@ -41,9 +40,6 @@ type Model struct {
 	sessionEnded   bool   // event channel closed
 	showHelp       bool   // help overlay visible
 
-	// Locale
-	lang locale.Lang
-
 	// Usage score
 	scoreCalc *analyzer.ScoreCalculator
 
@@ -52,9 +48,9 @@ type Model struct {
 }
 
 // NewModel creates a new TUI model with initial events pre-loaded.
-func NewModel(initialEvents []parser.SessionEvent, eventCh <-chan parser.SessionEvent, sessionID string, lang locale.Lang) Model {
+func NewModel(initialEvents []parser.SessionEvent, eventCh <-chan parser.SessionEvent, sessionID string) Model {
 	stats := analyzer.NewStats()
-	det := analyzer.NewDetector(lang.Code)
+	det := analyzer.NewDetector()
 	sc := analyzer.NewScoreCalculator()
 	var tasks []TaskState
 	taskMap := make(map[string]int)
@@ -123,7 +119,6 @@ func NewModel(initialEvents []parser.SessionEvent, eventCh <-chan parser.Session
 		autoFollow:    true,
 		inPlanMode:    inPlanMode,
 		awaitingAnswer: awaitingAnswer,
-		lang:          lang,
 	}
 }
 
