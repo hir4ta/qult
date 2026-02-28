@@ -18,12 +18,11 @@ func persistSessionMemory(sessionID, cwd string) {
 		return
 	}
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "memory: open store: %v\n", err)
 		return
 	}
-	defer st.Close()
 
 	// Skip if not enough sessions to produce useful knowledge.
 	stats, err := st.GetProjectSessionStats(cwd)

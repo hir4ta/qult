@@ -18,11 +18,10 @@ func (d *HookDetector) detectLearnedEpisodes() string {
 		return ""
 	}
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return ""
 	}
-	defer st.Close()
 
 	// Only check episodes seen 2+ times (validated patterns).
 	episodes, err := st.GetLearnedEpisodes(2)
@@ -89,11 +88,10 @@ func (d *HookDetector) detectTrajectoryMatch() string {
 		return ""
 	}
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return ""
 	}
-	defer st.Close()
 
 	sessionID, similarity, err := st.MatchesWorkflowTrajectory(taskType, phases)
 	if err != nil || similarity < 0.7 {
@@ -121,11 +119,10 @@ func updateWorkflowAlignment(sdb *sessiondb.SessionDB) string {
 		return ""
 	}
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return ""
 	}
-	defer st.Close()
 
 	cwd, _ := sdb.GetContext("cwd")
 	bestWorkflow, count, _ := st.MostCommonWorkflow(cwd, taskType, 2)
@@ -280,11 +277,10 @@ func RecordLearnedEpisode(sdb *sessiondb.SessionDB, sessionID string) {
 	// Generate a fingerprint name from the sequence.
 	name := "learned:" + strings.Join(failSeq[:min(len(failSeq), 4)], "_")
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return
 	}
-	defer st.Close()
 
 	_ = st.InsertLearnedEpisode(sessionID, name, failSeq, "failure")
 }

@@ -63,11 +63,10 @@ func TryFix(finding Finding, content []byte) string {
 // Boosts confidence for rules with high helpful rate, reduces for high misleading rate.
 // No-op if the store is unavailable or has insufficient data.
 func adjustConfidence(fix *CodeFix) {
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return
 	}
-	defer st.Close()
 
 	rule := fix.Finding.Rule
 	if rule == "" {

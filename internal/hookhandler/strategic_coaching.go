@@ -32,11 +32,10 @@ func findStrategicSignal(sdb *sessiondb.SessionDB, projectPath string) *Signal {
 		return nil
 	}
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return nil
 	}
-	defer st.Close()
 
 	// Need sufficient history for meaningful insights.
 	stats, err := st.GetProjectSessionStats(projectPath)
@@ -188,6 +187,9 @@ func sessionPaceInsight(sdb *sessiondb.SessionDB, st *store.Store, taskType Task
 				improvementNote = fmt.Sprintf(" Last %s: %d tools. Current pace: %d tools (%d%% improvement).", taskType, lastTools, currentTools, pct)
 			}
 		}
+		// Cross-session improvement delta for this task type.
+		improvementNote += taskTypeImprovementNote(st, string(taskType))
+
 		return &strategicInsight{
 			category: "pace",
 			message: fmt.Sprintf(
@@ -198,6 +200,25 @@ func sessionPaceInsight(sdb *sessiondb.SessionDB, st *store.Store, taskType Task
 	}
 
 	return nil
+}
+
+// taskTypeImprovementNote returns a formatted improvement delta string
+// comparing recent vs older sessions for a task type. Returns empty string
+// if insufficient data or improvement is not meaningful (< 10%).
+func taskTypeImprovementNote(st *store.Store, taskType string) string {
+	recent, old, err := st.TaskTypeImprovement(taskType)
+	if err != nil || old == 0 || recent == 0 {
+		return ""
+	}
+	if old <= recent {
+		return ""
+	}
+	pct := ((old - recent) * 100) / old
+	if pct < 10 {
+		return ""
+	}
+	return fmt.Sprintf(" %s sessions: %d%% faster (%d->%d tools over recent sessions).",
+		taskType, pct, old, recent)
 }
 
 // recurringStruggle detects files or error types that repeatedly cause failures

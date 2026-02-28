@@ -282,11 +282,10 @@ func (d *HookDetector) detectCompactionRisk() string {
 // The threshold is further adjusted by user cluster: conservative users get
 // lower thresholds (earlier warnings), aggressive users get higher thresholds.
 func adaptiveThreshold(metricName string, k float64, hardcodedDefault float64) float64 {
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return hardcodedDefault
 	}
-	defer st.Close()
 
 	threshold, err := st.GetAdaptiveThreshold(metricName, k, hardcodedDefault, 10)
 	if err != nil {

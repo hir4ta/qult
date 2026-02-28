@@ -88,9 +88,8 @@ func generatePlaybook(sdb *sessiondb.SessionDB, taskType TaskType, projectPath s
 	}
 
 	// Try learned workflow from persistent store.
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err == nil {
-		defer st.Close()
 		phases, count, _ := st.MostCommonWorkflow(projectPath, string(taskType), 3)
 		if len(phases) > 0 {
 			_ = sdb.SetCooldown(key, 30*time.Minute)

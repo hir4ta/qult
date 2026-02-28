@@ -1,11 +1,13 @@
 package hookhandler
 
 import (
+	"fmt"
 	"math"
 	"strconv"
 	"time"
 
 	"github.com/hir4ta/claude-buddy/internal/sessiondb"
+	"github.com/hir4ta/claude-buddy/internal/store"
 )
 
 // EWMA smoothing factor: alpha=0.3 gives ~70% weight to history, 30% to latest.
@@ -146,17 +148,34 @@ func classifyFlowState(sdb *sessiondb.SessionDB) FlowState {
 	return FlowNormal
 }
 
+// FlowDetail controls content detail level based on the session's flow state.
+// Used to adapt verbosity, alternative count, and content inclusion dynamically.
+type FlowDetail struct {
+	Budget          int  // character budget for output
+	IncludeWhy      bool // whether to include WHY rationale in suggestions
+	IncludeCoChange bool // whether to include co-change alternatives
+	MaxAlternatives int  // maximum number of alternatives to present
+}
+
+// flowDetail returns content detail settings adapted to the current flow state.
+func flowDetail(sdb *sessiondb.SessionDB) FlowDetail {
+	state := classifyFlowState(sdb)
+	switch state {
+	case FlowProductive:
+		return FlowDetail{Budget: 800, IncludeWhy: false, IncludeCoChange: false, MaxAlternatives: 1}
+	case FlowStalled, FlowThrashing:
+		return FlowDetail{Budget: 3000, IncludeWhy: true, IncludeCoChange: true, MaxAlternatives: 5}
+	case FlowFatigued:
+		return FlowDetail{Budget: 1500, IncludeWhy: true, IncludeCoChange: false, MaxAlternatives: 2}
+	default: // FlowNormal
+		return FlowDetail{Budget: 2000, IncludeWhy: true, IncludeCoChange: true, MaxAlternatives: 3}
+	}
+}
+
 // flowBudget returns the character budget for output based on current flow state.
 // Productive flow gets minimal output; stalled/thrashing gets more detail.
 func flowBudget(sdb *sessiondb.SessionDB) int {
-	switch classifyFlowState(sdb) {
-	case FlowProductive:
-		return 800
-	case FlowStalled, FlowThrashing:
-		return 3000
-	default:
-		return 2000
-	}
+	return flowDetail(sdb).Budget
 }
 
 // isInFlow returns true if the session is in a productive flow state.
@@ -326,6 +345,16 @@ func PredictHealthTrend(sdb *sessiondb.SessionDB) *HealthTrend {
 			trend.RecoveryPlaybook = "Low velocity. Step back → re-read files → identify the actual blocker."
 		default:
 			trend.RecoveryPlaybook = "Declining trend. Commit progress → run tests → consider a fresh approach."
+		}
+
+		// Add historical recovery time estimate from past sessions.
+		taskType, _ := sdb.GetContext("task_type")
+		if taskType != "" {
+			if st, err := store.OpenDefaultCached(); err == nil {
+				if avgTools := st.AverageRecoveryTools(taskType); avgTools > 0 {
+					trend.RecoveryPlaybook += fmt.Sprintf(" Recovery typically takes ~%d tools.", avgTools)
+				}
+			}
 		}
 	}
 

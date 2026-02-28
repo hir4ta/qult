@@ -45,10 +45,7 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 
 	// Open buddy.db for direct knowledge writes (phases, files, sequences).
 	// Nil-safe: callers check st != nil before use.
-	st, _ := store.OpenDefault()
-	if st != nil {
-		defer st.Close()
-	}
+	st, _ := store.OpenDefaultCached()
 
 	// Cache task_type and velocity for contextual Thompson Sampling.
 	SetDeliveryContext(sdb)
@@ -154,6 +151,12 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 				}
 			}
 		}
+	}
+
+	// Lightweight mode: skip heavy analysis during subagent activity.
+	// Basic event recording, file tracking, and context tracking above are retained.
+	if sdb.ActiveSubagentCount() > 0 {
+		return nil, nil
 	}
 
 	// Update EWMA flow metrics (velocity, error rate).
@@ -489,11 +492,10 @@ func matchFileContextKnowledge(sdb *sessiondb.SessionDB, filePath string) {
 		return
 	}
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return
 	}
-	defer st.Close()
 
 	patterns, _ := st.SearchPatternsByFile(filePath, 2)
 	if len(patterns) == 0 {
@@ -575,11 +577,10 @@ func recordFailureSolution(sdb *sessiondb.SessionDB, sessionID, filePath string,
 		solution = fmt.Sprintf("Fixed %s by rewriting %s", f.FailureType, filepath.Base(filePath))
 	}
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return
 	}
-	defer st.Close()
 
 	if resolutionDiff != "" {
 		_ = st.InsertFailureSolutionWithDiff(sessionID, f.FailureType, f.ErrorSig, filePath, solution, resolutionDiff, "")
@@ -690,10 +691,9 @@ func trackSolutionChain(sdb *sessiondb.SessionDB, sessionID, toolName string, is
 		if step >= 2 && step < 20 {
 			// Persist to store as a reusable playbook.
 			toolSeqJSON, _ := json.Marshal(strings.Split(seq, ","))
-			st, err := store.OpenDefault()
+			st, err := store.OpenDefaultCached()
 			if err == nil {
 				_ = st.InsertSolutionChain(sessionID, chainSig, string(toolSeqJSON), step)
-				st.Close()
 			}
 		}
 		// Clear chain state.
@@ -753,7 +753,7 @@ func buildTestFailureGuidance(sdb *sessiondb.SessionDB, sessionID, cmd, resp, cw
 	// 2. Search past resolution chains for this failure signature.
 	errSig := extractErrorSignature(resp)
 	if errSig != "" {
-		st, err := store.OpenDefault()
+		st, err := store.OpenDefaultCached()
 		if err == nil {
 			chains, _ := st.SearchSolutionChains("test:"+errSig, 1)
 			if len(chains) > 0 {
@@ -771,7 +771,6 @@ func buildTestFailureGuidance(sdb *sessiondb.SessionDB, sessionID, cmd, resp, cw
 					fmt.Fprintf(&b, "\n  Previous fix: `%s` → `%s`", old, new_)
 				}
 			}
-			st.Close()
 		}
 	}
 
@@ -880,9 +879,8 @@ func asyncPreGenCoaching(sdb *sessiondb.SessionDB, sessionID string) {
 			text = result.Suggestion
 		}
 
-		if genST, err := store.OpenDefault(); err == nil {
+		if genST, err := store.OpenDefaultCached(); err == nil {
 			_ = genST.SetCachedCoaching(cwd, taskType, domain, text, "")
-			genST.Close()
 		}
 	}()
 }
@@ -909,11 +907,10 @@ func surfaceCoChanges(sdb *sessiondb.SessionDB, filePath string) {
 		return
 	}
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return
 	}
-	defer st.Close()
 
 	coFiles, err := st.CoChangedFiles(filePath, 3)
 	if err != nil || len(coFiles) == 0 {

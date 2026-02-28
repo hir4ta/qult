@@ -97,11 +97,10 @@ func searchErrorSolutions(sdb *sessiondb.SessionDB, sig string) []store.PatternR
 		return nil
 	}
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return nil
 	}
-	defer st.Close()
 
 	patterns, _ := st.SearchPatternsByVector(vec, "error_solution", 3)
 	return patterns

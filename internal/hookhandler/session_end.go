@@ -28,10 +28,12 @@ func handleSessionEnd(input []byte) (*HookOutput, error) {
 	// Persist session knowledge (workflow, metrics, user profile, global sync).
 	persistSessionData(in.SessionID, in.CWD)
 
+	// Log suggestion signal-to-noise ratio.
+	logSNR()
+
 	// Clean up live session data from buddy.db.
-	if st, err := store.OpenDefault(); err == nil {
+	if st, err := store.OpenDefaultCached(); err == nil {
 		_ = st.CleanupLiveSession(in.SessionID)
-		st.Close()
 	}
 
 	// Destroy ephemeral session DB.
@@ -39,6 +41,35 @@ func handleSessionEnd(input []byte) (*HookOutput, error) {
 		_ = sdb.Destroy()
 	}
 	return nil, nil
+}
+
+// logSNR computes and logs the suggestion signal-to-noise ratio at session end.
+// When SNR is below 0.5 with a meaningful sample size, identifies the
+// lowest-performing patterns for diagnostic visibility.
+func logSNR() {
+	st, err := store.OpenDefaultCached()
+	if err != nil {
+		return
+	}
+
+	snr, total, err := st.ComputeSNR(30)
+	if err != nil || total == 0 {
+		return
+	}
+
+	fmt.Fprintf(os.Stderr, "[buddy] SNR: %.2f (%d suggestions in last 30 days)\n", snr, total)
+
+	if snr < 0.5 && total > 20 {
+		worst, err := st.LowestPerformingPatterns(30, 3, 5)
+		if err != nil || len(worst) == 0 {
+			return
+		}
+		fmt.Fprintf(os.Stderr, "[buddy] Low SNR — worst patterns:\n")
+		for _, p := range worst {
+			fmt.Fprintf(os.Stderr, "[buddy]   %s: %.0f%% resolved (%d/%d)\n",
+				p.Pattern, p.Rate*100, p.Resolved, p.Total)
+		}
+	}
 }
 
 // persistSessionData runs all persist functions for the given session.
@@ -68,11 +99,10 @@ func persistSessionData(sessionID, cwd string) {
 // (populated by PostToolUse) and saves it as a workflow_sequence for future learning.
 // Falls back to sessiondb phases if live data is unavailable.
 func persistWorkflowSequence(sdb *sessiondb.SessionDB, sessionID string) {
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return
 	}
-	defer st.Close()
 
 	// Read phases from buddy.db (populated directly by PostToolUse).
 	phases, err := st.LivePhaseSequence(sessionID)
@@ -109,11 +139,10 @@ func persistWorkflowSequence(sdb *sessiondb.SessionDB, sessionID string) {
 // persistSessionMetrics extracts per-session metrics and feeds them into
 // the adaptive baselines (Welford online algorithm) in the persistent store.
 func persistSessionMetrics(sdb *sessiondb.SessionDB) {
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return
 	}
-	defer st.Close()
 
 	// Retry loop: max consecutive same-tool runs.
 	events, err := sdb.RecentEvents(50)
@@ -190,11 +219,10 @@ func persistSessionMetrics(sdb *sessiondb.SessionDB) {
 // persistUserProfile extracts session-level coding style metrics
 // and updates the persistent user profile with EWMA smoothing.
 func persistUserProfile(sdb *sessiondb.SessionDB) {
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return
 	}
-	defer st.Close()
 
 	tc, hasWrite, _, _ := sdb.BurstState()
 	if tc == 0 {
@@ -304,11 +332,10 @@ func syncToGlobalDB(sdb *sessiondb.SessionDB, cwd string) {
 	_ = gs.UpsertFingerprint(fp)
 
 	// Sync recent decisions from the project store.
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return
 	}
-	defer st.Close()
 
 	decisions, err := st.GetDecisions("", fp.ProjectName, 5)
 	if err != nil || len(decisions) == 0 {
@@ -340,11 +367,10 @@ func preGenerateCoaching(sdb *sessiondb.SessionDB, cwd string) {
 		return
 	}
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return
 	}
-	defer st.Close()
 
 	// Build rich coaching context from session state.
 	cc := coach.CoachingContext{
@@ -417,11 +443,10 @@ func extractPatternsWithLLM(sdb *sessiondb.SessionDB, sessionID string) {
 		return
 	}
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return
 	}
-	defer st.Close()
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, r := range results {
@@ -572,9 +597,8 @@ func RecoverOrphanedSessions(currentSessionID, cwd string) int {
 		persistSessionData(sessionID, cwd)
 
 		// Clean up live data and destroy the session DB.
-		if st, serr := store.OpenDefault(); serr == nil {
+		if st, serr := store.OpenDefaultCached(); serr == nil {
 			_ = st.CleanupLiveSession(sessionID)
-			st.Close()
 		}
 		if sdb, serr := sessiondb.Open(sessionID); serr == nil {
 			_ = sdb.Destroy()

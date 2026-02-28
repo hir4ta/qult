@@ -188,12 +188,11 @@ func unresolvedFailureHint(sdb *sessiondb.SessionDB) string {
 		_ = sdb.SetCooldown("idle_failure_hint", 10*time.Minute)
 
 		// Search for past solutions.
-		st, err := store.OpenDefault()
+		st, err := store.OpenDefaultCached()
 		if err != nil {
 			return fmt.Sprintf("Unresolved %s in %s — consider fixing before continuing.", f.FailureType, f.FilePath)
 		}
 		solutions, _ := st.SearchFailureSolutionsByFile(f.FilePath, 1)
-		st.Close()
 
 		if len(solutions) > 0 {
 			text := solutions[0].SolutionText

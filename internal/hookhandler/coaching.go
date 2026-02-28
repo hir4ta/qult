@@ -267,19 +267,16 @@ func generateCoaching(sdb *sessiondb.SessionDB) string {
 
 	// Use UserCluster as risk profile (conservative/balanced/aggressive).
 	var riskProfile string
-	if st, err := store.OpenDefault(); err == nil {
+	if st, err := store.OpenDefaultCached(); err == nil {
 		riskProfile = st.UserCluster()
 
 		// Check AI-generated coaching cache first (contextual coaching).
 		cwd, _ := sdb.GetContext("cwd")
 		if cwd != "" {
 			if cached, ok := st.GetCachedCoaching(cwd, taskTypeStr, domain, 24*time.Hour); ok {
-				st.Close()
 				return formatCachedCoaching(cached) + SkillHintForPhase(phaseStr)
 			}
 		}
-
-		st.Close()
 	}
 
 	// Try domain-specific override first.
@@ -459,11 +456,10 @@ var testFilePathPattern = regexp.MustCompile(`(?i)(_test\.go|\.test\.[jt]sx?|\.s
 func personalizeCoaching(sdb *sessiondb.SessionDB, entry coachingEntry, taskType TaskType) coachingEntry {
 	ps := personalContext(sdb)
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return injectPaceAndTestContext(entry, ps)
 	}
-	defer st.Close()
 
 	projectPath, _ := sdb.GetWorkingSet("project_path")
 

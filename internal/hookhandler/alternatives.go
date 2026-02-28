@@ -86,10 +86,8 @@ func editAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 	}
 
 	// 3. Past failure solutions for this file.
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err == nil {
-		defer st.Close()
-
 		solutions, _ := st.SearchFailureSolutionsByFile(ei.FilePath, 2)
 		for _, sol := range solutions {
 			rationale := sol.SolutionText
@@ -231,8 +229,8 @@ func editAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 		}
 	}
 
-	// 6b. File co-change suggestions.
-	if st != nil {
+	// 6b. File co-change suggestions (gated by flow detail).
+	if st != nil && flowDetail(sdb).IncludeCoChange {
 		coChanges, _ := st.CoChangedFiles(ei.FilePath, 3)
 		for _, cc := range coChanges {
 			if cc.SessionCount < 3 {
@@ -389,9 +387,8 @@ func bashAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 		outcome, count, _ := sdb.PredictFromTrigram(prevPrevTool, prevTool, "Bash")
 		// Also check global trigrams.
 		globalCount := 0
-		if st, stErr := store.OpenDefault(); stErr == nil {
+		if st, stErr := store.OpenDefaultCached(); stErr == nil {
 			preds, _ := st.PredictFromTrigramGlobal(prevPrevTool, prevTool, 1)
-			st.Close()
 			for _, p := range preds {
 				if p.Tool == "Bash" && p.SuccessRate < 0.3 {
 					globalCount = p.Count
@@ -412,9 +409,8 @@ func bashAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 	if !trigramMatched && prevTool != "" {
 		outcome, count, _ := sdb.PredictOutcome(prevTool, "Bash")
 		globalCount := 0
-		if st, stErr := store.OpenDefault(); stErr == nil {
+		if st, stErr := store.OpenDefaultCached(); stErr == nil {
 			preds, _ := st.PredictNextToolGlobal(prevTool, 3)
-			st.Close()
 			for _, p := range preds {
 				if p.Tool == "Bash" && p.SuccessRate < 0.3 {
 					globalCount = p.Count
@@ -442,9 +438,8 @@ func bashAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 				Priority:  35,
 			})
 		}
-	} else if st, stErr := store.OpenDefault(); stErr == nil {
+	} else if st, stErr := store.OpenDefaultCached(); stErr == nil {
 		preds, _ := st.PredictNextToolGlobal("Bash", 1)
-		st.Close()
 		for _, p := range preds {
 			if p.Tool == "Read" && p.Count >= 5 && p.SuccessRate > 0.5 {
 				alts = append(alts, Alternative{
@@ -462,9 +457,8 @@ func bashAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 	if taskType != "" {
 		currentPhase := classifyBashPhase(bi.Command)
 		if currentPhase != "" {
-			st, stErr := store.OpenDefault()
+			st, stErr := store.OpenDefaultCached()
 			if stErr == nil {
-				defer st.Close()
 				expectedPhases, wfCount, _ := st.MostCommonWorkflow("", taskType, 3)
 				if len(expectedPhases) > 0 && wfCount >= 3 {
 					recentPhases := getRecentPhases(sdb, 5)
@@ -514,9 +508,13 @@ func formatAlternatives(sdb *sessiondb.SessionDB, cooldownKey, target string, al
 		}
 	}
 
-	// Cap at 3 alternatives.
-	if len(deduped) > 3 {
-		deduped = deduped[:3]
+	// Cap at flow-aware maximum alternatives.
+	maxAlts := flowDetail(sdb).MaxAlternatives
+	if maxAlts <= 0 {
+		maxAlts = 3 // safety fallback
+	}
+	if len(deduped) > maxAlts {
+		deduped = deduped[:maxAlts]
 	}
 
 	// Format output.

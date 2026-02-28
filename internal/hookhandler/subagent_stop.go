@@ -50,6 +50,8 @@ func handleSubagentStop(input []byte) (*HookOutput, error) {
 	}
 	defer sdb.Close()
 
+	_ = sdb.DecrementSubagentCount()
+
 	SetDeliveryContext(sdb)
 
 	var issues []string

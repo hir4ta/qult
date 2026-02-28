@@ -365,11 +365,10 @@ func formatImpact(info *ImpactInfo) string {
 // coChangeHint checks the persistent store for files frequently co-changed
 // with the given file and returns a hint if strong associations exist.
 func coChangeHint(filePath string) string {
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return ""
 	}
-	defer st.Close()
 
 	coChanges, err := st.CoChangedFiles(filePath, 3)
 	if err != nil || len(coChanges) == 0 {

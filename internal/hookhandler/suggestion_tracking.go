@@ -18,11 +18,10 @@ func recordNudgeDelivery(sdb *sessiondb.SessionDB, sessionID string, nudges []se
 		return
 	}
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return
 	}
-	defer st.Close()
 
 	var lastID int64
 	var lastPattern string
@@ -74,11 +73,10 @@ func checkNudgeTimeout(sdb *sessiondb.SessionDB) {
 	_ = sdb.SetContext("last_nudge_outcome_id", "")
 	_ = sdb.SetContext("nudge_delivered_tool_count", "")
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return
 	}
-	defer st.Close()
 
 	sessionID, _ := sdb.GetContext("session_id")
 	if sessionID == "" {
@@ -177,12 +175,22 @@ func verifyPendingResolution(sdb *sessiondb.SessionDB, isSuccess bool) {
 		updatePreferenceOnResolution(pattern, tc)
 		recordAutoFeedback(sdb, pattern, tc)
 
-		st, err := store.OpenDefault()
+		st, err := store.OpenDefaultCached()
 		if err != nil {
 			return
 		}
-		defer st.Close()
 		_ = st.ResolveSuggestion(outcomeID)
+
+		// If a past-solution nudge was resolved, mark the solution as effective.
+		if pattern == "past-solution" {
+			if idStr, _ := sdb.GetContext("last_surfaced_solution_id"); idStr != "" {
+				var solutionID int
+				if _, serr := fmt.Sscanf(idStr, "%d", &solutionID); serr == nil && solutionID > 0 {
+					_ = st.IncrementTimesEffective(solutionID)
+				}
+				_ = sdb.SetContext("last_surfaced_solution_id", "")
+			}
+		}
 	} else {
 		// False positive: the "resolution" action failed — the nudge didn't actually help.
 		recordFalsePositiveFeedback(sdb, pattern)
@@ -192,11 +200,10 @@ func verifyPendingResolution(sdb *sessiondb.SessionDB, isSuccess bool) {
 // recordFalsePositiveFeedback records a not_helpful auto-feedback when a pending
 // resolution turns out to be a false positive (the follow-up action failed).
 func recordFalsePositiveFeedback(sdb *sessiondb.SessionDB, pattern string) {
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return
 	}
-	defer st.Close()
 
 	sessionID, _ := sdb.GetContext("session_id")
 	if sessionID == "" {
@@ -225,22 +232,20 @@ func checkLLMSuggestionResolution(sdb *sessiondb.SessionDB, toolName string) {
 		return
 	}
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return
 	}
-	defer st.Close()
 
 	_ = st.ResolveSuggestion(outcomeID)
 }
 
 // updatePreferenceOnResolution updates the user_preferences table when a nudge is resolved.
 func updatePreferenceOnResolution(pattern string, toolsSinceDelivery int) {
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return
 	}
-	defer st.Close()
 
 	// Compute response time proxy from tool count (approximate seconds).
 	responseTimeSec := float64(toolsSinceDelivery) * 3.0
@@ -285,11 +290,10 @@ func feedbackThresholds() (int, int) {
 func recordAutoFeedback(sdb *sessiondb.SessionDB, pattern string, toolsSinceDelivery int) {
 	rating := inferFeedbackRating(toolsSinceDelivery)
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return
 	}
-	defer st.Close()
 
 	// Skip auto-feedback when it contradicts explicit user feedback.
 	if st.CheckFeedbackContradiction(pattern) {
@@ -321,11 +325,10 @@ func recordUnresolvedFeedback(sdb *sessiondb.SessionDB) {
 	// Track unresolved pattern for enrichment on next encounter.
 	_ = sdb.SetContext("last_unresolved_pattern", pattern)
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return
 	}
-	defer st.Close()
 
 	sessionID, _ := sdb.GetContext("session_id")
 	if sessionID == "" {

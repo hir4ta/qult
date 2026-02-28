@@ -148,11 +148,10 @@ func isAtWorkflowBoundary(sdb *sessiondb.SessionDB) bool {
 // to naturally balance exploration (new patterns) and exploitation (proven patterns).
 // Returns PrioritySuppressed if the pattern should not be delivered at all.
 func adjustPriority(rng *rand.Rand, pattern string, base SuggestionPriority) SuggestionPriority {
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return base
 	}
-	defer st.Close()
 
 	// Build contextual key for finer-grained Thompson Sampling.
 	ctxKey := contextualPatternKey(pattern)
@@ -301,6 +300,11 @@ func Deliver(sdb *sessiondb.SessionDB, pattern, level, observation, suggestion s
 		why = formatPersonalWhy(why, ps, pattern)
 	}
 
+	// Gate WHY rationale based on flow detail (suppress during productive flow).
+	if why != "" && !flowDetail(sdb).IncludeWhy {
+		why = ""
+	}
+
 	decision := RouteDelivery(sdb, pattern, priority)
 
 	switch decision.Channel {
@@ -376,9 +380,8 @@ func SetDeliveryContext(sdb *sessiondb.SessionDB) {
 	}
 
 	// Cache user cluster from persistent store.
-	if st, err := store.OpenDefault(); err == nil {
+	if st, err := store.OpenDefaultCached(); err == nil {
 		ctxUserCluster = st.UserCluster()
-		st.Close()
 	}
 }
 
@@ -453,11 +456,10 @@ func enrichIfRepeated(sdb *sessiondb.SessionDB, pattern, suggestion string) stri
 	// Clear to avoid double-enrichment.
 	_ = sdb.SetContext("last_unresolved_pattern", "")
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return suggestion
 	}
-	defer st.Close()
 
 	// Try to find past solutions for this pattern.
 	if stats, serr := st.PatternFeedbackStats(pattern); serr == nil && stats.TotalCount > 0 {
@@ -489,11 +491,10 @@ func enrichIfRepeated(sdb *sessiondb.SessionDB, pattern, suggestion string) stri
 // patternSavingsNote returns a quantified savings message for high-priority patterns.
 // e.g., "IMPACT: Acting on this saved avg 12 tools in past 5 sessions"
 func patternSavingsNote(pattern string) string {
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return ""
 	}
-	defer st.Close()
 
 	saved, instances, err := st.PatternSavings(pattern)
 	if err != nil || instances < 2 || saved < 3 {
@@ -529,11 +530,10 @@ func trackImplicitFeedback(sdb *sessiondb.SessionDB, sessionID string) {
 	}
 	_ = sdb.SetCooldown("implicit_silence_feedback", 15*time.Minute)
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return
 	}
-	defer st.Close()
 
 	// Record as auto-feedback against recently delivered patterns.
 	_ = st.InsertFeedback(sessionID, "auto:silence", store.RatingNotHelpful,

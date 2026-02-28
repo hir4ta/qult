@@ -171,6 +171,128 @@ func TestFlowEventCount(t *testing.T) {
 	}
 }
 
+func TestFlowDetail(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name            string
+		vel             string
+		errRate         string
+		acceptance      string
+		streak          string
+		wantBudget      int
+		wantIncludeWhy  bool
+		wantCoChange    bool
+		wantMaxAlts     int
+	}{
+		{
+			name:           "normal",
+			vel:            "4.0",
+			errRate:        "0.1",
+			wantBudget:     2000,
+			wantIncludeWhy: true,
+			wantCoChange:   true,
+			wantMaxAlts:    3,
+		},
+		{
+			name:           "productive",
+			vel:            "8.0",
+			errRate:        "0.05",
+			streak:         "5",
+			wantBudget:     800,
+			wantIncludeWhy: false,
+			wantCoChange:   false,
+			wantMaxAlts:    1,
+		},
+		{
+			name:           "stalled",
+			vel:            "1.5",
+			errRate:        "0.05",
+			wantBudget:     3000,
+			wantIncludeWhy: true,
+			wantCoChange:   true,
+			wantMaxAlts:    5,
+		},
+		{
+			name:           "thrashing",
+			vel:            "8.0",
+			errRate:        "0.30",
+			wantBudget:     3000,
+			wantIncludeWhy: true,
+			wantCoChange:   true,
+			wantMaxAlts:    5,
+		},
+		{
+			name:           "fatigued",
+			vel:            "5.0",
+			errRate:        "0.1",
+			acceptance:     "0.05",
+			wantBudget:     1500,
+			wantIncludeWhy: true,
+			wantCoChange:   false,
+			wantMaxAlts:    2,
+		},
+		{
+			name:           "fresh session defaults to normal",
+			wantBudget:     2000,
+			wantIncludeWhy: true,
+			wantCoChange:   true,
+			wantMaxAlts:    3,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			sdb := openFlowTestDB(t)
+			if tt.vel != "" {
+				_ = sdb.SetContext("ewma_tool_velocity", tt.vel)
+			}
+			if tt.errRate != "" {
+				_ = sdb.SetContext("ewma_error_rate", tt.errRate)
+			}
+			if tt.acceptance != "" {
+				_ = sdb.SetContext("ewma_acceptance_rate", tt.acceptance)
+			}
+			if tt.streak != "" {
+				_ = sdb.SetContext("success_streak", tt.streak)
+			}
+			fd := flowDetail(sdb)
+			if fd.Budget != tt.wantBudget {
+				t.Errorf("flowDetail().Budget = %d, want %d", fd.Budget, tt.wantBudget)
+			}
+			if fd.IncludeWhy != tt.wantIncludeWhy {
+				t.Errorf("flowDetail().IncludeWhy = %v, want %v", fd.IncludeWhy, tt.wantIncludeWhy)
+			}
+			if fd.IncludeCoChange != tt.wantCoChange {
+				t.Errorf("flowDetail().IncludeCoChange = %v, want %v", fd.IncludeCoChange, tt.wantCoChange)
+			}
+			if fd.MaxAlternatives != tt.wantMaxAlts {
+				t.Errorf("flowDetail().MaxAlternatives = %d, want %d", fd.MaxAlternatives, tt.wantMaxAlts)
+			}
+		})
+	}
+}
+
+func TestFlowBudgetDelegates(t *testing.T) {
+	t.Parallel()
+	sdb := openFlowTestDB(t)
+
+	// flowBudget should return the same value as flowDetail().Budget.
+	if got, want := flowBudget(sdb), flowDetail(sdb).Budget; got != want {
+		t.Errorf("flowBudget() = %d, flowDetail().Budget = %d, want equal", got, want)
+	}
+
+	// Set productive flow and verify both agree.
+	_ = sdb.SetContext("ewma_tool_velocity", "8.0")
+	_ = sdb.SetContext("ewma_error_rate", "0.05")
+	_ = sdb.SetContext("success_streak", "5")
+	if got, want := flowBudget(sdb), flowDetail(sdb).Budget; got != want {
+		t.Errorf("flowBudget() = %d, flowDetail().Budget = %d in productive flow, want equal", got, want)
+	}
+	if got := flowBudget(sdb); got != 800 {
+		t.Errorf("flowBudget() = %d in productive flow, want 800", got)
+	}
+}
+
 func TestAdaptiveErrorThreshold(t *testing.T) {
 	t.Parallel()
 	sdb := openFlowTestDB(t)

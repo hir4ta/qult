@@ -32,6 +32,8 @@ func handleSubagentStart(input []byte) (*HookOutput, error) {
 	}
 	defer sdb.Close()
 
+	_ = sdb.IncrementSubagentCount()
+
 	var parts []string
 
 	if intent, _ := sdb.GetWorkingSet("intent"); intent != "" {

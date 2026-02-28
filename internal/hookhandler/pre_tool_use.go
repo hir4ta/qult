@@ -37,6 +37,9 @@ func handlePreToolUse(input []byte) (*HookOutput, error) {
 			obs, sugg, matched := analyzer.MatchDestructiveCommand(toolInput.Command)
 			if matched {
 				reason := fmt.Sprintf("[buddy] %s\n→ %s", obs, sugg)
+				if note := patternSavingsNote("destructive-command"); note != "" {
+					reason += "\n  " + note
+				}
 				return makeDenyOutput(reason), nil
 			}
 		}
@@ -61,6 +64,15 @@ func handlePreToolUse(input []byte) (*HookOutput, error) {
 	}
 	defer sdb.Close()
 
+	// Lightweight mode: skip heavy analysis during subagent activity.
+	// Safety checks (destructive gate, bash safety) already ran above.
+	if sdb.ActiveSubagentCount() > 0 {
+		if safetyWarning != "" {
+			return makeOutput("PreToolUse", safetyWarning), nil
+		}
+		return nil, nil
+	}
+
 	// Silent auto-correction: improve tool inputs before execution.
 	if out := autoCorrectTool(sdb, in.ToolName, in.ToolInput, in.CWD); out != nil {
 		return out, nil
@@ -77,7 +89,11 @@ func handlePreToolUse(input []byte) (*HookOutput, error) {
 	if sig := det.detectEpisodes(); sig != nil {
 		switch sig.Name {
 		case "retry_cascade", "edit_fail_spiral":
-			return makeDenyOutput(sig.Message), nil
+			msg := sig.Message
+			if note := patternSavingsNote(sig.Name); note != "" {
+				msg += "\n  " + note
+			}
+			return makeDenyOutput(msg), nil
 		default:
 			return makeOutput("PreToolUse", sig.Message), nil
 		}
@@ -219,7 +235,7 @@ func handlePreToolUse(input []byte) (*HookOutput, error) {
 			n.Pattern, n.Level, n.Observation, n.Suggestion))
 	}
 
-	return makeOutput("PreToolUse", budgetJoinPrioritized(signals, nudgeParts, flowBudget(sdb))), nil
+	return makeOutput("PreToolUse", budgetJoinPrioritized(signals, nudgeParts, flowDetail(sdb).Budget)), nil
 }
 
 // extractCmdSignature extracts the base command pattern from a Bash command.
@@ -286,11 +302,10 @@ func buildContextQuery(sdb *sessiondb.SessionDB, toolName string, toolInput json
 // searchContextualPatterns searches for relevant patterns using FTS5 with
 // keyword fallback and formats them as a concise context string.
 func searchContextualPatterns(query string) string {
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return ""
 	}
-	defer st.Close()
 
 	// Try FTS5 first, then keyword fallback.
 	results, _ := st.SearchPatternsByFTS(query, "", 2)
@@ -572,11 +587,10 @@ func proactiveSolutionLookup(sdb *sessiondb.SessionDB, _ string, toolInput json.
 		return ""
 	}
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return ""
 	}
-	defer st.Close()
 
 	// 3-axis search in priority order: error_signature (highest precision) →
 	// file_path (file-specific) → failure_type (broadest match).

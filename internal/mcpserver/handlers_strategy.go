@@ -66,6 +66,15 @@ func sessionOutlookHandler(claudeHome string, st *store.Store) server.ToolHandle
 		// Risk assessment.
 		result["risk_level"] = assessRisk(health, len(alerts), stats.ToolUseCount)
 
+		// Signal-to-noise ratio from suggestion outcomes (30-day window).
+		if st != nil {
+			snr, sampleSize, snrErr := st.ComputeSNR(30)
+			if snrErr == nil && sampleSize > 0 {
+				result["snr"] = snr
+				result["snr_sample_size"] = sampleSize
+			}
+		}
+
 		// User profile context.
 		if st != nil {
 			cluster := st.UserCluster()

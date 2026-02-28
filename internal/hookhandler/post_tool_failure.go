@@ -362,9 +362,8 @@ func searchPastSolutions(sdb *sessiondb.SessionDB, failureType, errorMsg string)
 	errSig := extractErrorSignature(errorMsg)
 
 	// Try persistent failure_solutions first, preferring those with exact diffs.
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err == nil {
-		defer st.Close()
 		solutions, _ := st.SearchFailureSolutionsWithDiff(failureType, errSig, 1)
 		if len(solutions) > 0 {
 			_ = st.IncrementTimesSurfaced(solutions[0].ID)

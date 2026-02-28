@@ -150,11 +150,10 @@ func checkLearnedWorkflow(taskType TaskType, hasWrite bool, hasTestRun bool) str
 		return "" // only suggest when writing without prior expected steps
 	}
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return ""
 	}
-	defer st.Close()
 
 	phases, count, err := st.MostCommonWorkflow("", string(taskType), 3)
 	if err != nil || len(phases) < 2 {

@@ -592,6 +592,27 @@ func (s *SessionDB) BurstStartTime() (time.Time, error) {
 }
 
 // SetContext sets a session context key-value pair.
+// IncrementSubagentCount atomically increments the active subagent counter.
+func (s *SessionDB) IncrementSubagentCount() error {
+	_, err := s.db.Exec(`INSERT INTO session_context (key, value) VALUES ('active_subagents', '1')
+		ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)`)
+	return err
+}
+
+// DecrementSubagentCount atomically decrements the active subagent counter (floor 0).
+func (s *SessionDB) DecrementSubagentCount() error {
+	_, err := s.db.Exec(`UPDATE session_context SET value = CAST(MAX(CAST(value AS INTEGER) - 1, 0) AS TEXT)
+		WHERE key = 'active_subagents'`)
+	return err
+}
+
+// ActiveSubagentCount returns the number of currently active subagents.
+func (s *SessionDB) ActiveSubagentCount() int {
+	v, _ := s.GetContext("active_subagents")
+	n, _ := strconv.Atoi(v)
+	return n
+}
+
 func (s *SessionDB) SetContext(key, value string) error {
 	_, err := s.db.Exec(
 		`INSERT INTO session_context (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?`,

@@ -96,6 +96,11 @@ func handleUserPromptSubmit(input []byte) (*HookOutput, error) {
 	// record as a signal that current suggestions may not be valuable enough.
 	trackImplicitFeedback(sdb, in.SessionID)
 
+	// Lightweight mode: skip JARVIS briefing during subagent activity.
+	if sdb.ActiveSubagentCount() > 0 {
+		return nil, nil
+	}
+
 	// --- JARVIS briefing: select the single most important signal ---
 	var entries []nudgeEntry
 
@@ -264,11 +269,10 @@ func buildSessionContextSummary(sdb *sessiondb.SessionDB) string {
 // coChangeCandidates checks if any working set files have frequent co-change partners
 // that haven't been modified yet. Returns a compact hint or "".
 func coChangeCandidates(files []string) string {
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return ""
 	}
-	defer st.Close()
 
 	wsSet := make(map[string]bool, len(files))
 	for _, f := range files {
@@ -357,11 +361,10 @@ func findKnowledgeSignal(sdb *sessiondb.SessionDB, prompt string) *Signal {
 	query := strings.Join(keywords, " ")
 	vec := embedQuery(sdb, query, 1*time.Second)
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return nil
 	}
-	defer st.Close()
 
 	var allResults []store.PatternRow
 	for _, patType := range activeTypes {
@@ -503,14 +506,13 @@ func predictTargetFiles(sdb *sessiondb.SessionDB, prompt string) []string {
 	}
 
 	// 3. Expand with co-change partners.
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		if len(predicted) > 3 {
 			return predicted[:3]
 		}
 		return predicted
 	}
-	defer st.Close()
 
 	var cochanged []string
 	for _, f := range predicted {
@@ -547,11 +549,10 @@ func buildPredictiveContext(sdb *sessiondb.SessionDB, prompt string) string {
 		return ""
 	}
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return ""
 	}
-	defer st.Close()
 
 	var hints []string
 
@@ -609,11 +610,10 @@ func buildPredictiveContext(sdb *sessiondb.SessionDB, prompt string) string {
 // dataMaturityLabel returns a short label indicating buddy's data maturity level.
 // Returns "" when mature (silence is healthy).
 func dataMaturityLabel(sdb *sessiondb.SessionDB) string {
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return ""
 	}
-	defer st.Close()
 
 	sessionCount := 0
 	if stats, err := st.GetProjectSessionStats(""); err == nil && stats != nil {

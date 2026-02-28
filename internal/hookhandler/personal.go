@@ -41,12 +41,11 @@ func personalContext(sdb *sessiondb.SessionDB) *PersonalStats {
 		Cluster: "balanced",
 	}
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		cachePersonalStats(sdb, ps)
 		return ps
 	}
-	defer st.Close()
 
 	// User cluster.
 	ps.Cluster = st.UserCluster()

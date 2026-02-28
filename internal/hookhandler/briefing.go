@@ -159,11 +159,10 @@ func findPastSolution(sdb *sessiondb.SessionDB) *Signal {
 		return nil
 	}
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return nil
 	}
-	defer st.Close()
 
 	solutions, _ := st.SearchFailureSolutions(recentFail.FailureType, recentFail.ErrorSig, 1)
 	if len(solutions) == 0 {
@@ -196,11 +195,10 @@ func findCoChangeHint(sdb *sessiondb.SessionDB) *Signal {
 		return nil
 	}
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return nil
 	}
-	defer st.Close()
 
 	wsSet := make(map[string]bool, len(files))
 	for _, f := range files {
@@ -374,7 +372,7 @@ func buildNarrative(sig *Signal, sdb *sessiondb.SessionDB) string {
 					evidence += fmt.Sprintf("Your successful sessions avg %d tools", ps.SuccessMedianTools)
 				}
 				action := "Apply the past fix or use buddy_diagnose for alternatives"
-				parts = append(parts, formatCausalChain(cause, effect, evidence, action))
+				parts = append(parts, formatCausalChainWithHistory(cause, effect, evidence, action, f.FilePath))
 			}
 		} else {
 			parts = append(parts, "→ Apply the past fix or use buddy_diagnose for alternatives.")
@@ -406,9 +404,8 @@ func buildNarrative(sig *Signal, sdb *sessiondb.SessionDB) string {
 	if sig.Kind == "knowledge" || sig.Kind == "cochange" {
 		files, _ := sdb.GetWorkingSetFiles()
 		if len(files) > 0 && len(files) <= 3 {
-			st, err := store.OpenDefault()
+			st, err := store.OpenDefaultCached()
 			if err == nil {
-				defer st.Close()
 				for _, f := range files {
 					coFiles, _ := st.CoChangedFiles(f, 2)
 					for _, co := range coFiles {
@@ -474,11 +471,10 @@ func lookupCachedCoaching(sdb *sessiondb.SessionDB) string {
 		return ""
 	}
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return ""
 	}
-	defer st.Close()
 
 	cached, ok := st.GetCachedCoaching(cwd, taskType, domain, 24*time.Hour)
 	if !ok || cached == "" {

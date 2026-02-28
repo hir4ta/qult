@@ -91,12 +91,11 @@ func handleSessionStart(input []byte) (*HookOutput, error) {
 }
 
 func handleStartupResume(in sessionStartInput, sdb *sessiondb.SessionDB) (*HookOutput, error) {
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		// No store available — skip resume.
 		return nil, nil
 	}
-	defer st.Close()
 
 	data, err := BuildResumeData(st, "", in.CWD)
 	if err != nil || data == nil {
@@ -284,11 +283,10 @@ func supplementFromStore(sdb *sessiondb.SessionDB) string {
 		return ""
 	}
 
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return ""
 	}
-	defer st.Close()
 
 	data, err := BuildResumeData(st, "", cwd)
 	if err != nil || data == nil {

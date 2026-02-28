@@ -13,11 +13,10 @@ import (
 // autoEstimate returns a compact 1-line task estimate from historical data.
 // Returns "" if insufficient data (fewer than 3 sessions for this task type).
 func autoEstimate(cwd, taskType string) string {
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return ""
 	}
-	defer st.Close()
 
 	workflows, err := st.GetSuccessfulWorkflows(cwd, taskType, 50)
 	if err != nil || len(workflows) < 3 {

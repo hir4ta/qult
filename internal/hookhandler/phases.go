@@ -198,11 +198,10 @@ func shouldGateForPhase(sdb *sessiondb.SessionDB, pattern string) bool {
 // shouldGateForProfile suppresses suggestions the user already follows habitually.
 // Uses the persistent user profile to avoid nagging about established practices.
 func shouldGateForProfile(pattern string) bool {
-	st, err := store.OpenDefault()
+	st, err := store.OpenDefaultCached()
 	if err != nil {
 		return false
 	}
-	defer st.Close()
 
 	switch pattern {
 	case "checkpoint":

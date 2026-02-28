@@ -97,6 +97,68 @@ func (s *Store) PatternSavings(pattern string) (savedTools int, instances int, e
 	return int(avgUnresolved - avgResolved), resolvedCount, nil
 }
 
+// ComputeSNR computes the signal-to-noise ratio from suggestion outcomes
+// over the last N days. SNR = resolved_count / total_count.
+// Returns the ratio, total sample size, and any error.
+// Returns 0.0 with total=0 when no data is available.
+func (s *Store) ComputeSNR(days int) (float64, int, error) {
+	var total, resolved int
+	err := s.db.QueryRow(
+		`SELECT COUNT(*), COALESCE(SUM(resolved), 0)
+		 FROM suggestion_outcomes
+		 WHERE delivered_at > datetime('now', ? || ' days')`,
+		fmt.Sprintf("-%d", days),
+	).Scan(&total, &resolved)
+	if err != nil {
+		return 0, 0, fmt.Errorf("store: compute snr: %w", err)
+	}
+	if total == 0 {
+		return 0, 0, nil
+	}
+	return float64(resolved) / float64(total), total, nil
+}
+
+// LowestPerformingPatterns returns patterns with the worst resolution rates
+// over the last N days, requiring at least minDeliveries to be included.
+// Results are ordered by resolution rate ascending (worst first).
+func (s *Store) LowestPerformingPatterns(days, minDeliveries, limit int) ([]PatternSNR, error) {
+	rows, err := s.db.Query(
+		`SELECT pattern, COUNT(*) AS total, COALESCE(SUM(resolved), 0) AS res
+		 FROM suggestion_outcomes
+		 WHERE delivered_at > datetime('now', ? || ' days')
+		 GROUP BY pattern
+		 HAVING total >= ?
+		 ORDER BY (CAST(res AS REAL) / total) ASC
+		 LIMIT ?`,
+		fmt.Sprintf("-%d", days), minDeliveries, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store: lowest performing patterns: %w", err)
+	}
+	defer rows.Close()
+
+	var results []PatternSNR
+	for rows.Next() {
+		var ps PatternSNR
+		if err := rows.Scan(&ps.Pattern, &ps.Total, &ps.Resolved); err != nil {
+			continue
+		}
+		if ps.Total > 0 {
+			ps.Rate = float64(ps.Resolved) / float64(ps.Total)
+		}
+		results = append(results, ps)
+	}
+	return results, rows.Err()
+}
+
+// PatternSNR holds per-pattern signal-to-noise data.
+type PatternSNR struct {
+	Pattern  string
+	Total    int
+	Resolved int
+	Rate     float64
+}
+
 // DecayedPatternEffectiveness returns time-weighted delivery and resolution counts.
 // Recent outcomes (last 30 days) count fully; older outcomes are exponentially
 // decayed with a half-life of 30 days. Returns float64 counts to preserve decay precision.

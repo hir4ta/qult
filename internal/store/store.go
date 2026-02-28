@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	_ "github.com/ncruces/go-sqlite3/driver"
 	_ "github.com/ncruces/go-sqlite3/embed"
@@ -58,6 +59,22 @@ func Open(dbPath string) (*Store, error) {
 // OpenDefault opens the database at the default path (~/.claude-buddy/buddy.db).
 func OpenDefault() (*Store, error) {
 	return Open(DefaultDBPath())
+}
+
+var (
+	defaultCached    *Store
+	defaultCachedErr error
+	defaultOnce      sync.Once
+)
+
+// OpenDefaultCached returns a process-level cached store connection.
+// Intended for short-lived hook-handler processes where opening the DB
+// once per process is sufficient. Do NOT call Close() on the returned Store.
+func OpenDefaultCached() (*Store, error) {
+	defaultOnce.Do(func() {
+		defaultCached, defaultCachedErr = Open(DefaultDBPath())
+	})
+	return defaultCached, defaultCachedErr
 }
 
 // Close closes the underlying database connection.
