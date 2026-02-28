@@ -20,7 +20,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          direct_prompt: |
+          prompt: |
             You are a Claude Code plugin compliance auditor.
 
             ## Task
@@ -77,7 +77,7 @@ jobs:
 
             Only include findings that are clearly documented in the fetched docs.
             Do NOT speculate or infer requirements not in the docs.
-          max_turns: "10"
+          claude_args: "--max-turns 10"
 
       - name: Parse findings
         id: parse
