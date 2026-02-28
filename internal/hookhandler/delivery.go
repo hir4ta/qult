@@ -295,6 +295,12 @@ func Deliver(sdb *sessiondb.SessionDB, pattern, level, observation, suggestion s
 		why = reasoning[0]
 	}
 
+	// Enrich WHY with personal data when available.
+	if why != "" {
+		ps := personalContext(sdb)
+		why = formatPersonalWhy(why, ps, pattern)
+	}
+
 	decision := RouteDelivery(sdb, pattern, priority)
 
 	switch decision.Channel {
@@ -302,6 +308,12 @@ func Deliver(sdb *sessiondb.SessionDB, pattern, level, observation, suggestion s
 		msg := fmt.Sprintf("[buddy] %s (%s): %s\n→ %s", pattern, level, observation, suggestion)
 		if why != "" {
 			msg += "\n  WHY: " + why
+		}
+		// Quantified impact for deny/warn patterns.
+		if priority <= PriorityHigh {
+			if savingsNote := patternSavingsNote(pattern); savingsNote != "" {
+				msg += "\n  " + savingsNote
+			}
 		}
 		msg += SkillHintForPattern(pattern)
 		return msg
@@ -472,6 +484,22 @@ func enrichIfRepeated(sdb *sessiondb.SessionDB, pattern, suggestion string) stri
 	}
 
 	return suggestion
+}
+
+// patternSavingsNote returns a quantified savings message for high-priority patterns.
+// e.g., "IMPACT: Acting on this saved avg 12 tools in past 5 sessions"
+func patternSavingsNote(pattern string) string {
+	st, err := store.OpenDefault()
+	if err != nil {
+		return ""
+	}
+	defer st.Close()
+
+	saved, instances, err := st.PatternSavings(pattern)
+	if err != nil || instances < 2 || saved < 3 {
+		return ""
+	}
+	return fmt.Sprintf("IMPACT: Acting on this saved avg %d tools in past %d instances", saved, instances)
 }
 
 // trackImplicitFeedback records implicit negative signals when buddy MCP tools

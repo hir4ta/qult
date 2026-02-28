@@ -146,6 +146,19 @@ func classifyFlowState(sdb *sessiondb.SessionDB) FlowState {
 	return FlowNormal
 }
 
+// flowBudget returns the character budget for output based on current flow state.
+// Productive flow gets minimal output; stalled/thrashing gets more detail.
+func flowBudget(sdb *sessiondb.SessionDB) int {
+	switch classifyFlowState(sdb) {
+	case FlowProductive:
+		return 800
+	case FlowStalled, FlowThrashing:
+		return 3000
+	default:
+		return 2000
+	}
+}
+
 // isInFlow returns true if the session is in a productive flow state.
 // Kept for backward compatibility with MCP tools (buddy_current_state).
 func isInFlow(sdb *sessiondb.SessionDB) bool {
@@ -232,10 +245,12 @@ func recordHealthSnapshot(sdb *sessiondb.SessionDB) {
 
 // HealthTrend describes the predicted health trajectory.
 type HealthTrend struct {
-	CurrentHealth  float64
-	Slope          float64 // health change per 10 tools
-	ToolsToThreshold int  // predicted tools until health drops below 0.5 (-1 if stable/improving)
-	Trend          string // "improving", "stable", "declining"
+	CurrentHealth    float64
+	Slope            float64 // health change per 10 tools
+	ToolsToThreshold int     // predicted tools until health drops below 0.5 (-1 if stable/improving)
+	Trend            string  // "improving", "stable", "declining"
+	CompoundRisk     float64 // multi-factor risk score (0-1)
+	RecoveryPlaybook string  // suggested recovery action
 }
 
 // PredictHealthTrend computes a linear regression over recent health snapshots
@@ -292,6 +307,26 @@ func PredictHealthTrend(sdb *sessiondb.SessionDB) *HealthTrend {
 		}
 	default:
 		trend.Trend = "stable"
+	}
+
+	// Compound risk: velocity decline + error rate + phase stagnation.
+	vel := last.Velocity
+	errRate := last.ErrorRate
+	velRisk := math.Max(0, 1.0-vel/10.0)    // low velocity = high risk
+	errRisk := math.Min(errRate/0.5, 1.0)     // high error = high risk
+	trendRisk := math.Max(0, -slopePer10*10)  // declining trend = high risk
+	trend.CompoundRisk = math.Min(1.0, (velRisk+errRisk+trendRisk)/3.0)
+
+	// Recovery playbook based on dominant risk factor.
+	if trend.CompoundRisk > 0.5 {
+		switch {
+		case errRisk > velRisk && errRisk > trendRisk:
+			trend.RecoveryPlaybook = "High error rate. Narrow scope → fix one failure → test → re-plan."
+		case velRisk > trendRisk:
+			trend.RecoveryPlaybook = "Low velocity. Step back → re-read files → identify the actual blocker."
+		default:
+			trend.RecoveryPlaybook = "Declining trend. Commit progress → run tests → consider a fresh approach."
+		}
 	}
 
 	return trend

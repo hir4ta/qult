@@ -173,11 +173,20 @@ func sessionPaceInsight(sdb *sessiondb.SessionDB, st *store.Store, taskType Task
 		if hasTest != "true" {
 			testNote = " No tests run yet."
 		}
+		// Quantified improvement: compare to last similar session.
+		improvementNote := ""
+		if len(workflows) >= 2 {
+			lastTools := workflows[0].ToolCount
+			if lastTools > 0 && currentTools < lastTools {
+				pct := 100 - (currentTools*100)/lastTools
+				improvementNote = fmt.Sprintf(" Last %s: %d tools. Current pace: %d tools (%d%% improvement).", taskType, lastTools, currentTools, pct)
+			}
+		}
 		return &strategicInsight{
 			category: "pace",
 			message: fmt.Sprintf(
-				"This %s session: %d tools used (successful sessions median: %d).%s Consider committing progress or pivoting approach.",
-				taskType, currentTools, median, testNote),
+				"This %s session: %d tools used (successful sessions median: %d).%s%s Consider committing progress or pivoting approach.",
+				taskType, currentTools, median, testNote, improvementNote),
 			priority: 0,
 		}
 	}

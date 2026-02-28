@@ -2,6 +2,7 @@ package hookhandler
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -299,6 +300,8 @@ func generateCoaching(sdb *sessiondb.SessionDB) string {
 			if phase == PhaseTest || phase == PhaseVerify {
 				entry = enrichWithTestCommand(sdb, entry)
 			}
+			// Inject working_set context: file names and decisions.
+			entry = enrichWithSessionContext(sdb, entry)
 			// Enrich with personal history from cross-session data.
 			entry = personalizeCoaching(sdb, entry, taskType)
 			entry = adaptToneForRiskProfile(entry, riskProfile)
@@ -474,10 +477,13 @@ func personalizeCoaching(sdb *sessiondb.SessionDB, entry coachingEntry, taskType
 	}
 	avgTools := totalTools / len(successful)
 
-	personalNote := fmt.Sprintf(" Your successful %s sessions average %d tools across %d sessions.",
+	// Build causal chain: cause → effect with personal evidence.
+	cause := fmt.Sprintf("%s task in progress", taskType)
+	effect := "session efficiency depends on workflow alignment"
+	evidence := fmt.Sprintf("Your successful %s sessions average %d tools (%d sessions)",
 		taskType, avgTools, len(successful))
 
-	// Axis 2: Success vs failure contrast.
+	// Success vs failure contrast.
 	failed, _ := st.GetFailedWorkflows(string(taskType), 10)
 	if len(failed) >= 2 {
 		var failedTools int
@@ -486,26 +492,62 @@ func personalizeCoaching(sdb *sessiondb.SessionDB, entry coachingEntry, taskType
 		}
 		avgFailed := failedTools / len(failed)
 		if avgFailed > avgTools+10 {
-			personalNote += fmt.Sprintf(" Failed sessions averaged %d tools.", avgFailed)
+			evidence += fmt.Sprintf(". Failed sessions averaged %d tools", avgFailed)
 		}
 	}
 
-	// Axis 3: Test frequency — low testers get a stronger test nudge.
+	// Test frequency — low testers get stronger evidence.
 	if tf, count, err := st.GetUserProfile("test_frequency"); err == nil && count >= 5 {
 		if tf < 0.3 {
-			personalNote += " Your test frequency is low — sessions with early testing resolve faster."
+			evidence += fmt.Sprintf(". Test frequency %.0f%% — early testing resolves faster", tf*100)
 		}
 	}
 
-	// Axis 4: Session duration — flag if successful sessions are consistently short.
+	// Session duration insight.
 	if totalDuration > 0 {
 		avgDuration := totalDuration / len(successful)
 		if avgDuration > 0 && avgDuration < 600 {
-			personalNote += fmt.Sprintf(" Successful sessions typically finish in ~%d min.", avgDuration/60)
+			evidence += fmt.Sprintf(". Successful sessions typically ~%d min", avgDuration/60)
 		}
 	}
 
-	entry.reasoning += personalNote
+	action := entry.reasoning
+	entry.reasoning = formatCausalChain(cause, effect, evidence, action)
+	return entry
+}
+
+// enrichWithSessionContext injects working_set file names, decisions, and
+// recurring struggles into the coaching entry for session-aware guidance.
+func enrichWithSessionContext(sdb *sessiondb.SessionDB, entry coachingEntry) coachingEntry {
+	// Add working files to reasoning.
+	files, _ := sdb.GetWorkingSetFiles()
+	if len(files) > 0 {
+		names := make([]string, 0, min(len(files), 3))
+		for i, f := range files {
+			if i >= 3 {
+				break
+			}
+			names = append(names, filepath.Base(f))
+		}
+		entry.reasoning += fmt.Sprintf(" Active files: %s.", strings.Join(names, ", "))
+	}
+
+	// Add recent decisions.
+	decisions, _ := sdb.GetWorkingSetDecisions()
+	if len(decisions) > 0 {
+		latest := decisions[len(decisions)-1]
+		if len([]rune(latest)) > 60 {
+			latest = string([]rune(latest)[:60]) + "..."
+		}
+		entry.reasoning += fmt.Sprintf(" Recent decision: %s.", latest)
+	}
+
+	// Add recurring struggles from personal context.
+	ps := personalContext(sdb)
+	if ps != nil && len(ps.RecurringStruggles) > 0 {
+		entry.reasoning += fmt.Sprintf(" Watch for: %s.", strings.Join(ps.RecurringStruggles, ", "))
+	}
+
 	return entry
 }
 

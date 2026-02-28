@@ -189,6 +189,13 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 		}
 	}
 
+	// Workflow alignment: check current session against best successful trajectory.
+	if msg := updateWorkflowAlignment(sdb); msg != "" {
+		Deliver(sdb, "workflow-alignment", "warning",
+			"Workflow divergence detected", msg, PriorityMedium,
+			"Diverging from proven successful workflows increases the risk of hitting known failure modes.")
+	}
+
 	// Async coaching pre-generation on phase transitions.
 	// PostToolUse is async (<5s), so a goroutine with 5s timeout is safe.
 	if changed, _ := sdb.GetContext("coaching_phase_changed"); changed == "true" {

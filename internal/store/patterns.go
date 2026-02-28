@@ -21,8 +21,9 @@ type PatternRow struct {
 	Scope         string // "project" | "global"
 	SourceEventID int64
 	Timestamp     string
-	Tags          []string // populated by queries, not stored directly
-	Files         []string // populated by queries, not stored directly
+	Tags            []string // populated by queries, not stored directly
+	Files           []string // populated by queries, not stored directly
+	SelectionReason string   // why this result was ranked highly (set by RankPatterns)
 }
 
 // Error-solution keywords (EN + JA).
@@ -449,6 +450,9 @@ func PatternJSON(p PatternRow) map[string]any {
 	}
 	if len(p.Files) > 0 {
 		m["files"] = p.Files
+	}
+	if p.SelectionReason != "" {
+		m["selection_reason"] = p.SelectionReason
 	}
 	return m
 }

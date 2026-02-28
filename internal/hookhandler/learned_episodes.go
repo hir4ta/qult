@@ -106,6 +106,106 @@ func (d *HookDetector) detectTrajectoryMatch() string {
 	) + SkillHintForEpisode("trajectory_match")
 }
 
+// updateWorkflowAlignment computes alignment between the current session's phase
+// sequence and the best successful workflow for this task type. Stores the score
+// in sessiondb and returns a divergence warning if alignment drops significantly.
+func updateWorkflowAlignment(sdb *sessiondb.SessionDB) string {
+	taskType, _ := sdb.GetContext("task_type")
+	if taskType == "" {
+		return ""
+	}
+
+	// Build current phase history.
+	phases := getPhaseHistory(sdb)
+	if len(phases) < 3 {
+		return ""
+	}
+
+	st, err := store.OpenDefault()
+	if err != nil {
+		return ""
+	}
+	defer st.Close()
+
+	cwd, _ := sdb.GetContext("cwd")
+	bestWorkflow, count, _ := st.MostCommonWorkflow(cwd, taskType, 2)
+	if len(bestWorkflow) == 0 || count < 2 {
+		return ""
+	}
+
+	// Compute Jaccard similarity on phase bigrams.
+	currentBigrams := workflowPhaseBigrams(phases)
+	bestBigrams := workflowPhaseBigrams(bestWorkflow)
+	alignment := workflowJaccard(currentBigrams, bestBigrams)
+
+	// Store current alignment score.
+	_ = sdb.SetContext("workflow_alignment", fmt.Sprintf("%.2f", alignment))
+
+	// Check for significant drop from previous alignment.
+	prevStr, _ := sdb.GetContext("prev_workflow_alignment")
+	_ = sdb.SetContext("prev_workflow_alignment", fmt.Sprintf("%.2f", alignment))
+
+	if prevStr == "" {
+		return ""
+	}
+	var prev float64
+	fmt.Sscanf(prevStr, "%f", &prev)
+
+	// Detect divergence: alignment dropped by 20%+ and is now below 0.5.
+	if prev > 0.5 && alignment < 0.5 && (prev-alignment) > 0.2 {
+		set, _ := sdb.TrySetCooldown("workflow_divergence", 15*time.Minute)
+		if !set {
+			return ""
+		}
+		// Find the divergence point.
+		divergePhase := ""
+		for i, p := range phases {
+			if i < len(bestWorkflow) && p != bestWorkflow[i] {
+				divergePhase = fmt.Sprintf("at phase %d: you did %q, successful sessions did %q", i+1, p, bestWorkflow[i])
+				break
+			}
+		}
+		if divergePhase == "" && len(phases) > len(bestWorkflow) {
+			divergePhase = fmt.Sprintf("after phase %d (successful sessions had %d phases)", len(bestWorkflow), len(bestWorkflow))
+		}
+
+		msg := fmt.Sprintf("[buddy] workflow-divergence: Alignment with successful %s sessions dropped to %.0f%% (was %.0f%%).", taskType, alignment*100, prev*100)
+		if divergePhase != "" {
+			msg += " Diverged " + divergePhase + "."
+		}
+		msg += fmt.Sprintf(" Successful pattern (%d sessions): %s.", count, strings.Join(bestWorkflow, " → "))
+		return msg
+	}
+	return ""
+}
+
+// workflowPhaseBigrams returns the set of consecutive phase pairs from a phase list.
+func workflowPhaseBigrams(phases []string) map[string]bool {
+	bigrams := make(map[string]bool)
+	for i := 0; i < len(phases)-1; i++ {
+		bigrams[phases[i]+"→"+phases[i+1]] = true
+	}
+	return bigrams
+}
+
+// workflowJaccard computes |A∩B| / |A∪B| for two sets.
+func workflowJaccard(a, b map[string]bool) float64 {
+	if len(a) == 0 && len(b) == 0 {
+		return 0
+	}
+	intersection := 0
+	for k := range a {
+		if b[k] {
+			intersection++
+		}
+	}
+	union := len(a) + len(b) - intersection
+	if union == 0 {
+		return 0
+	}
+	return float64(intersection) / float64(union)
+}
+
 // matchSubsequence counts how many elements of target appear in sequence
 // within source (order-preserving but not necessarily contiguous).
 func matchSubsequence(source, target []string) int {

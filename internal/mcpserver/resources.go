@@ -159,6 +159,10 @@ func healthTimelineResource(claudeHome string) server.ResourceHandlerFunc {
 				"slope_per_10":       trend.Slope,
 				"trend":              trend.Trend,
 				"tools_to_threshold": trend.ToolsToThreshold,
+				"compound_risk":      trend.CompoundRisk,
+			}
+			if trend.RecoveryPlaybook != "" {
+				trendData["recovery_playbook"] = trend.RecoveryPlaybook
 			}
 		}
 

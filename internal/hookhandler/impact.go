@@ -26,6 +26,7 @@ type ImpactInfo struct {
 	BlastScore           int      // composite risk score (0-100)
 	Risk                 string   // "low", "medium", "high"
 	SuggestedTestCmd     string   // specific go test -run command from coverage map
+	DomainRisk           string   // domain-specific risk note (auth, database, etc.)
 }
 
 // analyzeImpact runs a lightweight impact analysis for a file being edited.
@@ -63,6 +64,9 @@ func analyzeImpact(sdb *sessiondb.SessionDB, filePath, cwd string) *ImpactInfo {
 			info.SuggestedTestCmd = SuggestTestCommand(cm, filePath, nil, cwd)
 		}
 	}
+
+	// Domain risk from file path.
+	info.DomainRisk = classifyDomainRisk(filePath)
 
 	info.BlastScore = computeBlastScore(info)
 	info.Risk = assessRisk(info)
@@ -301,6 +305,11 @@ func computeBlastScore(info *ImpactInfo) int {
 	}
 	score += transitPts
 
+	// Domain risk: +10 for sensitive domains.
+	if info.DomainRisk != "" {
+		score += 10
+	}
+
 	if score > 100 {
 		score = 100
 	}
@@ -344,6 +353,9 @@ func formatImpact(info *ImpactInfo) string {
 	if info.SuggestedTestCmd != "" {
 		parts = append(parts, fmt.Sprintf("Run: %s", info.SuggestedTestCmd))
 	}
+	if info.DomainRisk != "" {
+		parts = append(parts, fmt.Sprintf("Domain risk: %s", info.DomainRisk))
+	}
 	if info.BlastScore > 0 {
 		parts = append(parts, fmt.Sprintf("Blast radius: %d/100 (%s)", info.BlastScore, info.Risk))
 	}
@@ -381,6 +393,27 @@ func coChangeHint(filePath string) string {
 	}
 
 	return fmt.Sprintf("[buddy] Frequently co-changed: %s", strings.Join(suggestions, ", "))
+}
+
+// classifyDomainRisk returns a domain-specific risk note based on file path.
+// Returns "" for general/low-risk domains.
+func classifyDomainRisk(filePath string) string {
+	lower := strings.ToLower(filePath)
+
+	switch {
+	case containsAny(lower, "auth", "login", "password", "token", "credential", "jwt", "oauth"):
+		return "auth — changes may affect authentication/authorization security"
+	case containsAny(lower, "migration", "schema"):
+		return "database schema — changes may require migration coordination"
+	case containsAny(lower, "middleware", "interceptor"):
+		return "middleware — changes affect all requests passing through"
+	case containsAny(lower, "deploy", "docker", "k8s", "terraform", "ci", "pipeline"):
+		return "infra — changes affect deployment and availability"
+	case containsAny(lower, "crypto", "encrypt", "secret", "key"):
+		return "security — changes involve cryptographic or secret handling"
+	default:
+		return ""
+	}
 }
 
 // GoExportedSymbols extracts exported symbol names from a Go file.

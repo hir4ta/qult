@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -36,6 +37,9 @@ type TaskEstimate struct {
 	SessionCount   int      `json:"session_count"`
 	MedianTools    int      `json:"median_tool_count"`
 	AvgTools       int      `json:"avg_tool_count"`
+	P25Tools       int      `json:"p25_tool_count"`
+	P75Tools       int      `json:"p75_tool_count"`
+	StdDev         float64  `json:"std_dev"`
 	SuccessRate    float64  `json:"success_rate"`
 	CommonWorkflow []string `json:"common_workflow,omitempty"`
 }
@@ -87,12 +91,25 @@ func EstimateTask(st *store.Store, projectPath, taskType string) (*TaskEstimate,
 		}
 	}
 
-	median := toolCounts[len(toolCounts)/2]
+	n := len(toolCounts)
+	median := toolCounts[n/2]
+	p25 := toolCounts[n/4]
+	p75 := toolCounts[(n*3)/4]
+
 	sum := 0
 	for _, tc := range toolCounts {
 		sum += tc
 	}
-	avg := sum / len(toolCounts)
+	avg := sum / n
+
+	// Standard deviation.
+	meanF := float64(sum) / float64(n)
+	var variance float64
+	for _, tc := range toolCounts {
+		d := float64(tc) - meanF
+		variance += d * d
+	}
+	stddev := math.Sqrt(variance / float64(n))
 
 	var successRate float64
 	if totalCount > 0 {
@@ -104,9 +121,12 @@ func EstimateTask(st *store.Store, projectPath, taskType string) (*TaskEstimate,
 
 	return &TaskEstimate{
 		TaskType:       taskType,
-		SessionCount:   len(workflows),
+		SessionCount:   n,
 		MedianTools:    median,
 		AvgTools:       avg,
+		P25Tools:       p25,
+		P75Tools:       p75,
+		StdDev:         math.Round(stddev*10) / 10,
 		SuccessRate:    successRate,
 		CommonWorkflow: commonWorkflow,
 	}, nil

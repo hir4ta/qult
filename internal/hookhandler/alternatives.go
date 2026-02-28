@@ -127,6 +127,7 @@ func editAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 			alts = append(alts, Alternative{
 				Label:     "Past decision",
 				Rationale: text,
+				Why:       "Past decision constrains how this file should be modified.",
 				Priority:  60,
 			})
 		}
@@ -142,6 +143,7 @@ func editAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 				alts = append(alts, Alternative{
 					Label:     "Architecture note",
 					Rationale: text,
+					Why:       "Architecture pattern from past sessions applies to this module.",
 					Priority:  50,
 				})
 			}
@@ -153,6 +155,7 @@ func editAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 			alts = append(alts, Alternative{
 				Label:     "Cross-session failures",
 				Rationale: fmt.Sprintf("This file has had %d failures across sessions.", totalCross),
+				Why:       "Repeated cross-session failures indicate a structural difficulty. Extra caution prevents the same mistake.",
 				Priority:  75,
 			})
 		}
@@ -168,6 +171,7 @@ func editAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 			alts = append(alts, Alternative{
 				Label:     "Package architecture",
 				Rationale: text,
+				Why:       "Directory-level architecture pattern affects all files here.",
 				Priority:  45,
 			})
 		}
@@ -182,6 +186,7 @@ func editAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 			alts = append(alts, Alternative{
 				Label:     "Package decision",
 				Rationale: text,
+				Why:       "Team decision for this package should be preserved.",
 				Priority:  42,
 			})
 		}
@@ -211,6 +216,7 @@ func editAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 				alts = append(alts, Alternative{
 					Label:     "Untested functions",
 					Rationale: fmt.Sprintf("%d function(s) lack tests: %s", len(untested), names),
+					Why:       "Untested functions increase regression risk on edit.",
 					Priority:  35,
 				})
 			}
@@ -249,6 +255,7 @@ func editAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 		alts = append(alts, Alternative{
 			Label:     "Step back and re-read",
 			Rationale: fmt.Sprintf("This file has been modified %d times this session.", editCount),
+			Why:       fmt.Sprintf("Edited %d times — high churn increases error probability.", editCount),
 			Priority:  40,
 		})
 	}
@@ -262,6 +269,7 @@ func editAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 			alts = append(alts, Alternative{
 				Label:     "Run tests first",
 				Rationale: fmt.Sprintf("Multiple edits for %s task without running tests.", taskType),
+				Why:       "Editing without test feedback accumulates risk. Run tests to catch regressions early.",
 				Priority:  55,
 			})
 		}
@@ -284,6 +292,7 @@ func editAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 				alts = append(alts, Alternative{
 					Label:     "Commit/stash first",
 					Rationale: rationale,
+					Why:       "Uncommitted changes risk merge conflicts. Commit or stash to create a clean restore point.",
 					Priority:  45,
 				})
 				break
@@ -339,6 +348,7 @@ func bashAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 			alts = append(alts, Alternative{
 				Label:     "Similar command failed",
 				Rationale: summary,
+				Why:       "This command failed before with similar input.",
 				Priority:  75,
 			})
 		}
@@ -386,6 +396,7 @@ func bashAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 			alts = append(alts, Alternative{
 				Label:     "Try different approach",
 				Rationale: fmt.Sprintf("The pattern %s→%s→Bash has failed %d times (session: %d, global: %d).", prevPrevTool, prevTool, combinedCount, count, globalCount),
+				Why:       "Historical success pattern suggests this tool sequence leads to failure.",
 				Priority:  75,
 			})
 		}
@@ -407,6 +418,7 @@ func bashAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 			alts = append(alts, Alternative{
 				Label:     "Try different approach",
 				Rationale: fmt.Sprintf("The pattern %s→Bash has failed %d times (session: %d, global: %d).", prevTool, combinedCount, count, globalCount),
+				Why:       "Cross-session data shows this tool sequence typically fails.",
 				Priority:  70,
 			})
 		}
@@ -418,6 +430,7 @@ func bashAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 			alts = append(alts, Alternative{
 				Label:     "Read after run",
 				Rationale: fmt.Sprintf("In past sessions, Bash→Read was the successful pattern (%d times).", count),
+				Why:       "Historical success pattern suggests reading output after running commands.",
 				Priority:  35,
 			})
 		}
@@ -429,6 +442,7 @@ func bashAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 				alts = append(alts, Alternative{
 					Label:     "Read after run",
 					Rationale: fmt.Sprintf("Across sessions, Bash→Read was successful %d times (%.0f%% success).", p.Count, p.SuccessRate*100),
+					Why:       fmt.Sprintf("Predicted next tool (%.0f%% success rate).", p.SuccessRate*100),
 					Priority:  35,
 				})
 			}
@@ -451,6 +465,7 @@ func bashAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 						alts = append(alts, Alternative{
 							Label:     "Workflow deviation",
 							Rationale: fmt.Sprintf("For %s tasks, next step is usually '%s' (%d sessions). Currently doing '%s'.", taskType, nextExpected, wfCount, currentPhase),
+							Why:       "Deviating from proven workflows correlates with longer sessions and more errors.",
 							Priority:  40,
 						})
 					}

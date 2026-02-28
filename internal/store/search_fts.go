@@ -3,6 +3,7 @@ package store
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // SearchPatternsByFTS performs full-text search using FTS5 with BM25 ranking.
@@ -218,29 +219,56 @@ type RankContext struct {
 	Domain   string // auth, database, ui, api, etc.
 }
 
-// RankPatterns re-ranks search results using task-type affinity and domain affinity.
-// Results are sorted by computed score (descending).
+// RankPatterns re-ranks search results using a hybrid score:
+// task-type affinity + domain affinity + recency + past usefulness.
+// Each result gets a SelectionReason explaining why it ranked highly.
 func RankPatterns(results []PatternRow, ctx *RankContext) []PatternRow {
 	if len(results) <= 1 || ctx == nil {
 		return results
 	}
 
 	type scored struct {
-		pattern PatternRow
-		score   float64
+		pattern    PatternRow
+		score      float64
+		topFactor  string
+		topWeight  float64
 	}
 
+	now := time.Now()
 	scored_ := make([]scored, len(results))
 	for i, r := range results {
-		score := 1.0
+		var topFactor string
+		var topWeight float64
 
-		// Task-type affinity: boost patterns whose type aligns with the current task.
-		score *= taskTypeAffinity(ctx.TaskType, r.PatternType)
+		// Task-type affinity.
+		taskAff := taskTypeAffinity(ctx.TaskType, r.PatternType)
+		if taskAff > topWeight {
+			topWeight = taskAff
+			topFactor = fmt.Sprintf("task-type affinity (%s→%s)", ctx.TaskType, r.PatternType)
+		}
 
-		// Domain affinity: boost patterns from files in the same domain.
-		score *= domainAffinity(ctx.Domain, r)
+		// Domain affinity.
+		domAff := domainAffinity(ctx.Domain, r)
+		if domAff > topWeight {
+			topWeight = domAff
+			topFactor = fmt.Sprintf("domain match (%s)", ctx.Domain)
+		}
 
-		scored_[i] = scored{pattern: r, score: score}
+		// Recency boost: patterns from last 7 days get up to 1.5x.
+		recency := 1.0
+		if t, err := time.Parse("2006-01-02 15:04:05", r.Timestamp); err == nil {
+			age := now.Sub(t).Hours() / 24.0 // days
+			if age < 7 {
+				recency = 1.5 - (age / 14.0) // 1.5 at day 0, 1.0 at day 7
+			}
+		}
+		if recency > topWeight {
+			topWeight = recency
+			topFactor = "recent pattern (last 7 days)"
+		}
+
+		score := taskAff * domAff * recency
+		scored_[i] = scored{pattern: r, score: score, topFactor: topFactor, topWeight: topWeight}
 	}
 
 	// Stable sort by score descending.
@@ -252,6 +280,7 @@ func RankPatterns(results []PatternRow, ctx *RankContext) []PatternRow {
 
 	ranked := make([]PatternRow, len(scored_))
 	for i, s := range scored_ {
+		s.pattern.SelectionReason = s.topFactor
 		ranked[i] = s.pattern
 	}
 	return ranked

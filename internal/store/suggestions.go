@@ -71,6 +71,32 @@ func (s *Store) ShouldSuppressPattern(pattern string) bool {
 	return rate < 0.05
 }
 
+// PatternSavings estimates the tool count saved by acting on a pattern.
+// Looks at sessions where the pattern was resolved vs ignored and compares
+// subsequent tool counts within the same burst.
+func (s *Store) PatternSavings(pattern string) (savedTools int, instances int, err error) {
+	// Compare resolved vs unresolved outcomes: average tools-after for each group.
+	row := s.db.QueryRow(`
+		SELECT
+			COALESCE(AVG(CASE WHEN resolved = 0 THEN tools_after END), 0),
+			COALESCE(AVG(CASE WHEN resolved = 1 THEN tools_after END), 0),
+			COUNT(CASE WHEN resolved = 1 THEN 1 END)
+		FROM suggestion_outcomes
+		WHERE pattern = ? AND tools_after > 0`, pattern)
+
+	var avgUnresolved, avgResolved float64
+	var resolvedCount int
+	if err := row.Scan(&avgUnresolved, &avgResolved, &resolvedCount); err != nil {
+		return 0, 0, fmt.Errorf("store: pattern savings: %w", err)
+	}
+
+	if resolvedCount < 2 || avgUnresolved <= avgResolved {
+		return 0, resolvedCount, nil
+	}
+
+	return int(avgUnresolved - avgResolved), resolvedCount, nil
+}
+
 // DecayedPatternEffectiveness returns time-weighted delivery and resolution counts.
 // Recent outcomes (last 30 days) count fully; older outcomes are exponentially
 // decayed with a half-life of 30 days. Returns float64 counts to preserve decay precision.

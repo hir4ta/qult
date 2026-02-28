@@ -356,9 +356,6 @@ func findKnowledgeSignal(sdb *sessiondb.SessionDB, prompt string) *Signal {
 
 	query := strings.Join(keywords, " ")
 	vec := embedQuery(sdb, query, 1*time.Second)
-	if vec == nil {
-		return nil
-	}
 
 	st, err := store.OpenDefault()
 	if err != nil {
@@ -368,8 +365,17 @@ func findKnowledgeSignal(sdb *sessiondb.SessionDB, prompt string) *Signal {
 
 	var allResults []store.PatternRow
 	for _, patType := range activeTypes {
-		patterns, _ := st.SearchPatternsByVector(vec, patType, 2)
-		allResults = append(allResults, patterns...)
+		if vec != nil {
+			patterns, _ := st.SearchPatternsByVector(vec, patType, 2)
+			allResults = append(allResults, patterns...)
+		} else {
+			// FTS5 fallback when embedder is unavailable.
+			patterns, _ := st.SearchPatternsByFTS(query, patType, 2)
+			if len(patterns) == 0 {
+				patterns, _ = st.SearchPatternsByKeyword(query, patType, 2)
+			}
+			allResults = append(allResults, patterns...)
+		}
 	}
 	if len(allResults) == 0 {
 		return nil

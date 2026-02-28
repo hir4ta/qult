@@ -1,6 +1,7 @@
 package hookhandler
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,67 @@ import (
 	"github.com/hir4ta/claude-buddy/internal/sessiondb"
 	"github.com/hir4ta/claude-buddy/internal/store"
 )
+
+// recentSignalEntry tracks a delivered signal for deduplication.
+type recentSignalEntry struct {
+	Kind   string `json:"kind"`
+	Detail string `json:"detail"`
+}
+
+const maxRecentSignals = 3
+
+// recordSignal saves a signal to the recent history (max 3 entries).
+func recordSignal(sdb *sessiondb.SessionDB, sig *Signal) {
+	if sig == nil {
+		return
+	}
+	var history []recentSignalEntry
+	if raw, _ := sdb.GetContext("recent_signals"); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &history)
+	}
+	// Truncate detail for storage (first 120 chars).
+	detail := sig.Detail
+	if len(detail) > 120 {
+		detail = detail[:120]
+	}
+	history = append(history, recentSignalEntry{Kind: sig.Kind, Detail: detail})
+	if len(history) > maxRecentSignals {
+		history = history[len(history)-maxRecentSignals:]
+	}
+	data, _ := json.Marshal(history)
+	_ = sdb.SetContext("recent_signals", string(data))
+}
+
+// recentSignals returns the last N delivered signal entries.
+func recentSignals(sdb *sessiondb.SessionDB) []recentSignalEntry {
+	raw, _ := sdb.GetContext("recent_signals")
+	if raw == "" {
+		return nil
+	}
+	var history []recentSignalEntry
+	_ = json.Unmarshal([]byte(raw), &history)
+	return history
+}
+
+// isDuplicateSignal checks if a signal's kind+detail is too similar to recent history.
+func isDuplicateSignal(sdb *sessiondb.SessionDB, sig *Signal) bool {
+	if sig == nil {
+		return false
+	}
+	for _, h := range recentSignals(sdb) {
+		if h.Kind == sig.Kind && h.Detail != "" {
+			// Same kind within recent window — check detail overlap.
+			sigPrefix := sig.Detail
+			if len(sigPrefix) > 60 {
+				sigPrefix = sigPrefix[:60]
+			}
+			if sigPrefix != "" && (strings.Contains(sig.Detail, h.Detail) || strings.Contains(h.Detail, sigPrefix)) {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // Signal represents a single JARVIS briefing signal to inject into Claude's context.
 type Signal struct {
@@ -26,45 +88,46 @@ type Signal struct {
 //	P0 critical alert > P1 past solution > P2 knowledge match > P3 co-change >
 //	P4 phase transition > P5 strategic insight > P6 health decline
 func selectTopSignal(sdb *sessiondb.SessionDB, prompt, projectPath string) *Signal {
-	// P0: Critical detection (action-level alert from HookDetector).
-	if det, _ := sdb.LatestDetection("action"); det != nil {
-		// Only surface if recent (within last 5 minutes).
-		if time.Since(det.Timestamp) < 5*time.Minute {
-			on, _ := sdb.IsOnCooldown("briefing_alert")
-			if !on {
-				_ = sdb.SetCooldown("briefing_alert", 3*time.Minute)
-				return &Signal{Priority: 0, Kind: "alert", Detail: det.Detail}
+	// Candidate generators in priority order.
+	candidates := []func() *Signal{
+		// P0: Critical detection (action-level alert from HookDetector).
+		func() *Signal {
+			det, _ := sdb.LatestDetection("action")
+			if det == nil || time.Since(det.Timestamp) >= 5*time.Minute {
+				return nil
 			}
+			on, _ := sdb.IsOnCooldown("briefing_alert")
+			if on {
+				return nil
+			}
+			_ = sdb.SetCooldown("briefing_alert", 3*time.Minute)
+			return &Signal{Priority: 0, Kind: "alert", Detail: det.Detail}
+		},
+		// P1: Past solution for a recent failure.
+		func() *Signal { return findPastSolution(sdb) },
+		// P2: Knowledge match (semantic search of past patterns).
+		func() *Signal { return findKnowledgeSignal(sdb, prompt) },
+		// P3: Co-change hint for the most recently edited file.
+		func() *Signal { return findCoChangeHint(sdb) },
+		// P4: Phase transition suggestion.
+		func() *Signal { return findPhaseSignal(sdb) },
+		// P5: Strategic insight (cross-session behavioral data).
+		func() *Signal { return findStrategicSignal(sdb, projectPath) },
+		// P6: Health decline trend.
+		func() *Signal { return findHealthSignal(sdb) },
+	}
+
+	for _, gen := range candidates {
+		sig := gen()
+		if sig == nil {
+			continue
 		}
-	}
-
-	// P1: Past solution for a recent failure.
-	if sig := findPastSolution(sdb); sig != nil {
-		return sig
-	}
-
-	// P2: Knowledge match (semantic search of past patterns).
-	if sig := findKnowledgeSignal(sdb, prompt); sig != nil {
-		return sig
-	}
-
-	// P3: Co-change hint for the most recently edited file.
-	if sig := findCoChangeHint(sdb); sig != nil {
-		return sig
-	}
-
-	// P4: Phase transition suggestion.
-	if sig := findPhaseSignal(sdb); sig != nil {
-		return sig
-	}
-
-	// P5: Strategic insight (cross-session behavioral data).
-	if sig := findStrategicSignal(sdb, projectPath); sig != nil {
-		return sig
-	}
-
-	// P6: Health decline trend.
-	if sig := findHealthSignal(sdb); sig != nil {
+		// P0 (critical) always passes; others check dedup.
+		if sig.Priority > 0 && isDuplicateSignal(sdb, sig) {
+			continue
+		}
+		// Record for future dedup and return.
+		recordSignal(sdb, sig)
 		return sig
 	}
 
@@ -112,6 +175,11 @@ func findPastSolution(sdb *sessiondb.SessionDB) *Signal {
 	detail := fmt.Sprintf("Past solution for %q: %s", recentFail.ErrorSig, solutions[0].SolutionText)
 	if solutions[0].ResolutionDiff != "" {
 		detail += fmt.Sprintf(" (diff: %s)", solutions[0].ResolutionDiff)
+	}
+	// Enrich with personal context.
+	ps := personalContext(sdb)
+	if ps != nil && ps.SessionCount >= 3 && ps.SuccessMedianTools > 0 {
+		detail += fmt.Sprintf(" (Your avg resolution: %d tools)", ps.SuccessMedianTools)
 	}
 	return &Signal{Priority: 1, Kind: "solution", Detail: detail}
 }
@@ -166,10 +234,11 @@ func findCoChangeHint(sdb *sessiondb.SessionDB) *Signal {
 	}
 
 	_ = sdb.SetCooldown("briefing_cochange", 10*time.Minute)
+	detail := "Files often changed together (structural coupling, not accidental): also check " + strings.Join(missing, ", ")
 	return &Signal{
 		Priority: 3,
 		Kind:     "cochange",
-		Detail:   "Files often changed together: also check " + strings.Join(missing, ", "),
+		Detail:   detail,
 	}
 }
 
@@ -252,20 +321,33 @@ func buildNarrative(sig *Signal, sdb *sessiondb.SessionDB) string {
 	var parts []string
 	parts = append(parts, sig.Detail)
 
-	// Add failure context for solution/alert signals.
+	// Add failure context for solution/alert signals with causal chain.
 	if sig.Kind == "solution" || sig.Kind == "alert" {
 		failures, _ := sdb.RecentFailures(1)
 		if len(failures) > 0 {
 			f := failures[0]
 			if f.FilePath != "" {
 				count, _ := sdb.FileEditCount(f.FilePath)
+				cause := fmt.Sprintf("Failure in %s", filepath.Base(f.FilePath))
+				effect := "blocks progress"
+				evidence := ""
 				if count > 1 {
-					parts = append(parts, fmt.Sprintf("(%s edited %d times in this session)", filepath.Base(f.FilePath), count))
+					evidence = fmt.Sprintf("%s edited %d times", filepath.Base(f.FilePath), count)
 				}
+				// Add personal context.
+				ps := personalContext(sdb)
+				if ps != nil && ps.SessionCount >= 3 && ps.SuccessMedianTools > 0 {
+					if evidence != "" {
+						evidence += ". "
+					}
+					evidence += fmt.Sprintf("Your successful sessions avg %d tools", ps.SuccessMedianTools)
+				}
+				action := "Apply the past fix or use buddy_diagnose for alternatives"
+				parts = append(parts, formatCausalChain(cause, effect, evidence, action))
 			}
+		} else {
+			parts = append(parts, "→ Apply the past fix or use buddy_diagnose for alternatives.")
 		}
-		// Actionable hint for solutions.
-		parts = append(parts, "→ Apply the past fix or use buddy_diagnose for alternatives.")
 	}
 
 	// Add test status context for phase transitions.
@@ -284,10 +366,9 @@ func buildNarrative(sig *Signal, sdb *sessiondb.SessionDB) string {
 		}
 	}
 
-	// Enrich knowledge signals with pattern content excerpt.
+	// Enrich knowledge signals with deep-dive hint.
 	if sig.Kind == "knowledge" {
-		// Actionable hint.
-		parts = append(parts, "→ Use buddy_knowledge to see full pattern details.")
+		parts = append(parts, "→ Dig deeper: call buddy_knowledge with a refined query to see full pattern details and related decisions.")
 	}
 
 	// Add co-change reminder for knowledge signals about specific files.
@@ -325,10 +406,24 @@ func buildNarrative(sig *Signal, sdb *sessiondb.SessionDB) string {
 
 	// Actionable hints for remaining signal types.
 	if sig.Kind == "health" {
-		parts = append(parts, "→ Use buddy_state for detailed health metrics.")
+		parts = append(parts, "→ Dig deeper: call buddy_state(detail='outlook') for health trends and risk predictions.")
 	}
 	if sig.Kind == "strategic" {
-		parts = append(parts, "→ Use buddy_plan for a strategic session plan.")
+		parts = append(parts, "→ Dig deeper: call buddy_plan(mode='strategy') for an optimal phase-sequenced plan.")
+	}
+	if sig.Kind == "solution" {
+		parts = append(parts, "→ Dig deeper: call buddy_diagnose for root cause analysis and alternative fix patches.")
+	}
+
+	// Weave recent signal history into narrative for continuity.
+	history := recentSignals(sdb)
+	if len(history) >= 2 {
+		// Build a brief continuity note from the previous signal.
+		prev := history[len(history)-2] // second-to-last = previous turn's signal
+		if prev.Kind != sig.Kind {
+			// Cross-reference creates a narrative arc.
+			parts = append(parts, fmt.Sprintf("(Previous signal: %s — %s.)", prev.Kind, truncate(prev.Detail, 60)))
+		}
 	}
 
 	if len(parts) == 1 {

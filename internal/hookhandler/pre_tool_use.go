@@ -219,7 +219,7 @@ func handlePreToolUse(input []byte) (*HookOutput, error) {
 			n.Pattern, n.Level, n.Observation, n.Suggestion))
 	}
 
-	return makeOutput("PreToolUse", budgetJoinPrioritized(signals, nudgeParts, 2000)), nil
+	return makeOutput("PreToolUse", budgetJoinPrioritized(signals, nudgeParts, flowBudget(sdb))), nil
 }
 
 // extractCmdSignature extracts the base command pattern from a Bash command.
@@ -583,6 +583,12 @@ func proactiveSolutionLookup(sdb *sessiondb.SessionDB, _ string, toolInput json.
 	if len(solutions) == 0 {
 		// Fall back to file-specific solutions.
 		solutions, _ = st.SearchFailureSolutionsByFile(filePath, 1)
+	}
+	if len(solutions) == 0 {
+		// FTS5 fallback: search by error signature keywords.
+		if errorSig != "" {
+			solutions, _ = st.SearchFailureSolutionsByText(errorSig, 1)
+		}
 	}
 	if len(solutions) == 0 {
 		return ""
