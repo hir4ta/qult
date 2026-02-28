@@ -145,6 +145,10 @@ func handleUserPromptSubmit(input []byte) (*HookOutput, error) {
 				taskBriefing = generateTaskTransitionBriefing(sdb, prevTaskType, string(taskType), in.CWD)
 			}
 		}
+		// Classify and cache task complexity for delivery gating.
+		complexity := classifyComplexity(in.Prompt, taskType)
+		_ = sdb.SetContext("task_complexity", string(complexity))
+
 		_ = sdb.SetContext("has_test_run", "")
 
 		// Update working set with current intent and task type.
@@ -242,8 +246,11 @@ func handleUserPromptSubmit(input []byte) (*HookOutput, error) {
 		return nil, nil
 	}
 	out := makeOutput("UserPromptSubmit", formatNudges(entries))
-	if len(entries) > 0 {
-		enrichOutput(out, suggestedToolForPattern(entries[0].Pattern))
+	for _, e := range entries {
+		if tool := suggestedToolForPattern(e.Pattern); tool != "" {
+			enrichOutput(out, tool)
+			break
+		}
 	}
 	return out, nil
 }

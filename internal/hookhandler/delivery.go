@@ -57,6 +57,14 @@ func RouteDelivery(sdb *sessiondb.SessionDB, pattern string, priority Suggestion
 		return DeliveryDecision{Channel: ChannelImmediate, Priority: priority}
 	}
 
+	// Complexity gating: low-complexity tasks (delete, rename, format) only
+	// receive Critical and High suggestions. This prevents mechanical operations
+	// from being flooded with workflow and knowledge noise.
+	complexity := currentTaskComplexity(sdb)
+	if complexity == ComplexityLow && priority > PriorityHigh {
+		return DeliveryDecision{Channel: ChannelSuppress, Priority: priority}
+	}
+
 	// Graduated suppression based on multi-signal flow state.
 	flow := classifyFlowState(sdb)
 	switch flow {
@@ -455,11 +463,11 @@ func LastConfidence() float64 {
 
 // Process-level cache for contextual delivery (set once per hook invocation).
 var (
-	ctxTaskType      string
-	ctxVelocityState string
-	ctxUserCluster   string
-	ctxDomain        string  // used by SetDeliveryContext for domain-aware features outside TS
-	ctxCwd           string  // project path for per-user pattern effectiveness lookup
+	ctxTaskType       string
+	ctxVelocityState  string
+	ctxUserCluster    string
+	ctxDomain         string  // used by SetDeliveryContext for domain-aware features outside TS
+	ctxCwd            string  // project path for per-user pattern effectiveness lookup
 	ctxLastConfidence float64 // last confidence from adjustPriorityWithConfidence
 )
 
@@ -582,9 +590,11 @@ func trackImplicitFeedback(sdb *sessiondb.SessionDB, sessionID string) {
 	turns++
 	_ = sdb.SetContext("turns_since_buddy_call", strconv.Itoa(turns))
 
-	// After 5+ turns without a buddy call, record as implicit negative signal.
-	// This suggests suggestions aren't compelling enough to trigger MCP usage.
-	if turns < 5 {
+	// Adaptive threshold: low-complexity tasks rarely need buddy MCP tools,
+	// so wait longer before recording negative signal. High-complexity tasks
+	// should trigger MCP usage sooner if suggestions are relevant.
+	threshold := implicitFeedbackThreshold(sdb)
+	if turns < threshold {
 		return
 	}
 
@@ -602,7 +612,22 @@ func trackImplicitFeedback(sdb *sessiondb.SessionDB, sessionID string) {
 
 	// Record as auto-feedback against recently delivered patterns.
 	_ = st.InsertFeedback(sessionID, "auto:silence", store.RatingNotHelpful,
-		"auto: no buddy MCP calls in 5+ user turns", 0)
+		fmt.Sprintf("auto: no buddy MCP calls in %d+ user turns", threshold), 0)
+}
+
+// implicitFeedbackThreshold returns the number of user turns without a buddy
+// MCP call before recording a negative implicit signal.
+// Low-complexity tasks: 15 turns (simple tasks rarely need buddy).
+// High-complexity tasks: 3 turns (if not calling buddy, suggestions are off-target).
+func implicitFeedbackThreshold(sdb *sessiondb.SessionDB) int {
+	switch currentTaskComplexity(sdb) {
+	case ComplexityLow:
+		return 15
+	case ComplexityHigh:
+		return 3
+	default:
+		return 8
+	}
 }
 
 // ResetBuddyCallTracker resets the turns-since-buddy-call counter.

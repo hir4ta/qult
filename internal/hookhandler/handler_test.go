@@ -412,6 +412,73 @@ func searchSubstring(s, substr string) bool {
 	return false
 }
 
+func TestSuggestedToolForPattern_DefaultEmpty(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		pattern string
+		want    string
+	}{
+		{"retry-loop", "buddy_diagnose"},
+		{"explore-stuck", "buddy_diagnose"},
+		{"knowledge", "buddy_knowledge"},
+		{"health-decline", "buddy_state"},
+		{"co-change", "buddy_analyze"},
+		{"session-context", ""},
+		{"task-briefing", ""},
+		{"briefing", ""},
+		{"predictive-context", ""},
+		{"unknown-pattern", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.pattern, func(t *testing.T) {
+			t.Parallel()
+			got := suggestedToolForPattern(tt.pattern)
+			if got != tt.want {
+				t.Errorf("suggestedToolForPattern(%q) = %q, want %q", tt.pattern, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEnrichOutput_FirstActionableEntry(t *testing.T) {
+	t.Parallel()
+
+	// When entries start with informational patterns, the first actionable one wins.
+	entries := []nudgeEntry{
+		{Pattern: "session-context", Level: "info", Observation: "ctx", Suggestion: "..."},
+		{Pattern: "task-briefing", Level: "info", Observation: "brief", Suggestion: "..."},
+		{Pattern: "retry-loop", Level: "action", Observation: "loop", Suggestion: "..."},
+	}
+	out := makeOutput("UserPromptSubmit", formatNudges(entries))
+	for _, e := range entries {
+		if tool := suggestedToolForPattern(e.Pattern); tool != "" {
+			enrichOutput(out, tool)
+			break
+		}
+	}
+	ctx, _ := out.HookSpecificOutput["additionalContext"].(string)
+	if !contains(ctx, "[suggested: buddy_diagnose]") {
+		t.Errorf("expected buddy_diagnose from retry-loop, got: %q", ctx)
+	}
+
+	// When no entry has a matching tool, no suggestion is appended.
+	infoOnly := []nudgeEntry{
+		{Pattern: "session-context", Level: "info", Observation: "ctx", Suggestion: "..."},
+		{Pattern: "task-briefing", Level: "info", Observation: "brief", Suggestion: "..."},
+	}
+	out2 := makeOutput("UserPromptSubmit", formatNudges(infoOnly))
+	for _, e := range infoOnly {
+		if tool := suggestedToolForPattern(e.Pattern); tool != "" {
+			enrichOutput(out2, tool)
+			break
+		}
+	}
+	ctx2, _ := out2.HookSpecificOutput["additionalContext"].(string)
+	if contains(ctx2, "[suggested:") {
+		t.Errorf("expected no suggestion for info-only entries, got: %q", ctx2)
+	}
+}
+
 func TestEnrichOutput(t *testing.T) {
 	t.Parallel()
 

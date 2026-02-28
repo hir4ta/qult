@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/hir4ta/claude-buddy/internal/sessiondb"
 	"github.com/hir4ta/claude-buddy/internal/store"
 )
 
@@ -95,6 +96,65 @@ func classifyIntent(intent string) TaskType {
 	}
 
 	return TaskUnknown
+}
+
+// TaskComplexity estimates the cognitive and implementation complexity of a task.
+// Used to gate suggestion delivery — low-complexity tasks need fewer suggestions.
+type TaskComplexity string
+
+const (
+	ComplexityLow     TaskComplexity = "low"
+	ComplexityMedium  TaskComplexity = "medium"
+	ComplexityHigh    TaskComplexity = "high"
+	ComplexityUnknown TaskComplexity = ""
+)
+
+// mechanicalKeywords indicate simple, repetitive, or one-step operations
+// that override task-type-based complexity classification.
+var mechanicalKeywords = []string{
+	"delete", "remove", "drop", "rename", "replace all",
+	"format", "lint", "sort", "enable", "disable",
+	"全部消す", "全部削除", "一括", "リネーム",
+}
+
+// classifyComplexity estimates task complexity from the prompt and task type.
+// Mechanical keywords override task type (e.g., "delete all X" → Low even for refactor).
+func classifyComplexity(prompt string, taskType TaskType) TaskComplexity {
+	lower := strings.ToLower(prompt)
+
+	// Mechanical keywords → Low regardless of task type.
+	for _, kw := range mechanicalKeywords {
+		if strings.Contains(lower, kw) {
+			return ComplexityLow
+		}
+	}
+
+	// Short prompts with unknown task type are typically simple instructions.
+	if len([]rune(prompt)) < 20 && taskType == TaskUnknown {
+		return ComplexityLow
+	}
+
+	switch taskType {
+	case TaskExplore, TaskDocs, TaskReview:
+		return ComplexityLow
+	case TaskBugfix, TaskTest, TaskDebug:
+		return ComplexityMedium
+	case TaskFeature, TaskRefactor:
+		return ComplexityHigh
+	default:
+		return ComplexityMedium
+	}
+}
+
+// currentTaskComplexity reads the cached task_complexity from sessiondb.
+func currentTaskComplexity(sdb *sessiondb.SessionDB) TaskComplexity {
+	val, _ := sdb.GetContext("task_complexity")
+	switch TaskComplexity(val) {
+	case ComplexityLow, ComplexityMedium, ComplexityHigh:
+		return TaskComplexity(val)
+	default:
+		return ComplexityUnknown
+	}
 }
 
 // testCmdPattern matches common test runner commands.

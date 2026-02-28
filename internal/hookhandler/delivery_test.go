@@ -260,6 +260,61 @@ func TestSetDeliveryContext(t *testing.T) {
 	}
 }
 
+func TestRouteDelivery_LowComplexity_Suppresses(t *testing.T) {
+	// Not parallel — modifies package globals.
+	sdb := openDeliveryTestDB(t)
+	ctxTaskType = ""
+	ctxVelocityState = ""
+	ctxUserCluster = ""
+
+	_ = sdb.SetContext("task_complexity", "low")
+
+	// Medium priority suppressed for low-complexity tasks.
+	// Use unique pattern names with no store history to avoid graduated demotion interference.
+	d := RouteDelivery(sdb, "test-complexity-gate-med", PriorityMedium)
+	if d.Channel != ChannelSuppress {
+		t.Errorf("RouteDelivery(Medium, low complexity) channel = %d, want %d (suppress)",
+			d.Channel, ChannelSuppress)
+	}
+
+	// Low priority also suppressed.
+	d = RouteDelivery(sdb, "test-complexity-gate-low", PriorityLow)
+	if d.Channel != ChannelSuppress {
+		t.Errorf("RouteDelivery(Low, low complexity) channel = %d, want %d (suppress)",
+			d.Channel, ChannelSuppress)
+	}
+
+	// High priority still goes through.
+	d = RouteDelivery(sdb, "test-complexity-gate-high", PriorityHigh)
+	if d.Channel == ChannelSuppress {
+		t.Error("RouteDelivery(High, low complexity) should not suppress")
+	}
+
+	// Critical always passes.
+	d = RouteDelivery(sdb, "destructive", PriorityCritical)
+	if d.Channel != ChannelImmediate {
+		t.Errorf("RouteDelivery(Critical, low complexity) channel = %d, want %d (immediate)",
+			d.Channel, ChannelImmediate)
+	}
+}
+
+func TestRouteDelivery_HighComplexity_NoSuppression(t *testing.T) {
+	// Not parallel — modifies package globals.
+	sdb := openDeliveryTestDB(t)
+	ctxTaskType = ""
+	ctxVelocityState = ""
+	ctxUserCluster = ""
+
+	_ = sdb.SetContext("task_complexity", "high")
+
+	// Medium priority should NOT be suppressed for high-complexity tasks.
+	// Use unique pattern name with no store history to avoid graduated demotion interference.
+	d := RouteDelivery(sdb, "test-complexity-gate-med", PriorityMedium)
+	if d.Channel == ChannelSuppress {
+		t.Error("RouteDelivery(Medium, high complexity) should not suppress")
+	}
+}
+
 func openDeliveryTestDB(t *testing.T) *sessiondb.SessionDB {
 	t.Helper()
 	id := "test-delivery-" + strings.ReplaceAll(t.Name(), "/", "-")

@@ -194,6 +194,6 @@ func suggestedToolForPattern(pattern string) string {
 	case "co-change", "blast-radius", "code-quality":
 		return "buddy_analyze"
 	default:
-		return "buddy_guidance"
+		return ""
 	}
 }

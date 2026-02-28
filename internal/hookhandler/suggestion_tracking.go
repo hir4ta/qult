@@ -95,9 +95,20 @@ func checkNudgeTimeout(sdb *sessiondb.SessionDB) {
 	outcomeIDStr, _ := sdb.GetContext("last_nudge_outcome_id")
 	toolsAfter := tc - deliveredAt
 
+	// Read detection confidence: low-confidence detections (likely false positives)
+	// should not poison Thompson Sampling when they time out.
+	confStr, _ := sdb.GetContext("last_detection_confidence")
+	confidence := 1.0
+	if confStr != "" {
+		if c, cerr := strconv.ParseFloat(confStr, 64); cerr == nil {
+			confidence = c
+		}
+	}
+
 	_ = sdb.SetContext("last_nudge_pattern", "")
 	_ = sdb.SetContext("last_nudge_outcome_id", "")
 	_ = sdb.SetContext("nudge_delivered_tool_count", "")
+	_ = sdb.SetContext("last_detection_confidence", "")
 
 	st, err := store.OpenDefaultCached()
 	if err != nil {
@@ -111,9 +122,20 @@ func checkNudgeTimeout(sdb *sessiondb.SessionDB) {
 		}
 	}
 
+	// Skip negative feedback for low-confidence detections to prevent TS pollution.
+	if confidence < 0.5 {
+		return
+	}
+
 	sessionID, _ := sdb.GetContext("session_id")
 	if sessionID == "" {
 		sessionID = "unknown"
+	}
+
+	// Downgrade feedback for medium-confidence detections.
+	if confidence < 0.7 {
+		_ = st.InsertFeedback(sessionID, pattern, store.RatingPartiallyHelpful, "auto:timeout:mid_conf", 0)
+		return
 	}
 
 	_ = st.InsertFeedback(sessionID, pattern, store.RatingNotHelpful, "auto:timeout", 0)
