@@ -1,6 +1,6 @@
 #!/bin/sh
 # claude-buddy wrapper — auto-downloads binary on version mismatch.
-BUDDY_VERSION="0.13.15"
+BUDDY_VERSION="0.14.0"
 BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUDDY_BIN="${BIN_DIR}/claude-buddy"
 VERSION_FILE="${BIN_DIR}/.buddy-version"
@@ -114,7 +114,17 @@ case "$1" in
       fi
       echo "claude-buddy ${BUDDY_VERSION} installed"
     fi
-    exec "$BUDDY_BIN" install
+    shift
+    exec "$BUDDY_BIN" install "$@"
+    ;;
+
+  count-sessions)
+    # Quick session count — no sync, just directory scan.
+    if ! ensure_binary 30; then
+      echo '{"error":"binary not available"}' >&2
+      exit 1
+    fi
+    exec "$BUDDY_BIN" count-sessions
     ;;
 
   serve)

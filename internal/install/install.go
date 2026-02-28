@@ -12,6 +12,7 @@ import (
 
 	"github.com/hir4ta/claude-buddy/internal/embedder"
 	"github.com/hir4ta/claude-buddy/internal/store"
+	"github.com/hir4ta/claude-buddy/internal/watcher"
 )
 
 // settingsPathFunc returns the path to ~/.claude/settings.json.
@@ -26,14 +27,39 @@ func defaultSettingsPath() string {
 	return filepath.Join(home, ".claude", "settings.json")
 }
 
+// syncRange maps CLI flag values to durations and display labels.
+type syncRange struct {
+	Days  int
+	Label string
+}
+
+var syncRanges = map[string]syncRange{
+	"7d":  {7, "past week"},
+	"14d": {14, "past 2 weeks"},
+	"30d": {30, "past month"},
+	"90d": {90, "past 3 months"},
+}
+
 // Run executes the install command. All steps are idempotent.
 // Hooks, skills, agent, and MCP are managed by the plugin — this only
 // syncs sessions/docs, generates embeddings, and ensures global rules.
-func Run() error {
+// args may contain --since=7d|14d|30d|90d (default: 30d).
+func Run(args []string) error {
+	sinceFlag := "30d"
+	for _, a := range args {
+		if strings.HasPrefix(a, "--since=") {
+			sinceFlag = strings.TrimPrefix(a, "--since=")
+		}
+	}
+	sr, ok := syncRanges[sinceFlag]
+	if !ok {
+		return fmt.Errorf("invalid --since value: %s (use 7d, 14d, 30d, or 90d)", sinceFlag)
+	}
+
 	// Clean up legacy files from pre-plugin installs (silent if nothing to clean).
 	cleanupLegacyInstall()
 
-	if err := initialSync(); err != nil {
+	if err := initialSync(sr); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: initial sync failed: %v\n", err)
 	}
 
@@ -50,6 +76,48 @@ func Run() error {
 	fmt.Println("  /plugin install claude-buddy@claude-buddy")
 
 	return nil
+}
+
+// CountSessions outputs session counts per sync range as JSON.
+func CountSessions() error {
+	sessions, err := listAllSessions()
+	if err != nil {
+		return err
+	}
+
+	type rangeInfo struct {
+		Days       int  `json:"days"`
+		Sessions   int  `json:"sessions"`
+		EstMinutes int  `json:"est_minutes"`
+	}
+	type output struct {
+		Ranges      []rangeInfo `json:"ranges"`
+		HasVoyageKey bool       `json:"has_voyage_key"`
+	}
+
+	now := time.Now()
+	days := []int{7, 14, 30, 90}
+	var ranges []rangeInfo
+	for _, d := range days {
+		cutoff := now.AddDate(0, 0, -d)
+		count := 0
+		for _, s := range sessions {
+			if !s.ModTime.Before(cutoff) {
+				count++
+			}
+		}
+		est := (count + 119) / 120 // ~0.5s per session ≈ 120 sessions/min, round up
+		if est < 1 && count > 0 {
+			est = 1
+		}
+		ranges = append(ranges, rangeInfo{Days: d, Sessions: count, EstMinutes: est})
+	}
+
+	out := output{
+		Ranges:      ranges,
+		HasVoyageKey: os.Getenv("VOYAGE_API_KEY") != "",
+	}
+	return json.NewEncoder(os.Stdout).Encode(out)
 }
 
 // buddyRulesVersion tracks the rules content version for safe upgrades.
@@ -467,15 +535,20 @@ func RemoveHooks() error {
 	return os.WriteFile(settingsPath, append(out, '\n'), 0o644)
 }
 
-func initialSync() error {
+func listAllSessions() ([]watcher.SessionInfo, error) {
+	claudeHome := watcher.DefaultClaudeHome()
+	return watcher.ListSessions(claudeHome)
+}
+
+func initialSync(sr syncRange) error {
 	st, err := store.OpenDefault()
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer st.Close()
 
-	since := time.Now().AddDate(0, -1, 0)
-	fmt.Println("Syncing sessions from the past month (parsing JSONL + extracting patterns)...")
+	since := time.Now().AddDate(0, 0, -sr.Days)
+	fmt.Printf("Syncing sessions from the %s (parsing JSONL + extracting patterns)...\n", sr.Label)
 
 	if err := st.SyncAllWithProgress(since, func(done, total int) {
 		renderProgress("Syncing sessions", done, total)
@@ -489,7 +562,7 @@ func initialSync() error {
 	st.DB().QueryRow("SELECT COUNT(*) FROM events").Scan(&eventCount)
 	st.DB().QueryRow("SELECT COUNT(*) FROM patterns").Scan(&patternCount)
 
-	fmt.Printf("✓ Synced sessions from past month (total: %d sessions, %d events, %d patterns)\n", sessionCount, eventCount, patternCount)
+	fmt.Printf("✓ Synced sessions from %s (total: %d sessions, %d events, %d patterns)\n", sr.Label, sessionCount, eventCount, patternCount)
 	return nil
 }
 

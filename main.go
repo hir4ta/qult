@@ -44,7 +44,9 @@ func run() error {
 	case "serve":
 		return runServe()
 	case "install":
-		return install.Run()
+		return install.Run(os.Args[2:])
+	case "count-sessions":
+		return install.CountSessions()
 	case "uninstall":
 		return install.Uninstall()
 	case "analyze":
@@ -222,7 +224,8 @@ Commands:
   browse        Browse past session history
   serve         Run as MCP server (stdio) for Claude Code integration
   hook-handler  Handle Claude Code hook events (stdin/stdout JSON)
-  install       Sync sessions and generate embeddings
+  install       Sync sessions and generate embeddings (--since=7d|14d|30d|90d)
+  count-sessions Show session counts per sync range (JSON)
   uninstall     Remove hooks and MCP server registration
   analyze       Session analysis report
   plugin-bundle Generate plugin directory from Go sources

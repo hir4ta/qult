@@ -221,7 +221,17 @@ case "$1" in
       fi
       echo "claude-buddy ${BUDDY_VERSION} installed"
     fi
-    exec "$BUDDY_BIN" install
+    shift
+    exec "$BUDDY_BIN" install "$@"
+    ;;
+
+  count-sessions)
+    # Quick session count — no sync, just directory scan.
+    if ! ensure_binary 30; then
+      echo '{"error":"binary not available"}' >&2
+      exit 1
+    fi
+    exec "$BUDDY_BIN" count-sessions
     ;;
 
   serve)

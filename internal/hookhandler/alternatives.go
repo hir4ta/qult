@@ -21,7 +21,22 @@ type Alternative struct {
 
 // presentAlternatives builds structured alternatives for a PreToolUse action.
 // Returns a formatted string with numbered options, or "" if no alternatives.
+//
+// During PhaseImplement, most alternatives are suppressed to avoid interrupting
+// the model's implementation flow. The "Before this action, consider:" format
+// with numbered options and "Why:" rationales can cause the model to pause
+// mid-turn and seek user confirmation, breaking the implementation momentum.
+// Only high-priority signals (past failure resolutions, priority >= 90) pass
+// through during implementation.
 func presentAlternatives(sdb *sessiondb.SessionDB, toolName string, toolInput json.RawMessage) string {
+	taskType, _ := sdb.GetContext("task_type")
+	phase := classifyCurrentPhase(sdb, TaskType(taskType))
+	if phase == PhaseImplement {
+		// During implementation, only surface past failure resolutions (priority >= 90)
+		// to avoid advisory outputs that interrupt the model's flow.
+		return implementPhaseAlternatives(sdb, toolName, toolInput)
+	}
+
 	switch toolName {
 	case "Edit", "Write":
 		return editAlternatives(sdb, toolInput)
@@ -36,6 +51,59 @@ func presentAlternatives(sdb *sessiondb.SessionDB, toolName string, toolInput js
 	default:
 		return genericAlternatives(sdb, toolName)
 	}
+}
+
+// implementPhaseAlternatives returns only critical alternatives during implementation.
+// Most advisory signals are suppressed to prevent the model from pausing mid-turn.
+func implementPhaseAlternatives(sdb *sessiondb.SessionDB, toolName string, toolInput json.RawMessage) string {
+	if toolName != "Edit" && toolName != "Write" {
+		return ""
+	}
+
+	var ei struct {
+		FilePath string `json:"file_path"`
+	}
+	if json.Unmarshal(toolInput, &ei) != nil || ei.FilePath == "" {
+		return ""
+	}
+
+	cooldownKey := "alternatives:" + filepath.Base(ei.FilePath)
+	if on, _ := sdb.IsOnCooldown(cooldownKey); on {
+		return ""
+	}
+
+	var alts []Alternative
+
+	// Only include past failure resolutions with concrete diffs (priority 95).
+	// These prevent repeating known mistakes without disrupting flow.
+	st, err := store.OpenDefaultCached()
+	if err == nil {
+		solutions, _ := st.SearchFailureSolutionsByFile(ei.FilePath, 2)
+		for _, sol := range solutions {
+			if sol.ResolutionDiff == "" {
+				continue
+			}
+			var diff struct {
+				Old string `json:"old"`
+				New string `json:"new"`
+			}
+			if json.Unmarshal([]byte(sol.ResolutionDiff), &diff) != nil || diff.Old == "" {
+				continue
+			}
+			rationale := fmt.Sprintf("`%s` → `%s`", truncate(diff.Old, 40), truncate(diff.New, 40))
+			if sol.TimesEffective > 0 {
+				rationale += fmt.Sprintf(" (effective in %d sessions)", sol.TimesEffective)
+			}
+			alts = append(alts, Alternative{
+				Label:     "Past fix available",
+				Rationale: rationale,
+				Why:       "This fix resolved the same error in a past session.",
+				Priority:  95,
+			})
+		}
+	}
+
+	return formatAlternatives(sdb, cooldownKey, ei.FilePath, alts)
 }
 
 // editAlternatives generates alternatives before Edit/Write operations.
