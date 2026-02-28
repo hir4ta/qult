@@ -4,20 +4,35 @@ A proactive session companion for Claude Code — real-time anti-pattern detecti
 
 ## Install
 
-Install the plugin and run the init skill:
+**1. Add the plugin in Claude Code:**
 
 ```
 /plugin marketplace add hir4ta/claude-buddy
 /plugin install claude-buddy@claude-buddy
 ```
 
-Restart Claude Code, then:
+**2. Run initial setup in your terminal (one-time):**
 
-```
-/claude-buddy:init
+```bash
+curl -fsSL https://raw.githubusercontent.com/hir4ta/claude-buddy/main/setup.sh | sh
 ```
 
-The init skill downloads the binary from GitHub Releases, syncs past sessions, and optionally configures Voyage AI semantic search.
+This downloads the binary, syncs past sessions, and generates embeddings.
+
+**3. Restart Claude Code** to activate hooks and MCP tools.
+
+### Optional: Voyage AI for semantic search
+
+Set `VOYAGE_API_KEY` before running setup to enable vector-based knowledge search across sessions. Without it, search falls back to FTS5 BM25 / LIKE.
+
+```bash
+export VOYAGE_API_KEY=your-api-key
+curl -fsSL https://raw.githubusercontent.com/hir4ta/claude-buddy/main/setup.sh | sh
+```
+
+Already ran setup without the key? Just set the key and re-run — embeddings are generated incrementally.
+
+Uses `voyage-4-large` (2048 dimensions) for maximum retrieval accuracy.
 
 ### Building from source
 
@@ -27,17 +42,6 @@ cd claude-buddy
 go build -o claude-buddy .
 ```
 
-### Optional: Voyage AI for semantic search
-
-Set `VOYAGE_API_KEY` to enable vector-based knowledge search across sessions. Without it, search falls back to FTS5 BM25 / LIKE. The init skill will ask about this, or you can configure it manually:
-
-```bash
-echo 'export VOYAGE_API_KEY=your-api-key' >> ~/.$(basename "$SHELL")rc
-source ~/.$(basename "$SHELL")rc
-```
-
-Uses `voyage-4-large` (2048 dimensions) for maximum retrieval accuracy.
-
 ## Upgrade
 
 Update the plugin inside Claude Code:
@@ -46,11 +50,7 @@ Update the plugin inside Claude Code:
 /plugin marketplace update
 ```
 
-Restart Claude Code and re-run init to download the new binary:
-
-```
-/claude-buddy:init
-```
+That's it. The binary is automatically downloaded on the next Claude Code restart. Session sync and embedding generation happen in the background.
 
 ## Commands
 
@@ -169,7 +169,7 @@ claude-buddy is distributed as a Claude Code plugin. The plugin provides:
 
 | Skill | Invocation | Description |
 |---|---|---|
-| init | `/claude-buddy:init` | Download binary, sync sessions, configure semantic search |
+| init | `/claude-buddy:init` | Re-sync sessions and regenerate embeddings (binary updates are automatic) |
 | buddy-recover | auto | Failure recovery: stuck loops, error resolution diffs, test debugging |
 | buddy-gate | auto | Session health check + pre-commit quality gate |
 | buddy-analyze | `/claude-buddy:buddy-analyze` | Blast radius analysis and change review (runs in forked context) |

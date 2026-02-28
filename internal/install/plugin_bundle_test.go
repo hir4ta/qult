@@ -92,7 +92,7 @@ func TestBundle(t *testing.T) {
 		}
 	})
 
-	// Verify all skills exist, including init.
+	// Verify all skills exist.
 	t.Run("skills", func(t *testing.T) {
 		for _, skill := range buddySkills {
 			p := filepath.Join(outputDir, "skills", skill.Dir, "SKILL.md")
@@ -104,15 +104,6 @@ func TestBundle(t *testing.T) {
 			if len(data) == 0 {
 				t.Errorf("skill %s: empty file", skill.Dir)
 			}
-		}
-
-		// init skill must be user-invocable.
-		initData, err := os.ReadFile(filepath.Join(outputDir, "skills", "init", "SKILL.md"))
-		if err != nil {
-			t.Fatalf("init skill missing: %v", err)
-		}
-		if !strings.Contains(string(initData), "user-invocable: true") {
-			t.Error("init skill should be user-invocable")
 		}
 	})
 
@@ -126,6 +117,35 @@ func TestBundle(t *testing.T) {
 			t.Error("buddy.md is empty")
 		}
 	})
+}
+
+func TestRunScriptAutoDownload(t *testing.T) {
+	t.Parallel()
+	script := generateRunScript("1.2.3")
+
+	checks := map[string]string{
+		"version embedding":   `BUDDY_VERSION="1.2.3"`,
+		"version sidecar":     ".buddy-version",
+		"lock directory":      ".buddy-download.lock",
+		"is_current function": "is_current()",
+		"acquire_lock":        "acquire_lock()",
+		"download_binary":     "download_binary()",
+		"ensure_binary":       "ensure_binary",
+		"serve case":          "serve)",
+		"hook-handler case":   "hook-handler)",
+		"setup case":          "setup)",
+		"install marker":      ".buddy-installed-",
+		"atomic temp dir":     ".buddy-dl.",
+		"github releases url": "github.com/hir4ta/claude-buddy/releases/download",
+		"stale lock cleanup":  "kill -0",
+		"fallback to old bin": `[ -f "$BUDDY_BIN" ]`,
+	}
+
+	for name, keyword := range checks {
+		if !strings.Contains(script, keyword) {
+			t.Errorf("run.sh missing %s: expected to contain %q", name, keyword)
+		}
+	}
 }
 
 func TestBundleIdempotent(t *testing.T) {

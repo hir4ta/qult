@@ -1,40 +1,37 @@
 ---
 name: init
 description: >
-  Initialize claude-buddy: download binary, sync sessions, and optionally
-  configure semantic search. Run after /plugin install or /plugin marketplace update.
+  Re-sync sessions and regenerate embeddings. Binary updates are automatic —
+  this skill is only needed for manual re-sync or after setting VOYAGE_API_KEY.
 user-invocable: true
-allowed-tools: Bash, AskUserQuestion
+allowed-tools: Bash
 ---
 
-Initialize claude-buddy for this system.
+Re-sync claude-buddy data (sessions, patterns, embeddings).
+
+Note: Binary updates happen automatically when the plugin is updated via /plugin.
+This skill is useful for:
+- Manual re-sync after setting VOYAGE_API_KEY
+- Forcing a full session re-sync
 
 ## Steps
 
 1. Find the plugin installation directory:
    ```bash
-   find ~/.claude/plugins/cache -name "run.sh" -path "*/claude-buddy/*/bin/*" -type f 2>/dev/null | head -1
+   find ~/.claude/plugins/cache -name "run.sh" -path "*/claude-buddy/*/bin/*" -type f 2>/dev/null | sort -V | tail -1
    ```
 
-2. Ask the user if they want to enable semantic search (Voyage AI).
-   If yes, ask for their API key and add it to their shell profile:
-   ```bash
-   echo 'export VOYAGE_API_KEY=<key>' >> ~/.$(basename "$SHELL")rc
-   source ~/.$(basename "$SHELL")rc
-   ```
-
-3. Run the setup script (downloads binary + syncs sessions):
+2. Run setup (downloads binary if needed + syncs sessions + generates embeddings):
    ```bash
    sh <path-to-run.sh> setup
    ```
 
-4. Verify the installation:
+3. Verify:
    ```bash
    sh <path-to-run.sh> version
    ```
 
 ## Output
 
-- Installation status with version
-- Semantic search status (enabled/disabled)
-- Tell the user to restart Claude Code to activate hooks and MCP tools
+- Sync status and version
+- Tell the user to restart Claude Code if the binary was updated
