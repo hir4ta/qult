@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"hash/fnv"
 	"math"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -50,6 +51,31 @@ func containsError(text string) bool {
 		}
 	}
 	return false
+}
+
+// goTestFailPattern matches Go test runner failure output.
+// "--- FAIL:" = individual test failure, "FAIL\t" at line start = package failure.
+var goTestFailPattern = regexp.MustCompile(`(?m)(^--- FAIL:|^FAIL\t)`)
+
+// isGoTestFailure detects Go test failures from command output.
+// More precise than containsError — ignores log messages containing "error" or "FAIL"
+// that aren't actual test results (e.g., buddy seed pattern logs).
+func isGoTestFailure(output string) bool {
+	return goTestFailPattern.MatchString(output)
+}
+
+// goBuildFailPattern matches Go compiler error output: "file.go:line:col: message".
+var goBuildFailPattern = regexp.MustCompile(`(?m)^\S+\.go:\d+:\d+:`)
+
+// isBuildFailure detects build/compile failures from command output.
+// Matches Go compiler error format rather than generic keywords,
+// preventing false positives from log messages containing "error" or "undefined".
+func isBuildFailure(output string) bool {
+	if goBuildFailPattern.MatchString(output) {
+		return true
+	}
+	lower := strings.ToLower(output)
+	return strings.Contains(lower, "compilation failed") || strings.Contains(lower, "build failed")
 }
 
 // extractErrorSignature extracts a short searchable string from error output.

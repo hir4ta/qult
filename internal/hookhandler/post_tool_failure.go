@@ -64,12 +64,30 @@ func handlePostToolUseFailure(input []byte) (*HookOutput, error) {
 	}
 
 	// Track test/build failure status for Stop hook quality gate.
-	if failureType == failTestFailure {
-		_ = sdb.SetContext("has_test_run", "true")
-		_ = sdb.SetContext("last_test_passed", "false")
-	}
-	if failureType == failCompileError {
-		_ = sdb.SetContext("last_build_passed", "false")
+	// Use command-based detection instead of relying solely on classifyFailure,
+	// which can misclassify (e.g., test output with "undefined" → compile error).
+	if in.ToolName == "Bash" {
+		var bi struct {
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(in.ToolInput, &bi) == nil {
+			if testCmdPattern.MatchString(bi.Command) {
+				_ = sdb.SetContext("has_test_run", "true")
+				_ = sdb.SetContext("last_test_passed", "false")
+			}
+			if isCompileCommand(bi.Command) {
+				_ = sdb.SetContext("last_build_passed", "false")
+			}
+		}
+	} else {
+		// Non-Bash tools: fall back to classification-based tracking.
+		if failureType == failTestFailure {
+			_ = sdb.SetContext("has_test_run", "true")
+			_ = sdb.SetContext("last_test_passed", "false")
+		}
+		if failureType == failCompileError {
+			_ = sdb.SetContext("last_build_passed", "false")
+		}
 	}
 
 	// Record tool sequence with failure outcome.
@@ -120,7 +138,7 @@ var (
 	editMismatchPattern  = regexp.MustCompile(`(?i)(not found in file|old_string.*not|no match|does not match)`)
 	fileNotFoundPattern  = regexp.MustCompile(`(?i)(no such file|not found|does not exist|ENOENT)`)
 	permissionPattern    = regexp.MustCompile(`(?i)(permission denied|EACCES|read.only|not writable)`)
-	compileErrorPattern  = regexp.MustCompile(`(?i)(syntax error|cannot find|undefined|undeclared|compile|compilation failed)`)
+	compileErrorPattern  = regexp.MustCompile(`(?i)(syntax error|cannot find module|undefined:\s+\S+|undeclared name|compile error|compilation failed|\.\w+:\d+:\d+:)`)
 	testFailurePattern   = regexp.MustCompile(`(?i)(^FAIL\s|--- FAIL:|FAILED\s+::|test suite failed|tests?\s+failed)`)
 )
 
@@ -152,11 +170,13 @@ func classifyFailure(toolName, errorMsg string) string {
 		}
 		return failGeneric
 	case "Bash":
-		if compileErrorPattern.MatchString(errorMsg) {
-			return failCompileError
-		}
+		// Check test failure before compile error: test output may contain
+		// "undefined" from log messages, which falsely matches compileErrorPattern.
 		if testFailurePattern.MatchString(errorMsg) {
 			return failTestFailure
+		}
+		if compileErrorPattern.MatchString(errorMsg) {
+			return failCompileError
 		}
 		return failBashError
 	default:

@@ -113,14 +113,17 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 			Command string `json:"command"`
 		}
 		if json.Unmarshal(in.ToolInput, &bi) == nil {
-			hasError := len(in.ToolResponse) > 0 && containsError(string(in.ToolResponse))
+			resp := string(in.ToolResponse)
 
+			// Use command-specific detection instead of generic containsError.
+			// Generic detection produces false positives from log messages
+			// (e.g., buddy seed pattern logs containing "undefined" or "error").
 			if testCmdPattern.MatchString(bi.Command) {
 				_ = sdb.SetContext("has_test_run", "true")
 
-				// Track test pass/fail status from tool response.
+				testFailed := isGoTestFailure(resp)
 				prevTestPassed, _ := sdb.GetContext("last_test_passed")
-				if hasError {
+				if testFailed {
 					_ = sdb.SetContext("last_test_passed", "false")
 					if prevTestPassed == "true" {
 						ctxJSON, _ := json.Marshal(map[string]string{"tool": "Bash", "cmd": truncate(bi.Command, 120)})
@@ -149,9 +152,9 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 				}
 			}
 
-			// Track build/compile success.
+			// Track build/compile success with precise detection.
 			if isCompileCommand(bi.Command) {
-				if hasError {
+				if isBuildFailure(resp) {
 					_ = sdb.SetContext("last_build_passed", "false")
 				} else {
 					_ = sdb.SetContext("last_build_passed", "true")
