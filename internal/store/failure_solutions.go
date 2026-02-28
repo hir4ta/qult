@@ -137,14 +137,18 @@ func (s *Store) SearchFailureSolutions(failureType, errorSig string, limit int) 
 }
 
 // SearchFailureSolutionsByFile finds solutions for a specific file path.
-// Returns effective solutions first, newest second.
+// Returns effective solutions first, newest second. Includes resolution_diff and tool_sequence.
 func (s *Store) SearchFailureSolutionsByFile(filePath string, limit int) ([]FailureSolution, error) {
 	rows, err := s.db.Query(
 		`SELECT id, session_id, failure_type, error_signature, file_path, solution_text,
+		        resolution_diff, tool_sequence, transferability_score,
 		        times_surfaced, times_effective, timestamp
 		 FROM failure_solutions
 		 WHERE file_path = ?
-		 ORDER BY times_effective DESC, timestamp DESC
+		 ORDER BY
+		   CASE WHEN resolution_diff != '' THEN 1 ELSE 0 END DESC,
+		   CASE WHEN times_surfaced > 0 THEN CAST(times_effective AS REAL) / times_surfaced ELSE 0.5 END DESC,
+		   timestamp DESC
 		 LIMIT ?`,
 		filePath, limit,
 	)
@@ -158,7 +162,47 @@ func (s *Store) SearchFailureSolutionsByFile(filePath string, limit int) ([]Fail
 		var fs FailureSolution
 		var ts string
 		if err := rows.Scan(&fs.ID, &fs.SessionID, &fs.FailureType, &fs.ErrorSignature,
-			&fs.FilePath, &fs.SolutionText, &fs.TimesSurfaced, &fs.TimesEffective, &ts); err != nil {
+			&fs.FilePath, &fs.SolutionText, &fs.ResolutionDiff, &fs.ToolSequence,
+			&fs.TransferabilityScore, &fs.TimesSurfaced, &fs.TimesEffective, &ts); err != nil {
+			continue
+		}
+		fs.Timestamp, _ = time.Parse("2006-01-02 15:04:05", ts)
+		results = append(results, fs)
+	}
+	return results, rows.Err()
+}
+
+// SearchFailureSolutionsByType finds solutions matching a failure type only (broadest search axis).
+// Used as the final fallback when error_signature and file_path searches yield no results.
+func (s *Store) SearchFailureSolutionsByType(failureType string, limit int) ([]FailureSolution, error) {
+	if failureType == "" {
+		return nil, nil
+	}
+	rows, err := s.db.Query(
+		`SELECT id, session_id, failure_type, error_signature, file_path, solution_text,
+		        resolution_diff, tool_sequence, transferability_score,
+		        times_surfaced, times_effective, timestamp
+		 FROM failure_solutions
+		 WHERE failure_type = ?
+		 ORDER BY
+		   CASE WHEN resolution_diff != '' THEN 1 ELSE 0 END DESC,
+		   CASE WHEN times_surfaced > 0 THEN CAST(times_effective AS REAL) / times_surfaced ELSE 0.5 END DESC,
+		   timestamp DESC
+		 LIMIT ?`,
+		failureType, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store: search failure solutions by type: %w", err)
+	}
+	defer rows.Close()
+
+	var results []FailureSolution
+	for rows.Next() {
+		var fs FailureSolution
+		var ts string
+		if err := rows.Scan(&fs.ID, &fs.SessionID, &fs.FailureType, &fs.ErrorSignature,
+			&fs.FilePath, &fs.SolutionText, &fs.ResolutionDiff, &fs.ToolSequence,
+			&fs.TransferabilityScore, &fs.TimesSurfaced, &fs.TimesEffective, &ts); err != nil {
 			continue
 		}
 		fs.Timestamp, _ = time.Parse("2006-01-02 15:04:05", ts)

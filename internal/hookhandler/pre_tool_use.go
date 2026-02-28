@@ -552,8 +552,9 @@ func suggestDedicatedTool(toolInput json.RawMessage) string {
 	return "[buddy] Consider using dedicated Grep/Glob tools instead of CLI grep/rg/find for better integration"
 }
 
-// proactiveSolutionLookup searches past failure resolutions for the target file
-// and surfaces them as context before the action is taken.
+// proactiveSolutionLookup searches past failure resolutions using a 3-axis
+// priority search and surfaces them as context before the action is taken.
+// Axes (in priority order): error_signature → file_path → failure_type.
 func proactiveSolutionLookup(sdb *sessiondb.SessionDB, _ string, toolInput json.RawMessage) string {
 	filePath := extractFilePath(toolInput)
 	if filePath == "" {
@@ -566,7 +567,6 @@ func proactiveSolutionLookup(sdb *sessiondb.SessionDB, _ string, toolInput json.
 		return ""
 	}
 
-	// Check if this file has an unresolved failure in the current session.
 	unresolved, failureType, errorSig, _ := sdb.UnresolvedFailureDetail(filePath)
 	if !unresolved {
 		return ""
@@ -578,18 +578,25 @@ func proactiveSolutionLookup(sdb *sessiondb.SessionDB, _ string, toolInput json.
 	}
 	defer st.Close()
 
-	// Search for past solutions with resolution diffs (most actionable).
-	solutions, _ := st.SearchFailureSolutionsWithDiff(failureType, errorSig, 1)
+	// 3-axis search in priority order: error_signature (highest precision) →
+	// file_path (file-specific) → failure_type (broadest match).
+	var solutions []store.FailureSolution
+
+	// Axis 1: error_signature exact match (with optional failureType filter).
+	if errorSig != "" {
+		solutions, _ = st.SearchFailureSolutionsWithDiff(failureType, errorSig, 1)
+	}
+
+	// Axis 2: file_path specific solutions.
 	if len(solutions) == 0 {
-		// Fall back to file-specific solutions.
 		solutions, _ = st.SearchFailureSolutionsByFile(filePath, 1)
 	}
+
+	// Axis 3: failure_type broadest match.
 	if len(solutions) == 0 {
-		// FTS5 fallback: search by error signature keywords.
-		if errorSig != "" {
-			solutions, _ = st.SearchFailureSolutionsByText(errorSig, 1)
-		}
+		solutions, _ = st.SearchFailureSolutionsByType(failureType, 1)
 	}
+
 	if len(solutions) == 0 {
 		return ""
 	}
@@ -597,10 +604,27 @@ func proactiveSolutionLookup(sdb *sessiondb.SessionDB, _ string, toolInput json.
 	_ = sdb.SetCooldown(cooldownKey, 10*time.Minute)
 
 	sol := solutions[0]
+
+	// Track surfacing: increment times_surfaced counter.
+	_ = st.IncrementTimesSurfaced(sol.ID)
+
+	// Track via suggestion outcome for effectiveness measurement.
+	patternKey := "past-solution:" + filepath.Base(filePath)
+	sessionID, _ := sdb.GetContext("session_id")
+	if sessionID == "" {
+		sessionID = "unknown"
+	}
+	outcomeID, _ := st.InsertSuggestionOutcome(sessionID, patternKey, sol.SolutionText)
+	if outcomeID > 0 {
+		_ = sdb.SetContext("last_nudge_outcome_id", fmt.Sprintf("%d", outcomeID))
+		_ = sdb.SetContext("last_nudge_pattern", "past-solution")
+	}
+
+	_ = sdb.SetContext("last_surfaced_solution_id", fmt.Sprintf("%d", sol.ID))
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "[buddy] Past resolution for %s (%s)", filepath.Base(filePath), failureType)
 
-	// Parse and display the exact resolution diff when available.
 	diffShown := false
 	if sol.ResolutionDiff != "" {
 		var diff struct {
@@ -615,13 +639,11 @@ func proactiveSolutionLookup(sdb *sessiondb.SessionDB, _ string, toolInput json.
 		}
 	}
 
-	// Search for solution chains (multi-step playbooks) for this failure.
 	chainSig := failureType + ":" + errorSig
 	chains, _ := st.SearchSolutionChains(chainSig, 1)
 	if len(chains) > 0 {
 		fmt.Fprintf(&b, "\n→ Playbook (%d steps): %s", chains[0].StepCount, chains[0].ToolSequence)
 	} else if !diffShown {
-		// Fall back to solution text when neither diff nor chain is available.
 		text := sol.SolutionText
 		if len([]rune(text)) > 150 {
 			text = string([]rune(text)[:150]) + "..."
@@ -629,9 +651,6 @@ func proactiveSolutionLookup(sdb *sessiondb.SessionDB, _ string, toolInput json.
 		b.WriteString("\n→ ")
 		b.WriteString(text)
 	}
-
-	// Track surfaced solution for effectiveness measurement.
-	_ = sdb.SetContext("last_surfaced_solution_id", fmt.Sprintf("%d", sol.ID))
 
 	return b.String() + SkillHintForPattern("past-solution")
 }

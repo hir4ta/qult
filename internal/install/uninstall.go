@@ -38,7 +38,16 @@ func Uninstall() error {
 		}
 	}
 
-	// Step 5: Clean up legacy plugin bundle.
+	// Step 5: Remove buddy rules file.
+	if home, err := os.UserHomeDir(); err == nil {
+		rulesPath := filepath.Join(home, ".claude", "rules", "buddy.md")
+		if _, err := os.Stat(rulesPath); err == nil {
+			_ = os.Remove(rulesPath)
+			fmt.Println("✓ Buddy rules file removed")
+		}
+	}
+
+	// Step 6: Clean up legacy plugin bundle.
 	home, err := os.UserHomeDir()
 	if err == nil {
 		pluginDir := filepath.Join(home, ".claude-buddy", "plugin")

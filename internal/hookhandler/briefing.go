@@ -207,7 +207,11 @@ func findCoChangeHint(sdb *sessiondb.SessionDB) *Signal {
 		wsSet[f] = true
 	}
 
-	var missing []string
+	type coChangePeer struct {
+		Name         string
+		SessionCount int
+	}
+	var missing []coChangePeer
 	seen := make(map[string]bool)
 	for _, f := range files {
 		coFiles, err := st.CoChangedFiles(f, 2)
@@ -215,13 +219,16 @@ func findCoChangeHint(sdb *sessiondb.SessionDB) *Signal {
 			continue
 		}
 		for _, co := range coFiles {
+			if co.SessionCount < 3 {
+				continue
+			}
 			peer := co.FileA
 			if peer == f {
 				peer = co.FileB
 			}
 			if !wsSet[peer] && !seen[peer] {
 				seen[peer] = true
-				missing = append(missing, filepath.Base(peer))
+				missing = append(missing, coChangePeer{Name: filepath.Base(peer), SessionCount: co.SessionCount})
 			}
 		}
 		if len(missing) >= 3 {
@@ -234,7 +241,11 @@ func findCoChangeHint(sdb *sessiondb.SessionDB) *Signal {
 	}
 
 	_ = sdb.SetCooldown("briefing_cochange", 10*time.Minute)
-	detail := "Files often changed together (structural coupling, not accidental): also check " + strings.Join(missing, ", ")
+	var peerLabels []string
+	for _, m := range missing {
+		peerLabels = append(peerLabels, fmt.Sprintf("%s (%d sessions)", m.Name, m.SessionCount))
+	}
+	detail := "Co-changed files (structural coupling): also check " + strings.Join(peerLabels, ", ")
 	return &Signal{
 		Priority: 3,
 		Kind:     "cochange",
@@ -264,10 +275,23 @@ func findPhaseSignal(sdb *sessiondb.SessionDB) *Signal {
 	}
 
 	_ = sdb.SetCooldown("briefing_phase", 10*time.Minute)
+
+	detail := fmt.Sprintf("Current phase: %s (%d%%). Consider moving to %s.", progress.CurrentPhase, progress.ProgressPct, progress.ExpectedPhase)
+
+	ps := personalContext(sdb)
+	if ps != nil && ps.SessionCount >= 3 {
+		if (progress.ExpectedPhase == PhaseTest || progress.CurrentPhase == PhaseTest) && ps.TestFrequency > 0 {
+			detail += fmt.Sprintf(" Your test frequency is %.0f%%.", ps.TestFrequency*100)
+			if ps.TestFrequency < 0.3 {
+				detail += " Running tests at this transition catches regressions early."
+			}
+		}
+	}
+
 	return &Signal{
 		Priority: 4,
 		Kind:     "phase",
-		Detail:   fmt.Sprintf("Current phase: %s (%d%%). Consider moving to %s.", progress.CurrentPhase, progress.ProgressPct, progress.ExpectedPhase),
+		Detail:   detail,
 	}
 }
 
@@ -278,13 +302,20 @@ func findHealthSignal(sdb *sessiondb.SessionDB) *Signal {
 		return nil
 	}
 
+	ps := personalContext(sdb)
+	paceNote := ""
+	if ps != nil && ps.SessionCount >= 3 && ps.CurrentPace > 0 && ps.AvgToolsPerSession > 0 {
+		paceNote = fmt.Sprintf(" You're at %.0f%% of your typical pace (%d tools/session).",
+			ps.CurrentPace*100, int(ps.AvgToolsPerSession))
+	}
+
 	errRate := getFloat(sdb, "ewma_error_rate")
 	if errRate > 0.3 {
 		_ = sdb.SetCooldown("briefing_health", 10*time.Minute)
 		return &Signal{
 			Priority: 6,
 			Kind:     "health",
-			Detail:   fmt.Sprintf("Error rate is high (%.0f%%). Consider reviewing recent failures with buddy_alerts.", errRate*100),
+			Detail:   fmt.Sprintf("Error rate is high (%.0f%%).%s Consider reviewing recent failures with buddy_alerts.", errRate*100, paceNote),
 		}
 	}
 
@@ -294,7 +325,7 @@ func findHealthSignal(sdb *sessiondb.SessionDB) *Signal {
 		return &Signal{
 			Priority: 6,
 			Kind:     "health",
-			Detail:   "Velocity is low. Session may be stuck. Consider buddy_diagnose for root cause analysis.",
+			Detail:   fmt.Sprintf("Velocity is low.%s Session may be stuck. Consider buddy_diagnose for root cause analysis.", paceNote),
 		}
 	}
 
@@ -381,11 +412,13 @@ func buildNarrative(sig *Signal, sdb *sessiondb.SessionDB) string {
 				for _, f := range files {
 					coFiles, _ := st.CoChangedFiles(f, 2)
 					for _, co := range coFiles {
+						if co.SessionCount < 3 {
+							continue
+						}
 						peer := co.FileA
 						if peer == f {
 							peer = co.FileB
 						}
-						// Check peer not already in working set.
 						inWS := false
 						for _, wf := range files {
 							if wf == peer {
@@ -394,7 +427,7 @@ func buildNarrative(sig *Signal, sdb *sessiondb.SessionDB) string {
 							}
 						}
 						if !inWS {
-							parts = append(parts, fmt.Sprintf("Also check %s (frequently changed together).", filepath.Base(peer)))
+							parts = append(parts, fmt.Sprintf("Also check %s (changed together in %d sessions, structural coupling).", filepath.Base(peer), co.SessionCount))
 							break
 						}
 					}

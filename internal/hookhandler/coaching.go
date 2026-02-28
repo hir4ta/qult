@@ -2,6 +2,7 @@ package hookhandler
 
 import (
 	"fmt"
+	"math"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -456,9 +457,11 @@ var testFilePathPattern = regexp.MustCompile(`(?i)(_test\.go|\.test\.[jt]sx?|\.s
 // actual cross-session data. Transforms generic advice ("tests prevent regressions")
 // into personal evidence ("your test-first bugfix sessions average 22 tools vs 45 without").
 func personalizeCoaching(sdb *sessiondb.SessionDB, entry coachingEntry, taskType TaskType) coachingEntry {
+	ps := personalContext(sdb)
+
 	st, err := store.OpenDefault()
 	if err != nil {
-		return entry
+		return injectPaceAndTestContext(entry, ps)
 	}
 	defer st.Close()
 
@@ -467,7 +470,7 @@ func personalizeCoaching(sdb *sessiondb.SessionDB, entry coachingEntry, taskType
 	// Axis 1: Workflow efficiency (tool count comparison).
 	successful, err := st.GetSuccessfulWorkflows(projectPath, string(taskType), 20)
 	if err != nil || len(successful) < 3 {
-		return entry
+		return injectPaceAndTestContext(entry, ps)
 	}
 
 	var totalTools, totalDuration int
@@ -483,6 +486,20 @@ func personalizeCoaching(sdb *sessiondb.SessionDB, entry coachingEntry, taskType
 	evidence := fmt.Sprintf("Your successful %s sessions average %d tools (%d sessions)",
 		taskType, avgTools, len(successful))
 
+	// CurrentPace comparison.
+	if ps != nil && ps.CurrentPace > 0 && ps.AvgToolsPerSession > 0 {
+		currentTools := FlowEventCount(sdb)
+		if currentTools > 0 {
+			pctDiff := (ps.CurrentPace - 1) * 100
+			direction := "below"
+			if pctDiff > 0 {
+				direction = "above"
+			}
+			evidence += fmt.Sprintf(". You're at %d tools (%.0f%% %s your %d-tool baseline)",
+				currentTools, math.Abs(pctDiff), direction, int(ps.AvgToolsPerSession))
+		}
+	}
+
 	// Success vs failure contrast.
 	failed, _ := st.GetFailedWorkflows(string(taskType), 10)
 	if len(failed) >= 2 {
@@ -496,8 +513,12 @@ func personalizeCoaching(sdb *sessiondb.SessionDB, entry coachingEntry, taskType
 		}
 	}
 
-	// Test frequency — low testers get stronger evidence.
-	if tf, count, err := st.GetUserProfile("test_frequency"); err == nil && count >= 5 {
+	// TestFrequency context.
+	if ps != nil && ps.SessionCount >= 5 && ps.TestFrequency > 0 {
+		if ps.TestFrequency < 0.3 {
+			evidence += fmt.Sprintf(". Test frequency %.0f%% — consider running tests at this phase", ps.TestFrequency*100)
+		}
+	} else if tf, count, stErr := st.GetUserProfile("test_frequency"); stErr == nil && count >= 5 {
 		if tf < 0.3 {
 			evidence += fmt.Sprintf(". Test frequency %.0f%% — early testing resolves faster", tf*100)
 		}
@@ -515,6 +536,38 @@ func personalizeCoaching(sdb *sessiondb.SessionDB, entry coachingEntry, taskType
 	entry.reasoning = formatCausalChain(cause, effect, evidence, action)
 	return entry
 }
+
+// injectPaceAndTestContext adds CurrentPace and TestFrequency context to coaching
+// when full workflow data is unavailable (store open failed or insufficient sessions).
+func injectPaceAndTestContext(entry coachingEntry, ps *PersonalStats) coachingEntry {
+	if ps == nil || ps.SessionCount < 3 {
+		return entry
+	}
+
+	var extras []string
+
+	if ps.CurrentPace > 0 && ps.AvgToolsPerSession > 0 {
+		pctDiff := (ps.CurrentPace - 1) * 100
+		direction := "below"
+		if pctDiff > 0 {
+			direction = "above"
+		}
+		extras = append(extras, fmt.Sprintf("Current pace: %.0f%% %s your %d-tool baseline",
+			math.Abs(pctDiff), direction, int(ps.AvgToolsPerSession)))
+	}
+
+	if ps.TestFrequency > 0 && ps.TestFrequency < 0.3 && ps.SessionCount >= 5 {
+		extras = append(extras, fmt.Sprintf("Test frequency %.0f%% — consider running tests at this phase",
+			ps.TestFrequency*100))
+	}
+
+	if len(extras) > 0 {
+		entry.reasoning += " " + strings.Join(extras, ". ") + "."
+	}
+
+	return entry
+}
+
 
 // enrichWithSessionContext injects working_set file names, decisions, and
 // recurring struggles into the coaching entry for session-aware guidance.

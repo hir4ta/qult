@@ -75,7 +75,13 @@ func findStrategicSignal(sdb *sessiondb.SessionDB, projectPath string) *Signal {
 
 	_ = sdb.SetCooldown("briefing_strategic", 15*time.Minute)
 
-	return &Signal{Priority: 5, Kind: "strategic", Detail: insights[0].message}
+	detail := insights[0].message
+	ps := personalContext(sdb)
+	if ps != nil && len(ps.RecurringStruggles) > 0 {
+		detail += fmt.Sprintf(" Recurring struggles: %s.", strings.Join(ps.RecurringStruggles, ", "))
+	}
+
+	return &Signal{Priority: 5, Kind: "strategic", Detail: detail}
 }
 
 // behavioralTrend detects actionable patterns in the user's coding behavior

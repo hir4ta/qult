@@ -27,7 +27,7 @@ func defaultSettingsPath() string {
 
 // Run executes the install command. All steps are idempotent.
 // Hooks, skills, agent, and MCP are managed by the plugin — this only
-// syncs sessions/docs and generates embeddings.
+// syncs sessions/docs, generates embeddings, and ensures global rules.
 func Run() error {
 	// Clean up legacy files from pre-plugin installs (silent if nothing to clean).
 	cleanupLegacyInstall()
@@ -41,6 +41,7 @@ func Run() error {
 	}
 
 	generateEmbeddings()
+	ensureRulesFile()
 
 	fmt.Println("\n✓ Installation complete!")
 	fmt.Println("\nIf you haven't set up the plugin yet:")
@@ -48,6 +49,53 @@ func Run() error {
 	fmt.Println("  /plugin install claude-buddy@claude-buddy")
 
 	return nil
+}
+
+// buddyRulesContent is the content written to ~/.claude/rules/buddy.md.
+// It instructs Claude Code to consult buddy MCP tools when appropriate.
+const buddyRulesContent = `# claude-buddy
+
+claude-buddy hooks deliver automatic briefings every turn. MCP tools provide deeper analysis:
+
+- **buddy_guidance** — workflow alerts, next steps, and recommendations
+- **buddy_knowledge** — search past patterns, decisions, and error solutions
+- **buddy_diagnose** — root cause analysis + fix patches when errors occur
+- **buddy_state** — session health, statistics, and trend predictions
+
+Consult these tools when:
+- An error occurs or a tool fails repeatedly
+- You need to recall a past decision or pattern
+- Session health declines or you feel stuck
+- Starting work on a file with high blast radius
+`
+
+// ensureRulesFile creates ~/.claude/rules/buddy.md if it does not exist.
+// Existing files are never overwritten to respect user customizations.
+func ensureRulesFile() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+
+	rulesDir := filepath.Join(home, ".claude", "rules")
+	rulesPath := filepath.Join(rulesDir, "buddy.md")
+
+	// Skip if file already exists.
+	if _, err := os.Stat(rulesPath); err == nil {
+		return
+	}
+
+	if err := os.MkdirAll(rulesDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to create rules dir: %v\n", err)
+		return
+	}
+
+	if err := os.WriteFile(rulesPath, []byte(buddyRulesContent), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to write rules file: %v\n", err)
+		return
+	}
+
+	fmt.Println("✓ Created ~/.claude/rules/buddy.md")
 }
 
 // cleanupLegacyInstall removes skills, agent, hooks, and MCP registration

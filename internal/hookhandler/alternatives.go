@@ -106,8 +106,11 @@ func editAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 					priority = 95 // concrete diffs get highest priority
 				}
 			}
-			if len([]rune(rationale)) > 100 {
-				rationale = string([]rune(rationale)[:100]) + "..."
+			if sol.TimesEffective > 0 {
+				rationale += fmt.Sprintf(" (effective in %d sessions)", sol.TimesEffective)
+			}
+			if len([]rune(rationale)) > 120 {
+				rationale = string([]rune(rationale)[:120]) + "..."
 			}
 			alts = append(alts, Alternative{
 				Label:     "Past fix available",
@@ -152,10 +155,15 @@ func editAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 		// 5b. Cross-session failure history for this file.
 		_, totalCross, _ := st.FailureHistoryForFile(ei.FilePath, 2)
 		if totalCross >= 3 {
+			why := "Repeated cross-session failures indicate a structural difficulty. Extra caution prevents the same mistake."
+			ps := personalContext(sdb)
+			if ps != nil && len(ps.RecurringStruggles) > 0 {
+				why += fmt.Sprintf(" Your recurring struggles: %s.", strings.Join(ps.RecurringStruggles, ", "))
+			}
 			alts = append(alts, Alternative{
 				Label:     "Cross-session failures",
 				Rationale: fmt.Sprintf("This file has had %d failures across sessions.", totalCross),
-				Why:       "Repeated cross-session failures indicate a structural difficulty. Extra caution prevents the same mistake.",
+				Why:       why,
 				Priority:  75,
 			})
 		}
@@ -237,7 +245,7 @@ func editAlternatives(sdb *sessiondb.SessionDB, toolInput json.RawMessage) strin
 			alts = append(alts, Alternative{
 				Label:     "Co-changed file",
 				Rationale: fmt.Sprintf("%s is often changed with this file (%d sessions).", filepath.Base(other), cc.SessionCount),
-				Why:       "Files that change together may have implicit coupling. Review the related file to avoid inconsistencies.",
+				Why:       fmt.Sprintf("Changed together in %d sessions (structural coupling). Review to avoid inconsistencies.", cc.SessionCount),
 				Priority:  38,
 			})
 		}

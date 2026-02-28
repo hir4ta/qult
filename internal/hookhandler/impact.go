@@ -376,7 +376,6 @@ func coChangeHint(filePath string) string {
 		return ""
 	}
 
-	// Only suggest files with 3+ co-change sessions (strong signal).
 	var suggestions []string
 	for _, cc := range coChanges {
 		if cc.SessionCount < 3 {
@@ -386,13 +385,13 @@ func coChangeHint(filePath string) string {
 		if other == filePath {
 			other = cc.FileA
 		}
-		suggestions = append(suggestions, fmt.Sprintf("%s (%dx)", filepath.Base(other), cc.SessionCount))
+		suggestions = append(suggestions, fmt.Sprintf("%s (%d sessions)", filepath.Base(other), cc.SessionCount))
 	}
 	if len(suggestions) == 0 {
 		return ""
 	}
 
-	return fmt.Sprintf("[buddy] Frequently co-changed: %s", strings.Join(suggestions, ", "))
+	return fmt.Sprintf("[buddy] Co-changed files: %s — changed together across sessions (structural coupling)", strings.Join(suggestions, ", "))
 }
 
 // classifyDomainRisk returns a domain-specific risk note based on file path.
