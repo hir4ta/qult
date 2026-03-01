@@ -45,7 +45,7 @@ func stateConsolidatedHandler(claudeHome string, st *store.Store) server.ToolHan
 // knowledgeConsolidatedHandler consolidates patterns + decisions + cross_project + recall.
 // Routes based on "scope" (project/global/recall) and "type" parameters.
 func knowledgeConsolidatedHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandlerFunc {
-	patternsFn := withMetaHandler(patternsHandler(st, emb), st, "project")
+	docsFn := withMetaHandler(docsSearchHandler(st, emb), st, "project")
 	decisionsFn := withMetaHandler(decisionsHandler(st), st, "project")
 	crossProjectFn := withMetaHandler(crossProjectHandler(), st, "global")
 	recallFn := withMetaHandler(recallHandler(st), st, "session")
@@ -63,7 +63,7 @@ func knowledgeConsolidatedHandler(st *store.Store, emb *embedder.Embedder) serve
 			if patternType == "decision" {
 				return decisionsFn(ctx, req)
 			}
-			return patternsFn(ctx, req)
+			return docsFn(ctx, req)
 		}
 	}
 }

@@ -67,33 +67,102 @@ func decisionsHandler(st *store.Store) server.ToolHandlerFunc {
 	}
 }
 
-// patternsHandler is a placeholder — patterns table was removed in alfred v1.
-// Will be replaced by docs-based knowledge search.
-func patternsHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandlerFunc {
-	return func(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+// docsSearchHandler searches the docs knowledge base using 3-tier fallback:
+// vector search (Voyage AI) → FTS5 BM25 → LIKE.
+func docsSearchHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		query := req.GetString("query", "")
 		if query == "" {
 			return mcp.NewToolResultError("query parameter is required"), nil
 		}
+		limit := req.GetInt("limit", 5)
+		if limit < 1 {
+			limit = 5
+		}
 
-		// Search decisions as interim knowledge source.
-		decisions, _ := st.SearchDecisions(query, "", 5)
-		decisionList := make([]map[string]any, 0, len(decisions))
+		var docs []store.DocRow
+		searchMethod := ""
+
+		// Tier 1: Vector search via Voyage AI.
+		if emb != nil && emb.Available() {
+			queryVec, err := emb.EmbedForSearch(ctx, query)
+			if err == nil && queryVec != nil {
+				matches, err := st.VectorSearch(queryVec, "docs", limit)
+				if err == nil && len(matches) > 0 {
+					ids := make([]int64, len(matches))
+					for i, m := range matches {
+						ids[i] = m.SourceID
+					}
+					docs, _ = st.GetDocsByIDs(ids)
+					searchMethod = "vector"
+				}
+			}
+		}
+
+		// Tier 2: FTS5 BM25 phrase search.
+		if len(docs) == 0 {
+			ftsResults, err := st.SearchDocsFTS(query, "", limit)
+			if err == nil && len(ftsResults) > 0 {
+				docs = ftsResults
+				searchMethod = "fts5"
+			}
+		}
+
+		// Tier 3: LIKE fallback.
+		if len(docs) == 0 {
+			likeResults, err := st.SearchDocsLIKE(query, limit)
+			if err == nil && len(likeResults) > 0 {
+				docs = likeResults
+				searchMethod = "like"
+			}
+		}
+
+		// Also include decisions as supplemental results.
+		decisions, _ := st.SearchDecisions(query, "", 3)
+
+		// Build response.
+		docResults := make([]map[string]any, 0, len(docs))
+		for _, d := range docs {
+			dm := map[string]any{
+				"type":         "docs",
+				"url":          d.URL,
+				"section_path": d.SectionPath,
+				"content":      d.Content,
+				"source_type":  d.SourceType,
+			}
+			if d.Version != "" {
+				dm["version"] = d.Version
+			}
+			docResults = append(docResults, dm)
+		}
+
+		decisionResults := make([]map[string]any, 0, len(decisions))
 		for _, d := range decisions {
-			decisionList = append(decisionList, map[string]any{
+			decisionResults = append(decisionResults, map[string]any{
 				"type":    "decision",
 				"topic":   d.Topic,
 				"content": d.DecisionText,
 			})
 		}
 
+		// Merge results: docs first, then decisions.
+		allResults := make([]map[string]any, 0, len(docResults)+len(decisionResults))
+		allResults = append(allResults, docResults...)
+		allResults = append(allResults, decisionResults...)
+
 		result := map[string]any{
 			"query":         query,
-			"results":       decisionList,
-			"search_method": "decisions_only",
-			"note":          "Pattern search will be replaced by docs knowledge base in alfred v1.",
+			"results":       allResults,
+			"docs_count":    len(docResults),
+			"search_method": searchMethod,
 		}
-		_ = emb // placeholder for future docs embedding search
+		if searchMethod == "" && len(decisionResults) > 0 {
+			result["search_method"] = "decisions_only"
+		}
+		if searchMethod == "" && len(allResults) == 0 {
+			result["note"] = "No results found. Run /alfred-crawl to populate the knowledge base."
+		}
+
 		return marshalResult(result)
 	}
 }

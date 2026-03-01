@@ -42,7 +42,7 @@ const serverInstructions = `claude-alfred is a real-time session advisor for Cla
 Hook-based briefings are delivered automatically every turn.
 
 ## When you need more detail from a briefing:
-  knowledge — Search past patterns, decisions, and solutions
+  knowledge — Search docs, decisions, and solutions
   guidance — Get alerts, recommendations, next steps
   diagnose — Root cause analysis + fix patches for errors
 
@@ -50,6 +50,9 @@ Hook-based briefings are delivered automatically every turn.
   state — Session health, statistics, and predictions
   plan — Task estimation, progress tracking, strategic plans
   feedback — Rate suggestion quality (improves future relevance)
+
+## Knowledge base:
+  ingest — Store documentation sections with vector embeddings
 `
 
 // New creates a new MCP server with all tools registered.
@@ -100,7 +103,7 @@ func New(claudeHome string, st *store.Store, emb *embedder.Embedder) *server.MCP
 		// 2. knowledge: Consolidated knowledge search + recall.
 		server.ServerTool{
 			Tool: mcp.NewTool("knowledge",
-				mcp.WithDescription("Search accumulated knowledge including error solutions, architecture patterns, design decisions, and cross-project insights. Use when encountering a problem that may have been solved before, or when checking past architectural decisions. Set 'scope' to 'global' for cross-project search, 'recall' to search pre-compact conversation history, or 'project' (default) for current project; 'type' filters by kind (error_solution, architecture, decision, tool_usage)."),
+				mcp.WithDescription("Search the alfred knowledge base including Claude Code documentation, design decisions, and cross-project insights. Uses vector search (Voyage AI) with FTS5 and LIKE fallbacks. Set 'scope' to 'global' for cross-project search, 'recall' to search pre-compact conversation history, or 'project' (default) for docs + decisions. 'type' filters by kind: docs (default), decision, all."),
 				mcp.WithTitleAnnotation("Knowledge Search"),
 				mcp.WithReadOnlyHintAnnotation(true),
 				mcp.WithDestructiveHintAnnotation(false),
@@ -222,7 +225,40 @@ func New(claudeHome string, st *store.Store, emb *embedder.Embedder) *server.MCP
 			Handler: withAlfredTracker(st, diagnoseConsolidatedHandler(st)),
 		},
 
-		// 6. feedback: Suggestion feedback (write operation — separate annotations).
+		// 6. ingest: Document ingestion (write operation).
+		server.ServerTool{
+			Tool: mcp.NewTool("ingest",
+				mcp.WithDescription("Ingest documentation sections into the alfred knowledge base. Accepts a URL with an array of sections (path + content), stores them in the docs table, and generates vector embeddings for semantic search. Use with /alfred-crawl to populate the knowledge base from Claude Code documentation."),
+				mcp.WithTitleAnnotation("Document Ingestion"),
+				mcp.WithReadOnlyHintAnnotation(false),
+				mcp.WithDestructiveHintAnnotation(false),
+				mcp.WithIdempotentHintAnnotation(true),
+				mcp.WithOpenWorldHintAnnotation(false),
+				mcp.WithString("url",
+					mcp.Required(),
+					mcp.Description("Source URL of the documentation page"),
+				),
+				mcp.WithObject("sections",
+					mcp.Required(),
+					mcp.Description("Array of {path, content} objects representing document sections"),
+				),
+				mcp.WithString("source_type",
+					mcp.Description("Document type: docs (default), changelog, engineering"),
+				),
+				mcp.WithString("version",
+					mcp.Description("CLI version (for changelog entries)"),
+				),
+				mcp.WithNumber("ttl_days",
+					mcp.Description("Time-to-live in days (default: 7)"),
+				),
+				mcp.WithString("format",
+					mcp.Description("Response format: concise (summary + key data only) or detailed (default, full output)"),
+				),
+			),
+			Handler: withAlfredTracker(st, ingestHandler(st, emb)),
+		},
+
+		// 7. feedback: Suggestion feedback (write operation — separate annotations).
 		server.ServerTool{
 			Tool: mcp.NewTool("feedback",
 				mcp.WithDescription("Rate the quality of an alfred suggestion to improve future relevance via Thompson Sampling. Use when a suggestion was particularly helpful or unhelpful and you want to provide explicit signal. The required 'pattern' identifies which suggestion to rate; 'rating' must be helpful, partially_helpful, not_helpful, or misleading. Explicit feedback overrides automatic inference and has lasting impact on prioritization."),
