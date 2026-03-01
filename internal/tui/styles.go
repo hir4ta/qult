@@ -151,6 +151,23 @@ var (
 	mdHorizontalRuleStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#686068"))
 
+	// Tab bar
+	tabActiveStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#D0D0D0")).
+			Background(lipgloss.Color("#585060")).
+			Padding(0, 1)
+
+	tabInactiveStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#908890")).
+				Padding(0, 1)
+
+	tabLabelStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#B5A06A"))
+
+	tabValueStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#908890"))
+
 	// Usage score
 	scoreGoodStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#6A9A78"))

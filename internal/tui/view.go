@@ -34,25 +34,72 @@ func (m Model) View() string {
 	// Title area (always shown)
 	sections = append(sections, m.renderHeader())
 
-	// Tasks section
-	taskLines := m.renderTasks()
-	if taskLines != "" {
-		sections = append(sections, m.renderLabeledSeparator("Tasks"))
-		sections = append(sections, taskLines)
-	}
+	// Tab bar
+	sections = append(sections, m.renderTabBar())
 
-	// Monitor section (conversation history)
-	sections = append(sections, m.renderLabeledSeparator("Monitor"))
-	sections = append(sections, m.renderMessages())
+	// Tab content
+	switch m.activeTab {
+	case TabKnowledge:
+		sections = append(sections, m.viewKnowledge())
+	case TabPreferences:
+		sections = append(sections, m.viewPreferences())
+	case TabDocs:
+		sections = append(sections, m.viewDocs())
+	default:
+		sections = append(sections, m.viewActivity())
+	}
 
 	// Bottom
 	sections = append(sections, m.renderSeparator())
 	if m.sessionEnded {
 		sections = append(sections, dimStyle.Render("  Session ended"))
 	}
-	sections = append(sections, m.renderHelp())
+	sections = append(sections, m.renderTabHelp())
 
 	return strings.Join(sections, "\n")
+}
+
+// viewActivity renders the Activity tab (original watch view).
+func (m Model) viewActivity() string {
+	var parts []string
+
+	// Tasks section
+	taskLines := m.renderTasks()
+	if taskLines != "" {
+		parts = append(parts, m.renderLabeledSeparator("Tasks"))
+		parts = append(parts, taskLines)
+	}
+
+	// Monitor section (conversation history)
+	parts = append(parts, m.renderLabeledSeparator("Monitor"))
+	parts = append(parts, m.renderMessages())
+
+	return strings.Join(parts, "\n")
+}
+
+// renderTabBar renders the tab navigation bar.
+func (m Model) renderTabBar() string {
+	tabs := []struct {
+		key   string
+		label string
+		tab   Tab
+	}{
+		{"1", "Activity", TabActivity},
+		{"2", "Knowledge", TabKnowledge},
+		{"3", "Preferences", TabPreferences},
+		{"4", "Docs", TabDocs},
+	}
+
+	var parts []string
+	for _, t := range tabs {
+		label := t.key + ":" + t.label
+		if m.activeTab == t.tab {
+			parts = append(parts, tabActiveStyle.Render(label))
+		} else {
+			parts = append(parts, tabInactiveStyle.Render(label))
+		}
+	}
+	return strings.Join(parts, "")
 }
 
 func (m Model) renderHeader() string {
@@ -228,6 +275,19 @@ func (m Model) renderSeparator() string {
 
 func (m Model) renderHelp() string {
 	return helpStyle.Render("  q: quit | \u2191\u2193: select | Enter: expand/collapse | ?: help")
+}
+
+// renderTabHelp renders tab-specific help.
+func (m Model) renderTabHelp() string {
+	common := "1-4: tabs | "
+	switch m.activeTab {
+	case TabDocs:
+		return helpStyle.Render("  " + common + "/: search | \u2191\u2193: select | Enter: expand | q: quit | ?: help")
+	case TabKnowledge, TabPreferences:
+		return helpStyle.Render("  " + common + "q: quit | ?: help")
+	default:
+		return helpStyle.Render("  " + common + "\u2191\u2193: select | Enter: expand/collapse | q: quit | ?: help")
+	}
 }
 
 func (m Model) renderHelpOverlay() string {

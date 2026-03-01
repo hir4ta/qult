@@ -7,6 +7,17 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/hir4ta/claude-alfred/internal/analyzer"
 	"github.com/hir4ta/claude-alfred/internal/parser"
+	"github.com/hir4ta/claude-alfred/internal/store"
+)
+
+// Tab represents a dashboard tab.
+type Tab int
+
+const (
+	TabActivity    Tab = iota
+	TabKnowledge
+	TabPreferences
+	TabDocs
 )
 
 // TaskState tracks a single task's current state.
@@ -45,10 +56,34 @@ type Model struct {
 
 	// Animation state
 	animFrame    int  // increments every animTick (for shimmer, pulse, etc.)
+
+	// Dashboard tabs
+	activeTab Tab
+	st        *store.Store // nil-safe
+
+	// Knowledge tab cache
+	knTotal     int
+	knBySource  map[string]int
+	knLastCrawl string
+	knVersion   string
+
+	// Preferences tab cache
+	pfCluster  string
+	pfMetrics  []store.UserProfileMetric
+	pfFeatures map[string]*store.UserPref
+
+	// Docs tab state
+	docsSearching bool
+	docsQuery     string
+	docsResults   []store.DocRow
+	docsCursor    int
+	docsExpanded  map[int]bool
+	docsScrollOff int
 }
 
 // NewModel creates a new TUI model with initial events pre-loaded.
-func NewModel(initialEvents []parser.SessionEvent, eventCh <-chan parser.SessionEvent, sessionID string) Model {
+// st may be nil if the store is unavailable.
+func NewModel(initialEvents []parser.SessionEvent, eventCh <-chan parser.SessionEvent, sessionID string, st *store.Store) Model {
 	stats := analyzer.NewStats()
 	det := analyzer.NewDetector()
 	sc := analyzer.NewScoreCalculator()
@@ -119,6 +154,8 @@ func NewModel(initialEvents []parser.SessionEvent, eventCh <-chan parser.Session
 		autoFollow:    true,
 		inPlanMode:    inPlanMode,
 		awaitingAnswer: awaitingAnswer,
+		st:            st,
+		docsExpanded:  make(map[int]bool),
 	}
 }
 
@@ -204,61 +241,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showHelp = false
 			return m, nil
 		}
+		// Global keys (all tabs)
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "?":
 			m.showHelp = true
 			return m, nil
-		case "up", "k":
-			if m.expanded[m.cursorIdx] && m.expandOffset > 0 {
-				m.expandOffset--
-				return m, nil
-			}
-			prev := m.prevVisibleIdx(m.cursorIdx)
-			if prev != m.cursorIdx {
-				m.cursorIdx = prev
-				m.expandOffset = 0
-				m.autoFollow = false
-			}
+		case "1":
+			m.switchTab(TabActivity)
 			return m, nil
-		case "down", "j":
-			if m.expanded[m.cursorIdx] && m.cursorIdx < len(m.events) {
-				maxOff := m.expandMaxOffset(m.cursorIdx)
-				if m.expandOffset < maxOff {
-					m.expandOffset++
-					return m, nil
-				}
-			}
-			next := m.nextVisibleIdx(m.cursorIdx)
-			if next != m.cursorIdx {
-				m.cursorIdx = next
-				m.expandOffset = 0
-			}
-			if m.cursorIdx >= m.lastVisibleIdx() {
-				m.autoFollow = true
-			}
+		case "2":
+			m.switchTab(TabKnowledge)
 			return m, nil
-		case "enter":
-			if m.cursorIdx >= 0 && m.cursorIdx < len(m.events) {
-				if m.expanded[m.cursorIdx] {
-					delete(m.expanded, m.cursorIdx)
-				} else {
-					m.expanded[m.cursorIdx] = true
-				}
-				m.expandOffset = 0
-			}
+		case "3":
+			m.switchTab(TabPreferences)
 			return m, nil
-		case "home", "g":
-			m.cursorIdx = m.firstVisibleIdx()
-			m.expandOffset = 0
-			m.autoFollow = false
+		case "4":
+			m.switchTab(TabDocs)
 			return m, nil
-		case "end", "G":
-			m.cursorIdx = m.lastVisibleIdx()
-			m.expandOffset = 0
-			m.autoFollow = true
+		case "tab":
+			next := (m.activeTab + 1) % 4
+			m.switchTab(next)
 			return m, nil
+		case "shift+tab":
+			next := (m.activeTab + 3) % 4
+			m.switchTab(next)
+			return m, nil
+		}
+		// Tab-specific keys
+		switch m.activeTab {
+		case TabDocs:
+			return m.updateDocs(msg)
+		case TabActivity:
+			return m.updateActivity(msg)
 		}
 	}
 
@@ -343,8 +359,8 @@ func applyModeFlags(ev *parser.SessionEvent, inPlanMode *bool, awaitingAnswer *b
 
 // fixedHeight returns the number of lines consumed by non-message areas.
 func (m Model) fixedHeight() int {
-	// header: 3 lines (title + stats + score) + optional breakdown line
-	h := 3
+	// header: 3 lines (title + stats + score) + tab bar + optional breakdown line
+	h := 4
 	score := m.scoreCalc.Score()
 	bd := score.Components
 	if bd.AlertPenalty != 0 || bd.ToolEfficiency != 0 || bd.PlanMode != 0 ||
@@ -472,5 +488,169 @@ func animTickCmd() tea.Cmd {
 	return tea.Tick(150*time.Millisecond, func(t time.Time) tea.Msg {
 		return animTickMsg(t)
 	})
+}
+
+// switchTab changes the active tab and refreshes data if needed.
+func (m *Model) switchTab(tab Tab) {
+	m.activeTab = tab
+	switch tab {
+	case TabKnowledge:
+		m.refreshKnowledge()
+	case TabPreferences:
+		m.refreshPreferences()
+	}
+}
+
+// refreshKnowledge loads docs statistics from the store.
+func (m *Model) refreshKnowledge() {
+	if m.st == nil {
+		return
+	}
+	total, bySource, lastCrawl, err := m.st.DocsStats()
+	if err != nil {
+		return
+	}
+	m.knTotal = total
+	m.knBySource = bySource
+	m.knLastCrawl = lastCrawl
+	m.knVersion, _, _ = m.st.LatestChangelogVersion()
+}
+
+// refreshPreferences loads user profile data from the store.
+func (m *Model) refreshPreferences() {
+	if m.st == nil {
+		return
+	}
+	m.pfCluster = m.st.UserCluster()
+	m.pfMetrics, _ = m.st.AllUserProfile()
+	m.pfFeatures = make(map[string]*store.UserPref)
+	for _, key := range []string{"plan_mode", "worktree", "agent", "skill", "team"} {
+		if p, err := m.st.UserPreference("feature_" + key); err == nil && p != nil {
+			m.pfFeatures[key] = p
+		}
+	}
+}
+
+// executeDocsSearch runs a docs search with FTS5 → LIKE fallback.
+func (m *Model) executeDocsSearch() {
+	if m.st == nil || m.docsQuery == "" {
+		m.docsResults = nil
+		return
+	}
+	results, err := m.st.SearchDocsFTS(m.docsQuery, "", 20)
+	if err != nil || len(results) == 0 {
+		results, _ = m.st.SearchDocsLIKE(m.docsQuery, 20)
+	}
+	m.docsResults = results
+	m.docsCursor = 0
+	m.docsExpanded = make(map[int]bool)
+}
+
+// updateActivity handles key events for the Activity tab.
+func (m Model) updateActivity(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.expanded[m.cursorIdx] && m.expandOffset > 0 {
+			m.expandOffset--
+			return m, nil
+		}
+		prev := m.prevVisibleIdx(m.cursorIdx)
+		if prev != m.cursorIdx {
+			m.cursorIdx = prev
+			m.expandOffset = 0
+			m.autoFollow = false
+		}
+		return m, nil
+	case "down", "j":
+		if m.expanded[m.cursorIdx] && m.cursorIdx < len(m.events) {
+			maxOff := m.expandMaxOffset(m.cursorIdx)
+			if m.expandOffset < maxOff {
+				m.expandOffset++
+				return m, nil
+			}
+		}
+		next := m.nextVisibleIdx(m.cursorIdx)
+		if next != m.cursorIdx {
+			m.cursorIdx = next
+			m.expandOffset = 0
+		}
+		if m.cursorIdx >= m.lastVisibleIdx() {
+			m.autoFollow = true
+		}
+		return m, nil
+	case "enter":
+		if m.cursorIdx >= 0 && m.cursorIdx < len(m.events) {
+			if m.expanded[m.cursorIdx] {
+				delete(m.expanded, m.cursorIdx)
+			} else {
+				m.expanded[m.cursorIdx] = true
+			}
+			m.expandOffset = 0
+		}
+		return m, nil
+	case "home", "g":
+		m.cursorIdx = m.firstVisibleIdx()
+		m.expandOffset = 0
+		m.autoFollow = false
+		return m, nil
+	case "end", "G":
+		m.cursorIdx = m.lastVisibleIdx()
+		m.expandOffset = 0
+		m.autoFollow = true
+		return m, nil
+	}
+	return m, nil
+}
+
+// updateDocs handles key events for the Docs tab.
+func (m Model) updateDocs(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.docsSearching {
+		switch msg.String() {
+		case "enter":
+			m.docsSearching = false
+			m.executeDocsSearch()
+			return m, nil
+		case "esc":
+			m.docsSearching = false
+			return m, nil
+		case "backspace":
+			if len(m.docsQuery) > 0 {
+				m.docsQuery = m.docsQuery[:len(m.docsQuery)-1]
+			}
+			return m, nil
+		default:
+			if len(msg.String()) == 1 {
+				m.docsQuery += msg.String()
+			}
+			return m, nil
+		}
+	}
+
+	switch msg.String() {
+	case "/":
+		m.docsSearching = true
+		m.docsQuery = ""
+		return m, nil
+	case "up", "k":
+		if m.docsCursor > 0 {
+			m.docsCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.docsCursor < len(m.docsResults)-1 {
+			m.docsCursor++
+		}
+		return m, nil
+	case "enter":
+		if m.docsCursor >= 0 && m.docsCursor < len(m.docsResults) {
+			if m.docsExpanded[m.docsCursor] {
+				delete(m.docsExpanded, m.docsCursor)
+			} else {
+				m.docsExpanded[m.docsCursor] = true
+			}
+		}
+		return m, nil
+	}
+	return m, nil
 }
 

@@ -67,6 +67,7 @@ func Run(args []string) error {
 
 	generateEmbeddings()
 	ensureRulesFile()
+	ensurePathSymlink()
 
 	fmt.Println("\n✓ Installation complete!")
 	fmt.Println("\nIf you haven't set up the plugin yet:")
@@ -550,4 +551,41 @@ func renderProgress(prefix string, done, total int) {
 
 func clearLine() {
 	fmt.Print("\r\033[K")
+}
+
+// ensurePathSymlink creates a symlink at ~/.local/bin/claude-alfred
+// pointing to the current binary, so users can run claude-alfred from PATH.
+func ensurePathSymlink() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	exe, err = filepath.EvalSymlinks(exe)
+	if err != nil {
+		return
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	binDir := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return
+	}
+	linkPath := filepath.Join(binDir, "claude-alfred")
+
+	// Check if symlink already points to the right target.
+	if target, err := os.Readlink(linkPath); err == nil && target == exe {
+		return
+	}
+
+	_ = os.Remove(linkPath)
+	if err := os.Symlink(exe, linkPath); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not create symlink %s: %v\n", linkPath, err)
+		return
+	}
+	fmt.Printf("✓ Symlink created: %s\n", linkPath)
+	fmt.Printf("  Add ~/.local/bin to PATH if not already:\n")
+	fmt.Printf("  export PATH=\"$HOME/.local/bin:$PATH\"\n")
 }

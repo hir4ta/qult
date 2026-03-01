@@ -118,7 +118,10 @@ func runWatch() error {
 	}
 	fmt.Printf("Watching session: %s (%d existing events)\n", sid, len(result.InitialEvents))
 
-	model := tui.NewModel(result.InitialEvents, result.EventCh, selected.SessionID)
+	// Open store for dashboard tabs (nil-safe if unavailable).
+	st, _ := store.OpenDefaultCached()
+
+	model := tui.NewModel(result.InitialEvents, result.EventCh, selected.SessionID, st)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {
