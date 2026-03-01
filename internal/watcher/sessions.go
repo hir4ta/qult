@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hir4ta/claude-buddy/internal/parser"
+	"github.com/hir4ta/claude-alfred/internal/parser"
 )
 
 // SessionInfo holds metadata about a session file.

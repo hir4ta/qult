@@ -1,4 +1,4 @@
-module github.com/hir4ta/claude-buddy
+module github.com/hir4ta/claude-alfred
 
 go 1.25.0
 
@@ -8,7 +8,6 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/mark3labs/mcp-go v0.44.0
 	github.com/ncruces/go-sqlite3 v0.30.5
-	github.com/odvcencio/gotreesitter v0.5.2
 )
 
 require (

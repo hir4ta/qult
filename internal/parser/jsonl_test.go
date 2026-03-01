@@ -412,7 +412,7 @@ func TestParseBuddyResumeDefault(t *testing.T) {
 				{
 					"type": "tool_use",
 					"id": "toolu_b1",
-					"name": "mcp__claude-buddy__buddy_resume",
+					"name": "mcp__claude-alfred__buddy_resume",
 					"input": {}
 				}
 			]
@@ -426,7 +426,7 @@ func TestParseBuddyResumeDefault(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
 	}
-	if events[0].ToolName != "mcp__claude-buddy__buddy_resume" {
+	if events[0].ToolName != "mcp__claude-alfred__buddy_resume" {
 		t.Errorf("expected buddy_resume, got %q", events[0].ToolName)
 	}
 	if events[0].ToolInput != "latest session" {
@@ -446,9 +446,9 @@ func TestParseBuddyResumeWithProject(t *testing.T) {
 				{
 					"type": "tool_use",
 					"id": "toolu_b2",
-					"name": "mcp__claude-buddy__buddy_resume",
+					"name": "mcp__claude-alfred__buddy_resume",
 					"input": {
-						"project": "claude-buddy"
+						"project": "claude-alfred"
 					}
 				}
 			]
@@ -479,7 +479,7 @@ func TestParseBuddyRecallWithQuery(t *testing.T) {
 				{
 					"type": "tool_use",
 					"id": "toolu_b3",
-					"name": "mcp__claude-buddy__buddy_recall",
+					"name": "mcp__claude-alfred__buddy_recall",
 					"input": {
 						"query": "authentication flow"
 					}
@@ -512,7 +512,7 @@ func TestParseBuddyPatternsWithQuery(t *testing.T) {
 				{
 					"type": "tool_use",
 					"id": "toolu_b4",
-					"name": "mcp__claude-buddy__buddy_patterns",
+					"name": "mcp__claude-alfred__buddy_patterns",
 					"input": {
 						"query": "error handling",
 						"type": "error_solution"
@@ -546,7 +546,7 @@ func TestParseBuddyStatsDefault(t *testing.T) {
 				{
 					"type": "tool_use",
 					"id": "toolu_b5",
-					"name": "mcp__claude-buddy__buddy_stats",
+					"name": "mcp__claude-alfred__buddy_stats",
 					"input": {}
 				}
 			]
@@ -577,7 +577,7 @@ func TestParseBuddyDecisionsWithSessionID(t *testing.T) {
 				{
 					"type": "tool_use",
 					"id": "toolu_b6",
-					"name": "mcp__claude-buddy__buddy_decisions",
+					"name": "mcp__claude-alfred__buddy_decisions",
 					"input": {
 						"session_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 					}

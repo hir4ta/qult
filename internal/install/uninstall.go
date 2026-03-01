@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// Uninstall removes claude-buddy hooks and MCP registration.
+// Uninstall removes claude-alfred hooks and MCP registration.
 func Uninstall() error {
 	// Step 1: Remove hooks from settings.json.
 	if err := RemoveHooks(); err != nil {
@@ -18,39 +18,39 @@ func Uninstall() error {
 	}
 
 	// Step 2: Remove MCP server registration.
-	cmd := exec.Command("claude", "mcp", "remove", "-s", "user", "claude-buddy")
+	cmd := exec.Command("claude", "mcp", "remove", "-s", "user", "claude-alfred")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("Warning: MCP removal: %v (%s)\n", err, strings.TrimSpace(string(output)))
 	} else {
 		fmt.Println("✓ MCP server removed")
 	}
 
-	// Step 3: Remove buddy skills.
+	// Step 3: Remove alfred skills.
 	removeSkills()
 	fmt.Println("✓ Skills removed")
 
-	// Step 4: Remove buddy agent.
+	// Step 4: Remove alfred agent.
 	if home, err := os.UserHomeDir(); err == nil {
-		agentPath := filepath.Join(home, ".claude", "agents", "buddy.md")
+		agentPath := filepath.Join(home, ".claude", "agents", "alfred.md")
 		if _, err := os.Stat(agentPath); err == nil {
 			_ = os.Remove(agentPath)
-			fmt.Println("✓ Buddy agent removed")
+			fmt.Println("✓ Alfred agent removed")
 		}
 	}
 
-	// Step 5: Remove buddy rules file.
+	// Step 5: Remove alfred rules file.
 	if home, err := os.UserHomeDir(); err == nil {
-		rulesPath := filepath.Join(home, ".claude", "rules", "buddy.md")
+		rulesPath := filepath.Join(home, ".claude", "rules", "alfred.md")
 		if _, err := os.Stat(rulesPath); err == nil {
 			_ = os.Remove(rulesPath)
-			fmt.Println("✓ Buddy rules file removed")
+			fmt.Println("✓ Alfred rules file removed")
 		}
 	}
 
 	// Step 6: Clean up legacy plugin bundle.
 	home, err := os.UserHomeDir()
 	if err == nil {
-		pluginDir := filepath.Join(home, ".claude-buddy", "plugin")
+		pluginDir := filepath.Join(home, ".claude-alfred", "plugin")
 		if _, err := os.Stat(pluginDir); err == nil {
 			if err := os.RemoveAll(pluginDir); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to remove %s: %v\n", pluginDir, err)

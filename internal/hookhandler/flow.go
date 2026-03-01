@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
-	"github.com/hir4ta/claude-buddy/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
 // EWMA smoothing factor: alpha=0.3 gives ~70% weight to history, 30% to latest.
@@ -179,7 +179,7 @@ func flowBudget(sdb *sessiondb.SessionDB) int {
 }
 
 // isInFlow returns true if the session is in a productive flow state.
-// Kept for backward compatibility with MCP tools (buddy_current_state).
+// Kept for backward compatibility with MCP tools (alfred_current_state).
 func isInFlow(sdb *sessiondb.SessionDB) bool {
 	return classifyFlowState(sdb) == FlowProductive
 }
@@ -198,18 +198,6 @@ func getInt(sdb *sessiondb.SessionDB, key string) int {
 	}
 	v, _ := strconv.Atoi(s)
 	return v
-}
-
-// updateAcceptanceRate updates the EWMA acceptance rate when a suggestion
-// outcome is known. accepted=true means the user acted on the suggestion.
-func updateAcceptanceRate(sdb *sessiondb.SessionDB, accepted bool) {
-	var val float64
-	if accepted {
-		val = 1.0
-	}
-	prev := getFloat(sdb, "ewma_acceptance_rate")
-	newRate := ewmaUpdate(prev, val, ewmaAlpha)
-	_ = sdb.SetContext("ewma_acceptance_rate", strconv.FormatFloat(newRate, 'f', 4, 64))
 }
 
 // IsWallDetected returns true if a velocity wall was detected.

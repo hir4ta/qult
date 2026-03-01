@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
 )
 
 // ErrClaudeNotFound indicates that the claude CLI is not in PATH.

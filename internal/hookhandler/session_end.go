@@ -1,7 +1,6 @@
 package hookhandler
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,9 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hir4ta/claude-buddy/internal/coach"
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
-	"github.com/hir4ta/claude-buddy/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
 type sessionEndInput struct {
@@ -31,7 +29,7 @@ func handleSessionEnd(input []byte) (*HookOutput, error) {
 	// Log suggestion signal-to-noise ratio.
 	logSNR()
 
-	// Clean up live session data from buddy.db.
+	// Clean up live session data from alfred.db.
 	if st, err := store.OpenDefaultCached(); err == nil {
 		_ = st.CleanupLiveSession(in.SessionID)
 	}
@@ -43,45 +41,8 @@ func handleSessionEnd(input []byte) (*HookOutput, error) {
 	return nil, nil
 }
 
-// logSNR computes and logs the suggestion signal-to-noise ratio at session end.
-// Records the measurement to snr_history and runs auto-elimination for
-// consistently low-performing patterns.
-func logSNR() {
-	st, err := store.OpenDefaultCached()
-	if err != nil {
-		return
-	}
-
-	snr, total, err := st.ComputeSNR(30)
-	if err != nil || total == 0 {
-		return
-	}
-
-	fmt.Fprintf(os.Stderr, "[buddy] SNR: %.2f (%d suggestions in last 30 days)\n", snr, total)
-
-	// Auto-eliminate noise patterns (3 consecutive sessions below target).
-	var eliminatedStr string
-	suppressed, _ := st.AutoEliminateNoisePatterns(0.80, 3)
-	if len(suppressed) > 0 {
-		eliminatedStr = strings.Join(suppressed, ",")
-		fmt.Fprintf(os.Stderr, "[buddy] Auto-eliminated noise patterns: %s\n", eliminatedStr)
-	}
-
-	// Record SNR measurement to history.
-	_ = st.InsertSNRHistory("", snr, total, eliminatedStr)
-
-	if snr < 0.5 && total > 20 {
-		worst, err := st.LowestPerformingPatterns(30, 3, 5)
-		if err != nil || len(worst) == 0 {
-			return
-		}
-		fmt.Fprintf(os.Stderr, "[buddy] Low SNR — worst patterns:\n")
-		for _, p := range worst {
-			fmt.Fprintf(os.Stderr, "[buddy]   %s: %.0f%% resolved (%d/%d)\n",
-				p.Pattern, p.Rate*100, p.Resolved, p.Total)
-		}
-	}
-}
+// logSNR is a placeholder — SNR/pattern tables were removed in alfred v1.
+func logSNR() {}
 
 // persistSessionData runs all persist functions for the given session.
 // Safe to call multiple times — all writers are idempotent
@@ -101,12 +62,10 @@ func persistSessionData(sessionID, cwd string) {
 	persistSessionMetrics(sdb)
 	persistUserProfile(sdb)
 	syncToGlobalDB(sdb, cwd)
-	extractPatternsWithLLM(sdb, sessionID)
-	preGenerateCoaching(sdb, cwd)
 	persistSessionMemory(sessionID, cwd)
 }
 
-// persistWorkflowSequence reads the phase sequence from buddy.db's live tables
+// persistWorkflowSequence reads the phase sequence from alfred.db's live tables
 // (populated by PostToolUse) and saves it as a workflow_sequence for future learning.
 // Falls back to sessiondb phases if live data is unavailable.
 func persistWorkflowSequence(sdb *sessiondb.SessionDB, sessionID string) {
@@ -115,7 +74,7 @@ func persistWorkflowSequence(sdb *sessiondb.SessionDB, sessionID string) {
 		return
 	}
 
-	// Read phases from buddy.db (populated directly by PostToolUse).
+	// Read phases from alfred.db (populated directly by PostToolUse).
 	phases, err := st.LivePhaseSequence(sessionID)
 	if err != nil || len(phases) < 2 {
 		// Fall back to sessiondb for orphan recovery or legacy sessions.
@@ -315,11 +274,7 @@ func persistUserProfile(sdb *sessiondb.SessionDB) {
 		}
 	}
 
-	// suggestion_follow_rate: fraction of helpful feedback (from feedbacks table).
-	if stats, ferr := st.AllFeedbackStats(); ferr == nil && stats.TotalCount > 0 {
-		followRate := float64(stats.Helpful) / float64(stats.TotalCount)
-		_ = st.UpdateUserProfile("suggestion_follow_rate", followRate)
-	}
+	// suggestion_follow_rate: feedbacks table removed in alfred v1.
 }
 
 // syncToGlobalDB syncs patterns and decisions from the project store
@@ -365,219 +320,13 @@ func syncToGlobalDB(sdb *sessiondb.SessionDB, cwd string) {
 	}
 }
 
-// preGenerateCoaching generates AI coaching for the next session and caches it.
-// Uses the current session's rich context for personalized SITUATION/WHY/SUGGESTION coaching.
-func preGenerateCoaching(sdb *sessiondb.SessionDB, cwd string) {
-	if cwd == "" {
-		return
-	}
 
-	taskType, _ := sdb.GetContext("task_type")
-	domain, _ := sdb.GetWorkingSet("domain")
-	if taskType == "" {
-		return
-	}
-
-	st, err := store.OpenDefaultCached()
-	if err != nil {
-		return
-	}
-
-	// Build rich coaching context from session state.
-	cc := coach.CoachingContext{
-		TaskType:    taskType,
-		Domain:      domain,
-		UserCluster: st.UserCluster(),
-	}
-
-	if intent, _ := sdb.GetWorkingSet("intent"); intent != "" {
-		cc.Intent = intent
-	}
-	if files, _ := sdb.GetWorkingSetFiles(); len(files) > 0 {
-		cc.Files = files
-	}
-	if decisions, _ := sdb.GetWorkingSetDecisions(); len(decisions) > 0 {
-		limit := len(decisions)
-		if limit > 3 {
-			limit = 3
-		}
-		cc.Decisions = decisions[:limit]
-	}
-
-	// Gather recent error summaries from structured events.
-	if errEvents, _ := sdb.GetStructuredEventsByCategory("error"); len(errEvents) > 0 {
-		limit := len(errEvents)
-		if limit > 3 {
-			limit = 3
-		}
-		for _, e := range errEvents[:limit] {
-			cc.RecentErrors = append(cc.RecentErrors, e.Summary)
-		}
-	}
-
-	// Gather related pattern titles.
-	patterns, _ := st.SearchPatternsByProject(cwd, 3)
-	for _, p := range patterns {
-		cc.PastPatterns = append(cc.PastPatterns, p.Title)
-	}
-
-	ctx := context.Background()
-	result, err := coach.GenerateCoachingWithContext(ctx, sdb, cc, 5*time.Second)
-	if err != nil || result == nil {
-		return
-	}
-
-	// Format as labeled text for cache storage.
-	var text string
-	if result.Situation != "" {
-		text = fmt.Sprintf("SITUATION: %s\nWHY: %s\nSUGGESTION: %s",
-			result.Situation, result.Reasoning, result.Suggestion)
-	} else {
-		text = result.Suggestion
-	}
-
-	_ = st.SetCachedCoaching(cwd, taskType, domain, text, "")
-}
-
-// extractPatternsWithLLM uses the coach package to extract reusable knowledge
-// from the session's recent events via `claude -p`. Results are persisted to buddy.db.
-// Gracefully skips if claude CLI is not available or on timeout.
-func extractPatternsWithLLM(sdb *sessiondb.SessionDB, sessionID string) {
-	summary := buildExtractionSummary(sdb)
-	if summary == "" {
-		return
-	}
-
-	ctx := context.Background()
-	results, err := coach.ExtractPatterns(ctx, sdb, summary, 5*time.Second)
-	if err != nil || len(results) == 0 {
-		return
-	}
-
-	st, err := store.OpenDefaultCached()
-	if err != nil {
-		return
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	for _, r := range results {
-		p := &store.PatternRow{
-			SessionID:   sessionID,
-			PatternType: r.Type,
-			Title:       r.Title,
-			Content:     r.Content,
-			EmbedText:   r.Title + " " + r.Content,
-			Language:    "en",
-			Scope:       "project",
-			Timestamp:   now,
-			Tags:        []string{r.Type, "llm-extracted"},
-		}
-		_, _ = st.InsertPattern(p)
-	}
-}
-
-// buildExtractionSummary builds a rich session summary for LLM pattern extraction.
-// Combines working set context, structured events, tool sequence, and decisions.
-func buildExtractionSummary(sdb *sessiondb.SessionDB) string {
-	events, err := sdb.RecentEvents(50)
-	if err != nil || len(events) == 0 {
-		return ""
-	}
-
-	var b strings.Builder
-
-	// Section 1: Session context from working set.
-	b.WriteString("## Session Summary\n")
-	if intent, _ := sdb.GetWorkingSet("intent"); intent != "" {
-		fmt.Fprintf(&b, "- Task: %s\n", intent)
-	}
-	if taskType, _ := sdb.GetContext("task_type"); taskType != "" {
-		fmt.Fprintf(&b, "- Task Type: %s\n", taskType)
-	}
-	if domain, _ := sdb.GetWorkingSet("domain"); domain != "" {
-		fmt.Fprintf(&b, "- Domain: %s\n", domain)
-	}
-	if branch, _ := sdb.GetWorkingSet("git_branch"); branch != "" {
-		fmt.Fprintf(&b, "- Git Branch: %s\n", branch)
-	}
-	if files, _ := sdb.GetWorkingSetFiles(); len(files) > 0 {
-		b.WriteString("- Files Modified:")
-		limit := len(files)
-		if limit > 10 {
-			limit = 10
-		}
-		for _, f := range files[:limit] {
-			fmt.Fprintf(&b, " %s", filepath.Base(f))
-		}
-		b.WriteString("\n")
-	}
-
-	// Section 2: Structured events (errors, fixes, decisions, discoveries).
-	structuredEvents, _ := sdb.GetStructuredEvents()
-	if len(structuredEvents) > 0 {
-		b.WriteString("\n## Key Events\n")
-		limit := len(structuredEvents)
-		if limit > 15 {
-			limit = 15
-		}
-		for _, se := range structuredEvents[:limit] {
-			fmt.Fprintf(&b, "[%s] %s\n", se.Category, se.Summary)
-		}
-	}
-
-	// Section 3: Abbreviated tool sequence.
-	b.WriteString("\n## Tool Sequence\n")
-	prevTool := ""
-	repeatCount := 0
-	for _, ev := range events {
-		name := ev.ToolName
-		if ev.IsWrite {
-			name += "[w]"
-		}
-		if name == prevTool {
-			repeatCount++
-			continue
-		}
-		if prevTool != "" {
-			if repeatCount > 0 {
-				fmt.Fprintf(&b, "%s(x%d)→", prevTool, repeatCount+1)
-			} else {
-				b.WriteString(prevTool + "→")
-			}
-		}
-		prevTool = name
-		repeatCount = 0
-	}
-	if prevTool != "" {
-		if repeatCount > 0 {
-			fmt.Fprintf(&b, "%s(x%d)", prevTool, repeatCount+1)
-		} else {
-			b.WriteString(prevTool)
-		}
-	}
-	b.WriteString("\n")
-
-	// Section 4: Decisions from working set.
-	if decisions, _ := sdb.GetWorkingSetDecisions(); len(decisions) > 0 {
-		b.WriteString("\n## Decisions Made\n")
-		limit := len(decisions)
-		if limit > 5 {
-			limit = 5
-		}
-		for _, d := range decisions[:limit] {
-			fmt.Fprintf(&b, "- %s\n", d)
-		}
-	}
-
-	return b.String()
-}
-
-// RecoverOrphanedSessions scans /tmp/claude-buddy/ for session DBs
+// RecoverOrphanedSessions scans /tmp/claude-alfred/ for session DBs
 // that were not properly destroyed (SessionEnd never fired).
 // Extracts and persists their data, then destroys them.
 // Skips the current session. Returns the number of recovered sessions.
 func RecoverOrphanedSessions(currentSessionID, cwd string) int {
-	dir := filepath.Join(os.TempDir(), "claude-buddy")
+	dir := filepath.Join(os.TempDir(), "claude-alfred")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return 0

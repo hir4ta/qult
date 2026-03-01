@@ -16,7 +16,7 @@ func (s *Store) AverageRecoveryTools(taskType string) int {
 		taskType,
 	).Scan(&avg, &count)
 	if err != nil {
-		fmt.Printf("[buddy] avg recovery tools query: %v\n", err)
+		fmt.Printf("[alfred] avg recovery tools query: %v\n", err)
 		return 0
 	}
 	if count < 2 {

@@ -2,7 +2,7 @@ package store
 
 import "fmt"
 
-// RecordLivePhase writes a phase entry directly to buddy.db.
+// RecordLivePhase writes a phase entry directly to alfred.db.
 // Called from PostToolUse so phase data persists without SessionEnd.
 func (s *Store) RecordLivePhase(sessionID, phase, toolName string) error {
 	_, err := s.db.Exec(

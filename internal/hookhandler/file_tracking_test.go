@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
 )
 
 func openFileTrackingTestDB(t *testing.T) *sessiondb.SessionDB {

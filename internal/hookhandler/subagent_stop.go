@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
 )
 
 type subagentStopInput struct {
@@ -45,7 +45,7 @@ func handleSubagentStop(input []byte) (*HookOutput, error) {
 
 	sdb, err := sessiondb.Open(in.SessionID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[buddy] SubagentStop: open session db: %v\n", err)
+		fmt.Fprintf(os.Stderr, "[alfred] SubagentStop: open session db: %v\n", err)
 		return nil, nil
 	}
 	defer sdb.Close()
@@ -86,7 +86,7 @@ func handleSubagentStop(input []byte) (*HookOutput, error) {
 		return nil, nil
 	}
 
-	reason := fmt.Sprintf("[buddy] Subagent %q quality check failed: %s. Fix these issues before completing.",
+	reason := fmt.Sprintf("[alfred] Subagent %q quality check failed: %s. Fix these issues before completing.",
 		in.AgentName, strings.Join(issues, "; "))
 	Deliver(sdb, "subagent-quality", "warning",
 		"Subagent output quality check", reason, PriorityHigh,

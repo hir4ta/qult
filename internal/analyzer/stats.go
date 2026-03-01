@@ -3,7 +3,7 @@ package analyzer
 import (
 	"time"
 
-	"github.com/hir4ta/claude-buddy/internal/parser"
+	"github.com/hir4ta/claude-alfred/internal/parser"
 )
 
 // Stats tracks live session statistics.

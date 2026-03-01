@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hir4ta/claude-buddy/internal/parser"
+	"github.com/hir4ta/claude-alfred/internal/parser"
 )
 
 // FeedbackKind distinguishes proposals (early hints) from full alerts.

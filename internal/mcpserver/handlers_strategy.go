@@ -8,10 +8,10 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/hir4ta/claude-buddy/internal/analyzer"
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
-	"github.com/hir4ta/claude-buddy/internal/store"
-	"github.com/hir4ta/claude-buddy/internal/watcher"
+	"github.com/hir4ta/claude-alfred/internal/analyzer"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/watcher"
 )
 
 // sessionOutlookHandler provides a holistic view of the current session:
@@ -65,31 +65,6 @@ func sessionOutlookHandler(claudeHome string, st *store.Store) server.ToolHandle
 
 		// Risk assessment.
 		result["risk_level"] = assessRisk(health, len(alerts), stats.ToolUseCount)
-
-		// Signal-to-noise ratio from suggestion outcomes (30-day window).
-		if st != nil {
-			snr, sampleSize, snrErr := st.ComputeSNR(30)
-			if snrErr == nil && sampleSize > 0 {
-				result["snr"] = snr
-				result["snr_sample_size"] = sampleSize
-			}
-		}
-
-		// Priority accuracy from signal outcomes (30-day window).
-		if st != nil {
-			if stats, overall, paErr := st.PriorityAccuracy(30); paErr == nil && len(stats) > 0 {
-				result["signal_accuracy"] = overall
-				priorityDetail := make(map[string]any)
-				for p, s := range stats {
-					priorityDetail[fmt.Sprintf("P%d", p)] = map[string]any{
-						"delivered": s.Delivered,
-						"acted_on":  s.ActedOn,
-						"rate":      s.Rate,
-					}
-				}
-				result["priority_accuracy"] = priorityDetail
-			}
-		}
 
 		// User profile context.
 		if st != nil {
@@ -411,19 +386,7 @@ func clusterAdvice(cluster, taskType string) string {
 	}
 }
 
-func frequentFailuresSummary(st *store.Store, project string) []map[string]any {
-	failures, _ := st.FrequentFailures(project, 5)
-	var result []map[string]any
-	for _, f := range failures {
-		sig := f.ErrorSignature
-		if len([]rune(sig)) > 80 {
-			sig = string([]rune(sig)[:80]) + "..."
-		}
-		result = append(result, map[string]any{
-			"type":       f.FailureType,
-			"signature":  sig,
-			"occurrences": f.Count,
-		})
-	}
-	return result
+func frequentFailuresSummary(_ *store.Store, _ string) []map[string]any {
+	// FrequentFailures removed — failure_solutions table deleted in schema reset.
+	return nil
 }

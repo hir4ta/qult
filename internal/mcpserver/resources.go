@@ -8,9 +8,9 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/hir4ta/claude-buddy/internal/hookhandler"
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
-	"github.com/hir4ta/claude-buddy/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/hookhandler"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
 // registerResources adds MCP resources to the server.
@@ -18,7 +18,7 @@ func registerResources(s *server.MCPServer, claudeHome string, st *store.Store) 
 	s.AddResources(
 		server.ServerResource{
 			Resource: mcp.Resource{
-				URI:         "buddy://health",
+				URI:         "alfred://health",
 				Name:        "Session Health",
 				Description: "Current session health score and alert count",
 				MIMEType:    "application/json",
@@ -27,7 +27,7 @@ func registerResources(s *server.MCPServer, claudeHome string, st *store.Store) 
 		},
 		server.ServerResource{
 			Resource: mcp.Resource{
-				URI:         "buddy://alerts",
+				URI:         "alfred://alerts",
 				Name:        "Active Alerts",
 				Description: "Active anti-pattern alerts with observations and suggestions",
 				MIMEType:    "application/json",
@@ -36,7 +36,7 @@ func registerResources(s *server.MCPServer, claudeHome string, st *store.Store) 
 		},
 		server.ServerResource{
 			Resource: mcp.Resource{
-				URI:         "buddy://decisions",
+				URI:         "alfred://decisions",
 				Name:        "Design Decisions",
 				Description: "Past design decisions from stored sessions",
 				MIMEType:    "application/json",
@@ -45,7 +45,7 @@ func registerResources(s *server.MCPServer, claudeHome string, st *store.Store) 
 		},
 		server.ServerResource{
 			Resource: mcp.Resource{
-				URI:         "buddy://health-timeline",
+				URI:         "alfred://health-timeline",
 				Name:        "Health Timeline",
 				Description: "Session health snapshots with trend prediction and sparkline",
 				MIMEType:    "application/json",
@@ -59,7 +59,7 @@ func healthResource(claudeHome string) server.ResourceHandlerFunc {
 	return func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 		session := findLatestSession(claudeHome)
 		if session == nil {
-			return jsonResource("buddy://health", map[string]any{
+			return jsonResource("alfred://health", map[string]any{
 				"health_score": 1.0,
 				"alert_count":  0,
 				"status":       "no active session",
@@ -67,7 +67,7 @@ func healthResource(claudeHome string) server.ResourceHandlerFunc {
 		}
 
 		alerts, score := computeAlertsAndScore(session)
-		return jsonResource("buddy://health", map[string]any{
+		return jsonResource("alfred://health", map[string]any{
 			"health_score": score,
 			"alert_count":  len(alerts),
 			"session_id":   session.SessionID,
@@ -79,7 +79,7 @@ func alertsResource(claudeHome string) server.ResourceHandlerFunc {
 	return func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 		session := findLatestSession(claudeHome)
 		if session == nil {
-			return jsonResource("buddy://alerts", []any{})
+			return jsonResource("alfred://alerts", []any{})
 		}
 
 		alerts, _ := computeAlertsAndScore(session)
@@ -92,14 +92,14 @@ func alertsResource(claudeHome string) server.ResourceHandlerFunc {
 				"suggestion":  a.Suggestion,
 			})
 		}
-		return jsonResource("buddy://alerts", result)
+		return jsonResource("alfred://alerts", result)
 	}
 }
 
 func decisionsResource(st *store.Store) server.ResourceHandlerFunc {
 	return func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 		if st == nil {
-			return jsonResource("buddy://decisions", []any{})
+			return jsonResource("alfred://decisions", []any{})
 		}
 
 		decisions, err := st.SearchDecisions("", "", 20)
@@ -114,7 +114,7 @@ func decisionsResource(st *store.Store) server.ResourceHandlerFunc {
 				"decision": d.DecisionText,
 			})
 		}
-		return jsonResource("buddy://decisions", result)
+		return jsonResource("alfred://decisions", result)
 	}
 }
 
@@ -122,7 +122,7 @@ func healthTimelineResource(claudeHome string) server.ResourceHandlerFunc {
 	return func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 		session := findLatestSession(claudeHome)
 		if session == nil {
-			return jsonResource("buddy://health-timeline", map[string]any{
+			return jsonResource("alfred://health-timeline", map[string]any{
 				"snapshots": []any{},
 				"trend":     nil,
 				"sparkline": "",
@@ -131,7 +131,7 @@ func healthTimelineResource(claudeHome string) server.ResourceHandlerFunc {
 
 		sdb, err := sessiondb.Open(session.SessionID)
 		if err != nil {
-			return jsonResource("buddy://health-timeline", map[string]any{
+			return jsonResource("alfred://health-timeline", map[string]any{
 				"error": "failed to open session db",
 			})
 		}
@@ -166,7 +166,7 @@ func healthTimelineResource(claudeHome string) server.ResourceHandlerFunc {
 			}
 		}
 
-		return jsonResource("buddy://health-timeline", map[string]any{
+		return jsonResource("alfred://health-timeline", map[string]any{
 			"snapshots": snapshotData,
 			"trend":     trendData,
 			"sparkline": sparkline,

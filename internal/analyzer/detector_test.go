@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hir4ta/claude-buddy/internal/parser"
+	"github.com/hir4ta/claude-alfred/internal/parser"
 )
 
 func makeToolEvent(name, input string, ts time.Time) parser.SessionEvent {
@@ -550,8 +550,8 @@ func TestCompactAmnesiaFileList(t *testing.T) {
 			if !hasFile {
 				t.Errorf("Observation should contain overlapping file names, got: %s", a.Observation)
 			}
-			if !strings.Contains(a.Suggestion, "buddy_knowledge") {
-				t.Errorf("Suggestion should mention buddy_knowledge, got: %s", a.Suggestion)
+			if !strings.Contains(a.Suggestion, "alfred_knowledge") {
+				t.Errorf("Suggestion should mention alfred_knowledge, got: %s", a.Suggestion)
 			}
 			return
 		}

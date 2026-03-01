@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
 )
 
 // trackFileChange records file change metrics after Edit/Write and detects oscillation/revert.
@@ -47,7 +47,7 @@ func trackFileChange(sdb *sessiondb.SessionDB, filePath, cwd string) {
 
 	seq, _ := sdb.CurrentEventSeq()
 	if err := sdb.RecordFileChange(filePath, seq, added, removed, diffHash); err != nil {
-		fmt.Fprintf(os.Stderr, "[buddy] trackFileChange: %v\n", err)
+		fmt.Fprintf(os.Stderr, "[alfred] trackFileChange: %v\n", err)
 		return
 	}
 

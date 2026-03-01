@@ -48,7 +48,7 @@ type GlobalStore struct {
 	dbPath string
 }
 
-// OpenGlobal opens (or creates) the global database at ~/.claude-buddy/global.db.
+// OpenGlobal opens (or creates) the global database at ~/.claude-alfred/global.db.
 func OpenGlobal() (*GlobalStore, error) {
 	dbPath := GlobalDBPath()
 	dir := filepath.Dir(dbPath)
@@ -85,7 +85,7 @@ func GlobalDBPath() string {
 	if err != nil {
 		home = "."
 	}
-	return filepath.Join(home, ".claude-buddy", "global.db")
+	return filepath.Join(home, ".claude-alfred", "global.db")
 }
 
 func migrateGlobal(db *sql.DB) error {

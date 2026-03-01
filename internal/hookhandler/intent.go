@@ -1,12 +1,10 @@
 package hookhandler
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
 
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
-	"github.com/hir4ta/claude-buddy/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
 )
 
 // TaskType represents the classified intent of the user's prompt.
@@ -180,76 +178,3 @@ func containsDecisionKeyword(text string) bool {
 	return false
 }
 
-// checkWorkflowOrder checks if the current action matches the expected workflow
-// for the given task type. Uses learned workflows from past sessions when available
-// (>=3 examples), otherwise falls back to hard-coded defaults.
-func checkWorkflowOrder(taskType TaskType, hasWrite bool, hasTestRun bool, inPlanMode bool) string {
-	// Try learned workflow first.
-	if suggestion := checkLearnedWorkflow(taskType, hasWrite, hasTestRun); suggestion != "" {
-		return suggestion
-	}
-
-	// Fall back to hard-coded defaults.
-	switch taskType {
-	case TaskBugfix:
-		if hasWrite && !hasTestRun {
-			return "Bugfix workflow: consider running the failing test first to reproduce the issue before editing."
-		}
-	case TaskFeature:
-		if hasWrite && !inPlanMode {
-			return "Feature workflow: consider using Plan Mode to outline the approach before starting implementation."
-		}
-	case TaskRefactor:
-		if hasWrite && !hasTestRun {
-			return "Refactor workflow: consider running tests first to establish a passing baseline before making changes."
-		}
-	}
-	return ""
-}
-
-// checkLearnedWorkflow uses past successful workflows to suggest the expected next phase.
-func checkLearnedWorkflow(taskType TaskType, hasWrite bool, hasTestRun bool) string {
-	if !hasWrite {
-		return "" // only suggest when writing without prior expected steps
-	}
-
-	st, err := store.OpenDefaultCached()
-	if err != nil {
-		return ""
-	}
-
-	phases, count, err := st.MostCommonWorkflow("", string(taskType), 3)
-	if err != nil || len(phases) < 2 {
-		return ""
-	}
-
-	// Check if the learned workflow starts with "test" or "read" before "write".
-	writeIdx := -1
-	testIdx := -1
-	readIdx := -1
-	for i, p := range phases {
-		switch p {
-		case "write":
-			if writeIdx < 0 {
-				writeIdx = i
-			}
-		case "test":
-			if testIdx < 0 {
-				testIdx = i
-			}
-		case "read":
-			if readIdx < 0 {
-				readIdx = i
-			}
-		}
-	}
-
-	if testIdx >= 0 && testIdx < writeIdx && !hasTestRun {
-		return fmt.Sprintf("Past %d successful sessions ran tests before editing for %s tasks.", count, taskType)
-	}
-	if readIdx >= 0 && readIdx < writeIdx && writeIdx == 0 {
-		return fmt.Sprintf("Past %d successful sessions read files before editing for %s tasks.", count, taskType)
-	}
-
-	return ""
-}

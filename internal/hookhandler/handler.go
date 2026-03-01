@@ -71,7 +71,7 @@ func Run(eventName string) error {
 	}
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[buddy] %s error: %v\n", eventName, err)
+		fmt.Fprintf(os.Stderr, "[alfred] %s error: %v\n", eventName, err)
 		return nil // Don't block Claude on errors.
 	}
 
@@ -102,17 +102,6 @@ func makeDenyOutput(reason string) *HookOutput {
 		HookSpecificOutput: map[string]any{
 			"hookEventName":          "PreToolUse",
 			"permissionDecision":     "deny",
-			"permissionDecisionReason": reason,
-		},
-	}
-}
-
-// makeAskOutput creates a PreToolUse "ask" response that prompts the user for confirmation.
-func makeAskOutput(reason string) *HookOutput {
-	return &HookOutput{
-		HookSpecificOutput: map[string]any{
-			"hookEventName":            "PreToolUse",
-			"permissionDecision":       "ask",
 			"permissionDecisionReason": reason,
 		},
 	}
@@ -150,7 +139,7 @@ func formatNudges(nudges []nudgeEntry) string {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
-		fmt.Fprintf(&b, "[buddy] %s (%s): %s\n→ %s", n.Pattern, n.Level, n.Observation, n.Suggestion)
+		fmt.Fprintf(&b, "[alfred] %s (%s): %s\n→ %s", n.Pattern, n.Level, n.Observation, n.Suggestion)
 	}
 	return b.String()
 }
@@ -186,13 +175,13 @@ func suggestedToolForPattern(pattern string) string {
 	}
 	switch base {
 	case "retry-loop", "explore-stuck", "edit-fail-spiral":
-		return "buddy_diagnose"
+		return "alfred_diagnose"
 	case "knowledge", "solution", "past-fix":
-		return "buddy_knowledge"
+		return "alfred_knowledge"
 	case "health-decline", "context-overload", "velocity-wall":
-		return "buddy_state"
+		return "alfred_state"
 	case "co-change", "blast-radius", "code-quality":
-		return "buddy_analyze"
+		return "alfred_analyze"
 	default:
 		return ""
 	}

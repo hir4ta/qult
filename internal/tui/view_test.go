@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	"github.com/hir4ta/claude-buddy/internal/parser"
+	"github.com/hir4ta/claude-alfred/internal/parser"
 )
 
 func TestIsVisibleEvent(t *testing.T) {

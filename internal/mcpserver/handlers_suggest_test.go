@@ -3,8 +3,8 @@ package mcpserver
 import (
 	"testing"
 
-	"github.com/hir4ta/claude-buddy/internal/analyzer"
-	"github.com/hir4ta/claude-buddy/internal/parser"
+	"github.com/hir4ta/claude-alfred/internal/analyzer"
+	"github.com/hir4ta/claude-alfred/internal/parser"
 )
 
 func TestTrackFeatures(t *testing.T) {

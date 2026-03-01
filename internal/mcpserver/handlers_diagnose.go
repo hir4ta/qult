@@ -2,7 +2,6 @@ package mcpserver
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -11,7 +10,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/hir4ta/claude-buddy/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
 func diagnoseHandler(st *store.Store) server.ToolHandlerFunc {
@@ -29,7 +28,7 @@ func diagnoseHandler(st *store.Store) server.ToolHandlerFunc {
 	}
 }
 
-// diagnosis is the structured output of buddy_diagnose.
+// diagnosis is the structured output of alfred_diagnose.
 type diagnosis struct {
 	FailureType   string            `json:"failure_type"`
 	RootCause     string            `json:"root_cause"`
@@ -281,55 +280,14 @@ func extractSig(errorMsg string) string {
 	return ""
 }
 
-func searchSolutions(st *store.Store, failureType, errorSig, filePath string) []pastSolution {
-	var results []pastSolution
-
-	// Try signature-based search first.
-	solutions, _ := st.SearchFailureSolutionsWithDiff(failureType, errorSig, 3)
-	for _, sol := range solutions {
-		ps := pastSolution{
-			Text:       sol.SolutionText,
-			Confidence: 0.7,
-		}
-		if sol.ResolutionDiff != "" {
-			ps.Diff = sol.ResolutionDiff
-			ps.Confidence = 0.85
-		}
-		if sol.TimesEffective > 0 && sol.TimesSurfaced > 0 {
-			ps.Confidence = float64(sol.TimesEffective) / float64(sol.TimesSurfaced)
-		}
-		results = append(results, ps)
-	}
-
-	// Try file-based search if no signature matches.
-	if len(results) == 0 && filePath != "" {
-		fileSolutions, _ := st.SearchFailureSolutionsByFile(filePath, 2)
-		for _, sol := range fileSolutions {
-			ps := pastSolution{
-				Text:       sol.SolutionText,
-				Confidence: 0.5,
-			}
-			if sol.ResolutionDiff != "" {
-				ps.Diff = sol.ResolutionDiff
-				ps.Confidence = 0.65
-			}
-			results = append(results, ps)
-		}
-	}
-
-	return results
+// searchSolutions is a placeholder — failure_solutions table was removed in alfred v1.
+func searchSolutions(_ *store.Store, _, _, _ string) []pastSolution {
+	return nil
 }
 
-func searchChains(st *store.Store, failureType, errorSig string) []string {
-	sig := failureType + ":" + errorSig
-	chains, _ := st.SearchSolutionChains(sig, 1)
-	if len(chains) == 0 {
-		return nil
-	}
-
-	var toolSeq []string
-	_ = json.Unmarshal([]byte(chains[0].ToolSequence), &toolSeq)
-	return toolSeq
+// searchChains is a placeholder — solution_chains table was removed in alfred v1.
+func searchChains(_ *store.Store, _, _ string) []string {
+	return nil
 }
 
 func buildActions(d *diagnosis, filePath string) []recommendAction {

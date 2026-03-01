@@ -5,13 +5,17 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 16
+// schemaVersion 100 = alfred v1 (full reset from buddy V1-V16).
+const schemaVersion = 100
 
 const ddlV1 = `
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER NOT NULL
 );
 
+-- ==========================================================
+-- Core tables
+-- ==========================================================
 CREATE TABLE IF NOT EXISTS sessions (
     id              TEXT PRIMARY KEY,
     project_path    TEXT NOT NULL,
@@ -75,160 +79,21 @@ CREATE TABLE IF NOT EXISTS decisions (
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
-`
-
-const ddlV2 = `
--- ==========================================================
--- tags master (normalized: junction table instead of JSON array)
--- ==========================================================
 CREATE TABLE IF NOT EXISTS tags (
     id   INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE
 );
 
 -- ==========================================================
--- patterns table (knowledge unit)
+-- User behavior tables
 -- ==========================================================
-CREATE TABLE IF NOT EXISTS patterns (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id      TEXT NOT NULL,
-    pattern_type    TEXT NOT NULL,
-    title           TEXT NOT NULL,
-    content         TEXT NOT NULL,
-    embed_text      TEXT NOT NULL,
-    language        TEXT,
-    scope           TEXT NOT NULL DEFAULT 'project',
-    source_event_id INTEGER,
-    timestamp       TEXT NOT NULL,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (session_id) REFERENCES sessions(id),
-    FOREIGN KEY (source_event_id) REFERENCES events(id)
+CREATE TABLE IF NOT EXISTS user_profile (
+    metric_name  TEXT PRIMARY KEY,
+    ewma_value   REAL NOT NULL DEFAULT 0.0,
+    sample_count INTEGER NOT NULL DEFAULT 0,
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS pattern_tags (
-    pattern_id INTEGER NOT NULL,
-    tag_id     INTEGER NOT NULL,
-    PRIMARY KEY (pattern_id, tag_id),
-    FOREIGN KEY (pattern_id) REFERENCES patterns(id) ON DELETE CASCADE,
-    FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS pattern_files (
-    pattern_id INTEGER NOT NULL,
-    file_path  TEXT NOT NULL,
-    role       TEXT NOT NULL DEFAULT 'related',
-    PRIMARY KEY (pattern_id, file_path),
-    FOREIGN KEY (pattern_id) REFERENCES patterns(id) ON DELETE CASCADE
-);
-
--- ==========================================================
--- alerts table (anti-pattern detection records)
--- ==========================================================
-CREATE TABLE IF NOT EXISTS alerts (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id      TEXT NOT NULL,
-    pattern_type    TEXT NOT NULL,
-    level           TEXT NOT NULL,
-    situation       TEXT,
-    observation     TEXT,
-    suggestion      TEXT,
-    event_count     INTEGER,
-    first_event_id  INTEGER,
-    last_event_id   INTEGER,
-    timestamp       TEXT NOT NULL,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (session_id) REFERENCES sessions(id),
-    FOREIGN KEY (first_event_id) REFERENCES events(id),
-    FOREIGN KEY (last_event_id) REFERENCES events(id)
-);
-
-CREATE TABLE IF NOT EXISTS alert_events (
-    alert_id  INTEGER NOT NULL,
-    event_id  INTEGER NOT NULL,
-    PRIMARY KEY (alert_id, event_id),
-    FOREIGN KEY (alert_id) REFERENCES alerts(id) ON DELETE CASCADE,
-    FOREIGN KEY (event_id) REFERENCES events(id)
-);
-
--- ==========================================================
--- embeddings (BLOB storage, cosine similarity computed in Go)
--- ==========================================================
-CREATE TABLE IF NOT EXISTS embeddings (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    source     TEXT NOT NULL,
-    source_id  INTEGER NOT NULL,
-    model      TEXT NOT NULL,
-    dims       INTEGER NOT NULL,
-    vector     BLOB NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE (source, source_id)
-);
-
--- ==========================================================
--- indexes
--- ==========================================================
-CREATE INDEX IF NOT EXISTS idx_patterns_session ON patterns(session_id);
-CREATE INDEX IF NOT EXISTS idx_patterns_type ON patterns(pattern_type);
-CREATE INDEX IF NOT EXISTS idx_patterns_scope ON patterns(scope);
-CREATE INDEX IF NOT EXISTS idx_alerts_session ON alerts(session_id);
-CREATE INDEX IF NOT EXISTS idx_alerts_type ON alerts(pattern_type);
-CREATE INDEX IF NOT EXISTS idx_pattern_tags_tag ON pattern_tags(tag_id);
-CREATE INDEX IF NOT EXISTS idx_embeddings_source ON embeddings(source, source_id);
-`
-
-const ddlV3 = `
--- Drop all FTS5 virtual tables and triggers (migrating to vector-only search).
-DROP TRIGGER IF EXISTS events_ai;
-DROP TRIGGER IF EXISTS events_ad;
-DROP TRIGGER IF EXISTS decisions_ai;
-DROP TRIGGER IF EXISTS decisions_ad;
-DROP TRIGGER IF EXISTS patterns_ai;
-DROP TRIGGER IF EXISTS patterns_ad;
-DROP TABLE IF EXISTS events_fts;
-DROP TABLE IF EXISTS decisions_fts;
-DROP TABLE IF EXISTS patterns_fts;
-`
-
-const ddlV4 = `
--- ==========================================================
--- suggestion_outcomes: tracks whether nudges led to action
--- ==========================================================
-CREATE TABLE IF NOT EXISTS suggestion_outcomes (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id   TEXT NOT NULL,
-    pattern      TEXT NOT NULL,
-    suggestion   TEXT NOT NULL,
-    delivered_at TEXT NOT NULL DEFAULT (datetime('now')),
-    resolved     INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_so_pattern ON suggestion_outcomes(pattern);
-CREATE INDEX IF NOT EXISTS idx_so_session ON suggestion_outcomes(session_id);
-`
-
-const ddlV5 = `
--- ==========================================================
--- failure_solutions: cross-session failure→fix knowledge
--- ==========================================================
-CREATE TABLE IF NOT EXISTS failure_solutions (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id       TEXT NOT NULL,
-    failure_type     TEXT NOT NULL,
-    error_signature  TEXT NOT NULL,
-    file_path        TEXT NOT NULL DEFAULT '',
-    solution_text    TEXT NOT NULL,
-    times_surfaced   INTEGER NOT NULL DEFAULT 0,
-    times_effective  INTEGER NOT NULL DEFAULT 0,
-    timestamp        TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-CREATE INDEX IF NOT EXISTS idx_fs_sig ON failure_solutions(error_signature);
-CREATE INDEX IF NOT EXISTS idx_fs_type ON failure_solutions(failure_type);
-`
-
-const ddlV6 = `
--- ==========================================================
--- workflow_sequences: learned workflow patterns per task type
--- ==========================================================
 CREATE TABLE IF NOT EXISTS workflow_sequences (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id     TEXT NOT NULL,
@@ -242,57 +107,6 @@ CREATE TABLE IF NOT EXISTS workflow_sequences (
 );
 CREATE INDEX IF NOT EXISTS idx_wseq_task ON workflow_sequences(task_type);
 
--- ==========================================================
--- user_preferences: adaptive suggestion effectiveness tracking
--- ==========================================================
-CREATE TABLE IF NOT EXISTS user_preferences (
-    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-    pattern               TEXT NOT NULL UNIQUE,
-    delivery_count        INTEGER NOT NULL DEFAULT 0,
-    resolution_count      INTEGER NOT NULL DEFAULT 0,
-    ignore_count          INTEGER NOT NULL DEFAULT 0,
-    avg_response_time_sec REAL NOT NULL DEFAULT 0,
-    effectiveness_score   REAL NOT NULL DEFAULT 0.5,
-    updated_at            TEXT NOT NULL DEFAULT (datetime('now'))
-);
-`
-
-const ddlV7 = `
--- ==========================================================
--- FTS5 full-text search for patterns (BM25 fallback when VOYAGE_API_KEY unset)
--- ==========================================================
-CREATE VIRTUAL TABLE IF NOT EXISTS patterns_fts USING fts5(
-    title, content, embed_text,
-    content='patterns', content_rowid='id'
-);
-
--- Populate FTS index from existing patterns.
-INSERT OR IGNORE INTO patterns_fts(rowid, title, content, embed_text)
-    SELECT id, title, content, embed_text FROM patterns;
-
--- Auto-sync triggers.
-CREATE TRIGGER IF NOT EXISTS patterns_fts_ai AFTER INSERT ON patterns BEGIN
-    INSERT INTO patterns_fts(rowid, title, content, embed_text)
-    VALUES (new.id, new.title, new.content, new.embed_text);
-END;
-
-CREATE TRIGGER IF NOT EXISTS patterns_fts_ad AFTER DELETE ON patterns BEGIN
-    INSERT INTO patterns_fts(patterns_fts, rowid, title, content, embed_text)
-    VALUES ('delete', old.id, old.title, old.content, old.embed_text);
-END;
-
-CREATE TRIGGER IF NOT EXISTS patterns_fts_au AFTER UPDATE ON patterns BEGIN
-    INSERT INTO patterns_fts(patterns_fts, rowid, title, content, embed_text)
-    VALUES ('delete', old.id, old.title, old.content, old.embed_text);
-    INSERT INTO patterns_fts(rowid, title, content, embed_text)
-    VALUES (new.id, new.title, new.content, new.embed_text);
-END;
-`
-
-const ddlV8 = `
--- ==========================================================
--- adaptive_baselines: Welford online algorithm running stats
--- ==========================================================
 CREATE TABLE IF NOT EXISTS adaptive_baselines (
     metric_name  TEXT PRIMARY KEY,
     count        INTEGER NOT NULL DEFAULT 0,
@@ -301,70 +115,6 @@ CREATE TABLE IF NOT EXISTS adaptive_baselines (
     last_updated TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- ==========================================================
--- global_tool_sequences: cross-session Markov chain (bigrams)
--- ==========================================================
-CREATE TABLE IF NOT EXISTS global_tool_sequences (
-    from_tool     TEXT NOT NULL,
-    to_tool       TEXT NOT NULL,
-    count         INTEGER NOT NULL DEFAULT 0,
-    success_count INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (from_tool, to_tool)
-);
-
--- ==========================================================
--- global_tool_trigrams: cross-session Markov chain (trigrams)
--- ==========================================================
-CREATE TABLE IF NOT EXISTS global_tool_trigrams (
-    tool1         TEXT NOT NULL,
-    tool2         TEXT NOT NULL,
-    tool3         TEXT NOT NULL,
-    count         INTEGER NOT NULL DEFAULT 0,
-    success_count INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (tool1, tool2, tool3)
-);
-
-CREATE INDEX IF NOT EXISTS idx_gts_from ON global_tool_sequences(from_tool);
-CREATE INDEX IF NOT EXISTS idx_gtt_t1t2 ON global_tool_trigrams(tool1, tool2);
-`
-
-const ddlV9 = `
--- ==========================================================
--- failure_solutions: add resolution diff and tool sequence columns
--- ==========================================================
-ALTER TABLE failure_solutions ADD COLUMN resolution_diff TEXT NOT NULL DEFAULT '';
-ALTER TABLE failure_solutions ADD COLUMN tool_sequence TEXT NOT NULL DEFAULT '';
-ALTER TABLE failure_solutions ADD COLUMN transferability_score REAL NOT NULL DEFAULT 0.5;
-
--- ==========================================================
--- user_profile: per-user coding style metrics (EWMA)
--- ==========================================================
-CREATE TABLE IF NOT EXISTS user_profile (
-    metric_name  TEXT PRIMARY KEY,
-    ewma_value   REAL NOT NULL DEFAULT 0.0,
-    sample_count INTEGER NOT NULL DEFAULT 0,
-    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- ==========================================================
--- solution_chains: multi-step failure→resolution playbooks
--- ==========================================================
-CREATE TABLE IF NOT EXISTS solution_chains (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id      TEXT NOT NULL,
-    failure_sig     TEXT NOT NULL,
-    tool_sequence   TEXT NOT NULL,
-    outcome         TEXT NOT NULL DEFAULT 'resolved',
-    step_count      INTEGER NOT NULL DEFAULT 0,
-    times_replayed  INTEGER NOT NULL DEFAULT 0,
-    timestamp       TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-CREATE INDEX IF NOT EXISTS idx_sc_sig ON solution_chains(failure_sig);
-
--- ==========================================================
--- file_co_changes: cross-session file co-change coupling
--- ==========================================================
 CREATE TABLE IF NOT EXISTS file_co_changes (
     file_a        TEXT NOT NULL,
     file_b        TEXT NOT NULL,
@@ -373,46 +123,7 @@ CREATE TABLE IF NOT EXISTS file_co_changes (
     PRIMARY KEY (file_a, file_b)
 );
 CREATE INDEX IF NOT EXISTS idx_cochange_a ON file_co_changes(file_a);
-`
 
-const ddlV10 = `
--- ==========================================================
--- feedbacks: explicit feedback from Claude on suggestion quality
--- ==========================================================
-CREATE TABLE IF NOT EXISTS feedbacks (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id      TEXT NOT NULL,
-    pattern         TEXT NOT NULL,
-    rating          TEXT NOT NULL,
-    suggestion_id   INTEGER,
-    comment         TEXT,
-    source          TEXT NOT NULL DEFAULT 'explicit',
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-CREATE INDEX IF NOT EXISTS idx_feedbacks_pattern ON feedbacks(pattern);
-CREATE INDEX IF NOT EXISTS idx_feedbacks_session ON feedbacks(session_id);
-`
-
-const ddlV11 = `
--- ==========================================================
--- learned_episodes: dynamically learned anti-pattern episodes
--- ==========================================================
-CREATE TABLE IF NOT EXISTS learned_episodes (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id      TEXT NOT NULL,
-    name            TEXT NOT NULL UNIQUE,
-    tool_sequence   TEXT NOT NULL,
-    total_steps     INTEGER NOT NULL,
-    outcome         TEXT NOT NULL DEFAULT 'failure',
-    occurrences     INTEGER NOT NULL DEFAULT 1,
-    timestamp       TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-CREATE INDEX IF NOT EXISTS idx_learned_ep_name ON learned_episodes(name);
-`
-
-const ddlV12 = `
 CREATE TABLE IF NOT EXISTS live_session_phases (
     session_id TEXT NOT NULL,
     phase      TEXT NOT NULL,
@@ -428,69 +139,103 @@ CREATE TABLE IF NOT EXISTS live_session_files (
     UNIQUE(session_id, file_path)
 );
 CREATE INDEX IF NOT EXISTS idx_live_files_session ON live_session_files(session_id);
-`
 
-const ddlV13 = `
-CREATE TABLE IF NOT EXISTS coaching_cache (
-    project   TEXT NOT NULL,
-    task_type TEXT NOT NULL,
-    domain    TEXT NOT NULL DEFAULT 'general',
-    coaching_text TEXT NOT NULL,
-    context_summary TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (project, task_type, domain)
+CREATE TABLE IF NOT EXISTS global_tool_sequences (
+    from_tool     TEXT NOT NULL,
+    to_tool       TEXT NOT NULL,
+    count         INTEGER NOT NULL DEFAULT 0,
+    success_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (from_tool, to_tool)
 );
-`
+CREATE INDEX IF NOT EXISTS idx_gts_from ON global_tool_sequences(from_tool);
 
-const ddlV14 = `
-ALTER TABLE suggestion_outcomes ADD COLUMN tools_after INTEGER NOT NULL DEFAULT 0;
-`
-
-const ddlV15 = `
-CREATE TABLE IF NOT EXISTS snr_history (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id  TEXT NOT NULL,
-    snr_value   REAL NOT NULL,
-    sample_size INTEGER NOT NULL,
-    eliminated  TEXT NOT NULL DEFAULT '',
-    recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
+CREATE TABLE IF NOT EXISTS global_tool_trigrams (
+    tool1         TEXT NOT NULL,
+    tool2         TEXT NOT NULL,
+    tool3         TEXT NOT NULL,
+    count         INTEGER NOT NULL DEFAULT 0,
+    success_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (tool1, tool2, tool3)
 );
-CREATE INDEX IF NOT EXISTS idx_snr_recorded ON snr_history(recorded_at);
+CREATE INDEX IF NOT EXISTS idx_gtt_t1t2 ON global_tool_trigrams(tool1, tool2);
 
-CREATE TABLE IF NOT EXISTS signal_outcomes (
+CREATE TABLE IF NOT EXISTS user_preferences (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern               TEXT NOT NULL UNIQUE,
+    delivery_count        INTEGER NOT NULL DEFAULT 0,
+    resolution_count      INTEGER NOT NULL DEFAULT 0,
+    ignore_count          INTEGER NOT NULL DEFAULT 0,
+    avg_response_time_sec REAL NOT NULL DEFAULT 0,
+    effectiveness_score   REAL NOT NULL DEFAULT 0.5,
+    updated_at            TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ==========================================================
+-- Embeddings (generic vector store)
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS embeddings (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    source     TEXT NOT NULL,
+    source_id  INTEGER NOT NULL,
+    model      TEXT NOT NULL,
+    dims       INTEGER NOT NULL,
+    vector     BLOB NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (source, source_id)
+);
+CREATE INDEX IF NOT EXISTS idx_embeddings_source ON embeddings(source, source_id);
+
+-- ==========================================================
+-- Docs knowledge base (new in alfred v1)
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS docs (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id   TEXT NOT NULL,
-    priority     INTEGER NOT NULL,
-    kind         TEXT NOT NULL,
-    detail_hash  TEXT NOT NULL,
-    acted_on     INTEGER NOT NULL DEFAULT 0,
-    delivered_at TEXT NOT NULL DEFAULT (datetime('now'))
+    url          TEXT NOT NULL,
+    section_path TEXT NOT NULL,
+    content      TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    source_type  TEXT NOT NULL,
+    version      TEXT,
+    crawled_at   TEXT NOT NULL,
+    ttl_days     INTEGER DEFAULT 7,
+    UNIQUE(url, section_path)
 );
-CREATE INDEX IF NOT EXISTS idx_sigout_session ON signal_outcomes(session_id);
-CREATE INDEX IF NOT EXISTS idx_sigout_priority ON signal_outcomes(priority);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
+    section_path, content,
+    content='docs', content_rowid='id'
+);
+
+CREATE TRIGGER IF NOT EXISTS docs_fts_ai AFTER INSERT ON docs BEGIN
+    INSERT INTO docs_fts(rowid, section_path, content)
+    VALUES (new.id, new.section_path, new.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS docs_fts_ad AFTER DELETE ON docs BEGIN
+    INSERT INTO docs_fts(docs_fts, rowid, section_path, content)
+    VALUES ('delete', old.id, old.section_path, old.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS docs_fts_au AFTER UPDATE ON docs BEGIN
+    INSERT INTO docs_fts(docs_fts, rowid, section_path, content)
+    VALUES ('delete', old.id, old.section_path, old.content);
+    INSERT INTO docs_fts(rowid, section_path, content)
+    VALUES (new.id, new.section_path, new.content);
+END;
 `
 
-const ddlV16 = `
--- suggestion_outcomes: add tracking columns for accuracy measurement
-ALTER TABLE suggestion_outcomes ADD COLUMN delivery_channel TEXT NOT NULL DEFAULT '';
-ALTER TABLE suggestion_outcomes ADD COLUMN predicted_priority TEXT NOT NULL DEFAULT '';
-ALTER TABLE suggestion_outcomes ADD COLUMN context_json TEXT NOT NULL DEFAULT '{}';
-ALTER TABLE suggestion_outcomes ADD COLUMN action_event_id INTEGER NOT NULL DEFAULT 0;
+// legacyTables are tables from buddy V1-V16 that no longer exist in alfred.
+var legacyTables = []string{
+	"patterns", "pattern_tags", "pattern_files", "patterns_fts",
+	"alerts", "alert_events",
+	"suggestion_outcomes", "failure_solutions", "solution_chains",
+	"learned_episodes", "feedbacks", "coaching_cache",
+	"snr_history", "signal_outcomes", "user_pattern_effectiveness",
+}
 
--- user_pattern_effectiveness: per-project individual pattern tracking
-CREATE TABLE IF NOT EXISTS user_pattern_effectiveness (
-    project_path TEXT NOT NULL,
-    pattern      TEXT NOT NULL,
-    task_type    TEXT NOT NULL DEFAULT '',
-    resolved     INTEGER NOT NULL DEFAULT 0,
-    not_resolved INTEGER NOT NULL DEFAULT 0,
-    explicit_helpful     INTEGER NOT NULL DEFAULT 0,
-    explicit_not_helpful INTEGER NOT NULL DEFAULT 0,
-    last_updated TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (project_path, pattern, task_type)
-);
-CREATE INDEX IF NOT EXISTS idx_upe_pattern ON user_pattern_effectiveness(pattern);
-`
+var legacyTriggers = []string{
+	"patterns_fts_ai", "patterns_fts_ad", "patterns_fts_au",
+}
 
 // SchemaVersion returns the current schema version constant.
 func SchemaVersion() int { return schemaVersion }
@@ -507,85 +252,18 @@ func Migrate(db *sql.DB) error {
 		return nil
 	}
 
-	if current < 1 {
-		if _, err := db.Exec(ddlV1); err != nil {
-			return err
+	// Drop legacy tables from buddy V1-V16.
+	if current > 0 && current < schemaVersion {
+		for _, trigger := range legacyTriggers {
+			db.Exec("DROP TRIGGER IF EXISTS " + trigger)
+		}
+		for _, table := range legacyTables {
+			db.Exec("DROP TABLE IF EXISTS " + table)
 		}
 	}
-	if current < 2 {
-		if _, err := db.Exec(ddlV2); err != nil {
-			return err
-		}
-	}
-	if current < 3 {
-		if _, err := db.Exec(ddlV3); err != nil {
-			return err
-		}
-	}
-	if current < 4 {
-		if _, err := db.Exec(ddlV4); err != nil {
-			return err
-		}
-	}
-	if current < 5 {
-		if _, err := db.Exec(ddlV5); err != nil {
-			return err
-		}
-	}
-	if current < 6 {
-		if _, err := db.Exec(ddlV6); err != nil {
-			return err
-		}
-	}
-	if current < 7 {
-		if _, err := db.Exec(ddlV7); err != nil {
-			return err
-		}
-	}
-	if current < 8 {
-		if _, err := db.Exec(ddlV8); err != nil {
-			return err
-		}
-	}
-	if current < 9 {
-		if _, err := db.Exec(ddlV9); err != nil {
-			return err
-		}
-	}
-	if current < 10 {
-		if _, err := db.Exec(ddlV10); err != nil {
-			return err
-		}
-	}
-	if current < 11 {
-		if _, err := db.Exec(ddlV11); err != nil {
-			return err
-		}
-	}
-	if current < 12 {
-		if _, err := db.Exec(ddlV12); err != nil {
-			return err
-		}
-	}
-	if current < 13 {
-		if _, err := db.Exec(ddlV13); err != nil {
-			return err
-		}
-	}
-	if current < 14 {
-		if _, err := db.Exec(ddlV14); err != nil {
-			return err
-		}
-	}
-	if current < 15 {
-		if _, err := db.Exec(ddlV15); err != nil {
-			return err
-		}
-	}
-	if current < 16 {
-		if _, err := db.Exec(ddlV16); err != nil {
-			return err
-		}
+
+	if _, err := db.Exec(ddlV1); err != nil {
+		return err
 	}
 
 	// Upsert schema version.

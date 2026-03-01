@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
 )
 
 type subagentStartInput struct {
@@ -27,7 +27,7 @@ func handleSubagentStart(input []byte) (*HookOutput, error) {
 
 	sdb, err := sessiondb.Open(in.SessionID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[buddy] SubagentStart: open session db: %v\n", err)
+		fmt.Fprintf(os.Stderr, "[alfred] SubagentStart: open session db: %v\n", err)
 		return nil, nil
 	}
 	defer sdb.Close()
@@ -61,6 +61,6 @@ func handleSubagentStart(input []byte) (*HookOutput, error) {
 		return nil, nil
 	}
 
-	ctx := "[buddy] Parent session context:\n" + strings.Join(parts, "\n")
+	ctx := "[alfred] Parent session context:\n" + strings.Join(parts, "\n")
 	return makeOutput("SubagentStart", ctx), nil
 }

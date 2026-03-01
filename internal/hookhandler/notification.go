@@ -7,8 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
-	"github.com/hir4ta/claude-buddy/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
 )
 
 type notificationInput struct {
@@ -27,7 +26,7 @@ func handleNotification(input []byte) (*HookOutput, error) {
 
 	sdb, err := sessiondb.Open(in.SessionID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[buddy] Notification: open session db: %v\n", err)
+		fmt.Fprintf(os.Stderr, "[alfred] Notification: open session db: %v\n", err)
 		return nil, nil
 	}
 	defer sdb.Close()
@@ -39,7 +38,7 @@ func handleNotification(input []byte) (*HookOutput, error) {
 
 	var parts []string
 	for _, n := range nudges {
-		parts = append(parts, fmt.Sprintf("[buddy] %s (%s): %s\n→ %s",
+		parts = append(parts, fmt.Sprintf("[alfred] %s (%s): %s\n→ %s",
 			n.Pattern, n.Level, n.Observation, n.Suggestion))
 	}
 
@@ -92,7 +91,7 @@ func generateIdleNextStep(sdb *sessiondb.SessionDB) string {
 	_ = sdb.SetCooldown("idle_next_step", 5*time.Minute)
 
 	var b strings.Builder
-	b.WriteString("[buddy] next-step (info): Session idle — suggested next action")
+	b.WriteString("[alfred] next-step (info): Session idle — suggested next action")
 	b.WriteString("\n→ ")
 	b.WriteString(suggestion)
 	return b.String()
@@ -187,20 +186,7 @@ func unresolvedFailureHint(sdb *sessiondb.SessionDB) string {
 
 		_ = sdb.SetCooldown("idle_failure_hint", 10*time.Minute)
 
-		// Search for past solutions.
-		st, err := store.OpenDefaultCached()
-		if err != nil {
-			return fmt.Sprintf("Unresolved %s in %s — consider fixing before continuing.", f.FailureType, f.FilePath)
-		}
-		solutions, _ := st.SearchFailureSolutionsByFile(f.FilePath, 1)
-
-		if len(solutions) > 0 {
-			text := solutions[0].SolutionText
-			if len([]rune(text)) > 120 {
-				text = string([]rune(text)[:120]) + "..."
-			}
-			return fmt.Sprintf("Unresolved %s in %s. Past fix: %s", f.FailureType, f.FilePath, text)
-		}
+		return fmt.Sprintf("Unresolved %s in %s — consider fixing before continuing.", f.FailureType, f.FilePath)
 
 		return fmt.Sprintf("Unresolved %s in %s — consider fixing before continuing.", f.FailureType, f.FilePath)
 	}

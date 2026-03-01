@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // CodeChunk represents a semantically meaningful piece of code extracted by AST parsing.
@@ -119,23 +118,3 @@ func formatReceiver(expr ast.Expr) string {
 	return ""
 }
 
-// StoreCodeChunks stores code chunks as patterns with type "code_chunk".
-func (s *Store) StoreCodeChunks(sessionID string, chunks []CodeChunk) (int, error) {
-	stored := 0
-	for _, c := range chunks {
-		_, err := s.InsertPattern(&PatternRow{
-			SessionID:   sessionID,
-			PatternType: "code_chunk",
-			Title:       fmt.Sprintf("%s %s", c.Kind, c.Symbol),
-			Content:     c.Content,
-			EmbedText:   c.EmbedText,
-			Scope:       "project",
-			Timestamp:   time.Now().UTC().Format(time.DateTime),
-		})
-		if err != nil {
-			continue
-		}
-		stored++
-	}
-	return stored, nil
-}

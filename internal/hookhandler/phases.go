@@ -1,11 +1,10 @@
 package hookhandler
 
 import (
-	"fmt"
 	"strings"
 
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
-	"github.com/hir4ta/claude-buddy/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
 // Phase represents a recognized development phase within a session.
@@ -220,29 +219,3 @@ func shouldGateForProfile(pattern string) bool {
 	return false
 }
 
-// buildWallIntervention creates a context-rich suggestion when velocity drops sharply.
-func buildWallIntervention(sdb *sessiondb.SessionDB) string {
-	var b strings.Builder
-	b.WriteString("Your productivity velocity dropped significantly. Consider:")
-
-	intent, _ := sdb.GetWorkingSet("intent")
-	if intent != "" {
-		fmt.Fprintf(&b, "\n  - Review your intent: %s", intent)
-	}
-
-	progress := GetPhaseProgress(sdb)
-	if progress != nil {
-		switch progress.CurrentPhase {
-		case PhaseImplement:
-			b.WriteString("\n  - Step back: re-read related code or check test output")
-		case PhaseExplore:
-			b.WriteString("\n  - Narrow focus: pick one file/function to investigate")
-		}
-		if progress.ExpectedPhase != PhaseUnknown && progress.ExpectedPhase != progress.CurrentPhase {
-			fmt.Fprintf(&b, "\n  - Expected next phase: %s", progress.ExpectedPhase)
-		}
-	}
-
-	b.WriteString("\n  - Try a different approach or break the problem into smaller steps")
-	return b.String()
-}

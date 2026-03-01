@@ -10,14 +10,14 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/hir4ta/claude-buddy/internal/analyzer"
-	"github.com/hir4ta/claude-buddy/internal/embedder"
-	"github.com/hir4ta/claude-buddy/internal/hookhandler"
-	"github.com/hir4ta/claude-buddy/internal/install"
-	"github.com/hir4ta/claude-buddy/internal/mcpserver"
-	"github.com/hir4ta/claude-buddy/internal/store"
-	"github.com/hir4ta/claude-buddy/internal/tui"
-	"github.com/hir4ta/claude-buddy/internal/watcher"
+	"github.com/hir4ta/claude-alfred/internal/analyzer"
+	"github.com/hir4ta/claude-alfred/internal/embedder"
+	"github.com/hir4ta/claude-alfred/internal/hookhandler"
+	"github.com/hir4ta/claude-alfred/internal/install"
+	"github.com/hir4ta/claude-alfred/internal/mcpserver"
+	"github.com/hir4ta/claude-alfred/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/tui"
+	"github.com/hir4ta/claude-alfred/internal/watcher"
 )
 
 // version is set at build time via ldflags (-X main.version=...).
@@ -59,11 +59,11 @@ func run() error {
 		return install.Bundle(outputDir, version)
 	case "hook-handler":
 		if len(os.Args) < 3 {
-			return fmt.Errorf("usage: claude-buddy hook-handler <EventName>")
+			return fmt.Errorf("usage: claude-alfred hook-handler <EventName>")
 		}
 		return hookhandler.Run(os.Args[2])
 	case "version", "--version", "-v":
-		fmt.Printf("claude-buddy %s\n", version)
+		fmt.Printf("claude-alfred %s\n", version)
 		return nil
 	case "help", "-h", "--help":
 		printUsage()
@@ -214,10 +214,10 @@ func runAnalyze() error {
 }
 
 func printUsage() {
-	fmt.Println(`claude-buddy - Claude Code companion TUI
+	fmt.Println(`claude-alfred - Claude Code companion TUI
 
 Usage:
-  claude-buddy [command]
+  claude-alfred [command]
 
 Commands:
   watch         Monitor active Claude Code session in real-time (default)

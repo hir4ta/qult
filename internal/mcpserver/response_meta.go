@@ -10,7 +10,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/hir4ta/claude-buddy/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
 // ResponseMeta provides context about the quality and source of a response.
@@ -45,7 +45,7 @@ func buildResponseMeta(st *store.Store, source string) *ResponseMeta {
 	}
 	meta.SessionCount = sessionCount
 
-	patternCount, _ := st.CountPatterns()
+	patternCount := 0 // patterns table removed in alfred v1
 
 	switch {
 	case sessionCount < 3:

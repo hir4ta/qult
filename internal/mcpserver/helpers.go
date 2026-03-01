@@ -1,8 +1,8 @@
 package mcpserver
 
 import (
-	"github.com/hir4ta/claude-buddy/internal/analyzer"
-	"github.com/hir4ta/claude-buddy/internal/watcher"
+	"github.com/hir4ta/claude-alfred/internal/analyzer"
+	"github.com/hir4ta/claude-alfred/internal/watcher"
 )
 
 // levelString converts a FeedbackLevel to a string label.

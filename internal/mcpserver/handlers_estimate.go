@@ -9,10 +9,10 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/hir4ta/claude-buddy/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
-// estimateHandler returns a handler for the buddy_estimate tool.
+// estimateHandler returns a handler for the alfred_estimate tool.
 func estimateHandler(st *store.Store) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		taskType, _ := request.GetArguments()["task_type"].(string)

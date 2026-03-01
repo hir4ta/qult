@@ -43,7 +43,7 @@ func checkBashSafety(toolInput json.RawMessage) *safetyResult {
 			}
 			return &safetyResult{
 				UpdatedInput: updated,
-				Warning:      "[buddy] Safety: added -i flag to rm command for interactive confirmation.",
+				Warning:      "[alfred] Safety: added -i flag to rm command for interactive confirmation.",
 			}
 		}
 	}
@@ -51,7 +51,7 @@ func checkBashSafety(toolInput json.RawMessage) *safetyResult {
 	// git stash drop — warn only, don't modify.
 	if strings.Contains(bi.Command, "git stash drop") {
 		return &safetyResult{
-			Warning: "[buddy] Safety: git stash drop permanently removes the stash entry. Consider git stash pop instead to apply and remove.",
+			Warning: "[alfred] Safety: git stash drop permanently removes the stash entry. Consider git stash pop instead to apply and remove.",
 		}
 	}
 

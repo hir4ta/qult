@@ -3,7 +3,7 @@ package store
 import (
 	"fmt"
 
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
 )
 
 // GlobalToolPrediction represents a predicted next tool from cross-session data.

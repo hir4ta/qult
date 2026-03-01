@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/hir4ta/claude-buddy/internal/analyzer"
+	"github.com/hir4ta/claude-alfred/internal/analyzer"
 )
 
 // GetBaseline returns the Welford state for a metric, or nil if not found.

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hir4ta/claude-buddy/internal/parser"
+	"github.com/hir4ta/claude-alfred/internal/parser"
 )
 
 // Regex patterns for destructive command detection.
@@ -181,7 +181,7 @@ func (d *Detector) detectCompactAmnesia() *Alert {
 		}
 		obs += ")"
 	}
-	suggestion := "Use buddy_knowledge(scope=recall) to search for pre-compact context — faster than re-reading files"
+	suggestion := "Use alfred_knowledge(scope=recall) to search for pre-compact context — faster than re-reading files"
 
 	return &Alert{
 		Pattern:     PatternCompactAmnesia,

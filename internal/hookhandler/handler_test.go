@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
 )
 
 func TestMakeOutput(t *testing.T) {
@@ -137,7 +137,7 @@ func TestHandlePreToolUse_SafeCommand(t *testing.T) {
 		t.Fatalf("handlePreToolUse() = %v", err)
 	}
 	// Safe command with no pending nudges → no deny/ask output.
-	// Advisory additionalContext output is acceptable (depends on buddy.db state).
+	// Advisory additionalContext output is acceptable (depends on alfred.db state).
 	if out != nil {
 		if decision, ok := out.HookSpecificOutput["permissionDecision"]; ok {
 			t.Errorf("handlePreToolUse(safe) has permissionDecision=%v, want no blocking decision", decision)
@@ -310,11 +310,11 @@ func TestSuggestedToolForPattern_DefaultEmpty(t *testing.T) {
 		pattern string
 		want    string
 	}{
-		{"retry-loop", "buddy_diagnose"},
-		{"explore-stuck", "buddy_diagnose"},
-		{"knowledge", "buddy_knowledge"},
-		{"health-decline", "buddy_state"},
-		{"co-change", "buddy_analyze"},
+		{"retry-loop", "alfred_diagnose"},
+		{"explore-stuck", "alfred_diagnose"},
+		{"knowledge", "alfred_knowledge"},
+		{"health-decline", "alfred_state"},
+		{"co-change", "alfred_analyze"},
 		{"session-context", ""},
 		{"task-briefing", ""},
 		{"briefing", ""},
@@ -349,8 +349,8 @@ func TestEnrichOutput_FirstActionableEntry(t *testing.T) {
 		}
 	}
 	ctx, _ := out.HookSpecificOutput["additionalContext"].(string)
-	if !contains(ctx, "[suggested: buddy_diagnose]") {
-		t.Errorf("expected buddy_diagnose from retry-loop, got: %q", ctx)
+	if !contains(ctx, "[suggested: alfred_diagnose]") {
+		t.Errorf("expected alfred_diagnose from retry-loop, got: %q", ctx)
 	}
 
 	// When no entry has a matching tool, no suggestion is appended.
@@ -375,7 +375,7 @@ func TestEnrichOutput(t *testing.T) {
 	t.Parallel()
 
 	// nil output is safe.
-	enrichOutput(nil, "buddy_diagnose")
+	enrichOutput(nil, "alfred_diagnose")
 
 	// Empty tool is a no-op.
 	out := makeOutput("PostToolUse", "some context")
@@ -386,9 +386,9 @@ func TestEnrichOutput(t *testing.T) {
 	}
 
 	// Non-empty tool appends suggestion.
-	enrichOutput(out, "buddy_diagnose")
+	enrichOutput(out, "alfred_diagnose")
 	ctx, _ = out.HookSpecificOutput["additionalContext"].(string)
-	want := "some context\n[suggested: buddy_diagnose]"
+	want := "some context\n[suggested: alfred_diagnose]"
 	if ctx != want {
 		t.Errorf("enrichOutput() = %q, want %q", ctx, want)
 	}
@@ -541,7 +541,7 @@ func TestCaptureGitContext(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = sdb.Destroy() })
 
-	// Use the current repo (claude-buddy) as the test target.
+	// Use the current repo (claude-alfred) as the test target.
 	captureGitContext(sdb, "/Users/user/Projects/claude-buddy")
 
 	branch, _ := sdb.GetWorkingSet("git_branch")

@@ -25,6 +25,6 @@ func SendAlert(ctx context.Context, s *server.MCPServer, level, logger, message 
 func SendAlertIfWarning(ctx context.Context, s *server.MCPServer, level, message string) {
 	switch level {
 	case "warning", "error", "critical":
-		SendAlert(ctx, s, level, "claude-buddy", message)
+		SendAlert(ctx, s, level, "claude-alfred", message)
 	}
 }

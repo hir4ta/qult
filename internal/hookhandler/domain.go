@@ -3,7 +3,7 @@ package hookhandler
 import (
 	"strings"
 
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
 )
 
 // domainKeywords maps domain names to detection keywords.

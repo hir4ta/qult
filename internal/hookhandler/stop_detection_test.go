@@ -27,12 +27,12 @@ func TestIsGoTestFailure(t *testing.T) {
 		},
 		{
 			name:   "log containing error keyword",
-			output: "[buddy] seed patterns: store: insert seed pattern \"undefined: FooBar\": error\nok  \tgithub.com/foo/bar\t0.7s",
+			output: "[alfred] seed patterns: store: insert seed pattern \"undefined: FooBar\": error\nok  \tgithub.com/foo/bar\t0.7s",
 			want:   false,
 		},
 		{
 			name:   "log containing FAIL keyword in non-test context",
-			output: "[buddy] SNR: 0.00 (3 suggestions)\nFAILED to insert\nok  \tgithub.com/foo/bar\t0.7s",
+			output: "[alfred] SNR: 0.00 (3 suggestions)\nFAILED to insert\nok  \tgithub.com/foo/bar\t0.7s",
 			want:   false,
 		},
 		{
@@ -93,7 +93,7 @@ func TestIsBuildFailure(t *testing.T) {
 		},
 		{
 			name:   "log containing error but not build failure",
-			output: "[buddy] store: insert seed pattern \"undefined: FooBar\": error",
+			output: "[alfred] store: insert seed pattern \"undefined: FooBar\": error",
 			want:   false,
 		},
 		{

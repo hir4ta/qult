@@ -11,9 +11,9 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
-	"github.com/hir4ta/claude-buddy/internal/store"
-	"github.com/hir4ta/claude-buddy/internal/watcher"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/watcher"
 )
 
 // SkillContext holds aggregated session data tailored for a specific skill.
@@ -97,18 +97,18 @@ func skillContextHandler(claudeHome string) server.ToolHandlerFunc {
 
 		// Skill-specific enrichment (supports both current and legacy skill names).
 		switch skillName {
-		case "buddy-analyze", "buddy-review", "buddy-impact":
+		case "alfred-analyze", "alfred-review", "alfred-impact":
 			sc.Context, sc.Alerts, sc.Suggestions = enrichForReview(sdb)
-		case "buddy-gate":
+		case "alfred-gate":
 			// Merged skill: commit gate + health checkpoint.
 			sc.Context, sc.Alerts, sc.Suggestions = enrichForCommit(sdb)
 			_, extraAlerts, _ := enrichForCheckpoint(sdb)
 			sc.Alerts = append(sc.Alerts, extraAlerts...)
-		case "buddy-before-commit":
+		case "alfred-before-commit":
 			sc.Context, sc.Alerts, sc.Suggestions = enrichForCommit(sdb)
-		case "buddy-checkpoint":
+		case "alfred-checkpoint":
 			sc.Context, sc.Alerts, sc.Suggestions = enrichForCheckpoint(sdb)
-		case "buddy-recover", "buddy-unstuck", "buddy-error-recovery", "buddy-test-guidance":
+		case "alfred-recover", "alfred-unstuck", "alfred-error-recovery", "alfred-test-guidance":
 			sc.Context, sc.Alerts, sc.Suggestions = enrichForUnstuck(sdb)
 		default:
 			sc.Context = map[string]string{"note": "generic context"}
@@ -168,25 +168,12 @@ func enrichForReview(sdb *sessiondb.SessionDB) (map[string]string, []string, []s
 		alerts = append(alerts, "Build is currently failing")
 	}
 
-	// Find patterns for modified files.
+	// Pattern search removed in alfred v1 — will be replaced by docs knowledge.
 	files, _ := sdb.GetWorkingSetFiles()
 	if len(files) > 0 {
-		st, err := store.OpenDefault()
-		if err == nil {
-			defer st.Close()
-			for _, f := range files {
-				patterns, _ := st.SearchPatternsByFile(f, 1)
-				for _, p := range patterns {
-					text := p.Content
-					if len([]rune(text)) > 80 {
-						text = string([]rune(text)[:80]) + "..."
-					}
-					suggestions = append(suggestions, fmt.Sprintf("[%s] %s: %s", p.PatternType, filepath.Base(f), text))
-				}
-				if len(suggestions) >= 5 {
-					break
-				}
-			}
+		// placeholder: file-specific knowledge will come from docs table
+		_ = files
+		if false {
 		}
 	}
 
@@ -254,23 +241,7 @@ func enrichForUnstuck(sdb *sessiondb.SessionDB) (map[string]string, []string, []
 		}
 	}
 
-	// Find past solutions for recent errors.
-	st, err := store.OpenDefault()
-	if err == nil {
-		defer st.Close()
-		for _, f := range failures {
-			if f.ErrorSig == "" {
-				continue
-			}
-			solutions, _ := st.SearchFailureSolutions(f.FailureType, f.ErrorSig, 1)
-			for _, sol := range solutions {
-				suggestions = append(suggestions, fmt.Sprintf("Past solution: %s", truncate(sol.SolutionText, 80)))
-			}
-			if len(suggestions) >= 3 {
-				break
-			}
-		}
-	}
+	// Past solutions search removed in alfred v1 (failure_solutions table gone).
 
 	// Burst state.
 	tc, hasWrite, _, _ := sdb.BurstState()

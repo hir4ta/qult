@@ -263,7 +263,7 @@ func DBPath(sessionID string) string {
 		panic(fmt.Sprintf("sessiondb: invalid session ID: %q", sessionID))
 	}
 	tmpDir := os.TempDir()
-	return filepath.Join(tmpDir, "claude-buddy", fmt.Sprintf("session-%s.db", sessionID))
+	return filepath.Join(tmpDir, "claude-alfred", fmt.Sprintf("session-%s.db", sessionID))
 }
 
 // Close closes the database connection.

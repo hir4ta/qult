@@ -146,7 +146,7 @@ func TestRegisterHooks_PreservesOtherHooks(t *testing.T) {
 		t.Fatal("PreToolUse is not a list")
 	}
 
-	// Should have 2 entries: other-tool + claude-buddy.
+	// Should have 2 entries: other-tool + claude-alfred.
 	if len(preToolList) != 2 {
 		t.Errorf("PreToolUse has %d entries, want 2", len(preToolList))
 	}
@@ -154,7 +154,7 @@ func TestRegisterHooks_PreservesOtherHooks(t *testing.T) {
 	// Verify other-tool entry is preserved.
 	found := false
 	for _, item := range preToolList {
-		if !isBuddyHookEntry(item) {
+		if !isAlfredHookEntry(item) {
 			found = true
 		}
 	}
@@ -222,7 +222,7 @@ func TestRemoveHooks_PreservesOtherHooks(t *testing.T) {
 	out, _ := json.MarshalIndent(settings, "", "  ")
 	os.WriteFile(path, append(out, '\n'), 0o644)
 
-	// Remove claude-buddy hooks.
+	// Remove claude-alfred hooks.
 	if err := RemoveHooks(); err != nil {
 		t.Fatalf("RemoveHooks() = %v", err)
 	}
@@ -236,8 +236,8 @@ func TestRemoveHooks_PreservesOtherHooks(t *testing.T) {
 		t.Fatalf("PreToolUse has %d entries, want 1", len(preToolList))
 	}
 
-	if isBuddyHookEntry(preToolList[0]) {
-		t.Error("claude-buddy entry still present")
+	if isAlfredHookEntry(preToolList[0]) {
+		t.Error("claude-alfred entry still present")
 	}
 }
 
@@ -262,11 +262,11 @@ func TestHasLegacyHooks(t *testing.T) {
 		t.Cleanup(func() { settingsPathFunc = orig })
 
 		if hasLegacyHooks() {
-			t.Error("hasLegacyHooks() = true, want false (no buddy hooks)")
+			t.Error("hasLegacyHooks() = true, want false (no alfred hooks)")
 		}
 	})
 
-	t.Run("buddy hooks present", func(t *testing.T) {
+	t.Run("alfred hooks present", func(t *testing.T) {
 		path := tempSettings(t, "")
 		orig := settingsPathFunc
 		settingsPathFunc = func() string { return path }
@@ -300,10 +300,10 @@ func TestHasLegacyHooks(t *testing.T) {
 	})
 }
 
-func TestBuddyHookEntries(t *testing.T) {
+func TestAlfredHookEntries(t *testing.T) {
 	t.Parallel()
 
-	entries := buddyHookEntries("/usr/local/bin/claude-buddy")
+	entries := alfredHookEntries("/usr/local/bin/claude-alfred")
 
 	events := []string{
 		"SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure",
@@ -313,11 +313,11 @@ func TestBuddyHookEntries(t *testing.T) {
 	}
 	for _, ev := range events {
 		if _, ok := entries[ev]; !ok {
-			t.Errorf("event %s missing from buddyHookEntries", ev)
+			t.Errorf("event %s missing from alfredHookEntries", ev)
 		}
 	}
 	if len(entries) != len(events) {
-		t.Errorf("buddyHookEntries() has %d events, want %d", len(entries), len(events))
+		t.Errorf("alfredHookEntries() has %d events, want %d", len(entries), len(events))
 	}
 
 	// Verify commands contain the binary path (skip prompt-type hooks).
@@ -340,13 +340,13 @@ func TestBuddyHookEntries(t *testing.T) {
 			continue
 		}
 		cmd := hook["command"].(string)
-		if cmd != "/usr/local/bin/claude-buddy hook-handler "+event {
+		if cmd != "/usr/local/bin/claude-alfred hook-handler "+event {
 			t.Errorf("%s: command = %s", event, cmd)
 		}
 	}
 }
 
-func TestIsBuddyHookEntry(t *testing.T) {
+func TestIsAlfredHookEntry(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -355,9 +355,9 @@ func TestIsBuddyHookEntry(t *testing.T) {
 		want  bool
 	}{
 		{
-			name: "buddy entry",
+			name: "alfred entry",
 			entry: map[string]any{
-				"hooks": []any{map[string]any{"type": "command", "command": "/usr/bin/claude-buddy hook-handler PreToolUse"}},
+				"hooks": []any{map[string]any{"type": "command", "command": "/usr/bin/claude-alfred hook-handler PreToolUse"}},
 			},
 			want: true,
 		},
@@ -378,8 +378,8 @@ func TestIsBuddyHookEntry(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := isBuddyHookEntry(tt.entry); got != tt.want {
-				t.Errorf("isBuddyHookEntry() = %v, want %v", got, tt.want)
+			if got := isAlfredHookEntry(tt.entry); got != tt.want {
+				t.Errorf("isAlfredHookEntry() = %v, want %v", got, tt.want)
 			}
 		})
 	}

@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hir4ta/claude-buddy/internal/embedder"
-	"github.com/hir4ta/claude-buddy/internal/store"
-	"github.com/hir4ta/claude-buddy/internal/watcher"
+	"github.com/hir4ta/claude-alfred/internal/embedder"
+	"github.com/hir4ta/claude-alfred/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/watcher"
 )
 
 // settingsPathFunc returns the path to ~/.claude/settings.json.
@@ -65,17 +65,13 @@ func Run(args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: initial sync failed: %v\n", err)
 	}
 
-	if err := syncDocsToStore(); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: docs knowledge sync failed: %v\n", err)
-	}
-
 	generateEmbeddings()
 	ensureRulesFile()
 
 	fmt.Println("\n✓ Installation complete!")
 	fmt.Println("\nIf you haven't set up the plugin yet:")
-	fmt.Println("  /plugin marketplace add hir4ta/claude-buddy")
-	fmt.Println("  /plugin install claude-buddy@claude-buddy")
+	fmt.Println("  /plugin marketplace add hir4ta/claude-alfred")
+	fmt.Println("  /plugin install claude-alfred@claude-alfred")
 
 	return nil
 }
@@ -106,59 +102,59 @@ func CountSessions() error {
 	return json.NewEncoder(os.Stdout).Encode(out)
 }
 
-// buddyRulesVersion tracks the rules content version for safe upgrades.
-// Bump this when buddyRulesContent changes to trigger overwrites.
-const buddyRulesVersion = "2"
+// alfredRulesVersion tracks the rules content version for safe upgrades.
+// Bump this when alfredRulesContent changes to trigger overwrites.
+const alfredRulesVersion = "2"
 
-// buddyRulesContent is the content written to ~/.claude/rules/buddy.md.
-// It instructs Claude Code to actively call buddy MCP tools when conditions are met.
+// alfredRulesContent is the content written to ~/.claude/rules/alfred.md.
+// It instructs Claude Code to actively call alfred MCP tools when conditions are met.
 // NOTE: Go raw string literals cannot contain backticks, so we use regular strings
 // with explicit newlines for the rules content.
-var buddyRulesContent = strings.Join([]string{
-	"# claude-buddy",
+var alfredRulesContent = strings.Join([]string{
+	"# claude-alfred",
 	"",
-	"buddy hooks inject context into every turn automatically.",
-	"These rules tell you when to call buddy MCP tools yourself.",
+	"alfred hooks inject context into every turn automatically.",
+	"These rules tell you when to call alfred MCP tools yourself.",
 	"",
 	"## On Tool Failure",
 	"",
 	"When a tool fails or returns an error:",
-	"1. Read the [buddy] hint in additionalContext — it has root cause analysis",
-	"2. When the hint says \"call buddy_diagnose\", do so with the error text",
-	"3. On repeated failure (2+ times), call `buddy_diagnose` before retrying",
-	"   — buddy_diagnose surfaces past fixes and resolution diffs so you don't repeat mistakes",
+	"1. Read the [alfred] hint in additionalContext — it has root cause analysis",
+	"2. When the hint says \"call alfred_diagnose\", do so with the error text",
+	"3. On repeated failure (2+ times), call `alfred_diagnose` before retrying",
+	"   — alfred_diagnose surfaces past fixes and resolution diffs so you don't repeat mistakes",
 	"",
 	"## Tool Trigger Map",
 	"",
 	"Call these MCP tools when the condition matches:",
 	"",
-	"**buddy_diagnose** — call on any tool failure or error",
+	"**alfred_diagnose** — call on any tool failure or error",
 	"- Edit mismatch, compile error, test failure, non-zero exit",
 	"- Same error appearing 2+ times — get root cause before retrying",
 	"",
-	"**buddy_knowledge** — call to search past patterns and solutions",
+	"**alfred_knowledge** — call to search past patterns and solutions",
 	"- Working on unfamiliar code or debugging a recurring pattern",
 	"- Hook output shows a \"knowledge\" briefing — call to dig deeper",
 	"- Looking for an architectural precedent or past design decision",
 	"",
-	"**buddy_state** — call to check session health",
+	"**alfred_state** — call to check session health",
 	"- Many tool calls without visible progress",
 	"- Hook output shows a health decline warning",
 	"- Before a major refactoring decision (risk assessment)",
 	"",
-	"**buddy_guidance** — call for workflow recommendations",
+	"**alfred_guidance** — call for workflow recommendations",
 	"- Switching to a new file or task",
 	"- Before editing a high-blast-radius file",
 	"- After completing a major milestone (what's next?)",
 	"",
-	"**buddy_feedback** — call to rate a suggestion (trains the model)",
-	"- After acting on a [buddy] suggestion: rate helpful / not_helpful",
+	"**alfred_feedback** — call to rate a suggestion (trains the model)",
+	"- After acting on a [alfred] suggestion: rate helpful / not_helpful",
 	"- After ignoring a suggestion that turned out wrong: rate misleading",
 	"- Each rating directly improves future suggestion quality",
 	"",
 	"## Reading Hook Output",
 	"",
-	"- `[buddy]` lines are session intelligence — read them",
+	"- `[alfred]` lines are session intelligence — read them",
 	"- Lines starting with → are actionable recommendations",
 	"- `WHY:` explains the reasoning behind a suggestion",
 	"- `IMPACT:` quantifies savings — prioritize high-impact items",
@@ -166,8 +162,8 @@ var buddyRulesContent = strings.Join([]string{
 	"",
 }, "\n")
 
-// ensureRulesFile creates or updates ~/.claude/rules/buddy.md.
-// Uses a version marker (<!-- buddy-rules-vN -->) to detect stale content.
+// ensureRulesFile creates or updates ~/.claude/rules/alfred.md.
+// Uses a version marker (<!-- alfred-rules-vN -->) to detect stale content.
 // Files with the current version marker are left untouched.
 func ensureRulesFile() {
 	home, err := os.UserHomeDir()
@@ -176,10 +172,10 @@ func ensureRulesFile() {
 	}
 
 	rulesDir := filepath.Join(home, ".claude", "rules")
-	rulesPath := filepath.Join(rulesDir, "buddy.md")
+	rulesPath := filepath.Join(rulesDir, "alfred.md")
 
 	// Check existing file for version marker.
-	versionTag := "<!-- buddy-rules-v" + buddyRulesVersion + " -->"
+	versionTag := "<!-- alfred-rules-v" + alfredRulesVersion + " -->"
 	existing, readErr := os.ReadFile(rulesPath)
 	if readErr == nil {
 		if strings.Contains(string(existing), versionTag) {
@@ -192,16 +188,16 @@ func ensureRulesFile() {
 		return
 	}
 
-	content := versionTag + "\n" + buddyRulesContent
+	content := versionTag + "\n" + alfredRulesContent
 	if err := os.WriteFile(rulesPath, []byte(content), 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to write rules file: %v\n", err)
 		return
 	}
 
 	if readErr == nil {
-		fmt.Println("✓ Updated ~/.claude/rules/buddy.md (v" + buddyRulesVersion + ")")
+		fmt.Println("✓ Updated ~/.claude/rules/alfred.md (v" + alfredRulesVersion + ")")
 	} else {
-		fmt.Println("✓ Created ~/.claude/rules/buddy.md")
+		fmt.Println("✓ Created ~/.claude/rules/alfred.md")
 	}
 }
 
@@ -229,7 +225,7 @@ func cleanupLegacyInstall() {
 	}
 
 	// Remove legacy agent.
-	agentPath := filepath.Join(home, ".claude", "agents", "buddy.md")
+	agentPath := filepath.Join(home, ".claude", "agents", "alfred.md")
 	if _, err := os.Stat(agentPath); err == nil {
 		_ = os.Remove(agentPath)
 		cleaned = true
@@ -249,7 +245,7 @@ func cleanupLegacyInstall() {
 	}
 }
 
-// hasLegacyHooks checks if settings.json contains claude-buddy hooks.
+// hasLegacyHooks checks if settings.json contains claude-alfred hooks.
 func hasLegacyHooks() bool {
 	data, err := os.ReadFile(settingsPathFunc())
 	if err != nil {
@@ -269,7 +265,7 @@ func hasLegacyHooks() bool {
 			continue
 		}
 		for _, entry := range entries {
-			if isBuddyHookEntry(entry) {
+			if isAlfredHookEntry(entry) {
 				return true
 			}
 		}
@@ -279,7 +275,7 @@ func hasLegacyHooks() bool {
 
 // removeLegacyMCP silently removes the MCP server registered via `claude mcp add`.
 func removeLegacyMCP() {
-	cmd := exec.Command("claude", "mcp", "remove", "-s", "user", "claude-buddy")
+	cmd := exec.Command("claude", "mcp", "remove", "-s", "user", "claude-alfred")
 	_ = cmd.Run()
 }
 
@@ -296,8 +292,8 @@ func resolveBinPath() (string, error) {
 	return resolved, nil
 }
 
-// buddyHookEntries builds hook event entries keyed by event name.
-func buddyHookEntries(binPath string) map[string]any {
+// alfredHookEntries builds hook event entries keyed by event name.
+func alfredHookEntries(binPath string) map[string]any {
 	makeEntry := func(event string, timeout int, async bool, matcher string) []any {
 		hook := map[string]any{
 			"type":    "command",
@@ -336,7 +332,7 @@ func buddyHookEntries(binPath string) map[string]any {
 	return entries
 }
 
-// registerHooks writes claude-buddy hooks to ~/.claude/settings.json.
+// registerHooks writes claude-alfred hooks to ~/.claude/settings.json.
 // Existing settings and hooks from other tools are preserved.
 func registerHooks() error {
 	binPath, err := resolveBinPath()
@@ -361,8 +357,8 @@ func registerHooks() error {
 		hooks = make(map[string]any)
 	}
 
-	// Merge claude-buddy entries, preserving other tools' hooks.
-	for event, entry := range buddyHookEntries(binPath) {
+	// Merge claude-alfred entries, preserving other tools' hooks.
+	for event, entry := range alfredHookEntries(binPath) {
 		hooks[event] = mergeEventHooks(hooks[event], entry)
 	}
 	settings["hooks"] = hooks
@@ -385,33 +381,33 @@ func registerHooks() error {
 	return nil
 }
 
-// mergeEventHooks replaces the claude-buddy entry in an event's hook list,
+// mergeEventHooks replaces the claude-alfred entry in an event's hook list,
 // preserving entries from other tools.
-func mergeEventHooks(existing any, buddyEntry any) any {
+func mergeEventHooks(existing any, alfredEntry any) any {
 	existingList, ok := existing.([]any)
 	if !ok {
-		return buddyEntry
+		return alfredEntry
 	}
 
-	buddyList, ok := buddyEntry.([]any)
-	if !ok || len(buddyList) == 0 {
-		return buddyEntry
+	alfredList, ok := alfredEntry.([]any)
+	if !ok || len(alfredList) == 0 {
+		return alfredEntry
 	}
 
-	// Filter out old claude-buddy entries, keep others.
+	// Filter out old claude-alfred entries, keep others.
 	var kept []any
 	for _, item := range existingList {
-		if !isBuddyHookEntry(item) {
+		if !isAlfredHookEntry(item) {
 			kept = append(kept, item)
 		}
 	}
 
-	return append(kept, buddyList...)
+	return append(kept, alfredList...)
 }
 
-// isBuddyHookEntry checks if a hook entry belongs to claude-buddy
+// isAlfredHookEntry checks if a hook entry belongs to claude-alfred
 // by inspecting command strings and prompt markers.
-func isBuddyHookEntry(entry any) bool {
+func isAlfredHookEntry(entry any) bool {
 	m, ok := entry.(map[string]any)
 	if !ok {
 		return false
@@ -427,19 +423,19 @@ func isBuddyHookEntry(entry any) bool {
 		}
 		// Check command hooks.
 		cmd, _ := hm["command"].(string)
-		if strings.Contains(cmd, "claude-buddy") || strings.Contains(cmd, " hook-handler ") {
+		if strings.Contains(cmd, "claude-alfred") || strings.Contains(cmd, " hook-handler ") {
 			return true
 		}
-		// Check prompt hooks with [buddy] marker.
+		// Check prompt hooks with [alfred] marker.
 		prompt, _ := hm["prompt"].(string)
-		if strings.Contains(prompt, "[buddy]") {
+		if strings.Contains(prompt, "[alfred]") {
 			return true
 		}
 	}
 	return false
 }
 
-// RemoveHooks removes claude-buddy hooks from settings.json.
+// RemoveHooks removes claude-alfred hooks from settings.json.
 func RemoveHooks() error {
 	settingsPath := settingsPathFunc()
 
@@ -473,7 +469,7 @@ func RemoveHooks() error {
 
 		var kept []any
 		for _, item := range existing {
-			if !isBuddyHookEntry(item) {
+			if !isAlfredHookEntry(item) {
 				kept = append(kept, item)
 			}
 		}
@@ -530,15 +526,6 @@ func initialSync(sr syncRange) error {
 	return nil
 }
 
-func syncDocsToStore() error {
-	st, err := store.OpenDefault()
-	if err != nil {
-		return fmt.Errorf("open store: %w", err)
-	}
-	defer st.Close()
-	return syncDocsKnowledge(st)
-}
-
 func generateEmbeddings() {
 	emb := embedder.NewEmbedder()
 
@@ -547,32 +534,8 @@ func generateEmbeddings() {
 		fmt.Println("⚠ VOYAGE_API_KEY not set — vector search will use text-based fallback")
 		return
 	}
-
-	st, err := store.OpenDefault()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: embedding failed: %v\n", err)
-		return
-	}
-	defer st.Close()
-
-	model := emb.Model()
-	count, err := st.EmbedPending(func(text string) ([]float32, error) {
-		return emb.EmbedForStorage(ctx, text)
-	}, model, func(done, total int) {
-		renderProgress("Generating embeddings", done, total)
-	})
-	if err != nil {
-		clearLine()
-		fmt.Fprintf(os.Stderr, "Warning: embedding failed: %v\n", err)
-		return
-	}
-	clearLine()
-
-	if count > 0 {
-		fmt.Printf("✓ Generated %d embeddings (model: %s)\n", count, model)
-	} else {
-		fmt.Printf("✓ Embeddings up to date (model: %s)\n", model)
-	}
+	fmt.Printf("✓ Embedder available (model: %s)\n", emb.Model())
+	_ = ctx // placeholder for future docs embedding
 }
 
 func renderProgress(prefix string, done, total int) {

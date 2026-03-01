@@ -14,13 +14,13 @@ func TestSkillHintForPattern(t *testing.T) {
 		wantEmpty  bool
 		wantDeny   bool
 	}{
-		{pattern: "retry-loop", wantSkill: "buddy-recover"},
-		{pattern: "code-quality", wantSkill: "buddy-recover"},
-		{pattern: "test-correlation", wantSkill: "buddy-recover"},
+		{pattern: "retry-loop", wantSkill: "alfred-recover"},
+		{pattern: "code-quality", wantSkill: "alfred-recover"},
+		{pattern: "test-correlation", wantSkill: "alfred-recover"},
 		{pattern: "stale-read", wantEmpty: true},
-		{pattern: "past-solution", wantSkill: "buddy-recover"},
-		{pattern: "file-knowledge", wantSkill: "buddy-recover"},
-		{pattern: "workflow", wantSkill: "buddy-gate"},
+		{pattern: "past-solution", wantSkill: "alfred-recover"},
+		{pattern: "file-knowledge", wantSkill: "alfred-recover"},
+		{pattern: "workflow", wantSkill: "alfred-gate"},
 		{pattern: "strategic", wantEmpty: true},
 		{pattern: "playbook", wantEmpty: true},
 		{pattern: "unknown-pattern", wantEmpty: true},
@@ -55,13 +55,13 @@ func TestSkillHintForEpisode(t *testing.T) {
 		wantEmpty bool
 		wantDeny  bool
 	}{
-		{episode: "retry_cascade", wantSkill: "buddy-recover", wantDeny: true},
-		{episode: "edit_fail_spiral", wantSkill: "buddy-recover", wantDeny: true},
-		{episode: "test_fail_fixup", wantSkill: "buddy-recover", wantDeny: true},
-		{episode: "explore_to_stuck", wantSkill: "buddy-gate"},
-		{episode: "context_overload", wantSkill: "buddy-context-recovery", wantDeny: true},
-		{episode: "learned_episode", wantSkill: "buddy-recover"},
-		{episode: "trajectory_match", wantSkill: "buddy-recover"},
+		{episode: "retry_cascade", wantSkill: "alfred-recover", wantDeny: true},
+		{episode: "edit_fail_spiral", wantSkill: "alfred-recover", wantDeny: true},
+		{episode: "test_fail_fixup", wantSkill: "alfred-recover", wantDeny: true},
+		{episode: "explore_to_stuck", wantSkill: "alfred-gate"},
+		{episode: "context_overload", wantSkill: "alfred-context-recovery", wantDeny: true},
+		{episode: "learned_episode", wantSkill: "alfred-recover"},
+		{episode: "trajectory_match", wantSkill: "alfred-recover"},
 		{episode: "unknown_episode", wantEmpty: true},
 	}
 
@@ -99,13 +99,13 @@ func TestSkillHintForPhase(t *testing.T) {
 		wantSkill string
 		wantEmpty bool
 	}{
-		{phase: "explore", wantSkill: "buddy-forecast"},
-		{phase: "read", wantSkill: "buddy-forecast"},
-		{phase: "implement", wantSkill: "buddy-analyze"},
-		{phase: "write", wantSkill: "buddy-analyze"},
-		{phase: "test", wantSkill: "buddy-gate"},
-		{phase: "verify", wantSkill: "buddy-gate"},
-		{phase: "compile", wantSkill: "buddy-gate"},
+		{phase: "explore", wantSkill: "alfred-forecast"},
+		{phase: "read", wantSkill: "alfred-forecast"},
+		{phase: "implement", wantSkill: "alfred-analyze"},
+		{phase: "write", wantSkill: "alfred-analyze"},
+		{phase: "test", wantSkill: "alfred-gate"},
+		{phase: "verify", wantSkill: "alfred-gate"},
+		{phase: "compile", wantSkill: "alfred-gate"},
 		{phase: "unknown", wantEmpty: true},
 		{phase: "", wantEmpty: true},
 	}

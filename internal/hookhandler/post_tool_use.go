@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
-	"github.com/hir4ta/claude-buddy/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
 type postToolUseInput struct {
@@ -36,7 +36,7 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 
 	sdb, err := sessiondb.Open(in.SessionID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[buddy] PostToolUse: open session db: %v\n", err)
+		fmt.Fprintf(os.Stderr, "[alfred] PostToolUse: open session db: %v\n", err)
 		return nil, nil
 	}
 	defer sdb.Close()
@@ -47,7 +47,7 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 		return nil, nil
 	}
 
-	// Open buddy.db for direct knowledge writes (phases, files, sequences).
+	// Open alfred.db for direct knowledge writes (phases, files, sequences).
 	// Nil-safe: callers check st != nil before use.
 	st, _ := store.OpenDefaultCached()
 
@@ -61,7 +61,7 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 	verifyPendingResolution(sdb, true)
 
 	if err := sdb.RecordEvent(in.ToolName, inputHash, isWrite); err != nil {
-		fmt.Fprintf(os.Stderr, "[buddy] PostToolUse: record event: %v\n", err)
+		fmt.Fprintf(os.Stderr, "[alfred] PostToolUse: record event: %v\n", err)
 		return nil, nil
 	}
 
@@ -109,7 +109,7 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 
 			// Use command-specific detection instead of generic containsError.
 			// Generic detection produces false positives from log messages
-			// (e.g., buddy seed pattern logs containing "undefined" or "error").
+			// (e.g., seed pattern logs containing "undefined" or "error").
 			if testCmdPattern.MatchString(bi.Command) {
 				_ = sdb.SetContext("has_test_run", "true")
 
@@ -166,7 +166,7 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 	// Record workflow phase for adaptive learning.
 	recordPhase(sdb, in.ToolName, in.ToolInput)
 
-	// Persist phase to buddy.db for cross-session learning.
+	// Persist phase to alfred.db for cross-session learning.
 	if st != nil {
 		if phase := classifyPhase(in.ToolName, in.ToolInput); phase != "" {
 			_ = st.RecordLivePhase(in.SessionID, phase, in.ToolName)
@@ -249,8 +249,8 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 		}
 	}
 
-	// Enrich MCP tool output with session context for buddy tools.
-	if strings.HasPrefix(in.ToolName, "mcp__claude-buddy__") {
+	// Enrich MCP tool output with session context for alfred tools.
+	if strings.HasPrefix(in.ToolName, "mcp__claude-alfred__") {
 		if enrichment := buildMCPEnrichment(sdb); enrichment != "" {
 			return &HookOutput{
 				HookSpecificOutput: map[string]any{
@@ -285,7 +285,7 @@ func buildMCPEnrichment(sdb *sessiondb.SessionDB) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return "[buddy session context] " + strings.Join(parts, " | ")
+	return "[alfred session context] " + strings.Join(parts, " | ")
 }
 
 
@@ -301,48 +301,8 @@ func recordFailureSolution(sdb *sessiondb.SessionDB, sessionID, filePath string,
 		return
 	}
 
-	// Build solution description from the successful edit.
-	var solution string
-	var resolutionDiff string
-	var edit struct {
-		OldString string `json:"old_string"`
-		NewString string `json:"new_string"`
-	}
-	if json.Unmarshal(toolInput, &edit) == nil && edit.NewString != "" {
-		solution = fmt.Sprintf("Fixed %s by editing %s", f.FailureType, filepath.Base(filePath))
-		if len([]rune(edit.NewString)) <= 200 {
-			solution += fmt.Sprintf(": %s", edit.NewString)
-		}
-		// Store the exact resolution diff for future replay.
-		if len([]rune(edit.OldString)) <= 500 && len([]rune(edit.NewString)) <= 500 {
-			diffJSON, _ := json.Marshal(map[string]string{
-				"old": edit.OldString, "new": edit.NewString,
-			})
-			resolutionDiff = string(diffJSON)
-		}
-	} else {
-		solution = fmt.Sprintf("Fixed %s by rewriting %s", f.FailureType, filepath.Base(filePath))
-	}
-
-	st, err := store.OpenDefaultCached()
-	if err != nil {
-		return
-	}
-
-	if resolutionDiff != "" {
-		_ = st.InsertFailureSolutionWithDiff(sessionID, f.FailureType, f.ErrorSig, filePath, solution, resolutionDiff, "")
-	} else {
-		_ = st.InsertFailureSolution(sessionID, f.FailureType, f.ErrorSig, filePath, solution)
-	}
-
-	// If a past solution was surfaced before this fix, mark it as effective.
-	if idStr, _ := sdb.GetContext("last_surfaced_solution_id"); idStr != "" {
-		var solutionID int
-		if _, err := fmt.Sscanf(idStr, "%d", &solutionID); err == nil && solutionID > 0 {
-			_ = st.IncrementTimesEffective(solutionID)
-		}
-		_ = sdb.SetContext("last_surfaced_solution_id", "")
-	}
+	// failure_solutions table removed in alfred v1 — data recording only via sessiondb.
+	_ = sdb.SetContext("last_surfaced_solution_id", "")
 }
 
 // classifyPhase maps a tool call to a workflow phase string.
@@ -435,14 +395,8 @@ func trackSolutionChain(sdb *sessiondb.SessionDB, sessionID, toolName string, is
 
 	// Finalize chain when a write succeeds (likely fix) or after 20 steps (abandon).
 	if isSuccessfulWrite || step >= 20 {
-		if step >= 2 && step < 20 {
-			// Persist to store as a reusable playbook.
-			toolSeqJSON, _ := json.Marshal(strings.Split(seq, ","))
-			st, err := store.OpenDefaultCached()
-			if err == nil {
-				_ = st.InsertSolutionChain(sessionID, chainSig, string(toolSeqJSON), step)
-			}
-		}
+		// solution_chains table removed in alfred v1.
+		_ = step
 		// Clear chain state.
 		_ = sdb.SetContext("chain_failure_sig", "")
 		_ = sdb.SetContext("chain_tool_seq", "")

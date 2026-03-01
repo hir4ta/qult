@@ -46,7 +46,7 @@ var (
 	messageStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#7090A0"))
 
-	// Tip label (buddy MCP tool events)
+	// Tip label (alfred MCP tool events)
 	tipLabelStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#6A9A78")).
 			Bold(true)

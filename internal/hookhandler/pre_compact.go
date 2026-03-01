@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
 )
 
 type preCompactInput struct {
@@ -24,7 +24,7 @@ func handlePreCompact(input []byte) (*HookOutput, error) {
 
 	sdb, err := sessiondb.Open(in.SessionID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[buddy] PreCompact: open session db: %v\n", err)
+		fmt.Fprintf(os.Stderr, "[alfred] PreCompact: open session db: %v\n", err)
 		return nil, nil
 	}
 	defer sdb.Close()
@@ -66,7 +66,7 @@ func serializeWorkingSetForCompact(sdb *sessiondb.SessionDB) {
 	}
 
 	var b strings.Builder
-	b.WriteString("[buddy] Working context preserved across compact:\n")
+	b.WriteString("[alfred] Working context preserved across compact:\n")
 
 	if intent, ok := ws["intent"]; ok && intent != "" {
 		fmt.Fprintf(&b, "Current goal: %s\n", intent)

@@ -26,8 +26,8 @@ func TestBundle(t *testing.T) {
 		if err := json.Unmarshal(data, &m); err != nil {
 			t.Fatalf("parse plugin.json: %v", err)
 		}
-		if got := m["name"]; got != "claude-buddy" {
-			t.Errorf("name = %v, want claude-buddy", got)
+		if got := m["name"]; got != "claude-alfred" {
+			t.Errorf("name = %v, want claude-alfred", got)
 		}
 		if got := m["version"]; got != "0.15.0-test" {
 			t.Errorf("version = %v, want 0.15.0-test", got)
@@ -86,8 +86,8 @@ func TestBundle(t *testing.T) {
 		if !ok {
 			t.Fatal("mcpServers key missing")
 		}
-		if _, ok := servers["claude-buddy"]; !ok {
-			t.Error("claude-buddy server missing from .mcp.json")
+		if _, ok := servers["claude-alfred"]; !ok {
+			t.Error("claude-alfred server missing from .mcp.json")
 		}
 	})
 
@@ -108,12 +108,12 @@ func TestBundle(t *testing.T) {
 
 	// Verify agent exists.
 	t.Run("agent", func(t *testing.T) {
-		data, err := os.ReadFile(filepath.Join(outputDir, "agents", "buddy.md"))
+		data, err := os.ReadFile(filepath.Join(outputDir, "agents", "alfred.md"))
 		if err != nil {
-			t.Fatalf("read buddy.md: %v", err)
+			t.Fatalf("read alfred.md: %v", err)
 		}
 		if len(data) == 0 {
-			t.Error("buddy.md is empty")
+			t.Error("alfred.md is empty")
 		}
 	})
 }
@@ -123,9 +123,9 @@ func TestRunScriptAutoDownload(t *testing.T) {
 	script := generateRunScript("1.2.3")
 
 	checks := map[string]string{
-		"version embedding":   `BUDDY_VERSION="1.2.3"`,
-		"version sidecar":     ".buddy-version",
-		"lock directory":      ".buddy-download.lock",
+		"version embedding":   `ALFRED_VERSION="1.2.3"`,
+		"version sidecar":     ".alfred-version",
+		"lock directory":      ".alfred-download.lock",
 		"is_current function": "is_current()",
 		"acquire_lock":        "acquire_lock()",
 		"download_binary":     "download_binary()",
@@ -133,11 +133,11 @@ func TestRunScriptAutoDownload(t *testing.T) {
 		"serve case":          "serve)",
 		"hook-handler case":   "hook-handler)",
 		"setup case":          "setup)",
-		"install marker":      ".buddy-installed-",
-		"atomic temp dir":     ".buddy-dl.",
-		"github releases url": "github.com/hir4ta/claude-buddy/releases/download",
+		"install marker":      ".alfred-installed-",
+		"atomic temp dir":     ".alfred-dl.",
+		"github releases url": "github.com/hir4ta/claude-alfred/releases/download",
 		"stale lock cleanup":  "kill -0",
-		"fallback to old bin": `[ -f "$BUDDY_BIN" ]`,
+		"fallback to old bin": `[ -f "$ALFRED_BIN" ]`,
 	}
 
 	for name, keyword := range checks {

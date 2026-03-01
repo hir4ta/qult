@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"os"
 	"sort"
 )
 
@@ -32,49 +31,26 @@ func (s *Store) GetEmbedding(source string, sourceID int64) ([]float32, error) {
 	return deserializeFloat32(blob), nil
 }
 
-// SearchPatternsByVector performs vector-only search using cosine similarity.
-// Returns nil if queryVec is nil.
-func (s *Store) SearchPatternsByVector(queryVec []float32, patternType string, limit int) ([]PatternRow, error) {
+// minSimilarity is the cosine similarity threshold below which candidates are discarded.
+const minSimilarity = 0.3
+
+// VectorSearch performs a generic vector search on a given source table.
+// Returns (sourceID, score) pairs sorted by descending similarity.
+func (s *Store) VectorSearch(queryVec []float32, source string, limit int) ([]VectorMatch, error) {
 	if queryVec == nil {
 		return nil, nil
 	}
 	if limit <= 0 {
 		limit = 10
 	}
-	return s.vectorSearchPatterns(queryVec, patternType, limit)
-}
 
-// minSimilarity is the cosine similarity threshold below which candidates are discarded.
-const minSimilarity = 0.3
-
-// vectorSearchPatterns ranks pattern embeddings by cosine similarity.
-// When patternType is specified, a JOIN pre-filters embeddings at the SQL level
-// so only relevant vectors are loaded into memory.
-func (s *Store) vectorSearchPatterns(queryVec []float32, patternType string, limit int) ([]PatternRow, error) {
-	var query string
-	var args []any
-	if patternType != "" {
-		query = `SELECT e.source_id, e.vector FROM embeddings e
-			JOIN patterns p ON p.id = e.source_id
-			WHERE e.source = 'patterns' AND p.pattern_type = ?`
-		args = append(args, patternType)
-	} else {
-		query = `SELECT e.source_id, e.vector FROM embeddings e
-			WHERE e.source = 'patterns'`
-	}
-
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.Query(`SELECT source_id, vector FROM embeddings WHERE source = ?`, source)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	type scored struct {
-		id    int64
-		score float64
-	}
-	var candidates []scored
-
+	var candidates []VectorMatch
 	for rows.Next() {
 		var sourceID int64
 		var blob []byte
@@ -86,91 +62,23 @@ func (s *Store) vectorSearchPatterns(queryVec []float32, patternType string, lim
 		if sim < minSimilarity {
 			continue
 		}
-		candidates = append(candidates, scored{id: sourceID, score: sim})
+		candidates = append(candidates, VectorMatch{SourceID: sourceID, Score: sim})
 	}
 
 	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].score > candidates[j].score
+		return candidates[i].Score > candidates[j].Score
 	})
 
-	// Load pattern rows for top results.
-	var result []PatternRow
-	for _, c := range candidates {
-		if len(result) >= limit {
-			break
-		}
-		p, err := s.getPatternByID(c.id)
-		if err != nil {
-			continue
-		}
-		result = append(result, *p)
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
 	}
-
-	return result, nil
+	return candidates, nil
 }
 
-// getPatternByID loads a single pattern by ID.
-func (s *Store) getPatternByID(id int64) (*PatternRow, error) {
-	var p PatternRow
-	err := s.db.QueryRow(`
-		SELECT id, session_id, pattern_type, title, content, embed_text,
-			COALESCE(language,''), scope, COALESCE(source_event_id,0), timestamp
-		FROM patterns WHERE id = ?`, id).
-		Scan(&p.ID, &p.SessionID, &p.PatternType, &p.Title, &p.Content, &p.EmbedText,
-			&p.Language, &p.Scope, &p.SourceEventID, &p.Timestamp)
-	if err != nil {
-		return nil, err
-	}
-	p.Tags = s.getPatternTags(p.ID)
-	p.Files = s.getPatternFiles(p.ID)
-	return &p, nil
-}
-
-// EmbedPending generates embeddings for patterns that don't have one yet.
-// progressFn is called after each embedding is generated (can be nil).
-func (s *Store) EmbedPending(embedFunc func(text string) ([]float32, error), model string, progressFn func(done, total int)) (int, error) {
-	var total int
-	s.db.QueryRow(`
-		SELECT COUNT(*) FROM patterns p
-		WHERE NOT EXISTS (
-			SELECT 1 FROM embeddings e WHERE e.source = 'patterns' AND e.source_id = p.id
-		)`).Scan(&total)
-
-	rows, err := s.db.Query(`
-		SELECT p.id, p.embed_text FROM patterns p
-		WHERE NOT EXISTS (
-			SELECT 1 FROM embeddings e WHERE e.source = 'patterns' AND e.source_id = p.id
-		)`)
-	if err != nil {
-		return 0, fmt.Errorf("store: query pending embeddings: %w", err)
-	}
-	defer rows.Close()
-
-	var count int
-	for rows.Next() {
-		var id int64
-		var text string
-		if err := rows.Scan(&id, &text); err != nil {
-			continue
-		}
-
-		vec, err := embedFunc(text)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: embed pattern %d: %v\n", id, err)
-			continue
-		}
-
-		if err := s.InsertEmbedding("patterns", id, model, vec); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: store embedding %d: %v\n", id, err)
-			continue
-		}
-		count++
-		if progressFn != nil {
-			progressFn(count, total)
-		}
-	}
-
-	return count, nil
+// VectorMatch represents a vector search result.
+type VectorMatch struct {
+	SourceID int64
+	Score    float64
 }
 
 // cosineSimilarity computes the cosine similarity between two vectors.

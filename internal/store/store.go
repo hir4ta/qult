@@ -54,15 +54,10 @@ func Open(dbPath string) (*Store, error) {
 
 	st := &Store{db: db, dbPath: dbPath}
 
-	// Seed knowledge patterns for cold-start users.
-	if err := SeedIfEmpty(st); err != nil {
-		fmt.Fprintf(os.Stderr, "[buddy] seed patterns: %v\n", err)
-	}
-
 	return st, nil
 }
 
-// OpenDefault opens the database at the default path (~/.claude-buddy/buddy.db).
+// OpenDefault opens the database at the default path (~/.claude-alfred/alfred.db).
 func OpenDefault() (*Store, error) {
 	return Open(DefaultDBPath())
 }
@@ -101,11 +96,11 @@ func (s *Store) DB() *sql.DB {
 	return s.db
 }
 
-// DefaultDBPath returns ~/.claude-buddy/buddy.db.
+// DefaultDBPath returns ~/.claude-alfred/alfred.db.
 func DefaultDBPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "."
 	}
-	return filepath.Join(home, ".claude-buddy", "buddy.db")
+	return filepath.Join(home, ".claude-alfred", "alfred.db")
 }

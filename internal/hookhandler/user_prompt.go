@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
-	"github.com/hir4ta/claude-buddy/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
 type userPromptInput struct {
@@ -99,7 +99,7 @@ func handleUserPromptSubmit(input []byte) (*HookOutput, error) {
 
 	sdb, err := sessiondb.Open(in.SessionID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[buddy] UserPromptSubmit: open session db: %v\n", err)
+		fmt.Fprintf(os.Stderr, "[alfred] UserPromptSubmit: open session db: %v\n", err)
 		return nil, nil
 	}
 	defer sdb.Close()
@@ -167,7 +167,7 @@ func handleUserPromptSubmit(input []byte) (*HookOutput, error) {
 		}
 	}
 
-	// Track implicit feedback: if Claude hasn't called buddy MCP tools recently,
+	// Track implicit feedback: if Claude hasn't called alfred MCP tools recently,
 	// record as a signal that current suggestions may not be valuable enough.
 	trackImplicitFeedback(sdb, in.SessionID)
 

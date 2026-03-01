@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
-	"github.com/hir4ta/claude-buddy/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
 type postToolFailureInput struct {
@@ -28,7 +28,7 @@ func handlePostToolUseFailure(input []byte) (*HookOutput, error) {
 
 	sdb, err := sessiondb.Open(in.SessionID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[buddy] PostToolUseFailure: open session db: %v\n", err)
+		fmt.Fprintf(os.Stderr, "[alfred] PostToolUseFailure: open session db: %v\n", err)
 		return nil, nil
 	}
 	defer sdb.Close()
@@ -117,9 +117,9 @@ func handlePostToolUseFailure(input []byte) (*HookOutput, error) {
 		return nil, nil
 	}
 
-	suggestion += "\n→ For root cause analysis: call buddy_diagnose with the error details."
+	suggestion += "\n→ For root cause analysis: call alfred_diagnose with the error details."
 	out := makeOutput("PostToolUseFailure", suggestion)
-	enrichOutput(out, "buddy_diagnose")
+	enrichOutput(out, "alfred_diagnose")
 	return out, nil
 }
 
@@ -193,7 +193,7 @@ func buildFixSuggestion(sdb *sessiondb.SessionDB, sessionID, failureType, filePa
 
 	switch failureType {
 	case failEditMismatch:
-		b.WriteString("[buddy] Edit failed — old_string not found in file.\n")
+		b.WriteString("[alfred] Edit failed — old_string not found in file.\n")
 		b.WriteString("  WHY: The file content changed since your last Read. Another edit or auto-formatter may have modified it.\n")
 		b.WriteString("→ Read the file first to get the exact current content, then retry with the correct old_string.")
 
@@ -210,7 +210,7 @@ func buildFixSuggestion(sdb *sessiondb.SessionDB, sessionID, failureType, filePa
 		}
 
 	case failFileNotFound:
-		b.WriteString("[buddy] File not found.\n")
+		b.WriteString("[alfred] File not found.\n")
 		b.WriteString("  WHY: The path does not exist on disk. It may have been moved, renamed, or never created.\n")
 		if filePath != "" {
 			if similar := findSimilarPaths(sdb, filePath); similar != "" {
@@ -221,12 +221,12 @@ func buildFixSuggestion(sdb *sessiondb.SessionDB, sessionID, failureType, filePa
 		}
 
 	case failPermission:
-		fmt.Fprintf(&b, "[buddy] Permission denied for %s.\n", filepath.Base(filePath))
+		fmt.Fprintf(&b, "[alfred] Permission denied for %s.\n", filepath.Base(filePath))
 		b.WriteString("  WHY: The process lacks write permission. The file may be read-only, owned by another user, or in a protected directory.\n")
 		b.WriteString("→ Check if the file is read-only or if the directory exists.")
 
 	case failCompileError:
-		b.WriteString("[buddy] Compilation error detected.\n")
+		b.WriteString("[alfred] Compilation error detected.\n")
 		b.WriteString("  WHY: Recent edits likely introduced a syntax or type error.\n")
 		if grouped := groupCompileErrors(errorMsg); grouped != "" {
 			fmt.Fprintf(&b, "→ %s", grouped)
@@ -239,7 +239,7 @@ func buildFixSuggestion(sdb *sessiondb.SessionDB, sessionID, failureType, filePa
 		}
 
 	case failTestFailure:
-		b.WriteString("[buddy] Test failure detected.\n")
+		b.WriteString("[alfred] Test failure detected.\n")
 		if wsFiles, _ := sdb.GetWorkingSetFiles(); len(wsFiles) > 0 {
 			limit := min(3, len(wsFiles))
 			fmt.Fprintf(&b, "  WHY: You recently edited %s. The change likely broke an assumption in the test.\n",
@@ -255,7 +255,7 @@ func buildFixSuggestion(sdb *sessiondb.SessionDB, sessionID, failureType, filePa
 		}
 
 	case failBashError:
-		b.WriteString("[buddy] Command failed.\n")
+		b.WriteString("[alfred] Command failed.\n")
 		b.WriteString("  WHY: The shell command returned a non-zero exit code. Check if prerequisites are installed and paths are correct.\n")
 		if solution := searchPastSolutions(sdb, failBashError, errorMsg); solution != "" {
 			fmt.Fprintf(&b, "→ Past solution found: %s", solution)
@@ -379,64 +379,9 @@ func extractCompileLocation(errorMsg string) string {
 	return m
 }
 
-// searchPastSolutions searches for past solutions to similar errors.
-// Checks both the persistent failure_solutions table and vector search.
-func searchPastSolutions(sdb *sessiondb.SessionDB, failureType, errorMsg string) string {
-	errSig := extractErrorSignature(errorMsg)
-
-	// Try persistent failure_solutions first, preferring those with exact diffs.
-	st, err := store.OpenDefaultCached()
-	if err == nil {
-		solutions, _ := st.SearchFailureSolutionsWithDiff(failureType, errSig, 1)
-		if len(solutions) > 0 {
-			_ = st.IncrementTimesSurfaced(solutions[0].ID)
-			_ = sdb.SetContext("last_surfaced_solution_id", fmt.Sprintf("%d", solutions[0].ID))
-
-			// If a resolution diff is available, present the exact fix.
-			if solutions[0].ResolutionDiff != "" {
-				return formatResolutionDiff(solutions[0])
-			}
-
-			text := solutions[0].SolutionText
-			if len([]rune(text)) > 150 {
-				text = string([]rune(text)[:150]) + "..."
-			}
-			return text
-		}
-	}
-
-	// Check for solution chains (multi-step playbooks).
-	if err == nil {
-		chains, _ := st.SearchSolutionChains(failureType+":"+errSig, 1)
-		if len(chains) > 0 {
-			_ = st.IncrementChainReplayed(chains[0].ID)
-			return fmt.Sprintf("Past resolution playbook (%d steps): %s", chains[0].StepCount, chains[0].ToolSequence)
-		}
-	}
-
+// searchPastSolutions is a placeholder for future knowledge-base integration.
+func searchPastSolutions(_ *sessiondb.SessionDB, _, _ string) string {
 	return ""
-}
-
-// formatResolutionDiff formats a failure solution with an exact diff for display.
-func formatResolutionDiff(fs store.FailureSolution) string {
-	var diff struct {
-		Old string `json:"old"`
-		New string `json:"new"`
-	}
-	if json.Unmarshal([]byte(fs.ResolutionDiff), &diff) != nil {
-		return fs.SolutionText
-	}
-
-	old := diff.Old
-	new := diff.New
-	if len([]rune(old)) > 80 {
-		old = string([]rune(old)[:80]) + "..."
-	}
-	if len([]rune(new)) > 80 {
-		new = string([]rune(new)[:80]) + "..."
-	}
-	return fmt.Sprintf("Past fix for %s in %s: change `%s` to `%s`",
-		fs.FailureType, filepath.Base(fs.FilePath), old, new)
 }
 
 // predictFailureCascade checks if the next likely tools (based on session bigrams)
@@ -460,7 +405,7 @@ func predictFailureCascade(sdb *sessiondb.SessionDB, currentTool string) string 
 		return ""
 	}
 
-	return fmt.Sprintf("[buddy] cascade-risk: Next likely tools also have high failure rates: %s. Consider a different approach instead of retrying.",
+	return fmt.Sprintf("[alfred] cascade-risk: Next likely tools also have high failure rates: %s. Consider a different approach instead of retrying.",
 		strings.Join(atRisk, ", "))
 }
 
@@ -592,6 +537,6 @@ func searchCrossProjectSolutions(errorSig string) string {
 	if len([]rune(text)) > 150 {
 		text = string([]rune(text)[:150]) + "..."
 	}
-	return fmt.Sprintf("[buddy] Cross-project solution (from %s):\n→ %s", p.SourceProject, text)
+	return fmt.Sprintf("[alfred] Cross-project solution (from %s):\n→ %s", p.SourceProject, text)
 }
 

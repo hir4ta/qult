@@ -3,14 +3,12 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"os"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/hir4ta/claude-buddy/internal/embedder"
-	"github.com/hir4ta/claude-buddy/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/embedder"
+	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
 func decisionsHandler(st *store.Store) server.ToolHandlerFunc {
@@ -69,83 +67,33 @@ func decisionsHandler(st *store.Store) server.ToolHandlerFunc {
 	}
 }
 
+// patternsHandler is a placeholder — patterns table was removed in alfred v1.
+// Will be replaced by docs-based knowledge search.
 func patternsHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		if st == nil {
-			return mcp.NewToolResultError("store not available"), nil
-		}
-
+	return func(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		query := req.GetString("query", "")
 		if query == "" {
 			return mcp.NewToolResultError("query parameter is required"), nil
 		}
 
-		patternType := req.GetString("type", "")
-		limit := req.GetInt("limit", 5)
-		if limit < 1 {
-			limit = 5
-		}
-
-		var patterns []store.PatternRow
-		var searchMethod string
-
-		if emb != nil && emb.Available() {
-			queryVec, err := emb.EmbedForSearch(ctx, query)
-			if err == nil && queryVec != nil {
-				patterns, err = st.SearchPatternsByVector(queryVec, patternType, limit)
-				if err == nil {
-					searchMethod = "vector"
-				} else {
-					fmt.Fprintf(os.Stderr, "[buddy] vector search failed, falling back: %v\n", err)
-				}
-			}
-		}
-
-		// FTS5 BM25 fallback when vector search unavailable or failed.
-		if searchMethod == "" {
-			var err error
-			patterns, err = st.SearchPatternsByFTS(query, patternType, limit)
-			if err == nil && len(patterns) > 0 {
-				searchMethod = "fts5"
-			} else if err != nil {
-				fmt.Fprintf(os.Stderr, "[buddy] fts5 search failed, falling back: %v\n", err)
-			}
-		}
-
-		// LIKE fallback as last resort.
-		if searchMethod == "" {
-			var err error
-			patterns, err = st.SearchPatternsByKeyword(query, patternType, limit)
-			if err != nil {
-				return mcp.NewToolResultError("search failed: " + err.Error()), nil
-			}
-			searchMethod = "keyword"
-		}
-
-		// Re-rank by task-type and domain affinity if context is provided.
-		taskType := req.GetString("task_type", "")
-		domain := req.GetString("domain", "")
-		if taskType != "" || domain != "" {
-			patterns = store.RankPatterns(patterns, &store.RankContext{
-				TaskType: taskType,
-				Domain:   domain,
+		// Search decisions as interim knowledge source.
+		decisions, _ := st.SearchDecisions(query, "", 5)
+		decisionList := make([]map[string]any, 0, len(decisions))
+		for _, d := range decisions {
+			decisionList = append(decisionList, map[string]any{
+				"type":    "decision",
+				"topic":   d.Topic,
+				"content": d.DecisionText,
 			})
 		}
 
-		total, _ := st.CountPatterns()
-
-		patternList := make([]map[string]any, 0, len(patterns))
-		for _, p := range patterns {
-			patternList = append(patternList, store.PatternJSON(p))
-		}
-
 		result := map[string]any{
-			"query":          query,
-			"patterns":       patternList,
-			"total_patterns": total,
-			"search_method":  searchMethod,
+			"query":         query,
+			"results":       decisionList,
+			"search_method": "decisions_only",
+			"note":          "Pattern search will be replaced by docs knowledge base in alfred v1.",
 		}
-
+		_ = emb // placeholder for future docs embedding search
 		return marshalResult(result)
 	}
 }

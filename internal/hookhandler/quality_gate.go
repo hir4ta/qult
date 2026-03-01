@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
 )
 
 type qualityGateInput struct {
@@ -27,7 +27,7 @@ func handleQualityGate(input []byte, eventName string) (*HookOutput, error) {
 
 	sdb, err := sessiondb.Open(in.SessionID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[buddy] %s: open session db: %v\n", eventName, err)
+		fmt.Fprintf(os.Stderr, "[alfred] %s: open session db: %v\n", eventName, err)
 		return nil, nil
 	}
 	defer sdb.Close()
@@ -67,6 +67,6 @@ func handleQualityGate(input []byte, eventName string) (*HookOutput, error) {
 		return nil, nil
 	}
 
-	msg := fmt.Sprintf("[buddy] Quality gate (%s): %s", eventName, strings.Join(issues, "; "))
+	msg := fmt.Sprintf("[alfred] Quality gate (%s): %s", eventName, strings.Join(issues, "; "))
 	return makeOutput(eventName, msg), nil
 }

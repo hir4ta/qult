@@ -6,23 +6,23 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/hir4ta/claude-buddy/internal/embedder"
-	"github.com/hir4ta/claude-buddy/internal/hookhandler"
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
-	"github.com/hir4ta/claude-buddy/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/embedder"
+	"github.com/hir4ta/claude-alfred/internal/hookhandler"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
-// withBuddyTracker wraps a handler to reset the silence-as-signal counter
-// whenever a buddy MCP tool is invoked. This signals to the Thompson Sampling
-// system that the user is actively engaging with buddy suggestions.
-func withBuddyTracker(st *store.Store, h server.ToolHandlerFunc) server.ToolHandlerFunc {
+// withAlfredTracker wraps a handler to reset the silence-as-signal counter
+// whenever an alfred MCP tool is invoked. This signals to the Thompson Sampling
+// system that the user is actively engaging with alfred suggestions.
+func withAlfredTracker(st *store.Store, h server.ToolHandlerFunc) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		resetBuddyTracker(st)
+		resetAlfredTracker(st)
 		return h(ctx, req)
 	}
 }
 
-func resetBuddyTracker(st *store.Store) {
+func resetAlfredTracker(st *store.Store) {
 	if st == nil {
 		return
 	}
@@ -35,28 +35,28 @@ func resetBuddyTracker(st *store.Store) {
 		return
 	}
 	defer sdb.Close()
-	hookhandler.ResetBuddyCallTracker(sdb)
+	hookhandler.ResetAlfredCallTracker(sdb)
 }
 
-const serverInstructions = `claude-buddy is a real-time session advisor for Claude Code.
+const serverInstructions = `claude-alfred is a real-time session advisor for Claude Code.
 Hook-based briefings are delivered automatically every turn.
 
 ## When you need more detail from a briefing:
-  buddy_knowledge — Search past patterns, decisions, and solutions
-  buddy_guidance — Get alerts, recommendations, next steps
-  buddy_diagnose — Root cause analysis + fix patches for errors
+  alfred_knowledge — Search past patterns, decisions, and solutions
+  alfred_guidance — Get alerts, recommendations, next steps
+  alfred_diagnose — Root cause analysis + fix patches for errors
 
 ## Session management:
-  buddy_state — Session health, statistics, and predictions
-  buddy_plan — Task estimation, progress tracking, strategic plans
-  buddy_feedback — Rate suggestion quality (improves future relevance)
+  alfred_state — Session health, statistics, and predictions
+  alfred_plan — Task estimation, progress tracking, strategic plans
+  alfred_feedback — Rate suggestion quality (improves future relevance)
 `
 
 // New creates a new MCP server with all tools registered.
 // emb may be nil if VOYAGE_API_KEY is not set.
 func New(claudeHome string, st *store.Store, emb *embedder.Embedder) *server.MCPServer {
 	s := server.NewMCPServer(
-		"claude-buddy",
+		"claude-alfred",
 		"0.3.0",
 		server.WithToolCapabilities(true),
 		server.WithResourceCapabilities(true, true),
@@ -66,9 +66,9 @@ func New(claudeHome string, st *store.Store, emb *embedder.Embedder) *server.MCP
 	)
 
 	s.AddTools(
-		// 1. buddy_state: Consolidated session state + sessions + resume + skill_context + accuracy.
+		// 1. alfred_state: Consolidated session state + sessions + resume + skill_context + accuracy.
 		server.ServerTool{
-			Tool: mcp.NewTool("buddy_state",
+			Tool: mcp.NewTool("alfred_state",
 				mcp.WithDescription("Get session health, statistics, burst state, and trend predictions. Use when you need to assess current session progress, check health metrics, or predict potential issues. The 'detail' parameter controls depth: 'brief' returns stats only, 'standard' (default) returns a full snapshot including burst state and phase, 'outlook' adds health trends and risk predictions, 'sessions' lists recent sessions, 'resume' restores context from a previous session, 'skill' returns skill-specific context, 'accuracy' returns suggestion accuracy metrics."),
 				mcp.WithTitleAnnotation("Session State"),
 				mcp.WithReadOnlyHintAnnotation(true),
@@ -94,12 +94,12 @@ func New(claudeHome string, st *store.Store, emb *embedder.Embedder) *server.MCP
 					mcp.Description("Response format: concise (summary + key data only) or detailed (default, full output)"),
 				),
 			),
-			Handler: withBuddyTracker(st, stateConsolidatedHandler(claudeHome, st)),
+			Handler: withAlfredTracker(st, stateConsolidatedHandler(claudeHome, st)),
 		},
 
-		// 2. buddy_knowledge: Consolidated knowledge search + recall.
+		// 2. alfred_knowledge: Consolidated knowledge search + recall.
 		server.ServerTool{
-			Tool: mcp.NewTool("buddy_knowledge",
+			Tool: mcp.NewTool("alfred_knowledge",
 				mcp.WithDescription("Search accumulated knowledge including error solutions, architecture patterns, design decisions, and cross-project insights. Use when encountering a problem that may have been solved before, or when checking past architectural decisions. Set 'scope' to 'global' for cross-project search, 'recall' to search pre-compact conversation history, or 'project' (default) for current project; 'type' filters by kind (error_solution, architecture, decision, tool_usage)."),
 				mcp.WithTitleAnnotation("Knowledge Search"),
 				mcp.WithReadOnlyHintAnnotation(true),
@@ -132,13 +132,13 @@ func New(claudeHome string, st *store.Store, emb *embedder.Embedder) *server.MCP
 					mcp.Description("Response format: concise (summary + key data only) or detailed (default, full output)"),
 				),
 			),
-			Handler: withBuddyTracker(st, knowledgeConsolidatedHandler(st, emb)),
+			Handler: withAlfredTracker(st, knowledgeConsolidatedHandler(st, emb)),
 		},
 
-		// 3. buddy_guidance: Consolidated guidance.
+		// 3. alfred_guidance: Consolidated guidance.
 		server.ServerTool{
-			Tool: mcp.NewTool("buddy_guidance",
-				mcp.WithDescription("Get workflow guidance including active alerts, actionable recommendations, suggested next steps, and pending nudges. Use when you want to check what buddy recommends doing next, review outstanding warnings, or see queued suggestions. The 'focus' parameter narrows results: 'alerts' for warnings only, 'recommendations' for suggestions, 'next_steps' for prioritized actions, 'pending' for queued nudges."),
+			Tool: mcp.NewTool("alfred_guidance",
+				mcp.WithDescription("Get workflow guidance including active alerts, actionable recommendations, suggested next steps, and pending nudges. Use when you want to check what alfred recommends doing next, review outstanding warnings, or see queued suggestions. The 'focus' parameter narrows results: 'alerts' for warnings only, 'recommendations' for suggestions, 'next_steps' for prioritized actions, 'pending' for queued nudges."),
 				mcp.WithTitleAnnotation("Workflow Guidance"),
 				mcp.WithReadOnlyHintAnnotation(true),
 				mcp.WithDestructiveHintAnnotation(false),
@@ -157,12 +157,12 @@ func New(claudeHome string, st *store.Store, emb *embedder.Embedder) *server.MCP
 					mcp.Description("Response format: concise (summary + key data only) or detailed (default, full output)"),
 				),
 			),
-			Handler: withBuddyTracker(st, guidanceConsolidatedHandler(claudeHome, st)),
+			Handler: withAlfredTracker(st, guidanceConsolidatedHandler(claudeHome, st)),
 		},
 
-		// 4. buddy_plan: Consolidated planning.
+		// 4. alfred_plan: Consolidated planning.
 		server.ServerTool{
-			Tool: mcp.NewTool("buddy_plan",
+			Tool: mcp.NewTool("alfred_plan",
 				mcp.WithDescription("Plan and estimate tasks using historical session data for complexity estimation, multi-session progress tracking, and strategic workflow planning. Use when starting a new task to get effort estimates, checking progress on ongoing work, or generating an optimal phase sequence. The 'mode' parameter selects the function: 'estimate' returns median tool counts, 'progress' shows tracking, 'strategy' generates a phase-sequenced plan."),
 				mcp.WithTitleAnnotation("Planning"),
 				mcp.WithReadOnlyHintAnnotation(true),
@@ -185,12 +185,12 @@ func New(claudeHome string, st *store.Store, emb *embedder.Embedder) *server.MCP
 					mcp.Description("Response format: concise (summary + key data only) or detailed (default, full output)"),
 				),
 			),
-			Handler: withBuddyTracker(st, planConsolidatedHandler(st)),
+			Handler: withAlfredTracker(st, planConsolidatedHandler(st)),
 		},
 
-		// 5. buddy_diagnose: Consolidated diagnosis + fix.
+		// 5. alfred_diagnose: Consolidated diagnosis + fix.
 		server.ServerTool{
-			Tool: mcp.NewTool("buddy_diagnose",
+			Tool: mcp.NewTool("alfred_diagnose",
 				mcp.WithDescription("Diagnose errors and generate concrete fix patches with before/after code and verification commands. Use when a tool produces an error you need to understand, or when code quality findings need automated fixes. Provide 'error_output' for error diagnosis, or 'file_path' with 'finding_rule' for code fix generation. Supports Go compile errors, test failure correlation, and AST-based code fixes."),
 				mcp.WithTitleAnnotation("Error Diagnosis & Fix"),
 				mcp.WithReadOnlyHintAnnotation(true),
@@ -219,13 +219,13 @@ func New(claudeHome string, st *store.Store, emb *embedder.Embedder) *server.MCP
 					mcp.Description("Response format: concise (summary + key data only) or detailed (default, full output)"),
 				),
 			),
-			Handler: withBuddyTracker(st, diagnoseConsolidatedHandler(st)),
+			Handler: withAlfredTracker(st, diagnoseConsolidatedHandler(st)),
 		},
 
-		// 6. buddy_feedback: Suggestion feedback (write operation — separate annotations).
+		// 6. alfred_feedback: Suggestion feedback (write operation — separate annotations).
 		server.ServerTool{
-			Tool: mcp.NewTool("buddy_feedback",
-				mcp.WithDescription("Rate the quality of a buddy suggestion to improve future relevance via Thompson Sampling. Use when a suggestion was particularly helpful or unhelpful and you want to provide explicit signal. The required 'pattern' identifies which suggestion to rate; 'rating' must be helpful, partially_helpful, not_helpful, or misleading. Explicit feedback overrides automatic inference and has lasting impact on prioritization."),
+			Tool: mcp.NewTool("alfred_feedback",
+				mcp.WithDescription("Rate the quality of an alfred suggestion to improve future relevance via Thompson Sampling. Use when a suggestion was particularly helpful or unhelpful and you want to provide explicit signal. The required 'pattern' identifies which suggestion to rate; 'rating' must be helpful, partially_helpful, not_helpful, or misleading. Explicit feedback overrides automatic inference and has lasting impact on prioritization."),
 				mcp.WithTitleAnnotation("Suggestion Feedback"),
 				mcp.WithReadOnlyHintAnnotation(false),
 				mcp.WithDestructiveHintAnnotation(false),
@@ -249,7 +249,7 @@ func New(claudeHome string, st *store.Store, emb *embedder.Embedder) *server.MCP
 					mcp.Description("Response format: concise (summary + key data only) or detailed (default, full output)"),
 				),
 			),
-			Handler: withBuddyTracker(st, feedbackHandler(st)),
+			Handler: withAlfredTracker(st, feedbackHandler(st)),
 		},
 	)
 

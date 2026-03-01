@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hir4ta/claude-buddy/internal/parser"
+	"github.com/hir4ta/claude-alfred/internal/parser"
 )
 
 func newTestStore(t *testing.T) *Store {

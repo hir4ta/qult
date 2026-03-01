@@ -2,10 +2,9 @@ package hookhandler
 
 import (
 	"encoding/json"
-	"fmt"
 
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
-	"github.com/hir4ta/claude-buddy/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
 // PersonalStats aggregates user-specific data from multiple sources
@@ -83,9 +82,6 @@ func personalContext(sdb *sessiondb.SessionDB) *PersonalStats {
 		ps.SuccessMedianTools, ps.FailMedianTools = computeSessionMedians(st, projectPath)
 	}
 
-	// Recurring struggles from failure_solutions.
-	ps.RecurringStruggles = findRecurringStruggles(st, 3)
-
 	cachePersonalStats(sdb, ps)
 	return ps
 }
@@ -145,28 +141,3 @@ func median(vals []int) int {
 	return sorted[len(sorted)/2]
 }
 
-// findRecurringStruggles returns the top N most frequent failure types
-// from the failure_solutions table.
-func findRecurringStruggles(st *store.Store, limit int) []string {
-	rows, err := st.DB().Query(`
-		SELECT failure_type, COUNT(*) as cnt
-		FROM failure_solutions
-		GROUP BY failure_type
-		HAVING cnt >= 2
-		ORDER BY cnt DESC
-		LIMIT ?`, limit)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-
-	var struggles []string
-	for rows.Next() {
-		var ftype string
-		var cnt int
-		if rows.Scan(&ftype, &cnt) == nil && ftype != "" {
-			struggles = append(struggles, fmt.Sprintf("%s (%dx)", ftype, cnt))
-		}
-	}
-	return struggles
-}

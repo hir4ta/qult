@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hir4ta/claude-buddy/internal/parser"
-	"github.com/hir4ta/claude-buddy/internal/watcher"
+	"github.com/hir4ta/claude-alfred/internal/parser"
+	"github.com/hir4ta/claude-alfred/internal/watcher"
 )
 
 // SyncSession syncs a single JSONL file to the database.
@@ -69,11 +69,9 @@ func (s *Store) SyncSession(jsonlPath string) error {
 		firstPrompt = sess.FirstPrompt
 	}
 
-	hasNewEvents := false
 	for scanner.Scan() {
 		line := scanner.Text()
 		lineLen := int64(len(line)) + 1 // +1 for newline
-		hasNewEvents = true
 
 		pl := parser.ParseLineRaw(line)
 
@@ -237,67 +235,7 @@ func (s *Store) SyncSession(jsonlPath string) error {
 		return err
 	}
 
-	// Extract and store patterns from assistant events (only when new data was added).
-	if hasNewEvents {
-		s.extractAndStorePatterns(sess.ID)
-	}
-
 	return nil
-}
-
-// extractAndStorePatterns extracts patterns from assistant events and stores them.
-// Re-extraction replaces existing patterns to pick up classification improvements.
-func (s *Store) extractAndStorePatterns(sessionID string) {
-	events, err := s.getAssistantEvents(sessionID)
-	if err != nil || len(events) == 0 {
-		return
-	}
-
-	lang := ""
-	sess, err := s.GetSession(sessionID)
-	if err == nil {
-		lang = detectLang(sess.ProjectPath)
-	}
-
-	patterns := ExtractPatterns(events, sessionID, lang)
-	if len(patterns) == 0 {
-		return
-	}
-
-	// Replace existing patterns to pick up fixes (e.g. classification bug fixes).
-	_ = s.DeletePatternsBySession(sessionID)
-
-	for i := range patterns {
-		s.InsertPattern(&patterns[i])
-	}
-}
-
-// getAssistantEvents returns all events for a session (needed for pattern extraction context).
-func (s *Store) getAssistantEvents(sessionID string) ([]EventRow, error) {
-	rows, err := s.db.Query(`
-		SELECT id, session_id, event_type, timestamp,
-			COALESCE(user_text,''), COALESCE(assistant_text,''),
-			COALESCE(tool_name,''), COALESCE(tool_input,''),
-			COALESCE(task_id,''), COALESCE(task_subject,''), COALESCE(task_status,''),
-			COALESCE(agent_name,''), COALESCE(plan_title,''),
-			COALESCE(raw_json,''), COALESCE(byte_offset,0), compact_segment
-		FROM events
-		WHERE session_id = ?
-		ORDER BY id ASC`, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanEventRows(rows), nil
-}
-
-// detectLang tries to detect language from project path (simple heuristic).
-func detectLang(projectPath string) string {
-	lower := strings.ToLower(projectPath)
-	if strings.Contains(lower, "go") || strings.Contains(lower, "golang") {
-		return "go"
-	}
-	return ""
 }
 
 // SyncAll discovers all sessions and syncs them, then estimates chains.

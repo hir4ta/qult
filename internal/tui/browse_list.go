@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/hir4ta/claude-buddy/internal/watcher"
+	"github.com/hir4ta/claude-alfred/internal/watcher"
 )
 
 func (m BrowseModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -78,7 +78,7 @@ func (m BrowseModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m BrowseModel) viewList() string {
 	var b strings.Builder
 
-	b.WriteString(headerStyle.Render(" claude-buddy browse "))
+	b.WriteString(headerStyle.Render(" claude-alfred browse "))
 	b.WriteString("\n")
 
 	sessions := m.visibleSessions()

@@ -8,11 +8,21 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/hir4ta/claude-buddy/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/store"
+)
+
+// FeedbackRating represents the user's assessment of a suggestion.
+type FeedbackRating string
+
+const (
+	RatingHelpful           FeedbackRating = "helpful"
+	RatingPartiallyHelpful  FeedbackRating = "partially_helpful"
+	RatingNotHelpful        FeedbackRating = "not_helpful"
+	RatingMisleading        FeedbackRating = "misleading"
 )
 
 func feedbackHandler(st *store.Store) server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if st == nil {
 			return mcp.NewToolResultError("store not available"), nil
 		}
@@ -26,10 +36,10 @@ func feedbackHandler(st *store.Store) server.ToolHandlerFunc {
 			return mcp.NewToolResultError("rating parameter is required"), nil
 		}
 
-		rating := store.FeedbackRating(ratingStr)
+		rating := FeedbackRating(ratingStr)
 		switch rating {
-		case store.RatingHelpful, store.RatingPartiallyHelpful,
-			store.RatingNotHelpful, store.RatingMisleading:
+		case RatingHelpful, RatingPartiallyHelpful,
+			RatingNotHelpful, RatingMisleading:
 			// valid
 		default:
 			return mcp.NewToolResultError(
@@ -37,45 +47,27 @@ func feedbackHandler(st *store.Store) server.ToolHandlerFunc {
 			), nil
 		}
 
-		suggestionID := int64(req.GetInt("suggestion_id", 0))
 		comment := req.GetString("comment", "")
 
-		// Determine session ID from the most recent session.
-		sessionID := latestSessionID(st)
-
-		if err := st.InsertFeedback(sessionID, pattern, rating, comment, suggestionID); err != nil {
-			return mcp.NewToolResultError("failed to record feedback: " + err.Error()), nil
-		}
-
-		// Update the effectiveness score using the feedback signal.
-		resolved := rating == store.RatingHelpful || rating == store.RatingPartiallyHelpful
+		// Record feedback via UserPreference (the only remaining feedback mechanism).
+		resolved := rating == RatingHelpful || rating == RatingPartiallyHelpful
 		responseTime := 0.0
 		if resolved {
-			responseTime = 3.0 // nominal value for explicit feedback
+			responseTime = 3.0
 		}
 		_ = st.UpsertUserPreference(pattern, resolved, responseTime)
 
-		// Return current stats for transparency.
-		stats, _ := st.PatternFeedbackStats(pattern)
 		result := map[string]any{
 			"success": true,
 			"pattern": pattern,
 			"rating":  ratingStr,
-		}
-		if stats != nil {
-			result["feedback_stats"] = map[string]any{
-				"total":          stats.TotalCount,
-				"helpful":        stats.Helpful,
-				"not_helpful":    stats.NotHelpful,
-				"weighted_score": fmt.Sprintf("%.2f", stats.WeightedScore),
-			}
+			"comment": comment,
 		}
 
 		return marshalResult(result)
 	}
 }
 
-// latestSessionID returns the most recent session ID from the store.
 // marshalResult converts a value to indented JSON and returns an MCP tool result.
 // On encoding failure, returns an MCP error result instead of silently dropping the error.
 func marshalResult(v any) (*mcp.CallToolResult, error) {
@@ -86,6 +78,7 @@ func marshalResult(v any) (*mcp.CallToolResult, error) {
 	return mcp.NewToolResultText(string(data)), nil
 }
 
+// latestSessionID returns the most recent session ID from the store.
 func latestSessionID(st *store.Store) string {
 	var id string
 	err := st.DB().QueryRow(

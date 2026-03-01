@@ -9,7 +9,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/hir4ta/claude-buddy/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
 func resumeHandler(st *store.Store) server.ToolHandlerFunc {
@@ -305,23 +305,8 @@ func buildBriefing(st *store.Store, projectPath string) []briefingItem {
 
 	var items []briefingItem
 
-	// Rule 1: Frequent anti-patterns
-	patternFreqs, err := st.GetAlertPatternFrequency(projectPath)
-	if err == nil {
-		for _, pf := range patternFreqs {
-			if pf.Count < 3 {
-				continue
-			}
-			priority := "medium"
-			if pf.Count >= 5 {
-				priority = "high"
-			}
-			items = append(items, briefingItem{
-				Category: "anti_pattern",
-				Message:  fmt.Sprintf("%s has occurred %d times in this project (last: %s)", pf.PatternType, pf.Count, pf.LastSeen),
-				Priority: priority,
-			})
-		}
+	// Rule 1: Anti-patterns — alerts table removed in alfred v1.
+	if false {
 	}
 
 	// Rule 2: High compact rate

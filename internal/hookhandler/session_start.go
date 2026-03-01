@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hir4ta/claude-buddy/internal/embedder"
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
-	"github.com/hir4ta/claude-buddy/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/embedder"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
 type sessionStartInput struct {
@@ -54,7 +54,7 @@ func handleSessionStart(input []byte) (*HookOutput, error) {
 	// Recover orphaned session DBs from previous sessions that didn't get
 	// a clean SessionEnd. Extracts their knowledge before destroying them.
 	if recovered := RecoverOrphanedSessions(in.SessionID, in.CWD); recovered > 0 {
-		fmt.Fprintf(os.Stderr, "[buddy] Recovered %d orphaned session(s)\n", recovered)
+		fmt.Fprintf(os.Stderr, "[alfred] Recovered %d orphaned session(s)\n", recovered)
 	}
 
 	// Background initialization: embedder probe.
@@ -186,58 +186,14 @@ func generateStartupBriefing(sdb *sessiondb.SessionDB, data *ResumeData, cwd str
 	if len(parts) == 0 {
 		return ""
 	}
-	return "[buddy] Proactive briefing:\n" + strings.Join(parts, "\n")
+	return "[alfred] Proactive briefing:\n" + strings.Join(parts, "\n")
 }
 
-// snrHealthNote returns a signal-to-noise ratio health summary with trend.
-// Only displayed when there is meaningful data.
-func snrHealthNote() string {
-	st, err := store.OpenDefaultCached()
-	if err != nil {
-		return ""
-	}
-	snr, total, err := st.ComputeSNR(30)
-	if err != nil || total < 5 {
-		return ""
-	}
+// snrHealthNote is a placeholder — SNR tables were removed in alfred v1.
+func snrHealthNote() string { return "" }
 
-	note := fmt.Sprintf("SNR: %.0f%% (%d suggestions, 30 days)", snr*100, total)
-
-	// Add trend from recent history.
-	trend, err := st.RecentSNRTrend(3)
-	if err == nil && len(trend) >= 2 {
-		newest := trend[0].SNR
-		oldest := trend[len(trend)-1].SNR
-		delta := newest - oldest
-		switch {
-		case delta > 0.05:
-			note += " [trending up]"
-		case delta < -0.05:
-			note += " [trending down]"
-		default:
-			note += " [stable]"
-		}
-	}
-
-	if snr < 0.80 {
-		note += fmt.Sprintf(" — target: 80%%. Auto-elimination active for patterns below 10%%")
-	}
-	return note
-}
-
-// totalSavingsNote returns a cumulative savings summary from suggestion outcomes.
-// Only shown when there are enough data points (>= 5 total saved tools).
-func totalSavingsNote() string {
-	st, err := store.OpenDefaultCached()
-	if err != nil {
-		return ""
-	}
-	totalSaved, totalInstances, _, err := st.TotalSavings(30)
-	if err != nil || totalSaved < 5 {
-		return ""
-	}
-	return fmt.Sprintf("Saved ~%d tools across %d actions in 30 days by following suggestions", totalSaved, totalInstances)
-}
+// totalSavingsNote is a placeholder — suggestion outcomes table was removed in alfred v1.
+func totalSavingsNote() string { return "" }
 
 // learningProgressNote returns a message describing what data is available
 // based on the number of project sessions. At >= 10 sessions the system is
@@ -317,7 +273,7 @@ func handlePostCompactResume(sdb *sessiondb.SessionDB) (*HookOutput, error) {
 			// The compact_context nudge contains the serialized working set.
 			parts = append(parts, n.Suggestion)
 		} else {
-			parts = append(parts, fmt.Sprintf("[buddy] %s (%s): %s\n→ %s",
+			parts = append(parts, fmt.Sprintf("[alfred] %s (%s): %s\n→ %s",
 				n.Pattern, n.Level, n.Observation, n.Suggestion))
 		}
 	}
@@ -366,7 +322,7 @@ func supplementFromStore(sdb *sessiondb.SessionDB) string {
 
 	var b strings.Builder
 	if len(data.Decisions) > 0 {
-		b.WriteString("[buddy] Recent design decisions:\n")
+		b.WriteString("[alfred] Recent design decisions:\n")
 		limit := min(3, len(data.Decisions))
 		for i := range limit {
 			text := data.Decisions[i].DecisionText
@@ -431,12 +387,6 @@ func captureGitContext(sdb *sessiondb.SessionDB, cwd string) {
 		dirtyFiles = append(dirtyFiles, name)
 	}
 	_ = sdb.SetWorkingSet("git_dirty_files", strings.Join(dirtyFiles, "\n"))
-}
-
-// isGoProject checks if the directory has a go.mod file.
-func isGoProject(cwd string) bool {
-	_, err := os.Stat(filepath.Join(cwd, "go.mod"))
-	return err == nil
 }
 
 func execGit(ctx context.Context, cwd string, args ...string) (string, error) {

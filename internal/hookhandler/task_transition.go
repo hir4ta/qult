@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
 )
 
 func generateTaskTransitionBriefing(sdb *sessiondb.SessionDB, prevType, newType, cwd string) string {

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
-	"github.com/hir4ta/claude-buddy/internal/store"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
 // ImpactInfo holds the results of an impact analysis for a file.
@@ -61,19 +61,6 @@ func analyzeImpact(sdb *sessiondb.SessionDB, filePath, cwd string) *ImpactInfo {
 	return info
 }
 
-// goModulePath reads go.mod and returns the module path (e.g. "github.com/user/repo").
-func goModulePath(cwd string) string {
-	data, err := os.ReadFile(filepath.Join(cwd, "go.mod"))
-	if err != nil {
-		return ""
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, "module ") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "module "))
-		}
-	}
-	return ""
-}
 
 // analyzeGoImpact uses go/ast to find exported symbols, then greps for importers.
 func analyzeGoImpact(info *ImpactInfo, filePath, cwd string) {
@@ -383,75 +370,6 @@ func assessRisk(info *ImpactInfo) string {
 		return "medium"
 	}
 	return "low"
-}
-
-// formatImpact formats impact info for inclusion in alternatives.
-func formatImpact(info *ImpactInfo) string {
-	if info == nil {
-		return ""
-	}
-	if len(info.Importers) == 0 && len(info.TestFiles) == 0 && len(info.CoChanges) == 0 && info.BlastScore == 0 {
-		return ""
-	}
-
-	var parts []string
-	if len(info.Importers) > 0 {
-		parts = append(parts, fmt.Sprintf("%d file(s) reference this: %s",
-			len(info.Importers), strings.Join(info.Importers, ", ")))
-	}
-	if info.TransitiveImporterN > 0 {
-		parts = append(parts, fmt.Sprintf("%d transitive importer(s)", info.TransitiveImporterN))
-	}
-	if len(info.TestFiles) > 0 {
-		parts = append(parts, fmt.Sprintf("Tests: %s", strings.Join(info.TestFiles, ", ")))
-	}
-	if len(info.CoChanges) > 0 {
-		parts = append(parts, fmt.Sprintf("Co-changes: %s", strings.Join(info.CoChanges, ", ")))
-	}
-	if info.SuggestedTestCmd != "" {
-		parts = append(parts, fmt.Sprintf("Run: %s", info.SuggestedTestCmd))
-	}
-	if info.DomainRisk != "" {
-		parts = append(parts, fmt.Sprintf("Domain risk: %s", info.DomainRisk))
-	}
-	if info.RegressionProb > 0.1 {
-		parts = append(parts, fmt.Sprintf("Regression probability: %.0f%%", info.RegressionProb*100))
-	}
-	if info.BlastScore > 0 {
-		parts = append(parts, fmt.Sprintf("Blast radius: %d/100 (%s)", info.BlastScore, info.Risk))
-	}
-	return strings.Join(parts, "; ")
-}
-
-// coChangeHint checks the persistent store for files frequently co-changed
-// with the given file and returns a hint if strong associations exist.
-func coChangeHint(filePath string) string {
-	st, err := store.OpenDefaultCached()
-	if err != nil {
-		return ""
-	}
-
-	coChanges, err := st.CoChangedFiles(filePath, 3)
-	if err != nil || len(coChanges) == 0 {
-		return ""
-	}
-
-	var suggestions []string
-	for _, cc := range coChanges {
-		if cc.SessionCount < 3 {
-			continue
-		}
-		other := cc.FileB
-		if other == filePath {
-			other = cc.FileA
-		}
-		suggestions = append(suggestions, fmt.Sprintf("%s (%d sessions)", filepath.Base(other), cc.SessionCount))
-	}
-	if len(suggestions) == 0 {
-		return ""
-	}
-
-	return fmt.Sprintf("[buddy] Co-changed files: %s — changed together across sessions (structural coupling)", strings.Join(suggestions, ", "))
 }
 
 // classifyDomainRisk returns a domain-specific risk note based on file path.

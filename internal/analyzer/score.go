@@ -3,7 +3,7 @@ package analyzer
 import (
 	"strings"
 
-	"github.com/hir4ta/claude-buddy/internal/parser"
+	"github.com/hir4ta/claude-alfred/internal/parser"
 )
 
 // UsageScore holds the live usage quality score and its breakdown.

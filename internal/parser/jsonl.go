@@ -394,8 +394,8 @@ func extractToolSummary(toolName string, inputRaw json.RawMessage) string {
 	}
 
 	// Buddy MCP tools get dedicated summary extraction.
-	if strings.Contains(toolName, "buddy_") {
-		return extractBuddyToolSummary(toolName, ti)
+	if strings.Contains(toolName, "alfred_") {
+		return extractAlfredToolSummary(toolName, ti)
 	}
 
 	var summary string
@@ -432,8 +432,8 @@ func extractToolSummary(toolName string, inputRaw json.RawMessage) string {
 	return Truncate(summary, maxInputSummaryLen)
 }
 
-// extractBuddyToolSummary builds a summary for buddy MCP tool calls.
-func extractBuddyToolSummary(toolName string, ti ToolInput) string {
+// extractAlfredToolSummary builds a summary for alfred MCP tool calls.
+func extractAlfredToolSummary(toolName string, ti ToolInput) string {
 	// Query is the most informative field.
 	if ti.Query != "" {
 		return Truncate(fmt.Sprintf("%q", ti.Query), maxInputSummaryLen)
@@ -457,7 +457,7 @@ func extractBuddyToolSummary(toolName string, ti ToolInput) string {
 
 	// Default label based on tool name.
 	shortName := toolName
-	if idx := strings.LastIndex(toolName, "buddy_"); idx >= 0 {
+	if idx := strings.LastIndex(toolName, "alfred_"); idx >= 0 {
 		shortName = toolName[idx:]
 	}
 	switch shortName {

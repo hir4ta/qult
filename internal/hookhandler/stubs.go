@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/hir4ta/claude-buddy/internal/sessiondb"
+	"github.com/hir4ta/claude-alfred/internal/sessiondb"
 )
 
 // extractErrorSignature extracts a normalized error signature for failure tracking.
@@ -48,9 +48,6 @@ func extractTestFailures(_ string) []string { return nil }
 
 // correlateWithRecentEdits is a stub (test correlation removed).
 func correlateWithRecentEdits(_ *sessiondb.SessionDB, _ []string) string { return "" }
-
-// searchErrorSolutions is a stub (knowledge search removed).
-func searchErrorSolutions(_ *sessiondb.SessionDB, _ string) []string { return nil }
 
 // --- Phase analysis helpers (moved from deleted playbook.go) ---
 

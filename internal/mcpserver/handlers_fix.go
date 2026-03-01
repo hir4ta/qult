@@ -24,7 +24,7 @@ func fixHandler() server.ToolHandlerFunc {
 		message := req.GetString("message", "")
 
 		return marshalResult(FixResponse{
-			Reason:   "code quality fixers removed — use buddy_diagnose for error diagnosis",
+			Reason:   "code quality fixers removed — use alfred_diagnose for error diagnosis",
 			FilePath: filePath,
 			Rule:     rule,
 			Message:  message,

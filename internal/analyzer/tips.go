@@ -16,7 +16,7 @@ const (
 // Feedback is the LLM's evaluation of the user's Claude Code usage.
 type Feedback struct {
 	Situation   string        // what the user is currently doing
-	Observation string        // what the buddy noticed
+	Observation string        // what alfred noticed
 	Suggestion  string        // concrete action proposal
 	Level       FeedbackLevel
 }

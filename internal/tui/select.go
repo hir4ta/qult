@@ -6,7 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/hir4ta/claude-buddy/internal/watcher"
+	"github.com/hir4ta/claude-alfred/internal/watcher"
 )
 
 // SelectModel is a Bubble Tea model for interactive session selection.
@@ -66,7 +66,7 @@ func (m SelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m SelectModel) View() string {
 	var b strings.Builder
 
-	b.WriteString(headerStyle.Render(" claude-buddy "))
+	b.WriteString(headerStyle.Render(" claude-alfred "))
 	b.WriteString("  ")
 	b.WriteString(dimStyle.Render("Select a session to watch"))
 	b.WriteString("\n")

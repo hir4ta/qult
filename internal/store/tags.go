@@ -16,14 +16,3 @@ func (s *Store) GetOrCreateTag(name string) (int64, error) {
 	return res.LastInsertId()
 }
 
-// LinkPatternTag creates a pattern_tags association.
-func (s *Store) LinkPatternTag(patternID, tagID int64) error {
-	_, err := s.db.Exec(`INSERT OR IGNORE INTO pattern_tags (pattern_id, tag_id) VALUES (?, ?)`, patternID, tagID)
-	return err
-}
-
-// LinkPatternFile creates a pattern_files association.
-func (s *Store) LinkPatternFile(patternID int64, filePath, role string) error {
-	_, err := s.db.Exec(`INSERT OR IGNORE INTO pattern_files (pattern_id, file_path, role) VALUES (?, ?, ?)`, patternID, filePath, role)
-	return err
-}

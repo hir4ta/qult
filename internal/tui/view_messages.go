@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hir4ta/claude-buddy/internal/parser"
+	"github.com/hir4ta/claude-alfred/internal/parser"
 )
 
 // viewLine is a single rendered line in the message area.
@@ -176,12 +176,12 @@ func formatEvent(ev parser.SessionEvent) string {
 		case "TaskList", "TaskGet", "TaskStop":
 			return ""
 		}
-		// buddy MCP tools shown as [tip]
-		if isBuddyTool(ev.ToolName) {
+		// alfred MCP tools shown as [tip]
+		if isAlfredTool(ev.ToolName) {
 			label := alignLabel(tipLabelStyle.Render("[tip]"), 5)
-			// Extract short tool name: "mcp__claude-buddy__buddy_tips" -> "buddy_tips"
+			// Extract short tool name: "mcp__claude-alfred__buddy_tips" -> "buddy_tips"
 			shortName := ev.ToolName
-			if idx := strings.LastIndex(shortName, "buddy_"); idx >= 0 {
+			if idx := strings.LastIndex(shortName, "alfred_"); idx >= 0 {
 				shortName = shortName[idx:]
 			}
 			name := tipLabelStyle.Render(shortName)
@@ -267,16 +267,16 @@ func eventFullText(ev parser.SessionEvent) string {
 	}
 }
 
-// isBuddyTool returns true if the tool name is a claude-buddy MCP tool.
-func isBuddyTool(name string) bool {
-	return strings.Contains(name, "buddy_")
+// isAlfredTool returns true if the tool name is a claude-alfred MCP tool.
+func isAlfredTool(name string) bool {
+	return strings.Contains(name, "alfred_")
 }
 
 // isVisibleEvent returns true if the event should appear as a row in the event list.
-// Tool-use events are hidden from the list except for buddy MCP tools ([tip]).
+// Tool-use events are hidden from the list except for alfred MCP tools ([tip]).
 func isVisibleEvent(ev parser.SessionEvent) bool {
 	if ev.Type == parser.EventToolUse {
-		return isBuddyTool(ev.ToolName)
+		return isAlfredTool(ev.ToolName)
 	}
 	return formatEvent(ev) != ""
 }

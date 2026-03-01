@@ -56,7 +56,7 @@ func (m Model) View() string {
 }
 
 func (m Model) renderHeader() string {
-	title := headerStyle.Render(" claude-buddy watch ")
+	title := headerStyle.Render(" claude-alfred watch ")
 
 	// Pulsing activity indicator
 	pulseChars := []string{"\u2022", "\u25e6"} // ● ◦
@@ -231,7 +231,7 @@ func (m Model) renderHelp() string {
 }
 
 func (m Model) renderHelpOverlay() string {
-	title := headerStyle.Render(" claude-buddy help ")
+	title := headerStyle.Render(" claude-alfred help ")
 
 	keys := []struct{ key, desc string }{
 		{"\u2191 / k", "Move cursor up"},
