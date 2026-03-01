@@ -170,10 +170,6 @@ func handleUserPromptSubmit(input []byte) (*HookOutput, error) {
 		}
 	}
 
-	// Dequeue pending nudges to prevent pile-up and record delivery.
-	nudges, _ := sdb.DequeueNudges(2)
-	recordNudgeDelivery(sdb, in.SessionID, nudges)
-
 	// Track implicit feedback: if Claude hasn't called buddy MCP tools recently,
 	// record as a signal that current suggestions may not be valuable enough.
 	trackImplicitFeedback(sdb, in.SessionID)
@@ -186,16 +182,6 @@ func handleUserPromptSubmit(input []byte) (*HookOutput, error) {
 	// --- JARVIS briefing: select the single most important signal ---
 	pc := newPromptContext(sdb)
 	var entries []nudgeEntry
-
-	// 0. Predictive context: predict target files from prompt and surface proactive hints.
-	if predictiveHint := buildPredictiveContext(pc, in.Prompt); predictiveHint != "" {
-		entries = append(entries, nudgeEntry{
-			Pattern:     "predictive-context",
-			Level:       "info",
-			Observation: "Predictive context",
-			Suggestion:  predictiveHint,
-		})
-	}
 
 	// 1. JARVIS briefing signal (max 1, priority-based).
 	// Use narrative synthesis to enrich the signal with session context.
@@ -212,17 +198,7 @@ func handleUserPromptSubmit(input []byte) (*HookOutput, error) {
 		recordSignalOutcome(sdb, in.SessionID, sig)
 	}
 
-	// 2. Queued nudges from other hooks (PostToolUse etc.).
-	for _, n := range nudges {
-		entries = append(entries, nudgeEntry{
-			Pattern:     n.Pattern,
-			Level:       n.Level,
-			Observation: n.Observation,
-			Suggestion:  n.Suggestion,
-		})
-	}
-
-	// 3. Task transition briefing (one-time event, not noise).
+	// 2. Task transition briefing (one-time event, not noise).
 	if taskBriefing != "" {
 		entries = append([]nudgeEntry{{
 			Pattern:     "task-briefing",

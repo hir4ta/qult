@@ -139,20 +139,7 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 					}
 				}
 
-				// Positive signal: test-first recognition for bugfix/refactor.
-				taskTypeStr, _ := sdb.GetContext("task_type")
-				tc, hasWrite, _, _ := sdb.BurstState()
-				if (taskTypeStr == "bugfix" || taskTypeStr == "refactor") && !hasWrite && tc <= 3 {
-					set, _ := sdb.TrySetCooldown("test_first_ack", 30*time.Minute)
-					if set {
-						Deliver(sdb, "test-first", "info",
-							"Good practice: running tests before editing",
-							"Test-first approach established. This gives a baseline to verify changes against.",
-							PriorityMedium,
-							"Running tests before editing creates a verifiable baseline; without it, you can't distinguish pre-existing failures from ones you introduced.")
-					}
 				}
-			}
 
 			// Track build/compile success with precise detection.
 			if isCompileCommand(bi.Command) {
@@ -181,17 +168,9 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 	// Record health snapshot every 10 tool calls for trend prediction.
 	recordHealthSnapshot(sdb)
 
-	// Wall detection: velocity dropped sharply — deliver intervention.
+	// Wall detection: clear flag (data only, no output).
 	if IsWallDetected(sdb) {
 		ClearWallDetected(sdb)
-		if msg := buildWallIntervention(sdb); msg != "" {
-			set, _ := sdb.TrySetCooldown("wall_intervention", 10*time.Minute)
-			if set {
-				Deliver(sdb, "wall-detected", "warning",
-					"Productivity drop detected", msg, PriorityHigh,
-					"Velocity drops often indicate a blocker — addressing it early prevents cascade failures.")
-			}
-		}
 	}
 
 	// Record workflow phase for adaptive learning.
@@ -204,18 +183,8 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 		}
 	}
 
-	// Workflow alignment: check current session against best successful trajectory.
-	if msg := updateWorkflowAlignment(sdb); msg != "" {
-		Deliver(sdb, "workflow-alignment", "warning",
-			"Workflow divergence detected", msg, PriorityMedium,
-			"Diverging from proven successful workflows increases the risk of hitting known failure modes.")
-	}
-
-	// Async coaching pre-generation on phase transitions.
-	// PostToolUse is async (<5s), so a goroutine with 5s timeout is safe.
-	if changed, _ := sdb.GetContext("coaching_phase_changed"); changed == "true" {
-		asyncPreGenCoaching(sdb, in.SessionID)
-	}
+	// Workflow alignment: record data only (no output).
+	_ = updateWorkflowAlignment(sdb)
 
 	// Record tool outcome for prediction intelligence.
 	filePath := extractFilePath(in.ToolInput)
@@ -259,11 +228,6 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 		}
 	}
 
-	// Surface co-changed files after writes.
-	if isWrite && filePath != "" {
-		surfaceCoChanges(sdb, filePath)
-	}
-
 	// Failure→solution pipeline: record fix when Edit/Write succeeds after a failure.
 	if isWrite && filePath != "" {
 		recordFailureSolution(sdb, in.SessionID, filePath, in.ToolInput)
@@ -282,39 +246,9 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 		lintAfterWrite(sdb, filePath, in.CWD)
 	}
 
-	// Code quality heuristics on write operations.
-	if isWrite && filePath != "" {
-		if hint := runCodeHeuristics(filePath, in.ToolInput); hint != "" {
-			cooldownKey := "code_hint:" + filepath.Base(filePath)
-			set, _ := sdb.TrySetCooldown(cooldownKey, 5*time.Minute)
-			if set {
-				Deliver(sdb, "code-quality", "info",
-					"Code quality observation", hint, PriorityMedium)
-			}
-		}
-	}
-
-	// Suggest specific test command after editing Go files.
-	if isWrite && filePath != "" && filepath.Ext(filePath) == ".go" && !strings.HasSuffix(filePath, "_test.go") {
-		suggestTestForEdit(sdb, filePath, in.ToolInput, in.CWD)
-	}
-
-	// Workflow order check — enqueue nudge if write doesn't match expected workflow.
-	if isWrite {
-		if nudge := checkWorkflowForCurrentTask(sdb); nudge != "" {
-			Deliver(sdb, "workflow", "info", "Workflow suggestion", nudge, PriorityMedium,
-			"Following the established workflow order (read→plan→edit→test) reduces rework by catching issues earlier.")
-		}
-	}
-
-	// Periodic checkpoint: every 20 tool calls, check session health.
-	checkPeriodicHealth(sdb)
-
-	// Run lightweight signal detection → deliver via additionalContext.
+	// Run lightweight signal detection (data recording only, no output).
 	det := &HookDetector{sdb: sdb}
-	if signal := det.Detect(); signal != "" {
-		return makeOutput("PostToolUse", signal), nil
-	}
+	det.Detect()
 
 	// Search for past error solutions when Bash fails.
 	// Also record the failure for PreToolUse past-failure warning.
@@ -346,16 +280,6 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 			if msg := buildTestFailureGuidance(sdb, in.SessionID, bi.Command, resp, in.CWD); msg != "" {
 				return makeOutput("PostToolUse", msg), nil
 			}
-		}
-	}
-
-	// File-context knowledge: after Read/Edit/Write, search for related patterns.
-	if in.ToolName == "Read" || isWrite {
-		var fi struct {
-			FilePath string `json:"file_path"`
-		}
-		if json.Unmarshal(in.ToolInput, &fi) == nil && fi.FilePath != "" {
-			matchFileContextKnowledge(sdb, fi.FilePath)
 		}
 	}
 
