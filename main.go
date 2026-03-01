@@ -51,6 +51,12 @@ func run() error {
 		return install.Uninstall()
 	case "analyze":
 		return runAnalyze()
+	case "crawl-seed":
+		output := "internal/install/seed_docs.json"
+		if len(os.Args) > 2 {
+			output = os.Args[2]
+		}
+		return install.CrawlSeed(output)
 	case "plugin-bundle":
 		outputDir := "./plugin"
 		if len(os.Args) > 2 {
@@ -231,6 +237,7 @@ Commands:
   count-sessions Show session counts per sync range (JSON)
   uninstall     Remove hooks and MCP server registration
   analyze       Session analysis report
+  crawl-seed    Crawl official docs and generate seed_docs.json
   plugin-bundle Generate plugin directory from Go sources
   version       Show version
   help          Show this help

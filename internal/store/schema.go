@@ -5,8 +5,8 @@ import (
 	"strconv"
 )
 
-// schemaVersion 100 = alfred v1 (full reset from V1-V16).
-const schemaVersion = 100
+// schemaVersion 101 = search quality upgrade (FTS5 porter, indexes, embedding reset).
+const schemaVersion = 101
 
 const ddlV1 = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -224,6 +224,57 @@ CREATE TRIGGER IF NOT EXISTS docs_fts_au AFTER UPDATE ON docs BEGIN
 END;
 `
 
+// ddlV101 upgrades from v100: FTS5 porter stemming, new indexes, embedding reset for 1024d.
+const ddlV101 = `
+-- Rebuild FTS5 with porter stemmer for better recall (configuring ≈ configuration).
+DROP TRIGGER IF EXISTS docs_fts_ai;
+DROP TRIGGER IF EXISTS docs_fts_ad;
+DROP TRIGGER IF EXISTS docs_fts_au;
+DROP TABLE IF EXISTS docs_fts;
+
+CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
+    section_path, content,
+    content='docs', content_rowid='id',
+    tokenize='porter unicode61',
+    prefix='2,3'
+);
+
+-- Re-populate FTS from existing docs.
+INSERT INTO docs_fts(rowid, section_path, content)
+    SELECT id, section_path, content FROM docs;
+
+-- Set column weights: section_path matches 10x more important than content.
+INSERT INTO docs_fts(docs_fts, rank) VALUES('rank', 'bm25(10.0, 1.0)');
+
+-- Recreate triggers for FTS sync.
+CREATE TRIGGER IF NOT EXISTS docs_fts_ai AFTER INSERT ON docs BEGIN
+    INSERT INTO docs_fts(rowid, section_path, content)
+    VALUES (new.id, new.section_path, new.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS docs_fts_ad AFTER DELETE ON docs BEGIN
+    INSERT INTO docs_fts(docs_fts, rowid, section_path, content)
+    VALUES ('delete', old.id, old.section_path, old.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS docs_fts_au AFTER UPDATE ON docs BEGIN
+    INSERT INTO docs_fts(docs_fts, rowid, section_path, content)
+    VALUES ('delete', old.id, old.section_path, old.content);
+    INSERT INTO docs_fts(rowid, section_path, content)
+    VALUES (new.id, new.section_path, new.content);
+END;
+
+-- Missing indexes for common query patterns.
+CREATE INDEX IF NOT EXISTS idx_docs_source_type ON docs(source_type);
+CREATE INDEX IF NOT EXISTS idx_docs_crawled_at ON docs(crawled_at);
+CREATE INDEX IF NOT EXISTS idx_decisions_session ON decisions(session_id);
+CREATE INDEX IF NOT EXISTS idx_decisions_timestamp ON decisions(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, event_type);
+
+-- Clear embeddings so they regenerate at new dimensions (2048d → 1024d).
+DELETE FROM embeddings WHERE source = 'docs';
+`
+
 // legacyTables are tables from V1-V16 that no longer exist in alfred.
 var legacyTables = []string{
 	"patterns", "pattern_tags", "pattern_files", "patterns_fts",
@@ -264,6 +315,13 @@ func Migrate(db *sql.DB) error {
 
 	if _, err := db.Exec(ddlV1); err != nil {
 		return err
+	}
+
+	// Apply incremental migrations.
+	if current < 101 {
+		if _, err := db.Exec(ddlV101); err != nil {
+			return err
+		}
 	}
 
 	// Upsert schema version.

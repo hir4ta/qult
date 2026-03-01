@@ -33,6 +33,10 @@ func Open(dbPath string) (*Store, error) {
 	pragmas := []string{
 		"PRAGMA journal_mode=WAL",
 		"PRAGMA foreign_keys=ON",
+		"PRAGMA synchronous=NORMAL",
+		"PRAGMA cache_size=-8000",
+		"PRAGMA mmap_size=268435456",
+		"PRAGMA temp_store=MEMORY",
 	}
 	for _, p := range pragmas {
 		if _, err := db.Exec(p); err != nil {

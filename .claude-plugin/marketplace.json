@@ -11,7 +11,7 @@
       "name": "claude-alfred",
       "source": "./plugin",
       "description": "Anti-pattern detection, adaptive suggestions, cross-session learning",
-      "version": "0.17.0"
+      "version": "0.18.0"
     }
   ]
 }

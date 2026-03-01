@@ -52,7 +52,7 @@ func (e *Embedder) Available() bool {
 	return e.available
 }
 
-// Dims returns the embedding dimensions (fixed for voyage-3.5).
+// Dims returns the embedding dimensions.
 func (e *Embedder) Dims() int {
 	return voyageDims
 }
@@ -84,4 +84,13 @@ func (e *Embedder) EmbedForStorage(ctx context.Context, text string) ([]float32,
 		return nil, nil
 	}
 	return e.client.embedForStorage(ctx, text)
+}
+
+// Rerank reorders documents by relevance to the query using the Voyage rerank API.
+// Returns results sorted by descending relevance score.
+func (e *Embedder) Rerank(ctx context.Context, query string, documents []string, topK int) ([]RerankResult, error) {
+	if e.client == nil {
+		return nil, nil
+	}
+	return e.client.rerank(ctx, query, documents, topK)
 }

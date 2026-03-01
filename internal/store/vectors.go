@@ -120,3 +120,66 @@ func deserializeFloat32(blob []byte) []float32 {
 	return vec
 }
 
+// rrfK is the Reciprocal Rank Fusion constant. A standard value of 60 balances
+// contributions from highly ranked and lower ranked results.
+const rrfK = 60
+
+// HybridMatch represents a combined vector + FTS5 search result.
+type HybridMatch struct {
+	DocID    int64
+	RRFScore float64
+}
+
+// HybridSearch combines vector search and FTS5 search using Reciprocal Rank Fusion.
+// Both search methods run independently and results are merged by RRF score.
+// The overRetrieve parameter controls how many candidates each method retrieves
+// before fusion (typically 3-4x the desired final limit).
+func (s *Store) HybridSearch(queryVec []float32, ftsQuery string, sourceType string, limit int, overRetrieve int) ([]HybridMatch, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	if overRetrieve <= 0 {
+		overRetrieve = limit * 4
+	}
+
+	scores := make(map[int64]float64)
+
+	// Vector search.
+	if queryVec != nil {
+		matches, err := s.VectorSearch(queryVec, "docs", overRetrieve)
+		if err == nil {
+			for rank, m := range matches {
+				scores[m.SourceID] += 1.0 / float64(rrfK+rank+1)
+			}
+		}
+	}
+
+	// FTS5 search.
+	if ftsQuery != "" {
+		ftsResults, err := s.SearchDocsFTS(ftsQuery, sourceType, overRetrieve)
+		if err == nil {
+			for rank, d := range ftsResults {
+				scores[d.ID] += 1.0 / float64(rrfK+rank+1)
+			}
+		}
+	}
+
+	if len(scores) == 0 {
+		return nil, nil
+	}
+
+	// Sort by combined RRF score.
+	candidates := make([]HybridMatch, 0, len(scores))
+	for id, score := range scores {
+		candidates = append(candidates, HybridMatch{DocID: id, RRFScore: score})
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].RRFScore > candidates[j].RRFScore
+	})
+
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	return candidates, nil
+}
+

@@ -67,8 +67,10 @@ func decisionsHandler(st *store.Store) server.ToolHandlerFunc {
 	}
 }
 
-// docsSearchHandler searches the docs knowledge base using 3-tier fallback:
-// vector search (Voyage AI) → FTS5 BM25 → LIKE.
+// docsSearchHandler searches the docs knowledge base using hybrid search:
+// 1. Hybrid RRF (vector + FTS5 fusion) → over-retrieve 20 candidates
+// 2. Rerank top candidates via Voyage rerank API → return top 5
+// 3. LIKE fallback if hybrid returns nothing.
 func docsSearchHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		query := req.GetString("query", "")
@@ -83,32 +85,74 @@ func docsSearchHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandl
 		var docs []store.DocRow
 		searchMethod := ""
 
-		// Tier 1: Vector search via Voyage AI.
-		if emb != nil && emb.Available() {
-			queryVec, err := emb.EmbedForSearch(ctx, query)
-			if err == nil && queryVec != nil {
-				matches, err := st.VectorSearch(queryVec, "docs", limit)
-				if err == nil && len(matches) > 0 {
-					ids := make([]int64, len(matches))
-					for i, m := range matches {
-						ids[i] = m.SourceID
-					}
-					docs, _ = st.GetDocsByIDs(ids)
-					searchMethod = "vector"
-				}
-			}
+		// Stage 1: Hybrid RRF search (vector + FTS5 combined).
+		var queryVec []float32
+		embAvailable := emb != nil && emb.Available()
+		if embAvailable {
+			queryVec, _ = emb.EmbedForSearch(ctx, query)
 		}
 
-		// Tier 2: FTS5 BM25 phrase search.
-		if len(docs) == 0 {
-			ftsResults, err := st.SearchDocsFTS(query, "", limit)
-			if err == nil && len(ftsResults) > 0 {
-				docs = ftsResults
+		overRetrieve := limit * 4
+		if overRetrieve < 20 {
+			overRetrieve = 20
+		}
+
+		hybridMatches, _ := st.HybridSearch(queryVec, query, "", overRetrieve, overRetrieve)
+
+		if len(hybridMatches) > 0 {
+			ids := make([]int64, len(hybridMatches))
+			for i, m := range hybridMatches {
+				ids[i] = m.DocID
+			}
+			docs, _ = st.GetDocsByIDs(ids)
+
+			// Preserve RRF ordering (GetDocsByIDs may reorder).
+			if len(docs) > 1 {
+				docMap := make(map[int64]store.DocRow, len(docs))
+				for _, d := range docs {
+					docMap[d.ID] = d
+				}
+				ordered := make([]store.DocRow, 0, len(ids))
+				for _, id := range ids {
+					if d, ok := docMap[id]; ok {
+						ordered = append(ordered, d)
+					}
+				}
+				docs = ordered
+			}
+
+			if queryVec != nil {
+				searchMethod = "hybrid_rrf"
+			} else {
 				searchMethod = "fts5"
 			}
+
+			// Stage 2: Rerank via Voyage rerank API (if available).
+			if embAvailable && len(docs) > limit {
+				contents := make([]string, len(docs))
+				for i, d := range docs {
+					contents[i] = d.SectionPath + "\n" + d.Content
+				}
+				reranked, err := emb.Rerank(ctx, query, contents, limit)
+				if err == nil && len(reranked) > 0 {
+					reorderedDocs := make([]store.DocRow, 0, len(reranked))
+					for _, r := range reranked {
+						if r.Index >= 0 && r.Index < len(docs) {
+							reorderedDocs = append(reorderedDocs, docs[r.Index])
+						}
+					}
+					docs = reorderedDocs
+					searchMethod = "hybrid_rrf+rerank"
+				}
+			}
+
+			// Trim to requested limit.
+			if len(docs) > limit {
+				docs = docs[:limit]
+			}
 		}
 
-		// Tier 3: LIKE fallback.
+		// Fallback: LIKE search.
 		if len(docs) == 0 {
 			likeResults, err := st.SearchDocsLIKE(query, limit)
 			if err == nil && len(likeResults) > 0 {

@@ -65,7 +65,7 @@ func Run(args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: initial sync failed: %v\n", err)
 	}
 
-	generateEmbeddings()
+	seedDocs()
 	ensureRulesFile()
 	ensurePathSymlink()
 
@@ -527,16 +527,42 @@ func initialSync(sr syncRange) error {
 	return nil
 }
 
-func generateEmbeddings() {
-	emb := embedder.NewEmbedder()
-
-	ctx := context.Background()
-	if !emb.EnsureAvailable(ctx) {
-		fmt.Println("⚠ VOYAGE_API_KEY not set — vector search will use text-based fallback")
+func seedDocs() {
+	st, err := store.OpenDefault()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not open store for seed docs: %v\n", err)
 		return
 	}
-	fmt.Printf("✓ Embedder available (model: %s)\n", emb.Model())
-	_ = ctx // placeholder for future docs embedding
+	defer st.Close()
+
+	emb := embedder.NewEmbedder()
+	ctx := context.Background()
+	embAvailable := emb.EnsureAvailable(ctx)
+	if embAvailable {
+		fmt.Printf("✓ Embedder available (model: %s)\n", emb.Model())
+		fmt.Println("  First-time embedding may take up to 15 minutes")
+	} else {
+		fmt.Println("⚠ VOYAGE_API_KEY not set — seed docs will use FTS5 text search only")
+	}
+
+	res, err := ApplySeed(st, emb, func(done, total int) {
+		renderProgress("Seeding docs", done, total)
+	})
+	clearLine()
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: seed docs partially failed: %v\n", err)
+	}
+
+	if res.Applied > 0 {
+		msg := fmt.Sprintf("✓ Seeded %d doc sections (%d unchanged)", res.Applied, res.Unchanged)
+		if res.Embedded > 0 {
+			msg += fmt.Sprintf(", %d embeddings generated", res.Embedded)
+		}
+		fmt.Println(msg)
+	} else if res.Unchanged > 0 {
+		fmt.Printf("✓ Docs already up to date (%d sections)\n", res.Unchanged)
+	}
 }
 
 func renderProgress(prefix string, done, total int) {
