@@ -71,15 +71,7 @@ func generateTaskTransitionBriefing(sdb *sessiondb.SessionDB, prevType, newType,
 		}
 	}
 
-	// 4. Playbook for the new task type.
-	if playbook := generatePlaybook(sdb, TaskType(newType), cwd); playbook != "" {
-		b.WriteString("\n")
-		b.WriteString(playbook)
-	} else if est := autoEstimate(cwd, newType); est != "" {
-		fmt.Fprintf(&b, "\nEstimate: %s.", est)
-	}
-
-	// 5. START HERE: concrete first action for the new task.
+	// 4. START HERE: concrete first action for the new task.
 	if action := taskTransitionAction(sdb, TaskType(newType)); action != "" {
 		fmt.Fprintf(&b, "\nSTART HERE: %s", action)
 	}
@@ -94,10 +86,6 @@ func generateTaskTransitionBriefing(sdb *sessiondb.SessionDB, prevType, newType,
 }
 
 func taskTransitionAction(sdb *sessiondb.SessionDB, newType TaskType) string {
-	if action := autoNextStep(sdb); action != "" {
-		return action
-	}
-
 	switch newType {
 	case TaskBugfix:
 		return "Reproduce the bug — run the failing test or trigger the error path"

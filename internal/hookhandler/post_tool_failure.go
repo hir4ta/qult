@@ -414,12 +414,7 @@ func searchPastSolutions(sdb *sessiondb.SessionDB, failureType, errorMsg string)
 		}
 	}
 
-	// Fall back to vector-based pattern search.
-	solutions := searchErrorSolutions(sdb, errSig)
-	if len(solutions) == 0 {
-		return ""
-	}
-	return formatSolution(solutions[0])
+	return ""
 }
 
 // formatResolutionDiff formats a failure solution with an exact diff for display.

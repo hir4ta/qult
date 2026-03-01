@@ -57,26 +57,12 @@ func handleSessionStart(input []byte) (*HookOutput, error) {
 		fmt.Fprintf(os.Stderr, "[buddy] Recovered %d orphaned session(s)\n", recovered)
 	}
 
-	// Detect available external linters for PostToolUse checks.
-	detectAvailableLinters(sdb)
-
-	// Background initialization: embedder probe + coverage map.
-	// Fire-and-forget — callers handle missing data gracefully:
-	//   - embedQuery() falls back to FTS5 when embedder_available != "true"
-	//   - LoadCoverageMap() returns nil when coverage map is not yet ready
+	// Background initialization: embedder probe.
+	// Fire-and-forget — embedQuery() falls back to FTS5 when embedder_available != "true".
 	go func() {
 		if db, err := sessiondb.Open(in.SessionID); err == nil {
 			cacheEmbedderStatus(db)
 			db.Close()
-		}
-		if isGoProject(in.CWD) {
-			cm := GenerateCoverageMap(in.CWD)
-			if cm != nil && len(cm.FuncToTests) > 0 {
-				if db, err := sessiondb.Open(in.SessionID); err == nil {
-					SaveCoverageMap(db, cm)
-					db.Close()
-				}
-			}
 		}
 	}()
 
@@ -172,9 +158,6 @@ func generateStartupBriefing(sdb *sessiondb.SessionDB, data *ResumeData, cwd str
 		taskType := inferTaskType(data)
 		if taskType != TaskUnknown {
 			_ = sdb.SetContext("task_type", string(taskType))
-			if playbook := generatePlaybook(sdb, taskType, cwd); playbook != "" {
-				parts = append(parts, playbook)
-			}
 		}
 	}
 

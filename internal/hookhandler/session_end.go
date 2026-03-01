@@ -221,8 +221,8 @@ func persistSessionMetrics(sdb *sessiondb.SessionDB) {
 		dist := phaseDist(phases)
 		_ = st.UpdateBaseline("explore_read_pct", dist["read"])
 
-		editBashCount := countTransitions(phases, "write", "compile") +
-			countTransitions(phases, "write", "test")
+		editBashCount := countPhaseTransitions(phases, "write", "compile") +
+			countPhaseTransitions(phases, "write", "test")
 		_ = st.UpdateBaseline("debug_edit_cycles", float64(editBashCount))
 	}
 }

@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"math"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -148,125 +146,35 @@ func TestEnrichAlertsFromSessionDB_Empty(t *testing.T) {
 	}
 }
 
-// TestFixHandler_Integration tests the fixHandler end-to-end with real temp files.
-func TestFixHandler_Integration(t *testing.T) {
+// TestFixHandler_Stub tests that the stub fix handler returns a reason message.
+func TestFixHandler_Stub(t *testing.T) {
 	t.Parallel()
 	handler := fixHandler()
 
-	t.Run("go_defer_in_loop", func(t *testing.T) {
-		t.Parallel()
-		// Create a temp Go file with a defer-in-loop pattern.
-		dir := t.TempDir()
-		fp := filepath.Join(dir, "main.go")
-		code := "package main\n\nfunc run() {\n\tfor i := 0; i < 10; i++ {\n\t\tdefer cleanup()\n\t}\n}\n"
-		if err := os.WriteFile(fp, []byte(code), 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		result, err := handler(context.Background(), newFixRequest(fp, "go_defer_in_loop", "", 5))
-		if err != nil {
-			t.Fatalf("fixHandler error = %v", err)
-		}
-		parsed := parseFixResult(t, result)
-		if parsed["success"] != true {
-			t.Errorf("success = %v, want true", parsed["success"])
-		}
-		if parsed["before"] == nil || parsed["after"] == nil {
-			t.Error("expected before/after in result")
-		}
-	})
-
-	t.Run("unknown_extension", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		fp := filepath.Join(dir, "data.xyz")
-		if err := os.WriteFile(fp, []byte("some data"), 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		result, err := handler(context.Background(), newFixRequest(fp, "some_rule", "", 1))
-		if err != nil {
-			t.Fatalf("fixHandler error = %v", err)
-		}
-		parsed := parseFixResult(t, result)
-		if parsed["success"] != false {
-			t.Errorf("success = %v, want false (no fixer for .xyz)", parsed["success"])
-		}
-		if parsed["reason"] == nil {
-			t.Error("expected reason field for no-fixer case")
-		}
-	})
-
-	t.Run("unknown_rule", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		fp := filepath.Join(dir, "main.go")
-		if err := os.WriteFile(fp, []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		result, err := handler(context.Background(), newFixRequest(fp, "nonexistent_rule", "", 3))
-		if err != nil {
-			t.Fatalf("fixHandler error = %v", err)
-		}
-		parsed := parseFixResult(t, result)
-		if parsed["success"] != false {
-			t.Errorf("success = %v, want false (unknown rule)", parsed["success"])
-		}
-	})
-
-	t.Run("missing_file", func(t *testing.T) {
-		t.Parallel()
-		result, err := handler(context.Background(), newFixRequest("/nonexistent/path.go", "go_defer_in_loop", "", 1))
-		if err != nil {
-			t.Fatalf("fixHandler error = %v", err)
-		}
-		if !result.IsError {
-			t.Error("expected MCP error for missing file")
-		}
-	})
-
-	t.Run("missing_params", func(t *testing.T) {
-		t.Parallel()
-		// No file_path.
-		result, err := handler(context.Background(), newFixRequest("", "some_rule", "", 1))
-		if err != nil {
-			t.Fatalf("fixHandler error = %v", err)
-		}
-		if !result.IsError {
-			t.Error("expected MCP error for missing file_path")
-		}
-	})
-}
-
-// newFixRequest builds an mcp.CallToolRequest for the fix handler.
-func newFixRequest(filePath, rule, message string, line int) mcp.CallToolRequest {
-	args := map[string]any{
-		"file_path":    filePath,
-		"finding_rule": rule,
-		"line":         float64(line),
-	}
-	if message != "" {
-		args["message"] = message
-	}
-	return mcp.CallToolRequest{
+	req := mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
-			Name:      "buddy_fix",
-			Arguments: args,
+			Name: "buddy_fix",
+			Arguments: map[string]any{
+				"file_path":    "/some/file.go",
+				"finding_rule": "some_rule",
+			},
 		},
 	}
-}
 
-// parseFixResult extracts the JSON body from a non-error MCP result.
-func parseFixResult(t *testing.T, result *mcp.CallToolResult) map[string]any {
-	t.Helper()
-	if result.IsError {
-		t.Fatalf("unexpected MCP error result")
+	result, err := handler(context.Background(), req)
+	if err != nil {
+		t.Fatalf("fixHandler error = %v", err)
 	}
+	if result.IsError {
+		t.Fatal("fixHandler returned MCP error, want stub response")
+	}
+
 	text := result.Content[0].(mcp.TextContent).Text
 	var parsed map[string]any
 	if err := json.Unmarshal([]byte(text), &parsed); err != nil {
-		t.Fatalf("invalid JSON in result: %v\n%s", err, text)
+		t.Fatalf("invalid JSON: %v", err)
 	}
-	return parsed
+	if parsed["reason"] == nil || parsed["reason"] == "" {
+		t.Error("expected non-empty reason in stub response")
+	}
 }

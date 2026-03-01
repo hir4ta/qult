@@ -85,9 +85,6 @@ func handlePreToolUse(input []byte) (*HookOutput, error) {
 	}
 
 	// Auto-apply high-confidence code fixes (>=0.9) on Edit for Go files.
-	if out := autoApplyCodeFix(sdb, in.ToolName, in.ToolInput); out != nil {
-		return out, nil
-	}
 
 	// Light mode: safety gates + auto-corrections only.
 	// Advisory intelligence is available on-demand via MCP tools
@@ -256,76 +253,6 @@ func fixGoTestRaceCache(cmd string) (string, string) {
 	return corrected, "[buddy] Added -count=1 to disable test caching with -race"
 }
 
-// autoApplyCodeFix runs high-confidence Go code fixers on Edit operations.
-// Only applies fixes with confidence >= 0.9 (nil-error-wrap, defer-in-loop).
-// Lower-confidence fixes (empty-error-return 0.85, error-shadow 0.7) are excluded.
-func autoApplyCodeFix(sdb *sessiondb.SessionDB, toolName string, toolInput json.RawMessage) *HookOutput {
-	if toolName != "Edit" {
-		return nil
-	}
-
-	var edit struct {
-		FilePath   string `json:"file_path"`
-		OldString  string `json:"old_string"`
-		NewString  string `json:"new_string"`
-		ReplaceAll bool   `json:"replace_all,omitempty"`
-	}
-	if json.Unmarshal(toolInput, &edit) != nil || edit.FilePath == "" {
-		return nil
-	}
-	if filepath.Ext(edit.FilePath) != ".go" || strings.HasSuffix(edit.FilePath, "_test.go") {
-		return nil
-	}
-
-	// Read file and simulate the edit result for AST analysis.
-	content, err := os.ReadFile(edit.FilePath)
-	if err != nil {
-		return nil
-	}
-	simulated := strings.Replace(string(content), edit.OldString, edit.NewString, 1)
-
-	// Run high-confidence fixers on simulated content.
-	fixer := &goFixer{}
-	fixedNew := edit.NewString
-	var fixes []string
-
-	for _, check := range []struct {
-		rule    string
-		message string
-	}{
-		{"go_nil_error_wrap", "wrapping nil"},
-		{"go_defer_in_loop", "defer` inside loop"},
-	} {
-		finding := Finding{File: edit.FilePath, Rule: check.rule, Message: check.message}
-		fix := fixer.Fix(finding, []byte(simulated))
-		if fix == nil || fix.Confidence < 0.9 {
-			continue
-		}
-		// Only apply if the fix's Before is within the new_string region.
-		if !strings.Contains(fixedNew, fix.Before) {
-			continue
-		}
-		fixedNew = strings.Replace(fixedNew, fix.Before, fix.After, 1)
-		fixes = append(fixes, check.rule)
-	}
-
-	if len(fixes) == 0 {
-		return nil
-	}
-
-	// Track auto-fix for revert detection in subsequent edits.
-	_ = sdb.SetContext("last_auto_fix_pattern", strings.Join(fixes, ","))
-	_ = sdb.SetContext("last_auto_fix_file", edit.FilePath)
-
-	updated, _ := json.Marshal(struct {
-		FilePath   string `json:"file_path"`
-		OldString  string `json:"old_string"`
-		NewString  string `json:"new_string"`
-		ReplaceAll bool   `json:"replace_all,omitempty"`
-	}{edit.FilePath, edit.OldString, fixedNew, edit.ReplaceAll})
-	return makeUpdatedInputOutput(updated,
-		fmt.Sprintf("[buddy] Auto-applied code fix: %s", strings.Join(fixes, ", ")))
-}
 
 // narrowTestScope replaces go test ./... with specific changed packages.
 func narrowTestScope(sdb *sessiondb.SessionDB, cmd, cwd string) (string, string) {
@@ -596,58 +523,12 @@ func containsAny(s string, subs ...string) bool {
 	return false
 }
 
-// signalPriority controls the order in which advisor signals consume the budget.
-type signalPriority int
-
-const (
-	priCritical signalPriority = iota + 1
-	priHigh
-	priMedium
-	priLow
-)
-
-// prioritizedSignal pairs an advisor message with its priority level.
-type prioritizedSignal struct {
-	Priority signalPriority
-	Content  string
-}
-
-// budgetJoinPrioritized sorts signals by priority (critical first), then joins
-// them within the character budget. Stable sort preserves insertion order within
-// the same priority level.
-func budgetJoinPrioritized(signals []prioritizedSignal, extra []string, budget int) string {
-	sort.SliceStable(signals, func(i, j int) bool {
-		return signals[i].Priority < signals[j].Priority
-	})
-
-	var b strings.Builder
-	for i, s := range signals {
-		needed := len(s.Content)
-		if i > 0 {
-			needed++
-		}
-		if b.Len()+needed > budget {
-			break
-		}
-		if i > 0 {
-			b.WriteByte('\n')
-		}
-		b.WriteString(s.Content)
+// truncate shortens a string to maxLen runes, appending "..." if truncated.
+func truncate(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
 	}
-	// Append extra parts (nudges) after prioritized signals.
-	for _, p := range extra {
-		needed := len(p)
-		if b.Len() > 0 {
-			needed++
-		}
-		if b.Len()+needed > budget {
-			break
-		}
-		if b.Len() > 0 {
-			b.WriteByte('\n')
-		}
-		b.WriteString(p)
-	}
-	return b.String()
+	return string(runes[:maxLen]) + "..."
 }
 

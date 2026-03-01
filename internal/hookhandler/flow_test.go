@@ -293,32 +293,3 @@ func TestFlowBudgetDelegates(t *testing.T) {
 	}
 }
 
-func TestAdaptiveErrorThreshold(t *testing.T) {
-	t.Parallel()
-	sdb := openFlowTestDB(t)
-
-	// With insufficient flow data, returns some threshold (from store or default).
-	threshold := adaptiveErrorThreshold(sdb)
-	if threshold < 0 || threshold > 1.0 {
-		t.Errorf("adaptiveErrorThreshold() with no data = %v, want [0, 1.0]", threshold)
-	}
-
-	// With sufficient data and meaningful variance, uses EWMV-based UCL.
-	_ = sdb.SetContext("flow_event_count", "20")
-	_ = sdb.SetContext("ewma_error_rate", "0.1")
-	_ = sdb.SetContext("ewmv_error_var", "0.01") // sigma=0.1
-
-	threshold = adaptiveErrorThreshold(sdb)
-	// UCL = 0.1 + 2*0.1 = 0.3, clamped to [0.15, 0.6]
-	if threshold < 0.25 || threshold > 0.35 {
-		t.Errorf("adaptiveErrorThreshold() with mean=0.1 sigma=0.1 = %v, want ~0.3", threshold)
-	}
-
-	// With very low sigma, falls back (not EWMV path).
-	_ = sdb.SetContext("ewmv_error_var", "0.00001")
-	threshold = adaptiveErrorThreshold(sdb)
-	// Falls back to store/default; just verify it returns something non-negative.
-	if threshold < 0 || threshold > 1.0 {
-		t.Errorf("adaptiveErrorThreshold() with tiny sigma = %v, want [0, 1.0]", threshold)
-	}
-}

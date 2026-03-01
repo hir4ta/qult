@@ -35,7 +35,7 @@ func handleNotification(input []byte) (*HookOutput, error) {
 	// Dequeue up to 2 nudges during idle time.
 	nudges, _ := sdb.DequeueNudges(2)
 
-	recordNudgeDelivery(sdb, in.SessionID, nudges)
+	// Nudge delivery tracking removed (alfred v1 simplification).
 
 	var parts []string
 	for _, n := range nudges {

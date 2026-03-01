@@ -41,30 +41,12 @@ func analyzeImpact(sdb *sessiondb.SessionDB, filePath, cwd string) *ImpactInfo {
 	case ".go":
 		analyzeGoImpact(info, filePath, cwd)
 		info.ExportedN = len(GoExportedSymbols(filePath))
-		// Transitive impact via dep graph (requires sdb for caching).
-		if sdb != nil {
-			if graph := buildGoDepGraph(sdb, cwd); graph != nil {
-				pkgDir := filepath.Dir(filePath)
-				relDir, _ := filepath.Rel(cwd, pkgDir)
-				if modPath := goModulePath(cwd); modPath != "" && relDir != "." {
-					importPath := modPath + "/" + relDir
-					info.TransitiveImporterN = len(transitiveImporters(graph, importPath, 3))
-				}
-			}
-		}
 	default:
 		analyzeGenericImpact(info, filePath, cwd)
 	}
 
 	findTestFiles(info, filePath, cwd)
 	findCoChanges(info, filePath, cwd)
-
-	// Coverage map: generate specific test command for Go files.
-	if sdb != nil && filepath.Ext(filePath) == ".go" {
-		if cm := LoadCoverageMap(sdb); cm != nil {
-			info.SuggestedTestCmd = SuggestTestCommand(cm, filePath, nil, cwd)
-		}
-	}
 
 	// Domain risk from file path.
 	info.DomainRisk = classifyDomainRisk(filePath)

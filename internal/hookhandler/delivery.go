@@ -354,11 +354,7 @@ func Deliver(sdb *sessiondb.SessionDB, pattern, level, observation, suggestion s
 		why = reasoning[0]
 	}
 
-	// Enrich WHY with personal data when available.
-	if why != "" {
-		ps := personalContext(sdb)
-		why = formatPersonalWhy(why, ps, pattern)
-	}
+	// Personal context enrichment removed (alfred v1 simplification).
 
 	// Gate WHY rationale based on flow detail (suppress during productive flow).
 	if why != "" && !flowDetail(sdb).IncludeWhy {
