@@ -2,35 +2,51 @@
 
 Your silent butler for Claude Code.
 
-Alfred watches your coding sessions quietly — never interrupting, never suggesting, never getting in the way. But the moment you turn to him, he knows everything: which tools you rely on, how you structure your projects, and exactly how to make your Claude Code setup world-class.
+Alfred watches your coding sessions quietly — never interrupting, never
+suggesting, never getting in the way. But the moment you turn to him, he
+knows everything: which tools you rely on, how you structure your projects,
+and exactly how to make your Claude Code setup world-class.
 
 He doesn't tell you what to do. He does what you ask — perfectly.
 
 ## What Alfred Does
 
-**When you're working** — Alfred is invisible. Three silent hooks collect session data with zero output. No messages, no alerts, no interruptions. You won't know he's there.
+**When you're working** — Alfred is invisible. Three silent hooks collect
+session data with zero output. No messages, no alerts, no interruptions.
 
-**When you call him** — Alfred already has context. Ask him to review your project, and he'll analyze your CLAUDE.md, skills, rules, hooks, MCP servers, and session history. He'll tell you exactly what you're doing well and what could be better — backed by the latest Claude Code best practices.
+**When you call him** — Alfred already has context. Ask him to review your
+project, create a skill, or improve your CLAUDE.md — he'll deliver results
+backed by the latest Claude Code best practices and your personal preferences.
 
-**He remembers you** — Your preferences persist across every project. Tell Alfred once that you prefer Japanese commit messages or TDD workflows, and every skill, rule, and CLAUDE.md he creates will reflect that.
+**He remembers you** — Preferences persist across every project. Tell Alfred
+once that you prefer Japanese commit messages or TDD workflows, and every
+artifact he creates will reflect that.
 
 ## Install
 
-**1. Add the plugin in Claude Code:**
+**1. Add the marketplace** (one-time):
 
 ```
-/install claude-alfred
+/plugin marketplace add hir4ta/claude-alfred
 ```
 
-**2. Set your API key:**
+**2. Install the plugin:**
+
+```
+/plugin install claude-alfred@hir4ta/claude-alfred
+```
+
+> Scope options: `--scope user` (default, personal), `--scope project` (shared via git), `--scope local` (gitignored).
+
+**3. Set your API key:**
 
 ```bash
 export VOYAGE_API_KEY=your-key
 ```
 
-Cost is negligible (~$0.50/month). Uses `voyage-4-large` (1024 dimensions).
+Voyage AI is used for semantic search (`voyage-4-large`, 1024d). Cost ~$0.50/month.
 
-**3. Restart Claude Code** to activate hooks and MCP tools.
+**4. Restart Claude Code** to activate hooks and MCP tools.
 
 ### Building from source
 
@@ -40,23 +56,35 @@ cd claude-alfred
 go build -o claude-alfred .
 ```
 
-## Skills
+### Plugin management
 
-Skills are invoked by typing `/alfred:<skill-name>` in Claude Code. They guide Claude through a structured workflow using MCP tools behind the scenes.
+```
+/plugin                          # Interactive UI (Discover/Installed/Marketplaces/Errors tabs)
+/plugin update claude-alfred@... # Update to latest version
+/plugin disable claude-alfred@...# Temporarily disable
+/plugin uninstall claude-alfred@...# Remove completely
+```
+
+## Skills (16)
+
+Invoke with `/alfred:<skill-name>` in Claude Code. Each skill follows a
+structured workflow with constraint-typed steps (`[HOW]`/`[WHAT]`/`[Template]`/`[Guardrails]`).
 
 ### Create — "Build it for me"
 
 | Skill | What it does |
 |-------|-------------|
-| `/alfred:create-skill` | Generate a skill file following best practices + your preferences |
-| `/alfred:create-rule` | Generate a rule file |
-| `/alfred:create-hook` | Generate hook configuration + handler |
+| `/alfred:create-skill` | Generate a skill file with official template + your preferences |
+| `/alfred:create-rule` | Generate a rule file with paths and actionable instructions |
+| `/alfred:create-hook` | Generate hook configuration + handler script |
 | `/alfred:create-agent` | Generate a custom agent definition |
-| `/alfred:create-mcp` | Configure an MCP server |
+| `/alfred:create-mcp` | Configure an MCP server in `.mcp.json` |
 | `/alfred:create-claude-md` | Create or improve CLAUDE.md from project analysis |
-| `/alfred:create-memory` | Set up project memory directory |
+| `/alfred:create-memory` | Set up project memory directory + MEMORY.md |
 
-Every create skill ends with an **independent review** — a separate Explore agent validates the generated file against official spec and knowledge base, catching issues the creator might miss.
+Every create skill ends with an **independent review** — a separate Explore
+agent validates the generated file against official spec and knowledge base
+in a forked context, catching issues the creator might miss.
 
 ### Update — "Improve what I have"
 
@@ -64,72 +92,81 @@ Every create skill ends with an **independent review** — a separate Explore ag
 |-------|-------------|
 | `/alfred:update <type> [name]` | Update an existing file against latest best practices |
 
-Supported types: `skill`, `rule`, `hook`, `agent`, `claude-md`, `memory`, `mcp`. Shows a diff with explanations before applying, then runs the same independent review.
+Supported types: `skill`, `rule`, `hook`, `agent`, `claude-md`, `memory`, `mcp`.
+Reads the current file, compares with knowledge base, presents a diff with
+explanations, applies after approval, then runs the same independent review.
 
 ### Analyze — "How am I doing?"
 
 | Skill | What it does |
 |-------|-------------|
 | `/alfred:review` | Full utilization report — config quality, feature usage, improvement suggestions |
-| `/alfred:audit` | Quick setup check against best practices |
+| `/alfred:audit` | Quick setup check against best practices (checklist format) |
 
 ### Learn — "Remember this"
 
 | Skill | What it does |
 |-------|-------------|
-| `/alfred:learn` | Record your preferences (workflow, style, tools) |
-| `/alfred:preferences` | View what Alfred remembers about you |
-| `/alfred:update-docs` | Refresh Claude Code documentation in knowledge base |
+| `/alfred:learn` | Record your preferences (workflow, coding style, tools) |
+| `/alfred:preferences` | View all recorded preferences |
+| `/alfred:update-docs` | Crawl Claude Code docs and ingest into knowledge base |
 
 ### Power — "Level up my setup"
 
 | Skill | What it does |
 |-------|-------------|
 | `/alfred:setup` | Interactive wizard — CLAUDE.md + skills + rules + hooks in one go |
-| `/alfred:migrate` | Update your setup to match latest best practices |
-| `/alfred:explain` | Learn about any Claude Code feature with examples |
+| `/alfred:migrate` | Compare current setup against latest best practices, suggest updates |
+| `/alfred:explain [feature]` | Explain any Claude Code feature with concrete examples |
 
-## MCP Tools
+## MCP Tools (4)
 
-MCP tools are the backend that powers skills and the alfred agent. You don't call them directly — Claude Code invokes them automatically when a skill or agent needs data.
+Backend that powers skills and the alfred agent. Claude invokes these
+automatically — you don't call them directly.
 
-| Tool | When it's called | What it does |
-|------|-----------------|-------------|
-| `knowledge` | Skills search for best practices or docs | Hybrid vector + FTS5 search over Claude Code documentation |
-| `review` | `/alfred:review`, `/alfred:audit`, `/alfred:setup` | Analyze project config (CLAUDE.md, skills, rules, hooks, MCP, sessions) |
-| `ingest` | `/alfred:update-docs` crawls documentation | Store documentation sections with vector embeddings |
-| `preferences` | `/alfred:learn` records, `/alfred:create:*` reads | Get/set user preferences that persist across projects |
+| Tool | Used by | What it does |
+|------|---------|-------------|
+| `knowledge` | All skills (best practice lookups) | Hybrid vector + FTS5 search over Claude Code documentation |
+| `review` | `review`, `audit`, `setup`, `migrate` | Analyze project config + session history |
+| `ingest` | `update-docs` | Store documentation sections with vector embeddings |
+| `preferences` | `learn`, all `create-*`, `update` | Get/set user preferences across projects |
 
 ## How It Works
 
-Alfred is a Claude Code plugin with three invisible hooks and four MCP tools.
-
-**Hooks** fire automatically on Claude Code lifecycle events. They silently record session data to `alfred.db` — no output, no interruption:
-
-| Hook | When it fires | What it records |
-|------|--------------|----------------|
-| `SessionStart` | Session begins or resumes | Project path, session ID |
-| `PostToolUse` | After any tool executes | Tool name, success/failure |
-| `SessionEnd` | Session closes | Final session statistics |
-
-**MCP Tools** are called by Claude when a skill or agent needs data (see above).
-
-**Skills** are invoked by you with `/alfred:<name>` (see above).
-
 ```
-┌─────────────────────────────────────────┐
-│           Your Claude Code Session       │
-│                                          │
-│  Silent hooks ──→ alfred.db              │
-│  (you see nothing)    ↑                  │
-│                       │                  │
-│  You: "/alfred:review"                   │
-│       ↓                                  │
-│  MCP tools ──→ analysis + knowledge base │
-│       ↓                                  │
-│  Alfred: complete report                 │
-└─────────────────────────────────────────┘
+┌─────────────────────────────────────────────┐
+│            Your Claude Code Session          │
+│                                              │
+│  Hooks (silent) ──→ alfred.db                │
+│  SessionStart        (project, tools, stats) │
+│  PostToolUse                                 │
+│  SessionEnd              ↑                   │
+│                          │                   │
+│  You: /alfred:create-skill                   │
+│       ↓                                      │
+│  Skill → MCP tools → knowledge + preferences │
+│       ↓                                      │
+│  Generated file                              │
+│       ↓                                      │
+│  Independent review (Explore agent, fork)    │
+│       ↓                                      │
+│  Validated result                            │
+└─────────────────────────────────────────────┘
 ```
+
+**Hooks** fire automatically on Claude Code lifecycle events. They silently
+record data — no output, no interruption:
+
+| Hook | When | What it records |
+|------|------|----------------|
+| `SessionStart` | Session begins | Project path, git branch, session ID |
+| `PostToolUse` | After any tool executes | Tool name, success/failure, file path |
+| `SessionEnd` | Session closes | Session statistics (duration, tool counts) |
+
+**Independent Review** — Every create and update skill spawns an Explore
+agent in a separate context after file generation. This agent has read-only
+access + knowledge base search, providing unbiased validation against
+official Claude Code specifications.
 
 ## TUI (Optional)
 
@@ -140,42 +177,21 @@ claude-alfred          # Interactive session selector + live monitor
 claude-alfred browse   # Browse past session history
 ```
 
-**Key bindings:** `↑↓` scroll, `Enter` expand/collapse, `g/G` top/bottom, `?` help, `q` quit.
+**Key bindings:** `↑↓` navigate, `Enter` expand/collapse, `g/G` top/bottom, `?` help, `q` quit.
 
-## Commands
+## CLI Commands
 
 | Command | Description |
 |---------|-------------|
-| `claude-alfred` | Monitor active session in real-time (default) |
+| `claude-alfred` | Monitor active session (default) |
 | `claude-alfred browse` | Browse past session history |
-| `claude-alfred serve` | Run as MCP server (stdio) |
-| `claude-alfred hook <Event>` | Handle silent hook events |
-| `claude-alfred install` | Sync sessions and generate embeddings |
+| `claude-alfred serve` | Run MCP server (stdio, used by plugin) |
+| `claude-alfred hook <Event>` | Handle hook events (used by plugin) |
+| `claude-alfred install` | Sync sessions + generate embeddings |
 | `claude-alfred uninstall` | Remove MCP server registration |
-| `claude-alfred plugin-bundle` | Generate plugin directory |
-
-## Architecture
-
-```
-claude-alfred/
-├── main.go                 # Entry point + subcommand routing
-├── plugin/                 # Claude Code plugin (generated)
-│   ├── hooks/              # 3 silent hooks (SessionStart, PostToolUse, SessionEnd)
-│   ├── skills/             # 16 skills (create, update, analyze, learn, power)
-│   ├── rules/              # 7 rules (Claude Code best practices)
-│   ├── agents/             # 1 agent (alfred)
-│   └── .mcp.json           # MCP server config
-├── internal/
-│   ├── parser/             # JSONL parser
-│   ├── watcher/            # File watching (fsnotify)
-│   ├── analyzer/           # Live session statistics
-│   ├── embedder/           # Voyage AI (voyage-4-large, 1024d)
-│   ├── tui/                # Bubble Tea TUI
-│   ├── mcpserver/          # MCP server (4 tools)
-│   ├── store/              # SQLite (vector search, docs, preferences)
-│   └── install/            # Plugin bundle + sync + PATH symlink
-└── go.mod
-```
+| `claude-alfred analyze` | Session analysis report |
+| `claude-alfred plugin-bundle` | Regenerate plugin directory |
+| `claude-alfred version` | Show version |
 
 ## Dependencies
 
@@ -185,7 +201,7 @@ claude-alfred/
 | [lipgloss](https://github.com/charmbracelet/lipgloss) | TUI styling |
 | [fsnotify](https://github.com/fsnotify/fsnotify) | File change watching |
 | [mcp-go](https://github.com/mark3labs/mcp-go) | MCP server SDK |
-| [go-sqlite3](https://github.com/ncruces/go-sqlite3) | SQLite driver (pure Go) |
+| [go-sqlite3](https://github.com/ncruces/go-sqlite3) | SQLite driver (pure Go, WASM) |
 
 ## License
 
