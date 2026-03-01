@@ -1,6 +1,6 @@
 #!/bin/sh
 # alfred wrapper — auto-downloads binary on version mismatch.
-ALFRED_VERSION="0.24.0"
+ALFRED_VERSION="0.25.0"
 BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
 ALFRED_BIN="${BIN_DIR}/alfred"
 VERSION_FILE="${BIN_DIR}/.alfred-version"
@@ -145,7 +145,7 @@ case "$1" in
     fi
     if [ ! -f "$INSTALL_MARKER" ] && mkdir "$INSTALL_LOCK" 2>/dev/null; then
       ( echo $$ > "$INSTALL_LOCK/pid"
-        "$ALFRED_BIN" install >/dev/null 2>&1
+        "$ALFRED_BIN" install --sync-only >/dev/null 2>&1
         printf '%s' "$ALFRED_VERSION" > "$INSTALL_MARKER"
         rm -rf "$INSTALL_LOCK" ) &
     fi

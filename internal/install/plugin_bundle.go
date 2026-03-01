@@ -268,7 +268,7 @@ case "$1" in
     fi
     if [ ! -f "$INSTALL_MARKER" ] && mkdir "$INSTALL_LOCK" 2>/dev/null; then
       ( echo $$ > "$INSTALL_LOCK/pid"
-        "$ALFRED_BIN" install >/dev/null 2>&1
+        "$ALFRED_BIN" install --sync-only >/dev/null 2>&1
         printf '%s' "$ALFRED_VERSION" > "$INSTALL_MARKER"
         rm -rf "$INSTALL_LOCK" ) &
     fi

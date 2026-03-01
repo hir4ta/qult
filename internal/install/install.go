@@ -40,16 +40,21 @@ var syncRanges = map[string]syncRange{
 }
 
 // Run executes the install command. All steps are idempotent.
-// Hooks, skills, agent, and MCP are managed by the plugin — this only
-// syncs sessions/docs, generates embeddings, and ensures global rules.
-// args may contain --since=7d|14d|30d|90d (default: 30d).
-// Claude Code retains sessions for ~30 days (cleanupPeriodDays default),
-// so 30d captures everything available.
+// Called by the curl one-liner installer (install.sh) or directly via `alfred install`.
+//
+// Flags:
+//
+//	--since=7d|14d|30d|90d (default: 30d) — session sync range
+//	--sync-only            — skip component registration (used by plugin run.sh)
 func Run(args []string) error {
 	sinceFlag := "30d"
+	syncOnly := false
 	for _, a := range args {
 		if strings.HasPrefix(a, "--since=") {
 			sinceFlag = strings.TrimPrefix(a, "--since=")
+		}
+		if a == "--sync-only" {
+			syncOnly = true
 		}
 	}
 	sr, ok := syncRanges[sinceFlag]
@@ -57,28 +62,37 @@ func Run(args []string) error {
 		return fmt.Errorf("invalid --since value: %s (use 7d, 14d, 30d, or 90d)", sinceFlag)
 	}
 
-	// Clean up legacy files from pre-plugin installs (silent if nothing to clean).
-	cleanupLegacyInstall()
+	if !syncOnly {
+		fmt.Println("Installing alfred...")
 
+		// Fast setup first — available immediately even if sync is interrupted.
+		ensurePathSymlink()
+		installSkills()
+		installAgent()
+		if err := registerHooks(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: hook registration: %v\n", err)
+		}
+		registerMCP()
+		ensureRulesFile()
+	}
+
+	// Heavy operations — session sync and doc embedding.
 	if err := initialSync(sr); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: initial sync failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Warning: session sync: %v\n", err)
 	}
 
 	seedDocs()
 
-	// OOBE: guide users when knowledge base needs content.
 	if hint := docsOOBEHint(); hint != "" {
 		fmt.Println(hint)
 	}
 
-	ensureRulesFile()
-	ensurePathSymlink()
+	if syncOnly {
+		return nil
+	}
 
 	fmt.Println("\n✓ Installation complete!")
-	fmt.Println("\nIf you haven't set up the plugin yet:")
-	fmt.Println("  /plugin marketplace add hir4ta/claude-alfred")
-	fmt.Println("  /plugin install alfred@hir4ta/claude-alfred")
-
+	fmt.Println("  Restart Claude Code to activate.")
 	return nil
 }
 
@@ -178,86 +192,6 @@ func ensureRulesFile() {
 	}
 }
 
-// cleanupLegacyInstall removes skills, agent, hooks, and MCP registration
-// that were installed directly by the pre-plugin install flow.
-// Silent if nothing to clean up.
-func cleanupLegacyInstall() {
-	var cleaned bool
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-
-	// Remove legacy skills.
-	for _, skill := range alfredSkills {
-		skillDir := filepath.Join(home, ".claude", "skills", skill.Dir)
-		if _, err := os.Stat(skillDir); err == nil {
-			cleaned = true
-			break
-		}
-	}
-	if cleaned {
-		removeSkills()
-	}
-
-	// Remove legacy agent.
-	agentPath := filepath.Join(home, ".claude", "agents", "alfred.md")
-	if _, err := os.Stat(agentPath); err == nil {
-		_ = os.Remove(agentPath)
-		cleaned = true
-	}
-
-	// Remove legacy hooks from settings.json.
-	if hasLegacyHooks() {
-		_ = RemoveHooks()
-		cleaned = true
-	}
-
-	// Remove legacy MCP registration.
-	removeLegacyMCP()
-
-	if cleaned {
-		fmt.Println("✓ Cleaned up legacy skills/agent/hooks from ~/.claude/")
-	}
-}
-
-// hasLegacyHooks checks if settings.json contains claude-alfred hooks.
-func hasLegacyHooks() bool {
-	data, err := os.ReadFile(settingsPathFunc())
-	if err != nil {
-		return false
-	}
-	var settings map[string]any
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return false
-	}
-	hooks, ok := settings["hooks"].(map[string]any)
-	if !ok {
-		return false
-	}
-	for _, event := range []string{"SessionStart", "PreToolUse", "PostToolUse"} {
-		entries, ok := hooks[event].([]any)
-		if !ok {
-			continue
-		}
-		for _, entry := range entries {
-			if isAlfredHookEntry(entry) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// removeLegacyMCP silently removes the MCP server registered via `claude mcp add`.
-func removeLegacyMCP() {
-	// Remove both old and new names.
-	for _, name := range []string{"claude-alfred", "alfred"} {
-		cmd := exec.Command("claude", "mcp", "remove", "-s", "user", name)
-		_ = cmd.Run()
-	}
-}
 
 // resolveBinPath returns the resolved absolute path of the current binary.
 func resolveBinPath() (string, error) {
@@ -563,8 +497,45 @@ func clearLine() {
 	fmt.Print("\r\033[K")
 }
 
-// ensurePathSymlink creates a symlink at ~/.local/bin/claude-alfred
-// pointing to the current binary, so users can run claude-alfred from PATH.
+// registerMCP registers the alfred MCP server via `claude mcp add`.
+// Uses the stable ~/.local/bin/alfred path if available, falling back
+// to the current binary location.
+func registerMCP() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not determine home dir for MCP: %v\n", err)
+		return
+	}
+
+	// Prefer the PATH-stable location.
+	binPath := filepath.Join(home, ".local", "bin", "alfred")
+	if _, err := os.Stat(binPath); err != nil {
+		binPath, err = resolveBinPath()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not determine binary path for MCP: %v\n", err)
+			return
+		}
+	}
+
+	// Remove existing registrations (both old and current names).
+	for _, name := range []string{"claude-alfred", "alfred"} {
+		cmd := exec.Command("claude", "mcp", "remove", "-s", "user", name)
+		_ = cmd.Run()
+	}
+
+	// Register MCP server.
+	cmd := exec.Command("claude", "mcp", "add", "-s", "user", "alfred", "--", binPath, "serve")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: MCP registration: %v (%s)\n", err, strings.TrimSpace(string(output)))
+		fmt.Fprintf(os.Stderr, "  Register manually: claude mcp add -s user alfred -- %s serve\n", binPath)
+		return
+	}
+	fmt.Println("✓ MCP server registered")
+}
+
+// ensurePathSymlink creates a symlink at ~/.local/bin/alfred pointing to the
+// current binary. Skips if the binary is already at the target location
+// (e.g., curl installer placed it there directly).
 func ensurePathSymlink() {
 	exe, err := os.Executable()
 	if err != nil {
@@ -580,10 +551,16 @@ func ensurePathSymlink() {
 		return
 	}
 	binDir := filepath.Join(home, ".local", "bin")
+	linkPath := filepath.Join(binDir, "alfred")
+
+	// Binary is already at the target location (curl install).
+	if exe == linkPath {
+		return
+	}
+
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return
 	}
-	linkPath := filepath.Join(binDir, "alfred")
 
 	// Check if symlink already points to the right target.
 	if target, err := os.Readlink(linkPath); err == nil && target == exe {
@@ -595,7 +572,5 @@ func ensurePathSymlink() {
 		fmt.Fprintf(os.Stderr, "Warning: could not create symlink %s: %v\n", linkPath, err)
 		return
 	}
-	fmt.Printf("✓ Symlink created: %s\n", linkPath)
-	fmt.Printf("  Add ~/.local/bin to PATH if not already:\n")
-	fmt.Printf("  export PATH=\"$HOME/.local/bin:$PATH\"\n")
+	fmt.Printf("✓ Symlink created: %s → %s\n", linkPath, exe)
 }

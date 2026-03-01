@@ -225,9 +225,8 @@ Commands:
   browse         Browse past session history
   serve          Run as MCP server (stdio) for Claude Code integration
   hook           Handle silent hook events (no output)
-  install        Sync sessions and generate embeddings (--since=7d|14d|30d|90d)
-  count-sessions Show session counts per sync range (JSON)
-  uninstall      Remove MCP server registration
+  install        Set up alfred (skills, hooks, MCP, rules, DB sync)
+  uninstall      Remove alfred completely (hooks, MCP, skills, rules, DB, binary)
   analyze        Project analysis report
   crawl-seed     Crawl official docs and generate seed_docs.json
   plugin-bundle  Generate plugin directory from Go sources

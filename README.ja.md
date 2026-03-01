@@ -23,29 +23,37 @@ Alfred はコーディングセッションを静かに見守る。
 
 ## インストール
 
-**1. マーケットプレイスを追加**（初回のみ）:
-
-```
-/plugin marketplace add hir4ta/claude-alfred
+```bash
+curl -fsSL https://raw.githubusercontent.com/hir4ta/claude-alfred/main/install.sh | sh
 ```
 
-**2. プラグインをインストール:**
+バイナリのダウンロード、フック・MCP・スキルの登録、セッション履歴の同期まで一括で行う。
+インストール後は Claude Code を再起動。
 
-```
-/plugin install alfred@hir4ta/claude-alfred
-```
-
-> スコープ: `--scope user`（デフォルト、個人用）、`--scope project`（git 共有）、`--scope local`（gitignore）
-
-**3. API キーを設定:**
+**API キー**（セマンティック検索に必要）:
 
 ```bash
 export VOYAGE_API_KEY=your-key
 ```
 
-セマンティック検索に Voyage AI を使用（`voyage-4-large`, 1024d）。月額約 $0.50。
+Voyage AI `voyage-4-large`（1024d）。月額約 $0.50。
 
-**4. Claude Code を再起動**してフックと MCP ツールを有効化。
+## アンインストール
+
+```bash
+alfred uninstall
+```
+
+フック、MCP サーバー、スキル、エージェント、ルール、データベース、バイナリをすべて削除する。
+
+### 別の方法: プラグインインストール
+
+Claude Code のプラグインシステムからもインストールできる:
+
+```
+/plugin marketplace add hir4ta/claude-alfred
+/plugin install alfred@hir4ta/claude-alfred
+```
 
 ### ソースからビルド
 
@@ -53,15 +61,7 @@ export VOYAGE_API_KEY=your-key
 git clone https://github.com/hir4ta/claude-alfred
 cd claude-alfred
 go build -o alfred .
-```
-
-### プラグイン管理
-
-```
-/plugin                       # 管理 UI（Discover / Installed / Marketplaces / Errors）
-/plugin update alfred@...     # 最新版に更新
-/plugin disable alfred@...    # 一時的に無効化
-/plugin uninstall alfred@...  # 完全に削除
+./alfred install
 ```
 
 ## スキル (16)
@@ -172,20 +172,6 @@ alfred browse   # 過去セッション閲覧
 ```
 
 **キーバインド:** `↑↓` 移動、`Enter` 展開/折りたたみ、`g/G` 先頭/末尾、`?` ヘルプ、`q` 終了
-
-## CLI コマンド
-
-| コマンド | 説明 |
-|---------|------|
-| `alfred` | アクティブセッション監視（デフォルト） |
-| `alfred browse` | 過去セッション閲覧 |
-| `alfred serve` | MCP サーバー起動（stdio、プラグインが使用） |
-| `alfred hook <Event>` | フックイベント処理（プラグインが使用） |
-| `alfred install` | セッション同期と embedding 生成 |
-| `alfred uninstall` | MCP サーバー登録解除 |
-| `alfred analyze` | セッション分析レポート |
-| `alfred plugin-bundle` | plugin ディレクトリ再生成 |
-| `alfred version` | バージョン表示 |
 
 ## 依存ライブラリ
 

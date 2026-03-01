@@ -1,5 +1,29 @@
 package install
 
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+)
+
+// installAgent writes the alfred agent definition to ~/.claude/agents/alfred.md.
+func installAgent() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	dir := filepath.Join(home, ".claude", "agents")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: agents dir: %v\n", err)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(dir, "alfred.md"), []byte(alfredAgentContent), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: agent: %v\n", err)
+		return
+	}
+	fmt.Println("✓ Agent installed")
+}
+
 const alfredAgentContent = `---
 name: alfred
 description: >

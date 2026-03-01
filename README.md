@@ -24,29 +24,37 @@ artifact he creates will reflect that.
 
 ## Install
 
-**1. Add the marketplace** (one-time):
-
-```
-/plugin marketplace add hir4ta/claude-alfred
+```bash
+curl -fsSL https://raw.githubusercontent.com/hir4ta/claude-alfred/main/install.sh | sh
 ```
 
-**2. Install the plugin:**
+This downloads the binary, registers hooks/MCP/skills in Claude Code, and
+syncs your session history. Restart Claude Code after installation.
 
-```
-/plugin install alfred@hir4ta/claude-alfred
-```
-
-> Scope options: `--scope user` (default, personal), `--scope project` (shared via git), `--scope local` (gitignored).
-
-**3. Set your API key:**
+**API key** (required for semantic search):
 
 ```bash
 export VOYAGE_API_KEY=your-key
 ```
 
-Voyage AI is used for semantic search (`voyage-4-large`, 1024d). Cost ~$0.50/month.
+Voyage AI `voyage-4-large` (1024d). Cost ~$0.50/month.
 
-**4. Restart Claude Code** to activate hooks and MCP tools.
+## Uninstall
+
+```bash
+alfred uninstall
+```
+
+Removes everything: hooks, MCP server, skills, agent, rules, database, and binary.
+
+### Alternative: Plugin install
+
+You can also install via the Claude Code plugin system:
+
+```
+/plugin marketplace add hir4ta/claude-alfred
+/plugin install alfred@hir4ta/claude-alfred
+```
 
 ### Building from source
 
@@ -54,15 +62,7 @@ Voyage AI is used for semantic search (`voyage-4-large`, 1024d). Cost ~$0.50/mon
 git clone https://github.com/hir4ta/claude-alfred
 cd claude-alfred
 go build -o alfred .
-```
-
-### Plugin management
-
-```
-/plugin                       # Interactive UI (Discover/Installed/Marketplaces/Errors tabs)
-/plugin update alfred@...     # Update to latest version
-/plugin disable alfred@...    # Temporarily disable
-/plugin uninstall alfred@...  # Remove completely
+./alfred install
 ```
 
 ## Skills (16)
@@ -177,20 +177,6 @@ alfred browse   # Browse past session history
 ```
 
 **Key bindings:** `↑↓` navigate, `Enter` expand/collapse, `g/G` top/bottom, `?` help, `q` quit.
-
-## CLI Commands
-
-| Command | Description |
-|---------|-------------|
-| `alfred` | Monitor active session (default) |
-| `alfred browse` | Browse past session history |
-| `alfred serve` | Run MCP server (stdio, used by plugin) |
-| `alfred hook <Event>` | Handle hook events (used by plugin) |
-| `alfred install` | Sync sessions + generate embeddings |
-| `alfred uninstall` | Remove MCP server registration |
-| `alfred analyze` | Session analysis report |
-| `alfred plugin-bundle` | Regenerate plugin directory |
-| `alfred version` | Show version |
 
 ## Dependencies
 
