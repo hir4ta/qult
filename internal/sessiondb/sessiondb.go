@@ -650,19 +650,6 @@ func (s *SessionDB) RecordFileLastRead(path string, eventSeq int64) error {
 	return nil
 }
 
-// FileLastReadSeq returns the event sequence for the last Read of a file, or 0 if never read.
-func (s *SessionDB) FileLastReadSeq(path string) (int64, error) {
-	var seq int64
-	err := s.db.QueryRow(`SELECT event_seq FROM file_last_read WHERE path = ?`, path).Scan(&seq)
-	if err == sql.ErrNoRows {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, fmt.Errorf("sessiondb: file last read seq: %w", err)
-	}
-	return seq, nil
-}
-
 // CurrentEventSeq returns the current maximum event ID (used as sequence counter).
 func (s *SessionDB) CurrentEventSeq() (int64, error) {
 	var seq int64
@@ -683,24 +670,6 @@ func (s *SessionDB) RecordBashFailure(cmdSignature, errorSummary string) error {
 		return fmt.Errorf("sessiondb: record bash failure: %w", err)
 	}
 	return nil
-}
-
-// FindSimilarFailure checks if a command signature matches a recent failure.
-// Returns the error summary if found, or "" if no match.
-func (s *SessionDB) FindSimilarFailure(cmdSignature string) (string, error) {
-	var summary string
-	err := s.db.QueryRow(
-		`SELECT error_summary FROM bash_failures
-		 WHERE cmd_signature = ?
-		 ORDER BY id DESC LIMIT 1`, cmdSignature,
-	).Scan(&summary)
-	if err == sql.ErrNoRows {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("sessiondb: find similar failure: %w", err)
-	}
-	return summary, nil
 }
 
 // --- Working Set ---
@@ -910,26 +879,6 @@ func (s *SessionDB) HasUnresolvedFailure(filePath string) (bool, string, error) 
 	return true, failureType, nil
 }
 
-// UnresolvedFailureDetail is like HasUnresolvedFailure but also returns the error_signature.
-func (s *SessionDB) UnresolvedFailureDetail(filePath string) (unresolved bool, failureType, errorSig string, err error) {
-	err = s.db.QueryRow(
-		`SELECT failure_type, error_signature FROM failure_log
-		 WHERE file_path = ? AND timestamp > COALESCE(
-		   (SELECT MAX(he.timestamp) FROM hook_events he
-		    WHERE he.tool_name IN ('Edit','Write') AND he.is_write = 1),
-		   '2000-01-01'
-		 )
-		 ORDER BY id DESC LIMIT 1`, filePath,
-	).Scan(&failureType, &errorSig)
-	if err == sql.ErrNoRows {
-		return false, "", "", nil
-	}
-	if err != nil {
-		return false, "", "", fmt.Errorf("sessiondb: unresolved failure detail: %w", err)
-	}
-	return true, failureType, errorSig, nil
-}
-
 // --- Tool Outcomes ---
 
 // RecordToolOutcome records a success or failure for a tool+file combination.
@@ -1090,23 +1039,6 @@ func (s *SessionDB) PhaseCount() (int, error) {
 		return 0, fmt.Errorf("sessiondb: phase count: %w", err)
 	}
 	return count, nil
-}
-
-// PredictOutcome returns the most common outcome for a tool bigram.
-// Returns ("", 0) if no data.
-func (s *SessionDB) PredictOutcome(prevTool, currentTool string) (outcome string, count int, err error) {
-	hash := prevTool + "→" + currentTool
-	err = s.db.QueryRow(
-		`SELECT next_outcome, count FROM tool_sequences
-		 WHERE bigram_hash = ? ORDER BY count DESC LIMIT 1`, hash,
-	).Scan(&outcome, &count)
-	if err == sql.ErrNoRows {
-		return "", 0, nil
-	}
-	if err != nil {
-		return "", 0, fmt.Errorf("sessiondb: predict outcome: %w", err)
-	}
-	return outcome, count, nil
 }
 
 // PredictNextTool returns the most likely successful next tool after currentTool,

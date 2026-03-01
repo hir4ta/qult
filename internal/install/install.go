@@ -66,6 +66,12 @@ func Run(args []string) error {
 	}
 
 	seedDocs()
+
+	// OOBE: guide users when knowledge base needs content.
+	if hint := docsOOBEHint(); hint != "" {
+		fmt.Println(hint)
+	}
+
 	ensureRulesFile()
 	ensurePathSymlink()
 
@@ -565,6 +571,28 @@ func seedDocs() {
 	} else if res.Unchanged > 0 {
 		fmt.Printf("✓ Docs already up to date (%d sections)\n", res.Unchanged)
 	}
+}
+
+// docsOOBEHint checks the docs table and returns a helpful message
+// if the knowledge base needs more content.
+func docsOOBEHint() string {
+	st, err := store.OpenDefault()
+	if err != nil {
+		return ""
+	}
+	defer st.Close()
+
+	total, _, _, err := st.DocsStats()
+	if err != nil {
+		return ""
+	}
+	if total == 0 {
+		return "\nKnowledge base is empty. Run /alfred-crawl in Claude Code to populate it with documentation.\n  This enables semantic search over Claude Code docs and changelog."
+	}
+	if total < 20 {
+		return fmt.Sprintf("\nKnowledge base has only %d sections. Run /alfred-crawl for full documentation coverage.", total)
+	}
+	return ""
 }
 
 func renderProgress(prefix string, done, total int) {

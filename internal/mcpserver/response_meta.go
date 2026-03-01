@@ -45,21 +45,19 @@ func buildResponseMeta(st *store.Store, source string) *ResponseMeta {
 	}
 	meta.SessionCount = sessionCount
 
-	patternCount := 0 // patterns table removed in alfred v1
-
 	switch {
 	case sessionCount < 3:
 		meta.DataMaturity = "learning"
 		meta.DataMaturityNote = "Limited data (< 3 sessions). Recommendations will improve with usage."
 		meta.Confidence = 0.3 + 0.1*float64(sessionCount)
-	case patternCount < 10:
+	case sessionCount < 10:
 		meta.DataMaturity = "growing"
 		meta.DataMaturityNote = "Building profile (3-10 sessions). Core patterns established."
-		meta.Confidence = 0.6 + 0.02*float64(patternCount)
+		meta.Confidence = 0.6 + 0.02*float64(sessionCount)
 	default:
 		meta.DataMaturity = "mature"
 		meta.DataMaturityNote = "Rich data available. Recommendations are personalized."
-		meta.Confidence = 0.8 + min(0.2, 0.005*float64(patternCount))
+		meta.Confidence = min(1.0, 0.8+0.005*float64(sessionCount))
 	}
 
 	return meta

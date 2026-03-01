@@ -168,15 +168,6 @@ func enrichForReview(sdb *sessiondb.SessionDB) (map[string]string, []string, []s
 		alerts = append(alerts, "Build is currently failing")
 	}
 
-	// Pattern search removed in alfred v1 — will be replaced by docs knowledge.
-	files, _ := sdb.GetWorkingSetFiles()
-	if len(files) > 0 {
-		// placeholder: file-specific knowledge will come from docs table
-		_ = files
-		if false {
-		}
-	}
-
 	return ctx, alerts, suggestions
 }
 

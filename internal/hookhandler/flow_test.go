@@ -46,30 +46,6 @@ func TestEwmaUpdate(t *testing.T) {
 	}
 }
 
-func TestIsInFlow(t *testing.T) {
-	t.Parallel()
-	sdb := openFlowTestDB(t)
-
-	// Initially not in flow.
-	if isInFlow(sdb) {
-		t.Error("isInFlow() = true on fresh session, want false")
-	}
-
-	// Set high velocity, low error rate, success streak → flow.
-	_ = sdb.SetContext("ewma_tool_velocity", "8.0")
-	_ = sdb.SetContext("ewma_error_rate", "0.05")
-	_ = sdb.SetContext("success_streak", "5")
-	if !isInFlow(sdb) {
-		t.Error("isInFlow() = false with vel=8.0 err=0.05 streak=5, want true")
-	}
-
-	// High error rate → not in flow.
-	_ = sdb.SetContext("ewma_error_rate", "0.2")
-	if isInFlow(sdb) {
-		t.Error("isInFlow() = true with err=0.2, want false")
-	}
-}
-
 func TestClassifyFlowState(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -108,66 +84,6 @@ func TestClassifyFlowState(t *testing.T) {
 				t.Errorf("classifyFlowState() = %d, want %d", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestSuggestionFatigue(t *testing.T) {
-	t.Parallel()
-	sdb := openFlowTestDB(t)
-
-	// No data → no fatigue.
-	if suggestionFatigue(sdb) {
-		t.Error("suggestionFatigue() = true on fresh session, want false")
-	}
-
-	// Low acceptance → fatigue.
-	_ = sdb.SetContext("ewma_acceptance_rate", "0.05")
-	if !suggestionFatigue(sdb) {
-		t.Error("suggestionFatigue() = false with rate=0.05, want true")
-	}
-
-	// Good acceptance → no fatigue.
-	_ = sdb.SetContext("ewma_acceptance_rate", "0.5")
-	if suggestionFatigue(sdb) {
-		t.Error("suggestionFatigue() = true with rate=0.5, want false")
-	}
-}
-
-func TestEWMVTracking(t *testing.T) {
-	t.Parallel()
-	sdb := openFlowTestDB(t)
-
-	// Initially zero.
-	if got := VelocitySigma(sdb); got != 0 {
-		t.Errorf("VelocitySigma() = %v on fresh session, want 0", got)
-	}
-	if got := ErrorRateSigma(sdb); got != 0 {
-		t.Errorf("ErrorRateSigma() = %v on fresh session, want 0", got)
-	}
-
-	// After updates, variance should grow with varying inputs.
-	_ = sdb.SetContext("ewmv_velocity_var", "4.0")
-	if got := VelocitySigma(sdb); got < 1.99 || got > 2.01 {
-		t.Errorf("VelocitySigma() = %v with var=4.0, want ~2.0", got)
-	}
-
-	_ = sdb.SetContext("ewmv_error_var", "0.09")
-	if got := ErrorRateSigma(sdb); got < 0.29 || got > 0.31 {
-		t.Errorf("ErrorRateSigma() = %v with var=0.09, want ~0.3", got)
-	}
-}
-
-func TestFlowEventCount(t *testing.T) {
-	t.Parallel()
-	sdb := openFlowTestDB(t)
-
-	if got := FlowEventCount(sdb); got != 0 {
-		t.Errorf("FlowEventCount() = %d on fresh session, want 0", got)
-	}
-
-	_ = sdb.SetContext("flow_event_count", "15")
-	if got := FlowEventCount(sdb); got != 15 {
-		t.Errorf("FlowEventCount() = %d, want 15", got)
 	}
 }
 
@@ -272,24 +188,5 @@ func TestFlowDetail(t *testing.T) {
 	}
 }
 
-func TestFlowBudgetDelegates(t *testing.T) {
-	t.Parallel()
-	sdb := openFlowTestDB(t)
 
-	// flowBudget should return the same value as flowDetail().Budget.
-	if got, want := flowBudget(sdb), flowDetail(sdb).Budget; got != want {
-		t.Errorf("flowBudget() = %d, flowDetail().Budget = %d, want equal", got, want)
-	}
-
-	// Set productive flow and verify both agree.
-	_ = sdb.SetContext("ewma_tool_velocity", "8.0")
-	_ = sdb.SetContext("ewma_error_rate", "0.05")
-	_ = sdb.SetContext("success_streak", "5")
-	if got, want := flowBudget(sdb), flowDetail(sdb).Budget; got != want {
-		t.Errorf("flowBudget() = %d, flowDetail().Budget = %d in productive flow, want equal", got, want)
-	}
-	if got := flowBudget(sdb); got != 800 {
-		t.Errorf("flowBudget() = %d in productive flow, want 800", got)
-	}
-}
 

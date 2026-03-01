@@ -26,9 +26,6 @@ func handleSessionEnd(input []byte) (*HookOutput, error) {
 	// Persist session knowledge (workflow, metrics, user profile, global sync).
 	persistSessionData(in.SessionID, in.CWD)
 
-	// Log suggestion signal-to-noise ratio.
-	logSNR()
-
 	// Clean up live session data from alfred.db.
 	if st, err := store.OpenDefaultCached(); err == nil {
 		_ = st.CleanupLiveSession(in.SessionID)
@@ -42,9 +39,6 @@ func handleSessionEnd(input []byte) (*HookOutput, error) {
 	}
 	return nil, nil
 }
-
-// logSNR is a placeholder — SNR/pattern tables were removed in alfred v1.
-func logSNR() {}
 
 // persistSessionData runs all persist functions for the given session.
 // Safe to call multiple times — all writers are idempotent

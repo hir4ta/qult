@@ -172,24 +172,6 @@ func flowDetail(sdb *sessiondb.SessionDB) FlowDetail {
 	}
 }
 
-// flowBudget returns the character budget for output based on current flow state.
-// Productive flow gets minimal output; stalled/thrashing gets more detail.
-func flowBudget(sdb *sessiondb.SessionDB) int {
-	return flowDetail(sdb).Budget
-}
-
-// isInFlow returns true if the session is in a productive flow state.
-// Kept for backward compatibility with MCP tools (alfred_current_state).
-func isInFlow(sdb *sessiondb.SessionDB) bool {
-	return classifyFlowState(sdb) == FlowProductive
-}
-
-// suggestionFatigue returns true if the user is ignoring most suggestions,
-// indicated by a very low acceptance rate.
-func suggestionFatigue(sdb *sessiondb.SessionDB) bool {
-	return classifyFlowState(sdb) == FlowFatigued
-}
-
 // getInt reads an integer value from sessiondb context.
 func getInt(sdb *sessiondb.SessionDB, key string) int {
 	s, _ := sdb.GetContext(key)
@@ -209,26 +191,6 @@ func IsWallDetected(sdb *sessiondb.SessionDB) bool {
 // ClearWallDetected resets the wall detection flag.
 func ClearWallDetected(sdb *sessiondb.SessionDB) {
 	_ = sdb.SetContext("wall_detected", "")
-}
-
-// VelocityDelta returns the most recent velocity change between snapshots.
-func VelocityDelta(sdb *sessiondb.SessionDB) float64 {
-	return getFloat(sdb, "velocity_delta")
-}
-
-// VelocitySigma returns the standard deviation of velocity from EWMV.
-func VelocitySigma(sdb *sessiondb.SessionDB) float64 {
-	return math.Sqrt(getFloat(sdb, "ewmv_velocity_var"))
-}
-
-// ErrorRateSigma returns the standard deviation of error rate from EWMV.
-func ErrorRateSigma(sdb *sessiondb.SessionDB) float64 {
-	return math.Sqrt(getFloat(sdb, "ewmv_error_var"))
-}
-
-// FlowEventCount returns the total number of flow events tracked.
-func FlowEventCount(sdb *sessiondb.SessionDB) int {
-	return int(getFloat(sdb, "flow_event_count"))
 }
 
 // recordHealthSnapshot saves a health measurement every 10 tool calls.

@@ -1,7 +1,5 @@
 package analyzer
 
-import "strings"
-
 // FeedbackLevel indicates the severity/importance of feedback.
 type FeedbackLevel int
 
@@ -21,20 +19,4 @@ type Feedback struct {
 	Level       FeedbackLevel
 }
 
-// ParseLevel converts a string to FeedbackLevel.
-func ParseLevel(s string) FeedbackLevel {
-	switch strings.TrimSpace(strings.ToLower(s)) {
-	case "low":
-		return LevelLow
-	case "insight":
-		return LevelInsight
-	case "warning":
-		return LevelWarning
-	case "action":
-		return LevelAction
-	case "info":
-		return LevelInfo
-	default:
-		return LevelLow
-	}
-}
+

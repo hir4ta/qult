@@ -305,11 +305,7 @@ func buildBriefing(st *store.Store, projectPath string) []briefingItem {
 
 	var items []briefingItem
 
-	// Rule 1: Anti-patterns — alerts table removed in alfred v1.
-	if false {
-	}
-
-	// Rule 2: High compact rate
+	// Rule 1: High compact rate
 	projectStats, err := st.GetProjectSessionStats(projectPath)
 	if err == nil && projectStats.TotalSessions > 0 {
 		if projectStats.AvgCompactsPerSess > 2.0 {

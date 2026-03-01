@@ -34,17 +34,9 @@ type diagnosis struct {
 	RootCause     string            `json:"root_cause"`
 	Confidence    float64           `json:"confidence"`
 	Location      string            `json:"location,omitempty"`
-	PastSolutions []pastSolution    `json:"past_solutions,omitempty"`
-	SolutionChain []string          `json:"solution_chain,omitempty"`
 	StackFrames   []stackFrame      `json:"stack_frames,omitempty"`
 	CoChangedWith []string          `json:"co_changed_with,omitempty"`
 	Actions       []recommendAction `json:"recommended_actions"`
-}
-
-type pastSolution struct {
-	Text       string  `json:"text"`
-	Diff       string  `json:"diff,omitempty"`
-	Confidence float64 `json:"confidence"`
 }
 
 type stackFrame struct {
@@ -81,13 +73,8 @@ func buildDiagnosis(st *store.Store, errorMsg, toolName, filePath string) *diagn
 	// 4. Determine root cause.
 	d.RootCause, d.Confidence = determineRootCause(d.FailureType, errorMsg, toolName)
 
-	// 5. Search past solutions.
+	// 5. File co-changes for blast radius.
 	if st != nil {
-		sig := extractSig(errorMsg)
-		d.PastSolutions = searchSolutions(st, d.FailureType, sig, filePath)
-		d.SolutionChain = searchChains(st, d.FailureType, sig)
-
-		// 6. File co-changes for blast radius.
 		if filePath != "" {
 			coChanges, _ := st.CoChangedFiles(filePath, 5)
 			for _, cc := range coChanges {
@@ -280,15 +267,6 @@ func extractSig(errorMsg string) string {
 	return ""
 }
 
-// searchSolutions is a placeholder — failure_solutions table was removed in alfred v1.
-func searchSolutions(_ *store.Store, _, _, _ string) []pastSolution {
-	return nil
-}
-
-// searchChains is a placeholder — solution_chains table was removed in alfred v1.
-func searchChains(_ *store.Store, _, _ string) []string {
-	return nil
-}
 
 func buildActions(d *diagnosis, filePath string) []recommendAction {
 	var actions []recommendAction
@@ -338,14 +316,6 @@ func buildActions(d *diagnosis, filePath string) []recommendAction {
 		actions = append(actions, recommendAction{
 			Action: "Review the error output carefully for specific error messages",
 			Why:    "The root cause is often stated explicitly in the output but buried in noise.",
-		})
-	}
-
-	// Add past solution replay if available.
-	if len(d.SolutionChain) > 0 {
-		actions = append(actions, recommendAction{
-			Action: fmt.Sprintf("Follow past solution chain: %s", strings.Join(d.SolutionChain, " → ")),
-			Why:    "This tool sequence resolved the same error in a previous session.",
 		})
 	}
 

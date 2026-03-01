@@ -97,6 +97,18 @@ func (s *Store) UpsertUserPreference(pattern string, resolved bool, responseTime
 	return nil
 }
 
+// AggregatePreferenceStats returns totals across all user_preferences rows.
+func (s *Store) AggregatePreferenceStats() (totalDelivered, totalResolved int, err error) {
+	err = s.db.QueryRow(
+		`SELECT COALESCE(SUM(delivery_count), 0), COALESCE(SUM(resolution_count), 0)
+		 FROM user_preferences`,
+	).Scan(&totalDelivered, &totalResolved)
+	if err != nil {
+		return 0, 0, fmt.Errorf("store: aggregate preference stats: %w", err)
+	}
+	return totalDelivered, totalResolved, nil
+}
+
 // UserPreference returns the effectiveness data for a pattern.
 // Returns nil if no data exists.
 func (s *Store) UserPreference(pattern string) (*UserPref, error) {

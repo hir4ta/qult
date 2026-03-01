@@ -142,21 +142,12 @@ func TestBuildActions(t *testing.T) {
 		}
 	})
 
-	t.Run("with solution chain", func(t *testing.T) {
+	t.Run("compile error with location", func(t *testing.T) {
 		t.Parallel()
-		d := &diagnosis{
-			FailureType:   "compile_error",
-			SolutionChain: []string{"Read", "Edit", "Bash"},
-		}
-		actions := buildActions(d, "")
-		found := false
-		for _, a := range actions {
-			if a.Action != "" && len(a.Action) > 10 {
-				found = true
-			}
-		}
-		if !found {
-			t.Error("expected solution chain action")
+		d := &diagnosis{FailureType: "compile_error", Location: "main.go:10"}
+		actions := buildActions(d, "main.go")
+		if len(actions) < 2 {
+			t.Errorf("got %d actions, want >= 2", len(actions))
 		}
 	})
 }

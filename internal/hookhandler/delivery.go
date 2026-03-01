@@ -321,11 +321,6 @@ func currentUserCluster() string {
 	return ctxUserCluster
 }
 
-// LastConfidence returns the confidence from the most recent adjustPriorityWithConfidence call.
-func LastConfidence() float64 {
-	return ctxLastConfidence
-}
-
 // Process-level cache for contextual delivery (set once per hook invocation).
 var (
 	ctxTaskType       string
@@ -393,9 +388,22 @@ func enrichIfRepeated(sdb *sessiondb.SessionDB, pattern, suggestion string) stri
 	return suggestion + " (repeated — previously unresolved)"
 }
 
-// patternSavingsNote is a placeholder for future impact quantification.
-func patternSavingsNote(_ string) string {
-	return ""
+// patternSavingsNote returns an impact quantification note for high-priority suggestions.
+// Reads aggregate delivery/resolution counts from user_preferences.
+// Only shows after 5+ deliveries to avoid noisy early data.
+func patternSavingsNote(pattern string) string {
+	st, err := store.OpenDefaultCached()
+	if err != nil {
+		return ""
+	}
+	key := contextualPatternKey(pattern)
+	pref, err := st.UserPreference(key)
+	if err != nil || pref == nil || pref.DeliveryCount < 5 {
+		return ""
+	}
+	pct := float64(pref.ResolutionCount) / float64(pref.DeliveryCount) * 100
+	return fmt.Sprintf("IMPACT: %d/%d suggestions acted on (%.0f%% effective)",
+		pref.ResolutionCount, pref.DeliveryCount, pct)
 }
 
 // trackImplicitFeedback tracks turns since last MCP tool call (data recording only).

@@ -172,18 +172,13 @@ func generateStartupBriefing(sdb *sessiondb.SessionDB, data *ResumeData, cwd str
 		}
 	}
 
-	// 5. SNR health with trend.
-	if note := snrHealthNote(); note != "" {
-		parts = append(parts, note)
-	}
-
-	// 6. Cumulative savings from acting on suggestions.
-	if note := totalSavingsNote(); note != "" {
-		parts = append(parts, note)
-	}
-
-	// 6. Learning progress: data availability by session count.
+	// 5. Learning progress: data availability by session count.
 	if note := learningProgressNote(sdb); note != "" {
+		parts = append(parts, note)
+	}
+
+	// 6. Cumulative impact.
+	if note := impactSummaryNote(); note != "" {
 		parts = append(parts, note)
 	}
 
@@ -197,12 +192,6 @@ func generateStartupBriefing(sdb *sessiondb.SessionDB, data *ResumeData, cwd str
 	}
 	return "[alfred] Proactive briefing:\n" + strings.Join(parts, "\n")
 }
-
-// snrHealthNote is a placeholder — SNR tables were removed in alfred v1.
-func snrHealthNote() string { return "" }
-
-// totalSavingsNote is a placeholder — suggestion outcomes table was removed in alfred v1.
-func totalSavingsNote() string { return "" }
 
 // learningProgressNote returns a message describing what data is available
 // based on the number of project sessions. At >= 10 sessions the system is
@@ -220,6 +209,23 @@ func learningProgressNote(sdb *sessiondb.SessionDB) string {
 	default:
 		return ""
 	}
+}
+
+// impactSummaryNote returns a cumulative impact line for the startup briefing.
+// Shows total suggestions delivered and acted on across all sessions.
+// Returns "" if insufficient data (<10 total deliveries).
+func impactSummaryNote() string {
+	st, err := store.OpenDefaultCached()
+	if err != nil {
+		return ""
+	}
+	delivered, resolved, err := st.AggregatePreferenceStats()
+	if err != nil || delivered < 10 {
+		return ""
+	}
+	pct := float64(resolved) / float64(delivered) * 100
+	return fmt.Sprintf("alfred impact: %d suggestions delivered, %d acted on (%.0f%% effective)",
+		delivered, resolved, pct)
 }
 
 // checkDocsFreshness returns a reminder when the knowledge base hasn't been

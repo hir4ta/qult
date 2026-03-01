@@ -6,8 +6,6 @@ package hookhandler
 import (
 	"regexp"
 	"strings"
-
-	"github.com/hir4ta/claude-alfred/internal/sessiondb"
 )
 
 // extractErrorSignature extracts a normalized error signature for failure tracking.
@@ -39,15 +37,6 @@ func extractErrorSignature(errorMsg string) string {
 }
 
 var errorSigPathRe = regexp.MustCompile(`\S+\.\w+:\d+(?::\d+)?:\s*`)
-
-// verifyPendingResolution is a no-op stub (suggestion tracking removed).
-func verifyPendingResolution(_ *sessiondb.SessionDB, _ bool) {}
-
-// extractTestFailures is a stub that returns nil (test correlation removed).
-func extractTestFailures(_ string) []string { return nil }
-
-// correlateWithRecentEdits is a stub (test correlation removed).
-func correlateWithRecentEdits(_ *sessiondb.SessionDB, _ []string) string { return "" }
 
 // --- Detection functions for data recording (moved from deleted stop_detection.go) ---
 

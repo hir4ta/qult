@@ -167,12 +167,6 @@ func taskProgressHandler(st *store.Store) server.ToolHandlerFunc {
 			}
 		}
 
-		// Frequent failure patterns.
-		failures := frequentFailuresSummary(st, project)
-		if len(failures) > 0 {
-			result["common_failures"] = failures
-		}
-
 		return marshalResult(result)
 	}
 }
@@ -243,13 +237,7 @@ func strategicPlanHandler(st *store.Store) server.ToolHandlerFunc {
 			}
 		}
 
-		// 5. Common failures to watch for.
-		failures := frequentFailuresSummary(st, project)
-		if len(failures) > 0 {
-			result["common_failures"] = failures
-		}
-
-		// 6. Tool sequence predictions.
+		// 5. Tool sequence predictions.
 		preds, _ := st.PredictNextToolGlobal("Read", 3)
 		if len(preds) > 0 {
 			predList := make([]map[string]any, 0, len(preds))
@@ -386,7 +374,3 @@ func clusterAdvice(cluster, taskType string) string {
 	}
 }
 
-func frequentFailuresSummary(_ *store.Store, _ string) []map[string]any {
-	// FrequentFailures removed — failure_solutions table deleted in schema reset.
-	return nil
-}

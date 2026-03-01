@@ -103,33 +103,3 @@ func (s *Store) PredictNextToolGlobal(fromTool string, limit int) ([]GlobalToolP
 	return predictions, rows.Err()
 }
 
-// PredictFromTrigramGlobal returns the most likely next tools given a tool pair.
-func (s *Store) PredictFromTrigramGlobal(tool1, tool2 string, limit int) ([]GlobalToolPrediction, error) {
-	if tool1 == "" || tool2 == "" || limit <= 0 {
-		return nil, nil
-	}
-
-	rows, err := s.db.Query(
-		`SELECT tool3, count, success_count FROM global_tool_trigrams
-		 WHERE tool1 = ? AND tool2 = ? ORDER BY count DESC LIMIT ?`,
-		tool1, tool2, limit,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("store: predict from trigram global: %w", err)
-	}
-	defer rows.Close()
-
-	var predictions []GlobalToolPrediction
-	for rows.Next() {
-		var p GlobalToolPrediction
-		var successCount int
-		if err := rows.Scan(&p.Tool, &p.Count, &successCount); err != nil {
-			continue
-		}
-		if p.Count > 0 {
-			p.SuccessRate = float64(successCount) / float64(p.Count)
-		}
-		predictions = append(predictions, p)
-	}
-	return predictions, rows.Err()
-}

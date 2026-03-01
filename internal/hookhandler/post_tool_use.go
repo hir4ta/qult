@@ -57,9 +57,6 @@ func handlePostToolUse(input []byte) (*HookOutput, error) {
 	isWrite := writeTools[in.ToolName]
 	inputHash := hashInput(in.ToolName, in.ToolInput)
 
-	// Verify pending resolution from previous tool call (success path).
-	verifyPendingResolution(sdb, true)
-
 	if err := sdb.RecordEvent(in.ToolName, inputHash, isWrite); err != nil {
 		fmt.Fprintf(os.Stderr, "[alfred] PostToolUse: record event: %v\n", err)
 		return nil, nil

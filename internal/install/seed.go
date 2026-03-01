@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"os"
 
 	"github.com/hir4ta/claude-alfred/internal/embedder"
 	"github.com/hir4ta/claude-alfred/internal/store"
@@ -39,20 +38,6 @@ func LoadEmbedded() (*SeedFile, error) {
 	var sf SeedFile
 	if err := json.Unmarshal(seedJSON, &sf); err != nil {
 		return nil, fmt.Errorf("seed: parse embedded data: %w", err)
-	}
-	return &sf, nil
-}
-
-// LoadSeedFromFile parses seed data from an external JSON file.
-func LoadSeedFromFile(path string) (*SeedFile, error) {
-	// Only used by tests or manual verification; the primary path is LoadEmbedded.
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("seed: read file: %w", err)
-	}
-	var sf SeedFile
-	if err := json.Unmarshal(data, &sf); err != nil {
-		return nil, fmt.Errorf("seed: parse file: %w", err)
 	}
 	return &sf, nil
 }

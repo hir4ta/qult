@@ -2,6 +2,8 @@ package hookhandler
 
 import (
 	"encoding/json"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hir4ta/claude-alfred/internal/sessiondb"
@@ -58,8 +60,8 @@ func TestHandleStop_CleanCompletion(t *testing.T) {
 }
 
 func TestHandleStop_SingleTodoNoBlock(t *testing.T) {
-	// Not parallel — handleStop calls SetDeliveryContext which writes package globals.
-	// Single text signal → soft warning, not block.
+	t.Parallel()
+	// Single text signal → SystemMessage soft warning, not block.
 	id, _ := openStopTestDB(t)
 	input := makeStopInput(t, id, "Implementation complete. TODO: add edge case tests later.")
 	output, err := handleStop(input)
@@ -68,6 +70,9 @@ func TestHandleStop_SingleTodoNoBlock(t *testing.T) {
 	}
 	if output != nil && output.Decision == "block" {
 		t.Error("handleStop(single TODO) should not block, want soft warning only")
+	}
+	if output == nil || output.SystemMessage == "" {
+		t.Error("single signal should return SystemMessage as soft warning")
 	}
 }
 
@@ -113,9 +118,121 @@ func TestHandleStop_Japanese(t *testing.T) {
 	}
 }
 
+func TestHandleStop_StopHookActiveAllowsExit(t *testing.T) {
+	t.Parallel()
+	id, sdb := openStopTestDB(t)
+	_ = sdb.RecordFailure("Bash", "test", "build error: undefined func", "main.go")
+
+	// First attempt without stop_hook_active should block.
+	input := makeStopInput(t, id, "I've made some changes to main.go.")
+	output, err := handleStop(input)
+	if err != nil {
+		t.Fatalf("attempt 1: handleStop() error = %v", err)
+	}
+	if output == nil || output.Decision != "block" {
+		t.Fatalf("attempt 1: should block, got %+v", output)
+	}
+
+	// Second attempt with stop_hook_active=true should allow exit.
+	in := stopInput{
+		CommonInput:          CommonInput{SessionID: id},
+		LastAssistantMessage: "I've made some changes to main.go.",
+		StopHookActive:       true,
+	}
+	data, _ := json.Marshal(in)
+	output, err = handleStop(data)
+	if err != nil {
+		t.Fatalf("attempt 2 (active): handleStop() error = %v", err)
+	}
+	if output != nil {
+		t.Errorf("handleStop(stop_hook_active=true) should allow exit, got %+v", output)
+	}
+}
+
+func TestHandleStop_ExploreTaskTypeSkipsFailures(t *testing.T) {
+	t.Parallel()
+	id, sdb := openStopTestDB(t)
+	_ = sdb.SetContext("task_type", "explore")
+	_ = sdb.RecordFailure("Bash", "test", "build error: undefined func", "main.go")
+
+	input := makeStopInput(t, id, "I've made some changes to main.go.")
+	output, err := handleStop(input)
+	if err != nil {
+		t.Fatalf("handleStop() error = %v", err)
+	}
+	if output != nil && output.Decision == "block" {
+		t.Error("handleStop(explore task) should not block on unresolved failures")
+	}
+}
+
+func TestHandleStop_BlockHasSystemMessage(t *testing.T) {
+	t.Parallel()
+	id, sdb := openStopTestDB(t)
+	_ = sdb.RecordFailure("Bash", "test", "build error: undefined func", "main.go")
+	input := makeStopInput(t, id, "I've made some changes to main.go.")
+	output, err := handleStop(input)
+	if err != nil {
+		t.Fatalf("handleStop() error = %v", err)
+	}
+	if output == nil || output.Decision != "block" {
+		t.Fatalf("should block, got %+v", output)
+	}
+	if output.SystemMessage == "" {
+		t.Error("block output should have SystemMessage with actionable instructions")
+	}
+	if !strings.Contains(output.SystemMessage, "main.go") {
+		t.Errorf("SystemMessage should mention the failing file, got: %s", output.SystemMessage)
+	}
+}
+
+func TestHandleStop_SingleSignalUsesSystemMessage(t *testing.T) {
+	t.Parallel()
+	// Single incompletePattern signal → SystemMessage (not nil output).
+	id, _ := openStopTestDB(t)
+	input := makeStopInput(t, id, "Most of the work is done. The remaining items are minor.")
+	output, err := handleStop(input)
+	if err != nil {
+		t.Fatalf("handleStop() error = %v", err)
+	}
+	if output != nil && output.Decision == "block" {
+		t.Error("single signal should not block")
+	}
+	if output == nil || output.SystemMessage == "" {
+		t.Error("single signal should return SystemMessage as soft warning")
+	}
+}
+
+func TestActionForFailure(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		failType string
+		filePath string
+		errorSig string
+		want     string
+	}{
+		{"test_failure", "/path/to/main.go", "undefined: Foo", "Run tests to verify main.go"},
+		{"compile_error", "/path/to/handler.go", "syntax error", "Fix compile error in handler.go"},
+		{"edit_mismatch", "/path/to/config.go", "", "Re-read config.go before editing"},
+		{"unknown", "/path/to/file.go", "something failed", "Resolve failure in file.go"},
+		{"unknown_empty_sig", "/path/to/empty.go", "", "Resolve failure in empty.go"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.failType, func(t *testing.T) {
+			t.Parallel()
+			got := actionForFailure(tt.failType, tt.filePath, tt.errorSig)
+			if !strings.Contains(got, filepath.Base(tt.filePath)) {
+				t.Errorf("actionForFailure(%q) = %q, should contain filename", tt.failType, got)
+			}
+			if strings.HasSuffix(got, ": ") {
+				t.Errorf("actionForFailure(%q) = %q, should not end with trailing ': '", tt.failType, got)
+			}
+		})
+	}
+}
+
 func TestHandleStop_JapaneseSingleSignal(t *testing.T) {
-	// Not parallel — handleStop calls SetDeliveryContext which writes package globals.
-	// Single Japanese signal → soft warning, no block.
+	t.Parallel()
+	// Single Japanese signal → SystemMessage soft warning, no block.
 	id, _ := openStopTestDB(t)
 	input := makeStopInput(t, id, "実装完了。残りのテストは後で追加します。")
 	output, err := handleStop(input)
@@ -125,5 +242,8 @@ func TestHandleStop_JapaneseSingleSignal(t *testing.T) {
 	// "残り" is detected (single signal) → no block.
 	if output != nil && output.Decision == "block" {
 		t.Error("handleStop(single Japanese signal) should not block")
+	}
+	if output == nil || output.SystemMessage == "" {
+		t.Error("single Japanese signal should return SystemMessage as soft warning")
 	}
 }

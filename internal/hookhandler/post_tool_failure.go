@@ -36,9 +36,6 @@ func handlePostToolUseFailure(input []byte) (*HookOutput, error) {
 	// Cache task_type and velocity for contextual Thompson Sampling.
 	SetDeliveryContext(sdb)
 
-	// Verify pending resolution from previous tool call (failure path → false positive).
-	verifyPendingResolution(sdb, false)
-
 	// Classify the failure type.
 	filePath := extractFilePath(in.ToolInput)
 	failureType := classifyFailure(in.ToolName, in.Error)
@@ -247,30 +244,21 @@ func buildFixSuggestion(sdb *sessiondb.SessionDB, sessionID, failureType, filePa
 		} else {
 			b.WriteString("  WHY: A test assertion failed, indicating behavior diverged from expected output.\n")
 		}
-		failures := extractTestFailures(errorMsg)
-		if correlation := correlateWithRecentEdits(sdb, failures); correlation != "" {
-			fmt.Fprintf(&b, "→ %s", correlation)
-		} else {
-			b.WriteString("→ Check the test output for the specific failing assertion.")
-		}
+		b.WriteString("→ Check the test output for the specific failing assertion.")
 
 	case failBashError:
 		b.WriteString("[alfred] Command failed.\n")
 		b.WriteString("  WHY: The shell command returned a non-zero exit code. Check if prerequisites are installed and paths are correct.\n")
-		if solution := searchPastSolutions(sdb, failBashError, errorMsg); solution != "" {
-			fmt.Fprintf(&b, "→ Past solution found: %s", solution)
-		} else {
-			var bi struct {
-				Command string `json:"command"`
-			}
-			if json.Unmarshal(toolInput, &bi) == nil && bi.Command != "" {
-				sig := extractCmdSignature(bi.Command)
-				if sig != "" {
-					_ = sdb.RecordBashFailure(sig, extractErrorSignature(errorMsg))
-				}
-			}
-			b.WriteString("→ Review the error message and try an alternative approach.")
+		var bi struct {
+			Command string `json:"command"`
 		}
+		if json.Unmarshal(toolInput, &bi) == nil && bi.Command != "" {
+			sig := extractCmdSignature(bi.Command)
+			if sig != "" {
+				_ = sdb.RecordBashFailure(sig, extractErrorSignature(errorMsg))
+			}
+		}
+		b.WriteString("→ Review the error message and try an alternative approach.")
 
 	default:
 		return ""
@@ -377,11 +365,6 @@ var compileLocPattern = regexp.MustCompile(`(\S+\.(?:go|py|js|ts|rs|java|c|cpp))
 func extractCompileLocation(errorMsg string) string {
 	m := compileLocPattern.FindString(errorMsg)
 	return m
-}
-
-// searchPastSolutions is a placeholder for future knowledge-base integration.
-func searchPastSolutions(_ *sessiondb.SessionDB, _, _ string) string {
-	return ""
 }
 
 // predictFailureCascade checks if the next likely tools (based on session bigrams)

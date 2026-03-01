@@ -74,13 +74,6 @@ func generateMemoryContent(st *store.Store, cwd string, totalSessions int) strin
 
 	sections := 0
 
-	// Common failures and solutions.
-	if s := buildFailuresSection(st, cwd); s != "" {
-		b.WriteString("\n")
-		b.WriteString(s)
-		sections++
-	}
-
 	// Important design decisions.
 	if s := buildDecisionsSection(st, cwd); s != "" {
 		b.WriteString("\n")
@@ -102,13 +95,6 @@ func generateMemoryContent(st *store.Store, cwd string, totalSessions int) strin
 		sections++
 	}
 
-	// Suggestion accuracy.
-	if s := buildAccuracySection(st); s != "" {
-		b.WriteString("\n")
-		b.WriteString(s)
-		sections++
-	}
-
 	if sections == 0 {
 		return ""
 	}
@@ -122,11 +108,6 @@ func generateMemoryContent(st *store.Store, cwd string, totalSessions int) strin
 	}
 
 	return result
-}
-
-// buildFailuresSection is a placeholder — failure_solutions table was removed in alfred v1.
-func buildFailuresSection(_ *store.Store, _ string) string {
-	return ""
 }
 
 // buildDecisionsSection generates the "Important Design Decisions" section.
@@ -215,11 +196,6 @@ func buildWorkStyleSection(st *store.Store) string {
 	}
 
 	return b.String()
-}
-
-// buildAccuracySection is a placeholder — accuracy metrics table was removed in alfred v1.
-func buildAccuracySection(_ *store.Store) string {
-	return ""
 }
 
 // shortenPath strips common prefixes to make file paths more readable.

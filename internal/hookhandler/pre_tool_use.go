@@ -130,17 +130,7 @@ func autoCorrectTool(sdb *sessiondb.SessionDB, toolName string, toolInput json.R
 		return nil
 	}
 
-	// go test ./... → narrowed to changed packages.
-	if corrected, ctx := narrowTestScope(sdb, bi.Command, cwd); corrected != "" {
-		updated, _ := json.Marshal(map[string]string{"command": corrected})
-		return makeUpdatedInputOutput(updated, ctx)
-	}
-
-	// git add . → scoped to working set files.
-	if corrected, ctx := scopeGitAdd(sdb, bi.Command, cwd); corrected != "" {
-		updated, _ := json.Marshal(map[string]string{"command": corrected})
-		return makeUpdatedInputOutput(updated, ctx)
-	}
+	// Safety auto-corrections (always correct, applied silently).
 
 	// go test -race → add -count=1 to disable test caching.
 	if corrected, ctx := fixGoTestRaceCache(bi.Command); corrected != "" {
@@ -152,6 +142,18 @@ func autoCorrectTool(sdb *sessiondb.SessionDB, toolName string, toolInput json.R
 	if corrected, ctx := fixForcePush(bi.Command); corrected != "" {
 		updated, _ := json.Marshal(map[string]string{"command": corrected})
 		return makeUpdatedInputOutput(updated, ctx)
+	}
+
+	// Advisory suggestions (context-dependent, shown as hints instead of auto-applied).
+
+	// go test ./... → suggest narrowing to changed packages.
+	if suggested, ctx := narrowTestScope(sdb, bi.Command, cwd); suggested != "" {
+		return makeOutput("PreToolUse", ctx+"\n→ Suggested: "+suggested)
+	}
+
+	// git add . → suggest scoping to working set files.
+	if suggested, ctx := scopeGitAdd(sdb, bi.Command, cwd); suggested != "" {
+		return makeOutput("PreToolUse", ctx+"\n→ Suggested: "+suggested)
 	}
 
 	return nil
