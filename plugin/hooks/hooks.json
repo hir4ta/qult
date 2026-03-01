@@ -1,5 +1,5 @@
 {
-  "description": "Silent data collection hooks — zero output, zero interruption",
+  "description": "Silent butler hooks — data collection + contextual hints",
   "hooks": {
     "PostToolUse": [
       {
@@ -29,6 +29,17 @@
           {
             "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook SessionStart",
             "timeout": 5,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook UserPromptSubmit",
+            "timeout": 2,
             "type": "command"
           }
         ]

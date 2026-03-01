@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -177,18 +178,29 @@ func runAnalyze() error {
 }
 
 // hookEvent is the minimal structure of a Claude Code hook stdin payload.
+// Fields vary by event type; unused fields are zero values.
 type hookEvent struct {
-	SessionID   string `json:"session_id"`
-	ProjectPath string `json:"cwd"`
-	ToolName    string `json:"tool_name"`
-	ToolError   bool   `json:"tool_error"`
+	SessionID   string          `json:"session_id"`
+	ProjectPath string          `json:"cwd"`
+	ToolName    string          `json:"tool_name"`
+	ToolError   bool            `json:"tool_error"`
+	Prompt      json.RawMessage `json:"prompt,omitempty"`
 }
 
-// runHook handles silent hook events. Reads stdin, records to store, produces no output.
+// runHook handles hook events. Most are silent data collection;
+// UserPromptSubmit may emit additionalContext to nudge toward alfred tools.
 func runHook(event string) error {
 	var ev hookEvent
 	if err := json.NewDecoder(os.Stdin).Decode(&ev); err != nil {
 		// Malformed input — silently ignore (butler never complains).
+		return nil
+	}
+
+	// UserPromptSubmit does not need store access — handle early.
+	if event == "UserPromptSubmit" {
+		if hint := matchAlfredHint(promptText(ev.Prompt)); hint != "" {
+			fmt.Print(hint)
+		}
 		return nil
 	}
 
@@ -212,6 +224,91 @@ func runHook(event string) error {
 	}
 
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// UserPromptSubmit: alfred tool hint
+// ---------------------------------------------------------------------------
+
+// promptText extracts the user's message from the hook payload.
+// Handles both object form {"message":"text"} and plain string.
+func promptText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var obj struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(raw, &obj) == nil && obj.Message != "" {
+		return obj.Message
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	return ""
+}
+
+// Keyword lists for detecting alfred-relevant prompts.
+var (
+	reviewActions = []string{
+		"レビュー", "review", "分析", "改善", "チェック",
+		"audit", "監査", "診断", "evaluate", "評価",
+	}
+	claudeCodeSubjects = []string{
+		// core config files
+		"skill", "スキル", "hook", "フック", "rule", "ルール",
+		"claude.md", "agent", "エージェント",
+		// infrastructure
+		"mcp", "plugin", "プラグイン",
+		"memory", "メモリ", "memory.md",
+		// setup / workflow
+		"setup", "セットアップ", "settings.json",
+		"worktree", "ワークツリー",
+		// concepts
+		"claude code", "プロンプト設計", "prompt engineering",
+		"コンテキスト", "context window",
+		"permission", "パーミッション",
+		"slash command", "スラッシュコマンド",
+	}
+	knowledgeTriggers = []string{
+		"ベストプラクティス", "best practice",
+	}
+)
+
+const (
+	reviewHint    = "alfred review tool is available for analyzing Claude Code configuration (skills, rules, hooks, MCP). Consider using it before manually reading files."
+	knowledgeHint = "alfred knowledge tool is available for searching Claude Code documentation and best practices."
+)
+
+// matchAlfredHint returns a context hint if the prompt matches known patterns,
+// or empty string for silent pass-through (butler stays quiet by default).
+func matchAlfredHint(prompt string) string {
+	if prompt == "" {
+		return ""
+	}
+	lower := strings.ToLower(prompt)
+
+	// Pattern 1: review/analysis action targeting Claude Code configuration.
+	if containsAny(lower, reviewActions) && containsAny(lower, claudeCodeSubjects) {
+		return reviewHint
+	}
+
+	// Pattern 2: explicit best-practices / documentation search.
+	if containsAny(lower, knowledgeTriggers) {
+		return knowledgeHint
+	}
+
+	return ""
+}
+
+func containsAny(s string, words []string) bool {
+	for _, w := range words {
+		if strings.Contains(s, w) {
+			return true
+		}
+	}
+	return false
 }
 
 func printUsage() {

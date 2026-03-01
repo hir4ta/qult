@@ -53,7 +53,7 @@ func Bundle(outputDir, version string) error {
 
 	// 3. Write hooks.json — commands invoke the guard/setup wrapper.
 	hooksJSON := map[string]any{
-		"description": "Silent data collection hooks — zero output, zero interruption",
+		"description": "Silent butler hooks — data collection + contextual hints",
 		"hooks":       alfredHookEntries(runCmd),
 	}
 	if err := writeJSON(filepath.Join(outputDir, "hooks", "hooks.json"), hooksJSON); err != nil {

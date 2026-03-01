@@ -207,7 +207,7 @@ func resolveBinPath() (string, error) {
 }
 
 // alfredHookEntries builds hook event entries keyed by event name.
-// 静観型執事: 3 silent hooks only — data collection, zero output.
+// 静観型執事: silent data collection + contextual hints on UserPromptSubmit.
 func alfredHookEntries(binPath string) map[string]any {
 	makeEntry := func(event string, timeout int) []any {
 		hook := map[string]any{
@@ -219,9 +219,10 @@ func alfredHookEntries(binPath string) map[string]any {
 	}
 
 	return map[string]any{
-		"SessionStart": makeEntry("SessionStart", 5),
-		"PostToolUse":  makeEntry("PostToolUse", 3),
-		"SessionEnd":   makeEntry("SessionEnd", 8),
+		"SessionStart":     makeEntry("SessionStart", 5),
+		"PostToolUse":      makeEntry("PostToolUse", 3),
+		"SessionEnd":       makeEntry("SessionEnd", 8),
+		"UserPromptSubmit": makeEntry("UserPromptSubmit", 2),
 	}
 }
 

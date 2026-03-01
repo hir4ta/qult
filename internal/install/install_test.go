@@ -19,8 +19,8 @@ func tempSettings(t *testing.T, content string) string {
 	return path
 }
 
-// expectedEvents is the set of hook events registered by alfred (静観型執事: 3 silent hooks).
-var expectedEvents = []string{"SessionStart", "PostToolUse", "SessionEnd"}
+// expectedEvents is the set of hook events registered by alfred.
+var expectedEvents = []string{"SessionStart", "PostToolUse", "SessionEnd", "UserPromptSubmit"}
 
 func TestRegisterHooks(t *testing.T) {
 	path := tempSettings(t, "")
