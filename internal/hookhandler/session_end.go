@@ -32,6 +32,8 @@ func handleSessionEnd(input []byte) (*HookOutput, error) {
 	// Clean up live session data from alfred.db.
 	if st, err := store.OpenDefaultCached(); err == nil {
 		_ = st.CleanupLiveSession(in.SessionID)
+		// Purge expired docs (cheap idempotent operation).
+		_, _ = st.DeleteExpiredDocs()
 	}
 
 	// Destroy ephemeral session DB.

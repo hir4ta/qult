@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hir4ta/claude-alfred/internal/embedder"
+	"github.com/hir4ta/claude-alfred/internal/install"
 	"github.com/hir4ta/claude-alfred/internal/sessiondb"
 	"github.com/hir4ta/claude-alfred/internal/store"
 )
@@ -222,7 +223,8 @@ func learningProgressNote(sdb *sessiondb.SessionDB) string {
 }
 
 // checkDocsFreshness returns a reminder when the knowledge base hasn't been
-// refreshed recently. Returns "" when docs are fresh or not yet populated.
+// refreshed recently, or when a newer seed is bundled with the current binary.
+// Also runs DeleteExpiredDocs as secondary cleanup (primary is at SessionEnd).
 func checkDocsFreshness() string {
 	st, err := store.OpenDefaultCached()
 	if err != nil {
@@ -232,9 +234,24 @@ func checkDocsFreshness() string {
 	if err != nil || total == 0 || lastCrawl == "" {
 		return ""
 	}
-	t, err := time.Parse("2006-01-02 15:04:05", lastCrawl)
+
+	// Check if embedded seed is newer than DB docs (new version bundled).
+	sf, _ := install.LoadEmbedded()
+	if sf != nil && sf.CrawledAt != "" && lastCrawl != "" {
+		if sf.CrawledAt > lastCrawl { // RFC3339 timestamps sort lexicographically
+			return "Newer documentation bundled with this version. Run `claude-alfred install` to update."
+		}
+	}
+
+	// Purge expired docs as secondary cleanup.
+	_, _ = st.DeleteExpiredDocs()
+
+	t, err := time.Parse(time.RFC3339, lastCrawl)
 	if err != nil {
-		return ""
+		t, err = time.Parse("2006-01-02 15:04:05", lastCrawl)
+		if err != nil {
+			return ""
+		}
 	}
 	days := int(time.Since(t).Hours() / 24)
 	if days < 7 {

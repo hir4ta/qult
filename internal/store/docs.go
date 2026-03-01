@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -130,13 +131,67 @@ func (s *Store) GetDocsByIDs(ids []int64) ([]DocRow, error) {
 	return docs, nil
 }
 
+// fts5SpecialChars are characters with special meaning in FTS5 MATCH syntax.
+var fts5Replacer = strings.NewReplacer(
+	`"`, " ", `(`, " ", `)`, " ",
+	`*`, " ", `+`, " ", `^`, " ",
+	`:`, " ", `{`, " ", `}`, " ",
+)
+
+// fts5Reserved are FTS5 boolean operators that must be removed from user queries.
+var fts5Reserved = map[string]bool{
+	"AND": true, "OR": true, "NOT": true, "NEAR": true,
+}
+
+// SanitizeFTS5Query strips FTS5 special characters and reserved words from a
+// user query. Short single-word queries (3-6 chars) get prefix expansion.
+// Returns "" if the sanitized query is empty.
+func SanitizeFTS5Query(query string) string {
+	q := fts5Replacer.Replace(query)
+	words := strings.Fields(q)
+	filtered := words[:0]
+	for _, w := range words {
+		w = strings.TrimLeft(w, "-")
+		if w == "" || fts5Reserved[strings.ToUpper(w)] {
+			continue
+		}
+		filtered = append(filtered, w)
+	}
+	if len(filtered) == 0 {
+		return ""
+	}
+	if len(filtered) == 1 && len(filtered[0]) >= 3 && len(filtered[0]) <= 6 {
+		return filtered[0] + "*"
+	}
+	return strings.Join(filtered, " ")
+}
+
 // SearchDocsFTS searches the docs table using FTS5 full-text search.
-// Returns results ranked by BM25 relevance.
-func (s *Store) SearchDocsFTS(query string, sourceType string, limit int) ([]DocRow, error) {
+// Multi-word queries use phrase-first matching with OR fallback.
+func (s *Store) SearchDocsFTS(rawQuery string, sourceType string, limit int) ([]DocRow, error) {
 	if limit <= 0 {
 		limit = 10
 	}
+	query := SanitizeFTS5Query(rawQuery)
+	if query == "" {
+		return nil, nil
+	}
 
+	words := strings.Fields(query)
+	// Multi-word: try phrase match first, then OR fallback.
+	if len(words) > 1 {
+		phraseQuery := `"` + strings.Join(words, " ") + `"`
+		results, err := s.matchDocsFTS(phraseQuery, sourceType, limit)
+		if err == nil && len(results) > 0 {
+			return results, nil
+		}
+		query = strings.Join(words, " OR ")
+	}
+	return s.matchDocsFTS(query, sourceType, limit)
+}
+
+// matchDocsFTS executes a FTS5 MATCH query against the docs_fts table.
+func (s *Store) matchDocsFTS(query string, sourceType string, limit int) ([]DocRow, error) {
 	var sqlQuery string
 	var args []any
 

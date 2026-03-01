@@ -5,8 +5,8 @@ import (
 	"strconv"
 )
 
-// schemaVersion 101 = search quality upgrade (FTS5 porter, indexes, embedding reset).
-const schemaVersion = 101
+// schemaVersion 102 = decisions FTS5, query sanitization.
+const schemaVersion = 102
 
 const ddlV1 = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -275,6 +275,38 @@ CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, event_type);
 DELETE FROM embeddings WHERE source = 'docs';
 `
 
+// ddlV102 adds FTS5 for decisions table (semantic search on design decisions).
+const ddlV102 = `
+CREATE VIRTUAL TABLE IF NOT EXISTS decisions_fts USING fts5(
+    topic, decision_text, reasoning,
+    content='decisions', content_rowid='id',
+    tokenize='porter unicode61',
+    prefix='2,3'
+);
+
+INSERT INTO decisions_fts(rowid, topic, decision_text, reasoning)
+    SELECT id, topic, decision_text, COALESCE(reasoning, '') FROM decisions;
+
+INSERT INTO decisions_fts(decisions_fts, rank) VALUES('rank', 'bm25(10.0, 5.0, 1.0)');
+
+CREATE TRIGGER IF NOT EXISTS decisions_fts_ai AFTER INSERT ON decisions BEGIN
+    INSERT INTO decisions_fts(rowid, topic, decision_text, reasoning)
+    VALUES (new.id, new.topic, new.decision_text, COALESCE(new.reasoning, ''));
+END;
+
+CREATE TRIGGER IF NOT EXISTS decisions_fts_ad AFTER DELETE ON decisions BEGIN
+    INSERT INTO decisions_fts(decisions_fts, rowid, topic, decision_text, reasoning)
+    VALUES ('delete', old.id, old.topic, old.decision_text, COALESCE(old.reasoning, ''));
+END;
+
+CREATE TRIGGER IF NOT EXISTS decisions_fts_au AFTER UPDATE ON decisions BEGIN
+    INSERT INTO decisions_fts(decisions_fts, rowid, topic, decision_text, reasoning)
+    VALUES ('delete', old.id, old.topic, old.decision_text, COALESCE(old.reasoning, ''));
+    INSERT INTO decisions_fts(rowid, topic, decision_text, reasoning)
+    VALUES (new.id, new.topic, new.decision_text, COALESCE(new.reasoning, ''));
+END;
+`
+
 // legacyTables are tables from V1-V16 that no longer exist in alfred.
 var legacyTables = []string{
 	"patterns", "pattern_tags", "pattern_files", "patterns_fts",
@@ -320,6 +352,11 @@ func Migrate(db *sql.DB) error {
 	// Apply incremental migrations.
 	if current < 101 {
 		if _, err := db.Exec(ddlV101); err != nil {
+			return err
+		}
+	}
+	if current < 102 {
+		if _, err := db.Exec(ddlV102); err != nil {
 			return err
 		}
 	}

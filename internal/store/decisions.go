@@ -149,7 +149,7 @@ func extractFilePaths(text string) []string {
 }
 
 // InsertDecision inserts a decision row into the decisions table.
-// The FTS index is updated automatically via the database trigger.
+// The FTS index is updated automatically via database trigger (decisions_fts).
 func (s *Store) InsertDecision(d *DecisionRow) error {
 	res, err := s.db.Exec(`
 		INSERT INTO decisions (session_id, event_id, timestamp, topic, decision_text, reasoning, file_paths, compact_segment)
@@ -163,13 +163,58 @@ func (s *Store) InsertDecision(d *DecisionRow) error {
 	return nil
 }
 
-// SearchDecisions searches decisions using LIKE on text columns.
-// If sessionID is non-empty, results are filtered to that session.
-func (s *Store) SearchDecisions(query string, sessionID string, limit int) ([]DecisionRow, error) {
+// SearchDecisionsFTS searches decisions using FTS5 full-text search with
+// LIKE fallback. Returns results ranked by BM25 relevance.
+func (s *Store) SearchDecisionsFTS(query string, sessionID string, limit int) ([]DecisionRow, error) {
+	if query == "" {
+		return nil, nil
+	}
 	if limit <= 0 {
 		limit = 20
 	}
+	sanitized := SanitizeFTS5Query(query)
+	if sanitized != "" {
+		results, err := s.matchDecisionsFTS(sanitized, sessionID, limit)
+		if err == nil && len(results) > 0 {
+			return results, nil
+		}
+	}
+	// Fallback to LIKE.
+	return s.searchDecisionsLIKE(query, sessionID, limit)
+}
 
+// matchDecisionsFTS executes a FTS5 MATCH query against decisions_fts.
+func (s *Store) matchDecisionsFTS(ftsQuery string, sessionID string, limit int) ([]DecisionRow, error) {
+	var sqlStr string
+	var args []any
+
+	if sessionID != "" {
+		sqlStr = `
+			SELECT d.id, d.session_id, d.event_id, d.timestamp, d.topic,
+			       d.decision_text, d.reasoning, d.file_paths, d.compact_segment
+			FROM decisions_fts f
+			JOIN decisions d ON d.id = f.rowid
+			WHERE decisions_fts MATCH ? AND d.session_id = ?
+			ORDER BY rank
+			LIMIT ?`
+		args = []any{ftsQuery, sessionID, limit}
+	} else {
+		sqlStr = `
+			SELECT d.id, d.session_id, d.event_id, d.timestamp, d.topic,
+			       d.decision_text, d.reasoning, d.file_paths, d.compact_segment
+			FROM decisions_fts f
+			JOIN decisions d ON d.id = f.rowid
+			WHERE decisions_fts MATCH ?
+			ORDER BY rank
+			LIMIT ?`
+		args = []any{ftsQuery, limit}
+	}
+
+	return s.scanDecisionRows(sqlStr, args)
+}
+
+// searchDecisionsLIKE searches decisions using LIKE on text columns.
+func (s *Store) searchDecisionsLIKE(query string, sessionID string, limit int) ([]DecisionRow, error) {
 	var where []string
 	var args []any
 
@@ -191,6 +236,20 @@ func (s *Store) SearchDecisions(query string, sessionID string, limit int) ([]De
 		LIMIT ?`, whereClause)
 	args = append(args, limit)
 
+	return s.scanDecisionRows(sqlStr, args)
+}
+
+// SearchDecisions searches decisions using LIKE on text columns (legacy API).
+// Prefer SearchDecisionsFTS for ranked results.
+func (s *Store) SearchDecisions(query string, sessionID string, limit int) ([]DecisionRow, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	return s.searchDecisionsLIKE(query, sessionID, limit)
+}
+
+// scanDecisionRows executes a query and scans results into DecisionRow slices.
+func (s *Store) scanDecisionRows(sqlStr string, args []any) ([]DecisionRow, error) {
 	dbRows, err := s.db.Query(sqlStr, args...)
 	if err != nil {
 		return nil, err

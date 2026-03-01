@@ -233,6 +233,61 @@ func TestGetDecisions(t *testing.T) {
 	}
 }
 
+func TestSearchDecisionsFTS(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	_, err = s.DB().Exec(`INSERT INTO sessions (id, project_path, project_name, jsonl_path) VALUES ('s1', '/tmp', 'test', '/tmp/t.jsonl')`)
+	if err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+
+	decisions := []*DecisionRow{
+		{SessionID: "s1", Timestamp: "2025-01-01T00:00:00Z", Topic: "database choice", DecisionText: "decided to use SQLite for local storage", Reasoning: "lightweight and embedded", FilePaths: "[]"},
+		{SessionID: "s1", Timestamp: "2025-01-02T00:00:00Z", Topic: "UI framework", DecisionText: "going with Bubble Tea for the TUI", Reasoning: "Go native, good ecosystem", FilePaths: "[]"},
+		{SessionID: "s1", Timestamp: "2025-01-03T00:00:00Z", Topic: "search strategy", DecisionText: "opted for hybrid RRF with reranking", Reasoning: "best recall and precision tradeoff", FilePaths: "[]"},
+	}
+	for _, d := range decisions {
+		if err := s.InsertDecision(d); err != nil {
+			t.Fatalf("InsertDecision: %v", err)
+		}
+	}
+
+	// FTS5 search should find by keyword.
+	results, err := s.SearchDecisionsFTS("sqlite", "", 10)
+	if err != nil {
+		t.Fatalf("SearchDecisionsFTS: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected results for 'sqlite'")
+	}
+	if results[0].Topic != "database choice" {
+		t.Errorf("topic = %q, want 'database choice'", results[0].Topic)
+	}
+
+	// Porter stemming: "reranking" should match "rerank".
+	results, err = s.SearchDecisionsFTS("rerank", "", 10)
+	if err != nil {
+		t.Fatalf("SearchDecisionsFTS (stemming): %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected results for 'rerank' via stemming")
+	}
+
+	// Empty query returns nil.
+	results, err = s.SearchDecisionsFTS("", "", 10)
+	if err != nil {
+		t.Fatalf("SearchDecisionsFTS (empty): %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected 0 results for empty query, got %d", len(results))
+	}
+}
+
 func containsStr(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && findSubstr(s, substr))
 }

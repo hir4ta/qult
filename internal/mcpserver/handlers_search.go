@@ -3,6 +3,9 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -92,7 +95,12 @@ func docsSearchHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandl
 			queryVec, _ = emb.EmbedForSearch(ctx, query)
 		}
 
+		// Adaptive over-retrieve: short queries are vague, need more candidates.
+		wordCount := len(strings.Fields(query))
 		overRetrieve := limit * 4
+		if wordCount <= 1 {
+			overRetrieve = limit * 6
+		}
 		if overRetrieve < 20 {
 			overRetrieve = 20
 		}
@@ -161,11 +169,12 @@ func docsSearchHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandl
 			}
 		}
 
-		// Also include decisions as supplemental results.
-		decisions, _ := st.SearchDecisions(query, "", 3)
+		// Also include decisions as supplemental results (FTS5 with LIKE fallback).
+		decisions, _ := st.SearchDecisionsFTS(query, "", 3)
 
-		// Build response.
+		// Build response with freshness metadata.
 		docResults := make([]map[string]any, 0, len(docs))
+		maxAgeDays := 0
 		for _, d := range docs {
 			dm := map[string]any{
 				"type":         "docs",
@@ -176,6 +185,21 @@ func docsSearchHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandl
 			}
 			if d.Version != "" {
 				dm["version"] = d.Version
+			}
+			if d.CrawledAt != "" {
+				if t, err := time.Parse(time.RFC3339, d.CrawledAt); err == nil {
+					age := int(time.Since(t).Hours() / 24)
+					dm["freshness_days"] = age
+					if age > maxAgeDays {
+						maxAgeDays = age
+					}
+				} else if t, err := time.Parse("2006-01-02 15:04:05", d.CrawledAt); err == nil {
+					age := int(time.Since(t).Hours() / 24)
+					dm["freshness_days"] = age
+					if age > maxAgeDays {
+						maxAgeDays = age
+					}
+				}
 			}
 			docResults = append(docResults, dm)
 		}
@@ -205,6 +229,10 @@ func docsSearchHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandl
 		}
 		if searchMethod == "" && len(allResults) == 0 {
 			result["note"] = "No results found. Run /alfred-crawl to populate the knowledge base."
+		}
+		if maxAgeDays > 30 {
+			result["staleness_warning"] = fmt.Sprintf(
+				"Results include docs from %d days ago. Run /alfred-crawl to refresh.", maxAgeDays)
 		}
 
 		return marshalResult(result)
