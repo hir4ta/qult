@@ -12,14 +12,20 @@ import (
 const runCmd = `"${CLAUDE_PLUGIN_ROOT}/bin/run.sh"`
 
 // Bundle generates the plugin directory structure from Go source definitions.
-// The outputDir will contain .claude-plugin/, hooks/, bin/, skills/, agents/, and .mcp.json.
+// The outputDir will contain .claude-plugin/, hooks/, bin/, skills/, agents/, rules/, and .mcp.json.
 func Bundle(outputDir, version string) error {
+	// 0. Clean up deprecated skill directories.
+	for _, dir := range deprecatedSkillDirs {
+		_ = os.RemoveAll(filepath.Join(outputDir, "skills", dir))
+	}
+
 	// 1. Create directory structure.
 	dirs := []string{
 		filepath.Join(outputDir, ".claude-plugin"),
 		filepath.Join(outputDir, "hooks"),
 		filepath.Join(outputDir, "bin"),
 		filepath.Join(outputDir, "agents"),
+		filepath.Join(outputDir, "rules"),
 	}
 	for _, skill := range alfredSkills {
 		dirs = append(dirs, filepath.Join(outputDir, "skills", skill.Dir))
@@ -87,6 +93,14 @@ func Bundle(outputDir, version string) error {
 		return fmt.Errorf("write alfred agent: %w", err)
 	}
 
+	// 8. Write rules.
+	for _, rule := range alfredRules {
+		p := filepath.Join(outputDir, "rules", rule.File)
+		if err := os.WriteFile(p, []byte(rule.Content), 0o644); err != nil {
+			return fmt.Errorf("write rule %s: %w", rule.File, err)
+		}
+	}
+
 	hookCount := len(alfredHookEntries(runCmd))
 
 	fmt.Printf("✓ Plugin bundle generated at %s\n", outputDir)
@@ -95,6 +109,7 @@ func Bundle(outputDir, version string) error {
 	fmt.Printf("  - .mcp.json\n")
 	fmt.Printf("  - bin/run.sh (guard + setup wrapper)\n")
 	fmt.Printf("  - %d skills\n", len(alfredSkills))
+	fmt.Printf("  - %d rules\n", len(alfredRules))
 	fmt.Printf("  - 1 agent (alfred)\n")
 	return nil
 }

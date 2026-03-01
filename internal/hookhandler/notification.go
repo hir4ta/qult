@@ -187,8 +187,6 @@ func unresolvedFailureHint(sdb *sessiondb.SessionDB) string {
 		_ = sdb.SetCooldown("idle_failure_hint", 10*time.Minute)
 
 		return fmt.Sprintf("Unresolved %s in %s — consider fixing before continuing.", f.FailureType, f.FilePath)
-
-		return fmt.Sprintf("Unresolved %s in %s — consider fixing before continuing.", f.FailureType, f.FilePath)
 	}
 
 	return ""
