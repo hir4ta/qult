@@ -1,6 +1,6 @@
 #!/bin/sh
 # claude-alfred wrapper — auto-downloads binary on version mismatch.
-ALFRED_VERSION="dev"
+ALFRED_VERSION="0.23.0"
 BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
 ALFRED_BIN="${BIN_DIR}/claude-alfred"
 VERSION_FILE="${BIN_DIR}/.alfred-version"
