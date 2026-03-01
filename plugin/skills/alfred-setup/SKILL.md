@@ -2,38 +2,26 @@
 name: alfred-setup
 description: >
   Interactive wizard to set up Claude Code best practices for your project.
-  Creates CLAUDE.md, hooks, skills, and other configurations step by step.
+  Creates CLAUDE.md, hooks, skills, rules, and MCP configuration step by step.
 user-invocable: true
-allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, mcp__claude-alfred__knowledge
+allowed-tools: Read, Write, Edit, Glob, Bash, AskUserQuestion, mcp__claude-alfred__knowledge, mcp__claude-alfred__preferences, mcp__claude-alfred__review
 ---
 
-Project setup wizard for Claude Code.
+Project setup wizard.
 
 ## Steps
 
-1. Check current setup (same as alfred-audit step 1-2)
-2. For each missing configuration, ask the user if they want to set it up:
-   - AskUserQuestion with options for each feature
+1. **[HOW]** Call review with project_path to assess current setup
+2. **[HOW]** Call preferences with action="get" for user preferences
+3. **[HOW]** Show current setup status and ask what to configure:
+   - AskUserQuestion with multiSelect: CLAUDE.md, Skills, Rules, Hooks, MCP, Memory
+4. **[HOW]** For each selected item, run the corresponding create flow:
+   - Each create flow follows its own skill's template and validation
+5. **[WHAT]** After all items created, call review again and verify:
+   - Setup score improved
+   - No configuration conflicts (e.g. hook and rule targeting same concern)
 
-3. If CLAUDE.md is missing or minimal:
-   - Detect project stack (look at package.json, go.mod, Cargo.toml, etc.)
-   - Call knowledge for CLAUDE.md best practices
-   - Generate a template CLAUDE.md with Commands and Rules sections
-   - Write it with user approval
+## Guardrails
 
-4. If hooks are not configured:
-   - Explain what hooks can do
-   - Offer common hook configurations (pre-commit lint, test on edit)
-
-5. If no skills exist:
-   - Explain what skills are
-   - Offer to create a starter skill template
-
-6. If no rules exist:
-   - Explain file-matched rules
-   - Offer to create rules for the project's main language
-
-## Output
-
-For each step, show what was created/modified and why.
-At the end, summarize the new setup and suggest next steps.
+- Do NOT create all items without user selection — let them choose
+- Do NOT skip validation steps from individual create skills

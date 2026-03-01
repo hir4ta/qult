@@ -19,6 +19,9 @@ func tempSettings(t *testing.T, content string) string {
 	return path
 }
 
+// expectedEvents is the set of hook events registered by alfred (静観型執事: 3 silent hooks).
+var expectedEvents = []string{"SessionStart", "PostToolUse", "SessionEnd"}
+
 func TestRegisterHooks(t *testing.T) {
 	path := tempSettings(t, "")
 	orig := settingsPathFunc
@@ -44,8 +47,7 @@ func TestRegisterHooks(t *testing.T) {
 		t.Fatal("hooks key missing or not object")
 	}
 
-	events := []string{"SessionStart", "PreToolUse", "PostToolUse", "UserPromptSubmit", "PreCompact", "SessionEnd"}
-	for _, ev := range events {
+	for _, ev := range expectedEvents {
 		if _, ok := hooks[ev]; !ok {
 			t.Errorf("hook event %s missing", ev)
 		}
@@ -117,7 +119,7 @@ func TestRegisterHooks_Idempotent(t *testing.T) {
 func TestRegisterHooks_PreservesOtherHooks(t *testing.T) {
 	path := tempSettings(t, `{
   "hooks": {
-    "PreToolUse": [
+    "PostToolUse": [
       {
         "matcher": "Bash",
         "hooks": [
@@ -141,19 +143,19 @@ func TestRegisterHooks_PreservesOtherHooks(t *testing.T) {
 	json.Unmarshal(data, &settings)
 
 	hooks := settings["hooks"].(map[string]any)
-	preToolList, ok := hooks["PreToolUse"].([]any)
+	postToolList, ok := hooks["PostToolUse"].([]any)
 	if !ok {
-		t.Fatal("PreToolUse is not a list")
+		t.Fatal("PostToolUse is not a list")
 	}
 
 	// Should have 2 entries: other-tool + claude-alfred.
-	if len(preToolList) != 2 {
-		t.Errorf("PreToolUse has %d entries, want 2", len(preToolList))
+	if len(postToolList) != 2 {
+		t.Errorf("PostToolUse has %d entries, want 2", len(postToolList))
 	}
 
 	// Verify other-tool entry is preserved.
 	found := false
-	for _, item := range preToolList {
+	for _, item := range postToolList {
 		if !isAlfredHookEntry(item) {
 			found = true
 		}
@@ -169,12 +171,10 @@ func TestRemoveHooks(t *testing.T) {
 	settingsPathFunc = func() string { return path }
 	t.Cleanup(func() { settingsPathFunc = orig })
 
-	// First register hooks.
 	if err := registerHooks(); err != nil {
 		t.Fatalf("registerHooks() = %v", err)
 	}
 
-	// Then remove them.
 	if err := RemoveHooks(); err != nil {
 		t.Fatalf("RemoveHooks() = %v", err)
 	}
@@ -188,8 +188,7 @@ func TestRemoveHooks(t *testing.T) {
 		t.Fatal("hooks key missing")
 	}
 
-	events := []string{"SessionStart", "PreToolUse", "PostToolUse", "UserPromptSubmit", "PreCompact", "SessionEnd"}
-	for _, ev := range events {
+	for _, ev := range expectedEvents {
 		if _, ok := hooks[ev]; ok {
 			t.Errorf("hook event %s still present after removal", ev)
 		}
@@ -202,7 +201,6 @@ func TestRemoveHooks_PreservesOtherHooks(t *testing.T) {
 	settingsPathFunc = func() string { return path }
 	t.Cleanup(func() { settingsPathFunc = orig })
 
-	// Register hooks + add another tool's hook.
 	if err := registerHooks(); err != nil {
 		t.Fatalf("registerHooks() = %v", err)
 	}
@@ -212,17 +210,16 @@ func TestRemoveHooks_PreservesOtherHooks(t *testing.T) {
 	json.Unmarshal(data, &settings)
 
 	hooks := settings["hooks"].(map[string]any)
-	preToolList := hooks["PreToolUse"].([]any)
-	preToolList = append(preToolList, map[string]any{
+	postToolList := hooks["PostToolUse"].([]any)
+	postToolList = append(postToolList, map[string]any{
 		"matcher": "Bash",
 		"hooks":   []any{map[string]any{"type": "command", "command": "other-tool check", "timeout": 1}},
 	})
-	hooks["PreToolUse"] = preToolList
+	hooks["PostToolUse"] = postToolList
 	settings["hooks"] = hooks
 	out, _ := json.MarshalIndent(settings, "", "  ")
 	os.WriteFile(path, append(out, '\n'), 0o644)
 
-	// Remove claude-alfred hooks.
 	if err := RemoveHooks(); err != nil {
 		t.Fatalf("RemoveHooks() = %v", err)
 	}
@@ -231,19 +228,17 @@ func TestRemoveHooks_PreservesOtherHooks(t *testing.T) {
 	json.Unmarshal(data, &settings)
 	hooks = settings["hooks"].(map[string]any)
 
-	preToolList, ok := hooks["PreToolUse"].([]any)
-	if !ok || len(preToolList) != 1 {
-		t.Fatalf("PreToolUse has %d entries, want 1", len(preToolList))
+	postToolList, ok := hooks["PostToolUse"].([]any)
+	if !ok || len(postToolList) != 1 {
+		t.Fatalf("PostToolUse has %d entries, want 1", len(postToolList))
 	}
 
-	if isAlfredHookEntry(preToolList[0]) {
+	if isAlfredHookEntry(postToolList[0]) {
 		t.Error("claude-alfred entry still present")
 	}
 }
 
 func TestHasLegacyHooks(t *testing.T) {
-	// Cannot use t.Parallel() — subtests mutate package-level settingsPathFunc.
-
 	t.Run("no settings file", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "settings.json")
 		orig := settingsPathFunc
@@ -272,7 +267,6 @@ func TestHasLegacyHooks(t *testing.T) {
 		settingsPathFunc = func() string { return path }
 		t.Cleanup(func() { settingsPathFunc = orig })
 
-		// Register hooks to create them.
 		if err := registerHooks(); err != nil {
 			t.Fatalf("registerHooks() = %v", err)
 		}
@@ -305,23 +299,16 @@ func TestAlfredHookEntries(t *testing.T) {
 
 	entries := alfredHookEntries("/usr/local/bin/claude-alfred")
 
-	events := []string{
-		"SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure",
-		"UserPromptSubmit", "PreCompact", "SessionEnd",
-		"SubagentStart", "SubagentStop", "Notification",
-		"TeammateIdle", "TaskCompleted", "PermissionRequest",
-		"Stop",
-	}
-	for _, ev := range events {
+	for _, ev := range expectedEvents {
 		if _, ok := entries[ev]; !ok {
 			t.Errorf("event %s missing from alfredHookEntries", ev)
 		}
 	}
-	if len(entries) != len(events) {
-		t.Errorf("alfredHookEntries() has %d events, want %d", len(entries), len(events))
+	if len(entries) != len(expectedEvents) {
+		t.Errorf("alfredHookEntries() has %d events, want %d", len(entries), len(expectedEvents))
 	}
 
-	// Verify commands contain the binary path (skip prompt-type hooks).
+	// Verify commands contain the binary path and use "hook" subcommand.
 	for event, entry := range entries {
 		list, ok := entry.([]any)
 		if !ok || len(list) == 0 {
@@ -331,18 +318,9 @@ func TestAlfredHookEntries(t *testing.T) {
 		m := list[0].(map[string]any)
 		hooks := m["hooks"].([]any)
 		hook := hooks[0].(map[string]any)
-		hookType, _ := hook["type"].(string)
-		if hookType == "prompt" {
-			// Prompt hooks don't have a command field; verify they have a prompt.
-			prompt, _ := hook["prompt"].(string)
-			if prompt == "" {
-				t.Errorf("%s: prompt hook has empty prompt", event)
-			}
-			continue
-		}
 		cmd := hook["command"].(string)
-		if cmd != "/usr/local/bin/claude-alfred hook-handler "+event {
-			t.Errorf("%s: command = %s", event, cmd)
+		if cmd != "/usr/local/bin/claude-alfred hook "+event {
+			t.Errorf("%s: command = %s, want %s", event, cmd, "/usr/local/bin/claude-alfred hook "+event)
 		}
 	}
 }
@@ -351,12 +329,19 @@ func TestIsAlfredHookEntry(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name string
+		name  string
 		entry any
 		want  bool
 	}{
 		{
-			name: "alfred entry",
+			name: "alfred hook entry",
+			entry: map[string]any{
+				"hooks": []any{map[string]any{"type": "command", "command": "/usr/bin/claude-alfred hook PostToolUse"}},
+			},
+			want: true,
+		},
+		{
+			name: "legacy alfred hook-handler entry",
 			entry: map[string]any{
 				"hooks": []any{map[string]any{"type": "command", "command": "/usr/bin/claude-alfred hook-handler PreToolUse"}},
 			},

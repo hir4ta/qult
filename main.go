@@ -2,17 +2,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/hir4ta/claude-alfred/internal/analyzer"
 	"github.com/hir4ta/claude-alfred/internal/embedder"
-	"github.com/hir4ta/claude-alfred/internal/hookhandler"
 	"github.com/hir4ta/claude-alfred/internal/install"
 	"github.com/hir4ta/claude-alfred/internal/mcpserver"
 	"github.com/hir4ta/claude-alfred/internal/store"
@@ -63,11 +61,11 @@ func run() error {
 			outputDir = os.Args[2]
 		}
 		return install.Bundle(outputDir, version)
-	case "hook-handler":
+	case "hook":
 		if len(os.Args) < 3 {
-			return fmt.Errorf("usage: claude-alfred hook-handler <EventName>")
+			return fmt.Errorf("usage: claude-alfred hook <EventName>")
 		}
-		return hookhandler.Run(os.Args[2])
+		return runHook(os.Args[2])
 	case "version", "--version", "-v":
 		fmt.Printf("claude-alfred %s\n", version)
 		return nil
@@ -124,13 +122,10 @@ func runWatch() error {
 	}
 	fmt.Printf("Watching session: %s (%d existing events)\n", sid, len(result.InitialEvents))
 
-	// Open store for dashboard tabs (nil-safe if unavailable).
+	// Open store (nil-safe if unavailable).
 	st, _ := store.OpenDefaultCached()
 
-	// Best-effort embedder for hybrid docs search (nil-safe).
-	emb, _ := embedder.NewEmbedder()
-
-	model := tui.NewModel(result.InitialEvents, result.EventCh, selected.SessionID, st, emb)
+	model := tui.NewModel(result.InitialEvents, result.EventCh, selected.SessionID, st)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {
@@ -177,73 +172,67 @@ func runServe() error {
 }
 
 func runAnalyze() error {
-	claudeHome := watcher.DefaultClaudeHome()
+	fmt.Println("analyze command is being redesigned. Use /alfred:review via MCP instead.")
+	return nil
+}
 
-	sessions, err := watcher.ListSessions(claudeHome)
-	if err != nil || len(sessions) == 0 {
-		return fmt.Errorf("no sessions found")
+// hookEvent is the minimal structure of a Claude Code hook stdin payload.
+type hookEvent struct {
+	SessionID   string `json:"session_id"`
+	ProjectPath string `json:"cwd"`
+	ToolName    string `json:"tool_name"`
+	ToolError   bool   `json:"tool_error"`
+}
+
+// runHook handles silent hook events. Reads stdin, records to store, produces no output.
+func runHook(event string) error {
+	var ev hookEvent
+	if err := json.NewDecoder(os.Stdin).Decode(&ev); err != nil {
+		// Malformed input — silently ignore (butler never complains).
+		return nil
 	}
 
-	var target watcher.SessionInfo
-	if len(os.Args) > 2 {
-		prefix := os.Args[2]
-		for _, s := range sessions {
-			if strings.HasPrefix(s.SessionID, prefix) {
-				target = s
-				break
-			}
-		}
-		if target.Path == "" {
-			return fmt.Errorf("session not found: %s", prefix)
-		}
-	} else {
-		target = sessions[0]
-	}
-
-	detail, err := watcher.LoadSessionDetail(target)
+	st, err := store.OpenDefaultCached()
 	if err != nil {
-		return fmt.Errorf("load session: %w", err)
+		return nil // store unavailable — silently skip
 	}
 
-	stats := analyzer.NewStats()
-	det := analyzer.NewDetector()
-	for _, ev := range detail.Events {
-		stats.Update(ev)
-		det.Update(ev)
+	switch event {
+	case "SessionStart":
+		if ev.SessionID != "" && ev.ProjectPath != "" {
+			_ = st.EnsureSession(ev.SessionID, ev.ProjectPath)
+		}
+	case "PostToolUse":
+		if ev.SessionID != "" && ev.ToolName != "" {
+			_ = st.RecordToolUse(ev.SessionID, ev.ToolName, !ev.ToolError)
+		}
+	case "SessionEnd":
+		// Session statistics are already maintained incrementally.
+		// Nothing extra to do — the store is consistent.
 	}
 
-	sid := target.SessionID
-	if len(sid) > 8 {
-		sid = sid[:8]
-	}
-
-	features := mcpserver.TrackFeatures(detail.Events)
-	hints := mcpserver.ComputeUsageHints(detail.Events, stats)
-	recs := mcpserver.BuildRecommendations(hints, features, det.ActiveAlerts())
-
-	fmt.Print(mcpserver.FormatAnalyzeReport(sid, stats, det, features, hints, recs))
 	return nil
 }
 
 func printUsage() {
-	fmt.Println(`claude-alfred - Claude Code companion TUI
+	fmt.Println(`alfred - Your silent butler for Claude Code
 
 Usage:
   claude-alfred [command]
 
 Commands:
-  watch         Monitor active Claude Code session in real-time (default)
-  browse        Browse past session history
-  serve         Run as MCP server (stdio) for Claude Code integration
-  hook-handler  Handle Claude Code hook events (stdin/stdout JSON)
-  install       Sync sessions and generate embeddings (--since=7d|14d|30d|90d)
+  watch          Monitor active Claude Code session in real-time (default)
+  browse         Browse past session history
+  serve          Run as MCP server (stdio) for Claude Code integration
+  hook           Handle silent hook events (no output)
+  install        Sync sessions and generate embeddings (--since=7d|14d|30d|90d)
   count-sessions Show session counts per sync range (JSON)
-  uninstall     Remove hooks and MCP server registration
-  analyze       Session analysis report
-  crawl-seed    Crawl official docs and generate seed_docs.json
-  plugin-bundle Generate plugin directory from Go sources
-  version       Show version
-  help          Show this help
+  uninstall      Remove MCP server registration
+  analyze        Project analysis report
+  crawl-seed     Crawl official docs and generate seed_docs.json
+  plugin-bundle  Generate plugin directory from Go sources
+  version        Show version
+  help           Show this help
 
 Requirements:
   VOYAGE_API_KEY  Required for vector search (serve/install commands)`)

@@ -2,16 +2,16 @@
   "author": {
     "name": "hir4ta"
   },
-  "description": "Proactive session advisor for Claude Code",
+  "description": "Your silent butler for Claude Code",
   "homepage": "https://github.com/hir4ta/claude-alfred",
   "keywords": [
-    "session-advisor",
-    "anti-pattern",
-    "workflow",
-    "productivity"
+    "butler",
+    "best-practices",
+    "preferences",
+    "workflow"
   ],
   "license": "MIT",
   "name": "claude-alfred",
   "repository": "https://github.com/hir4ta/claude-alfred",
-  "version": "0.22.0"
+  "version": "dev"
 }

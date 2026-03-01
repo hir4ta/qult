@@ -1,6 +1,6 @@
 #!/bin/sh
 # claude-alfred wrapper — auto-downloads binary on version mismatch.
-ALFRED_VERSION="0.22.0"
+ALFRED_VERSION="dev"
 BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
 ALFRED_BIN="${BIN_DIR}/claude-alfred"
 VERSION_FILE="${BIN_DIR}/.alfred-version"
@@ -152,10 +152,9 @@ case "$1" in
     exec "$ALFRED_BIN" serve
     ;;
 
-  hook-handler)
-    # Hooks have tight timeouts (1-8s). Try briefly, then degrade.
+  hook)
+    # Hooks have tight timeouts (1-8s). Try briefly, then degrade silently.
     if ! ensure_binary 3; then
-      echo '{"additionalContext":"[alfred] Updating binary. Will be ready shortly."}'
       exit 0
     fi
     exec "$ALFRED_BIN" "$@"

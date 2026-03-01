@@ -1,25 +1,13 @@
 package tui
 
 import (
-	"context"
 	"strconv"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/hir4ta/claude-alfred/internal/analyzer"
-	"github.com/hir4ta/claude-alfred/internal/embedder"
 	"github.com/hir4ta/claude-alfred/internal/parser"
 	"github.com/hir4ta/claude-alfred/internal/store"
-)
-
-// Tab represents a dashboard tab.
-type Tab int
-
-const (
-	TabActivity    Tab = iota
-	TabKnowledge
-	TabPreferences
-	TabDocs
 )
 
 // TaskState tracks a single task's current state.
@@ -35,7 +23,6 @@ type TaskState struct {
 type Model struct {
 	events         []parser.SessionEvent
 	stats          analyzer.Stats
-	detector       *analyzer.Detector
 	tasks          []TaskState // ordered by creation
 	taskMap        map[string]int // taskID -> index in tasks
 	taskCounter    int
@@ -53,50 +40,17 @@ type Model struct {
 	sessionEnded   bool   // event channel closed
 	showHelp       bool   // help overlay visible
 
-	// Usage score
-	scoreCalc *analyzer.ScoreCalculator
-
 	// Animation state
 	animFrame    int  // increments every animTick (for shimmer, pulse, etc.)
 
-	// Dashboard tabs
-	activeTab Tab
-	st        *store.Store // nil-safe
-
-	// Knowledge tab cache
-	knTotal     int
-	knBySource  map[string]int
-	knLastCrawl string
-	knVersion   string
-
-	// Preferences tab cache
-	pfCluster  string
-	pfMetrics  []store.UserProfileMetric
-	pfFeatures map[string]*store.UserPref
-
-	// Docs tab state
-	emb            *embedder.Embedder // nil-safe; enables hybrid vector+FTS5 search
-	docsSearching  bool
-	docsQuery      string
-	docsResults    []docsResult
-	docsMethod     string // "hybrid_rrf" or "FTS5"
-	docsCursor     int
-	docsExpanded   map[int]bool
-	docsScrollOff  int
-}
-
-// docsResult wraps a DocRow with its search score.
-type docsResult struct {
-	store.DocRow
-	Score float64
+	// Dashboard
+	st *store.Store // nil-safe
 }
 
 // NewModel creates a new TUI model with initial events pre-loaded.
-// st may be nil if the store is unavailable. emb may be nil (FTS5-only search).
-func NewModel(initialEvents []parser.SessionEvent, eventCh <-chan parser.SessionEvent, sessionID string, st *store.Store, emb *embedder.Embedder) Model {
+// st may be nil if the store is unavailable.
+func NewModel(initialEvents []parser.SessionEvent, eventCh <-chan parser.SessionEvent, sessionID string, st *store.Store) Model {
 	stats := analyzer.NewStats()
-	det := analyzer.NewDetector()
-	sc := analyzer.NewScoreCalculator()
 	var tasks []TaskState
 	taskMap := make(map[string]int)
 	taskCounter := 0
@@ -107,8 +61,6 @@ func NewModel(initialEvents []parser.SessionEvent, eventCh <-chan parser.Session
 	for i := range initialEvents {
 		ev := &initialEvents[i]
 		stats.Update(*ev)
-		initAlerts := det.Update(*ev)
-		sc.Update(*ev, initAlerts)
 
 		// Auto-compact boundary: reset displayed events to avoid duplicates.
 		// After compaction, Claude Code re-serializes context messages to the JSONL,
@@ -152,8 +104,6 @@ func NewModel(initialEvents []parser.SessionEvent, eventCh <-chan parser.Session
 	return Model{
 		events:        events,
 		stats:         stats,
-		detector:      det,
-		scoreCalc:     sc,
 		tasks:         tasks,
 		taskMap:       taskMap,
 		taskCounter:   taskCounter,
@@ -165,8 +115,6 @@ func NewModel(initialEvents []parser.SessionEvent, eventCh <-chan parser.Session
 		inPlanMode:    inPlanMode,
 		awaitingAnswer: awaitingAnswer,
 		st:            st,
-		emb:           emb,
-		docsExpanded:  make(map[int]bool),
 	}
 }
 
@@ -201,10 +149,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		ev := parser.SessionEvent(msg)
 		applyModeFlags(&ev, &m.inPlanMode, &m.awaitingAnswer)
 
-		// Update stats, detector, and tasks always
+		// Update stats and tasks
 		m.stats.Update(ev)
-		newAlerts := m.detector.Update(ev)
-		m.scoreCalc.Update(ev, newAlerts)
 
 		// Auto-compact boundary: reset displayed events to avoid duplicates.
 		if ev.Type == parser.EventCompactBoundary {
@@ -259,34 +205,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "?":
 			m.showHelp = true
 			return m, nil
-		case "1":
-			m.switchTab(TabActivity)
-			return m, nil
-		case "2":
-			m.switchTab(TabKnowledge)
-			return m, nil
-		case "3":
-			m.switchTab(TabPreferences)
-			return m, nil
-		case "4":
-			m.switchTab(TabDocs)
-			return m, nil
-		case "tab":
-			next := (m.activeTab + 1) % 4
-			m.switchTab(next)
-			return m, nil
-		case "shift+tab":
-			next := (m.activeTab + 3) % 4
-			m.switchTab(next)
-			return m, nil
 		}
-		// Tab-specific keys
-		switch m.activeTab {
-		case TabDocs:
-			return m.updateDocs(msg)
-		case TabActivity:
-			return m.updateActivity(msg)
-		}
+		return m.updateActivity(msg)
 	}
 
 	return m, nil
@@ -370,14 +290,8 @@ func applyModeFlags(ev *parser.SessionEvent, inPlanMode *bool, awaitingAnswer *b
 
 // fixedHeight returns the number of lines consumed by non-message areas.
 func (m Model) fixedHeight() int {
-	// header: 3 lines (title + stats + score) + tab bar + optional breakdown line
+	// header: 3 lines (title + stats + summary) + tab bar
 	h := 4
-	score := m.scoreCalc.Score()
-	bd := score.Components
-	if bd.AlertPenalty != 0 || bd.ToolEfficiency != 0 || bd.PlanMode != 0 ||
-		bd.CLAUDEMD != 0 || bd.Subagent != 0 || bd.ContextMgmt != 0 || bd.InstructionQual != 0 {
-		h++ // breakdown line
-	}
 
 	// tasks section
 	taskCount := 0
@@ -501,108 +415,6 @@ func animTickCmd() tea.Cmd {
 	})
 }
 
-// switchTab changes the active tab and refreshes data if needed.
-func (m *Model) switchTab(tab Tab) {
-	m.activeTab = tab
-	switch tab {
-	case TabKnowledge:
-		m.refreshKnowledge()
-	case TabPreferences:
-		m.refreshPreferences()
-	}
-}
-
-// refreshKnowledge loads docs statistics from the store.
-func (m *Model) refreshKnowledge() {
-	if m.st == nil {
-		return
-	}
-	total, bySource, lastCrawl, err := m.st.DocsStats()
-	if err != nil {
-		return
-	}
-	m.knTotal = total
-	m.knBySource = bySource
-	m.knLastCrawl = lastCrawl
-	m.knVersion, _, _ = m.st.LatestChangelogVersion()
-}
-
-// refreshPreferences loads user profile data from the store.
-func (m *Model) refreshPreferences() {
-	if m.st == nil {
-		return
-	}
-	m.pfCluster = m.st.UserCluster()
-	m.pfMetrics, _ = m.st.AllUserProfile()
-	m.pfFeatures = make(map[string]*store.UserPref)
-	for _, key := range []string{"plan_mode", "worktree", "agent", "skill", "team"} {
-		if p, err := m.st.UserPreference("feature_" + key); err == nil && p != nil {
-			m.pfFeatures[key] = p
-		}
-	}
-}
-
-// executeDocsSearch runs a hybrid vector+FTS5 search (or FTS5-only if embedder is nil).
-func (m *Model) executeDocsSearch() {
-	if m.st == nil || m.docsQuery == "" {
-		m.docsResults = nil
-		return
-	}
-
-	// Try hybrid search with vector embedding.
-	var queryVec []float32
-	if m.emb != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		vec, err := m.emb.EmbedForSearch(ctx, m.docsQuery)
-		cancel()
-		if err == nil {
-			queryVec = vec
-		}
-	}
-
-	if queryVec != nil {
-		m.docsMethod = "hybrid_rrf"
-	} else {
-		m.docsMethod = "FTS5"
-	}
-
-	matches, err := m.st.HybridSearch(queryVec, m.docsQuery, "", 20, 80)
-	if err != nil || len(matches) == 0 {
-		m.docsResults = nil
-		m.docsCursor = 0
-		m.docsExpanded = make(map[int]bool)
-		return
-	}
-
-	ids := make([]int64, len(matches))
-	scoreMap := make(map[int64]float64, len(matches))
-	for i, match := range matches {
-		ids[i] = match.DocID
-		scoreMap[match.DocID] = match.RRFScore
-	}
-
-	docs, err := m.st.GetDocsByIDs(ids)
-	if err != nil {
-		m.docsResults = nil
-		m.docsCursor = 0
-		m.docsExpanded = make(map[int]bool)
-		return
-	}
-
-	// Build results preserving RRF rank order.
-	docByID := make(map[int64]store.DocRow, len(docs))
-	for _, d := range docs {
-		docByID[d.ID] = d
-	}
-	m.docsResults = make([]docsResult, 0, len(ids))
-	for _, id := range ids {
-		if d, ok := docByID[id]; ok {
-			m.docsResults = append(m.docsResults, docsResult{DocRow: d, Score: scoreMap[id]})
-		}
-	}
-	m.docsCursor = 0
-	m.docsExpanded = make(map[int]bool)
-}
 
 // updateActivity handles key events for the Activity tab.
 func (m Model) updateActivity(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -660,55 +472,4 @@ func (m Model) updateActivity(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateDocs handles key events for the Docs tab.
-func (m Model) updateDocs(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.docsSearching {
-		switch msg.String() {
-		case "enter":
-			m.docsSearching = false
-			m.executeDocsSearch()
-			return m, nil
-		case "esc":
-			m.docsSearching = false
-			return m, nil
-		case "backspace":
-			if len(m.docsQuery) > 0 {
-				m.docsQuery = m.docsQuery[:len(m.docsQuery)-1]
-			}
-			return m, nil
-		default:
-			if len(msg.String()) == 1 {
-				m.docsQuery += msg.String()
-			}
-			return m, nil
-		}
-	}
-
-	switch msg.String() {
-	case "/":
-		m.docsSearching = true
-		m.docsQuery = ""
-		return m, nil
-	case "up", "k":
-		if m.docsCursor > 0 {
-			m.docsCursor--
-		}
-		return m, nil
-	case "down", "j":
-		if m.docsCursor < len(m.docsResults)-1 {
-			m.docsCursor++
-		}
-		return m, nil
-	case "enter":
-		if m.docsCursor >= 0 && m.docsCursor < len(m.docsResults) {
-			if m.docsExpanded[m.docsCursor] {
-				delete(m.docsExpanded, m.docsCursor)
-			} else {
-				m.docsExpanded[m.docsCursor] = true
-			}
-		}
-		return m, nil
-	}
-	return m, nil
-}
 

@@ -34,27 +34,15 @@ func (m Model) View() string {
 	// Title area (always shown)
 	sections = append(sections, m.renderHeader())
 
-	// Tab bar
-	sections = append(sections, m.renderTabBar())
-
-	// Tab content
-	switch m.activeTab {
-	case TabKnowledge:
-		sections = append(sections, m.viewKnowledge())
-	case TabPreferences:
-		sections = append(sections, m.viewPreferences())
-	case TabDocs:
-		sections = append(sections, m.viewDocs())
-	default:
-		sections = append(sections, m.viewActivity())
-	}
+	// Activity view (single tab)
+	sections = append(sections, m.viewActivity())
 
 	// Bottom
 	sections = append(sections, m.renderSeparator())
 	if m.sessionEnded {
 		sections = append(sections, dimStyle.Render("  Session ended"))
 	}
-	sections = append(sections, m.renderTabHelp())
+	sections = append(sections, m.renderHelp())
 
 	return strings.Join(sections, "\n")
 }
@@ -75,31 +63,6 @@ func (m Model) viewActivity() string {
 	parts = append(parts, m.renderMessages())
 
 	return strings.Join(parts, "\n")
-}
-
-// renderTabBar renders the tab navigation bar.
-func (m Model) renderTabBar() string {
-	tabs := []struct {
-		key   string
-		label string
-		tab   Tab
-	}{
-		{"1", "Activity", TabActivity},
-		{"2", "Knowledge", TabKnowledge},
-		{"3", "Preferences", TabPreferences},
-		{"4", "Docs", TabDocs},
-	}
-
-	var parts []string
-	for _, t := range tabs {
-		label := t.key + ":" + t.label
-		if m.activeTab == t.tab {
-			parts = append(parts, tabActiveStyle.Render(label))
-		} else {
-			parts = append(parts, tabInactiveStyle.Render(label))
-		}
-	}
-	return strings.Join(parts, "")
 }
 
 func (m Model) renderHeader() string {
@@ -135,66 +98,17 @@ func (m Model) renderHeader() string {
 }
 
 func (m Model) renderScoreLine() string {
-	score := m.scoreCalc.Score()
-
-	scoreStr := fmt.Sprintf("Score: %d/100", score.Total)
-
-	filled := score.Total / 10
-	if filled > 10 {
-		filled = 10
+	tpt := m.stats.ToolsPerTurn()
+	top := m.stats.TopTools(3)
+	var topParts []string
+	for _, t := range top {
+		topParts = append(topParts, fmt.Sprintf("%s:%d", t.Name, t.Count))
 	}
-	bar := strings.Repeat("\u2588", filled) + strings.Repeat("\u2591", 10-filled)
-
-	text := fmt.Sprintf("%s %s | %s", scoreStr, bar, score.Label)
-
-	var style lipgloss.Style
-	switch {
-	case score.Total >= 80:
-		style = scoreGoodStyle
-	case score.Total >= 60:
-		style = scoreFairStyle
-	default:
-		style = scorePoorStyle
+	text := fmt.Sprintf("%.1f tools/turn", tpt)
+	if len(topParts) > 0 {
+		text += " | " + strings.Join(topParts, " ")
 	}
-
-	line := style.Render(text)
-
-	// Breakdown: show only non-zero components with descriptive labels
-	bd := score.Components
-	var parts []string
-	type comp struct {
-		posLabel string // label when value > 0
-		negLabel string // label when value < 0
-		value    int
-	}
-	for _, c := range []comp{
-		{"", "Anti-patterns detected", bd.AlertPenalty},
-		{"", "Excessive tools", bd.ToolEfficiency},
-		{"Planned approach", "No plan (5+ files)", bd.PlanMode},
-		{"Read CLAUDE.md", "", bd.CLAUDEMD},
-		{"Used subagents", "", bd.Subagent},
-		{"", "Context compactions", bd.ContextMgmt},
-		{"Detailed prompts", "", bd.InstructionQual},
-	} {
-		if c.value == 0 {
-			continue
-		}
-		descr := c.posLabel
-		if c.value < 0 {
-			descr = c.negLabel
-		}
-		label := fmt.Sprintf("%+d %s", c.value, descr)
-		if c.value > 0 {
-			parts = append(parts, scoreBonusStyle.Render(label))
-		} else {
-			parts = append(parts, scorePenaltyStyle.Render(label))
-		}
-	}
-	if len(parts) > 0 {
-		line += "\n  " + strings.Join(parts, dimStyle.Render(" | "))
-	}
-
-	return line
+	return dimStyle.Render(text)
 }
 
 func (m Model) renderTasks() string {
@@ -277,18 +191,6 @@ func (m Model) renderHelp() string {
 	return helpStyle.Render("  q: quit | \u2191\u2193: select | Enter: expand/collapse | ?: help")
 }
 
-// renderTabHelp renders tab-specific help.
-func (m Model) renderTabHelp() string {
-	common := "1-4: tabs | "
-	switch m.activeTab {
-	case TabDocs:
-		return helpStyle.Render("  " + common + "/: search | \u2191\u2193: select | Enter: expand | q: quit | ?: help")
-	case TabKnowledge, TabPreferences:
-		return helpStyle.Render("  " + common + "q: quit | ?: help")
-	default:
-		return helpStyle.Render("  " + common + "\u2191\u2193: select | Enter: expand/collapse | q: quit | ?: help")
-	}
-}
 
 func (m Model) renderHelpOverlay() string {
 	title := headerStyle.Render(" claude-alfred help ")

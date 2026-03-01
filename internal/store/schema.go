@@ -5,8 +5,10 @@ import (
 	"strconv"
 )
 
-// schemaVersion 102 = decisions FTS5, query sanitization.
-const schemaVersion = 102
+// schemaVersion 1 = 静観型執事 V1 reset.
+// Clean slate: sessions, events, compact_events, decisions, preferences,
+// docs, embeddings. All legacy tables are dropped on migration.
+const schemaVersion = 1
 
 const ddlV1 = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -79,95 +81,19 @@ CREATE TABLE IF NOT EXISTS decisions (
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
-CREATE TABLE IF NOT EXISTS tags (
-    id   INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE
-);
-
 -- ==========================================================
--- User behavior tables
+-- User preferences (静観型執事: remember user preferences)
 -- ==========================================================
-CREATE TABLE IF NOT EXISTS user_profile (
-    metric_name  TEXT PRIMARY KEY,
-    ewma_value   REAL NOT NULL DEFAULT 0.0,
-    sample_count INTEGER NOT NULL DEFAULT 0,
-    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS workflow_sequences (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id     TEXT NOT NULL,
-    task_type      TEXT NOT NULL,
-    phase_sequence TEXT NOT NULL,
-    success        INTEGER NOT NULL DEFAULT 0,
-    tool_count     INTEGER NOT NULL DEFAULT 0,
-    duration_sec   INTEGER NOT NULL DEFAULT 0,
-    timestamp      TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-CREATE INDEX IF NOT EXISTS idx_wseq_task ON workflow_sequences(task_type);
-
-CREATE TABLE IF NOT EXISTS adaptive_baselines (
-    metric_name  TEXT PRIMARY KEY,
-    count        INTEGER NOT NULL DEFAULT 0,
-    mean         REAL NOT NULL DEFAULT 0.0,
-    m2           REAL NOT NULL DEFAULT 0.0,
-    last_updated TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS file_co_changes (
-    file_a        TEXT NOT NULL,
-    file_b        TEXT NOT NULL,
-    session_count INTEGER NOT NULL DEFAULT 1,
-    last_seen     TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (file_a, file_b)
-);
-CREATE INDEX IF NOT EXISTS idx_cochange_a ON file_co_changes(file_a);
-
-CREATE TABLE IF NOT EXISTS live_session_phases (
-    session_id TEXT NOT NULL,
-    phase      TEXT NOT NULL,
-    tool_name  TEXT NOT NULL,
-    timestamp  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_live_phases_session ON live_session_phases(session_id);
-
-CREATE TABLE IF NOT EXISTS live_session_files (
-    session_id TEXT NOT NULL,
-    file_path  TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS preferences (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    category   TEXT NOT NULL,
+    key        TEXT NOT NULL,
+    value      TEXT NOT NULL,
+    source     TEXT NOT NULL DEFAULT 'explicit',
+    confidence REAL NOT NULL DEFAULT 1.0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(session_id, file_path)
-);
-CREATE INDEX IF NOT EXISTS idx_live_files_session ON live_session_files(session_id);
-
-CREATE TABLE IF NOT EXISTS global_tool_sequences (
-    from_tool     TEXT NOT NULL,
-    to_tool       TEXT NOT NULL,
-    count         INTEGER NOT NULL DEFAULT 0,
-    success_count INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (from_tool, to_tool)
-);
-CREATE INDEX IF NOT EXISTS idx_gts_from ON global_tool_sequences(from_tool);
-
-CREATE TABLE IF NOT EXISTS global_tool_trigrams (
-    tool1         TEXT NOT NULL,
-    tool2         TEXT NOT NULL,
-    tool3         TEXT NOT NULL,
-    count         INTEGER NOT NULL DEFAULT 0,
-    success_count INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (tool1, tool2, tool3)
-);
-CREATE INDEX IF NOT EXISTS idx_gtt_t1t2 ON global_tool_trigrams(tool1, tool2);
-
-CREATE TABLE IF NOT EXISTS user_preferences (
-    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-    pattern               TEXT NOT NULL UNIQUE,
-    delivery_count        INTEGER NOT NULL DEFAULT 0,
-    resolution_count      INTEGER NOT NULL DEFAULT 0,
-    ignore_count          INTEGER NOT NULL DEFAULT 0,
-    avg_response_time_sec REAL NOT NULL DEFAULT 0,
-    effectiveness_score   REAL NOT NULL DEFAULT 0.5,
-    updated_at            TEXT NOT NULL DEFAULT (datetime('now'))
+    UNIQUE(category, key)
 );
 
 -- ==========================================================
@@ -186,7 +112,7 @@ CREATE TABLE IF NOT EXISTS embeddings (
 CREATE INDEX IF NOT EXISTS idx_embeddings_source ON embeddings(source, source_id);
 
 -- ==========================================================
--- Docs knowledge base (new in alfred v1)
+-- Docs knowledge base
 -- ==========================================================
 CREATE TABLE IF NOT EXISTS docs (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -203,50 +129,13 @@ CREATE TABLE IF NOT EXISTS docs (
 
 CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
     section_path, content,
-    content='docs', content_rowid='id'
-);
-
-CREATE TRIGGER IF NOT EXISTS docs_fts_ai AFTER INSERT ON docs BEGIN
-    INSERT INTO docs_fts(rowid, section_path, content)
-    VALUES (new.id, new.section_path, new.content);
-END;
-
-CREATE TRIGGER IF NOT EXISTS docs_fts_ad AFTER DELETE ON docs BEGIN
-    INSERT INTO docs_fts(docs_fts, rowid, section_path, content)
-    VALUES ('delete', old.id, old.section_path, old.content);
-END;
-
-CREATE TRIGGER IF NOT EXISTS docs_fts_au AFTER UPDATE ON docs BEGIN
-    INSERT INTO docs_fts(docs_fts, rowid, section_path, content)
-    VALUES ('delete', old.id, old.section_path, old.content);
-    INSERT INTO docs_fts(rowid, section_path, content)
-    VALUES (new.id, new.section_path, new.content);
-END;
-`
-
-// ddlV101 upgrades from v100: FTS5 porter stemming, new indexes, embedding reset for 1024d.
-const ddlV101 = `
--- Rebuild FTS5 with porter stemmer for better recall (configuring ≈ configuration).
-DROP TRIGGER IF EXISTS docs_fts_ai;
-DROP TRIGGER IF EXISTS docs_fts_ad;
-DROP TRIGGER IF EXISTS docs_fts_au;
-DROP TABLE IF EXISTS docs_fts;
-
-CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
-    section_path, content,
     content='docs', content_rowid='id',
     tokenize='porter unicode61',
     prefix='2,3'
 );
 
--- Re-populate FTS from existing docs.
-INSERT INTO docs_fts(rowid, section_path, content)
-    SELECT id, section_path, content FROM docs;
+INSERT OR IGNORE INTO docs_fts(docs_fts, rank) VALUES('rank', 'bm25(10.0, 1.0)');
 
--- Set column weights: section_path matches 10x more important than content.
-INSERT INTO docs_fts(docs_fts, rank) VALUES('rank', 'bm25(10.0, 1.0)');
-
--- Recreate triggers for FTS sync.
 CREATE TRIGGER IF NOT EXISTS docs_fts_ai AFTER INSERT ON docs BEGIN
     INSERT INTO docs_fts(rowid, section_path, content)
     VALUES (new.id, new.section_path, new.content);
@@ -264,19 +153,9 @@ CREATE TRIGGER IF NOT EXISTS docs_fts_au AFTER UPDATE ON docs BEGIN
     VALUES (new.id, new.section_path, new.content);
 END;
 
--- Missing indexes for common query patterns.
-CREATE INDEX IF NOT EXISTS idx_docs_source_type ON docs(source_type);
-CREATE INDEX IF NOT EXISTS idx_docs_crawled_at ON docs(crawled_at);
-CREATE INDEX IF NOT EXISTS idx_decisions_session ON decisions(session_id);
-CREATE INDEX IF NOT EXISTS idx_decisions_timestamp ON decisions(timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, event_type);
-
--- Clear embeddings so they regenerate at new dimensions (2048d → 1024d).
-DELETE FROM embeddings WHERE source = 'docs';
-`
-
-// ddlV102 adds FTS5 for decisions table (semantic search on design decisions).
-const ddlV102 = `
+-- ==========================================================
+-- Decisions FTS5
+-- ==========================================================
 CREATE VIRTUAL TABLE IF NOT EXISTS decisions_fts USING fts5(
     topic, decision_text, reasoning,
     content='decisions', content_rowid='id',
@@ -284,10 +163,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS decisions_fts USING fts5(
     prefix='2,3'
 );
 
-INSERT INTO decisions_fts(rowid, topic, decision_text, reasoning)
-    SELECT id, topic, decision_text, COALESCE(reasoning, '') FROM decisions;
-
-INSERT INTO decisions_fts(decisions_fts, rank) VALUES('rank', 'bm25(10.0, 5.0, 1.0)');
+INSERT OR IGNORE INTO decisions_fts(decisions_fts, rank) VALUES('rank', 'bm25(10.0, 5.0, 1.0)');
 
 CREATE TRIGGER IF NOT EXISTS decisions_fts_ai AFTER INSERT ON decisions BEGIN
     INSERT INTO decisions_fts(rowid, topic, decision_text, reasoning)
@@ -305,19 +181,44 @@ CREATE TRIGGER IF NOT EXISTS decisions_fts_au AFTER UPDATE ON decisions BEGIN
     INSERT INTO decisions_fts(rowid, topic, decision_text, reasoning)
     VALUES (new.id, new.topic, new.decision_text, COALESCE(new.reasoning, ''));
 END;
+
+-- ==========================================================
+-- Indexes
+-- ==========================================================
+CREATE INDEX IF NOT EXISTS idx_docs_source_type ON docs(source_type);
+CREATE INDEX IF NOT EXISTS idx_docs_crawled_at ON docs(crawled_at);
+CREATE INDEX IF NOT EXISTS idx_decisions_session ON decisions(session_id);
+CREATE INDEX IF NOT EXISTS idx_decisions_timestamp ON decisions(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, event_type);
 `
 
-// legacyTables are tables from V1-V16 that no longer exist in alfred.
+// legacyTables are tables from previous versions that no longer exist.
 var legacyTables = []string{
+	// V1-V16 era
 	"patterns", "pattern_tags", "pattern_files", "patterns_fts",
 	"alerts", "alert_events",
 	"suggestion_outcomes", "failure_solutions", "solution_chains",
 	"learned_episodes", "feedbacks", "coaching_cache",
 	"snr_history", "signal_outcomes", "user_pattern_effectiveness",
+	// V100 era (dropped in V200 静観型執事 reset)
+	"user_profile", "user_preferences", "adaptive_baselines",
+	"workflow_sequences", "file_co_changes",
+	"live_session_phases", "live_session_files",
+	"global_tool_sequences", "global_tool_trigrams",
+	"tags",
 }
 
 var legacyTriggers = []string{
 	"patterns_fts_ai", "patterns_fts_ad", "patterns_fts_au",
+}
+
+var legacyIndexes = []string{
+	"idx_wseq_task",
+	"idx_cochange_a",
+	"idx_live_phases_session",
+	"idx_live_files_session",
+	"idx_gts_from",
+	"idx_gtt_t1t2",
 }
 
 // SchemaVersion returns the current schema version constant.
@@ -328,20 +229,22 @@ func Migrate(db *sql.DB) error {
 	var current int
 	row := db.QueryRow("SELECT version FROM schema_version LIMIT 1")
 	if err := row.Scan(&current); err != nil {
-		// Table doesn't exist yet or is empty; current stays 0.
 		current = 0
 	}
-	if current >= schemaVersion {
+	if current == schemaVersion {
 		return nil
 	}
 
-	// Drop legacy tables from V1-V16.
-	if current > 0 && current < schemaVersion {
+	// Drop legacy tables, triggers, and indexes from previous versions.
+	if current != 0 {
 		for _, trigger := range legacyTriggers {
 			db.Exec("DROP TRIGGER IF EXISTS " + trigger)
 		}
 		for _, table := range legacyTables {
 			db.Exec("DROP TABLE IF EXISTS " + table)
+		}
+		for _, idx := range legacyIndexes {
+			db.Exec("DROP INDEX IF EXISTS " + idx)
 		}
 	}
 
@@ -349,28 +252,13 @@ func Migrate(db *sql.DB) error {
 		return err
 	}
 
-	// Apply incremental migrations.
-	if current < 101 {
-		if _, err := db.Exec(ddlV101); err != nil {
-			return err
-		}
-	}
-	if current < 102 {
-		if _, err := db.Exec(ddlV102); err != nil {
-			return err
-		}
-	}
-
 	// Upsert schema version.
-	_, err := db.Exec(`DELETE FROM schema_version`)
-	if err != nil {
+	if _, err := db.Exec(`DELETE FROM schema_version`); err != nil {
 		return err
 	}
-	_, err = db.Exec(`INSERT INTO schema_version (version) VALUES (?)`, schemaVersion)
-	if err != nil {
+	if _, err := db.Exec(`INSERT INTO schema_version (version) VALUES (?)`, schemaVersion); err != nil {
 		return err
 	}
-	// Set PRAGMA user_version for fast-path skip in store.Open().
-	_, err = db.Exec("PRAGMA user_version = " + strconv.Itoa(schemaVersion))
+	_, err := db.Exec("PRAGMA user_version = " + strconv.Itoa(schemaVersion))
 	return err
 }

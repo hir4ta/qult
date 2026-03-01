@@ -108,61 +108,34 @@ func CountSessions() error {
 
 // alfredRulesVersion tracks the rules content version for safe upgrades.
 // Bump this when alfredRulesContent changes to trigger overwrites.
-const alfredRulesVersion = "2"
+const alfredRulesVersion = "3"
 
 // alfredRulesContent is the content written to ~/.claude/rules/alfred.md.
-// It instructs Claude Code to actively call alfred MCP tools when conditions are met.
+// 静観型執事: alfred never interrupts. Tools are called on demand.
 // NOTE: Go raw string literals cannot contain backticks, so we use regular strings
 // with explicit newlines for the rules content.
 var alfredRulesContent = strings.Join([]string{
+	"<!-- alfred-rules-v3 -->",
 	"# claude-alfred",
 	"",
-	"alfred hooks inject context into every turn automatically.",
-	"These rules tell you when to call alfred MCP tools yourself.",
+	"alfred is a silent butler for Claude Code.",
+	"He never interrupts your work. When you need him, he's ready.",
 	"",
-	"## On Tool Failure",
+	"## MCP Tools",
 	"",
-	"When a tool fails or returns an error:",
-	"1. Read the [alfred] hint in additionalContext — it has root cause analysis",
-	"2. When the hint says \"call diagnose\", do so with the error text",
-	"3. On repeated failure (2+ times), call `diagnose` before retrying",
-	"   — diagnose surfaces past fixes and resolution diffs so you don't repeat mistakes",
+	"**knowledge** — search Claude Code docs and best practices",
+	"- Looking for how a Claude Code feature works",
+	"- Need architectural guidance or best practice reference",
 	"",
-	"## Tool Trigger Map",
+	"**review** — analyze project's Claude Code utilization",
+	"- On-demand project health check",
+	"- Compare setup against best practices",
 	"",
-	"Call these MCP tools when the condition matches:",
+	"**ingest** — store documentation in knowledge base",
+	"- After crawling new documentation pages",
 	"",
-	"**diagnose** — call on any tool failure or error",
-	"- Edit mismatch, compile error, test failure, non-zero exit",
-	"- Same error appearing 2+ times — get root cause before retrying",
-	"",
-	"**knowledge** — call to search past patterns and solutions",
-	"- Working on unfamiliar code or debugging a recurring pattern",
-	"- Hook output shows a \"knowledge\" briefing — call to dig deeper",
-	"- Looking for an architectural precedent or past design decision",
-	"",
-	"**state** — call to check session health",
-	"- Many tool calls without visible progress",
-	"- Hook output shows a health decline warning",
-	"- Before a major refactoring decision (risk assessment)",
-	"",
-	"**guidance** — call for workflow recommendations",
-	"- Switching to a new file or task",
-	"- Before editing a high-blast-radius file",
-	"- After completing a major milestone (what's next?)",
-	"",
-	"**feedback** — call to rate a suggestion (trains the model)",
-	"- After acting on a [alfred] suggestion: rate helpful / not_helpful",
-	"- After ignoring a suggestion that turned out wrong: rate misleading",
-	"- Each rating directly improves future suggestion quality",
-	"",
-	"## Reading Hook Output",
-	"",
-	"- `[alfred]` lines are session intelligence — read them",
-	"- Lines starting with → are actionable recommendations",
-	"- `WHY:` explains the reasoning behind a suggestion",
-	"- `IMPACT:` quantifies savings — prioritize high-impact items",
-	"- `suggested_tool` in JSON output names the MCP tool to call next",
+	"**preferences** — get/set user preferences",
+	"- Record or retrieve user workflow preferences",
 	"",
 }, "\n")
 
@@ -297,44 +270,22 @@ func resolveBinPath() (string, error) {
 }
 
 // alfredHookEntries builds hook event entries keyed by event name.
+// 静観型執事: 3 silent hooks only — data collection, zero output.
 func alfredHookEntries(binPath string) map[string]any {
-	makeEntry := func(event string, timeout int, async bool, matcher string) []any {
+	makeEntry := func(event string, timeout int) []any {
 		hook := map[string]any{
 			"type":    "command",
-			"command": binPath + " hook-handler " + event,
+			"command": binPath + " hook " + event,
 			"timeout": timeout,
 		}
-		if async {
-			hook["async"] = true
-		}
-
-		entry := map[string]any{
-			"hooks": []any{hook},
-		}
-		if matcher != "" {
-			entry["matcher"] = matcher
-		}
-		return []any{entry}
+		return []any{map[string]any{"hooks": []any{hook}}}
 	}
 
-	entries := map[string]any{
-		"SessionStart":        makeEntry("SessionStart", 5, false, "startup|resume|compact"),
-		"PreToolUse":          makeEntry("PreToolUse", 2, false, ""),
-		"PostToolUse":         makeEntry("PostToolUse", 5, true, ""),
-		"PostToolUseFailure":  makeEntry("PostToolUseFailure", 5, false, ""),
-		"UserPromptSubmit":    makeEntry("UserPromptSubmit", 2, false, ""),
-		"PreCompact":          makeEntry("PreCompact", 5, false, ""),
-		"SessionEnd":          makeEntry("SessionEnd", 8, false, ""),
-		"SubagentStart":       makeEntry("SubagentStart", 3, false, ""),
-		"SubagentStop":        makeEntry("SubagentStop", 3, false, ""),
-		"Notification":        makeEntry("Notification", 2, false, ""),
-		"TeammateIdle":        makeEntry("TeammateIdle", 3, true, ""),
-		"TaskCompleted":       makeEntry("TaskCompleted", 3, false, ""),
-		"PermissionRequest":   makeEntry("PermissionRequest", 1, false, ""),
-		"Stop":                makeEntry("Stop", 3, false, ""),
+	return map[string]any{
+		"SessionStart": makeEntry("SessionStart", 5),
+		"PostToolUse":  makeEntry("PostToolUse", 3),
+		"SessionEnd":   makeEntry("SessionEnd", 8),
 	}
-
-	return entries
 }
 
 // registerHooks writes claude-alfred hooks to ~/.claude/settings.json.
@@ -428,7 +379,7 @@ func isAlfredHookEntry(entry any) bool {
 		}
 		// Check command hooks.
 		cmd, _ := hm["command"].(string)
-		if strings.Contains(cmd, "claude-alfred") || strings.Contains(cmd, " hook-handler ") {
+		if strings.Contains(cmd, "claude-alfred") || strings.Contains(cmd, " hook-handler ") || strings.Contains(cmd, " hook ") {
 			return true
 		}
 		// Check prompt hooks with [alfred] marker.
@@ -459,9 +410,13 @@ func RemoveHooks() error {
 		return nil // no hooks section
 	}
 
+	// Current + legacy event names to clean up.
 	events := []string{
-		"SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure",
-		"UserPromptSubmit", "PreCompact", "SessionEnd",
+		// Current (静観型執事)
+		"SessionStart", "PostToolUse", "SessionEnd",
+		// Legacy (removed in v1 reset)
+		"PreToolUse", "PostToolUseFailure",
+		"UserPromptSubmit", "PreCompact",
 		"SubagentStart", "SubagentStop", "Notification",
 		"TeammateIdle", "TaskCompleted", "PermissionRequest",
 		"Stop",

@@ -47,14 +47,23 @@ func ingestHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandlerFu
 		}
 
 		// Parse sections array from arguments.
+		// Handles both native JSON array and string-encoded JSON.
 		args := req.GetArguments()
 		sectionsRaw, ok := args["sections"]
 		if !ok {
 			return mcp.NewToolResultError("sections is required"), nil
 		}
-		sectionsJSON, err := json.Marshal(sectionsRaw)
-		if err != nil {
-			return mcp.NewToolResultError("invalid sections: " + err.Error()), nil
+
+		var sectionsJSON []byte
+		if s, ok := sectionsRaw.(string); ok {
+			// String-encoded JSON (e.g. from some MCP clients).
+			sectionsJSON = []byte(s)
+		} else {
+			var err error
+			sectionsJSON, err = json.Marshal(sectionsRaw)
+			if err != nil {
+				return mcp.NewToolResultError("invalid sections: " + err.Error()), nil
+			}
 		}
 
 		var sections []IngestSection

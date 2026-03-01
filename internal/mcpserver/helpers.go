@@ -1,25 +1,10 @@
 package mcpserver
 
 import (
-	"github.com/hir4ta/claude-alfred/internal/analyzer"
-	"github.com/hir4ta/claude-alfred/internal/watcher"
-)
+	"encoding/json"
 
-// levelString converts a FeedbackLevel to a string label.
-func levelString(l analyzer.FeedbackLevel) string {
-	switch l {
-	case analyzer.LevelLow:
-		return "low"
-	case analyzer.LevelInsight:
-		return "insight"
-	case analyzer.LevelWarning:
-		return "warning"
-	case analyzer.LevelAction:
-		return "action"
-	default:
-		return "info"
-	}
-}
+	"github.com/mark3labs/mcp-go/mcp"
+)
 
 // truncate shortens a string to maxLen runes, appending "..." if truncated.
 func truncate(s string, maxLen int) string {
@@ -30,44 +15,27 @@ func truncate(s string, maxLen int) string {
 	return string(runes[:maxLen]) + "..."
 }
 
-// alertInfo is a flattened alert for resource/prompt use.
-type alertInfo struct {
-	Pattern     string
-	Level       string
-	Observation string
-	Suggestion  string
-}
-
-// findLatestSession returns the latest session from claudeHome, or nil.
-func findLatestSession(claudeHome string) *watcher.SessionInfo {
-	sessions, err := watcher.ListSessions(claudeHome)
-	if err != nil || len(sessions) == 0 {
-		return nil
+// objectItems returns a PropertyOption that sets array items to an object
+// with the given required string properties.
+func objectItems(props ...string) mcp.PropertyOption {
+	return func(schema map[string]any) {
+		properties := make(map[string]any, len(props))
+		for _, p := range props {
+			properties[p] = map[string]any{"type": "string"}
+		}
+		schema["items"] = map[string]any{
+			"type":       "object",
+			"properties": properties,
+			"required":   props,
+		}
 	}
-	return &sessions[0]
 }
 
-// computeAlertsAndScore loads a session's events, runs the detector, and returns alerts + health score.
-func computeAlertsAndScore(session *watcher.SessionInfo) ([]alertInfo, float64) {
-	detail, err := watcher.LoadSessionDetail(*session)
+// marshalResult encodes v as JSON and wraps it in an MCP CallToolResult.
+func marshalResult(v any) (*mcp.CallToolResult, error) {
+	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
-		return nil, 1.0
+		return mcp.NewToolResultError("failed to marshal result"), nil
 	}
-
-	det := analyzer.NewDetector()
-	for _, ev := range detail.Events {
-		det.Update(ev)
-	}
-
-	active := det.ActiveAlerts()
-	var alerts []alertInfo
-	for _, a := range active {
-		alerts = append(alerts, alertInfo{
-			Pattern:     analyzer.PatternName(a.Pattern),
-			Level:       levelString(a.Level),
-			Observation: a.Observation,
-			Suggestion:  a.Suggestion,
-		})
-	}
-	return alerts, det.SessionHealth()
+	return mcp.NewToolResultText(string(data)), nil
 }

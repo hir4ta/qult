@@ -1,36 +1,36 @@
-# claude-alfred
+# alfred
 
-A proactive session companion for Claude Code — real-time session monitoring, knowledge base management, adaptive personalization, and cross-project learning. Works as a Claude Code plugin with hooks, MCP tools, skills, rules, and agents.
+Your silent butler for Claude Code.
+
+Alfred watches your coding sessions quietly — never interrupting, never suggesting, never getting in the way. But the moment you turn to him, he knows everything: which tools you rely on, how you structure your projects, and exactly how to make your Claude Code setup world-class.
+
+He doesn't tell you what to do. He does what you ask — perfectly.
+
+## What Alfred Does
+
+**When you're working** — Alfred is invisible. Three silent hooks collect session data with zero output. No messages, no alerts, no interruptions. You won't know he's there.
+
+**When you call him** — Alfred already has context. Ask him to review your project, and he'll analyze your CLAUDE.md, skills, rules, hooks, MCP servers, and session history. He'll tell you exactly what you're doing well and what could be better — backed by the latest Claude Code best practices.
+
+**He remembers you** — Your preferences persist across every project. Tell Alfred once that you prefer Japanese commit messages or TDD workflows, and every skill, rule, and CLAUDE.md he creates will reflect that.
 
 ## Install
 
 **1. Add the plugin in Claude Code:**
 
 ```
-/plugin marketplace add hir4ta/claude-alfred
-/plugin install claude-alfred@claude-alfred
+/install claude-alfred
 ```
 
-**2. Run initial setup in your terminal (one-time):**
+**2. Set your API key:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hir4ta/claude-alfred/main/setup.sh | sh
+export VOYAGE_API_KEY=your-key
 ```
 
-This downloads the binary, syncs all available sessions (JSONL parsing + embedding generation), and creates a `~/.local/bin/claude-alfred` symlink for PATH access.
+Cost is negligible (~$0.50/month). Uses `voyage-4-large` (1024 dimensions).
 
 **3. Restart Claude Code** to activate hooks and MCP tools.
-
-### Required: Voyage AI API key
-
-`VOYAGE_API_KEY` is required for knowledge base embedding and semantic search. Set it before running setup:
-
-```bash
-export VOYAGE_API_KEY=your-api-key
-curl -fsSL https://raw.githubusercontent.com/hir4ta/claude-alfred/main/setup.sh | sh
-```
-
-Cost is negligible (well under $1/month for typical usage). Uses `voyage-4-large` (1024 dimensions).
 
 ### Building from source
 
@@ -40,189 +40,153 @@ cd claude-alfred
 go build -o claude-alfred .
 ```
 
-## Upgrade
+## Skills
 
-Update the plugin inside Claude Code:
+Skills are invoked by typing `/alfred:<skill-name>` in Claude Code. They guide Claude through a structured workflow using MCP tools behind the scenes.
+
+### Create — "Build it for me"
+
+| Skill | What it does |
+|-------|-------------|
+| `/alfred:create-skill` | Generate a skill file following best practices + your preferences |
+| `/alfred:create-rule` | Generate a rule file |
+| `/alfred:create-hook` | Generate hook configuration + handler |
+| `/alfred:create-agent` | Generate a custom agent definition |
+| `/alfred:create-mcp` | Configure an MCP server |
+| `/alfred:create-claude-md` | Create or improve CLAUDE.md from project analysis |
+| `/alfred:create-memory` | Set up project memory directory |
+
+Every create skill ends with an **independent review** — a separate Explore agent validates the generated file against official spec and knowledge base, catching issues the creator might miss.
+
+### Update — "Improve what I have"
+
+| Skill | What it does |
+|-------|-------------|
+| `/alfred:update <type> [name]` | Update an existing file against latest best practices |
+
+Supported types: `skill`, `rule`, `hook`, `agent`, `claude-md`, `memory`, `mcp`. Shows a diff with explanations before applying, then runs the same independent review.
+
+### Analyze — "How am I doing?"
+
+| Skill | What it does |
+|-------|-------------|
+| `/alfred:review` | Full utilization report — config quality, feature usage, improvement suggestions |
+| `/alfred:audit` | Quick setup check against best practices |
+
+### Learn — "Remember this"
+
+| Skill | What it does |
+|-------|-------------|
+| `/alfred:learn` | Record your preferences (workflow, style, tools) |
+| `/alfred:preferences` | View what Alfred remembers about you |
+| `/alfred:update-docs` | Refresh Claude Code documentation in knowledge base |
+
+### Power — "Level up my setup"
+
+| Skill | What it does |
+|-------|-------------|
+| `/alfred:setup` | Interactive wizard — CLAUDE.md + skills + rules + hooks in one go |
+| `/alfred:migrate` | Update your setup to match latest best practices |
+| `/alfred:explain` | Learn about any Claude Code feature with examples |
+
+## MCP Tools
+
+MCP tools are the backend that powers skills and the alfred agent. You don't call them directly — Claude Code invokes them automatically when a skill or agent needs data.
+
+| Tool | When it's called | What it does |
+|------|-----------------|-------------|
+| `knowledge` | Skills search for best practices or docs | Hybrid vector + FTS5 search over Claude Code documentation |
+| `review` | `/alfred:review`, `/alfred:audit`, `/alfred:setup` | Analyze project config (CLAUDE.md, skills, rules, hooks, MCP, sessions) |
+| `ingest` | `/alfred:update-docs` crawls documentation | Store documentation sections with vector embeddings |
+| `preferences` | `/alfred:learn` records, `/alfred:create:*` reads | Get/set user preferences that persist across projects |
+
+## How It Works
+
+Alfred is a Claude Code plugin with three invisible hooks and four MCP tools.
+
+**Hooks** fire automatically on Claude Code lifecycle events. They silently record session data to `alfred.db` — no output, no interruption:
+
+| Hook | When it fires | What it records |
+|------|--------------|----------------|
+| `SessionStart` | Session begins or resumes | Project path, session ID |
+| `PostToolUse` | After any tool executes | Tool name, success/failure |
+| `SessionEnd` | Session closes | Final session statistics |
+
+**MCP Tools** are called by Claude when a skill or agent needs data (see above).
+
+**Skills** are invoked by you with `/alfred:<name>` (see above).
 
 ```
-/plugin marketplace update
+┌─────────────────────────────────────────┐
+│           Your Claude Code Session       │
+│                                          │
+│  Silent hooks ──→ alfred.db              │
+│  (you see nothing)    ↑                  │
+│                       │                  │
+│  You: "/alfred:review"                   │
+│       ↓                                  │
+│  MCP tools ──→ analysis + knowledge base │
+│       ↓                                  │
+│  Alfred: complete report                 │
+└─────────────────────────────────────────┘
 ```
 
-The binary is automatically downloaded on the next Claude Code restart.
+## TUI (Optional)
+
+Run `claude-alfred` in a separate terminal to watch sessions live.
+
+```bash
+claude-alfred          # Interactive session selector + live monitor
+claude-alfred browse   # Browse past session history
+```
+
+**Key bindings:** `↑↓` scroll, `Enter` expand/collapse, `g/G` top/bottom, `?` help, `q` quit.
 
 ## Commands
 
-### `claude-alfred` / `claude-alfred watch`
-
-Monitor a Claude Code session in real-time with a tabbed dashboard. Run in a separate terminal or tmux pane.
-
-```bash
-# Terminal 1
-claude-alfred
-
-# Terminal 2
-claude
-```
-
-**Dashboard tabs:**
-
-| Tab | Content |
-|-----|---------|
-| **1:Activity** | Live event stream — user input, assistant responses, tool summaries, task progress |
-| **2:Knowledge** | Knowledge base statistics — total sections, source breakdown, freshness, latest version |
-| **3:Preferences** | User profile — cluster classification, EWMA metrics, feature usage |
-| **4:Docs** | Interactive documentation search — hybrid vector + FTS5 search with score display |
-
-**Key bindings:**
-
-| Key | Action |
-|-----|--------|
-| `1`-`4` / `Tab` / `Shift+Tab` | Switch tabs |
-| `↑` / `k`, `↓` / `j` | Scroll / select |
-| `Enter` | Expand/collapse |
-| `/` | Search (Docs tab) |
-| `g` / `G` | Jump to top/bottom |
-| `?` | Help overlay |
-| `q` / `Ctrl+C` | Quit |
-
----
-
-### `claude-alfred browse`
-
-Browse past session history with the same expand/collapse interface.
-
----
-
-### `claude-alfred serve`
-
-Run as an MCP server (stdio) for Claude Code integration.
-
-**MCP Tools (7 consolidated):**
-
-| Tool | Description |
-|------|-------------|
-| `state` | Session health, statistics, predictions, session list, context recovery, skill context, accuracy metrics, user preferences (`detail`: brief/standard/outlook/sessions/resume/skill/accuracy/preferences) |
-| `knowledge` | Search docs (hybrid vector + FTS5), decisions, cross-project insights, and pre-compact history (`scope`: project/global/recall) |
-| `guidance` | Workflow recommendations, alerts, next steps, pending nudges (`focus`: all/alerts/recommendations/next_steps/pending) |
-| `plan` | Task estimation, progress tracking, strategic workflow planning (`mode`: estimate/progress/strategy) |
-| `diagnose` | Error diagnosis + concrete fix patches with before/after code and verification commands |
-| `ingest` | Document ingestion — stores sections with vector embeddings for semantic search |
-| `feedback` | Rate suggestion quality (helpful/partially_helpful/not_helpful/misleading) |
-
-All tools support `format=concise` for reduced token consumption.
-
----
-
-### `claude-alfred install`
-
-Sync sessions and generate embeddings. Creates `~/.local/bin/claude-alfred` symlink for PATH access.
-
-```bash
-claude-alfred install                # Default: sync past 30 days
-claude-alfred install --since=7d     # 7d, 14d, 30d, or 90d
-```
-
-### `claude-alfred analyze [session_id]`
-
-Session analysis report.
-
-```bash
-claude-alfred analyze          # Latest session
-claude-alfred analyze de999fa4 # Specific session by ID prefix
-```
-
-### `claude-alfred uninstall`
-
-Remove hooks and MCP server registration.
-
-### `claude-alfred plugin-bundle [output_dir]`
-
-Generate the plugin directory from Go source definitions.
-
-## Plugin
-
-claude-alfred is distributed as a Claude Code plugin. The plugin provides:
-
-- **13 hooks**: SessionStart, PreToolUse, PostToolUse, PostToolUseFailure, UserPromptSubmit, PreCompact, SessionEnd, SubagentStart, SubagentStop, Notification, TeammateIdle, TaskCompleted, PermissionRequest
-- **9 skills**: alfred-analyze, alfred-audit, alfred-context-recovery, alfred-crawl, alfred-forecast, alfred-gate, alfred-learn, alfred-recover, alfred-setup
-- **7 rules**: claude-md, skills, hooks, agents, mcp-config, rules, memory
-- **1 agent**: alfred (session advisor)
-- **MCP server**: 7 consolidated tools
-
-### Skills
-
-| Skill | Invocation | Description |
-|---|---|---|
-| alfred-recover | auto | Failure recovery: stuck loops, error resolution |
-| alfred-gate | auto | Session health check + pre-commit quality gate |
-| alfred-context-recovery | auto | Restore working context after compaction |
-| alfred-analyze | `/claude-alfred:alfred-analyze` | Session analysis and change review |
-| alfred-forecast | `/claude-alfred:alfred-forecast` | Task estimation and session prediction |
-| alfred-crawl | `/claude-alfred:alfred-crawl` | Crawl and ingest Claude Code documentation |
-| alfred-audit | `/claude-alfred:alfred-audit` | Code quality audit |
-| alfred-learn | `/claude-alfred:alfred-learn` | Pattern learning from sessions |
-| alfred-setup | `/claude-alfred:alfred-setup` | Initial setup wizard |
-
-## Hooks
-
-Hooks monitor sessions through Claude Code's lifecycle events with minimal overhead (sensor-based design):
-
-| Hook Event | Behavior |
-|---|---|
-| **SessionStart** | Restores session context (working set, decisions, git branch), checks docs freshness |
-| **PreToolUse** | Safety checks, stale-read warnings, past failure warnings |
-| **PostToolUse** | Tracks tool/file patterns, workflow phases, feature usage, solution chains |
-| **UserPromptSubmit** | Classifies intent/task type, delivers brief context signal |
-| **PreCompact** | Serializes working set for automatic restoration |
-| **PostToolUseFailure** | Failure diagnosis, tracks failure cascades |
-| **SessionEnd** | Persists user profile, workflow sequences, feature preferences; syncs to global DB |
-
-**Automatic context recovery**: Working set (files, intent, task type, decisions, git branch) is serialized before compaction and restored afterward.
-
-**User profiling**: Behavioral clustering (conservative/balanced/aggressive) based on read-write ratio, test frequency, and session velocity. Profile influences detection thresholds and suggestion priorities.
-
-**Cross-project learning**: Patterns and decisions synced to global DB (`~/.claude-alfred/global.db`) for reuse across projects. Opt-in via `ALFRED_CROSS_PROJECT=1` environment variable.
+| Command | Description |
+|---------|-------------|
+| `claude-alfred` | Monitor active session in real-time (default) |
+| `claude-alfred browse` | Browse past session history |
+| `claude-alfred serve` | Run as MCP server (stdio) |
+| `claude-alfred hook <Event>` | Handle silent hook events |
+| `claude-alfred install` | Sync sessions and generate embeddings |
+| `claude-alfred uninstall` | Remove MCP server registration |
+| `claude-alfred plugin-bundle` | Generate plugin directory |
 
 ## Architecture
 
 ```
 claude-alfred/
-├── main.go                    # Entry point + subcommand routing
-├── plugin/                    # Claude Code plugin (generated by plugin-bundle)
-│   ├── .claude-plugin/        # Plugin manifest
-│   ├── hooks/                 # Hook definitions (13 events)
-│   ├── bin/                   # Guard + setup wrapper script
-│   ├── skills/                # 9 skills
-│   ├── rules/                 # 7 rules
-│   ├── agents/                # Alfred agent
-│   └── .mcp.json              # MCP server config
-├── .claude-plugin/            # Marketplace manifest
+├── main.go                 # Entry point + subcommand routing
+├── plugin/                 # Claude Code plugin (generated)
+│   ├── hooks/              # 3 silent hooks (SessionStart, PostToolUse, SessionEnd)
+│   ├── skills/             # 16 skills (create, update, analyze, learn, power)
+│   ├── rules/              # 7 rules (Claude Code best practices)
+│   ├── agents/             # 1 agent (alfred)
+│   └── .mcp.json           # MCP server config
 ├── internal/
-│   ├── parser/                # JSONL parser (type definitions + parsing)
-│   ├── watcher/               # File watching (fsnotify + tail)
-│   ├── analyzer/              # Live stats + Feedback type + anti-pattern detector
-│   ├── coach/                 # AI feedback generation via claude -p
-│   ├── hookhandler/           # Hook handlers (sensor signals, workflow tracking)
-│   ├── sessiondb/             # Ephemeral per-session SQLite (working set, burst state, cooldowns)
-│   ├── embedder/              # Voyage AI integration for semantic search
-│   ├── tui/                   # Bubble Tea TUI (watch dashboard / browse / select)
-│   ├── mcpserver/             # MCP server (stdio, 7 consolidated tools)
-│   ├── store/                 # SQLite persistence (vector search + docs + user profile + global DB)
-│   └── install/               # Plugin bundle + initial sync + PATH symlink
-├── go.mod
-└── go.sum
+│   ├── parser/             # JSONL parser
+│   ├── watcher/            # File watching (fsnotify)
+│   ├── analyzer/           # Live session statistics
+│   ├── embedder/           # Voyage AI (voyage-4-large, 1024d)
+│   ├── tui/                # Bubble Tea TUI
+│   ├── mcpserver/          # MCP server (4 tools)
+│   ├── store/              # SQLite (vector search, docs, preferences)
+│   └── install/            # Plugin bundle + sync + PATH symlink
+└── go.mod
 ```
 
 ## Dependencies
 
 | Library | Purpose |
 |---------|---------|
-| [charmbracelet/bubbletea](https://github.com/charmbracelet/bubbletea) | TUI framework |
-| [charmbracelet/lipgloss](https://github.com/charmbracelet/lipgloss) | TUI styling |
-| [fsnotify/fsnotify](https://github.com/fsnotify/fsnotify) | File change watching |
-| [mark3labs/mcp-go](https://github.com/mark3labs/mcp-go) | MCP server SDK |
-| [ncruces/go-sqlite3](https://github.com/ncruces/go-sqlite3) | SQLite driver (pure Go, WASM-based) |
+| [bubbletea](https://github.com/charmbracelet/bubbletea) | TUI framework |
+| [lipgloss](https://github.com/charmbracelet/lipgloss) | TUI styling |
+| [fsnotify](https://github.com/fsnotify/fsnotify) | File change watching |
+| [mcp-go](https://github.com/mark3labs/mcp-go) | MCP server SDK |
+| [go-sqlite3](https://github.com/ncruces/go-sqlite3) | SQLite driver (pure Go) |
 
-## Semantic Search
+## License
 
-Voyage AI (`voyage-4-large`, 1024 dimensions) powers `knowledge` search and TUI Docs tab via hybrid vector + FTS5 retrieval with Reciprocal Rank Fusion (RRF). `VOYAGE_API_KEY` is required for `serve` and `install` commands.
+MIT

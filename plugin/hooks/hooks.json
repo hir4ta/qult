@@ -1,67 +1,12 @@
 {
+  "description": "Silent data collection hooks — zero output, zero interruption",
   "hooks": {
-    "Notification": [
-      {
-        "hooks": [
-          {
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook-handler Notification",
-            "timeout": 2,
-            "type": "command"
-          }
-        ]
-      }
-    ],
-    "PermissionRequest": [
-      {
-        "hooks": [
-          {
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook-handler PermissionRequest",
-            "timeout": 1,
-            "type": "command"
-          }
-        ]
-      }
-    ],
     "PostToolUse": [
       {
         "hooks": [
           {
-            "async": true,
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook-handler PostToolUse",
-            "timeout": 5,
-            "type": "command"
-          }
-        ]
-      }
-    ],
-    "PostToolUseFailure": [
-      {
-        "hooks": [
-          {
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook-handler PostToolUseFailure",
-            "timeout": 5,
-            "type": "command"
-          }
-        ]
-      }
-    ],
-    "PreCompact": [
-      {
-        "hooks": [
-          {
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook-handler PreCompact",
-            "timeout": 5,
-            "type": "command"
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "hooks": [
-          {
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook-handler PreToolUse",
-            "timeout": 2,
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook PostToolUse",
+            "timeout": 3,
             "type": "command"
           }
         ]
@@ -71,7 +16,7 @@
       {
         "hooks": [
           {
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook-handler SessionEnd",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook SessionEnd",
             "timeout": 8,
             "type": "command"
           }
@@ -82,76 +27,8 @@
       {
         "hooks": [
           {
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook-handler SessionStart",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook SessionStart",
             "timeout": 5,
-            "type": "command"
-          }
-        ],
-        "matcher": "startup|resume|compact"
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook-handler Stop",
-            "timeout": 3,
-            "type": "command"
-          }
-        ]
-      }
-    ],
-    "SubagentStart": [
-      {
-        "hooks": [
-          {
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook-handler SubagentStart",
-            "timeout": 3,
-            "type": "command"
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "hooks": [
-          {
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook-handler SubagentStop",
-            "timeout": 3,
-            "type": "command"
-          }
-        ]
-      }
-    ],
-    "TaskCompleted": [
-      {
-        "hooks": [
-          {
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook-handler TaskCompleted",
-            "timeout": 3,
-            "type": "command"
-          }
-        ]
-      }
-    ],
-    "TeammateIdle": [
-      {
-        "hooks": [
-          {
-            "async": true,
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook-handler TeammateIdle",
-            "timeout": 3,
-            "type": "command"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook-handler UserPromptSubmit",
-            "timeout": 2,
             "type": "command"
           }
         ]

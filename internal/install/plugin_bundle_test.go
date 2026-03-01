@@ -50,10 +50,7 @@ func TestBundle(t *testing.T) {
 		}
 
 		expectedEvents := []string{
-			"SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure",
-			"UserPromptSubmit", "PreCompact", "SessionEnd",
-			"SubagentStart", "SubagentStop", "Notification",
-			"TeammateIdle", "TaskCompleted", "PermissionRequest",
+			"SessionStart", "PostToolUse", "SessionEnd",
 		}
 		for _, event := range expectedEvents {
 			if _, ok := hooks[event]; !ok {
@@ -131,7 +128,7 @@ func TestRunScriptAutoDownload(t *testing.T) {
 		"download_binary":     "download_binary()",
 		"ensure_binary":       "ensure_binary",
 		"serve case":          "serve)",
-		"hook-handler case":   "hook-handler)",
+		"hook case":           "hook)",
 		"setup case":          "setup)",
 		"install marker":      ".alfred-installed-",
 		"atomic temp dir":     ".alfred-dl.",

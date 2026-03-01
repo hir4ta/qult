@@ -40,12 +40,12 @@ func Bundle(outputDir, version string) error {
 	pluginJSON := map[string]any{
 		"name":        "claude-alfred",
 		"version":     version,
-		"description": "Proactive session advisor for Claude Code",
+		"description": "Your silent butler for Claude Code",
 		"author":      map[string]string{"name": "hir4ta"},
 		"homepage":    "https://github.com/hir4ta/claude-alfred",
 		"repository":  "https://github.com/hir4ta/claude-alfred",
 		"license":     "MIT",
-		"keywords":    []string{"session-advisor", "anti-pattern", "workflow", "productivity"},
+		"keywords":    []string{"butler", "best-practices", "preferences", "workflow"},
 	}
 	if err := writeJSON(filepath.Join(outputDir, ".claude-plugin", "plugin.json"), pluginJSON); err != nil {
 		return fmt.Errorf("write plugin.json: %w", err)
@@ -53,7 +53,8 @@ func Bundle(outputDir, version string) error {
 
 	// 3. Write hooks.json — commands invoke the guard/setup wrapper.
 	hooksJSON := map[string]any{
-		"hooks": alfredHookEntries(runCmd),
+		"description": "Silent data collection hooks — zero output, zero interruption",
+		"hooks":       alfredHookEntries(runCmd),
 	}
 	if err := writeJSON(filepath.Join(outputDir, "hooks", "hooks.json"), hooksJSON); err != nil {
 		return fmt.Errorf("write hooks.json: %w", err)
@@ -274,10 +275,9 @@ case "$1" in
     exec "$ALFRED_BIN" serve
     ;;
 
-  hook-handler)
-    # Hooks have tight timeouts (1-8s). Try briefly, then degrade.
+  hook)
+    # Hooks have tight timeouts (1-8s). Try briefly, then degrade silently.
     if ! ensure_binary 3; then
-      echo '{"additionalContext":"[alfred] Updating binary. Will be ready shortly."}'
       exit 0
     fi
     exec "$ALFRED_BIN" "$@"

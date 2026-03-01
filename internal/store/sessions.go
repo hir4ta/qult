@@ -226,6 +226,35 @@ func scanSessionRow(row *sql.Row) (*SessionRow, error) {
 	return &sr, nil
 }
 
+// EnsureSession creates a minimal session record if it doesn't exist yet.
+// Used by silent hooks to register a session on first contact.
+func (s *Store) EnsureSession(sessionID, projectPath string) error {
+	projectName := projectPath
+	if i := len(projectPath) - 1; i >= 0 {
+		for i > 0 && projectPath[i-1] != '/' {
+			i--
+		}
+		projectName = projectPath[i:]
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(`
+		INSERT INTO sessions (id, project_path, project_name, jsonl_path, first_event_at, last_event_at)
+		VALUES (?, ?, ?, '', ?, ?)
+		ON CONFLICT(id) DO UPDATE SET last_event_at = excluded.last_event_at`,
+		sessionID, projectPath, projectName, now, now)
+	return err
+}
+
+// RecordToolUse increments tool_use_count for the session and updates last_event_at.
+func (s *Store) RecordToolUse(sessionID, toolName string, success bool) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(`
+		UPDATE sessions
+		SET tool_use_count = tool_use_count + 1, last_event_at = ?
+		WHERE id = ?`, now, sessionID)
+	return err
+}
+
 func nullIfEmpty(s string) interface{} {
 	if s == "" {
 		return nil

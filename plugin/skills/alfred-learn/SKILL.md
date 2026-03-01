@@ -2,42 +2,36 @@
 name: alfred-learn
 description: >
   Tell alfred about your Claude Code preferences and working style.
-  Records preferences that influence future suggestions and briefings.
+  Records preferences that persist across all projects and sessions.
 user-invocable: true
-allowed-tools: AskUserQuestion, mcp__claude-alfred__feedback, mcp__claude-alfred__state
+allowed-tools: AskUserQuestion, mcp__claude-alfred__preferences
 ---
 
-Preference recording for personalized advice.
+Record your preferences.
 
 ## Steps
 
-1. Call state with detail="brief" to get current session stats and user profile
-2. Ask the user about their preferences using AskUserQuestion:
+1. **[HOW]** Call preferences with action="get" to show current preferences
+2. **[HOW]** Ask the user with AskUserQuestion:
 
-   Question 1: "How do you prefer to work with Claude Code?"
-   - "Plan first, then implement" (plan mode user)
-   - "Jump straight into coding" (direct mode)
-   - "Depends on the task" (adaptive)
+   "What would you like alfred to remember?"
+   - "Coding style preference" (e.g., commit language, testing approach)
+   - "Workflow preference" (e.g., always use plan mode, prefer TDD)
+   - "Tool preference" (e.g., preferred test runner, linter)
+   - Other (free text)
 
-   Question 2: "How do you feel about automated suggestions?"
-   - "Show me everything — I'll filter" (aggressive)
-   - "Only important things" (balanced)
-   - "Minimal interruptions" (conservative)
-
-   Question 3: "Which features do you use most?"
-   - Options: hooks, skills, MCP tools, worktrees, agents, teams
-   - multiSelect: true
-
-3. Record each preference via feedback tool with appropriate pattern names:
-   - feedback pattern="workflow_preference" rating="helpful" comment="[selected option]"
-   - feedback pattern="suggestion_verbosity" rating="helpful" comment="[selected option]"
+3. **[HOW]** Based on selection, ask for the specific preference value
+4. **[WHAT]** Validate:
+   - Category is one of: coding_style, workflow, communication, tools
+   - Key is specific and reusable (e.g. "commit_language" not "my preference")
+   - Value is concrete (e.g. "japanese" not "I prefer japanese sometimes")
+5. **[HOW]** Call preferences with action="set", appropriate category/key/value, source="explicit"
 
 ## Output
 
-Confirm what was recorded:
-- Workflow style: [selection]
-- Suggestion level: [selection]
-- Primary features: [selections]
-- "These preferences will influence future alfred suggestions."
+Confirm: Category / Key = Value. "This will be applied in future create operations."
 
-Keep it brief — max 5 lines.
+## Guardrails
+
+- Do NOT infer preferences without explicit user confirmation
+- Do NOT store vague or ambiguous values

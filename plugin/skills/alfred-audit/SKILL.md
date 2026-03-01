@@ -1,40 +1,36 @@
 ---
 name: alfred-audit
 description: >
-  Review your project's Claude Code setup and suggest improvements.
-  Checks CLAUDE.md, hooks, skills, agents, rules, MCP, and memory
-  against best practices from the alfred knowledge base.
+  Quick setup check against Claude Code best practices. Lighter than
+  a full review — just checks configuration exists and is well-formed.
 user-invocable: true
-allowed-tools: Read, Glob, Grep, mcp__claude-alfred__knowledge, mcp__claude-alfred__state
+allowed-tools: Read, Glob, mcp__claude-alfred__review
 context: fork
-agent: general-purpose
+agent: Explore
 ---
 
-Project setup reviewer and improvement advisor.
+Quick setup audit.
 
 ## Steps
 
-1. Detect project root (look for .git or CLAUDE.md)
-2. Scan for Claude Code configuration:
-   - CLAUDE.md — exists? size? has Commands/Rules sections?
-   - .claude/hooks.json — exists? which events are hooked?
-   - .claude/skills/ — count and names
-   - .claude/agents/ — count and names
-   - .claude/rules/ — count and names
-   - .mcp.json or .claude/mcp.json — MCP servers configured?
-   - .claude/memory/ or MEMORY.md — memory in use?
-3. For each found configuration, Read the file and assess quality
-4. Call knowledge to get best practices for each feature area
-5. Compare current setup vs best practices
-6. Determine proficiency level (beginner/intermediate/advanced)
+1. **[HOW]** Call review with project_path set to the current working directory
+2. **[WHAT]** For each configuration item, check:
+   - Exists and is non-empty
+   - Follows official format (frontmatter present where required)
+   - No obvious anti-patterns (e.g., CLAUDE.md > 200 lines, skills without descriptions)
 
 ## Output
 
-Report format:
-- **Level**: [Beginner/Intermediate/Advanced]
-- **Features in use**: [list]
-- **Missing features**: [list with brief explanation of value]
-- **Improvement suggestions**: [max 5, ordered by impact]
-  - For each: what to do, why it helps, one-line example
+```
+[x] CLAUDE.md (N lines)
+[x] Skills (N configured)
+[ ] Hooks (not configured — add for automated checks)
+...
+```
 
-Keep under 20 lines. Be specific and actionable.
+One-line suggestion for each missing item. Keep under 10 lines.
+
+## Guardrails
+
+- Do NOT read file contents for audit — just check existence and basic structure
+- Do NOT suggest installing alfred's own features as improvements
