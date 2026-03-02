@@ -24,12 +24,20 @@ what matters — without you having to ask.
 
 ## Install
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/hir4ta/claude-alfred/main/install.sh | sh
+Claude Code 内で:
+
+```
+/plugin marketplace add hir4ta/claude-alfred
+/plugin install alfred@hir4ta/claude-alfred
 ```
 
-This downloads the binary, registers hooks/MCP/skills in Claude Code, and
-syncs your session history. Restart Claude Code after installation.
+Claude Code を終了し、ターミナルで:
+
+```bash
+go install github.com/hir4ta/claude-alfred@latest
+```
+
+Claude Code を再起動すれば完了。
 
 **API key** (optional):
 
@@ -37,33 +45,14 @@ syncs your session history. Restart Claude Code after installation.
 export VOYAGE_API_KEY=your-key       # Semantic search (Voyage AI voyage-4-large)
 ```
 
-Voyage AI `voyage-4-large` (1024d). Cost ~$0.50/month. Without `VOYAGE_API_KEY`, Alfred
-falls back to FTS5 keyword search.
-
-## Uninstall
-
-```bash
-alfred uninstall
-```
-
-Removes everything: hooks, MCP server, skills, agent, rules, database, and binary.
-
-### Alternative: Plugin install
-
-You can also install via the Claude Code plugin system:
-
-```
-/plugin marketplace add hir4ta/claude-alfred
-/plugin install alfred@hir4ta/claude-alfred
-```
+未設定の場合、検索は FTS5 キーワード検索にフォールバックします。
 
 ### Building from source
 
 ```bash
 git clone https://github.com/hir4ta/claude-alfred
 cd claude-alfred
-go build -o alfred .
-./alfred install
+go build -o claude-alfred .
 ```
 
 ## Skills (3)

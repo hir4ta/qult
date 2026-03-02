@@ -23,12 +23,20 @@ Alfred はコーディングセッションを静かに見守る。
 
 ## インストール
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/hir4ta/claude-alfred/main/install.sh | sh
+Claude Code 内で:
+
+```
+/plugin marketplace add hir4ta/claude-alfred
+/plugin install alfred@hir4ta/claude-alfred
 ```
 
-バイナリのダウンロード、フック・MCP・スキルの登録、セッション履歴の同期まで一括で行う。
-インストール後は Claude Code を再起動。
+Claude Code を終了し、ターミナルで:
+
+```bash
+go install github.com/hir4ta/claude-alfred@latest
+```
+
+Claude Code を再起動すれば完了。
 
 **API キー**（任意）:
 
@@ -36,33 +44,14 @@ curl -fsSL https://raw.githubusercontent.com/hir4ta/claude-alfred/main/install.s
 export VOYAGE_API_KEY=your-key       # セマンティック検索（Voyage AI voyage-4-large）
 ```
 
-Voyage AI `voyage-4-large`（1024d）。月額約 $0.50。`VOYAGE_API_KEY` 未設定時は FTS5
-キーワード検索にフォールバック。
-
-## アンインストール
-
-```bash
-alfred uninstall
-```
-
-フック、MCP サーバー、スキル、エージェント、ルール、データベース、バイナリをすべて削除する。
-
-### 別の方法: プラグインインストール
-
-Claude Code のプラグインシステムからもインストールできる:
-
-```
-/plugin marketplace add hir4ta/claude-alfred
-/plugin install alfred@hir4ta/claude-alfred
-```
+未設定の場合、検索は FTS5 キーワード検索にフォールバックします。
 
 ### ソースからビルド
 
 ```bash
 git clone https://github.com/hir4ta/claude-alfred
 cd claude-alfred
-go build -o alfred .
-./alfred install
+go build -o claude-alfred .
 ```
 
 ## スキル (3)
