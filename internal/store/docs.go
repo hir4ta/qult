@@ -21,10 +21,10 @@ type DocRow struct {
 	TTLDays     int
 }
 
-// DocsCount returns the total number of rows in the docs table.
-func (s *Store) DocsCount() (int, error) {
+// SeedDocsCount returns the number of seed docs (source_type != 'project').
+func (s *Store) SeedDocsCount() (int, error) {
 	var n int
-	err := s.db.QueryRow("SELECT COUNT(*) FROM docs").Scan(&n)
+	err := s.db.QueryRow("SELECT COUNT(*) FROM docs WHERE source_type != 'project'").Scan(&n)
 	return n, err
 }
 

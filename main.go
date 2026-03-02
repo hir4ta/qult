@@ -31,6 +31,8 @@ func run() error {
 	switch cmd {
 	case "serve":
 		return runServe()
+	case "setup":
+		return runSetup()
 	case "crawl-seed":
 		output := "internal/install/seed_docs.json"
 		if len(os.Args) > 2 {
@@ -70,11 +72,13 @@ func runServe() error {
 	}
 	defer st.Close()
 
-	emb, _ := embedder.NewEmbedder() // nil when VOYAGE_API_KEY is unset; graceful FTS5-only fallback
+	emb, err := embedder.NewEmbedder()
+	if err != nil {
+		return fmt.Errorf("VOYAGE_API_KEY is required: %w", err)
+	}
 
-	// Auto-seed docs on first serve if the docs table is empty.
-	if count, _ := st.DocsCount(); count == 0 {
-		install.ApplySeed(st, emb, nil)
+	if count, _ := st.SeedDocsCount(); count == 0 {
+		fmt.Fprintln(os.Stderr, "Warning: no seed docs found. Run 'claude-alfred setup' to initialize.")
 	}
 
 	s := mcpserver.New(st, emb)
@@ -89,6 +93,7 @@ Usage:
 
 Commands:
   serve          Run as MCP server (stdio) for Claude Code integration
+  setup          Initialize knowledge base (seed docs + generate embeddings)
   hook           Handle silent hook events (no output)
   crawl-seed     Crawl official docs and generate seed_docs.json
   plugin-bundle  Generate plugin directory from Go sources
@@ -96,6 +101,5 @@ Commands:
   help           Show this help
 
 Environment:
-  VOYAGE_API_KEY     Optional. Enables semantic vector search (hybrid RRF + reranking).
-                     Without it, search falls back to FTS5-only.`)
+  VOYAGE_API_KEY     Required. Enables semantic vector search with Voyage AI.`)
 }

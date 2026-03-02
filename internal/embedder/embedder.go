@@ -44,6 +44,11 @@ func (e *Embedder) EmbedForStorage(ctx context.Context, text string) ([]float32,
 	return e.client.embedForStorage(ctx, text)
 }
 
+// EmbedBatchForStorage generates document embeddings for multiple texts in a single API call.
+func (e *Embedder) EmbedBatchForStorage(ctx context.Context, texts []string) ([][]float32, error) {
+	return e.client.embed(ctx, texts, "document")
+}
+
 // Rerank reorders documents by relevance to the query using the Voyage rerank API.
 // Returns results sorted by descending relevance score.
 func (e *Embedder) Rerank(ctx context.Context, query string, documents []string, topK int) ([]RerankResult, error) {

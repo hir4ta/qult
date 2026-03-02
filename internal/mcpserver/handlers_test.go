@@ -107,16 +107,9 @@ func TestKnowledgeHandler_FTSSearch(t *testing.T) {
 	}
 
 	m := resultJSON(t, res)
-	if m["search_method"] != "fts5_only" {
-		t.Errorf("search_method = %v, want fts5_only (no embedder)", m["search_method"])
-	}
 	docsCount, _ := m["docs_count"].(float64)
 	if docsCount == 0 {
 		t.Error("expected at least one doc result")
-	}
-	// Verify hint about VOYAGE_API_KEY is present when embedder is nil.
-	if _, ok := m["hint"]; !ok {
-		t.Error("expected hint about VOYAGE_API_KEY when embedder is nil")
 	}
 }
 

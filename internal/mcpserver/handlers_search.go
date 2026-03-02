@@ -28,7 +28,7 @@ func docsSearchHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandl
 		}
 
 		var docs []store.DocRow
-		searchMethod := "fts5_only"
+		searchMethod := "hybrid_rrf"
 
 		// Try embedding the query for hybrid search (requires VOYAGE_API_KEY).
 		var queryVec []float32
@@ -145,10 +145,6 @@ func docsSearchHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandl
 			result["staleness_warning"] = fmt.Sprintf(
 				"Results include docs from %d days ago. Run /alfred-crawl to refresh.", maxAgeDays)
 		}
-		if emb == nil {
-			result["hint"] = "Set VOYAGE_API_KEY for semantic search (hybrid vector + FTS5 + reranking)."
-		}
-
 		return marshalResult(result)
 	}
 }

@@ -49,10 +49,21 @@ type SeedResult struct {
 	Embedded  int
 }
 
-// ApplySeed loads the embedded seed data into the store's docs table.
-// Uses UpsertDoc for content-hash deduplication — safe to call on every install.
-// The embedder may be nil; in that case only FTS5 indexing occurs.
-func ApplySeed(st *store.Store, emb *embedder.Embedder, progress func(done, total int)) (SeedResult, error) {
+// SeedProgress provides callbacks for the two phases of seeding.
+type SeedProgress struct {
+	OnDocUpsert  func(done, total int) // Phase 1: doc upsert progress
+	OnEmbedBatch func(done, total int) // Phase 2: embedding progress
+}
+
+const embedBatchSize = 50
+
+// ApplySeed loads the embedded seed data into the store's docs table and generates embeddings.
+// Two-phase approach: Phase 1 upserts all docs, Phase 2 batch-embeds via Voyage API.
+func ApplySeed(ctx context.Context, st *store.Store, emb *embedder.Embedder, progress *SeedProgress) (SeedResult, error) {
+	if emb == nil {
+		return SeedResult{}, fmt.Errorf("seed: embedder is required")
+	}
+
 	sf, err := LoadEmbedded()
 	if err != nil {
 		return SeedResult{}, err
@@ -62,15 +73,21 @@ func ApplySeed(st *store.Store, emb *embedder.Embedder, progress func(done, tota
 		return SeedResult{}, nil // empty seed (dev build)
 	}
 
-	// Count total sections for progress.
+	// Count total sections.
 	total := 0
 	for _, src := range sf.Sources {
 		total += len(src.Sections)
 	}
 
 	var res SeedResult
+
+	// Phase 1: Upsert all docs, collect pending embeddings.
+	type pendingEmbed struct {
+		docID     int64
+		embedText string
+	}
+	var pending []pendingEmbed
 	done := 0
-	ctx := context.Background()
 
 	for _, src := range sf.Sources {
 		for _, sec := range src.Sections {
@@ -81,7 +98,7 @@ func ApplySeed(st *store.Store, emb *embedder.Embedder, progress func(done, tota
 				SourceType:  src.SourceType,
 				Version:     src.Version,
 				CrawledAt:   sf.CrawledAt,
-				TTLDays:     365, // bundled seed data persists for a year
+				TTLDays:     365,
 			}
 
 			docID, changed, err := st.UpsertDoc(doc)
@@ -95,24 +112,49 @@ func ApplySeed(st *store.Store, emb *embedder.Embedder, progress func(done, tota
 				res.Applied++
 			}
 
-			// Generate embedding if missing (handles both new docs and
-			// dimension upgrades where old embeddings were cleared).
-			if emb != nil {
-				if _, err := st.GetEmbedding("docs", docID); err != nil {
-					embedText := sec.Path + "\n" + sec.Content
-					vec, err := emb.EmbedForStorage(ctx, embedText)
-					if err == nil {
-						if st.InsertEmbedding("docs", docID, emb.Model(), vec) == nil {
-							res.Embedded++
-						}
-					}
-				}
+			// Collect docs that need embedding.
+			if _, err := st.GetEmbedding("docs", docID); err != nil {
+				pending = append(pending, pendingEmbed{
+					docID:     docID,
+					embedText: sec.Path + "\n" + sec.Content,
+				})
 			}
 
 			done++
-			if progress != nil {
-				progress(done, total)
+			if progress != nil && progress.OnDocUpsert != nil {
+				progress.OnDocUpsert(done, total)
 			}
+		}
+	}
+
+	// Phase 2: Batch embed.
+	for i := 0; i < len(pending); i += embedBatchSize {
+		if err := ctx.Err(); err != nil {
+			return res, err
+		}
+
+		end := min(i+embedBatchSize, len(pending))
+		batch := pending[i:end]
+
+		texts := make([]string, len(batch))
+		for j, p := range batch {
+			texts[j] = p.embedText
+		}
+
+		vecs, err := emb.EmbedBatchForStorage(ctx, texts)
+		if err != nil {
+			return res, fmt.Errorf("seed: embed batch %d-%d: %w", i, end, err)
+		}
+
+		for j, vec := range vecs {
+			if err := st.InsertEmbedding("docs", batch[j].docID, emb.Model(), vec); err != nil {
+				return res, fmt.Errorf("seed: store embedding %d: %w", batch[j].docID, err)
+			}
+			res.Embedded++
+		}
+
+		if progress != nil && progress.OnEmbedBatch != nil {
+			progress.OnEmbedBatch(min(i+len(batch), len(pending)), len(pending))
 		}
 	}
 
