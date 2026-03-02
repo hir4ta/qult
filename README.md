@@ -11,7 +11,7 @@ He doesn't tell you what to do. He does what you ask — perfectly.
 
 ## What Alfred Does
 
-**When you're working** — Alfred is invisible. Three silent hooks collect
+**When you're working** — Alfred is invisible. Eight silent hooks collect
 session data with zero output. No messages, no alerts, no interruptions.
 
 **When you call him** — Alfred already has context. Ask him to review your
@@ -31,13 +31,16 @@ curl -fsSL https://raw.githubusercontent.com/hir4ta/claude-alfred/main/install.s
 This downloads the binary, registers hooks/MCP/skills in Claude Code, and
 syncs your session history. Restart Claude Code after installation.
 
-**API key** (required for semantic search):
+**API keys** (both optional):
 
 ```bash
-export VOYAGE_API_KEY=your-key
+export VOYAGE_API_KEY=your-key       # Semantic search (Voyage AI voyage-4-large)
+export ANTHROPIC_API_KEY=your-key    # LLM decision extraction (claude-haiku)
 ```
 
-Voyage AI `voyage-4-large` (1024d). Cost ~$0.50/month.
+Voyage AI `voyage-4-large` (1024d). Cost ~$0.50/month. Without `VOYAGE_API_KEY`, Alfred
+falls back to FTS5 keyword search. Without `ANTHROPIC_API_KEY`, decision extraction is
+skipped.
 
 ## Uninstall
 
@@ -99,25 +102,27 @@ automatically — you don't call them directly.
 ## How It Works
 
 ```
-┌─────────────────────────────────────────────┐
-│            Your Claude Code Session          │
-│                                              │
-│  Hooks ──→ alfred.db                         │
-│  SessionStart  (project + CLAUDE.md ingest)  │
-│  PostToolUse   (tool stats)                  │
-│  UserPromptSubmit → past decisions context   │
-│  SessionEnd                ↑                 │
-│                            │                 │
-│  You: /alfred:prepare skill                   │
-│       ↓                                      │
-│  Skill → MCP tools → knowledge + preferences │
-│       ↓                                      │
-│  Generated file                              │
-│       ↓                                      │
-│  Independent review (Explore agent, fork)    │
-│       ↓                                      │
-│  Validated result                            │
-└─────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────┐
+│              Your Claude Code Session            │
+│                                                  │
+│  Hooks ──→ alfred.db                             │
+│  SessionStart  (project + CLAUDE.md ingest)      │
+│  PostToolUse / PostToolUseFailure (tool stats)   │
+│  SubagentStart → subagent context injection      │
+│  Stop / SubagentStop → LLM decision extraction   │
+│  UserPromptSubmit → past decisions context    ↑  │
+│  SessionEnd                                   │  │
+│                                               │  │
+│  You: /alfred:prepare skill                       │
+│       ↓                                          │
+│  Skill → MCP tools → knowledge + preferences     │
+│       ↓                                          │
+│  Generated file                                  │
+│       ↓                                          │
+│  Independent review (Explore agent, fork)        │
+│       ↓                                          │
+│  Validated result                                │
+└─────────────────────────────────────────────────┘
 ```
 
 **Hooks** fire automatically on Claude Code lifecycle events. Most are silent;
@@ -125,9 +130,13 @@ automatically — you don't call them directly.
 
 | Hook | When | What it does |
 |------|------|-------------|
-| `SessionStart` | Session begins | Record project + auto-ingest CLAUDE.md + auto-harvest changelog |
-| `PostToolUse` | After any tool executes | Record tool name, success/failure |
-| `UserPromptSubmit` | User sends prompt | Inject past decisions about referenced files as context |
+| `SessionStart` | Session begins | Record project + auto-ingest CLAUDE.md + re-inject context after compaction |
+| `PostToolUse` | After tool succeeds | Record tool name and stats |
+| `PostToolUseFailure` | After tool fails | Record tool failure |
+| `UserPromptSubmit` | User sends prompt | Inject past decisions about referenced files |
+| `SubagentStart` | Subagent spawned | Inject compact context (recent decisions + files) |
+| `Stop` | Assistant stops responding | Extract decisions from response via LLM (async) |
+| `SubagentStop` | Subagent finishes | Extract decisions from subagent response via LLM (async) |
 | `SessionEnd` | Session closes | Finalize session statistics |
 
 **Independent Review** — `/alfred:prepare` and `/alfred:polish` spawn an Explore
@@ -144,7 +153,8 @@ alfred          # Interactive session selector + live monitor
 alfred browse   # Browse past session history
 ```
 
-**Key bindings:** `↑↓` navigate, `Enter` expand/collapse, `g/G` top/bottom, `?` help, `q` quit.
+**Key bindings:** `↑↓` navigate, `Enter` expand/collapse, `g/G` top/bottom,
+`1`/`2` or `Tab` switch tabs (Activity / Decisions), `?` help, `q` quit.
 
 ## Dependencies
 
