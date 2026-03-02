@@ -65,58 +65,23 @@ go build -o alfred .
 ./alfred install
 ```
 
-## Skills (16)
+## Skills (7)
 
 Invoke with `/alfred:<skill-name>` in Claude Code.
 
-### Create — "Build it for me"
-
 | Skill | What it does |
 |-------|-------------|
-| `/alfred:create-skill` | Generate a skill file with official template + your preferences |
-| `/alfred:create-rule` | Generate a rule file with paths and actionable instructions |
-| `/alfred:create-hook` | Generate hook configuration + handler script |
-| `/alfred:create-agent` | Generate a custom agent definition |
-| `/alfred:create-mcp` | Configure an MCP server in `.mcp.json` |
-| `/alfred:create-claude-md` | Create or improve CLAUDE.md from project analysis |
-| `/alfred:create-memory` | Set up project memory directory + MEMORY.md |
+| `/alfred:inspect [--quick]` | Project analysis — utilization report, quick audit, migration check |
+| `/alfred:prepare <type> [name]` | Generate new config files (skill, rule, hook, agent, MCP, CLAUDE.md, memory) |
+| `/alfred:polish <type> [name]` | Update existing config files against latest best practices |
+| `/alfred:greetings` | Interactive setup wizard for new projects |
+| `/alfred:brief <feature>` | Explain any Claude Code feature with concrete examples |
+| `/alfred:memorize [pref]` | Record/view your preferences (coding style, workflow, tools) |
+| `/alfred:harvest [--force]` | Refresh knowledge base (auto-harvest runs on SessionStart) |
 
-Every create skill ends with an **independent review** — a separate Explore
-agent validates the generated file against official spec and knowledge base
-in a forked context, catching issues the creator might miss.
-
-### Update — "Improve what I have"
-
-| Skill | What it does |
-|-------|-------------|
-| `/alfred:update <type> [name]` | Update an existing file against latest best practices |
-
-Supported types: `skill`, `rule`, `hook`, `agent`, `claude-md`, `memory`, `mcp`.
-Reads the current file, compares with knowledge base, presents a diff with
-explanations, applies after approval, then runs the same independent review.
-
-### Analyze — "How am I doing?"
-
-| Skill | What it does |
-|-------|-------------|
-| `/alfred:review` | Full utilization report — config quality, feature usage, improvement suggestions |
-| `/alfred:audit` | Quick setup check against best practices (checklist format) |
-
-### Learn — "Remember this"
-
-| Skill | What it does |
-|-------|-------------|
-| `/alfred:learn` | Record your preferences (workflow, coding style, tools) |
-| `/alfred:preferences` | View all recorded preferences |
-| `/alfred:update-docs` | Crawl Claude Code docs and ingest into knowledge base |
-
-### Power — "Level up my setup"
-
-| Skill | What it does |
-|-------|-------------|
-| `/alfred:setup` | Interactive wizard — CLAUDE.md + skills + rules + hooks in one go |
-| `/alfred:migrate` | Compare current setup against latest best practices, suggest updates |
-| `/alfred:explain [feature]` | Explain any Claude Code feature with concrete examples |
+`/alfred:prepare` and `/alfred:polish` end with an **independent review** — a
+separate Explore agent validates the generated file against official spec and
+knowledge base in a forked context, catching issues the creator might miss.
 
 ## MCP Tools (5)
 
@@ -127,9 +92,9 @@ automatically — you don't call them directly.
 |------|---------|-------------|
 | `knowledge` | All skills (best practice lookups) | Hybrid vector + FTS5 search over Claude Code documentation |
 | `recall` | Context injection, agent | Recall project context from past sessions (decisions, co-changed files, hotspots) |
-| `review` | `review`, `audit`, `setup`, `migrate` | Analyze project config + session history |
-| `ingest` | `update-docs` | Store documentation sections with vector embeddings |
-| `preferences` | `learn`, all `create-*`, `update` | Get/set user preferences across projects |
+| `review` | `inspect`, `greetings` | Analyze project config + session history |
+| `ingest` | `harvest`, auto-harvest | Store documentation sections with vector embeddings |
+| `preferences` | `memorize`, `prepare`, `polish` | Get/set user preferences across projects |
 
 ## How It Works
 
@@ -143,7 +108,7 @@ automatically — you don't call them directly.
 │  UserPromptSubmit → past decisions context   │
 │  SessionEnd                ↑                 │
 │                            │                 │
-│  You: /alfred:create-skill                   │
+│  You: /alfred:prepare skill                   │
 │       ↓                                      │
 │  Skill → MCP tools → knowledge + preferences │
 │       ↓                                      │
@@ -160,12 +125,12 @@ automatically — you don't call them directly.
 
 | Hook | When | What it does |
 |------|------|-------------|
-| `SessionStart` | Session begins | Record project + auto-ingest CLAUDE.md into knowledge base |
+| `SessionStart` | Session begins | Record project + auto-ingest CLAUDE.md + auto-harvest changelog |
 | `PostToolUse` | After any tool executes | Record tool name, success/failure |
 | `UserPromptSubmit` | User sends prompt | Inject past decisions about referenced files as context |
 | `SessionEnd` | Session closes | Finalize session statistics |
 
-**Independent Review** — Every create and update skill spawns an Explore
+**Independent Review** — `/alfred:prepare` and `/alfred:polish` spawn an Explore
 agent in a separate context after file generation. This agent has read-only
 access + knowledge base search, providing unbiased validation against
 official Claude Code specifications.
