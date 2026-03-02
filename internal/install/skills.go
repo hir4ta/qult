@@ -12,817 +12,478 @@ type skillDef struct {
 }
 
 var alfredSkills = []skillDef{
-	// ─── Create: 構築系 ─────────────────────────────────────────────────
-
 	{
-		Dir: "create-skill",
+		Dir: "inspect",
 		Content: `---
-name: create-skill
-description: >
-  Generate a new Claude Code skill file following latest best practices
-  and the user's preferences.
-user-invocable: true
-argument-hint: "[skill-name]"
-allowed-tools: Read, Write, Glob, Agent, AskUserQuestion, mcp__alfred__knowledge, mcp__alfred__preferences
----
-
-Create a new Claude Code skill.
-
-## Steps
-
-1. **[HOW]** Call preferences with action="get" to load user's coding style and workflow preferences
-2. **[HOW]** Ask the user with AskUserQuestion:
-   - "What should this skill do?" (free text)
-   - "Should it be user-invocable?" (yes/no)
-   - "Should it run in a forked context?" (yes for heavy exploration, no for quick tasks)
-3. **[HOW]** Check existing skills with Glob pattern=".claude/skills/*/SKILL.md" to avoid name collisions
-4. **[Template]** Generate SKILL.md using the template below, filling in user's requirements
-5. **[WHAT]** Validate the generated skill against these criteria:
-   - name field: lowercase, hyphens only, max 64 chars
-   - description field: present and specific (not vague like "does stuff")
-   - Each step tagged with constraint type (HOW/WHAT/Template/Guardrails)
-   - allowed-tools: only tools actually needed (principle of least privilege)
-   - If context=fork, agent field must be set
-6. **[HOW]** Apply user preferences (language, style) to the generated content
-7. **[HOW]** Write the file to .claude/skills/<name>/SKILL.md
-8. **[WHAT] Independent Review** Spawn an Agent (subagent_type: "Explore") to review the generated file in a separate context:
-   - Prompt: "Read .claude/skills/<name>/SKILL.md and validate against Claude Code skill spec. Check: (1) frontmatter has required name+description, (2) all steps have constraint type tags [HOW/WHAT/Template/Guardrails], (3) allowed-tools follows least privilege, (4) guardrails section exists with concrete prohibitions, (5) call mcp__alfred__knowledge with query='Claude Code skill best practices' to verify against latest docs. Report PASS or list specific issues."
-   - If issues found: fix them and note what was corrected
-
-## Template
-
-` + "```yaml" + `
----
-name: <skill-name>
-description: >
-  <one-line description of when Claude should use this skill>
-user-invocable: true
-argument-hint: "[optional-args]"
-allowed-tools: <comma-separated list>
-# context: fork          # uncomment for heavy exploration
-# agent: general-purpose # required when context=fork
----
-
-<Brief description of what the skill does.>
-
-## Steps
-
-1. **[HOW/WHAT/Template/Guardrails]** <step description>
-2. ...
-
-## Output
-
-<Expected output format>
-
-## Guardrails
-
-- <things the skill must NOT do>
-` + "```" + `
-
-## Guardrails
-
-- Do NOT create skills with vague descriptions
-- Do NOT allow tools the skill doesn't actually need
-- Do NOT omit constraint type tags on steps
-`,
-	},
-	{
-		Dir: "create-rule",
-		Content: `---
-name: create-rule
-description: >
-  Generate a new Claude Code rule file following latest best practices
-  and the user's preferences.
-user-invocable: true
-argument-hint: "[rule-name]"
-allowed-tools: Read, Write, Glob, Agent, AskUserQuestion, mcp__alfred__knowledge, mcp__alfred__preferences
----
-
-Create a new Claude Code rule.
-
-## Steps
-
-1. **[HOW]** Call preferences with action="get" to load user preferences
-2. **[HOW]** Ask the user:
-   - "What convention should this rule enforce?" (free text)
-   - "Which files should it apply to?" (glob pattern, e.g. "**/*.go")
-3. **[HOW]** Check existing rules with Glob pattern=".claude/rules/*.md"
-4. **[Template]** Generate the rule using the template below
-5. **[WHAT]** Validate:
-   - paths field: valid glob patterns, specific enough to avoid over-matching
-   - Instructions: actionable ("use X" not "consider using X")
-   - Concise: rules inject into context on every match — keep short
-6. **[HOW]** Write to .claude/rules/<name>.md
-7. **[WHAT] Independent Review** Spawn an Agent (subagent_type: "Explore") to review the generated file in a separate context:
-   - Prompt: "Read .claude/rules/<name>.md and validate against Claude Code rule spec. Check: (1) paths field has valid glob patterns, (2) instructions are actionable (no 'consider'/'try to'), (3) not duplicating CLAUDE.md content, (4) concise (under 20 lines), (5) call mcp__alfred__knowledge with query='Claude Code rule best practices' to verify. Report PASS or list specific issues."
-   - If issues found: fix them and note what was corrected
-
-## Template
-
-` + "```yaml" + `
----
-paths:
-  - "**/*.ext"
----
-
-# <Rule Name>
-
-- <actionable instruction 1>
-- <actionable instruction 2>
-` + "```" + `
-
-## Guardrails
-
-- Do NOT create rules without paths (unless user explicitly wants a global rule)
-- Do NOT duplicate CLAUDE.md content in rules
-- Do NOT write vague instructions ("consider" → "use", "try to" → "always")
-`,
-	},
-	{
-		Dir: "create-hook",
-		Content: `---
-name: create-hook
-description: >
-  Generate Claude Code hook configuration and handler script following
-  latest best practices and the user's preferences.
-user-invocable: true
-argument-hint: "[event-name]"
-allowed-tools: Read, Write, Edit, Glob, Agent, AskUserQuestion, mcp__alfred__knowledge, mcp__alfred__preferences
----
-
-Create a new Claude Code hook.
-
-## Steps
-
-1. **[HOW]** Call preferences with action="get" for user preferences
-2. **[HOW]** Ask the user:
-   - "Which event?" (PreToolUse, PostToolUse, SessionStart, UserPromptSubmit, Stop, etc.)
-   - "What should the hook do?" (free text)
-   - "Should it block on failure?" (yes for PreToolUse gates, no for async)
-3. **[HOW]** Read existing .claude/hooks.json or settings.json hooks section if present
-4. **[Template]** Generate hook configuration using the template below
-5. **[WHAT]** Validate:
-   - timeout: ≤ 5s for PreToolUse (blocks workflow), ≤ 30s for others
-   - matcher: regex that matches only intended tools (not overly broad)
-   - Handler type: command for scripts, prompt for AI-powered checks, http for webhooks
-   - If PreToolUse: non-zero exit must have a clear, helpful error message
-6. **[HOW]** Write/update hooks configuration and handler script
-7. **[WHAT] Independent Review** Spawn an Agent (subagent_type: "Explore") to review the generated hook in a separate context:
-   - Prompt: "Read the generated hook config and handler script. Check: (1) timeout appropriate for event type (≤5s for PreToolUse), (2) matcher not overly broad, (3) handler script is executable, (4) PreToolUse hooks have clear error messages on failure, (5) call mcp__alfred__knowledge with query='Claude Code hook best practices timeout matcher' to verify. Report PASS or list specific issues."
-   - If issues found: fix them and note what was corrected
-
-## Template (hooks.json entry)
-
-` + "```json" + `
-{
-  "EventName": [{
-    "matcher": "ToolPattern",
-    "hooks": [{
-      "type": "command",
-      "command": ".claude/scripts/hook-name.sh",
-      "timeout": 5
-    }]
-  }]
-}
-` + "```" + `
-
-## Available Hook Types
-
-- command: Shell script (default, most common)
-- prompt: AI-powered check using a model prompt
-- agent: Full agent with tools for complex validation
-- http: POST to external URL
-
-## Guardrails
-
-- Do NOT set timeout > 5s for PreToolUse hooks (blocks user workflow)
-- Do NOT use overly broad matchers (e.g. ".*" catches everything)
-- Do NOT forget to make handler scripts executable (chmod +x)
-`,
-	},
-	{
-		Dir: "create-agent",
-		Content: `---
-name: create-agent
-description: >
-  Generate a custom Claude Code agent definition following latest best
-  practices and the user's preferences.
-user-invocable: true
-argument-hint: "[agent-name]"
-allowed-tools: Read, Write, Glob, Agent, AskUserQuestion, mcp__alfred__knowledge, mcp__alfred__preferences
----
-
-Create a new custom agent.
-
-## Steps
-
-1. **[HOW]** Call preferences with action="get" for user preferences
-2. **[HOW]** Ask the user:
-   - "What should this agent specialize in?" (free text)
-   - "Which tools should it have access to?" (suggest based on purpose)
-   - "Should it have persistent memory?" (user/project/local)
-3. **[HOW]** Check existing agents with Glob pattern=".claude/agents/*.md"
-4. **[Template]** Generate agent markdown using the template below
-5. **[WHAT]** Validate:
-   - name: required, lowercase letters and hyphens
-   - description: required, describes WHEN to delegate (not just what it does)
-   - tools: minimal set needed (principle of least privilege)
-   - model: explicit (sonnet for most, haiku for fast read-only, opus for complex)
-6. **[HOW]** Write to .claude/agents/<name>.md
-7. **[WHAT] Independent Review** Spawn an Agent (subagent_type: "Explore") to review the generated file in a separate context:
-   - Prompt: "Read .claude/agents/<name>.md and validate against Claude Code agent spec. Check: (1) frontmatter has name+description+tools+model, (2) description explains WHEN to delegate (not just what it does), (3) tools follow least privilege, (4) model is explicit, (5) call mcp__alfred__knowledge with query='Claude Code custom agent definition best practices' to verify. Report PASS or list specific issues."
-   - If issues found: fix them and note what was corrected
-
-## Template
-
-` + "```yaml" + `
----
-name: <agent-name>
-description: >
-  <When Claude should delegate to this agent. Be specific about triggers.>
-tools: <comma-separated list>
-model: sonnet
-maxTurns: 30
-# memory: user   # uncomment for persistent cross-session memory
----
-
-<Agent instructions. Be direct about role and output format.>
-
-## Decision Flow
-
-1. <first action>
-2. <second action>
-
-## Output Format
-
-- <expected output structure>
-` + "```" + `
-
-## Guardrails
-
-- Do NOT give agents Write/Edit tools unless they need to modify files
-- Do NOT omit model field (implicit inherit may pick wrong model)
-- Do NOT write vague descriptions — agents need clear delegation triggers
-`,
-	},
-	{
-		Dir: "create-mcp",
-		Content: `---
-name: create-mcp
-description: >
-  Configure a new MCP server in the project's .mcp.json following
-  latest best practices.
-user-invocable: true
-argument-hint: "[server-name]"
-allowed-tools: Read, Write, Edit, Agent, AskUserQuestion, mcp__alfred__knowledge, mcp__alfred__preferences
----
-
-Configure a new MCP server.
-
-## Steps
-
-1. **[HOW]** Ask the user:
-   - "What MCP server do you want to add?" (name or npm package)
-   - "Is it a local command or remote SSE server?" (stdio/sse)
-2. **[HOW]** Read existing .mcp.json if present
-3. **[Template]** Add the server configuration using the template below
-4. **[WHAT]** Validate:
-   - command: points to an executable that exists or will be installed
-   - env: API keys use environment variables, not hardcoded values
-   - Tool namespace: will be mcp__<server-name>__<tool-name>
-5. **[HOW]** Write/update .mcp.json
-6. **[WHAT] Independent Review** Spawn an Agent (subagent_type: "Explore") to review the generated config in a separate context:
-   - Prompt: "Read .mcp.json and validate the new MCP server entry. Check: (1) command path exists or is a known package, (2) no hardcoded API keys (must use env vars), (3) args array is valid, (4) call mcp__alfred__knowledge with query='Claude Code MCP server configuration best practices' to verify. Report PASS or list specific issues."
-   - If issues found: fix them and note what was corrected
-
-## Template
-
-` + "```json" + `
-{
-  "mcpServers": {
-    "<server-name>": {
-      "command": "<executable>",
-      "args": ["<arg1>", "<arg2>"],
-      "env": {
-        "API_KEY": "${API_KEY}"
-      }
-    }
-  }
-}
-` + "```" + `
-
-## Guardrails
-
-- Do NOT hardcode API keys in .mcp.json — use environment variables
-- Do NOT add servers without verifying the command exists
-`,
-	},
-	{
-		Dir: "create-claude-md",
-		Content: `---
-name: create-claude-md
-description: >
-  Create or improve a project's CLAUDE.md from project structure analysis,
-  best practices, and the user's preferences.
-user-invocable: true
-allowed-tools: Read, Write, Edit, Glob, Bash, Agent, AskUserQuestion, mcp__alfred__knowledge, mcp__alfred__preferences
----
-
-Create or improve CLAUDE.md.
-
-## Steps
-
-1. **[HOW]** Call preferences with action="get" for user preferences (language, style)
-2. **[HOW]** Detect project stack:
-   - Glob for go.mod, package.json, Cargo.toml, pyproject.toml, etc.
-   - Read the detected config file to identify stack and dependencies
-3. **[HOW]** Scan project structure with Glob and Bash (directory listing)
-4. **[HOW]** Read existing CLAUDE.md if present
-5. **[Template]** Generate or improve CLAUDE.md using the template below
-6. **[WHAT]** Validate:
-   - Under 200 lines (every line costs context window)
-   - Has ## Stack, ## Commands, ## Structure, ## Rules sections
-   - Commands are copy-pasteable (not relative or ambiguous)
-   - Rules are actionable ("use X" not "consider using X")
-   - No duplicate content from README
-   - No environment-specific paths
-7. **[HOW]** Write CLAUDE.md
-8. **[WHAT] Independent Review** Spawn an Agent (subagent_type: "Explore") to review the generated file in a separate context:
-   - Prompt: "Read CLAUDE.md and validate against Claude Code best practices. Check: (1) under 200 lines, (2) has Stack/Commands/Structure/Rules sections, (3) commands are copy-pasteable, (4) rules are actionable (no 'consider'/'try to'), (5) no README duplication, (6) call mcp__alfred__knowledge with query='CLAUDE.md best practices structure' to verify. Report PASS or list specific issues."
-   - If issues found: fix them and note what was corrected
-
-## Template
-
-` + "```markdown" + `
-# <project-name>
-
-<one-line description>
-
-## Stack
-
-<language> / <framework> / <key deps>
-
-## Commands
-
-` + "```" + `bash
-<build command>
-<test command>
-<lint command>
-` + "```" + `
-
-## Structure
-
-| Package | Role |
-|---------|------|
-| <dir>   | <purpose> |
-
-## Rules
-
-- <actionable rule 1>
-- <actionable rule 2>
-` + "```" + `
-
-## Guardrails
-
-- Do NOT exceed 200 lines
-- Do NOT duplicate README content
-- Do NOT include environment-specific paths
-- Do NOT write vague rules
-`,
-	},
-	{
-		Dir: "create-memory",
-		Content: `---
-name: create-memory
-description: >
-  Set up project memory directory and MEMORY.md template for persistent
-  context across conversations.
-user-invocable: true
-allowed-tools: Read, Write, Glob, Agent, mcp__alfred__knowledge, mcp__alfred__preferences
----
-
-Set up project memory.
-
-## Steps
-
-1. **[HOW]** Check if .claude/memory/ or MEMORY.md already exists
-2. **[HOW]** Call preferences with action="get" for user preferences
-3. **[Template]** Create MEMORY.md at the auto memory path using the template below
-4. **[WHAT]** Validate:
-   - Under 200 lines (first 200 lines auto-loaded per session)
-   - Organized by topic, not chronologically
-   - No session-specific or temporary context
-   - No sensitive data (credentials, API keys)
-5. **[HOW]** Optionally create topic files in .claude/memory/ for detailed notes
-6. **[WHAT] Independent Review** Spawn an Agent (subagent_type: "Explore") to review the generated file in a separate context:
-   - Prompt: "Read the generated MEMORY.md and validate. Check: (1) under 200 lines, (2) organized by topic not chronologically, (3) no session-specific context, (4) no sensitive data, (5) call mcp__alfred__knowledge with query='Claude Code memory best practices auto memory' to verify. Report PASS or list specific issues."
-   - If issues found: fix them and note what was corrected
-
-## Template
-
-` + "```markdown" + `
-# Project Memory
-
-## Architecture Decisions
-
-- <key decision 1>
-
-## Patterns & Conventions
-
-- <confirmed pattern 1>
-
-## Workflow Preferences
-
-- <preference 1>
-
-## Known Issues
-
-- <recurring issue and its solution>
-` + "```" + `
-
-## Guardrails
-
-- Do NOT store session-specific context (current task, in-progress work)
-- Do NOT store unverified conclusions
-- Do NOT store sensitive data (credentials, API keys)
-- Do NOT exceed 200 lines
-`,
-	},
-
-	// ─── Analyze: 分析系 ────────────────────────────────────────────────
-
-	{
-		Dir: "review",
-		Content: `---
-name: review
+name: inspect
 description: >
   Full Claude Code utilization report for your project. Analyzes CLAUDE.md,
-  skills, rules, hooks, MCP servers, and session history. Returns
-  improvement suggestions backed by best practices.
+  skills, rules, hooks, MCP servers, and session history. Returns improvement
+  suggestions backed by best practices. Includes quick audit and migration checks.
 user-invocable: true
-allowed-tools: mcp__alfred__review, mcp__alfred__knowledge, mcp__alfred__preferences
+argument-hint: "[--quick]"
+allowed-tools: Read, Glob, mcp__alfred__review, mcp__alfred__knowledge, mcp__alfred__preferences
 context: fork
 agent: general-purpose
 ---
 
-Project utilization review.
+The butler's rounds — inspect the estate and report what needs attention.
 
 ## Steps
 
-1. **[HOW]** Call review with project_path set to the current working directory
-2. **[HOW]** Call knowledge with query="Claude Code best practices setup checklist"
-3. **[HOW]** Call preferences with action="get" to understand user's context
-4. **[WHAT]** Compare the review results against these criteria:
-   - CLAUDE.md: exists, under 200 lines, has Commands/Rules/Structure sections
-   - Skills: each has name, description, constraint-tagged steps, guardrails
-   - Rules: each has paths field, actionable instructions
-   - Hooks: timeout appropriate for event type, matcher not overly broad
-   - Agent: has name, description, tools, model fields
-5. **[Template]** Generate report in the format below
+1. **[HOW]** Load context:
+   - Call ` + "`preferences`" + ` with action="get" to understand the user's style
+   - Call ` + "`review`" + ` with project_path=$CWD for current setup analysis
 
-## Output
+2. **[WHAT]** If $ARGUMENTS contains "--quick":
+   - Output a checklist only: ` + "`[x] CLAUDE.md (N lines)`" + `, ` + "`[ ] Hooks (not configured)`" + `, etc.
+   - One-line suggestion for each missing item
+   - STOP here
 
-**Setup Score**: X/10 (based on features in use and quality)
-**In Use**: [list of configured features]
-**Missing**: [features not yet configured, with brief value explanation]
-**Top 3 Improvements**: ordered by impact, each with:
-  - What: specific change
-  - Why: concrete benefit
-  - How: one-line example or command
+3. **[HOW]** Deep analysis:
+   - Call ` + "`knowledge`" + ` with query about latest best practices and setup checklist
+   - Compare current setup against best practices:
+     - CLAUDE.md: presence, length (<200 lines), required sections (Stack, Commands, Rules)
+     - Skills: constraint tags (HOW/WHAT), guardrails section, tool least-privilege
+     - Rules: valid glob patterns, actionable instructions, concise (<20 lines)
+     - Hooks: timeout appropriateness, matcher specificity
+     - Agents: model explicit, tools minimal, description explains WHEN to delegate
+     - MCP: no hardcoded API keys, valid commands
+
+4. **[WHAT]** Migration check:
+   - Identify outdated patterns (missing constraint tags, deprecated fields, new event types)
+   - Flag features available in current CC version but not yet adopted
+
+5. **[Template]** Output format:
+   ` + "```" + `
+   ## Setup Score: N/10
+
+   ### In Use
+   - ...
+
+   ### Needs Attention (ordered by impact)
+   1. **[HIGH]** What — Why — How to fix
+   2. **[MEDIUM]** ...
+
+   ### Migration Opportunities
+   - ...
+   ` + "```" + `
 
 ## Guardrails
 
-- Do NOT suggest features the user has explicitly chosen not to use (check preferences)
-- Do NOT give vague suggestions ("improve your hooks" → "add PreToolUse hook for lint: ...")
+- Do NOT suggest changes that conflict with user preferences
+- Do NOT report LOW severity or PASS items — only actionable findings
+- Do NOT read file contents unless checking specific patterns; rely on review MCP tool
+- Keep report under 30 lines unless user asks for detail
 `,
 	},
 	{
-		Dir: "audit",
+		Dir: "prepare",
 		Content: `---
-name: audit
+name: prepare
 description: >
-  Quick setup check against Claude Code best practices. Lighter than
-  a full review — just checks configuration exists and is well-formed.
+  Generate a new Claude Code configuration file (skill, rule, hook, agent,
+  MCP server, CLAUDE.md, or memory) following latest best practices and
+  the user's preferences.
 user-invocable: true
-allowed-tools: Read, Glob, mcp__alfred__review
-context: fork
-agent: Explore
+argument-hint: "<type> [name]"
+allowed-tools: Read, Write, Edit, Glob, Bash, Agent, AskUserQuestion, mcp__alfred__knowledge, mcp__alfred__preferences
+context: current
 ---
 
-Quick setup audit.
+The butler prepares what the master needs — tailored to their preferences.
 
 ## Steps
 
-1. **[HOW]** Call review with project_path set to the current working directory
-2. **[WHAT]** For each configuration item, check:
-   - Exists and is non-empty
-   - Follows official format (frontmatter present where required)
-   - No obvious anti-patterns (e.g., CLAUDE.md > 200 lines, skills without descriptions)
+1. **[HOW]** Load user preferences:
+   - Call ` + "`preferences`" + ` with action="get" to understand coding style and workflow
 
-## Output
+2. **[WHAT]** Determine target type:
+   - Parse $ARGUMENTS for type: ` + "`skill`" + `, ` + "`rule`" + `, ` + "`hook`" + `, ` + "`agent`" + `, ` + "`mcp`" + `, ` + "`claude-md`" + `, ` + "`memory`" + `
+   - If type not provided or unclear, ask with AskUserQuestion
+   - If name not provided, ask for it (except claude-md and memory which have fixed paths)
 
-` + "```" + `
-[x] CLAUDE.md (N lines)
-[x] Skills (N configured)
-[ ] Hooks (not configured — add for automated checks)
-...
-` + "```" + `
+3. **[HOW]** Check for collisions:
+   - Glob for existing files at the target path
+   - If exists, warn and ask whether to overwrite or use ` + "`/polish`" + ` instead
 
-One-line suggestion for each missing item. Keep under 10 lines.
+4. **[HOW]** Gather requirements (type-specific):
+   - **skill**: purpose, user-invocable flag, fork/current context, allowed-tools
+   - **rule**: enforcement concept, glob patterns (e.g., ` + "`**/*.go`" + `)
+   - **hook**: event type, handler purpose, blocking behavior
+   - **agent**: specialization, required tools, memory type (user/project/local)
+   - **mcp**: server name/npm package, server type (stdio/sse)
+   - **claude-md**: detect project stack (go.mod, package.json, etc.), scan structure
+   - **memory**: check auto memory path, topic organization
 
-## Guardrails
+5. **[HOW]** Search best practices:
+   - Call ` + "`knowledge`" + ` with query about the specific type's best practices
 
-- Do NOT read file contents for audit — just check existence and basic structure
-- Do NOT suggest installing alfred's own features as improvements
-`,
-	},
+6. **[Template]** Generate from type-specific template:
+   - **skill**: frontmatter (name, description, allowed-tools, context, agent) + constraint tags (HOW/WHAT/Template/Guardrails)
+   - **rule**: frontmatter with paths + actionable instructions (<20 lines)
+   - **hook**: hooks.json entry (timeout, matcher, command) + handler script
+   - **agent**: frontmatter (name, description, tools, model, maxTurns, memory) + system prompt
+   - **mcp**: .mcp.json entry (command, args, env — no hardcoded API keys)
+   - **claude-md**: Stack, Commands, Structure, Rules sections (<200 lines)
+   - **memory**: MEMORY.md template organized by topic
 
-	// ─── Learn: 学習系 ──────────────────────────────────────────────────
+7. **[HOW]** Validate (type-specific):
+   - skill: name format, tool least-privilege, guardrails section exists
+   - rule: glob patterns valid, instructions actionable (no "consider"), concise
+   - hook: timeout ≤5s for PreToolUse, ≤30s for others, matcher not overly broad
+   - agent: name lowercase-hyphens, model explicit, tools minimal
+   - mcp: command executable, env vars for secrets
+   - claude-md: <200 lines, copy-pasteable commands
+   - memory: <200 lines, no session-specific content
 
-	{
-		Dir: "learn",
-		Content: `---
-name: learn
-description: >
-  Tell alfred about your Claude Code preferences and working style.
-  Records preferences that persist across all projects and sessions.
-user-invocable: true
-allowed-tools: AskUserQuestion, mcp__alfred__preferences
----
+8. **[HOW]** Write file to target path
 
-Record your preferences.
+9. **[HOW]** Independent review:
+   - Spawn Explore agent to validate the generated file against knowledge base
+   - Fix any issues found
 
-## Steps
+## Target Paths
 
-1. **[HOW]** Call preferences with action="get" to show current preferences
-2. **[HOW]** Ask the user with AskUserQuestion:
-
-   "What would you like alfred to remember?"
-   - "Coding style preference" (e.g., commit language, testing approach)
-   - "Workflow preference" (e.g., always use plan mode, prefer TDD)
-   - "Tool preference" (e.g., preferred test runner, linter)
-   - Other (free text)
-
-3. **[HOW]** Based on selection, ask for the specific preference value
-4. **[WHAT]** Validate:
-   - Category is one of: coding_style, workflow, communication, tools
-   - Key is specific and reusable (e.g. "commit_language" not "my preference")
-   - Value is concrete (e.g. "japanese" not "I prefer japanese sometimes")
-5. **[HOW]** Call preferences with action="set", appropriate category/key/value, source="explicit"
-
-## Output
-
-Confirm: Category / Key = Value. "This will be applied in future create operations."
-
-## Guardrails
-
-- Do NOT infer preferences without explicit user confirmation
-- Do NOT store vague or ambiguous values
-`,
-	},
-	{
-		Dir: "preferences",
-		Content: `---
-name: preferences
-description: >
-  View all preferences alfred remembers about you. Shows coding style,
-  workflow, communication, and tool preferences.
-user-invocable: true
-allowed-tools: mcp__alfred__preferences
----
-
-View your recorded preferences.
-
-## Steps
-
-1. **[HOW]** Call preferences with action="get" (no category filter — get all)
-2. **[Template]** Group by category and display in the format below
-
-## Output
-
-**Coding Style**
-- [key]: [value] (source: explicit/inferred)
-
-**Workflow**
-- ...
-
-If no preferences: "No preferences recorded yet. Use /alfred:learn to teach alfred."
+| Type | Path |
+|------|------|
+| skill | ` + "`.claude/skills/<name>/SKILL.md`" + ` |
+| rule | ` + "`.claude/rules/<name>.md`" + ` |
+| hook | ` + "`.claude/hooks.json`" + ` (or settings.json hooks section) |
+| agent | ` + "`.claude/agents/<name>.md`" + ` |
+| mcp | ` + "`.mcp.json`" + ` |
+| claude-md | ` + "`CLAUDE.md`" + ` (project root) |
+| memory | Auto memory path ` + "`MEMORY.md`" + ` |
 
 ## Guardrails
 
-- Do NOT modify preferences in this skill — it's read-only
+- Do NOT generate without checking user preferences first
+- Do NOT use overly broad tool lists — apply least-privilege
+- Do NOT skip the independent review step
+- Do NOT hardcode API keys or secrets in any generated file
+- Do NOT create files that exceed type-specific line limits
 `,
 	},
 	{
-		Dir: "update-docs",
+		Dir: "polish",
 		Content: `---
-name: update-docs
+name: polish
 description: >
-  Crawl Claude Code documentation and ingest into the alfred knowledge
-  base for semantic search. Updates existing docs and adds new ones.
+  Update an existing Claude Code configuration file (skill, rule, hook,
+  agent, CLAUDE.md, memory, MCP) against latest best practices. Reads the
+  current file, compares with knowledge base, proposes improvements.
 user-invocable: true
-allowed-tools: WebFetch, WebSearch, mcp__alfred__ingest, mcp__alfred__knowledge
-context: fork
-agent: general-purpose
----
-
-Documentation crawler for the knowledge base.
-
-## Steps
-
-1. **[HOW]** Fetch the docs index page:
-   - WebFetch url="https://docs.claude.com/en/docs" with prompt="Extract all documentation page URLs from the sidebar navigation. Return as a JSON array of {url, title} objects."
-
-2. **[HOW]** For each documentation page:
-   - WebFetch the page URL with prompt="Split the page content into sections by h2/h3 headings. Return as a JSON array of {path, content} objects where path is 'Page Title > Section Heading' and content is the section text. Omit navigation and boilerplate."
-   - Call ingest with url, sections, source_type="docs"
-
-3. **[HOW]** Fetch the changelog:
-   - WebSearch query="Claude Code changelog site:docs.claude.com"
-   - WebFetch and split into version entries
-   - Call ingest with source_type="changelog"
-
-4. **[WHAT]** Verify: Call knowledge with a test query to confirm ingestion worked
-
-## Guardrails
-
-- Do NOT ingest sections > 2000 chars (split further)
-- Do NOT stop on individual page failures — skip and continue
-- Do NOT ingest navigation, footer, or boilerplate content
-`,
-	},
-
-	// ─── Update: 更新系 ─────────────────────────────────────────────────
-
-	{
-		Dir: "update",
-		Content: `---
-name: update
-description: >
-  Update an existing Claude Code configuration file (skill, rule, hook, agent,
-  CLAUDE.md, memory) against latest best practices. Reads the current file,
-  compares with knowledge base, proposes improvements, and validates in a
-  separate review context.
-user-invocable: true
-argument-hint: "<type> [name]  (e.g. skill my-skill, rule go-errors, claude-md)"
+argument-hint: "<type> [name]"
 allowed-tools: Read, Write, Edit, Glob, Agent, AskUserQuestion, mcp__alfred__knowledge, mcp__alfred__preferences
+context: current
 ---
 
-Update an existing Claude Code configuration file.
+The butler polishes what already exists — making it shine against current standards.
 
 ## Steps
 
-1. **[HOW]** Parse $ARGUMENTS to determine target type and name:
-   - Valid types: skill, rule, hook, agent, claude-md, memory, mcp
-   - If no arguments, ask with AskUserQuestion: "What do you want to update?" (skill/rule/hook/agent/claude-md/memory/mcp)
-2. **[HOW]** Locate the target file:
-   - skill: .claude/skills/<name>/SKILL.md
-   - rule: .claude/rules/<name>.md
-   - hook: .claude/hooks.json (or settings.json hooks section)
-   - agent: .claude/agents/<name>.md
-   - claude-md: CLAUDE.md
-   - memory: auto memory path MEMORY.md
-   - mcp: .mcp.json
-   - If name not specified and multiple exist, list them and ask which one
-3. **[HOW]** Read the current file content
-4. **[HOW]** Call preferences with action="get" to load user preferences
-5. **[HOW]** Call knowledge to fetch latest best practices for this file type:
-   - query: "Claude Code <type> best practices latest spec"
-6. **[WHAT]** Compare current file against best practices and identify gaps:
-   - skill: missing constraint type tags? missing guardrails? vague description? missing argument-hint?
-   - rule: missing paths? vague instructions? too long?
-   - hook: timeout too high? matcher too broad? missing error messages?
-   - agent: missing model? vague description? excessive tools?
-   - claude-md: over 200 lines? missing sections? vague rules?
-   - memory: over 200 lines? chronological instead of topical? sensitive data?
-   - mcp: hardcoded API keys? missing env vars?
-7. **[HOW]** Present the proposed changes as a diff to the user:
-   - Show each change with WHY it improves the file
-   - Ask for approval before applying
-8. **[HOW]** Apply approved changes with Edit tool (preserve unchanged sections)
-9. **[WHAT] Independent Review** Spawn an Agent (subagent_type: "Explore") to review the updated file in a separate context:
-   - Prompt: "Read <file-path> and validate against Claude Code <type> spec. Compare with latest best practices via mcp__alfred__knowledge. Check all quality criteria for this file type. Report PASS or list specific remaining issues."
-   - If issues found: present to user and offer to fix
+1. **[WHAT]** Determine target:
+   - Parse $ARGUMENTS for type and name: ` + "`skill foo`" + `, ` + "`rule go-errors`" + `, ` + "`claude-md`" + `, etc.
+   - If not provided, ask with AskUserQuestion
+   - Locate file using target paths (same as ` + "`/prepare`" + `)
+
+2. **[HOW]** Read current file:
+   - Read the target file content in full
+   - If file not found, suggest using ` + "`/prepare`" + ` instead
+
+3. **[HOW]** Load context:
+   - Call ` + "`preferences`" + ` with action="get"
+   - Call ` + "`knowledge`" + ` with query about latest best practices for this type
+
+4. **[WHAT]** Compare and identify gaps (type-specific):
+   - **skill**: constraint tags present (HOW/WHAT/Template/Guardrails), tool least-privilege, argument-hint, context choice
+   - **rule**: glob patterns valid, instructions actionable, concise (<20 lines)
+   - **hook**: timeout values appropriate, matchers specific, handler robust
+   - **agent**: model explicit, tools minimal, description explains WHEN to delegate, maxTurns set
+   - **mcp**: env vars for secrets, valid command
+   - **claude-md**: <200 lines, required sections, actionable rules, copy-pasteable commands
+   - **memory**: <200 lines, topic-organized, no session-specific content
+
+5. **[Template]** Present proposed changes:
+   ` + "```" + `
+   ## Proposed Changes
+
+   ### 1. [What changed] — Why
+   - Before: ...
+   - After: ...
+
+   ### 2. ...
+
+   Apply these changes? (y/n)
+   ` + "```" + `
+
+6. **[HOW]** Apply changes:
+   - Use Edit tool to apply approved changes (preserve unchanged sections)
+   - Do NOT rewrite the entire file
+
+7. **[HOW]** Independent review:
+   - Spawn Explore agent to validate the updated file
+   - Fix any issues found
 
 ## Guardrails
 
-- Do NOT overwrite the file without showing changes and getting approval first
-- Do NOT change content the user intentionally customized (check preferences)
-- Do NOT add boilerplate the user previously removed (check git history if available)
-- Do NOT apply changes silently — always explain WHY each change improves the file
+- Do NOT rewrite sections the user didn't ask to change
+- Do NOT apply changes without showing the diff and getting approval
+- Do NOT remove user customizations that don't conflict with best practices
+- Do NOT suggest changes that conflict with user preferences
+- Preserve the user's voice and style in the file
 `,
 	},
-
-	// ─── Power: 応用系 ──────────────────────────────────────────────────
-
 	{
-		Dir: "setup",
+		Dir: "greetings",
 		Content: `---
-name: setup
+name: greetings
 description: >
   Interactive wizard to set up Claude Code best practices for your project.
   Creates CLAUDE.md, hooks, skills, rules, and MCP configuration step by step.
 user-invocable: true
 allowed-tools: Read, Write, Edit, Glob, Bash, AskUserQuestion, mcp__alfred__knowledge, mcp__alfred__preferences, mcp__alfred__review
+context: current
 ---
 
-Project setup wizard.
+Welcome to the estate — the butler prepares everything for a new master.
 
 ## Steps
 
-1. **[HOW]** Call review with project_path to assess current setup
-2. **[HOW]** Call preferences with action="get" for user preferences
-3. **[HOW]** Show current setup status and ask what to configure:
-   - AskUserQuestion with multiSelect: CLAUDE.md, Skills, Rules, Hooks, MCP, Memory
-4. **[HOW]** For each selected item, run the corresponding create flow:
-   - Each create flow follows its own skill's template and validation
-5. **[WHAT]** After all items created, call review again and verify:
-   - Setup score improved
-   - No configuration conflicts (e.g. hook and rule targeting same concern)
+1. **[HOW]** Assess current setup:
+   - Call ` + "`review`" + ` with project_path=$CWD to see what already exists
+   - Call ` + "`preferences`" + ` with action="get" to load user style
+
+2. **[WHAT]** Show setup status and ask what to configure:
+   - Present current state: ` + "`[x] CLAUDE.md`" + `, ` + "`[ ] Hooks`" + `, etc.
+   - Use AskUserQuestion with multiSelect=true:
+     - CLAUDE.md
+     - Skills
+     - Rules
+     - Hooks
+     - MCP servers
+     - Memory
+   - Pre-select items that are missing
+
+3. **[HOW]** For each selected item, run the creation flow:
+   - Follow the same generation logic as ` + "`/prepare`" + ` for each type
+   - But streamlined — use sensible defaults based on detected project stack
+   - Ask fewer questions than standalone ` + "`/prepare`" + ` (wizard mode)
+
+4. **[HOW]** Detect project stack automatically:
+   - go.mod → Go project defaults (go vet, go test, Go rules)
+   - package.json → Node project defaults (npm test, ESLint rules)
+   - Cargo.toml → Rust project defaults
+   - pyproject.toml → Python project defaults
+   - Fall back to generic defaults
+
+5. **[HOW]** Verify setup:
+   - Call ` + "`review`" + ` again to check improvement
+   - Report before/after score
+
+6. **[Template]** Final output:
+   ` + "```" + `
+   ## Setup Complete
+
+   Created:
+   - CLAUDE.md (N lines)
+   - .claude/hooks.json (N hooks)
+   - ...
+
+   Setup Score: N/10 (was M/10)
+
+   Next: Try asking Claude Code about your project — alfred's knowledge
+   base will help provide better answers.
+   ` + "```" + `
 
 ## Guardrails
 
-- Do NOT create all items without user selection — let them choose
-- Do NOT skip validation steps from individual create skills
+- Do NOT overwrite existing files without asking
+- Do NOT create configurations that conflict with each other
+- Do NOT ask more than 2 questions per item (wizard should be fast)
+- Do NOT skip stack detection — it drives sensible defaults
+- Do NOT create items the user didn't select
 `,
 	},
 	{
-		Dir: "migrate",
+		Dir: "brief",
 		Content: `---
-name: migrate
-description: >
-  Compare your current Claude Code setup against latest best practices
-  and generate migration suggestions. Shows what's outdated and how to update.
-user-invocable: true
-allowed-tools: Read, Glob, Bash, AskUserQuestion, mcp__alfred__knowledge, mcp__alfred__review, mcp__alfred__preferences
-context: fork
-agent: general-purpose
----
-
-Setup migration advisor.
-
-## Steps
-
-1. **[HOW]** Call review with project_path to get current setup analysis
-2. **[HOW]** Call knowledge with query="Claude Code latest features changelog new capabilities"
-3. **[WHAT]** Compare current setup against latest best practices:
-   - Skills: have constraint-type tags? argument-hint? guardrails section?
-   - Hooks: using new event types (Stop, ConfigChange, prompt/agent handler types)?
-   - Agents: have maxTurns, memory, skills preloading?
-   - CLAUDE.md: using @imports? Under 200 lines?
-4. **[HOW]** Call preferences with action="get" to filter by user preferences
-5. **[Template]** Generate migration plan
-
-## Output
-
-**Available Updates** (ordered by impact):
-1. [feature]: [current state] → [recommended state]
-   - How: [specific change]
-
-## Guardrails
-
-- Do NOT suggest changes that would break existing workflows
-- Do NOT include changes the user has explicitly rejected (check preferences)
-`,
-	},
-	{
-		Dir: "explain",
-		Content: `---
-name: explain
+name: brief
 description: >
   Explain any Claude Code feature with concrete examples. Covers hooks,
   skills, rules, agents, MCP, memory, worktrees, teams, and more.
 user-invocable: true
-argument-hint: "[feature-name]"
+argument-hint: "<feature>"
 allowed-tools: AskUserQuestion, mcp__alfred__knowledge
+context: current
 ---
 
-Claude Code feature explainer.
+The butler's morning briefing — concise, clear, actionable.
 
 ## Steps
 
-1. **[HOW]** If $ARGUMENTS is provided, use it as the feature name. Otherwise ask:
-   "Which feature would you like to learn about?"
-   - Hooks, Skills, Rules, Agents, MCP Servers, Memory, Other
-2. **[HOW]** Call knowledge with query about the selected feature
-3. **[Template]** Explain using this format:
+1. **[WHAT]** Determine feature to explain:
+   - If $ARGUMENTS provided, use as feature name
+   - Otherwise, ask with AskUserQuestion: "Which feature would you like explained?"
+     - Options: hooks, skills, rules, agents, MCP, memory, worktrees, teams
 
-## Output
+2. **[HOW]** Search knowledge base:
+   - Call ` + "`knowledge`" + ` with query about the selected feature
+   - If multiple results, synthesize the most relevant
 
-**[Feature Name]**
+3. **[Template]** Output format:
+   ` + "```" + `
+   ## <Feature Name>
 
-**What**: <one sentence>
-**When to use**: <2-3 concrete scenarios>
-**Setup**:
-` + "```" + `
-<minimal working example, copy-pasteable>
-` + "```" + `
-**Tips**: <2-3 practical tips>
+   **What**: One sentence explanation.
+
+   **When to use**:
+   - Scenario 1
+   - Scenario 2
+
+   **Setup** (copy-pasteable):
+   ` + "```" + `
+   <minimal working example>
+   ` + "```" + `
+
+   **Tips**:
+   - Practical tip 1
+   - Practical tip 2
+   ` + "```" + `
 
 ## Guardrails
 
-- Do NOT write abstract descriptions — every explanation needs a concrete example
+- Do NOT output more than 20 lines unless the user asks for detail
+- Do NOT fabricate features — only explain what's in the knowledge base
+- Do NOT include boilerplate or generic advice — be specific and practical
 - Do NOT explain multiple features at once — focus on the one requested
+`,
+	},
+	{
+		Dir: "memorize",
+		Content: `---
+name: memorize
+description: >
+  Tell alfred about your Claude Code preferences and working style, or view
+  what alfred already remembers. Preferences persist across all projects
+  and sessions.
+user-invocable: true
+argument-hint: "[preference to remember]"
+allowed-tools: AskUserQuestion, mcp__alfred__preferences
+context: current
+---
+
+The butler memorizes the master's preferences — every detail matters.
+
+## Steps
+
+1. **[WHAT]** Determine intent:
+   - If $ARGUMENTS provided: treat as a preference to remember → go to Step 3
+   - If no arguments: show current preferences first
+
+2. **[HOW]** Show current preferences:
+   - Call ` + "`preferences`" + ` with action="get" (no filters)
+   - Group by category and display:
+     ` + "```" + `
+     ## Your Preferences
+
+     ### Coding Style
+     - language: Go
+     - ...
+
+     ### Workflow
+     - ...
+     ` + "```" + `
+   - If empty: "No preferences recorded yet. Tell me what you'd like me to remember."
+
+3. **[HOW]** Record new preference:
+   - Parse the preference from $ARGUMENTS or ask with AskUserQuestion:
+     - Category: coding_style, workflow, communication, tools
+     - Key: descriptive, reusable identifier
+     - Value: concrete, actionable preference
+   - Call ` + "`preferences`" + ` with action="set", source="explicit"
+
+4. **[Template]** Confirm:
+   ` + "```" + `
+   Remembered: [category] / [key] = [value]
+   ` + "```" + `
+
+## Guardrails
+
+- Do NOT infer preferences without explicit user confirmation
+- Do NOT store vague or ambiguous values — ask for clarification
+- Do NOT overwrite existing preferences without showing the current value first
+- Keep keys short and descriptive (e.g., "commit_style", "test_framework")
+`,
+	},
+	{
+		Dir: "harvest",
+		Content: `---
+name: harvest
+description: >
+  Manually refresh the alfred knowledge base. Normally auto-harvest keeps
+  docs fresh automatically — use this for forced full crawl or targeted
+  page updates.
+user-invocable: true
+argument-hint: "[--force | page-topic]"
+allowed-tools: WebFetch, WebSearch, mcp__alfred__ingest, mcp__alfred__knowledge
+context: fork
+agent: general-purpose
+---
+
+The butler's procurement run — gathering the finest ingredients for the knowledge base.
+
+## Steps
+
+1. **[HOW]** Check current KB freshness:
+   - Call ` + "`knowledge`" + ` with query="Claude Code changelog latest version" (limit=1)
+   - Note the ` + "`version`" + ` and ` + "`freshness_days`" + ` from the result
+   - If no results, treat as empty KB → go to Step 4 (full crawl)
+
+2. **[HOW]** Fetch latest changelog:
+   - WebFetch url="https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md" with prompt="Extract the latest 5 version entries. For each entry return: version number, release date, and a list of changes. Focus on changes to: hooks, skills, plugins, MCP, agents, rules, settings. Return as JSON array."
+
+3. **[WHAT]** Determine action:
+   - If $ARGUMENTS contains "--force": skip freshness check, go to Step 4 (full crawl)
+   - If $ARGUMENTS contains a page topic (e.g., "hooks"): go to Step 5 (targeted)
+   - If KB version matches latest AND freshness < 7 days:
+     → Report "Knowledge base is up to date (vX.Y.Z, N days old)" and STOP
+   - Otherwise: identify affected doc pages from changelog diff
+
+4. **[HOW]** Full crawl (empty KB, --force, or major version jump):
+   - WebFetch url="https://code.claude.com/docs/llms.txt" to get full docs index
+   - Fetch each page and split into sections by h2/h3 headings
+   - For each page: WebFetch with prompt="Split content into sections by h2/h3 headings. Return as JSON array of {path, content} objects where path is 'Page Title > Section Heading'. Omit navigation and boilerplate."
+   - Call ` + "`ingest`" + ` with url, sections, source_type="docs"
+   - Go to Step 6
+
+5. **[HOW]** Targeted update (specific page or changelog-diff):
+   - Map topics to doc URLs:
+     - hooks → https://code.claude.com/docs/en/hooks
+     - skills → https://code.claude.com/docs/en/skills
+     - plugins → https://code.claude.com/docs/en/plugins-reference
+     - mcp → https://code.claude.com/docs/en/mcp
+     - settings → https://code.claude.com/docs/en/settings
+     - agents → https://code.claude.com/docs/en/agents
+     - rules → https://code.claude.com/docs/en/rules
+     - memory → https://code.claude.com/docs/en/memory
+   - Fetch only affected pages, split into sections, ingest
+
+6. **[HOW]** Ingest changelog entries:
+   - Split new changelog versions into sections
+   - Call ` + "`ingest`" + ` with source_type="changelog", version=<version number>
+
+7. **[WHAT]** Verify:
+   - Call ` + "`knowledge`" + ` with a test query related to the updated content
+   - Report summary: "Updated N pages, ingested changelog vX.Y.Z"
+
+## Guardrails
+
+- Do NOT crawl all pages unless KB is empty or --force is specified
+- Do NOT ingest sections > 2000 chars (split further)
+- Do NOT stop on individual page failures — skip and continue
+- Do NOT ingest navigation, footer, or boilerplate content
+- Do NOT make WebFetch calls if Step 3 determines KB is up to date
 `,
 	},
 }
@@ -865,6 +526,23 @@ var deprecatedSkillDirs = []string{
 	"alfred-setup",
 	"alfred-migrate",
 	"alfred-explain",
+	// v0.24-v0.26 era (renamed to butler-style in v0.27)
+	"create-skill",
+	"create-rule",
+	"create-hook",
+	"create-agent",
+	"create-mcp",
+	"create-claude-md",
+	"create-memory",
+	"review",
+	"audit",
+	"learn",
+	"preferences",
+	"update-docs",
+	"update",
+	"setup",
+	"migrate",
+	"explain",
 }
 
 // installSkills writes alfred skills to ~/.claude/skills/ and cleans up
