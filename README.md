@@ -118,7 +118,7 @@ explanations, applies after approval, then runs the same independent review.
 | `/alfred:migrate` | Compare current setup against latest best practices, suggest updates |
 | `/alfred:explain [feature]` | Explain any Claude Code feature with concrete examples |
 
-## MCP Tools (4)
+## MCP Tools (5)
 
 Backend that powers skills and the alfred agent. Claude invokes these
 automatically — you don't call them directly.
@@ -126,6 +126,7 @@ automatically — you don't call them directly.
 | Tool | Used by | What it does |
 |------|---------|-------------|
 | `knowledge` | All skills (best practice lookups) | Hybrid vector + FTS5 search over Claude Code documentation |
+| `recall` | Context injection, agent | Recall project context from past sessions (decisions, co-changed files, hotspots) |
 | `review` | `review`, `audit`, `setup`, `migrate` | Analyze project config + session history |
 | `ingest` | `update-docs` | Store documentation sections with vector embeddings |
 | `preferences` | `learn`, all `create-*`, `update` | Get/set user preferences across projects |
@@ -136,11 +137,12 @@ automatically — you don't call them directly.
 ┌─────────────────────────────────────────────┐
 │            Your Claude Code Session          │
 │                                              │
-│  Hooks (silent) ──→ alfred.db                │
-│  SessionStart        (project, tools, stats) │
-│  PostToolUse                                 │
-│  SessionEnd              ↑                   │
-│                          │                   │
+│  Hooks ──→ alfred.db                         │
+│  SessionStart  (project + CLAUDE.md ingest)  │
+│  PostToolUse   (tool stats)                  │
+│  UserPromptSubmit → past decisions context   │
+│  SessionEnd                ↑                 │
+│                            │                 │
 │  You: /alfred:create-skill                   │
 │       ↓                                      │
 │  Skill → MCP tools → knowledge + preferences │
@@ -153,14 +155,15 @@ automatically — you don't call them directly.
 └─────────────────────────────────────────────┘
 ```
 
-**Hooks** fire automatically on Claude Code lifecycle events. They silently
-record data — no output, no interruption:
+**Hooks** fire automatically on Claude Code lifecycle events. Most are silent;
+`UserPromptSubmit` injects context when relevant:
 
-| Hook | When | What it records |
-|------|------|----------------|
-| `SessionStart` | Session begins | Project path, git branch, session ID |
-| `PostToolUse` | After any tool executes | Tool name, success/failure, file path |
-| `SessionEnd` | Session closes | Session statistics (duration, tool counts) |
+| Hook | When | What it does |
+|------|------|-------------|
+| `SessionStart` | Session begins | Record project + auto-ingest CLAUDE.md into knowledge base |
+| `PostToolUse` | After any tool executes | Record tool name, success/failure |
+| `UserPromptSubmit` | User sends prompt | Inject past decisions about referenced files as context |
+| `SessionEnd` | Session closes | Finalize session statistics |
 
 **Independent Review** — Every create and update skill spawns an Explore
 agent in a separate context after file generation. This agent has read-only
