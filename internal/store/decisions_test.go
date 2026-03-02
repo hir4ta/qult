@@ -197,6 +197,90 @@ func TestSearchDecisionsByFile(t *testing.T) {
 	}
 }
 
+func TestSearchDecisionsByFile_SuffixDisambiguation(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	_, err = s.DB().Exec(`INSERT INTO sessions (id, project_path, project_name, jsonl_path) VALUES ('s1', '/tmp', 'test', '/tmp/t.jsonl')`)
+	if err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+
+	// Two decisions referencing files with the same basename but different directories.
+	decisions := []*DecisionRow{
+		{
+			SessionID:    "s1",
+			Timestamp:    "2025-01-01T00:00:00Z",
+			Topic:        "store model",
+			DecisionText: "store model design",
+			FilePaths:    `["internal/store/model.go"]`,
+		},
+		{
+			SessionID:    "s1",
+			Timestamp:    "2025-01-02T00:00:00Z",
+			Topic:        "tui model",
+			DecisionText: "tui model design",
+			FilePaths:    `["internal/tui/model.go"]`,
+		},
+	}
+	for _, d := range decisions {
+		if err := s.InsertDecision(d); err != nil {
+			t.Fatalf("InsertDecision: %v", err)
+		}
+	}
+
+	// Searching with full path should match only the correct directory.
+	results, err := s.SearchDecisionsByFile("internal/store/model.go", 10)
+	if err != nil {
+		t.Fatalf("SearchDecisionsByFile: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result for store/model.go, got %d", len(results))
+	}
+	if results[0].Topic != "store model" {
+		t.Errorf("topic = %q, want 'store model'", results[0].Topic)
+	}
+
+	results, err = s.SearchDecisionsByFile("internal/tui/model.go", 10)
+	if err != nil {
+		t.Fatalf("SearchDecisionsByFile: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result for tui/model.go, got %d", len(results))
+	}
+	if results[0].Topic != "tui model" {
+		t.Errorf("topic = %q, want 'tui model'", results[0].Topic)
+	}
+}
+
+func TestPathSuffix(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"/Users/user/Projects/app/internal/store/events.go", "store/events.go"},
+		{"internal/store/events.go", "store/events.go"},
+		{"store/events.go", "store/events.go"},
+		{"events.go", "events.go"},
+		{"/events.go", "events.go"},
+		{"", "."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			t.Parallel()
+			got := PathSuffix(tc.input)
+			if got != tc.want {
+				t.Errorf("PathSuffix(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSearchDecisionsByDirectory(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(filepath.Join(dir, "test.db"))

@@ -3,7 +3,6 @@ package store
 import (
 	"database/sql"
 	"fmt"
-	"path/filepath"
 	"strings"
 )
 
@@ -282,8 +281,8 @@ func (s *Store) GetCoChangedFiles(filePath string, limit int) ([]FileActivity, e
 	if limit <= 0 {
 		limit = 5
 	}
-	base := filepath.Base(filePath)
-	pat := "%" + base + "%"
+	suffix := PathSuffix(filePath)
+	pat := "%" + suffix + "%"
 
 	rows, err := s.db.Query(`
 		SELECT e2.tool_input, 'co-change', COUNT(DISTINCT e2.session_id) AS sess_count

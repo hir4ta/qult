@@ -54,6 +54,47 @@ func TestGetCoChangedFiles(t *testing.T) {
 	}
 }
 
+func TestGetCoChangedFiles_SuffixDisambiguation(t *testing.T) {
+	t.Parallel()
+	st := openTestStore(t)
+
+	st.UpsertSession(&SessionRow{
+		ID: "s1", ProjectPath: "/proj/a", ProjectName: "a",
+		JSONLPath: "/a/s1.jsonl",
+	})
+
+	// Two different model.go files in different directories.
+	for _, f := range []string{"/proj/a/internal/store/model.go", "/proj/a/internal/store/helper.go"} {
+		st.InsertEvent(&EventRow{
+			SessionID: "s1", EventType: 2, Timestamp: "2025-01-01T00:00:00Z",
+			ToolName: "Edit", ToolInput: f,
+		})
+	}
+
+	st.UpsertSession(&SessionRow{
+		ID: "s2", ProjectPath: "/proj/a", ProjectName: "a",
+		JSONLPath: "/a/s2.jsonl",
+	})
+	for _, f := range []string{"/proj/a/internal/tui/model.go", "/proj/a/internal/tui/view.go"} {
+		st.InsertEvent(&EventRow{
+			SessionID: "s2", EventType: 2, Timestamp: "2025-01-02T00:00:00Z",
+			ToolName: "Edit", ToolInput: f,
+		})
+	}
+
+	// Querying store/model.go should find helper.go, not tui/view.go.
+	results, err := st.GetCoChangedFiles("/proj/a/internal/store/model.go", 10)
+	if err != nil {
+		t.Fatalf("GetCoChangedFiles: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("got %d co-changed files, want 1", len(results))
+	}
+	if results[0].Path != "/proj/a/internal/store/helper.go" {
+		t.Errorf("results[0].Path = %q, want store/helper.go", results[0].Path)
+	}
+}
+
 func TestGetCoChangedFiles_Nonexistent(t *testing.T) {
 	t.Parallel()
 	st := openTestStore(t)

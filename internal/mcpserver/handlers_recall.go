@@ -79,9 +79,9 @@ func recallFile(st *store.Store, query, project string, limit int, result map[st
 	if project != "" {
 		hotspots, err := st.GetFileReworkHotspots(project, 2)
 		if err == nil {
-			base := filepath.Base(query)
+			suffix := store.PathSuffix(query)
 			for _, h := range hotspots {
-				if filepath.Base(h.Path) == base {
+				if strings.HasSuffix(h.Path, suffix) {
 					result["rework_sessions"] = h.SessionCount
 					break
 				}

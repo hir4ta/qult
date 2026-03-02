@@ -73,3 +73,12 @@ func decodeProjectName(dirName string) string {
 	}
 	return dirName
 }
+
+// DefaultClaudeHome returns the default path for ~/.claude.
+func DefaultClaudeHome() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(os.Getenv("HOME"), ".claude")
+	}
+	return filepath.Join(home, ".claude")
+}

@@ -348,13 +348,25 @@ func (s *Store) scanDecisionRows(sqlStr string, args []any) ([]DecisionRow, erro
 	return rows, dbRows.Err()
 }
 
+// PathSuffix returns the last 2 path components (dir/file) for LIKE matching.
+// Falls back to basename if no parent directory exists.
+// Example: "/Users/user/Projects/app/internal/store/events.go" → "store/events.go"
+func PathSuffix(filePath string) string {
+	dir := filepath.Base(filepath.Dir(filePath))
+	base := filepath.Base(filePath)
+	if dir == "." || dir == "/" || dir == "" {
+		return base
+	}
+	return dir + "/" + base
+}
+
 // SearchDecisionsByFile returns decisions whose file_paths JSON contains the given file path.
 func (s *Store) SearchDecisionsByFile(filePath string, limit int) ([]DecisionRow, error) {
 	if limit <= 0 {
 		limit = 5
 	}
-	base := filepath.Base(filePath)
-	pat := "%" + base + "%"
+	suffix := PathSuffix(filePath)
+	pat := "%" + suffix + "%"
 
 	dbRows, err := s.db.Query(`
 		SELECT d.id, d.session_id, COALESCE(d.event_id,0), d.timestamp, d.topic,

@@ -137,25 +137,14 @@ separate context after file generation. This agent has read-only access +
 knowledge base search, providing unbiased validation against official Claude
 Code specifications.
 
-## TUI (Optional)
+## Debug
 
-Run `alfred` in a separate terminal to watch sessions live.
-
-```bash
-alfred          # Interactive session selector + live monitor
-```
-
-**Key bindings:** `↑↓` navigate, `Enter` expand/collapse, `g/G` top/bottom,
-`1`/`2` or `Tab` switch tabs (Activity / Decisions), `a` add decision,
-`d` delete decision, `?` help, `q` quit.
+Set `ALFRED_DEBUG=1` to enable debug logging to `~/.claude-alfred/debug.log`.
 
 ## Dependencies
 
 | Library | Purpose |
 |---------|---------|
-| [bubbletea](https://github.com/charmbracelet/bubbletea) | TUI framework |
-| [lipgloss](https://github.com/charmbracelet/lipgloss) | TUI styling |
-| [fsnotify](https://github.com/fsnotify/fsnotify) | File change watching |
 | [mcp-go](https://github.com/mark3labs/mcp-go) | MCP server SDK |
 | [go-sqlite3](https://github.com/ncruces/go-sqlite3) | SQLite driver (pure Go, WASM) |
 
