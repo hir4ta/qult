@@ -16,7 +16,6 @@ He never interrupts your work. When you need him, he's ready:
   recall      — Recall project context from past sessions
   review      — Analyze your project's Claude Code utilization
   ingest      — Store documentation with vector embeddings
-  preferences — Get/set your preferences
 
 When to use alfred tools:
 - Claude Code の設定（rules, skills, hooks, MCP, CLAUDE.md）をレビュー・改善するとき → review を先に実行
@@ -84,21 +83,6 @@ func New(claudeHome string, st *store.Store, emb *embedder.Embedder) *server.MCP
 				mcp.WithNumber("ttl_days", mcp.Description("Time-to-live in days (default: 7)")),
 			),
 			Handler: ingestHandler(st, emb),
-		},
-
-		server.ServerTool{
-			Tool: mcp.NewTool("preferences",
-				mcp.WithDescription("Get, set, or delete user preferences. Preferences persist across projects and sessions."),
-				mcp.WithTitleAnnotation("User Preferences"),
-				mcp.WithReadOnlyHintAnnotation(false),
-				mcp.WithIdempotentHintAnnotation(true),
-				mcp.WithString("action", mcp.Description("Action: get (default), set, delete")),
-				mcp.WithString("category", mcp.Description("Category: coding_style, workflow, communication, tools")),
-				mcp.WithString("key", mcp.Description("Preference key (required for set/delete)")),
-				mcp.WithString("value", mcp.Description("Preference value (required for set)")),
-				mcp.WithString("source", mcp.Description("Source: explicit (default), inferred")),
-			),
-			Handler: preferencesHandler(st),
 		},
 	)
 

@@ -7,11 +7,10 @@
   "keywords": [
     "butler",
     "best-practices",
-    "preferences",
     "workflow"
   ],
   "license": "MIT",
   "name": "alfred",
   "repository": "https://github.com/hir4ta/claude-alfred",
-  "version": "0.28.2"
+  "version": "0.29.0"
 }

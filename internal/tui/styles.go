@@ -173,6 +173,14 @@ var (
 
 	decisionFileStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#6A9A78"))
+
+	decisionInputLabelStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#6A9FB5")).
+				Bold(true)
+
+	decisionDeletePromptStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#C15F3C")).
+				Bold(true)
 )
 
 // Nerd Fonts glyphs (Font Awesome set).

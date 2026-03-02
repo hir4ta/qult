@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/hir4ta/claude-alfred/internal/analyzer"
 	"github.com/hir4ta/claude-alfred/internal/parser"
@@ -55,6 +56,12 @@ type Model struct {
 	// Tabs
 	activeTab int            // tabActivity or tabDecisions
 	decisions []store.DecisionRow
+
+	// Decision operations (Decisions tab)
+	decisionInput    textinput.Model // text input for adding decisions
+	addingDecision   bool            // add-decision mode active
+	deletingDecision bool            // confirming deletion
+	decisionCursor   int             // selected decision index
 }
 
 // NewModel creates a new TUI model with initial events pre-loaded.
@@ -111,6 +118,10 @@ func NewModel(initialEvents []parser.SessionEvent, eventCh <-chan parser.Session
 		}
 	}
 
+	ti := textinput.New()
+	ti.Placeholder = "Type a decision to remember..."
+	ti.CharLimit = 300
+
 	return Model{
 		events:        events,
 		stats:         stats,
@@ -125,6 +136,7 @@ func NewModel(initialEvents []parser.SessionEvent, eventCh <-chan parser.Session
 		inPlanMode:    inPlanMode,
 		awaitingAnswer: awaitingAnswer,
 		st:            st,
+		decisionInput: ti,
 	}
 }
 
@@ -230,6 +242,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showHelp = false
 			return m, nil
 		}
+		// When in decision input/confirm mode, skip global keys to avoid accidental quit/tab switch.
+		if m.addingDecision || m.deletingDecision {
+			if m.activeTab == tabDecisions {
+				return m.updateDecisions(msg)
+			}
+		}
 		// Global keys (all tabs)
 		switch msg.String() {
 		case "q", "ctrl+c":
@@ -262,6 +280,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.activeTab == tabActivity {
 			return m.updateActivity(msg)
+		}
+		if m.activeTab == tabDecisions {
+			return m.updateDecisions(msg)
 		}
 		return m, nil
 	}
@@ -472,6 +493,98 @@ func animTickCmd() tea.Cmd {
 	})
 }
 
+
+// updateDecisions handles key events for the Decisions tab.
+func (m Model) updateDecisions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Adding mode: text input is active
+	if m.addingDecision {
+		switch msg.Type {
+		case tea.KeyEscape:
+			m.addingDecision = false
+			m.decisionInput.Blur()
+			m.decisionInput.SetValue("")
+			return m, nil
+		case tea.KeyEnter:
+			text := m.decisionInput.Value()
+			if text != "" && m.st != nil {
+				topic := text
+				if runes := []rune(topic); len(runes) > 80 {
+					topic = string(runes[:80])
+				}
+				d := &store.DecisionRow{
+					SessionID:    m.sessionID,
+					Timestamp:    time.Now().UTC().Format(time.RFC3339),
+					Topic:        topic,
+					DecisionText: text,
+					FilePaths:    "[]",
+				}
+				// Ignore error; best-effort insert
+				_ = m.st.InsertDecision(d)
+			}
+			m.addingDecision = false
+			m.decisionInput.Blur()
+			m.decisionInput.SetValue("")
+			m.refreshDecisions()
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.decisionInput, cmd = m.decisionInput.Update(msg)
+		return m, cmd
+	}
+
+	// Deleting mode: confirmation prompt
+	if m.deletingDecision {
+		switch msg.String() {
+		case "y":
+			if m.decisionCursor < len(m.decisions) && m.st != nil {
+				id := m.decisions[m.decisionCursor].ID
+				_ = m.st.DeleteDecision(id)
+				m.refreshDecisions()
+				if m.decisionCursor >= len(m.decisions) && m.decisionCursor > 0 {
+					m.decisionCursor--
+				}
+			}
+			m.deletingDecision = false
+			return m, nil
+		case "n", "escape":
+			m.deletingDecision = false
+			return m, nil
+		}
+		return m, nil
+	}
+
+	// Normal navigation in Decisions tab
+	switch msg.String() {
+	case "up", "k":
+		if m.decisionCursor > 0 {
+			m.decisionCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.decisionCursor < len(m.decisions)-1 {
+			m.decisionCursor++
+		}
+		return m, nil
+	case "a":
+		m.addingDecision = true
+		m.decisionInput.Focus()
+		return m, nil
+	case "d":
+		if len(m.decisions) > 0 && m.decisionCursor < len(m.decisions) {
+			m.deletingDecision = true
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+// refreshDecisions reloads decisions from the DB into the model.
+func (m *Model) refreshDecisions() {
+	if m.st != nil && m.sessionID != "" {
+		rows, _ := m.st.GetDecisions(m.sessionID, "", 50)
+		m.decisions = rows
+	}
+}
 
 // updateActivity handles key events for the Activity tab.
 func (m Model) updateActivity(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

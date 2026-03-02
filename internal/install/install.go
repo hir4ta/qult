@@ -122,14 +122,14 @@ func CountSessions() error {
 
 // alfredRulesVersion tracks the rules content version for safe upgrades.
 // Bump this when alfredRulesContent changes to trigger overwrites.
-const alfredRulesVersion = "4"
+const alfredRulesVersion = "5"
 
 // alfredRulesContent is the content written to ~/.claude/rules/alfred.md.
 // 静観型執事: alfred never interrupts. Tools are called on demand.
 // NOTE: Go raw string literals cannot contain backticks, so we use regular strings
 // with explicit newlines for the rules content.
 var alfredRulesContent = strings.Join([]string{
-	"<!-- alfred-rules-v4 -->",
+	"<!-- alfred-rules-v5 -->",
 	"# claude-alfred",
 	"",
 	"alfred is a silent butler for Claude Code.",
@@ -151,9 +151,6 @@ var alfredRulesContent = strings.Join([]string{
 	"",
 	"**ingest** — store documentation in knowledge base",
 	"- USE when: ドキュメントページをクロールした後",
-	"",
-	"**preferences** — get/set user preferences",
-	"- USE when: ユーザーのワークフロー設定を記録・取得する",
 	"",
 }, "\n")
 

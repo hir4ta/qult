@@ -5,12 +5,15 @@ import (
 	"strconv"
 )
 
-// schemaVersion 1 = 静観型執事 V1 reset.
-// Clean slate: sessions, events, compact_events, decisions, preferences,
-// docs, embeddings. All legacy tables are dropped on migration.
-const schemaVersion = 1
+// schemaVersion 2 = 静観型執事 V2.
+// Changes from V1:
+//   - preferences table removed (replaced by Claude Code auto memory)
+//   - decisions: context_before/context_after added
+//   - sessions: estimated_input_tokens/estimated_output_tokens added
+//   - tool_failures table added
+const schemaVersion = 2
 
-const ddlV1 = `
+const ddl = `
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER NOT NULL
 );
@@ -30,6 +33,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     turn_count      INTEGER NOT NULL DEFAULT 0,
     tool_use_count  INTEGER NOT NULL DEFAULT 0,
     compact_count   INTEGER NOT NULL DEFAULT 0,
+    estimated_input_tokens  INTEGER NOT NULL DEFAULT 0,
+    estimated_output_tokens INTEGER NOT NULL DEFAULT 0,
     parent_session_id TEXT,
     synced_offset   INTEGER NOT NULL DEFAULT 0,
     synced_at       TEXT,
@@ -76,24 +81,21 @@ CREATE TABLE IF NOT EXISTS decisions (
     topic           TEXT NOT NULL,
     decision_text   TEXT NOT NULL,
     reasoning       TEXT,
+    context_before  TEXT,
+    context_after   TEXT,
     file_paths      TEXT,
     compact_segment INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
--- ==========================================================
--- User preferences (静観型執事: remember user preferences)
--- ==========================================================
-CREATE TABLE IF NOT EXISTS preferences (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    category   TEXT NOT NULL,
-    key        TEXT NOT NULL,
-    value      TEXT NOT NULL,
-    source     TEXT NOT NULL DEFAULT 'explicit',
-    confidence REAL NOT NULL DEFAULT 1.0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(category, key)
+CREATE TABLE IF NOT EXISTS tool_failures (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id      TEXT NOT NULL,
+    tool_name       TEXT NOT NULL,
+    failure_count   INTEGER NOT NULL DEFAULT 1,
+    last_failure_at TEXT NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES sessions(id),
+    UNIQUE(session_id, tool_name)
 );
 
 -- ==========================================================
@@ -154,7 +156,7 @@ CREATE TRIGGER IF NOT EXISTS docs_fts_au AFTER UPDATE ON docs BEGIN
 END;
 
 -- ==========================================================
--- Decisions FTS5
+-- Decisions FTS5 (context_before/after excluded — display only)
 -- ==========================================================
 CREATE VIRTUAL TABLE IF NOT EXISTS decisions_fts USING fts5(
     topic, decision_text, reasoning,
@@ -190,6 +192,7 @@ CREATE INDEX IF NOT EXISTS idx_docs_crawled_at ON docs(crawled_at);
 CREATE INDEX IF NOT EXISTS idx_decisions_session ON decisions(session_id);
 CREATE INDEX IF NOT EXISTS idx_decisions_timestamp ON decisions(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, event_type);
+CREATE INDEX IF NOT EXISTS idx_tool_failures_session ON tool_failures(session_id);
 `
 
 // legacyTables are tables from previous versions that no longer exist.
@@ -206,6 +209,8 @@ var legacyTables = []string{
 	"live_session_phases", "live_session_files",
 	"global_tool_sequences", "global_tool_trigrams",
 	"tags",
+	// V1 era (dropped in V2 静観型執事)
+	"preferences",
 }
 
 var legacyTriggers = []string{
@@ -235,11 +240,30 @@ func Migrate(db *sql.DB) error {
 		return nil
 	}
 
-	// Drop legacy tables, triggers, and indexes from previous versions.
+	// V2 is a breaking change — drop everything and rebuild.
 	if current != 0 {
+		// Drop FTS virtual tables first (triggers reference them).
+		for _, vt := range []string{"decisions_fts", "docs_fts"} {
+			db.Exec("DROP TABLE IF EXISTS " + vt)
+		}
+		// Drop triggers.
 		for _, trigger := range legacyTriggers {
 			db.Exec("DROP TRIGGER IF EXISTS " + trigger)
 		}
+		for _, trigger := range []string{
+			"docs_fts_ai", "docs_fts_ad", "docs_fts_au",
+			"decisions_fts_ai", "decisions_fts_ad", "decisions_fts_au",
+		} {
+			db.Exec("DROP TRIGGER IF EXISTS " + trigger)
+		}
+		// Drop all V1 core tables.
+		for _, table := range []string{
+			"decisions", "compact_events", "events", "sessions",
+			"embeddings", "docs", "schema_version",
+		} {
+			db.Exec("DROP TABLE IF EXISTS " + table)
+		}
+		// Drop legacy tables from even older versions.
 		for _, table := range legacyTables {
 			db.Exec("DROP TABLE IF EXISTS " + table)
 		}
@@ -248,7 +272,7 @@ func Migrate(db *sql.DB) error {
 		}
 	}
 
-	if _, err := db.Exec(ddlV1); err != nil {
+	if _, err := db.Exec(ddl); err != nil {
 		return err
 	}
 

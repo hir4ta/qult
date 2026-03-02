@@ -225,10 +225,14 @@ func runHook(event string) error {
 		if ev.SessionID != "" && ev.ProjectPath != "" {
 			_ = st.EnsureSession(ev.SessionID, ev.ProjectPath)
 			ingestProjectClaudeMD(st, ev.ProjectPath)
-			autoHarvestIfStale(st)
 		}
 		if ev.Source == "compact" && ev.SessionID != "" {
 			if ctx := buildCompactContext(st, ev.SessionID); ctx != "" {
+				fmt.Print(ctx)
+			}
+		}
+		if ev.Source != "compact" && ev.SessionID != "" && ev.ProjectPath != "" {
+			if ctx := buildSessionStartContext(st, ev.SessionID, ev.ProjectPath); ctx != "" {
 				fmt.Print(ctx)
 			}
 		}
@@ -240,8 +244,22 @@ func runHook(event string) error {
 		}
 	case "SubagentStart":
 		if ev.SessionID != "" {
+			var parts []string
 			if ctx := buildCompactContext(st, ev.SessionID); ctx != "" {
-				fmt.Print(ctx)
+				parts = append(parts, ctx)
+			}
+			if sess, _ := st.GetSession(ev.SessionID); sess != nil {
+				failures, _ := st.GetToolFailurePatterns(sess.ProjectPath, 3)
+				if len(failures) > 0 {
+					var items []string
+					for _, f := range failures {
+						items = append(items, fmt.Sprintf("%s (failed %dx)", f.ToolName, f.FailureCount))
+					}
+					parts = append(parts, "Tool failure patterns: "+strings.Join(items, ", "))
+				}
+			}
+			if len(parts) > 0 {
+				fmt.Print(strings.Join(parts, "\n\n"))
 			}
 		}
 	case "SubagentStop":
@@ -298,6 +316,33 @@ func buildProjectContext(prompt string) string {
 		}
 	}
 
+	// Co-changed files
+	for _, p := range paths {
+		if len(hints) >= 5 {
+			break
+		}
+		coChanged, err := st.GetCoChangedFiles(p, 3)
+		if err != nil || len(coChanged) == 0 {
+			continue
+		}
+		var names []string
+		for _, c := range coChanged {
+			names = append(names, filepath.Base(c.Path))
+		}
+		hints = append(hints, fmt.Sprintf("Files often changed with %s: %s", filepath.Base(p), strings.Join(names, ", ")))
+	}
+
+	// Tool failure patterns
+	failures, err := st.GetToolFailurePatterns(currentProjectPath(st), 3)
+	if err == nil {
+		for _, f := range failures {
+			if len(hints) >= 7 {
+				break
+			}
+			hints = append(hints, fmt.Sprintf("Note: %s has failed %d times recently", f.ToolName, f.FailureCount))
+		}
+	}
+
 	if len(hints) == 0 {
 		return ""
 	}
@@ -310,6 +355,14 @@ func buildProjectContext(prompt string) string {
 	}
 
 	return "Past decisions about referenced files: " + strings.Join(hints, " | ")
+}
+
+func currentProjectPath(st *store.Store) string {
+	latest, err := st.GetLatestSession("")
+	if err != nil || latest == nil {
+		return ""
+	}
+	return latest.ProjectPath
 }
 
 // promptText extracts the user's message from the hook payload.
@@ -451,6 +504,20 @@ func buildCompactContext(st *store.Store, sessionID string) string {
 		}
 	}
 
+	// Hotspot warnings
+	if sess, _ := st.GetSession(sessionID); sess != nil && sess.ProjectPath != "" {
+		hotspots, _ := st.GetFileReworkHotspots(sess.ProjectPath, 3)
+		if len(hotspots) > 0 {
+			b.WriteString("\n## Frequently modified files\n")
+			for i, h := range hotspots {
+				if i >= 3 {
+					break
+				}
+				fmt.Fprintf(&b, "- %s (changed in %d sessions)\n", filepath.Base(h.Path), h.SessionCount)
+			}
+		}
+	}
+
 	return b.String()
 }
 
@@ -523,46 +590,39 @@ func ingestProjectClaudeMD(st *store.Store, projectPath string) {
 }
 
 // ---------------------------------------------------------------------------
-// SessionStart: auto-harvest (changelog freshness check)
+// SessionStart: session start context (non-compact)
 // ---------------------------------------------------------------------------
 
-// autoHarvestIfStale checks if the knowledge base changelog is stale (>7 days)
-// and fetches the latest changelog if so. Uses a short timeout to stay within
-// the SessionStart hook budget. Silently skips on any error.
-func autoHarvestIfStale(st *store.Store) {
-	_, crawledAt, _ := st.LatestChangelogVersion()
-	if crawledAt != "" {
-		t, err := time.Parse(time.RFC3339, crawledAt)
-		if err == nil && time.Since(t) < 7*24*time.Hour {
-			return // fresh enough
+// buildSessionStartContext provides context hints at session start (non-compact),
+// including previous session quality warnings and file hotspots.
+func buildSessionStartContext(st *store.Store, sessionID, projectPath string) string {
+	var parts []string
+
+	prev, err := st.GetLatestSession(projectPath)
+	if err == nil && prev != nil && prev.ID != sessionID {
+		if prev.CompactCount >= 3 {
+			parts = append(parts, fmt.Sprintf("Previous session had %d context compactions. Consider splitting tasks into smaller sessions.", prev.CompactCount))
 		}
 	}
 
-	sources, err := install.FetchAndParseChangelog(3 * time.Second)
-	if err != nil {
-		return // network unavailable — silently skip
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	var failures int
-	for _, src := range sources {
-		for _, sec := range src.Sections {
-			if _, _, err := st.UpsertDoc(&store.DocRow{
-				URL:         src.URL,
-				SectionPath: sec.Path,
-				Content:     sec.Content,
-				SourceType:  src.SourceType,
-				Version:     src.Version,
-				CrawledAt:   now,
-				TTLDays:     30,
-			}); err != nil {
-				failures++
-				if failures > 3 {
-					return // database likely broken — stop trying
-				}
+	hotspots, err := st.GetFileReworkHotspots(projectPath, 3)
+	if err == nil && len(hotspots) > 0 {
+		var items []string
+		for _, h := range hotspots {
+			if len(items) >= 3 {
+				break
 			}
+			items = append(items, fmt.Sprintf("%s (%d sessions)", filepath.Base(h.Path), h.SessionCount))
+		}
+		if len(items) > 0 {
+			parts = append(parts, "Frequently modified files: "+strings.Join(items, ", "))
 		}
 	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "\n")
 }
 
 func printUsage() {

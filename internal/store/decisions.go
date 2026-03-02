@@ -17,6 +17,8 @@ type DecisionRow struct {
 	Topic          string
 	DecisionText   string
 	Reasoning      string
+	ContextBefore  string
+	ContextAfter   string
 	FilePaths      string // JSON array
 	CompactSegment int
 }
@@ -104,7 +106,7 @@ func ExtractDecisions(assistantText string, timestamp string) []DecisionRow {
 	var decisions []DecisionRow
 	seen := make(map[string]bool)
 
-	for _, sentence := range sentences {
+	for i, sentence := range sentences {
 		trimmed := strings.TrimSpace(sentence)
 		if trimmed == "" {
 			continue
@@ -132,11 +134,27 @@ func ExtractDecisions(assistantText string, timestamp string) []DecisionRow {
 			topic = string(runes[:80])
 		}
 
+		var ctxBefore, ctxAfter string
+		if i > 0 {
+			ctxBefore = strings.TrimSpace(sentences[i-1])
+			if runes := []rune(ctxBefore); len(runes) > 200 {
+				ctxBefore = string(runes[:200])
+			}
+		}
+		if i < len(sentences)-1 {
+			ctxAfter = strings.TrimSpace(sentences[i+1])
+			if runes := []rune(ctxAfter); len(runes) > 200 {
+				ctxAfter = string(runes[:200])
+			}
+		}
+
 		decisions = append(decisions, DecisionRow{
-			Timestamp:    timestamp,
-			Topic:        topic,
-			DecisionText: trimmed,
-			FilePaths:    string(filePathsJSON),
+			Timestamp:     timestamp,
+			Topic:         topic,
+			DecisionText:  trimmed,
+			ContextBefore: ctxBefore,
+			ContextAfter:  ctxAfter,
+			FilePaths:     string(filePathsJSON),
 		})
 	}
 
@@ -205,9 +223,9 @@ func ExtractFilePaths(text string) []string {
 // The FTS index is updated automatically via database trigger (decisions_fts).
 func (s *Store) InsertDecision(d *DecisionRow) error {
 	res, err := s.db.Exec(`
-		INSERT INTO decisions (session_id, event_id, timestamp, topic, decision_text, reasoning, file_paths, compact_segment)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		d.SessionID, d.EventID, d.Timestamp, d.Topic, d.DecisionText, d.Reasoning, d.FilePaths, d.CompactSegment,
+		INSERT INTO decisions (session_id, event_id, timestamp, topic, decision_text, reasoning, context_before, context_after, file_paths, compact_segment)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		d.SessionID, d.EventID, d.Timestamp, d.Topic, d.DecisionText, d.Reasoning, d.ContextBefore, d.ContextAfter, d.FilePaths, d.CompactSegment,
 	)
 	if err != nil {
 		return err
@@ -244,7 +262,8 @@ func (s *Store) matchDecisionsFTS(ftsQuery string, sessionID string, limit int) 
 	if sessionID != "" {
 		sqlStr = `
 			SELECT d.id, d.session_id, d.event_id, d.timestamp, d.topic,
-			       d.decision_text, d.reasoning, d.file_paths, d.compact_segment
+			       d.decision_text, d.reasoning, COALESCE(d.context_before,''), COALESCE(d.context_after,''),
+			       d.file_paths, d.compact_segment
 			FROM decisions_fts f
 			JOIN decisions d ON d.id = f.rowid
 			WHERE decisions_fts MATCH ? AND d.session_id = ?
@@ -254,7 +273,8 @@ func (s *Store) matchDecisionsFTS(ftsQuery string, sessionID string, limit int) 
 	} else {
 		sqlStr = `
 			SELECT d.id, d.session_id, d.event_id, d.timestamp, d.topic,
-			       d.decision_text, d.reasoning, d.file_paths, d.compact_segment
+			       d.decision_text, d.reasoning, COALESCE(d.context_before,''), COALESCE(d.context_after,''),
+			       d.file_paths, d.compact_segment
 			FROM decisions_fts f
 			JOIN decisions d ON d.id = f.rowid
 			WHERE decisions_fts MATCH ?
@@ -282,7 +302,8 @@ func (s *Store) searchDecisionsLIKE(query string, sessionID string, limit int) (
 
 	whereClause := strings.Join(where, " AND ")
 	sqlStr := fmt.Sprintf(`
-		SELECT d.id, d.session_id, d.event_id, d.timestamp, d.topic, d.decision_text, d.reasoning, d.file_paths, d.compact_segment
+		SELECT d.id, d.session_id, d.event_id, d.timestamp, d.topic, d.decision_text, d.reasoning,
+		       COALESCE(d.context_before,''), COALESCE(d.context_after,''), d.file_paths, d.compact_segment
 		FROM decisions d
 		WHERE %s
 		ORDER BY d.timestamp DESC
@@ -313,7 +334,7 @@ func (s *Store) scanDecisionRows(sqlStr string, args []any) ([]DecisionRow, erro
 	for dbRows.Next() {
 		var r DecisionRow
 		var filePaths, reasoning *string
-		if err := dbRows.Scan(&r.ID, &r.SessionID, &r.EventID, &r.Timestamp, &r.Topic, &r.DecisionText, &reasoning, &filePaths, &r.CompactSegment); err != nil {
+		if err := dbRows.Scan(&r.ID, &r.SessionID, &r.EventID, &r.Timestamp, &r.Topic, &r.DecisionText, &reasoning, &r.ContextBefore, &r.ContextAfter, &filePaths, &r.CompactSegment); err != nil {
 			return nil, err
 		}
 		if reasoning != nil {
@@ -337,7 +358,8 @@ func (s *Store) SearchDecisionsByFile(filePath string, limit int) ([]DecisionRow
 
 	dbRows, err := s.db.Query(`
 		SELECT d.id, d.session_id, COALESCE(d.event_id,0), d.timestamp, d.topic,
-			   d.decision_text, COALESCE(d.reasoning,''), COALESCE(d.file_paths,'[]'), d.compact_segment
+			   d.decision_text, COALESCE(d.reasoning,''), COALESCE(d.context_before,''), COALESCE(d.context_after,''),
+			   COALESCE(d.file_paths,'[]'), d.compact_segment
 		FROM decisions d
 		WHERE d.file_paths LIKE ?
 		ORDER BY d.timestamp DESC
@@ -351,7 +373,7 @@ func (s *Store) SearchDecisionsByFile(filePath string, limit int) ([]DecisionRow
 	for dbRows.Next() {
 		var r DecisionRow
 		if err := dbRows.Scan(&r.ID, &r.SessionID, &r.EventID, &r.Timestamp, &r.Topic,
-			&r.DecisionText, &r.Reasoning, &r.FilePaths, &r.CompactSegment); err != nil {
+			&r.DecisionText, &r.Reasoning, &r.ContextBefore, &r.ContextAfter, &r.FilePaths, &r.CompactSegment); err != nil {
 			continue
 		}
 		rows = append(rows, r)
@@ -375,7 +397,8 @@ func (s *Store) SearchDecisionsByDirectory(dirPath string, limit int) ([]Decisio
 
 	dbRows, err := s.db.Query(`
 		SELECT d.id, d.session_id, COALESCE(d.event_id,0), d.timestamp, d.topic,
-			   d.decision_text, COALESCE(d.reasoning,''), COALESCE(d.file_paths,'[]'), d.compact_segment
+			   d.decision_text, COALESCE(d.reasoning,''), COALESCE(d.context_before,''), COALESCE(d.context_after,''),
+			   COALESCE(d.file_paths,'[]'), d.compact_segment
 		FROM decisions d
 		WHERE d.file_paths LIKE ? ESCAPE '\'
 		ORDER BY d.timestamp DESC
@@ -389,7 +412,7 @@ func (s *Store) SearchDecisionsByDirectory(dirPath string, limit int) ([]Decisio
 	for dbRows.Next() {
 		var r DecisionRow
 		if err := dbRows.Scan(&r.ID, &r.SessionID, &r.EventID, &r.Timestamp, &r.Topic,
-			&r.DecisionText, &r.Reasoning, &r.FilePaths, &r.CompactSegment); err != nil {
+			&r.DecisionText, &r.Reasoning, &r.ContextBefore, &r.ContextAfter, &r.FilePaths, &r.CompactSegment); err != nil {
 			continue
 		}
 		rows = append(rows, r)
@@ -409,7 +432,8 @@ func (s *Store) GetDecisions(sessionID string, project string, limit int) ([]Dec
 	switch {
 	case sessionID != "" && project != "":
 		sqlStr = `
-			SELECT d.id, d.session_id, d.event_id, d.timestamp, d.topic, d.decision_text, d.reasoning, d.file_paths, d.compact_segment
+			SELECT d.id, d.session_id, d.event_id, d.timestamp, d.topic, d.decision_text, d.reasoning,
+			       COALESCE(d.context_before,''), COALESCE(d.context_after,''), d.file_paths, d.compact_segment
 			FROM decisions d
 			JOIN sessions s ON d.session_id = s.id
 			WHERE d.session_id = ? AND s.project_name = ?
@@ -418,7 +442,8 @@ func (s *Store) GetDecisions(sessionID string, project string, limit int) ([]Dec
 		args = []any{sessionID, project, limit}
 	case sessionID != "":
 		sqlStr = `
-			SELECT d.id, d.session_id, d.event_id, d.timestamp, d.topic, d.decision_text, d.reasoning, d.file_paths, d.compact_segment
+			SELECT d.id, d.session_id, d.event_id, d.timestamp, d.topic, d.decision_text, d.reasoning,
+			       COALESCE(d.context_before,''), COALESCE(d.context_after,''), d.file_paths, d.compact_segment
 			FROM decisions d
 			WHERE d.session_id = ?
 			ORDER BY d.timestamp DESC
@@ -426,7 +451,8 @@ func (s *Store) GetDecisions(sessionID string, project string, limit int) ([]Dec
 		args = []any{sessionID, limit}
 	case project != "":
 		sqlStr = `
-			SELECT d.id, d.session_id, d.event_id, d.timestamp, d.topic, d.decision_text, d.reasoning, d.file_paths, d.compact_segment
+			SELECT d.id, d.session_id, d.event_id, d.timestamp, d.topic, d.decision_text, d.reasoning,
+			       COALESCE(d.context_before,''), COALESCE(d.context_after,''), d.file_paths, d.compact_segment
 			FROM decisions d
 			JOIN sessions s ON d.session_id = s.id
 			WHERE s.project_name = ?
@@ -435,7 +461,8 @@ func (s *Store) GetDecisions(sessionID string, project string, limit int) ([]Dec
 		args = []any{project, limit}
 	default:
 		sqlStr = `
-			SELECT d.id, d.session_id, d.event_id, d.timestamp, d.topic, d.decision_text, d.reasoning, d.file_paths, d.compact_segment
+			SELECT d.id, d.session_id, d.event_id, d.timestamp, d.topic, d.decision_text, d.reasoning,
+			       COALESCE(d.context_before,''), COALESCE(d.context_after,''), d.file_paths, d.compact_segment
 			FROM decisions d
 			ORDER BY d.timestamp DESC
 			LIMIT ?`
@@ -452,7 +479,7 @@ func (s *Store) GetDecisions(sessionID string, project string, limit int) ([]Dec
 	for dbRows.Next() {
 		var r DecisionRow
 		var filePaths, reasoning *string
-		if err := dbRows.Scan(&r.ID, &r.SessionID, &r.EventID, &r.Timestamp, &r.Topic, &r.DecisionText, &reasoning, &filePaths, &r.CompactSegment); err != nil {
+		if err := dbRows.Scan(&r.ID, &r.SessionID, &r.EventID, &r.Timestamp, &r.Topic, &r.DecisionText, &reasoning, &r.ContextBefore, &r.ContextAfter, &filePaths, &r.CompactSegment); err != nil {
 			return nil, err
 		}
 		if reasoning != nil {
@@ -464,4 +491,12 @@ func (s *Store) GetDecisions(sessionID string, project string, limit int) ([]Dec
 		rows = append(rows, r)
 	}
 	return rows, dbRows.Err()
+}
+
+func (s *Store) DeleteDecision(id int64) error {
+	_, err := s.db.Exec("DELETE FROM decisions WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("store: delete decision: %w", err)
+	}
+	return nil
 }

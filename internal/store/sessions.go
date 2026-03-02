@@ -16,10 +16,12 @@ type SessionRow struct {
 	LastEventAt     string
 	FirstPrompt     string
 	Summary         string
-	TurnCount       int
-	ToolUseCount    int
-	CompactCount    int
-	ParentSessionID string
+	TurnCount            int
+	ToolUseCount         int
+	CompactCount         int
+	EstimatedInputTokens  int
+	EstimatedOutputTokens int
+	ParentSessionID      string
 	SyncedOffset    int64
 	SyncedAt        string
 }
@@ -31,8 +33,9 @@ func (s *Store) UpsertSession(sess *SessionRow) error {
 			id, project_path, project_name, jsonl_path,
 			first_event_at, last_event_at, first_prompt, summary,
 			turn_count, tool_use_count, compact_count,
+			estimated_input_tokens, estimated_output_tokens,
 			parent_session_id, synced_offset, synced_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET
 			project_path=excluded.project_path,
 			project_name=excluded.project_name,
@@ -44,12 +47,15 @@ func (s *Store) UpsertSession(sess *SessionRow) error {
 			turn_count=excluded.turn_count,
 			tool_use_count=excluded.tool_use_count,
 			compact_count=excluded.compact_count,
+			estimated_input_tokens=excluded.estimated_input_tokens,
+			estimated_output_tokens=excluded.estimated_output_tokens,
 			parent_session_id=excluded.parent_session_id,
 			synced_offset=excluded.synced_offset,
 			synced_at=excluded.synced_at`,
 		sess.ID, sess.ProjectPath, sess.ProjectName, sess.JSONLPath,
 		sess.FirstEventAt, sess.LastEventAt, sess.FirstPrompt, sess.Summary,
 		sess.TurnCount, sess.ToolUseCount, sess.CompactCount,
+		sess.EstimatedInputTokens, sess.EstimatedOutputTokens,
 		nullIfEmpty(sess.ParentSessionID), sess.SyncedOffset, sess.SyncedAt,
 	)
 	if err != nil {
@@ -65,6 +71,7 @@ func (s *Store) GetSession(id string) (*SessionRow, error) {
 			COALESCE(first_event_at,''), COALESCE(last_event_at,''),
 			COALESCE(first_prompt,''), COALESCE(summary,''),
 			turn_count, tool_use_count, compact_count,
+			estimated_input_tokens, estimated_output_tokens,
 			COALESCE(parent_session_id,''), synced_offset, COALESCE(synced_at,'')
 		FROM sessions WHERE id = ?`, id)
 	return scanSessionRow(row)
@@ -79,6 +86,7 @@ func (s *Store) GetLatestSession(project string) (*SessionRow, error) {
 				COALESCE(first_event_at,''), COALESCE(last_event_at,''),
 				COALESCE(first_prompt,''), COALESCE(summary,''),
 				turn_count, tool_use_count, compact_count,
+				estimated_input_tokens, estimated_output_tokens,
 				COALESCE(parent_session_id,''), synced_offset, COALESCE(synced_at,'')
 			FROM sessions
 			WHERE project_name = ? OR project_path = ?
@@ -90,6 +98,7 @@ func (s *Store) GetLatestSession(project string) (*SessionRow, error) {
 				COALESCE(first_event_at,''), COALESCE(last_event_at,''),
 				COALESCE(first_prompt,''), COALESCE(summary,''),
 				turn_count, tool_use_count, compact_count,
+				estimated_input_tokens, estimated_output_tokens,
 				COALESCE(parent_session_id,''), synced_offset, COALESCE(synced_at,'')
 			FROM sessions
 			ORDER BY last_event_at DESC
@@ -112,6 +121,7 @@ func (s *Store) GetSessionChain(sessionID string) ([]SessionRow, error) {
 			COALESCE(s.first_event_at,''), COALESCE(s.last_event_at,''),
 			COALESCE(s.first_prompt,''), COALESCE(s.summary,''),
 			s.turn_count, s.tool_use_count, s.compact_count,
+			s.estimated_input_tokens, s.estimated_output_tokens,
 			COALESCE(s.parent_session_id,''), s.synced_offset, COALESCE(s.synced_at,'')
 		FROM sessions s
 		JOIN chain c ON s.id = c.id
@@ -129,6 +139,7 @@ func (s *Store) GetSessionChain(sessionID string) ([]SessionRow, error) {
 			&sr.FirstEventAt, &sr.LastEventAt,
 			&sr.FirstPrompt, &sr.Summary,
 			&sr.TurnCount, &sr.ToolUseCount, &sr.CompactCount,
+			&sr.EstimatedInputTokens, &sr.EstimatedOutputTokens,
 			&sr.ParentSessionID, &sr.SyncedOffset, &sr.SyncedAt,
 		); err != nil {
 			continue
@@ -144,6 +155,8 @@ type ProjectStats struct {
 	TotalTurns         int
 	TotalToolUses      int
 	TotalCompacts      int
+	TotalInputTokens   int
+	TotalOutputTokens  int
 	AvgTurnsPerSession float64
 	AvgCompactsPerSess float64
 }
@@ -153,13 +166,15 @@ func (s *Store) GetProjectSessionStats(projectPath string) (*ProjectStats, error
 	row := s.db.QueryRow(`
 		SELECT COUNT(*), COALESCE(SUM(turn_count),0), COALESCE(SUM(tool_use_count),0),
 			COALESCE(SUM(compact_count),0),
+			COALESCE(SUM(estimated_input_tokens),0), COALESCE(SUM(estimated_output_tokens),0),
 			COALESCE(AVG(turn_count),0),
 			COALESCE(AVG(compact_count),0)
 		FROM sessions WHERE project_path = ?`, projectPath)
 
 	var ps ProjectStats
 	err := row.Scan(&ps.TotalSessions, &ps.TotalTurns, &ps.TotalToolUses,
-		&ps.TotalCompacts, &ps.AvgTurnsPerSession, &ps.AvgCompactsPerSess)
+		&ps.TotalCompacts, &ps.TotalInputTokens, &ps.TotalOutputTokens,
+		&ps.AvgTurnsPerSession, &ps.AvgCompactsPerSess)
 	if err != nil {
 		return nil, fmt.Errorf("store: get project session stats: %w", err)
 	}
@@ -184,6 +199,7 @@ func (s *Store) FindSessionByJSONLPath(jsonlPath string) (*SessionRow, error) {
 			COALESCE(first_event_at,''), COALESCE(last_event_at,''),
 			COALESCE(first_prompt,''), COALESCE(summary,''),
 			turn_count, tool_use_count, compact_count,
+			estimated_input_tokens, estimated_output_tokens,
 			COALESCE(parent_session_id,''), synced_offset, COALESCE(synced_at,'')
 		FROM sessions WHERE jsonl_path = ?`, jsonlPath)
 	sr, err := scanSessionRow(row)
@@ -218,6 +234,7 @@ func scanSessionRow(row *sql.Row) (*SessionRow, error) {
 		&sr.FirstEventAt, &sr.LastEventAt,
 		&sr.FirstPrompt, &sr.Summary,
 		&sr.TurnCount, &sr.ToolUseCount, &sr.CompactCount,
+		&sr.EstimatedInputTokens, &sr.EstimatedOutputTokens,
 		&sr.ParentSessionID, &sr.SyncedOffset, &sr.SyncedAt,
 	)
 	if err != nil {
@@ -252,10 +269,54 @@ func (s *Store) RecordToolUse(sessionID, toolName string, success bool) error {
 		UPDATE sessions
 		SET tool_use_count = tool_use_count + 1, last_event_at = ?
 		WHERE id = ?`, now, sessionID)
+	if err != nil {
+		return err
+	}
+	if !success {
+		_, err = s.db.Exec(`INSERT INTO tool_failures (session_id, tool_name, failure_count, last_failure_at)
+			VALUES (?, ?, 1, ?) ON CONFLICT(session_id, tool_name) DO UPDATE SET
+			failure_count = failure_count + 1, last_failure_at = excluded.last_failure_at`,
+			sessionID, toolName, now)
+	}
 	return err
 }
 
-func nullIfEmpty(s string) interface{} {
+type ToolFailure struct {
+	ToolName     string
+	FailureCount int
+	SessionCount int
+}
+
+func (s *Store) GetToolFailurePatterns(projectPath string, minFailures int) ([]ToolFailure, error) {
+	if minFailures < 1 {
+		minFailures = 3
+	}
+	rows, err := s.db.Query(`
+		SELECT tf.tool_name, SUM(tf.failure_count) AS total_failures, COUNT(DISTINCT tf.session_id) AS sess_count
+		FROM tool_failures tf
+		JOIN sessions s ON tf.session_id = s.id
+		WHERE s.project_path = ?
+		GROUP BY tf.tool_name
+		HAVING total_failures >= ?
+		ORDER BY total_failures DESC
+		LIMIT 10`, projectPath, minFailures)
+	if err != nil {
+		return nil, fmt.Errorf("store: get tool failure patterns: %w", err)
+	}
+	defer rows.Close()
+
+	var result []ToolFailure
+	for rows.Next() {
+		var tf ToolFailure
+		if err := rows.Scan(&tf.ToolName, &tf.FailureCount, &tf.SessionCount); err != nil {
+			continue
+		}
+		result = append(result, tf)
+	}
+	return result, nil
+}
+
+func nullIfEmpty(s string) any {
 	if s == "" {
 		return nil
 	}

@@ -57,6 +57,8 @@ func (s *Store) SyncSession(jsonlPath string) error {
 	toolUseCount := sess.ToolUseCount
 	var firstEventAt, lastEventAt string
 	var firstPrompt string
+	inputChars := sess.EstimatedInputTokens
+	outputChars := sess.EstimatedOutputTokens
 	if sess.FirstEventAt != "" {
 		firstEventAt = sess.FirstEventAt
 	}
@@ -100,6 +102,7 @@ func (s *Store) SyncSession(jsonlPath string) error {
 
 			case parser.EventUserMessage:
 				turnCount++
+				inputChars += len([]rune(ev.UserText))
 				if firstPrompt == "" && ev.UserText != "" && !ev.IsAnswer {
 					text := ev.UserText
 					runes := []rune(text)
@@ -136,6 +139,7 @@ func (s *Store) SyncSession(jsonlPath string) error {
 				}
 
 			case parser.EventAssistantText:
+				outputChars += len([]rune(ev.AssistantText))
 				if _, err := s.InsertEvent(&EventRow{
 					SessionID:      sess.ID,
 					EventType:      int(ev.Type),
@@ -215,6 +219,8 @@ func (s *Store) SyncSession(jsonlPath string) error {
 	sess.TurnCount = turnCount
 	sess.ToolUseCount = toolUseCount
 	sess.CompactCount = compactSegment
+	sess.EstimatedInputTokens = inputChars
+	sess.EstimatedOutputTokens = outputChars
 	sess.SyncedOffset = offset
 	sess.SyncedAt = time.Now().UTC().Format(time.RFC3339)
 

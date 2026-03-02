@@ -13,122 +13,64 @@ type skillDef struct {
 
 var alfredSkills = []skillDef{
 	{
-		Dir: "inspect",
+		Dir: "configure",
 		Content: `---
-name: inspect
+name: configure
 description: >
-  Full Claude Code utilization report for your project. Analyzes CLAUDE.md,
-  skills, rules, hooks, MCP servers, and session history. Returns improvement
-  suggestions backed by best practices. Includes quick audit and migration checks.
-user-invocable: true
-argument-hint: "[--quick]"
-allowed-tools: Read, Glob, mcp__alfred__review, mcp__alfred__knowledge, mcp__alfred__preferences
-context: fork
-agent: general-purpose
----
-
-The butler's rounds — inspect the estate and report what needs attention.
-
-## Steps
-
-1. **[HOW]** Load context:
-   - Call ` + "`preferences`" + ` with action="get" to understand the user's style
-   - Call ` + "`review`" + ` with project_path=$CWD for current setup analysis
-
-2. **[WHAT]** If $ARGUMENTS contains "--quick":
-   - Output a checklist only: ` + "`[x] CLAUDE.md (N lines)`" + `, ` + "`[ ] Hooks (not configured)`" + `, etc.
-   - One-line suggestion for each missing item
-   - STOP here
-
-3. **[HOW]** Deep analysis:
-   - Call ` + "`knowledge`" + ` with query about latest best practices and setup checklist
-   - Compare current setup against best practices:
-     - CLAUDE.md: presence, length (<200 lines), required sections (Stack, Commands, Rules)
-     - Skills: constraint tags (HOW/WHAT), guardrails section, tool least-privilege
-     - Rules: valid glob patterns, actionable instructions, concise (<20 lines)
-     - Hooks: timeout appropriateness, matcher specificity
-     - Agents: model explicit, tools minimal, description explains WHEN to delegate
-     - MCP: no hardcoded API keys, valid commands
-
-4. **[WHAT]** Migration check:
-   - Identify outdated patterns (missing constraint tags, deprecated fields, new event types)
-   - Flag features available in current CC version but not yet adopted
-
-5. **[Template]** Output format:
-   ` + "```" + `
-   ## Setup Score: N/10
-
-   ### In Use
-   - ...
-
-   ### Needs Attention (ordered by impact)
-   1. **[HIGH]** What — Why — How to fix
-   2. **[MEDIUM]** ...
-
-   ### Migration Opportunities
-   - ...
-   ` + "```" + `
-
-## Guardrails
-
-- Do NOT suggest changes that conflict with user preferences
-- Do NOT report LOW severity or PASS items — only actionable findings
-- Do NOT read file contents unless checking specific patterns; rely on review MCP tool
-- Keep report under 30 lines unless user asks for detail
-`,
-	},
-	{
-		Dir: "prepare",
-		Content: `---
-name: prepare
-description: >
-  Generate a new Claude Code configuration file (skill, rule, hook, agent,
-  MCP server, CLAUDE.md, or memory) following latest best practices and
-  the user's preferences.
+  Generate or update Claude Code configuration files (skill, rule, hook,
+  agent, MCP server, CLAUDE.md, or memory) following latest best practices.
 user-invocable: true
 argument-hint: "<type> [name]"
-allowed-tools: Read, Write, Edit, Glob, Bash, Agent, AskUserQuestion, mcp__alfred__knowledge, mcp__alfred__preferences
+allowed-tools: Read, Write, Edit, Glob, Bash, Agent, AskUserQuestion, mcp__alfred__knowledge
 context: current
 ---
 
-The butler prepares what the master needs — tailored to their preferences.
+The butler tends to the estate's configuration — whether building new or polishing existing.
 
 ## Steps
 
-1. **[HOW]** Load user preferences:
-   - Call ` + "`preferences`" + ` with action="get" to understand coding style and workflow
-
-2. **[WHAT]** Determine target type:
-   - Parse $ARGUMENTS for type: ` + "`skill`" + `, ` + "`rule`" + `, ` + "`hook`" + `, ` + "`agent`" + `, ` + "`mcp`" + `, ` + "`claude-md`" + `, ` + "`memory`" + `
+1. **[WHAT]** Determine target type from $ARGUMENTS:
+   - Parse for type: ` + "`skill`" + `, ` + "`rule`" + `, ` + "`hook`" + `, ` + "`agent`" + `, ` + "`mcp`" + `, ` + "`claude-md`" + `, ` + "`memory`" + `
    - If type not provided or unclear, ask with AskUserQuestion
    - If name not provided, ask for it (except claude-md and memory which have fixed paths)
 
-3. **[HOW]** Check for collisions:
-   - Glob for existing files at the target path
-   - If exists, warn and ask whether to overwrite or use ` + "`/polish`" + ` instead
+2. **[HOW]** Check if target file exists:
+   - Glob for existing files at the target path (see Target Paths below)
 
-4. **[HOW]** Gather requirements (type-specific):
-   - **skill**: purpose, user-invocable flag, fork/current context, allowed-tools
-   - **rule**: enforcement concept, glob patterns (e.g., ` + "`**/*.go`" + `)
-   - **hook**: event type, handler purpose, blocking behavior
-   - **agent**: specialization, required tools, memory type (user/project/local)
-   - **mcp**: server name/npm package, server type (stdio/sse)
-   - **claude-md**: detect project stack (go.mod, package.json, etc.), scan structure
-   - **memory**: check auto memory path, topic organization
+3. **[HOW]** If file EXISTS (polish flow):
+   - Read the current file content in full
+   - Call ` + "`knowledge`" + ` with query about latest best practices for this type
+   - Compare against best practices and identify gaps (type-specific):
+     - **skill**: constraint tags (HOW/WHAT/Template/Guardrails), tool least-privilege, argument-hint, context choice
+     - **rule**: glob patterns valid, instructions actionable, concise (<20 lines)
+     - **hook**: timeout values appropriate, matchers specific, handler robust
+     - **agent**: model explicit, tools minimal, description explains WHEN to delegate, maxTurns set
+     - **mcp**: env vars for secrets, valid command
+     - **claude-md**: <200 lines, required sections, actionable rules, copy-pasteable commands
+     - **memory**: <200 lines, topic-organized, no session-specific content
+   - Present proposed changes with before/after diff and ask for approval
+   - Use Edit tool to apply approved changes (preserve unchanged sections)
 
-5. **[HOW]** Search best practices:
+4. **[HOW]** If file is NEW (prepare flow):
+   - Gather requirements (type-specific):
+     - **skill**: purpose, user-invocable flag, fork/current context, allowed-tools
+     - **rule**: enforcement concept, glob patterns (e.g., ` + "`**/*.go`" + `)
+     - **hook**: event type, handler purpose, blocking behavior
+     - **agent**: specialization, required tools, memory type (user/project/local)
+     - **mcp**: server name/npm package, server type (stdio/sse)
+     - **claude-md**: detect project stack (go.mod, package.json, etc.), scan structure
+     - **memory**: check auto memory path, topic organization
    - Call ` + "`knowledge`" + ` with query about the specific type's best practices
+   - Generate from type-specific template:
+     - **skill**: frontmatter (name, description, allowed-tools, context, agent) + constraint tags (HOW/WHAT/Template/Guardrails)
+     - **rule**: frontmatter with paths + actionable instructions (<20 lines)
+     - **hook**: hooks.json entry (timeout, matcher, command) + handler script
+     - **agent**: frontmatter (name, description, tools, model, maxTurns, memory) + system prompt
+     - **mcp**: .mcp.json entry (command, args, env — no hardcoded API keys)
+     - **claude-md**: Stack, Commands, Structure, Rules sections (<200 lines)
+     - **memory**: MEMORY.md template organized by topic
 
-6. **[Template]** Generate from type-specific template:
-   - **skill**: frontmatter (name, description, allowed-tools, context, agent) + constraint tags (HOW/WHAT/Template/Guardrails)
-   - **rule**: frontmatter with paths + actionable instructions (<20 lines)
-   - **hook**: hooks.json entry (timeout, matcher, command) + handler script
-   - **agent**: frontmatter (name, description, tools, model, maxTurns, memory) + system prompt
-   - **mcp**: .mcp.json entry (command, args, env — no hardcoded API keys)
-   - **claude-md**: Stack, Commands, Structure, Rules sections (<200 lines)
-   - **memory**: MEMORY.md template organized by topic
-
-7. **[HOW]** Validate (type-specific):
+5. **[HOW]** Validate type-specific constraints:
    - skill: name format, tool least-privilege, guardrails section exists
    - rule: glob patterns valid, instructions actionable (no "consider"), concise
    - hook: timeout ≤5s for PreToolUse, ≤30s for others, matcher not overly broad
@@ -137,10 +79,10 @@ The butler prepares what the master needs — tailored to their preferences.
    - claude-md: <200 lines, copy-pasteable commands
    - memory: <200 lines, no session-specific content
 
-8. **[HOW]** Write file to target path
+6. **[HOW]** Write/Edit file to target path
 
-9. **[HOW]** Independent review:
-   - Spawn Explore agent to validate the generated file against knowledge base
+7. **[HOW]** Independent review:
+   - Spawn Explore agent to validate the generated/updated file against knowledge base
    - Fix any issues found
 
 ## Target Paths
@@ -157,105 +99,64 @@ The butler prepares what the master needs — tailored to their preferences.
 
 ## Guardrails
 
-- Do NOT generate without checking user preferences first
+- Do NOT overwrite existing files without asking for approval first
 - Do NOT use overly broad tool lists — apply least-privilege
 - Do NOT skip the independent review step
 - Do NOT hardcode API keys or secrets in any generated file
 - Do NOT create files that exceed type-specific line limits
+- Preserve the user's voice and style when updating existing files
 `,
 	},
 	{
-		Dir: "polish",
+		Dir: "setup",
 		Content: `---
-name: polish
+name: setup
 description: >
-  Update an existing Claude Code configuration file (skill, rule, hook,
-  agent, CLAUDE.md, memory, MCP) against latest best practices. Reads the
-  current file, compares with knowledge base, proposes improvements.
+  Set up Claude Code best practices for your project, or explain any
+  Claude Code feature with examples.
 user-invocable: true
-argument-hint: "<type> [name]"
-allowed-tools: Read, Write, Edit, Glob, Agent, AskUserQuestion, mcp__alfred__knowledge, mcp__alfred__preferences
+argument-hint: "[feature | --wizard]"
+allowed-tools: Read, Write, Edit, Glob, Bash, AskUserQuestion, mcp__alfred__knowledge, mcp__alfred__review
 context: current
 ---
 
-The butler polishes what already exists — making it shine against current standards.
+The butler welcomes the master and briefs them on the estate.
 
 ## Steps
 
-1. **[WHAT]** Determine target:
-   - Parse $ARGUMENTS for type and name: ` + "`skill foo`" + `, ` + "`rule go-errors`" + `, ` + "`claude-md`" + `, etc.
-   - If not provided, ask with AskUserQuestion
-   - Locate file using target paths (same as ` + "`/prepare`" + `)
+1. **[WHAT]** Determine mode from $ARGUMENTS:
+   - If arguments contain a feature name (hooks, skills, rules, agents, MCP, memory, worktrees, teams) → go to Step 2 (brief flow)
+   - If arguments contain "--wizard" or no arguments → go to Step 3 (wizard flow)
 
-2. **[HOW]** Read current file:
-   - Read the target file content in full
-   - If file not found, suggest using ` + "`/prepare`" + ` instead
+2. **[HOW]** Brief flow — explain a feature:
+   - Call ` + "`knowledge`" + ` with query about the selected feature
+   - If multiple results, synthesize the most relevant
+   - Output in template format:
+     ` + "```" + `
+     ## <Feature Name>
 
-3. **[HOW]** Load context:
-   - Call ` + "`preferences`" + ` with action="get"
-   - Call ` + "`knowledge`" + ` with query about latest best practices for this type
+     **What**: One sentence explanation.
 
-4. **[WHAT]** Compare and identify gaps (type-specific):
-   - **skill**: constraint tags present (HOW/WHAT/Template/Guardrails), tool least-privilege, argument-hint, context choice
-   - **rule**: glob patterns valid, instructions actionable, concise (<20 lines)
-   - **hook**: timeout values appropriate, matchers specific, handler robust
-   - **agent**: model explicit, tools minimal, description explains WHEN to delegate, maxTurns set
-   - **mcp**: env vars for secrets, valid command
-   - **claude-md**: <200 lines, required sections, actionable rules, copy-pasteable commands
-   - **memory**: <200 lines, topic-organized, no session-specific content
+     **When to use**:
+     - Scenario 1
+     - Scenario 2
 
-5. **[Template]** Present proposed changes:
-   ` + "```" + `
-   ## Proposed Changes
+     **Setup** (copy-pasteable):
+     ` + "```" + `
+     <minimal working example>
+     ` + "```" + `
 
-   ### 1. [What changed] — Why
-   - Before: ...
-   - After: ...
+     **Tips**:
+     - Practical tip 1
+     - Practical tip 2
+     ` + "```" + `
+   - STOP here
 
-   ### 2. ...
+3. **[HOW]** Wizard flow — interactive setup:
+   - Call ` + "`review`" + ` with project_path=$CWD to assess current setup
+   - Present current state as a status checklist: ` + "`[x] CLAUDE.md`" + `, ` + "`[ ] Hooks`" + `, etc.
 
-   Apply these changes? (y/n)
-   ` + "```" + `
-
-6. **[HOW]** Apply changes:
-   - Use Edit tool to apply approved changes (preserve unchanged sections)
-   - Do NOT rewrite the entire file
-
-7. **[HOW]** Independent review:
-   - Spawn Explore agent to validate the updated file
-   - Fix any issues found
-
-## Guardrails
-
-- Do NOT rewrite sections the user didn't ask to change
-- Do NOT apply changes without showing the diff and getting approval
-- Do NOT remove user customizations that don't conflict with best practices
-- Do NOT suggest changes that conflict with user preferences
-- Preserve the user's voice and style in the file
-`,
-	},
-	{
-		Dir: "greetings",
-		Content: `---
-name: greetings
-description: >
-  Interactive wizard to set up Claude Code best practices for your project.
-  Creates CLAUDE.md, hooks, skills, rules, and MCP configuration step by step.
-user-invocable: true
-allowed-tools: Read, Write, Edit, Glob, Bash, AskUserQuestion, mcp__alfred__knowledge, mcp__alfred__preferences, mcp__alfred__review
-context: current
----
-
-Welcome to the estate — the butler prepares everything for a new master.
-
-## Steps
-
-1. **[HOW]** Assess current setup:
-   - Call ` + "`review`" + ` with project_path=$CWD to see what already exists
-   - Call ` + "`preferences`" + ` with action="get" to load user style
-
-2. **[WHAT]** Show setup status and ask what to configure:
-   - Present current state: ` + "`[x] CLAUDE.md`" + `, ` + "`[ ] Hooks`" + `, etc.
+4. **[WHAT]** Ask what to configure:
    - Use AskUserQuestion with multiSelect=true:
      - CLAUDE.md
      - Skills
@@ -265,23 +166,22 @@ Welcome to the estate — the butler prepares everything for a new master.
      - Memory
    - Pre-select items that are missing
 
-3. **[HOW]** For each selected item, run the creation flow:
-   - Follow the same generation logic as ` + "`/prepare`" + ` for each type
-   - But streamlined — use sensible defaults based on detected project stack
-   - Ask fewer questions than standalone ` + "`/prepare`" + ` (wizard mode)
-
-4. **[HOW]** Detect project stack automatically:
+5. **[HOW]** Auto-detect project stack:
    - go.mod → Go project defaults (go vet, go test, Go rules)
    - package.json → Node project defaults (npm test, ESLint rules)
    - Cargo.toml → Rust project defaults
    - pyproject.toml → Python project defaults
    - Fall back to generic defaults
 
-5. **[HOW]** Verify setup:
+6. **[HOW]** Generate selected items:
+   - For each selected item, follow generation logic with sensible defaults based on detected stack
+   - Use streamlined wizard mode — ask fewer questions, prefer smart defaults
+
+7. **[HOW]** Verify setup:
    - Call ` + "`review`" + ` again to check improvement
    - Report before/after score
 
-6. **[Template]** Final output:
+8. **[Template]** Final output:
    ` + "```" + `
    ## Setup Complete
 
@@ -300,120 +200,11 @@ Welcome to the estate — the butler prepares everything for a new master.
 
 - Do NOT overwrite existing files without asking
 - Do NOT create configurations that conflict with each other
-- Do NOT ask more than 2 questions per item (wizard should be fast)
+- Do NOT ask more than 2 questions per item in wizard mode (wizard should be fast)
 - Do NOT skip stack detection — it drives sensible defaults
 - Do NOT create items the user didn't select
-`,
-	},
-	{
-		Dir: "brief",
-		Content: `---
-name: brief
-description: >
-  Explain any Claude Code feature with concrete examples. Covers hooks,
-  skills, rules, agents, MCP, memory, worktrees, teams, and more.
-user-invocable: true
-argument-hint: "<feature>"
-allowed-tools: AskUserQuestion, mcp__alfred__knowledge
-context: current
----
-
-The butler's morning briefing — concise, clear, actionable.
-
-## Steps
-
-1. **[WHAT]** Determine feature to explain:
-   - If $ARGUMENTS provided, use as feature name
-   - Otherwise, ask with AskUserQuestion: "Which feature would you like explained?"
-     - Options: hooks, skills, rules, agents, MCP, memory, worktrees, teams
-
-2. **[HOW]** Search knowledge base:
-   - Call ` + "`knowledge`" + ` with query about the selected feature
-   - If multiple results, synthesize the most relevant
-
-3. **[Template]** Output format:
-   ` + "```" + `
-   ## <Feature Name>
-
-   **What**: One sentence explanation.
-
-   **When to use**:
-   - Scenario 1
-   - Scenario 2
-
-   **Setup** (copy-pasteable):
-   ` + "```" + `
-   <minimal working example>
-   ` + "```" + `
-
-   **Tips**:
-   - Practical tip 1
-   - Practical tip 2
-   ` + "```" + `
-
-## Guardrails
-
-- Do NOT output more than 20 lines unless the user asks for detail
-- Do NOT fabricate features — only explain what's in the knowledge base
-- Do NOT include boilerplate or generic advice — be specific and practical
-- Do NOT explain multiple features at once — focus on the one requested
-`,
-	},
-	{
-		Dir: "memorize",
-		Content: `---
-name: memorize
-description: >
-  Tell alfred about your Claude Code preferences and working style, or view
-  what alfred already remembers. Preferences persist across all projects
-  and sessions.
-user-invocable: true
-argument-hint: "[preference to remember]"
-allowed-tools: AskUserQuestion, mcp__alfred__preferences
-context: current
----
-
-The butler memorizes the master's preferences — every detail matters.
-
-## Steps
-
-1. **[WHAT]** Determine intent:
-   - If $ARGUMENTS provided: treat as a preference to remember → go to Step 3
-   - If no arguments: show current preferences first
-
-2. **[HOW]** Show current preferences:
-   - Call ` + "`preferences`" + ` with action="get" (no filters)
-   - Group by category and display:
-     ` + "```" + `
-     ## Your Preferences
-
-     ### Coding Style
-     - language: Go
-     - ...
-
-     ### Workflow
-     - ...
-     ` + "```" + `
-   - If empty: "No preferences recorded yet. Tell me what you'd like me to remember."
-
-3. **[HOW]** Record new preference:
-   - Parse the preference from $ARGUMENTS or ask with AskUserQuestion:
-     - Category: coding_style, workflow, communication, tools
-     - Key: descriptive, reusable identifier
-     - Value: concrete, actionable preference
-   - Call ` + "`preferences`" + ` with action="set", source="explicit"
-
-4. **[Template]** Confirm:
-   ` + "```" + `
-   Remembered: [category] / [key] = [value]
-   ` + "```" + `
-
-## Guardrails
-
-- Do NOT infer preferences without explicit user confirmation
-- Do NOT store vague or ambiguous values — ask for clarification
-- Do NOT overwrite existing preferences without showing the current value first
-- Keep keys short and descriptive (e.g., "commit_style", "test_framework")
+- Do NOT output more than 20 lines in brief mode unless the user asks for detail
+- Do NOT fabricate features in brief mode — only explain what's in the knowledge base
 `,
 	},
 	{
@@ -543,6 +334,13 @@ var deprecatedSkillDirs = []string{
 	"setup",
 	"migrate",
 	"explain",
+	// v0.27-v0.28 era (consolidated into configure/setup/harvest)
+	"inspect",
+	"prepare",
+	"polish",
+	"greetings",
+	"brief",
+	"memorize",
 }
 
 // installSkills writes alfred skills to ~/.claude/skills/ and cleans up

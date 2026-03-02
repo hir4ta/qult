@@ -18,9 +18,9 @@ session data with zero output. No messages, no alerts, no interruptions.
 project, create a skill, or improve your CLAUDE.md — he'll deliver results
 backed by the latest Claude Code best practices and your personal preferences.
 
-**He remembers you** — Preferences persist across every project. Tell Alfred
-once that you prefer Japanese commit messages or TDD workflows, and every
-artifact he creates will reflect that.
+**He learns from history** — Alfred tracks decisions, co-changed files, and
+tool failure patterns across sessions. When you revisit a file, he surfaces
+what matters — without you having to ask.
 
 ## Install
 
@@ -66,25 +66,21 @@ go build -o alfred .
 ./alfred install
 ```
 
-## Skills (7)
+## Skills (3)
 
 Invoke with `/alfred:<skill-name>` in Claude Code.
 
 | Skill | What it does |
 |-------|-------------|
-| `/alfred:inspect [--quick]` | Project analysis — utilization report, quick audit, migration check |
-| `/alfred:prepare <type> [name]` | Generate new config files (skill, rule, hook, agent, MCP, CLAUDE.md, memory) |
-| `/alfred:polish <type> [name]` | Update existing config files against latest best practices |
-| `/alfred:greetings` | Interactive setup wizard for new projects |
-| `/alfred:brief <feature>` | Explain any Claude Code feature with concrete examples |
-| `/alfred:memorize [pref]` | Record/view your preferences (coding style, workflow, tools) |
-| `/alfred:harvest [--force]` | Refresh knowledge base (auto-harvest runs on SessionStart) |
+| `/alfred:configure <type> [name]` | Create or update config files (skill, rule, hook, agent, MCP, CLAUDE.md, memory) with independent review |
+| `/alfred:setup` | Interactive setup wizard — project analysis + guided configuration |
+| `/alfred:harvest [--force]` | Refresh knowledge base from Claude Code documentation |
 
-`/alfred:prepare` and `/alfred:polish` end with an **independent review** — a
-separate Explore agent validates the generated file against official spec and
-knowledge base in a forked context, catching issues the creator might miss.
+`/alfred:configure` ends with an **independent review** — a separate Explore
+agent validates the generated file against official spec and knowledge base
+in a forked context, catching issues the creator might miss.
 
-## MCP Tools (5)
+## MCP Tools (4)
 
 Backend that powers skills and the alfred agent. Claude invokes these
 automatically — you don't call them directly.
@@ -93,9 +89,8 @@ automatically — you don't call them directly.
 |------|---------|-------------|
 | `knowledge` | All skills (best practice lookups) | Hybrid vector + FTS5 search over Claude Code documentation |
 | `recall` | Context injection, agent | Recall project context from past sessions (decisions, co-changed files, hotspots) |
-| `review` | `inspect`, `greetings` | Analyze project config + session history |
-| `ingest` | `harvest`, auto-harvest | Store documentation sections with vector embeddings |
-| `preferences` | `memorize`, `prepare`, `polish` | Get/set user preferences across projects |
+| `review` | `setup` | Analyze project config + session history |
+| `ingest` | `harvest` | Store documentation sections with vector embeddings |
 
 ## How It Works
 
@@ -111,9 +106,9 @@ automatically — you don't call them directly.
 │  UserPromptSubmit → past decisions context    ↑  │
 │  SessionEnd                                   │  │
 │                                               │  │
-│  You: /alfred:prepare skill                       │
+│  You: /alfred:configure skill                      │
 │       ↓                                          │
-│  Skill → MCP tools → knowledge + preferences     │
+│  Skill → MCP tools → knowledge base              │
 │       ↓                                          │
 │  Generated file                                  │
 │       ↓                                          │
@@ -128,19 +123,19 @@ automatically — you don't call them directly.
 
 | Hook | When | What it does |
 |------|------|-------------|
-| `SessionStart` | Session begins | Record project + auto-ingest CLAUDE.md + re-inject context after compaction |
+| `SessionStart` | Session begins | Record project + auto-ingest CLAUDE.md + quality score + hotspots + re-inject context after compaction |
 | `PostToolUse` | After tool succeeds | Record tool name and stats |
 | `PostToolUseFailure` | After tool fails | Record tool failure |
-| `UserPromptSubmit` | User sends prompt | Inject past decisions about referenced files |
-| `SubagentStart` | Subagent spawned | Inject compact context (recent decisions + files) |
+| `UserPromptSubmit` | User sends prompt | Inject past decisions + co-changed files + tool failure patterns for referenced files |
+| `SubagentStart` | Subagent spawned | Inject compact context (recent decisions + files + hotspots + tool failures) |
 | `Stop` | Assistant stops responding | Extract decisions from response (async) |
 | `SubagentStop` | Subagent finishes | Extract decisions from subagent response (async) |
 | `SessionEnd` | Session closes | Finalize session statistics |
 
-**Independent Review** — `/alfred:prepare` and `/alfred:polish` spawn an Explore
-agent in a separate context after file generation. This agent has read-only
-access + knowledge base search, providing unbiased validation against
-official Claude Code specifications.
+**Independent Review** — `/alfred:configure` spawns an Explore agent in a
+separate context after file generation. This agent has read-only access +
+knowledge base search, providing unbiased validation against official Claude
+Code specifications.
 
 ## TUI (Optional)
 
@@ -152,7 +147,8 @@ alfred browse   # Browse past session history
 ```
 
 **Key bindings:** `↑↓` navigate, `Enter` expand/collapse, `g/G` top/bottom,
-`1`/`2` or `Tab` switch tabs (Activity / Decisions), `?` help, `q` quit.
+`1`/`2` or `Tab` switch tabs (Activity / Decisions), `a` add decision,
+`d` delete decision, `?` help, `q` quit.
 
 ## Dependencies
 

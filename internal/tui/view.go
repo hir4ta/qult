@@ -79,39 +79,58 @@ func (m Model) renderTabBar() string {
 
 // viewDecisions renders the Decisions tab.
 func (m Model) viewDecisions() string {
-	if len(m.decisions) == 0 {
+	var lines []string
+
+	if len(m.decisions) == 0 && !m.addingDecision {
 		empty := dimStyle.Render("  No decisions recorded yet for this session.")
 		hint := dimStyle.Render("  Decisions are extracted after each response.")
-		return "\n" + empty + "\n" + hint
-	}
+		actionHint := dimStyle.Render("  Press 'a' to add a decision manually.")
+		lines = append(lines, "", empty, hint, actionHint)
+	} else {
+		lines = append(lines, m.renderLabeledSeparator(fmt.Sprintf("Decisions (%d)", len(m.decisions))))
 
-	var lines []string
-	lines = append(lines, m.renderLabeledSeparator(fmt.Sprintf("Decisions (%d)", len(m.decisions))))
-
-	w := m.width - 4
-	if w < 40 {
-		w = 40
-	}
-
-	for _, d := range m.decisions {
-		// Topic line
-		topic := decisionTopicStyle.Render("  ▸ " + truncate(d.Topic, w-6))
-		lines = append(lines, topic)
-
-		// Decision text
-		text := truncate(d.DecisionText, w-4)
-		lines = append(lines, dimStyle.Render("    "+text))
-
-		// File paths (if any)
-		if d.FilePaths != "" && d.FilePaths != "[]" {
-			var paths []string
-			if err := json.Unmarshal([]byte(d.FilePaths), &paths); err == nil && len(paths) > 0 {
-				fileStr := strings.Join(paths, ", ")
-				lines = append(lines, decisionFileStyle.Render("    → "+truncate(fileStr, w-6)))
-			}
+		w := m.width - 4
+		if w < 40 {
+			w = 40
 		}
 
-		lines = append(lines, "") // blank line between decisions
+		for i, d := range m.decisions {
+			// Cursor indicator
+			prefix := "  "
+			if i == m.decisionCursor {
+				prefix = cursorStyle.Render("> ")
+			}
+
+			// Topic line
+			topic := decisionTopicStyle.Render(prefix + "\u25b8 " + truncate(d.Topic, w-6))
+			lines = append(lines, topic)
+
+			// Decision text
+			text := truncate(d.DecisionText, w-4)
+			lines = append(lines, dimStyle.Render("    "+text))
+
+			// File paths (if any)
+			if d.FilePaths != "" && d.FilePaths != "[]" {
+				var paths []string
+				if err := json.Unmarshal([]byte(d.FilePaths), &paths); err == nil && len(paths) > 0 {
+					fileStr := strings.Join(paths, ", ")
+					lines = append(lines, decisionFileStyle.Render("    \u2192 "+truncate(fileStr, w-6)))
+				}
+			}
+
+			lines = append(lines, "") // blank line between decisions
+		}
+	}
+
+	// Input/confirmation UI at the bottom
+	if m.addingDecision {
+		lines = append(lines, "")
+		lines = append(lines, decisionInputLabelStyle.Render("  Add decision:"))
+		lines = append(lines, "  "+m.decisionInput.View())
+		lines = append(lines, dimStyle.Render("  Enter: save | Esc: cancel"))
+	} else if m.deletingDecision {
+		lines = append(lines, "")
+		lines = append(lines, decisionDeletePromptStyle.Render("  Delete this decision? (y/n)"))
 	}
 
 	return strings.Join(lines, "\n")
@@ -269,6 +288,15 @@ func (m Model) renderSeparator() string {
 }
 
 func (m Model) renderHelp() string {
+	if m.activeTab == tabDecisions {
+		if m.addingDecision {
+			return helpStyle.Render("  Enter: save | Esc: cancel")
+		}
+		if m.deletingDecision {
+			return helpStyle.Render("  y: confirm delete | n/Esc: cancel")
+		}
+		return helpStyle.Render("  q: quit | \u2191\u2193: select | a: add | d: delete | 1/2/Tab: switch tab | ?: help")
+	}
 	return helpStyle.Render("  q: quit | \u2191\u2193: select | Enter: expand/collapse | 1/2/Tab: switch tab | ?: help")
 }
 
@@ -283,6 +311,8 @@ func (m Model) renderHelpOverlay() string {
 		{"g", "Jump to first event"},
 		{"G", "Jump to latest event"},
 		{"1 / 2 / Tab", "Switch tab (Activity / Decisions)"},
+		{"a", "Add decision (Decisions tab)"},
+		{"d", "Delete decision (Decisions tab)"},
 		{"?", "Toggle this help"},
 		{"q / Ctrl+C", "Quit"},
 	}
