@@ -1,7 +1,6 @@
 package store
 
 import (
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -21,106 +20,11 @@ type DecisionRow struct {
 	CompactSegment int
 }
 
-// English keywords that indicate a design decision.
-var enKeywords = []string{
-	"decided to",
-	"chosen to",
-	"going with",
-	"opted for",
-	"instead of",
-	"will use",
-	"approach:",
-	"strategy:",
-}
-
-var allKeywords = enKeywords
-
 // Regex patterns for extracting file paths from text.
 var (
 	backtickPathRe = regexp.MustCompile("`([a-zA-Z0-9._\\-/]+)`")
 	barePathRe     = regexp.MustCompile(`(?:^|[\s(,])([a-zA-Z0-9._\-]+(?:/[a-zA-Z0-9._\-]+)+)`)
 )
-
-// ExtractDecisions extracts design decisions from assistant text using
-// keyword pattern matching. No LLM is used — this is fast and deterministic.
-func ExtractDecisions(assistantText string, userText string, timestamp string) []DecisionRow {
-	if assistantText == "" {
-		return nil
-	}
-
-	// Split into sentences on ".", "。", and "\n".
-	sentences := splitSentences(assistantText)
-
-	topic := userText
-	if len([]rune(topic)) > 100 {
-		topic = string([]rune(topic)[:100])
-	}
-
-	filePaths := ExtractFilePaths(assistantText)
-	filePathsJSON, _ := json.Marshal(filePaths)
-
-	var decisions []DecisionRow
-	seen := make(map[string]bool)
-
-	for _, sentence := range sentences {
-		trimmed := strings.TrimSpace(sentence)
-		if trimmed == "" {
-			continue
-		}
-
-		lower := strings.ToLower(trimmed)
-		matched := false
-		for _, kw := range allKeywords {
-			if strings.Contains(lower, strings.ToLower(kw)) {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			continue
-		}
-
-		// Deduplicate identical decision text.
-		if seen[trimmed] {
-			continue
-		}
-		seen[trimmed] = true
-
-		decisions = append(decisions, DecisionRow{
-			Timestamp:    timestamp,
-			Topic:        topic,
-			DecisionText: trimmed,
-			Reasoning:    trimmed,
-			FilePaths:    string(filePathsJSON),
-		})
-	}
-
-	return decisions
-}
-
-// splitSentences splits text on ".", "。", and "\n".
-func splitSentences(text string) []string {
-	var result []string
-	current := strings.Builder{}
-
-	for _, r := range text {
-		switch r {
-		case '.', '。', '\n':
-			s := strings.TrimSpace(current.String())
-			if s != "" {
-				result = append(result, s)
-			}
-			current.Reset()
-		default:
-			current.WriteRune(r)
-		}
-	}
-	// Remaining text.
-	if s := strings.TrimSpace(current.String()); s != "" {
-		result = append(result, s)
-	}
-	return result
-}
 
 // ExtractFilePaths extracts file paths from text using regex patterns.
 func ExtractFilePaths(text string) []string {

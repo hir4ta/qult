@@ -34,6 +34,18 @@
         ]
       }
     ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook Stop",
+            "timeout": 30,
+            "type": "command"
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [

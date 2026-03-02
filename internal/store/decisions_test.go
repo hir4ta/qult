@@ -1,113 +1,9 @@
 package store
 
 import (
-	"encoding/json"
 	"path/filepath"
 	"testing"
 )
-
-func TestExtractDecisions_English(t *testing.T) {
-	assistant := "After reviewing the options, I decided to use SQLite for local storage. This will use WAL mode for concurrency."
-	user := "What database should we use?"
-
-	decisions := ExtractDecisions(assistant, user, "2025-01-01T00:00:00Z")
-
-	if len(decisions) == 0 {
-		t.Fatal("expected at least one decision, got 0")
-	}
-
-	found := false
-	for _, d := range decisions {
-		if containsStr(d.DecisionText, "decided to use SQLite") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected decision containing 'decided to use SQLite', got: %+v", decisions)
-	}
-
-	// Topic should be the user text.
-	if decisions[0].Topic != user {
-		t.Errorf("topic = %q, want %q", decisions[0].Topic, user)
-	}
-}
-
-func TestExtractDecisions_MultipleKeywords(t *testing.T) {
-	assistant := "I decided to use SQLite. We opted for WAL mode for concurrent access. Going with embedded storage instead of client-server."
-	user := "What database approach?"
-
-	decisions := ExtractDecisions(assistant, user, "2025-01-01T00:00:00Z")
-
-	if len(decisions) < 2 {
-		t.Fatalf("expected at least 2 decisions, got %d: %+v", len(decisions), decisions)
-	}
-}
-
-func TestExtractDecisions_FilePaths(t *testing.T) {
-	assistant := "I decided to put the schema in `internal/store/schema.go` and the main logic in internal/store/store.go."
-	user := "Where should the files go?"
-
-	decisions := ExtractDecisions(assistant, user, "2025-01-01T00:00:00Z")
-
-	if len(decisions) == 0 {
-		t.Fatal("expected at least one decision, got 0")
-	}
-
-	var paths []string
-	if err := json.Unmarshal([]byte(decisions[0].FilePaths), &paths); err != nil {
-		t.Fatalf("failed to parse file_paths JSON: %v", err)
-	}
-
-	if len(paths) < 2 {
-		t.Fatalf("expected at least 2 file paths, got %d: %v", len(paths), paths)
-	}
-
-	expected := map[string]bool{
-		"internal/store/schema.go": true,
-		"internal/store/store.go":  true,
-	}
-	for _, p := range paths {
-		if !expected[p] {
-			t.Errorf("unexpected path: %s", p)
-		}
-	}
-}
-
-func TestExtractDecisions_NoKeywords(t *testing.T) {
-	assistant := "Here is the code you requested. It creates a simple HTTP server."
-	user := "Write me a server."
-
-	decisions := ExtractDecisions(assistant, user, "2025-01-01T00:00:00Z")
-
-	if len(decisions) != 0 {
-		t.Errorf("expected 0 decisions when no keywords present, got %d: %+v", len(decisions), decisions)
-	}
-}
-
-func TestExtractDecisions_EmptyText(t *testing.T) {
-	decisions := ExtractDecisions("", "question", "2025-01-01T00:00:00Z")
-	if decisions != nil {
-		t.Errorf("expected nil for empty assistant text, got %+v", decisions)
-	}
-}
-
-func TestExtractDecisions_TopicTruncation(t *testing.T) {
-	longUser := ""
-	for i := 0; i < 120; i++ {
-		longUser += "a"
-	}
-
-	assistant := "I decided to keep it short."
-	decisions := ExtractDecisions(assistant, longUser, "2025-01-01T00:00:00Z")
-
-	if len(decisions) == 0 {
-		t.Fatal("expected at least one decision")
-	}
-	if len([]rune(decisions[0].Topic)) != 100 {
-		t.Errorf("topic length = %d, want 100", len([]rune(decisions[0].Topic)))
-	}
-}
 
 func TestInsertAndSearchDecisions(t *testing.T) {
 	dir := t.TempDir()
@@ -288,15 +184,3 @@ func TestSearchDecisionsFTS(t *testing.T) {
 	}
 }
 
-func containsStr(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && findSubstr(s, substr))
-}
-
-func findSubstr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

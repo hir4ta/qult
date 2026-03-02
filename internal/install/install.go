@@ -222,11 +222,22 @@ func alfredHookEntries(binPath string) map[string]any {
 		return []any{map[string]any{"hooks": []any{hook}}}
 	}
 
+	makeAsyncEntry := func(event string, timeout int) []any {
+		hook := map[string]any{
+			"type":    "command",
+			"command": binPath + " hook " + event,
+			"timeout": timeout,
+			"async":   true,
+		}
+		return []any{map[string]any{"hooks": []any{hook}}}
+	}
+
 	return map[string]any{
 		"SessionStart":     makeEntry("SessionStart", 5),
 		"PostToolUse":      makeEntry("PostToolUse", 3),
 		"SessionEnd":       makeEntry("SessionEnd", 8),
 		"UserPromptSubmit": makeEntry("UserPromptSubmit", 2),
+		"Stop":             makeAsyncEntry("Stop", 30),
 	}
 }
 

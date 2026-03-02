@@ -90,7 +90,8 @@ func (s *Stats) TopTools(n int) []ToolCount {
 	// Simple sort (small N)
 	for i := 0; i < len(counts); i++ {
 		for j := i + 1; j < len(counts); j++ {
-			if counts[j].Count > counts[i].Count {
+			if counts[j].Count > counts[i].Count ||
+					(counts[j].Count == counts[i].Count && counts[j].Name < counts[i].Name) {
 				counts[i], counts[j] = counts[j], counts[i]
 			}
 		}

@@ -15,6 +15,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/hir4ta/claude-alfred/internal/embedder"
 	"github.com/hir4ta/claude-alfred/internal/install"
+	"github.com/hir4ta/claude-alfred/internal/llm"
 	"github.com/hir4ta/claude-alfred/internal/mcpserver"
 	"github.com/hir4ta/claude-alfred/internal/store"
 	"github.com/hir4ta/claude-alfred/internal/tui"
@@ -179,11 +180,14 @@ func runAnalyze() error {
 // hookEvent is the minimal structure of a Claude Code hook stdin payload.
 // Fields vary by event type; unused fields are zero values.
 type hookEvent struct {
-	SessionID   string          `json:"session_id"`
-	ProjectPath string          `json:"cwd"`
-	ToolName    string          `json:"tool_name"`
-	ToolError   bool            `json:"tool_error"`
-	Prompt      json.RawMessage `json:"prompt,omitempty"`
+	SessionID            string          `json:"session_id"`
+	ProjectPath          string          `json:"cwd"`
+	ToolName             string          `json:"tool_name"`
+	ToolError            bool            `json:"tool_error"`
+	Prompt               json.RawMessage `json:"prompt,omitempty"`
+	StopHookActive       bool            `json:"stop_hook_active"`
+	LastAssistantMessage string          `json:"last_assistant_message"`
+	Source               string          `json:"source"`
 }
 
 // runHook handles hook events. Most are silent data collection;
@@ -223,6 +227,15 @@ func runHook(event string) error {
 			_ = st.EnsureSession(ev.SessionID, ev.ProjectPath)
 			ingestProjectClaudeMD(st, ev.ProjectPath)
 			autoHarvestIfStale(st)
+		}
+		if ev.Source == "compact" && ev.SessionID != "" {
+			if ctx := buildCompactContext(st, ev.SessionID); ctx != "" {
+				fmt.Print(ctx)
+			}
+		}
+	case "Stop":
+		if ev.LastAssistantMessage != "" && ev.SessionID != "" {
+			extractAndSaveDecisions(st, ev.SessionID, ev.LastAssistantMessage)
 		}
 	case "PostToolUse":
 		if ev.SessionID != "" && ev.ToolName != "" {
@@ -366,6 +379,92 @@ func containsAny(s string, words []string) bool {
 }
 
 // ---------------------------------------------------------------------------
+// Stop hook: LLM-based decision extraction (async, silent)
+// ---------------------------------------------------------------------------
+
+// extractAndSaveDecisions calls Haiku to extract design decisions from the
+// last assistant message and saves them to the database.
+// Silently returns on any error (butler never complains).
+func extractAndSaveDecisions(st *store.Store, sessionID, assistantText string) {
+	llmClient, err := llm.NewClient()
+	if err != nil {
+		return // ANTHROPIC_API_KEY not set — graceful skip
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	decisions, err := llmClient.ExtractDecisions(ctx, assistantText)
+	if err != nil || len(decisions) == 0 {
+		return
+	}
+
+	ts := time.Now().UTC().Format(time.RFC3339)
+	for _, d := range decisions {
+		filePaths := "[]"
+		if len(d.FilePaths) > 0 {
+			if b, err := json.Marshal(d.FilePaths); err == nil {
+				filePaths = string(b)
+			}
+		}
+		_ = st.InsertDecision(&store.DecisionRow{
+			SessionID:    sessionID,
+			Timestamp:    ts,
+			Topic:        d.Topic,
+			DecisionText: d.Decision,
+			Reasoning:    d.Reasoning,
+			FilePaths:    filePaths,
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SessionStart(compact): context re-injection
+// ---------------------------------------------------------------------------
+
+// buildCompactContext builds a context string with recent decisions and
+// modified files from the session to re-inject after compaction.
+// Returns empty string if nothing useful to inject.
+func buildCompactContext(st *store.Store, sessionID string) string {
+	decisions, _ := st.GetDecisions(sessionID, "", 5)
+	files, _ := st.GetFilesWritten(sessionID, 15)
+
+	if len(decisions) == 0 && len(files) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+
+	if len(decisions) > 0 {
+		b.WriteString("## Decisions made this session\n")
+		for _, d := range decisions {
+			entry := fmt.Sprintf("- **%s**: %s", d.Topic, d.DecisionText)
+			if d.Reasoning != "" {
+				entry += " (" + d.Reasoning + ")"
+			}
+			runes := []rune(entry)
+			if len(runes) > 400 {
+				entry = string(runes[:397]) + "..."
+			}
+			b.WriteString(entry)
+			b.WriteByte('\n')
+		}
+	}
+
+	if len(files) > 0 {
+		if len(decisions) > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString("## Files modified this session\n")
+		for _, f := range files {
+			fmt.Fprintf(&b, "- %s (%s)\n", f.Path, f.Action)
+		}
+	}
+
+	return b.String()
+}
+
+// ---------------------------------------------------------------------------
 // SessionStart: CLAUDE.md auto-ingest
 // ---------------------------------------------------------------------------
 
@@ -496,6 +595,8 @@ Commands:
   help           Show this help
 
 Environment:
-  VOYAGE_API_KEY  Optional. Enables semantic vector search (hybrid RRF + reranking).
-                  Without it, search falls back to FTS5-only.`)
+  ANTHROPIC_API_KEY  Optional. Enables LLM-based decision extraction via Haiku.
+                     Without it, decision extraction is silently skipped.
+  VOYAGE_API_KEY     Optional. Enables semantic vector search (hybrid RRF + reranking).
+                     Without it, search falls back to FTS5-only.`)
 }

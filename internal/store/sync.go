@@ -57,8 +57,6 @@ func (s *Store) SyncSession(jsonlPath string) error {
 	toolUseCount := sess.ToolUseCount
 	var firstEventAt, lastEventAt string
 	var firstPrompt string
-	var lastUserText string
-
 	if sess.FirstEventAt != "" {
 		firstEventAt = sess.FirstEventAt
 	}
@@ -102,9 +100,6 @@ func (s *Store) SyncSession(jsonlPath string) error {
 
 			case parser.EventUserMessage:
 				turnCount++
-				if ev.UserText != "" {
-					lastUserText = ev.UserText
-				}
 				if firstPrompt == "" && ev.UserText != "" && !ev.IsAnswer {
 					text := ev.UserText
 					runes := []rune(text)
@@ -153,15 +148,7 @@ func (s *Store) SyncSession(jsonlPath string) error {
 					return err
 				}
 
-				// Extract design decisions from assistant text.
-				if ev.AssistantText != "" {
-					decisions := ExtractDecisions(ev.AssistantText, lastUserText, ts)
-					for i := range decisions {
-						decisions[i].SessionID = sess.ID
-						decisions[i].CompactSegment = compactSegment
-						_ = s.InsertDecision(&decisions[i])
-					}
-				}
+				// Decision extraction moved to Stop hook (LLM-based via Haiku).
 
 			case parser.EventTaskCreate, parser.EventTaskUpdate:
 				if _, err := s.InsertEvent(&EventRow{
