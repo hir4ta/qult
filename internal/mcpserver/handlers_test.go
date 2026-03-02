@@ -56,232 +56,6 @@ func resultJSON(t *testing.T, res *mcp.CallToolResult) map[string]any {
 	return m
 }
 
-// seedSession inserts a session required for foreign key constraints.
-func seedSession(t *testing.T, st *store.Store, id, project string) {
-	t.Helper()
-	err := st.UpsertSession(&store.SessionRow{
-		ID:          id,
-		ProjectPath: project,
-		ProjectName: filepath.Base(project),
-		JSONLPath:   filepath.Join(project, id+".jsonl"),
-	})
-	if err != nil {
-		t.Fatalf("UpsertSession(%s): %v", id, err)
-	}
-}
-
-// seedDecision inserts a decision row for testing.
-func seedDecision(t *testing.T, st *store.Store, sessionID, topic, text, filePaths string) {
-	t.Helper()
-	err := st.InsertDecision(&store.DecisionRow{
-		SessionID:    sessionID,
-		Timestamp:    "2025-01-15T10:00:00Z",
-		Topic:        topic,
-		DecisionText: text,
-		FilePaths:    filePaths,
-	})
-	if err != nil {
-		t.Fatalf("InsertDecision(%s): %v", topic, err)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// recall handler tests
-// ---------------------------------------------------------------------------
-
-func TestRecallHandler_EmptyQuery(t *testing.T) {
-	t.Parallel()
-	st := openTestStore(t)
-	handler := recallHandler(st)
-
-	res, err := handler(context.Background(), newRequest(nil))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !res.IsError {
-		t.Fatal("expected error result for empty query")
-	}
-	text := resultText(t, res)
-	if !strings.Contains(text, "query") {
-		t.Errorf("error message should mention query: %s", text)
-	}
-}
-
-func TestRecallHandler_NilStore(t *testing.T) {
-	t.Parallel()
-	handler := recallHandler(nil)
-
-	res, err := handler(context.Background(), newRequest(map[string]any{"query": "test"}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !res.IsError {
-		t.Fatal("expected error result for nil store")
-	}
-}
-
-func TestRecallHandler_FileScope(t *testing.T) {
-	t.Parallel()
-	st := openTestStore(t)
-	handler := recallHandler(st)
-
-	seedSession(t, st, "s1", "/proj/myapp")
-	seedDecision(t, st, "s1", "use WAL mode", "decided to use WAL mode for SQLite",
-		`["internal/store/store.go"]`)
-
-	res, err := handler(context.Background(), newRequest(map[string]any{
-		"query": "store.go",
-		"scope": "file",
-	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if res.IsError {
-		t.Fatalf("unexpected error result: %s", resultText(t, res))
-	}
-
-	m := resultJSON(t, res)
-	if m["scope"] != "file" {
-		t.Errorf("scope = %v, want file", m["scope"])
-	}
-	decisions, ok := m["decisions"].([]any)
-	if !ok || len(decisions) == 0 {
-		t.Fatal("expected at least one decision for file scope")
-	}
-	d0 := decisions[0].(map[string]any)
-	if d0["topic"] != "use WAL mode" {
-		t.Errorf("topic = %v, want 'use WAL mode'", d0["topic"])
-	}
-}
-
-func TestRecallHandler_DirectoryScope(t *testing.T) {
-	t.Parallel()
-	st := openTestStore(t)
-	handler := recallHandler(st)
-
-	seedSession(t, st, "s1", "/proj/myapp")
-	seedDecision(t, st, "s1", "refactor store", "split store into sub-files",
-		`["internal/store/sessions.go","internal/store/events.go"]`)
-
-	res, err := handler(context.Background(), newRequest(map[string]any{
-		"query": "internal/store/",
-		"scope": "directory",
-	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if res.IsError {
-		t.Fatalf("unexpected error result: %s", resultText(t, res))
-	}
-
-	m := resultJSON(t, res)
-	if m["scope"] != "directory" {
-		t.Errorf("scope = %v, want directory", m["scope"])
-	}
-	decisions, ok := m["decisions"].([]any)
-	if !ok || len(decisions) == 0 {
-		t.Fatal("expected at least one decision for directory scope")
-	}
-}
-
-func TestRecallHandler_AllScope(t *testing.T) {
-	t.Parallel()
-	st := openTestStore(t)
-	handler := recallHandler(st)
-
-	seedSession(t, st, "s1", "/proj/myapp")
-	seedDecision(t, st, "s1", "authentication strategy", "use JWT tokens for auth",
-		`[]`)
-
-	res, err := handler(context.Background(), newRequest(map[string]any{
-		"query": "authentication",
-		"scope": "all",
-	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if res.IsError {
-		t.Fatalf("unexpected error result: %s", resultText(t, res))
-	}
-
-	m := resultJSON(t, res)
-	if m["scope"] != "all" {
-		t.Errorf("scope = %v, want all", m["scope"])
-	}
-}
-
-func TestRecallHandler_ProjectScope(t *testing.T) {
-	t.Parallel()
-	st := openTestStore(t)
-	handler := recallHandler(st)
-
-	seedSession(t, st, "s1", "/proj/myapp")
-	seedDecision(t, st, "s1", "project setup", "initialized Go module",
-		`[]`)
-
-	// With project parameter: should return session stats.
-	res, err := handler(context.Background(), newRequest(map[string]any{
-		"query":   "project overview",
-		"scope":   "project",
-		"project": "/proj/myapp",
-	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if res.IsError {
-		t.Fatalf("unexpected error result: %s", resultText(t, res))
-	}
-
-	m := resultJSON(t, res)
-	if m["scope"] != "project" {
-		t.Errorf("scope = %v, want project", m["scope"])
-	}
-	if _, ok := m["session_stats"]; !ok {
-		t.Error("expected session_stats in project scope result")
-	}
-}
-
-func TestRecallHandler_ProjectScopeMissingProject(t *testing.T) {
-	t.Parallel()
-	st := openTestStore(t)
-	handler := recallHandler(st)
-
-	// scope=project without project parameter should include error field.
-	res, err := handler(context.Background(), newRequest(map[string]any{
-		"query": "overview",
-		"scope": "project",
-	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	m := resultJSON(t, res)
-	if errMsg, ok := m["error"].(string); !ok || errMsg == "" {
-		t.Error("expected error field in result when project is missing for scope=project")
-	}
-}
-
-func TestRecallHandler_AutoDetectScope(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		query string
-		want  string
-	}{
-		{"main.go", "file"},
-		{"internal/store/", "directory"},
-		{"authentication", "all"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.query, func(t *testing.T) {
-			t.Parallel()
-			got := detectScope(tc.query)
-			if got != tc.want {
-				t.Errorf("detectScope(%q) = %q, want %q", tc.query, got, tc.want)
-			}
-		})
-	}
-}
-
 // ---------------------------------------------------------------------------
 // knowledge / docs search handler tests
 // ---------------------------------------------------------------------------
@@ -366,16 +140,6 @@ func TestKnowledgeHandler_NoResults(t *testing.T) {
 	if docsCount != 0 {
 		t.Errorf("docs_count = %v, want 0 for no matching docs", docsCount)
 	}
-}
-
-func TestKnowledgeHandler_NilStore(t *testing.T) {
-	t.Parallel()
-	// docsSearchHandler does not nil-check st before calling SearchDocsFTS.
-	// With nil embedder, it falls through to FTS-only path.
-	// This test verifies the handler does not panic with a nil store
-	// (the FTS search would fail, but the handler should still return).
-	// Note: the handler does not check st==nil at the top, so this may panic.
-	// If the implementation adds a nil check, this test should verify IsError.
 }
 
 // ---------------------------------------------------------------------------
@@ -589,9 +353,8 @@ func TestIngestHandler_SourceTypeAndVersion(t *testing.T) {
 
 func TestReviewHandler_EmptyProject(t *testing.T) {
 	t.Parallel()
-	st := openTestStore(t)
 	claudeHome := t.TempDir()
-	handler := reviewHandler(claudeHome, st)
+	handler := reviewHandler(claudeHome)
 
 	res, err := handler(context.Background(), newRequest(nil))
 	if err != nil {
@@ -602,7 +365,6 @@ func TestReviewHandler_EmptyProject(t *testing.T) {
 	}
 
 	m := resultJSON(t, res)
-	// Should still return a report even with empty project path.
 	if _, ok := m["claude_md"]; !ok {
 		t.Error("expected claude_md key in review report")
 	}
@@ -613,10 +375,9 @@ func TestReviewHandler_EmptyProject(t *testing.T) {
 
 func TestReviewHandler_WithClaudeMD(t *testing.T) {
 	t.Parallel()
-	st := openTestStore(t)
 	claudeHome := t.TempDir()
 	projectDir := t.TempDir()
-	handler := reviewHandler(claudeHome, st)
+	handler := reviewHandler(claudeHome)
 
 	// Create a CLAUDE.md file in the project directory.
 	claudeMD := `# My Project
@@ -684,10 +445,9 @@ Go 1.22 / PostgreSQL
 
 func TestReviewHandler_WithSkillsAndRules(t *testing.T) {
 	t.Parallel()
-	st := openTestStore(t)
 	claudeHome := t.TempDir()
 	projectDir := t.TempDir()
-	handler := reviewHandler(claudeHome, st)
+	handler := reviewHandler(claudeHome)
 
 	// Create .claude/skills/mypkg/SKILL.md
 	skillDir := filepath.Join(projectDir, ".claude", "skills", "mypkg")
@@ -746,9 +506,8 @@ description: A test skill
 
 func TestReviewHandler_WithHooks(t *testing.T) {
 	t.Parallel()
-	st := openTestStore(t)
 	claudeHome := t.TempDir()
-	handler := reviewHandler(claudeHome, st)
+	handler := reviewHandler(claudeHome)
 
 	// Create settings.json with hooks config.
 	settings := map[string]any{
@@ -759,17 +518,6 @@ func TestReviewHandler_WithHooks(t *testing.T) {
 						map[string]any{
 							"command": "claude-alfred hook SessionStart",
 							"timeout": 5000,
-						},
-					},
-				},
-			},
-			"Stop": []any{
-				map[string]any{
-					"hooks": []any{
-						map[string]any{
-							"command": "claude-alfred hook Stop",
-							"timeout": 5000,
-							"async":   true,
 						},
 					},
 				},
@@ -797,24 +545,16 @@ func TestReviewHandler_WithHooks(t *testing.T) {
 		t.Fatal("expected hooks to be a map")
 	}
 	hookCount, _ := hooks["count"].(float64)
-	if hookCount != 2 {
-		t.Errorf("hooks.count = %v, want 2", hookCount)
-	}
-	events, ok := hooks["events"].([]any)
-	if !ok {
-		t.Fatal("expected hooks.events to be an array")
-	}
-	if len(events) != 2 {
-		t.Errorf("len(hooks.events) = %d, want 2", len(events))
+	if hookCount != 1 {
+		t.Errorf("hooks.count = %v, want 1", hookCount)
 	}
 }
 
 func TestReviewHandler_Suggestions(t *testing.T) {
 	t.Parallel()
-	st := openTestStore(t)
 	claudeHome := t.TempDir()
 	projectDir := t.TempDir()
-	handler := reviewHandler(claudeHome, st)
+	handler := reviewHandler(claudeHome)
 
 	// Empty project directory: should generate suggestions.
 	res, err := handler(context.Background(), newRequest(map[string]any{
@@ -894,52 +634,5 @@ func TestTruncate(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("truncate(%q, %d) = %q, want %q", tc.input, tc.maxLen, got, tc.want)
 		}
-	}
-}
-
-func TestFormatDecisions(t *testing.T) {
-	t.Parallel()
-	decisions := []store.DecisionRow{
-		{
-			SessionID:    "s1",
-			Timestamp:    "2025-01-15T10:00:00Z",
-			Topic:        "use WAL",
-			DecisionText: "decided to use WAL mode",
-			Reasoning:    "better concurrency",
-			FilePaths:    `["store.go"]`,
-		},
-		{
-			SessionID:    "s2",
-			Timestamp:    "2025-01-16T10:00:00Z",
-			Topic:        "add FTS",
-			DecisionText: "added FTS5 search",
-			FilePaths:    `[]`,
-		},
-	}
-
-	items := formatDecisions(decisions)
-	if len(items) != 2 {
-		t.Fatalf("formatDecisions returned %d items, want 2", len(items))
-	}
-
-	// First decision should have reasoning and file_paths.
-	d0 := items[0]
-	if d0["topic"] != "use WAL" {
-		t.Errorf("d0.topic = %v, want 'use WAL'", d0["topic"])
-	}
-	if d0["reasoning"] != "better concurrency" {
-		t.Errorf("d0.reasoning = %v, want 'better concurrency'", d0["reasoning"])
-	}
-	if paths, ok := d0["file_paths"].([]string); !ok || len(paths) != 1 || paths[0] != "store.go" {
-		t.Errorf("d0.file_paths = %v, want [store.go]", d0["file_paths"])
-	}
-
-	// Second decision should not have reasoning or file_paths (empty values).
-	d1 := items[1]
-	if _, ok := d1["reasoning"]; ok {
-		t.Error("d1 should not have reasoning (empty)")
-	}
-	if _, ok := d1["file_paths"]; ok {
-		t.Error("d1 should not have file_paths (empty array)")
 	}
 }

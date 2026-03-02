@@ -82,14 +82,6 @@ func OpenDefaultCached() (*Store, error) {
 	return defaultCached, defaultCachedErr
 }
 
-// ResetDefaultCached clears the cached store so the next OpenDefaultCached
-// call creates a fresh connection. Only for use in tests.
-func ResetDefaultCached() {
-	defaultOnce = sync.Once{}
-	defaultCached = nil
-	defaultCachedErr = nil
-}
-
 // Close closes the underlying database connection.
 func (s *Store) Close() error {
 	return s.db.Close()

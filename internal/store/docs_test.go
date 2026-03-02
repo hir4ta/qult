@@ -65,40 +65,6 @@ func TestUpsertDoc(t *testing.T) {
 	}
 }
 
-func TestGetDoc(t *testing.T) {
-	t.Parallel()
-	st := openTestStore(t)
-
-	doc := &DocRow{
-		URL:         "https://docs.example.com/skills",
-		SectionPath: "Skills > Overview",
-		Content:     "Skills are reusable prompt templates.",
-		SourceType:  "docs",
-		TTLDays:     14,
-	}
-	id, _, err := st.UpsertDoc(doc)
-	if err != nil {
-		t.Fatalf("UpsertDoc: %v", err)
-	}
-
-	got, err := st.GetDoc(id)
-	if err != nil {
-		t.Fatalf("GetDoc: %v", err)
-	}
-	if got.URL != doc.URL {
-		t.Errorf("URL = %q, want %q", got.URL, doc.URL)
-	}
-	if got.SectionPath != doc.SectionPath {
-		t.Errorf("SectionPath = %q, want %q", got.SectionPath, doc.SectionPath)
-	}
-	if got.Content != doc.Content {
-		t.Errorf("Content = %q, want %q", got.Content, doc.Content)
-	}
-	if got.TTLDays != 14 {
-		t.Errorf("TTLDays = %d, want 14", got.TTLDays)
-	}
-}
-
 func TestSearchDocsFTS(t *testing.T) {
 	t.Parallel()
 	st := openTestStore(t)
@@ -169,34 +135,6 @@ func TestGetDocsByIDs(t *testing.T) {
 	}
 	if len(empty) != 0 {
 		t.Errorf("got %d docs for nil, want 0", len(empty))
-	}
-}
-
-func TestDocsStats(t *testing.T) {
-	t.Parallel()
-	st := openTestStore(t)
-
-	docs := []DocRow{
-		{URL: "https://a.com/1", SectionPath: "S1", Content: "c1", SourceType: "docs"},
-		{URL: "https://a.com/2", SectionPath: "S2", Content: "c2", SourceType: "docs"},
-		{URL: "https://a.com/3", SectionPath: "S3", Content: "c3", SourceType: "changelog"},
-	}
-	for i := range docs {
-		st.UpsertDoc(&docs[i])
-	}
-
-	total, bySource, _, err := st.DocsStats()
-	if err != nil {
-		t.Fatalf("DocsStats: %v", err)
-	}
-	if total != 3 {
-		t.Errorf("total = %d, want 3", total)
-	}
-	if bySource["docs"] != 2 {
-		t.Errorf("docs count = %d, want 2", bySource["docs"])
-	}
-	if bySource["changelog"] != 1 {
-		t.Errorf("changelog count = %d, want 1", bySource["changelog"])
 	}
 }
 

@@ -34,11 +34,6 @@ func (e *Embedder) Model() string {
 	return voyageModel
 }
 
-// EmbedBatch generates embeddings for multiple texts.
-func (e *Embedder) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
-	return e.client.embed(ctx, texts, "document")
-}
-
 // EmbedForSearch generates a search query embedding.
 func (e *Embedder) EmbedForSearch(ctx context.Context, query string) ([]float32, error) {
 	return e.client.embedForSearch(ctx, query)

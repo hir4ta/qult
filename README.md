@@ -1,28 +1,19 @@
 # alfred
 
-Your silent butler for Claude Code.
+Claude Code の完全受動型執事。
 
-Alfred watches your coding sessions quietly — never interrupting, never
-suggesting, never getting in the way. But the moment you turn to him, he
-knows everything: which tools you rely on, how you structure your projects,
-and exactly how to make your Claude Code setup world-class.
+主人が呼ぶまで沈黙。呼ばれたら、最高の知識を即座に渡す。
+Claude Code の設定・ベストプラクティス・ドキュメントを知識ベースから検索し、最適な回答を提供する。
 
-He doesn't tell you what to do. He does what you ask — perfectly.
+## Alfred ができること
 
-## What Alfred Does
+**呼ばれたら** — Claude Code の知識ベースから最適解を返す。
+プロジェクトのレビュー、スキル作成、CLAUDE.md の改善。
+最新のベストプラクティスに基づいた結果を即座に返す。
 
-**When you're working** — Alfred is invisible. Eight silent hooks collect
-session data with zero output. No messages, no alerts, no interruptions.
+**SessionStart** — セッション開始時に CLAUDE.md を自動取り込み。それだけ。
 
-**When you call him** — Alfred already has context. Ask him to review your
-project, create a skill, or improve your CLAUDE.md — he'll deliver results
-backed by the latest Claude Code best practices and your personal preferences.
-
-**He learns from history** — Alfred tracks decisions, co-changed files, and
-tool failure patterns across sessions. When you revisit a file, he surfaces
-what matters — without you having to ask.
-
-## Install
+## インストール
 
 Claude Code 内で:
 
@@ -39,15 +30,15 @@ go install github.com/hir4ta/claude-alfred@latest
 
 Claude Code を再起動すれば完了。
 
-**API key** (optional):
+**API キー**（任意）:
 
 ```bash
-export VOYAGE_API_KEY=your-key       # Semantic search (Voyage AI voyage-4-large)
+export VOYAGE_API_KEY=your-key       # セマンティック検索（Voyage AI voyage-4-large）
 ```
 
 未設定の場合、検索は FTS5 キーワード検索にフォールバックします。
 
-### Building from source
+### ソースからビルド
 
 ```bash
 git clone https://github.com/hir4ta/claude-alfred
@@ -55,88 +46,63 @@ cd claude-alfred
 go build -o claude-alfred .
 ```
 
-## Skills (3)
+## スキル (3)
 
-Invoke with `/alfred:<skill-name>` in Claude Code.
+Claude Code 内で `/alfred:<スキル名>` で呼び出す。
 
-| Skill | What it does |
-|-------|-------------|
-| `/alfred:configure <type> [name]` | Create or polish a single config file (skill, rule, hook, agent, MCP, CLAUDE.md, memory) with independent review |
-| `/alfred:setup` | Project-wide setup wizard — scan and configure multiple files, or explain any Claude Code feature |
-| `/alfred:harvest [--force]` | Refresh knowledge base from Claude Code documentation |
+| スキル | 内容 |
+|--------|------|
+| `/alfred:configure <種類> [名前]` | 単一の設定ファイルを作成・更新（skill, rule, hook, agent, MCP, CLAUDE.md, memory）+ 独立レビュー |
+| `/alfred:setup` | プロジェクト全体のセットアップウィザード — 複数ファイルのスキャン+設定、または Claude Code 機能の解説 |
+| `/alfred:harvest [--force]` | Claude Code ドキュメントから知識ベースを更新 |
 
-`/alfred:configure` ends with an **independent review** — a separate Explore
-agent validates the generated file against official spec and knowledge base
-in a forked context, catching issues the creator might miss.
+## MCP ツール (3)
 
-## MCP Tools (4)
+スキルと alfred エージェントのバックエンド。
+Claude が必要に応じて自動的に呼び出すため、直接呼ぶ必要はない。
 
-Backend that powers skills and the alfred agent. Claude invokes these
-automatically — you don't call them directly.
+| ツール | 利用元 | 内容 |
+|--------|--------|------|
+| `knowledge` | 全スキル | ハイブリッド vector + FTS5 によるドキュメント検索 |
+| `review` | `setup` | プロジェクト設定の分析 |
+| `ingest` | `harvest` | ドキュメントセクションを embedding 付きで保存 |
 
-| Tool | Used by | What it does |
-|------|---------|-------------|
-| `knowledge` | All skills (best practice lookups) | Hybrid vector + FTS5 search over Claude Code documentation |
-| `recall` | Context injection, agent | Recall project context from past sessions (decisions, co-changed files, hotspots) |
-| `review` | `setup` | Analyze project config + session history |
-| `ingest` | `harvest` | Store documentation sections with vector embeddings |
-
-## How It Works
+## 仕組み
 
 ```
-┌─────────────────────────────────────────────────┐
-│              Your Claude Code Session            │
-│                                                  │
-│  Hooks ──→ alfred.db                             │
-│  SessionStart  (project + CLAUDE.md ingest)      │
-│  PostToolUse / PostToolUseFailure (tool stats)   │
-│  SubagentStart → subagent context injection      │
-│  Stop / SubagentStop → decision extraction         │
-│  UserPromptSubmit → past decisions context    ↑  │
-│  SessionEnd                                   │  │
-│                                               │  │
-│  You: /alfred:configure skill                      │
-│       ↓                                          │
-│  Skill → MCP tools → knowledge base              │
-│       ↓                                          │
-│  Generated file                                  │
-│       ↓                                          │
-│  Independent review (Explore agent, fork)        │
-│       ↓                                          │
-│  Validated result                                │
-└─────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────┐
+│           Claude Code セッション             │
+│                                             │
+│  Hook ──→ alfred.db                          │
+│  SessionStart  (CLAUDE.md 自動 ingest)       │
+│                                             │
+│  あなた: /alfred:configure skill               │
+│          ↓                                   │
+│  スキル → MCP → knowledge base               │
+│          ↓                                   │
+│  ファイル生成                                 │
+│          ↓                                   │
+│  独立レビュー（Explore agent、別コンテキスト）  │
+│          ↓                                   │
+│  検証済み成果物                               │
+└─────────────────────────────────────────────┘
 ```
 
-**Hooks** fire automatically on Claude Code lifecycle events. Most are silent;
-`UserPromptSubmit` injects context when relevant:
+**Hook** — SessionStart のみ。CLAUDE.md を docs テーブルに自動取り込み。
 
-| Hook | When | What it does |
-|------|------|-------------|
-| `SessionStart` | Session begins | Record project + auto-ingest CLAUDE.md + quality score + hotspots + re-inject context after compaction |
-| `PostToolUse` | After tool succeeds | Record tool name and stats |
-| `PostToolUseFailure` | After tool fails | Record tool failure |
-| `UserPromptSubmit` | User sends prompt | Inject past decisions + co-changed files + tool failure patterns for referenced files |
-| `SubagentStart` | Subagent spawned | Inject compact context (recent decisions + files + hotspots + tool failures) |
-| `Stop` | Assistant stops responding | Extract decisions from response (async) |
-| `SubagentStop` | Subagent finishes | Extract decisions from subagent response (async) |
-| `SessionEnd` | Session closes | Finalize session statistics |
+**独立レビュー** — `/alfred:configure` は、ファイル生成後に別コンテキストで Explore エージェントを起動する。読み取り専用かつ知識ベース検索が可能で、公式仕様に対する客観的な検証を行う。
 
-**Independent Review** — `/alfred:configure` spawns an Explore agent in a
-separate context after file generation. This agent has read-only access +
-knowledge base search, providing unbiased validation against official Claude
-Code specifications.
+## デバッグ
 
-## Debug
+`ALFRED_DEBUG=1` を設定すると `~/.claude-alfred/debug.log` にデバッグログを出力する。
 
-Set `ALFRED_DEBUG=1` to enable debug logging to `~/.claude-alfred/debug.log`.
+## 依存ライブラリ
 
-## Dependencies
+| ライブラリ | 用途 |
+|-----------|------|
+| [mcp-go](https://github.com/mark3labs/mcp-go) | MCP サーバー SDK |
+| [go-sqlite3](https://github.com/ncruces/go-sqlite3) | SQLite ドライバ（pure Go, WASM） |
 
-| Library | Purpose |
-|---------|---------|
-| [mcp-go](https://github.com/mark3labs/mcp-go) | MCP server SDK |
-| [go-sqlite3](https://github.com/ncruces/go-sqlite3) | SQLite driver (pure Go, WASM) |
-
-## License
+## ライセンス
 
 MIT

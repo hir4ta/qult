@@ -12,7 +12,7 @@ func TestBundle(t *testing.T) {
 	t.Parallel()
 	outputDir := t.TempDir()
 
-	if err := Bundle(outputDir, "0.15.0-test"); err != nil {
+	if err := Bundle(outputDir, "0.30.0-test"); err != nil {
 		t.Fatalf("Bundle() error: %v", err)
 	}
 
@@ -29,12 +29,12 @@ func TestBundle(t *testing.T) {
 		if got := m["name"]; got != "alfred" {
 			t.Errorf("name = %v, want alfred", got)
 		}
-		if got := m["version"]; got != "0.15.0-test" {
-			t.Errorf("version = %v, want 0.15.0-test", got)
+		if got := m["version"]; got != "0.30.0-test" {
+			t.Errorf("version = %v, want 0.30.0-test", got)
 		}
 	})
 
-	// Verify hooks.json has all 13 events.
+	// Verify hooks.json has only SessionStart.
 	t.Run("hooks.json", func(t *testing.T) {
 		data, err := os.ReadFile(filepath.Join(outputDir, "hooks", "hooks.json"))
 		if err != nil {
@@ -49,23 +49,17 @@ func TestBundle(t *testing.T) {
 			t.Fatal("hooks key missing or wrong type")
 		}
 
-		expectedEvents := []string{
-			"SessionStart", "PostToolUse", "SessionEnd",
+		if _, ok := hooks["SessionStart"]; !ok {
+			t.Error("missing event: SessionStart")
 		}
-		for _, event := range expectedEvents {
-			if _, ok := hooks[event]; !ok {
-				t.Errorf("missing event: %s", event)
-			}
+		if len(hooks) != 1 {
+			t.Errorf("expected 1 hook event (SessionStart), got %d", len(hooks))
 		}
 
 		// All hook commands should use ${CLAUDE_PLUGIN_ROOT}.
-		raw, _ := os.ReadFile(filepath.Join(outputDir, "hooks", "hooks.json"))
-		content := string(raw)
+		content := string(data)
 		if !strings.Contains(content, "${CLAUDE_PLUGIN_ROOT}") {
 			t.Error("hook commands should use ${CLAUDE_PLUGIN_ROOT}")
-		}
-		if strings.Contains(content, "$HOME/.claude/plugins") {
-			t.Error("hook commands should not use hardcoded $HOME path")
 		}
 	})
 
@@ -113,35 +107,18 @@ func TestBundle(t *testing.T) {
 			t.Error("alfred.md is empty")
 		}
 	})
-}
 
-func TestRunScriptAutoDownload(t *testing.T) {
-	t.Parallel()
-	script := generateRunScript("1.2.3")
-
-	checks := map[string]string{
-		"version embedding":   `ALFRED_VERSION="1.2.3"`,
-		"version sidecar":     ".alfred-version",
-		"lock directory":      ".alfred-download.lock",
-		"is_current function": "is_current()",
-		"acquire_lock":        "acquire_lock()",
-		"download_binary":     "download_binary()",
-		"ensure_binary":       "ensure_binary",
-		"serve case":          "serve)",
-		"hook case":           "hook)",
-		"setup case":          "setup)",
-		"install marker":      ".alfred-installed-",
-		"atomic temp dir":     ".alfred-dl.",
-		"github releases url": "github.com/hir4ta/claude-alfred/releases/download",
-		"stale lock cleanup":  "kill -0",
-		"fallback to old bin": `[ -f "$ALFRED_BIN" ]`,
-	}
-
-	for name, keyword := range checks {
-		if !strings.Contains(script, keyword) {
-			t.Errorf("run.sh missing %s: expected to contain %q", name, keyword)
+	// Verify run.sh is a simple delegator.
+	t.Run("run.sh", func(t *testing.T) {
+		data, err := os.ReadFile(filepath.Join(outputDir, "bin", "run.sh"))
+		if err != nil {
+			t.Fatalf("read run.sh: %v", err)
 		}
-	}
+		content := string(data)
+		if !strings.Contains(content, "exec claude-alfred") {
+			t.Error("run.sh should delegate to claude-alfred")
+		}
+	})
 }
 
 func TestBundleIdempotent(t *testing.T) {

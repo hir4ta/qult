@@ -5,97 +5,16 @@ import (
 	"strconv"
 )
 
-// schemaVersion 2 = 静観型執事 V2.
-// Changes from V1:
-//   - preferences table removed (replaced by Claude Code auto memory)
-//   - decisions: context_before/context_after added
-//   - sessions: estimated_input_tokens/estimated_output_tokens added
-//   - tool_failures table added
-const schemaVersion = 2
+// schemaVersion 3 = 完全受動型（知識ベース特化）.
+// Changes from V2:
+//   - sessions, events, compact_events, decisions, tool_failures tables removed
+//   - decisions_fts virtual table removed
+//   - Only docs, docs_fts, embeddings remain
+const schemaVersion = 3
 
 const ddl = `
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER NOT NULL
-);
-
--- ==========================================================
--- Core tables
--- ==========================================================
-CREATE TABLE IF NOT EXISTS sessions (
-    id              TEXT PRIMARY KEY,
-    project_path    TEXT NOT NULL,
-    project_name    TEXT NOT NULL,
-    jsonl_path      TEXT NOT NULL,
-    first_event_at  TEXT,
-    last_event_at   TEXT,
-    first_prompt    TEXT,
-    summary         TEXT,
-    turn_count      INTEGER NOT NULL DEFAULT 0,
-    tool_use_count  INTEGER NOT NULL DEFAULT 0,
-    compact_count   INTEGER NOT NULL DEFAULT 0,
-    estimated_input_tokens  INTEGER NOT NULL DEFAULT 0,
-    estimated_output_tokens INTEGER NOT NULL DEFAULT 0,
-    parent_session_id TEXT,
-    synced_offset   INTEGER NOT NULL DEFAULT 0,
-    synced_at       TEXT,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (parent_session_id) REFERENCES sessions(id)
-);
-
-CREATE TABLE IF NOT EXISTS events (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id      TEXT NOT NULL,
-    event_type      INTEGER NOT NULL,
-    timestamp       TEXT NOT NULL,
-    user_text       TEXT,
-    assistant_text  TEXT,
-    tool_name       TEXT,
-    tool_input      TEXT,
-    task_id         TEXT,
-    task_subject    TEXT,
-    task_status     TEXT,
-    agent_name      TEXT,
-    plan_title      TEXT,
-    raw_json        TEXT,
-    byte_offset     INTEGER,
-    compact_segment INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-
-CREATE TABLE IF NOT EXISTS compact_events (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id      TEXT NOT NULL,
-    segment_index   INTEGER NOT NULL,
-    summary_text    TEXT,
-    timestamp       TEXT,
-    pre_turn_count  INTEGER NOT NULL DEFAULT 0,
-    pre_tool_count  INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-
-CREATE TABLE IF NOT EXISTS decisions (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id      TEXT NOT NULL,
-    event_id        INTEGER,
-    timestamp       TEXT NOT NULL,
-    topic           TEXT NOT NULL,
-    decision_text   TEXT NOT NULL,
-    reasoning       TEXT,
-    context_before  TEXT,
-    context_after   TEXT,
-    file_paths      TEXT,
-    compact_segment INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-
-CREATE TABLE IF NOT EXISTS tool_failures (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id      TEXT NOT NULL,
-    tool_name       TEXT NOT NULL,
-    failure_count   INTEGER NOT NULL DEFAULT 1,
-    last_failure_at TEXT NOT NULL,
-    FOREIGN KEY (session_id) REFERENCES sessions(id),
-    UNIQUE(session_id, tool_name)
 );
 
 -- ==========================================================
@@ -156,43 +75,10 @@ CREATE TRIGGER IF NOT EXISTS docs_fts_au AFTER UPDATE ON docs BEGIN
 END;
 
 -- ==========================================================
--- Decisions FTS5 (context_before/after excluded — display only)
--- ==========================================================
-CREATE VIRTUAL TABLE IF NOT EXISTS decisions_fts USING fts5(
-    topic, decision_text, reasoning,
-    content='decisions', content_rowid='id',
-    tokenize='porter unicode61',
-    prefix='2,3'
-);
-
-INSERT OR IGNORE INTO decisions_fts(decisions_fts, rank) VALUES('rank', 'bm25(10.0, 5.0, 1.0)');
-
-CREATE TRIGGER IF NOT EXISTS decisions_fts_ai AFTER INSERT ON decisions BEGIN
-    INSERT INTO decisions_fts(rowid, topic, decision_text, reasoning)
-    VALUES (new.id, new.topic, new.decision_text, COALESCE(new.reasoning, ''));
-END;
-
-CREATE TRIGGER IF NOT EXISTS decisions_fts_ad AFTER DELETE ON decisions BEGIN
-    INSERT INTO decisions_fts(decisions_fts, rowid, topic, decision_text, reasoning)
-    VALUES ('delete', old.id, old.topic, old.decision_text, COALESCE(old.reasoning, ''));
-END;
-
-CREATE TRIGGER IF NOT EXISTS decisions_fts_au AFTER UPDATE ON decisions BEGIN
-    INSERT INTO decisions_fts(decisions_fts, rowid, topic, decision_text, reasoning)
-    VALUES ('delete', old.id, old.topic, old.decision_text, COALESCE(old.reasoning, ''));
-    INSERT INTO decisions_fts(rowid, topic, decision_text, reasoning)
-    VALUES (new.id, new.topic, new.decision_text, COALESCE(new.reasoning, ''));
-END;
-
--- ==========================================================
 -- Indexes
 -- ==========================================================
 CREATE INDEX IF NOT EXISTS idx_docs_source_type ON docs(source_type);
 CREATE INDEX IF NOT EXISTS idx_docs_crawled_at ON docs(crawled_at);
-CREATE INDEX IF NOT EXISTS idx_decisions_session ON decisions(session_id);
-CREATE INDEX IF NOT EXISTS idx_decisions_timestamp ON decisions(timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, event_type);
-CREATE INDEX IF NOT EXISTS idx_tool_failures_session ON tool_failures(session_id);
 `
 
 // legacyTables are tables from previous versions that no longer exist.
@@ -209,12 +95,14 @@ var legacyTables = []string{
 	"live_session_phases", "live_session_files",
 	"global_tool_sequences", "global_tool_trigrams",
 	"tags",
-	// V1 era (dropped in V2 静観型執事)
+	// V1-V2 era (dropped in V3 完全受動型)
 	"preferences",
+	"sessions", "events", "compact_events", "decisions", "tool_failures",
 }
 
 var legacyTriggers = []string{
 	"patterns_fts_ai", "patterns_fts_ad", "patterns_fts_au",
+	"decisions_fts_ai", "decisions_fts_ad", "decisions_fts_au",
 }
 
 var legacyIndexes = []string{
@@ -224,6 +112,10 @@ var legacyIndexes = []string{
 	"idx_live_files_session",
 	"idx_gts_from",
 	"idx_gtt_t1t2",
+	"idx_decisions_session",
+	"idx_decisions_timestamp",
+	"idx_events_session",
+	"idx_tool_failures_session",
 }
 
 // SchemaVersion returns the current schema version constant.
@@ -240,7 +132,7 @@ func Migrate(db *sql.DB) error {
 		return nil
 	}
 
-	// V2 is a breaking change — drop everything and rebuild.
+	// Breaking change — drop everything and rebuild.
 	if current != 0 {
 		// Drop FTS virtual tables first (triggers reference them).
 		for _, vt := range []string{"decisions_fts", "docs_fts"} {
@@ -252,19 +144,14 @@ func Migrate(db *sql.DB) error {
 		}
 		for _, trigger := range []string{
 			"docs_fts_ai", "docs_fts_ad", "docs_fts_au",
-			"decisions_fts_ai", "decisions_fts_ad", "decisions_fts_au",
 		} {
 			db.Exec("DROP TRIGGER IF EXISTS " + trigger)
 		}
-		// Drop all V1 core tables.
-		for _, table := range []string{
-			"decisions", "compact_events", "events", "sessions",
-			"embeddings", "docs", "schema_version",
-		} {
+		// Drop all known tables.
+		for _, table := range legacyTables {
 			db.Exec("DROP TABLE IF EXISTS " + table)
 		}
-		// Drop legacy tables from even older versions.
-		for _, table := range legacyTables {
+		for _, table := range []string{"embeddings", "docs", "schema_version"} {
 			db.Exec("DROP TABLE IF EXISTS " + table)
 		}
 		for _, idx := range legacyIndexes {

@@ -5,11 +5,11 @@ import (
 	"os"
 
 	"github.com/mark3labs/mcp-go/server"
+
 	"github.com/hir4ta/claude-alfred/internal/embedder"
 	"github.com/hir4ta/claude-alfred/internal/install"
 	"github.com/hir4ta/claude-alfred/internal/mcpserver"
 	"github.com/hir4ta/claude-alfred/internal/store"
-	"github.com/hir4ta/claude-alfred/internal/watcher"
 )
 
 // version is set at build time via ldflags (-X main.version=...).
@@ -31,10 +31,6 @@ func run() error {
 	switch cmd {
 	case "serve":
 		return runServe()
-	case "install":
-		return install.Run(os.Args[2:])
-	case "uninstall":
-		return install.Uninstall()
 	case "crawl-seed":
 		output := "internal/install/seed_docs.json"
 		if len(os.Args) > 2 {
@@ -68,8 +64,6 @@ func run() error {
 }
 
 func runServe() error {
-	claudeHome := watcher.DefaultClaudeHome()
-
 	st, err := store.OpenDefault()
 	if err != nil {
 		return fmt.Errorf("failed to open store: %w", err)
@@ -78,7 +72,12 @@ func runServe() error {
 
 	emb, _ := embedder.NewEmbedder() // nil when VOYAGE_API_KEY is unset; graceful FTS5-only fallback
 
-	s := mcpserver.New(claudeHome, st, emb)
+	// Auto-seed docs on first serve if the docs table is empty.
+	if count, _ := st.DocsCount(); count == 0 {
+		install.ApplySeed(st, emb, nil)
+	}
+
+	s := mcpserver.New(st, emb)
 	return server.ServeStdio(s)
 }
 
@@ -91,8 +90,6 @@ Usage:
 Commands:
   serve          Run as MCP server (stdio) for Claude Code integration
   hook           Handle silent hook events (no output)
-  install        Set up alfred (skills, hooks, MCP, rules, DB sync)
-  uninstall      Remove alfred completely (hooks, MCP, skills, rules, DB, binary)
   crawl-seed     Crawl official docs and generate seed_docs.json
   plugin-bundle  Generate plugin directory from Go sources
   version        Show version

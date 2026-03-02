@@ -9,11 +9,9 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-
-	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
-func reviewHandler(claudeHome string, st *store.Store) server.ToolHandlerFunc {
+func reviewHandler(claudeHome string) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectPath := req.GetString("project_path", "")
 
@@ -34,19 +32,6 @@ func reviewHandler(claudeHome string, st *store.Store) server.ToolHandlerFunc {
 
 		// 4. Check MCP servers
 		report["mcp_servers"] = reviewMCP(projectPath)
-
-		// 5. Session stats from store
-		if st != nil && projectPath != "" {
-			if stats, err := st.GetProjectSessionStats(projectPath); err == nil {
-				report["session_stats"] = map[string]any{
-					"total_sessions":        stats.TotalSessions,
-					"total_turns":           stats.TotalTurns,
-					"total_tool_uses":       stats.TotalToolUses,
-					"total_compacts":        stats.TotalCompacts,
-					"avg_turns_per_session": stats.AvgTurnsPerSession,
-				}
-			}
-		}
 
 		// Generate improvement suggestions.
 		formatReviewSuggestions(report)
@@ -226,7 +211,7 @@ func parseSKILLFrontmatter(content string) map[string]string {
 // ---------------------------------------------------------------------------
 
 // recommendedEvents lists hook events alfred should register for full functionality.
-var recommendedEvents = []string{"SessionStart", "Stop", "UserPromptSubmit", "PostToolUse"}
+var recommendedEvents = []string{"SessionStart"}
 
 func reviewHooks(claudeHome string) map[string]any {
 	result := map[string]any{"count": 0}
@@ -265,50 +250,7 @@ func reviewHooks(claudeHome string) map[string]any {
 		result["missing_recommended"] = missing
 	}
 
-	// Inspect Stop hook: needs async:true for non-blocking decision extraction.
-	if stopEntries, ok := hooks["Stop"].([]any); ok {
-		if info := inspectAlfredHook(stopEntries); info != nil {
-			result["stop_hook"] = info
-			if async, _ := info["async"].(bool); !async {
-				result["stop_hook_warning"] = "Stop hook should have async:true for decision extraction"
-			}
-		}
-	}
-
 	return result
-}
-
-// inspectAlfredHook returns timeout/async info for the first alfred hook in the entries list.
-func inspectAlfredHook(entries []any) map[string]any {
-	for _, item := range entries {
-		m, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		hookList, ok := m["hooks"].([]any)
-		if !ok {
-			continue
-		}
-		for _, h := range hookList {
-			hm, ok := h.(map[string]any)
-			if !ok {
-				continue
-			}
-			cmd, _ := hm["command"].(string)
-			if !strings.Contains(cmd, "alfred") {
-				continue
-			}
-			info := map[string]any{}
-			if t, ok := hm["timeout"]; ok {
-				info["timeout"] = t
-			}
-			if a, ok := hm["async"]; ok {
-				info["async"] = a
-			}
-			return info
-		}
-	}
-	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -425,9 +367,6 @@ func formatReviewSuggestions(report map[string]any) {
 	} else {
 		if missing, ok := hooks["missing_recommended"].([]string); ok && len(missing) > 0 {
 			suggestions = append(suggestions, "Missing recommended alfred hook events: "+strings.Join(missing, ", "))
-		}
-		if w, _ := hooks["stop_hook_warning"].(string); w != "" {
-			suggestions = append(suggestions, w)
 		}
 	}
 

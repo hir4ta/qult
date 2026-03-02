@@ -1,91 +1,12 @@
 {
-  "description": "Silent butler hooks — data collection + contextual hints",
+  "description": "Silent butler hooks — CLAUDE.md auto-ingest on session start",
   "hooks": {
-    "PostToolUse": [
-      {
-        "hooks": [
-          {
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook PostToolUse",
-            "timeout": 3,
-            "type": "command"
-          }
-        ]
-      }
-    ],
-    "PostToolUseFailure": [
-      {
-        "hooks": [
-          {
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook PostToolUseFailure",
-            "timeout": 3,
-            "type": "command"
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook SessionEnd",
-            "timeout": 8,
-            "type": "command"
-          }
-        ]
-      }
-    ],
     "SessionStart": [
       {
         "hooks": [
           {
             "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook SessionStart",
             "timeout": 5,
-            "type": "command"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "async": true,
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook Stop",
-            "timeout": 5,
-            "type": "command"
-          }
-        ]
-      }
-    ],
-    "SubagentStart": [
-      {
-        "hooks": [
-          {
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook SubagentStart",
-            "timeout": 3,
-            "type": "command"
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "hooks": [
-          {
-            "async": true,
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook SubagentStop",
-            "timeout": 5,
-            "type": "command"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook UserPromptSubmit",
-            "timeout": 2,
             "type": "command"
           }
         ]

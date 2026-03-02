@@ -21,6 +21,13 @@ type DocRow struct {
 	TTLDays     int
 }
 
+// DocsCount returns the total number of rows in the docs table.
+func (s *Store) DocsCount() (int, error) {
+	var n int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM docs").Scan(&n)
+	return n, err
+}
+
 // ContentHashOf returns the SHA-256 hex hash of content for change detection.
 func ContentHashOf(content string) string {
 	h := sha256.Sum256([]byte(content))
@@ -75,22 +82,6 @@ func (s *Store) UpsertDoc(doc *DocRow) (id int64, changed bool, err error) {
 		).Scan(&id)
 	}
 	return id, true, nil
-}
-
-// GetDoc retrieves a single doc by ID.
-func (s *Store) GetDoc(id int64) (*DocRow, error) {
-	var d DocRow
-	var version sql.NullString
-	err := s.db.QueryRow(`
-		SELECT id, url, section_path, content, content_hash, source_type, version, crawled_at, ttl_days
-		FROM docs WHERE id = ?`, id,
-	).Scan(&d.ID, &d.URL, &d.SectionPath, &d.Content, &d.ContentHash,
-		&d.SourceType, &version, &d.CrawledAt, &d.TTLDays)
-	if err != nil {
-		return nil, err
-	}
-	d.Version = version.String
-	return &d, nil
 }
 
 // GetDocsByIDs retrieves multiple docs by their IDs.
@@ -237,47 +228,3 @@ func (s *Store) matchDocsFTS(query string, sourceType string, limit int) ([]DocR
 	return docs, nil
 }
 
-// DeleteExpiredDocs removes docs whose TTL has expired.
-func (s *Store) DeleteExpiredDocs() (int64, error) {
-	res, err := s.db.Exec(`
-		DELETE FROM docs
-		WHERE julianday('now') - julianday(crawled_at) > ttl_days`)
-	if err != nil {
-		return 0, fmt.Errorf("store: delete expired docs: %w", err)
-	}
-	// Also clean up orphaned embeddings.
-	s.db.Exec(`DELETE FROM embeddings WHERE source = 'docs' AND source_id NOT IN (SELECT id FROM docs)`)
-	return res.RowsAffected()
-}
-
-// DocsStats returns summary statistics about the docs table.
-func (s *Store) DocsStats() (total int, bySource map[string]int, lastCrawl string, err error) {
-	bySource = make(map[string]int)
-	rows, err := s.db.Query(`SELECT source_type, COUNT(*) FROM docs GROUP BY source_type`)
-	if err != nil {
-		return 0, nil, "", err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var st string
-		var count int
-		if rows.Scan(&st, &count) == nil {
-			bySource[st] = count
-			total += count
-		}
-	}
-	s.db.QueryRow(`SELECT MAX(crawled_at) FROM docs`).Scan(&lastCrawl)
-	return total, bySource, lastCrawl, nil
-}
-
-// LatestChangelogVersion returns the most recent changelog version and its crawl time.
-// Returns empty strings if no changelog entries exist.
-func (s *Store) LatestChangelogVersion() (version string, crawledAt string, err error) {
-	err = s.db.QueryRow(
-		`SELECT COALESCE(version,''), crawled_at FROM docs WHERE source_type='changelog' ORDER BY crawled_at DESC LIMIT 1`,
-	).Scan(&version, &crawledAt)
-	if err != nil {
-		return "", "", nil // no rows is not an error
-	}
-	return version, crawledAt, nil
-}

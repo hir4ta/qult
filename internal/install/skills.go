@@ -1,11 +1,4 @@
 package install
-
-import (
-	"fmt"
-	"os"
-	"path/filepath"
-)
-
 type skillDef struct {
 	Dir     string // directory name under ~/.claude/skills/
 	Content string // SKILL.md content
@@ -345,49 +338,3 @@ var deprecatedSkillDirs = []string{
 	"memorize",
 }
 
-// installSkills writes alfred skills to ~/.claude/skills/ and cleans up
-// deprecated skill directories from previous versions.
-func installSkills() {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-	skillsBase := filepath.Join(home, ".claude", "skills")
-
-	var installed int
-	for _, skill := range alfredSkills {
-		dir := filepath.Join(skillsBase, skill.Dir)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: skill dir %s: %v\n", skill.Dir, err)
-			continue
-		}
-		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(skill.Content), 0o644); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: skill %s: %v\n", skill.Dir, err)
-			continue
-		}
-		installed++
-	}
-
-	// Clean up deprecated directories.
-	for _, dir := range deprecatedSkillDirs {
-		_ = os.RemoveAll(filepath.Join(skillsBase, dir))
-	}
-
-	fmt.Printf("✓ %d skills installed\n", installed)
-}
-
-// removeSkills removes alfred skills from ~/.claude/skills/, including
-// deprecated skill directories from previous versions.
-func removeSkills() {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-	skillsBase := filepath.Join(home, ".claude", "skills")
-	for _, skill := range alfredSkills {
-		_ = os.RemoveAll(filepath.Join(skillsBase, skill.Dir))
-	}
-	for _, dir := range deprecatedSkillDirs {
-		_ = os.RemoveAll(filepath.Join(skillsBase, dir))
-	}
-}
