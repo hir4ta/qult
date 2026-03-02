@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mark3labs/mcp-go/server"
@@ -221,6 +222,7 @@ func runHook(event string) error {
 		if ev.SessionID != "" && ev.ProjectPath != "" {
 			_ = st.EnsureSession(ev.SessionID, ev.ProjectPath)
 			ingestProjectClaudeMD(st, ev.ProjectPath)
+			autoHarvestIfStale(st)
 		}
 	case "PostToolUse":
 		if ev.SessionID != "" && ev.ToolName != "" {
@@ -428,6 +430,43 @@ func ingestProjectClaudeMD(st *store.Store, projectPath string) {
 			SourceType:  "project",
 			TTLDays:     1,
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SessionStart: auto-harvest (changelog freshness check)
+// ---------------------------------------------------------------------------
+
+// autoHarvestIfStale checks if the knowledge base changelog is stale (>7 days)
+// and fetches the latest changelog if so. Uses a short timeout to stay within
+// the SessionStart hook budget. Silently skips on any error.
+func autoHarvestIfStale(st *store.Store) {
+	_, crawledAt, _ := st.LatestChangelogVersion()
+	if crawledAt != "" {
+		t, err := time.Parse(time.RFC3339, crawledAt)
+		if err == nil && time.Since(t) < 7*24*time.Hour {
+			return // fresh enough
+		}
+	}
+
+	sources, err := install.FetchAndParseChangelog(3 * time.Second)
+	if err != nil {
+		return // network unavailable — silently skip
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, src := range sources {
+		for _, sec := range src.Sections {
+			st.UpsertDoc(&store.DocRow{
+				URL:         src.URL,
+				SectionPath: sec.Path,
+				Content:     sec.Content,
+				SourceType:  src.SourceType,
+				Version:     src.Version,
+				CrawledAt:   now,
+				TTLDays:     30,
+			})
+		}
 	}
 }
 

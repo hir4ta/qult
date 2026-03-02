@@ -115,6 +115,30 @@ func CrawlSeed(outputPath string) error {
 	return nil
 }
 
+// FetchAndParseChangelog fetches the Claude Code changelog with the given
+// timeout and parses it into seed sources. Used by auto-harvest in SessionStart.
+func FetchAndParseChangelog(timeout time.Duration) ([]SeedSource, error) {
+	client := &http.Client{Timeout: timeout}
+	req, err := http.NewRequest("GET", changelogURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "claude-alfred/auto-harvest")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return crawlChangelog(string(body)), nil
+}
+
 // fetchPage performs an HTTP GET and returns the response body as a string.
 func fetchPage(url string) (string, error) {
 	req, err := http.NewRequest("GET", url, nil)
