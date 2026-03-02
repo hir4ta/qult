@@ -85,68 +85,79 @@ func docsSearchHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandl
 		}
 
 		var docs []store.DocRow
-		searchMethod := "hybrid_rrf"
+		searchMethod := "fts5_only"
 
-		// Stage 1: Hybrid RRF search (vector + FTS5 combined).
-		queryVec, _ := emb.EmbedForSearch(ctx, query)
-
-		// Adaptive over-retrieve: short queries are vague, need more candidates.
-		wordCount := len(strings.Fields(query))
-		overRetrieve := limit * 4
-		if wordCount <= 1 {
-			overRetrieve = limit * 6
-		}
-		if overRetrieve < 20 {
-			overRetrieve = 20
+		// Try embedding the query for hybrid search (requires VOYAGE_API_KEY).
+		var queryVec []float32
+		if emb != nil {
+			queryVec, _ = emb.EmbedForSearch(ctx, query)
 		}
 
-		hybridMatches, _ := st.HybridSearch(queryVec, query, "", overRetrieve, overRetrieve)
+		if queryVec != nil {
+			// Stage 1: Hybrid RRF search (vector + FTS5 combined).
+			searchMethod = "hybrid_rrf"
 
-		if len(hybridMatches) > 0 {
-			ids := make([]int64, len(hybridMatches))
-			for i, m := range hybridMatches {
-				ids[i] = m.DocID
+			// Adaptive over-retrieve: short queries are vague, need more candidates.
+			wordCount := len(strings.Fields(query))
+			overRetrieve := limit * 4
+			if wordCount <= 1 {
+				overRetrieve = limit * 6
 			}
-			docs, _ = st.GetDocsByIDs(ids)
+			if overRetrieve < 20 {
+				overRetrieve = 20
+			}
 
-			// Preserve RRF ordering (GetDocsByIDs may reorder).
-			if len(docs) > 1 {
-				docMap := make(map[int64]store.DocRow, len(docs))
-				for _, d := range docs {
-					docMap[d.ID] = d
+			hybridMatches, _ := st.HybridSearch(queryVec, query, "", overRetrieve, overRetrieve)
+
+			if len(hybridMatches) > 0 {
+				ids := make([]int64, len(hybridMatches))
+				for i, m := range hybridMatches {
+					ids[i] = m.DocID
 				}
-				ordered := make([]store.DocRow, 0, len(ids))
-				for _, id := range ids {
-					if d, ok := docMap[id]; ok {
-						ordered = append(ordered, d)
+				docs, _ = st.GetDocsByIDs(ids)
+
+				// Preserve RRF ordering (GetDocsByIDs may reorder).
+				if len(docs) > 1 {
+					docMap := make(map[int64]store.DocRow, len(docs))
+					for _, d := range docs {
+						docMap[d.ID] = d
 					}
-				}
-				docs = ordered
-			}
-
-			// Stage 2: Rerank via Voyage rerank API.
-			if len(docs) > limit {
-				contents := make([]string, len(docs))
-				for i, d := range docs {
-					contents[i] = d.SectionPath + "\n" + d.Content
-				}
-				reranked, err := emb.Rerank(ctx, query, contents, limit)
-				if err == nil && len(reranked) > 0 {
-					reorderedDocs := make([]store.DocRow, 0, len(reranked))
-					for _, r := range reranked {
-						if r.Index >= 0 && r.Index < len(docs) {
-							reorderedDocs = append(reorderedDocs, docs[r.Index])
+					ordered := make([]store.DocRow, 0, len(ids))
+					for _, id := range ids {
+						if d, ok := docMap[id]; ok {
+							ordered = append(ordered, d)
 						}
 					}
-					docs = reorderedDocs
-					searchMethod = "hybrid_rrf+rerank"
+					docs = ordered
+				}
+
+				// Stage 2: Rerank via Voyage rerank API.
+				if len(docs) > limit {
+					contents := make([]string, len(docs))
+					for i, d := range docs {
+						contents[i] = d.SectionPath + "\n" + d.Content
+					}
+					reranked, err := emb.Rerank(ctx, query, contents, limit)
+					if err == nil && len(reranked) > 0 {
+						reorderedDocs := make([]store.DocRow, 0, len(reranked))
+						for _, r := range reranked {
+							if r.Index >= 0 && r.Index < len(docs) {
+								reorderedDocs = append(reorderedDocs, docs[r.Index])
+							}
+						}
+						docs = reorderedDocs
+						searchMethod = "hybrid_rrf+rerank"
+					}
+				}
+
+				// Trim to requested limit.
+				if len(docs) > limit {
+					docs = docs[:limit]
 				}
 			}
-
-			// Trim to requested limit.
-			if len(docs) > limit {
-				docs = docs[:limit]
-			}
+		} else {
+			// FTS5-only fallback (no embedder available).
+			docs, _ = st.SearchDocsFTS(query, "", limit)
 		}
 
 		// Also include decisions as supplemental results (FTS5 with LIKE fallback).
@@ -207,6 +218,9 @@ func docsSearchHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandl
 		if maxAgeDays > 30 {
 			result["staleness_warning"] = fmt.Sprintf(
 				"Results include docs from %d days ago. Run /alfred-crawl to refresh.", maxAgeDays)
+		}
+		if emb == nil {
+			result["hint"] = "Set VOYAGE_API_KEY for semantic search (hybrid vector + FTS5 + reranking)."
 		}
 
 		return marshalResult(result)
