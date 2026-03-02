@@ -11,7 +11,7 @@
       "name": "alfred",
       "source": "./plugin",
       "description": "Silent butler — best practice skills, preferences, independent review",
-      "version": "0.25.1"
+      "version": "0.26.0"
     }
   ]
 }
