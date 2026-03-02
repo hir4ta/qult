@@ -13,6 +13,7 @@ const serverInstructions = `alfred is your silent butler for Claude Code.
 He never interrupts your work. When you need him, he's ready:
 
   knowledge   — Search Claude Code docs and best practices
+  recall      — Recall project context from past sessions
   review      — Analyze your project's Claude Code utilization
   ingest      — Store documentation with vector embeddings
   preferences — Get/set your preferences
@@ -38,6 +39,19 @@ func New(claudeHome string, st *store.Store, emb *embedder.Embedder) *server.MCP
 				mcp.WithNumber("limit", mcp.Description("Maximum results (default: 5)")),
 			),
 			Handler: docsSearchHandler(st, emb),
+		},
+
+		server.ServerTool{
+			Tool: mcp.NewTool("recall",
+				mcp.WithDescription("Recall project-specific context from past sessions. Surfaces decisions, file change patterns, and session history."),
+				mcp.WithTitleAnnotation("Project Recall"),
+				mcp.WithReadOnlyHintAnnotation(true),
+				mcp.WithString("query", mcp.Description("Search query, file path, or directory path"), mcp.Required()),
+				mcp.WithString("scope", mcp.Description("Search scope: file, directory, project, or all (auto-detected if omitted)")),
+				mcp.WithString("project", mcp.Description("Project path filter")),
+				mcp.WithNumber("limit", mcp.Description("Maximum results (default: 5)")),
+			),
+			Handler: recallHandler(st),
 		},
 
 		server.ServerTool{
