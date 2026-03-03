@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/server"
 
@@ -40,6 +41,8 @@ func run() error {
 		return runSetup()
 	case "harvest":
 		return runHarvest()
+	case "update":
+		return runUpdate()
 	case "crawl-seed":
 		output := "internal/install/seed_docs.json"
 		if len(os.Args) > 2 {
@@ -58,7 +61,7 @@ func run() error {
 		}
 		return runHook(os.Args[2])
 	case "version", "--version", "-v":
-		printVersion()
+		showVersion()
 		return nil
 	case "help", "-h", "--help":
 		printUsage()
@@ -92,30 +95,49 @@ func runServe() error {
 	return server.ServeStdio(s)
 }
 
-func printVersion() {
-	c, d := commit, date
-	if c == "unknown" {
-		// Fallback for dev builds: read VCS info from Go build info.
-		if bi, ok := debug.ReadBuildInfo(); ok {
-			for _, s := range bi.Settings {
-				switch s.Key {
-				case "vcs.revision":
-					if len(s.Value) > 7 {
-						c = s.Value[:7]
-					} else {
-						c = s.Value
-					}
-				case "vcs.time":
-					d = s.Value
+// resolvedVersion returns the best available version string.
+// Priority: ldflags > module version (go install) > "dev".
+func resolvedVersion() string {
+	if version != "dev" {
+		return version
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return strings.TrimPrefix(bi.Main.Version, "v")
+	}
+	return version
+}
+
+// resolvedCommit returns the best available commit hash.
+func resolvedCommit() string {
+	if commit != "unknown" {
+		return commit
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		for _, s := range bi.Settings {
+			if s.Key == "vcs.revision" {
+				if len(s.Value) > 7 {
+					return s.Value[:7]
 				}
+				return s.Value
 			}
 		}
 	}
-	if c != "unknown" {
-		fmt.Printf("alfred %s (%s %s)\n", version, c, d)
-	} else {
-		fmt.Printf("alfred %s\n", version)
+	return ""
+}
+
+// resolvedDate returns the best available build date.
+func resolvedDate() string {
+	if date != "unknown" {
+		return date
 	}
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		for _, s := range bi.Settings {
+			if s.Key == "vcs.time" {
+				return s.Value
+			}
+		}
+	}
+	return ""
 }
 
 func printUsage() {
@@ -128,6 +150,7 @@ Commands:
   serve          Run as MCP server (stdio) for Claude Code integration
   setup          Initialize knowledge base (seed docs + generate embeddings)
   harvest        Refresh knowledge base (crawl + embed fresh docs)
+  update         Update alfred to the latest version
   version        Show version
   help           Show this help
 
