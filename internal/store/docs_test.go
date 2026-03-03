@@ -159,6 +159,10 @@ func TestSanitizeFTS5Query(t *testing.T) {
 		{"3 char gets prefix", "mcp", "mcp*"},
 		{"6 char gets prefix", "agents", "agents*"},
 		{"7 char no prefix", "worktree", "worktree"},
+		{"dot slash path", ".claude/agents", "claude agents"},
+		{"underscore token", "allowed_tools", "allowed tools"},
+		{"complex path", ".claude/rules/next/fsd.md", "claude rules next fsd md"},
+		{"at and hash", "user@example.com #tag", "user example com tag"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -214,6 +218,32 @@ func TestSearchDocsFTS_SpecialChars(t *testing.T) {
 	}
 	if len(results) == 0 {
 		t.Fatal("expected results even with parentheses in query")
+	}
+}
+
+func TestSearchDocsFTS_TokenSeparators(t *testing.T) {
+	t.Parallel()
+	st := openTestStore(t)
+
+	doc := &DocRow{
+		URL:         "https://a.com/1",
+		SectionPath: "Create custom subagents > Write subagent files",
+		Content:     "Subagents use YAML frontmatter for configuration. The tools and disallowedTools fields control capabilities.",
+		SourceType:  "docs",
+	}
+	if _, _, err := st.UpsertDoc(doc); err != nil {
+		t.Fatalf("UpsertDoc: %v", err)
+	}
+
+	// This query previously returned 0 results because .claude/agents and
+	// allowed_tools injected bare AND terms into the OR fallback chain.
+	results, err := st.SearchDocsFTS(
+		"custom agent .claude/agents markdown frontmatter allowed_tools model haiku sonnet opus", "", 5)
+	if err != nil {
+		t.Fatalf("SearchDocsFTS: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected results for query with token separators (/ . _)")
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // DocRow represents a row in the docs table.
@@ -122,28 +123,37 @@ func (s *Store) GetDocsByIDs(ids []int64) ([]DocRow, error) {
 	return docs, nil
 }
 
-// fts5SpecialChars are characters with special meaning in FTS5 MATCH syntax.
-var fts5Replacer = strings.NewReplacer(
-	`"`, " ", `(`, " ", `)`, " ",
-	`*`, " ", `+`, " ", `^`, " ",
-	`:`, " ", `{`, " ", `}`, " ",
-)
+// isFTS5TokenChar reports whether r is a token character under the unicode61
+// tokenizer's default configuration (categories L*, N*, Co).
+// Everything else is a separator.
+func isFTS5TokenChar(r rune) bool {
+	return unicode.In(r, unicode.Letter, unicode.Number, unicode.Co)
+}
 
 // fts5Reserved are FTS5 boolean operators that must be removed from user queries.
 var fts5Reserved = map[string]bool{
 	"AND": true, "OR": true, "NOT": true, "NEAR": true,
 }
 
-// SanitizeFTS5Query strips FTS5 special characters and reserved words from a
-// user query. Short single-word queries (3-6 chars) get prefix expansion.
+// SanitizeFTS5Query converts user input into safe FTS5 MATCH tokens.
+// Non-token characters (per unicode61 rules) become word boundaries.
+// Short single-word queries (3-6 chars) get prefix expansion.
 // Returns "" if the sanitized query is empty.
 func SanitizeFTS5Query(query string) string {
-	q := fts5Replacer.Replace(query)
-	words := strings.Fields(q)
+	var buf strings.Builder
+	buf.Grow(len(query))
+	for _, r := range query {
+		if isFTS5TokenChar(r) {
+			buf.WriteRune(r)
+		} else {
+			buf.WriteByte(' ')
+		}
+	}
+
+	words := strings.Fields(buf.String())
 	filtered := words[:0]
 	for _, w := range words {
-		w = strings.TrimLeft(w, "-")
-		if w == "" || fts5Reserved[strings.ToUpper(w)] {
+		if fts5Reserved[strings.ToUpper(w)] {
 			continue
 		}
 		filtered = append(filtered, w)
