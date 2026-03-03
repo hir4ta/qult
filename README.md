@@ -31,7 +31,7 @@ Claude Code 内で:
 ターミナルで:
 
 ```bash
-go install github.com/hir4ta/claude-alfred@latest
+go install github.com/hir4ta/claude-alfred/cmd/alfred@latest
 ```
 
 MCP サーバーと Hook handler のバイナリをコンパイルする。
@@ -48,7 +48,7 @@ export VOYAGE_API_KEY=your-key  # ~/.zshrc 等に追加
 ### 4. 知識ベースを初期化
 
 ```bash
-claude-alfred setup
+alfred setup
 ```
 
 公式ドキュメント（1,400+ 件）を SQLite に取り込み、Voyage AI で embedding を生成する。
@@ -61,7 +61,7 @@ Claude Code を再起動すれば完了。
 ```bash
 git clone https://github.com/hir4ta/claude-alfred
 cd claude-alfred
-go build -o claude-alfred .
+go build -o alfred ./cmd/alfred
 ```
 
 ## スキル (3)

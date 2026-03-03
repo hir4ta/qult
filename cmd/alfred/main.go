@@ -78,7 +78,7 @@ func runServe() error {
 	}
 
 	if count, _ := st.SeedDocsCount(); count == 0 {
-		fmt.Fprintln(os.Stderr, "Warning: no seed docs found. Run 'claude-alfred setup' to initialize.")
+		fmt.Fprintln(os.Stderr, "Warning: no seed docs found. Run 'alfred setup' to initialize.")
 	}
 
 	s := mcpserver.New(st, emb)

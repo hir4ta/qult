@@ -509,7 +509,7 @@ func TestReviewHandler_WithHooks(t *testing.T) {
 				map[string]any{
 					"hooks": []any{
 						map[string]any{
-							"command": "claude-alfred hook SessionStart",
+							"command": "alfred hook SessionStart",
 							"timeout": 5000,
 						},
 					},

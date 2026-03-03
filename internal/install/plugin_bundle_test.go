@@ -126,8 +126,8 @@ func TestBundle(t *testing.T) {
 			t.Fatalf("read run.sh: %v", err)
 		}
 		content := string(data)
-		if !strings.Contains(content, "exec claude-alfred") {
-			t.Error("run.sh should delegate to claude-alfred")
+		if !strings.Contains(content, "exec alfred") {
+			t.Error("run.sh should delegate to alfred")
 		}
 	})
 }

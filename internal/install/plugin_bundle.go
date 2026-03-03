@@ -159,11 +159,11 @@ func Bundle(outputDir, version string) error {
 }
 
 // generateRunScript creates a simple delegator script.
-// Requires claude-alfred to be installed via `go install`.
+// Requires alfred to be installed via `go install github.com/hir4ta/claude-alfred/cmd/alfred@latest`.
 func generateRunScript(_ string) string {
 	return `#!/bin/sh
 # alfred wrapper — delegates to go-installed binary.
-exec claude-alfred "$@"
+exec alfred "$@"
 `
 }
 

@@ -1,8 +1,8 @@
-claude-alfred
+/claude-alfred
+/alfred
 *.exe
 .DS_Store
 dist/
 *.db
 CLAUDE.md
 .claude/
-alfred
