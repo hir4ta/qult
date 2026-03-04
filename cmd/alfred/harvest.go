@@ -192,19 +192,25 @@ func (m harvestModel) View() tea.View {
 	// Phase 1: Crawling.
 	switch {
 	case m.phase == harvestCrawling:
-		if m.crawlDocsTotal > 0 {
+		if m.customTotal > 0 {
+			// Custom sources in progress — docs/blog already done.
+			b.WriteString(fmt.Sprintf("  [1/3] Crawling docs %s %d/%d %s\n",
+				dimStyle.Render("···"), m.crawlDocsDone, m.crawlDocsDone, doneStyle.Render("✓")))
+			if m.crawlBlogTotal > 0 {
+				b.WriteString(fmt.Sprintf("        Crawling blog %s %d/%d %s\n",
+					dimStyle.Render("···"), m.crawlBlogTotal, m.crawlBlogTotal, doneStyle.Render("✓")))
+			}
+			b.WriteString(fmt.Sprintf("        Crawling %s %s %d/%d\n",
+				m.customName, m.spinner.View(), m.customDone, m.customTotal))
+		} else if m.crawlDocsTotal > 0 {
 			b.WriteString(fmt.Sprintf("  [1/3] Crawling docs %s %d/%d\n",
 				m.spinner.View(), m.crawlDocsDone, m.crawlDocsTotal))
+			if m.crawlBlogTotal > 0 {
+				b.WriteString(fmt.Sprintf("        Crawling blog %s %d/%d\n",
+					dimStyle.Render("···"), m.crawlBlogDone, m.crawlBlogTotal))
+			}
 		} else {
 			b.WriteString("  [1/3] Crawling docs " + m.spinner.View() + "\n")
-		}
-		if m.crawlBlogTotal > 0 {
-			b.WriteString(fmt.Sprintf("        Crawling blog %s %d/%d\n",
-				dimStyle.Render("···"), m.crawlBlogDone, m.crawlBlogTotal))
-		}
-		if m.customTotal > 0 {
-			b.WriteString(fmt.Sprintf("        Crawling %s %s %d/%d\n",
-				m.customName, dimStyle.Render("···"), m.customDone, m.customTotal))
 		}
 	default:
 		total := m.crawlDocsTotal + m.crawlBlogTotal + m.customTotal
