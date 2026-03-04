@@ -52,13 +52,21 @@ func DefaultSourcesPath() string {
 // CrawlCustomProgress provides callbacks for custom source crawl progress.
 type CrawlCustomProgress struct {
 	OnSource    func(name string, done, total int)
-	OnPage      func(done, total int)
+	OnPage      func(name string, done, total int)
 	OnDiscovery func(name, method string, count int)
 }
 
 // CrawlCustomSources crawls all user-defined sources and returns SeedSources.
+// Phase 1: discover URLs for all sources. Phase 2: crawl pages with cumulative progress.
 func CrawlCustomSources(sources []CustomSource, progress *CrawlCustomProgress) []SeedSource {
-	var result []SeedSource
+	// Phase 1: Discover URLs for all sources.
+	type sourceURLs struct {
+		src    CustomSource
+		urls   []string
+		method string
+	}
+	discovered := make([]sourceURLs, 0, len(sources))
+	totalPages := 0
 	for i, src := range sources {
 		if progress != nil && progress.OnSource != nil {
 			progress.OnSource(src.Name, i+1, len(sources))
@@ -68,9 +76,18 @@ func CrawlCustomSources(sources []CustomSource, progress *CrawlCustomProgress) [
 		if progress != nil && progress.OnDiscovery != nil {
 			progress.OnDiscovery(src.Name, method, len(urls))
 		}
-		for j, pageURL := range urls {
+		discovered = append(discovered, sourceURLs{src, urls, method})
+		totalPages += len(urls)
+	}
+
+	// Phase 2: Crawl pages with cumulative progress.
+	var result []SeedSource
+	crawled := 0
+	for _, d := range discovered {
+		for _, pageURL := range d.urls {
+			crawled++
 			if progress != nil && progress.OnPage != nil {
-				progress.OnPage(j+1, len(urls))
+				progress.OnPage(d.src.Name, crawled, totalPages)
 			}
 
 			ss, err := crawlCustomPage(pageURL)

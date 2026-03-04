@@ -123,6 +123,50 @@ func (s *Store) GetDocsByIDs(ids []int64) ([]DocRow, error) {
 	return docs, nil
 }
 
+// StaleCustomSources returns the names of custom sources whose newest crawled_at
+// is older than maxAge. It maps custom doc URLs back to source names via the
+// provided url→name mapping.
+func (s *Store) StaleCustomSources(urlToName map[string]string, maxAge time.Duration) ([]string, error) {
+	rows, err := s.db.Query(`
+		SELECT url, MAX(crawled_at) AS newest
+		FROM docs
+		WHERE source_type = 'custom'
+		GROUP BY url`)
+	if err != nil {
+		return nil, fmt.Errorf("store: stale custom sources: %w", err)
+	}
+	defer rows.Close()
+
+	threshold := time.Now().Add(-maxAge)
+	staleNames := make(map[string]bool)
+	for rows.Next() {
+		var docURL, newest string
+		if err := rows.Scan(&docURL, &newest); err != nil {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, newest)
+		if err != nil {
+			t, err = time.Parse("2006-01-02 15:04:05", newest)
+			if err != nil {
+				continue
+			}
+		}
+		if t.Before(threshold) {
+			for prefix, name := range urlToName {
+				if strings.HasPrefix(docURL, prefix) {
+					staleNames[name] = true
+				}
+			}
+		}
+	}
+
+	var result []string
+	for name := range staleNames {
+		result = append(result, name)
+	}
+	return result, nil
+}
+
 // isFTS5TokenChar reports whether r is a token character under the unicode61
 // tokenizer's default configuration (categories L*, N*, Co).
 // Everything else is a separator.

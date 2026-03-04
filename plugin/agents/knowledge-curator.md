@@ -79,13 +79,22 @@ Guidelines:
 - For each suggestion, provide the docs URL you would add
 - If the user selects any, verify crawlability and add them too (same Step 2-3 flow)
 
-### Step 5: Confirm
+### Step 5: Crawl and vectorize
 
-Tell the user:
+After adding each source to sources.yaml, immediately crawl and vectorize **only that source** using:
+
+```bash
+alfred harvest --source "<Name>"
+```
+
+The `--source` flag harvests only the named source (matching the `name` field in sources.yaml), skipping all other sources and built-in docs. This is much faster than a full harvest.
+
+Run this for each newly added source (including accepted suggestions from Step 4).
+
+Wait for each to complete. Report the result to the user:
 - What was added (all sources including suggestions they accepted)
 - Discovery method per source (llms.txt / sitemap / single page)
-- Estimated page count per source
-- Run `alfred harvest` to crawl and generate embeddings
+- Harvest result per source (docs count, embeddings generated)
 
 ## Important
 

@@ -40,7 +40,13 @@ func run() error {
 	case "setup":
 		return runSetup()
 	case "harvest":
-		return runHarvest()
+		sourceName := ""
+		for i, arg := range os.Args[2:] {
+			if arg == "--source" && i+1 < len(os.Args[2:]) {
+				sourceName = os.Args[2+i+1]
+			}
+		}
+		return runHarvest(sourceName)
 	case "update":
 		return runUpdate()
 	case "crawl-seed":

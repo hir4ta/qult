@@ -26,7 +26,7 @@ type CrawlProgress struct {
 	OnDocsPage        func(done, total int)
 	OnBlogPost        func(done, total int)
 	OnCustomSource    func(name string, done, total int)
-	OnCustomPage      func(done, total int)
+	OnCustomPage      func(name string, done, total int)
 	OnCustomDiscovery func(name, method string, count int)
 }
 
@@ -93,9 +93,9 @@ func Crawl(progress *CrawlProgress) (*SeedFile, error) {
 					progress.OnCustomSource(name, done, total)
 				}
 			},
-			OnPage: func(done, total int) {
+			OnPage: func(name string, done, total int) {
 				if progress != nil && progress.OnCustomPage != nil {
-					progress.OnCustomPage(done, total)
+					progress.OnCustomPage(name, done, total)
 				}
 			},
 			OnDiscovery: func(name, method string, count int) {

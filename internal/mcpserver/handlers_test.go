@@ -64,7 +64,7 @@ func resultJSON(t *testing.T, res *mcp.CallToolResult) map[string]any {
 func TestKnowledgeHandler_EmptyQuery(t *testing.T) {
 	t.Parallel()
 	st := openTestStore(t)
-	handler := docsSearchHandler(st, nil)
+	handler := docsSearchHandler(st, nil, nil)
 
 	res, err := handler(context.Background(), newRequest(nil))
 	if err != nil {
@@ -82,7 +82,7 @@ func TestKnowledgeHandler_EmptyQuery(t *testing.T) {
 func TestKnowledgeHandler_FTSSearch(t *testing.T) {
 	t.Parallel()
 	st := openTestStore(t)
-	handler := docsSearchHandler(st, nil)
+	handler := docsSearchHandler(st, nil, nil)
 
 	// Insert docs into the store.
 	for _, doc := range []store.DocRow{
@@ -117,7 +117,7 @@ func TestKnowledgeHandler_FTSSearch(t *testing.T) {
 func TestKnowledgeHandler_NoResults(t *testing.T) {
 	t.Parallel()
 	st := openTestStore(t)
-	handler := docsSearchHandler(st, nil)
+	handler := docsSearchHandler(st, nil, nil)
 
 	res, err := handler(context.Background(), newRequest(map[string]any{
 		"query": "xyznonexistentterm",

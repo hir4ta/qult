@@ -46,6 +46,8 @@ func New(st *store.Store, emb *embedder.Embedder) *server.MCPServer {
 		server.WithLogging(),
 	)
 
+	ar := newAutoRefresher(st, emb)
+
 	s.AddTools(
 		server.ServerTool{
 			Tool: mcp.NewTool("knowledge",
@@ -55,7 +57,7 @@ func New(st *store.Store, emb *embedder.Embedder) *server.MCPServer {
 				mcp.WithString("query", mcp.Description("Search query"), mcp.Required()),
 				mcp.WithNumber("limit", mcp.Description("Maximum results (default: 5)")),
 			),
-			Handler: docsSearchHandler(st, emb),
+			Handler: docsSearchHandler(st, emb, ar),
 		},
 
 		server.ServerTool{

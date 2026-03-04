@@ -46,10 +46,11 @@ const (
 )
 
 type harvestModel struct {
-	phase     harvestPhase
-	startTime time.Time
-	err       error
-	result    install.SeedResult
+	phase        harvestPhase
+	singleSource bool // true when harvesting a single custom source
+	startTime    time.Time
+	err          error
+	result       install.SeedResult
 
 	// crawl progress
 	crawlDocsDone  int
@@ -189,53 +190,35 @@ func (m harvestModel) View() tea.View {
 
 	elapsed := time.Since(m.startTime).Round(time.Second)
 
-	// Phase 1: Crawling.
-	switch {
-	case m.phase == harvestCrawling:
-		if m.customTotal > 0 {
-			// Custom sources in progress — docs/blog already done.
-			b.WriteString(fmt.Sprintf("  [1/3] Crawling docs %s %d/%d %s\n",
-				dimStyle.Render("···"), m.crawlDocsDone, m.crawlDocsDone, doneStyle.Render("✓")))
-			if m.crawlBlogTotal > 0 {
-				b.WriteString(fmt.Sprintf("        Crawling blog %s %d/%d %s\n",
-					dimStyle.Render("···"), m.crawlBlogTotal, m.crawlBlogTotal, doneStyle.Render("✓")))
-			}
-			b.WriteString(fmt.Sprintf("        Crawling %s %s %d/%d\n",
-				m.customName, m.spinner.View(), m.customDone, m.customTotal))
-		} else if m.crawlDocsTotal > 0 {
-			b.WriteString(fmt.Sprintf("  [1/3] Crawling docs %s %d/%d\n",
-				m.spinner.View(), m.crawlDocsDone, m.crawlDocsTotal))
-			if m.crawlBlogTotal > 0 {
-				b.WriteString(fmt.Sprintf("        Crawling blog %s %d/%d\n",
-					dimStyle.Render("···"), m.crawlBlogDone, m.crawlBlogTotal))
-			}
-		} else {
-			b.WriteString("  [1/3] Crawling docs " + m.spinner.View() + "\n")
-		}
-	default:
-		total := m.crawlDocsTotal + m.crawlBlogTotal + m.customTotal
-		if m.customTotal > 0 {
-			b.WriteString(fmt.Sprintf("  [1/3] Crawling %s %d pages (%d docs, %d blog, %d custom) %s\n",
-				dimStyle.Render("···"), total, m.crawlDocsTotal, m.crawlBlogTotal, m.customTotal, doneStyle.Render("✓")))
-		} else {
-			b.WriteString(fmt.Sprintf("  [1/3] Crawling %s %d pages %s\n",
-				dimStyle.Render("···"), total, doneStyle.Render("✓")))
+	steps := 3
+	if m.singleSource {
+		steps = 2
+	}
+
+	if m.singleSource {
+		// Single-source mode: only custom crawling.
+		m.viewCrawlSingle(&b, steps)
+	} else {
+		// Full mode: docs + blog + custom.
+		m.viewCrawlFull(&b, steps)
+	}
+
+	// Seeding docs (full harvest only — single-source skips this display).
+	if !m.singleSource {
+		switch {
+		case m.phase < harvestSeeding:
+			// not started
+		case m.phase == harvestSeeding:
+			fmt.Fprintf(&b, "  [2/%d] Seeding docs %s %d/%d\n",
+				steps, dimStyle.Render("···"), m.docsDone, m.docsTotal)
+		default:
+			fmt.Fprintf(&b, "  [2/%d] Seeding docs %s %d/%d %s\n",
+				steps, dimStyle.Render("···"), m.docsTotal, m.docsTotal, doneStyle.Render("✓"))
 		}
 	}
 
-	// Phase 2: Seeding docs.
-	switch {
-	case m.phase < harvestSeeding:
-		// not started
-	case m.phase == harvestSeeding:
-		b.WriteString(fmt.Sprintf("  [2/3] Seeding docs %s %d/%d\n",
-			dimStyle.Render("···"), m.docsDone, m.docsTotal))
-	default:
-		b.WriteString(fmt.Sprintf("  [2/3] Seeding docs %s %d/%d %s\n",
-			dimStyle.Render("···"), m.docsTotal, m.docsTotal, doneStyle.Render("✓")))
-	}
-
-	// Phase 3: Embedding.
+	// Embedding.
+	embedStep := steps
 	switch {
 	case m.phase < harvestEmbedding:
 		// not started
@@ -244,35 +227,81 @@ func (m harvestModel) View() tea.View {
 		if m.embedTot > 0 {
 			pct = float64(m.embedDone) / float64(m.embedTot) * 100
 		}
-		b.WriteString(fmt.Sprintf("  [3/3] Generating embeddings %s %d/%d\n",
-			dimStyle.Render("···"), m.embedDone, m.embedTot))
-		b.WriteString(fmt.Sprintf("        %s %s\n",
-			m.progress.View(), dimStyle.Render(fmt.Sprintf("%.0f%%", pct))))
+		fmt.Fprintf(&b, "  [%d/%d] Generating embeddings %s %d/%d\n",
+			embedStep, steps, dimStyle.Render("···"), m.embedDone, m.embedTot)
+		fmt.Fprintf(&b, "        %s %s\n",
+			m.progress.View(), dimStyle.Render(fmt.Sprintf("%.0f%%", pct)))
 	default:
-		b.WriteString(fmt.Sprintf("  [3/3] Generating embeddings %s %d/%d %s\n",
-			dimStyle.Render("···"), m.embedTot, m.embedTot, doneStyle.Render("✓")))
+		fmt.Fprintf(&b, "  [%d/%d] Generating embeddings %s %d/%d %s\n",
+			embedStep, steps, dimStyle.Render("···"), m.embedTot, m.embedTot, doneStyle.Render("✓"))
 	}
 
 	// Footer.
 	b.WriteString("\n")
 	if m.phase == harvestComplete {
 		total := m.result.Applied + m.result.Unchanged
-		b.WriteString(fmt.Sprintf("  %s (%s)\n",
-			doneStyle.Render("✓ Harvest complete"), elapsed))
-		b.WriteString(fmt.Sprintf("  %d docs (%d updated, %d unchanged), %d embeddings\n\n",
-			total, m.result.Applied, m.result.Unchanged, m.result.Embedded))
+		fmt.Fprintf(&b, "  %s (%s)\n", doneStyle.Render("✓ Harvest complete"), elapsed)
+		fmt.Fprintf(&b, "  %d docs (%d updated, %d unchanged), %d embeddings\n\n",
+			total, m.result.Applied, m.result.Unchanged, m.result.Embedded)
 	} else if m.phase == harvestError {
-		b.WriteString(fmt.Sprintf("  %s %v\n\n",
-			errStyle.Render("✗ Error:"), m.err))
+		fmt.Fprintf(&b, "  %s %v\n\n", errStyle.Render("✗ Error:"), m.err)
 	} else {
-		b.WriteString(fmt.Sprintf("  %s\n",
-			dimStyle.Render(fmt.Sprintf("%s elapsed", elapsed))))
+		fmt.Fprintf(&b, "  %s\n", dimStyle.Render(fmt.Sprintf("%s elapsed", elapsed)))
 	}
 
 	return tea.NewView(b.String())
 }
 
-func runHarvest() error {
+func (m harvestModel) viewCrawlFull(b *strings.Builder, steps int) {
+	switch {
+	case m.phase == harvestCrawling:
+		if m.customTotal > 0 {
+			fmt.Fprintf(b, "  [1/%d] Crawling docs %s %d/%d %s\n",
+				steps, dimStyle.Render("···"), m.crawlDocsDone, m.crawlDocsDone, doneStyle.Render("✓"))
+			if m.crawlBlogTotal > 0 {
+				fmt.Fprintf(b, "        Crawling blog %s %d/%d %s\n",
+					dimStyle.Render("···"), m.crawlBlogTotal, m.crawlBlogTotal, doneStyle.Render("✓"))
+			}
+			fmt.Fprintf(b, "        Crawling %s %s %d/%d\n",
+				m.customName, m.spinner.View(), m.customDone, m.customTotal)
+		} else if m.crawlDocsTotal > 0 {
+			fmt.Fprintf(b, "  [1/%d] Crawling docs %s %d/%d\n",
+				steps, m.spinner.View(), m.crawlDocsDone, m.crawlDocsTotal)
+			if m.crawlBlogTotal > 0 {
+				fmt.Fprintf(b, "        Crawling blog %s %d/%d\n",
+					dimStyle.Render("···"), m.crawlBlogDone, m.crawlBlogTotal)
+			}
+		} else {
+			fmt.Fprintf(b, "  [1/%d] Crawling docs %s\n", steps, m.spinner.View())
+		}
+	default:
+		total := m.crawlDocsTotal + m.crawlBlogTotal + m.customTotal
+		if m.customTotal > 0 {
+			fmt.Fprintf(b, "  [1/%d] Crawling %s %d pages (%d docs, %d blog, %d custom) %s\n",
+				steps, dimStyle.Render("···"), total, m.crawlDocsTotal, m.crawlBlogTotal, m.customTotal, doneStyle.Render("✓"))
+		} else {
+			fmt.Fprintf(b, "  [1/%d] Crawling %s %d pages %s\n",
+				steps, dimStyle.Render("···"), total, doneStyle.Render("✓"))
+		}
+	}
+}
+
+func (m harvestModel) viewCrawlSingle(b *strings.Builder, steps int) {
+	switch {
+	case m.phase == harvestCrawling:
+		if m.customTotal > 0 {
+			fmt.Fprintf(b, "  [1/%d] Crawling %s %s %d/%d\n",
+				steps, m.customName, m.spinner.View(), m.customDone, m.customTotal)
+		} else {
+			fmt.Fprintf(b, "  [1/%d] Crawling %s\n", steps, m.spinner.View())
+		}
+	default:
+		fmt.Fprintf(b, "  [1/%d] Crawling %s %d pages %s\n",
+			steps, dimStyle.Render("···"), m.customTotal, doneStyle.Render("✓"))
+	}
+}
+
+func runHarvest(sourceName string) error {
 	emb, err := embedder.NewEmbedder()
 	if err != nil {
 		return fmt.Errorf("VOYAGE_API_KEY is required: %w", err)
@@ -289,27 +318,40 @@ func runHarvest() error {
 
 	m := newHarvestModel()
 	m.cancel = cancel
+	m.singleSource = sourceName != ""
 	p := tea.NewProgram(m)
 
 	go func() {
-		// Phase 1: Crawl.
-		var currentCustomSource string
-		sf, crawlErr := install.Crawl(&install.CrawlProgress{
-			OnDocsPage: func(done, total int) {
-				p.Send(crawlDocsMsg{done, total})
-			},
-			OnBlogPost: func(done, total int) {
-				p.Send(crawlBlogMsg{done, total})
-			},
-			OnCustomSource: func(name string, done, total int) {
-				currentCustomSource = name
-				p.Send(crawlCustomMsg{name, done, total})
-			},
-			OnCustomPage: func(done, total int) {
-				p.Send(crawlCustomMsg{currentCustomSource, done, total})
-			},
-		})
-		p.Send(crawlDoneMsg{sf, crawlErr})
+		var sf *install.SeedFile
+
+		if sourceName != "" {
+			// Single-source mode: crawl + embed only the named source.
+			var crawlErr error
+			sf, crawlErr = crawlSingleSource(sourceName, p)
+			if crawlErr != nil {
+				p.Send(crawlDoneMsg{nil, crawlErr})
+				return
+			}
+			p.Send(crawlDoneMsg{sf, nil})
+		} else {
+			// Full harvest mode.
+			var crawlErr error
+			sf, crawlErr = install.Crawl(&install.CrawlProgress{
+				OnDocsPage: func(done, total int) {
+					p.Send(crawlDocsMsg{done, total})
+				},
+				OnBlogPost: func(done, total int) {
+					p.Send(crawlBlogMsg{done, total})
+				},
+				OnCustomSource: func(name string, done, total int) {
+					p.Send(crawlCustomMsg{name, done, total})
+				},
+				OnCustomPage: func(name string, done, total int) {
+					p.Send(crawlCustomMsg{name, done, total})
+				},
+			})
+			p.Send(crawlDoneMsg{sf, crawlErr})
+		}
 		if sf == nil {
 			return
 		}
@@ -323,10 +365,40 @@ func runHarvest() error {
 				p.Send(harvestEmbedMsg{done, total})
 			},
 		}
-		result, err := install.ApplySeedData(ctx, st, emb, sf, prog)
-		p.Send(harvestDoneMsg{result, err})
+		result, seedErr := install.ApplySeedData(ctx, st, emb, sf, prog)
+		p.Send(harvestDoneMsg{result, seedErr})
 	}()
 
 	_, err = p.Run()
 	return err
+}
+
+func crawlSingleSource(name string, p *tea.Program) (*install.SeedFile, error) {
+	csf, err := install.ParseSourcesFile(install.DefaultSourcesPath())
+	if err != nil {
+		return nil, err
+	}
+	if csf == nil {
+		return nil, fmt.Errorf("sources.yaml not found")
+	}
+	var target []install.CustomSource
+	for _, src := range csf.Sources {
+		if src.Name == name {
+			target = append(target, src)
+		}
+	}
+	if len(target) == 0 {
+		return nil, fmt.Errorf("source %q not found in sources.yaml", name)
+	}
+
+	sources := install.CrawlCustomSources(target, &install.CrawlCustomProgress{
+		OnPage: func(name string, done, total int) {
+			p.Send(crawlCustomMsg{name, done, total})
+		},
+	})
+
+	return &install.SeedFile{
+		CrawledAt: time.Now().UTC().Format(time.RFC3339),
+		Sources:   sources,
+	}, nil
 }
