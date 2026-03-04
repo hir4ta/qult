@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -53,7 +54,18 @@ type voyageErrorResponse struct {
 	Detail string `json:"detail"`
 }
 
-// embed sends an embedding request to the Voyage API.
+// voyageError wraps a Voyage API error with status code for retry decisions.
+type voyageError struct {
+	status int
+	detail string
+}
+
+func (e *voyageError) Error() string {
+	return fmt.Sprintf("embedder: voyage returned %d: %s", e.status, e.detail)
+}
+
+// embed sends an embedding request to the Voyage API with retry on transient errors.
+// Retries up to 3 times on 400 (transient model failures) and 5xx errors.
 func (c *voyageClient) embed(ctx context.Context, texts []string, inputType string) ([][]float32, error) {
 	body := voyageRequest{
 		Input:           texts,
@@ -66,6 +78,37 @@ func (c *voyageClient) embed(ctx context.Context, texts []string, inputType stri
 		return nil, fmt.Errorf("embedder: marshal: %w", err)
 	}
 
+	var lastErr error
+	for attempt := range 3 {
+		if attempt > 0 {
+			delay := time.Duration(attempt) * 2 * time.Second
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+
+		vecs, err := c.doEmbed(ctx, payload)
+		if err == nil {
+			return vecs, nil
+		}
+		lastErr = err
+
+		// Retry on 400 (transient "Request to model ... failed") and 5xx.
+		// Don't retry on 401, 403, 404, 422, etc.
+		var ve *voyageError
+		if errors.As(err, &ve) {
+			if ve.status == 400 || ve.status == 429 || ve.status >= 500 {
+				continue
+			}
+			return nil, err
+		}
+	}
+	return nil, lastErr
+}
+
+func (c *voyageClient) doEmbed(ctx context.Context, payload []byte) ([][]float32, error) {
 	req, err := http.NewRequestWithContext(ctx, "POST", voyageAPI, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("embedder: new request: %w", err)
@@ -82,10 +125,11 @@ func (c *voyageClient) embed(ctx context.Context, texts []string, inputType stri
 	if resp.StatusCode != 200 {
 		respBody, _ := io.ReadAll(resp.Body)
 		var errResp voyageErrorResponse
+		detail := string(respBody)
 		if json.Unmarshal(respBody, &errResp) == nil && errResp.Detail != "" {
-			return nil, fmt.Errorf("embedder: voyage returned %d: %s", resp.StatusCode, errResp.Detail)
+			detail = errResp.Detail
 		}
-		return nil, fmt.Errorf("embedder: voyage returned %d: %s", resp.StatusCode, string(respBody))
+		return nil, &voyageError{status: resp.StatusCode, detail: detail}
 	}
 
 	var result voyageResponse

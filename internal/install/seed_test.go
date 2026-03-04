@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,17 +12,6 @@ import (
 	"github.com/hir4ta/claude-alfred/internal/embedder"
 	"github.com/hir4ta/claude-alfred/internal/store"
 )
-
-// rewriteTransport redirects all requests to a test server.
-type rewriteTransport struct {
-	base string
-}
-
-func (rt *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	target, _ := url.Parse(rt.base + req.URL.Path)
-	req.URL = target
-	return http.DefaultTransport.RoundTrip(req)
-}
 
 func openTestStore(t *testing.T) *store.Store {
 	t.Helper()

@@ -96,3 +96,25 @@ func TestAutoRefresherNoStale(t *testing.T) {
 		t.Error("lastChecked should be set after checkAndRefresh")
 	}
 }
+
+func TestCheckAndRefresh_AfterCooldownExpires(t *testing.T) {
+	t.Parallel()
+	st := openTestStore(t)
+	ar := newAutoRefresher(st, nil)
+
+	// Simulate that the last check was long ago.
+	ar.mu.Lock()
+	ar.lastChecked = time.Now().Add(-2 * refreshCooldown)
+	ar.mu.Unlock()
+
+	// This call should proceed past the cooldown check and update lastChecked.
+	ar.checkAndRefresh()
+
+	ar.mu.Lock()
+	lastChecked := ar.lastChecked
+	ar.mu.Unlock()
+
+	if time.Since(lastChecked) > time.Second {
+		t.Error("lastChecked should have been updated to ~now")
+	}
+}

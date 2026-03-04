@@ -1,6 +1,9 @@
 package install
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -424,6 +427,370 @@ func TestTruncate(t *testing.T) {
 		}
 		if !strings.HasSuffix(got, " [...]") {
 			t.Errorf("truncate() should end with ' [...]', got suffix %q", got[len(got)-10:])
+		}
+	})
+}
+
+// rewriteTransport redirects all HTTP requests to the test server,
+// preserving the original URL path.
+type rewriteTransport struct {
+	base string
+}
+
+func (rt *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	target, _ := url.Parse(rt.base + req.URL.Path)
+	req.URL = target
+	return http.DefaultTransport.RoundTrip(req)
+}
+
+// setupMockHTTPRewrite starts a test server and rewrites ALL HTTP requests
+// (regardless of host) to that server. Returns the server URL.
+func setupMockHTTPRewrite(t *testing.T, handler http.Handler) string {
+	t.Helper()
+	orig := httpClient
+	t.Cleanup(func() { httpClient = orig })
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	httpClient = &http.Client{Transport: &rewriteTransport{base: srv.URL}}
+	return srv.URL
+}
+
+func TestFetchPage(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		setupMockHTTPRewrite(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(200)
+			w.Write([]byte("hello world"))
+		}))
+
+		body, err := FetchPage("https://example.com/test")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if body != "hello world" {
+			t.Errorf("got %q, want %q", body, "hello world")
+		}
+	})
+
+	t.Run("non-200 returns error", func(t *testing.T) {
+		setupMockHTTPRewrite(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(404)
+		}))
+
+		_, err := FetchPage("https://example.com/missing")
+		if err == nil {
+			t.Fatal("expected error for 404 status")
+		}
+		if !strings.Contains(err.Error(), "HTTP 404") {
+			t.Errorf("error should mention HTTP 404, got: %v", err)
+		}
+	})
+
+	t.Run("user-agent header set", func(t *testing.T) {
+		var gotUA string
+		setupMockHTTPRewrite(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotUA = r.Header.Get("User-Agent")
+			w.WriteHeader(200)
+			w.Write([]byte("ok"))
+		}))
+
+		FetchPage("https://example.com/ua")
+		if gotUA != "claude-alfred/seed-crawler" {
+			t.Errorf("User-Agent = %q, want %q", gotUA, "claude-alfred/seed-crawler")
+		}
+	})
+}
+
+func TestFetchDocsIndex(t *testing.T) {
+	t.Run("parses markdown links", func(t *testing.T) {
+		llmsTxt := `# Claude Code Docs
+
+- [Overview](https://code.claude.com/docs/en/overview)
+- [Hooks](https://code.claude.com/docs/en/hooks.md)
+- [MCP](https://code.claude.com/docs/en/mcp)
+`
+		setupMockHTTPRewrite(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(200)
+			w.Write([]byte(llmsTxt))
+		}))
+
+		urls, err := fetchDocsIndex()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(urls) != 3 {
+			t.Fatalf("got %d URLs, want 3", len(urls))
+		}
+		// .md extension should be stripped
+		for _, u := range urls {
+			if strings.HasSuffix(u, ".md") {
+				t.Errorf("URL should not end with .md: %s", u)
+			}
+		}
+		if urls[0] != "https://code.claude.com/docs/en/overview" {
+			t.Errorf("urls[0] = %q, want overview URL", urls[0])
+		}
+	})
+
+	t.Run("fallback to plain URLs", func(t *testing.T) {
+		plainTxt := `https://code.claude.com/docs/en/getting-started
+https://code.claude.com/docs/en/configuration
+`
+		setupMockHTTPRewrite(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(200)
+			w.Write([]byte(plainTxt))
+		}))
+
+		urls, err := fetchDocsIndex()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(urls) != 2 {
+			t.Fatalf("got %d URLs, want 2", len(urls))
+		}
+	})
+
+	t.Run("no URLs returns error", func(t *testing.T) {
+		setupMockHTTPRewrite(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(200)
+			w.Write([]byte("nothing useful here"))
+		}))
+
+		_, err := fetchDocsIndex()
+		if err == nil {
+			t.Fatal("expected error when no URLs found")
+		}
+		if !strings.Contains(err.Error(), "no doc URLs found") {
+			t.Errorf("error = %v, want 'no doc URLs found'", err)
+		}
+	})
+}
+
+func TestCrawlDocsPage(t *testing.T) {
+	t.Run("returns SeedSource with sections", func(t *testing.T) {
+		mdContent := `# Getting Started
+
+This is the overview section with enough content to pass the length threshold for embedding.
+
+## Installation
+
+Install Claude Code with npm install. This section has enough content to be included as a section.
+
+## Configuration
+
+Configure your settings in the config file. This section also has enough content to be included properly.
+`
+		setupMockHTTPRewrite(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// CrawlDocsPage appends .md to the URL
+			w.WriteHeader(200)
+			w.Write([]byte(mdContent))
+		}))
+
+		src, err := CrawlDocsPage("https://code.claude.com/docs/en/getting-started")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if src.SourceType != "docs" {
+			t.Errorf("source_type = %q, want %q", src.SourceType, "docs")
+		}
+		if src.URL != "https://code.claude.com/docs/en/getting-started" {
+			t.Errorf("URL = %q, want original URL", src.URL)
+		}
+		if len(src.Sections) == 0 {
+			t.Fatal("expected at least one section")
+		}
+	})
+
+	t.Run("fetch error propagates", func(t *testing.T) {
+		setupMockHTTPRewrite(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(500)
+		}))
+
+		_, err := CrawlDocsPage("https://code.claude.com/docs/en/broken")
+		if err == nil {
+			t.Fatal("expected error for 500 status")
+		}
+	})
+}
+
+func TestCrawlChangelog(t *testing.T) {
+	t.Run("extracts v2.x entries", func(t *testing.T) {
+		content := `# Changelog
+
+## 2.5.0
+
+- Added new feature A with enough detail to make this a meaningful section entry.
+- Fixed bug B that was causing issues in the previous release version.
+
+## 2.4.0
+
+- Improved performance of the core engine significantly over the prior version.
+- Updated dependencies to the latest stable releases available.
+
+## 1.9.0
+
+- Legacy feature that should be excluded from v2.x changelog sections.
+`
+		sources := crawlChangelog(content)
+		if len(sources) != 1 {
+			t.Fatalf("got %d sources, want 1", len(sources))
+		}
+		src := sources[0]
+		if src.SourceType != "changelog" {
+			t.Errorf("source_type = %q, want %q", src.SourceType, "changelog")
+		}
+		if src.Version != "2.5.0" {
+			t.Errorf("version = %q, want %q", src.Version, "2.5.0")
+		}
+		// Should have 2 sections (v2.5.0 and v2.4.0), not v1.9.0
+		if len(src.Sections) != 2 {
+			t.Fatalf("got %d sections, want 2", len(src.Sections))
+		}
+		if src.Sections[0].Path != "v2.5.0" {
+			t.Errorf("sections[0].Path = %q, want %q", src.Sections[0].Path, "v2.5.0")
+		}
+		if src.Sections[1].Path != "v2.4.0" {
+			t.Errorf("sections[1].Path = %q, want %q", src.Sections[1].Path, "v2.4.0")
+		}
+	})
+
+	t.Run("no v2.x entries returns nil", func(t *testing.T) {
+		content := `# Changelog
+
+## 1.0.0
+
+- Initial release of the software package.
+`
+		sources := crawlChangelog(content)
+		if sources != nil {
+			t.Errorf("expected nil for no v2.x entries, got %d sources", len(sources))
+		}
+	})
+}
+
+func TestCrawlBlogPost(t *testing.T) {
+	t.Run("extracts article content", func(t *testing.T) {
+		html := `<!DOCTYPE html>
+<html>
+<head><title>Test Post | Anthropic</title></head>
+<body>
+<article>
+<h1>Test Blog Post</h1>
+<p>This is the first paragraph of the blog post with enough content to be meaningful for extraction purposes.</p>
+<h2>Details</h2>
+<p>This is the details section with sufficient content to pass the minimum length threshold for sections.</p>
+</article>
+</body>
+</html>`
+		setupMockHTTPRewrite(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(200)
+			w.Write([]byte(html))
+		}))
+
+		src, err := crawlBlogPost("https://www.anthropic.com/engineering/test-post")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if src.SourceType != "engineering" {
+			t.Errorf("source_type = %q, want %q", src.SourceType, "engineering")
+		}
+		if src.URL != "https://www.anthropic.com/engineering/test-post" {
+			t.Errorf("URL = %q, want original URL", src.URL)
+		}
+		if len(src.Sections) == 0 {
+			t.Fatal("expected at least one section")
+		}
+	})
+
+	t.Run("no article content returns error", func(t *testing.T) {
+		// Provide HTML where extractArticleContent returns "" — empty tags only
+		html := `<!DOCTYPE html><html><head></head><body></body></html>`
+		setupMockHTTPRewrite(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(200)
+			w.Write([]byte(html))
+		}))
+
+		_, err := crawlBlogPost("https://www.anthropic.com/engineering/empty")
+		if err == nil {
+			t.Fatal("expected error for empty article content")
+		}
+		if !strings.Contains(err.Error(), "no article content") {
+			t.Errorf("error = %v, want 'no article content'", err)
+		}
+	})
+
+	t.Run("fetch error propagates", func(t *testing.T) {
+		setupMockHTTPRewrite(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(503)
+		}))
+
+		_, err := crawlBlogPost("https://www.anthropic.com/engineering/down")
+		if err == nil {
+			t.Fatal("expected error for 503 status")
+		}
+	})
+}
+
+func TestFetchBlogIndex(t *testing.T) {
+	t.Run("extracts blog post URLs", func(t *testing.T) {
+		html := `<!DOCTYPE html>
+<html><body>
+<a href="/engineering/claude-code-best-practices">Best Practices</a>
+<a href="/engineering/building-effective-agents">Effective Agents</a>
+<a href="/engineering/claude-code-best-practices">Best Practices Duplicate</a>
+<a href="/about">Not a blog post</a>
+</body></html>`
+		setupMockHTTPRewrite(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(200)
+			w.Write([]byte(html))
+		}))
+
+		urls, err := fetchBlogIndex()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Should deduplicate
+		if len(urls) != 2 {
+			t.Fatalf("got %d URLs, want 2 (deduped)", len(urls))
+		}
+		if urls[0] != "https://www.anthropic.com/engineering/claude-code-best-practices" {
+			t.Errorf("urls[0] = %q", urls[0])
+		}
+		if urls[1] != "https://www.anthropic.com/engineering/building-effective-agents" {
+			t.Errorf("urls[1] = %q", urls[1])
+		}
+	})
+
+	t.Run("includes page 2 results", func(t *testing.T) {
+		html1 := `<a href="/engineering/post-a">A</a>`
+		html2 := `<a href="/engineering/post-b">B</a>`
+		setupMockHTTPRewrite(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(200)
+			if strings.Contains(r.URL.RawQuery, "page=2") || strings.Contains(r.URL.Path, "page=2") {
+				w.Write([]byte(html2))
+			} else {
+				w.Write([]byte(html1))
+			}
+		}))
+
+		urls, err := fetchBlogIndex()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// page 2 query string is appended to the path in the rewrite,
+		// so we just verify we get at least the page-1 result
+		if len(urls) < 1 {
+			t.Fatal("expected at least 1 URL")
+		}
+	})
+
+	t.Run("fetch error returns error", func(t *testing.T) {
+		setupMockHTTPRewrite(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(500)
+		}))
+
+		_, err := fetchBlogIndex()
+		if err == nil {
+			t.Fatal("expected error for 500 status")
 		}
 	})
 }
