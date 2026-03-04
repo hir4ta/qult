@@ -240,7 +240,22 @@ func (m harvestModel) View() tea.View {
 			total, m.result.Applied, m.result.Unchanged, m.result.Embedded)
 	} else if m.phase == harvestError {
 		fmt.Fprintf(&b, "  %s\n", errStyle.Render("✗ Error:"))
-		fmt.Fprintf(&b, "  %v\n", m.err)
+		// Wrap long error messages at ~50 chars for readability.
+		errText := fmt.Sprintf("%v", m.err)
+		for len(errText) > 50 {
+			cut := strings.LastIndex(errText[:50], " ")
+			if cut <= 0 {
+				cut = 50
+			}
+			fmt.Fprintf(&b, "  %s\n", errText[:cut])
+			errText = errText[cut:]
+			if len(errText) > 0 && errText[0] == ' ' {
+				errText = errText[1:]
+			}
+		}
+		if errText != "" {
+			fmt.Fprintf(&b, "  %s\n", errText)
+		}
 		if strings.Contains(m.err.Error(), "embed batch") {
 			fmt.Fprintf(&b, "\n  %s\n", dimStyle.Render("再度 harvest を実行すると、クロールとシードは再実行されますが"))
 			fmt.Fprintf(&b, "  %s\n", dimStyle.Render("embedding は生成済みの分をスキップして続きから再開します。"))

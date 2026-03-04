@@ -58,9 +58,13 @@ type voyageErrorResponse struct {
 type voyageError struct {
 	status int
 	detail string
+	raw    string // full response body for debugging
 }
 
 func (e *voyageError) Error() string {
+	if e.raw != "" && e.raw != e.detail {
+		return fmt.Sprintf("embedder: voyage returned %d: %s (raw: %s)", e.status, e.detail, e.raw)
+	}
 	return fmt.Sprintf("embedder: voyage returned %d: %s", e.status, e.detail)
 }
 
@@ -124,12 +128,14 @@ func (c *voyageClient) doEmbed(ctx context.Context, payload []byte) ([][]float32
 
 	if resp.StatusCode != 200 {
 		respBody, _ := io.ReadAll(resp.Body)
+		// Always include raw response body for debugging.
+		// Try to extract detail field if present, but append raw body too.
+		raw := string(respBody)
 		var errResp voyageErrorResponse
-		detail := string(respBody)
 		if json.Unmarshal(respBody, &errResp) == nil && errResp.Detail != "" {
-			detail = errResp.Detail
+			return nil, &voyageError{status: resp.StatusCode, detail: errResp.Detail, raw: raw}
 		}
-		return nil, &voyageError{status: resp.StatusCode, detail: detail}
+		return nil, &voyageError{status: resp.StatusCode, detail: raw, raw: raw}
 	}
 
 	var result voyageResponse
