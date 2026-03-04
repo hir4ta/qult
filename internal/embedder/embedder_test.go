@@ -242,3 +242,101 @@ func TestRerank_APIError(t *testing.T) {
 		t.Fatal("rerank() with 503 response should return error")
 	}
 }
+
+// newTestEmbedder creates an Embedder with a mocked HTTP client for testing.
+func newTestEmbedder(t *testing.T, handler http.HandlerFunc) *Embedder {
+	t.Helper()
+	c := newTestClient(t, handler)
+	return &Embedder{client: c}
+}
+
+func embedHandler(w http.ResponseWriter, r *http.Request) {
+	var req voyageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	resp := voyageResponse{}
+	for range req.Input {
+		resp.Data = append(resp.Data, struct {
+			Embedding []float32 `json:"embedding"`
+		}{Embedding: []float32{0.1, 0.2, 0.3}})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func TestEmbedder_EmbedForSearch(t *testing.T) {
+	t.Parallel()
+	e := newTestEmbedder(t, embedHandler)
+	vec, err := e.EmbedForSearch(context.Background(), "test query")
+	if err != nil {
+		t.Fatalf("EmbedForSearch() error: %v", err)
+	}
+	if len(vec) != 3 {
+		t.Errorf("EmbedForSearch() dims = %d, want 3", len(vec))
+	}
+}
+
+func TestEmbedder_EmbedForStorage(t *testing.T) {
+	t.Parallel()
+	e := newTestEmbedder(t, embedHandler)
+	vec, err := e.EmbedForStorage(context.Background(), "test doc")
+	if err != nil {
+		t.Fatalf("EmbedForStorage() error: %v", err)
+	}
+	if len(vec) != 3 {
+		t.Errorf("EmbedForStorage() dims = %d, want 3", len(vec))
+	}
+}
+
+func TestEmbedder_EmbedBatchForStorage(t *testing.T) {
+	t.Parallel()
+	e := newTestEmbedder(t, embedHandler)
+	vecs, err := e.EmbedBatchForStorage(context.Background(), []string{"doc1", "doc2"})
+	if err != nil {
+		t.Fatalf("EmbedBatchForStorage() error: %v", err)
+	}
+	if len(vecs) != 2 {
+		t.Errorf("EmbedBatchForStorage() returned %d vecs, want 2", len(vecs))
+	}
+}
+
+func TestEmbedder_Rerank(t *testing.T) {
+	t.Parallel()
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		resp := rerankResponse{
+			Data: []RerankResult{
+				{Index: 0, RelevanceScore: 0.9},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}
+	e := newTestEmbedder(t, handler)
+	results, err := e.Rerank(context.Background(), "query", []string{"doc"}, 1)
+	if err != nil {
+		t.Fatalf("Rerank() error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("Rerank() returned %d results, want 1", len(results))
+	}
+}
+
+func TestRerank_ErrorDetail(t *testing.T) {
+	t.Parallel()
+
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(voyageErrorResponse{Detail: "bad rerank"})
+	}
+
+	c := newTestClient(t, handler)
+	_, err := c.rerank(context.Background(), "query", []string{"doc"}, 1)
+	if err == nil {
+		t.Fatal("rerank() with error detail should return error")
+	}
+	if !strings.Contains(err.Error(), "bad rerank") {
+		t.Errorf("error %q should contain 'bad rerank'", err.Error())
+	}
+}

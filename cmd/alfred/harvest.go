@@ -223,14 +223,9 @@ func (m harvestModel) View() tea.View {
 	case m.phase < harvestEmbedding:
 		// not started
 	case m.phase == harvestEmbedding:
-		var pct float64
-		if m.embedTot > 0 {
-			pct = float64(m.embedDone) / float64(m.embedTot) * 100
-		}
 		fmt.Fprintf(&b, "  [%d/%d] Generating embeddings %s %d/%d\n",
 			embedStep, steps, dimStyle.Render("···"), m.embedDone, m.embedTot)
-		fmt.Fprintf(&b, "        %s %s\n",
-			m.progress.View(), dimStyle.Render(fmt.Sprintf("%.0f%%", pct)))
+		fmt.Fprintf(&b, "        %s\n", m.progress.View())
 	default:
 		fmt.Fprintf(&b, "  [%d/%d] Generating embeddings %s %d/%d %s\n",
 			embedStep, steps, dimStyle.Render("···"), m.embedTot, m.embedTot, doneStyle.Render("✓"))
@@ -244,7 +239,13 @@ func (m harvestModel) View() tea.View {
 		fmt.Fprintf(&b, "  %d docs (%d updated, %d unchanged), %d embeddings\n\n",
 			total, m.result.Applied, m.result.Unchanged, m.result.Embedded)
 	} else if m.phase == harvestError {
-		fmt.Fprintf(&b, "  %s %v\n\n", errStyle.Render("✗ Error:"), m.err)
+		fmt.Fprintf(&b, "  %s\n", errStyle.Render("✗ Error:"))
+		fmt.Fprintf(&b, "  %v\n", m.err)
+		if strings.Contains(m.err.Error(), "embed batch") {
+			fmt.Fprintf(&b, "\n  %s\n", dimStyle.Render("再度 harvest を実行すると、クロールとシードは再実行されますが"))
+			fmt.Fprintf(&b, "  %s\n", dimStyle.Render("embedding は生成済みの分をスキップして続きから再開します。"))
+		}
+		fmt.Fprintln(&b)
 	} else {
 		fmt.Fprintf(&b, "  %s\n", dimStyle.Render(fmt.Sprintf("%s elapsed", elapsed)))
 	}

@@ -2,7 +2,9 @@ package store
 
 import (
 	"path/filepath"
+	"sort"
 	"testing"
+	"time"
 )
 
 func openTestStore(t *testing.T) *Store {
@@ -258,4 +260,208 @@ func TestContentHashOf(t *testing.T) {
 	if h1 == h3 {
 		t.Error("different content should produce different hash")
 	}
+}
+
+func TestStaleCustomSources(t *testing.T) {
+	t.Parallel()
+
+	freshTime := time.Now().UTC().Format(time.RFC3339)
+	staleTime := time.Now().Add(-8 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	maxAge := 7 * 24 * time.Hour
+
+	t.Run("all stale", func(t *testing.T) {
+		t.Parallel()
+		st := openTestStore(t)
+		_, _, err := st.UpsertDoc(&DocRow{
+			URL: "https://react.dev/docs", SectionPath: "Intro",
+			Content: "React docs", SourceType: "custom", CrawledAt: staleTime,
+		})
+		if err != nil {
+			t.Fatalf("UpsertDoc: %v", err)
+		}
+		_, _, err = st.UpsertDoc(&DocRow{
+			URL: "https://go.dev/docs", SectionPath: "Intro",
+			Content: "Go docs", SourceType: "custom", CrawledAt: staleTime,
+		})
+		if err != nil {
+			t.Fatalf("UpsertDoc: %v", err)
+		}
+
+		urlToName := map[string]string{
+			"https://react.dev": "react",
+			"https://go.dev":    "go",
+		}
+		got, err := st.StaleCustomSources(urlToName, maxAge)
+		if err != nil {
+			t.Fatalf("StaleCustomSources = _, %v", err)
+		}
+		sort.Strings(got)
+		if len(got) != 2 {
+			t.Fatalf("StaleCustomSources = %v, want 2 names", got)
+		}
+		if got[0] != "go" || got[1] != "react" {
+			t.Errorf("StaleCustomSources = %v, want [go react]", got)
+		}
+	})
+
+	t.Run("some stale some fresh", func(t *testing.T) {
+		t.Parallel()
+		st := openTestStore(t)
+		_, _, err := st.UpsertDoc(&DocRow{
+			URL: "https://react.dev/docs", SectionPath: "Intro",
+			Content: "React docs", SourceType: "custom", CrawledAt: staleTime,
+		})
+		if err != nil {
+			t.Fatalf("UpsertDoc: %v", err)
+		}
+		_, _, err = st.UpsertDoc(&DocRow{
+			URL: "https://go.dev/docs", SectionPath: "Intro",
+			Content: "Go docs", SourceType: "custom", CrawledAt: freshTime,
+		})
+		if err != nil {
+			t.Fatalf("UpsertDoc: %v", err)
+		}
+
+		urlToName := map[string]string{
+			"https://react.dev": "react",
+			"https://go.dev":    "go",
+		}
+		got, err := st.StaleCustomSources(urlToName, maxAge)
+		if err != nil {
+			t.Fatalf("StaleCustomSources = _, %v", err)
+		}
+		if len(got) != 1 || got[0] != "react" {
+			t.Errorf("StaleCustomSources = %v, want [react]", got)
+		}
+	})
+
+	t.Run("all fresh", func(t *testing.T) {
+		t.Parallel()
+		st := openTestStore(t)
+		_, _, err := st.UpsertDoc(&DocRow{
+			URL: "https://react.dev/docs", SectionPath: "Intro",
+			Content: "React docs", SourceType: "custom", CrawledAt: freshTime,
+		})
+		if err != nil {
+			t.Fatalf("UpsertDoc: %v", err)
+		}
+
+		urlToName := map[string]string{"https://react.dev": "react"}
+		got, err := st.StaleCustomSources(urlToName, maxAge)
+		if err != nil {
+			t.Fatalf("StaleCustomSources = _, %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("StaleCustomSources = %v, want empty", got)
+		}
+	})
+
+	t.Run("empty DB", func(t *testing.T) {
+		t.Parallel()
+		st := openTestStore(t)
+		urlToName := map[string]string{"https://react.dev": "react"}
+		got, err := st.StaleCustomSources(urlToName, maxAge)
+		if err != nil {
+			t.Fatalf("StaleCustomSources = _, %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("StaleCustomSources = %v, want empty", got)
+		}
+	})
+
+	t.Run("RFC3339 time format", func(t *testing.T) {
+		t.Parallel()
+		st := openTestStore(t)
+		_, _, err := st.UpsertDoc(&DocRow{
+			URL: "https://example.com/docs", SectionPath: "A",
+			Content: "test", SourceType: "custom",
+			CrawledAt: "2020-01-01T00:00:00Z",
+		})
+		if err != nil {
+			t.Fatalf("UpsertDoc: %v", err)
+		}
+
+		urlToName := map[string]string{"https://example.com": "example"}
+		got, err := st.StaleCustomSources(urlToName, maxAge)
+		if err != nil {
+			t.Fatalf("StaleCustomSources = _, %v", err)
+		}
+		if len(got) != 1 || got[0] != "example" {
+			t.Errorf("StaleCustomSources = %v, want [example]", got)
+		}
+	})
+}
+
+func TestSeedDocsCount(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty DB", func(t *testing.T) {
+		t.Parallel()
+		st := openTestStore(t)
+		n, err := st.SeedDocsCount()
+		if err != nil {
+			t.Fatalf("SeedDocsCount = _, %v", err)
+		}
+		if n != 0 {
+			t.Errorf("SeedDocsCount = %d, want 0", n)
+		}
+	})
+
+	t.Run("seed docs counted", func(t *testing.T) {
+		t.Parallel()
+		st := openTestStore(t)
+		for i := range 3 {
+			_, _, err := st.UpsertDoc(&DocRow{
+				URL:         "https://docs.example.com/page",
+				SectionPath: "Section " + string(rune('A'+i)),
+				Content:     "Seed content " + string(rune('A'+i)),
+				SourceType:  "seed",
+			})
+			if err != nil {
+				t.Fatalf("UpsertDoc[%d]: %v", i, err)
+			}
+		}
+		n, err := st.SeedDocsCount()
+		if err != nil {
+			t.Fatalf("SeedDocsCount = _, %v", err)
+		}
+		if n != 3 {
+			t.Errorf("SeedDocsCount = %d, want 3", n)
+		}
+	})
+
+	t.Run("project docs excluded", func(t *testing.T) {
+		t.Parallel()
+		st := openTestStore(t)
+		_, _, err := st.UpsertDoc(&DocRow{
+			URL: "https://docs.example.com/a", SectionPath: "A",
+			Content: "seed content", SourceType: "seed",
+		})
+		if err != nil {
+			t.Fatalf("UpsertDoc(seed): %v", err)
+		}
+		_, _, err = st.UpsertDoc(&DocRow{
+			URL: "project://claude.md", SectionPath: "B",
+			Content: "project content", SourceType: "project",
+		})
+		if err != nil {
+			t.Fatalf("UpsertDoc(project): %v", err)
+		}
+		_, _, err = st.UpsertDoc(&DocRow{
+			URL: "https://custom.dev/docs", SectionPath: "C",
+			Content: "custom content", SourceType: "custom",
+		})
+		if err != nil {
+			t.Fatalf("UpsertDoc(custom): %v", err)
+		}
+
+		n, err := st.SeedDocsCount()
+		if err != nil {
+			t.Fatalf("SeedDocsCount = _, %v", err)
+		}
+		// seed(1) + custom(1) = 2. Project excluded.
+		if n != 2 {
+			t.Errorf("SeedDocsCount = %d, want 2", n)
+		}
+	})
 }
