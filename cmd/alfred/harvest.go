@@ -214,8 +214,13 @@ func (m harvestModel) View() tea.View {
 		}
 	default:
 		total := m.crawlDocsTotal + m.crawlBlogTotal + m.customTotal
-		b.WriteString(fmt.Sprintf("  [1/3] Crawling %s %d pages %s\n",
-			dimStyle.Render("···"), total, doneStyle.Render("✓")))
+		if m.customTotal > 0 {
+			b.WriteString(fmt.Sprintf("  [1/3] Crawling %s %d pages (%d docs, %d blog, %d custom) %s\n",
+				dimStyle.Render("···"), total, m.crawlDocsTotal, m.crawlBlogTotal, m.customTotal, doneStyle.Render("✓")))
+		} else {
+			b.WriteString(fmt.Sprintf("  [1/3] Crawling %s %d pages %s\n",
+				dimStyle.Render("···"), total, doneStyle.Render("✓")))
+		}
 	}
 
 	// Phase 2: Seeding docs.
@@ -288,6 +293,7 @@ func runHarvest() error {
 
 	go func() {
 		// Phase 1: Crawl.
+		var currentCustomSource string
 		sf, crawlErr := install.Crawl(&install.CrawlProgress{
 			OnDocsPage: func(done, total int) {
 				p.Send(crawlDocsMsg{done, total})
@@ -296,10 +302,11 @@ func runHarvest() error {
 				p.Send(crawlBlogMsg{done, total})
 			},
 			OnCustomSource: func(name string, done, total int) {
+				currentCustomSource = name
 				p.Send(crawlCustomMsg{name, done, total})
 			},
 			OnCustomPage: func(done, total int) {
-				p.Send(crawlCustomMsg{"", done, total})
+				p.Send(crawlCustomMsg{currentCustomSource, done, total})
 			},
 		})
 		p.Send(crawlDoneMsg{sf, crawlErr})

@@ -51,8 +51,9 @@ func DefaultSourcesPath() string {
 
 // CrawlCustomProgress provides callbacks for custom source crawl progress.
 type CrawlCustomProgress struct {
-	OnSource func(name string, done, total int)
-	OnPage   func(done, total int)
+	OnSource    func(name string, done, total int)
+	OnPage      func(done, total int)
+	OnDiscovery func(name, method string, count int)
 }
 
 // CrawlCustomSources crawls all user-defined sources and returns SeedSources.
@@ -63,7 +64,10 @@ func CrawlCustomSources(sources []CustomSource, progress *CrawlCustomProgress) [
 			progress.OnSource(src.Name, i+1, len(sources))
 		}
 
-		urls := discoverURLs(src)
+		urls, method := discoverURLs(src)
+		if progress != nil && progress.OnDiscovery != nil {
+			progress.OnDiscovery(src.Name, method, len(urls))
+		}
 		for j, pageURL := range urls {
 			if progress != nil && progress.OnPage != nil {
 				progress.OnPage(j+1, len(urls))
@@ -82,10 +86,11 @@ func CrawlCustomSources(sources []CustomSource, progress *CrawlCustomProgress) [
 }
 
 // discoverURLs tries llms.txt first, then sitemap.xml.
-func discoverURLs(src CustomSource) []string {
+// Returns discovered URLs and the method used ("llms.txt", "sitemap", "single page").
+func discoverURLs(src CustomSource) ([]string, string) {
 	parsed, err := url.Parse(src.URL)
 	if err != nil {
-		return nil
+		return nil, ""
 	}
 
 	// Try llms.txt at various locations.
@@ -100,7 +105,7 @@ func discoverURLs(src CustomSource) []string {
 				if src.PathPrefix != "" {
 					urls = filterByPrefix(urls, src.PathPrefix)
 				}
-				return urls
+				return urls, "llms.txt"
 			}
 		}
 	}
@@ -115,12 +120,12 @@ func discoverURLs(src CustomSource) []string {
 		}
 		urls := ParseSitemap(body, prefix)
 		if len(urls) > 0 {
-			return urls
+			return urls, "sitemap"
 		}
 	}
 
 	// Last resort: just the URL itself.
-	return []string{src.URL}
+	return []string{src.URL}, "single page"
 }
 
 var llmsTxtLinkRe = regexp.MustCompile(`\(?(https?://[^\s)]+)\)?`)
