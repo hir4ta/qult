@@ -131,10 +131,16 @@ func Bundle(outputDir, version string) error {
 		}
 	}
 
-	// 7. Write agent.
-	agentPath := filepath.Join(outputDir, "agents", "alfred.md")
-	if err := os.WriteFile(agentPath, []byte(alfredAgentContent), 0o644); err != nil {
-		return fmt.Errorf("write alfred agent: %w", err)
+	// 7. Write agents.
+	agents := map[string]string{
+		"alfred.md":            alfredAgentContent,
+		"knowledge-curator.md": knowledgeCuratorAgentContent,
+	}
+	for name, content := range agents {
+		p := filepath.Join(outputDir, "agents", name)
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			return fmt.Errorf("write agent %s: %w", name, err)
+		}
 	}
 
 	// 8. Write rules.
@@ -154,7 +160,7 @@ func Bundle(outputDir, version string) error {
 	fmt.Printf("  - bin/run.sh (delegator)\n")
 	fmt.Printf("  - %d skills\n", len(alfredSkills))
 	fmt.Printf("  - %d rules\n", len(alfredRules))
-	fmt.Printf("  - 1 agent (alfred)\n")
+	fmt.Printf("  - %d agents\n", len(agents))
 	return nil
 }
 
