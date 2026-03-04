@@ -17,9 +17,13 @@ import (
 
 // harvest TUI messages.
 type (
-	crawlDocsMsg  struct{ done, total int }
-	crawlBlogMsg  struct{ done, total int }
-	crawlDoneMsg  struct {
+	crawlDocsMsg   struct{ done, total int }
+	crawlBlogMsg   struct{ done, total int }
+	crawlCustomMsg struct {
+		name        string
+		done, total int
+	}
+	crawlDoneMsg struct {
 		sf  *install.SeedFile
 		err error
 	}
@@ -52,6 +56,9 @@ type harvestModel struct {
 	crawlDocsTotal int
 	crawlBlogDone  int
 	crawlBlogTotal int
+	customName     string
+	customDone     int
+	customTotal    int
 
 	// seed progress
 	docsDone  int
@@ -106,6 +113,12 @@ func (m harvestModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case crawlBlogMsg:
 		m.crawlBlogDone = msg.done
 		m.crawlBlogTotal = msg.total
+		return m, nil
+
+	case crawlCustomMsg:
+		m.customName = msg.name
+		m.customDone = msg.done
+		m.customTotal = msg.total
 		return m, nil
 
 	case crawlDoneMsg:
@@ -189,8 +202,12 @@ func (m harvestModel) View() tea.View {
 			b.WriteString(fmt.Sprintf("        Crawling blog %s %d/%d\n",
 				dimStyle.Render("···"), m.crawlBlogDone, m.crawlBlogTotal))
 		}
+		if m.customTotal > 0 {
+			b.WriteString(fmt.Sprintf("        Crawling %s %s %d/%d\n",
+				m.customName, dimStyle.Render("···"), m.customDone, m.customTotal))
+		}
 	default:
-		total := m.crawlDocsTotal + m.crawlBlogTotal
+		total := m.crawlDocsTotal + m.crawlBlogTotal + m.customTotal
 		b.WriteString(fmt.Sprintf("  [1/3] Crawling %s %d pages %s\n",
 			dimStyle.Render("···"), total, doneStyle.Render("✓")))
 	}
@@ -271,6 +288,12 @@ func runHarvest() error {
 			},
 			OnBlogPost: func(done, total int) {
 				p.Send(crawlBlogMsg{done, total})
+			},
+			OnCustomSource: func(name string, done, total int) {
+				p.Send(crawlCustomMsg{name, done, total})
+			},
+			OnCustomPage: func(done, total int) {
+				p.Send(crawlCustomMsg{"", done, total})
 			},
 		})
 		p.Send(crawlDoneMsg{sf, crawlErr})

@@ -23,8 +23,10 @@ var httpClient = &http.Client{Timeout: fetchTimeout}
 
 // CrawlProgress provides callbacks for crawl progress reporting.
 type CrawlProgress struct {
-	OnDocsPage func(done, total int)
-	OnBlogPost func(done, total int)
+	OnDocsPage     func(done, total int)
+	OnBlogPost     func(done, total int)
+	OnCustomSource func(name string, done, total int)
+	OnCustomPage   func(done, total int)
 }
 
 // Crawl fetches all documentation sources and returns the seed data.
@@ -76,6 +78,24 @@ func Crawl(progress *CrawlProgress) (*SeedFile, error) {
 				sf.Sources = append(sf.Sources, *src)
 			}
 		}
+	}
+
+	// 4. Crawl custom sources.
+	csf, csErr := ParseSourcesFile(DefaultSourcesPath())
+	if csErr == nil && csf != nil && len(csf.Sources) > 0 {
+		customSources := CrawlCustomSources(csf.Sources, &CrawlCustomProgress{
+			OnSource: func(name string, done, total int) {
+				if progress != nil && progress.OnCustomSource != nil {
+					progress.OnCustomSource(name, done, total)
+				}
+			},
+			OnPage: func(done, total int) {
+				if progress != nil && progress.OnCustomPage != nil {
+					progress.OnCustomPage(done, total)
+				}
+			},
+		})
+		sf.Sources = append(sf.Sources, customSources...)
 	}
 
 	if docsFail > len(urls)/5 {
