@@ -44,7 +44,7 @@ func Crawl(progress *CrawlProgress) (*SeedFile, error) {
 		if progress != nil && progress.OnDocsPage != nil {
 			progress.OnDocsPage(i+1, len(urls))
 		}
-		src, err := crawlDocsPage(pageURL)
+		src, err := CrawlDocsPage(pageURL)
 		if err != nil {
 			docsFail++
 			continue
@@ -55,7 +55,7 @@ func Crawl(progress *CrawlProgress) (*SeedFile, error) {
 	}
 
 	// 2. Fetch changelog (v2.x only).
-	body, err := fetchPage(changelogURL)
+	body, err := FetchPage(changelogURL)
 	if err == nil {
 		clSources := crawlChangelog(body)
 		sf.Sources = append(sf.Sources, clSources...)
@@ -120,8 +120,8 @@ func CrawlSeed(outputPath string) error {
 	return err // may contain crawl warning
 }
 
-// fetchPage performs an HTTP GET and returns the response body as a string.
-func fetchPage(url string) (string, error) {
+// FetchPage performs an HTTP GET and returns the response body as a string.
+func FetchPage(url string) (string, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return "", err
@@ -149,7 +149,7 @@ func fetchPage(url string) (string, error) {
 
 // fetchDocsIndex reads llms.txt and extracts documentation page URLs.
 func fetchDocsIndex() ([]string, error) {
-	body, err := fetchPage(docsIndexURL)
+	body, err := FetchPage(docsIndexURL)
 	if err != nil {
 		return nil, err
 	}
@@ -181,15 +181,15 @@ func fetchDocsIndex() ([]string, error) {
 	return urls, nil
 }
 
-// crawlDocsPage fetches a docs page and splits into sections.
-func crawlDocsPage(url string) (*SeedSource, error) {
+// CrawlDocsPage fetches a docs page and splits into sections.
+func CrawlDocsPage(url string) (*SeedSource, error) {
 	// Fetch the .md version which returns raw markdown.
 	mdURL := url
 	if !strings.HasSuffix(mdURL, ".md") {
 		mdURL += ".md"
 	}
 
-	body, err := fetchPage(mdURL)
+	body, err := FetchPage(mdURL)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +200,7 @@ func crawlDocsPage(url string) (*SeedSource, error) {
 	// Strip MDX/JSX components.
 	cleaned := stripJSX(body)
 
-	sections := splitMarkdownSections(title, cleaned)
+	sections := SplitMarkdownSections(title, cleaned)
 	return &SeedSource{
 		URL:        url,
 		SourceType: "docs",
@@ -268,7 +268,7 @@ var blogLinkRe = regexp.MustCompile(`href="(/engineering/[a-z0-9-]+)"`)
 
 // fetchBlogIndex fetches the engineering page and extracts blog post URLs.
 func fetchBlogIndex() ([]string, error) {
-	body, err := fetchPage(engineeringURL)
+	body, err := FetchPage(engineeringURL)
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +285,7 @@ func fetchBlogIndex() ([]string, error) {
 	}
 
 	// Blog may have pagination; try page 2.
-	body2, err := fetchPage(engineeringURL + "?page=2")
+	body2, err := FetchPage(engineeringURL + "?page=2")
 	if err == nil {
 		for _, match := range blogLinkRe.FindAllStringSubmatch(body2, -1) {
 			path := match[1]
@@ -302,7 +302,7 @@ func fetchBlogIndex() ([]string, error) {
 
 // crawlBlogPost fetches a blog post and extracts article content as sections.
 func crawlBlogPost(url string) (*SeedSource, error) {
-	body, err := fetchPage(url)
+	body, err := FetchPage(url)
 	if err != nil {
 		return nil, err
 	}
@@ -321,7 +321,7 @@ func crawlBlogPost(url string) (*SeedSource, error) {
 		title = parts[len(parts)-1]
 	}
 
-	sections := splitMarkdownSections(title, content)
+	sections := SplitMarkdownSections(title, content)
 	return &SeedSource{
 		URL:        url,
 		SourceType: "engineering",
@@ -336,8 +336,8 @@ var (
 	jsxTagRe  = regexp.MustCompile(`</?(?:Tip|Note|Warning|Info|Frame|Steps|Step|Tabs|Tab|Accordion|AccordionGroup|Card|CardGroup|CodeGroup|ResponseField|ParamField|Expandable|Check|Icon|Snippet|Update)[^>]*>`)
 )
 
-// splitMarkdownSections splits markdown content by h2/h3 headings.
-func splitMarkdownSections(pageTitle, content string) []SeedSection {
+// SplitMarkdownSections splits markdown content by h2/h3 headings.
+func SplitMarkdownSections(pageTitle, content string) []SeedSection {
 	lines := strings.Split(content, "\n")
 
 	type heading struct {
@@ -461,7 +461,7 @@ func extractArticleContent(html string) string {
 	}
 
 	// Strip all HTML tags and convert to plain text.
-	return htmlToText(html)
+	return HTMLToText(html)
 }
 
 // extractHTMLTitle extracts the title from HTML.
@@ -487,8 +487,8 @@ func extractHTMLTitle(html string) string {
 	return ""
 }
 
-// htmlToText converts HTML to readable plain text with markdown-style headings.
-func htmlToText(html string) string {
+// HTMLToText converts HTML to readable plain text with markdown-style headings.
+func HTMLToText(html string) string {
 	// Replace headings with markdown equivalents.
 	for i := 3; i >= 1; i-- {
 		prefix := strings.Repeat("#", i) + " "
