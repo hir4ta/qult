@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -15,6 +16,24 @@ import (
 	"github.com/hir4ta/claude-alfred/internal/install"
 	"github.com/hir4ta/claude-alfred/internal/store"
 )
+
+const sourcesTemplate = `# alfred custom knowledge sources
+# Add your tech stack documentation URLs here.
+# Run ` + "`alfred harvest`" + ` after editing to crawl and generate embeddings.
+#
+# Example:
+#   sources:
+#     - name: Next.js
+#       url: https://nextjs.org/docs
+#     - name: Go
+#       url: https://go.dev
+#       path_prefix: /doc/
+#
+# Discovery: llms.txt is tried first, then sitemap.xml, then single page.
+# Use the knowledge-curator agent to add sources interactively.
+
+sources: []
+`
 
 // TUI messages.
 type (
@@ -241,5 +260,18 @@ func runSetup() error {
 	}()
 
 	_, err = p.Run()
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Create sources.yaml template if it doesn't exist.
+	sourcesPath := install.DefaultSourcesPath()
+	if _, statErr := os.Stat(sourcesPath); os.IsNotExist(statErr) {
+		if writeErr := os.WriteFile(sourcesPath, []byte(sourcesTemplate), 0o644); writeErr == nil {
+			fmt.Printf("\n  Created %s\n", sourcesPath)
+			fmt.Printf("  Add your tech stack docs, then run `alfred harvest` to ingest.\n")
+		}
+	}
+
+	return nil
 }
