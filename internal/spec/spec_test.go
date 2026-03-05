@@ -104,6 +104,28 @@ func TestReadActiveNoFile(t *testing.T) {
 	}
 }
 
+func TestInitRejectsInvalidSlug(t *testing.T) {
+	tmp := t.TempDir()
+	for _, slug := range []string{"../../evil", "has spaces", "UPPERCASE", "a/b", ""} {
+		_, err := Init(tmp, slug, "test")
+		if err == nil {
+			t.Errorf("Init(%q) should fail with invalid slug", slug)
+		}
+	}
+}
+
+func TestInitRejectsOverwrite(t *testing.T) {
+	tmp := t.TempDir()
+	_, err := Init(tmp, "my-task", "first")
+	if err != nil {
+		t.Fatalf("first Init failed: %v", err)
+	}
+	_, err = Init(tmp, "my-task", "second")
+	if err == nil {
+		t.Error("second Init should fail — spec already exists")
+	}
+}
+
 func TestSpecDirExists(t *testing.T) {
 	tmp := t.TempDir()
 	sd := &SpecDir{ProjectPath: tmp, TaskSlug: "nonexistent"}

@@ -237,6 +237,329 @@ The butler's procurement run — gathering the finest ingredients for the knowle
 - Do NOT run harvest if VOYAGE_API_KEY is not set (the CLI will error)
 `,
 	},
+	{
+		Dir: "brainstorm",
+		Content: `---
+name: brainstorm
+description: |
+  発散（ブレスト）: ラフなテーマから観点・選択肢・仮説・質問を増やし、次の意思決定に渡せるMarkdownを作る。
+  alfred knowledge を活用してナレッジベースから関連情報を補強する。
+  Use when: (1) 何を考えるべきか分からない, (2) アイデアが少ない/思考が固い,
+  (3) リスクや論点を洗い出したい, (4) 収束（意思決定）に渡す材料が欲しい（/alfred:refine 用の素材）。
+user-invocable: true
+argument-hint: "<theme or rough prompt>"
+allowed-tools: Read, Glob, Grep, WebSearch, WebFetch, AskUserQuestion, Agent, mcp__alfred__knowledge, mcp__alfred__butler-init
+context: current
+---
+
+# /alfred:brainstorm
+
+AIと一緒に「発散」を行い、思考の材料（選択肢・観点・仮説・質問）を増やすスキル。
+目的は"決めること"ではなく、"増やすこと"。ただし最後に「収束に進める入口」を作る。
+
+## 重要宣言（運用ルール）
+- このスキルの役割は **発散**。判断・決定はしない（決めるのは /alfred:refine）。
+- 事実が不足している箇所は「仮説」と明記し、**推測で断定しない**。
+- 長文化したら要点だけに圧縮して続行する。
+
+## alfred特化ポイント
+- Phase 1 で ` + "`knowledge`" + ` ツールを使い、ナレッジベースから関連ドキュメント・ベストプラクティスを検索して発散の材料にする
+- Phase 4 出力後に「butler-init でspec化する？」の選択肢を提示する
+- 出力結果はDBに永続化可能（butler-init経由）
+
+## Phase 0: 受理 & 最小前提確認（AskUserQuestion 推奨）
+以下を最大3問で確認（選択肢つき）:
+
+1) ゴールはどれ？
+- a) 方向性を決めたい
+- b) 選択肢を増やしたい
+- c) リスク/論点を洗い出したい
+- d) 問いの立て直しをしたい
+
+2) 制約はある？
+- 期限 / 時間 / 予算 / 体制 / 技術縛り / 絶対NG
+
+3) 対象範囲は？
+- 個人の意思決定 / チームの合意 / プロダクト / 学習 / キャリア etc
+
+※ユーザーが「お任せ」と言ったら「一般的な前提」で進める。
+
+## Phase 1: 観点の網羅（発散）+ ナレッジ検索
+まず ` + "`knowledge`" + ` ツールでテーマに関連するドキュメントを検索し、発散の材料にする。
+
+最低でもこの"観点ブロック"を出す:
+- 目的・成功状態（What good looks like）
+- 対象ユーザー/状況（誰の何が変わる）
+- アプローチの類型（解決策のタイプ）
+- トレードオフ軸（速度/品質、短期/長期 等）
+- リスク/失敗パターン
+- 検証（どう確かめるか）
+
+## Phase 2: アイデア生成（束で）
+「保守的/現実的/実験的」の3束で、各3〜7個。
+各アイデアは必ずこの形で短く:
+- 一言
+- 30秒説明
+- 効く条件
+- 制約との相性
+- 最小検証
+
+## Phase 3: 収束に必要な質問を生成
+収束（意思決定）で決めるための質問を5〜12個作る。
+
+## Phase 4: 出力（Markdown）
+必ずこの構造で出す:
+
+` + "```md" + `
+# Brainstorm Output: <テーマ>
+
+## 前提
+- ゴール:
+- 制約:
+- 対象範囲:
+
+## 観点（抜け漏れ防止）
+- ...
+
+## アイデア束
+### 保守的
+- ...
+### 現実的
+- ...
+### 実験的
+- ...
+
+## リスク/懸念（想定失敗パターン）
+- ...
+
+## 検証のタネ
+- テスト案:
+- 観測/ログ案:
+
+## 次に答えると収束できる質問（重要順）
+1.
+2.
+3.
+
+## 次の一手（推奨）
+- 収束に進むなら：/alfred:refine
+- spec化するなら：/alfred:plan
+- 探索するなら：Plan Modeで読むべき @file / 調べるべきコマンド候補
+` + "```" + `
+
+## 終了条件
+- ユーザーが「十分」と言う
+- アイデアが"束"で最低10個出た
+- 収束に必要な質問が揃った
+`,
+	},
+	{
+		Dir: "refine",
+		Content: `---
+name: refine
+description: |
+  壁打ち（収束）: 論点を1行に固定し、選択肢を最大3に絞り、評価軸で決め、次のアウトプットを確定してMarkdown化する。
+  決定事項は butler-update で自動的にspec保存される。
+  Use when: (1) モヤモヤして手が動かない, (2) 候補はあるが決めきれない, (3) 最小スコープを確定したい,
+  (4) ブレスト結果やメモを意思決定に落としたい。
+user-invocable: true
+argument-hint: "<theme or current messy notes>"
+allowed-tools: Read, Glob, Grep, WebSearch, WebFetch, AskUserQuestion, Agent, mcp__alfred__knowledge, mcp__alfred__butler-update, mcp__alfred__butler-status
+context: current
+---
+
+# /alfred:refine（壁打ち）
+
+目的: 前に進むための「合意された決定」と「次のアウトプット」を作る。
+方針: Claude Code公式の Explore→Plan→Implement に合わせ、ここは Plan までを強くする。
+
+## 重要宣言（運用ルール）
+- このスキルの役割は **収束（意思決定）**。実装はしない。
+- このスキルの出力は「次の計画/実装の入力」になる。曖昧さを残さない。
+- 事実が不足している箇所は推測で埋めず、質問で確定する。
+- 話が発散したら必ず「1行の論点」に戻る。
+
+## alfred特化ポイント
+- ` + "`knowledge`" + ` ツールで関連ベストプラクティスを検索して判断材料にする
+- Phase 4（決定）後に ` + "`butler-update decisions.md`" + ` で決定を自動記録する
+- アクティブなspecがあれば ` + "`butler-status`" + ` で現在の状態を確認してから開始する
+
+## Phase 0: 詰まりタイプ診断（1問）
+以下から選んでもらう:
+1) 問いが不明
+2) 多すぎて選べない
+3) 最小化できない
+4) 次の一手が曖昧
+5) 不安で止まる
+
+## Phase 1: 論点固定（合意まで微修正）
+次の1行を作って合意:
+- 「私は <状況> において <決めたいこと> を <制約> の中で決めたい」
+
+## Phase 2: 選択肢の棚卸し（最大5→3）
+既存案があれば列挙。なければ暫定3案を仮置きしてYes/Noで整える。
+
+## Phase 3: 評価軸（3〜5個）確定 → ラフ採点
+よく使う軸: インパクト / 実現容易性 / 失敗コスト / 学び / 継続性 / 依存の少なさ
+
+## Phase 4: 決定（ここが合意点）
+- 採用案（1つ） or 2案を順番に試す
+- OUT（やらないこと）を必ず3つ
+- **アクティブなspecがあれば ` + "`butler-update`" + ` で decisions.md に記録する**
+
+## Phase 5: 検証方法（自己検証の条件を固定）
+テスト/期待出力/スクショ比較/コマンド
+
+## Phase 6: 次のアウトプットを1つ確定
+例: 1枚図 / 1ページ仕様 / 最小デモ。完了条件を1行で。
+
+## Phase 7: 出力（Markdown）
+必ずこの構造:
+
+` + "```md" + `
+# Refine Output: <テーマ>
+
+## 1行の論点（合意版）
+- ...
+
+## 前提・制約
+- ...
+
+## 選択肢（最大3）
+1.
+2.
+3.
+
+## 評価軸とラフ採点（1〜5）
+| 軸 | 1 | 2 | 3 | メモ |
+|---|---:|---:|---:|---|
+| インパクト | | | | |
+| 実現容易性 | | | | |
+| 失敗コスト | | | | |
+
+## 決定
+- 採用案:
+- 理由（短く）:
+- OUT（やらないこと）:
+  - ...
+  - ...
+  - ...
+
+## 検証
+- 実行コマンド/チェック:
+- 期待結果:
+
+## 次のアウトプット（これだけやる）
+- 成果物:
+- 完了条件:
+- 参考に見るべき @file / コマンド:
+` + "```" + `
+
+## 終了条件
+- 1行論点が合意できた
+- 最大3案に絞れた
+- 次のアウトプットが1つ決まった
+`,
+	},
+	{
+		Dir: "plan",
+		Content: `---
+name: plan
+description: >
+  Butler Protocol: 対話的にspecを生成する。要件定義→設計→タスク分解を行い、
+  .alfred/specs/ に保存。Compact/セッション喪失に強い開発計画を作成する。
+  Use when: (1) 新しいタスクを始める, (2) 設計を整理したい, (3) 作業を再開する前に計画を立てたい。
+user-invocable: true
+argument-hint: "<task-slug> [description]"
+allowed-tools: Read, Write, Edit, Glob, Grep, WebSearch, AskUserQuestion, Agent, mcp__alfred__knowledge, mcp__alfred__butler-init, mcp__alfred__butler-update, mcp__alfred__butler-status
+context: current
+---
+
+# /alfred:plan — Butler Protocol Spec Generator
+
+対話的にspecを生成し、Compact/セッション喪失に強い開発計画を作る。
+
+## Core Principle
+**Compactで最も失われるのは「推論過程」「設計判断の理由」「探索の死に筋」「暗黙の合意」。**
+これらを明示的にファイルに書き出すことで、どのタイミングでセッションが切れても完璧に復帰できるspecを作る。
+
+## Steps
+
+1. **[WHAT]** Parse $ARGUMENTS:
+   - task-slug（必須）: URL-safe identifier
+   - description（任意）: 概要
+   - 引数がなければ AskUserQuestion で確認
+
+2. **[HOW]** Call ` + "`butler-status`" + ` to check existing state:
+   - If active spec exists for this slug → resume mode (skip to Step 7)
+   - If no spec → creation mode (continue)
+
+3. **[HOW]** Requirements gathering (対話, 最大3問):
+   - What is the goal? (1文で)
+   - What does success look like? (計測可能な条件)
+   - What is explicitly out of scope?
+
+4. **[HOW]** Design decisions (対話 + knowledge検索):
+   - Call ` + "`knowledge`" + ` to search for relevant best practices
+   - Discuss architecture approach
+   - Record alternatives considered (CRITICAL for compact resilience)
+
+5. **[HOW]** Task breakdown:
+   - Break into concrete, checkable tasks
+   - Order by dependency
+
+6. **[HOW]** Call ` + "`butler-init`" + ` with gathered information:
+   - Creates all 6 files with templates
+   - Then call ` + "`butler-update`" + ` for each file to fill in gathered content:
+     - requirements.md: replace with full requirements
+     - design.md: replace with design decisions
+     - tasks.md: replace with task checklist
+     - decisions.md: append initial design decisions
+     - session.md: replace with current position + next steps
+
+7. **[OUTPUT]** Confirm to user:
+   ` + "```" + `
+   Butler Protocol initialized for '{task-slug}'.
+
+   Spec files: .alfred/specs/{task-slug}/
+   - requirements.md ✓
+   - design.md ✓
+   - tasks.md ✓
+   - decisions.md ✓
+   - knowledge.md ✓
+   - session.md ✓
+
+   DB synced: {N} documents indexed.
+
+   Compact resilience: Active. Session state will auto-save before compaction.
+   Session recovery: Active. Context will auto-restore on session start.
+
+   Ready to implement. Start with the first task in tasks.md.
+   ` + "```" + `
+
+## Resume Mode (from Step 2)
+
+If an active spec already exists:
+1. Call ` + "`butler-status`" + ` to get current session state
+2. Read spec files in recovery order:
+   - session.md (where am I?)
+   - requirements.md (what am I building?)
+   - design.md (how?)
+   - tasks.md (what's done/remaining?)
+   - decisions.md (why these choices?)
+   - knowledge.md (what did I learn?)
+3. Present summary: "Resuming task '{slug}'. Last position: {current_position}. Next steps: {next_steps}"
+4. Ask: "Continue from here, or update the plan?"
+
+## Guardrails
+
+- Do NOT skip requirements gathering — even for "obvious" tasks
+- Do NOT leave decisions.md empty — record at least the initial approach decision
+- Do NOT create tasks without success criteria
+- ALWAYS record alternatives considered, even if only briefly
+- ALWAYS update session.md with current position after plan completion
+`,
+	},
 }
 
 // deprecatedSkillDirs lists skill directories from previous versions that

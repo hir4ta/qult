@@ -5,6 +5,7 @@ description: |
   決定事項は butler-update で自動的にspec保存される。
   Use when: (1) モヤモヤして手が動かない, (2) 候補はあるが決めきれない, (3) 最小スコープを確定したい,
   (4) ブレスト結果やメモを意思決定に落としたい。
+user-invocable: true
 argument-hint: "<theme or current messy notes>"
 allowed-tools: Read, Glob, Grep, WebSearch, WebFetch, AskUserQuestion, Agent, mcp__alfred__knowledge, mcp__alfred__butler-update, mcp__alfred__butler-status
 context: current

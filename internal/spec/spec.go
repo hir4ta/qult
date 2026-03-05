@@ -4,9 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
+
+// validSlug matches URL-safe task identifiers: lowercase letters, digits, hyphens.
+var validSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]{0,63}$`)
 
 // SpecFile represents a spec file type.
 type SpecFile string
@@ -58,11 +62,6 @@ func ActivePath(projectPath string) string {
 	return filepath.Join(projectPath, ".alfred", "specs", "_active.md")
 }
 
-// ProjectMDPath returns the path to .alfred/project.md.
-func ProjectMDPath(projectPath string) string {
-	return filepath.Join(projectPath, ".alfred", "project.md")
-}
-
 // Dir returns the task's spec directory path.
 func (s *SpecDir) Dir() string {
 	return filepath.Join(SpecsDir(s.ProjectPath), s.TaskSlug)
@@ -81,7 +80,16 @@ func (s *SpecDir) Exists() bool {
 
 // Init creates a new spec directory with template files and sets _active.md.
 func Init(projectPath, taskSlug, description string) (*SpecDir, error) {
+	if !validSlug.MatchString(taskSlug) {
+		return nil, fmt.Errorf("invalid task_slug %q: must be lowercase alphanumeric with hyphens (e.g., 'add-auth')", taskSlug)
+	}
+
 	sd := &SpecDir{ProjectPath: projectPath, TaskSlug: taskSlug}
+
+	// Refuse to overwrite an existing spec directory.
+	if sd.Exists() {
+		return nil, fmt.Errorf("spec already exists for '%s'; use butler-update to modify", taskSlug)
+	}
 
 	if err := os.MkdirAll(sd.Dir(), 0o755); err != nil {
 		return nil, fmt.Errorf("create spec dir: %w", err)

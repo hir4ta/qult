@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -138,7 +139,7 @@ func butlerStatusHandler() server.ToolHandlerFunc {
 
 		taskSlug, err := spec.ReadActive(projectPath)
 		if err != nil {
-			if os.IsNotExist(err) || taskSlug == "" {
+			if errors.Is(err, os.ErrNotExist) {
 				return marshalResult(map[string]any{
 					"active":  false,
 					"message": "no active spec found; use butler-init to start a task",
@@ -164,8 +165,8 @@ func butlerStatusHandler() server.ToolHandlerFunc {
 			"spec_dir":  sd.Dir(),
 		}
 
-		// Read key files for context restoration.
-		for _, f := range []spec.SpecFile{spec.FileSession, spec.FileTasks, spec.FileRequirements} {
+		// Read all 6 spec files for complete context restoration.
+		for _, f := range spec.AllFiles {
 			content, err := sd.ReadFile(f)
 			if err != nil {
 				continue

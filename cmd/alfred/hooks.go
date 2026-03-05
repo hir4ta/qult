@@ -41,14 +41,19 @@ func debugf(format string, args ...any) {
 
 // hookEvent is the minimal structure of a Claude Code hook stdin payload.
 // Fields are populated depending on the event type:
-//   - SessionStart: ProjectPath
+//   - SessionStart: ProjectPath, Source, TranscriptPath
+//   - PreCompact:   ProjectPath, TranscriptPath, Trigger, CustomInstructions
 //   - PreToolUse:   ProjectPath, ToolName, ToolInput
 //   - UserPromptSubmit: ProjectPath, Prompt
 type hookEvent struct {
-	ProjectPath string         `json:"cwd"`
-	ToolName    string         `json:"tool_name"`
-	ToolInput   map[string]any `json:"tool_input"`
-	Prompt      string         `json:"prompt"`
+	ProjectPath        string         `json:"cwd"`
+	Source             string         `json:"source"`              // SessionStart: startup/resume/clear/compact
+	TranscriptPath     string         `json:"transcript_path"`     // path to conversation JSONL
+	Trigger            string         `json:"trigger"`             // PreCompact: manual/auto
+	CustomInstructions string         `json:"custom_instructions"` // PreCompact: user's /compact instructions
+	ToolName           string         `json:"tool_name"`
+	ToolInput          map[string]any `json:"tool_input"`
+	Prompt             string         `json:"prompt"`
 }
 
 // configReminder is the additionalContext message injected when Claude Code
@@ -78,12 +83,13 @@ func runHook(event string) error {
 			}
 			ingestProjectClaudeMD(st, ev.ProjectPath)
 
-			// Inject butler-protocol context if active spec exists
-			injectButlerContext(ev.ProjectPath)
+			// Inject butler-protocol context if active spec exists.
+			// After compact, inject richer context for full recovery.
+			injectButlerContext(ev.ProjectPath, ev.Source)
 		}
 	case "PreCompact":
 		if ev.ProjectPath != "" {
-			handlePreCompact(ev.ProjectPath)
+			handlePreCompact(ev.ProjectPath, ev.TranscriptPath, ev.CustomInstructions)
 		}
 	case "PreToolUse":
 		handlePreToolUse(&ev)
@@ -231,9 +237,10 @@ func ingestProjectClaudeMD(st *store.Store, projectPath string) {
 // ---------------------------------------------------------------------------
 
 // handlePreCompact saves session state before context compaction.
-// This is the core of compact resilience — capturing context that would
-// otherwise be lost during summarization.
-func handlePreCompact(projectPath string) {
+// This is the core of compact resilience — it reads the conversation transcript
+// to extract key context (recent user messages, decisions, blockers) and saves
+// them to session.md before the context is summarized.
+func handlePreCompact(projectPath, transcriptPath, customInstructions string) {
 	taskSlug, err := spec.ReadActive(projectPath)
 	if err != nil {
 		debugf("PreCompact: no active spec, skipping")
@@ -246,15 +253,31 @@ func handlePreCompact(projectPath string) {
 		return
 	}
 
-	// Add compact marker to session.md
-	marker := fmt.Sprintf("\n## Compact Marker [%s]\nAuto-saved before compaction. Context above this point may be summarized.\n",
-		time.Now().Format("2006-01-02 15:04:05"))
-	if err := sd.AppendFile(spec.FileSession, marker); err != nil {
+	// Extract recent conversation context from transcript.
+	var contextSnapshot string
+	if transcriptPath != "" {
+		contextSnapshot = extractTranscriptContext(transcriptPath)
+	}
+
+	// Build compact marker with extracted context.
+	var marker strings.Builder
+	marker.WriteString(fmt.Sprintf("\n## Compact Marker [%s]\n", time.Now().Format("2006-01-02 15:04:05")))
+	if customInstructions != "" {
+		marker.WriteString(fmt.Sprintf("User compact instructions: %s\n", customInstructions))
+	}
+	if contextSnapshot != "" {
+		marker.WriteString("### Pre-Compact Context Snapshot\n")
+		marker.WriteString(contextSnapshot)
+		marker.WriteString("\n")
+	}
+	marker.WriteString("---\n")
+
+	if err := sd.AppendFile(spec.FileSession, marker.String()); err != nil {
 		debugf("PreCompact: append marker error: %v", err)
 		return
 	}
 
-	// Sync session.md to DB (without embedder — hook is short-lived)
+	// Sync session.md to DB (without embedder — hook is short-lived).
 	st, err := store.OpenDefaultCached()
 	if err != nil {
 		debugf("PreCompact: DB open error: %v", err)
@@ -265,20 +288,182 @@ func handlePreCompact(projectPath string) {
 		return
 	}
 
-	debugf("PreCompact: saved session for %s", taskSlug)
+	debugf("PreCompact: saved session for %s (context: %d bytes)", taskSlug, len(contextSnapshot))
+}
 
-	// Output context for Claude to see after compact
-	fmt.Fprintf(os.Stdout, "Butler Protocol: session state saved for task '%s'. After compact, call butler-status to restore full context.\n", taskSlug)
+// transcriptEntry represents a single line from the Claude Code conversation JSONL.
+type transcriptEntry struct {
+	Type    string `json:"type"`
+	Role    string `json:"role"`
+	Content any    `json:"content"` // string or []ContentBlock
+	Message struct {
+		Role    string `json:"role"`
+		Content any    `json:"content"`
+	} `json:"message"`
+}
+
+// extractTranscriptContext reads the tail of a conversation transcript and
+// extracts the most valuable context: recent user messages, assistant summaries,
+// and tool errors that would otherwise be lost during compaction.
+func extractTranscriptContext(transcriptPath string) string {
+	// Read last 64KB of transcript (conversation can be huge).
+	data, err := readFileTail(transcriptPath, 64*1024)
+	if err != nil {
+		debugf("PreCompact: read transcript error: %v", err)
+		return ""
+	}
+
+	lines := strings.Split(string(data), "\n")
+
+	var userMessages []string
+	var assistantSummaries []string
+	var toolErrors []string
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || line[0] != '{' {
+			continue
+		}
+		var entry transcriptEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+
+		text := extractTextContent(entry)
+		if text == "" {
+			continue
+		}
+
+		switch {
+		case entry.Type == "human" || entry.Role == "user" ||
+			(entry.Message.Role == "user"):
+			// Keep last 5 user messages.
+			userMessages = append(userMessages, truncateStr(text, 200))
+			if len(userMessages) > 5 {
+				userMessages = userMessages[len(userMessages)-5:]
+			}
+		case entry.Type == "assistant" || entry.Role == "assistant" ||
+			(entry.Message.Role == "assistant"):
+			// Keep last 3 assistant summaries (first 150 chars only).
+			summary := truncateStr(text, 150)
+			assistantSummaries = append(assistantSummaries, summary)
+			if len(assistantSummaries) > 3 {
+				assistantSummaries = assistantSummaries[len(assistantSummaries)-3:]
+			}
+		case entry.Type == "tool_error" || entry.Type == "error":
+			toolErrors = append(toolErrors, truncateStr(text, 150))
+			if len(toolErrors) > 3 {
+				toolErrors = toolErrors[len(toolErrors)-3:]
+			}
+		}
+	}
+
+	var buf strings.Builder
+	if len(userMessages) > 0 {
+		buf.WriteString("Recent user requests:\n")
+		for _, m := range userMessages {
+			buf.WriteString("- " + m + "\n")
+		}
+	}
+	if len(assistantSummaries) > 0 {
+		buf.WriteString("Recent assistant actions:\n")
+		for _, s := range assistantSummaries {
+			buf.WriteString("- " + s + "\n")
+		}
+	}
+	if len(toolErrors) > 0 {
+		buf.WriteString("Recent errors (dead ends):\n")
+		for _, e := range toolErrors {
+			buf.WriteString("- " + e + "\n")
+		}
+	}
+	return buf.String()
+}
+
+// extractTextContent extracts readable text from a transcript entry.
+// Handles both string content and structured content blocks.
+func extractTextContent(entry transcriptEntry) string {
+	// Try direct content field.
+	if s, ok := entry.Content.(string); ok && s != "" {
+		return s
+	}
+	// Try message.content field.
+	if s, ok := entry.Message.Content.(string); ok && s != "" {
+		return s
+	}
+	// Try content blocks (array of {type, text}).
+	if blocks, ok := entry.Content.([]any); ok {
+		for _, b := range blocks {
+			if block, ok := b.(map[string]any); ok {
+				if text, ok := block["text"].(string); ok && text != "" {
+					return text
+				}
+			}
+		}
+	}
+	if blocks, ok := entry.Message.Content.([]any); ok {
+		for _, b := range blocks {
+			if block, ok := b.(map[string]any); ok {
+				if text, ok := block["text"].(string); ok && text != "" {
+					return text
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// readFileTail reads the last n bytes of a file.
+func readFileTail(path string, n int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	size := info.Size()
+	if size <= n {
+		return os.ReadFile(path)
+	}
+
+	buf := make([]byte, n)
+	_, err = f.ReadAt(buf, size-n)
+	if err != nil {
+		return nil, err
+	}
+
+	// Skip to first complete line.
+	if idx := strings.IndexByte(string(buf), '\n'); idx >= 0 {
+		buf = buf[idx+1:]
+	}
+	return buf, nil
+}
+
+// truncateStr truncates a string to maxLen runes, adding "..." if truncated.
+func truncateStr(s string, maxLen int) string {
+	s = strings.TrimSpace(s)
+	// Remove newlines for single-line output.
+	s = strings.ReplaceAll(s, "\n", " ")
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "..."
 }
 
 // ---------------------------------------------------------------------------
 // SessionStart: butler-protocol context injection
 // ---------------------------------------------------------------------------
 
-// injectButlerContext outputs session.md content to stdout when an active
-// butler-protocol spec exists, so Claude Code can restore context after
-// compact or session restart.
-func injectButlerContext(projectPath string) {
+// injectButlerContext outputs spec content to stdout when an active
+// butler-protocol spec exists. After compact, injects richer context
+// (all 6 files) for full recovery. On normal startup, injects only session.md.
+func injectButlerContext(projectPath, source string) {
 	taskSlug, err := spec.ReadActive(projectPath)
 	if err != nil {
 		return // no active spec — silently skip
@@ -289,11 +474,39 @@ func injectButlerContext(projectPath string) {
 		return
 	}
 
-	session, err := sd.ReadFile(spec.FileSession)
-	if err != nil || session == "" {
-		return
-	}
+	if source == "compact" {
+		// After compact: inject all spec files for full context recovery.
+		// This is the critical path — Claude has lost most conversation context.
+		var buf strings.Builder
+		buf.WriteString(fmt.Sprintf("\n--- Butler Protocol: Recovering Task '%s' (post-compact) ---\n", taskSlug))
+		buf.WriteString("Read these spec files to restore full context:\n\n")
 
-	fmt.Fprintf(os.Stdout, "\n--- Butler Protocol: Active Task '%s' ---\n%s\n--- End Butler Protocol ---\n", taskSlug, session)
-	debugf("SessionStart: injected butler context for %s", taskSlug)
+		// Recovery order: session → requirements → design → tasks → decisions → knowledge
+		recoveryOrder := []spec.SpecFile{
+			spec.FileSession,
+			spec.FileRequirements,
+			spec.FileDesign,
+			spec.FileTasks,
+			spec.FileDecisions,
+			spec.FileKnowledge,
+		}
+		for _, f := range recoveryOrder {
+			content, err := sd.ReadFile(f)
+			if err != nil || strings.TrimSpace(content) == "" {
+				continue
+			}
+			buf.WriteString(fmt.Sprintf("### %s\n%s\n\n", f, content))
+		}
+		buf.WriteString("--- End Butler Protocol ---\n")
+		fmt.Fprint(os.Stdout, buf.String())
+		debugf("SessionStart(compact): injected full butler context for %s", taskSlug)
+	} else {
+		// Normal startup/resume: inject session.md only (lightweight).
+		session, err := sd.ReadFile(spec.FileSession)
+		if err != nil || session == "" {
+			return
+		}
+		fmt.Fprintf(os.Stdout, "\n--- Butler Protocol: Active Task '%s' ---\n%s\n--- End Butler Protocol ---\n", taskSlug, session)
+		debugf("SessionStart(%s): injected session context for %s", source, taskSlug)
+	}
 }

@@ -5,6 +5,7 @@ description: |
   alfred knowledge を活用してナレッジベースから関連情報を補強する。
   Use when: (1) 何を考えるべきか分からない, (2) アイデアが少ない/思考が固い,
   (3) リスクや論点を洗い出したい, (4) 収束（意思決定）に渡す材料が欲しい（/alfred:refine 用の素材）。
+user-invocable: true
 argument-hint: "<theme or rough prompt>"
 allowed-tools: Read, Glob, Grep, WebSearch, WebFetch, AskUserQuestion, Agent, mcp__alfred__knowledge, mcp__alfred__butler-init
 context: current

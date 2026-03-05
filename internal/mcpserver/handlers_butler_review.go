@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -90,10 +91,10 @@ func getReviewDiff(projectPath string) string {
 }
 
 // reviewAgainstSpec checks changes against decisions.md, knowledge.md, and requirements.md.
-func reviewAgainstSpec(sd *spec.SpecDir, _ string) []reviewFinding {
+func reviewAgainstSpec(sd *spec.SpecDir, diff string) []reviewFinding {
 	var findings []reviewFinding
 
-	// Check against decisions
+	// Check against decisions — surface relevant decisions based on diff content.
 	decisions, err := sd.ReadFile(spec.FileDecisions)
 	if err == nil && decisions != "" {
 		decisionCount := max(strings.Count(decisions, "## ")-1, 0) // exclude header
@@ -104,10 +105,19 @@ func reviewAgainstSpec(sd *spec.SpecDir, _ string) []reviewFinding {
 				Message:  fmt.Sprintf("Review against %d recorded decisions in spec '%s'.", decisionCount, sd.TaskSlug),
 				Source:   sd.FilePath(spec.FileDecisions),
 			})
+			// Surface decisions whose content overlaps with changed file paths.
+			for _, excerpt := range extractDecisionExcerpts(decisions, diff) {
+				findings = append(findings, reviewFinding{
+					Layer:    "spec",
+					Severity: "warning",
+					Message:  fmt.Sprintf("Relevant decision: %s", excerpt),
+					Source:   sd.FilePath(spec.FileDecisions),
+				})
+			}
 		}
 	}
 
-	// Check knowledge for dead ends
+	// Check knowledge for dead ends — warn if diff touches areas with known dead ends.
 	knowledge, err := sd.ReadFile(spec.FileKnowledge)
 	if err == nil && knowledge != "" {
 		discoveryCount := max(strings.Count(knowledge, "## ")-1, 0)
@@ -118,10 +128,18 @@ func reviewAgainstSpec(sd *spec.SpecDir, _ string) []reviewFinding {
 				Message:  fmt.Sprintf("Review against %d knowledge entries (including dead ends) in spec.", discoveryCount),
 				Source:   sd.FilePath(spec.FileKnowledge),
 			})
+			if strings.Contains(strings.ToLower(knowledge), "dead end") {
+				findings = append(findings, reviewFinding{
+					Layer:    "spec",
+					Severity: "warning",
+					Message:  "Knowledge base contains dead end entries. Review before repeating failed approaches.",
+					Source:   sd.FilePath(spec.FileKnowledge),
+				})
+			}
 		}
 	}
 
-	// Check out-of-scope
+	// Check out-of-scope — extract scope items and check diff for potential violations.
 	requirements, err := sd.ReadFile(spec.FileRequirements)
 	if err == nil && strings.Contains(requirements, "## Out of Scope") {
 		findings = append(findings, reviewFinding{
@@ -132,7 +150,61 @@ func reviewAgainstSpec(sd *spec.SpecDir, _ string) []reviewFinding {
 		})
 	}
 
+	// Check tasks.md for incomplete prerequisites.
+	tasks, err := sd.ReadFile(spec.FileTasks)
+	if err == nil && tasks != "" {
+		incomplete := strings.Count(tasks, "- [ ]")
+		complete := strings.Count(tasks, "- [x]") + strings.Count(tasks, "- [X]")
+		if incomplete > 0 || complete > 0 {
+			findings = append(findings, reviewFinding{
+				Layer:    "spec",
+				Severity: "info",
+				Message:  fmt.Sprintf("Task progress: %d/%d complete.", complete, complete+incomplete),
+				Source:   sd.FilePath(spec.FileTasks),
+			})
+		}
+	}
+
 	return findings
+}
+
+// extractDecisionExcerpts finds decisions whose headings relate to changed files in the diff.
+func extractDecisionExcerpts(decisions, diff string) []string {
+	// Extract changed file paths from diff.
+	changedFiles := make(map[string]bool)
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "+++ b/") || strings.HasPrefix(line, "--- a/") {
+			path := strings.TrimPrefix(strings.TrimPrefix(line, "+++ b/"), "--- a/")
+			if path != "/dev/null" {
+				changedFiles[path] = true
+				// Also add the base filename for matching.
+				changedFiles[filepath.Base(path)] = true
+			}
+		}
+	}
+	if len(changedFiles) == 0 {
+		return nil
+	}
+
+	// Scan decision headers for overlap with changed files.
+	var excerpts []string
+	for _, line := range strings.Split(decisions, "\n") {
+		if !strings.HasPrefix(line, "## ") {
+			continue
+		}
+		heading := strings.TrimPrefix(line, "## ")
+		headingLower := strings.ToLower(heading)
+		for path := range changedFiles {
+			pathLower := strings.ToLower(path)
+			// Match if heading mentions the file or directory.
+			baseName := strings.TrimSuffix(filepath.Base(pathLower), filepath.Ext(pathLower))
+			if baseName != "" && strings.Contains(headingLower, baseName) {
+				excerpts = append(excerpts, heading)
+				break
+			}
+		}
+	}
+	return excerpts
 }
 
 // reviewAgainstKnowledge performs semantic search for related spec knowledge.
@@ -141,10 +213,11 @@ func reviewAgainstKnowledge(ctx context.Context, st *store.Store, emb *embedder.
 
 	query := focus
 	if query == "" {
-		query = diff
-		if len(query) > 500 {
-			query = query[:500]
-		}
+		// Extract meaningful content from diff (skip headers, use added lines).
+		query = extractDiffContent(diff, 500)
+	}
+	if query == "" {
+		return findings
 	}
 
 	queryVec, err := emb.EmbedForSearch(ctx, query)
@@ -179,10 +252,14 @@ func reviewAgainstKnowledge(ctx context.Context, st *store.Store, emb *embedder.
 }
 
 // reviewAgainstBestPractices performs FTS search for relevant documentation.
-func reviewAgainstBestPractices(st *store.Store, _ string, focus string) []reviewFinding {
+func reviewAgainstBestPractices(st *store.Store, diff string, focus string) []reviewFinding {
 	var findings []reviewFinding
 
 	query := focus
+	if query == "" {
+		// Extract meaningful keywords from diff (changed file extensions, package names).
+		query = extractDiffKeywords(diff)
+	}
 	if query == "" {
 		query = "code review best practices"
 	}
@@ -198,4 +275,68 @@ func reviewAgainstBestPractices(st *store.Store, _ string, focus string) []revie
 	}
 
 	return findings
+}
+
+// extractDiffContent extracts added lines from a diff for use as a search query.
+// Skips diff headers and metadata, returns only meaningful code/text content.
+func extractDiffContent(diff string, maxLen int) string {
+	var buf strings.Builder
+	for _, line := range strings.Split(diff, "\n") {
+		if !strings.HasPrefix(line, "+") || strings.HasPrefix(line, "+++") {
+			continue
+		}
+		content := strings.TrimPrefix(line, "+")
+		content = strings.TrimSpace(content)
+		if content == "" || content == "{" || content == "}" {
+			continue
+		}
+		if buf.Len() > 0 {
+			buf.WriteByte(' ')
+		}
+		buf.WriteString(content)
+		if buf.Len() >= maxLen {
+			break
+		}
+	}
+	return buf.String()
+}
+
+// extractDiffKeywords extracts search-relevant keywords from a git diff.
+func extractDiffKeywords(diff string) string {
+	var keywords []string
+	seen := make(map[string]bool)
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "+++ b/") {
+			path := strings.TrimPrefix(line, "+++ b/")
+			ext := filepath.Ext(path)
+			switch ext {
+			case ".go":
+				if !seen["go"] {
+					keywords = append(keywords, "Go")
+					seen["go"] = true
+				}
+			case ".ts", ".tsx":
+				if !seen["typescript"] {
+					keywords = append(keywords, "TypeScript")
+					seen["typescript"] = true
+				}
+			case ".py":
+				if !seen["python"] {
+					keywords = append(keywords, "Python")
+					seen["python"] = true
+				}
+			}
+			// Add directory context (e.g., "hooks", "skills", "rules").
+			dir := filepath.Dir(path)
+			base := filepath.Base(dir)
+			if base != "." && !seen[base] {
+				keywords = append(keywords, base)
+				seen[base] = true
+			}
+		}
+	}
+	if len(keywords) > 5 {
+		keywords = keywords[:5]
+	}
+	return strings.Join(keywords, " ")
 }

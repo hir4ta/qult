@@ -28,6 +28,17 @@ func alfredHookEntries(binPath string) map[string]any {
 				},
 			},
 		},
+		"PreCompact": []any{
+			map[string]any{
+				"hooks": []any{
+					map[string]any{
+						"type":    "command",
+						"command": binPath + " hook PreCompact",
+						"timeout": 10,
+					},
+				},
+			},
+		},
 		"PreToolUse": []any{
 			map[string]any{
 				"matcher": "Read|Glob|Grep|Edit|Write",
@@ -96,7 +107,7 @@ func Bundle(outputDir, version string) error {
 
 	// 3. Write hooks.json — commands invoke the guard/setup wrapper.
 	hooksJSON := map[string]any{
-		"description": "Silent butler hooks — auto-import, config access reminder, prompt detection",
+		"description": "Silent butler hooks — auto-import, config access reminder, prompt detection, butler-protocol session persistence",
 		"hooks":       alfredHookEntries(runCmd),
 	}
 	if err := writeJSON(filepath.Join(outputDir, "hooks", "hooks.json"), hooksJSON); err != nil {
