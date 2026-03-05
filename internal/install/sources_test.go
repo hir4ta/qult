@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -164,6 +165,211 @@ func TestFilterByPrefix(t *testing.T) {
 				t.Errorf("filterByPrefix(%v, %q) = %d URLs, want %d", tt.urls, tt.prefix, len(got), tt.want)
 			}
 		})
+	}
+}
+
+func TestFilterSameDomain(t *testing.T) {
+	t.Parallel()
+
+	urls := []string{
+		"https://example.com/docs/intro",
+		"https://example.com/docs/api",
+		"https://other.com/docs/page",
+		"https://replicate.com/models",
+		"https://example.com/guide",
+	}
+
+	got := filterSameDomain(urls, "example.com")
+	if len(got) != 3 {
+		t.Fatalf("filterSameDomain() = %d URLs, want 3; got %v", len(got), got)
+	}
+	for _, u := range got {
+		if !strings.Contains(u, "example.com") {
+			t.Errorf("unexpected URL in result: %s", u)
+		}
+	}
+}
+
+func TestFilterExcludePatterns(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		urls         []string
+		userPatterns []string
+		want         int
+	}{
+		{
+			name: "built-in excludes changelog and blog",
+			urls: []string{
+				"https://example.com/docs/intro",
+				"https://example.com/changelog",
+				"https://example.com/blog/post1",
+				"https://example.com/docs/api",
+			},
+			want: 2,
+		},
+		{
+			name: "built-in excludes release-notes and pricing",
+			urls: []string{
+				"https://example.com/docs/setup",
+				"https://example.com/release-notes/v1",
+				"https://example.com/pricing",
+			},
+			want: 1,
+		},
+		{
+			name: "user patterns filter additional paths",
+			urls: []string{
+				"https://example.com/docs/intro",
+				"https://example.com/docs/internal/debug",
+				"https://example.com/docs/guide",
+			},
+			userPatterns: []string{"/internal/"},
+			want:         2,
+		},
+		{
+			name: "api prefix excluded",
+			urls: []string{
+				"https://example.com/api/v1/users",
+				"https://example.com/docs/api-reference",
+			},
+			want: 1,
+		},
+		{
+			name: "no exclusions when all clean",
+			urls: []string{
+				"https://example.com/docs/intro",
+				"https://example.com/guide/setup",
+			},
+			want: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := filterExcludePatterns(tt.urls, tt.userPatterns)
+			if len(got) != tt.want {
+				t.Errorf("filterExcludePatterns() = %d URLs, want %d; got %v", len(got), tt.want, got)
+			}
+		})
+	}
+}
+
+func TestShouldExclude(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"/docs/intro", false},
+		{"/changelog", true},
+		{"/v1/changelog/2024", true},
+		{"/blog/post1", true},
+		{"/pricing", true},
+		{"/enterprise/plan", true},
+		{"/docs/releases/v2", true},
+		{"/api/v1/users", true},
+		{"/docs/api-reference", false}, // "api-reference" != "api"
+		{"/playground/test", true},
+		{"/guide/getting-started", false},
+		{"/dashboard", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			t.Parallel()
+			got := shouldExclude(tt.path, nil)
+			if got != tt.want {
+				t.Errorf("shouldExclude(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMaxPages(t *testing.T) {
+	t.Run("no max_pages means unlimited", func(t *testing.T) {
+		// Generate 300 same-domain URLs via llms.txt.
+		srvURL := setupMockHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/docs/llms.txt" {
+				var links []string
+				for i := range 300 {
+					links = append(links, fmt.Sprintf("- [Page %d](http://%s/docs/page%d)", i, r.Host, i))
+				}
+				fmt.Fprint(w, strings.Join(links, "\n"))
+				return
+			}
+			if strings.HasPrefix(r.URL.Path, "/docs/page") && strings.HasSuffix(r.URL.Path, ".md") {
+				fmt.Fprintf(w, "# Page\n\nContent for %s with enough text to produce a section.\n", r.URL.Path)
+				return
+			}
+			http.NotFound(w, r)
+		}))
+
+		sources := []CustomSource{
+			{Name: "Test", URL: srvURL + "/docs"},
+		}
+		// Discover URLs to verify no cap is applied.
+		urls, _ := discoverURLs(sources[0])
+		if len(urls) < 250 {
+			t.Errorf("discoverURLs returned %d URLs, want 300 (no cap)", len(urls))
+		}
+	})
+
+	t.Run("explicit max_pages limits", func(t *testing.T) {
+		srvURL := setupMockHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/docs/llms.txt" {
+				var links []string
+				for i := range 50 {
+					links = append(links, fmt.Sprintf("- [Page %d](http://%s/docs/page%d)", i, r.Host, i))
+				}
+				fmt.Fprint(w, strings.Join(links, "\n"))
+				return
+			}
+			if strings.HasPrefix(r.URL.Path, "/docs/page") && strings.HasSuffix(r.URL.Path, ".md") {
+				fmt.Fprintf(w, "# Page\n\nContent for %s with enough text.\n", r.URL.Path)
+				return
+			}
+			http.NotFound(w, r)
+		}))
+
+		sources := []CustomSource{
+			{Name: "Test", URL: srvURL + "/docs", MaxPages: 10},
+		}
+		result := CrawlCustomSources(sources, nil)
+		if len(result) > 10 {
+			t.Errorf("got %d results, want <= 10", len(result))
+		}
+	})
+}
+
+func TestParseSourcesFile_WithNewFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sources.yaml")
+
+	content := `sources:
+  - name: Test
+    url: https://example.com/docs
+    max_pages: 50
+    exclude_patterns:
+      - /internal/
+      - /deprecated/
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sf, err := ParseSourcesFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sf.Sources[0].MaxPages != 50 {
+		t.Errorf("MaxPages = %d, want 50", sf.Sources[0].MaxPages)
+	}
+	if len(sf.Sources[0].ExcludePatterns) != 2 {
+		t.Errorf("ExcludePatterns = %v, want 2 items", sf.Sources[0].ExcludePatterns)
 	}
 }
 

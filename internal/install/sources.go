@@ -17,9 +17,29 @@ type SourcesFile struct {
 
 // CustomSource represents a user-defined documentation source.
 type CustomSource struct {
-	Name       string `yaml:"name"`
-	URL        string `yaml:"url"`
-	PathPrefix string `yaml:"path_prefix,omitempty"`
+	Name            string   `yaml:"name"`
+	URL             string   `yaml:"url"`
+	PathPrefix      string   `yaml:"path_prefix,omitempty"`
+	MaxPages        int      `yaml:"max_pages,omitempty"`
+	ExcludePatterns []string `yaml:"exclude_patterns,omitempty"`
+}
+
+// MaxPages is only applied when explicitly set in sources.yaml.
+
+// excludeSegments are path segments that indicate non-documentation pages.
+// A URL is excluded if any segment of its path exactly matches one of these.
+var excludeSegments = []string{
+	"changelog", "changelogs",
+	"releases", "release-notes",
+	"blog", "news",
+	"pricing", "enterprise", "contact", "support",
+	"playground", "dashboard", "login", "signup",
+	"community", "discussions", "forum",
+}
+
+// excludePrefixes are path prefixes that indicate non-documentation content.
+var excludePrefixes = []string{
+	"/api/", // REST API endpoints (not docs about APIs)
 }
 
 // ParseSourcesFile reads and parses a sources.yaml file.
@@ -73,6 +93,12 @@ func CrawlCustomSources(sources []CustomSource, progress *CrawlCustomProgress) [
 		}
 
 		urls, method := discoverURLs(src)
+
+		// Apply max_pages limit (only when explicitly set).
+		if src.MaxPages > 0 && len(urls) > src.MaxPages {
+			urls = urls[:src.MaxPages]
+		}
+
 		if progress != nil && progress.OnDiscovery != nil {
 			progress.OnDiscovery(src.Name, method, len(urls))
 		}
@@ -104,11 +130,14 @@ func CrawlCustomSources(sources []CustomSource, progress *CrawlCustomProgress) [
 
 // discoverURLs tries llms.txt first, then sitemap.xml.
 // Returns discovered URLs and the method used ("llms.txt", "sitemap", "single page").
+// Applies same-domain filtering, built-in exclude patterns, and user exclude patterns.
 func discoverURLs(src CustomSource) ([]string, string) {
 	parsed, err := url.Parse(src.URL)
 	if err != nil {
 		return nil, ""
 	}
+
+	host := parsed.Host
 
 	// Try llms.txt at various locations.
 	for _, llmsPath := range []string{
@@ -119,9 +148,11 @@ func discoverURLs(src CustomSource) ([]string, string) {
 		if err == nil && len(body) > 0 {
 			urls := ParseLLMsTxt(body, parsed.Scheme+"://"+parsed.Host)
 			if len(urls) > 0 {
+				urls = filterSameDomain(urls, host)
 				if src.PathPrefix != "" {
 					urls = filterByPrefix(urls, src.PathPrefix)
 				}
+				urls = filterExcludePatterns(urls, src.ExcludePatterns)
 				return urls, "llms.txt"
 			}
 		}
@@ -137,6 +168,7 @@ func discoverURLs(src CustomSource) ([]string, string) {
 		}
 		urls := ParseSitemap(body, prefix)
 		if len(urls) > 0 {
+			urls = filterExcludePatterns(urls, src.ExcludePatterns)
 			return urls, "sitemap"
 		}
 	}
@@ -190,6 +222,64 @@ func ParseSitemap(xml, pathPrefix string) []string {
 		urls = append(urls, u)
 	}
 	return urls
+}
+
+// filterSameDomain keeps only URLs whose host matches the source host.
+func filterSameDomain(urls []string, host string) []string {
+	var out []string
+	for _, u := range urls {
+		parsed, err := url.Parse(u)
+		if err != nil {
+			continue
+		}
+		if parsed.Host == host {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
+// filterExcludePatterns removes URLs matching built-in or user-defined exclude patterns.
+func filterExcludePatterns(urls []string, userPatterns []string) []string {
+	var out []string
+	for _, u := range urls {
+		parsed, err := url.Parse(u)
+		if err != nil {
+			continue
+		}
+		if shouldExclude(parsed.Path, userPatterns) {
+			continue
+		}
+		out = append(out, u)
+	}
+	return out
+}
+
+// shouldExclude returns true if the path matches any built-in or user exclude pattern.
+func shouldExclude(path string, userPatterns []string) bool {
+	// Check built-in segment exclusions.
+	segments := strings.Split(strings.Trim(path, "/"), "/")
+	for _, seg := range segments {
+		lower := strings.ToLower(seg)
+		for _, excl := range excludeSegments {
+			if lower == excl {
+				return true
+			}
+		}
+	}
+	// Check built-in prefix exclusions.
+	for _, prefix := range excludePrefixes {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	// Check user-defined patterns.
+	for _, pat := range userPatterns {
+		if strings.Contains(path, pat) {
+			return true
+		}
+	}
+	return false
 }
 
 func filterByPrefix(urls []string, prefix string) []string {

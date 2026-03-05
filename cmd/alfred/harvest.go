@@ -23,6 +23,11 @@ type (
 		name        string
 		done, total int
 	}
+	crawlDiscoveryMsg struct {
+		name   string
+		method string
+		count  int
+	}
 	crawlDoneMsg struct {
 		sf  *install.SeedFile
 		err error
@@ -34,6 +39,12 @@ type (
 		err    error
 	}
 )
+
+type discoveryInfo struct {
+	name   string
+	method string
+	count  int
+}
 
 type harvestPhase int
 
@@ -60,6 +71,7 @@ type harvestModel struct {
 	customName     string
 	customDone     int
 	customTotal    int
+	discoveries    []discoveryInfo // per-source discovery details
 
 	// seed progress
 	docsDone  int
@@ -120,6 +132,14 @@ func (m harvestModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.customName = msg.name
 		m.customDone = msg.done
 		m.customTotal = msg.total
+		return m, nil
+
+	case crawlDiscoveryMsg:
+		m.discoveries = append(m.discoveries, discoveryInfo{
+			name:   msg.name,
+			method: msg.method,
+			count:  msg.count,
+		})
 		return m, nil
 
 	case crawlDoneMsg:
@@ -236,8 +256,15 @@ func (m harvestModel) View() tea.View {
 	if m.phase == harvestComplete {
 		total := m.result.Applied + m.result.Unchanged
 		fmt.Fprintf(&b, "  %s (%s)\n", doneStyle.Render("✓ Harvest complete"), elapsed)
-		fmt.Fprintf(&b, "  %d docs (%d updated, %d unchanged), %d embeddings\n\n",
+		fmt.Fprintf(&b, "  %d docs (%d updated, %d unchanged), %d embeddings\n",
 			total, m.result.Applied, m.result.Unchanged, m.result.Embedded)
+		if len(m.discoveries) > 0 {
+			fmt.Fprintf(&b, "\n  %s\n", dimStyle.Render("Custom sources:"))
+			for _, d := range m.discoveries {
+				fmt.Fprintf(&b, "    %-20s %3d pages (%s)\n", d.name, d.count, d.method)
+			}
+		}
+		fmt.Fprintln(&b)
 	} else if m.phase == harvestError {
 		fmt.Fprintf(&b, "  %s\n", errStyle.Render("✗ Error:"))
 		// Wrap long error messages at ~50 chars for readability.
@@ -365,6 +392,9 @@ func runHarvest(sourceName string) error {
 				OnCustomPage: func(name string, done, total int) {
 					p.Send(crawlCustomMsg{name, done, total})
 				},
+				OnCustomDiscovery: func(name, method string, count int) {
+					p.Send(crawlDiscoveryMsg{name, method, count})
+				},
 			})
 			p.Send(crawlDoneMsg{sf, crawlErr})
 		}
@@ -410,6 +440,9 @@ func crawlSingleSource(name string, p *tea.Program) (*install.SeedFile, error) {
 	sources := install.CrawlCustomSources(target, &install.CrawlCustomProgress{
 		OnPage: func(name string, done, total int) {
 			p.Send(crawlCustomMsg{name, done, total})
+		},
+		OnDiscovery: func(name, method string, count int) {
+			p.Send(crawlDiscoveryMsg{name, method, count})
 		},
 	})
 
