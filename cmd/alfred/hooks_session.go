@@ -79,7 +79,8 @@ func ingestProjectClaudeMD(st *store.Store, projectPath string) {
 	claudeMD := filepath.Join(projectPath, "CLAUDE.md")
 	content, err := os.ReadFile(claudeMD)
 	if err != nil {
-		return // CLAUDE.md doesn't exist or unreadable — silently skip
+		debugf("ingestProjectClaudeMD: %s not found or unreadable, skipping", claudeMD)
+		return
 	}
 
 	sections := splitMarkdownSections(string(content))
@@ -106,7 +107,8 @@ func ingestProjectClaudeMD(st *store.Store, projectPath string) {
 func injectSpecContext(projectPath, source string) {
 	taskSlug, err := spec.ReadActive(projectPath)
 	if err != nil {
-		return // no active spec — silently skip
+		debugf("injectSpecContext: no active spec for %s", projectPath)
+		return
 	}
 
 	sd := &spec.SpecDir{ProjectPath: projectPath, TaskSlug: taskSlug}
@@ -191,6 +193,7 @@ func proactiveHintsForNextSteps(session string) string {
 
 	st, err := store.OpenDefaultCached()
 	if err != nil {
+		debugf("proactiveHintsForNextSteps: store open failed: %v", err)
 		return ""
 	}
 

@@ -820,7 +820,7 @@ func TestParseSKILLFrontmatter(t *testing.T) {
 	}{
 		{"with frontmatter", "---\nname: my-skill\ndescription: test skill\n---\n# Body\n", "name", "my-skill"},
 		{"no frontmatter", "# Just markdown\ncontent\n", "name", ""},
-		{"multiline value", "---\nname: test\ndescription: >\n  a long description\n---\n", "description", ""},
+		{"multiline value", "---\nname: test\ndescription: >\n  a long description\n---\n", "description", "a long description"},
 		{"no closing", "---\nname: test\nno close\n", "name", ""},
 	}
 	for _, tt := range tests {

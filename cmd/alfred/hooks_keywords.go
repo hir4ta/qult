@@ -114,16 +114,18 @@ func detectClaudeCodeKeywords(prompt string) []string {
 			continue
 		}
 		// For ambiguous keywords (hook, plugin, rule, etc.), check if the prompt
-		// mentions a specific framework that uses the same term. If so, skip.
+		// mentions a specific framework that uses the same term. If so, skip —
+		// UNLESS the prompt also contains explicit Claude Code context signals,
+		// which indicates the user is discussing both topics.
 		if frameworks, ok := ambiguousKeywords[kw]; ok {
-			negated := false
+			frameworkFound := false
 			for _, fw := range frameworks {
 				if strings.Contains(lower, fw) {
-					negated = true
+					frameworkFound = true
 					break
 				}
 			}
-			if negated {
+			if frameworkFound && !hasClaudeCodeContext(lower) {
 				continue
 			}
 		}
@@ -131,6 +133,26 @@ func detectClaudeCodeKeywords(prompt string) []string {
 		found = append(found, kw)
 	}
 	return found
+}
+
+// claudeCodeContextSignals are unambiguous terms that confirm the user is
+// discussing Claude Code, even when ambiguous keywords (hook, plugin, etc.)
+// co-occur with framework names like "react" or "webpack".
+var claudeCodeContextSignals = []string{
+	"claude code", "claude-code", "alfred",
+	"sessionstart", "precompact", "pretooluse", "userpromptsubmit",
+	"claude.md", ".claude/", "compaction",
+}
+
+// hasClaudeCodeContext reports whether the lowercased prompt contains
+// unambiguous Claude Code context signals.
+func hasClaudeCodeContext(lower string) bool {
+	for _, sig := range claudeCodeContextSignals {
+		if strings.Contains(lower, sig) {
+			return true
+		}
+	}
+	return false
 }
 
 // isClaudeCodeRelated reports whether the prompt mentions Claude Code features.

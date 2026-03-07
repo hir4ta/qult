@@ -16,6 +16,19 @@ import (
 	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
+// validateProjectPath checks that project_path is absolute and clean.
+// Returns the cleaned path or an error result.
+func validateProjectPath(raw string) (string, *mcp.CallToolResult) {
+	if raw == "" {
+		return "", mcp.NewToolResultError("project_path is required")
+	}
+	cleaned := filepath.Clean(raw)
+	if !filepath.IsAbs(cleaned) {
+		return "", mcp.NewToolResultError("project_path must be an absolute path")
+	}
+	return cleaned, nil
+}
+
 // validSpecFiles maps allowed file name strings to spec.SpecFile constants.
 var validSpecFiles = map[string]spec.SpecFile{
 	string(spec.FileRequirements): spec.FileRequirements,
@@ -51,9 +64,9 @@ func specHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandlerFunc
 }
 
 func specDoInit(ctx context.Context, req mcp.CallToolRequest, st *store.Store, emb *embedder.Embedder) (*mcp.CallToolResult, error) {
-	projectPath := req.GetString("project_path", "")
-	if projectPath == "" {
-		return mcp.NewToolResultError("project_path is required"), nil
+	projectPath, errResult := validateProjectPath(req.GetString("project_path", ""))
+	if errResult != nil {
+		return errResult, nil
 	}
 	taskSlug := req.GetString("task_slug", "")
 	if taskSlug == "" {
@@ -88,9 +101,9 @@ func specDoInit(ctx context.Context, req mcp.CallToolRequest, st *store.Store, e
 }
 
 func specDoUpdate(ctx context.Context, req mcp.CallToolRequest, st *store.Store, emb *embedder.Embedder) (*mcp.CallToolResult, error) {
-	projectPath := req.GetString("project_path", "")
-	if projectPath == "" {
-		return mcp.NewToolResultError("project_path is required"), nil
+	projectPath, errResult := validateProjectPath(req.GetString("project_path", ""))
+	if errResult != nil {
+		return errResult, nil
 	}
 	fileName := req.GetString("file", "")
 	if fileName == "" {
@@ -150,9 +163,9 @@ func specDoUpdate(ctx context.Context, req mcp.CallToolRequest, st *store.Store,
 }
 
 func specDoStatus(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	projectPath := req.GetString("project_path", "")
-	if projectPath == "" {
-		return mcp.NewToolResultError("project_path is required"), nil
+	projectPath, errResult := validateProjectPath(req.GetString("project_path", ""))
+	if errResult != nil {
+		return errResult, nil
 	}
 
 	taskSlug, err := spec.ReadActive(projectPath)
@@ -197,9 +210,9 @@ func specDoStatus(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 }
 
 func specDoSwitch(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	projectPath := req.GetString("project_path", "")
-	if projectPath == "" {
-		return mcp.NewToolResultError("project_path is required"), nil
+	projectPath, errResult := validateProjectPath(req.GetString("project_path", ""))
+	if errResult != nil {
+		return errResult, nil
 	}
 	taskSlug := req.GetString("task_slug", "")
 	if taskSlug == "" {
@@ -232,9 +245,9 @@ func specDoSwitch(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 }
 
 func specDoDelete(ctx context.Context, req mcp.CallToolRequest, st *store.Store) (*mcp.CallToolResult, error) {
-	projectPath := req.GetString("project_path", "")
-	if projectPath == "" {
-		return mcp.NewToolResultError("project_path is required"), nil
+	projectPath, errResult := validateProjectPath(req.GetString("project_path", ""))
+	if errResult != nil {
+		return errResult, nil
 	}
 	taskSlug := req.GetString("task_slug", "")
 	if taskSlug == "" {

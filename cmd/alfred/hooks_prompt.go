@@ -245,12 +245,18 @@ func handleUserPromptSubmit(ev *hookEvent) {
 		}
 	}
 	ftsQuery := strings.Join(ftsTerms, " OR ")
-	allDocs, _ := st.SearchDocsFTS(ftsQuery, "", 8)
+	allDocs, ftsErr := st.SearchDocsFTS(ftsQuery, "", 8)
+	if ftsErr != nil {
+		debugf("UserPromptSubmit: FTS keyword search failed: %v", ftsErr)
+	}
 
 	// Supplemental: also search with prompt keywords (no expansion) for coverage.
 	keywords := extractSearchKeywords(prompt, 6)
 	if keywords != "" {
-		docs, _ := st.SearchDocsFTS(keywords, "", 3)
+		docs, err := st.SearchDocsFTS(keywords, "", 3)
+		if err != nil {
+			debugf("UserPromptSubmit: FTS supplemental search failed: %v", err)
+		}
 		allDocs = append(allDocs, docs...)
 	}
 

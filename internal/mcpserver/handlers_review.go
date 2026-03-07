@@ -9,6 +9,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"gopkg.in/yaml.v3"
 
 	"github.com/hir4ta/claude-alfred/internal/embedder"
 	"github.com/hir4ta/claude-alfred/internal/store"
@@ -231,6 +232,7 @@ func countBodyLines(content string) int {
 
 // parseSKILLFrontmatter extracts YAML frontmatter fields from SKILL.md content.
 // Handles --- delimited blocks. Returns empty map if no frontmatter found.
+// Uses gopkg.in/yaml.v3 for correct multi-line value handling (e.g. description: >-).
 func parseSKILLFrontmatter(content string) map[string]string {
 	result := make(map[string]string)
 
@@ -251,22 +253,23 @@ func parseSKILLFrontmatter(content string) map[string]string {
 		return result
 	}
 
-	// Parse top-level key: value pairs (skip continuation lines starting with whitespace).
-	for _, line := range lines[1:end] {
-		if line == "" || (len(line) > 0 && (line[0] == ' ' || line[0] == '\t')) {
-			continue
-		}
-		key, val, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		val = strings.TrimSpace(val)
-		// Strip folded/literal scalar markers
-		val = strings.TrimLeft(val, ">|")
-		val = strings.TrimSpace(val)
-		if key != "" {
-			result[key] = val
+	// Parse with yaml.v3 for correct multi-line scalar handling.
+	fmBlock := strings.Join(lines[1:end], "\n")
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(fmBlock), &parsed); err != nil {
+		return result
+	}
+
+	for k, v := range parsed {
+		switch val := v.(type) {
+		case string:
+			result[k] = val
+		case bool:
+			if val {
+				result[k] = "true"
+			} else {
+				result[k] = "false"
+			}
 		}
 	}
 	return result

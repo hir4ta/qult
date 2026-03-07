@@ -155,7 +155,8 @@ func Bundle(outputDir, version string) error {
 
 	// 7. Write agents.
 	agents := map[string]string{
-		"alfred.md": alfredAgentContent,
+		"alfred.md":        alfredAgentContent,
+		"code-reviewer.md": codeReviewerAgentContent,
 	}
 	for name, content := range agents {
 		p := filepath.Join(outputDir, "agents", name)
@@ -174,7 +175,13 @@ func Bundle(outputDir, version string) error {
 
 	// 9. Write settings.json — plugin settings (currently only "agent" key is
 	// supported by Claude Code; permissions are not honored in plugin settings).
-	settingsJSON := map[string]any{}
+	settingsJSON := map[string]any{
+		"agent": map[string]any{
+			"alfred:alfred": map[string]any{
+				"model": "sonnet",
+			},
+		},
+	}
 	if err := writeJSON(filepath.Join(outputDir, "settings.json"), settingsJSON); err != nil {
 		return fmt.Errorf("write settings.json: %w", err)
 	}

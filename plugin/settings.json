@@ -1,1 +1,7 @@
-{}
+{
+  "agent": {
+    "alfred:alfred": {
+      "model": "sonnet"
+    }
+  }
+}
