@@ -20,43 +20,20 @@ He works silently in the background — surfacing relevant knowledge, catching s
 
 ### 1. Install alfred
 
-**Homebrew (recommended):**
-
 ```bash
 brew install hir4ta/alfred/alfred
 ```
 
-**Or download automatically** — if you skip this step, the plugin will download the binary on first use.
-
-<details>
-<summary>Other install methods</summary>
-
-**From source (requires Go 1.25+):**
-
-```bash
-go install github.com/hir4ta/claude-alfred/cmd/alfred@latest
-```
-
-**Build from repo:**
-
-```bash
-git clone https://github.com/hir4ta/claude-alfred
-cd claude-alfred
-go install ./cmd/alfred
-```
-
-</details>
-
 ### 2. Add the plugin
 
-In Claude Code:
+In Claude Code
 
 ```
 /plugin marketplace add hir4ta/claude-alfred   # Register the marketplace (once)
 /plugin install alfred                          # Install the plugin
 ```
 
-This installs skills, rules, hooks, agents, and MCP configuration.
+Skills, rules, hooks, agents, and MCP configuration will be installed.
 
 ### 3. Set API key
 
@@ -80,7 +57,7 @@ Restart Claude Code to finish setup.
 
 ### 1. Update the plugin
 
-In Claude Code:
+In Claude Code
 
 ```
 /plugin update alfred
@@ -88,13 +65,11 @@ In Claude Code:
 
 ### 2. Update the binary
 
-Exit Claude Code, then:
+Exit Claude Code, then
 
 ```bash
-alfred update
+brew upgrade hir4ta/alfred/alfred
 ```
-
-Auto-detects the best update method: Homebrew → direct download → `go install`.
 
 ### 3. Restart Claude Code
 
@@ -183,7 +158,7 @@ Run automatically during Claude Code lifecycle. No user action needed.
 │  └ spec-init / update / status / switch           │
 │    / delete / code-review                         │
 │                                                  │
-│  Butler Protocol Flow:                            │
+│  Butler Protocol Flow                             │
 │  spec-init → .alfred/specs/add-auth/              │
 │  (4 files + DB sync)                              │
 │        ↓                                         │

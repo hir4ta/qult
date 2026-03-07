@@ -217,7 +217,7 @@ func doInstall(version string) tea.Cmd {
 	return func() tea.Msg {
 		// Try Homebrew first.
 		if isBrewInstalled() {
-			cmd := exec.Command("brew", "upgrade", "alfred")
+			cmd := exec.Command("brew", "upgrade", "hir4ta/alfred/alfred")
 			if out, err := cmd.CombinedOutput(); err != nil {
 				// brew upgrade fails if already latest or not installed via brew.
 				// Try reinstall as fallback.
