@@ -1017,15 +1017,10 @@ func TestHandleUserPromptSubmitEarlyReturns(t *testing.T) {
 		t.Error("config path prompt should trigger reminder")
 	}
 
-	// Test unrelated prompt (no keyword match).
-	output = captureStdout(t, func() {
-		handleUserPromptSubmit(&hookEvent{Prompt: "Fix the login bug in the auth service"})
-	})
-	if output != "" {
-		t.Errorf("unrelated prompt should produce no output, got %q", output)
-	}
+	// Note: keyword filtering removed; LLM prompt hook handles relevance gating.
+	// The command hook no longer rejects "unrelated" prompts — it proceeds to FTS search.
 
-	// Test short prompt with keyword (< 10 runes).
+	// Test short prompt (< 10 runes).
 	output = captureStdout(t, func() {
 		handleUserPromptSubmit(&hookEvent{Prompt: "hook?"})
 	})

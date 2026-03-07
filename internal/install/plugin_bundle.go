@@ -51,15 +51,15 @@ func alfredHookEntries(binPath string) map[string]any {
 				},
 			},
 		},
-		// UserPromptSubmit: dual-layer gating.
-		// Both hooks are in the same array so the prompt hook gates the command hook:
-		// if LLM judges ok=false (not config-related), the command hook is skipped entirely.
+		// UserPromptSubmit: LLM gate + knowledge injection.
+		// The prompt hook gates the command hook: only clearly unrelated messages are blocked.
+		// Default is ok=true (permissive) to avoid false-positive blocking.
 		"UserPromptSubmit": []any{
 			map[string]any{
 				"hooks": []any{
 					map[string]any{
 						"type":          "prompt",
-						"prompt":        "Does this user message involve Claude Code configuration or features (.claude/ directory, CLAUDE.md, MEMORY.md, .mcp.json, hooks, skills, rules, agents, MCP servers, memory, plugins, worktrees)?\n\nUser message: $ARGUMENTS\n\nRespond ok=true ONLY if the message is specifically about creating, modifying, reviewing, or asking about Claude Code configuration. General programming tasks should be ok=false.",
+						"prompt":        "Does this user message relate to Claude Code or software development?\n\nUser message: $ARGUMENTS\n\nRespond ok=true by default. Only respond ok=false if the message is CLEARLY unrelated to software development (e.g., casual chat about weather, cooking, sports). Messages about code, debugging, hooks, errors, configuration, tools, features, or ANY development task should be ok=true.",
 						"timeout":       5,
 						"statusMessage": "alfred: checking relevance...",
 					},

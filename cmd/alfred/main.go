@@ -57,11 +57,6 @@ func run() error {
 			outputDir = os.Args[2]
 		}
 		return install.Bundle(outputDir, version)
-	case "pane":
-		if len(os.Args) < 3 {
-			return fmt.Errorf("usage: alfred pane <spec|decisions|git>")
-		}
-		return runPane(os.Args[2])
 	case "embed-async":
 		return runEmbedAsync()
 	case "hook":
@@ -182,12 +177,8 @@ Usage:
 Commands:
   init           Initialize knowledge base (seed docs + generate embeddings)
   update         Update alfred to the latest version
-  pane <type>    Run a monitoring pane (spec, decisions, git)
   version        Show version
   help           Show this help
-
-Install:
-  brew install hir4ta/alfred/alfred
 
 Environment:
   VOYAGE_API_KEY     Required. Enables semantic vector search with Voyage AI.`)

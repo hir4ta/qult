@@ -248,11 +248,8 @@ func handleUserPromptSubmit(ev *hookEvent) {
 		return // config reminder is sufficient, skip knowledge injection
 	}
 
-	// Proactive knowledge injection: only when prompt relates to Claude Code features.
+	// Proactive knowledge injection: LLM gate has already filtered unrelated prompts.
 	prompt := strings.TrimSpace(ev.Prompt)
-	if !isClaudeCodeRelated(prompt) {
-		return
-	}
 	if len([]rune(prompt)) < 10 {
 		return // too short to search meaningfully (rune-based for CJK)
 	}
