@@ -52,7 +52,8 @@ go install ./cmd/alfred
 In Claude Code:
 
 ```
-/install-plugin hir4ta/claude-alfred
+/plugin marketplace add hir4ta/claude-alfred   # Register the marketplace (once)
+/plugin install alfred                          # Install the plugin
 ```
 
 This installs skills, rules, hooks, agents, and MCP configuration.
@@ -82,7 +83,7 @@ Restart Claude Code to finish setup.
 In Claude Code:
 
 ```
-/install-plugin hir4ta/claude-alfred
+/plugin update alfred
 ```
 
 ### 2. Update the binary

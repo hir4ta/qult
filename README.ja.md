@@ -52,7 +52,8 @@ go install ./cmd/alfred
 Claude Code 内で:
 
 ```
-/install-plugin hir4ta/claude-alfred
+/plugin marketplace add hir4ta/claude-alfred   # マーケットプレイスを登録（初回のみ）
+/plugin install alfred                          # プラグインをインストール
 ```
 
 プラグイン（skills, rules, hooks, agents, MCP 設定）が配置される。
@@ -82,7 +83,7 @@ Claude Code を再起動すれば完了。
 Claude Code 内で:
 
 ```
-/install-plugin hir4ta/claude-alfred
+/plugin update alfred
 ```
 
 ### 2. バイナリを更新
