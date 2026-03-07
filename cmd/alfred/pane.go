@@ -118,7 +118,6 @@ func separator(width int) string {
 type specPaneModel struct {
 	width, height int
 	slug          string
-	tasks         string
 	session       string
 	hash          string
 }
@@ -148,17 +147,14 @@ func (m *specPaneModel) refresh() {
 		return
 	}
 
-	tp := specFilePath(slug, "tasks.md")
 	sp := specFilePath(slug, "session.md")
-	h := fileHash(tp, sp)
+	h := fileHash(sp)
 	if h == m.hash {
 		return
 	}
 
 	m.slug = slug
-	t, _ := os.ReadFile(tp)
 	s, _ := os.ReadFile(sp)
-	m.tasks = string(t)
 	m.session = string(s)
 	m.hash = h
 }
@@ -175,24 +171,6 @@ func (m specPaneModel) View() tea.View {
 
 	b.WriteString("\n")
 	b.WriteString("  " + paneBlue.Render(m.slug) + "\n")
-
-	// Tasks
-	b.WriteString("\n")
-	b.WriteString("  " + separator(m.width) + "\n")
-	b.WriteString(paneSec.Render("  tasks.md") + "\n")
-	b.WriteString("  " + separator(m.width) + "\n")
-	for line := range strings.SplitSeq(m.tasks, "\n") {
-		switch {
-		case strings.Contains(line, "- [x]"):
-			b.WriteString(paneGreen.Render("  "+line) + "\n")
-		case strings.Contains(line, "- [ ]"):
-			b.WriteString(paneYellow.Render("  "+line) + "\n")
-		case strings.HasPrefix(line, "#"):
-			// skip
-		case strings.TrimSpace(line) != "":
-			b.WriteString(paneFg.Render("  "+line) + "\n")
-		}
-	}
 
 	// Session
 	b.WriteString("\n")
@@ -219,7 +197,6 @@ type decisionsPaneModel struct {
 	width, height int
 	slug          string
 	decisions     string
-	knowledge     string
 	hash          string
 }
 
@@ -249,17 +226,14 @@ func (m *decisionsPaneModel) refresh() {
 	}
 
 	dp := specFilePath(slug, "decisions.md")
-	kp := specFilePath(slug, "knowledge.md")
-	h := fileHash(dp, kp)
+	h := fileHash(dp)
 	if h == m.hash {
 		return
 	}
 
 	m.slug = slug
 	d, _ := os.ReadFile(dp)
-	k, _ := os.ReadFile(kp)
 	m.decisions = stripComments(string(d))
-	m.knowledge = stripComments(string(k))
 	m.hash = h
 }
 
@@ -283,24 +257,6 @@ func (m decisionsPaneModel) View() tea.View {
 			b.WriteString(paneYellow.Render("  "+line) + "\n")
 		case strings.HasPrefix(line, "- **"):
 			b.WriteString(paneAqua.Render("  "+line) + "\n")
-		case strings.TrimSpace(line) != "":
-			b.WriteString(paneFg.Render("  "+line) + "\n")
-		}
-	}
-
-	// Knowledge
-	b.WriteString("\n")
-	b.WriteString("  " + separator(m.width) + "\n")
-	b.WriteString(paneBlue.Bold(true).Render("  knowledge.md") + "\n")
-	b.WriteString("  " + separator(m.width) + "\n")
-	for line := range strings.SplitSeq(m.knowledge, "\n") {
-		switch {
-		case strings.HasPrefix(line, "## "):
-			b.WriteString(paneAqua.Render("  "+line) + "\n")
-		case strings.Contains(line, "Dead end") || strings.Contains(line, "dead end"):
-			b.WriteString(paneRed.Render("  "+line) + "\n")
-		case strings.HasPrefix(line, "- **"):
-			b.WriteString(paneOrange.Render("  "+line) + "\n")
 		case strings.TrimSpace(line) != "":
 			b.WriteString(paneFg.Render("  "+line) + "\n")
 		}

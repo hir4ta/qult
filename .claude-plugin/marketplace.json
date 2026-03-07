@@ -11,7 +11,7 @@
       "name": "alfred",
       "source": "./plugin",
       "description": "Silent butler — best practice skills, session intelligence, independent review",
-      "version": "0.41.0"
+      "version": "0.42.0"
     }
   ]
 }

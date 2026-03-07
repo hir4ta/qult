@@ -88,7 +88,7 @@ func runHook(event string) error {
 			}
 			ingestProjectClaudeMD(st, ev.ProjectPath)
 
-			// Inject butler-protocol context if active spec exists.
+			// Inject spec context if active spec exists.
 			// After compact, inject richer context for full recovery.
 			injectButlerContext(ev.ProjectPath, ev.Source)
 		}
@@ -159,13 +159,247 @@ func shouldRemindPrompt(prompt string) bool {
 	return false
 }
 
-// handleUserPromptSubmit emits a reminder when the user mentions config paths.
+// domainSynonyms maps user terms to related knowledge base terms for query expansion.
+var domainSynonyms = map[string][]string{
+	"hook":        {"hooks", "lifecycle", "event handler", "PreToolUse", "SessionStart", "PreCompact"},
+	"hooks":       {"hook", "lifecycle", "event handler"},
+	"mcp":         {"model context protocol", "tool server", "MCP server"},
+	"compact":     {"compaction", "context window", "token limit", "PreCompact"},
+	"compaction":  {"compact", "context window", "PreCompact"},
+	"rule":        {"rules", "instructions", "glob patterns"},
+	"rules":       {"rule", "instructions", "glob patterns"},
+	"skill":       {"skills", "slash command", "SKILL.md"},
+	"skills":      {"skill", "slash command", "SKILL.md"},
+	"memory":      {"MEMORY.md", "auto memory", "persistence", "context"},
+	"agent":       {"agents", "subagent", "custom agent"},
+	"agents":      {"agent", "subagent", "custom agent"},
+	"config":      {"configuration", "CLAUDE.md", ".claude/", "settings"},
+	"configure":   {"configuration", "CLAUDE.md", ".claude/", "setup"},
+	"setup":       {"configure", "initialize", "wizard"},
+	"worktree":    {"worktrees", "git worktree", "isolation"},
+	"review":      {"code review", "audit", "inspect"},
+	"spec":        {"specification", "butler protocol", "requirements"},
+	"embed":       {"embedding", "vector", "semantic search"},
+	"embedding":   {"embed", "vector", "semantic search"},
+	"search":      {"FTS", "full text search", "vector search", "hybrid"},
+	"test":        {"testing", "test runner"},
+	"debug":       {"debugging", "troubleshoot", "ALFRED_DEBUG"},
+	"permission":  {"permissions", "allowed tools", "security"},
+	"permissions": {"permission", "allowed tools", "security"},
+}
+
+// expandQuery adds domain synonyms to a keyword query for better FTS recall.
+func expandQuery(keywords string) string {
+	words := strings.Fields(keywords)
+	var expanded []string
+	expanded = append(expanded, words...)
+	for _, w := range words {
+		if syns, ok := domainSynonyms[strings.ToLower(w)]; ok {
+			// Add up to 2 synonyms to avoid overly broad queries.
+			for i, s := range syns {
+				if i >= 2 {
+					break
+				}
+				expanded = append(expanded, s)
+			}
+		}
+	}
+	return strings.Join(expanded, " ")
+}
+
+// extractSearchKeywords extracts meaningful keywords from a prompt for FTS search.
+// Filters out common stop words and short words, returns up to maxWords.
+func extractSearchKeywords(prompt string, maxWords int) string {
+	stopWords := map[string]bool{
+		"the": true, "a": true, "an": true, "is": true, "are": true,
+		"was": true, "were": true, "be": true, "been": true, "being": true,
+		"have": true, "has": true, "had": true, "do": true, "does": true,
+		"did": true, "will": true, "would": true, "could": true, "should": true,
+		"may": true, "might": true, "can": true, "this": true, "that": true,
+		"these": true, "those": true, "with": true, "from": true, "into": true,
+		"for": true, "and": true, "but": true, "not": true, "what": true,
+		"how": true, "when": true, "where": true, "which": true, "who": true,
+		"about": true, "some": true, "want": true, "need": true, "like": true,
+		"make": true, "just": true, "also": true, "more": true, "very": true,
+		"please": true, "help": true, "using": true, "used": true, "use": true,
+	}
+
+	var keywords []string
+	for _, word := range strings.Fields(strings.ToLower(prompt)) {
+		// Strip punctuation.
+		word = strings.Trim(word, ".,!?;:\"'`()[]{}/-")
+		if len(word) < 3 || stopWords[word] {
+			continue
+		}
+		keywords = append(keywords, word)
+		if len(keywords) >= maxWords {
+			break
+		}
+	}
+	return strings.Join(keywords, " ")
+}
+
+// scoreRelevance computes a relevance score (0.0-1.0) between a prompt and a document.
+// Uses section_path matching, content keyword overlap with position weighting,
+// and coverage bonus for multiple distinct keyword matches.
+func scoreRelevance(promptLower string, doc store.DocRow) float64 {
+	promptWords := strings.Fields(promptLower)
+	if len(promptWords) == 0 {
+		return 0
+	}
+
+	// Filter to meaningful words (4+ chars, not stop words).
+	var meaningful []string
+	for _, w := range promptWords {
+		if len(w) >= 4 {
+			meaningful = append(meaningful, w)
+		}
+	}
+	if len(meaningful) == 0 {
+		return 0
+	}
+
+	// Section path match: high value signal.
+	pathLower := strings.ToLower(doc.SectionPath)
+	pathHits := 0
+	for _, w := range meaningful {
+		if strings.Contains(pathLower, w) {
+			pathHits++
+		}
+	}
+	pathScore := float64(pathHits) * 0.25
+
+	// Content match with position weighting.
+	contentLower := strings.ToLower(doc.Content)
+	firstLine := contentLower
+	if idx := strings.IndexByte(firstLine, '\n'); idx > 0 {
+		firstLine = firstLine[:idx]
+	}
+
+	contentHits := 0
+	earlyHits := 0 // matches in first line get bonus
+	for _, w := range meaningful {
+		if strings.Contains(contentLower, w) {
+			contentHits++
+			if strings.Contains(firstLine, w) {
+				earlyHits++
+			}
+		}
+	}
+
+	coverage := float64(contentHits) / float64(len(meaningful))
+	earlyBonus := float64(earlyHits) * 0.1
+
+	// Coverage bonus: reward matching multiple distinct keywords.
+	coverageBonus := 0.0
+	if contentHits >= 3 {
+		coverageBonus = 0.15
+	} else if contentHits >= 2 {
+		coverageBonus = 0.05
+	}
+
+	return min(pathScore+coverage+earlyBonus+coverageBonus, 1.0)
+}
+
+// handleUserPromptSubmit emits config reminders and proactively injects
+// relevant knowledge from the FTS index based on the user's prompt.
 func handleUserPromptSubmit(ev *hookEvent) {
-	if !shouldRemindPrompt(ev.Prompt) {
+	if shouldRemindPrompt(ev.Prompt) {
+		debugf("UserPromptSubmit: reminding about alfred for prompt")
+		fmt.Print(configReminder)
+		return // config reminder is sufficient, skip knowledge injection
+	}
+
+	// Proactive knowledge injection: search FTS for relevant best practices.
+	prompt := strings.TrimSpace(ev.Prompt)
+	if len([]rune(prompt)) < 10 {
+		return // too short to search meaningfully (rune-based for CJK)
+	}
+
+	st, err := store.OpenDefaultCached()
+	if err != nil {
+		debugf("UserPromptSubmit: store open failed: %v", err)
 		return
 	}
-	debugf("UserPromptSubmit: reminding about alfred for prompt")
-	fmt.Print(configReminder)
+
+	// Strategy 1: Search with extracted keywords + synonym expansion.
+	keywords := extractSearchKeywords(prompt, 8)
+	var allDocs []store.DocRow
+
+	if keywords != "" {
+		expanded := expandQuery(keywords)
+		docs, err := st.SearchDocsFTS(expanded, "", 5)
+		if err == nil {
+			allDocs = append(allDocs, docs...)
+		}
+	}
+
+	// Strategy 2: Search with raw prompt (catches phrase matches).
+	rawQuery := prompt
+	if len(rawQuery) > 150 {
+		rawQuery = rawQuery[:150]
+	}
+	docs, err := st.SearchDocsFTS(rawQuery, "", 3)
+	if err == nil {
+		allDocs = append(allDocs, docs...)
+	}
+
+	if len(allDocs) == 0 {
+		debugf("UserPromptSubmit: FTS search returned 0 results")
+		return
+	}
+
+	// Deduplicate by doc ID.
+	seen := make(map[int64]bool)
+	var uniqueDocs []store.DocRow
+	for _, d := range allDocs {
+		if !seen[d.ID] {
+			seen[d.ID] = true
+			uniqueDocs = append(uniqueDocs, d)
+		}
+	}
+
+	// Score and filter by relevance.
+	promptLower := strings.ToLower(prompt)
+	type scored struct {
+		doc   store.DocRow
+		score float64
+	}
+	var candidates []scored
+	for _, doc := range uniqueDocs {
+		s := scoreRelevance(promptLower, doc)
+		if s >= 0.15 {
+			candidates = append(candidates, scored{doc, s})
+		}
+	}
+	if len(candidates) == 0 {
+		debugf("UserPromptSubmit: no relevant matches (all below threshold)")
+		return
+	}
+
+	// Sort by score descending, take top 2.
+	for i := 0; i < len(candidates)-1; i++ {
+		for j := i + 1; j < len(candidates); j++ {
+			if candidates[j].score > candidates[i].score {
+				candidates[i], candidates[j] = candidates[j], candidates[i]
+			}
+		}
+	}
+	if len(candidates) > 2 {
+		candidates = candidates[:2]
+	}
+
+	var buf strings.Builder
+	buf.WriteString("Relevant best practices from alfred knowledge base:\n")
+	for _, c := range candidates {
+		snippet := c.doc.Content
+		if len(snippet) > 300 {
+			snippet = snippet[:300] + "..."
+		}
+		fmt.Fprintf(&buf, "- [%s] %s\n", c.doc.SectionPath, snippet)
+	}
+	fmt.Print(buf.String())
+	debugf("UserPromptSubmit: injected %d knowledge snippets (scores: %.2f+)", len(candidates), candidates[0].score)
 }
 
 // ---------------------------------------------------------------------------
@@ -238,7 +472,7 @@ func ingestProjectClaudeMD(st *store.Store, projectPath string) {
 }
 
 // ---------------------------------------------------------------------------
-// PreCompact: butler-protocol session persistence
+// PreCompact: spec session persistence
 // ---------------------------------------------------------------------------
 
 // handlePreCompact saves session state before context compaction.
@@ -271,23 +505,18 @@ func handlePreCompact(projectPath, transcriptPath, customInstructions string) {
 		debugf("PreCompact: empty context from transcript %s", transcriptPath)
 	}
 
-	// Build compact marker with extracted context.
-	var marker strings.Builder
-	marker.WriteString(fmt.Sprintf("\n## Compact Marker [%s]\n", time.Now().Format("2006-01-02 15:04:05")))
-	if customInstructions != "" {
-		marker.WriteString(fmt.Sprintf("User compact instructions: %s\n", customInstructions))
+	// Extract decisions from transcript.
+	var decisions []string
+	if transcriptPath != "" {
+		decisions = extractDecisionsFromTranscript(transcriptPath)
 	}
-	if contextSnapshot != "" {
-		marker.WriteString("### Pre-Compact Context Snapshot\n")
-		marker.WriteString(contextSnapshot)
-		marker.WriteString("\n")
-	}
-	marker.WriteString("---\n")
 
-	// Read current session.md to rotate compact markers (keep max 3).
-	session, _ := sd.ReadFile(spec.FileSession)
-	rotated := rotateCompactMarkers(session+marker.String(), 3)
-	if err := sd.WriteFile(spec.FileSession, rotated); err != nil {
+	// Get modified files from git.
+	modifiedFiles := getModifiedFiles(projectPath)
+
+	// Build activeContext session.md.
+	session := buildActiveContextSession(sd, taskSlug, contextSnapshot, decisions, modifiedFiles, customInstructions)
+	if err := sd.WriteFile(spec.FileSession, session); err != nil {
 		debugf("PreCompact: write session error: %v", err)
 		return
 	}
@@ -374,16 +603,17 @@ func emitCompactionInstructions(sd *spec.SpecDir, taskSlug string) {
 		}
 	}
 	if session, err := sd.ReadFile(spec.FileSession); err == nil {
-		// Extract current position (line after "## Current Position" header).
+		// Extract "Currently Working On" from activeContext format.
 		lines := strings.Split(session, "\n")
 		for i, line := range lines {
-			if strings.HasPrefix(line, "## Current Position") {
+			if strings.HasPrefix(line, "## Currently Working On") {
 				for j := i + 1; j < len(lines); j++ {
 					pos := strings.TrimSpace(lines[j])
-					if pos != "" {
-						buf.WriteString("Current position: " + pos + "\n")
+					if pos == "" || strings.HasPrefix(pos, "## ") {
 						break
 					}
+					buf.WriteString("Current position: " + pos + "\n")
+					break
 				}
 				break
 			}
@@ -431,6 +661,417 @@ func asyncEmbedSession(sd *spec.SpecDir) {
 	// Detach — don't wait for completion.
 	go func() { _ = cmd.Wait() }()
 	debugf("asyncEmbedSession: spawned pid=%d for %s/%s", cmd.Process.Pid, sd.TaskSlug, spec.FileSession)
+}
+
+// trivialVerbs are verbs that follow decision keywords but indicate
+// routine actions rather than real design decisions.
+var trivialVerbs = []string{
+	"read ", "check ", "look ", "run ", "open ", "try ", "start ",
+	"continue ", "proceed ", "skip ", "move ", "fix ", "update ",
+	"install ", "build ", "test ", "debug ", "print ", "log ",
+	"add ", "remove ", "delete ", "rename ", "import ", "copy ",
+	"format ", "lint ", "commit ", "push ", "pull ", "merge ",
+	"revert ", "rebase ",
+}
+
+// rationaleMarkers indicate the sentence contains a reason/justification,
+// which strongly suggests a real design decision.
+var rationaleMarkers = []string{
+	"because ", "since ", "due to ", "given that ", "in order to ",
+	"so that ", "for better ", "to ensure ", "to avoid ", "to reduce ",
+	"to improve ", "to support ", "for the sake of ",
+}
+
+// alternativeMarkers indicate the sentence compares options,
+// which is a strong signal for a design decision.
+var alternativeMarkers = []string{
+	" over ", " instead of ", " rather than ", " vs ", " versus ",
+	" compared to ", " as opposed to ",
+}
+
+// architectureTerms boost confidence when the sentence mentions design concepts.
+var architectureTerms = []string{
+	"architecture", "pattern", "approach", "strategy", "trade-off",
+	"tradeoff", "schema", "interface", "protocol", "abstraction",
+	"design", "api ", "migration", "infrastructure",
+}
+
+// scoreDecisionConfidence returns a confidence score (0.0-1.0) for whether
+// a sentence represents a real design decision vs an implementation action.
+func scoreDecisionConfidence(sentence string) float64 {
+	lower := strings.ToLower(sentence)
+	score := 0.4 // base score for having a decision keyword
+
+	// Rationale clause: strong positive signal.
+	for _, marker := range rationaleMarkers {
+		if strings.Contains(lower, marker) {
+			score += 0.25
+			break
+		}
+	}
+
+	// Alternative comparison: strong positive signal.
+	for _, marker := range alternativeMarkers {
+		if strings.Contains(lower, marker) {
+			score += 0.3
+			break
+		}
+	}
+
+	// Architecture vocabulary: moderate positive signal.
+	for _, term := range architectureTerms {
+		if strings.Contains(lower, term) {
+			score += 0.15
+			break
+		}
+	}
+
+	// Code artifact penalty: backticks, file paths, camelCase.
+	if strings.Contains(sentence, "`") {
+		score -= 0.15
+	}
+	if strings.Contains(sentence, "/") && strings.Contains(sentence, ".") {
+		// Likely a file path like "src/main.go".
+		score -= 0.1
+	}
+
+	// Hedging words penalty: "just", "simply", "quickly".
+	for _, hedge := range []string{"just ", "simply ", "quickly ", "also "} {
+		if strings.Contains(lower, hedge) {
+			score -= 0.1
+			break
+		}
+	}
+
+	return min(max(score, 0), 1.0)
+}
+
+// isTrivialDecision returns true if the sentence describes a routine action
+// rather than a meaningful design/architecture decision.
+func isTrivialDecision(sentence string) bool {
+	lower := strings.ToLower(sentence)
+	for _, v := range trivialVerbs {
+		// Check if a trivial verb follows a decision keyword.
+		for _, kw := range []string{"decided to ", "chose to ", "going to "} {
+			if strings.Contains(lower, kw+v) {
+				return true
+			}
+		}
+	}
+	// Too short to be a real decision.
+	if len(sentence) < 30 {
+		return true
+	}
+	return false
+}
+
+// extractDecisionsFromTranscript scans the transcript for meaningful design decisions
+// from the assistant. Uses keyword matching + structured pattern detection + trivial filtering.
+func extractDecisionsFromTranscript(transcriptPath string) []string {
+	data, err := readFileTail(transcriptPath, 64*1024)
+	if err != nil {
+		return nil
+	}
+
+	// Keyword patterns that indicate design decisions (not routine actions).
+	decisionKeywords := []string{
+		"decided to ", "chose ", "going with ", "selected ",
+		"decision: ", "we'll use ", "opting for ",
+		"settled on ", "choosing ", "picked ",
+	}
+
+	// Structured patterns from spec format or explicit decision markers.
+	structuredPrefixes := []string{
+		"**chosen:**", "**decision:**", "**selected:**",
+		"- chosen: ", "- decision: ", "- selected: ",
+	}
+
+	type scoredDecision struct {
+		text       string
+		confidence float64
+	}
+	var decisions []scoredDecision
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || line[0] != '{' {
+			continue
+		}
+		var entry transcriptEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+
+		role := entry.Role
+		if role == "" {
+			role = entry.Message.Role
+		}
+		if role != "assistant" && entry.Type != "assistant" {
+			continue
+		}
+
+		text := extractTextContent(entry)
+		if text == "" {
+			continue
+		}
+		textLower := strings.ToLower(text)
+
+		// Strategy 1: Structured patterns (high confidence = 0.9).
+		for _, prefix := range structuredPrefixes {
+			idx := strings.Index(textLower, prefix)
+			if idx < 0 {
+				continue
+			}
+			rest := strings.TrimSpace(text[idx+len(prefix):])
+			end := strings.IndexAny(rest, "\n")
+			if end < 0 {
+				end = min(len(rest), 200)
+			}
+			value := strings.TrimSpace(rest[:end])
+			if len(value) > 5 {
+				decisions = append(decisions, scoredDecision{value, 0.9})
+			}
+			break
+		}
+
+		// Strategy 2: Keyword matching with confidence scoring.
+		for _, kw := range decisionKeywords {
+			idx := strings.Index(textLower, kw)
+			if idx < 0 {
+				continue
+			}
+			start := strings.LastIndexAny(text[:idx], ".!?\n") + 1
+			end := strings.IndexAny(text[idx:], ".!?\n")
+			if end < 0 {
+				end = min(len(text)-idx, 200)
+			}
+			sentence := strings.TrimSpace(text[start : idx+end])
+			if len(sentence) > 10 && len(sentence) < 300 && !isTrivialDecision(sentence) {
+				conf := scoreDecisionConfidence(sentence)
+				if conf >= 0.4 {
+					decisions = append(decisions, scoredDecision{sentence, conf})
+				}
+			}
+			break // one decision per entry
+		}
+	}
+
+	// Deduplicate, keeping the highest confidence version.
+	seen := make(map[string]int) // key -> index in unique
+	var unique []scoredDecision
+	for _, d := range decisions {
+		key := strings.ToLower(d.text)
+		if len(key) > 80 {
+			key = key[:80]
+		}
+		if idx, ok := seen[key]; ok {
+			if d.confidence > unique[idx].confidence {
+				unique[idx] = d
+			}
+		} else {
+			seen[key] = len(unique)
+			unique = append(unique, d)
+		}
+	}
+
+	// Sort by confidence descending, keep last 5.
+	for i := 0; i < len(unique)-1; i++ {
+		for j := i + 1; j < len(unique); j++ {
+			if unique[j].confidence > unique[i].confidence {
+				unique[i], unique[j] = unique[j], unique[i]
+			}
+		}
+	}
+	if len(unique) > 5 {
+		unique = unique[:5]
+	}
+
+	result := make([]string, len(unique))
+	for i, d := range unique {
+		result[i] = d.text
+	}
+	return result
+}
+
+// getModifiedFiles returns a list of files modified in the current git working tree.
+func getModifiedFiles(projectPath string) []string {
+	cmd := execCommand("git", "diff", "--name-only", "HEAD")
+	cmd.Dir = projectPath
+	out, err := cmd.Output()
+	if err != nil {
+		// Fallback: try unstaged only.
+		cmd = execCommand("git", "diff", "--name-only")
+		cmd.Dir = projectPath
+		out, _ = cmd.Output()
+	}
+
+	// Also include staged files.
+	cmd2 := execCommand("git", "diff", "--cached", "--name-only")
+	cmd2.Dir = projectPath
+	staged, _ := cmd2.Output()
+
+	seen := make(map[string]bool)
+	var files []string
+	for _, chunk := range [][]byte{out, staged} {
+		for _, f := range strings.Split(strings.TrimSpace(string(chunk)), "\n") {
+			f = strings.TrimSpace(f)
+			if f != "" && !seen[f] {
+				seen[f] = true
+				files = append(files, f)
+			}
+		}
+	}
+	return files
+}
+
+// buildActiveContextSession constructs session.md in activeContext format.
+// It preserves existing content before any Compact Marker, then rebuilds
+// the structured sections with fresh data.
+func buildActiveContextSession(sd *spec.SpecDir, taskSlug, contextSnapshot string, decisions, modifiedFiles []string, customInstructions string) string {
+	existing, _ := sd.ReadFile(spec.FileSession)
+
+	// Extract existing structured fields from session.md.
+	// Supports both new activeContext format and legacy format.
+	existingStatus := extractSection(existing, "## Status")
+	existingWorkingOn := extractSection(existing, "## Currently Working On")
+	if existingWorkingOn == "" {
+		// Legacy format fallback.
+		existingWorkingOn = extractSection(existing, "## Current Position")
+	}
+	existingNextSteps := extractSection(existing, "## Next Steps")
+	if existingNextSteps == "" {
+		existingNextSteps = extractSection(existing, "## Pending")
+	}
+	existingBlockers := extractSection(existing, "## Blockers")
+	if existingBlockers == "" {
+		existingBlockers = extractSection(existing, "## Unresolved Issues")
+	}
+
+	if existingStatus == "" {
+		existingStatus = "active"
+	}
+
+	// Build "Currently Working On" from recent assistant actions in transcript.
+	workingOn := existingWorkingOn
+	if contextSnapshot != "" {
+		// Extract the most recent assistant action as "currently working on".
+		inAssistantSection := false
+		for _, line := range strings.Split(contextSnapshot, "\n") {
+			if line == "Recent assistant actions:" {
+				inAssistantSection = true
+				continue
+			}
+			if !strings.HasPrefix(line, "- ") && strings.TrimSpace(line) != "" {
+				inAssistantSection = false
+			}
+			if inAssistantSection && strings.HasPrefix(line, "- ") {
+				workingOn = strings.TrimPrefix(line, "- ")
+			}
+		}
+	}
+
+	// Build "Recent Decisions" from existing + newly extracted.
+	existingDecisions := extractListItems(existing, "## Recent Decisions")
+	allDecisions := append(existingDecisions, decisions...)
+	if len(allDecisions) > 3 {
+		allDecisions = allDecisions[len(allDecisions)-3:]
+	}
+
+	var buf strings.Builder
+	buf.WriteString(fmt.Sprintf("# Session: %s\n\n", taskSlug))
+
+	buf.WriteString("## Status\n")
+	buf.WriteString(existingStatus + "\n\n")
+
+	buf.WriteString("## Currently Working On\n")
+	if workingOn != "" {
+		buf.WriteString(workingOn + "\n")
+	}
+	buf.WriteString("\n")
+
+	buf.WriteString("## Recent Decisions (last 3)\n")
+	for i, d := range allDecisions {
+		buf.WriteString(fmt.Sprintf("%d. %s\n", i+1, d))
+	}
+	buf.WriteString("\n")
+
+	buf.WriteString("## Next Steps\n")
+	if existingNextSteps != "" {
+		buf.WriteString(existingNextSteps + "\n")
+	}
+	buf.WriteString("\n")
+
+	buf.WriteString("## Blockers\n")
+	if existingBlockers != "" {
+		buf.WriteString(existingBlockers + "\n")
+	} else {
+		buf.WriteString("None\n")
+	}
+	buf.WriteString("\n")
+
+	buf.WriteString("## Modified Files (this session)\n")
+	for _, f := range modifiedFiles {
+		buf.WriteString("- " + f + "\n")
+	}
+	buf.WriteString("\n")
+
+	// Add compact marker.
+	buf.WriteString(fmt.Sprintf("## Compact Marker [%s]\n", time.Now().Format("2006-01-02 15:04:05")))
+	if customInstructions != "" {
+		buf.WriteString(fmt.Sprintf("User compact instructions: %s\n", customInstructions))
+	}
+	if contextSnapshot != "" {
+		buf.WriteString("### Pre-Compact Context Snapshot\n")
+		buf.WriteString(contextSnapshot)
+		buf.WriteString("\n")
+	}
+	buf.WriteString("---\n")
+
+	return rotateCompactMarkers(buf.String(), 3)
+}
+
+// extractSection extracts the content under a ## heading until the next ## heading.
+func extractSection(content, heading string) string {
+	lines := strings.Split(content, "\n")
+	var result []string
+	inSection := false
+	for _, line := range lines {
+		if line == heading || strings.HasPrefix(line, heading+" ") {
+			inSection = true
+			continue
+		}
+		if inSection && strings.HasPrefix(line, "## ") {
+			break
+		}
+		if inSection {
+			result = append(result, line)
+		}
+	}
+	return strings.TrimSpace(strings.Join(result, "\n"))
+}
+
+// extractListItems extracts numbered or bulleted list items from a section.
+func extractListItems(content, heading string) []string {
+	section := extractSection(content, heading)
+	if section == "" {
+		return nil
+	}
+	var items []string
+	for _, line := range strings.Split(section, "\n") {
+		trimmed := strings.TrimSpace(line)
+		// Strip leading "1. ", "2. ", "- " etc.
+		if len(trimmed) > 2 {
+			if trimmed[0] >= '0' && trimmed[0] <= '9' {
+				if idx := strings.Index(trimmed, ". "); idx >= 0 && idx < 4 {
+					items = append(items, trimmed[idx+2:])
+					continue
+				}
+			}
+			if strings.HasPrefix(trimmed, "- ") {
+				items = append(items, trimmed[2:])
+			}
+		}
+	}
+	return items
 }
 
 // transcriptEntry represents a single line from the Claude Code conversation JSONL.
@@ -599,12 +1240,12 @@ func truncateStr(s string, maxLen int) string {
 }
 
 // ---------------------------------------------------------------------------
-// SessionStart: butler-protocol context injection
+// SessionStart: spec context injection
 // ---------------------------------------------------------------------------
 
 // injectButlerContext outputs spec content to stdout when an active
-// butler-protocol spec exists. After compact, injects richer context
-// (all 6 files) for full recovery. On normal startup, injects only session.md.
+// spec exists. After compact, injects richer context
+// (all 4 files) for full recovery. On normal startup, injects only session.md.
 func injectButlerContext(projectPath, source string) {
 	taskSlug, err := spec.ReadActive(projectPath)
 	if err != nil {
@@ -625,15 +1266,13 @@ func injectButlerContext(projectPath, source string) {
 		buf.WriteString(fmt.Sprintf("\n--- Butler Protocol: Recovering Task '%s' (post-compact #%d) ---\n", taskSlug, compactCount))
 
 		if compactCount <= 1 {
-			// First compact: inject all 6 spec files for full context recovery.
+			// First compact: inject all spec files for full context recovery.
 			buf.WriteString("Full context recovery (first compact):\n\n")
 			recoveryOrder := []spec.SpecFile{
 				spec.FileSession,
 				spec.FileRequirements,
 				spec.FileDesign,
-				spec.FileTasks,
 				spec.FileDecisions,
-				spec.FileKnowledge,
 			}
 			for _, f := range recoveryOrder {
 				content, err := sd.ReadFile(f)
@@ -643,9 +1282,9 @@ func injectButlerContext(projectPath, source string) {
 				buf.WriteString(fmt.Sprintf("### %s\n%s\n\n", f, content))
 			}
 		} else {
-			// Subsequent compacts: inject only session.md + tasks.md (lightweight).
-			buf.WriteString("Lightweight recovery (use butler-status or knowledge tool for full spec):\n\n")
-			for _, f := range []spec.SpecFile{spec.FileSession, spec.FileTasks} {
+			// Subsequent compacts: inject only session.md (lightweight).
+			buf.WriteString("Lightweight recovery (use spec-status or knowledge tool for full spec):\n\n")
+			for _, f := range []spec.SpecFile{spec.FileSession} {
 				content, err := sd.ReadFile(f)
 				if err != nil || strings.TrimSpace(content) == "" {
 					continue

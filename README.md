@@ -1,179 +1,224 @@
 # alfred
 
-Claude Code の完全受動型執事。
+A proactive butler for Claude Code.
 
-主人が呼ぶまで沈黙。呼ばれたら、最高の知識を即座に渡す。
-Claude Code の設定・ベストプラクティスを知識ベースから検索し、最適な回答を提供する。
+He works silently in the background — surfacing relevant knowledge, catching scope violations, and preserving session context across compactions — so you can focus on building.
 
-## Alfred ができること
+[日本語版 README](README.ja.md)
 
-**呼ばれたら** — 知識ベースから最適解を返す。
-Claude Code の設定、プロジェクトのレビュー、スキル作成、CLAUDE.md の改善。
+## What alfred does
 
-**Butler Protocol** — Compact/セッション喪失に強い開発計画。
-`.alfred/specs/` に要件・設計・タスク・決定・知見・セッション状態を構造化保存。
-PreCompact hook が会話コンテキストを自動保存し、SessionStart で自動復帰する。
+**Proactive Knowledge Injection** — Automatically surfaces relevant best practices from a 1,400+ document knowledge base when you're working on Claude Code configuration, architecture decisions, or any topic covered by the docs.
 
-**SessionStart** — セッション開始時に CLAUDE.md を自動取り込み。
+**Butler Protocol** — Structured spec management resilient to Compact and session loss. Saves requirements, design, decisions, and session state to `.alfred/specs/`, with automatic context preservation and recovery.
 
-## 初回セットアップ
+**3-Layer Code Review** — Checks your changes against active specs (scope violations, decision contradictions), semantic knowledge search, and best practices from documentation.
 
-### 1. プラグインを追加
+**Compact Resilience** — PreCompact hook auto-extracts decisions, tracks modified files, and saves session state in activeContext format. SessionStart hook restores full context after compaction.
 
-Claude Code 内で:
+## Getting Started
+
+### 1. Add the plugin
+
+In Claude Code:
 
 ```
-/plugin marketplace add hir4ta/claude-alfred
-/plugin install alfred@hir4ta/claude-alfred
+/install-plugin hir4ta/claude-alfred
 ```
 
-プラグイン（skills, rules, hooks, agents, MCP 設定）が配置される。
+This installs skills, rules, hooks, agents, and MCP configuration.
 
-### 2. バイナリをインストール
-
-ターミナルで:
+### 2. Install the binary
 
 ```bash
 go install github.com/hir4ta/claude-alfred/cmd/alfred@latest
 ```
 
-MCP サーバーと Hook handler のバイナリをコンパイルする。
-初回は依存ライブラリのビルドに 30〜60 秒かかる。
+Compiles the MCP server and hook handler binary. First build takes 30-60 seconds for dependencies.
 
-### 3. API キーを設定
+### 3. Set API key
 
 ```bash
-export VOYAGE_API_KEY=your-key  # ~/.zshrc 等に追加
+export VOYAGE_API_KEY=your-key  # Add to ~/.zshrc or equivalent
 ```
 
-セマンティック検索に [Voyage AI](https://voyageai.com/) を使用する。
+Semantic search uses [Voyage AI](https://voyageai.com/) for embeddings and reranking.
 
-### 4. 知識ベースを初期化
+### 4. Initialize the knowledge base
 
 ```bash
 alfred setup
 ```
 
-公式ドキュメント（1,400+ 件）を SQLite に取り込み、Voyage AI で embedding を生成する。
-TUI で進捗を表示する。
+Ingests 1,400+ official documentation sections into SQLite and generates Voyage AI embeddings. Shows TUI progress.
 
-Claude Code を再起動すれば完了。
+Restart Claude Code to finish setup.
 
-### ソースからビルド
+### Build from source
 
 ```bash
 git clone https://github.com/hir4ta/claude-alfred
 cd claude-alfred
-go build -o alfred ./cmd/alfred
+go install ./cmd/alfred
 ```
 
-## アップデート
+## Updating
 
-### 1. プラグインを更新
+### 1. Update the plugin
 
-Claude Code 内で:
+In Claude Code:
 
 ```
-/plugin install alfred@hir4ta/claude-alfred
+/install-plugin hir4ta/claude-alfred
 ```
 
-### 2. バイナリを更新
+### 2. Update the binary
 
-Claude Code を終了し、ターミナルで:
+Exit Claude Code, then:
 
 ```bash
 alfred update
 ```
 
-最新バージョンを確認し、自動で `go install` を実行する。
+Checks for the latest version and runs `go install` automatically.
 
-### 3. Claude Code を再起動
+### 3. Restart Claude Code
 
-更新完了。
+Done.
 
-## スキル (5)
+## Skills (6)
 
-Claude Code 内で `/alfred:<スキル名>` で呼び出す。
+Invoke with `/alfred:<skill>` in Claude Code.
 
-| スキル | 内容 |
-|--------|------|
-| `/alfred:configure <種類> [名前]` | 単一の設定ファイルを作成・更新（skill, rule, hook, agent, MCP, CLAUDE.md, memory）+ 独立レビュー |
-| `/alfred:setup` | プロジェクト全体のセットアップウィザード — 複数ファイルのスキャン+設定、または Claude Code 機能の解説 |
-| `/alfred:brainstorm <テーマ>` | 発散（ブレスト）— 観点・選択肢・仮説・質問を増やす |
-| `/alfred:refine <テーマ>` | 壁打ち（収束）— 論点を固定し、選択肢を絞り、決定を出す |
-| `/alfred:plan <task-slug>` | Butler Protocol — 対話的に spec を生成し、Compact/セッション喪失に強い開発計画を作成 |
+| Skill | Description |
+|-------|-------------|
+| `/alfred:configure <type> [name]` | Create or polish a single config file (skill, rule, hook, agent, MCP, CLAUDE.md, memory) with independent review |
+| `/alfred:setup` | Project-wide setup wizard — multi-file scan + configuration, or Claude Code feature explainer |
+| `/alfred:brainstorm <theme>` | Divergent thinking — expand perspectives, options, hypotheses, and questions |
+| `/alfred:refine <theme>` | Convergent thinking — fix the issue, narrow options, score, and decide |
+| `/alfred:plan <task-slug>` | Butler Protocol — interactively generate a spec for compact-resilient development |
+| `/alfred:review [focus]` | 3-layer knowledge-powered code review (spec + knowledge + best practices) |
 
-## エージェント (1)
+## Agent (1)
 
-| エージェント | 内容 |
-|------------|------|
-| `alfred` | Claude Code の設定・ベストプラクティスに関するサポート |
+| Agent | Description |
+|-------|-------------|
+| `alfred` | Claude Code configuration and best practices support |
 
-## MCP ツール (7)
+## MCP Tools (9)
 
-スキルとエージェントのバックエンド。
-Claude が必要に応じて自動的に呼び出すため、直接呼ぶ必要はない。
+Backend for skills and agents. Claude calls these automatically as needed.
 
-| ツール | 内容 |
-|--------|------|
-| `knowledge` | ハイブリッド vector + FTS5 + Voyage rerank によるドキュメント検索 |
-| `review` | プロジェクトの .claude/ 設定を分析（ファイル内容読み込み + KB 照合） |
-| `suggest` | git diff を分析して .claude/ 設定の更新を提案 |
-| `butler-init` | 新しい開発タスクの spec を初期化（.alfred/specs/ に 6 ファイル生成 + DB 同期） |
-| `butler-update` | アクティブ spec のファイルを更新（決定・知見・タスク進捗・セッション状態の記録） |
-| `butler-status` | 現在のタスク状態を取得（セッション復帰用） |
-| `butler-review` | 3層コードレビュー（spec + 蓄積知見 + ベストプラクティス） |
+### Knowledge Base
 
-## コマンド
+| Tool | Description |
+|------|-------------|
+| `knowledge` | Hybrid vector + FTS5 + Voyage rerank document search |
+| `config-review` | Deep audit of .claude/ config (file contents + KB cross-reference) |
+| `config-suggest` | Analyze git diff and suggest .claude/ config updates |
 
-| コマンド | 内容 |
-|----------|------|
-| `serve` | MCP サーバー起動（stdio） |
-| `setup` | 知識ベース初期化（TUI 進捗表示、seed + embedding 生成） |
-| `hook <Event>` | Hook handler（Claude Code から呼ばれる） |
-| `update` | 最新バージョンに更新（TUI 進捗表示） |
-| `version` | バージョン表示 |
+### Butler Protocol
 
-## 仕組み
+| Tool | Description |
+|------|-------------|
+| `spec-init` | Initialize a new task spec (.alfred/specs/ with 4 files + DB sync) |
+| `spec-update` | Update a spec file for the active task (decisions, session state) |
+| `spec-status` | Get current task state for context restoration |
+| `spec-switch` | Switch the primary active task (records switch-away in old session) |
+| `spec-delete` | Delete a task spec + clean DB + update _active.md |
+| `code-review` | 3-layer code review (spec + semantic knowledge + best practices) |
+
+## Hooks (4)
+
+Run automatically during Claude Code lifecycle. No user action needed.
+
+| Event | Action |
+|-------|--------|
+| SessionStart | Auto-ingest CLAUDE.md + spec context injection (adaptive recovery) |
+| PreCompact | Extract context from transcript + auto-detect decisions + track modified files → save session.md in activeContext format → emit compaction instructions → async embedding |
+| PreToolUse | Reminder to use alfred tools when accessing .claude/ config files |
+| UserPromptSubmit | Proactive knowledge injection via FTS search, or config reminder when mentioning .claude/ paths |
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `serve` | Start MCP server (stdio) |
+| `setup` | Initialize knowledge base (TUI progress, seed + embedding generation) |
+| `hook <Event>` | Hook handler (called by Claude Code) |
+| `pane <type>` | Monitoring pane (`spec` / `decisions` / `git`) with Zellij layout |
+| `update` | Update to latest version (TUI progress) |
+| `version` | Show version |
+
+## Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│           Claude Code セッション             │
-│                                             │
-│  Hook ──→ alfred.db                          │
-│  SessionStart  (CLAUDE.md 自動取り込み)        │
-│  PreCompact    (spec session.md 自動保存)     │
-│                                             │
-│  あなた: 「認証機能を追加して」               │
-│          ↓                                   │
-│  butler-init → .alfred/specs/add-auth/       │
-│  (6 ファイル生成 + DB 同期)                   │
-│          ↓                                   │
-│  Compact 発生 → PreCompact が自動保存         │
-│          ↓                                   │
-│  SessionStart(compact) → 全 spec 自動復帰     │
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│              Claude Code Session                  │
+│                                                  │
+│  Hooks (automatic)                                │
+│  ├ SessionStart → CLAUDE.md ingest               │
+│  │                + spec context injection        │
+│  ├ PreCompact  → session.md auto-save            │
+│  │               (decisions + modified files)     │
+│  │               + compaction instructions        │
+│  │               + async embedding                │
+│  ├ PreToolUse  → .claude/ access reminder         │
+│  └ UserPromptSubmit → knowledge injection         │
+│                                                  │
+│  MCP Tools (on demand)                            │
+│  ├ knowledge / config-review / config-suggest     │
+│  └ spec-init / update / status / switch           │
+│    / delete / code-review                         │
+│                                                  │
+│  Butler Protocol Flow:                            │
+│  spec-init → .alfred/specs/add-auth/              │
+│  (4 files + DB sync)                              │
+│        ↓                                         │
+│  Compact → PreCompact auto-saves                  │
+│  (transcript extraction + decision detection      │
+│   + git modified files → activeContext format)     │
+│        ↓                                         │
+│  SessionStart(compact) → adaptive recovery        │
+│  (1st: all 4 files / 2nd+: session.md only)       │
+└──────────────────────────────────────────────────┘
 ```
 
-**Hook** — SessionStart（CLAUDE.md 取り込み + butler-protocol コンテキスト注入）、PreCompact（session.md 自動保存）、PreToolUse / UserPromptSubmit（.claude/ 設定リマインダー）。
+### Butler Protocol File Structure
 
-**Butler Protocol** — `.alfred/specs/{task-slug}/` に 6 ファイル（requirements, design, tasks, decisions, knowledge, session）を構造化保存。Compact 前にコンテキストスナップショットを session.md に保存し、Compact 後に全 spec ファイルを自動注入して完全復帰する。
+```
+.alfred/specs/{task-slug}/
+├── requirements.md  # Goals, success criteria, out of scope
+├── design.md        # Architecture, tech decisions
+├── decisions.md     # Design decisions with alternatives and rationale
+└── session.md       # Session state in activeContext format + Compact Markers
+```
 
-**独立レビュー** — `/alfred:configure` は、ファイル生成後に別コンテキストで Explore エージェントを起動する。読み取り専用かつ知識ベース検索が可能で、公式仕様に対する客観的な検証を行う。
+`_active.md` (YAML) manages multiple tasks; switch with `spec-switch`.
 
-## デバッグ
+### 3-Layer Code Review (code-review)
 
-`ALFRED_DEBUG=1` を設定すると `~/.claude-alfred/debug.log` にデバッグログを出力する。
+| Layer | Search Target | Severity |
+|-------|--------------|----------|
+| Layer 1: Spec | decisions.md / requirements.md | critical (scope violation) / warning / info |
+| Layer 2: Knowledge | Semantic search across all sources + Voyage rerank top-3 (threshold 0.3) | info |
+| Layer 3: Best Practice | FTS5 document search | info |
 
-## 依存ライブラリ
+Findings are deduplicated by `(source, message)` with highest severity preserved.
 
-| ライブラリ | 用途 |
-|-----------|------|
-| [mcp-go](https://github.com/mark3labs/mcp-go) | MCP サーバー SDK |
-| [go-sqlite3](https://github.com/ncruces/go-sqlite3) | SQLite ドライバ（pure Go, WASM） |
-| [bubbletea](https://github.com/charmbracelet/bubbletea) | TUI フレームワーク（setup 画面） |
-| [Voyage AI](https://voyageai.com/) | embedding + rerank（voyage-4-large, 2048d） |
+## Debugging
 
-## ライセンス
+Set `ALFRED_DEBUG=1` to output debug logs to `~/.claude-alfred/debug.log`.
+
+## Dependencies
+
+| Library | Purpose |
+|---------|---------|
+| [mcp-go](https://github.com/mark3labs/mcp-go) | MCP server SDK |
+| [go-sqlite3](https://github.com/ncruces/go-sqlite3) | SQLite driver (pure Go, WASM) |
+| [bubbletea](https://github.com/charmbracelet/bubbletea) | TUI framework (setup screen) |
+| [Voyage AI](https://voyageai.com/) | Embedding + rerank (voyage-4-large, 2048d) |
+
+## License
 
 MIT

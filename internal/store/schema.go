@@ -5,7 +5,7 @@ import (
 	"strconv"
 )
 
-// schemaVersion 4 = 冗長インデックス削除 + embedding 2048d 化.
+// schemaVersion 4 = removed redundant index + embedding 2048d.
 // Changes from V3:
 //   - Removed redundant idx_embeddings_source (UNIQUE constraint already creates implicit index)
 const schemaVersion = 4
@@ -85,13 +85,13 @@ var legacyTables = []string{
 	"suggestion_outcomes", "failure_solutions", "solution_chains",
 	"learned_episodes", "feedbacks", "coaching_cache",
 	"snr_history", "signal_outcomes", "user_pattern_effectiveness",
-	// V100 era (dropped in V200 静観型執事 reset)
+	// V100 era (dropped in V200 passive butler reset)
 	"user_profile", "user_preferences", "adaptive_baselines",
 	"workflow_sequences", "file_co_changes",
 	"live_session_phases", "live_session_files",
 	"global_tool_sequences", "global_tool_trigrams",
 	"tags",
-	// V1-V2 era (dropped in V3 完全受動型)
+	// V1-V2 era (dropped in V3 fully passive)
 	"preferences",
 	"sessions", "events", "compact_events", "decisions", "tool_failures",
 }

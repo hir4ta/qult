@@ -22,12 +22,12 @@ layout {
             pane size="60%" name="main" focus=true
             // Right: 3 monitoring panes (Bubbletea TUI)
             pane size="40%" split_direction="horizontal" {
-                // Spec watcher: tasks.md + session.md
+                // Spec watcher: session.md
                 pane size="34%" name="spec" {
                     command "alfred"
                     args "pane" "spec"
                 }
-                // Decisions + Knowledge
+                // Decisions
                 pane size="33%" name="decisions" {
                     command "alfred"
                     args "pane" "decisions"

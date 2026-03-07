@@ -68,9 +68,12 @@ func alfredHookEntries(binPath string) map[string]any {
 // Bundle generates the plugin directory structure from Go source definitions.
 // The outputDir will contain .claude-plugin/, hooks/, bin/, skills/, agents/, rules/, and .mcp.json.
 func Bundle(outputDir, version string) error {
-	// 0. Clean up deprecated skill directories.
+	// 0. Clean up deprecated skill directories and rule files.
 	for _, dir := range deprecatedSkillDirs {
 		_ = os.RemoveAll(filepath.Join(outputDir, "skills", dir))
+	}
+	for _, file := range deprecatedRuleFiles {
+		_ = os.Remove(filepath.Join(outputDir, "rules", file))
 	}
 
 	// 1. Create directory structure.
@@ -94,7 +97,7 @@ func Bundle(outputDir, version string) error {
 	pluginJSON := map[string]any{
 		"name":        "alfred",
 		"version":     version,
-		"description": "Your silent butler for Claude Code",
+		"description": "Your proactive butler for Claude Code",
 		"author":      map[string]string{"name": "hir4ta"},
 		"homepage":    "https://github.com/hir4ta/claude-alfred",
 		"repository":  "https://github.com/hir4ta/claude-alfred",
@@ -107,7 +110,7 @@ func Bundle(outputDir, version string) error {
 
 	// 3. Write hooks.json — commands invoke the guard/setup wrapper.
 	hooksJSON := map[string]any{
-		"description": "Silent butler hooks — auto-import, config access reminder, prompt detection, butler-protocol session persistence",
+		"description": "Proactive butler hooks — auto-import, config access reminder, knowledge injection, spec session persistence",
 		"hooks":       alfredHookEntries(runCmd),
 	}
 	if err := writeJSON(filepath.Join(outputDir, "hooks", "hooks.json"), hooksJSON); err != nil {

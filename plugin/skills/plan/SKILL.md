@@ -1,40 +1,40 @@
 ---
 name: plan
 description: >
-  Butler Protocol: 対話的にspecを生成する。要件定義→設計→タスク分解を行い、
-  .alfred/specs/ に保存。Compact/セッション喪失に強い開発計画を作成する。
-  Use when: (1) 新しいタスクを始める, (2) 設計を整理したい, (3) 作業を再開する前に計画を立てたい。
+  Butler Protocol: Interactively generate a spec. Requirements -> design -> task breakdown,
+  saved to .alfred/specs/. Creates a development plan resilient to Compact/session loss.
+  Use when: (1) starting a new task, (2) organizing a design, (3) planning before resuming work.
 user-invocable: true
 argument-hint: "<task-slug> [description]"
-allowed-tools: Read, Write, Edit, Glob, Grep, WebSearch, AskUserQuestion, Agent, mcp__alfred__knowledge, mcp__alfred__butler-init, mcp__alfred__butler-update, mcp__alfred__butler-status
+allowed-tools: Read, Write, Edit, Glob, Grep, WebSearch, AskUserQuestion, Agent, mcp__alfred__knowledge, mcp__alfred__spec-init, mcp__alfred__spec-update, mcp__alfred__spec-status
 context: current
 ---
 
 # /alfred:plan — Butler Protocol Spec Generator
 
-対話的にspecを生成し、Compact/セッション喪失に強い開発計画を作る。
+Interactively generate a spec, creating a development plan resilient to Compact/session loss.
 
 ## Core Principle
-**Compactで最も失われるのは「推論過程」「設計判断の理由」「探索の死に筋」「暗黙の合意」。**
-これらを明示的にファイルに書き出すことで、どのタイミングでセッションが切れても完璧に復帰できるspecを作る。
+**What Compact loses most: reasoning process, rationale for design decisions, dead-end explorations, implicit agreements.**
+By explicitly writing these to files, we create a spec that enables perfect recovery regardless of when the session is interrupted.
 
 ## Steps
 
 1. **[WHAT]** Parse $ARGUMENTS:
-   - task-slug（必須）: URL-safe identifier
-   - description（任意）: 概要
-   - 引数がなければ AskUserQuestion で確認
+   - task-slug (required): URL-safe identifier
+   - description (optional): brief summary
+   - If no arguments, confirm via AskUserQuestion
 
-2. **[HOW]** Call `butler-status` to check existing state:
-   - If active spec exists for this slug → resume mode (skip to Step 7)
-   - If no spec → creation mode (continue)
+2. **[HOW]** Call `spec-status` to check existing state:
+   - If active spec exists for this slug -> resume mode (skip to Step 7)
+   - If no spec -> creation mode (continue)
 
-3. **[HOW]** Requirements gathering (対話, 最大3問):
-   - What is the goal? (1文で)
-   - What does success look like? (計測可能な条件)
+3. **[HOW]** Requirements gathering (interactive, max 3 questions):
+   - What is the goal? (one sentence)
+   - What does success look like? (measurable criteria)
    - What is explicitly out of scope?
 
-4. **[HOW]** Design decisions (対話 + knowledge検索):
+4. **[HOW]** Design decisions (interactive + knowledge search):
    - Call `knowledge` to search for relevant best practices
    - Discuss architecture approach
    - Record alternatives considered (CRITICAL for compact resilience)
@@ -43,12 +43,11 @@ context: current
    - Break into concrete, checkable tasks
    - Order by dependency
 
-6. **[HOW]** Call `butler-init` with gathered information:
-   - Creates all 6 files with templates
-   - Then call `butler-update` for each file to fill in gathered content:
+6. **[HOW]** Call `spec-init` with gathered information:
+   - Creates all 4 files with templates
+   - Then call `spec-update` for each file to fill in gathered content:
      - requirements.md: replace with full requirements
      - design.md: replace with design decisions
-     - tasks.md: replace with task checklist
      - decisions.md: append initial design decisions
      - session.md: replace with current position + next steps
 
@@ -59,9 +58,7 @@ context: current
    Spec files: .alfred/specs/{task-slug}/
    - requirements.md ✓
    - design.md ✓
-   - tasks.md ✓
    - decisions.md ✓
-   - knowledge.md ✓
    - session.md ✓
 
    DB synced: {N} documents indexed.
@@ -69,20 +66,18 @@ context: current
    Compact resilience: Active. Session state will auto-save before compaction.
    Session recovery: Active. Context will auto-restore on session start.
 
-   Ready to implement. Start with the first task in tasks.md.
+   Ready to implement. Start with the first item in Next Steps.
    ```
 
 ## Resume Mode (from Step 2)
 
 If an active spec already exists:
-1. Call `butler-status` to get current session state
+1. Call `spec-status` to get current session state
 2. Read spec files in recovery order:
    - session.md (where am I?)
    - requirements.md (what am I building?)
    - design.md (how?)
-   - tasks.md (what's done/remaining?)
    - decisions.md (why these choices?)
-   - knowledge.md (what did I learn?)
 3. Present summary: "Resuming task '{slug}'. Last position: {current_position}. Next steps: {next_steps}"
 4. Ask: "Continue from here, or update the plan?"
 

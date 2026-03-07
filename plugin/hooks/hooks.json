@@ -1,5 +1,5 @@
 {
-  "description": "Silent butler hooks — auto-import, config access reminder, prompt detection, butler-protocol session persistence",
+  "description": "Proactive butler hooks — auto-import, config access reminder, knowledge injection, spec session persistence",
   "hooks": {
     "PreCompact": [
       {

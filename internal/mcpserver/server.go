@@ -11,32 +11,32 @@ import (
 	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
-const serverInstructions = `alfred is your silent butler for Claude Code.
+const serverInstructions = `alfred is your proactive butler for Claude Code.
 
-He never interrupts your work. When you need him, he's ready:
+He works silently in the background, and provides powerful tools when needed:
 
-  knowledge    — Search Claude Code docs and best practices
-  review       — Deep audit of .claude/ config: reads file contents, checks sizes, cross-references with best practices
-  suggest      — Reads git diff content, detects change patterns, suggests specific config updates with best practices
-  butler-init   — Initialize spec for a new development task (creates .alfred/specs/ files + DB sync)
-  butler-update — Record decisions, knowledge, task progress to active spec (auto DB sync)
-  butler-status — Get current task state for context restoration after compact/new session
-  butler-switch — Switch the primary active task (for multi-task workflows)
-  butler-delete — Delete a completed or abandoned task spec
-  butler-review — 3-layer knowledge-powered code review (spec + knowledge + best practices)
+  knowledge      — Search Claude Code docs and best practices
+  config-review  — Deep audit of .claude/ config against best practices
+  config-suggest — Analyze git diff, suggest .claude/ config updates
+  spec-init      — Initialize spec for a new development task
+  spec-update    — Record decisions to active spec (auto DB sync)
+  spec-status    — Get current task state for context restoration
+  spec-switch    — Switch the primary active task
+  spec-delete    — Delete a completed or abandoned task spec
+  code-review    — 3-layer knowledge-powered code review
 
 When to use alfred tools:
-- Reviewing or auditing .claude/ configuration → call review first (reads file contents, checks skill sizes and structure, validates rules, cross-references with knowledge base)
+- Reviewing or auditing .claude/ configuration → call config-review first
 - Creating or modifying .claude/ configuration files → call knowledge for best practices first
 - Looking up how a Claude Code feature works → call knowledge
-- After code changes, check if .claude/ config needs updating → call suggest (reads diff content, detects patterns like new APIs/deps/tests)
-- Starting a new development task → call butler-init to create spec
-- Making design decisions or discovering knowledge → call butler-update to record
-- Starting/resuming a session → call butler-status to check active task
-- Reviewing code changes against spec, knowledge, and best practices → call butler-review
+- After code changes, check if .claude/ config needs updating → call config-suggest
+- Starting a new development task → call spec-init to create spec
+- Making design decisions → call spec-update to record
+- Starting/resuming a session → call spec-status to check active task
+- Reviewing code changes against spec and best practices → call code-review
 
 Do NOT review or create .claude/ configuration by only reading files.
-review and suggest cross-reference your config against best practices from the knowledge base — information not in your training data.
+config-review and config-suggest cross-reference your config against best practices from the knowledge base.
 Always: alfred tools first → then read/edit files.
 `
 
@@ -70,9 +70,9 @@ func New(st *store.Store, emb *embedder.Embedder) *server.MCPServer {
 		},
 
 		server.ServerTool{
-			Tool: mcp.NewTool("review",
+			Tool: mcp.NewTool("config-review",
 				mcp.WithDescription("Deep audit of .claude/ configuration against best practices. Reads file contents, checks skill sizes and structure, validates rules, and cross-references findings with the knowledge base. Returns structured suggestions with severity levels and documentation references."),
-				mcp.WithTitleAnnotation("Project Review"),
+				mcp.WithTitleAnnotation("Config Review"),
 				mcp.WithReadOnlyHintAnnotation(true),
 				mcp.WithString("project_path", mcp.Description("Project root path (cwd)")),
 			),
@@ -80,7 +80,7 @@ func New(st *store.Store, emb *embedder.Embedder) *server.MCPServer {
 		},
 
 		server.ServerTool{
-			Tool: mcp.NewTool("suggest",
+			Tool: mcp.NewTool("config-suggest",
 				mcp.WithDescription("Analyze recent code changes and suggest specific .claude/ configuration updates. Reads git diff content to detect change patterns (new APIs, dependencies, tests, migrations), cross-references with current config and best practices from the knowledge base."),
 				mcp.WithTitleAnnotation("Config Suggestions"),
 				mcp.WithReadOnlyHintAnnotation(true),
@@ -90,8 +90,8 @@ func New(st *store.Store, emb *embedder.Embedder) *server.MCPServer {
 		},
 
 		server.ServerTool{
-			Tool: mcp.NewTool("butler-init",
-				mcp.WithDescription("Initialize a new spec for a development task. Creates .alfred/specs/{task_slug}/ with 6 template files (requirements, design, tasks, decisions, knowledge, session) and syncs to the knowledge DB for semantic search."),
+			Tool: mcp.NewTool("spec-init",
+				mcp.WithDescription("Initialize a new spec for a development task. Creates .alfred/specs/{task_slug}/ with template files (requirements, design, decisions, session) and syncs to the knowledge DB for semantic search."),
 				mcp.WithString("project_path", mcp.Description("Absolute path to the project root"), mcp.Required()),
 				mcp.WithString("task_slug", mcp.Description("URL-safe task identifier (e.g., 'add-auth', 'fix-memory-leak')"), mcp.Required()),
 				mcp.WithString("description", mcp.Description("Brief description of the task goal")),
@@ -100,10 +100,10 @@ func New(st *store.Store, emb *embedder.Embedder) *server.MCPServer {
 		},
 
 		server.ServerTool{
-			Tool: mcp.NewTool("butler-update",
-				mcp.WithDescription("Update a spec file for the active task. Appends or replaces content, then syncs to the knowledge DB. Use for recording decisions, knowledge discoveries, task progress, and session state."),
+			Tool: mcp.NewTool("spec-update",
+				mcp.WithDescription("Update a spec file for the active task. Appends or replaces content, then syncs to the knowledge DB. Use for recording decisions and session state."),
 				mcp.WithString("project_path", mcp.Description("Absolute path to the project root"), mcp.Required()),
-				mcp.WithString("file", mcp.Description("Spec file to update: requirements.md, design.md, tasks.md, decisions.md, knowledge.md, session.md"), mcp.Required()),
+				mcp.WithString("file", mcp.Description("Spec file to update: requirements.md, design.md, decisions.md, session.md"), mcp.Required()),
 				mcp.WithString("content", mcp.Description("Content to write"), mcp.Required()),
 				mcp.WithString("mode", mcp.Description("Write mode: 'append' (default) or 'replace'")),
 			),
@@ -111,8 +111,8 @@ func New(st *store.Store, emb *embedder.Embedder) *server.MCPServer {
 		},
 
 		server.ServerTool{
-			Tool: mcp.NewTool("butler-status",
-				mcp.WithDescription("Get the current spec status for a project. Returns the active task's session state, task list, and requirements. Use at session start to restore context after compact or new session."),
+			Tool: mcp.NewTool("spec-status",
+				mcp.WithDescription("Get the current spec status for a project. Returns the active task's session state, requirements, and decisions. Use at session start to restore context after compact or new session."),
 				mcp.WithReadOnlyHintAnnotation(true),
 				mcp.WithString("project_path", mcp.Description("Absolute path to the project root"), mcp.Required()),
 			),
@@ -120,8 +120,8 @@ func New(st *store.Store, emb *embedder.Embedder) *server.MCPServer {
 		},
 
 		server.ServerTool{
-			Tool: mcp.NewTool("butler-switch",
-				mcp.WithDescription("Switch the primary active task. Use when working on multiple tasks and you want to change which spec is active for butler-update and session hooks."),
+			Tool: mcp.NewTool("spec-switch",
+				mcp.WithDescription("Switch the primary active task. Use when working on multiple tasks and you want to change which spec is active for spec-update and session hooks."),
 				mcp.WithString("project_path", mcp.Description("Absolute path to the project root"), mcp.Required()),
 				mcp.WithString("task_slug", mcp.Description("Task slug to switch to (must already exist)"), mcp.Required()),
 			),
@@ -129,7 +129,7 @@ func New(st *store.Store, emb *embedder.Embedder) *server.MCPServer {
 		},
 
 		server.ServerTool{
-			Tool: mcp.NewTool("butler-delete",
+			Tool: mcp.NewTool("spec-delete",
 				mcp.WithDescription("Delete a task's spec directory and remove it from the knowledge DB. Use to clean up completed or abandoned tasks."),
 				mcp.WithString("project_path", mcp.Description("Absolute path to the project root"), mcp.Required()),
 				mcp.WithString("task_slug", mcp.Description("Task slug to delete"), mcp.Required()),
@@ -138,8 +138,8 @@ func New(st *store.Store, emb *embedder.Embedder) *server.MCPServer {
 		},
 
 		server.ServerTool{
-			Tool: mcp.NewTool("butler-review",
-				mcp.WithDescription("3-layer knowledge-powered code review. Layer 1: checks changes against active spec (decisions, requirements scope). Layer 2: semantic search against accumulated knowledge (past bugs, dead ends). Layer 3: best practices from documentation sources."),
+			Tool: mcp.NewTool("code-review",
+				mcp.WithDescription("3-layer knowledge-powered code review. Layer 1: checks changes against active spec (decisions, requirements scope). Layer 2: semantic search for related knowledge. Layer 3: best practices from documentation sources."),
 				mcp.WithReadOnlyHintAnnotation(true),
 				mcp.WithString("project_path", mcp.Description("Absolute path to the project root"), mcp.Required()),
 				mcp.WithString("focus", mcp.Description("Optional focus area for the review (e.g., 'auth logic', 'error handling')")),

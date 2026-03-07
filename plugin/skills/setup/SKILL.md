@@ -6,7 +6,7 @@ description: >
   For single-file work, use /alfred:configure instead.
 user-invocable: true
 argument-hint: "[feature | --wizard]"
-allowed-tools: Read, Write, Edit, Glob, Bash, AskUserQuestion, mcp__alfred__knowledge, mcp__alfred__review
+allowed-tools: Read, Write, Edit, Glob, Bash, AskUserQuestion, mcp__alfred__knowledge, mcp__alfred__config-review
 context: current
 ---
 
@@ -43,7 +43,7 @@ The butler welcomes the master and briefs them on the estate.
    - STOP here
 
 3. **[HOW]** Wizard flow — interactive setup:
-   - Call `review` with project_path=$CWD to assess current setup
+   - Call `config-review` with project_path=$CWD to assess current setup
    - Present current state as a status checklist: `[x] CLAUDE.md`, `[ ] Hooks`, etc.
 
 4. **[WHAT]** Ask what to configure:
@@ -68,7 +68,7 @@ The butler welcomes the master and briefs them on the estate.
    - Use streamlined wizard mode — ask fewer questions, prefer smart defaults
 
 7. **[HOW]** Verify setup:
-   - Call `review` again to check improvement
+   - Call `config-review` again to check improvement
    - Report before/after score
 
 8. **[Template]** Final output:

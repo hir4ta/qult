@@ -20,9 +20,7 @@ type SpecFile string
 const (
 	FileRequirements SpecFile = "requirements.md"
 	FileDesign       SpecFile = "design.md"
-	FileTasks        SpecFile = "tasks.md"
 	FileDecisions    SpecFile = "decisions.md"
-	FileKnowledge    SpecFile = "knowledge.md"
 	FileSession      SpecFile = "session.md"
 )
 
@@ -30,9 +28,7 @@ const (
 var AllFiles = []SpecFile{
 	FileRequirements,
 	FileDesign,
-	FileTasks,
 	FileDecisions,
-	FileKnowledge,
 	FileSession,
 }
 
@@ -102,7 +98,7 @@ func Init(projectPath, taskSlug, description string) (*SpecDir, error) {
 
 	// Refuse to overwrite an existing spec directory.
 	if sd.Exists() {
-		return nil, fmt.Errorf("spec already exists for '%s'; use butler-update to modify", taskSlug)
+		return nil, fmt.Errorf("spec already exists for '%s'; use spec-update to modify", taskSlug)
 	}
 
 	if err := os.MkdirAll(sd.Dir(), 0o755); err != nil {
@@ -136,11 +132,6 @@ func Init(projectPath, taskSlug, description string) (*SpecDir, error) {
 
 `, taskSlug),
 
-		FileTasks: fmt.Sprintf(`# Tasks: %s
-
-- [ ]
-`, taskSlug),
-
 		FileDecisions: fmt.Sprintf(`# Decisions: %s
 
 <!-- Format:
@@ -151,42 +142,24 @@ func Init(projectPath, taskSlug, description string) (*SpecDir, error) {
 -->
 `, taskSlug),
 
-		FileKnowledge: fmt.Sprintf(`# Knowledge: %s
-
-<!-- Format:
-## Discovery Title
-- **Finding:** what
-- **Context:** when/where
-- **Dead ends:** what didn't work and why
--->
-`, taskSlug),
-
 		FileSession: fmt.Sprintf(`# Session: %s
 
 ## Status
 active
 
-## Current Position
+## Currently Working On
 Task just initialized.
 
-## What I Was Doing
-
+## Recent Decisions (last 3)
 
 
 ## Next Steps
+1.
 
-- [ ]
+## Blockers
+None
 
-## Key Context for Resumption
-
-
-
-## Modified Files
-
-
-
-## Unresolved Issues
-
+## Modified Files (this session)
 
 `, taskSlug),
 	}

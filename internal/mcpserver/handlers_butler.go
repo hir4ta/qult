@@ -20,9 +20,7 @@ import (
 var validSpecFiles = map[string]spec.SpecFile{
 	string(spec.FileRequirements): spec.FileRequirements,
 	string(spec.FileDesign):       spec.FileDesign,
-	string(spec.FileTasks):        spec.FileTasks,
 	string(spec.FileDecisions):    spec.FileDecisions,
-	string(spec.FileKnowledge):    spec.FileKnowledge,
 	string(spec.FileSession):      spec.FileSession,
 }
 
@@ -88,7 +86,7 @@ func butlerUpdateHandler(st *store.Store, emb *embedder.Embedder) server.ToolHan
 
 		sf, ok := validSpecFiles[fileName]
 		if !ok {
-			return mcp.NewToolResultError(fmt.Sprintf("invalid file: %s (valid: requirements.md, design.md, tasks.md, decisions.md, knowledge.md, session.md)", fileName)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("invalid file: %s (valid: requirements.md, design.md, decisions.md, session.md)", fileName)), nil
 		}
 
 		taskSlug, err := spec.ReadActive(projectPath)
@@ -144,7 +142,7 @@ func butlerStatusHandler() server.ToolHandlerFunc {
 			if errors.Is(err, os.ErrNotExist) {
 				return marshalResult(map[string]any{
 					"active":  false,
-					"message": "no active spec found; use butler-init to start a task",
+					"message": "no active spec found; use spec-init to start a task",
 				})
 			}
 			return marshalResult(map[string]any{
@@ -167,7 +165,7 @@ func butlerStatusHandler() server.ToolHandlerFunc {
 			"spec_dir":  sd.Dir(),
 		}
 
-		// Read all 6 spec files for complete context restoration.
+		// Read all 4 spec files for complete context restoration.
 		for _, f := range spec.AllFiles {
 			content, err := sd.ReadFile(f)
 			if err != nil {

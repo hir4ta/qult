@@ -1,8 +1,15 @@
 package main
 
 import (
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/hir4ta/claude-alfred/internal/spec"
+	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
 func TestShouldRemind(t *testing.T) {
@@ -248,5 +255,603 @@ func TestExtractFirstLines(t *testing.T) {
 				t.Errorf("extractFirstLines() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestScoreDecisionConfidence(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		sentence string
+		minScore float64
+		maxScore float64
+	}{
+		{
+			"rationale boosts confidence",
+			"decided to use PostgreSQL because of ACID compliance and scalability",
+			0.6, 1.0,
+		},
+		{
+			"alternative comparison boosts confidence",
+			"chose FTS5 over pure vector search for deterministic ranking",
+			0.6, 1.0,
+		},
+		{
+			"architecture term boosts confidence",
+			"settled on a microservice architecture for the API layer",
+			0.5, 1.0,
+		},
+		{
+			"code artifact penalty",
+			"decided to refactor `handlePreCompact` in cmd/alfred/hooks.go",
+			0.0, 0.5,
+		},
+		{
+			"hedging word penalty",
+			"just decided to quickly update the variable naming style here",
+			0.0, 0.45,
+		},
+		{
+			"plain keyword only gets base score",
+			"decided to change the logging format for the output module",
+			0.3, 0.55,
+		},
+		{
+			"rationale + alternative = high confidence",
+			"chose SQLite over Redis because embedded databases avoid network overhead",
+			0.8, 1.0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			score := scoreDecisionConfidence(tt.sentence)
+			if score < tt.minScore || score > tt.maxScore {
+				t.Errorf("scoreDecisionConfidence(%q) = %.2f, want [%.2f, %.2f]", tt.sentence, score, tt.minScore, tt.maxScore)
+			}
+		})
+	}
+}
+
+func TestExpandQuery(t *testing.T) {
+	t.Parallel()
+	result := expandQuery("hook config")
+	if !strings.Contains(result, "hook") {
+		t.Error("should contain original keyword")
+	}
+	if !strings.Contains(result, "hooks") || !strings.Contains(result, "lifecycle") {
+		t.Error("should expand 'hook' with synonyms")
+	}
+	// "config" is 6 chars, should match "config" synonym.
+	if !strings.Contains(result, "configuration") {
+		t.Error("should expand 'config' with synonyms")
+	}
+}
+
+func TestIsTrivialDecision(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		sentence string
+		want     bool
+	}{
+		{"decided to use SQLite for the knowledge base due to portability", false},
+		{"decided to read the file first", true},
+		{"decided to check the test output", true},
+		{"chose hybrid vector + FTS5 over pure vector search for better recall", false},
+		{"chose to skip this", true},
+		{"short", true},
+		{"going with a 4-file spec structure to avoid duplication with Claude Code native features", false},
+		{"going to run tests", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.sentence, func(t *testing.T) {
+			t.Parallel()
+			if got := isTrivialDecision(tt.sentence); got != tt.want {
+				t.Errorf("isTrivialDecision(%q) = %v, want %v", tt.sentence, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractSection(t *testing.T) {
+	t.Parallel()
+	session := `# Session: my-task
+
+## Status
+active
+
+## Currently Working On
+Implementing the search feature
+
+## Next Steps
+1. Add tests
+2. Update docs
+
+## Blockers
+None
+`
+	tests := []struct {
+		heading string
+		want    string
+	}{
+		{"## Status", "active"},
+		{"## Currently Working On", "Implementing the search feature"},
+		{"## Next Steps", "1. Add tests\n2. Update docs"},
+		{"## Blockers", "None"},
+		{"## Missing Section", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.heading, func(t *testing.T) {
+			t.Parallel()
+			got := extractSection(session, tt.heading)
+			if got != tt.want {
+				t.Errorf("extractSection(%q) = %q, want %q", tt.heading, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractSectionNoFalsePrefix(t *testing.T) {
+	t.Parallel()
+	content := "## Status\nactive\n\n## StatusUpdate\nsome update\n"
+	got := extractSection(content, "## Status")
+	if got != "active" {
+		t.Errorf("extractSection should not match '## StatusUpdate', got %q", got)
+	}
+}
+
+func TestExtractListItems(t *testing.T) {
+	t.Parallel()
+	content := `## Recent Decisions (last 3)
+1. Use SQLite for storage
+2. 4-file spec structure
+3. FTS-only for hooks
+`
+	items := extractListItems(content, "## Recent Decisions")
+	if len(items) != 3 {
+		t.Fatalf("extractListItems() = %d items, want 3", len(items))
+	}
+	if items[0] != "Use SQLite for storage" {
+		t.Errorf("items[0] = %q, want %q", items[0], "Use SQLite for storage")
+	}
+}
+
+func TestExtractListItemsBullets(t *testing.T) {
+	t.Parallel()
+	content := "## Modified Files\n- src/main.go\n- src/util.go\n"
+	items := extractListItems(content, "## Modified Files")
+	if len(items) != 2 {
+		t.Fatalf("extractListItems() = %d items, want 2", len(items))
+	}
+}
+
+func TestBuildActiveContextSession(t *testing.T) {
+	t.Parallel()
+	sd := createTempSpec(t, "test-task")
+
+	result := buildActiveContextSession(sd, "test-task", "", nil, []string{"main.go", "util.go"}, "")
+
+	// Verify activeContext structure.
+	if !strings.Contains(result, "# Session: test-task") {
+		t.Error("missing session header")
+	}
+	if !strings.Contains(result, "## Status\nactive") {
+		t.Error("missing status section")
+	}
+	if !strings.Contains(result, "## Currently Working On") {
+		t.Error("missing currently working on section")
+	}
+	if !strings.Contains(result, "## Modified Files (this session)\n- main.go\n- util.go") {
+		t.Error("missing modified files")
+	}
+	if !strings.Contains(result, "## Compact Marker [") {
+		t.Error("missing compact marker")
+	}
+}
+
+func TestBuildActiveContextSessionMergesDecisions(t *testing.T) {
+	t.Parallel()
+	sd := createTempSpec(t, "test-task")
+
+	// Write existing session with decisions.
+	existing := "# Session: test-task\n\n## Status\nactive\n\n## Recent Decisions (last 3)\n1. Old decision A\n2. Old decision B\n"
+	if err := sd.WriteFile("session.md", existing); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+
+	result := buildActiveContextSession(sd, "test-task", "", []string{"New decision C"}, nil, "")
+
+	if !strings.Contains(result, "Old decision A") {
+		t.Error("should preserve old decision A")
+	}
+	if !strings.Contains(result, "New decision C") {
+		t.Error("should include new decision C")
+	}
+}
+
+func TestBuildActiveContextSessionLegacyFormat(t *testing.T) {
+	t.Parallel()
+	sd := createTempSpec(t, "legacy-task")
+
+	// Write legacy-format session.md.
+	legacy := "# Session: legacy-task\n\n## Current Position\nWorking on auth\n\n## Pending\n1. Fix bug\n\n## Unresolved Issues\nAPI rate limit\n"
+	if err := sd.WriteFile("session.md", legacy); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+
+	result := buildActiveContextSession(sd, "legacy-task", "", nil, nil, "")
+
+	// Legacy data should be migrated.
+	if !strings.Contains(result, "## Currently Working On\nWorking on auth") {
+		t.Error("should migrate Current Position to Currently Working On")
+	}
+	if !strings.Contains(result, "## Next Steps\n1. Fix bug") {
+		t.Error("should migrate Pending to Next Steps")
+	}
+	if !strings.Contains(result, "## Blockers\nAPI rate limit") {
+		t.Error("should migrate Unresolved Issues to Blockers")
+	}
+}
+
+func TestExtractSearchKeywords(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input string
+		max   int
+		want  int // expected keyword count
+	}{
+		{"short prompt", "fix bug", 8, 1}, // "fix" is 3 chars → kept, "bug" is 3 chars → kept
+		{"with stop words", "how do I configure the hooks for my project", 8, 3},
+		{"technical", "implement hybrid vector search with FTS5", 8, 4},
+		{"empty", "", 8, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := extractSearchKeywords(tt.input, tt.max)
+			words := strings.Fields(result)
+			if len(words) < tt.want-1 || len(words) > tt.want+1 {
+				t.Errorf("extractSearchKeywords(%q, %d) = %d words (%q), want ~%d", tt.input, tt.max, len(words), result, tt.want)
+			}
+		})
+	}
+}
+
+func TestScoreRelevance(t *testing.T) {
+	t.Parallel()
+	doc := store.DocRow{
+		SectionPath: "Hooks Configuration",
+		Content:     "Configure hooks in .claude/hooks.json to run commands on lifecycle events like SessionStart, PreCompact.",
+	}
+
+	high := scoreRelevance("how to configure hooks for precompact", doc)
+	low := scoreRelevance("fix login button css color", doc)
+
+	if high <= low {
+		t.Errorf("relevant prompt should score higher: high=%.2f, low=%.2f", high, low)
+	}
+	if high < 0.15 {
+		t.Errorf("relevant prompt score too low: %.2f", high)
+	}
+}
+
+// createTempSpec creates a temporary spec directory for testing.
+func createTempSpec(t *testing.T, slug string) *spec.SpecDir {
+	t.Helper()
+	dir := t.TempDir()
+	sd, err := spec.Init(dir, slug, "test")
+	if err != nil {
+		t.Fatalf("spec.Init: %v", err)
+	}
+	return sd
+}
+
+// writeFakeTranscript writes a JSONL transcript file with the given lines.
+func writeFakeTranscript(t *testing.T, dir string, lines []string) string {
+	t.Helper()
+	path := filepath.Join(dir, "transcript.jsonl")
+	content := strings.Join(lines, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	return path
+}
+
+// stubExecCommand replaces execCommand with a function that returns
+// the given stdout for any command invocation.
+func stubExecCommand(t *testing.T, stdout string) {
+	t.Helper()
+	orig := execCommand
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		cmd := exec.Command("echo", "-n", stdout)
+		return cmd
+	}
+	t.Cleanup(func() { execCommand = orig })
+}
+
+// captureStdout captures os.Stdout output during fn execution.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	origStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = origStdout })
+
+	fn()
+
+	w.Close()
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read pipe: %v", err)
+	}
+	return string(out)
+}
+
+func TestHandlePreCompactIntegration(t *testing.T) {
+	dir := t.TempDir()
+	sd, err := spec.Init(dir, "precompact-test", "test precompact flow")
+	if err != nil {
+		t.Fatalf("spec.Init: %v", err)
+	}
+
+	// Create a fake transcript with user messages, decisions, and structured patterns.
+	transcriptLines := []string{
+		`{"type":"human","content":"implement the database layer"}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I'll implement the database layer. I decided to use PostgreSQL for better scalability and ACID compliance."}]}}`,
+		`{"type":"human","content":"what about the search feature?"}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"For search, let me analyze the options.\n\n**Chosen:** hybrid vector + FTS5 for best recall and precision"}]}}`,
+		`{"type":"human","content":"sounds good, proceed"}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I'll proceed with the implementation now."}]}}`,
+	}
+	transcriptPath := writeFakeTranscript(t, dir, transcriptLines)
+
+	// Stub execCommand to return mock git output.
+	stubExecCommand(t, "cmd/alfred/hooks.go\ninternal/spec/spec.go")
+
+	// Capture stdout (emitCompactionInstructions writes there).
+	output := captureStdout(t, func() {
+		handlePreCompact(dir, transcriptPath, "focus on search feature")
+	})
+
+	// Verify session.md was written.
+	session, err := sd.ReadFile(spec.FileSession)
+	if err != nil {
+		t.Fatalf("read session.md: %v", err)
+	}
+
+	// Verify activeContext format sections.
+	if !strings.Contains(session, "## Status") {
+		t.Error("session.md missing '## Status'")
+	}
+	if !strings.Contains(session, "## Currently Working On") {
+		t.Error("session.md missing '## Currently Working On'")
+	}
+	if !strings.Contains(session, "## Recent Decisions") {
+		t.Error("session.md missing '## Recent Decisions'")
+	}
+
+	// Verify decisions extracted from transcript.
+	if !strings.Contains(session, "PostgreSQL") {
+		t.Error("session.md should contain decision about PostgreSQL")
+	}
+
+	// Verify modified files from git stub.
+	if !strings.Contains(session, "cmd/alfred/hooks.go") {
+		t.Error("session.md should contain modified file hooks.go")
+	}
+	if !strings.Contains(session, "internal/spec/spec.go") {
+		t.Error("session.md should contain modified file spec.go")
+	}
+
+	// Verify compact marker with user instructions.
+	if !strings.Contains(session, "## Compact Marker [") {
+		t.Error("session.md missing compact marker")
+	}
+	if !strings.Contains(session, "focus on search feature") {
+		t.Error("session.md should contain user compact instructions")
+	}
+
+	// Verify context snapshot from transcript.
+	if !strings.Contains(session, "implement the database layer") {
+		t.Error("session.md should contain context snapshot from user messages")
+	}
+
+	// Verify compaction instructions were emitted to stdout.
+	if !strings.Contains(output, "Butler Protocol") {
+		t.Error("stdout should contain Butler Protocol compaction instructions")
+	}
+	if !strings.Contains(output, "precompact-test") {
+		t.Error("stdout should contain task slug")
+	}
+}
+
+func TestInjectButlerContextCompact(t *testing.T) {
+	dir := t.TempDir()
+	sd, err := spec.Init(dir, "compact-ctx", "test compact context")
+	if err != nil {
+		t.Fatalf("spec.Init: %v", err)
+	}
+
+	// Write meaningful content to all 4 spec files.
+	if err := sd.WriteFile(spec.FileRequirements, "# Requirements\n\nBuild a search engine with hybrid vector + FTS5."); err != nil {
+		t.Fatalf("write requirements: %v", err)
+	}
+	if err := sd.WriteFile(spec.FileDesign, "# Design\n\nUse SQLite for storage with ncruces/go-sqlite3."); err != nil {
+		t.Fatalf("write design: %v", err)
+	}
+	if err := sd.WriteFile(spec.FileDecisions, "# Decisions\n\n## 2026-01-01 Storage Engine\n- **Chosen:** SQLite"); err != nil {
+		t.Fatalf("write decisions: %v", err)
+	}
+	sessionContent := "# Session: compact-ctx\n\n## Status\nactive\n\n## Currently Working On\nSearch implementation\n\n## Compact Marker [2026-01-01 10:00:00]\nfirst compact\n---\n"
+	if err := sd.WriteFile(spec.FileSession, sessionContent); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+
+	// First compact: should inject all 4 files.
+	output1 := captureStdout(t, func() {
+		injectButlerContext(dir, "compact")
+	})
+
+	if !strings.Contains(output1, "Requirements") {
+		t.Error("first compact should include requirements content")
+	}
+	if !strings.Contains(output1, "Design") {
+		t.Error("first compact should include design content")
+	}
+	if !strings.Contains(output1, "Decisions") {
+		t.Error("first compact should include decisions content")
+	}
+	if !strings.Contains(output1, "Search implementation") {
+		t.Error("first compact should include session content")
+	}
+	if !strings.Contains(output1, "Full context recovery") {
+		t.Error("first compact should say 'Full context recovery'")
+	}
+
+	// Add a second compact marker to session.md to simulate subsequent compact.
+	sessionContent2 := sessionContent + "\n## Compact Marker [2026-01-01 11:00:00]\nsecond compact\n---\n"
+	if err := sd.WriteFile(spec.FileSession, sessionContent2); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+
+	// Second compact: should inject only session.md (lightweight).
+	output2 := captureStdout(t, func() {
+		injectButlerContext(dir, "compact")
+	})
+
+	if !strings.Contains(output2, "Lightweight recovery") {
+		t.Error("subsequent compact should say 'Lightweight recovery'")
+	}
+	if !strings.Contains(output2, "Search implementation") {
+		t.Error("subsequent compact should still include session content")
+	}
+	// Requirements/Design should NOT appear in lightweight mode.
+	if strings.Contains(output2, "hybrid vector + FTS5") {
+		t.Error("subsequent compact should NOT include full requirements content")
+	}
+	if strings.Contains(output2, "ncruces/go-sqlite3") {
+		t.Error("subsequent compact should NOT include full design content")
+	}
+}
+
+func TestInjectButlerContextNormal(t *testing.T) {
+	dir := t.TempDir()
+	sd, err := spec.Init(dir, "normal-ctx", "test normal startup")
+	if err != nil {
+		t.Fatalf("spec.Init: %v", err)
+	}
+
+	sessionContent := "# Session: normal-ctx\n\n## Status\nactive\n\n## Currently Working On\nNormal startup test\n"
+	if err := sd.WriteFile(spec.FileSession, sessionContent); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+
+	// Write requirements to verify they are NOT injected on normal startup.
+	if err := sd.WriteFile(spec.FileRequirements, "# Requirements\n\nShould not appear in normal startup."); err != nil {
+		t.Fatalf("write requirements: %v", err)
+	}
+
+	output := captureStdout(t, func() {
+		injectButlerContext(dir, "startup")
+	})
+
+	if !strings.Contains(output, "Normal startup test") {
+		t.Error("normal startup should include session.md content")
+	}
+	if !strings.Contains(output, "Active Task 'normal-ctx'") {
+		t.Error("normal startup should include task slug in header")
+	}
+	if strings.Contains(output, "Should not appear") {
+		t.Error("normal startup should NOT include requirements content")
+	}
+}
+
+func TestHandlePreCompactNoSpec(t *testing.T) {
+	dir := t.TempDir()
+
+	// No .alfred/ directory exists. handlePreCompact should not panic.
+	stubExecCommand(t, "")
+
+	output := captureStdout(t, func() {
+		handlePreCompact(dir, "", "")
+	})
+
+	// Should produce no output (graceful no-op).
+	if output != "" {
+		t.Errorf("handlePreCompact with no spec should produce no stdout, got %q", output)
+	}
+}
+
+func TestExtractDecisionsFromTranscript(t *testing.T) {
+	dir := t.TempDir()
+
+	transcriptLines := []string{
+		// Trivial decision (should be filtered).
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I decided to read the file first to understand the structure."}]}}`,
+		// Real keyword decision (should be kept).
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"After analyzing the options, I decided to use hybrid search for better recall and precision across large document sets."}]}}`,
+		// Structured decision (should be kept).
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Comparing search backends:\n**Chosen:** FTS5 over pure vector for deterministic ranking and lower latency"}]}}`,
+		// Another trivial decision (should be filtered).
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I decided to run the tests to verify."}]}}`,
+		// User message (should be ignored entirely).
+		`{"type":"human","content":"decided to use Redis for caching"}`,
+		// Duplicate of the hybrid search decision (should be deduplicated).
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"After analyzing the options, I decided to use hybrid search for better recall and precision across large document sets."}]}}`,
+	}
+
+	transcriptPath := writeFakeTranscript(t, dir, transcriptLines)
+	decisions := extractDecisionsFromTranscript(transcriptPath)
+
+	// Verify trivial decisions are filtered.
+	for _, d := range decisions {
+		lower := strings.ToLower(d)
+		if strings.Contains(lower, "decided to read") {
+			t.Errorf("trivial decision should be filtered: %q", d)
+		}
+		if strings.Contains(lower, "decided to run") {
+			t.Errorf("trivial decision should be filtered: %q", d)
+		}
+	}
+
+	// Verify real decisions are kept.
+	foundHybrid := false
+	foundFTS5 := false
+	for _, d := range decisions {
+		lower := strings.ToLower(d)
+		if strings.Contains(lower, "hybrid search") {
+			foundHybrid = true
+		}
+		if strings.Contains(lower, "fts5") {
+			foundFTS5 = true
+		}
+	}
+	if !foundHybrid {
+		t.Errorf("should keep real keyword decision about hybrid search, got: %v", decisions)
+	}
+	if !foundFTS5 {
+		t.Errorf("should keep structured decision about FTS5, got: %v", decisions)
+	}
+
+	// Verify user messages are not extracted as decisions.
+	for _, d := range decisions {
+		if strings.Contains(strings.ToLower(d), "redis") {
+			t.Errorf("user message should not be extracted as decision: %q", d)
+		}
+	}
+
+	// Verify deduplication: count hybrid search mentions.
+	hybridCount := 0
+	for _, d := range decisions {
+		if strings.Contains(strings.ToLower(d), "hybrid search") {
+			hybridCount++
+		}
+	}
+	if hybridCount > 1 {
+		t.Errorf("duplicate decisions should be removed, got %d mentions of hybrid search", hybridCount)
 	}
 }

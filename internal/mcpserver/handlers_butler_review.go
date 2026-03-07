@@ -105,7 +105,7 @@ func getReviewDiff(projectPath string) string {
 	return ""
 }
 
-// reviewAgainstSpec checks changes against decisions.md, knowledge.md, and requirements.md.
+// reviewAgainstSpec checks changes against decisions.md and requirements.md.
 func reviewAgainstSpec(sd *spec.SpecDir, diff string) []reviewFinding {
 	var findings []reviewFinding
 
@@ -127,28 +127,6 @@ func reviewAgainstSpec(sd *spec.SpecDir, diff string) []reviewFinding {
 					Severity: "warning",
 					Message:  fmt.Sprintf("Relevant decision: %s", excerpt),
 					Source:   sd.FilePath(spec.FileDecisions),
-				})
-			}
-		}
-	}
-
-	// Check knowledge for dead ends — warn if diff touches areas with known dead ends.
-	knowledge, err := sd.ReadFile(spec.FileKnowledge)
-	if err == nil && knowledge != "" {
-		discoveryCount := max(strings.Count(knowledge, "## ")-1, 0)
-		if discoveryCount > 0 {
-			findings = append(findings, reviewFinding{
-				Layer:    "spec",
-				Severity: "info",
-				Message:  fmt.Sprintf("Review against %d knowledge entries (including dead ends) in spec.", discoveryCount),
-				Source:   sd.FilePath(spec.FileKnowledge),
-			})
-			if strings.Contains(strings.ToLower(knowledge), "dead end") {
-				findings = append(findings, reviewFinding{
-					Layer:    "spec",
-					Severity: "critical",
-					Message:  "Knowledge base contains dead end entries. Review before repeating failed approaches.",
-					Source:   sd.FilePath(spec.FileKnowledge),
 				})
 			}
 		}
@@ -178,21 +156,6 @@ func reviewAgainstSpec(sd *spec.SpecDir, diff string) []reviewFinding {
 			Message:  "Out of Scope section exists in requirements. Verify changes respect scope boundaries.",
 			Source:   sd.FilePath(spec.FileRequirements),
 		})
-	}
-
-	// Check tasks.md for incomplete prerequisites.
-	tasks, err := sd.ReadFile(spec.FileTasks)
-	if err == nil && tasks != "" {
-		incomplete := strings.Count(tasks, "- [ ]")
-		complete := strings.Count(tasks, "- [x]") + strings.Count(tasks, "- [X]")
-		if incomplete > 0 || complete > 0 {
-			findings = append(findings, reviewFinding{
-				Layer:    "spec",
-				Severity: "info",
-				Message:  fmt.Sprintf("Task progress: %d/%d complete.", complete, complete+incomplete),
-				Source:   sd.FilePath(spec.FileTasks),
-			})
-		}
 	}
 
 	return findings

@@ -14,7 +14,7 @@ func TestInitCreatesAllFiles(t *testing.T) {
 		t.Fatalf("Init failed: %v", err)
 	}
 
-	// Check all 6 spec files exist
+	// Check all 4 spec files exist
 	for _, f := range AllFiles {
 		path := sd.FilePath(f)
 		if _, err := os.Stat(path); err != nil {
