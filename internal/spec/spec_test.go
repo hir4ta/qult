@@ -287,3 +287,75 @@ func TestSpecDirExists(t *testing.T) {
 		t.Error("Exists() should return true after Init")
 	}
 }
+
+func TestWriteFileAtomic(t *testing.T) {
+	tmp := t.TempDir()
+	sd, err := Init(tmp, "atomic-test", "test")
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	content := "# Updated Session\n\n## Status\nactive\n"
+	if err := sd.WriteFile(FileSession, content); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	got, err := sd.ReadFile(FileSession)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if got != content {
+		t.Errorf("WriteFile content mismatch: got %q, want %q", got, content)
+	}
+
+	// Verify no .tmp file remains.
+	tmpFile := sd.FilePath(FileSession) + ".tmp"
+	if _, err := os.Stat(tmpFile); err == nil {
+		t.Error("tmp file should be cleaned up after atomic rename")
+	}
+}
+
+func TestRootDir(t *testing.T) {
+	got := RootDir("/home/user/project")
+	want := filepath.Join("/home/user/project", ".alfred")
+	if got != want {
+		t.Errorf("RootDir() = %q, want %q", got, want)
+	}
+}
+
+func TestRemoveTaskNotFound(t *testing.T) {
+	tmp := t.TempDir()
+	Init(tmp, "exists", "test")
+
+	_, err := RemoveTask(tmp, "not-found")
+	if err == nil {
+		t.Error("RemoveTask should fail for non-existent task")
+	}
+}
+
+func TestInitSessionTemplate(t *testing.T) {
+	tmp := t.TempDir()
+	sd, err := Init(tmp, "template-test", "check template")
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	session, err := sd.ReadFile(FileSession)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	// Verify activeContext format.
+	for _, section := range []string{
+		"## Status",
+		"## Currently Working On",
+		"## Recent Decisions",
+		"## Next Steps",
+		"## Blockers",
+		"## Modified Files",
+	} {
+		if !strings.Contains(session, section) {
+			t.Errorf("session template missing section %q", section)
+		}
+	}
+}

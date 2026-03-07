@@ -80,4 +80,17 @@ func TestSyncSingleFile(t *testing.T) {
 	if len(docs) == 0 {
 		t.Error("expected to find synced doc via FTS search")
 	}
+
+	// Sync again unchanged.
+	err = SyncSingleFile(context.Background(), sd, FileSession, st, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Modify and sync again.
+	sd.WriteFile(FileSession, "# Updated session\n\n## Status\ncompleted\n")
+	err = SyncSingleFile(context.Background(), sd, FileSession, st, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 }

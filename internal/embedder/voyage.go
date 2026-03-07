@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"strconv"
 	"time"
 )
@@ -134,11 +135,15 @@ func (c *voyageClient) embed(ctx context.Context, texts []string, inputType stri
 		}
 		lastErr = err
 
-		// Retry on 400 (transient "Request to model ... failed") and 5xx.
+		// Retry on 429 and 5xx. For 400, only retry Voyage-specific
+		// transient errors ("Request to model ... failed").
 		// Don't retry on 401, 403, 404, 422, etc.
 		var ve *voyageError
 		if errors.As(err, &ve) {
-			if ve.status == 400 || ve.status == 429 || ve.status >= 500 {
+			if ve.status == 429 || ve.status >= 500 {
+				continue
+			}
+			if ve.status == 400 && strings.Contains(ve.detail, "Request to model") {
 				continue
 			}
 			return nil, err

@@ -196,8 +196,14 @@ func asyncEmbedSession(sd *spec.SpecDir) {
 		debugf("asyncEmbedSession: start error: %v", err)
 		return
 	}
-	// Detach — don't wait for completion.
-	go func() { _ = cmd.Wait() }()
+	// Wait in background and log result.
+	go func() {
+		if err := cmd.Wait(); err != nil {
+			debugf("asyncEmbedSession: pid=%d error: %v", cmd.Process.Pid, err)
+		} else {
+			debugf("asyncEmbedSession: pid=%d completed", cmd.Process.Pid)
+		}
+	}()
 	debugf("asyncEmbedSession: spawned pid=%d for %s/%s", cmd.Process.Pid, sd.TaskSlug, spec.FileSession)
 }
 

@@ -339,6 +339,51 @@ func TestReviewHandler_WithHooks(t *testing.T) {
 	}
 }
 
+func TestReviewHandler_WithProjectHooks(t *testing.T) {
+	t.Parallel()
+	claudeHome := t.TempDir()
+	projectDir := t.TempDir()
+	handler := reviewHandler(claudeHome, nil, nil)
+
+	// Create project-level .claude/hooks.json.
+	hooksDir := filepath.Join(projectDir, ".claude")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	hooksJSON := map[string]any{
+		"hooks": map[string]any{
+			"SessionStart": []any{},
+			"PreToolUse":   []any{},
+		},
+	}
+	data, _ := json.Marshal(hooksJSON)
+	if err := os.WriteFile(filepath.Join(hooksDir, "hooks.json"), data, 0o644); err != nil {
+		t.Fatalf("write hooks.json: %v", err)
+	}
+
+	res, err := handler(context.Background(), newRequest(map[string]any{
+		"project_path": projectDir,
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m := resultJSON(t, res)
+	hooks, ok := m["hooks"].(map[string]any)
+	if !ok {
+		t.Fatal("expected hooks to be a map")
+	}
+	hookCount, _ := hooks["count"].(float64)
+	if hookCount != 2 {
+		t.Errorf("hooks.count = %v, want 2", hookCount)
+	}
+	// Verify project_hooks path is reported.
+	ph, _ := hooks["project_hooks"].(string)
+	if ph == "" {
+		t.Error("expected project_hooks path to be set")
+	}
+}
+
 func TestReviewHandler_Suggestions(t *testing.T) {
 	t.Parallel()
 	claudeHome := t.TempDir()
@@ -662,5 +707,129 @@ func TestTruncate(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("truncate(%q, %d) = %q, want %q", tc.input, tc.maxLen, got, tc.want)
 		}
+	}
+}
+
+func TestReviewDir_Agents(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	// Empty: no agents dir.
+	result := reviewDir(dir, ".claude", "agents")
+	if count, _ := result["count"].(int); count != 0 {
+		t.Errorf("empty dir should have count 0, got %d", count)
+	}
+
+	// With an agent file.
+	agentsDir := filepath.Join(dir, ".claude", "agents")
+	os.MkdirAll(agentsDir, 0o755)
+	os.WriteFile(filepath.Join(agentsDir, "butler.md"), []byte("# Butler"), 0o644)
+
+	result = reviewDir(dir, ".claude", "agents")
+	if count, _ := result["count"].(int); count != 1 {
+		t.Errorf("agents count = %d, want 1", count)
+	}
+	items, _ := result["items"].([]string)
+	if len(items) != 1 || items[0] != "butler.md" {
+		t.Errorf("items = %v, want [butler.md]", items)
+	}
+}
+
+func TestReviewDir_Empty(t *testing.T) {
+	t.Parallel()
+	result := reviewDir("", ".claude", "agents")
+	if count, _ := result["count"].(int); count != 0 {
+		t.Errorf("empty projectPath should have count 0")
+	}
+}
+
+func TestReviewMCP(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	// No .mcp.json.
+	result := reviewMCP(dir)
+	if count, _ := result["count"].(int); count != 0 {
+		t.Errorf("no mcp.json should have count 0")
+	}
+
+	// With .mcp.json.
+	mcpJSON := `{"mcpServers":{"alfred":{"command":"alfred","args":["serve"]},"context7":{"command":"context7"}}}`
+	os.WriteFile(filepath.Join(dir, ".mcp.json"), []byte(mcpJSON), 0o644)
+
+	result = reviewMCP(dir)
+	count, _ := result["count"].(int)
+	if count != 2 {
+		t.Errorf("mcp count = %d, want 2", count)
+	}
+	servers, _ := result["servers"].([]string)
+	if len(servers) != 2 {
+		t.Errorf("servers = %v, want 2 servers", servers)
+	}
+}
+
+func TestReviewMCP_InvalidJSON(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, ".mcp.json"), []byte("not json"), 0o644)
+
+	result := reviewMCP(dir)
+	if count, _ := result["count"].(int); count != 0 {
+		t.Errorf("invalid json should have count 0")
+	}
+}
+
+func TestReviewMCP_Empty(t *testing.T) {
+	t.Parallel()
+	result := reviewMCP("")
+	if count, _ := result["count"].(int); count != 0 {
+		t.Errorf("empty path should have count 0")
+	}
+}
+
+func TestCountBodyLines(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		content string
+		want    int
+	}{
+		{"no frontmatter", "line1\nline2\n", 2},
+		{"with frontmatter", "---\nname: test\n---\nBody line 1\nBody line 2\n", 2},
+		{"empty body", "---\nname: test\n---\n", 0},
+		{"no closing delimiter", "---\nname: test\nno close", 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := countBodyLines(tt.content)
+			if got != tt.want {
+				t.Errorf("countBodyLines() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseSKILLFrontmatter(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		content string
+		wantKey string
+		wantVal string
+	}{
+		{"with frontmatter", "---\nname: my-skill\ndescription: test skill\n---\n# Body\n", "name", "my-skill"},
+		{"no frontmatter", "# Just markdown\ncontent\n", "name", ""},
+		{"multiline value", "---\nname: test\ndescription: >\n  a long description\n---\n", "description", ""},
+		{"no closing", "---\nname: test\nno close\n", "name", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			fm := parseSKILLFrontmatter(tt.content)
+			if fm[tt.wantKey] != tt.wantVal {
+				t.Errorf("fm[%q] = %q, want %q", tt.wantKey, fm[tt.wantKey], tt.wantVal)
+			}
+		})
 	}
 }

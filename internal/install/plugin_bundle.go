@@ -51,9 +51,18 @@ func alfredHookEntries(binPath string) map[string]any {
 				},
 			},
 		},
+		// UserPromptSubmit: dual-layer gating.
+		// Both hooks are in the same array so the prompt hook gates the command hook:
+		// if LLM judges ok=false (not config-related), the command hook is skipped entirely.
 		"UserPromptSubmit": []any{
 			map[string]any{
 				"hooks": []any{
+					map[string]any{
+						"type":          "prompt",
+						"prompt":        "Does this user message involve Claude Code configuration or features (.claude/ directory, CLAUDE.md, MEMORY.md, .mcp.json, hooks, skills, rules, agents, MCP servers, memory, plugins, worktrees)?\n\nUser message: $ARGUMENTS\n\nRespond ok=true ONLY if the message is specifically about creating, modifying, reviewing, or asking about Claude Code configuration. General programming tasks should be ok=false.",
+						"timeout":       5,
+						"statusMessage": "alfred: checking relevance...",
+					},
 					map[string]any{
 						"type":    "command",
 						"command": binPath + " hook UserPromptSubmit",
@@ -137,11 +146,17 @@ func Bundle(outputDir, version string) error {
 		return fmt.Errorf("write run.sh: %w", err)
 	}
 
-	// 6. Write skills.
+	// 6. Write skills (SKILL.md + supporting files).
 	for _, skill := range loadSkills() {
 		p := filepath.Join(outputDir, "skills", skill.Dir, "SKILL.md")
 		if err := os.WriteFile(p, []byte(skill.Content), 0o644); err != nil {
 			return fmt.Errorf("write skill %s: %w", skill.Dir, err)
+		}
+	}
+	for _, sf := range loadSkillSupportFiles() {
+		p := filepath.Join(outputDir, "skills", sf.Dir, sf.File)
+		if err := os.WriteFile(p, []byte(sf.Data), 0o644); err != nil {
+			return fmt.Errorf("write skill support file %s/%s: %w", sf.Dir, sf.File, err)
 		}
 	}
 

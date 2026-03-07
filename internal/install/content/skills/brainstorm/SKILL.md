@@ -8,7 +8,7 @@ description: |
 user-invocable: true
 argument-hint: "<theme or rough prompt>"
 allowed-tools: Read, Glob, Grep, WebSearch, WebFetch, AskUserQuestion, Agent, mcp__alfred__knowledge, mcp__alfred__spec-init
-context: current
+context: fork
 ---
 
 # /alfred:brainstorm

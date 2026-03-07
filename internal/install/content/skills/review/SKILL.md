@@ -7,7 +7,7 @@ description: >
 user-invocable: true
 argument-hint: "[focus area]"
 allowed-tools: Read, Glob, Grep, Bash, mcp__alfred__code-review, mcp__alfred__spec-status
-context: current
+context: fork
 ---
 
 # /alfred:review — Knowledge-Powered Code Review

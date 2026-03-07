@@ -334,3 +334,52 @@ func TestSeedDocsCount(t *testing.T) {
 		}
 	})
 }
+
+func TestDeleteDocsByURLPrefix(t *testing.T) {
+	t.Parallel()
+	st := openTestStore(t)
+	ctx := t.Context()
+
+	// Insert docs with different URL prefixes.
+	for _, d := range []DocRow{
+		{URL: "https://docs.example.com/hooks", SectionPath: "Hooks", Content: "hooks content", SourceType: "docs"},
+		{URL: "https://docs.example.com/skills", SectionPath: "Skills", Content: "skills content", SourceType: "docs"},
+		{URL: "https://other.com/page", SectionPath: "Other", Content: "other content", SourceType: "docs"},
+	} {
+		d2 := d
+		if _, _, err := st.UpsertDoc(&d2); err != nil {
+			t.Fatalf("UpsertDoc: %v", err)
+		}
+	}
+
+	// Delete by prefix.
+	if err := st.DeleteDocsByURLPrefix(ctx, "https://docs.example.com/"); err != nil {
+		t.Fatalf("DeleteDocsByURLPrefix: %v", err)
+	}
+
+	// Verify docs.example.com docs are gone.
+	docs, err := st.SearchDocsFTS("hooks skills", "", 10)
+	if err != nil {
+		t.Fatalf("SearchDocsFTS: %v", err)
+	}
+	for _, d := range docs {
+		if d.URL == "https://docs.example.com/hooks" || d.URL == "https://docs.example.com/skills" {
+			t.Errorf("doc with URL %q should have been deleted", d.URL)
+		}
+	}
+
+	// Verify other.com doc still exists.
+	docs, err = st.SearchDocsFTS("other content", "", 10)
+	if err != nil {
+		t.Fatalf("SearchDocsFTS: %v", err)
+	}
+	found := false
+	for _, d := range docs {
+		if d.URL == "https://other.com/page" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("doc with other.com URL should still exist")
+	}
+}

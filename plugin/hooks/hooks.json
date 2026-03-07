@@ -39,6 +39,12 @@
       {
         "hooks": [
           {
+            "prompt": "Does this user message involve Claude Code configuration or features (.claude/ directory, CLAUDE.md, MEMORY.md, .mcp.json, hooks, skills, rules, agents, MCP servers, memory, plugins, worktrees)?\n\nUser message: $ARGUMENTS\n\nRespond ok=true ONLY if the message is specifically about creating, modifying, reviewing, or asking about Claude Code configuration. General programming tasks should be ok=false.",
+            "statusMessage": "alfred: checking relevance...",
+            "timeout": 5,
+            "type": "prompt"
+          },
+          {
             "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook UserPromptSubmit",
             "timeout": 3,
             "type": "command"

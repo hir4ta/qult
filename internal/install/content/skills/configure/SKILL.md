@@ -12,6 +12,10 @@ context: current
 
 The butler tends to the estate's configuration — whether building new or polishing existing.
 
+## Supporting Files
+
+- **best-practices.md** — Claude Code configuration best practices for all types (CLAUDE.md, skills, rules, hooks, agents, MCP, memory). Read this file when generating or reviewing configuration.
+
 ## Steps
 
 1. **[WHAT]** Determine target type from $ARGUMENTS:

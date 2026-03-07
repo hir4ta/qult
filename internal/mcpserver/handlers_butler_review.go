@@ -137,10 +137,15 @@ func reviewAgainstSpec(sd *spec.SpecDir, diff string) []reviewFinding {
 	if err == nil && strings.Contains(requirements, "## Out of Scope") {
 		outOfScopeItems := extractOutOfScopeItems(requirements)
 		if len(outOfScopeItems) > 0 {
-			diffLower := strings.ToLower(diff)
+			// Check against added lines only (not entire diff) to reduce false positives.
+			addedLower := strings.ToLower(extractDiffContent(diff, 16*1024))
 			for _, item := range outOfScopeItems {
 				itemLower := strings.ToLower(item)
-				if strings.Contains(diffLower, itemLower) {
+				// Skip very short items that cause excessive false positives.
+				if len(itemLower) < 4 {
+					continue
+				}
+				if strings.Contains(addedLower, itemLower) {
 					findings = append(findings, reviewFinding{
 						Layer:    "spec",
 						Severity: "critical",

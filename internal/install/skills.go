@@ -6,12 +6,18 @@ import (
 	"path"
 )
 
-//go:embed content/skills/*/SKILL.md
+//go:embed content/skills/*/SKILL.md content/skills/*/*.md
 var skillsFS embed.FS
 
 type skillDef struct {
 	Dir     string // directory name under skills/
 	Content string // SKILL.md content
+}
+
+type skillFileDef struct {
+	Dir  string // directory name under skills/
+	File string // filename (e.g., "best-practices.md")
+	Data string // file content
 }
 
 // loadSkills reads all skill definitions from the embedded filesystem.
@@ -32,6 +38,35 @@ func loadSkills() []skillDef {
 		skills = append(skills, skillDef{Dir: e.Name(), Content: string(data)})
 	}
 	return skills
+}
+
+// loadSkillSupportFiles reads all non-SKILL.md files from skill directories.
+func loadSkillSupportFiles() []skillFileDef {
+	var files []skillFileDef
+	entries, err := fs.ReadDir(skillsFS, "content/skills")
+	if err != nil {
+		return nil
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		dirEntries, err := fs.ReadDir(skillsFS, path.Join("content/skills", e.Name()))
+		if err != nil {
+			continue
+		}
+		for _, f := range dirEntries {
+			if f.IsDir() || f.Name() == "SKILL.md" {
+				continue
+			}
+			data, err := fs.ReadFile(skillsFS, path.Join("content/skills", e.Name(), f.Name()))
+			if err != nil {
+				continue
+			}
+			files = append(files, skillFileDef{Dir: e.Name(), File: f.Name(), Data: string(data)})
+		}
+	}
+	return files
 }
 
 // deprecatedSkillDirs lists skill directories from previous versions that

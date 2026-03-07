@@ -12,6 +12,10 @@ context: current
 
 The butler welcomes the master and briefs them on the estate.
 
+## Supporting Files
+
+- **../configure/best-practices.md** — Claude Code configuration best practices. Read when generating configuration files.
+
 ## Steps
 
 1. **[WHAT]** Determine mode from $ARGUMENTS:

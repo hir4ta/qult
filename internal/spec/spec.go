@@ -206,9 +206,15 @@ func (s *SpecDir) ReadFile(f SpecFile) (string, error) {
 	return string(data), nil
 }
 
-// WriteFile writes content to a spec file.
+// WriteFile writes content to a spec file using atomic rename to prevent
+// partial writes from concurrent hook invocations.
 func (s *SpecDir) WriteFile(f SpecFile, content string) error {
-	return os.WriteFile(s.FilePath(f), []byte(content), 0o644)
+	path := s.FilePath(f)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(content), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // AppendFile appends content to a spec file.

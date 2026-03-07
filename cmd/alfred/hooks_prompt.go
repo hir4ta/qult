@@ -91,6 +91,41 @@ var domainSynonyms = map[string][]string{
 	"permissions": {"permission", "allowed tools", "security"},
 }
 
+// claudeCodeKeywords are terms indicating a prompt is about Claude Code features.
+// Proactive knowledge injection only fires when these are detected.
+var claudeCodeKeywords = []string{
+	// English — multi-word or specific enough to avoid false positives.
+	"hook", "hooks", "skill", "skills",
+	"subagent", "mcp", "claude.md",
+	"memory.md", "claude code", "compact", "compaction",
+	"plugin", "worktree", "slash command", "claude-code",
+	"settings.json", "frontmatter",
+	// Japanese — specific to Claude Code context.
+	"フック", "スキル", "ルール", "エージェント",
+	"プラグイン", "設定ファイル", "コンパクト",
+}
+
+// claudeCodeKeywordsLower is the pre-lowered version of claudeCodeKeywords.
+// Japanese keywords are unaffected by ToLower but included for consistency.
+var claudeCodeKeywordsLower = func() []string {
+	out := make([]string, len(claudeCodeKeywords))
+	for i, kw := range claudeCodeKeywords {
+		out[i] = strings.ToLower(kw)
+	}
+	return out
+}()
+
+// isClaudeCodeRelated reports whether the prompt mentions Claude Code features.
+func isClaudeCodeRelated(prompt string) bool {
+	lower := strings.ToLower(prompt)
+	for _, kw := range claudeCodeKeywordsLower {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
 // expandQuery adds domain synonyms to a keyword query for better FTS recall.
 func expandQuery(keywords string) string {
 	words := strings.Fields(keywords)
@@ -213,8 +248,11 @@ func handleUserPromptSubmit(ev *hookEvent) {
 		return // config reminder is sufficient, skip knowledge injection
 	}
 
-	// Proactive knowledge injection: search FTS for relevant best practices.
+	// Proactive knowledge injection: only when prompt relates to Claude Code features.
 	prompt := strings.TrimSpace(ev.Prompt)
+	if !isClaudeCodeRelated(prompt) {
+		return
+	}
 	if len([]rune(prompt)) < 10 {
 		return // too short to search meaningfully (rune-based for CJK)
 	}
@@ -271,7 +309,7 @@ func handleUserPromptSubmit(ev *hookEvent) {
 	var candidates []scored
 	for _, doc := range uniqueDocs {
 		s := scoreRelevance(promptLower, doc)
-		if s >= 0.15 {
+		if s >= 0.40 {
 			candidates = append(candidates, scored{doc, s})
 		}
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -61,6 +62,40 @@ func TestShouldRemindPrompt(t *testing.T) {
 			t.Parallel()
 			if got := shouldRemindPrompt(tt.prompt); got != tt.want {
 				t.Errorf("shouldRemindPrompt(%q) = %v, want %v", tt.prompt, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsClaudeCodeRelated(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		prompt string
+		want   bool
+	}{
+		{"empty", "", false},
+		{"unrelated", "Fix the login bug in auth service", false},
+		{"hook keyword", "hookを設定したい", true},
+		{"skill keyword", "how do skills work?", true},
+		{"mcp keyword", "MCP server configuration", true},
+		{"claude code keyword", "Claude Code の使い方", true},
+		{"compact keyword", "compaction について教えて", true},
+		{"japanese フック", "フックの設定方法を教えて", true},
+		{"japanese スキル", "スキルを作りたい", true},
+		{"plugin keyword", "pluginをインストールしたい", true},
+		{"worktree keyword", "worktree を使ったことある？", true},
+		{"general agent (no match)", "my travel agent booked a flight", false},
+		{"general rule (no match)", "the golden rule of cooking", false},
+		{"frontmatter keyword", "frontmatter の書き方", true},
+		{"case insensitive", "HOOKS について", true},
+		{"short unrelated", "fix bug", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isClaudeCodeRelated(tt.prompt); got != tt.want {
+				t.Errorf("isClaudeCodeRelated(%q) = %v, want %v", tt.prompt, got, tt.want)
 			}
 		})
 	}
@@ -853,5 +888,302 @@ func TestExtractDecisionsFromTranscript(t *testing.T) {
 	}
 	if hybridCount > 1 {
 		t.Errorf("duplicate decisions should be removed, got %d mentions of hybrid search", hybridCount)
+	}
+}
+
+func TestReadFileTail(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	// Small file: should return entire content.
+	small := filepath.Join(dir, "small.txt")
+	if err := os.WriteFile(small, []byte("line1\nline2\nline3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	data, err := readFileTail(small, 1024)
+	if err != nil {
+		t.Fatalf("readFileTail small: %v", err)
+	}
+	if !strings.Contains(string(data), "line1") {
+		t.Error("small file should return all content")
+	}
+
+	// Large file: should return only the tail.
+	large := filepath.Join(dir, "large.txt")
+	var buf strings.Builder
+	for i := range 200 {
+		fmt.Fprintf(&buf, "line %d: some padding content here\n", i)
+	}
+	if err := os.WriteFile(large, []byte(buf.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	data, err = readFileTail(large, 256)
+	if err != nil {
+		t.Fatalf("readFileTail large: %v", err)
+	}
+	if len(data) > 256 {
+		t.Errorf("tail should be <= 256 bytes, got %d", len(data))
+	}
+	// Should not start mid-line (first partial line is skipped).
+	if data[0] == 0 {
+		t.Error("should not contain null bytes")
+	}
+
+	// Non-existent file.
+	_, err = readFileTail(filepath.Join(dir, "nope.txt"), 100)
+	if err == nil {
+		t.Error("expected error for non-existent file")
+	}
+}
+
+func TestExtractTextContent(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		entry transcriptEntry
+		want  string
+	}{
+		{
+			"direct string content",
+			transcriptEntry{Content: "hello world"},
+			"hello world",
+		},
+		{
+			"message string content",
+			transcriptEntry{
+				Message: struct {
+					Role    string `json:"role"`
+					Content any    `json:"content"`
+				}{Role: "assistant", Content: "from message"},
+			},
+			"from message",
+		},
+		{
+			"content blocks array",
+			transcriptEntry{
+				Content: []any{
+					map[string]any{"type": "text", "text": "block text"},
+				},
+			},
+			"block text",
+		},
+		{
+			"message content blocks",
+			transcriptEntry{
+				Message: struct {
+					Role    string `json:"role"`
+					Content any    `json:"content"`
+				}{
+					Role: "assistant",
+					Content: []any{
+						map[string]any{"type": "text", "text": "msg block"},
+					},
+				},
+			},
+			"msg block",
+		},
+		{
+			"empty entry",
+			transcriptEntry{},
+			"",
+		},
+		{
+			"content blocks without text key",
+			transcriptEntry{
+				Content: []any{
+					map[string]any{"type": "tool_use", "name": "Read"},
+				},
+			},
+			"",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := extractTextContent(tt.entry)
+			if got != tt.want {
+				t.Errorf("extractTextContent() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHandleUserPromptSubmitEarlyReturns(t *testing.T) {
+	// Test config reminder path.
+	output := captureStdout(t, func() {
+		handleUserPromptSubmit(&hookEvent{Prompt: ".claude/hooks.json を確認して"})
+	})
+	if !strings.Contains(output, "alfred") {
+		t.Error("config path prompt should trigger reminder")
+	}
+
+	// Test unrelated prompt (no keyword match).
+	output = captureStdout(t, func() {
+		handleUserPromptSubmit(&hookEvent{Prompt: "Fix the login bug in the auth service"})
+	})
+	if output != "" {
+		t.Errorf("unrelated prompt should produce no output, got %q", output)
+	}
+
+	// Test short prompt with keyword (< 10 runes).
+	output = captureStdout(t, func() {
+		handleUserPromptSubmit(&hookEvent{Prompt: "hook?"})
+	})
+	if output != "" {
+		t.Errorf("short prompt should produce no output, got %q", output)
+	}
+}
+
+func TestTruncateStr(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		input  string
+		maxLen int
+		want   string
+	}{
+		{"short", 10, "short"},
+		{"hello\nworld", 20, "hello world"},
+		{"abcdefghij", 5, "abcde..."},
+		{"", 5, ""},
+		{"  spaces  ", 20, "spaces"},
+		{"日本語テスト", 3, "日本語..."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
+			got := truncateStr(tt.input, tt.maxLen)
+			if got != tt.want {
+				t.Errorf("truncateStr(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHandlePreToolUse(t *testing.T) {
+	// Matching path: should output reminder.
+	output := captureStdout(t, func() {
+		handlePreToolUse(&hookEvent{
+			ToolInput: map[string]any{"file_path": "/project/.claude/rules/test.md"},
+		})
+	})
+	if !strings.Contains(output, "alfred") {
+		t.Error("should output reminder for .claude/ path")
+	}
+
+	// Non-matching path: no output.
+	output = captureStdout(t, func() {
+		handlePreToolUse(&hookEvent{
+			ToolInput: map[string]any{"file_path": "/project/src/main.go"},
+		})
+	})
+	if output != "" {
+		t.Errorf("should not output reminder for non-.claude/ path, got %q", output)
+	}
+}
+
+func TestGetModifiedFiles(t *testing.T) {
+	// Create a git repo in temp dir.
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init"},
+		{"config", "user.email", "test@test.com"},
+		{"config", "user.name", "test"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if err := cmd.Run(); err != nil {
+			t.Skipf("git setup failed: %v", err)
+		}
+	}
+	// Create and commit a file.
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "add", "a.go")
+	cmd.Dir = dir
+	cmd.Run()
+	cmd = exec.Command("git", "commit", "-m", "init")
+	cmd.Dir = dir
+	cmd.Run()
+
+	// Modify the file.
+	os.WriteFile(filepath.Join(dir, "a.go"), []byte("package main\nfunc f(){}\n"), 0o644)
+
+	files := getModifiedFiles(dir)
+	found := false
+	for _, f := range files {
+		if f == "a.go" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("getModifiedFiles should include a.go, got %v", files)
+	}
+}
+
+func TestIngestProjectClaudeMD(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer st.Close()
+
+	// No CLAUDE.md: should silently skip.
+	ingestProjectClaudeMD(st, dir)
+
+	// Create CLAUDE.md.
+	claudeMD := "# Project\n\n## Commands\ngo test ./...\n\n## Rules\nFollow conventions\n"
+	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte(claudeMD), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ingestProjectClaudeMD(st, dir)
+
+	// Verify docs were inserted.
+	docs, err := st.SearchDocsFTS("Commands", "project", 5)
+	if err != nil {
+		t.Fatalf("SearchDocsFTS: %v", err)
+	}
+	if len(docs) == 0 {
+		t.Error("expected docs after ingestProjectClaudeMD")
+	}
+}
+
+func TestExtractTranscriptContext(t *testing.T) {
+	dir := t.TempDir()
+	lines := []string{
+		`{"type":"human","content":"first user message"}`,
+		`{"type":"assistant","message":{"role":"assistant","content":"assistant response one"}}`,
+		`{"type":"human","content":"second user message"}`,
+		`{"type":"tool_error","content":"connection refused"}`,
+		`{"type":"assistant","message":{"role":"assistant","content":"assistant response two"}}`,
+	}
+	path := writeFakeTranscript(t, dir, lines)
+
+	result := extractTranscriptContext(path)
+
+	if !strings.Contains(result, "first user message") {
+		t.Error("should contain user messages")
+	}
+	if !strings.Contains(result, "assistant response") {
+		t.Error("should contain assistant summaries")
+	}
+	if !strings.Contains(result, "connection refused") {
+		t.Error("should contain tool errors")
+	}
+	if !strings.Contains(result, "Recent user requests:") {
+		t.Error("should have user section header")
+	}
+	if !strings.Contains(result, "Recent errors") {
+		t.Error("should have errors section header")
+	}
+}
+
+func TestExtractTranscriptContextEmpty(t *testing.T) {
+	result := extractTranscriptContext("/nonexistent/path/transcript.jsonl")
+	if result != "" {
+		t.Errorf("non-existent file should return empty, got %q", result)
 	}
 }

@@ -30,8 +30,8 @@ func reviewHandler(claudeHome string, st *store.Store, _ *embedder.Embedder) ser
 		report["rules"] = reviewRules(projectPath)
 		report["agents"] = reviewDir(projectPath, ".claude", "agents")
 
-		// 3. Check hooks in settings.json
-		report["hooks"] = reviewHooks(claudeHome)
+		// 3. Check hooks (project-level .claude/hooks.json + user settings)
+		report["hooks"] = reviewHooks(claudeHome, projectPath)
 
 		// 4. Check MCP servers
 		report["mcp_servers"] = reviewMCP(projectPath)
@@ -345,28 +345,43 @@ func reviewRules(projectPath string) map[string]any {
 // recommendedEvents lists hook events alfred should register for full functionality.
 var recommendedEvents = []string{"SessionStart"}
 
-func reviewHooks(claudeHome string) map[string]any {
+func reviewHooks(claudeHome, projectPath string) map[string]any {
 	result := map[string]any{"count": 0}
 
+	allEvents := make(map[string]bool)
+
+	// 1. Check project-level .claude/hooks.json (preferred location).
+	if projectPath != "" {
+		projectHooksPath := filepath.Join(projectPath, ".claude", "hooks.json")
+		if data, err := os.ReadFile(projectHooksPath); err == nil {
+			var hooksConfig struct {
+				Hooks map[string]any `json:"hooks"`
+			}
+			if json.Unmarshal(data, &hooksConfig) == nil && hooksConfig.Hooks != nil {
+				for event := range hooksConfig.Hooks {
+					allEvents[event] = true
+				}
+				result["project_hooks"] = projectHooksPath
+			}
+		}
+	}
+
+	// 2. Check user-level settings.json (legacy/fallback).
 	settingsPath := filepath.Join(claudeHome, "settings.json")
-	data, err := os.ReadFile(settingsPath)
-	if err != nil {
-		return result
+	if data, err := os.ReadFile(settingsPath); err == nil {
+		var settings map[string]any
+		if json.Unmarshal(data, &settings) == nil {
+			if hooks, ok := settings["hooks"].(map[string]any); ok {
+				for event := range hooks {
+					allEvents[event] = true
+				}
+			}
+		}
 	}
 
-	var settings map[string]any
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return result
-	}
-
-	hooks, ok := settings["hooks"].(map[string]any)
-	if !ok {
-		return result
-	}
-
-	result["count"] = len(hooks)
-	events := make([]string, 0, len(hooks))
-	for event := range hooks {
+	result["count"] = len(allEvents)
+	events := make([]string, 0, len(allEvents))
+	for event := range allEvents {
 		events = append(events, event)
 	}
 	result["events"] = events
@@ -374,7 +389,7 @@ func reviewHooks(claudeHome string) map[string]any {
 	// Check missing recommended events.
 	var missing []string
 	for _, ev := range recommendedEvents {
-		if _, ok := hooks[ev]; !ok {
+		if !allEvents[ev] {
 			missing = append(missing, ev)
 		}
 	}

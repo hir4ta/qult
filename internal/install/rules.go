@@ -37,4 +37,12 @@ func loadRules() []ruleDef {
 // should be cleaned up during install/uninstall.
 var deprecatedRuleFiles = []string{
 	"butler-protocol.md",
+	// v0.43 era: moved to skill supporting files
+	"agents.md",
+	"claude-md.md",
+	"hooks.md",
+	"memory.md",
+	"mcp-config.md",
+	"rules.md",
+	"skills.md",
 }

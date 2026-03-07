@@ -137,7 +137,7 @@ Run automatically during Claude Code lifecycle. No user action needed.
 | SessionStart | Auto-ingest CLAUDE.md + spec context injection (adaptive recovery) |
 | PreCompact | Extract context from transcript + auto-detect decisions + track modified files → save session.md in activeContext format → emit compaction instructions → async embedding |
 | PreToolUse | Reminder to use alfred tools when accessing .claude/ config files |
-| UserPromptSubmit | Proactive knowledge injection via FTS search, or config reminder when mentioning .claude/ paths |
+| UserPromptSubmit | Dual-layer: LLM-gated config relevance detection (prompt hook) + keyword-gated FTS knowledge injection (command hook) |
 
 ## Commands
 
@@ -164,7 +164,7 @@ Run automatically during Claude Code lifecycle. No user action needed.
 │  │               + compaction instructions        │
 │  │               + async embedding                │
 │  ├ PreToolUse  → .claude/ access reminder         │
-│  └ UserPromptSubmit → knowledge injection         │
+│  └ UserPromptSubmit → LLM gate + FTS injection     │
 │                                                  │
 │  MCP Tools (on demand)                            │
 │  ├ knowledge / config-review / config-suggest     │
