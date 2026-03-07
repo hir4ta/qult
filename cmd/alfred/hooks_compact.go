@@ -274,14 +274,8 @@ func autoAppendDecisions(sd *spec.SpecDir, decisions []string) {
 		}
 
 		// Check 2: significant word overlap (60%+ threshold).
-		words := strings.Fields(lower)
-		var sigWords []string
-		for _, w := range words {
-			w = strings.Trim(w, ".,!?;:\"'`()[]{}/-")
-			if len([]rune(w)) >= 4 {
-				sigWords = append(sigWords, w)
-			}
-		}
+		// Use tokenizePrompt for proper Japanese word segmentation.
+		sigWords := significantWords(lower)
 		if len(sigWords) > 0 {
 			hits := 0
 			for _, w := range sigWords {

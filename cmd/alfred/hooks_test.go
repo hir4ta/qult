@@ -87,16 +87,95 @@ func TestIsClaudeCodeRelated(t *testing.T) {
 		{"plugin keyword", "pluginをインストールしたい", true},
 		{"worktree keyword", "worktree を使ったことある？", true},
 		{"general agent (no match)", "my travel agent booked a flight", false},
-		{"general rule (no match)", "the golden rule of cooking", false},
+		{"general rule (match — Gate 1 is intentionally broad)", "the golden rule of cooking", true},
 		{"frontmatter keyword", "frontmatter の書き方", true},
 		{"case insensitive", "HOOKS について", true},
 		{"short unrelated", "fix bug", false},
+		// Word boundary tests — prevent false positives from substrings.
+		{"webhook (no match)", "set up a webhook for GitHub notifications", false},
+		{"hooking (no match)", "I'm hooking into the event system", false},
+		{"compacted (no match)", "the data was compacted efficiently", false},
+		{"pluginName (no match)", "rename pluginManager to serviceManager", false},
+		// Word boundary — should still match.
+		{"hook at start", "hook configuration guide", true},
+		{"hook at end", "how to set up a hook", true},
+		{"hooks plural", "configure hooks for automation", true},
+		{"hook with punctuation", "hook, skill, and rule", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			if got := isClaudeCodeRelated(tt.prompt); got != tt.want {
 				t.Errorf("isClaudeCodeRelated(%q) = %v, want %v", tt.prompt, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDetectClaudeCodeKeywords(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		prompt  string
+		wantLen int
+		wantAny string // at least this keyword should be found
+	}{
+		{"single keyword", "how do hooks work?", 1, "hooks"},
+		{"multiple keywords", "configure hooks and skills for MCP", 3, "hooks"},
+		{"no match", "fix the login bug", 0, ""},
+		{"word boundary", "webhooks are not hooks", 1, "hooks"},
+		{"japanese keyword", "スキルの作り方", 1, "スキル"},
+		{"mixed lang", "hook と skill を設定", 2, "hook"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := detectClaudeCodeKeywords(tt.prompt)
+			if len(got) != tt.wantLen {
+				t.Errorf("detectClaudeCodeKeywords(%q) returned %d keywords %v, want %d", tt.prompt, len(got), got, tt.wantLen)
+			}
+			if tt.wantAny != "" {
+				found := false
+				for _, kw := range got {
+					if kw == tt.wantAny {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("detectClaudeCodeKeywords(%q) = %v, want %q in results", tt.prompt, got, tt.wantAny)
+				}
+			}
+		})
+	}
+}
+
+func TestContainsWord(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		text string
+		word string
+		want bool
+	}{
+		{"configure hooks", "hook", false},         // "hooks" != "hook" at boundary
+		{"configure hook", "hook", true},            // exact word
+		{"hook configuration", "hook", true},        // at start
+		{"set up a hook", "hook", true},             // at end
+		{"hook, skill", "hook", true},               // punctuation boundary
+		{"webhook handler", "hook", false},          // embedded in "webhook"
+		{"hooking into", "hook", false},             // prefix of "hooking"
+		{"my-hook works", "hook", true},             // hyphen is boundary
+		{"use hook.json", "hook", true},             // dot is boundary
+		{"", "hook", false},                         // empty text
+		{"hook", "hook", true},                      // exact match
+		{"the hooks work", "hooks", true},           // plural
+		{"webhooks fire", "hooks", false},           // embedded
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s/%s", tt.text, tt.word), func(t *testing.T) {
+			t.Parallel()
+			if got := containsWord(tt.text, tt.word); got != tt.want {
+				t.Errorf("containsWord(%q, %q) = %v, want %v", tt.text, tt.word, got, tt.want)
 			}
 		})
 	}
@@ -349,21 +428,6 @@ func TestScoreDecisionConfidence(t *testing.T) {
 	}
 }
 
-func TestExpandQuery(t *testing.T) {
-	t.Parallel()
-	result := expandQuery("hook config")
-	if !strings.Contains(result, "hook") {
-		t.Error("should contain original keyword")
-	}
-	if !strings.Contains(result, "hooks") || !strings.Contains(result, "lifecycle") {
-		t.Error("should expand 'hook' with synonyms")
-	}
-	// "config" is 6 chars, should match "config" synonym.
-	if !strings.Contains(result, "configuration") {
-		t.Error("should expand 'config' with synonyms")
-	}
-}
-
 func TestIsTrivialDecision(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -541,14 +605,28 @@ func TestExtractSearchKeywords(t *testing.T) {
 		{"with stop words", "how do I configure the hooks for my project", 8, 3},
 		{"technical", "implement hybrid vector search with FTS5", 8, 4},
 		{"empty", "", 8, 0},
+		// Japanese prompts — kagome POS tokenization (OR-separated)
+		{"japanese hook setup", "hookの設定方法を教えて", 6, 4},    // hook, 設定, 方法, 教え
+		{"japanese skill", "スキルの書き方を知りたい", 6, 3},        // スキル, 書き方, 知り
+		{"japanese mixed", "MCPサーバーの設定方法", 6, 4},          // MCP, サーバー, 設定, 方法
+		{"japanese pure", "コミットメッセージの規約を決めたい", 6, 4}, // コミット, メッセージ, 規約, 決め
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			result := extractSearchKeywords(tt.input, tt.max)
-			words := strings.Fields(result)
-			if len(words) < tt.want-1 || len(words) > tt.want+1 {
-				t.Errorf("extractSearchKeywords(%q, %d) = %d words (%q), want ~%d", tt.input, tt.max, len(words), result, tt.want)
+			if result == "" && tt.want == 0 {
+				return
+			}
+			// Count actual keywords (CJK uses " OR " separator, ASCII uses " ")
+			var count int
+			if strings.Contains(result, " OR ") {
+				count = len(strings.Split(result, " OR "))
+			} else if result != "" {
+				count = len(strings.Fields(result))
+			}
+			if count < tt.want-1 || count > tt.want+1 {
+				t.Errorf("extractSearchKeywords(%q, %d) = %d keywords (%q), want ~%d", tt.input, tt.max, count, result, tt.want)
 			}
 		})
 	}
@@ -561,14 +639,195 @@ func TestScoreRelevance(t *testing.T) {
 		Content:     "Configure hooks in .claude/hooks.json to run commands on lifecycle events like SessionStart, PreCompact.",
 	}
 
-	high := scoreRelevance("how to configure hooks for precompact", doc)
-	low := scoreRelevance("fix login button css color", doc)
+	// With matched keywords (the primary signal from Gate 1).
+	high := scoreRelevance([]string{"hooks"}, "how to configure hooks for precompact", doc)
+	low := scoreRelevance([]string{"hooks"}, "fix login button css color", doc)
 
 	if high <= low {
 		t.Errorf("relevant prompt should score higher: high=%.2f, low=%.2f", high, low)
 	}
-	if high < 0.15 {
+	if high < 0.30 {
 		t.Errorf("relevant prompt score too low: %.2f", high)
+	}
+}
+
+func TestIsMeaningfulToken(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		token string
+		want  bool
+	}{
+		// ASCII
+		{"hooks", true},
+		{"configure", true},
+		{"MCP", true},
+		{"to", false},  // 2 chars
+		{"a", false},   // 1 char
+		{"the", true},  // 3 chars (stop words are filtered elsewhere)
+		{"hook", true}, // 4 chars
+
+		// CJK particles — should be filtered
+		{"の", false},
+		{"を", false},
+		{"は", false},
+		{"が", false},
+		{"に", false},
+		{"で", false},
+		{"と", false},
+		{"も", false},
+
+		// CJK auxiliaries/copulas — should be filtered
+		{"する", false},
+		{"いる", false},
+		{"ある", false},
+		{"です", false},
+		{"ます", false},
+		{"ない", false},
+		{"たい", false},
+		{"ください", false},
+
+		// CJK content words — should pass
+		{"設定", true},
+		{"方法", true},
+		{"スキル", true},
+		{"フック", true},
+		{"書き方", true},
+		{"サーバー", true},
+		{"コミット", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.token, func(t *testing.T) {
+			t.Parallel()
+			got := isMeaningfulToken(tt.token)
+			if got != tt.want {
+				t.Errorf("isMeaningfulToken(%q) = %v, want %v", tt.token, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestContentTokensForScoring(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		prompt string
+		want   []string // subset that must be present
+		reject []string // must NOT be present
+	}{
+		{
+			"english",
+			"how to configure hooks for precompact",
+			[]string{"configure", "hooks", "precompact"},
+			[]string{"how", "to", "for"},
+		},
+		{
+			"japanese hook",
+			"hookの設定方法を教えて",
+			[]string{"hook", "設定", "方法"},
+			[]string{"の", "を", "て"},
+		},
+		{
+			"japanese skill",
+			"スキルの書き方",
+			[]string{"スキル", "書き方"},
+			[]string{"の"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := contentTokensForScoring(tt.prompt)
+			gotSet := make(map[string]bool)
+			for _, w := range got {
+				gotSet[w] = true
+			}
+			for _, w := range tt.want {
+				if !gotSet[w] {
+					t.Errorf("contentTokensForScoring(%q) missing %q, got %v", tt.prompt, w, got)
+				}
+			}
+			for _, w := range tt.reject {
+				if gotSet[w] {
+					t.Errorf("contentTokensForScoring(%q) should not contain %q, got %v", tt.prompt, w, got)
+				}
+			}
+		})
+	}
+}
+
+func TestContentTokensForScoringWithStemming(t *testing.T) {
+	t.Parallel()
+	// English stemming: "configuring" should produce a stem that matches "configuration"
+	tokens := contentTokensForScoring("configuring hooks lifecycle")
+	gotSet := make(map[string]bool)
+	for _, w := range tokens {
+		gotSet[w] = true
+	}
+	// "configuring" → stem "configur", which matches substring of "configuration"
+	if !gotSet["configur"] && !gotSet["configuring"] {
+		t.Errorf("expected stem of 'configuring', got %v", tokens)
+	}
+	if !gotSet["hooks"] {
+		t.Errorf("expected 'hooks', got %v", tokens)
+	}
+	// "lifecycle" should be present
+	if !gotSet["lifecycle"] && !gotSet["lifecycl"] {
+		t.Errorf("expected 'lifecycle' or its stem, got %v", tokens)
+	}
+}
+
+func TestScoreRelevanceJapanese(t *testing.T) {
+	t.Parallel()
+	doc := store.DocRow{
+		SectionPath: "Hooks Configuration",
+		Content:     "Configure hooks in .claude/hooks.json to run commands on lifecycle events like SessionStart.",
+	}
+
+	// Japanese prompt — tokenizePrompt splits "hookの設定方法" into ["hook", "の", "設定", "方法"].
+	score := scoreRelevance([]string{"hook"}, "hookの設定方法を教えて", doc)
+	if score < 0.30 {
+		t.Errorf("Japanese prompt about hooks should score well, got %.2f", score)
+	}
+
+	// Irrelevant doc for same prompt.
+	irrelevantDoc := store.DocRow{
+		SectionPath: "Authentication Guide",
+		Content:     "OAuth2 authentication flow for third-party integrations.",
+	}
+	irrelevantScore := scoreRelevance([]string{"hook"}, "hookの設定方法を教えて", irrelevantDoc)
+	if irrelevantScore >= score {
+		t.Errorf("irrelevant doc should score lower: relevant=%.2f, irrelevant=%.2f", score, irrelevantScore)
+	}
+}
+
+func TestTokenizePrompt(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		input string
+		want  []string
+	}{
+		{"hookの設定方法を教えて", []string{"hook", "の", "設定", "方法", "を", "教え", "て"}},
+		{"フックの設定", []string{"フック", "の", "設定"}},
+		{"how to configure hooks", []string{"how", "to", "configure", "hooks"}},
+		{"MCP server setup", []string{"MCP", "server", "setup"}},
+		{"hook, skill, and rule", []string{"hook", "skill", "and", "rule"}},
+		{"", nil},
+		{"CLAUDE.md の書き方", []string{"CLAUDE", "md", "の", "書き方"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
+			got := tokenizePrompt(tt.input)
+			if len(got) != len(tt.want) {
+				t.Errorf("tokenizePrompt(%q) = %v, want %v", tt.input, got, tt.want)
+				return
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("tokenizePrompt(%q)[%d] = %q, want %q", tt.input, i, got[i], tt.want[i])
+				}
+			}
+		})
 	}
 }
 
@@ -1149,12 +1408,44 @@ func TestHandleUserPromptSubmitFTSLowRelevance(t *testing.T) {
 	openStore = func() (*store.Store, error) { return st, nil }
 	t.Cleanup(func() { openStore = origOpen })
 
-	// Prompt about hooks, but only auth docs exist — should be below relevance threshold.
+	// Prompt about hooks, but only auth docs exist — should be below relevance threshold (0.55).
 	output := captureStdout(t, func() {
 		handleUserPromptSubmit(&hookEvent{Prompt: "How do I configure hooks for SessionStart lifecycle events?"})
 	})
 	if strings.Contains(output, "Authentication") {
-		t.Errorf("irrelevant doc should be filtered by relevance scoring, got %q", output)
+		t.Errorf("irrelevant doc should be filtered by relevance scoring (threshold 0.55), got %q", output)
+	}
+}
+
+func TestHandleUserPromptSubmitWordBoundary(t *testing.T) {
+	// Prompt with "webhook" should NOT trigger injection (word boundary).
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "boundary.db")
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer st.Close()
+
+	doc := store.DocRow{
+		URL: "https://docs.example.com/hooks", SectionPath: "Hooks Configuration",
+		Content: "Configure hooks in .claude/hooks.json for lifecycle events.",
+		SourceType: "docs",
+	}
+	if _, _, err := st.UpsertDoc(&doc); err != nil {
+		t.Fatalf("UpsertDoc: %v", err)
+	}
+
+	origOpen := openStore
+	openStore = func() (*store.Store, error) { return st, nil }
+	t.Cleanup(func() { openStore = origOpen })
+
+	// "webhook" should NOT match — word boundary prevents "hook" substring match.
+	output := captureStdout(t, func() {
+		handleUserPromptSubmit(&hookEvent{Prompt: "set up a webhook for GitHub notifications to track deployments"})
+	})
+	if output != "" {
+		t.Errorf("webhook prompt should not trigger injection, got %q", output)
 	}
 }
 

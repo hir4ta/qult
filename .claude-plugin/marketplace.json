@@ -11,7 +11,7 @@
       "name": "alfred",
       "source": "./plugin",
       "description": "Proactive assistant — best practice skills, session intelligence, independent review",
-      "version": "0.47.1"
+      "version": "0.48.0"
     }
   ]
 }
