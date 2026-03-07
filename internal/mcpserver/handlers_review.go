@@ -40,6 +40,10 @@ func reviewHandler(claudeHome string, st *store.Store, _ *embedder.Embedder) ser
 		suggestions := generateReviewSuggestions(report, st)
 		report["suggestions"] = suggestions
 		report["suggestion_count"] = len(suggestions)
+
+		// Maturity scoring: score each category and compute overall.
+		maturity := computeMaturityScore(report, suggestions)
+		report["maturity"] = maturity
 		if len(suggestions) == 0 {
 			report["summary"] = "Good setup! CLAUDE.md, skills, rules, and hooks are all configured."
 		}
@@ -626,6 +630,121 @@ func enrichWithKB(suggestions []Suggestion, st *store.Store) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// computeMaturityScore derives a 0-100 score per category and overall from the review report.
+func computeMaturityScore(report map[string]any, suggestions []Suggestion) map[string]any {
+	scores := map[string]int{
+		"claude_md": 0,
+		"skills":    0,
+		"rules":     0,
+		"hooks":     0,
+		"mcp":       0,
+	}
+
+	// CLAUDE.md: exists=40, no size warning=20, has commands section=20, sections>2=20
+	if cm, ok := report["claude_md"].(map[string]any); ok {
+		if exists, _ := cm["exists"].(bool); exists {
+			scores["claude_md"] += 40
+			if _, hasWarning := cm["size_warning"]; !hasWarning {
+				scores["claude_md"] += 20
+			}
+			if ks, ok := cm["key_sections"].(map[string]bool); ok && ks["commands"] {
+				scores["claude_md"] += 20
+			}
+			if sc, _ := cm["section_count"].(int); sc > 2 {
+				scores["claude_md"] += 20
+			}
+		}
+	}
+
+	// Skills: count>0=40, all valid frontmatter=30, no size warnings=30
+	if sk, ok := report["skills"].(map[string]any); ok {
+		if count, _ := sk["count"].(int); count > 0 {
+			scores["skills"] += 40
+			if _, hasInvalid := sk["invalid_skills"]; !hasInvalid {
+				scores["skills"] += 30
+			}
+			hasWarning := false
+			if details, ok := sk["skill_details"].([]skillInfo); ok {
+				for _, si := range details {
+					if si.SizeWarning != "" {
+						hasWarning = true
+						break
+					}
+				}
+			}
+			if !hasWarning {
+				scores["skills"] += 30
+			}
+		}
+	}
+
+	// Rules: count>0=50, no size warnings=50
+	if ru, ok := report["rules"].(map[string]any); ok {
+		if count, _ := ru["count"].(int); count > 0 {
+			scores["rules"] += 50
+			hasWarning := false
+			if details, ok := ru["rule_details"].([]ruleInfo); ok {
+				for _, ri := range details {
+					if ri.SizeWarning != "" {
+						hasWarning = true
+						break
+					}
+				}
+			}
+			if !hasWarning {
+				scores["rules"] += 50
+			}
+		}
+	}
+
+	// Hooks: count>0=60, no missing recommended=40
+	if hk, ok := report["hooks"].(map[string]any); ok {
+		if count, _ := hk["count"].(int); count > 0 {
+			scores["hooks"] += 60
+			if _, hasMissing := hk["missing_recommended"]; !hasMissing {
+				scores["hooks"] += 40
+			}
+		}
+	}
+
+	// MCP: count>0=100
+	if mc, ok := report["mcp_servers"].(map[string]any); ok {
+		if count, _ := mc["count"].(int); count > 0 {
+			scores["mcp"] = 100
+		}
+	}
+
+	// Deduct for warnings.
+	for _, s := range suggestions {
+		if s.Severity == "warning" {
+			scores[s.Category] = max(scores[s.Category]-10, 0)
+		}
+	}
+
+	total := 0
+	for _, v := range scores {
+		total += v
+	}
+	overall := total / len(scores)
+
+	return map[string]any{
+		"overall":  overall,
+		"scores":   scores,
+		"warnings": countSeverity(suggestions, "warning"),
+		"info":     countSeverity(suggestions, "info"),
+	}
+}
+
+func countSeverity(suggestions []Suggestion, severity string) int {
+	n := 0
+	for _, s := range suggestions {
+		if s.Severity == severity {
+			n++
+		}
+	}
+	return n
+}
 
 func countLines(s string) int {
 	n := 0

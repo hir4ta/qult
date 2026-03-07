@@ -87,18 +87,28 @@ func (s *Store) UpsertDoc(doc *DocRow) (id int64, changed bool, err error) {
 }
 
 // DeleteDocsByURLPrefix removes all docs (and their embeddings) whose URL starts with the given prefix.
-func (s *Store) DeleteDocsByURLPrefix(ctx context.Context, prefix string) error {
+// Returns the number of deleted document rows.
+func (s *Store) DeleteDocsByURLPrefix(ctx context.Context, prefix string) (int64, error) {
 	_, err := s.db.ExecContext(ctx,
 		`DELETE FROM embeddings WHERE source = 'docs' AND source_id IN (SELECT id FROM docs WHERE url LIKE ? || '%')`, prefix)
 	if err != nil {
-		return fmt.Errorf("delete embeddings: %w", err)
+		return 0, fmt.Errorf("delete embeddings: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx,
+	res, err := s.db.ExecContext(ctx,
 		`DELETE FROM docs WHERE url LIKE ? || '%'`, prefix)
 	if err != nil {
-		return fmt.Errorf("delete docs: %w", err)
+		return 0, fmt.Errorf("delete docs: %w", err)
 	}
-	return nil
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
+// CountDocsByURLPrefix returns the number of documents matching the given URL prefix.
+func (s *Store) CountDocsByURLPrefix(ctx context.Context, prefix string) (int64, error) {
+	var count int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM docs WHERE url LIKE ? || '%'`, prefix).Scan(&count)
+	return count, err
 }
 
 // DeleteExpiredDocs removes docs whose TTL has expired based on crawled_at + ttl_days.

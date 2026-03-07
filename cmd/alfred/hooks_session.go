@@ -154,15 +154,72 @@ func injectSpecContext(projectPath, source string) {
 		emitAdditionalContext("SessionStart", buf.String())
 		debugf("SessionStart(compact#%d): injected spec context for %s", compactCount, taskSlug)
 	} else {
-		// Normal startup/resume: inject session.md only (lightweight).
+		// Normal startup/resume: inject session.md + proactive knowledge for Next Steps.
 		session, err := sd.ReadFile(spec.FileSession)
 		if err != nil || session == "" {
 			return
 		}
-		context := fmt.Sprintf("\n--- Alfred Protocol: Active Task '%s' ---\n%s\n--- End Alfred Protocol ---\n", taskSlug, session)
-		emitAdditionalContext("SessionStart", context)
+		var buf strings.Builder
+		buf.WriteString(fmt.Sprintf("\n--- Alfred Protocol: Active Task '%s' ---\n%s\n", taskSlug, session))
+
+		// Proactive: extract Next Steps and pre-fetch relevant knowledge.
+		if hints := proactiveHintsForNextSteps(session); hints != "" {
+			buf.WriteString(hints)
+		}
+
+		buf.WriteString("--- End Alfred Protocol ---\n")
+		emitAdditionalContext("SessionStart", buf.String())
 		debugf("SessionStart(%s): injected session context for %s", source, taskSlug)
 	}
+}
+
+// proactiveHintsForNextSteps extracts the "## Next Steps" section from session.md,
+// detects Claude Code keywords in it, and pre-fetches relevant knowledge snippets.
+// This makes alfred genuinely proactive: surfacing information before the user asks.
+func proactiveHintsForNextSteps(session string) string {
+	// Extract Next Steps section.
+	nextSteps := extractSection(session, "Next Steps")
+	if nextSteps == "" || len(strings.TrimSpace(nextSteps)) < 10 {
+		return ""
+	}
+
+	// Detect Claude Code keywords in the next steps.
+	matched := detectClaudeCodeKeywords(nextSteps)
+	if len(matched) == 0 {
+		return ""
+	}
+
+	st, err := store.OpenDefaultCached()
+	if err != nil {
+		return ""
+	}
+
+	// Search FTS with matched keywords.
+	var ftsTerms []string
+	for _, kw := range matched {
+		if en, ok := katakanaToEnglish[kw]; ok {
+			ftsTerms = append(ftsTerms, en)
+		} else {
+			ftsTerms = append(ftsTerms, kw)
+		}
+	}
+	ftsQuery := strings.Join(ftsTerms, " OR ")
+	docs, _ := st.SearchDocsFTS(ftsQuery, "", 3) // FTS failure is acceptable; no docs means no hints
+	if len(docs) == 0 {
+		return ""
+	}
+
+	var buf strings.Builder
+	buf.WriteString("\n### Proactive: Relevant knowledge for your Next Steps\n")
+	for _, d := range docs {
+		snippet := d.Content
+		if len(snippet) > 200 {
+			snippet = snippet[:200] + "..."
+		}
+		fmt.Fprintf(&buf, "- [%s] %s\n", d.SectionPath, snippet)
+	}
+	debugf("SessionStart: proactive injection for next steps keywords=%v, docs=%d", matched, len(docs))
+	return buf.String()
 }
 
 // runEmbedAsync is the entry point for the embed-async subcommand.

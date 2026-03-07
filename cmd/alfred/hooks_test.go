@@ -32,6 +32,9 @@ func TestShouldRemind(t *testing.T) {
 		{"non-string value", map[string]any{"file_path": 123}, false},
 		{"empty string", map[string]any{"file_path": ""}, false},
 		{"case insensitive", map[string]any{"file_path": "/project/.Claude/rules/x.md"}, true},
+		{"no false positive myclaude.md", map[string]any{"file_path": "/src/myclaude.md"}, false},
+		{"no false positive memory_analysis", map[string]any{"file_path": "/data/memory_analysis.md"}, false},
+		{"no false positive mcp.json without dot", map[string]any{"file_path": "/cfg/mcp.json"}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2051,6 +2054,58 @@ func TestIsTrivialDecisionJapanese(t *testing.T) {
 			t.Parallel()
 			if got := isTrivialDecision(tt.sentence); got != tt.want {
 				t.Errorf("isTrivialDecision(%q) = %v, want %v", tt.sentence, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEnvFloat(t *testing.T) {
+	// Cannot use t.Parallel with t.Setenv.
+	tests := []struct {
+		name       string
+		env        string
+		defaultVal float64
+		want       float64
+	}{
+		{"valid float", "0.75", 0.40, 0.75},
+		{"empty string", "", 0.40, 0.40},
+		{"invalid string", "notanumber", 0.40, 0.40},
+		{"zero", "0", 0.40, 0.0},
+		{"negative", "-0.5", 0.40, -0.5},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key := "TEST_ENVFLOAT_" + tt.name
+			if tt.env != "" {
+				t.Setenv(key, tt.env)
+			}
+			got := envFloat(key, tt.defaultVal)
+			if got != tt.want {
+				t.Errorf("envFloat(%q, %f) = %f, want %f", key, tt.defaultVal, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestProactiveHintsForNextSteps(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		session string
+		empty   bool
+	}{
+		{"no next steps section", "## Status\nactive\n", true},
+		{"empty next steps", "## Next Steps\n\n## Blockers\n", true},
+		{"short next steps", "## Next Steps\nabc\n", true},
+		{"no claude keywords", "## Next Steps\n1. Implement user OAuth2 flow\n2. Add database migration\n", true},
+		// Note: "with keywords" case needs a store with data, so tested via integration
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := proactiveHintsForNextSteps(tt.session)
+			if tt.empty && got != "" {
+				t.Errorf("proactiveHintsForNextSteps() = %q, want empty", got)
 			}
 		})
 	}

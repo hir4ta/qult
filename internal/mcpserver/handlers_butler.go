@@ -241,20 +241,65 @@ func specDoDelete(ctx context.Context, req mcp.CallToolRequest, st *store.Store)
 		return mcp.NewToolResultError("task_slug is required"), nil
 	}
 
+	confirm := req.GetBool("confirm", false)
+
+	// Without confirm: dry-run preview showing what would be deleted.
+	if !confirm {
+		sd := &spec.SpecDir{ProjectPath: projectPath, TaskSlug: taskSlug}
+		if !sd.Exists() {
+			return mcp.NewToolResultError(fmt.Sprintf("spec not found: %s", taskSlug)), nil
+		}
+
+		sections, _ := sd.AllSections()
+		var files []string
+		totalBytes := 0
+		for _, s := range sections {
+			files = append(files, string(s.File))
+			totalBytes += len(s.Content)
+		}
+
+		state, _ := spec.ReadActiveState(projectPath)
+		isPrimary := state != nil && state.Primary == taskSlug
+
+		preview := map[string]any{
+			"dry_run":    true,
+			"task_slug":  taskSlug,
+			"file_count": len(files),
+			"files":      files,
+			"total_bytes": totalBytes,
+			"is_primary": isPrimary,
+		}
+		if isPrimary && state != nil {
+			for _, t := range state.Tasks {
+				if t.Slug != taskSlug {
+					preview["new_primary_after_delete"] = t.Slug
+					break
+				}
+			}
+		}
+		if st != nil {
+			projectBase := filepath.Base(projectPath)
+			n, _ := st.CountDocsByURLPrefix(ctx, fmt.Sprintf("spec://%s/%s/", projectBase, taskSlug))
+			preview["db_doc_count"] = n
+		}
+		preview["next_step"] = "call again with confirm=true to delete"
+		return marshalResult(preview)
+	}
+
+	// With confirm: actually delete.
 	allGone, err := spec.RemoveTask(projectPath, taskSlug)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("delete failed: %v", err)), nil
 	}
 
+	result := map[string]any{
+		"deleted":  taskSlug,
+		"all_gone": allGone,
+	}
 	if st != nil {
 		projectBase := filepath.Base(projectPath)
-		st.DeleteDocsByURLPrefix(ctx, fmt.Sprintf("spec://%s/%s/", projectBase, taskSlug))
-	}
-
-	result := map[string]any{
-		"deleted":    taskSlug,
-		"all_gone":   allGone,
-		"db_cleaned": st != nil,
+		n, _ := st.DeleteDocsByURLPrefix(ctx, fmt.Sprintf("spec://%s/%s/", projectBase, taskSlug))
+		result["db_docs_deleted"] = n
 	}
 	if !allGone {
 		newPrimary, _ := spec.ReadActive(projectPath)

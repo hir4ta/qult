@@ -389,10 +389,24 @@ func TestSpecDelete_Success(t *testing.T) {
 		"description":  "to delete",
 	})))
 
-	// Delete it.
+	// Dry-run preview first.
+	preview, err := handler(context.Background(), newRequest(specReq("delete", map[string]any{
+		"project_path": dir,
+		"task_slug":    "del-task",
+	})))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	pm := resultJSON(t, preview)
+	if dryRun, _ := pm["dry_run"].(bool); !dryRun {
+		t.Error("expected dry_run=true in preview")
+	}
+
+	// Confirm delete.
 	res, err := handler(context.Background(), newRequest(specReq("delete", map[string]any{
 		"project_path": dir,
 		"task_slug":    "del-task",
+		"confirm":      true,
 	})))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -423,10 +437,11 @@ func TestSpecDelete_WithDB(t *testing.T) {
 		"description":  "to delete with DB",
 	})))
 
-	// Delete with DB cleanup.
+	// Delete with DB cleanup (confirm=true).
 	res, err := handler(context.Background(), newRequest(specReq("delete", map[string]any{
 		"project_path": dir,
 		"task_slug":    "db-del",
+		"confirm":      true,
 	})))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -436,8 +451,8 @@ func TestSpecDelete_WithDB(t *testing.T) {
 	}
 
 	m := resultJSON(t, res)
-	if cleaned, _ := m["db_cleaned"].(bool); !cleaned {
-		t.Error("expected db_cleaned = true")
+	if m["deleted"] != "db-del" {
+		t.Errorf("deleted = %v, want db-del", m["deleted"])
 	}
 }
 

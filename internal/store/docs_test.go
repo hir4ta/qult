@@ -353,8 +353,12 @@ func TestDeleteDocsByURLPrefix(t *testing.T) {
 	}
 
 	// Delete by prefix.
-	if err := st.DeleteDocsByURLPrefix(ctx, "https://docs.example.com/"); err != nil {
+	n, err := st.DeleteDocsByURLPrefix(ctx, "https://docs.example.com/")
+	if err != nil {
 		t.Fatalf("DeleteDocsByURLPrefix: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("DeleteDocsByURLPrefix deleted %d docs, want 2", n)
 	}
 
 	// Verify docs.example.com docs are gone.

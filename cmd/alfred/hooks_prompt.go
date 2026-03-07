@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/hir4ta/claude-alfred/internal/store"
@@ -17,14 +18,22 @@ var openStore = func() (*store.Store, error) {
 }
 
 // Scoring thresholds for knowledge injection.
-const (
-	// relevanceThreshold is the minimum score for a doc to be injected.
-	relevanceThreshold = 0.40
-	// highConfidenceThreshold triggers injection of a second result.
-	highConfidenceThreshold = 0.65
-	// singleKeywordDampen reduces confidence when only one keyword matched.
-	singleKeywordDampen = 0.7
+// Defaults can be overridden via environment variables for tuning.
+var (
+	relevanceThreshold      = envFloat("ALFRED_RELEVANCE_THRESHOLD", 0.40)
+	highConfidenceThreshold = envFloat("ALFRED_HIGH_CONFIDENCE_THRESHOLD", 0.65)
+	singleKeywordDampen     = envFloat("ALFRED_SINGLE_KEYWORD_DAMPEN", 0.7)
 )
+
+// envFloat returns the environment variable as float64 or the default value.
+func envFloat(key string, defaultVal float64) float64 {
+	if v := os.Getenv(key); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
+		}
+	}
+	return defaultVal
+}
 
 // ---------------------------------------------------------------------------
 // Architecture note: Hook vs MCP knowledge injection
@@ -51,12 +60,13 @@ const (
 
 // isClaudeConfigPath reports whether path refers to a Claude Code configuration
 // file or directory (.claude/, CLAUDE.md, MEMORY.md, .mcp.json).
+// Uses suffix/segment matching to avoid false positives on paths like "myclaude.md".
 func isClaudeConfigPath(path string) bool {
 	lower := strings.ToLower(path)
 	return strings.Contains(lower, ".claude/") ||
-		strings.Contains(lower, "claude.md") ||
-		strings.Contains(lower, "memory.md") ||
-		strings.Contains(lower, ".mcp.json")
+		strings.HasSuffix(lower, "/claude.md") || lower == "claude.md" ||
+		strings.HasSuffix(lower, "/memory.md") || lower == "memory.md" ||
+		strings.HasSuffix(lower, "/.mcp.json") || lower == ".mcp.json"
 }
 
 // shouldRemind reports whether a tool's input targets Claude Code configuration.

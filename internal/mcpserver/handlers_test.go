@@ -833,3 +833,64 @@ func TestParseSKILLFrontmatter(t *testing.T) {
 		})
 	}
 }
+
+func TestComputeMaturityScore(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		report      map[string]any
+		suggestions []Suggestion
+		wantMin     int
+		wantMax     int
+	}{
+		{
+			"full setup",
+			map[string]any{
+				"claude_md":   map[string]any{"exists": true, "section_count": 5, "key_sections": map[string]bool{"commands": true}},
+				"skills":      map[string]any{"count": 2, "skill_details": []skillInfo{{Name: "s1", HasName: true, HasDesc: true}}},
+				"rules":       map[string]any{"count": 3, "rule_details": []ruleInfo{{Name: "r1", Lines: 20}}},
+				"hooks":       map[string]any{"count": 4},
+				"mcp_servers": map[string]any{"count": 1},
+			},
+			nil,
+			80, 100,
+		},
+		{
+			"empty project",
+			map[string]any{
+				"claude_md":   map[string]any{"exists": false},
+				"skills":      map[string]any{"count": 0},
+				"rules":       map[string]any{"count": 0},
+				"hooks":       map[string]any{"count": 0},
+				"mcp_servers": map[string]any{"count": 0},
+			},
+			nil,
+			0, 0,
+		},
+		{
+			"warnings reduce score",
+			map[string]any{
+				"claude_md":   map[string]any{"exists": true, "section_count": 5, "key_sections": map[string]bool{"commands": true}},
+				"skills":      map[string]any{"count": 1},
+				"rules":       map[string]any{"count": 1},
+				"hooks":       map[string]any{"count": 1},
+				"mcp_servers": map[string]any{"count": 1},
+			},
+			[]Suggestion{
+				{Severity: "warning", Category: "claude_md"},
+				{Severity: "warning", Category: "skills"},
+			},
+			85, 100, // -10 per warning on 2 categories, base ~100 each
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := computeMaturityScore(tt.report, tt.suggestions)
+			overall, _ := result["overall"].(int)
+			if overall < tt.wantMin || overall > tt.wantMax {
+				t.Errorf("overall = %d, want [%d, %d]; scores=%v", overall, tt.wantMin, tt.wantMax, result["scores"])
+			}
+		})
+	}
+}

@@ -100,10 +100,11 @@ Actions:
 - update: Write to a spec file (requires file + content, mode: "append" or "replace")
 - status: Get active task state (session.md + task metadata)
 - switch: Change active task (requires task_slug)
-- delete: Remove a task spec (requires task_slug)
+- delete: Remove a task spec (requires task_slug; first call previews, add confirm=true to execute)
 
 task_slug format: lowercase alphanumeric with hyphens (e.g. "my-feature", max 64 chars).`),
 				mcp.WithTitleAnnotation("Spec Management"),
+				mcp.WithReadOnlyHintAnnotation(false),
 				mcp.WithDestructiveHintAnnotation(true),
 				mcp.WithOpenWorldHintAnnotation(false),
 				mcp.WithString("action", mcp.Description("Action to perform: init, update, status, switch, delete"), mcp.Required()),
@@ -113,6 +114,7 @@ task_slug format: lowercase alphanumeric with hyphens (e.g. "my-feature", max 64
 				mcp.WithString("file", mcp.Description("Spec file to update: requirements.md, design.md, decisions.md, session.md (for update)")),
 				mcp.WithString("content", mcp.Description("Content to write (for update)")),
 				mcp.WithString("mode", mcp.Description("Write mode: 'append' (default) or 'replace' (for update)")),
+				mcp.WithBoolean("confirm", mcp.Description("Required for delete: first call without confirm to preview, then with confirm=true to execute")),
 			),
 			Handler: specHandler(st, emb),
 		},
