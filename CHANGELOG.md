@@ -7,6 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.54.1] - 2026-03-08
+
+### Fixed
+- plugin.json から未サポートの `category` フィールドを削除（プラグインバリデーションエラー修正）
+
 ## [0.54.0] - 2026-03-08
 
 ### Changed
@@ -143,7 +148,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - PreCompact hook with transcript analysis
 - Decision extraction from conversation transcripts
 
-[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.54.0...HEAD
+[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.54.1...HEAD
+[0.54.1]: https://github.com/hir4ta/claude-alfred/compare/v0.54.0...v0.54.1
 [0.54.0]: https://github.com/hir4ta/claude-alfred/compare/v0.53.0...v0.54.0
 [0.53.0]: https://github.com/hir4ta/claude-alfred/compare/v0.52.0...v0.53.0
 [0.52.0]: https://github.com/hir4ta/claude-alfred/compare/v0.51.0...v0.52.0
