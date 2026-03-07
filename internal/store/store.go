@@ -1,3 +1,5 @@
+// Package store provides SQLite persistence for documents, FTS5 full-text
+// search, and vector embeddings with cosine similarity search.
 package store
 
 import (

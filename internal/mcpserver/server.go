@@ -1,3 +1,6 @@
+// Package mcpserver implements the MCP tool server for alfred,
+// providing 9 tools: knowledge search, config review/suggest,
+// spec management (init/update/status/switch/delete), and code review.
 package mcpserver
 
 import (

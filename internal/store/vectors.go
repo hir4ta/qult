@@ -34,6 +34,10 @@ func (s *Store) GetEmbedding(source string, sourceID int64) ([]float32, error) {
 // minSimilarity is the cosine similarity threshold below which candidates are discarded.
 const minSimilarity = 0.3
 
+// maxVectorCandidates caps the number of embeddings loaded into memory per search.
+// At 2048 dims × 4 bytes × 10000 rows ≈ 80 MB — a reasonable upper bound.
+const maxVectorCandidates = 10000
+
 // VectorSearch performs a generic vector search on a given source table.
 // Returns (sourceID, score) pairs sorted by descending similarity.
 func (s *Store) VectorSearch(queryVec []float32, source string, limit int) ([]VectorMatch, error) {
@@ -44,7 +48,7 @@ func (s *Store) VectorSearch(queryVec []float32, source string, limit int) ([]Ve
 		limit = 10
 	}
 
-	rows, err := s.db.Query(`SELECT source_id, vector FROM embeddings WHERE source = ?`, source)
+	rows, err := s.db.Query(`SELECT source_id, vector FROM embeddings WHERE source = ? LIMIT ?`, source, maxVectorCandidates)
 	if err != nil {
 		return nil, err
 	}

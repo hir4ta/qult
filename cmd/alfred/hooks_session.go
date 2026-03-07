@@ -1,0 +1,215 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/hir4ta/claude-alfred/internal/embedder"
+	"github.com/hir4ta/claude-alfred/internal/spec"
+	"github.com/hir4ta/claude-alfred/internal/store"
+)
+
+// ---------------------------------------------------------------------------
+// SessionStart: CLAUDE.md auto-ingest + spec context injection
+// ---------------------------------------------------------------------------
+
+// handleSessionStart ingests CLAUDE.md into the knowledge DB and injects
+// spec context if an active spec exists.
+func handleSessionStart(ev *hookEvent) {
+	if ev.ProjectPath == "" {
+		return
+	}
+	st, err := store.OpenDefaultCached()
+	if err != nil {
+		debugf("hook store open failed: %v", err)
+		return
+	}
+	ingestProjectClaudeMD(st, ev.ProjectPath)
+
+	// Inject spec context if active spec exists.
+	// After compact, inject richer context for full recovery.
+	injectButlerContext(ev.ProjectPath, ev.Source)
+}
+
+type mdSection struct {
+	Path    string
+	Content string
+}
+
+// splitMarkdownSections splits markdown by ## headers (or # for root).
+func splitMarkdownSections(md string) []mdSection {
+	lines := strings.Split(md, "\n")
+	var sections []mdSection
+	var currentPath string
+	var buf strings.Builder
+
+	flush := func() {
+		content := strings.TrimSpace(buf.String())
+		if currentPath != "" && content != "" {
+			sections = append(sections, mdSection{Path: currentPath, Content: content})
+		}
+		buf.Reset()
+	}
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "## ") {
+			flush()
+			currentPath = strings.TrimSpace(strings.TrimPrefix(line, "## "))
+		} else if strings.HasPrefix(line, "# ") && currentPath == "" {
+			currentPath = strings.TrimSpace(strings.TrimPrefix(line, "# "))
+		} else {
+			if currentPath != "" {
+				buf.WriteString(line)
+				buf.WriteByte('\n')
+			}
+		}
+	}
+	flush()
+	return sections
+}
+
+// ingestProjectClaudeMD reads CLAUDE.md from the project root and upserts
+// each markdown section into the docs table for knowledge search.
+// Silently skips if the file doesn't exist or is empty.
+func ingestProjectClaudeMD(st *store.Store, projectPath string) {
+	claudeMD := filepath.Join(projectPath, "CLAUDE.md")
+	content, err := os.ReadFile(claudeMD)
+	if err != nil {
+		return // CLAUDE.md doesn't exist or unreadable — silently skip
+	}
+
+	sections := splitMarkdownSections(string(content))
+	if len(sections) == 0 {
+		return
+	}
+
+	url := "project://" + projectPath + "/CLAUDE.md"
+	for _, sec := range sections {
+		st.UpsertDoc(&store.DocRow{
+			URL:         url,
+			SectionPath: sec.Path,
+			Content:     sec.Content,
+			SourceType:  "project",
+			TTLDays:     1,
+		})
+	}
+	debugf("ingestProjectClaudeMD: %d sections from %s", len(sections), claudeMD)
+}
+
+// injectButlerContext outputs spec content to stdout when an active
+// spec exists. After compact, injects richer context
+// (all 4 files) for full recovery. On normal startup, injects only session.md.
+func injectButlerContext(projectPath, source string) {
+	taskSlug, err := spec.ReadActive(projectPath)
+	if err != nil {
+		return // no active spec — silently skip
+	}
+
+	sd := &spec.SpecDir{ProjectPath: projectPath, TaskSlug: taskSlug}
+	if !sd.Exists() {
+		return
+	}
+
+	if source == "compact" {
+		// Adaptive recovery: count compact markers to decide injection depth.
+		session, _ := sd.ReadFile(spec.FileSession)
+		compactCount := strings.Count(session, "## Compact Marker [")
+
+		var buf strings.Builder
+		buf.WriteString(fmt.Sprintf("\n--- Butler Protocol: Recovering Task '%s' (post-compact #%d) ---\n", taskSlug, compactCount))
+
+		if compactCount <= 1 {
+			// First compact: inject all spec files for full context recovery.
+			buf.WriteString("Full context recovery (first compact):\n\n")
+			recoveryOrder := []spec.SpecFile{
+				spec.FileSession,
+				spec.FileRequirements,
+				spec.FileDesign,
+				spec.FileDecisions,
+			}
+			for _, f := range recoveryOrder {
+				content, err := sd.ReadFile(f)
+				if err != nil || strings.TrimSpace(content) == "" {
+					continue
+				}
+				buf.WriteString(fmt.Sprintf("### %s\n%s\n\n", f, content))
+			}
+		} else {
+			// Subsequent compacts: inject only session.md (lightweight).
+			buf.WriteString("Lightweight recovery (use spec-status or knowledge tool for full spec):\n\n")
+			for _, f := range []spec.SpecFile{spec.FileSession} {
+				content, err := sd.ReadFile(f)
+				if err != nil || strings.TrimSpace(content) == "" {
+					continue
+				}
+				buf.WriteString(fmt.Sprintf("### %s\n%s\n\n", f, content))
+			}
+		}
+
+		buf.WriteString("--- End Butler Protocol ---\n")
+		fmt.Fprint(os.Stdout, buf.String())
+		debugf("SessionStart(compact#%d): injected butler context for %s", compactCount, taskSlug)
+	} else {
+		// Normal startup/resume: inject session.md only (lightweight).
+		session, err := sd.ReadFile(spec.FileSession)
+		if err != nil || session == "" {
+			return
+		}
+		fmt.Fprintf(os.Stdout, "\n--- Butler Protocol: Active Task '%s' ---\n%s\n--- End Butler Protocol ---\n", taskSlug, session)
+		debugf("SessionStart(%s): injected session context for %s", source, taskSlug)
+	}
+}
+
+// runEmbedAsync is the entry point for the embed-async subcommand.
+// It generates embeddings for a single spec file with retry on transient failures.
+// Called as a background process by asyncEmbedSession.
+func runEmbedAsync() error {
+	var projectPath, taskSlug, fileName string
+	for i := 2; i < len(os.Args)-1; i++ {
+		switch os.Args[i] {
+		case "--project":
+			projectPath = os.Args[i+1]
+		case "--task":
+			taskSlug = os.Args[i+1]
+		case "--file":
+			fileName = os.Args[i+1]
+		}
+	}
+	if projectPath == "" || taskSlug == "" || fileName == "" {
+		return fmt.Errorf("usage: alfred embed-async --project PATH --task SLUG --file FILE")
+	}
+
+	st, err := store.OpenDefault()
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer st.Close()
+
+	emb, err := embedder.NewEmbedder()
+	if err != nil {
+		return fmt.Errorf("embedder: %w", err)
+	}
+
+	sd := &spec.SpecDir{ProjectPath: projectPath, TaskSlug: taskSlug}
+	sf := spec.SpecFile(fileName)
+
+	var lastErr error
+	for attempt := range 3 {
+		if attempt > 0 {
+			debugf("embed-async: retry attempt %d for %s/%s", attempt+1, taskSlug, fileName)
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+		}
+		if err := spec.SyncSingleFile(context.Background(), sd, sf, st, emb); err != nil {
+			lastErr = err
+			debugf("embed-async: attempt %d failed: %v", attempt+1, err)
+			continue
+		}
+		debugf("embed-async: success for %s/%s", taskSlug, fileName)
+		return nil
+	}
+	return fmt.Errorf("embed-async: all retries failed for %s/%s: %w", taskSlug, fileName, lastErr)
+}

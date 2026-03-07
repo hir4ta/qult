@@ -1,3 +1,4 @@
+// Package embedder wraps the Voyage AI API for text embedding and reranking.
 package embedder
 
 import (
@@ -26,12 +27,12 @@ func NewEmbedder() (*Embedder, error) {
 
 // Dims returns the embedding dimensions.
 func (e *Embedder) Dims() int {
-	return voyageDims
+	return e.client.dims
 }
 
 // Model returns the model name.
 func (e *Embedder) Model() string {
-	return voyageModel
+	return e.client.model
 }
 
 // EmbedForSearch generates a search query embedding.

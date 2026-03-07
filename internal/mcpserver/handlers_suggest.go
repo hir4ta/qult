@@ -284,6 +284,7 @@ func detectChangePatterns(diff diffInfo) []changePattern {
 	// 2. Dependency changes.
 	depFiles := []string{"go.mod", "go.sum", "package.json", "package-lock.json",
 		"requirements.txt", "pyproject.toml", "Cargo.toml", "Cargo.lock"}
+outer:
 	for _, f := range diff.files {
 		for _, dep := range depFiles {
 			if f == dep {
@@ -292,11 +293,10 @@ func detectChangePatterns(diff diffInfo) []changePattern {
 					Description: "Project dependencies changed",
 					Files:       []string{f},
 				})
-				goto depsChecked
+				break outer
 			}
 		}
 	}
-depsChecked:
 
 	// 3. New test functions.
 	if containsAny(diff.content,

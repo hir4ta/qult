@@ -95,7 +95,7 @@ func TestBundle(t *testing.T) {
 
 	// Verify all skills exist.
 	t.Run("skills", func(t *testing.T) {
-		for _, skill := range alfredSkills {
+		for _, skill := range loadSkills() {
 			p := filepath.Join(outputDir, "skills", skill.Dir, "SKILL.md")
 			data, err := os.ReadFile(p)
 			if err != nil {

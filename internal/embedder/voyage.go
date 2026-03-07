@@ -8,26 +8,61 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 )
 
+// Defaults for Voyage AI API. Override with environment variables:
+//
+//	VOYAGE_API_URL        — embedding endpoint (default: https://api.voyageai.com/v1/embeddings)
+//	VOYAGE_RERANK_API_URL — rerank endpoint   (default: https://api.voyageai.com/v1/rerank)
+//	VOYAGE_MODEL          — embedding model   (default: voyage-4-large)
+//	VOYAGE_RERANK_MODEL   — rerank model      (default: rerank-2.5)
+//	VOYAGE_DIMS           — output dimensions  (default: 2048)
 const (
-	voyageAPI       = "https://api.voyageai.com/v1/embeddings"
-	voyageRerankAPI = "https://api.voyageai.com/v1/rerank"
-	voyageModel     = "voyage-4-large"
-	voyageRerankMod = "rerank-2.5"
-	voyageDims      = 2048
+	defaultVoyageAPI       = "https://api.voyageai.com/v1/embeddings"
+	defaultVoyageRerankAPI = "https://api.voyageai.com/v1/rerank"
+	defaultVoyageModel     = "voyage-4-large"
+	defaultVoyageRerankMod = "rerank-2.5"
+	defaultVoyageDims      = 2048
 )
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func envIntOr(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return fallback
+}
 
 // voyageClient is an HTTP client for the Voyage AI embedding API.
 type voyageClient struct {
-	apiKey     string
-	httpClient *http.Client
+	apiKey      string
+	httpClient  *http.Client
+	apiURL      string
+	rerankURL   string
+	model       string
+	rerankModel string
+	dims        int
 }
 
 func newVoyageClient(apiKey string) *voyageClient {
 	return &voyageClient{
-		apiKey: apiKey,
+		apiKey:      apiKey,
+		apiURL:      envOr("VOYAGE_API_URL", defaultVoyageAPI),
+		rerankURL:   envOr("VOYAGE_RERANK_API_URL", defaultVoyageRerankAPI),
+		model:       envOr("VOYAGE_MODEL", defaultVoyageModel),
+		rerankModel: envOr("VOYAGE_RERANK_MODEL", defaultVoyageRerankMod),
+		dims:        envIntOr("VOYAGE_DIMS", defaultVoyageDims),
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -73,9 +108,9 @@ func (e *voyageError) Error() string {
 func (c *voyageClient) embed(ctx context.Context, texts []string, inputType string) ([][]float32, error) {
 	body := voyageRequest{
 		Input:           texts,
-		Model:           voyageModel,
+		Model:           c.model,
 		InputType:       inputType,
-		OutputDimension: voyageDims,
+		OutputDimension: c.dims,
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -113,7 +148,7 @@ func (c *voyageClient) embed(ctx context.Context, texts []string, inputType stri
 }
 
 func (c *voyageClient) doEmbed(ctx context.Context, payload []byte) ([][]float32, error) {
-	req, err := http.NewRequestWithContext(ctx, "POST", voyageAPI, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.apiURL, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("embedder: new request: %w", err)
 	}
@@ -199,7 +234,7 @@ func (c *voyageClient) rerank(ctx context.Context, query string, documents []str
 	body := rerankRequest{
 		Query:     query,
 		Documents: documents,
-		Model:     voyageRerankMod,
+		Model:     c.rerankModel,
 		TopK:      topK,
 	}
 	payload, err := json.Marshal(body)
@@ -207,7 +242,7 @@ func (c *voyageClient) rerank(ctx context.Context, query string, documents []str
 		return nil, fmt.Errorf("embedder: marshal rerank: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", voyageRerankAPI, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.rerankURL, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("embedder: new rerank request: %w", err)
 	}

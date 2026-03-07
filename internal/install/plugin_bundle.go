@@ -84,7 +84,7 @@ func Bundle(outputDir, version string) error {
 		filepath.Join(outputDir, "agents"),
 		filepath.Join(outputDir, "rules"),
 	}
-	for _, skill := range alfredSkills {
+	for _, skill := range loadSkills() {
 		dirs = append(dirs, filepath.Join(outputDir, "skills", skill.Dir))
 	}
 	for _, d := range dirs {
@@ -138,7 +138,7 @@ func Bundle(outputDir, version string) error {
 	}
 
 	// 6. Write skills.
-	for _, skill := range alfredSkills {
+	for _, skill := range loadSkills() {
 		p := filepath.Join(outputDir, "skills", skill.Dir, "SKILL.md")
 		if err := os.WriteFile(p, []byte(skill.Content), 0o644); err != nil {
 			return fmt.Errorf("write skill %s: %w", skill.Dir, err)
@@ -157,7 +157,7 @@ func Bundle(outputDir, version string) error {
 	}
 
 	// 8. Write rules.
-	for _, rule := range alfredRules {
+	for _, rule := range loadRules() {
 		p := filepath.Join(outputDir, "rules", rule.File)
 		if err := os.WriteFile(p, []byte(rule.Content), 0o644); err != nil {
 			return fmt.Errorf("write rule %s: %w", rule.File, err)
@@ -171,8 +171,8 @@ func Bundle(outputDir, version string) error {
 	fmt.Printf("  - hooks.json (%d events)\n", hookCount)
 	fmt.Printf("  - .mcp.json\n")
 	fmt.Printf("  - bin/run.sh (delegator)\n")
-	fmt.Printf("  - %d skills\n", len(alfredSkills))
-	fmt.Printf("  - %d rules\n", len(alfredRules))
+	fmt.Printf("  - %d skills\n", len(loadSkills()))
+	fmt.Printf("  - %d rules\n", len(loadRules()))
 	fmt.Printf("  - %d agents\n", len(agents))
 	return nil
 }

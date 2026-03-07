@@ -1,3 +1,5 @@
+// Package install handles plugin bundle generation, knowledge base seeding,
+// and embedded content management for skills, rules, and agents.
 package install
 
 import (
