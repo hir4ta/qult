@@ -98,20 +98,11 @@ Invoke with `/alfred:<skill>` in Claude Code.
 
 Backend for skills and agents. Claude calls these automatically as needed.
 
-### Knowledge Base
-
 | Tool | Description |
 |------|-------------|
 | `knowledge` | Hybrid vector + FTS5 + Voyage rerank document search |
 | `config-review` | Deep audit of .claude/ config (file contents + KB cross-reference) |
-| `config-suggest` | Analyze git diff and suggest .claude/ config updates |
-
-### Alfred Protocol
-
-| Tool | Description |
-|------|-------------|
 | `spec` | Unified spec management (action: init / update / status / switch / delete) |
-| `code-review` | 3-layer code review (spec + semantic knowledge + best practices) |
 
 ## Hooks (4)
 
@@ -150,9 +141,8 @@ Run automatically during Claude Code lifecycle. No user action needed.
 │  └ UserPromptSubmit → keyword filter + FTS injection │
 │                                                  │
 │  MCP Tools (on demand)                            │
-│  ├ knowledge / config-review / config-suggest     │
+│  ├ knowledge / config-review                      │
 │  └ spec (init/update/status/switch/delete)         │
-│    / code-review                                  │
 │                                                  │
 │  Alfred Protocol Flow                             │
 │  spec(init) → .alfred/specs/add-auth/             │
@@ -178,16 +168,6 @@ Run automatically during Claude Code lifecycle. No user action needed.
 ```
 
 `_active.md` (YAML) manages multiple tasks; switch with `spec` (action=switch).
-
-### 3-Layer Code Review (code-review)
-
-| Layer | Search Target | Severity |
-|-------|--------------|----------|
-| Layer 1: Spec | decisions.md / requirements.md | critical (scope violation) / warning / info |
-| Layer 2: Knowledge | Semantic search across all sources + Voyage rerank top-3 (threshold 0.3) | info |
-| Layer 3: Best Practice | FTS5 document search | info |
-
-Findings are deduplicated by `(source, message)` with highest severity preserved.
 
 ## Debugging
 

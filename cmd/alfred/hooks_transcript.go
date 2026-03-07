@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
 	"sort"
 	"strings"
 )
@@ -187,12 +189,34 @@ func extractDecisionsFromTranscript(transcriptPath string) []string {
 		"- 採用： ", "- 決定： ", "- 選択： ", "- 結論： ", "- 方針： ", "- 判断： ",
 	}
 
+	// Transcript format guard.
+	allLines := strings.Split(string(data), "\n")
+	parsedCount, totalCount := 0, 0
+	for _, line := range allLines {
+		line = strings.TrimSpace(line)
+		if line == "" || line[0] != '{' {
+			continue
+		}
+		totalCount++
+		if totalCount > 10 {
+			break
+		}
+		var probe map[string]any
+		if json.Unmarshal([]byte(line), &probe) == nil {
+			parsedCount++
+		}
+	}
+	if totalCount > 0 && parsedCount*2 < totalCount {
+		debugf("extractDecisions: transcript format guard triggered (%d/%d parsed)", parsedCount, totalCount)
+		return nil
+	}
+
 	type scoredDecision struct {
 		text       string
 		confidence float64
 	}
 	var decisions []scoredDecision
-	for _, line := range strings.Split(string(data), "\n") {
+	for _, line := range allLines {
 		line = strings.TrimSpace(line)
 		if line == "" || line[0] != '{' {
 			continue
@@ -319,6 +343,29 @@ func extractTranscriptContextRich(transcriptPath string) *transcriptContext {
 
 	// Track agents: agent tool_use entries that may still be running.
 	agentStarts := make(map[string]string) // tool_use_id -> description
+
+	// Transcript format guard: if most lines fail to parse, the format
+	// may have changed. Parse a sample first to detect this.
+	parsedCount, totalCount := 0, 0
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || line[0] != '{' {
+			continue
+		}
+		totalCount++
+		if totalCount > 10 {
+			break
+		}
+		var probe map[string]any
+		if json.Unmarshal([]byte(line), &probe) == nil {
+			parsedCount++
+		}
+	}
+	if totalCount > 0 && parsedCount*2 < totalCount {
+		fmt.Fprintf(os.Stderr, "[alfred] warning: transcript format may have changed — only %d/%d sample lines parsed\n", parsedCount, totalCount)
+		debugf("PreCompact: transcript format guard triggered (%d/%d parsed)", parsedCount, totalCount)
+		return nil
+	}
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)

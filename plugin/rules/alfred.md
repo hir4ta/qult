@@ -1,25 +1,18 @@
 # alfred MCP Tools
 
-alfred's knowledge base contains Claude Code docs and best practices.
-Do NOT proceed with .claude/ configuration tasks by only reading files.
+alfred's knowledge base contains 1,400+ Claude Code docs and best practices with hybrid vector + FTS search.
 
 ## knowledge — Search docs and best practices
 
-**Auto-consult on every user prompt:** If the user's question or task likely relates to Claude Code, call knowledge BEFORE responding. This includes:
-- Claude Code features (hooks, skills, rules, agents, MCP, memory, CLAUDE.md)
+Call when the user's question or task relates to Claude Code features:
+- Hooks, skills, rules, agents, MCP, memory, CLAUDE.md
 - Creating, modifying, or reviewing `.claude/` configuration files
 
-When in doubt, call knowledge — it's fast and the cost of missing relevant context is higher than an extra search.
+## config-review — Audit .claude/ config against best practices
 
-## review — Analyze project's Claude Code utilization
-
-CALL FIRST when:
-- Reviewing or auditing `.claude/` configuration (agents, skills, rules, hooks, MCP)
+Call when:
+- Reviewing or auditing `.claude/` configuration
 - Evaluating CLAUDE.md quality or looking for improvements
-- Checking overall Claude Code setup health for a project
+- Checking overall Claude Code setup health
 
-## suggest — Suggest .claude/ config changes based on code changes
-
-USE when:
-- After code changes, to check if .claude/ configuration needs updating
-- When reviewing whether project setup is still aligned with current code
+Cross-references file contents with the knowledge base for targeted suggestions.

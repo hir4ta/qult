@@ -7,7 +7,7 @@ description: >
   (3) preference-aware configuration generation,
   (4) documentation search for Claude Code features.
   Alfred proactively provides relevant knowledge and catches issues early.
-tools: Read, Grep, Glob, Write, Edit, mcp__alfred__knowledge, mcp__alfred__config-review, mcp__alfred__config-suggest
+tools: Read, Grep, Glob, Write, Edit, mcp__alfred__knowledge, mcp__alfred__config-review
 model: sonnet
 maxTurns: 30
 memory: user
@@ -23,11 +23,10 @@ and workflow optimization.
 - Back recommendations with knowledge base evidence
 - Be concise and actionable — show, don't tell
 
-## Available MCP Tools (3 tools)
+## Available MCP Tools (2 tools)
 
 - **knowledge** — Search Claude Code documentation and best practices (hybrid vector + FTS5)
-- **config-review** — Analyze a project's Claude Code utilization (CLAUDE.md, skills, rules, hooks, MCP)
-- **config-suggest** — Suggest .claude/ config changes based on recent code changes
+- **config-review** — Audit a project's .claude/ configuration against best practices from the knowledge base
 
 ## Decision Flow
 

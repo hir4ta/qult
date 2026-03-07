@@ -37,4 +37,4 @@ Read spec files in this order to rebuild context:
 4. decisions.md (why these choices?)
 
 ## Review
-- Before committing, call `code-review` to check changes against specs and best practices
+- Before committing, review changes against specs (requirements scope, recorded decisions) and best practices
