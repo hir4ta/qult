@@ -75,9 +75,12 @@ func (s *Store) UpsertDoc(doc *DocRow) (id int64, changed bool, err error) {
 		return 0, false, fmt.Errorf("store: upsert doc: %w", err)
 	}
 
+	// LastInsertId may return 0 on ON CONFLICT UPDATE; error is non-critical
+	// since the row was successfully written — ID is best-effort for embeddings.
 	id, _ = res.LastInsertId()
 	if id == 0 {
-		// ON CONFLICT UPDATE doesn't set LastInsertId; re-query.
+		// Re-query to get the ID; Scan error means row exists but ID lookup
+		// failed — acceptable since the upsert itself succeeded.
 		_ = s.db.QueryRow(
 			`SELECT id FROM docs WHERE url = ? AND section_path = ?`,
 			doc.URL, doc.SectionPath,
@@ -99,7 +102,10 @@ func (s *Store) DeleteDocsByURLPrefix(ctx context.Context, prefix string) (int64
 	if err != nil {
 		return 0, fmt.Errorf("delete docs: %w", err)
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("store: delete docs rows affected: %w", err)
+	}
 	return n, nil
 }
 
@@ -170,6 +176,9 @@ func (s *Store) GetDocsByIDs(ids []int64) ([]DocRow, error) {
 		}
 		d.Version = version.String
 		docs = append(docs, d)
+	}
+	if err := rows.Err(); err != nil {
+		return docs, fmt.Errorf("store: get docs by ids iteration: %w", err)
 	}
 	return docs, nil
 }
@@ -290,6 +299,9 @@ func (s *Store) matchDocsFTS(query string, sourceType string, limit int) ([]DocR
 		}
 		d.Version = version.String
 		docs = append(docs, d)
+	}
+	if err := rows.Err(); err != nil {
+		return docs, fmt.Errorf("store: search docs fts iteration: %w", err)
 	}
 	return docs, nil
 }

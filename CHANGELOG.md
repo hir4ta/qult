@@ -7,6 +7,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.54.4] - 2026-03-08
+
+### Fixed
+- `rows.Err()` チェック追加（docs.go 2箇所 + vectors.go 1箇所）— ループ中の I/O エラー検出漏れ修正
+- `RowsAffected()` エラー伝搬（DeleteDocsByURLPrefix）
+- Rerank API エラーを `voyageError` 型に統一（401/403 時の API key マスク対応）
+- configure スキルの実装ギャップ修正（存在しない Explore agent 参照、未実装 constraint tags 参照）
+- Debug log パーミッション 0644 → 0600（world-readable 解消）
+- UpsertDoc の `_` エラー無視に理由コメント追加（go-errors ルール準拠）
+
+### Changed
+- `handleSessionStart` で ctx を `ingestProjectClaudeMD` に伝搬（将来の context-aware 拡張に備え）
+- `handleUserPromptSubmit` の未使用 ctx を `_ context.Context` パラメータに変更（Go イディオム準拠）
+- CLAUDE.md に `## Compact Instructions` セクション追加
+
 ## [0.54.3] - 2026-03-08
 
 ### Changed
@@ -171,7 +186,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - PreCompact hook with transcript analysis
 - Decision extraction from conversation transcripts
 
-[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.54.3...HEAD
+[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.54.4...HEAD
+[0.54.4]: https://github.com/hir4ta/claude-alfred/compare/v0.54.3...v0.54.4
 [0.54.3]: https://github.com/hir4ta/claude-alfred/compare/v0.54.2...v0.54.3
 [0.54.2]: https://github.com/hir4ta/claude-alfred/compare/v0.54.1...v0.54.2
 [0.54.1]: https://github.com/hir4ta/claude-alfred/compare/v0.54.0...v0.54.1

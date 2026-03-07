@@ -20,7 +20,6 @@ import (
 // handleSessionStart ingests CLAUDE.md into the knowledge DB and injects
 // spec context if an active spec exists.
 func handleSessionStart(ctx context.Context, ev *hookEvent) {
-	_ = ctx // reserved for future context-aware store/spec operations
 	if ev.ProjectPath == "" {
 		return
 	}
@@ -30,7 +29,7 @@ func handleSessionStart(ctx context.Context, ev *hookEvent) {
 		debugf("hook store open failed: %v", err)
 		return
 	}
-	ingestProjectClaudeMD(st, ev.ProjectPath)
+	ingestProjectClaudeMD(ctx, st, ev.ProjectPath)
 
 	// Inject spec context if active spec exists.
 	// After compact, inject richer context for full recovery.
@@ -77,7 +76,7 @@ func splitMarkdownSections(md string) []mdSection {
 // ingestProjectClaudeMD reads CLAUDE.md from the project root and upserts
 // each markdown section into the docs table for knowledge search.
 // Silently skips if the file doesn't exist or is empty.
-func ingestProjectClaudeMD(st *store.Store, projectPath string) {
+func ingestProjectClaudeMD(_ context.Context, st *store.Store, projectPath string) {
 	claudeMD := filepath.Join(projectPath, "CLAUDE.md")
 	content, err := os.ReadFile(claudeMD)
 	if err != nil {

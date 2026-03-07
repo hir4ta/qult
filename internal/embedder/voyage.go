@@ -288,11 +288,12 @@ func (c *voyageClient) rerank(ctx context.Context, query string, documents []str
 
 	if resp.StatusCode != 200 {
 		respBody, _ := io.ReadAll(resp.Body)
+		raw := string(respBody)
 		var errResp voyageErrorResponse
 		if json.Unmarshal(respBody, &errResp) == nil && errResp.Detail != "" {
-			return nil, fmt.Errorf("embedder: rerank returned %d: %s", resp.StatusCode, errResp.Detail)
+			return nil, &voyageError{status: resp.StatusCode, detail: errResp.Detail, raw: raw}
 		}
-		return nil, fmt.Errorf("embedder: rerank returned %d: %s", resp.StatusCode, string(respBody))
+		return nil, &voyageError{status: resp.StatusCode, detail: raw, raw: raw}
 	}
 
 	var result rerankResponse

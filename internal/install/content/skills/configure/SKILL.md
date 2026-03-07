@@ -30,7 +30,7 @@ Alfred tends to the project's configuration — whether building new or polishin
    - Read the current file content in full
    - Call `knowledge` with query about latest best practices for this type
    - Compare against best practices and identify gaps (type-specific):
-     - **skill**: constraint tags (HOW/WHAT/Template/Guardrails), tool least-privilege, argument-hint, context choice
+     - **skill**: tool least-privilege, argument-hint, context choice, guardrails section
      - **rule**: glob patterns valid, instructions actionable, concise (<20 lines)
      - **hook**: timeout values appropriate, matchers specific, handler robust
      - **agent**: model explicit, tools minimal, description explains WHEN to delegate, maxTurns set
@@ -51,7 +51,7 @@ Alfred tends to the project's configuration — whether building new or polishin
      - **memory**: check auto memory path, topic organization
    - Call `knowledge` with query about the specific type's best practices
    - Generate from type-specific template:
-     - **skill**: frontmatter (name, description, allowed-tools, context, agent) + constraint tags (HOW/WHAT/Template/Guardrails)
+     - **skill**: frontmatter (name, description, allowed-tools, context, agent) + guardrails section
      - **rule**: frontmatter with paths + actionable instructions (<20 lines)
      - **hook**: hooks.json entry (timeout, matcher, command) + handler script
      - **agent**: frontmatter (name, description, tools, model, maxTurns, memory) + system prompt
@@ -71,7 +71,7 @@ Alfred tends to the project's configuration — whether building new or polishin
 6. **[HOW]** Write/Edit file to target path
 
 7. **[HOW]** Independent review:
-   - Spawn Explore agent to validate the generated/updated file against knowledge base
+   - Spawn alfred agent to validate the generated/updated file against knowledge base
    - Fix any issues found
 
 ## Target Paths

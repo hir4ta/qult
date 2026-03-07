@@ -34,7 +34,7 @@ func debugf(format string, args ...any) {
 		home, _ := os.UserHomeDir()
 		dir := filepath.Join(home, ".claude-alfred")
 		_ = os.MkdirAll(dir, 0755)
-		f, err := os.OpenFile(filepath.Join(dir, "debug.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		f, err := os.OpenFile(filepath.Join(dir, "debug.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
 			return
 		}

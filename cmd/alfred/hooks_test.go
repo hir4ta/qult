@@ -1622,7 +1622,7 @@ func TestIngestProjectClaudeMD(t *testing.T) {
 	defer st.Close()
 
 	// No CLAUDE.md: should silently skip.
-	ingestProjectClaudeMD(st, dir)
+	ingestProjectClaudeMD(context.Background(), st, dir)
 
 	// Create CLAUDE.md.
 	claudeMD := "# Project\n\n## Commands\ngo test ./...\n\n## Rules\nFollow conventions\n"
@@ -1630,7 +1630,7 @@ func TestIngestProjectClaudeMD(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ingestProjectClaudeMD(st, dir)
+	ingestProjectClaudeMD(context.Background(), st, dir)
 
 	// Verify docs were inserted.
 	docs, err := st.SearchDocsFTS("Commands", "project", 5)

@@ -74,6 +74,9 @@ func (s *Store) VectorSearch(queryVec []float32, source string, limit int) ([]Ve
 		}
 		candidates = append(candidates, VectorMatch{SourceID: sourceID, Score: sim})
 	}
+	if err := rows.Err(); err != nil {
+		return candidates, fmt.Errorf("store: vector search iteration: %w", err)
+	}
 
 	sort.Slice(candidates, func(i, j int) bool {
 		return candidates[i].Score > candidates[j].Score
