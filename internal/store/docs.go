@@ -163,14 +163,13 @@ func (s *Store) GetDocsByIDs(ids []int64) ([]DocRow, error) {
 		var version sql.NullString
 		if err := rows.Scan(&d.ID, &d.URL, &d.SectionPath, &d.Content, &d.ContentHash,
 			&d.SourceType, &version, &d.CrawledAt, &d.TTLDays); err != nil {
-			continue
+			continue // skip malformed rows; query itself succeeded
 		}
 		d.Version = version.String
 		docs = append(docs, d)
 	}
 	return docs, nil
 }
-
 
 // isFTS5TokenChar reports whether r is a token character under the unicode61
 // tokenizer's default configuration (categories L*, N*, Co).
@@ -279,7 +278,7 @@ func (s *Store) matchDocsFTS(query string, sourceType string, limit int) ([]DocR
 		var version sql.NullString
 		if err := rows.Scan(&d.ID, &d.URL, &d.SectionPath, &d.Content, &d.ContentHash,
 			&d.SourceType, &version, &d.CrawledAt, &d.TTLDays); err != nil {
-			continue
+			continue // skip malformed rows; query itself succeeded
 		}
 		d.Version = version.String
 		docs = append(docs, d)

@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
 	"strconv"
 )
 
@@ -190,26 +191,38 @@ func Migrate(db *sql.DB) error {
 func rebuildFromScratch(db *sql.DB) error {
 	// Drop FTS virtual tables first (triggers reference them).
 	for _, vt := range []string{"decisions_fts", "docs_fts"} {
-		db.Exec("DROP TABLE IF EXISTS " + vt)
+		if _, err := db.Exec("DROP TABLE IF EXISTS " + vt); err != nil {
+			return fmt.Errorf("drop FTS table %s: %w", vt, err)
+		}
 	}
 	// Drop triggers.
 	for _, trigger := range legacyTriggers {
-		db.Exec("DROP TRIGGER IF EXISTS " + trigger)
+		if _, err := db.Exec("DROP TRIGGER IF EXISTS " + trigger); err != nil {
+			return fmt.Errorf("drop trigger %s: %w", trigger, err)
+		}
 	}
 	for _, trigger := range []string{
 		"docs_fts_ai", "docs_fts_ad", "docs_fts_au",
 	} {
-		db.Exec("DROP TRIGGER IF EXISTS " + trigger)
+		if _, err := db.Exec("DROP TRIGGER IF EXISTS " + trigger); err != nil {
+			return fmt.Errorf("drop trigger %s: %w", trigger, err)
+		}
 	}
 	// Drop all known tables.
 	for _, table := range legacyTables {
-		db.Exec("DROP TABLE IF EXISTS " + table)
+		if _, err := db.Exec("DROP TABLE IF EXISTS " + table); err != nil {
+			return fmt.Errorf("drop table %s: %w", table, err)
+		}
 	}
 	for _, table := range []string{"embeddings", "docs", "schema_version"} {
-		db.Exec("DROP TABLE IF EXISTS " + table)
+		if _, err := db.Exec("DROP TABLE IF EXISTS " + table); err != nil {
+			return fmt.Errorf("drop table %s: %w", table, err)
+		}
 	}
 	for _, idx := range legacyIndexes {
-		db.Exec("DROP INDEX IF EXISTS " + idx)
+		if _, err := db.Exec("DROP INDEX IF EXISTS " + idx); err != nil {
+			return fmt.Errorf("drop index %s: %w", idx, err)
+		}
 	}
 	if _, err := db.Exec(ddl); err != nil {
 		return err
@@ -221,13 +234,19 @@ func rebuildFromScratch(db *sql.DB) error {
 // from previous installations sharing the same DB path.
 func cleanupLegacy(db *sql.DB) error {
 	for _, trigger := range legacyTriggers {
-		db.Exec("DROP TRIGGER IF EXISTS " + trigger)
+		if _, err := db.Exec("DROP TRIGGER IF EXISTS " + trigger); err != nil {
+			return fmt.Errorf("cleanup trigger %s: %w", trigger, err)
+		}
 	}
 	for _, table := range legacyTables {
-		db.Exec("DROP TABLE IF EXISTS " + table)
+		if _, err := db.Exec("DROP TABLE IF EXISTS " + table); err != nil {
+			return fmt.Errorf("cleanup table %s: %w", table, err)
+		}
 	}
 	for _, idx := range legacyIndexes {
-		db.Exec("DROP INDEX IF EXISTS " + idx)
+		if _, err := db.Exec("DROP INDEX IF EXISTS " + idx); err != nil {
+			return fmt.Errorf("cleanup index %s: %w", idx, err)
+		}
 	}
 	return nil
 }

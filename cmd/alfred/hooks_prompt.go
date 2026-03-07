@@ -22,7 +22,15 @@ var openStore = func() (*store.Store, error) {
 var (
 	relevanceThreshold      = envFloat("ALFRED_RELEVANCE_THRESHOLD", 0.40)
 	highConfidenceThreshold = envFloat("ALFRED_HIGH_CONFIDENCE_THRESHOLD", 0.65)
-	singleKeywordDampen     = envFloat("ALFRED_SINGLE_KEYWORD_DAMPEN", 0.7)
+	singleKeywordDampen     = envFloat("ALFRED_SINGLE_KEYWORD_DAMPEN", 0.8)
+)
+
+// Scoring weights for keyword-aware relevance computation.
+const (
+	kwPathWeight    = 0.40 // weight for keyword hits in doc section path
+	kwContentWeight = 0.20 // weight for keyword hits in doc content
+	coverageWeight  = 0.30 // weight for prompt token coverage in doc
+	earlyBonus      = 0.05 // bonus per early (first-line) hit
 )
 
 // envFloat returns the environment variable as float64 or the default value.
@@ -102,7 +110,9 @@ func handlePreToolUse(ev *hookEvent) {
 			"permissionDecisionReason": configReminder,
 		},
 	}
-	json.NewEncoder(os.Stdout).Encode(out)
+	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
+		debugf("PreToolUse: json encode error: %v", err)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -158,7 +168,7 @@ func scoreRelevance(matchedKeywords []string, promptLower string, doc store.DocR
 		}
 	}
 	nkw := max(len(matchedKeywords), 1)
-	keywordScore := float64(kwPathHits)*0.40/float64(nkw) + float64(kwContentHits)*0.20/float64(nkw)
+	keywordScore := float64(kwPathHits)*kwPathWeight/float64(nkw) + float64(kwContentHits)*kwContentWeight/float64(nkw)
 
 	// Dampen single-keyword confidence: one keyword alone is weak signal.
 	if len(matchedKeywords) == 1 {
@@ -182,11 +192,11 @@ func scoreRelevance(matchedKeywords []string, promptLower string, doc store.DocR
 
 	coverageScore := 0.0
 	if len(meaningful) > 0 {
-		coverageScore = float64(contentHits) / float64(len(meaningful)) * 0.30
+		coverageScore = float64(contentHits) / float64(len(meaningful)) * coverageWeight
 	}
-	earlyBonus := float64(earlyHits) * 0.05
+	earlyScore := float64(earlyHits) * earlyBonus
 
-	return min(keywordScore+coverageScore+earlyBonus, 1.0)
+	return min(keywordScore+coverageScore+earlyScore, 1.0)
 }
 
 // handleUserPromptSubmit emits config reminders and proactively injects

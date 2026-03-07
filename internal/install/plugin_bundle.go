@@ -99,12 +99,12 @@ func Bundle(outputDir, version string) error {
 	pluginJSON := map[string]any{
 		"name":        "alfred",
 		"version":     version,
-		"description": "Your proactive assistant for Claude Code",
-		"author":      map[string]string{"name": "hir4ta"},
+		"description": "Your proactive assistant for Claude Code — surfacing knowledge, catching scope violations, and preserving session context across compactions.",
+		"author":      map[string]string{"name": "hir4ta", "url": "https://github.com/hir4ta"},
 		"homepage":    "https://github.com/hir4ta/claude-alfred",
 		"repository":  "https://github.com/hir4ta/claude-alfred",
 		"license":     "MIT",
-		"keywords":    []string{"alfred", "best-practices", "workflow"},
+		"keywords":    []string{"alfred", "best-practices", "workflow", "compaction", "spec", "documentation"},
 	}
 	if err := writeJSON(filepath.Join(outputDir, ".claude-plugin", "plugin.json"), pluginJSON); err != nil {
 		return fmt.Errorf("write plugin.json: %w", err)

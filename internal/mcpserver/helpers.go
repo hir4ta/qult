@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
@@ -63,7 +64,7 @@ func truncate(s string, maxLen int) string {
 func marshalResult(v any) (*mcp.CallToolResult, error) {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
-		return mcp.NewToolResultError("failed to marshal result"), nil
+		return nil, fmt.Errorf("marshal result: %w", err)
 	}
 	return mcp.NewToolResultText(string(data)), nil
 }

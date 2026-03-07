@@ -1,16 +1,20 @@
 {
   "author": {
-    "name": "hir4ta"
+    "name": "hir4ta",
+    "url": "https://github.com/hir4ta"
   },
-  "description": "Your proactive assistant for Claude Code",
+  "description": "Your proactive assistant for Claude Code — surfacing knowledge, catching scope violations, and preserving session context across compactions.",
   "homepage": "https://github.com/hir4ta/claude-alfred",
   "keywords": [
     "alfred",
     "best-practices",
-    "workflow"
+    "workflow",
+    "compaction",
+    "spec",
+    "documentation"
   ],
   "license": "MIT",
   "name": "alfred",
   "repository": "https://github.com/hir4ta/claude-alfred",
-  "version": "0.50.0"
+  "version": "0.51.0"
 }

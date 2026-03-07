@@ -346,8 +346,8 @@ func reviewRules(projectPath string) map[string]any {
 // Hooks analysis
 // ---------------------------------------------------------------------------
 
-// recommendedEvents lists hook events alfred should register for full functionality.
-var recommendedEvents = []string{"SessionStart"}
+// recommendedEvents lists hook events that provide significant value when configured.
+var recommendedEvents = []string{"SessionStart", "PreCompact", "PreToolUse", "UserPromptSubmit"}
 
 func reviewHooks(claudeHome, projectPath string) map[string]any {
 	result := map[string]any{"count": 0}

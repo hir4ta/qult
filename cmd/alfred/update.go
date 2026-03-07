@@ -1,8 +1,11 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -278,36 +281,99 @@ func isBrewInstalled() bool {
 	return strings.HasPrefix(resolved, strings.TrimSpace(string(brewPrefix)))
 }
 
-// downloadRelease downloads the alfred binary from GitHub Releases.
+// downloadRelease downloads the alfred binary from GitHub Releases
+// and verifies the SHA256 checksum against checksums.txt.
 func downloadRelease(version string) error {
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
-	url := fmt.Sprintf("https://github.com/%s/releases/download/v%s/alfred_%s_%s.tar.gz",
-		githubRepo, version, goos, goarch)
+	archiveName := fmt.Sprintf("alfred_%s_%s.tar.gz", goos, goarch)
+	url := fmt.Sprintf("https://github.com/%s/releases/download/v%s/%s",
+		githubRepo, version, archiveName)
+	checksumURL := fmt.Sprintf("https://github.com/%s/releases/download/v%s/checksums.txt",
+		githubRepo, version)
 
 	cacheDir := filepath.Join(os.Getenv("HOME"), ".alfred", "bin")
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		return err
 	}
 
-	// Use curl or wget.
+	tarGzPath := filepath.Join(cacheDir, archiveName)
+
+	// Download archive to file (not piped, so we can verify checksum).
 	if curlPath, err := exec.LookPath("curl"); err == nil {
-		cmd := exec.Command("sh", "-c",
-			fmt.Sprintf("%s -sSfL '%s' | tar xz -C '%s' alfred", curlPath, url, cacheDir))
+		cmd := exec.Command(curlPath, "-sSfL", url, "-o", tarGzPath)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("download failed: %w: %s", err, out)
 		}
-		return nil
-	}
-	if wgetPath, err := exec.LookPath("wget"); err == nil {
-		cmd := exec.Command("sh", "-c",
-			fmt.Sprintf("%s -qO- '%s' | tar xz -C '%s' alfred", wgetPath, url, cacheDir))
+	} else if wgetPath, err := exec.LookPath("wget"); err == nil {
+		cmd := exec.Command(wgetPath, "-qO", tarGzPath, url)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("download failed: %w: %s", err, out)
 		}
-		return nil
+	} else {
+		return fmt.Errorf("curl or wget not found")
 	}
-	return fmt.Errorf("curl or wget not found")
+
+	// Verify SHA256 checksum (best-effort: warn but don't block on fetch failure).
+	if expected, err := fetchExpectedChecksum(checksumURL, archiveName); err == nil {
+		if err := verifyFileChecksum(tarGzPath, expected); err != nil {
+			os.Remove(tarGzPath)
+			return fmt.Errorf("checksum verification failed: %w", err)
+		}
+		debugf("downloadRelease: checksum verified for %s", archiveName)
+	} else {
+		debugf("downloadRelease: could not fetch checksums.txt: %v (continuing without verification)", err)
+	}
+
+	// Extract.
+	cmd := exec.Command("tar", "xzf", tarGzPath, "-C", cacheDir, "alfred")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("extract failed: %w: %s", err, out)
+	}
+	os.Remove(tarGzPath) // cleanup archive
+	return nil
+}
+
+// fetchExpectedChecksum downloads checksums.txt and extracts the SHA256 for archiveName.
+func fetchExpectedChecksum(checksumURL, archiveName string) (string, error) {
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Get(checksumURL)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(string(body), "\n") {
+		// Format: "<hash>  <filename>"
+		parts := strings.Fields(line)
+		if len(parts) == 2 && parts[1] == archiveName {
+			return parts[0], nil
+		}
+	}
+	return "", fmt.Errorf("checksum for %s not found in checksums.txt", archiveName)
+}
+
+// verifyFileChecksum computes SHA256 of filePath and compares to expectedHex.
+func verifyFileChecksum(filePath, expectedHex string) error {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return err
+	}
+	actual := hex.EncodeToString(h.Sum(nil))
+	if actual != expectedHex {
+		return fmt.Errorf("expected %s, got %s", expectedHex, actual)
+	}
+	return nil
 }
 
 // regenPluginBundle regenerates the plugin bundle at the installed location (best-effort).

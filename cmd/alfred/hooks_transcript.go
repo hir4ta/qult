@@ -378,7 +378,9 @@ func extractTranscriptContextRich(transcriptPath string) *transcriptContext {
 		}
 
 		var entry transcriptEntry
-		json.Unmarshal([]byte(line), &entry)
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue // already validated via raw parse above
+		}
 
 		text := extractTextContent(entry)
 

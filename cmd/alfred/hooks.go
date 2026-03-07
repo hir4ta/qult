@@ -17,7 +17,9 @@ var execCommand = exec.Command
 
 // debugWriter is set lazily on first debugf() call when ALFRED_DEBUG is non-empty.
 // Log file: ~/.claude-alfred/debug.log
+// The file handle is closed via closeDebugWriter() before process exit.
 var debugWriter io.Writer
+var debugFile *os.File // retained for explicit Close
 var debugOnce sync.Once
 var debugEnabled = os.Getenv("ALFRED_DEBUG") != ""
 
@@ -33,12 +35,20 @@ func debugf(format string, args ...any) {
 		if err != nil {
 			return
 		}
+		debugFile = f
 		debugWriter = f
 	})
 	if debugWriter == nil {
 		return
 	}
 	fmt.Fprintf(debugWriter, time.Now().Format("15:04:05.000")+" "+format+"\n", args...)
+}
+
+// closeDebugWriter closes the debug log file handle if it was opened.
+func closeDebugWriter() {
+	if debugFile != nil {
+		debugFile.Close()
+	}
 }
 
 // hookEvent is the minimal structure of a Claude Code hook stdin payload.
@@ -72,15 +82,18 @@ Call these BEFORE reading or modifying configuration files directly.`
 func emitAdditionalContext(eventName, context string) {
 	out := map[string]any{
 		"hookSpecificOutput": map[string]any{
-			"hookEventName":   eventName,
+			"hookEventName":     eventName,
 			"additionalContext": context,
 		},
 	}
-	json.NewEncoder(os.Stdout).Encode(out)
+	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
+		debugf("emitAdditionalContext: json encode error: %v", err)
+	}
 }
 
 // runHook handles hook events.
 func runHook(event string) error {
+	defer closeDebugWriter()
 	debugf("hook event=%s", event)
 	var ev hookEvent
 	if err := json.NewDecoder(os.Stdin).Decode(&ev); err != nil {

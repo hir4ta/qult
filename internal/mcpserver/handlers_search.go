@@ -63,14 +63,20 @@ func docsSearchHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandl
 				overRetrieve = overRetrieveMin
 			}
 
-			hybridMatches, _ := st.HybridSearch(queryVec, query, sourceType, overRetrieve, overRetrieve)
+			hybridMatches, err := st.HybridSearch(queryVec, query, sourceType, overRetrieve, overRetrieve)
+			if err != nil {
+				_ = err // hybrid search unavailable; results may be incomplete
+			}
 
 			if len(hybridMatches) > 0 {
 				ids := make([]int64, len(hybridMatches))
 				for i, m := range hybridMatches {
 					ids[i] = m.DocID
 				}
-				docs, _ = st.GetDocsByIDs(ids)
+				docs, err = st.GetDocsByIDs(ids)
+				if err != nil {
+					return mcp.NewToolResultError(fmt.Sprintf("failed to retrieve docs: %v", err)), nil
+				}
 
 				// Preserve RRF ordering (GetDocsByIDs may reorder).
 				if len(docs) > 1 {
@@ -113,7 +119,11 @@ func docsSearchHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandl
 			}
 		} else {
 			// FTS5-only fallback (no embedder available).
-			docs, _ = st.SearchDocsFTS(query, sourceType, limit)
+			var ftsErr error
+			docs, ftsErr = st.SearchDocsFTS(query, sourceType, limit)
+			if ftsErr != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("FTS search failed: %v", ftsErr)), nil
+			}
 		}
 
 		// Build response with freshness metadata.

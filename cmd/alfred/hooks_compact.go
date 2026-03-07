@@ -68,7 +68,9 @@ func handlePreCompact(projectPath, transcriptPath, customInstructions string) {
 		debugf("PreCompact: DB open error: %v", err)
 		return
 	}
-	if err := spec.SyncSingleFile(context.Background(), sd, spec.FileSession, st, nil); err != nil {
+	syncCtx, syncCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer syncCancel()
+	if err := spec.SyncSingleFile(syncCtx, sd, spec.FileSession, st, nil); err != nil {
 		debugf("PreCompact: sync error: %v", err)
 		return
 	}

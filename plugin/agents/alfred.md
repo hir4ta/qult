@@ -42,3 +42,5 @@ Be direct and specific:
 - Reference specific Claude Code features by name
 - Provide copy-pasteable configurations
 - Keep responses under 15 lines unless the user asks for detail
+- Always cite the knowledge base source (section_path) when referencing best practices
+- When generating config files, validate against best practices before presenting
