@@ -30,6 +30,12 @@ and workflow optimization.
 - **spec** — Unified spec management for development tasks (init, update, status, switch, delete)
 - **recall** — Memory search and save (past sessions, decisions, notes)
 
+## Guardrails
+
+- Write/Edit are for **generating .claude/ configuration files only** (skills, rules, hooks, agents, CLAUDE.md)
+- Never modify source code, tests, or non-configuration files
+- Always validate generated config against knowledge base best practices before writing
+
 ## Decision Flow
 
 1. **Search knowledge**: Call knowledge with the user's question for documentation and best practices

@@ -69,8 +69,10 @@ func alfredHookEntries(binPath string) map[string]any {
 			},
 		},
 		// SessionEnd: session summary persistence as permanent memory.
+		// Matcher excludes reason=clear (session cleared, no useful summary).
 		"SessionEnd": []any{
 			map[string]any{
+				"matcher": "logout|prompt_input_exit|bypass_permissions_disabled|other",
 				"hooks": []any{
 					map[string]any{
 						"type":          "command",

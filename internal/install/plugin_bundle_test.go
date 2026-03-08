@@ -67,6 +67,19 @@ func TestBundle(t *testing.T) {
 			}
 		}
 
+		// Verify SessionEnd has matcher excluding clear.
+		if sessionEnd, ok := hooks["SessionEnd"].([]any); ok && len(sessionEnd) > 0 {
+			if entry, ok := sessionEnd[0].(map[string]any); ok {
+				matcher, _ := entry["matcher"].(string)
+				if matcher == "" {
+					t.Error("SessionEnd should have a matcher to exclude reason=clear")
+				}
+				if strings.Contains(matcher, "clear") {
+					t.Errorf("SessionEnd matcher should not include clear, got %q", matcher)
+				}
+			}
+		}
+
 		// All hook commands should use ${CLAUDE_PLUGIN_ROOT}.
 		content := string(data)
 		if !strings.Contains(content, "${CLAUDE_PLUGIN_ROOT}") {
