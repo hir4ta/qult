@@ -17,10 +17,15 @@ import (
 )
 
 // validateProjectPath checks that project_path is absolute and clean.
+// Falls back to the current working directory when raw is empty.
 // Returns the cleaned path or an error result.
 func validateProjectPath(raw string) (string, *mcp.CallToolResult) {
 	if raw == "" {
-		return "", mcp.NewToolResultError("project_path is required")
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", mcp.NewToolResultError("project_path is required (cwd fallback failed)")
+		}
+		raw = cwd
 	}
 	cleaned := filepath.Clean(raw)
 	if !filepath.IsAbs(cleaned) {

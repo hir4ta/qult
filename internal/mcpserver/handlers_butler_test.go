@@ -47,17 +47,19 @@ func TestSpecHandler_UnknownAction(t *testing.T) {
 	}
 }
 
-func TestSpecInit_MissingProjectPath(t *testing.T) {
+func TestSpecInit_MissingProjectPath_FallsBackToCwd(t *testing.T) {
 	t.Parallel()
 	handler := specHandler(nil, nil)
-	res, err := handler(context.Background(), newRequest(specReq("init", map[string]any{
-		"task_slug": "test-task",
-	})))
+
+	// Use status action (idempotent) to verify cwd fallback works
+	// without creating spec artifacts in the working directory.
+	res, err := handler(context.Background(), newRequest(specReq("status", nil)))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !res.IsError {
-		t.Fatal("expected error for missing project_path")
+	// Should succeed using cwd as project_path fallback (no active spec is OK).
+	if res.IsError {
+		t.Fatalf("expected success with cwd fallback, got error: %v", res)
 	}
 }
 
@@ -154,7 +156,8 @@ func TestSpecUpdate_MissingFields(t *testing.T) {
 		args map[string]any
 		want string
 	}{
-		{"no project_path", specReq("update", map[string]any{"file": "design.md", "content": "x"}), "project_path"},
+		// project_path now falls back to cwd, so omitting it is not an error.
+		// {"no project_path", specReq("update", map[string]any{"file": "design.md", "content": "x"}), "project_path"},
 		{"no file", specReq("update", map[string]any{"project_path": "/tmp", "content": "x"}), "file"},
 		{"no content", specReq("update", map[string]any{"project_path": "/tmp", "file": "design.md"}), "content"},
 	}
@@ -319,15 +322,16 @@ func TestSpecStatus_WithSpec(t *testing.T) {
 	}
 }
 
-func TestSpecStatus_MissingProjectPath(t *testing.T) {
+func TestSpecStatus_MissingProjectPath_FallsBackToCwd(t *testing.T) {
 	t.Parallel()
 	handler := specHandler(nil, nil)
 	res, err := handler(context.Background(), newRequest(specReq("status", nil)))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !res.IsError {
-		t.Fatal("expected error for missing project_path")
+	// Should succeed using cwd as project_path fallback (no active spec is OK).
+	if res.IsError {
+		t.Fatalf("expected success with cwd fallback, got error: %v", res)
 	}
 }
 

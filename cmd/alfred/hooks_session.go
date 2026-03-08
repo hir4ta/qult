@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/hir4ta/claude-alfred/internal/embedder"
+	"github.com/hir4ta/claude-alfred/internal/install"
 	"github.com/hir4ta/claude-alfred/internal/spec"
 	"github.com/hir4ta/claude-alfred/internal/store"
 )
@@ -30,6 +33,9 @@ func handleSessionStart(ctx context.Context, ev *hookEvent) {
 		return
 	}
 	ingestProjectClaudeMD(ctx, st, ev.ProjectPath)
+
+	// Check if knowledge base needs refreshing (background crawl).
+	checkAndSpawnCrawl(st)
 
 	// Inject spec context if active spec exists.
 	// After compact, inject richer context for full recovery.
@@ -394,6 +400,187 @@ func runEmbedDoc() error {
 		return nil
 	}
 	return fmt.Errorf("embed-doc: all retries failed for doc_id=%d: %w", docID, lastErr)
+}
+
+// ---------------------------------------------------------------------------
+// Background auto-crawl: refresh knowledge base periodically
+// ---------------------------------------------------------------------------
+
+// defaultCrawlIntervalDays is the default interval between automatic crawls.
+const defaultCrawlIntervalDays = 7
+
+// crawlIntervalDays returns the configured crawl interval from env or default.
+func crawlIntervalDays() int {
+	if v := os.Getenv("ALFRED_CRAWL_INTERVAL_DAYS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultCrawlIntervalDays
+}
+
+// checkAndSpawnCrawl checks the last crawl timestamp and spawns a background
+// crawl process if the knowledge base is stale. This adds ~10-20ms to
+// SessionStart (DB query + optional process spawn).
+func checkAndSpawnCrawl(st *store.Store) {
+	lastCrawl, err := st.LastCrawledAt()
+	if err != nil {
+		// No docs at all — user hasn't run 'alfred init' yet.
+		debugf("checkAndSpawnCrawl: no crawl timestamp: %v", err)
+		return
+	}
+
+	age := time.Since(lastCrawl)
+	interval := time.Duration(crawlIntervalDays()) * 24 * time.Hour
+	if age < interval {
+		debugf("checkAndSpawnCrawl: last crawl %s ago (interval %dd), skipping", age.Round(time.Hour), crawlIntervalDays())
+		return
+	}
+
+	// Prevent concurrent crawls via a lock file.
+	lockPath := crawlLockPath()
+	if lockPath == "" {
+		debugf("checkAndSpawnCrawl: no lock path, skipping")
+		return
+	}
+	if isCrawlRunning(lockPath) {
+		debugf("checkAndSpawnCrawl: crawl already running")
+		return
+	}
+
+	debugf("checkAndSpawnCrawl: last crawl %s ago, spawning background crawl", age.Round(time.Hour))
+	spawnCrawlAsync()
+}
+
+// crawlLockPath returns the path to the crawl lock file.
+// Returns "" if the home directory cannot be determined.
+func crawlLockPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		debugf("crawlLockPath: no home dir: %v", err)
+		return ""
+	}
+	return filepath.Join(home, ".claude-alfred", "crawl.lock")
+}
+
+// isCrawlRunning checks if a crawl process is already running by examining
+// the lock file. Returns false if the lock file is stale (process exited).
+func isCrawlRunning(lockPath string) bool {
+	if lockPath == "" {
+		return false
+	}
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		return false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return false
+	}
+	// Check if process is still alive.
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	// On Unix, FindProcess always succeeds; send signal 0 to check liveness.
+	if err := proc.Signal(syscall.Signal(0)); err != nil {
+		// Process not running — stale lock file.
+		_ = os.Remove(lockPath)
+		return false
+	}
+	return true
+}
+
+// spawnCrawlAsync spawns a detached background process to crawl and refresh docs.
+// Writes the lock file before spawning to prevent TOCTOU races.
+func spawnCrawlAsync() {
+	lockPath := crawlLockPath()
+	if lockPath == "" {
+		debugf("spawnCrawlAsync: no lock path, skipping")
+		return
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		debugf("spawnCrawlAsync: executable path error: %v", err)
+		return
+	}
+
+	// Write a placeholder lock file before spawning to prevent concurrent
+	// sessions from both passing the isCrawlRunning check (TOCTOU).
+	// The child process will overwrite with its own PID.
+	if err := os.WriteFile(lockPath, []byte("spawning"), 0o600); err != nil {
+		debugf("spawnCrawlAsync: lock write error: %v", err)
+		return
+	}
+
+	cmd := execCommand(exe, "crawl-async")
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	if err := cmd.Start(); err != nil {
+		_ = os.Remove(lockPath)
+		debugf("spawnCrawlAsync: start error: %v", err)
+		return
+	}
+	_ = cmd.Process.Release()
+	notifyUser("refreshing knowledge base in background (pid=%d)", cmd.Process.Pid)
+	debugf("spawnCrawlAsync: spawned pid=%d", cmd.Process.Pid)
+}
+
+// runCrawlAsync is the entry point for the crawl-async subcommand.
+// It fetches fresh documentation and updates the knowledge base.
+func runCrawlAsync() error {
+	// Acquire lock file with our PID.
+	lockPath := crawlLockPath()
+	if lockPath == "" {
+		return fmt.Errorf("crawl-async: cannot determine home directory")
+	}
+	if err := os.WriteFile(lockPath, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+		return fmt.Errorf("crawl-async: acquire lock: %w", err)
+	}
+	defer os.Remove(lockPath)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	st, err := store.OpenDefault()
+	if err != nil {
+		return fmt.Errorf("crawl-async: open store: %w", err)
+	}
+	defer st.Close()
+
+	// Clean up expired docs first.
+	if n, err := st.DeleteExpiredDocs(ctx); err == nil && n > 0 {
+		debugf("crawl-async: cleaned %d expired docs", n)
+	}
+
+	// Crawl fresh docs from live sources.
+	debugf("crawl-async: starting live crawl")
+	sf, err := install.Crawl(nil)
+	if sf == nil {
+		return fmt.Errorf("crawl-async: crawl failed: %w", err)
+	}
+	if err != nil {
+		debugf("crawl-async: crawl warning: %v", err)
+	}
+
+	// Embedder is optional — FTS-only if VOYAGE_API_KEY not set.
+	var emb *embedder.Embedder
+	if e, err := embedder.NewEmbedder(); err == nil {
+		emb = e
+	}
+
+	res, err := install.ApplySeedData(ctx, st, emb, sf, nil)
+	if err != nil {
+		return fmt.Errorf("crawl-async: apply seed: %w", err)
+	}
+
+	mode := "FTS-only"
+	if emb != nil {
+		mode = fmt.Sprintf("with %d embeddings", res.Embedded)
+	}
+	debugf("crawl-async: done — %d applied, %d unchanged (%s)", res.Applied, res.Unchanged, mode)
+	return nil
 }
 
 // ---------------------------------------------------------------------------

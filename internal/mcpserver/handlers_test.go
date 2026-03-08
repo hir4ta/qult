@@ -145,13 +145,13 @@ func TestReviewHandler_EmptyProject(t *testing.T) {
 	claudeHome := t.TempDir()
 	handler := reviewHandler(claudeHome, nil, nil)
 
-	// Empty project_path should be rejected by validateProjectPath.
+	// Empty project_path falls back to cwd (should not error).
 	res, err := handler(context.Background(), newRequest(nil))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !res.IsError {
-		t.Fatal("expected error result for empty project_path")
+	if res.IsError {
+		t.Fatalf("expected success with cwd fallback, got error: %v", res)
 	}
 }
 

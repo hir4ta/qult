@@ -73,10 +73,25 @@ func newTestEmbedder(t *testing.T) *embedder.Embedder {
 func TestApplySeedData(t *testing.T) {
 	// Not parallel: newTestEmbedder modifies VOYAGE_API_KEY env var.
 
-	t.Run("nil embedder returns error", func(t *testing.T) {
-		_, err := ApplySeedData(context.TODO(), nil, nil, &SeedFile{}, nil)
-		if err == nil {
-			t.Fatal("expected error for nil embedder")
+	t.Run("nil embedder skips embeddings", func(t *testing.T) {
+		st := openTestStore(t)
+		sf := &SeedFile{
+			CrawledAt: "2024-01-01T00:00:00Z",
+			Sources: []SeedSource{{
+				URL:        "https://example.com/test",
+				SourceType: "docs",
+				Sections:   []SeedSection{{Path: "Test > Section", Content: "test content for FTS-only mode"}},
+			}},
+		}
+		res, err := ApplySeedData(context.TODO(), st, nil, sf, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res.Applied != 1 {
+			t.Errorf("Applied = %d, want 1", res.Applied)
+		}
+		if res.Embedded != 0 {
+			t.Errorf("Embedded = %d, want 0 (FTS-only)", res.Embedded)
 		}
 	})
 

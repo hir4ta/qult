@@ -16,6 +16,8 @@ Works silently in the background — surfacing relevant knowledge, catching scop
 
 **Persistent Memory** — Remembers past sessions, decisions, and notes across projects. Automatically saves session summaries and design decisions as permanent memory. Search past experience with the `recall` tool — alfred automatically surfaces relevant memories at session start.
 
+**Auto-Crawl** — Knowledge base automatically refreshes in the background. SessionStart checks when docs were last crawled and spawns a background process if they're stale (default: 7 days). No manual `alfred init` needed to stay current.
+
 **Compact Resilience** — PreCompact hook auto-extracts decisions, tracks modified files, saves session state in activeContext format, and auto-updates Next Steps completion status. SessionStart hook restores full context after compaction.
 
 ## Getting Started
@@ -107,7 +109,7 @@ Run automatically during Claude Code lifecycle. No user action needed.
 
 | Event | Action |
 |-------|--------|
-| SessionStart | Auto-ingest CLAUDE.md + spec context injection (adaptive recovery) + past memory hints |
+| SessionStart | Auto-ingest CLAUDE.md + spec context injection (adaptive recovery) + past memory hints + auto-crawl check |
 | PreCompact | Extract context from transcript + auto-detect decisions + track modified files + auto-update Next Steps completion → save session.md → persist decisions as memory → emit compaction instructions → async embedding |
 | PreToolUse | Reminder to use alfred tools when accessing .claude/ config files (Edit/Write/MultiEdit) |
 | UserPromptSubmit | Keyword-gated FTS knowledge injection + memory search — auto-surfaces best practices and past experience |
@@ -133,6 +135,7 @@ Run automatically during Claude Code lifecycle. No user action needed.
 │  ├ SessionStart → CLAUDE.md ingest               │
 │  │                + spec context injection        │
 │  │                + past memory hints             │
+│  │                + auto-crawl check              │
 │  ├ PreCompact  → session.md auto-save            │
 │  │               (decisions + modified files)     │
 │  │               + decision memory persistence    │
@@ -263,7 +266,7 @@ cat ~/.claude-alfred/debug.log  # View logs
 | "no seed docs found" on serve | Knowledge base not initialized | Run `alfred init` |
 | Hook timeout warnings | Slow FTS search or large transcript | Check `~/.claude-alfred/debug.log` |
 | "VOYAGE_API_KEY is required" on init | API key not set | Run `alfred settings` or `export VOYAGE_API_KEY=your-key` |
-| Knowledge results feel stale | Docs older than 30 days | Run `alfred init` to re-crawl |
+| Knowledge results feel stale | Auto-crawl hasn't run or failed | Check `debug.log`; run `alfred init` to force refresh |
 | Hook not firing | Plugin not installed | Run `/plugin install alfred` and restart |
 
 ### Environment variables
@@ -275,6 +278,7 @@ cat ~/.claude-alfred/debug.log  # View logs
 | `ALFRED_RELEVANCE_THRESHOLD` | `0.40` | Minimum score for knowledge injection |
 | `ALFRED_HIGH_CONFIDENCE_THRESHOLD` | `0.65` | Score threshold for injecting 2 results |
 | `ALFRED_SINGLE_KEYWORD_DAMPEN` | `0.80` | Dampening factor for single-keyword matches |
+| `ALFRED_CRAWL_INTERVAL_DAYS` | `7` | Auto-crawl interval in days |
 
 ## License
 

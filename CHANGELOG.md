@@ -7,6 +7,24 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.59.0] - 2026-03-08
+
+### Added
+- Background auto-crawl: SessionStart checks last crawl age and spawns `crawl-async` if stale (default 7 days, configurable via `ALFRED_CRAWL_INTERVAL_DAYS`)
+- `crawl-async` subcommand: background process for live doc fetch + DB upsert + optional embedding
+- `store.LastCrawledAt()` convenience method for crawl age checks
+- Lock file with PID-based stale detection for concurrent crawl prevention
+
+### Changed
+- `ApplySeedData` embedder is now optional: nil embedder → FTS-only mode (no vector embeddings)
+- `validateProjectPath` falls back to `os.Getwd()` when `project_path` is omitted (all MCP tools)
+- README.md / README.ja.md updated with auto-crawl documentation
+
+### Fixed
+- `isCrawlRunning`: use `syscall.Signal(0)` instead of `os.Signal(nil)` (nil interface panic)
+- TOCTOU race in crawl spawning: write lock file before `cmd.Start()`, not after
+- Lock file write failure now aborts crawl instead of silently continuing unlocked
+
 ## [0.58.2] - 2026-03-08
 
 ### Changed
@@ -279,7 +297,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - PreCompact hook with transcript analysis
 - Decision extraction from conversation transcripts
 
-[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.58.2...HEAD
+[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.59.0...HEAD
+[0.59.0]: https://github.com/hir4ta/claude-alfred/compare/v0.58.2...v0.59.0
 [0.58.1]: https://github.com/hir4ta/claude-alfred/compare/v0.58.0...v0.58.1
 [0.58.0]: https://github.com/hir4ta/claude-alfred/compare/v0.57.0...v0.58.0
 [0.57.0]: https://github.com/hir4ta/claude-alfred/compare/v0.56.1...v0.57.0

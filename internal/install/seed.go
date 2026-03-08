@@ -70,11 +70,8 @@ func ApplySeed(ctx context.Context, st *store.Store, emb *embedder.Embedder, pro
 }
 
 // ApplySeedData applies the given seed data into the store and generates embeddings.
+// When emb is nil, only FTS indexing is performed (no vector embeddings).
 func ApplySeedData(ctx context.Context, st *store.Store, emb *embedder.Embedder, sf *SeedFile, progress *SeedProgress) (SeedResult, error) {
-	if emb == nil {
-		return SeedResult{}, fmt.Errorf("seed: embedder is required")
-	}
-
 	if sf == nil || len(sf.Sources) == 0 {
 		return SeedResult{}, nil
 	}
@@ -118,12 +115,14 @@ func ApplySeedData(ctx context.Context, st *store.Store, emb *embedder.Embedder,
 				res.Applied++
 			}
 
-			// Collect docs that need embedding.
-			if _, err := st.GetEmbedding("docs", docID); err != nil {
-				pending = append(pending, pendingEmbed{
-					docID:     docID,
-					embedText: sec.Path + "\n" + sec.Content,
-				})
+			// Collect docs that need embedding (only when embedder available).
+			if emb != nil {
+				if _, err := st.GetEmbedding("docs", docID); err != nil {
+					pending = append(pending, pendingEmbed{
+						docID:     docID,
+						embedText: sec.Path + "\n" + sec.Content,
+					})
+				}
 			}
 
 			done++
@@ -133,7 +132,10 @@ func ApplySeedData(ctx context.Context, st *store.Store, emb *embedder.Embedder,
 		}
 	}
 
-	// Phase 2: Batch embed.
+	// Phase 2: Batch embed (skip when embedder is nil — FTS-only mode).
+	if emb == nil {
+		return res, nil
+	}
 	for i := 0; i < len(pending); i += embedBatchSize {
 		if err := ctx.Err(); err != nil {
 			return res, err

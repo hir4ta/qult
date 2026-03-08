@@ -20,6 +20,19 @@ const (
 	SourceEngineering = "engineering"
 )
 
+// LastCrawledAt returns the most recent crawled_at timestamp for seed docs.
+// Returns zero time if no docs exist.
+func (s *Store) LastCrawledAt() (time.Time, error) {
+	var crawledAt string
+	err := s.db.QueryRow(
+		`SELECT crawled_at FROM docs WHERE source_type = 'docs' ORDER BY crawled_at DESC LIMIT 1`,
+	).Scan(&crawledAt)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Parse(time.RFC3339, crawledAt)
+}
+
 // DocRow represents a row in the docs table.
 type DocRow struct {
 	ID          int64

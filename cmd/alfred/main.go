@@ -61,6 +61,8 @@ func run() error {
 			outputDir = os.Args[2]
 		}
 		return install.Bundle(outputDir, version)
+	case "crawl-async":
+		return runCrawlAsync()
 	case "embed-async":
 		return runEmbedAsync()
 	case "embed-doc":
