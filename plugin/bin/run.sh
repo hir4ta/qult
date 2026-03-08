@@ -3,7 +3,7 @@
 set -e
 
 REPO="hir4ta/claude-alfred"
-VERSION="0.56.1"
+VERSION="0.57.0"
 CACHE_DIR="${HOME}/.alfred/bin"
 CACHED_BIN="${CACHE_DIR}/alfred"
 

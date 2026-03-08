@@ -200,6 +200,9 @@ func TestIsClaudeConfigPath(t *testing.T) {
 		{"/project/.mcp.json", true},
 		{"/project/src/main.go", false},
 		{"/project/README.md", false},
+		{"/project/myclaude/config.go", false},
+		{"/project/src/.claude-test/file.go", false},
+		{".claude/hooks.json", true},
 		{"", false},
 	}
 	for _, tt := range tests {
@@ -2072,7 +2075,8 @@ func TestEnvFloat(t *testing.T) {
 		{"empty string", "", 0.40, 0.40},
 		{"invalid string", "notanumber", 0.40, 0.40},
 		{"zero", "0", 0.40, 0.0},
-		{"negative", "-0.5", 0.40, -0.5},
+		{"negative clamped to 0", "-0.5", 0.40, 0.0},
+		{"above 1 clamped to 1", "1.5", 0.40, 1.0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

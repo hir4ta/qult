@@ -7,6 +7,13 @@ import (
 	"sort"
 )
 
+// CountEmbeddings returns the total number of stored embeddings.
+func (s *Store) CountEmbeddings() (int, error) {
+	var n int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM embeddings").Scan(&n)
+	return n, err
+}
+
 // InsertEmbedding stores a vector embedding as a BLOB.
 func (s *Store) InsertEmbedding(source string, sourceID int64, model string, vector []float32) error {
 	blob := serializeFloat32(vector)

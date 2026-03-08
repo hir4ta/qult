@@ -6,6 +6,7 @@ description: >
   For project-wide setup, use /alfred:setup instead.
 user-invocable: true
 argument-hint: "<type> [name]"
+context: current
 allowed-tools: Read, Write, Edit, Glob, Agent, AskUserQuestion, mcp__plugin_alfred_alfred__knowledge
 ---
 

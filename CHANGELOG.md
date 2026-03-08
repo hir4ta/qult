@@ -7,6 +7,37 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.57.0] - 2026-03-08
+
+### Added
+- `alfred status` コマンド — DB統計、APIキー状態、アクティブタスク、パス情報をリッチ表示
+- `alfred settings` コマンド — 対話型TUIでAPIキー管理（シェルプロファイル永続化）
+- `alfred init` にAPIキー入力プロンプト追加（未設定時に対話的に入力、EscでFTS-onlyモード選択可）
+- `Store.CountEmbeddings()` メソッド追加
+- `envFloat` に範囲バリデーション [0,1] + parseエラーログ追加
+
+### Fixed
+- `isClaudeConfigPath` の `.claude/` 部分文字列マッチを `/.claude/` に修正（`myclaude/` 誤マッチ防止）
+- marketplace.json バージョン不整合 (0.55.0 → 0.57.0 に同期)
+- settings.local.json から不要な Supabase 権限削除
+- configure スキルに `context: current` 明示（plan との一貫性）
+
+### Changed
+- `alfred init` が VOYAGE_API_KEY 未設定でもFTS-onlyモードで動作可能に
+- チャネル同期に `atomic.Bool` による安全なdouble-close防止
+
+## [0.56.1] - 2026-03-08
+
+### Added
+- 永続メモリ機能（source_type="memory", TTL=0）
+- recall MCP tool（memory特化の検索・保存）
+- Stop hook: セッション要約をmemory永続化
+- 非同期embedding（spec/memory docs）
+- FTS日本語対応（kagome IPA辞書）
+
+### Fixed
+- plugin.json 重複 hooks フィールド削除
+
 ## [0.55.0] - 2026-03-08
 
 ### Fixed
@@ -208,7 +239,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - PreCompact hook with transcript analysis
 - Decision extraction from conversation transcripts
 
-[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.55.0...HEAD
+[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.57.0...HEAD
+[0.57.0]: https://github.com/hir4ta/claude-alfred/compare/v0.56.1...v0.57.0
+[0.56.1]: https://github.com/hir4ta/claude-alfred/compare/v0.55.0...v0.56.1
 [0.55.0]: https://github.com/hir4ta/claude-alfred/compare/v0.54.4...v0.55.0
 [0.54.4]: https://github.com/hir4ta/claude-alfred/compare/v0.54.3...v0.54.4
 [0.54.3]: https://github.com/hir4ta/claude-alfred/compare/v0.54.2...v0.54.3

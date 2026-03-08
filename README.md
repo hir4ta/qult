@@ -51,10 +51,13 @@ Without Voyage AI, alfred still works using FTS5 keyword search — no API key n
 ### 4. Initialize the knowledge base
 
 ```bash
-alfred init    # Requires VOYAGE_API_KEY for embedding generation
+alfred init
 ```
 
-Ingests official documentation sections into SQLite, generates Voyage AI embeddings, and cleans up expired docs. Shows TUI progress.
+Interactive TUI guides you through setup:
+- Prompts for Voyage API key (or press Esc for FTS-only mode)
+- Ingests documentation into SQLite with progress display
+- Generates embeddings if API key is provided
 
 Restart Claude Code to finish setup.
 
@@ -114,7 +117,9 @@ Run automatically during Claude Code lifecycle. No user action needed.
 
 | Command | Description |
 |---------|-------------|
-| `init` | Initialize knowledge base (TUI progress, seed + embedding generation + TTL cleanup) |
+| `init` | Initialize knowledge base (interactive API key setup + TUI progress) |
+| `status` | Show system status — DB stats, API key, active tasks, paths |
+| `settings` | Configure API keys and preferences (interactive TUI) |
 | `update` | Update to latest version (Homebrew / download / go install) |
 | `version` | Show version |
 
@@ -257,7 +262,7 @@ cat ~/.claude-alfred/debug.log  # View logs
 |---|---|---|
 | "no seed docs found" on serve | Knowledge base not initialized | Run `alfred init` |
 | Hook timeout warnings | Slow FTS search or large transcript | Check `~/.claude-alfred/debug.log` |
-| "VOYAGE_API_KEY is required" on init | API key not set | `export VOYAGE_API_KEY=your-key` |
+| "VOYAGE_API_KEY is required" on init | API key not set | Run `alfred settings` or `export VOYAGE_API_KEY=your-key` |
 | Knowledge results feel stale | Docs older than 30 days | Run `alfred init` to re-crawl |
 | Hook not firing | Plugin not installed | Run `/plugin install alfred` and restart |
 

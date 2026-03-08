@@ -45,6 +45,10 @@ func run() error {
 		return runSetup()
 	case "update":
 		return runUpdate()
+	case "status":
+		return runStatus()
+	case "settings":
+		return runSettings()
 	case "crawl-seed":
 		output := "internal/install/seed_docs.json"
 		if len(os.Args) > 2 {
@@ -181,6 +185,8 @@ Usage:
 
 Commands:
   init           Initialize knowledge base (seed docs + generate embeddings)
+  status         Show system status (DB, API keys, active tasks)
+  settings       Configure API keys and preferences
   update         Update alfred to the latest version
   version        Show version
   help           Show this help

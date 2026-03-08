@@ -36,12 +36,20 @@ const (
 
 // envFloat returns the environment variable as float64 or the default value.
 func envFloat(key string, defaultVal float64) float64 {
-	if v := os.Getenv(key); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			return f
-		}
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultVal
 	}
-	return defaultVal
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		debugf("envFloat: invalid %s=%q, using default %v", key, v, defaultVal)
+		return defaultVal
+	}
+	if f < 0 || f > 1 {
+		debugf("envFloat: %s=%v out of range [0,1], clamping", key, f)
+		return max(0, min(1, f))
+	}
+	return f
 }
 
 // ---------------------------------------------------------------------------
@@ -72,7 +80,7 @@ func envFloat(key string, defaultVal float64) float64 {
 // Uses suffix/segment matching to avoid false positives on paths like "myclaude.md".
 func isClaudeConfigPath(path string) bool {
 	lower := strings.ToLower(path)
-	return strings.Contains(lower, ".claude/") ||
+	return strings.Contains(lower, "/.claude/") || strings.HasPrefix(lower, ".claude/") ||
 		strings.HasSuffix(lower, "/claude.md") || lower == "claude.md" ||
 		strings.HasSuffix(lower, "/memory.md") || lower == "memory.md" ||
 		strings.HasSuffix(lower, "/.mcp.json") || lower == ".mcp.json"
