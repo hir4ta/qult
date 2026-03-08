@@ -992,7 +992,7 @@ func TestInjectSpecContextCompact(t *testing.T) {
 
 	// First compact: should inject all 4 files.
 	output1 := captureStdout(t, func() {
-		injectSpecContext(dir, "compact")
+		injectSpecContext(dir, "compact", nil)
 	})
 
 	if !strings.Contains(output1, "Requirements") {
@@ -1019,7 +1019,7 @@ func TestInjectSpecContextCompact(t *testing.T) {
 
 	// Second compact: should inject only session.md (lightweight).
 	output2 := captureStdout(t, func() {
-		injectSpecContext(dir, "compact")
+		injectSpecContext(dir, "compact", nil)
 	})
 
 	if !strings.Contains(output2, "Lightweight recovery") {
@@ -1055,7 +1055,7 @@ func TestInjectSpecContextNormal(t *testing.T) {
 	}
 
 	output := captureStdout(t, func() {
-		injectSpecContext(dir, "startup")
+		injectSpecContext(dir, "startup", nil)
 	})
 
 	if !strings.Contains(output, "Normal startup test") {
@@ -1799,7 +1799,7 @@ func TestSessionStartJSONOutput(t *testing.T) {
 	}
 
 	output := captureStdout(t, func() {
-		injectSpecContext(dir, "startup")
+		injectSpecContext(dir, "startup", nil)
 	})
 
 	if output == "" {
@@ -2104,7 +2104,7 @@ func TestProactiveHintsForNextSteps(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := proactiveHintsForNextSteps(tt.session)
+			got := proactiveHintsForNextSteps(tt.session, nil)
 			if tt.empty && got != "" {
 				t.Errorf("proactiveHintsForNextSteps() = %q, want empty", got)
 			}

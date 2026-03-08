@@ -33,7 +33,7 @@ func handleSessionStart(ctx context.Context, ev *hookEvent) {
 
 	// Inject spec context if active spec exists.
 	// After compact, inject richer context for full recovery.
-	injectSpecContext(ev.ProjectPath, ev.Source)
+	injectSpecContext(ev.ProjectPath, ev.Source, st)
 }
 
 type mdSection struct {
@@ -107,7 +107,7 @@ func ingestProjectClaudeMD(_ context.Context, st *store.Store, projectPath strin
 // injectSpecContext outputs spec content to stdout when an active
 // spec exists. After compact, injects richer context
 // (all 4 files) for full recovery. On normal startup, injects only session.md.
-func injectSpecContext(projectPath, source string) {
+func injectSpecContext(projectPath, source string, st *store.Store) {
 	taskSlug, err := spec.ReadActive(projectPath)
 	if err != nil {
 		debugf("injectSpecContext: no active spec for %s", projectPath)
@@ -168,8 +168,13 @@ func injectSpecContext(projectPath, source string) {
 		buf.WriteString(fmt.Sprintf("\n--- Alfred Protocol: Active Task '%s' ---\n%s\n", taskSlug, session))
 
 		// Proactive: extract Next Steps and pre-fetch relevant knowledge.
-		if hints := proactiveHintsForNextSteps(session); hints != "" {
+		if hints := proactiveHintsForNextSteps(session, st); hints != "" {
 			buf.WriteString(hints)
+		}
+
+		// Proactive: search past memories relevant to the current task.
+		if memHints := proactiveMemoryHints(taskSlug, session, st); memHints != "" {
+			buf.WriteString(memHints)
 		}
 
 		buf.WriteString("--- End Alfred Protocol ---\n")
@@ -181,7 +186,7 @@ func injectSpecContext(projectPath, source string) {
 // proactiveHintsForNextSteps extracts the "## Next Steps" section from session.md,
 // detects Claude Code keywords in it, and pre-fetches relevant knowledge snippets.
 // This makes alfred genuinely proactive: surfacing information before the user asks.
-func proactiveHintsForNextSteps(session string) string {
+func proactiveHintsForNextSteps(session string, st *store.Store) string {
 	// Extract Next Steps section.
 	nextSteps := extractSection(session, "Next Steps")
 	if nextSteps == "" || len(strings.TrimSpace(nextSteps)) < 10 {
@@ -194,23 +199,21 @@ func proactiveHintsForNextSteps(session string) string {
 		return ""
 	}
 
-	st, err := store.OpenDefaultCached()
-	if err != nil {
-		debugf("proactiveHintsForNextSteps: store open failed: %v", err)
+	if st == nil {
 		return ""
 	}
 
 	// Search FTS with matched keywords.
 	var ftsTerms []string
 	for _, kw := range matched {
-		if en, ok := katakanaToEnglish[kw]; ok {
+		if en, ok := store.KatakanaToEnglish[kw]; ok {
 			ftsTerms = append(ftsTerms, en)
 		} else {
 			ftsTerms = append(ftsTerms, kw)
 		}
 	}
 	ftsQuery := strings.Join(ftsTerms, " OR ")
-	docs, _ := st.SearchDocsFTS(ftsQuery, "", 3) // FTS failure is acceptable; no docs means no hints
+	docs, _ := st.SearchDocsFTS(ftsQuery, "docs", 3) // FTS failure is acceptable; no docs means no hints
 	if len(docs) == 0 {
 		return ""
 	}
@@ -222,6 +225,35 @@ func proactiveHintsForNextSteps(session string) string {
 		fmt.Fprintf(&buf, "- [%s] %s\n", d.SectionPath, snippet)
 	}
 	debugf("SessionStart: proactive injection for next steps keywords=%v, docs=%d", matched, len(docs))
+	return buf.String()
+}
+
+// proactiveMemoryHints searches past memories relevant to the current task
+// and returns formatted hints for injection into the session context.
+func proactiveMemoryHints(taskSlug, session string, st *store.Store) string {
+	if st == nil {
+		return ""
+	}
+
+	// Search memories using the task slug and current work context.
+	workingOn := extractSection(session, "## Currently Working On")
+	query := taskSlug
+	if workingOn != "" {
+		query = taskSlug + " " + truncateStr(workingOn, 100)
+	}
+
+	docs, err := st.SearchDocsFTS(query, "memory", 3)
+	if err != nil || len(docs) == 0 {
+		return ""
+	}
+
+	var buf strings.Builder
+	buf.WriteString("\n### Past Experience: Related memories\n")
+	for _, d := range docs {
+		snippet := safeSnippet(d.Content, 200)
+		fmt.Fprintf(&buf, "- [%s] %s\n", d.SectionPath, snippet)
+	}
+	debugf("SessionStart: proactive memory injection for %s, docs=%d", taskSlug, len(docs))
 	return buf.String()
 }
 
@@ -278,4 +310,122 @@ func runEmbedAsync() error {
 		return nil
 	}
 	return fmt.Errorf("embed-async: all retries failed for %s/%s: %w", taskSlug, fileName, lastErr)
+}
+
+// ---------------------------------------------------------------------------
+// Stop (SessionEnd): session-summary memory persistence
+// ---------------------------------------------------------------------------
+
+// handleSessionEnd persists a session summary as permanent memory when the
+// session ends. Reads the active spec's session.md and saves a condensed
+// summary to the docs table with source_type="memory".
+func handleSessionEnd(_ context.Context, ev *hookEvent) {
+	if ev.ProjectPath == "" {
+		return
+	}
+
+	taskSlug, err := spec.ReadActive(ev.ProjectPath)
+	if err != nil {
+		debugf("SessionEnd: no active spec, skipping")
+		return
+	}
+
+	sd := &spec.SpecDir{ProjectPath: ev.ProjectPath, TaskSlug: taskSlug}
+	if !sd.Exists() {
+		return
+	}
+
+	session, err := sd.ReadFile(spec.FileSession)
+	if err != nil || strings.TrimSpace(session) == "" {
+		debugf("SessionEnd: no session.md content for %s", taskSlug)
+		return
+	}
+
+	persistSessionSummary(ev.ProjectPath, taskSlug, session)
+}
+
+// persistSessionSummary saves a condensed session summary as permanent memory.
+// Extracts key sections from session.md and stores as source_type="memory".
+func persistSessionSummary(projectPath, taskSlug, session string) {
+	st, err := store.OpenDefaultCached()
+	if err != nil {
+		debugf("persistSessionSummary: DB open error: %v", err)
+		return
+	}
+
+	project := projectBaseName(projectPath)
+	date := time.Now().Format("2006-01-02")
+	url := fmt.Sprintf("memory://user/%s/%s/%s", project, taskSlug, date)
+
+	// Build a condensed summary from session.md sections.
+	summary := buildSessionSummary(session)
+	if strings.TrimSpace(summary) == "" {
+		debugf("persistSessionSummary: empty summary, skipping")
+		return
+	}
+
+	sectionPath := fmt.Sprintf("%s > %s > session-summary > %s",
+		project, taskSlug, truncateStr(extractSummaryTitle(session), 60))
+
+	_, changed, err := st.UpsertDoc(&store.DocRow{
+		URL:         url,
+		SectionPath: sectionPath,
+		Content:     summary,
+		SourceType:  "memory",
+		TTLDays:     0, // permanent
+	})
+	if err != nil {
+		debugf("persistSessionSummary: upsert error: %v", err)
+		return
+	}
+	if changed {
+		debugf("persistSessionSummary: saved session summary for %s/%s", project, taskSlug)
+	}
+}
+
+// buildSessionSummary extracts key information from session.md into a
+// condensed text suitable for memory storage and future search.
+func buildSessionSummary(session string) string {
+	var buf strings.Builder
+
+	workingOn := extractSection(session, "## Currently Working On")
+	if workingOn != "" {
+		buf.WriteString("作業内容: " + truncateStr(workingOn, 200) + "\n")
+	}
+
+	decisions := extractSection(session, "## Recent Decisions")
+	if decisions == "" {
+		decisions = extractSection(session, "## Recent Decisions (last 3)")
+	}
+	if decisions != "" {
+		buf.WriteString("意思決定: " + truncateStr(decisions, 200) + "\n")
+	}
+
+	nextSteps := extractSection(session, "## Next Steps")
+	if nextSteps != "" {
+		buf.WriteString("次のステップ: " + truncateStr(nextSteps, 200) + "\n")
+	}
+
+	modifiedFiles := extractSection(session, "## Modified Files")
+	if modifiedFiles == "" {
+		modifiedFiles = extractSection(session, "## Modified Files (this session)")
+	}
+	if modifiedFiles != "" {
+		buf.WriteString("変更ファイル: " + truncateStr(modifiedFiles, 200) + "\n")
+	}
+
+	return buf.String()
+}
+
+// extractSummaryTitle creates a short title from the session's "Currently Working On" section.
+func extractSummaryTitle(session string) string {
+	workingOn := extractSection(session, "## Currently Working On")
+	if workingOn == "" {
+		return "session"
+	}
+	// Take the first line as title.
+	if idx := strings.IndexByte(workingOn, '\n'); idx > 0 {
+		workingOn = workingOn[:idx]
+	}
+	return strings.TrimSpace(workingOn)
 }

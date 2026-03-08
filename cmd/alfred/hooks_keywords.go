@@ -18,18 +18,6 @@ var claudeCodeKeywords = []string{
 	"プラグイン", "設定ファイル", "コンパクト",
 }
 
-// katakanaToEnglish maps Japanese katakana Claude Code terms to their English equivalents.
-// Used to translate FTS queries so Japanese keywords find English documents.
-var katakanaToEnglish = map[string]string{
-	"フック":    "hook",
-	"スキル":    "skill",
-	"ルール":    "rule",
-	"エージェント": "agent",
-	"プラグイン":  "plugin",
-	"コンパクト":  "compact",
-	"設定ファイル": "settings",
-}
-
 // frameworkFamilies maps keyword families to their framework exclusion lists.
 // Each family groups keywords that share the same disambiguation context.
 var frameworkFamilies = []struct {

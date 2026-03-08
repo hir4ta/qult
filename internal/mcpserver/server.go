@@ -1,6 +1,6 @@
 // Package mcpserver implements the MCP tool server for alfred,
-// providing 3 tools: knowledge search, config review,
-// and unified spec management.
+// providing 4 tools: knowledge search, config review,
+// spec management, and memory recall.
 package mcpserver
 
 import (
@@ -21,6 +21,7 @@ He works silently in the background, and provides powerful tools when needed:
   knowledge      — Search Claude Code docs and best practices
   config-review  — Deep audit of .claude/ config against best practices
   spec           — Unified spec management (action: init/update/status/switch/delete)
+  recall         — Memory search and save (past sessions, decisions, notes)
 
 When to use alfred tools:
 - Questions specifically about Claude Code configuration or best practices → call knowledge FIRST
@@ -30,6 +31,7 @@ When to use alfred tools:
 - Starting a new development task → call spec with action=init
 - Making design decisions → call spec with action=update
 - Starting/resuming a session → call spec with action=status
+- Searching past experiences or saving notes → call recall
 
 IMPORTANT: knowledge contains extensive curated Claude Code docs with hybrid search.
 Always prefer knowledge over web search or guessing for Claude Code topics.
@@ -71,7 +73,7 @@ Example queries: "SessionStart hook best practices", "skill frontmatter options"
 				mcp.WithOpenWorldHintAnnotation(false),
 				mcp.WithString("query", mcp.Description("Search query"), mcp.Required()),
 				mcp.WithNumber("limit", mcp.Description("Maximum results (default: 5)")),
-				mcp.WithString("source_type", mcp.Description("Filter by source type: docs, spec, or empty for all")),
+				mcp.WithString("source_type", mcp.Description("Filter by source type: docs, memory, spec, changelog, engineering. Comma-separated for multiple (default: docs,memory)")),
 			),
 			Handler: docsSearchHandler(st, emb),
 		},
@@ -118,6 +120,31 @@ Note: "status" is read-only. Only "init", "update", "switch", and "delete" modif
 				mcp.WithBoolean("confirm", mcp.Description("Required for delete: first call without confirm to preview, then with confirm=true to execute")),
 			),
 			Handler: specHandler(st, emb),
+		},
+
+		server.ServerTool{
+			Tool: mcp.NewTool("recall",
+				mcp.WithDescription(`Memory search and save — your persistent memory across sessions.
+
+Actions:
+- search (default): Search past memories — decisions, session summaries, saved notes
+- save: Save a new memory entry for future retrieval
+
+Memories persist permanently and are searchable across projects. Use for:
+- "Have I worked on something like this before?"
+- "What decisions did I make about authentication?"
+- "Remember this approach for future reference"`),
+				mcp.WithTitleAnnotation("Memory Recall"),
+				mcp.WithReadOnlyHintAnnotation(false),
+				mcp.WithOpenWorldHintAnnotation(false),
+				mcp.WithString("action", mcp.Description("Action: 'search' (default) or 'save'"), mcp.Required()),
+				mcp.WithString("query", mcp.Description("Search query (required for search)")),
+				mcp.WithString("content", mcp.Description("Content to save (required for save)")),
+				mcp.WithString("label", mcp.Description("Short label/description for saved memory (required for save)")),
+				mcp.WithString("project", mcp.Description("Project name for context (default: 'general')")),
+				mcp.WithNumber("limit", mcp.Description("Maximum search results (default: 10)")),
+			),
+			Handler: recallHandler(st, emb),
 		},
 
 	)

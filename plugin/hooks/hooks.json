@@ -1,5 +1,5 @@
 {
-  "description": "Proactive hooks — auto-import, config access reminder, knowledge injection, spec session persistence",
+  "description": "Proactive hooks — auto-import, config access reminder, knowledge injection, spec session persistence, memory persistence",
   "hooks": {
     "PreCompact": [
       {
@@ -40,6 +40,17 @@
         "hooks": [
           {
             "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook UserPromptSubmit",
+            "timeout": 3,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook Stop",
             "timeout": 3,
             "type": "command"
           }

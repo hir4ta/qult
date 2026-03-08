@@ -53,6 +53,11 @@ func handlePreCompact(ctx context.Context, projectPath, transcriptPath, customIn
 		autoAppendDecisions(sd, decisions)
 	}
 
+	// Persist decisions as permanent memory (survives spec deletion).
+	if len(decisions) > 0 {
+		persistDecisionMemory(projectPath, taskSlug, decisions)
+	}
+
 	// Get modified files from git.
 	modifiedFiles := getModifiedFiles(projectPath)
 
@@ -382,6 +387,9 @@ func buildActiveContextSession(sd *spec.SpecDir, taskSlug string, txCtx *transcr
 
 	buf.WriteString("## Next Steps\n")
 	if existingNextSteps != "" {
+		if txCtx != nil {
+			existingNextSteps = updateNextStepsCompletion(existingNextSteps, txCtx)
+		}
 		buf.WriteString(existingNextSteps + "\n")
 	}
 	buf.WriteString("\n")
@@ -490,5 +498,131 @@ func removeOldestCompactMarker(content string) string {
 	// content[:start] already ends with \n from the preceding section;
 	// skip the \n in "\n## " to avoid a double newline.
 	return content[:start] + content[start+len(markerPrefix)+end+1:]
+}
+
+// updateNextStepsCompletion scans transcript context for completion signals
+// and updates unchecked Next Steps items to checked.
+// Matches assistant messages containing "完了" / "completed" / "done" patterns
+// against each Next Steps item text.
+func updateNextStepsCompletion(nextSteps string, txCtx *transcriptContext) string {
+	// Build combined text from recent assistant actions for matching.
+	var assistantText strings.Builder
+	for _, a := range txCtx.AssistantActions {
+		assistantText.WriteString(strings.ToLower(a))
+		assistantText.WriteByte('\n')
+	}
+	if txCtx.LastAssistantWork != "" {
+		assistantText.WriteString(strings.ToLower(txCtx.LastAssistantWork))
+	}
+	combined := assistantText.String()
+
+	lines := strings.Split(nextSteps, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "- [ ] ") {
+			continue
+		}
+		itemText := strings.TrimPrefix(trimmed, "- [ ] ")
+		if isItemCompleted(itemText, combined) {
+			lines[i] = strings.Replace(line, "- [ ] ", "- [x] ", 1)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// isItemCompleted checks if a Next Steps item appears completed in the transcript.
+// Extracts significant words from the item and checks if they appear near
+// completion markers in the assistant text.
+func isItemCompleted(itemText, assistantTextLower string) bool {
+	completionMarkers := []string{
+		"完了", "done", "completed", "finished", "✓", "✅",
+		"complete", "実装完了", "対応完了",
+	}
+
+	// Extract significant words from the item (skip short particles).
+	itemLower := strings.ToLower(itemText)
+	words := significantWords(itemLower)
+	if len(words) == 0 {
+		return false
+	}
+
+	// Check if enough item words appear near a completion marker.
+	for _, marker := range completionMarkers {
+		markerIdx := strings.Index(assistantTextLower, marker)
+		if markerIdx < 0 {
+			continue
+		}
+		// Look at a window around the marker (500 chars before/after).
+		start := max(0, markerIdx-500)
+		end := min(len(assistantTextLower), markerIdx+500)
+		window := assistantTextLower[start:end]
+
+		hits := 0
+		for _, w := range words {
+			if strings.Contains(window, w) {
+				hits++
+			}
+		}
+		// Require 50%+ word overlap for completion match.
+		if float64(hits)/float64(len(words)) >= 0.5 {
+			return true
+		}
+	}
+	return false
+}
+
+// persistDecisionMemory saves extracted decisions as permanent memory docs
+// (source_type="memory"). These survive spec deletion and enable cross-session
+// search for past decisions.
+func persistDecisionMemory(projectPath, taskSlug string, decisions []string) {
+	st, err := store.OpenDefaultCached()
+	if err != nil {
+		debugf("persistDecisionMemory: DB open error: %v", err)
+		return
+	}
+
+	project := projectBaseName(projectPath)
+	date := time.Now().Format("2006-01-02")
+	url := fmt.Sprintf("memory://user/%s/%s/%s", project, taskSlug, date)
+
+	saved := 0
+	for _, d := range decisions {
+		sectionPath := fmt.Sprintf("%s > %s > decision > %s", project, taskSlug, truncateDecision(d, 60))
+		_, changed, err := st.UpsertDoc(&store.DocRow{
+			URL:         url,
+			SectionPath: sectionPath,
+			Content:     d,
+			SourceType:  "memory",
+			TTLDays:     0, // permanent
+		})
+		if err != nil {
+			debugf("persistDecisionMemory: upsert error: %v", err)
+			continue
+		}
+		if changed {
+			saved++
+		}
+	}
+	if saved > 0 {
+		debugf("persistDecisionMemory: saved %d decisions for %s/%s", saved, project, taskSlug)
+	}
+}
+
+// projectBaseName extracts the project directory name from an absolute path.
+func projectBaseName(projectPath string) string {
+	parts := strings.Split(strings.TrimRight(projectPath, "/"), "/")
+	if len(parts) > 0 {
+		return parts[len(parts)-1]
+	}
+	return "unknown"
+}
+
+// truncateDecision shortens a decision string for use in section_path.
+func truncateDecision(d string, maxLen int) string {
+	runes := []rune(d)
+	if len(runes) <= maxLen {
+		return d
+	}
+	return string(runes[:maxLen])
 }
 

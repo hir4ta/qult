@@ -41,7 +41,7 @@ func docsSearchHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandl
 		if limit < 1 {
 			limit = 5
 		}
-		sourceType := req.GetString("source_type", "")
+		sourceType := req.GetString("source_type", "docs,memory")
 
 		var docs []store.DocRow
 		searchMethod := "hybrid_rrf"

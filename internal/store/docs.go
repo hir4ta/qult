@@ -43,7 +43,10 @@ func (s *Store) UpsertDoc(doc *DocRow) (id int64, changed bool, err error) {
 	if doc.CrawledAt == "" {
 		doc.CrawledAt = time.Now().UTC().Format(time.RFC3339)
 	}
-	if doc.TTLDays == 0 {
+	// TTLDays == 0 means "permanent" (never expires) when set intentionally
+	// (e.g., source_type="memory"). Apply default TTL only for source types
+	// that expect expiration (docs, project, etc.).
+	if doc.TTLDays == 0 && doc.SourceType != "memory" {
 		doc.TTLDays = 7
 	}
 
@@ -253,17 +256,39 @@ func SanitizeFTS5Query(query string) string {
 
 // SearchDocsFTS searches the docs table using FTS5 full-text search.
 // Multi-word queries use phrase-first matching with OR fallback.
+// Automatically translates Japanese terms and corrects typos when
+// the initial query returns no results.
 func (s *Store) SearchDocsFTS(rawQuery string, sourceType string, limit int) ([]DocRow, error) {
 	if limit <= 0 {
 		limit = 10
 	}
-	query := SanitizeFTS5Query(rawQuery)
+
+	// Translate Japanese terms to English before sanitizing.
+	translated := TranslateQuery(rawQuery)
+	query := SanitizeFTS5Query(translated)
 	if query == "" {
 		return nil, nil
 	}
 
+	results, err := s.searchFTS(query, sourceType, limit)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) > 0 {
+		return results, nil
+	}
+
+	// No results: try typo correction.
+	corrected := s.CorrectTypos(query)
+	if corrected == query {
+		return nil, nil
+	}
+	return s.searchFTS(corrected, sourceType, limit)
+}
+
+// searchFTS executes phrase-first then OR-fallback FTS5 search.
+func (s *Store) searchFTS(query string, sourceType string, limit int) ([]DocRow, error) {
 	words := strings.Fields(query)
-	// Multi-word: try phrase match first, then OR fallback.
 	if len(words) > 1 {
 		phraseQuery := `"` + strings.Join(words, " ") + `"`
 		results, err := s.matchDocsFTS(phraseQuery, sourceType, limit)
@@ -276,21 +301,14 @@ func (s *Store) SearchDocsFTS(rawQuery string, sourceType string, limit int) ([]
 }
 
 // matchDocsFTS executes a FTS5 MATCH query against the docs_fts table.
+// sourceType supports: single value ("docs"), comma-separated ("docs,memory"), or empty (all types).
 func (s *Store) matchDocsFTS(query string, sourceType string, limit int) ([]DocRow, error) {
 	var sqlQuery string
 	var args []any
 
-	if sourceType != "" {
-		sqlQuery = `
-			SELECT d.id, d.url, d.section_path, d.content, d.content_hash,
-			       d.source_type, d.version, d.crawled_at, d.ttl_days
-			FROM docs_fts f
-			JOIN docs d ON d.id = f.rowid
-			WHERE docs_fts MATCH ? AND d.source_type = ?
-			ORDER BY rank
-			LIMIT ?`
-		args = []any{query, sourceType, limit}
-	} else {
+	types := parseSourceTypes(sourceType)
+	switch len(types) {
+	case 0:
 		sqlQuery = `
 			SELECT d.id, d.url, d.section_path, d.content, d.content_hash,
 			       d.source_type, d.version, d.crawled_at, d.ttl_days
@@ -300,6 +318,32 @@ func (s *Store) matchDocsFTS(query string, sourceType string, limit int) ([]DocR
 			ORDER BY rank
 			LIMIT ?`
 		args = []any{query, limit}
+	case 1:
+		sqlQuery = `
+			SELECT d.id, d.url, d.section_path, d.content, d.content_hash,
+			       d.source_type, d.version, d.crawled_at, d.ttl_days
+			FROM docs_fts f
+			JOIN docs d ON d.id = f.rowid
+			WHERE docs_fts MATCH ? AND d.source_type = ?
+			ORDER BY rank
+			LIMIT ?`
+		args = []any{query, types[0], limit}
+	default:
+		placeholders := make([]string, len(types))
+		args = []any{query}
+		for i, t := range types {
+			placeholders[i] = "?"
+			args = append(args, t)
+		}
+		sqlQuery = `
+			SELECT d.id, d.url, d.section_path, d.content, d.content_hash,
+			       d.source_type, d.version, d.crawled_at, d.ttl_days
+			FROM docs_fts f
+			JOIN docs d ON d.id = f.rowid
+			WHERE docs_fts MATCH ? AND d.source_type IN (` + strings.Join(placeholders, ",") + `)
+			ORDER BY rank
+			LIMIT ?`
+		args = append(args, limit)
 	}
 
 	rows, err := s.db.Query(sqlQuery, args...)
@@ -326,5 +370,22 @@ func (s *Store) matchDocsFTS(query string, sourceType string, limit int) ([]DocR
 		return docs, fmt.Errorf("store: search docs fts iteration: %w", err)
 	}
 	return docs, nil
+}
+
+// parseSourceTypes splits a comma-separated source_type string into individual types.
+// Returns nil for empty input (meaning "all types").
+func parseSourceTypes(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	types := parts[:0]
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			types = append(types, p)
+		}
+	}
+	return types
 }
 

@@ -22,6 +22,9 @@ var DebugLog func(format string, args ...any)
 type Store struct {
 	db     *sql.DB
 	dbPath string
+
+	vocabOnce  sync.Once
+	vocabTerms map[string]bool
 }
 
 // Open opens (or creates) a SQLite database at dbPath,

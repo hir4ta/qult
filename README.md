@@ -14,7 +14,9 @@ Works silently in the background — surfacing relevant knowledge, catching scop
 
 **3-Layer Code Review** — Checks your changes against active specs (scope violations, decision contradictions), semantic knowledge search, and best practices from documentation.
 
-**Compact Resilience** — PreCompact hook auto-extracts decisions, tracks modified files, and saves session state in activeContext format. SessionStart hook restores full context after compaction.
+**Persistent Memory** — Remembers past sessions, decisions, and notes across projects. Automatically saves session summaries and design decisions as permanent memory. Search past experience with the `recall` tool or let alfred proactively surface relevant memories.
+
+**Compact Resilience** — PreCompact hook auto-extracts decisions, tracks modified files, saves session state in activeContext format, and auto-updates Next Steps completion status. SessionStart hook restores full context after compaction.
 
 ## Getting Started
 
@@ -85,7 +87,7 @@ Invoke with `/alfred:<skill>` in Claude Code.
 | `alfred` | Claude Code configuration and best practices support |
 | `code-reviewer` | Read-only code reviewer — cross-checks against spec and knowledge base |
 
-## MCP Tools (3)
+## MCP Tools (4)
 
 Backend for skills and agents. Claude calls these automatically as needed.
 
@@ -94,17 +96,19 @@ Backend for skills and agents. Claude calls these automatically as needed.
 | `knowledge` | Hybrid vector + FTS5 + Voyage rerank document search |
 | `config-review` | Deep audit of .claude/ config (file contents + KB cross-reference) |
 | `spec` | Unified spec management (action: init / update / status / switch / delete) |
+| `recall` | Memory search and save — past sessions, decisions, and notes |
 
-## Hooks (4)
+## Hooks (5)
 
 Run automatically during Claude Code lifecycle. No user action needed.
 
 | Event | Action |
 |-------|--------|
-| SessionStart | Auto-ingest CLAUDE.md + spec context injection (adaptive recovery) |
-| PreCompact | Extract context from transcript + auto-detect decisions + track modified files → save session.md in activeContext format → emit compaction instructions → async embedding |
+| SessionStart | Auto-ingest CLAUDE.md + spec context injection (adaptive recovery) + past memory hints |
+| PreCompact | Extract context from transcript + auto-detect decisions + track modified files + auto-update Next Steps completion → save session.md → persist decisions as memory → emit compaction instructions → async embedding |
 | PreToolUse | Reminder to use alfred tools when accessing .claude/ config files |
-| UserPromptSubmit | Keyword-gated FTS knowledge injection — auto-surfaces relevant best practices for Claude Code topics |
+| UserPromptSubmit | Keyword-gated FTS knowledge injection + memory search — auto-surfaces best practices and past experience |
+| Stop | Persist session summary as permanent memory for future recall |
 
 ## Commands
 
@@ -123,16 +127,20 @@ Run automatically during Claude Code lifecycle. No user action needed.
 │  Hooks (automatic)                                │
 │  ├ SessionStart → CLAUDE.md ingest               │
 │  │                + spec context injection        │
+│  │                + past memory hints             │
 │  ├ PreCompact  → session.md auto-save            │
 │  │               (decisions + modified files)     │
-│  │               + compaction instructions        │
+│  │               + decision memory persistence    │
+│  │               + Next Steps auto-update         │
 │  │               + async embedding                │
 │  ├ PreToolUse  → .claude/ access reminder         │
-│  └ UserPromptSubmit → keyword filter + FTS injection │
+│  ├ UserPromptSubmit → FTS injection + memory      │
+│  └ Stop        → session summary → memory         │
 │                                                  │
 │  MCP Tools (on demand)                            │
 │  ├ knowledge / config-review                      │
-│  └ spec (init/update/status/switch/delete)         │
+│  ├ spec (init/update/status/switch/delete)         │
+│  └ recall (memory search/save)                    │
 │                                                  │
 │  Alfred Protocol Flow                             │
 │  spec(init) → .alfred/specs/add-auth/             │

@@ -158,7 +158,7 @@ func scoreRelevance(matchedKeywords []string, promptLower string, doc store.DocR
 	kwContentHits := 0
 	for _, kw := range matchedKeywords {
 		kwCheck := kw
-		if en, ok := katakanaToEnglish[kw]; ok {
+		if en, ok := store.KatakanaToEnglish[kw]; ok {
 			kwCheck = en
 		}
 		if strings.Contains(pathLower, kwCheck) {
@@ -239,7 +239,7 @@ func handleUserPromptSubmit(_ context.Context, ev *hookEvent) {
 	// Translate katakana keywords to English for searching the English KB.
 	var ftsTerms []string
 	for _, kw := range matched {
-		if en, ok := katakanaToEnglish[kw]; ok {
+		if en, ok := store.KatakanaToEnglish[kw]; ok {
 			ftsTerms = append(ftsTerms, en)
 		} else {
 			ftsTerms = append(ftsTerms, kw)
@@ -247,7 +247,7 @@ func handleUserPromptSubmit(_ context.Context, ev *hookEvent) {
 	}
 	ftsQuery := strings.Join(ftsTerms, " OR ")
 	// Retrieve 8 candidates: enough diversity for scoring, but bounded to keep hook fast.
-	allDocs, ftsErr := st.SearchDocsFTS(ftsQuery, "", 8)
+	allDocs, ftsErr := st.SearchDocsFTS(ftsQuery, "docs", 8)
 	if ftsErr != nil {
 		debugf("UserPromptSubmit: FTS keyword search failed: %v", ftsErr)
 	}
@@ -255,7 +255,7 @@ func handleUserPromptSubmit(_ context.Context, ev *hookEvent) {
 	// Supplemental: also search with prompt keywords (no expansion) for coverage.
 	keywords := extractSearchKeywords(prompt, 6)
 	if keywords != "" {
-		docs, err := st.SearchDocsFTS(keywords, "", 3)
+		docs, err := st.SearchDocsFTS(keywords, "docs", 3)
 		if err != nil {
 			debugf("UserPromptSubmit: FTS supplemental search failed: %v", err)
 		}
@@ -314,6 +314,37 @@ func handleUserPromptSubmit(_ context.Context, ev *hookEvent) {
 		snippet := safeSnippet(c.doc.Content, 300)
 		fmt.Fprintf(&buf, "- [%s] %s\n", c.doc.SectionPath, snippet)
 	}
+	// Also search memories (no keyword gate — memory is small).
+	memSnippets := searchMemoryForPrompt(prompt, st)
+	if len(memSnippets) > 0 {
+		buf.WriteString("\nRelated past experience:\n")
+		for _, m := range memSnippets {
+			buf.WriteString(m)
+		}
+	}
+
 	emitAdditionalContext("UserPromptSubmit", buf.String())
-	debugf("UserPromptSubmit: injected %d knowledge snippets (top score: %.2f, keywords: %v)", len(candidates), candidates[0].score, matched)
+	debugf("UserPromptSubmit: injected %d knowledge snippets (top score: %.2f, keywords: %v), %d memory hints", len(candidates), candidates[0].score, matched, len(memSnippets))
+}
+
+// searchMemoryForPrompt searches memory docs for the user's prompt.
+// Returns formatted snippet lines (max 2) or nil if no relevant memories found.
+func searchMemoryForPrompt(prompt string, st *store.Store) []string {
+	keywords := extractSearchKeywords(prompt, 6)
+	if keywords == "" {
+		return nil
+	}
+
+	docs, err := st.SearchDocsFTS(keywords, "memory", 2)
+	if err != nil || len(docs) == 0 {
+		return nil
+	}
+
+	var results []string
+	for _, d := range docs {
+		snippet := safeSnippet(d.Content, 200)
+		results = append(results, fmt.Sprintf("- [%s] %s\n", d.SectionPath, snippet))
+	}
+	debugf("UserPromptSubmit: memory search found %d results for keywords=%s", len(results), keywords)
+	return results
 }
