@@ -39,12 +39,11 @@ type CrawlStats struct {
 // Crawl fetches all documentation sources and returns the seed data.
 // If st is non-nil, uses HTTP conditional requests (ETag/If-Modified-Since)
 // to skip unchanged pages. Pass nil for a fresh crawl without conditionals.
-func Crawl(progress *CrawlProgress, st *store.Store) (*SeedFile, *CrawlStats, error) {
+func Crawl(ctx context.Context, progress *CrawlProgress, st *store.Store) (*SeedFile, *CrawlStats, error) {
 	sf := &SeedFile{
 		CrawledAt: time.Now().UTC().Format(time.RFC3339),
 	}
 	stats := &CrawlStats{}
-	ctx := context.Background()
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// 1. Fetch and crawl Claude Code docs.
@@ -135,7 +134,7 @@ func crawlPageConditional(ctx context.Context, st *store.Store, canonicalURL, fe
 
 	var body string
 	if etag != "" || lastMod != "" {
-		res, err := FetchPageConditional(fetchURL, etag, lastMod)
+		res, err := FetchPageConditionalCtx(ctx, fetchURL, etag, lastMod)
 		if err != nil {
 			return nil, false, err
 		}
@@ -156,7 +155,7 @@ func crawlPageConditional(ctx context.Context, st *store.Store, canonicalURL, fe
 		lastMod = res.LastModified
 	} else {
 		// No prior metadata — plain fetch, but capture response headers.
-		res, err := FetchPageConditional(fetchURL, "", "")
+		res, err := FetchPageConditionalCtx(ctx, fetchURL, "", "")
 		if err != nil {
 			return nil, false, err
 		}
@@ -218,7 +217,7 @@ func fetchConditional(ctx context.Context, st *store.Store, url, now string) (st
 		}
 	}
 
-	res, err := FetchPageConditional(url, etag, lastMod)
+	res, err := FetchPageConditionalCtx(ctx, url, etag, lastMod)
 	if err != nil {
 		return "", false, err
 	}
@@ -256,7 +255,7 @@ func cond(ok bool, a, b string) string {
 // CrawlSeed fetches all documentation sources and writes a seed JSON file.
 func CrawlSeed(outputPath string) error {
 	fmt.Println("Fetching docs index from llms.txt...")
-	sf, _, err := Crawl(&CrawlProgress{
+	sf, _, err := Crawl(context.Background(), &CrawlProgress{
 		OnDocsPage: func(done, total int) {
 			fmt.Printf("\r  Crawling docs [%d/%d]", done, total)
 		},
@@ -291,7 +290,12 @@ func CrawlSeed(outputPath string) error {
 
 // FetchPage performs an HTTP GET and returns the response body as a string.
 func FetchPage(url string) (string, error) {
-	req, err := http.NewRequest("GET", url, nil)
+	return FetchPageCtx(context.Background(), url)
+}
+
+// FetchPageCtx performs an HTTP GET with context and returns the response body.
+func FetchPageCtx(ctx context.Context, url string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return "", err
 	}
@@ -327,7 +331,12 @@ type ConditionalResult struct {
 // If etag or lastModified are non-empty, sets If-None-Match / If-Modified-Since.
 // On 304 Not Modified, returns NotModified=true with an empty Body.
 func FetchPageConditional(url, etag, lastModified string) (*ConditionalResult, error) {
-	req, err := http.NewRequest("GET", url, nil)
+	return FetchPageConditionalCtx(context.Background(), url, etag, lastModified)
+}
+
+// FetchPageConditionalCtx is like FetchPageConditional but accepts a context.
+func FetchPageConditionalCtx(ctx context.Context, url, etag, lastModified string) (*ConditionalResult, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -555,8 +564,19 @@ func crawlBlogPost(url string) (*SeedSource, error) {
 // --- Markdown Parsing Helpers ---
 
 var (
-	headingRe = regexp.MustCompile(`^(#{2,3})\s+(.+)`)
-	jsxTagRe  = regexp.MustCompile(`</?(?:Tip|Note|Warning|Info|Frame|Steps|Step|Tabs|Tab|Accordion|AccordionGroup|Card|CardGroup|CodeGroup|ResponseField|ParamField|Expandable|Check|Icon|Snippet|Update)[^>]*>`)
+	headingRe    = regexp.MustCompile(`^(#{2,3})\s+(.+)`)
+	jsxTagRe     = regexp.MustCompile(`</?(?:Tip|Note|Warning|Info|Frame|Steps|Step|Tabs|Tab|Accordion|AccordionGroup|Card|CardGroup|CodeGroup|ResponseField|ParamField|Expandable|Check|Icon|Snippet|Update)[^>]*>`)
+	importLineRe = regexp.MustCompile(`(?m)^import\s+.*$`)
+	exportLineRe = regexp.MustCompile(`(?m)^export\s+.*$`)
+	h1TagRe      = regexp.MustCompile(`<h1[^>]*>(.*?)</h1>`)
+	titleTagRe   = regexp.MustCompile(`<title[^>]*>(.*?)</title>`)
+	pTagRe       = regexp.MustCompile(`</?p[^>]*>`)
+	brTagRe      = regexp.MustCompile(`<br\s*/?\s*>`)
+	liTagRe      = regexp.MustCompile(`<li[^>]*>`)
+	codeTagRe    = regexp.MustCompile(`<code[^>]*>(.*?)</code>`)
+	preTagRe     = regexp.MustCompile(`<pre[^>]*>`)
+	multiBlankRe = regexp.MustCompile(`\n{3,}`)
+	htmlTagRe    = regexp.MustCompile(`<[^>]+>`)
 )
 
 // SplitMarkdownSections splits markdown content by h2/h3 headings.
@@ -661,12 +681,8 @@ func extractTitle(markdown, url string) string {
 // stripJSX removes MDX/JSX component tags from markdown content.
 func stripJSX(content string) string {
 	content = jsxTagRe.ReplaceAllString(content, "")
-	// Remove import statements.
-	importRe := regexp.MustCompile(`(?m)^import\s+.*$`)
-	content = importRe.ReplaceAllString(content, "")
-	// Remove export statements.
-	exportRe := regexp.MustCompile(`(?m)^export\s+.*$`)
-	content = exportRe.ReplaceAllString(content, "")
+	content = importLineRe.ReplaceAllString(content, "")
+	content = exportLineRe.ReplaceAllString(content, "")
 	return content
 }
 
@@ -690,13 +706,11 @@ func extractArticleContent(html string) string {
 // extractHTMLTitle extracts the title from HTML.
 func extractHTMLTitle(html string) string {
 	// Try <h1>.
-	h1Re := regexp.MustCompile(`<h1[^>]*>(.*?)</h1>`)
-	if m := h1Re.FindStringSubmatch(html); m != nil {
+	if m := h1TagRe.FindStringSubmatch(html); m != nil {
 		return stripHTMLTags(m[1])
 	}
 	// Try <title>.
-	titleRe := regexp.MustCompile(`<title[^>]*>(.*?)</title>`)
-	if m := titleRe.FindStringSubmatch(html); m != nil {
+	if m := titleTagRe.FindStringSubmatch(html); m != nil {
 		title := stripHTMLTags(m[1])
 		// Often includes site name: "Title | Site".
 		if idx := strings.LastIndex(title, " | "); idx > 0 {
@@ -710,14 +724,19 @@ func extractHTMLTitle(html string) string {
 	return ""
 }
 
+// htmlHeadingRes are pre-compiled regexps for h1-h3 heading replacement.
+var htmlHeadingRes = [3]*regexp.Regexp{
+	regexp.MustCompile(`<h1[^>]*>(.*?)</h1>`),
+	regexp.MustCompile(`<h2[^>]*>(.*?)</h2>`),
+	regexp.MustCompile(`<h3[^>]*>(.*?)</h3>`),
+}
+
 // HTMLToText converts HTML to readable plain text with markdown-style headings.
 func HTMLToText(html string) string {
 	// Replace headings with markdown equivalents.
 	for i := 3; i >= 1; i-- {
 		prefix := strings.Repeat("#", i) + " "
-		openTag := fmt.Sprintf(`<h%d[^>]*>`, i)
-		closeTag := fmt.Sprintf(`</h%d>`, i)
-		re := regexp.MustCompile(openTag + `(.*?)` + closeTag)
+		re := htmlHeadingRes[i-1]
 		html = re.ReplaceAllStringFunc(html, func(match string) string {
 			inner := re.FindStringSubmatch(match)
 			if len(inner) > 1 {
@@ -727,19 +746,13 @@ func HTMLToText(html string) string {
 		})
 	}
 
-	// Replace <p> with double newline.
-	html = regexp.MustCompile(`</?p[^>]*>`).ReplaceAllString(html, "\n")
-	// Replace <br> with newline.
-	html = regexp.MustCompile(`<br\s*/?\s*>`).ReplaceAllString(html, "\n")
-	// Replace <li> with bullet.
-	html = regexp.MustCompile(`<li[^>]*>`).ReplaceAllString(html, "\n- ")
+	html = pTagRe.ReplaceAllString(html, "\n")
+	html = brTagRe.ReplaceAllString(html, "\n")
+	html = liTagRe.ReplaceAllString(html, "\n- ")
 	html = strings.ReplaceAll(html, "</li>", "")
-	// Replace <code> inline.
-	html = regexp.MustCompile(`<code[^>]*>(.*?)</code>`).ReplaceAllString(html, "`$1`")
-	// Replace <pre> blocks.
-	html = regexp.MustCompile(`<pre[^>]*>`).ReplaceAllString(html, "\n```\n")
+	html = codeTagRe.ReplaceAllString(html, "`$1`")
+	html = preTagRe.ReplaceAllString(html, "\n```\n")
 	html = strings.ReplaceAll(html, "</pre>", "\n```\n")
-	// Strip remaining tags.
 	html = stripHTMLTags(html)
 	// Decode common HTML entities.
 	html = strings.ReplaceAll(html, "&amp;", "&")
@@ -748,17 +761,14 @@ func HTMLToText(html string) string {
 	html = strings.ReplaceAll(html, "&quot;", "\"")
 	html = strings.ReplaceAll(html, "&#39;", "'")
 	html = strings.ReplaceAll(html, "&nbsp;", " ")
-	// Collapse multiple blank lines.
-	multiBlank := regexp.MustCompile(`\n{3,}`)
-	html = multiBlank.ReplaceAllString(html, "\n\n")
+	html = multiBlankRe.ReplaceAllString(html, "\n\n")
 
 	return strings.TrimSpace(html)
 }
 
 // stripHTMLTags removes all HTML tags from a string.
 func stripHTMLTags(s string) string {
-	re := regexp.MustCompile(`<[^>]+>`)
-	return strings.TrimSpace(re.ReplaceAllString(s, ""))
+	return strings.TrimSpace(htmlTagRe.ReplaceAllString(s, ""))
 }
 
 // joinLines joins a slice of lines into a single string.

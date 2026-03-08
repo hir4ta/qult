@@ -1,5 +1,10 @@
 # alfred
 
+[![Version](https://img.shields.io/github/v/tag/hir4ta/claude-alfred?label=version&sort=semver)](https://github.com/hir4ta/claude-alfred/releases)
+[![Go](https://img.shields.io/badge/go-%3E%3D1.25-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![MIT License](https://img.shields.io/github/license/hir4ta/claude-alfred)](https://github.com/hir4ta/claude-alfred/blob/main/LICENSE)
+[![Release](https://img.shields.io/github/actions/workflow/status/hir4ta/claude-alfred/release.yml?label=release)](https://github.com/hir4ta/claude-alfred/releases)
+
 Your silent butler for Claude Code.
 
 Works silently in the background — surfacing relevant knowledge, catching scope violations, and preserving session context across compactions — so you can focus on building.
@@ -131,40 +136,89 @@ Run automatically during Claude Code lifecycle. No user action needed.
 
 ## Architecture
 
+### System Overview
+
+```mermaid
+graph TB
+    subgraph CC["Claude Code Session"]
+        direction TB
+        subgraph Hooks["Hooks (automatic)"]
+            SS["SessionStart"]
+            PC["PreCompact"]
+            PTU["PreToolUse"]
+            UPS["UserPromptSubmit"]
+            SE["SessionEnd"]
+        end
+        subgraph MCP["MCP Tools (on demand)"]
+            K["knowledge"]
+            CR["config-review"]
+            SP["spec"]
+            RC["recall"]
+        end
+    end
+
+    subgraph Storage["Storage Layer"]
+        DB[("SQLite\nalfred.db")]
+        FS[".alfred/specs/\n{task-slug}/"]
+    end
+
+    subgraph External["External"]
+        VA["Voyage AI\n(optional)"]
+        Docs["code.claude.com\n/docs"]
+    end
+
+    SS -->|"CLAUDE.md ingest\n+ spec recovery\n+ memory hints\n+ auto-crawl"| DB
+    PC -->|"transcript → decisions\n+ modified files\n+ Next Steps update"| FS
+    PC -->|"async embed"| VA
+    PTU -->|".claude/ access\nreminder"| CC
+    UPS -->|"FTS keyword\ninjection"| DB
+    SE -->|"session summary\n→ memory"| DB
+    K & CR -->|"hybrid search\n(vector + FTS + rerank)"| DB
+    SP -->|"init / update\n/ status / switch"| FS
+    RC -->|"search / save"| DB
+    DB <-->|"embeddings"| VA
+    DB <-.->|"auto-crawl\n(background)"| Docs
+
+    style CC fill:#1a1a2e,stroke:#7571F9,color:#fff
+    style Hooks fill:#16213e,stroke:#04B575,color:#fff
+    style MCP fill:#16213e,stroke:#7571F9,color:#fff
+    style Storage fill:#0f3460,stroke:#e94560,color:#fff
+    style External fill:#1a1a2e,stroke:#626262,color:#aaa
 ```
-┌──────────────────────────────────────────────────┐
-│              Claude Code Session                  │
-│                                                  │
-│  Hooks (automatic)                                │
-│  ├ SessionStart → CLAUDE.md ingest               │
-│  │                + spec context injection        │
-│  │                + past memory hints             │
-│  │                + auto-crawl check              │
-│  ├ PreCompact  → session.md auto-save            │
-│  │               (decisions + modified files)     │
-│  │               + decision memory persistence    │
-│  │               + Next Steps auto-update         │
-│  │               + async embedding                │
-│  ├ PreToolUse  → .claude/ access reminder         │
-│  ├ UserPromptSubmit → FTS injection + memory      │
-│  └ SessionEnd  → session summary → memory         │
-│                                                  │
-│  MCP Tools (on demand)                            │
-│  ├ knowledge / config-review                      │
-│  ├ spec (init/update/status/switch/delete)         │
-│  └ recall (memory search/save)                    │
-│                                                  │
-│  Alfred Protocol Flow                             │
-│  spec(init) → .alfred/specs/add-auth/             │
-│  (4 files + DB sync)                              │
-│        ↓                                         │
-│  Compact → PreCompact auto-saves                  │
-│  (transcript extraction + decision detection      │
-│   + git modified files → activeContext format)     │
-│        ↓                                         │
-│  SessionStart(compact) → adaptive recovery        │
-│  (1st: all 4 files / 2nd+: session.md only)       │
-└──────────────────────────────────────────────────┘
+
+### Alfred Protocol Lifecycle
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant CC as Claude Code
+    participant H as Hooks
+    participant S as .alfred/specs/
+    participant DB as SQLite
+
+    Note over U,DB: Task Start
+    U->>CC: /alfred:plan my-feature
+    CC->>S: spec(init) → 4 files
+    CC->>DB: sync docs + embeddings
+
+    Note over U,DB: Normal Work
+    U->>CC: coding...
+    H->>DB: UserPromptSubmit → FTS inject
+
+    Note over U,DB: Compact Occurs
+    CC->>H: PreCompact trigger
+    H->>S: extract decisions + modified files
+    H->>DB: persist decisions as memory
+    H-->>CC: emit compaction instructions
+
+    Note over U,DB: Post-Compact Recovery
+    CC->>H: SessionStart(compact)
+    H->>S: read session.md
+    H-->>CC: inject context (adaptive depth)
+
+    Note over U,DB: Session End
+    CC->>H: SessionEnd
+    H->>DB: save session summary as memory
 ```
 
 ### Alfred Protocol File Structure

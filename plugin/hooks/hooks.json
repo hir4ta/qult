@@ -50,6 +50,18 @@
         ]
       }
     ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook Stop",
+            "statusMessage": "alfred: saving session memory...",
+            "timeout": 3,
+            "type": "command"
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [

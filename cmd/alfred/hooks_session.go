@@ -535,8 +535,8 @@ func crawlLockPath() string {
 
 // lockFileExists reports whether the lock file exists at all.
 // Used as a fast pre-check before the more expensive isCrawlRunning (signal 0).
-// Catches the transient "spawning" state where the file exists but contains
-// no valid PID yet (isCrawlRunning would incorrectly return false).
+// Catches the brief window between lock creation and process start where
+// isCrawlRunning might not yet detect the process.
 func lockFileExists(lockPath string) bool {
 	_, err := os.Stat(lockPath)
 	return err == nil
@@ -592,18 +592,20 @@ func spawnCrawlAsync() {
 		debugf("spawnCrawlAsync: lock acquire failed (concurrent session?): %v", err)
 		return
 	}
-	_, _ = f.WriteString("spawning")
-	_ = f.Close()
 
 	cmd := execCommand(exe, "crawl-async")
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	if err := cmd.Start(); err != nil {
+		_ = f.Close()
 		_ = os.Remove(lockPath)
 		debugf("spawnCrawlAsync: start error: %v", err)
 		return
 	}
 	pid := cmd.Process.Pid
+	// Write actual PID immediately so isCrawlRunning() can detect the process.
+	_, _ = fmt.Fprintf(f, "%d", pid)
+	_ = f.Close()
 	_ = cmd.Process.Release()
 	notifyUser("refreshing knowledge base in background (pid=%d)", pid)
 	debugf("spawnCrawlAsync: spawned pid=%d", pid)
@@ -638,7 +640,7 @@ func runCrawlAsync() error {
 
 	// Crawl fresh docs from live sources (with conditional requests).
 	debugf("crawl-async: starting live crawl")
-	sf, crawlStats, err := install.Crawl(nil, st)
+	sf, crawlStats, err := install.Crawl(ctx, nil, st)
 	if sf == nil {
 		return fmt.Errorf("crawl-async: crawl failed: %w", err)
 	}

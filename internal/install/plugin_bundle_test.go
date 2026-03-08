@@ -49,13 +49,13 @@ func TestBundle(t *testing.T) {
 			t.Fatal("hooks key missing or wrong type")
 		}
 
-		for _, event := range []string{"SessionStart", "PreCompact", "PreToolUse", "UserPromptSubmit", "SessionEnd"} {
+		for _, event := range []string{"SessionStart", "PreCompact", "PreToolUse", "UserPromptSubmit", "SessionEnd", "Stop"} {
 			if _, ok := hooks[event]; !ok {
 				t.Errorf("missing event: %s", event)
 			}
 		}
-		if len(hooks) != 5 {
-			t.Errorf("expected 5 hook events, got %d", len(hooks))
+		if len(hooks) != 6 {
+			t.Errorf("expected 6 hook events, got %d", len(hooks))
 		}
 
 		// Verify PreToolUse has correct matcher.

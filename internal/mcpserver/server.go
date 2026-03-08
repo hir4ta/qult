@@ -139,8 +139,8 @@ Response (delete confirm): {"task_slug", "deleted_files", "deleted_db_docs"}`),
 				mcp.WithDescription(`Memory search and save — your persistent memory across sessions.
 
 Actions:
-- search (default): Search past memories — decisions, session summaries, saved notes
-- save: Save a new memory entry for future retrieval
+- search (default): Search past memories — decisions, session summaries, saved notes (READ-ONLY, idempotent)
+- save: Save a new memory entry for future retrieval (WRITE, not idempotent)
 
 Memories persist permanently and are searchable across projects. Use for:
 - "Have I worked on something like this before?"
@@ -151,6 +151,7 @@ Response (search): {"query", "results": [{"section_path", "content", "url"}], "c
 Response (save): {"status", "id", "url", "section_path"}`),
 				mcp.WithTitleAnnotation("Memory Recall"),
 				mcp.WithReadOnlyHintAnnotation(false),
+				mcp.WithIdempotentHintAnnotation(false),
 				mcp.WithOpenWorldHintAnnotation(false),
 				mcp.WithString("action", mcp.Description("Action: 'search' (default) or 'save'"), mcp.Required()),
 				mcp.WithString("query", mcp.Description("Search query (required for search)")),

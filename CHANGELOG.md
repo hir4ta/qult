@@ -7,6 +7,31 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.60.3] - 2026-03-08
+
+### Fixed
+- **Critical**: `RecordFeedback` SQL injection pattern — replaced `fmt.Sprintf` column interpolation with two literal SQL statements
+- **Critical**: `memory prune` orphaned embeddings — new `DeleteMemoriesBefore` method cleans docs + embeddings + doc_feedback in a single transaction
+- `readFileTail` double file open / defer double-close — use `io.ReadAll(f)` on small-file path
+- `spawnCrawlAsync` lock file wrote "spawning" placeholder instead of actual PID
+- `lockFileExists` stale comment referencing removed "spawning" state
+- `CountDocsBySourceTypeAndAge` returned `int` instead of `int64` (inconsistent with other count methods)
+
+### Changed
+- 12 regexps in `HTMLToText`/`stripJSX`/`extractHTMLTitle`/`stripHTMLTags` moved to package-level `var` (compiled once, not per-call)
+- Store abstraction: `memory.go`, `export.go`, `status.go` no longer use `st.DB()` directly — new Store methods: `CountDocsBySourceType`, `CountDocsBySourceTypeAndAge`, `ListMemoriesBefore`, `DeleteMemoriesBefore`, `MemoryStatsByProject`, `QueryDocsBySourceType`
+- `QueryDocsBySourceType` uses `DocOrderBy` typed enum instead of raw string for ORDER BY clause
+- `Crawl()` accepts `context.Context` for cancellation propagation to HTTP requests
+- `sync.Once` vocab cache replaced with `sync.Mutex` + `bool` for safe `ResetVocabCache` in tests
+- `spec` file name extraction uses `strings.TrimSuffix` instead of byte-length arithmetic
+- `recall` MCP tool: added `IdempotentHintAnnotation`, description clarifies READ/WRITE per action
+- `Stop` hook registered in plugin bundle hooks.json for backward compatibility with older Claude Code versions
+- `alfred.md` rule: added `description` frontmatter field
+
+### Added
+- README badges: version (dynamic from GitHub tag), Go version, license, release workflow status
+- README Architecture section: Mermaid diagrams (system overview + Alfred Protocol lifecycle sequence)
+
 ## [0.60.2] - 2026-03-08
 
 ### Fixed
@@ -362,7 +387,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - PreCompact hook with transcript analysis
 - Decision extraction from conversation transcripts
 
-[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.60.2...HEAD
+[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.60.3...HEAD
+[0.60.3]: https://github.com/hir4ta/claude-alfred/compare/v0.60.2...v0.60.3
 [0.60.2]: https://github.com/hir4ta/claude-alfred/compare/v0.60.1...v0.60.2
 [0.60.1]: https://github.com/hir4ta/claude-alfred/compare/v0.60.0...v0.60.1
 [0.60.0]: https://github.com/hir4ta/claude-alfred/compare/v0.59.0...v0.60.0

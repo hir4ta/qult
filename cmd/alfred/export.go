@@ -39,47 +39,36 @@ func runExport() error {
 	}
 
 	// Export memories.
-	rows, err := st.DB().QueryContext(ctx,
-		`SELECT url, section_path, content, source_type, crawled_at
-		 FROM docs WHERE source_type = 'memory' ORDER BY crawled_at DESC`)
+	memories, err := st.QueryDocsBySourceType(ctx, store.SourceMemory, store.OrderByCrawledAtDesc)
 	if err != nil {
 		return fmt.Errorf("query memories: %w", err)
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var d exportDoc
-		if err := rows.Scan(&d.URL, &d.SectionPath, &d.Content, &d.SourceType, &d.CrawledAt); err != nil {
-			debugf("export: scan memory: %v", err)
-			continue
-		}
-		data.Memories = append(data.Memories, d)
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate memories: %w", err)
+	for _, d := range memories {
+		data.Memories = append(data.Memories, exportDoc{
+			URL:         d.URL,
+			SectionPath: d.SectionPath,
+			Content:     d.Content,
+			SourceType:  d.SourceType,
+			CrawledAt:   d.CrawledAt,
+		})
 	}
 
 	// Export specs (if --all flag).
 	for _, arg := range os.Args[2:] {
 		if arg == "--all" {
-			specRows, err := st.DB().QueryContext(ctx,
-				`SELECT url, section_path, content, source_type, crawled_at
-				 FROM docs WHERE source_type = 'spec' ORDER BY url`)
+			specs, err := st.QueryDocsBySourceType(ctx, store.SourceSpec, store.OrderByURL)
 			if err != nil {
 				return fmt.Errorf("query specs: %w", err)
 			}
-			for specRows.Next() {
-				var d exportDoc
-				if err := specRows.Scan(&d.URL, &d.SectionPath, &d.Content, &d.SourceType, &d.CrawledAt); err != nil {
-					debugf("export: scan spec: %v", err)
-					continue
-				}
-				data.Specs = append(data.Specs, d)
+			for _, d := range specs {
+				data.Specs = append(data.Specs, exportDoc{
+					URL:         d.URL,
+					SectionPath: d.SectionPath,
+					Content:     d.Content,
+					SourceType:  d.SourceType,
+					CrawledAt:   d.CrawledAt,
+				})
 			}
-			if err := specRows.Err(); err != nil {
-				specRows.Close()
-				return fmt.Errorf("iterate specs: %w", err)
-			}
-			specRows.Close()
 			break
 		}
 	}

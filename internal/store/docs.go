@@ -301,16 +301,17 @@ func (s *Store) RecordInjection(ctx context.Context, docIDs []int64) error {
 
 // RecordFeedback increments the positive or negative hit count for a doc.
 func (s *Store) RecordFeedback(ctx context.Context, docID int64, positive bool) error {
-	col := "negative_hits"
-	if positive {
-		col = "positive_hits"
-	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.ExecContext(ctx, fmt.Sprintf(`
-		UPDATE doc_feedback SET %s = %s + 1, last_feedback = ?
-		WHERE doc_id = ?`, col, col),
-		now, docID,
-	)
+	var err error
+	if positive {
+		_, err = s.db.ExecContext(ctx, `
+			UPDATE doc_feedback SET positive_hits = positive_hits + 1, last_feedback = ?
+			WHERE doc_id = ?`, now, docID)
+	} else {
+		_, err = s.db.ExecContext(ctx, `
+			UPDATE doc_feedback SET negative_hits = negative_hits + 1, last_feedback = ?
+			WHERE doc_id = ?`, now, docID)
+	}
 	return err
 }
 
@@ -604,5 +605,159 @@ func parseSourceTypes(s string) []string {
 		}
 	}
 	return types
+}
+
+// CountDocsBySourceType returns the number of documents with the given source type.
+func (s *Store) CountDocsBySourceType(ctx context.Context, sourceType string) (int64, error) {
+	var count int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM docs WHERE source_type = ?`, sourceType).Scan(&count)
+	return count, err
+}
+
+// CountDocsBySourceTypeAndAge returns the number of documents with the given
+// source type whose crawled_at is before the cutoff time.
+func (s *Store) CountDocsBySourceTypeAndAge(ctx context.Context, sourceType, cutoff string) (int64, error) {
+	var count int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM docs WHERE source_type = ? AND crawled_at < ?`,
+		sourceType, cutoff).Scan(&count)
+	return count, err
+}
+
+// MemoryListItem represents a memory entry for display purposes.
+type MemoryListItem struct {
+	SectionPath string
+	CrawledAt   string
+}
+
+// ListMemoriesBefore returns memory entries older than the cutoff, up to limit.
+func (s *Store) ListMemoriesBefore(ctx context.Context, cutoff string, limit int) ([]MemoryListItem, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT section_path, crawled_at FROM docs
+		 WHERE source_type = 'memory' AND crawled_at < ?
+		 ORDER BY crawled_at ASC LIMIT ?`, cutoff, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MemoryListItem
+	for rows.Next() {
+		var item MemoryListItem
+		if rows.Scan(&item.SectionPath, &item.CrawledAt) == nil {
+			items = append(items, item)
+		}
+	}
+	return items, rows.Err()
+}
+
+// DeleteMemoriesBefore removes memory docs older than cutoff along with their
+// embeddings and doc_feedback in a single transaction.
+func (s *Store) DeleteMemoriesBefore(ctx context.Context, cutoff string) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("store: begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Delete associated embeddings first.
+	_, err = tx.ExecContext(ctx,
+		`DELETE FROM embeddings WHERE source = 'docs' AND source_id IN (
+			SELECT id FROM docs WHERE source_type = 'memory' AND crawled_at < ?)`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("store: delete memory embeddings: %w", err)
+	}
+
+	// Best-effort: clean doc_feedback for these docs.
+	_, _ = tx.ExecContext(ctx,
+		`DELETE FROM doc_feedback WHERE doc_id IN (
+			SELECT id FROM docs WHERE source_type = 'memory' AND crawled_at < ?)`, cutoff)
+
+	res, err := tx.ExecContext(ctx,
+		`DELETE FROM docs WHERE source_type = 'memory' AND crawled_at < ?`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("store: delete memories: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("store: memory delete rows affected: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("store: commit memory delete: %w", err)
+	}
+	return n, nil
+}
+
+// MemoryProjectStat holds per-project memory counts.
+type MemoryProjectStat struct {
+	Project string
+	Count   int
+	Oldest  string
+	Newest  string
+}
+
+// MemoryStatsByProject returns memory counts grouped by project.
+// Pass limit <= 0 for no limit.
+func (s *Store) MemoryStatsByProject(ctx context.Context, limit int) ([]MemoryProjectStat, error) {
+	if limit <= 0 {
+		limit = -1 // SQLite: LIMIT -1 returns all rows
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT SUBSTR(section_path, 1, INSTR(section_path, ' > ')-1) AS project, COUNT(*) AS cnt,
+		        MIN(crawled_at) AS oldest, MAX(crawled_at) AS newest
+		 FROM docs WHERE source_type = 'memory'
+		 GROUP BY project ORDER BY cnt DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var stats []MemoryProjectStat
+	for rows.Next() {
+		var s MemoryProjectStat
+		if rows.Scan(&s.Project, &s.Count, &s.Oldest, &s.Newest) == nil && s.Project != "" {
+			stats = append(stats, s)
+		}
+	}
+	return stats, rows.Err()
+}
+
+// ExportDoc represents a document for export purposes.
+type ExportDoc struct {
+	URL         string
+	SectionPath string
+	Content     string
+	SourceType  string
+	CrawledAt   string
+}
+
+// DocOrderBy defines valid ORDER BY clauses for document queries.
+type DocOrderBy string
+
+const (
+	OrderByCrawledAtDesc DocOrderBy = "crawled_at DESC"
+	OrderByURL           DocOrderBy = "url ASC"
+)
+
+// QueryDocsBySourceType returns all documents of the given source type.
+func (s *Store) QueryDocsBySourceType(ctx context.Context, sourceType string, orderBy DocOrderBy) ([]ExportDoc, error) {
+	if orderBy == "" {
+		orderBy = OrderByCrawledAtDesc
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT url, section_path, content, source_type, crawled_at
+		 FROM docs WHERE source_type = ? ORDER BY `+string(orderBy), sourceType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var docs []ExportDoc
+	for rows.Next() {
+		var d ExportDoc
+		if err := rows.Scan(&d.URL, &d.SectionPath, &d.Content, &d.SourceType, &d.CrawledAt); err != nil {
+			continue
+		}
+		docs = append(docs, d)
+	}
+	return docs, rows.Err()
 }
 

@@ -253,7 +253,7 @@ func readFileTail(path string, n int64) ([]byte, error) {
 
 	size := info.Size()
 	if size <= n {
-		return os.ReadFile(path)
+		return io.ReadAll(f)
 	}
 
 	buf := make([]byte, n)

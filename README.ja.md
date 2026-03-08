@@ -1,5 +1,10 @@
 # alfred
 
+[![Version](https://img.shields.io/github/v/tag/hir4ta/claude-alfred?label=version&sort=semver)](https://github.com/hir4ta/claude-alfred/releases)
+[![Go](https://img.shields.io/badge/go-%3E%3D1.25-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![MIT License](https://img.shields.io/github/license/hir4ta/claude-alfred)](https://github.com/hir4ta/claude-alfred/blob/main/LICENSE)
+[![Release](https://img.shields.io/github/actions/workflow/status/hir4ta/claude-alfred/release.yml?label=release)](https://github.com/hir4ta/claude-alfred/releases)
+
 Claude Code の執事。
 
 バックグラウンドで静かに動き、関連するナレッジを提供し、スコープ違反を検出し、Compact を跨いでセッションコンテキストを保持する。開発に集中できる。
@@ -131,40 +136,89 @@ Claude Code のライフサイクルに応じて自動実行される。ユー�
 
 ## 仕組み
 
+### システム全体像
+
+```mermaid
+graph TB
+    subgraph CC["Claude Code セッション"]
+        direction TB
+        subgraph Hooks["Hook (自動実行)"]
+            SS["SessionStart"]
+            PC["PreCompact"]
+            PTU["PreToolUse"]
+            UPS["UserPromptSubmit"]
+            SE["SessionEnd"]
+        end
+        subgraph MCP["MCP ツール (必要時)"]
+            K["knowledge"]
+            CR["config-review"]
+            SP["spec"]
+            RC["recall"]
+        end
+    end
+
+    subgraph Storage["ストレージ"]
+        DB[("SQLite\nalfred.db")]
+        FS[".alfred/specs/\n{task-slug}/"]
+    end
+
+    subgraph External["外部サービス"]
+        VA["Voyage AI\n(任意)"]
+        Docs["code.claude.com\n/docs"]
+    end
+
+    SS -->|"CLAUDE.md 取込\n+ spec 復帰\n+ メモリ提示\n+ 自動クロール"| DB
+    PC -->|"transcript → 決定抽出\n+ 変更ファイル\n+ Next Steps 更新"| FS
+    PC -->|"非同期 embed"| VA
+    PTU -->|".claude/ アクセス\nリマインダー"| CC
+    UPS -->|"FTS キーワード\n注入"| DB
+    SE -->|"セッション要約\n→ メモリ保存"| DB
+    K & CR -->|"ハイブリッド検索\n(vector + FTS + rerank)"| DB
+    SP -->|"init / update\n/ status / switch"| FS
+    RC -->|"検索 / 保存"| DB
+    DB <-->|"embeddings"| VA
+    DB <-.->|"自動クロール\n(バックグラウンド)"| Docs
+
+    style CC fill:#1a1a2e,stroke:#7571F9,color:#fff
+    style Hooks fill:#16213e,stroke:#04B575,color:#fff
+    style MCP fill:#16213e,stroke:#7571F9,color:#fff
+    style Storage fill:#0f3460,stroke:#e94560,color:#fff
+    style External fill:#1a1a2e,stroke:#626262,color:#aaa
 ```
-┌──────────────────────────────────────────────────┐
-│              Claude Code セッション                │
-│                                                  │
-│  Hook (自動)                                      │
-│  ├ SessionStart → CLAUDE.md 取り込み              │
-│  │                + spec context 注入             │
-│  │                + 過去メモリ提示                 │
-│  │                + 自動クロールチェック             │
-│  ├ PreCompact  → session.md 自動保存             │
-│  │               (決定検出 + 変更ファイル追跡)      │
-│  │               + 決定メモリ永続化                │
-│  │               + Next Steps 自動更新            │
-│  │               + async embedding                │
-│  ├ PreToolUse  → .claude/ アクセスリマインダー     │
-│  ├ UserPromptSubmit → FTS 注入 + メモリ検索       │
-│  └ SessionEnd  → セッション要約 → メモリ保存       │
-│                                                  │
-│  MCP ツール (必要時)                               │
-│  ├ knowledge / config-review                      │
-│  ├ spec (init/update/status/switch/delete)         │
-│  └ recall (メモリ検索・保存)                       │
-│                                                  │
-│  Alfred Protocol フロー                           │
-│  spec(init) → .alfred/specs/add-auth/             │
-│  (4 ファイル生成 + DB 同期)                        │
-│        ↓                                         │
-│  Compact 発生 → PreCompact が自動保存             │
-│  (transcript 抽出 + 決定検出                       │
-│   + git 変更ファイル → activeContext 形式)          │
-│        ↓                                         │
-│  SessionStart(compact) → adaptive 復帰            │
-│  (初回: 全4ファイル / 2回目〜: session.md のみ)     │
-└──────────────────────────────────────────────────┘
+
+### Alfred Protocol ライフサイクル
+
+```mermaid
+sequenceDiagram
+    participant U as ユーザー
+    participant CC as Claude Code
+    participant H as Hook
+    participant S as .alfred/specs/
+    participant DB as SQLite
+
+    Note over U,DB: タスク開始
+    U->>CC: /alfred:plan my-feature
+    CC->>S: spec(init) → 4ファイル生成
+    CC->>DB: ドキュメント同期 + embedding
+
+    Note over U,DB: 通常作業
+    U->>CC: コーディング...
+    H->>DB: UserPromptSubmit → FTS 注入
+
+    Note over U,DB: Compact 発生
+    CC->>H: PreCompact トリガー
+    H->>S: 決定抽出 + 変更ファイル記録
+    H->>DB: 決定をメモリとして永続化
+    H-->>CC: compaction instructions
+
+    Note over U,DB: Compact 後の復帰
+    CC->>H: SessionStart(compact)
+    H->>S: session.md 読み込み
+    H-->>CC: コンテキスト注入 (adaptive)
+
+    Note over U,DB: セッション終了
+    CC->>H: SessionEnd
+    H->>DB: セッション要約をメモリ保存
 ```
 
 ### Alfred Protocol のファイル構成

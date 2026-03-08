@@ -70,10 +70,7 @@ func runMemoryPrune() error {
 	ctx := context.Background()
 	cutoff := time.Now().AddDate(0, 0, -maxAge).Format(time.RFC3339)
 
-	// Count candidates.
-	var count int
-	err = st.DB().QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM docs WHERE source_type = 'memory' AND crawled_at < ?`, cutoff).Scan(&count)
+	count, err := st.CountDocsBySourceTypeAndAge(ctx, store.SourceMemory, cutoff)
 	if err != nil {
 		return fmt.Errorf("count: %w", err)
 	}
@@ -91,41 +88,29 @@ func runMemoryPrune() error {
 		fmt.Printf("Found %s older than %d days:\n\n",
 			warnStyle.Render(fmt.Sprintf("%d memories", count)), maxAge)
 
-		rows, err := st.DB().QueryContext(ctx,
-			`SELECT section_path, crawled_at FROM docs
-			 WHERE source_type = 'memory' AND crawled_at < ?
-			 ORDER BY crawled_at ASC LIMIT 20`, cutoff)
+		items, err := st.ListMemoriesBefore(ctx, cutoff, 20)
 		if err != nil {
-			return fmt.Errorf("query: %w", err)
+			return fmt.Errorf("list: %w", err)
 		}
-		defer rows.Close()
-		for rows.Next() {
-			var path, crawled string
-			if rows.Scan(&path, &crawled) == nil {
-				dateStr := crawled
-				if len(crawled) >= 10 {
-					dateStr = crawled[:10]
-				}
-				fmt.Printf("  %s  %s\n", mutedStyle.Render(dateStr), path)
+		for _, item := range items {
+			dateStr := item.CrawledAt
+			if len(item.CrawledAt) >= 10 {
+				dateStr = item.CrawledAt[:10]
 			}
+			fmt.Printf("  %s  %s\n", mutedStyle.Render(dateStr), item.SectionPath)
 		}
 		if count > 20 {
 			fmt.Printf("  %s\n", mutedStyle.Render(fmt.Sprintf("... and %d more", count-20)))
-		}
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("iterate: %w", err)
 		}
 		fmt.Printf("\nRun with --confirm to delete. Consider 'alfred export' first.\n")
 		return nil
 	}
 
-	// Actually delete.
-	res, err := st.DB().ExecContext(ctx,
-		`DELETE FROM docs WHERE source_type = 'memory' AND crawled_at < ?`, cutoff)
+	// Actually delete (with embedding cleanup).
+	deleted, err := st.DeleteMemoriesBefore(ctx, cutoff)
 	if err != nil {
 		return fmt.Errorf("delete: %w", err)
 	}
-	deleted, _ := res.RowsAffected()
 	fmt.Printf("Deleted %d memories older than %d days.\n", deleted, maxAge)
 	return nil
 }
@@ -139,42 +124,29 @@ func runMemoryStats() error {
 
 	ctx := context.Background()
 
-	var total int64
-	if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM docs WHERE source_type = 'memory'`).Scan(&total); err != nil {
+	total, err := st.CountDocsBySourceType(ctx, store.SourceMemory)
+	if err != nil {
 		return fmt.Errorf("count: %w", err)
 	}
 
 	fmt.Printf("Total memories: %d\n", total)
 
-	rows, err := st.DB().QueryContext(ctx,
-		`SELECT SUBSTR(section_path, 1, INSTR(section_path, ' > ')-1) AS project, COUNT(*) AS cnt,
-		        MIN(crawled_at) AS oldest, MAX(crawled_at) AS newest
-		 FROM docs WHERE source_type = 'memory'
-		 GROUP BY project ORDER BY cnt DESC`)
+	stats, err := st.MemoryStatsByProject(ctx, 0)
 	if err != nil {
 		return fmt.Errorf("query: %w", err)
 	}
-	defer rows.Close()
 
 	fmt.Println()
-	for rows.Next() {
-		var proj string
-		var cnt int
-		var oldest, newest string
-		if rows.Scan(&proj, &cnt, &oldest, &newest) == nil && proj != "" {
-			oldDate := oldest
-			if len(oldest) >= 10 {
-				oldDate = oldest[:10]
-			}
-			newDate := newest
-			if len(newest) >= 10 {
-				newDate = newest[:10]
-			}
-			fmt.Printf("  %-30s %3d memories  (%s — %s)\n", proj, cnt, oldDate, newDate)
+	for _, s := range stats {
+		oldDate := s.Oldest
+		if len(s.Oldest) >= 10 {
+			oldDate = s.Oldest[:10]
 		}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate: %w", err)
+		newDate := s.Newest
+		if len(s.Newest) >= 10 {
+			newDate = s.Newest[:10]
+		}
+		fmt.Printf("  %-30s %3d memories  (%s — %s)\n", s.Project, s.Count, oldDate, newDate)
 	}
 	return nil
 }

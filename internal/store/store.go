@@ -27,7 +27,8 @@ type Store struct {
 	// When > 0, InsertEmbedding validates that vectors match this size.
 	ExpectedDims int
 
-	vocabOnce  sync.Once
+	vocabMu    sync.Mutex
+	vocabReady bool
 	vocabTerms map[string]bool
 }
 

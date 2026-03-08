@@ -69,13 +69,25 @@ func alfredHookEntries(binPath string) map[string]any {
 			},
 		},
 		// SessionEnd: session summary persistence as permanent memory.
-		// Go handler also accepts "Stop" for backward compatibility.
 		"SessionEnd": []any{
 			map[string]any{
 				"hooks": []any{
 					map[string]any{
 						"type":          "command",
 						"command":       binPath + " hook SessionEnd",
+						"statusMessage": "alfred: saving session memory...",
+						"timeout":       3,
+					},
+				},
+			},
+		},
+		// Stop: backward-compat alias for SessionEnd (older Claude Code versions).
+		"Stop": []any{
+			map[string]any{
+				"hooks": []any{
+					map[string]any{
+						"type":          "command",
+						"command":       binPath + " hook Stop",
 						"statusMessage": "alfred: saving session memory...",
 						"timeout":       3,
 					},

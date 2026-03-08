@@ -207,7 +207,7 @@ func specDoStatus(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if err != nil {
 			continue
 		}
-		key := string(f[:len(f)-len(".md")])
+		key := strings.TrimSuffix(string(f), ".md")
 		result[key] = content
 	}
 

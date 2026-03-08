@@ -173,9 +173,12 @@ func (s *Store) CorrectTypos(query string) string {
 
 // loadVocab lazily builds the vocabulary from docs section_paths.
 func (s *Store) loadVocab() map[string]bool {
-	s.vocabOnce.Do(func() {
+	s.vocabMu.Lock()
+	defer s.vocabMu.Unlock()
+	if !s.vocabReady {
 		s.vocabTerms = s.buildVocab()
-	})
+		s.vocabReady = true
+	}
 	return s.vocabTerms
 }
 
@@ -269,6 +272,8 @@ func intAbs(x int) int {
 // ResetVocabCache clears the cached vocabulary, forcing a rebuild on next use.
 // Used in tests to ensure fresh vocabulary after inserting new docs.
 func (s *Store) ResetVocabCache() {
-	s.vocabOnce = sync.Once{}
+	s.vocabMu.Lock()
+	defer s.vocabMu.Unlock()
+	s.vocabReady = false
 	s.vocabTerms = nil
 }

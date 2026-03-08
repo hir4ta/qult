@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"charm.land/lipgloss/v2"
 
@@ -81,16 +80,8 @@ func gatherStatus(verbose bool) statusInfo {
 	info.embedCount, _ = st.CountEmbeddings()
 
 	// Last crawl time.
-	var crawledAt string
-	_ = st.DB().QueryRow(
-		`SELECT crawled_at FROM docs WHERE source_type = 'docs' ORDER BY crawled_at DESC LIMIT 1`,
-	).Scan(&crawledAt)
-	if crawledAt != "" {
-		if t, err := time.Parse(time.RFC3339, crawledAt); err == nil {
-			info.lastCrawl = t.Format("2006-01-02 15:04")
-		} else {
-			info.lastCrawl = crawledAt
-		}
+	if t, err := st.LastCrawledAt(); err == nil {
+		info.lastCrawl = t.Format("2006-01-02 15:04")
 	}
 
 	// Active spec task.
@@ -106,22 +97,12 @@ func gatherStatus(verbose bool) statusInfo {
 		info.specDir = sd.Dir()
 	}
 
-	// Verbose: memory breakdown by project (reuse existing DB connection).
+	// Verbose: memory breakdown by project.
 	if verbose {
-		rows, err := st.DB().QueryContext(ctx,
-			`SELECT SUBSTR(section_path, 1, INSTR(section_path, ' > ')-1) AS project, COUNT(*) AS cnt
-			 FROM docs WHERE source_type = 'memory'
-			 GROUP BY project ORDER BY cnt DESC LIMIT 10`)
-		if err == nil {
-			for rows.Next() {
-				var proj string
-				var cnt int
-				if rows.Scan(&proj, &cnt) == nil && proj != "" {
-					info.memByProject = append(info.memByProject, memoryByProject{proj, cnt})
-				}
+		if stats, err := st.MemoryStatsByProject(ctx, 10); err == nil {
+			for _, s := range stats {
+				info.memByProject = append(info.memByProject, memoryByProject{s.Project, s.Count})
 			}
-			_ = rows.Err() // best effort for display
-			rows.Close()
 		}
 	}
 
