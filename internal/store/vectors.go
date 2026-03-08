@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 )
 
 // CountEmbeddings returns the total number of stored embeddings.
@@ -175,17 +176,13 @@ func (s *Store) HybridSearch(ctx context.Context, queryVec []float32, ftsQuery s
 
 	scores := make(map[int64]float64)
 
-	// Vector search — search each source type's embeddings.
-	vecSources := parseSourceTypes(sourceType)
-	if len(vecSources) == 0 {
-		vecSources = []string{"docs"}
-	}
-	for _, vs := range vecSources {
-		matches, err := s.VectorSearch(ctx, queryVec, vs, overRetrieve)
-		if err == nil {
-			for rank, m := range matches {
-				scores[m.SourceID] += 1.0 / float64(rrfK+rank+1)
-			}
+	// Vector search — all embeddings are stored with source="docs" in the
+	// embeddings table (the "source" column refers to the source table, not
+	// the doc's source_type). Search once with "docs".
+	matches, err := s.VectorSearch(ctx, queryVec, "docs", overRetrieve)
+	if err == nil {
+		for rank, m := range matches {
+			scores[m.SourceID] += 1.0 / float64(rrfK+rank+1)
 		}
 	}
 
@@ -212,9 +209,66 @@ func (s *Store) HybridSearch(ctx context.Context, queryVec []float32, ftsQuery s
 		return candidates[i].RRFScore > candidates[j].RRFScore
 	})
 
+	// Filter by doc source_type when specific types are requested.
+	// Vector results may include docs with non-matching source_types
+	// since all embeddings share source="docs" in the embeddings table.
+	types := parseSourceTypes(sourceType)
+	if len(types) > 0 {
+		candidates = s.filterByDocSourceType(ctx, candidates, types)
+	}
+
 	if len(candidates) > limit {
 		candidates = candidates[:limit]
 	}
 	return candidates, nil
+}
+
+// filterByDocSourceType removes HybridMatch entries whose doc source_type
+// is not in the allowed list. Used after RRF fusion to clean up vector
+// results that don't match the requested source_type filter.
+func (s *Store) filterByDocSourceType(ctx context.Context, candidates []HybridMatch, types []string) []HybridMatch {
+	if len(candidates) == 0 || len(types) == 0 {
+		return candidates
+	}
+	ids := make([]int64, len(candidates))
+	for i, c := range candidates {
+		ids[i] = c.DocID
+	}
+	var qb strings.Builder
+	qb.WriteString("SELECT id, source_type FROM docs WHERE id IN (")
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		if i > 0 {
+			qb.WriteByte(',')
+		}
+		qb.WriteByte('?')
+		args[i] = id
+	}
+	qb.WriteByte(')')
+	rows, err := s.db.QueryContext(ctx, qb.String(), args...)
+	if err != nil {
+		return candidates // fail-open
+	}
+	defer rows.Close()
+
+	allowed := make(map[string]bool, len(types))
+	for _, t := range types {
+		allowed[t] = true
+	}
+	valid := make(map[int64]bool)
+	for rows.Next() {
+		var id int64
+		var st string
+		if rows.Scan(&id, &st) == nil && allowed[st] {
+			valid[id] = true
+		}
+	}
+	filtered := make([]HybridMatch, 0, len(candidates))
+	for _, c := range candidates {
+		if valid[c.DocID] {
+			filtered = append(filtered, c)
+		}
+	}
+	return filtered
 }
 

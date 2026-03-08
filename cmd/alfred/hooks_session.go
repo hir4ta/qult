@@ -614,13 +614,11 @@ func spawnCrawlAsync() {
 // runCrawlAsync is the entry point for the crawl-async subcommand.
 // It fetches fresh documentation and updates the knowledge base.
 func runCrawlAsync() error {
-	// Acquire lock file with our PID.
+	// The parent (spawnCrawlAsync) already created the lock file with our PID
+	// via O_CREATE|O_EXCL. We only need to clean it up on exit.
 	lockPath := crawlLockPath()
 	if lockPath == "" {
 		return fmt.Errorf("crawl-async: cannot determine home directory")
-	}
-	if err := os.WriteFile(lockPath, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
-		return fmt.Errorf("crawl-async: acquire lock: %w", err)
 	}
 	defer os.Remove(lockPath)
 
@@ -671,7 +669,7 @@ func runCrawlAsync() error {
 }
 
 // ---------------------------------------------------------------------------
-// Stop (SessionEnd): session-summary memory persistence
+// SessionEnd: session-summary memory persistence
 // ---------------------------------------------------------------------------
 
 // handleSessionEnd persists a session summary as permanent memory when the

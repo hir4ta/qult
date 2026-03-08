@@ -14,8 +14,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// validSlug matches URL-safe task identifiers: lowercase letters, digits, hyphens.
-var validSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]{0,63}$`)
+// ValidSlug matches URL-safe task identifiers: lowercase letters, digits, hyphens.
+var ValidSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]{0,63}$`)
 
 // SpecFile represents a spec file type.
 type SpecFile string
@@ -93,7 +93,7 @@ func (s *SpecDir) Exists() bool {
 
 // Init creates a new spec directory with template files and sets _active.md.
 func Init(projectPath, taskSlug, description string) (*SpecDir, error) {
-	if !validSlug.MatchString(taskSlug) {
+	if !ValidSlug.MatchString(taskSlug) {
 		return nil, fmt.Errorf("invalid task_slug %q: must be lowercase alphanumeric with hyphens (e.g., 'add-auth')", taskSlug)
 	}
 

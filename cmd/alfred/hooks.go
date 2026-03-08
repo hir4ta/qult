@@ -131,7 +131,7 @@ func runHook(event string) error {
 		timeout = 1500 * time.Millisecond // hooks.json: 2s
 	case "UserPromptSubmit":
 		timeout = 2500 * time.Millisecond // hooks.json: 3s
-	case "Stop", "SessionEnd":
+	case "SessionEnd":
 		timeout = 2500 * time.Millisecond // hooks.json: 3s
 	default:
 		timeout = 5 * time.Second
@@ -150,7 +150,7 @@ func runHook(event string) error {
 		handlePreToolUse(&ev)
 	case "UserPromptSubmit":
 		handleUserPromptSubmit(ctx, &ev)
-	case "Stop", "SessionEnd":
+	case "SessionEnd":
 		handleSessionEnd(ctx, &ev)
 	}
 

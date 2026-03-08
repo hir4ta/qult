@@ -81,19 +81,6 @@ func alfredHookEntries(binPath string) map[string]any {
 				},
 			},
 		},
-		// Stop: backward-compat alias for SessionEnd (older Claude Code versions).
-		"Stop": []any{
-			map[string]any{
-				"hooks": []any{
-					map[string]any{
-						"type":          "command",
-						"command":       binPath + " hook Stop",
-						"statusMessage": "alfred: saving session memory...",
-						"timeout":       3,
-					},
-				},
-			},
-		},
 	}
 }
 

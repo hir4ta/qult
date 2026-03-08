@@ -300,17 +300,25 @@ func (s *Store) RecordInjection(ctx context.Context, docIDs []int64) error {
 }
 
 // RecordFeedback increments the positive or negative hit count for a doc.
+// Uses UPSERT to create the row if it doesn't exist yet (e.g., if
+// RecordInjection was never called for this doc).
 func (s *Store) RecordFeedback(ctx context.Context, docID int64, positive bool) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	var err error
 	if positive {
 		_, err = s.db.ExecContext(ctx, `
-			UPDATE doc_feedback SET positive_hits = positive_hits + 1, last_feedback = ?
-			WHERE doc_id = ?`, now, docID)
+			INSERT INTO doc_feedback (doc_id, positive_hits, negative_hits, last_feedback)
+			VALUES (?, 1, 0, ?)
+			ON CONFLICT(doc_id) DO UPDATE SET
+				positive_hits = positive_hits + 1,
+				last_feedback = excluded.last_feedback`, docID, now)
 	} else {
 		_, err = s.db.ExecContext(ctx, `
-			UPDATE doc_feedback SET negative_hits = negative_hits + 1, last_feedback = ?
-			WHERE doc_id = ?`, now, docID)
+			INSERT INTO doc_feedback (doc_id, positive_hits, negative_hits, last_feedback)
+			VALUES (?, 0, 1, ?)
+			ON CONFLICT(doc_id) DO UPDATE SET
+				negative_hits = negative_hits + 1,
+				last_feedback = excluded.last_feedback`, docID, now)
 	}
 	return err
 }

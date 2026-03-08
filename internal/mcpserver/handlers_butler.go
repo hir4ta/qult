@@ -223,6 +223,9 @@ func specDoSwitch(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if taskSlug == "" {
 		return mcp.NewToolResultError("task_slug is required"), nil
 	}
+	if !spec.ValidSlug.MatchString(taskSlug) {
+		return mcp.NewToolResultError(fmt.Sprintf("invalid task_slug: %q (pattern: ^[a-z0-9][a-z0-9-]{0,63}$)", taskSlug)), nil
+	}
 
 	// Record switch-away in the old primary's session.md
 	oldSlug, _ := spec.ReadActive(projectPath)
@@ -257,6 +260,9 @@ func specDoDelete(ctx context.Context, req mcp.CallToolRequest, st *store.Store)
 	taskSlug := req.GetString("task_slug", "")
 	if taskSlug == "" {
 		return mcp.NewToolResultError("task_slug is required"), nil
+	}
+	if !spec.ValidSlug.MatchString(taskSlug) {
+		return mcp.NewToolResultError(fmt.Sprintf("invalid task_slug: %q (pattern: ^[a-z0-9][a-z0-9-]{0,63}$)", taskSlug)), nil
 	}
 
 	confirm := req.GetBool("confirm", false)

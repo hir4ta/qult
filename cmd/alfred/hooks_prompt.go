@@ -321,23 +321,11 @@ func handleUserPromptSubmit(ctx context.Context, ev *hookEvent) {
 		return
 	}
 
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].score > candidates[j].score
-	})
-
-	// Confidence-based injection: 1 result by default, 2 if top score is high.
-	maxResults := 1
-	if len(candidates) > 1 && candidates[0].score >= highConfidenceThreshold {
-		maxResults = 2
-	}
-	if len(candidates) > maxResults {
-		candidates = candidates[:maxResults]
-	}
-
 	// Implicit feedback: check if previous injection's topic was referenced in this prompt.
 	evaluateInjectionFeedback(ctx, prompt, st)
 
-	// Apply feedback boost to candidate scores (batch query).
+	// Apply feedback boost BEFORE maxResults selection so boosted docs
+	// can be promoted into the top results.
 	boostIDs := make([]int64, len(candidates))
 	for i := range candidates {
 		boostIDs[i] = candidates[i].doc.ID
@@ -351,11 +339,12 @@ func handleUserPromptSubmit(ctx context.Context, ev *hookEvent) {
 			candidates[i].score = max(0, candidates[i].score+b-1.0)
 		}
 	}
+
 	// Re-sort after boost and re-apply threshold.
 	sort.Slice(candidates, func(i, j int) bool {
 		return candidates[i].score > candidates[j].score
 	})
-	filtered := candidates[:0]
+	var filtered []scored
 	for _, c := range candidates {
 		if c.score >= relevanceThreshold {
 			filtered = append(filtered, c)
@@ -365,6 +354,15 @@ func handleUserPromptSubmit(ctx context.Context, ev *hookEvent) {
 	if len(candidates) == 0 {
 		debugf("UserPromptSubmit: no relevant matches after feedback boost")
 		return
+	}
+
+	// Confidence-based injection: 1 result by default, 2 if top score is high.
+	maxResults := 1
+	if len(candidates) > 1 && candidates[0].score >= highConfidenceThreshold {
+		maxResults = 2
+	}
+	if len(candidates) > maxResults {
+		candidates = candidates[:maxResults]
 	}
 
 	var buf strings.Builder
