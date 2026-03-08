@@ -7,6 +7,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.58.2] - 2026-03-08
+
+### Changed
+- Extract `hybridSearchPipeline()` — deduplicate ~50 lines between knowledge search and recall handlers
+- Add `io.LimitReader` to all HTTP response reads (seed_fetch 10MB, voyage errors 64KB, checksums 1MB)
+- Add `DestructiveHintAnnotation(true)` to spec MCP tool (delete action is destructive)
+- Review skill: Glob fallback for code-reviewer agent path resolution in plugin cache
+
 ## [0.58.1] - 2026-03-08
 
 ### Fixed
@@ -271,11 +279,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - PreCompact hook with transcript analysis
 - Decision extraction from conversation transcripts
 
-[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.58.1...HEAD
+[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.58.2...HEAD
 [0.58.1]: https://github.com/hir4ta/claude-alfred/compare/v0.58.0...v0.58.1
 [0.58.0]: https://github.com/hir4ta/claude-alfred/compare/v0.57.0...v0.58.0
 [0.57.0]: https://github.com/hir4ta/claude-alfred/compare/v0.56.1...v0.57.0
 [0.56.1]: https://github.com/hir4ta/claude-alfred/compare/v0.55.0...v0.56.1
+[0.58.2]: https://github.com/hir4ta/claude-alfred/compare/v0.58.1...v0.58.2
 [0.55.0]: https://github.com/hir4ta/claude-alfred/compare/v0.54.4...v0.55.0
 [0.54.4]: https://github.com/hir4ta/claude-alfred/compare/v0.54.3...v0.54.4
 [0.54.3]: https://github.com/hir4ta/claude-alfred/compare/v0.54.2...v0.54.3

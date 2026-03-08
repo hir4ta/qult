@@ -7,6 +7,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
+	"github.com/hir4ta/claude-alfred/internal/embedder"
 	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
@@ -59,6 +60,103 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return string(runes[:maxLen]) + "..."
+}
+
+// hybridSearchResult holds the output of a hybrid search pipeline.
+type hybridSearchResult struct {
+	Docs         []store.DocRow
+	SearchMethod string // "hybrid_rrf+rerank", "hybrid_rrf", or "fts5_only"
+	Warnings     []string
+}
+
+// hybridSearchPipeline runs the 3-stage search: embed → hybrid RRF → rerank,
+// with automatic FTS-only fallback. Shared by knowledge search and recall.
+func hybridSearchPipeline(ctx context.Context, st *store.Store, emb *embedder.Embedder, query, sourceType string, limit, overRetrieve int) hybridSearchResult {
+	var res hybridSearchResult
+	res.SearchMethod = "fts5_only"
+
+	// Stage 0: Embed the query.
+	var queryVec []float32
+	if emb != nil {
+		var embedErr error
+		queryVec, embedErr = emb.EmbedForSearch(ctx, query)
+		if embedErr != nil {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("vector embedding failed, using FTS-only: %v", embedErr))
+		}
+	}
+
+	if queryVec != nil {
+		// Stage 1: Hybrid RRF search (vector + FTS5 combined).
+		matches, hybridErr := st.HybridSearch(ctx, queryVec, query, sourceType, overRetrieve, overRetrieve)
+		if hybridErr != nil {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("hybrid search degraded: %v", hybridErr))
+		}
+		if len(matches) > 0 {
+			ids := make([]int64, len(matches))
+			for i, m := range matches {
+				ids[i] = m.DocID
+			}
+			docs, fetchErr := st.GetDocsByIDs(ctx, ids)
+			if fetchErr != nil {
+				res.Warnings = append(res.Warnings, fmt.Sprintf("doc fetch failed, using FTS-only: %v", fetchErr))
+			} else {
+				// Preserve RRF ordering (GetDocsByIDs may reorder).
+				if len(docs) > 1 {
+					docMap := make(map[int64]store.DocRow, len(docs))
+					for _, d := range docs {
+						docMap[d.ID] = d
+					}
+					ordered := make([]store.DocRow, 0, len(ids))
+					for _, id := range ids {
+						if d, ok := docMap[id]; ok {
+							ordered = append(ordered, d)
+						}
+					}
+					docs = ordered
+				}
+				res.Docs = docs
+				res.SearchMethod = "hybrid_rrf"
+
+				// Stage 2: Rerank via Voyage rerank API.
+				if len(res.Docs) > limit {
+					contents := make([]string, len(res.Docs))
+					for i, d := range res.Docs {
+						contents[i] = d.SectionPath + "\n" + d.Content
+					}
+					reranked, rerankErr := emb.Rerank(ctx, query, contents, limit)
+					if rerankErr != nil {
+						res.Warnings = append(res.Warnings, fmt.Sprintf("rerank failed, using RRF order: %v", rerankErr))
+					} else if len(reranked) > 0 {
+						reorderedDocs := make([]store.DocRow, 0, len(reranked))
+						for _, r := range reranked {
+							if r.Index >= 0 && r.Index < len(res.Docs) {
+								reorderedDocs = append(reorderedDocs, res.Docs[r.Index])
+							}
+						}
+						res.Docs = reorderedDocs
+						res.SearchMethod = "hybrid_rrf+rerank"
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback to FTS-only if no results from hybrid pipeline.
+	if len(res.Docs) == 0 {
+		res.SearchMethod = "fts5_only"
+		docs, err := st.SearchDocsFTS(ctx, query, sourceType, limit)
+		if err != nil {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("FTS search failed: %v", err))
+		} else {
+			res.Docs = docs
+		}
+	}
+
+	// Trim to requested limit.
+	if len(res.Docs) > limit {
+		res.Docs = res.Docs[:limit]
+	}
+	return res
 }
 
 // marshalResult encodes v as JSON and wraps it in an MCP CallToolResult.

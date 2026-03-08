@@ -43,99 +43,20 @@ func docsSearchHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandl
 		}
 		sourceType := req.GetString("source_type", "docs,memory")
 
-		var docs []store.DocRow
-		searchMethod := "hybrid_rrf"
-
-		// Try embedding the query for hybrid search (requires VOYAGE_API_KEY).
-		var queryVec []float32
-		var warnings []string
-		if emb != nil {
-			var embedErr error
-			queryVec, embedErr = emb.EmbedForSearch(ctx, query)
-			if embedErr != nil {
-				warnings = append(warnings, fmt.Sprintf("vector embedding failed, using FTS-only: %v", embedErr))
-			}
+		// Adaptive over-retrieve: short queries are vague, need more candidates.
+		wordCount := len(strings.Fields(query))
+		overRetrieve := limit * overRetrieveMulti
+		if wordCount <= 1 {
+			overRetrieve = limit * overRetrieveSingle
+		}
+		if overRetrieve < overRetrieveMin {
+			overRetrieve = overRetrieveMin
 		}
 
-		if queryVec != nil {
-			// Stage 1: Hybrid RRF search (vector + FTS5 combined).
-			searchMethod = "hybrid_rrf"
-
-			// Adaptive over-retrieve: short queries are vague, need more candidates.
-			wordCount := len(strings.Fields(query))
-			overRetrieve := limit * overRetrieveMulti
-			if wordCount <= 1 {
-				overRetrieve = limit * overRetrieveSingle
-			}
-			if overRetrieve < overRetrieveMin {
-				overRetrieve = overRetrieveMin
-			}
-
-			hybridMatches, err := st.HybridSearch(ctx, queryVec, query, sourceType, overRetrieve, overRetrieve)
-			if err != nil {
-				warnings = append(warnings, fmt.Sprintf("hybrid search degraded: %v", err))
-			}
-
-			if len(hybridMatches) > 0 {
-				ids := make([]int64, len(hybridMatches))
-				for i, m := range hybridMatches {
-					ids[i] = m.DocID
-				}
-				docs, err = st.GetDocsByIDs(ctx, ids)
-				if err != nil {
-					return mcp.NewToolResultError(fmt.Sprintf("failed to retrieve docs: %v", err)), nil
-				}
-
-				// Preserve RRF ordering (GetDocsByIDs may reorder).
-				if len(docs) > 1 {
-					docMap := make(map[int64]store.DocRow, len(docs))
-					for _, d := range docs {
-						docMap[d.ID] = d
-					}
-					ordered := make([]store.DocRow, 0, len(ids))
-					for _, id := range ids {
-						if d, ok := docMap[id]; ok {
-							ordered = append(ordered, d)
-						}
-					}
-					docs = ordered
-				}
-
-				// Stage 2: Rerank via Voyage rerank API.
-				if len(docs) > limit {
-					contents := make([]string, len(docs))
-					for i, d := range docs {
-						contents[i] = d.SectionPath + "\n" + d.Content
-					}
-					reranked, rerankErr := emb.Rerank(ctx, query, contents, limit)
-					if rerankErr != nil {
-						warnings = append(warnings, fmt.Sprintf("rerank failed, using RRF order: %v", rerankErr))
-					} else if len(reranked) > 0 {
-						reorderedDocs := make([]store.DocRow, 0, len(reranked))
-						for _, r := range reranked {
-							if r.Index >= 0 && r.Index < len(docs) {
-								reorderedDocs = append(reorderedDocs, docs[r.Index])
-							}
-						}
-						docs = reorderedDocs
-						searchMethod = "hybrid_rrf+rerank"
-					}
-				}
-
-				// Trim to requested limit.
-				if len(docs) > limit {
-					docs = docs[:limit]
-				}
-			}
-		} else {
-			// FTS5-only fallback (no embedder available or embed failed).
-			searchMethod = "fts5_only"
-			var ftsErr error
-			docs, ftsErr = st.SearchDocsFTS(ctx, query, sourceType, limit)
-			if ftsErr != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("FTS search failed: %v", ftsErr)), nil
-			}
-		}
+		sr := hybridSearchPipeline(ctx, st, emb, query, sourceType, limit, overRetrieve)
+		docs := sr.Docs
+		searchMethod := sr.SearchMethod
+		warnings := sr.Warnings
 
 		// Build response with freshness metadata.
 		docResults := make([]map[string]any, 0, len(docs))

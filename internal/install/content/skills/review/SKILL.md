@@ -19,9 +19,12 @@ aggregation, output format, and guardrails) exactly as documented there.
 
 ## Steps
 
-1. **Read the code-reviewer agent definition** at `.claude/agents/code-reviewer.md` to get the full review protocol
+1. **Read the code-reviewer agent definition** to get the full review protocol
    (review dimensions, LLM blind spot checklists, output format, guardrails).
-   If the file is missing, use the inline fallback checklists in Step 2 below.
+   Try these paths in order: `.claude/agents/code-reviewer.md`, then search with
+   `Glob("**/agents/code-reviewer.md")` to find it in plugin cache.
+   If the file cannot be found, proceed with general review expertise — each
+   sub-reviewer should apply their domain knowledge without the structured checklist.
 2. **Context Gathering**: Call `spec` (action=status), run `git diff`, `git log`
 3. **Parallel Review**: Spawn 3 sub-reviewer agents as specified in the code-reviewer protocol
 4. **Aggregation**: Deduplicate, validate, prioritize, cap at 15 findings

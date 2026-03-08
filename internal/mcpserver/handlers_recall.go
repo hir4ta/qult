@@ -46,85 +46,15 @@ func recallSearch(ctx context.Context, st *store.Store, emb *embedder.Embedder, 
 		limit = 100
 	}
 
-	var docs []store.DocRow
-	searchMethod := "fts5_only"
-	var warnings []string
-
-	// Try hybrid search if embedder is available.
-	if emb != nil {
-		queryVec, embedErr := emb.EmbedForSearch(ctx, query)
-		if embedErr != nil {
-			warnings = append(warnings, fmt.Sprintf("vector embedding failed, using FTS-only: %v", embedErr))
-		} else if queryVec != nil {
-			overRetrieve := limit * 4
-			if overRetrieve < 20 {
-				overRetrieve = 20
-			}
-			matches, hybridErr := st.HybridSearch(ctx, queryVec, query, store.SourceMemory, overRetrieve, overRetrieve)
-			if hybridErr != nil {
-				warnings = append(warnings, fmt.Sprintf("hybrid search degraded: %v", hybridErr))
-			} else if len(matches) > 0 {
-				ids := make([]int64, len(matches))
-				for i, m := range matches {
-					ids[i] = m.DocID
-				}
-				fetchedDocs, fetchErr := st.GetDocsByIDs(ctx, ids)
-				if fetchErr != nil {
-					warnings = append(warnings, fmt.Sprintf("doc fetch failed, using FTS-only: %v", fetchErr))
-				} else {
-					// Preserve RRF ordering.
-					docMap := make(map[int64]store.DocRow, len(fetchedDocs))
-					for _, d := range fetchedDocs {
-						docMap[d.ID] = d
-					}
-					ordered := make([]store.DocRow, 0, len(ids))
-					for _, id := range ids {
-						if d, ok := docMap[id]; ok {
-							ordered = append(ordered, d)
-						}
-					}
-					docs = ordered
-					searchMethod = "hybrid_rrf"
-
-					// Rerank if we have enough candidates.
-					if len(docs) > limit {
-						contents := make([]string, len(docs))
-						for i, d := range docs {
-							contents[i] = d.SectionPath + "\n" + d.Content
-						}
-						reranked, rerankErr := emb.Rerank(ctx, query, contents, limit)
-						if rerankErr != nil {
-							warnings = append(warnings, fmt.Sprintf("rerank failed, using RRF order: %v", rerankErr))
-						} else if len(reranked) > 0 {
-							reorderedDocs := make([]store.DocRow, 0, len(reranked))
-							for _, r := range reranked {
-								if r.Index >= 0 && r.Index < len(docs) {
-									reorderedDocs = append(reorderedDocs, docs[r.Index])
-								}
-							}
-							docs = reorderedDocs
-							searchMethod = "hybrid_rrf+rerank"
-						}
-					}
-				}
-			}
-		}
+	overRetrieve := limit * 4
+	if overRetrieve < 20 {
+		overRetrieve = 20
 	}
 
-	// Fallback to FTS-only.
-	if len(docs) == 0 {
-		searchMethod = "fts5_only"
-		var err error
-		docs, err = st.SearchDocsFTS(ctx, query, store.SourceMemory, limit)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("memory search failed: %v", err)), nil
-		}
-	}
-
-	// Trim to limit.
-	if len(docs) > limit {
-		docs = docs[:limit]
-	}
+	sr := hybridSearchPipeline(ctx, st, emb, query, store.SourceMemory, limit, overRetrieve)
+	docs := sr.Docs
+	searchMethod := sr.SearchMethod
+	warnings := sr.Warnings
 
 	results := make([]map[string]any, 0, len(docs))
 	for _, d := range docs {

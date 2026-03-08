@@ -195,9 +195,7 @@ func (c *voyageClient) doEmbed(ctx context.Context, payload []byte) ([][]float32
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		respBody, _ := io.ReadAll(resp.Body)
-		// Always include raw response body for debugging.
-		// Try to extract detail field if present, but append raw body too.
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10)) // 64 KB cap for error responses
 		raw := string(respBody)
 		var errResp voyageErrorResponse
 		if json.Unmarshal(respBody, &errResp) == nil && errResp.Detail != "" {
@@ -327,7 +325,7 @@ func (c *voyageClient) doRerank(ctx context.Context, payload []byte) ([]RerankRe
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10)) // 64 KB cap for error responses
 		raw := string(respBody)
 		var errResp voyageErrorResponse
 		if json.Unmarshal(respBody, &errResp) == nil && errResp.Detail != "" {

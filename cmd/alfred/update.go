@@ -348,7 +348,7 @@ func fetchExpectedChecksum(checksumURL, archiveName string) (string, error) {
 	if resp.StatusCode != 200 {
 		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1 MB cap for checksums.txt
 	if err != nil {
 		return "", err
 	}
