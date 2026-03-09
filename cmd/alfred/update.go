@@ -16,6 +16,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/stopwatch"
 	"charm.land/lipgloss/v2"
 )
 
@@ -74,7 +75,7 @@ type updateModel struct {
 	method    string // "brew", "download", "go"
 	err       error
 	spinner   spinner.Model
-	startTime time.Time
+	stopwatch stopwatch.Model
 }
 
 func newUpdateModel() updateModel {
@@ -84,12 +85,12 @@ func newUpdateModel() updateModel {
 		phase:     updateChecking,
 		current:   resolvedVersion(),
 		spinner:   s,
-		startTime: time.Now(),
+		stopwatch: stopwatch.New(stopwatch.WithInterval(time.Second)),
 	}
 }
 
 func (m updateModel) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, checkLatestVersion)
+	return tea.Batch(m.spinner.Tick, m.stopwatch.Start(), checkLatestVersion)
 }
 
 func (m updateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -103,12 +104,12 @@ func (m updateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.phase = updateError
 			m.err = msg.err
-			return m, tea.Quit
+			return m, tea.Sequence(m.stopwatch.Stop(), tea.Quit)
 		}
 		m.latest = msg.version
 		if m.latest == m.current {
 			m.phase = updateUpToDate
-			return m, tea.Quit
+			return m, tea.Sequence(m.stopwatch.Stop(), tea.Quit)
 		}
 		m.phase = updateInstalling
 		return m, doInstall(m.latest)
@@ -117,10 +118,15 @@ func (m updateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.phase = updateError
 			m.err = msg.err
-			return m, tea.Quit
+			return m, tea.Sequence(m.stopwatch.Stop(), tea.Quit)
 		}
 		m.phase = updateDone
-		return m, tea.Quit
+		return m, tea.Sequence(m.stopwatch.Stop(), tea.Quit)
+
+	case stopwatch.TickMsg, stopwatch.StartStopMsg, stopwatch.ResetMsg:
+		var cmd tea.Cmd
+		m.stopwatch, cmd = m.stopwatch.Update(msg)
+		return m, cmd
 
 	case spinner.TickMsg:
 		if m.phase == updateChecking || m.phase == updateInstalling {
@@ -135,6 +141,7 @@ func (m updateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m updateModel) View() tea.View {
+	h := newHelp()
 	var b strings.Builder
 
 	b.WriteString("\n")
@@ -163,7 +170,6 @@ func (m updateModel) View() tea.View {
 		b.WriteString(fmt.Sprintf("  Installing %s\n", m.spinner.View()))
 
 	case updateDone:
-		elapsed := time.Since(m.startTime).Round(time.Second)
 		b.WriteString(fmt.Sprintf("  %s %s %s %s\n",
 			nameStyle.Render("alfred"),
 			dimStyle.Render(m.current),
@@ -171,7 +177,7 @@ func (m updateModel) View() tea.View {
 			verStyle.Render(m.latest)))
 		b.WriteString(fmt.Sprintf("  %s (%s)\n",
 			doneStyle.Render("✓ Updated"),
-			elapsed))
+			m.stopwatch.View()))
 
 	case updateError:
 		b.WriteString(fmt.Sprintf("  %s %v\n",
@@ -179,6 +185,9 @@ func (m updateModel) View() tea.View {
 	}
 
 	b.WriteString("\n")
+	if m.phase == updateChecking || m.phase == updateInstalling {
+		b.WriteString("  " + h.View(simpleKeyMap{keyForceQuit}) + "\n")
+	}
 	return tea.NewView(b.String())
 }
 

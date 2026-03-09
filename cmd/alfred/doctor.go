@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/bubbles/v2/table"
 	"charm.land/lipgloss/v2"
 
 	"github.com/hir4ta/claude-alfred/internal/embedder"
@@ -18,18 +20,111 @@ type checkResult struct {
 	message string
 }
 
-func runDoctor() error {
+type doctorModel struct {
+	table table.Model
+	fails int
+	warns int
+}
+
+func newDoctorModel() doctorModel {
+	checks := runChecks()
+
+	okStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575"))
+	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB627"))
+	failStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4672"))
+
+	var rows []table.Row
+	var fails, warns int
+	for _, c := range checks {
+		var icon string
+		switch c.status {
+		case "ok":
+			icon = okStyle.Render("✓ ok")
+		case "warn":
+			icon = warnStyle.Render("⚠ warn")
+			warns++
+		case "fail":
+			icon = failStyle.Render("✗ fail")
+			fails++
+		}
+		rows = append(rows, table.Row{icon, c.name, c.message})
+	}
+
+	columns := []table.Column{
+		{Title: "Status", Width: 10},
+		{Title: "Check", Width: 16},
+		{Title: "Details", Width: 40},
+	}
+
+	t := table.New(
+		table.WithColumns(columns),
+		table.WithRows(rows),
+		table.WithFocused(true),
+		table.WithHeight(len(rows)),
+	)
+
+	s := table.DefaultStyles()
+	s.Header = s.Header.
+		Bold(true).
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderBottom(true).
+		BorderForeground(lipgloss.Color("#626262"))
+	s.Selected = s.Selected.
+		Foreground(lipgloss.Color("229")).
+		Background(lipgloss.Color("57")).
+		Bold(false)
+	t.SetStyles(s)
+
+	return doctorModel{table: t, fails: fails, warns: warns}
+}
+
+func (m doctorModel) Init() tea.Cmd { return nil }
+
+func (m doctorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		switch msg.String() {
+		case "q", "ctrl+c", "esc":
+			return m, tea.Quit
+		}
+	}
+	var cmd tea.Cmd
+	m.table, cmd = m.table.Update(msg)
+	return m, cmd
+}
+
+func (m doctorModel) View() tea.View {
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7571F9"))
-	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
 	okStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575"))
 	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB627"))
 	failStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4672"))
 
 	var b strings.Builder
-	b.WriteString("\n")
-	b.WriteString("  " + headerStyle.Render("alfred doctor") + "\n")
-	b.WriteString("  " + mutedStyle.Render(strings.Repeat("─", 42)) + "\n\n")
+	b.WriteString("\n  " + headerStyle.Render("alfred doctor") + "\n\n")
+	b.WriteString("  " + m.table.View() + "\n\n")
 
+	// Summary.
+	if m.fails > 0 {
+		b.WriteString("  " + failStyle.Render(fmt.Sprintf("%d issue(s) need attention", m.fails)))
+		if m.warns > 0 {
+			b.WriteString(", " + warnStyle.Render(fmt.Sprintf("%d warning(s)", m.warns)))
+		}
+		b.WriteString("\n")
+	} else if m.warns > 0 {
+		b.WriteString("  " + warnStyle.Render(fmt.Sprintf("%d warning(s), no critical issues", m.warns)) + "\n")
+	} else {
+		b.WriteString("  " + okStyle.Render("All checks passed") + "\n")
+	}
+
+	b.WriteString("\n")
+	h := newHelp()
+	b.WriteString("  " + h.View(simpleKeyMap{keyUp, keyDown, keyQuit}) + "\n")
+
+	return tea.NewView(b.String())
+}
+
+// runChecks gathers all diagnostic check results.
+func runChecks() []checkResult {
 	var checks []checkResult
 
 	// 1. DB exists & opens.
@@ -148,45 +243,11 @@ func runDoctor() error {
 		checks = append(checks, checkResult{"Config dir", "warn", "~/.claude-alfred/ not found"})
 	}
 
-	// Render results.
-	for _, c := range checks {
-		var icon string
-		switch c.status {
-		case "ok":
-			icon = okStyle.Render("[ok]  ")
-		case "warn":
-			icon = warnStyle.Render("[warn]")
-		case "fail":
-			icon = failStyle.Render("[fail]")
-		}
-		b.WriteString(fmt.Sprintf("  %s %-16s %s\n", icon, c.name, mutedStyle.Render(c.message)))
-	}
+	return checks
+}
 
-	// Summary.
-	fails := 0
-	warns := 0
-	for _, c := range checks {
-		switch c.status {
-		case "fail":
-			fails++
-		case "warn":
-			warns++
-		}
-	}
-	b.WriteString("\n")
-	if fails > 0 {
-		b.WriteString("  " + failStyle.Render(fmt.Sprintf("%d issue(s) need attention", fails)))
-		if warns > 0 {
-			b.WriteString(", " + warnStyle.Render(fmt.Sprintf("%d warning(s)", warns)))
-		}
-		b.WriteString("\n")
-	} else if warns > 0 {
-		b.WriteString("  " + warnStyle.Render(fmt.Sprintf("%d warning(s), no critical issues", warns)) + "\n")
-	} else {
-		b.WriteString("  " + okStyle.Render("All checks passed") + "\n")
-	}
-
-	b.WriteString("\n")
-	fmt.Print(b.String())
-	return nil
+func runDoctor() error {
+	m := newDoctorModel()
+	_, err := tea.NewProgram(m).Run()
+	return err
 }

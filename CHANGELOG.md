@@ -7,6 +7,25 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.63.0] - 2026-03-09
+
+### Added
+- **Bubbles TUI overhaul**: integrate 8 Charm Bubbles components across all interactive screens
+- `table.Model` for `alfred doctor` (navigable check results) and `alfred analytics` (structured feedback/injection tables)
+- `list.Model` for `alfred settings` — replaces manual cursor management with built-in navigation, filtering, and help
+- `viewport.Model` for `alfred analytics` — scrollable output with mouse wheel support
+- `paginator.Model` for `alfred memory prune` — paginated preview (10/page, dot indicators) instead of 20-item cutoff
+- `stopwatch.Model` for `alfred init` and `alfred update` — replaces manual `time.Since` + tick scheduling
+- `help.Model` + `key.Binding` across all TUI screens — unified keybinding hints replacing hand-written strings
+- `keys.go`: shared key bindings (`keyQuit`, `keyEnter`, `keyUp`, etc.) and `simpleKeyMap` helper
+
+### Changed
+- `alfred doctor` and `alfred analytics` are now interactive Bubble Tea programs (previously static `fmt.Print`)
+- `alfred memory prune` default mode is now interactive with paginator (use `--confirm` for non-interactive delete)
+
+### Fixed
+- `DeleteMemoriesBefore` in memory prune was called synchronously inside Bubble Tea `Update()`, blocking the event loop — now dispatched as async `tea.Cmd`
+
 ## [0.62.0] - 2026-03-09
 
 ### Added
@@ -446,7 +465,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - PreCompact hook with transcript analysis
 - Decision extraction from conversation transcripts
 
-[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.62.0...HEAD
+[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.63.0...HEAD
+[0.63.0]: https://github.com/hir4ta/claude-alfred/compare/v0.62.0...v0.63.0
 [0.62.0]: https://github.com/hir4ta/claude-alfred/compare/v0.61.1...v0.62.0
 [0.61.1]: https://github.com/hir4ta/claude-alfred/compare/v0.61.0...v0.61.1
 [0.61.0]: https://github.com/hir4ta/claude-alfred/compare/v0.60.3...v0.61.0

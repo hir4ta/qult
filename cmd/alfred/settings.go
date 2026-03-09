@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
 )
@@ -20,20 +21,22 @@ const (
 	settingsSaved
 )
 
-// settingsItem represents a menu entry.
-type settingsItem struct {
+// settingEntry implements list.DefaultItem for the settings list.
+type settingEntry struct {
 	label string
-	key   string
+	envKey string
 	value string
 }
 
+func (s settingEntry) Title() string       { return s.label }
+func (s settingEntry) Description() string { return s.value }
+func (s settingEntry) FilterValue() string { return s.label }
+
 type settingsModel struct {
 	phase    settingsPhase
-	items    []settingsItem
-	cursor   int
+	list     list.Model
 	input    textinput.Model
 	editKey  string
-	saved    bool
 	err      error
 	quitting bool
 }
@@ -47,13 +50,21 @@ func newSettingsModel() settingsModel {
 	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	maskedKey := maskAPIKey(voyageKey)
 
-	items := []settingsItem{
-		{label: "Voyage API Key", key: "VOYAGE_API_KEY", value: maskedKey},
+	items := []list.Item{
+		settingEntry{label: "Voyage API Key", envKey: "VOYAGE_API_KEY", value: maskedKey},
 	}
+
+	delegate := list.NewDefaultDelegate()
+	l := list.New(items, delegate, 50, 10)
+	l.Title = "⚙  alfred settings"
+	l.Styles.Title = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7571F9"))
+	l.SetFilteringEnabled(false)
+	l.SetShowStatusBar(false)
+	l.DisableQuitKeybindings()
 
 	return settingsModel{
 		phase: settingsMenu,
-		items: items,
+		list:  l,
 		input: ti,
 	}
 }
@@ -73,26 +84,20 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "ctrl+c", "q", "esc":
 				m.quitting = true
 				return m, tea.Quit
-			case "up", "k":
-				if m.cursor > 0 {
-					m.cursor--
-				}
-			case "down", "j":
-				if m.cursor < len(m.items)-1 {
-					m.cursor++
-				}
 			case "enter":
-				m.phase = settingsEditKey
-				m.editKey = m.items[m.cursor].key
-				m.input.SetValue("")
-				if m.editKey == "VOYAGE_API_KEY" {
-					m.input.EchoMode = textinput.EchoPassword
-					m.input.Placeholder = "sk-voyage-..."
-				} else {
-					m.input.EchoMode = textinput.EchoNormal
+				if item, ok := m.list.SelectedItem().(settingEntry); ok {
+					m.phase = settingsEditKey
+					m.editKey = item.envKey
+					m.input.SetValue("")
+					if m.editKey == "VOYAGE_API_KEY" {
+						m.input.EchoMode = textinput.EchoPassword
+						m.input.Placeholder = "sk-voyage-..."
+					} else {
+						m.input.EchoMode = textinput.EchoNormal
+					}
+					return m, m.input.Focus()
 				}
-				m.input.Focus()
-				return m, m.input.Focus()
+
 			}
 
 		case settingsEditKey:
@@ -112,11 +117,20 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				os.Setenv(m.editKey, val)
-				m.items[m.cursor].value = maskAPIKey(val)
+				// Update the list item with new masked value.
+				idx := m.list.Index()
+				if item, ok := m.list.Items()[idx].(settingEntry); ok {
+					item.value = maskAPIKey(val)
+					cmd := m.list.SetItem(idx, item)
+					m.phase = settingsSaved
+					return m, tea.Sequence(cmd, tea.Quit)
+				}
 				m.phase = settingsSaved
 				return m, tea.Quit
 			}
 		}
+	case tea.WindowSizeMsg:
+		m.list.SetSize(msg.Width, msg.Height)
 	}
 
 	if m.phase == settingsEditKey {
@@ -125,50 +139,40 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	return m, nil
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
 }
 
 func (m settingsModel) View() tea.View {
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7571F9"))
-	labelStyle := lipgloss.NewStyle().Width(22)
-	valStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
-	selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#7571F9")).Bold(true)
 	okStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575"))
 	errStyleLocal := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4672"))
 	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
+	labelStyle := lipgloss.NewStyle().Width(22)
 
 	var b strings.Builder
 
-	b.WriteString("\n  " + headerStyle.Render("⚙  alfred settings") + "\n\n")
-
 	switch m.phase {
 	case settingsMenu:
-		for i, item := range m.items {
-			cursor := "  "
-			label := labelStyle.Render(item.label)
-			val := valStyle.Render(item.value)
-			if item.value == "(not set)" {
-				val = errStyleLocal.Render(item.value)
-			}
-			if i == m.cursor {
-				cursor = selectedStyle.Render("▸ ")
-				label = selectedStyle.Render(fmt.Sprintf("%-22s", item.label))
-			}
-			b.WriteString("  " + cursor + label + " " + val + "\n")
-		}
-		b.WriteString("\n")
+		b.WriteString(m.list.View())
 		if m.err != nil {
-			b.WriteString("  " + errStyleLocal.Render("✗ Error: "+m.err.Error()) + "\n\n")
+			b.WriteString("\n  " + errStyleLocal.Render("✗ Error: "+m.err.Error()) + "\n")
 		}
-		b.WriteString("  " + hintStyle.Render("↑↓ navigate · enter edit · q quit") + "\n\n")
 
 	case settingsEditKey:
+		headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7571F9"))
+		b.WriteString("\n  " + headerStyle.Render("⚙  alfred settings") + "\n\n")
 		b.WriteString("  " + labelStyle.Render(m.editKey) + "\n\n")
 		b.WriteString("  " + m.input.View() + "\n\n")
-		b.WriteString("  " + hintStyle.Render("enter save · esc cancel") + "\n\n")
+		h := newHelp()
+		enterKey := keyEnter
+		enterKey.SetHelp("enter", "save")
+		escKey := keyEsc
+		escKey.SetHelp("esc", "cancel")
+		b.WriteString("  " + h.View(simpleKeyMap{enterKey, escKey}) + "\n\n")
 
 	case settingsSaved:
-		b.WriteString("  " + okStyle.Render("✓ Saved") + "\n")
+		b.WriteString("\n  " + okStyle.Render("✓ Saved") + "\n")
 		b.WriteString("  " + hintStyle.Render("Value written to shell profile. Restart your terminal or run:") + "\n")
 		b.WriteString("  " + hintStyle.Render("  source ~/.zshrc") + "\n\n")
 	}

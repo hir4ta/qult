@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/progress"
 	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/stopwatch"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
 
@@ -27,7 +28,6 @@ type (
 		result install.SeedResult
 		err    error
 	}
-	tickMsg time.Time
 )
 
 type setupPhase int
@@ -47,17 +47,17 @@ type setupModel struct {
 	docsDone  int
 	embedTot  int
 	embedDone int
-	startTime time.Time
 	err       error
 	result    install.SeedResult
 	ftsOnly   bool // skip embeddings
 
-	keyInput textinput.Model
-	spinner  spinner.Model
-	progress progress.Model
-	cancel      context.CancelFunc
-	keyReady    chan struct{}   // closed when key prompt is resolved
-	keyClosed   *atomic.Bool   // guards double-close
+	keyInput  textinput.Model
+	spinner   spinner.Model
+	progress  progress.Model
+	stopwatch stopwatch.Model
+	cancel    context.CancelFunc
+	keyReady  chan struct{} // closed when key prompt is resolved
+	keyClosed *atomic.Bool  // guards double-close
 }
 
 var (
@@ -81,6 +81,8 @@ func newSetupModel(hasKey bool) setupModel {
 	ti.CharLimit = 256
 	ti.EchoMode = textinput.EchoPassword
 
+	sw := stopwatch.New(stopwatch.WithInterval(time.Second))
+
 	phase := phaseKeyPrompt
 	keyReady := make(chan struct{})
 	keyClosed := &atomic.Bool{}
@@ -92,10 +94,10 @@ func newSetupModel(hasKey bool) setupModel {
 
 	return setupModel{
 		phase:     phase,
-		startTime: time.Now(),
 		spinner:   s,
 		progress:  p,
 		keyInput:  ti,
+		stopwatch: sw,
 		keyReady:  keyReady,
 		keyClosed: keyClosed,
 	}
@@ -107,9 +109,7 @@ func (m setupModel) Init() tea.Cmd {
 	}
 	return tea.Batch(
 		m.spinner.Tick,
-		tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
-			return tickMsg(t)
-		}),
+		m.stopwatch.Start(),
 	)
 }
 
@@ -136,28 +136,22 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.ftsOnly = true
 				}
 				m.phase = phaseInit
-				m.startTime = time.Now()
 				if m.keyClosed.CompareAndSwap(false, true) {
-				close(m.keyReady)
-			}
+					close(m.keyReady)
+				}
 				return m, tea.Batch(
 					m.spinner.Tick,
-					tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
-						return tickMsg(t)
-					}),
+					m.stopwatch.Start(),
 				)
 			case "esc":
 				m.ftsOnly = true
 				m.phase = phaseInit
-				m.startTime = time.Now()
 				if m.keyClosed.CompareAndSwap(false, true) {
-				close(m.keyReady)
-			}
+					close(m.keyReady)
+				}
 				return m, tea.Batch(
 					m.spinner.Tick,
-					tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
-						return tickMsg(t)
-					}),
+					m.stopwatch.Start(),
 				)
 			}
 		}
@@ -195,12 +189,12 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.phase = phaseDone
 		m.result = msg.result
 		cmd := m.progress.SetPercent(1.0)
-		return m, tea.Sequence(cmd, tea.Quit)
+		return m, tea.Sequence(cmd, m.stopwatch.Stop(), tea.Quit)
 
-	case tickMsg:
-		return m, tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
-			return tickMsg(t)
-		})
+	case stopwatch.TickMsg, stopwatch.StartStopMsg, stopwatch.ResetMsg:
+		var cmd tea.Cmd
+		m.stopwatch, cmd = m.stopwatch.Update(msg)
+		return m, cmd
 
 	case spinner.TickMsg:
 		if m.phase == phaseInit || m.phase == phaseSeeding {
@@ -226,8 +220,8 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m setupModel) View() tea.View {
+	h := newHelp()
 	var b strings.Builder
-	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
 
 	b.WriteString("\n  " + titleStyle.Render("⚡ alfred init") + "\n\n")
 
@@ -235,12 +229,13 @@ func (m setupModel) View() tea.View {
 	if m.phase == phaseKeyPrompt {
 		b.WriteString("  Voyage API Key (for semantic search + reranking):\n\n")
 		b.WriteString("  " + m.keyInput.View() + "\n\n")
-		b.WriteString("  " + hintStyle.Render("enter confirm · esc skip (FTS-only mode)") + "\n")
-		b.WriteString("  " + hintStyle.Render("Get a key at https://dash.voyageai.com/") + "\n\n")
+		b.WriteString("  " + dimStyle.Render("Get a key at https://dash.voyageai.com/") + "\n\n")
+		keys := simpleKeyMap{keyEnter, keyEsc}
+		b.WriteString("  " + h.View(keys) + "\n")
 		return tea.NewView(b.String())
 	}
 
-	elapsed := time.Since(m.startTime).Round(time.Second)
+	elapsed := m.stopwatch.View()
 
 	// FTS-only mode banner.
 	if m.ftsOnly {
@@ -315,8 +310,10 @@ func (m setupModel) View() tea.View {
 		b.WriteString(fmt.Sprintf("  %s %v\n\n",
 			errStyle.Render("✗ Error:"), m.err))
 	} else {
-		b.WriteString(fmt.Sprintf("  %s\n",
-			dimStyle.Render(fmt.Sprintf("%s elapsed", elapsed))))
+		b.WriteString(fmt.Sprintf("  %s\n\n",
+			dimStyle.Render(elapsed+" elapsed")))
+		keys := simpleKeyMap{keyForceQuit}
+		b.WriteString("  " + h.View(keys) + "\n")
 	}
 
 	return tea.NewView(b.String())
