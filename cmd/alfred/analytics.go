@@ -74,8 +74,6 @@ func buildAnalyticsContent() (string, error) {
 	ctx := context.Background()
 
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7571F9"))
-	okStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575"))
-	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4672"))
 
 	var b strings.Builder
 
@@ -95,8 +93,8 @@ func buildAnalyticsContent() (string, error) {
 	}
 	feedbackRows := []table.Row{
 		{"Docs tracked", fmt.Sprintf("%d", fs.TotalTracked)},
-		{"Positive signals", okStyle.Render(fmt.Sprintf("+%d", fs.TotalPositive))},
-		{"Negative signals", warnStyle.Render(fmt.Sprintf("-%d", fs.TotalNegative))},
+		{"Positive signals", fmt.Sprintf("+%d", fs.TotalPositive)},
+		{"Negative signals", fmt.Sprintf("-%d", fs.TotalNegative)},
 		{"Boosted docs", fmt.Sprintf("%d", fs.BoostedCount)},
 		{"Penalized docs", fmt.Sprintf("%d", fs.PenalizedCount)},
 	}
@@ -152,7 +150,7 @@ func buildAnalyticsContent() (string, error) {
 			net := d.Positive - d.Negative
 			boostRows = append(boostRows, table.Row{
 				truncateStr(d.SectionPath, 34),
-				okStyle.Render(fmt.Sprintf("+%d/-%d net=%d", d.Positive, d.Negative, net)),
+				fmt.Sprintf("+%d/-%d net=%d", d.Positive, d.Negative, net),
 				fmt.Sprintf("%.2f", d.BoostFactor),
 			})
 		}
@@ -183,7 +181,7 @@ func buildAnalyticsContent() (string, error) {
 			net := d.Positive - d.Negative
 			penRows = append(penRows, table.Row{
 				truncateStr(d.SectionPath, 34),
-				warnStyle.Render(fmt.Sprintf("+%d/-%d net=%d", d.Positive, d.Negative, net)),
+				fmt.Sprintf("+%d/-%d net=%d", d.Positive, d.Negative, net),
 				fmt.Sprintf("%.2f", d.BoostFactor),
 			})
 		}

@@ -29,31 +29,27 @@ type doctorModel struct {
 func newDoctorModel() doctorModel {
 	checks := runChecks()
 
-	okStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575"))
-	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB627"))
-	failStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4672"))
-
 	var rows []table.Row
 	var fails, warns int
 	for _, c := range checks {
 		var icon string
 		switch c.status {
 		case "ok":
-			icon = okStyle.Render("✓ ok")
+			icon = "✓ ok"
 		case "warn":
-			icon = warnStyle.Render("⚠ warn")
+			icon = "⚠ warn"
 			warns++
 		case "fail":
-			icon = failStyle.Render("✗ fail")
+			icon = "✗ fail"
 			fails++
 		}
 		rows = append(rows, table.Row{icon, c.name, c.message})
 	}
 
 	columns := []table.Column{
-		{Title: "Status", Width: 10},
+		{Title: "Status", Width: 8},
 		{Title: "Check", Width: 16},
-		{Title: "Details", Width: 40},
+		{Title: "Details", Width: 44},
 	}
 
 	t := table.New(

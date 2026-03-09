@@ -7,6 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.63.1] - 2026-03-10
+
+### Fixed
+- Table cells in `alfred doctor` and `alfred analytics` were blank due to ANSI escape codes in cell values breaking width calculation — use plain text in cells instead
+
 ## [0.63.0] - 2026-03-09
 
 ### Added
@@ -465,7 +470,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - PreCompact hook with transcript analysis
 - Decision extraction from conversation transcripts
 
-[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.63.0...HEAD
+[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.63.1...HEAD
+[0.63.1]: https://github.com/hir4ta/claude-alfred/compare/v0.63.0...v0.63.1
 [0.63.0]: https://github.com/hir4ta/claude-alfred/compare/v0.62.0...v0.63.0
 [0.62.0]: https://github.com/hir4ta/claude-alfred/compare/v0.61.1...v0.62.0
 [0.61.1]: https://github.com/hir4ta/claude-alfred/compare/v0.61.0...v0.61.1
