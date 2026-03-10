@@ -7,6 +7,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.63.9] - 2026-03-10
+
+### Fixed
+- `review` skill: removed invalid `disallowed-tools` frontmatter field (not supported in skill YAML; `allowed-tools` whitelist already enforces read-only)
+- `best-practices.md`: added `model` to documented optional skill frontmatter fields
+
+### Changed
+- `configure` skill: explicit `model: sonnet` (cost optimization)
+- `refine` skill: explicit `model: sonnet` (cost optimization)
+- `help` skill: explicit `model: sonnet` (cost optimization)
+
 ## [0.63.8] - 2026-03-10
 
 ### Added
@@ -575,7 +586,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - PreCompact hook with transcript analysis
 - Decision extraction from conversation transcripts
 
-[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.63.8...HEAD
+[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.63.9...HEAD
+[0.63.9]: https://github.com/hir4ta/claude-alfred/compare/v0.63.8...v0.63.9
 [0.63.8]: https://github.com/hir4ta/claude-alfred/compare/v0.63.7...v0.63.8
 [0.63.7]: https://github.com/hir4ta/claude-alfred/compare/v0.63.6...v0.63.7
 [0.63.6]: https://github.com/hir4ta/claude-alfred/compare/v0.63.5...v0.63.6

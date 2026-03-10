@@ -7,6 +7,7 @@ description: >
 user-invocable: true
 argument-hint: "<type> [name]"
 context: current
+model: sonnet
 allowed-tools: Read, Write, Edit, Glob, Agent, AskUserQuestion, mcp__plugin_alfred_alfred__knowledge
 ---
 

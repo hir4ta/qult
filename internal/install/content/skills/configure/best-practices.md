@@ -15,7 +15,7 @@ Reference material for the configure skill. Loaded on demand, not injected into 
 ## Skills (SKILL.md)
 
 Required frontmatter: `name`, `description`
-Optional: `user-invocable`, `allowed-tools`, `context`, `agent`, `argument-hint`
+Optional: `user-invocable`, `allowed-tools`, `model`, `context`, `agent`, `argument-hint`
 
 - Keep skills focused — one skill, one purpose
 - Use `context: fork` for heavy exploration/review skills
