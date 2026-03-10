@@ -456,6 +456,7 @@ func runEmbedAsync() error {
 	if err != nil {
 		return fmt.Errorf("embedder: %w", err)
 	}
+	st.ExpectedDims = emb.Dims()
 
 	sd := &spec.SpecDir{ProjectPath: projectPath, TaskSlug: taskSlug}
 	sf := spec.SpecFile(fileName)
@@ -501,10 +502,19 @@ func asyncEmbedDocs(docIDs []int64) {
 	}
 	cmd := execCommand(exe, args...)
 	cmd.Stdout = nil
-	cmd.Stderr = nil
+	// Route child stderr to a log file so failures are diagnosable without ALFRED_DEBUG.
+	logW := asyncEmbedLogWriter()
+	cmd.Stderr = logW
 	if err := cmd.Start(); err != nil {
+		if logW != nil {
+			logW.Close()
+		}
 		debugf("asyncEmbedDocs: start error: %v", err)
 		return
+	}
+	// Close parent's copy — the child inherited its own fd via fork/exec.
+	if logW != nil {
+		logW.Close()
 	}
 	pid := cmd.Process.Pid
 	_ = cmd.Process.Release()
@@ -543,6 +553,7 @@ func runEmbedDoc() error {
 	if err != nil {
 		return fmt.Errorf("embedder: %w", err)
 	}
+	st.ExpectedDims = emb.Dims()
 
 	docs, err := st.GetDocsByIDs(context.Background(), docIDs)
 	if err != nil {

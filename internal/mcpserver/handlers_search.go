@@ -41,6 +41,9 @@ func docsSearchHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandl
 		if limit < 1 {
 			limit = 5
 		}
+		if limit > 100 {
+			limit = 100
+		}
 		sourceType := req.GetString("source_type", "docs,memory")
 
 		// Adaptive over-retrieve: short queries are vague, need more candidates.

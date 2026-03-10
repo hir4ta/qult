@@ -7,6 +7,22 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.63.5] - 2026-03-10
+
+### Fixed
+- Spec file locking: expanded retry budget from 3×100ms to 5×200ms to handle concurrent hook invocations (PreCompact + SessionEnd overlap)
+- Vector dimension validation: `Store.ExpectedDims` now set in production (`runServe`, `runEmbedAsync`, `runEmbedDoc`) — previously test-only, dimension mismatches went undetected
+- Async embed subprocess stderr was discarded (`nil`) — now routed to `~/.claude-alfred/embed-errors.log` for failure diagnosis without `ALFRED_DEBUG`
+- `asyncEmbedLogWriter`: parent fd leaked after `cmd.Start()` — now closed after child inherits; added `MkdirAll` for first-run reliability
+- `isVoyageTransient`: `"internal error"` and `"capacity"` patterns were too broad — narrowed to `"internal server error"` and `"over capacity"` to avoid retrying permanent 400 client errors
+- Recall `validProject` regex duplicated `spec.ValidSlug` — replaced with `spec.ValidSlug.MatchString()` to eliminate divergence risk
+
+### Changed
+- Recall limit cap (100) now emits a `warning` field instead of silently truncating
+- Knowledge search (`handlers_search.go`) now caps `limit` at 100 for consistency with recall
+- Hook timeout comments clarified: `"hooks.json: 5s"` → `"500ms headroom before 5s external timeout"` (no logic change)
+- `isVoyageTransient`: added `"service unavailable"` pattern for broader transient error coverage
+
 ## [0.63.4] - 2026-03-10
 
 ### Fixed
@@ -508,7 +524,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - PreCompact hook with transcript analysis
 - Decision extraction from conversation transcripts
 
-[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.63.4...HEAD
+[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.63.5...HEAD
+[0.63.5]: https://github.com/hir4ta/claude-alfred/compare/v0.63.4...v0.63.5
 [0.63.4]: https://github.com/hir4ta/claude-alfred/compare/v0.63.3...v0.63.4
 [0.63.3]: https://github.com/hir4ta/claude-alfred/compare/v0.63.2...v0.63.3
 [0.63.2]: https://github.com/hir4ta/claude-alfred/compare/v0.63.1...v0.63.2

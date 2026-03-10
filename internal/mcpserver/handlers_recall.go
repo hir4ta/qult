@@ -3,7 +3,6 @@ package mcpserver
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -11,16 +10,9 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/hir4ta/claude-alfred/internal/embedder"
+	"github.com/hir4ta/claude-alfred/internal/spec"
 	"github.com/hir4ta/claude-alfred/internal/store"
 )
-
-// validProject matches safe project names: lowercase letters, digits, hyphens.
-// Consistent with spec.ValidSlug to prevent path traversal and section_path parsing issues.
-var validProject = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]{0,63}$`)
-
-func isValidProject(s string) bool {
-	return validProject.MatchString(s)
-}
 
 // recallHandler provides memory-specific search and save operations.
 // Unlike the general "knowledge" tool, recall focuses on user memories:
@@ -51,8 +43,10 @@ func recallSearch(ctx context.Context, st *store.Store, emb *embedder.Embedder, 
 	if limit < 1 {
 		limit = 10
 	}
+	limitCapped := false
 	if limit > 100 {
 		limit = 100
+		limitCapped = true
 	}
 
 	overRetrieve := limit * 4
@@ -84,6 +78,9 @@ func recallSearch(ctx context.Context, st *store.Store, emb *embedder.Embedder, 
 		"count":         len(results),
 		"search_method": searchMethod,
 	}
+	if limitCapped {
+		warnings = append(warnings, "limit capped to 100 (maximum allowed)")
+	}
 	if len(warnings) > 0 {
 		result["warning"] = strings.Join(warnings, "; ")
 	}
@@ -103,7 +100,7 @@ func recallSave(ctx context.Context, st *store.Store, req mcp.CallToolRequest) (
 	project := req.GetString("project", "general")
 
 	// Validate project name to prevent path traversal and section_path parsing issues.
-	if !isValidProject(project) {
+	if !spec.ValidSlug.MatchString(project) {
 		return mcp.NewToolResultError("invalid project name: use lowercase letters, digits, and hyphens only (max 64 chars)"), nil
 	}
 

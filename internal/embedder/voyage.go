@@ -118,6 +118,9 @@ func isVoyageTransient(detail string) bool {
 		"model is overloaded", // potential future pattern
 		"temporarily",         // generic transient indicator
 		"try again",           // generic retry suggestion
+		"service unavailable",  // generic 503-like in body
+		"internal server error", // server-side failure (scoped to avoid matching client validation errors)
+		"over capacity",        // capacity-related transient failures
 	} {
 		if strings.Contains(lower, pattern) {
 			return true

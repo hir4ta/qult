@@ -56,6 +56,24 @@ func closeDebugWriter() {
 	}
 }
 
+// asyncEmbedLogWriter returns a writer for background embed subprocess stderr.
+// Logs to ~/.claude-alfred/embed-errors.log so failures are diagnosable without
+// ALFRED_DEBUG. Returns nil (discard) if the log file cannot be opened.
+func asyncEmbedLogWriter() *os.File {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	dir := filepath.Join(home, ".claude-alfred")
+	_ = os.MkdirAll(dir, 0o755)
+	logPath := filepath.Join(dir, "embed-errors.log")
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil
+	}
+	return f
+}
+
 // hookEvent is the minimal structure of a Claude Code hook stdin payload.
 // Fields are populated depending on the event type:
 //   - SessionStart: ProjectPath, Source, TranscriptPath
@@ -121,20 +139,21 @@ func runHook(event string) error {
 	}
 	debugf("hook project=%s", ev.ProjectPath)
 
-	// Internal context timeout per hook event, slightly under Claude Code's
-	// external timeout to allow graceful cleanup before SIGTERM.
+	// Internal context timeout per hook event.
+	// Set 500ms under Claude Code's external timeout (hooks.json) to allow
+	// graceful cleanup before SIGTERM.
 	var timeout time.Duration
 	switch event {
 	case "SessionStart":
-		timeout = 4500 * time.Millisecond // hooks.json: 5s
+		timeout = 4500 * time.Millisecond // 500ms headroom before 5s external timeout
 	case "PreCompact":
-		timeout = 9 * time.Second // hooks.json: 10s
+		timeout = 9 * time.Second // 1s headroom before 10s external timeout
 	case "PreToolUse":
-		timeout = 1500 * time.Millisecond // hooks.json: 2s
+		timeout = 1500 * time.Millisecond // 500ms headroom before 2s external timeout
 	case "UserPromptSubmit":
-		timeout = 2500 * time.Millisecond // hooks.json: 3s
+		timeout = 2500 * time.Millisecond // 500ms headroom before 3s external timeout
 	case "SessionEnd":
-		timeout = 2500 * time.Millisecond // hooks.json: 3s
+		timeout = 2500 * time.Millisecond // 500ms headroom before 3s external timeout
 	default:
 		timeout = 5 * time.Second
 	}

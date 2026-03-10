@@ -214,14 +214,23 @@ func asyncEmbedSession(sd *spec.SpecDir) {
 		"--task", sd.TaskSlug,
 		"--file", string(spec.FileSession))
 	cmd.Stdout = nil
-	cmd.Stderr = nil
+	// Route child stderr to a log file so failures are diagnosable without ALFRED_DEBUG.
+	logW := asyncEmbedLogWriter()
+	cmd.Stderr = logW
 	// Detach the child process so it runs independently.
 	// The hook handler exits shortly after; the OS reparents the child to init.
 	// No goroutine needed — cmd.Wait() is intentionally not called.
 	if err := cmd.Start(); err != nil {
+		if logW != nil {
+			logW.Close()
+		}
 		fmt.Fprintf(os.Stderr, "[alfred] warning: async embed failed: %v\n", err)
 		debugf("asyncEmbedSession: start error: %v", err)
 		return
+	}
+	// Close parent's copy — the child inherited its own fd via fork/exec.
+	if logW != nil {
+		logW.Close()
 	}
 	debugf("asyncEmbedSession: spawned pid=%d for %s/%s", cmd.Process.Pid, sd.TaskSlug, spec.FileSession)
 	_ = cmd.Process.Release()

@@ -209,20 +209,23 @@ func (s *SpecDir) ReadFile(f SpecFile) (string, error) {
 
 // lockSpecDir acquires an advisory flock on a .lock file in the spec directory.
 // Returns the lock file handle (caller must defer unlock+close) or an error.
-// Uses non-blocking lock with 3 retries (100ms apart) to avoid deadlock.
+// Uses non-blocking lock with 5 retries (200ms apart, 1s total) to handle
+// concurrent hook invocations (e.g., PreCompact + SessionEnd overlap).
+// Note: 1s worst-case consumes ~40% of SessionEnd's 2.5s budget; callers
+// fall back to unprotected write if the lock times out.
 func (s *SpecDir) lockSpecDir() (*os.File, error) {
 	lockPath := filepath.Join(s.Dir(), ".lock")
 	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("open lock file: %w", err)
 	}
-	for attempt := range 3 {
+	for attempt := range 5 {
 		err = syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if err == nil {
 			return lf, nil
 		}
-		if attempt < 2 {
-			time.Sleep(100 * time.Millisecond)
+		if attempt < 4 {
+			time.Sleep(200 * time.Millisecond)
 		}
 	}
 	lf.Close()
