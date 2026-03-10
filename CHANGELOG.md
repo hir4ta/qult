@@ -7,6 +7,15 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.63.10] - 2026-03-10
+
+### Fixed
+- MCP content size limit, vector early-stop, chapter TTL, plan context fork, transient error detection
+- `FeedbackBoostBatch`: added `rows.Err()` check to prevent silent partial results
+- `debugWriter`: added `fsync` before close to flush kernel page cache on crash
+- `loadProjectConfig`: log non-ENOENT read errors (permission issues etc.)
+- `spec.WriteFile`/`AppendFile`: log warning on lock timeout fallback (concurrent access detection)
+
 ## [0.63.9] - 2026-03-10
 
 ### Fixed
@@ -586,7 +595,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - PreCompact hook with transcript analysis
 - Decision extraction from conversation transcripts
 
-[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.63.9...HEAD
+[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.63.10...HEAD
+[0.63.10]: https://github.com/hir4ta/claude-alfred/compare/v0.63.9...v0.63.10
 [0.63.9]: https://github.com/hir4ta/claude-alfred/compare/v0.63.8...v0.63.9
 [0.63.8]: https://github.com/hir4ta/claude-alfred/compare/v0.63.7...v0.63.8
 [0.63.7]: https://github.com/hir4ta/claude-alfred/compare/v0.63.6...v0.63.7

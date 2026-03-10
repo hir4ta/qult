@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/hir4ta/claude-alfred/internal/spec"
 	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
@@ -49,9 +50,10 @@ func debugf(format string, args ...any) {
 	fmt.Fprintf(debugWriter, time.Now().Format("15:04:05.000")+" "+format+"\n", args...)
 }
 
-// closeDebugWriter closes the debug log file handle if it was opened.
+// closeDebugWriter flushes and closes the debug log file handle if it was opened.
 func closeDebugWriter() {
 	if debugFile != nil {
+		debugFile.Sync() // fsync before close to flush kernel page cache to disk
 		debugFile.Close()
 	}
 }
@@ -122,6 +124,7 @@ func emitAdditionalContext(eventName, context string) {
 func runHook(event string) error {
 	defer closeDebugWriter()
 	store.DebugLog = debugf
+	spec.DebugLog = debugf
 	debugf("hook event=%s", event)
 	var ev hookEvent
 	if err := json.NewDecoder(os.Stdin).Decode(&ev); err != nil {

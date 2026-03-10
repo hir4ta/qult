@@ -420,6 +420,9 @@ func (s *Store) FeedbackBoostBatch(ctx context.Context, docIDs []int64) map[int6
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
+		if DebugLog != nil {
+			DebugLog("store: FeedbackBoostBatch query error: %v", err)
+		}
 		return result
 	}
 	defer rows.Close()
@@ -428,6 +431,9 @@ func (s *Store) FeedbackBoostBatch(ctx context.Context, docIDs []int64) map[int6
 		var docID int64
 		var pos, neg int
 		if err := rows.Scan(&docID, &pos, &neg); err != nil {
+			if DebugLog != nil {
+				DebugLog("store: FeedbackBoostBatch scan error: %v", err)
+			}
 			continue
 		}
 		total := pos + neg
@@ -436,6 +442,11 @@ func (s *Store) FeedbackBoostBatch(ctx context.Context, docIDs []int64) map[int6
 		}
 		ratio := float64(pos-neg) / float64(total)
 		result[docID] = 1.0 + ratio*0.1
+	}
+	if err := rows.Err(); err != nil {
+		if DebugLog != nil {
+			DebugLog("store: FeedbackBoostBatch iteration error: %v", err)
+		}
 	}
 	return result
 }

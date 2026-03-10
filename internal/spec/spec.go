@@ -14,6 +14,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// DebugLog is an optional callback for diagnostic messages from the spec layer.
+// Set by the application (e.g., cmd/alfred) to route spec debug output to its
+// own logging facility. Nil by default (no logging).
+var DebugLog func(format string, args ...any)
+
 // ValidSlug matches URL-safe task identifiers: lowercase letters, digits, hyphens.
 var ValidSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]{0,63}$`)
 
@@ -246,7 +251,10 @@ func unlockSpecDir(lf *os.File) {
 func (s *SpecDir) WriteFile(f SpecFile, content string) error {
 	lf, err := s.lockSpecDir()
 	if err != nil {
-		// Fall back to unprotected write if lock fails.
+		// Fall back to unprotected write if lock fails (concurrent access risk accepted).
+		if DebugLog != nil {
+			DebugLog("spec: lock timeout for %s/%s, falling back to unprotected write: %v", s.TaskSlug, f, err)
+		}
 		return s.writeFileUnlocked(f, content)
 	}
 	defer unlockSpecDir(lf)
@@ -276,7 +284,10 @@ func (s *SpecDir) writeFileRaw(f SpecFile, content string) error {
 func (s *SpecDir) AppendFile(f SpecFile, content string) error {
 	lf, err := s.lockSpecDir()
 	if err != nil {
-		// Fall back to unprotected append if lock fails.
+		// Fall back to unprotected append if lock fails (concurrent access risk accepted).
+		if DebugLog != nil {
+			DebugLog("spec: lock timeout for %s/%s, falling back to unprotected append: %v", s.TaskSlug, f, err)
+		}
 		return s.appendFileUnlocked(f, content)
 	}
 	defer unlockSpecDir(lf)

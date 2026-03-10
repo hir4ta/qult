@@ -9,7 +9,7 @@ user-invocable: true
 argument-hint: "<task-slug> [description]"
 allowed-tools: Read, Write, Edit, Glob, Grep, AskUserQuestion, Agent, WebSearch, WebFetch, mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__spec
 model: sonnet
-context: fork
+context: current
 ---
 
 # /alfred:plan — Multi-Agent Spec Generator

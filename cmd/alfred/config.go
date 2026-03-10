@@ -34,6 +34,9 @@ func loadProjectConfig(projectPath string) *ProjectConfig {
 	path := filepath.Join(projectPath, ".alfred", "config.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			debugf("loadProjectConfig: read error: %v", err)
+		}
 		return nil
 	}
 	var cfg ProjectConfig
