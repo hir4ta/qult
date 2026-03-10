@@ -7,6 +7,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.64.1] - 2026-03-10
+
+### Added
+- Feedback boost integration in MCP knowledge search pipeline (previously only applied in UserPromptSubmit hook)
+- Hook stdin size limit (2 MB) via `io.LimitReader` to prevent memory exhaustion
+- MCP query length validation (max 10000 chars) for knowledge and recall tools
+- Hook timeout headroom warning when < 200ms remaining
+- Vector dimension mismatch aggregated warning log with re-embedding guidance
+- PATH binary version check in `run.sh` bootstrapper (with `dev` bypass for local development)
+- `IdempotentHintAnnotation(false)` on spec MCP tool
+
+### Fixed
+- Spec file lock timeout increased from 750ms to 1.5s (reduces race condition window under concurrent hooks)
+- Standardized 6 `fmt.Fprintf(stderr)` calls to `notifyUser()` for consistent notification pattern
+
 ## [0.64.0] - 2026-03-10
 
 ### Added
@@ -612,7 +627,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - PreCompact hook with transcript analysis
 - Decision extraction from conversation transcripts
 
-[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.64.0...HEAD
+[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.64.1...HEAD
+[0.64.1]: https://github.com/hir4ta/claude-alfred/compare/v0.64.0...v0.64.1
 [0.64.0]: https://github.com/hir4ta/claude-alfred/compare/v0.63.10...v0.64.0
 [0.63.10]: https://github.com/hir4ta/claude-alfred/compare/v0.63.9...v0.63.10
 [0.63.9]: https://github.com/hir4ta/claude-alfred/compare/v0.63.8...v0.63.9
