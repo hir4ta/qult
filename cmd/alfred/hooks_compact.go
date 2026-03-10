@@ -35,11 +35,11 @@ func handlePreCompact(ctx context.Context, projectPath, transcriptPath, customIn
 	if transcriptPath != "" {
 		txCtx = extractTranscriptContextRich(transcriptPath)
 	} else {
-		fmt.Fprintf(os.Stderr, "[alfred] warning: transcript_path is empty — session context will not be captured\n")
+		notifyUser("warning: transcript_path is empty — session context will not be captured")
 		debugf("PreCompact: transcript_path is empty")
 	}
 	if txCtx == nil && transcriptPath != "" {
-		fmt.Fprintf(os.Stderr, "[alfred] warning: could not extract context from transcript\n")
+		notifyUser("warning: could not extract context from transcript")
 		debugf("PreCompact: empty context from transcript %s", transcriptPath)
 	}
 
@@ -78,7 +78,7 @@ func handlePreCompact(ctx context.Context, projectPath, transcriptPath, customIn
 	// Sync session.md to DB (without embedder — hook is short-lived).
 	st, err := store.OpenDefaultCached()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[alfred] warning: DB open failed, session not synced: %v\n", err)
+		notifyUser("warning: DB open failed, session not synced: %v", err)
 		debugf("PreCompact: DB open error: %v", err)
 		return
 	}
@@ -224,7 +224,7 @@ func asyncEmbedSession(sd *spec.SpecDir) {
 		if logW != nil {
 			logW.Close()
 		}
-		fmt.Fprintf(os.Stderr, "[alfred] warning: async embed failed: %v\n", err)
+		notifyUser("warning: async embed failed: %v", err)
 		debugf("asyncEmbedSession: start error: %v", err)
 		return
 	}

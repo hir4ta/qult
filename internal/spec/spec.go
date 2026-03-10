@@ -215,10 +215,10 @@ func (s *SpecDir) ReadFile(f SpecFile) (string, error) {
 
 // lockSpecDir acquires an advisory flock on a .lock file in the spec directory.
 // Returns the lock file handle (caller must defer unlock+close) or an error.
-// Uses non-blocking lock with exponential backoff (50/100/200/400ms, 750ms total)
+// Uses non-blocking lock with exponential backoff (100/200/400/800ms, 1.5s total)
 // to handle concurrent hook invocations (e.g., PreCompact + SessionEnd overlap).
 // Respects context cancellation to avoid wasting budget on tight timeouts.
-// Note: 750ms worst-case consumes ~30% of SessionEnd's 2.5s budget; callers
+// Note: 1.5s worst-case consumes ~60% of SessionEnd's 2.5s budget; callers
 // fall back to unprotected write if the lock times out.
 func (s *SpecDir) lockSpecDir(ctx context.Context) (*os.File, error) {
 	lockPath := filepath.Join(s.Dir(), ".lock")
@@ -226,8 +226,8 @@ func (s *SpecDir) lockSpecDir(ctx context.Context) (*os.File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open lock file: %w", err)
 	}
-	// Exponential backoff: short contention resolves faster, total ~750ms.
-	delays := [4]time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond}
+	// Exponential backoff: short contention resolves faster, total ~1.5s.
+	delays := [4]time.Duration{100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond, 800 * time.Millisecond}
 	for attempt, delay := range delays {
 		err = syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if err == nil {

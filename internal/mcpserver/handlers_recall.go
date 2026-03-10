@@ -39,6 +39,9 @@ func recallSearch(ctx context.Context, st *store.Store, emb *embedder.Embedder, 
 	if query == "" {
 		return mcp.NewToolResultError("query parameter is required for search"), nil
 	}
+	if len([]rune(query)) > 10000 {
+		return mcp.NewToolResultError("query too long (max 10000 characters)"), nil
+	}
 	limit := req.GetInt("limit", 10)
 	if limit < 1 {
 		limit = 10

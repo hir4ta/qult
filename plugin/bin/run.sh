@@ -7,9 +7,12 @@ VERSION="0.64.0"
 CACHE_DIR="${HOME}/.alfred/bin"
 CACHED_BIN="${CACHE_DIR}/alfred"
 
-# 1. Binary in PATH? (e.g. Homebrew, go install)
+# 1. Binary in PATH with matching version? (e.g. Homebrew, go install)
 if command -v alfred >/dev/null 2>&1; then
-  exec alfred "$@"
+  PATH_VER=$(alfred version --short 2>/dev/null || echo "")
+  if [ "$PATH_VER" = "$VERSION" ] || [ "$PATH_VER" = "dev" ]; then
+    exec alfred "$@"
+  fi
 fi
 
 # 2. Cached binary exists and matches version?

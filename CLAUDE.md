@@ -76,15 +76,15 @@ go vet ./...                  # Static analysis
 - task_slug: `^[a-z0-9][a-z0-9\-]{0,63}$`
 - spec delete: dry-run preview (default) → `confirm=true` for actual deletion
 - spec.ValidSlug: exported regex for slug validation across packages
-- spec tool: DestructiveHint=false (safety via 2-phase delete confirm, not MCP annotation)
-- Spec file locking: advisory flock on `.lock` file (exponential backoff 50/100/200/400ms, context-aware cancellation, graceful fallback + stderr warning)
+- spec tool: DestructiveHint=false, IdempotentHint=false (safety via 2-phase delete confirm, not MCP annotation)
+- Spec file locking: advisory flock on `.lock` file (exponential backoff 100/200/400/800ms ~1.5s total, context-aware cancellation, graceful fallback + stderr warning)
 - Spec version history: `.history/` dir with max 20 versions per file; rollback saves current first
 - Spec tool actions: init / update / status / switch / delete / history / rollback
 
 ### Memory & Feedback
 
 - Memory persistence: source_type="memory" in docs table, TTL=0 (permanent)
-- Implicit feedback loop: doc_feedback table tracks injection>reference signals, applies +/-0.15 boost with time decay (linear, 180-day floor at 50%)
+- Feedback loop: doc_feedback tracks injection>reference signals, applies +/-0.15 boost with time decay (linear, 180-day floor at 50%); applied in BOTH UserPromptSubmit hook AND MCP knowledge search pipeline
 - Recency signal: post-rerank exponential decay for memory (60d half-life) and changelog (30d half-life); docs not decayed (crawled_at is fetch time, not feature age); floor at 50%
 - Cross-project learning: SessionStart proactively searches memories from other projects
 

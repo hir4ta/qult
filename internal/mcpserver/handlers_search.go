@@ -37,6 +37,9 @@ func docsSearchHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandl
 		if query == "" {
 			return mcp.NewToolResultError("query parameter is required"), nil
 		}
+		if len([]rune(query)) > 10000 {
+			return mcp.NewToolResultError("query too long (max 10000 characters)"), nil
+		}
 		limit := req.GetInt("limit", 5)
 		if limit < 1 {
 			limit = 5

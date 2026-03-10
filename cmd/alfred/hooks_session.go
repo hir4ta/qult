@@ -30,7 +30,7 @@ func handleSessionStart(ctx context.Context, ev *hookEvent) {
 	}
 	st, err := store.OpenDefaultCached()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[alfred] warning: store open failed: %v\n", err)
+		notifyUser("warning: store open failed: %v", err)
 		debugf("hook store open failed: %v", err)
 		return
 	}

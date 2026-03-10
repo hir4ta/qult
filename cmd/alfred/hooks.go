@@ -126,8 +126,10 @@ func runHook(event string) error {
 	store.DebugLog = debugf
 	spec.DebugLog = debugf
 	debugf("hook event=%s", event)
+	// Cap stdin to 2 MB to prevent memory exhaustion from oversized payloads.
+	const maxHookInputBytes = 2 << 20
 	var ev hookEvent
-	if err := json.NewDecoder(os.Stdin).Decode(&ev); err != nil {
+	if err := json.NewDecoder(io.LimitReader(os.Stdin, maxHookInputBytes)).Decode(&ev); err != nil {
 		// Fail-open: decode errors must not block Claude Code.
 		// Hook protocol requires clean exit; errors are logged for debugging.
 		debugf("hook decode error: %v", err)
@@ -190,6 +192,9 @@ func runHook(event string) error {
 		debugf("hook event=%s completed in %s (timeout=%s, OVERTIME by %s)",
 			event, elapsed.Round(time.Millisecond), timeout, (-headroom).Round(time.Millisecond))
 	} else {
+		if headroom < 200*time.Millisecond {
+			notifyUser("warning: hook %s near timeout (headroom: %dms)", event, headroom.Milliseconds())
+		}
 		debugf("hook event=%s completed in %s (timeout=%s, headroom=%s)",
 			event, elapsed.Round(time.Millisecond), timeout, headroom.Round(time.Millisecond))
 	}

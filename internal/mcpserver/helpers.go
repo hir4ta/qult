@@ -251,7 +251,36 @@ func hybridSearchPipeline(ctx context.Context, st *store.Store, emb *embedder.Em
 		}
 	}
 
-	// Stage 3: Apply recency signal (boost newer memories/changelogs).
+	// Stage 3: Apply feedback boost (promote docs with positive user feedback).
+	if len(res.Docs) > 1 {
+		ids := make([]int64, len(res.Docs))
+		for i, d := range res.Docs {
+			ids[i] = d.ID
+		}
+		boosts := st.FeedbackBoostBatch(ctx, ids)
+		if len(boosts) > 0 {
+			type boostedDoc struct {
+				doc   store.DocRow
+				score float64
+			}
+			items := make([]boostedDoc, len(res.Docs))
+			for i, d := range res.Docs {
+				posScore := 1.0 / float64(i+1)
+				if b, ok := boosts[d.ID]; ok {
+					posScore += b - 1.0 // b is ~1.0 ± feedbackBoostScale
+				}
+				items[i] = boostedDoc{doc: d, score: posScore}
+			}
+			sort.SliceStable(items, func(i, j int) bool {
+				return items[i].score > items[j].score
+			})
+			for i, item := range items {
+				res.Docs[i] = item.doc
+			}
+		}
+	}
+
+	// Stage 4: Apply recency signal (boost newer memories/changelogs).
 	res.Docs = applyRecencySignal(res.Docs, time.Now())
 
 	// Trim to requested limit.

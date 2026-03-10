@@ -123,7 +123,7 @@ func (s *Store) VectorSearch(ctx context.Context, queryVec []float32, source str
 	defer rows.Close()
 
 	var candidates []VectorMatch
-	var rowsScanned, highQualityCount int
+	var rowsScanned, highQualityCount, dimMismatchCount int
 	for rows.Next() {
 		rowsScanned++
 		var sourceID int64
@@ -136,7 +136,8 @@ func (s *Store) VectorSearch(ctx context.Context, queryVec []float32, source str
 		}
 		vec := deserializeFloat32(blob)
 		if len(vec) != len(queryVec) {
-			if DebugLog != nil {
+			dimMismatchCount++
+			if DebugLog != nil && dimMismatchCount <= 3 {
 				DebugLog("store: VectorSearch: dimension mismatch for source_id=%d (got %d, query %d), skipping", sourceID, len(vec), len(queryVec))
 			}
 			continue
@@ -158,6 +159,11 @@ func (s *Store) VectorSearch(ctx context.Context, queryVec []float32, source str
 	}
 	if err := rows.Err(); err != nil {
 		return candidates, fmt.Errorf("store: vector search iteration: %w", err)
+	}
+
+	// Warn if dimension mismatches occurred — may indicate stale embeddings.
+	if dimMismatchCount > 0 && DebugLog != nil {
+		DebugLog("store: VectorSearch: %d/%d embeddings had dimension mismatch (query=%d dims) — consider re-embedding with 'alfred init'", dimMismatchCount, rowsScanned, len(queryVec))
 	}
 
 	// Warn if scan hit the configured limit — recall may be degraded.

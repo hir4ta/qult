@@ -2,8 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
-	"os"
 	"sort"
 	"strings"
 )
@@ -390,7 +388,7 @@ func extractTranscriptContextRich(transcriptPath string) *transcriptContext {
 	// Transcript format guard: if most lines fail to parse, the format
 	// may have changed. Parse a sample first to detect this.
 	if !checkTranscriptFormat(lines) {
-		fmt.Fprintf(os.Stderr, "[alfred] warning: transcript format may have changed\n")
+		notifyUser("warning: transcript format may have changed")
 		debugf("PreCompact: transcript format guard triggered")
 		return nil
 	}

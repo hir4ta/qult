@@ -124,6 +124,7 @@ Response (history): {"task_slug", "file", "versions": [{"timestamp", "size_bytes
 Response (rollback): {"task_slug", "file", "restored", "message"}`),
 				mcp.WithTitleAnnotation("Spec Management"),
 				mcp.WithReadOnlyHintAnnotation(false),
+				mcp.WithIdempotentHintAnnotation(false),
 				mcp.WithDestructiveHintAnnotation(false),
 				mcp.WithOpenWorldHintAnnotation(false),
 				mcp.WithString("action", mcp.Description("Action to perform"), mcp.Required(), mcp.Enum("init", "update", "status", "switch", "delete", "history", "rollback")),
