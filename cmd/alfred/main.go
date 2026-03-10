@@ -143,7 +143,9 @@ func runServe() error {
 	}
 
 	s := mcpserver.New(st, emb, resolvedVersion())
-	return server.ServeStdio(s)
+	err = server.ServeStdio(s)
+	mcpserver.WaitBackground()
+	return err
 }
 
 // resolvedVersion returns the best available version string.

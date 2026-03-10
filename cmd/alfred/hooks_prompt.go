@@ -394,26 +394,38 @@ func evaluateInjectionFeedback(ctx context.Context, prompt string, st *store.Sto
 	}
 
 	promptLower := strings.ToLower(prompt)
+	// Skip negative feedback for very short prompts (e.g., "ok", "continue", "はい").
+	// Short prompts can't plausibly reference injected topics, so absence of
+	// overlap is not a meaningful negative signal.
+	promptWords := strings.Fields(promptLower)
+	shortPrompt := len(promptWords) < 5
+
 	for _, doc := range docs {
 		// Extract significant words from the doc's section path.
 		pathWords := strings.Fields(strings.ToLower(doc.SectionPath))
 		hits := 0
-		for _, w := range pathWords {
-			w = strings.Trim(w, ">|")
-			if len(w) >= 3 && strings.Contains(promptLower, w) {
-				hits++
-			}
-		}
-		// If 30%+ of path words appear in the prompt, count as positive.
 		meaningful := 0
 		for _, w := range pathWords {
-			if len(strings.Trim(w, ">|")) >= 3 {
+			w = strings.Trim(w, ">|")
+			if len(w) >= 3 {
 				meaningful++
+				if strings.Contains(promptLower, w) {
+					hits++
+				}
 			}
 		}
-		if meaningful > 0 && float64(hits)/float64(meaningful) >= 0.3 {
+		if meaningful == 0 {
+			continue
+		}
+		positive := float64(hits)/float64(meaningful) >= 0.3
+		if positive {
 			if err := st.RecordFeedback(ctx, doc.ID, true); err != nil {
 				debugf("evaluateInjectionFeedback: positive feedback error: %v", err)
+			}
+		} else if !shortPrompt {
+			// Only record negative feedback for substantive prompts.
+			if err := st.RecordFeedback(ctx, doc.ID, false); err != nil {
+				debugf("evaluateInjectionFeedback: negative feedback error: %v", err)
 			}
 		}
 	}

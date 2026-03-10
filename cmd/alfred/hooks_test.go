@@ -1852,7 +1852,7 @@ func TestAutoAppendDecisions(t *testing.T) {
 	}
 
 	// Auto-append new decisions (one duplicate, one new).
-	autoAppendDecisions(sd, []string{
+	autoAppendDecisions(context.Background(), sd, []string{
 		"Use SQLite for persistent storage in the knowledge base", // substring overlap → should be skipped
 		"Chose FTS5 over pure vector for deterministic ranking",   // new → should be added
 	})
@@ -1887,9 +1887,12 @@ func TestExtractTranscriptContextRich(t *testing.T) {
 	}
 	path := writeFakeTranscript(t, dir, lines)
 
-	ctx := extractTranscriptContextRich(path)
+	ctx, data := extractTranscriptContextRich(path)
 	if ctx == nil {
 		t.Fatal("expected non-nil context")
+	}
+	if len(data) == 0 {
+		t.Error("expected non-empty transcript data")
 	}
 
 	if len(ctx.UserMessages) != 2 {
@@ -1911,9 +1914,12 @@ func TestExtractTranscriptContextRich(t *testing.T) {
 }
 
 func TestExtractTranscriptContextRichEmpty(t *testing.T) {
-	ctx := extractTranscriptContextRich("/nonexistent/path")
+	ctx, data := extractTranscriptContextRich("/nonexistent/path")
 	if ctx != nil {
 		t.Error("non-existent file should return nil")
+	}
+	if data != nil {
+		t.Error("non-existent file should return nil data")
 	}
 }
 

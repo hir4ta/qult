@@ -108,8 +108,8 @@ Actions:
 - update: Write to a spec file (requires file + content, mode: "append" or "replace"; optional task_slug, defaults to active task)
 - switch: Change active task (requires task_slug)
 - delete: Remove a task spec (requires task_slug; first call previews, add confirm=true to execute) — DESTRUCTIVE
-- history: List version history for a spec file (requires file; operates on active task)
-- rollback: Restore a previous version of a spec file (requires file + version timestamp; use history to list versions)
+- history: List version history for a spec file (requires file; optional task_slug, defaults to active task)
+- rollback: Restore a previous version of a spec file (requires file + version timestamp; optional task_slug, defaults to active task)
 
 task_slug format: lowercase alphanumeric with hyphens (e.g. "my-feature", max 64 chars).
 
@@ -129,7 +129,7 @@ Response (rollback): {"task_slug", "file", "restored", "message"}`),
 				mcp.WithOpenWorldHintAnnotation(false),
 				mcp.WithString("action", mcp.Description("Action to perform"), mcp.Required(), mcp.Enum("init", "update", "status", "switch", "delete", "history", "rollback")),
 				mcp.WithString("project_path", mcp.Description("Project root path (defaults to current working directory if omitted)")),
-				mcp.WithString("task_slug", mcp.Description("Task identifier (required for init, switch, delete; optional for update — defaults to active task)")),
+				mcp.WithString("task_slug", mcp.Description("Task identifier (required for init, switch, delete; optional for update/history/rollback — defaults to active task)")),
 				mcp.WithString("description", mcp.Description("Brief task description (for init)")),
 				mcp.WithString("file", mcp.Description("Spec file (for update/history/rollback)"), mcp.Enum("requirements.md", "design.md", "decisions.md", "session.md")),
 				mcp.WithString("content", mcp.Description("Content to write (for update)")),
@@ -162,7 +162,7 @@ Response (save): {"status", "id", "url", "section_path"}`),
 				mcp.WithReadOnlyHintAnnotation(false),
 				mcp.WithIdempotentHintAnnotation(false),
 				mcp.WithOpenWorldHintAnnotation(false),
-				mcp.WithString("action", mcp.Description("Action (default: search)"), mcp.Enum("search", "save")),
+				mcp.WithString("action", mcp.Description("Action: search or save"), mcp.Required(), mcp.Enum("search", "save")),
 				mcp.WithString("query", mcp.Description("Search query (required for search)")),
 				mcp.WithString("content", mcp.Description("Content to save (required for save)")),
 				mcp.WithString("label", mcp.Description("Short label/description for saved memory (required for save)")),

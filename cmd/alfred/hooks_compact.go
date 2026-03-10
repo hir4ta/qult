@@ -30,10 +30,11 @@ func handlePreCompact(ctx context.Context, projectPath, transcriptPath, customIn
 		return
 	}
 
-	// Extract rich context from transcript.
+	// Extract rich context and decisions from transcript (single read).
 	var txCtx *transcriptContext
+	var txData []byte
 	if transcriptPath != "" {
-		txCtx = extractTranscriptContextRich(transcriptPath)
+		txCtx, txData = extractTranscriptContextRich(transcriptPath)
 	} else {
 		notifyUser("warning: transcript_path is empty — session context will not be captured")
 		debugf("PreCompact: transcript_path is empty")
@@ -43,15 +44,23 @@ func handlePreCompact(ctx context.Context, projectPath, transcriptPath, customIn
 		debugf("PreCompact: empty context from transcript %s", transcriptPath)
 	}
 
-	// Extract decisions from transcript.
+	// Extract decisions from the already-read transcript data (no re-read).
+	// Fallback to independent read if rich extraction failed (e.g., format guard).
 	var decisions []string
-	if transcriptPath != "" {
+	if len(txData) > 0 {
+		// Limit to last 64KB for decision extraction (matching original budget).
+		decData := txData
+		if len(decData) > 64*1024 {
+			decData = decData[len(decData)-64*1024:]
+		}
+		decisions = extractDecisionsFromData(decData)
+	} else if transcriptPath != "" {
 		decisions = extractDecisionsFromTranscript(transcriptPath)
 	}
 
 	// Auto-append decisions to decisions.md (not just session.md).
 	if len(decisions) > 0 {
-		autoAppendDecisions(sd, decisions)
+		autoAppendDecisions(ctx, sd, decisions)
 	}
 
 	// Persist decisions as permanent memory (survives spec deletion).
@@ -281,7 +290,7 @@ func getModifiedFiles(projectPath string) []string {
 
 // autoAppendDecisions appends newly extracted decisions to decisions.md,
 // deduplicating against existing content.
-func autoAppendDecisions(sd *spec.SpecDir, decisions []string) {
+func autoAppendDecisions(ctx context.Context, sd *spec.SpecDir, decisions []string) {
 	existing, _ := sd.ReadFile(spec.FileDecisions)
 	existingLower := strings.ToLower(existing)
 
@@ -345,7 +354,7 @@ func autoAppendDecisions(sd *spec.SpecDir, decisions []string) {
 		buf.WriteString(fmt.Sprintf("- %s\n", d))
 	}
 
-	if err := sd.AppendFile(context.Background(), spec.FileDecisions, buf.String()); err != nil {
+	if err := sd.AppendFile(ctx, spec.FileDecisions, buf.String()); err != nil {
 		debugf("autoAppendDecisions: %v", err)
 	} else {
 		debugf("autoAppendDecisions: added %d decisions", len(newDecisions))

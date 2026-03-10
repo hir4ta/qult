@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -14,12 +15,19 @@ import (
 	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
+// bgEmbedWG tracks in-flight background embedding goroutines.
+var bgEmbedWG sync.WaitGroup
+
+// WaitBackground blocks until all background embedding goroutines complete.
+// Call during graceful shutdown to ensure all embeddings are persisted.
+func WaitBackground() { bgEmbedWG.Wait() }
+
 // recallHandler provides memory-specific search and save operations.
 // Unlike the general "knowledge" tool, recall focuses on user memories:
 // past sessions, decisions, and explicitly saved notes.
 func recallHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		action := req.GetString("action", "search")
+		action := req.GetString("action", "")
 
 		switch action {
 		case "search":
@@ -137,10 +145,11 @@ func recallSave(ctx context.Context, st *store.Store, emb *embedder.Embedder, re
 	}
 
 	// Async embedding: generate vector for semantic recall search.
-	// Fire-and-forget is acceptable here: the MCP response must return immediately,
-	// and embedding failure only degrades vector search (FTS still works).
+	// Tracked by bgEmbedWG for graceful shutdown; embedding failure only degrades vector search.
 	if emb != nil && changed {
+		bgEmbedWG.Add(1)
 		go func() {
+			defer bgEmbedWG.Done()
 			embCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			vec, err := emb.EmbedForStorage(embCtx, strings.TrimSpace(content))

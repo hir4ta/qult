@@ -68,7 +68,7 @@ func specHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandlerFunc
 		case "status":
 			return specDoStatus(req)
 		case "switch":
-			return specDoSwitch(req)
+			return specDoSwitch(ctx, req)
 		case "delete":
 			return specDoDelete(ctx, req, st)
 		case "history":
@@ -239,7 +239,7 @@ func specDoStatus(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return marshalResult(result)
 }
 
-func specDoSwitch(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func specDoSwitch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	projectPath, errResult := validateProjectPath(req.GetString("project_path", ""))
 	if errResult != nil {
 		return errResult, nil
@@ -257,7 +257,7 @@ func specDoSwitch(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if oldSlug != "" && oldSlug != taskSlug {
 		oldSD := &spec.SpecDir{ProjectPath: projectPath, TaskSlug: oldSlug}
 		if oldSD.Exists() {
-			_ = oldSD.AppendFile(context.Background(), spec.FileSession, fmt.Sprintf("\n## Switched away\nSwitched to %s\n", taskSlug))
+			_ = oldSD.AppendFile(ctx, spec.FileSession, fmt.Sprintf("\n## Switched away\nSwitched to %s\n", taskSlug))
 		}
 	}
 
@@ -372,9 +372,17 @@ func specDoHistory(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		return mcp.NewToolResultError(fmt.Sprintf("invalid file: %s", fileName)), nil
 	}
 
-	taskSlug, err := spec.ReadActive(projectPath)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("no active spec: %v", err)), nil
+	taskSlug := req.GetString("task_slug", "")
+	if taskSlug != "" {
+		if !spec.ValidSlug.MatchString(taskSlug) {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid task_slug: %q", taskSlug)), nil
+		}
+	} else {
+		var err error
+		taskSlug, err = spec.ReadActive(projectPath)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("no active spec: %v", err)), nil
+		}
 	}
 
 	sd := &spec.SpecDir{ProjectPath: projectPath, TaskSlug: taskSlug}
@@ -418,9 +426,17 @@ func specDoRollback(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		return mcp.NewToolResultError(fmt.Sprintf("invalid file: %s", fileName)), nil
 	}
 
-	taskSlug, err := spec.ReadActive(projectPath)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("no active spec: %v", err)), nil
+	taskSlug := req.GetString("task_slug", "")
+	if taskSlug != "" {
+		if !spec.ValidSlug.MatchString(taskSlug) {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid task_slug: %q", taskSlug)), nil
+		}
+	} else {
+		var err error
+		taskSlug, err = spec.ReadActive(projectPath)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("no active spec: %v", err)), nil
+		}
 	}
 
 	sd := &spec.SpecDir{ProjectPath: projectPath, TaskSlug: taskSlug}

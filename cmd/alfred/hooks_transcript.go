@@ -207,13 +207,16 @@ func hasTranscriptFields(m map[string]any) bool {
 // extractDecisionsFromTranscript scans the transcript for meaningful design decisions
 // from the assistant. Uses keyword matching + structured pattern detection + trivial filtering.
 func extractDecisionsFromTranscript(transcriptPath string) []string {
-	// Read last 64KB of transcript — enough for ~50-100 conversation turns.
-	// Larger values increase memory/CPU without meaningfully improving recall.
 	data, err := readFileTail(transcriptPath, 64*1024)
 	if err != nil {
 		return nil
 	}
+	return extractDecisionsFromData(data)
+}
 
+// extractDecisionsFromData extracts decisions from pre-read transcript data.
+// This avoids re-reading the transcript when data is already available.
+func extractDecisionsFromData(data []byte) []string {
 	// Keyword patterns that indicate design decisions (not routine actions).
 	decisionKeywords := []string{
 		// English
@@ -372,11 +375,11 @@ type transcriptContext struct {
 // extractTranscriptContextRich reads the tail of a conversation transcript and
 // extracts structured context: recent user messages, assistant summaries,
 // tool errors, running agents, and recent tool uses.
-func extractTranscriptContextRich(transcriptPath string) *transcriptContext {
+func extractTranscriptContextRich(transcriptPath string) (*transcriptContext, []byte) {
 	data, err := readFileTail(transcriptPath, 128*1024)
 	if err != nil {
 		debugf("PreCompact: read transcript error: %v", err)
-		return nil
+		return nil, nil
 	}
 
 	ctx := &transcriptContext{}
@@ -390,7 +393,7 @@ func extractTranscriptContextRich(transcriptPath string) *transcriptContext {
 	if !checkTranscriptFormat(lines) {
 		notifyUser("warning: transcript format may have changed")
 		debugf("PreCompact: transcript format guard triggered")
-		return nil
+		return nil, nil
 	}
 
 	for _, line := range lines {
@@ -456,7 +459,7 @@ func extractTranscriptContextRich(transcriptPath string) *transcriptContext {
 		ctx.RunningAgents = append(ctx.RunningAgents, desc)
 	}
 
-	return ctx
+	return ctx, data
 }
 
 // extractAgentToolUses detects Agent tool_use entries from transcript raw JSON.

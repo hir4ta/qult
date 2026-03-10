@@ -7,6 +7,22 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.64.2] - 2026-03-11
+
+### Added
+- Negative feedback signal for injection feedback loop: records negative feedback when injected docs are not referenced in follow-up prompts (short prompts < 5 words exempt)
+- 9 new hook events in config-review validation: PostToolUseFailure, SubagentStart, ConfigChange, PermissionRequest, TaskCompleted, TeammateIdle, WorktreeCreate, WorktreeRemove, InstructionsLoaded
+- `sync.WaitGroup` tracking for recall save async embedding goroutines with `WaitBackground()` graceful shutdown
+- Config schema validation: unknown key warnings and value range clamping for `.alfred/config.json` (with `sync.Once` to avoid repeated warnings)
+- Spec history/rollback now accept optional `task_slug` parameter to operate on non-active tasks
+
+### Fixed
+- PreCompact transcript double-read eliminated: single 128 KB read shared between rich context and decision extraction (64 KB slice for decisions)
+- `context.Background()` replaced with caller context in `specDoSwitch` and `autoAppendDecisions`
+- `loadProjectConfig` parse errors now visible via `notifyUser` (previously debug-only)
+- Recall tool `action` parameter marked `Required()` for consistency with spec tool
+- Removed unofficial `memory: project` frontmatter from agents/alfred.md (not in Claude Code agent spec)
+
 ## [0.64.1] - 2026-03-10
 
 ### Added
@@ -627,7 +643,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - PreCompact hook with transcript analysis
 - Decision extraction from conversation transcripts
 
-[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.64.1...HEAD
+[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.64.2...HEAD
+[0.64.2]: https://github.com/hir4ta/claude-alfred/compare/v0.64.1...v0.64.2
 [0.64.1]: https://github.com/hir4ta/claude-alfred/compare/v0.64.0...v0.64.1
 [0.64.0]: https://github.com/hir4ta/claude-alfred/compare/v0.63.10...v0.64.0
 [0.63.10]: https://github.com/hir4ta/claude-alfred/compare/v0.63.9...v0.63.10
