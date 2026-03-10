@@ -25,7 +25,7 @@ func recallHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandlerFu
 		case "search":
 			return recallSearch(ctx, st, emb, req)
 		case "save":
-			return recallSave(ctx, st, req)
+			return recallSave(ctx, st, emb, req)
 		default:
 			return mcp.NewToolResultError(fmt.Sprintf("unknown action %q: use 'search' or 'save'", action)), nil
 		}
@@ -88,7 +88,8 @@ func recallSearch(ctx context.Context, st *store.Store, emb *embedder.Embedder, 
 }
 
 // recallSave saves a new memory entry to the knowledge base.
-func recallSave(ctx context.Context, st *store.Store, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+// If an embedder is available, it asynchronously generates an embedding for semantic search.
+func recallSave(ctx context.Context, st *store.Store, emb *embedder.Embedder, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	content := req.GetString("content", "")
 	if content == "" {
 		return mcp.NewToolResultError("content parameter is required for save"), nil
@@ -104,8 +105,8 @@ func recallSave(ctx context.Context, st *store.Store, req mcp.CallToolRequest) (
 		return mcp.NewToolResultError("invalid project name: use lowercase letters, digits, and hyphens only (max 64 chars)"), nil
 	}
 
-	date := time.Now().Format("2006-01-02")
-	url := fmt.Sprintf("memory://user/%s/manual/%s", project, date)
+	ts := time.Now().Format("2006-01-02T150405")
+	url := fmt.Sprintf("memory://user/%s/manual/%s", project, ts)
 	sectionPath := fmt.Sprintf("%s > manual > %s", project, truncate(label, 60))
 
 	id, changed, err := st.UpsertDoc(ctx, &store.DocRow{
@@ -122,6 +123,19 @@ func recallSave(ctx context.Context, st *store.Store, req mcp.CallToolRequest) (
 	status := "saved"
 	if !changed {
 		status = "unchanged (duplicate)"
+	}
+
+	// Async embedding: generate vector for semantic recall search.
+	if emb != nil && changed {
+		go func() {
+			embCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			vec, err := emb.EmbedForStorage(embCtx, strings.TrimSpace(content))
+			if err != nil {
+				return
+			}
+			_ = st.InsertEmbedding("docs", id, emb.Model(), vec)
+		}()
 	}
 
 	return marshalResult(map[string]any{

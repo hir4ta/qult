@@ -184,6 +184,76 @@ func TestSearchDocsFTS_TypoCorrection(t *testing.T) {
 	}
 }
 
+func TestTranslateTerm(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		term   string
+		wantEn string
+		wantOK bool
+	}{
+		{"フック", "hook", true},
+		{"スキル", "skill", true},
+		{"設定", "settings", true},
+		{"unknown", "", false},
+		{"hello", "", false},
+		{"", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.term, func(t *testing.T) {
+			t.Parallel()
+			en, ok := TranslateTerm(tt.term)
+			if en != tt.wantEn || ok != tt.wantOK {
+				t.Errorf("TranslateTerm(%q) = (%q, %v), want (%q, %v)", tt.term, en, ok, tt.wantEn, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestIsAllASCII(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"hello", true},
+		{"", true},
+		{"ASCII123!@#", true},
+		{"フック", false},
+		{"hello世界", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
+			got := isAllASCII(tt.input)
+			if got != tt.want {
+				t.Errorf("isAllASCII(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIntAbs(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		input int
+		want  int
+	}{
+		{0, 0},
+		{5, 5},
+		{-5, 5},
+		{-1, 1},
+	}
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			t.Parallel()
+			got := intAbs(tt.input)
+			if got != tt.want {
+				t.Errorf("intAbs(%d) = %d, want %d", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExtractTerms(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

@@ -7,6 +7,27 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.63.7] - 2026-03-10
+
+### Added
+- TUI tests: 24 tests with 55 subtests covering all 7 TUI files (Direct Model Testing pattern)
+- Recall MCP tool tests: 13 tests covering search, save, round-trip, validation
+- Store test coverage: ~20 new tests (DeleteExpiredDocs, RecordInjection, FeedbackBoost, FTS integrity, etc.)
+- Vector store tests: CountEmbeddings, dimension validation, source type filtering
+- FTS enhancement tests: TranslateTerm, IsAllASCII, IntAbs
+- Async embedding on `recall save`: background Voyage embedding after memory persistence
+- `ensureUserRules()` in SessionStart: auto-install plugin rules if missing
+
+### Removed
+- PreToolUse hook handler and all related code (~50 lines): `isClaudeConfigPath`, `shouldRemind`, `handlePreToolUse`
+- `ToolName`/`ToolInput` fields from `hookEvent` struct (unused after PreToolUse removal)
+- PreToolUse from `recommendedEvents` in config-review handler
+
+### Changed
+- MCP tool responses: `json.MarshalIndent` → `json.Marshal` (token savings)
+- Config-review tool description updated to match actual output structure
+- Test coverage: store 51.3% → 81.1%, cmd/alfred 40.9% → 51.6%
+
 ## [0.63.6] - 2026-03-10
 
 ### Improved
@@ -542,7 +563,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - PreCompact hook with transcript analysis
 - Decision extraction from conversation transcripts
 
-[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.63.6...HEAD
+[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.63.7...HEAD
+[0.63.7]: https://github.com/hir4ta/claude-alfred/compare/v0.63.6...v0.63.7
 [0.63.6]: https://github.com/hir4ta/claude-alfred/compare/v0.63.5...v0.63.6
 [0.63.5]: https://github.com/hir4ta/claude-alfred/compare/v0.63.4...v0.63.5
 [0.63.4]: https://github.com/hir4ta/claude-alfred/compare/v0.63.3...v0.63.4

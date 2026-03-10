@@ -78,17 +78,14 @@ func asyncEmbedLogWriter() *os.File {
 // Fields are populated depending on the event type:
 //   - SessionStart: ProjectPath, Source, TranscriptPath
 //   - PreCompact:   ProjectPath, TranscriptPath, Trigger, CustomInstructions
-//   - PreToolUse:   ProjectPath, ToolName, ToolInput
 //   - UserPromptSubmit: ProjectPath, Prompt
 type hookEvent struct {
 	ProjectPath        string         `json:"cwd"`
 	Source             string         `json:"source"`              // SessionStart: startup/resume/clear/compact
 	TranscriptPath     string         `json:"transcript_path"`     // path to conversation JSONL
 	Trigger            string         `json:"trigger"`             // PreCompact: manual/auto
-	CustomInstructions string         `json:"custom_instructions"` // PreCompact: user's /compact instructions
-	ToolName           string         `json:"tool_name"`
-	ToolInput          map[string]any `json:"tool_input"`
-	Prompt             string         `json:"prompt"`
+	CustomInstructions string `json:"custom_instructions"` // PreCompact: user's /compact instructions
+	Prompt             string `json:"prompt"`
 	Reason             string         `json:"reason"`              // SessionEnd: clear/logout/prompt_input_exit/other
 	StopHookActive     bool           `json:"stop_hook_active"`
 }
@@ -148,8 +145,6 @@ func runHook(event string) error {
 		timeout = 4500 * time.Millisecond // 500ms headroom before 5s external timeout
 	case "PreCompact":
 		timeout = 9 * time.Second // 1s headroom before 10s external timeout
-	case "PreToolUse":
-		timeout = 1500 * time.Millisecond // 500ms headroom before 2s external timeout
 	case "UserPromptSubmit":
 		timeout = 2500 * time.Millisecond // 500ms headroom before 3s external timeout
 	case "SessionEnd":
@@ -169,8 +164,6 @@ func runHook(event string) error {
 		if ev.ProjectPath != "" {
 			handlePreCompact(ctx, ev.ProjectPath, ev.TranscriptPath, ev.CustomInstructions)
 		}
-	case "PreToolUse":
-		handlePreToolUse(&ev)
 	case "UserPromptSubmit":
 		handleUserPromptSubmit(ctx, &ev)
 	case "SessionEnd":

@@ -88,7 +88,7 @@ Response: {"query", "results": [{"section_path", "content", "url", "source_type"
 Checks: CLAUDE.md quality, skills (size/frontmatter), rules (path scoping), hooks (performance/patterns), MCP server config, and settings.json.
 Requires project_path to locate .claude/ directory. If omitted, uses current working directory.
 
-Response: {"categories": [{"name", "score", "item_count", "suggestions": [{"type", "severity", "message", "reference?", "affected?"}]}], "overall_score", "kb_enrichments?"}`),
+Response: {"project_path", "claude_md": {"exists", "size_bytes?", "lines?", "sections?", "key_sections?"}, "skills": {"count", "items?", "skill_details?"}, "rules": {"count", "items?", "rule_details?"}, "agents": {"count", "items?"}, "hooks": {"count", "events?", "missing_recommended?"}, "mcp_servers": {"count", "servers?"}, "suggestions": [{"severity", "category", "message", "affected?", "best_practice?"}], "suggestion_count", "maturity": {"overall", "scores", "warnings", "info"}, "summary?"}`),
 				mcp.WithTitleAnnotation("Config Review"),
 				mcp.WithReadOnlyHintAnnotation(true),
 				mcp.WithIdempotentHintAnnotation(true),

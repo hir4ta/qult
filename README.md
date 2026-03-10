@@ -109,7 +109,7 @@ Backend for skills and agents. Claude calls these automatically as needed.
 | `spec` | Unified spec management (action: init / update / status / switch / delete / history / rollback) |
 | `recall` | Memory search and save — past sessions, decisions, and notes |
 
-## Hooks (5)
+## Hooks (4)
 
 Run automatically during Claude Code lifecycle. No user action needed.
 
@@ -117,7 +117,6 @@ Run automatically during Claude Code lifecycle. No user action needed.
 |-------|--------|
 | SessionStart | Auto-ingest CLAUDE.md + spec context injection (adaptive recovery) + past memory hints + auto-crawl check |
 | PreCompact | Extract context from transcript + auto-detect decisions + track modified files + auto-update Next Steps completion → save session.md → persist decisions as memory → emit compaction instructions → async embedding |
-| PreToolUse | Reminder to use alfred tools when accessing .claude/ config files (Edit/Write/MultiEdit) |
 | UserPromptSubmit | Keyword-gated FTS knowledge injection + memory search — auto-surfaces best practices and past experience (suppressed by `ALFRED_QUIET=1`) |
 | SessionEnd | Persist session summary as permanent memory for future recall (skips on `reason=clear`) |
 
@@ -147,7 +146,6 @@ graph TB
         subgraph Hooks["Hooks (automatic)"]
             SS["SessionStart"]
             PC["PreCompact"]
-            PTU["PreToolUse"]
             UPS["UserPromptSubmit"]
             SE["SessionEnd"]
         end

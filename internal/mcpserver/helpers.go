@@ -161,7 +161,7 @@ func hybridSearchPipeline(ctx context.Context, st *store.Store, emb *embedder.Em
 
 // marshalResult encodes v as JSON and wraps it in an MCP CallToolResult.
 func marshalResult(v any) (*mcp.CallToolResult, error) {
-	data, err := json.MarshalIndent(v, "", "  ")
+	data, err := json.Marshal(v)
 	if err != nil {
 		return nil, fmt.Errorf("marshal result: %w", err)
 	}

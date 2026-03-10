@@ -353,7 +353,7 @@ func reviewRules(projectPath string) map[string]any {
 // ---------------------------------------------------------------------------
 
 // recommendedEvents lists hook events that provide significant value when configured.
-var recommendedEvents = []string{"SessionStart", "PreCompact", "PreToolUse", "UserPromptSubmit"}
+var recommendedEvents = []string{"SessionStart", "PreCompact", "UserPromptSubmit"}
 
 func reviewHooks(claudeHome, projectPath string) map[string]any {
 	result := map[string]any{"count": 0}

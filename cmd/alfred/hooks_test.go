@@ -24,37 +24,6 @@ func extractEarlyUserContext(transcriptPath string) string {
 	return strings.Join(msgs, "\n---\n")
 }
 
-func TestShouldRemind(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		input map[string]any
-		want  bool
-	}{
-		{"nil input", nil, false},
-		{"empty input", map[string]any{}, false},
-		{"unrelated path", map[string]any{"file_path": "/src/main.go"}, false},
-		{".claude/ in file_path", map[string]any{"file_path": "/project/.claude/rules/foo.md"}, true},
-		{"CLAUDE.md in file_path", map[string]any{"file_path": "/project/CLAUDE.md"}, true},
-		{"MEMORY.md in path", map[string]any{"path": "/project/MEMORY.md"}, true},
-		{".mcp.json in file_path", map[string]any{"file_path": "/project/.mcp.json"}, true},
-		{".claude/ in pattern", map[string]any{"pattern": "**/.claude/**"}, true},
-		{"non-string value", map[string]any{"file_path": 123}, false},
-		{"empty string", map[string]any{"file_path": ""}, false},
-		{"case insensitive", map[string]any{"file_path": "/project/.Claude/rules/x.md"}, true},
-		{"no false positive myclaude.md", map[string]any{"file_path": "/src/myclaude.md"}, false},
-		{"no false positive memory_analysis", map[string]any{"file_path": "/data/memory_analysis.md"}, false},
-		{"no false positive mcp.json without dot", map[string]any{"file_path": "/cfg/mcp.json"}, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			if got := shouldRemind(tt.input); got != tt.want {
-				t.Errorf("shouldRemind(%v) = %v, want %v", tt.input, got, tt.want)
-			}
-		})
-	}
-}
 
 func TestShouldRemindPrompt(t *testing.T) {
 	t.Parallel()
@@ -194,35 +163,6 @@ func TestContainsWord(t *testing.T) {
 	}
 }
 
-func TestIsClaudeConfigPath(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		path string
-		want bool
-	}{
-		{"/project/.claude/hooks/hooks.json", true},
-		{"/project/.claude/skills/setup/SKILL.md", true},
-		{"/project/.claude/agents/alfred.md", true},
-		{"/project/.claude/memory/notes.md", true},
-		{"/project/CLAUDE.md", true},
-		{"/project/MEMORY.md", true},
-		{"/project/.mcp.json", true},
-		{"/project/src/main.go", false},
-		{"/project/README.md", false},
-		{"/project/myclaude/config.go", false},
-		{"/project/src/.claude-test/file.go", false},
-		{".claude/hooks.json", true},
-		{"", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			t.Parallel()
-			if got := isClaudeConfigPath(tt.path); got != tt.want {
-				t.Errorf("isClaudeConfigPath(%q) = %v, want %v", tt.path, got, tt.want)
-			}
-		})
-	}
-}
 
 func TestSplitMarkdownSections(t *testing.T) {
 	tests := []struct {
@@ -1589,27 +1529,6 @@ func TestTruncateStr(t *testing.T) {
 	}
 }
 
-func TestHandlePreToolUse(t *testing.T) {
-	// Matching path: should output reminder.
-	output := captureStdout(t, func() {
-		handlePreToolUse(&hookEvent{
-			ToolInput: map[string]any{"file_path": "/project/.claude/rules/test.md"},
-		})
-	})
-	if !strings.Contains(output, "alfred") {
-		t.Error("should output reminder for .claude/ path")
-	}
-
-	// Non-matching path: no output.
-	output = captureStdout(t, func() {
-		handlePreToolUse(&hookEvent{
-			ToolInput: map[string]any{"file_path": "/project/src/main.go"},
-		})
-	})
-	if output != "" {
-		t.Errorf("should not output reminder for non-.claude/ path, got %q", output)
-	}
-}
 
 func TestGetModifiedFiles(t *testing.T) {
 	// Create a git repo in temp dir.
@@ -1745,32 +1664,6 @@ func TestResolvedDateUnknown(t *testing.T) {
 	_ = got // just verify no panic
 }
 
-func TestPreToolUseJSONOutput(t *testing.T) {
-	output := captureStdout(t, func() {
-		handlePreToolUse(&hookEvent{
-			ToolInput: map[string]any{"file_path": "/project/.claude/rules/test.md"},
-		})
-	})
-
-	var result map[string]any
-	if err := json.Unmarshal([]byte(output), &result); err != nil {
-		t.Fatalf("PreToolUse output is not valid JSON: %v\noutput: %s", err, output)
-	}
-
-	hso, ok := result["hookSpecificOutput"].(map[string]any)
-	if !ok {
-		t.Fatal("missing hookSpecificOutput")
-	}
-	if hso["hookEventName"] != "PreToolUse" {
-		t.Errorf("hookEventName = %v, want PreToolUse", hso["hookEventName"])
-	}
-	if hso["permissionDecision"] != "allow" {
-		t.Errorf("permissionDecision = %v, want allow", hso["permissionDecision"])
-	}
-	if _, ok := hso["permissionDecisionReason"]; !ok {
-		t.Error("missing permissionDecisionReason")
-	}
-}
 
 func TestUserPromptSubmitJSONOutput(t *testing.T) {
 	output := captureStdout(t, func() {

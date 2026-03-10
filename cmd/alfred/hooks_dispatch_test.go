@@ -62,38 +62,6 @@ func TestRunHook_SessionStart(t *testing.T) {
 	}
 }
 
-func TestRunHook_PreToolUse_ConfigReminder(t *testing.T) {
-	feedStdin(t, hookEvent{
-		ProjectPath: t.TempDir(),
-		ToolName:    "Read",
-		ToolInput:   map[string]any{"file_path": "/project/.claude/rules/test.md"},
-	})
-
-	output := captureStdout(t, func() {
-		runHook("PreToolUse")
-	})
-
-	if !containsStr(output, "alfred") {
-		t.Errorf("expected config reminder, got: %s", output)
-	}
-}
-
-func TestRunHook_PreToolUse_NoReminder(t *testing.T) {
-	feedStdin(t, hookEvent{
-		ProjectPath: t.TempDir(),
-		ToolName:    "Read",
-		ToolInput:   map[string]any{"file_path": "/src/main.go"},
-	})
-
-	output := captureStdout(t, func() {
-		runHook("PreToolUse")
-	})
-
-	if output != "" {
-		t.Errorf("expected no output for non-config file, got: %s", output)
-	}
-}
-
 func TestRunHook_UserPromptSubmit_ConfigReminder(t *testing.T) {
 	feedStdin(t, hookEvent{
 		ProjectPath: t.TempDir(),

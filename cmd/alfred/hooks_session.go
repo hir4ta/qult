@@ -38,6 +38,9 @@ func handleSessionStart(ctx context.Context, ev *hookEvent) {
 	// Check if knowledge base needs refreshing (background crawl).
 	checkAndSpawnCrawl(st)
 
+	// Ensure rules are installed in ~/.claude/rules/ (auto-install on first run).
+	ensureUserRules()
+
 	// Inject spec context if active spec exists.
 	// After compact, inject richer context for full recovery.
 	injectSpecContext(ctx, ev.ProjectPath, ev.Source, st)
@@ -1002,4 +1005,33 @@ func extractSummaryTitle(session string) string {
 		workingOn = workingOn[:idx]
 	}
 	return strings.TrimSpace(workingOn)
+}
+
+// ensureUserRules checks if alfred rules are installed in ~/.claude/rules/
+// and installs them if missing. This ensures rules work even when only
+// /plugin install was run (without alfred init).
+func ensureUserRules() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	// Quick check: if any alfred-*.md rule file exists, skip.
+	rulesDir := filepath.Join(home, ".claude", "rules")
+	entries, err := os.ReadDir(rulesDir)
+	if err == nil {
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), "alfred-") && strings.HasSuffix(e.Name(), ".md") {
+				return
+			}
+		}
+	}
+	// No alfred rules found — install them.
+	n, err := install.InstallUserRules()
+	if err != nil {
+		debugf("ensureUserRules: %v", err)
+		return
+	}
+	if n > 0 {
+		debugf("ensureUserRules: installed %d rule files", n)
+	}
 }

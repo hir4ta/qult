@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -71,59 +70,6 @@ func envFloat(key string, defaultVal float64) float64 {
 // These are complementary, not redundant. The hook primes Claude with
 // lightweight hints; the MCP tool provides deep answers on demand.
 // ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// PreToolUse: .claude/ config access reminder
-// ---------------------------------------------------------------------------
-
-// isClaudeConfigPath reports whether path refers to a Claude Code configuration
-// file or directory (.claude/, CLAUDE.md, MEMORY.md, .mcp.json).
-// Uses suffix/segment matching to avoid false positives on paths like "myclaude.md".
-func isClaudeConfigPath(path string) bool {
-	lower := strings.ToLower(path)
-	return strings.Contains(lower, "/.claude/") || strings.HasPrefix(lower, ".claude/") ||
-		strings.HasSuffix(lower, "/claude.md") || lower == "claude.md" ||
-		strings.HasSuffix(lower, "/memory.md") || lower == "memory.md" ||
-		strings.HasSuffix(lower, "/.mcp.json") || lower == ".mcp.json"
-}
-
-// shouldRemind reports whether a tool's input targets Claude Code configuration.
-// Checks file_path (Read/Edit/Write), path (Grep/Glob), and pattern (Glob).
-func shouldRemind(toolInput map[string]any) bool {
-	for _, key := range []string{"file_path", "path", "pattern"} {
-		if v, ok := toolInput[key]; ok {
-			if s, ok := v.(string); ok && s != "" {
-				if isClaudeConfigPath(s) {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
-// handlePreToolUse emits a reminder when Claude accesses .claude/ config files.
-// Uses hookSpecificOutput with permissionDecision "allow" to inject the reminder
-// as feedback while letting the tool call proceed.
-func handlePreToolUse(ev *hookEvent) {
-	if len(ev.ToolInput) == 0 {
-		return
-	}
-	if !shouldRemind(ev.ToolInput) {
-		return
-	}
-	debugf("PreToolUse: reminding about alfred for %v", ev.ToolInput)
-	out := map[string]any{
-		"hookSpecificOutput": map[string]any{
-			"hookEventName":            "PreToolUse",
-			"permissionDecision":       "allow",
-			"permissionDecisionReason": configReminder,
-		},
-	}
-	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
-		debugf("PreToolUse: json encode error: %v", err)
-	}
-}
 
 // ---------------------------------------------------------------------------
 // UserPromptSubmit: Claude Code config keyword detection + knowledge injection

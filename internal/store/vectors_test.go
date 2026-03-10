@@ -246,6 +246,110 @@ func TestVectorSearch(t *testing.T) {
 	}
 }
 
+func TestCountEmbeddings(t *testing.T) {
+	t.Parallel()
+	st := openTestStore(t)
+
+	n, err := st.CountEmbeddings()
+	if err != nil {
+		t.Fatalf("CountEmbeddings(empty): %v", err)
+	}
+	if n != 0 {
+		t.Errorf("CountEmbeddings(empty) = %d, want 0", n)
+	}
+
+	// Insert some embeddings.
+	for i := int64(1); i <= 3; i++ {
+		_, _, err := st.UpsertDoc(context.Background(), &DocRow{
+			URL: "https://example.com/ce", SectionPath: "S" + string(rune('A'+i)),
+			Content: "c", SourceType: "docs",
+		})
+		if err != nil {
+			t.Fatalf("UpsertDoc: %v", err)
+		}
+		if err := st.InsertEmbedding("docs", i, "test", []float32{float32(i), 0, 0}); err != nil {
+			t.Fatalf("InsertEmbedding(%d): %v", i, err)
+		}
+	}
+
+	n, err = st.CountEmbeddings()
+	if err != nil {
+		t.Fatalf("CountEmbeddings: %v", err)
+	}
+	if n != 3 {
+		t.Errorf("CountEmbeddings = %d, want 3", n)
+	}
+}
+
+func TestGetEmbeddingNotFound(t *testing.T) {
+	t.Parallel()
+	st := openTestStore(t)
+
+	_, err := st.GetEmbedding("docs", 999)
+	if err == nil {
+		t.Error("GetEmbedding(nonexistent) should return error")
+	}
+}
+
+func TestInsertEmbeddingDimensionValidation(t *testing.T) {
+	t.Parallel()
+	st := openTestStore(t)
+	st.ExpectedDims = 3
+
+	// Correct dimensions.
+	err := st.InsertEmbedding("docs", 1, "test", []float32{1, 2, 3})
+	if err != nil {
+		t.Fatalf("InsertEmbedding(correct dims): %v", err)
+	}
+
+	// Wrong dimensions.
+	err = st.InsertEmbedding("docs", 2, "test", []float32{1, 2})
+	if err == nil {
+		t.Error("InsertEmbedding(wrong dims) should return error")
+	}
+}
+
+func TestFilterByDocSourceType(t *testing.T) {
+	t.Parallel()
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	// Insert docs of different source types.
+	id1, _, _ := st.UpsertDoc(ctx, &DocRow{
+		URL: "https://example.com/f1", SectionPath: "F1", Content: "c1", SourceType: "docs",
+	})
+	id2, _, _ := st.UpsertDoc(ctx, &DocRow{
+		URL: "https://example.com/f2", SectionPath: "F2", Content: "c2", SourceType: "memory",
+	})
+	id3, _, _ := st.UpsertDoc(ctx, &DocRow{
+		URL: "https://example.com/f3", SectionPath: "F3", Content: "c3", SourceType: "docs",
+	})
+
+	candidates := []HybridMatch{
+		{DocID: id1, RRFScore: 0.5},
+		{DocID: id2, RRFScore: 0.4},
+		{DocID: id3, RRFScore: 0.3},
+	}
+
+	// Filter to only "docs" type.
+	filtered := st.filterByDocSourceType(ctx, candidates, []string{"docs"})
+	if len(filtered) != 2 {
+		t.Errorf("filterByDocSourceType(docs) = %d results, want 2", len(filtered))
+	}
+
+	// Empty candidates.
+	empty := st.filterByDocSourceType(ctx, nil, []string{"docs"})
+	if len(empty) != 0 {
+		t.Errorf("filterByDocSourceType(nil) = %d, want 0", len(empty))
+	}
+
+	// Empty types returns all.
+	all := st.filterByDocSourceType(ctx, candidates, nil)
+	if len(all) != 3 {
+		t.Errorf("filterByDocSourceType(nil types) = %d, want 3", len(all))
+	}
+}
+
 func TestHybridSearch(t *testing.T) {
 	t.Parallel()
 	st := openTestStore(t)
