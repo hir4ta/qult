@@ -21,9 +21,10 @@ type checkResult struct {
 }
 
 type doctorModel struct {
-	table table.Model
-	fails int
-	warns int
+	table    table.Model
+	fails    int
+	warns    int
+	showHelp bool
 }
 
 func newDoctorModel() doctorModel {
@@ -52,10 +53,16 @@ func newDoctorModel() doctorModel {
 		{Title: "Details", Width: 44},
 	}
 
+	totalWidth := 0
+	for _, c := range columns {
+		totalWidth += c.Width + 2 // column width + padding
+	}
+
 	t := table.New(
 		table.WithColumns(columns),
 		table.WithRows(rows),
 		table.WithFocused(true),
+		table.WithWidth(totalWidth),
 		table.WithHeight(len(rows)),
 	)
 
@@ -70,6 +77,7 @@ func newDoctorModel() doctorModel {
 		Background(lipgloss.Color("57")).
 		Bold(false)
 	t.SetStyles(s)
+	t.UpdateViewport()
 
 	return doctorModel{table: t, fails: fails, warns: warns}
 }
@@ -81,7 +89,14 @@ func (m doctorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "q", "ctrl+c", "esc":
+			if m.showHelp {
+				m.showHelp = false
+				return m, nil
+			}
 			return m, tea.Quit
+		case "?":
+			m.showHelp = !m.showHelp
+			return m, nil
 		}
 	}
 	var cmd tea.Cmd
@@ -90,6 +105,10 @@ func (m doctorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m doctorModel) View() tea.View {
+	if m.showHelp {
+		return tea.NewView(m.renderHelpOverlay())
+	}
+
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7571F9"))
 	okStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575"))
 	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB627"))
@@ -114,9 +133,49 @@ func (m doctorModel) View() tea.View {
 
 	b.WriteString("\n")
 	h := newHelp()
-	b.WriteString("  " + h.View(simpleKeyMap{keyUp, keyDown, keyQuit}) + "\n")
+	b.WriteString("  " + h.View(simpleKeyMap{keyUp, keyDown, keyHelp, keyQuit}) + "\n")
 
 	return tea.NewView(b.String())
+}
+
+func (m doctorModel) renderHelpOverlay() string {
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7571F9"))
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFB627"))
+	descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
+
+	var b strings.Builder
+	b.WriteString("\n  " + headerStyle.Render("Doctor Checks") + "\n\n")
+
+	sections := []struct{ title, desc string }{
+		{"Database", "SQLite database existence, accessibility, and file size."},
+		{"Schema", "Whether the DB schema version matches the expected version.\n" +
+			"    A mismatch means a migration may be needed (run 'alfred init')."},
+		{"Seed docs", "Number of knowledge documents in the database.\n" +
+			"    If zero, run 'alfred init' to populate the knowledge base."},
+		{"FTS index", "Full-text search index integrity check.\n" +
+			"    A failure means the FTS index may be corrupted (rebuild with 'alfred init')."},
+		{"Plugin", "Whether the alfred MCP plugin is installed in ~/.claude/plugins/."},
+		{"Hooks", "Whether hooks.json exists in the plugin directory.\n" +
+			"    Hooks enable automatic knowledge injection on each prompt."},
+		{"Bootstrap", "Whether run.sh is present and executable in the plugin.\n" +
+			"    Required for Claude Code to start the MCP server."},
+		{"Voyage API", "Voyage AI API key availability.\n" +
+			"    Optional — without it, alfred uses FTS-only mode (no vector search)."},
+		{"Embeddings", "Number of vector embeddings stored in the database.\n" +
+			"    Zero is normal in FTS-only mode (no Voyage API key)."},
+		{"Last crawl", "When the knowledge base was last refreshed from source docs.\n" +
+			"    Auto-crawl runs every 7 days (configurable via ALFRED_CRAWL_INTERVAL_DAYS)."},
+		{"Config dir", "Whether ~/.claude-alfred/ directory exists.\n" +
+			"    Used for global settings, custom dictionary, and source overrides."},
+	}
+
+	for _, s := range sections {
+		b.WriteString("  " + titleStyle.Render(s.title) + "\n")
+		b.WriteString("  " + descStyle.Render(s.desc) + "\n\n")
+	}
+
+	b.WriteString("  " + descStyle.Render("Press ? or Esc to close") + "\n")
+	return b.String()
 }
 
 // runChecks gathers all diagnostic check results.

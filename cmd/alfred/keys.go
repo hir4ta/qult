@@ -39,6 +39,10 @@ var (
 		key.WithKeys("right", "l"),
 		key.WithHelp("→/l", "next page"),
 	)
+	keyHelp = key.NewBinding(
+		key.WithKeys("?"),
+		key.WithHelp("?", "help"),
+	)
 )
 
 // newHelp creates a help model with alfred styling.

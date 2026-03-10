@@ -7,6 +7,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.63.2] - 2026-03-10
+
+### Added
+- Help overlay (`?` key) for `alfred analytics` — explains Feedback Loop, Injection Activity, Top Boosted/Penalized Docs
+- Help overlay (`?` key) for `alfred doctor` — explains all 11 diagnostic checks
+- `--verbose` hint at the bottom of `alfred status` non-verbose output
+
+### Fixed
+- `alfred status --verbose` environment variable names truncated — label width increased from 20 to 36 columns
+
 ## [0.63.1] - 2026-03-10
 
 ### Fixed
@@ -470,7 +480,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - PreCompact hook with transcript analysis
 - Decision extraction from conversation transcripts
 
-[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.63.1...HEAD
+[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.63.2...HEAD
+[0.63.2]: https://github.com/hir4ta/claude-alfred/compare/v0.63.1...v0.63.2
 [0.63.1]: https://github.com/hir4ta/claude-alfred/compare/v0.63.0...v0.63.1
 [0.63.0]: https://github.com/hir4ta/claude-alfred/compare/v0.62.0...v0.63.0
 [0.62.0]: https://github.com/hir4ta/claude-alfred/compare/v0.61.1...v0.62.0

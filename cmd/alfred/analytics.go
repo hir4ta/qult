@@ -15,6 +15,9 @@ import (
 
 type analyticsModel struct {
 	viewport viewport.Model
+	showHelp bool
+	width    int
+	height   int
 }
 
 func newAnalyticsModel() (analyticsModel, error) {
@@ -40,9 +43,18 @@ func (m analyticsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "q", "ctrl+c", "esc":
+			if m.showHelp {
+				m.showHelp = false
+				return m, nil
+			}
 			return m, tea.Quit
+		case "?":
+			m.showHelp = !m.showHelp
+			return m, nil
 		}
 	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
 		m.viewport.SetWidth(msg.Width)
 		m.viewport.SetHeight(msg.Height - 3) // room for help bar
 	}
@@ -52,15 +64,65 @@ func (m analyticsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m analyticsModel) View() tea.View {
+	if m.showHelp {
+		return tea.NewView(m.renderHelpOverlay())
+	}
+
 	var b strings.Builder
 	b.WriteString(m.viewport.View())
 	b.WriteString("\n")
 
 	h := newHelp()
 	scrollPct := fmt.Sprintf(" %.0f%%", m.viewport.ScrollPercent()*100)
-	b.WriteString("  " + h.View(simpleKeyMap{keyUp, keyDown, keyQuit}) + dimStyle.Render(scrollPct) + "\n")
+	b.WriteString("  " + h.View(simpleKeyMap{keyUp, keyDown, keyHelp, keyQuit}) + dimStyle.Render(scrollPct) + "\n")
 
 	return tea.NewView(b.String())
+}
+
+func (m analyticsModel) renderHelpOverlay() string {
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7571F9"))
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFB627"))
+	descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
+
+	var b strings.Builder
+	b.WriteString("\n  " + headerStyle.Render("Analytics Help") + "\n\n")
+
+	sections := []struct{ title, desc string }{
+		{
+			"Feedback Loop",
+			"Tracks the effectiveness of knowledge injection.\n" +
+				"    Docs tracked   — total documents with feedback signals\n" +
+				"    Positive       — injected docs the user actually referenced (+)\n" +
+				"    Negative       — injected docs that were ignored (-)\n" +
+				"    Boosted/Penalized — docs whose boost factor has shifted",
+		},
+		{
+			"Injection Activity",
+			"How often the UserPromptSubmit hook injects knowledge.\n" +
+				"    Injections     — number of injection events\n" +
+				"    Unique Docs    — distinct documents used in injections",
+		},
+		{
+			"Top Boosted Docs",
+			"Documents most frequently referenced after injection.\n" +
+				"    Higher boost factor = prioritized in future searches.\n" +
+				"    Signals +N/-M  — positive/negative signal counts",
+		},
+		{
+			"Top Penalized Docs",
+			"Documents that were injected but consistently ignored.\n" +
+				"    Boost factor < 1.0 lowers their search ranking.\n" +
+				"    Consider improving or removing high-negative docs.",
+		},
+	}
+
+	for _, s := range sections {
+		b.WriteString("  " + titleStyle.Render(s.title) + "\n")
+		b.WriteString("  " + descStyle.Render(s.desc) + "\n\n")
+	}
+
+	b.WriteString("  " + descStyle.Render("Press ? or Esc to close") + "\n")
+	return b.String()
 }
 
 // buildAnalyticsContent generates the full analytics text for the viewport.
@@ -98,15 +160,7 @@ func buildAnalyticsContent() (string, error) {
 		{"Boosted docs", fmt.Sprintf("%d", fs.BoostedCount)},
 		{"Penalized docs", fmt.Sprintf("%d", fs.PenalizedCount)},
 	}
-	ft := table.New(
-		table.WithColumns(feedbackCols),
-		table.WithRows(feedbackRows),
-		table.WithHeight(len(feedbackRows)),
-	)
-	fts := table.DefaultStyles()
-	fts.Header = fts.Header.Bold(true).BorderStyle(lipgloss.NormalBorder()).BorderBottom(true).BorderForeground(lipgloss.Color("#626262"))
-	fts.Selected = lipgloss.NewStyle() // no selection highlighting in non-focused table
-	ft.SetStyles(fts)
+	ft := newStaticTable(feedbackCols, feedbackRows)
 	b.WriteString(indentBlock(ft.View(), "  ") + "\n")
 
 	// --- Injection Activity Table ---
@@ -124,15 +178,7 @@ func buildAnalyticsContent() (string, error) {
 		{"Last 7 days", fmt.Sprintf("%d", injected7), fmt.Sprintf("%d", unique7)},
 		{"Last 30 days", fmt.Sprintf("%d", injected30), fmt.Sprintf("%d", unique30)},
 	}
-	it := table.New(
-		table.WithColumns(injCols),
-		table.WithRows(injRows),
-		table.WithHeight(len(injRows)),
-	)
-	its := table.DefaultStyles()
-	its.Header = its.Header.Bold(true).BorderStyle(lipgloss.NormalBorder()).BorderBottom(true).BorderForeground(lipgloss.Color("#626262"))
-	its.Selected = lipgloss.NewStyle()
-	it.SetStyles(its)
+	it := newStaticTable(injCols, injRows)
 	b.WriteString(indentBlock(it.View(), "  ") + "\n")
 
 	// --- Top Boosted Docs Table ---
@@ -154,21 +200,13 @@ func buildAnalyticsContent() (string, error) {
 				fmt.Sprintf("%.2f", d.BoostFactor),
 			})
 		}
-		bt := table.New(
-			table.WithColumns(boostCols),
-			table.WithRows(boostRows),
-			table.WithHeight(len(boostRows)),
-		)
-		bts := table.DefaultStyles()
-		bts.Header = bts.Header.Bold(true).BorderStyle(lipgloss.NormalBorder()).BorderBottom(true).BorderForeground(lipgloss.Color("#626262"))
-		bts.Selected = lipgloss.NewStyle()
-		bt.SetStyles(bts)
+		bt := newStaticTable(boostCols, boostRows)
 		b.WriteString(indentBlock(bt.View(), "  ") + "\n")
 	}
 
-	// --- Top Penalized Docs Table ---
+	// --- Top Penalized Docs Table (only if there are actually penalized docs) ---
 	topPenalized, _ := st.TopFeedbackDocs(ctx, 5, true)
-	if len(topPenalized) > 0 {
+	if fs.PenalizedCount > 0 && len(topPenalized) > 0 {
 		b.WriteString("\n  " + headerStyle.Render("Top Penalized Docs") + "\n\n")
 
 		penCols := []table.Column{
@@ -185,20 +223,35 @@ func buildAnalyticsContent() (string, error) {
 				fmt.Sprintf("%.2f", d.BoostFactor),
 			})
 		}
-		pt := table.New(
-			table.WithColumns(penCols),
-			table.WithRows(penRows),
-			table.WithHeight(len(penRows)),
-		)
-		pts := table.DefaultStyles()
-		pts.Header = pts.Header.Bold(true).BorderStyle(lipgloss.NormalBorder()).BorderBottom(true).BorderForeground(lipgloss.Color("#626262"))
-		pts.Selected = lipgloss.NewStyle()
-		pt.SetStyles(pts)
+		pt := newStaticTable(penCols, penRows)
 		b.WriteString(indentBlock(pt.View(), "  ") + "\n")
 	}
 
 	b.WriteString("\n")
 	return b.String(), nil
+}
+
+// newStaticTable creates a non-interactive table for display purposes.
+func newStaticTable(cols []table.Column, rows []table.Row) table.Model {
+	w := 0
+	for _, c := range cols {
+		w += c.Width + 2
+	}
+	t := table.New(
+		table.WithColumns(cols),
+		table.WithRows(rows),
+		table.WithWidth(w),
+		table.WithHeight(len(rows)),
+	)
+	s := table.DefaultStyles()
+	s.Header = s.Header.Bold(true).
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderBottom(true).
+		BorderForeground(lipgloss.Color("#626262"))
+	s.Selected = lipgloss.NewStyle()
+	t.SetStyles(s)
+	t.UpdateViewport()
+	return t
 }
 
 // indentBlock adds prefix to each line of a multi-line string.

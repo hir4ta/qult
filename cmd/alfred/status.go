@@ -114,7 +114,11 @@ func runStatus() error {
 	info := gatherStatus(verbose)
 
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7571F9"))
-	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Width(20)
+	labelWidth := 20
+	if verbose {
+		labelWidth = 36
+	}
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Width(labelWidth)
 	valStyle := lipgloss.NewStyle().Bold(true)
 	okStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575"))
 	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4672"))
@@ -232,6 +236,9 @@ func runStatus() error {
 		}
 	}
 
+	if !verbose {
+		b.WriteString("  " + mutedStyle.Render("Run 'alfred status --verbose' for environment details") + "\n")
+	}
 	b.WriteString("\n")
 	fmt.Print(b.String())
 	return nil
