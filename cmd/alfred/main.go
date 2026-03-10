@@ -129,7 +129,7 @@ func runServe() error {
 	// Embedder is optional — graceful degradation to FTS-only search.
 	var emb *embedder.Embedder
 	if e, err := embedder.NewEmbedder(); err != nil {
-		fmt.Fprintln(os.Stderr, "Warning: VOYAGE_API_KEY not set — running in FTS-only mode (no vector search or reranking)")
+		fmt.Fprintln(os.Stderr, "Warning: VOYAGE_API_KEY not set — running in FTS-only mode (no vector search or reranking). Run 'alfred settings' to configure.")
 	} else {
 		emb = e
 	}
@@ -206,6 +206,6 @@ Commands:
   help           Show this help
 
 Environment:
-  VOYAGE_API_KEY     Optional for serve (FTS-only fallback), required for init (embedding generation).
-                     Enables semantic vector search and Voyage AI reranking.`)
+  VOYAGE_API_KEY     Optional (FTS-only fallback without it). Enables semantic vector search
+                     and Voyage AI reranking. Run 'alfred settings' to configure interactively.`)
 }

@@ -7,6 +7,18 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.63.3] - 2026-03-10
+
+### Added
+- Hook performance diagnostics: elapsed time, timeout headroom, and overtime detection in debug log (`ALFRED_DEBUG=1`)
+- Voyage API key validation on `alfred init` — detects invalid keys before embedding phase (10s timeout)
+- Changelog display after `alfred update` — shows release notes from GitHub API
+- Actionable error guidance: all VOYAGE_API_KEY errors now include `alfred settings` hint and docs URL
+
+### Changed
+- Help skill context `fork` → `current` — reduces overhead for lightweight reference display
+- CLAUDE.md uses `@path` import syntax for rule file references (ensures Claude reads them)
+
 ## [0.63.2] - 2026-03-10
 
 ### Added
@@ -480,7 +492,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - PreCompact hook with transcript analysis
 - Decision extraction from conversation transcripts
 
-[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.63.2...HEAD
+[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.63.3...HEAD
+[0.63.3]: https://github.com/hir4ta/claude-alfred/compare/v0.63.2...v0.63.3
 [0.63.2]: https://github.com/hir4ta/claude-alfred/compare/v0.63.1...v0.63.2
 [0.63.1]: https://github.com/hir4ta/claude-alfred/compare/v0.63.0...v0.63.1
 [0.63.0]: https://github.com/hir4ta/claude-alfred/compare/v0.62.0...v0.63.0

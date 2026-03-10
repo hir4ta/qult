@@ -6,8 +6,7 @@ description: >
 user-invocable: true
 argument-hint: "[feature-name]"
 allowed-tools: mcp__plugin_alfred_alfred__knowledge
-context: fork
-model: sonnet
+context: current
 ---
 
 # /alfred:help — Capability Reference

@@ -351,6 +351,14 @@ func runSetup() error {
 
 		var emb *embedder.Embedder
 		if e, err := embedder.NewEmbedder(); err == nil {
+			// Validate API key with a short timeout to avoid hanging the TUI.
+			valCtx, valCancel := context.WithTimeout(ctx, 10*time.Second)
+			if vErr := e.Validate(valCtx); vErr != nil {
+				valCancel()
+				p.Send(seedDoneMsg{err: fmt.Errorf("invalid VOYAGE_API_KEY, run 'alfred settings' to reconfigure: %w", vErr)})
+				return
+			}
+			valCancel()
 			emb = e
 		}
 

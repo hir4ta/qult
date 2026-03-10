@@ -62,8 +62,9 @@ const (
 
 type (
 	latestVersionMsg struct {
-		version string
-		err     error
+		version   string
+		changelog string
+		err       error
 	}
 	installDoneMsg struct{ err error }
 )
@@ -72,6 +73,7 @@ type updateModel struct {
 	phase     updatePhase
 	current   string
 	latest    string
+	changelog string // release notes body
 	method    string // "brew", "download", "go"
 	err       error
 	spinner   spinner.Model
@@ -107,6 +109,7 @@ func (m updateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Sequence(m.stopwatch.Stop(), tea.Quit)
 		}
 		m.latest = msg.version
+		m.changelog = msg.changelog
 		if m.latest == m.current {
 			m.phase = updateUpToDate
 			return m, tea.Sequence(m.stopwatch.Stop(), tea.Quit)
@@ -178,6 +181,22 @@ func (m updateModel) View() tea.View {
 		b.WriteString(fmt.Sprintf("  %s (%s)\n",
 			doneStyle.Render("✓ Updated"),
 			m.stopwatch.View()))
+		if m.changelog != "" {
+			b.WriteString("\n  " + dimStyle.Render("What's new:") + "\n")
+			lines := strings.Split(m.changelog, "\n")
+			shown := 0
+			for _, line := range lines {
+				if line == "" {
+					continue
+				}
+				if shown >= 10 {
+					b.WriteString("  " + dimStyle.Render("...") + "\n")
+					break
+				}
+				b.WriteString("  " + dimStyle.Render(line) + "\n")
+				shown++
+			}
+		}
 
 	case updateError:
 		b.WriteString(fmt.Sprintf("  %s %v\n",
@@ -212,13 +231,14 @@ func checkLatestVersion() tea.Msg {
 
 	var release struct {
 		TagName string `json:"tag_name"`
+		Body    string `json:"body"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
 		return latestVersionMsg{err: fmt.Errorf("failed to parse version info: %w", err)}
 	}
 
 	ver := strings.TrimPrefix(release.TagName, "v")
-	return latestVersionMsg{version: ver}
+	return latestVersionMsg{version: ver, changelog: release.Body}
 }
 
 // doInstall updates alfred using the best available method:

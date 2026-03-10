@@ -141,6 +141,8 @@ func runHook(event string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	start := time.Now()
+
 	switch event {
 	case "SessionStart":
 		handleSessionStart(ctx, &ev)
@@ -154,6 +156,16 @@ func runHook(event string) error {
 		handleUserPromptSubmit(ctx, &ev)
 	case "SessionEnd":
 		handleSessionEnd(ctx, &ev)
+	}
+
+	elapsed := time.Since(start)
+	headroom := timeout - elapsed
+	if headroom < 0 {
+		debugf("hook event=%s completed in %s (timeout=%s, OVERTIME by %s)",
+			event, elapsed.Round(time.Millisecond), timeout, (-headroom).Round(time.Millisecond))
+	} else {
+		debugf("hook event=%s completed in %s (timeout=%s, headroom=%s)",
+			event, elapsed.Round(time.Millisecond), timeout, headroom.Round(time.Millisecond))
 	}
 
 	return nil

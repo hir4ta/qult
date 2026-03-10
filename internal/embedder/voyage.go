@@ -100,7 +100,7 @@ type voyageError struct {
 func (e *voyageError) Error() string {
 	// Mask raw body for auth errors to prevent API key leakage in logs.
 	if e.status == 401 || e.status == 403 {
-		return fmt.Sprintf("embedder: voyage returned %d: authentication failed (check VOYAGE_API_KEY)", e.status)
+		return fmt.Sprintf("embedder: voyage returned %d: authentication failed (check VOYAGE_API_KEY, run 'alfred settings' to reconfigure)", e.status)
 	}
 	if e.raw != "" && e.raw != e.detail {
 		return fmt.Sprintf("embedder: voyage returned %d: %s (raw: %s)", e.status, e.detail, e.raw)

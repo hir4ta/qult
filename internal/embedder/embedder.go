@@ -18,7 +18,7 @@ type Embedder struct {
 func NewEmbedder() (*Embedder, error) {
 	apiKey := os.Getenv("VOYAGE_API_KEY")
 	if apiKey == "" {
-		return nil, fmt.Errorf("VOYAGE_API_KEY is required but not set")
+		return nil, fmt.Errorf("VOYAGE_API_KEY is required but not set (run 'alfred settings' to configure, get a key at https://dash.voyageai.com/)")
 	}
 	return &Embedder{
 		client: newVoyageClient(apiKey),
@@ -48,6 +48,16 @@ func (e *Embedder) EmbedForStorage(ctx context.Context, text string) ([]float32,
 // EmbedBatchForStorage generates document embeddings for multiple texts in a single API call.
 func (e *Embedder) EmbedBatchForStorage(ctx context.Context, texts []string) ([][]float32, error) {
 	return e.client.embed(ctx, texts, "document")
+}
+
+// Validate checks that the API key is valid by making a minimal embedding request.
+// Returns nil if the key works, or an error describing the problem.
+func (e *Embedder) Validate(ctx context.Context) error {
+	_, err := e.client.embed(ctx, []string{"test"}, "query")
+	if err != nil {
+		return fmt.Errorf("API key validation failed: %w", err)
+	}
+	return nil
 }
 
 // Rerank reorders documents by relevance to the query using the Voyage rerank API.
