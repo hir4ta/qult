@@ -101,8 +101,8 @@ var decisionSignals = []confidenceSignal{
 	{markers: alternativeMarkers, weight: +0.30},
 	{markers: architectureTerms, weight: +0.15},
 	{markers: []string{
-		"just ", "simply ", "quickly ", "also ",
-		"とりあえず", "一旦", "まず", "ちょっと", "簡単に",
+		"just ", "simply ", "quickly ",
+		"とりあえず", "一旦", "ちょっと", "簡単に",
 	}, weight: -0.10},
 }
 

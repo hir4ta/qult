@@ -4,10 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 )
+
+// validTimestamp matches the history timestamp format "YYYYMMDD-HHMMSS".
+var validTimestamp = regexp.MustCompile(`^\d{8}-\d{6}$`)
 
 const (
 	historyDir        = ".history"
@@ -93,6 +97,9 @@ func (s *SpecDir) History(f SpecFile) ([]HistoryEntry, error) {
 // Rollback restores a historical version as the current file.
 // Saves the current version to history first (so rollback is itself undoable).
 func (s *SpecDir) Rollback(f SpecFile, timestamp string) error {
+	if !validTimestamp.MatchString(timestamp) {
+		return fmt.Errorf("invalid version format %q: expected YYYYMMDD-HHMMSS", timestamp)
+	}
 	histPath := filepath.Join(s.Dir(), historyDir, string(f)+"."+timestamp)
 	data, err := os.ReadFile(histPath)
 	if err != nil {

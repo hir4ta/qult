@@ -326,20 +326,32 @@ func (s *Store) UpsertCrawlMeta(ctx context.Context, meta *CrawlMeta) error {
 
 // RecordInjection saves which doc IDs were injected, so the next prompt
 // can evaluate whether the injection was useful (implicit feedback).
+// Uses a single transaction for the batch to avoid N round-trips.
 func (s *Store) RecordInjection(ctx context.Context, docIDs []int64) error {
+	if len(docIDs) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: record injection begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // rollback after commit is a no-op
 	now := time.Now().UTC().Format(time.RFC3339)
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO doc_feedback (doc_id, last_injected)
+		VALUES (?, ?)
+		ON CONFLICT(doc_id) DO UPDATE SET last_injected = excluded.last_injected`)
+	if err != nil {
+		return fmt.Errorf("store: record injection prepare: %w", err)
+	}
 	for _, id := range docIDs {
-		_, err := s.db.ExecContext(ctx, `
-			INSERT INTO doc_feedback (doc_id, last_injected)
-			VALUES (?, ?)
-			ON CONFLICT(doc_id) DO UPDATE SET last_injected = excluded.last_injected`,
-			id, now,
-		)
-		if err != nil {
+		if _, err := stmt.ExecContext(ctx, id, now); err != nil {
+			stmt.Close()
 			return fmt.Errorf("store: record injection: %w", err)
 		}
 	}
-	return nil
+	stmt.Close()
+	return tx.Commit()
 }
 
 // RecordFeedback increments the positive or negative hit count for a doc.

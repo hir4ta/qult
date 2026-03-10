@@ -6,6 +6,7 @@ description: >
   aggregates findings. Use when: (1) before committing, (2) after a milestone,
   (3) want a second opinion on changes.
 user-invocable: true
+disable-model-invocation: true
 argument-hint: "[focus area]"
 allowed-tools: Read, Glob, Grep, Agent, Bash(git diff *, git log *, git show *, git status *), mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__spec
 context: fork

@@ -134,15 +134,24 @@ func recallSave(ctx context.Context, st *store.Store, emb *embedder.Embedder, re
 	}
 
 	// Async embedding: generate vector for semantic recall search.
+	// Fire-and-forget is acceptable here: the MCP response must return immediately,
+	// and embedding failure only degrades vector search (FTS still works).
 	if emb != nil && changed {
 		go func() {
 			embCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			vec, err := emb.EmbedForStorage(embCtx, strings.TrimSpace(content))
 			if err != nil {
+				if store.DebugLog != nil {
+					store.DebugLog("recall save: async embed failed: %v", err)
+				}
 				return
 			}
-			_ = st.InsertEmbedding("docs", id, emb.Model(), vec)
+			if err := st.InsertEmbedding("docs", id, emb.Model(), vec); err != nil {
+				if store.DebugLog != nil {
+					store.DebugLog("recall save: insert embedding failed: %v", err)
+				}
+			}
 		}()
 	}
 

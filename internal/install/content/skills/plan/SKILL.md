@@ -6,6 +6,7 @@ description: >
   design in parallel, debate, and converge into a robust spec saved to .alfred/specs/.
   Use when: (1) starting a new task, (2) organizing a design, (3) planning before resuming work.
 user-invocable: true
+disable-model-invocation: true
 argument-hint: "<task-slug> [description]"
 allowed-tools: Read, Write, Edit, Glob, Grep, AskUserQuestion, Agent, WebSearch, WebFetch, mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__spec
 model: sonnet

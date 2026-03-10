@@ -197,19 +197,32 @@ func injectSpecContext(ctx context.Context, projectPath, source string, st *stor
 
 		// Proactive hints: skip in quiet mode (spec context above is structural, always injected).
 		if os.Getenv("ALFRED_QUIET") != "1" {
-			// Proactive: extract Next Steps and pre-fetch relevant knowledge.
-			if hints := proactiveHintsForNextSteps(ctx, session, st); hints != "" {
+			// Run all 3 FTS searches in parallel to reduce latency.
+			var hints, memHints, crossHints string
+			currentProject := projectBaseName(projectPath)
+			var hintWG sync.WaitGroup
+			hintWG.Add(3)
+			go func() {
+				defer hintWG.Done()
+				hints = proactiveHintsForNextSteps(ctx, session, st)
+			}()
+			go func() {
+				defer hintWG.Done()
+				memHints = proactiveMemoryHints(ctx, taskSlug, session, st)
+			}()
+			go func() {
+				defer hintWG.Done()
+				crossHints = proactiveCrossProjectHints(ctx, currentProject, taskSlug, session, st)
+			}()
+			hintWG.Wait()
+
+			if hints != "" {
 				buf.WriteString(hints)
 			}
-
-			// Proactive: search past memories relevant to the current task.
-			if memHints := proactiveMemoryHints(ctx, taskSlug, session, st); memHints != "" {
+			if memHints != "" {
 				buf.WriteString(memHints)
 			}
-
-			// Proactive: search memories from other projects for cross-project patterns.
-			currentProject := projectBaseName(projectPath)
-			if crossHints := proactiveCrossProjectHints(ctx, currentProject, taskSlug, session, st); crossHints != "" {
+			if crossHints != "" {
 				buf.WriteString(crossHints)
 			}
 		}
