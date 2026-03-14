@@ -34,6 +34,12 @@ const (
 	earlyBonus      = 0.05 // bonus per early (first-line) hit
 )
 
+// scored pairs a document with its relevance score.
+type scored struct {
+	doc   store.DocRow
+	score float64
+}
+
 // envFloat returns the environment variable as float64 or the default value.
 func envFloat(key string, defaultVal float64) float64 {
 	v := os.Getenv(key)
@@ -218,6 +224,16 @@ func handleUserPromptSubmit(ctx context.Context, ev *hookEvent) {
 			"Parameters: content (what to save), label (short description), project (optional context)."
 	}
 
+	// Load spec/session context for proactive knowledge push (non-blocking).
+	var specCtx *specContext
+	var ctxBoostDisable *bool
+	if cfg != nil {
+		ctxBoostDisable = cfg.ContextBoostDisable
+	}
+	if !resolveBool(ctxBoostDisable, "ALFRED_CONTEXT_BOOST_DISABLE") {
+		specCtx = loadSpecContext(ev.ProjectPath)
+	}
+
 	// Gate 1: Detect Claude Code keywords with word boundary matching.
 	// Only the matched keywords are used as search terms — no synonym expansion.
 	matched := detectClaudeCodeKeywords(prompt)
@@ -275,6 +291,12 @@ func handleUserPromptSubmit(ctx context.Context, ev *hookEvent) {
 		debugf("UserPromptSubmit: skipping supplemental search (timeout)")
 	}
 
+	// Proactive knowledge push: search with spec/session context keywords.
+	if specCtx != nil && ctx.Err() == nil {
+		ctxDocs := searchSpecContext(ctx, specCtx, st)
+		allDocs = append(allDocs, ctxDocs...)
+	}
+
 	if len(allDocs) == 0 {
 		debugf("UserPromptSubmit: FTS search returned 0 results")
 		return
@@ -292,10 +314,6 @@ func handleUserPromptSubmit(ctx context.Context, ev *hookEvent) {
 
 	// Gate 3: Score with keyword-aware relevance (primary: keywords in doc, secondary: prompt coverage).
 	promptLower := strings.ToLower(prompt)
-	type scored struct {
-		doc   store.DocRow
-		score float64
-	}
 	var candidates []scored
 	for _, doc := range uniqueDocs {
 		s := scoreRelevance(matched, promptLower, doc, skDampen)
@@ -330,6 +348,12 @@ func handleUserPromptSubmit(ctx context.Context, ev *hookEvent) {
 		}
 	}
 
+	// Apply spec/session context boost (post-scoring, tiebreaker semantics).
+	ctxBoostedIDs := applyContextBoost(candidates, specCtx)
+	if len(ctxBoostedIDs) > 0 {
+		debugf("UserPromptSubmit: context boost applied to %d candidates", len(ctxBoostedIDs))
+	}
+
 	// Re-sort after boost and re-apply threshold.
 	sort.Slice(candidates, func(i, j int) bool {
 		return candidates[i].score > candidates[j].score
@@ -362,10 +386,32 @@ func handleUserPromptSubmit(ctx context.Context, ev *hookEvent) {
 	if rememberHint != "" {
 		buf.WriteString(rememberHint + "\n\n")
 	}
-	buf.WriteString("Relevant best practices from alfred knowledge base:\n")
+
+	// Separate context-boosted results from regular keyword-matched results.
+	var regular, contextAware []scored
 	for _, c := range candidates {
-		snippet := safeSnippet(c.doc.Content, 300)
-		fmt.Fprintf(&buf, "- [%s] %s\n", c.doc.SectionPath, snippet)
+		if ctxBoostedIDs[c.doc.ID] {
+			contextAware = append(contextAware, c)
+		} else {
+			regular = append(regular, c)
+		}
+	}
+	if len(regular) > 0 {
+		buf.WriteString("Relevant best practices from alfred knowledge base:\n")
+		for _, c := range regular {
+			snippet := safeSnippet(c.doc.Content, 300)
+			fmt.Fprintf(&buf, "- [%s] %s\n", c.doc.SectionPath, snippet)
+		}
+	}
+	if len(contextAware) > 0 {
+		if len(regular) > 0 {
+			buf.WriteByte('\n')
+		}
+		buf.WriteString("Context-aware suggestions (based on current task):\n")
+		for _, c := range contextAware {
+			snippet := safeSnippet(c.doc.Content, 300)
+			fmt.Fprintf(&buf, "- [%s] %s\n", c.doc.SectionPath, snippet)
+		}
 	}
 	// Also search memories (no keyword gate — memory is small).
 	memSnippets := searchMemoryForPrompt(ctx, prompt, st)

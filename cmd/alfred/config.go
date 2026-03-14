@@ -22,6 +22,7 @@ type ProjectConfig struct {
 	SingleKeywordDampen     *float64       `json:"single_keyword_dampen,omitempty"`
 	CrawlIntervalDays       *int           `json:"crawl_interval_days,omitempty"`
 	Quiet                   *bool          `json:"quiet,omitempty"`
+	ContextBoostDisable     *bool          `json:"context_boost_disable,omitempty"`
 	CustomSources           []CustomSource `json:"custom_sources,omitempty"`
 }
 
@@ -38,6 +39,7 @@ var knownConfigKeys = map[string]bool{
 	"single_keyword_dampen":     true,
 	"crawl_interval_days":       true,
 	"quiet":                     true,
+	"context_boost_disable":     true,
 	"custom_sources":            true,
 }
 

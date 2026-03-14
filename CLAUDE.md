@@ -16,6 +16,8 @@ Go 1.25 / SQLite (ncruces/go-sqlite3) / Voyage AI (embedding)
 | `internal/spec` | Spec management: .alfred/specs/ (4 files: requirements/design/decisions/session) |
 | `internal/install` | Plugin bundle + seed docs |
 | `cmd/alfred/hooks*.go` | Hook handler (SessionStart / PreCompact / UserPromptSubmit / SessionEnd) |
+| `cmd/alfred/hooks_context.go` | Proactive knowledge push: spec/session context boost for knowledge injection |
+| `cmd/alfred/hooks_alignment.go` | Spec alignment nudge: surface goals at PreCompact for drift awareness |
 | `cmd/alfred/hooks_instincts.go` | Instinct learning: pattern extraction, injection, cross-project promotion |
 | `cmd/alfred/setup.go` | Init TUI (API key prompt + seed progress + onboarding) |
 | `cmd/alfred/status.go` | Status display (DB stats, API key, active tasks, --verbose) |
@@ -68,6 +70,8 @@ go vet ./...                  # Static analysis
 - Proactive workflow: plan/review skills auto-visible to Claude (disable-model-invocation removed); Stop hook enforces quality gate
 - Auto-crawl: every SessionStart spawns background crawl (lock file prevents concurrent runs)
 - Workflow detection: UserPromptSubmit detects large task / review intent → suggests appropriate skills
+- Proactive knowledge push: UserPromptSubmit uses spec/session context keywords for supplemental FTS search + post-scoring tiebreaker boost (cap +0.15, ±0.10 range); `ALFRED_CONTEXT_BOOST_DISABLE=1` or `.alfred/config.json` `context_boost_disable` to disable
+- Spec alignment nudge: PreCompact surfaces requirements goals + open success criteria via additionalContext; progressive cooldown (full → summary → hidden after 2 shows); `<!-- alignment-ack -->` in session.md to suppress; state markers persist through session.md rebuild
 
 ### Database & Schema
 

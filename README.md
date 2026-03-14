@@ -23,6 +23,8 @@ Works silently in the background — surfacing relevant knowledge, catching scop
 
 **Auto-Crawl** — Knowledge base refreshes in the background on every session start (lock file prevents concurrent runs). Run `alfred harvest` for an immediate manual refresh. Sources: official docs, changelog, engineering blog, Claude product blog, Anthropic news, and Agent SDK docs.
 
+**Proactive Context** — Goes beyond keyword matching: uses your active spec and session context to surface relevant knowledge before you need it. At compaction, gently reminds you of spec goals and open success criteria so you stay on track without manual check-ins.
+
 **Compact Resilience** — PreCompact hook auto-extracts decisions, tracks modified files, saves session state in activeContext format, and auto-updates Next Steps completion status. SessionStart hook restores full context after compaction.
 
 ## Getting Started
@@ -116,8 +118,8 @@ Run automatically during Claude Code lifecycle. No user action needed.
 | Event | Action |
 |-------|--------|
 | SessionStart | Auto-ingest CLAUDE.md + spec context injection (adaptive recovery) + past memory hints + auto-crawl + instinct promotion |
-| PreCompact | Extract context from transcript + auto-detect decisions + track modified files + auto-update Next Steps completion → save session.md → persist decisions as memory → emit compaction instructions → async embedding |
-| UserPromptSubmit | Keyword-gated FTS knowledge injection + memory search — auto-surfaces best practices and past experience (suppressed by `ALFRED_QUIET=1`) |
+| PreCompact | Extract context from transcript + auto-detect decisions + track modified files + auto-update Next Steps completion → save session.md → persist decisions as memory → **spec alignment nudge** → emit compaction instructions → async embedding |
+| UserPromptSubmit | Keyword-gated FTS knowledge injection + **spec/session context boost** + memory search — auto-surfaces best practices and past experience (suppressed by `ALFRED_QUIET=1`) |
 | SessionEnd | Persist session summary as permanent memory for future recall (skips on `reason=clear`) |
 
 ## Commands
@@ -316,6 +318,7 @@ IDE autocomplete is available via the [JSON Schema](schema/config.schema.json) (
 | `high_confidence_threshold` | `0.65` | Score needed to inject 2 results instead of 1 |
 | `single_keyword_dampen` | `0.80` | Multiplier for single-keyword matches (reduces noise) |
 | `quiet` | `false` | Suppress knowledge injection (hooks still save state) |
+| `context_boost_disable` | `false` | Disable spec/session context boost in knowledge injection |
 | `custom_sources` | `[]` | Additional documentation URLs to crawl (HTTPS only) |
 
 All fields are optional — only specified values override the defaults.
@@ -376,6 +379,7 @@ cat ~/.claude-alfred/debug.log  # View logs
 | `ALFRED_HIGH_CONFIDENCE_THRESHOLD` | `0.65` | Score threshold for injecting 2 results |
 | `ALFRED_SINGLE_KEYWORD_DAMPEN` | `0.80` | Dampening factor for single-keyword matches |
 | `ALFRED_QUIET` | `0` | Set to `1` to suppress knowledge injection |
+| `ALFRED_CONTEXT_BOOST_DISABLE` | `0` | Set to `1` to disable spec/session context boost |
 | `ALFRED_MEMORY_MAX_AGE_DAYS` | `180` | Default cutoff age for `alfred memory prune` |
 
 ### Where to find things

@@ -76,9 +76,31 @@ func handlePreCompact(ctx context.Context, projectPath, transcriptPath, customIn
 	// recall of early-session conversations after multiple compactions.
 	persistChapterMemory(ctx, projectPath, taskSlug, sd, transcriptPath)
 
+	// Read alignment state from existing session BEFORE rebuild (markers are lost in rebuild).
+	oldSession, _ := sd.ReadFile(spec.FileSession)
+	alignmentCount := countAlignmentShown(oldSession)
+	alignmentAcked := strings.Contains(oldSession, alignmentAckMarker)
+
 	// Build activeContext session.md with rich context, then enforce size limit.
 	session := buildActiveContextSession(sd, taskSlug, txCtx, decisions, modifiedFiles, customInstructions)
 	session = enforceSessionSizeLimit(session)
+
+	// Spec alignment nudge: surface goals before compaction so Claude can self-check.
+	// State is read from old session (above) and persisted in new session (below).
+	workingOn := extractSection(oldSession, "## Currently Working On")
+	if nudge := specAlignmentNudgeFromState(sd, alignmentCount, alignmentAcked, workingOn); nudge != "" {
+		emitAdditionalContext("PreCompact", nudge)
+		alignmentCount++
+		debugf("PreCompact: alignment nudge emitted (shown count: %d)", alignmentCount)
+	}
+
+	// Append alignment state markers AFTER size enforcement so they are never truncated.
+	if alignmentAcked {
+		session += alignmentAckMarker + "\n"
+	}
+	if alignmentCount > 0 {
+		session += formatAlignmentShown(alignmentCount) + "\n"
+	}
 	if err := sd.WriteFile(ctx, spec.FileSession, session); err != nil {
 		debugf("PreCompact: write session error: %v", err)
 		return

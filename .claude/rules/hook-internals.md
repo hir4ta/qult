@@ -27,4 +27,5 @@ paths:
 | `ALFRED_HIGH_CONFIDENCE_THRESHOLD` | `0.65` | UserPromptSubmit: threshold for 2-result injection |
 | `ALFRED_SINGLE_KEYWORD_DAMPEN` | `0.80` | UserPromptSubmit: single-keyword score multiplier |
 | `ALFRED_QUIET` | `0` | Suppress knowledge injection (UserPromptSubmit + SessionStart hints) |
+| `ALFRED_CONTEXT_BOOST_DISABLE` | `0` | Disable spec/session context boost in UserPromptSubmit |
 | `ALFRED_MEMORY_MAX_AGE_DAYS` | `180` | `alfred memory prune`: default cutoff age |
