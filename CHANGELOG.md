@@ -7,6 +7,20 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.67.0] - 2026-03-14
+
+### Added
+- **Autonomous Orchestrator** (`/alfred:develop`): fully autonomous development skill — spec creation (3-agent deliberation), spec review loop (3 agents × 5 perspectives), phase-by-phase implementation with review gates, final self-review (4 agents), test gate, and auto-commit
+  - Multi-file skill directory: SKILL.md (~170 lines) + 4 supporting files (spec-agents, review-prompts, recovery, examples)
+  - 3-layer loop termination: score threshold → stagnation detection (SHA-256) → max iterations (ChatDev/MetaGPT evidence-based)
+  - BLOCKED protocol with security-aware recovery (security blocks re-review, non-security skips ahead)
+  - Agent spawn budget cap (20/run) with graceful degradation
+  - Structured JSON verdicts from all review agents (max 10 findings, severity-tagged)
+  - Auto-commit with path allowlist + credential scan
+
+### Fixed
+- Stop hook false positives: Q&A/analysis-only sessions no longer blocked by quality gate
+
 ## [0.66.0] - 2026-03-14
 
 ### Added
@@ -709,7 +723,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - PreCompact hook with transcript analysis
 - Decision extraction from conversation transcripts
 
-[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.66.0...HEAD
+[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.67.0...HEAD
+[0.67.0]: https://github.com/hir4ta/claude-alfred/compare/v0.66.0...v0.67.0
 [0.66.0]: https://github.com/hir4ta/claude-alfred/compare/v0.65.1...v0.66.0
 [0.65.1]: https://github.com/hir4ta/claude-alfred/compare/v0.65.0...v0.65.1
 [0.65.0]: https://github.com/hir4ta/claude-alfred/compare/v0.64.3...v0.65.0

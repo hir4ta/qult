@@ -16,5 +16,5 @@
   "license": "MIT",
   "name": "alfred",
   "repository": "https://github.com/hir4ta/claude-alfred",
-  "version": "dev"
+  "version": "0.67.0"
 }
