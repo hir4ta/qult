@@ -145,23 +145,7 @@ when the trade-off is genuinely subjective.
    - **design.md**: Unified design (from Step 6 synthesis), alternatives considered
    - **decisions.md**: All agreed decisions with rationale + alternatives + source
      (Architect/Advocate/Researcher). Flag unresolved conflicts.
-   - **session.md**: Current position + auto-generated task breakdown as Next Steps
-
-4. **Auto-decompose tasks** in session.md's Next Steps:
-   - Break the design into concrete implementation tasks
-   - Order by dependency (what must come first)
-   - Estimate effort: S (< 30 min), M (30 min - 2 hrs), L (> 2 hrs)
-   - Format as checklist for progress tracking:
-   ```markdown
-   ## Next Steps
-   1. [ ] [S] Create database schema migration
-   2. [ ] [M] Implement API endpoints (GET /users, POST /users)
-   3. [ ] [M] Add authentication middleware
-   4. [ ] [L] Build frontend components
-   5. [ ] [S] Write integration tests
-   6. [ ] [S] Update CLAUDE.md with new patterns
-   ```
-   PreCompact hook auto-marks completed items with [x] based on modified files.
+   - **session.md**: Current position + task breakdown as Next Steps
 
 3. **Assign confidence scores** (1-10) to each section using HTML comments:
    ```markdown

@@ -7,6 +7,37 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.65.0] - 2026-03-15
+
+### Added
+- **Instinct Learning System**: behavioral pattern auto-extraction from sessions (SessionEnd), confidence-based injection (UserPromptSubmit), cross-project promotion (SessionStart), MCP recall `instincts`/`instinct-feedback` actions
+- **DB schema V7**: `instincts` table with scope/domain/confidence indexes
+- **Proactive Workflow**: plan/review skills visible to Claude (auto-suggest), Stop hook quality gate, PostToolUse contextual hints, multi-signal task complexity detection, context pressure monitoring
+- **`/alfred:ingest` skill**: reference material processor — structures CSV/TXT/PDF into persistent knowledge
+- **Spec confidence scoring**: 10-point scale (`<!-- confidence: N -->`) with avg/low_items summary in `spec status`
+- **Spec task auto-decomposition**: plan skill generates S/M/L effort-estimated checklists
+- **brainstorm→refine handoff**: brainstorm saves output to spec, refine auto-loads
+- **Review→instinct**: review findings saved as learnings for future sessions
+- **`alfred-workflow` rule**: proactive skill suggestion guide (JARVIS-like behavior)
+- **Welcome screen**: onboarding with cost/time estimates
+- **Skill selection flowchart**: "Which skill should I use?" in `/alfred:help`
+- **Maturity score labels**: needs-setup/basic/functional/well-configured/exemplary
+- **Skill description length validation**: >1024 chars warning in config-review
+- **JSON Schema**: `schema/config.schema.json` for IDE autocomplete
+- **Config validation improvement**: unknown keys show valid key list
+- **Doctor actionable messages**: remediation hints for all warn/fail checks
+
+### Changed
+- Auto-crawl: runs every session start (removed interval-based check)
+- Hook injection notification: shows matched keywords and per-result scores
+- `escapeLIKEContains()` helper for substring LIKE queries
+- SessionStart: 4 parallel ops (added instinct promotion)
+- SessionEnd: instinct extraction after memory persistence
+
+### Removed
+- `ALFRED_CRAWL_INTERVAL_DAYS` env var (crawl now runs every session)
+- `resolveInt()`, `envInt()`, `defaultCrawlIntervalDays` (dead code cleanup)
+
 ## [0.64.3] - 2026-03-11
 
 ### Fixed
@@ -650,7 +681,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - PreCompact hook with transcript analysis
 - Decision extraction from conversation transcripts
 
-[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.64.3...HEAD
+[Unreleased]: https://github.com/hir4ta/claude-alfred/compare/v0.65.0...HEAD
+[0.65.0]: https://github.com/hir4ta/claude-alfred/compare/v0.64.3...v0.65.0
 [0.64.3]: https://github.com/hir4ta/claude-alfred/compare/v0.64.2...v0.64.3
 [0.64.2]: https://github.com/hir4ta/claude-alfred/compare/v0.64.1...v0.64.2
 [0.64.1]: https://github.com/hir4ta/claude-alfred/compare/v0.64.0...v0.64.1

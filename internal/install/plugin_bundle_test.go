@@ -54,8 +54,8 @@ func TestBundle(t *testing.T) {
 				t.Errorf("missing event: %s", event)
 			}
 		}
-		if len(hooks) != 4 {
-			t.Errorf("expected 4 hook events, got %d", len(hooks))
+		if len(hooks) != 6 {
+			t.Errorf("expected 6 hook events, got %d", len(hooks))
 		}
 
 		// Verify SessionEnd has matcher excluding clear.

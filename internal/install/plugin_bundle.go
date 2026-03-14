@@ -12,10 +12,31 @@ import (
 const runCmd = `"${CLAUDE_PLUGIN_ROOT}/bin/run.sh"`
 
 // alfredHookEntries returns the hook configuration for plugin distribution.
-// SessionStart: CLAUDE.md auto-import.
-// UserPromptSubmit: Claude Code config keyword detection.
 func alfredHookEntries(binPath string) map[string]any {
+	// Stop hook prompt for quality gate.
+	stopPrompt := `You are a quality gate for a development workflow. Check the conversation transcript ($ARGUMENTS) for these conditions:
+
+1. If significant code was written or modified (more than trivial changes), was a review done? Look for evidence of /alfred:review, self-review, or explicit review discussion.
+2. If a spec is active (.alfred/specs/ mentioned), was session.md updated with current progress?
+3. If the user asked for a large feature or multi-step implementation, was /alfred:plan used to create a structured plan, or was planning discussed?
+
+If ALL applicable conditions are met (or not applicable), respond: {"ok": true}
+If something important was skipped, respond: {"ok": false, "reason": "Suggestion: [what should be done before finishing, e.g. 'Run /alfred:review to review the changes' or 'Update spec session.md with current progress']"}
+
+Be pragmatic — don't block for trivial changes, quick fixes, or conversations that are just Q&A. Only flag genuinely missing workflow steps for substantial work.`
+
 	return map[string]any{
+		"Stop": []any{
+			map[string]any{
+				"hooks": []any{
+					map[string]any{
+						"type":    "prompt",
+						"prompt":  stopPrompt,
+						"timeout": 30,
+					},
+				},
+			},
+		},
 		"SessionStart": []any{
 			map[string]any{
 				"hooks": []any{
@@ -40,8 +61,6 @@ func alfredHookEntries(binPath string) map[string]any {
 				},
 			},
 		},
-		// UserPromptSubmit: keyword-gated knowledge injection.
-		// The command hook checks for Claude Code keywords internally — no LLM gate needed.
 		"UserPromptSubmit": []any{
 			map[string]any{
 				"hooks": []any{
@@ -54,8 +73,21 @@ func alfredHookEntries(binPath string) map[string]any {
 				},
 			},
 		},
-		// SessionEnd: session summary persistence as permanent memory.
-		// Matcher excludes reason=clear (session cleared, no useful summary).
+		// PostToolUse: contextual hints after file edits.
+		"PostToolUse": []any{
+			map[string]any{
+				"matcher": "Edit|Write",
+				"hooks": []any{
+					map[string]any{
+						"type":          "command",
+						"command":       binPath + " hook PostToolUse",
+						"statusMessage": "alfred: checking changes...",
+						"timeout":       5,
+					},
+				},
+			},
+		},
+		// SessionEnd: session summary + instinct extraction.
 		"SessionEnd": []any{
 			map[string]any{
 				"matcher": "logout|prompt_input_exit|bypass_permissions_disabled|other",
