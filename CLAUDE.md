@@ -128,6 +128,7 @@ go vet ./...                  # Static analysis
 ## Compact Instructions
 
 - Preserve active spec task slug and "Currently Working On" from session.md
+- Preserve `## Orchestrator State` block in session.md verbatim (phase, iteration, counters)
 - Keep all CLAUDE.md rules intact (re-read from disk after compact)
 - Do NOT discard in-progress implementation context or recent decisions
 

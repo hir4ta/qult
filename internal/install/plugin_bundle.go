@@ -14,18 +14,18 @@ const runCmd = `"${CLAUDE_PLUGIN_ROOT}/bin/run.sh"`
 // alfredHookEntries returns the hook configuration for plugin distribution.
 func alfredHookEntries(binPath string) map[string]any {
 	// Stop hook prompt for quality gate.
-	stopPrompt := `You are a quality gate for a development workflow. Check the conversation transcript ($ARGUMENTS) for these conditions:
+	stopPrompt := `You are a quality gate for a development workflow. Check the conversation transcript ($ARGUMENTS).
 
-1. If significant code was written or modified (more than trivial changes), was a review done? Look for evidence of /alfred:review, self-review, or explicit review discussion.
-2. If a spec is active (.alfred/specs/ mentioned), was session.md updated with current progress?
-3. If the user asked for a large feature or multi-step implementation, was /alfred:plan used to create a structured plan, or was planning discussed?
+FIRST: Determine if code was actually written or modified in this session (look for Edit/Write tool calls that changed source files). If NO code was changed — only analysis, Q&A, discussion, or planning — respond {"ok": true} immediately.
 
-If ALL applicable conditions are met (or not applicable), respond: {"ok": true}
-If something important was skipped, respond: {"ok": false, "reason": "Suggestion: [what should be done before finishing, e.g. 'Run /alfred:review to review the changes' or 'Update spec session.md with current progress']"}
+ONLY if significant code was written or modified, check:
+1. Was a review done? Look for /alfred:review, self-review discussion, or explicit review.
+2. If a spec is active (.alfred/specs/), was session.md updated with current progress?
 
-Be pragmatic — don't block for trivial changes, quick fixes, or conversations that are just Q&A. Only flag genuinely missing workflow steps for substantial work.
+If all applicable conditions are met, respond: {"ok": true}
+If a genuinely important step was skipped, respond: {"ok": false, "reason": "Suggestion: [concise action]"}
 
-IMPORTANT: Respond with ONLY raw JSON. No markdown, no code fences, no explanation. Just the JSON object.`
+IMPORTANT: Respond with ONLY raw JSON. No markdown, no code fences, no explanation.`
 
 	return map[string]any{
 		"Stop": []any{
