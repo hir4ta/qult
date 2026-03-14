@@ -98,6 +98,25 @@ Alfred tends to the project's configuration — whether building new or polishin
 - Do NOT create files that exceed type-specific line limits
 - Preserve the user's voice and style when updating existing files
 
+## Example
+
+User: `/alfred:configure hook session-guard`
+
+```
+Created: .claude/hooks.json
+  Event: PreToolUse
+  Matcher: "Bash"
+  Type: prompt
+  Timeout: 10s
+
+Validated against best practices:
+✓ Event name valid
+✓ Timeout in range
+✓ Matcher is specific (not overly broad)
+
+Independent review: PASS (no issues found)
+```
+
 ## Troubleshooting
 
 - **knowledge returns no results**: Use best-practices.md as the authoritative reference.

@@ -89,6 +89,22 @@ Ready for next step. Suggest:
 - /alfred:brainstorm <theme> → explore options
 ```
 
+## Example
+
+User: `/alfred:ingest docs/api-spec.pdf docs/schema.csv`
+
+```
+Ingested 2 files (340 total lines):
+- Key facts: 12 items
+- Entities: 8 relationships mapped
+- Constraints: 5 rules identified
+- Saved to: spec requirements.md (## Reference Materials)
+
+Ready for next step. Suggest:
+- /alfred:plan api-redesign → structured development plan
+- /alfred:brainstorm api-patterns → explore options
+```
+
 ## Troubleshooting
 
 - **PDF too large to read**: Use the `pages` parameter to read in chunks (max 20 pages per request).

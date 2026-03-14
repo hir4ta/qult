@@ -125,6 +125,30 @@ If an active spec already exists:
 - **Spec init fails**: Check if `.alfred/specs/{slug}` already exists. Use `spec` action=status first.
 - **User doesn't answer requirements questions**: Proceed with reasonable defaults, flag assumptions with low confidence scores (1-3).
 
+## Example
+
+User: `/alfred:plan auth-refactor Add OAuth2 to the API gateway`
+
+```
+Alfred Protocol initialized for 'auth-refactor'.
+
+Design deliberation: 3 agents consulted (Architect, Devil's Advocate, Researcher)
+- Agreements: 4 decisions settled
+- Conflicts resolved: 2 (by evidence)
+- Escalated to you: 1 (need your input)
+
+Confidence: requirements avg 8.2 (0 items ≤ 5), design avg 6.8 (2 items ≤ 5)
+
+Spec files: .alfred/specs/auth-refactor/
+- requirements.md ✓
+- design.md ✓
+- decisions.md ✓
+- session.md ✓
+
+Before starting, please decide:
+1. Token storage — PostgreSQL (Architect) vs Redis (Researcher). Trade-off: durability vs latency.
+```
+
 ## Guardrails
 
 - Do NOT skip requirements gathering — even for "obvious" tasks
