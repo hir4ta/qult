@@ -146,6 +146,35 @@ Use the output format defined in [_protocol.md](checklists/_protocol.md).
 For single profile: use single profile format.
 For multiple profiles: use multi-profile summary table + top 5 priority actions.
 
+## Example
+
+User: `/alfred:review security`
+
+```
+## Review: security
+
+**Score: 88/100 (good)**
+**Verdict: PASS_WITH_WARNINGS**
+Reviewed: 8 files, 342 lines
+
+### High
+- [SC4] `.gitignore:1` — .env file not in .gitignore
+  → Add `.env` to .gitignore
+
+### Medium
+- [CC2] `.claude/settings.json:3` — Bash(*) allows all commands
+  → Restrict to specific patterns: Bash(git *, npm run *)
+
+### Checklist Summary
+| # | Check | Status |
+|---|-------|--------|
+| IV1 | Trust boundary validation | OK |
+| SC1 | Hardcoded secrets | OK |
+| SC4 | .gitignore coverage | NG |
+| CC2 | Over-permissive allow | NG |
+| ... | ... | OK |
+```
+
 ## Guardrails
 
 - ALWAYS read the relevant checklist.md before evaluating — never review from memory alone
