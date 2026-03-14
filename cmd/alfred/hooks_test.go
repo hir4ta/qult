@@ -26,145 +26,6 @@ func extractEarlyUserContext(transcriptPath string) string {
 }
 
 
-func TestShouldRemindPrompt(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name   string
-		prompt string
-		want   bool
-	}{
-		{"empty", "", false},
-		{"unrelated", "Fix the login bug", false},
-		{".claude mention", ".claude/agents をレビューして", true},
-		{"CLAUDE.md mention", "CLAUDE.md を改善して", true},
-		{"MEMORY.md mention", "MEMORY.md を確認して", true},
-		{".mcp.json mention", ".mcp.json を更新して", true},
-		{"case insensitive", "claude.md を見て", true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			if got := shouldRemindPrompt(tt.prompt); got != tt.want {
-				t.Errorf("shouldRemindPrompt(%q) = %v, want %v", tt.prompt, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestIsClaudeCodeRelated(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name   string
-		prompt string
-		want   bool
-	}{
-		{"empty", "", false},
-		{"unrelated", "Fix the login bug in auth service", false},
-		{"hook keyword", "hookを設定したい", true},
-		{"skill keyword", "how do skills work?", true},
-		{"mcp keyword", "MCP server configuration", true},
-		{"claude code keyword", "Claude Code の使い方", true},
-		{"compact keyword", "compaction について教えて", true},
-		{"japanese フック", "フックの設定方法を教えて", true},
-		{"japanese スキル", "スキルを作りたい", true},
-		{"plugin keyword", "pluginをインストールしたい", true},
-		{"worktree keyword", "worktree を使ったことある？", true},
-		{"general agent (no match)", "my travel agent booked a flight", false},
-		{"general rule (match — Gate 1 is intentionally broad)", "the golden rule of cooking", true},
-		{"frontmatter keyword", "frontmatter の書き方", true},
-		{"case insensitive", "HOOKS について", true},
-		{"short unrelated", "fix bug", false},
-		// Word boundary tests — prevent false positives from substrings.
-		{"webhook (no match)", "set up a webhook for GitHub notifications", false},
-		{"hooking (no match)", "I'm hooking into the event system", false},
-		{"compacted (no match)", "the data was compacted efficiently", false},
-		{"pluginName (no match)", "rename pluginManager to serviceManager", false},
-		// Word boundary — should still match.
-		{"hook at start", "hook configuration guide", true},
-		{"hook at end", "how to set up a hook", true},
-		{"hooks plural", "configure hooks for automation", true},
-		{"hook with punctuation", "hook, skill, and rule", true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			if got := isClaudeCodeRelated(tt.prompt); got != tt.want {
-				t.Errorf("isClaudeCodeRelated(%q) = %v, want %v", tt.prompt, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestDetectClaudeCodeKeywords(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name    string
-		prompt  string
-		wantLen int
-		wantAny string // at least this keyword should be found
-	}{
-		{"single keyword", "how do hooks work?", 1, "hooks"},
-		{"multiple keywords", "configure hooks and skills for MCP", 3, "hooks"},
-		{"no match", "fix the login bug", 0, ""},
-		{"word boundary", "webhooks are not hooks", 1, "hooks"},
-		{"japanese keyword", "スキルの作り方", 1, "スキル"},
-		{"mixed lang", "hook と skill を設定", 2, "hook"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := detectClaudeCodeKeywords(tt.prompt)
-			if len(got) != tt.wantLen {
-				t.Errorf("detectClaudeCodeKeywords(%q) returned %d keywords %v, want %d", tt.prompt, len(got), got, tt.wantLen)
-			}
-			if tt.wantAny != "" {
-				found := false
-				for _, kw := range got {
-					if kw == tt.wantAny {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Errorf("detectClaudeCodeKeywords(%q) = %v, want %q in results", tt.prompt, got, tt.wantAny)
-				}
-			}
-		})
-	}
-}
-
-func TestContainsWord(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		text string
-		word string
-		want bool
-	}{
-		{"configure hooks", "hook", false},         // "hooks" != "hook" at boundary
-		{"configure hook", "hook", true},            // exact word
-		{"hook configuration", "hook", true},        // at start
-		{"set up a hook", "hook", true},             // at end
-		{"hook, skill", "hook", true},               // punctuation boundary
-		{"webhook handler", "hook", false},          // embedded in "webhook"
-		{"hooking into", "hook", false},             // prefix of "hooking"
-		{"my-hook works", "hook", true},             // hyphen is boundary
-		{"use hook.json", "hook", true},             // dot is boundary
-		{"", "hook", false},                         // empty text
-		{"hook", "hook", true},                      // exact match
-		{"the hooks work", "hooks", true},           // plural
-		{"webhooks fire", "hooks", false},           // embedded
-	}
-	for _, tt := range tests {
-		t.Run(fmt.Sprintf("%s/%s", tt.text, tt.word), func(t *testing.T) {
-			t.Parallel()
-			if got := containsWord(tt.text, tt.word); got != tt.want {
-				t.Errorf("containsWord(%q, %q) = %v, want %v", tt.text, tt.word, got, tt.want)
-			}
-		})
-	}
-}
-
-
 func TestSplitMarkdownSections(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -574,244 +435,6 @@ func TestBuildActiveContextSessionLegacyFormat(t *testing.T) {
 	}
 	if !strings.Contains(result, "## Blockers\nAPI rate limit") {
 		t.Error("should migrate Unresolved Issues to Blockers")
-	}
-}
-
-func TestExtractSearchKeywords(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		input string
-		max   int
-		want  int // expected keyword count
-	}{
-		{"short prompt", "fix bug", 8, 1}, // "fix" is 3 chars → kept, "bug" is 3 chars → kept
-		{"with stop words", "how do I configure the hooks for my project", 8, 3},
-		{"technical", "implement hybrid vector search with FTS5", 8, 4},
-		{"empty", "", 8, 0},
-		// Japanese prompts — kagome POS tokenization (OR-separated)
-		{"japanese hook setup", "hookの設定方法を教えて", 6, 4},    // hook, 設定, 方法, 教え
-		{"japanese skill", "スキルの書き方を知りたい", 6, 3},        // スキル, 書き方, 知り
-		{"japanese mixed", "MCPサーバーの設定方法", 6, 4},          // MCP, サーバー, 設定, 方法
-		{"japanese pure", "コミットメッセージの規約を決めたい", 6, 4}, // コミット, メッセージ, 規約, 決め
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			result := extractSearchKeywords(tt.input, tt.max)
-			if result == "" && tt.want == 0 {
-				return
-			}
-			// Count actual keywords (CJK uses " OR " separator, ASCII uses " ")
-			var count int
-			if strings.Contains(result, " OR ") {
-				count = len(strings.Split(result, " OR "))
-			} else if result != "" {
-				count = len(strings.Fields(result))
-			}
-			if count < tt.want-1 || count > tt.want+1 {
-				t.Errorf("extractSearchKeywords(%q, %d) = %d keywords (%q), want ~%d", tt.input, tt.max, count, result, tt.want)
-			}
-		})
-	}
-}
-
-func TestScoreRelevance(t *testing.T) {
-	t.Parallel()
-	doc := store.DocRow{
-		SectionPath: "Hooks Configuration",
-		Content:     "Configure hooks in .claude/hooks.json to run commands on lifecycle events like SessionStart, PreCompact.",
-	}
-
-	// With matched keywords (the primary signal from Gate 1).
-	high := scoreRelevance([]string{"hooks"}, "how to configure hooks for precompact", doc, defaultSingleKeywordDampen)
-	low := scoreRelevance([]string{"hooks"}, "fix login button css color", doc, defaultSingleKeywordDampen)
-
-	if high <= low {
-		t.Errorf("relevant prompt should score higher: high=%.2f, low=%.2f", high, low)
-	}
-	if high < 0.30 {
-		t.Errorf("relevant prompt score too low: %.2f", high)
-	}
-}
-
-func TestIsMeaningfulToken(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		token string
-		want  bool
-	}{
-		// ASCII
-		{"hooks", true},
-		{"configure", true},
-		{"MCP", true},
-		{"to", false},  // 2 chars
-		{"a", false},   // 1 char
-		{"the", true},  // 3 chars (stop words are filtered elsewhere)
-		{"hook", true}, // 4 chars
-
-		// CJK particles — should be filtered
-		{"の", false},
-		{"を", false},
-		{"は", false},
-		{"が", false},
-		{"に", false},
-		{"で", false},
-		{"と", false},
-		{"も", false},
-
-		// CJK auxiliaries/copulas — should be filtered
-		{"する", false},
-		{"いる", false},
-		{"ある", false},
-		{"です", false},
-		{"ます", false},
-		{"ない", false},
-		{"たい", false},
-		{"ください", false},
-
-		// CJK content words — should pass
-		{"設定", true},
-		{"方法", true},
-		{"スキル", true},
-		{"フック", true},
-		{"書き方", true},
-		{"サーバー", true},
-		{"コミット", true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.token, func(t *testing.T) {
-			t.Parallel()
-			got := isMeaningfulToken(tt.token)
-			if got != tt.want {
-				t.Errorf("isMeaningfulToken(%q) = %v, want %v", tt.token, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestContentTokensForScoring(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name   string
-		prompt string
-		want   []string // subset that must be present
-		reject []string // must NOT be present
-	}{
-		{
-			"english",
-			"how to configure hooks for precompact",
-			[]string{"configure", "hooks", "precompact"},
-			[]string{"how", "to", "for"},
-		},
-		{
-			"japanese hook",
-			"hookの設定方法を教えて",
-			[]string{"hook", "設定", "方法"},
-			[]string{"の", "を", "て"},
-		},
-		{
-			"japanese skill",
-			"スキルの書き方",
-			[]string{"スキル", "書き方"},
-			[]string{"の"},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := contentTokensForScoring(tt.prompt)
-			gotSet := make(map[string]bool)
-			for _, w := range got {
-				gotSet[w] = true
-			}
-			for _, w := range tt.want {
-				if !gotSet[w] {
-					t.Errorf("contentTokensForScoring(%q) missing %q, got %v", tt.prompt, w, got)
-				}
-			}
-			for _, w := range tt.reject {
-				if gotSet[w] {
-					t.Errorf("contentTokensForScoring(%q) should not contain %q, got %v", tt.prompt, w, got)
-				}
-			}
-		})
-	}
-}
-
-func TestContentTokensForScoringWithStemming(t *testing.T) {
-	t.Parallel()
-	// English stemming: "configuring" should produce a stem that matches "configuration"
-	tokens := contentTokensForScoring("configuring hooks lifecycle")
-	gotSet := make(map[string]bool)
-	for _, w := range tokens {
-		gotSet[w] = true
-	}
-	// "configuring" → stem "configur", which matches substring of "configuration"
-	if !gotSet["configur"] && !gotSet["configuring"] {
-		t.Errorf("expected stem of 'configuring', got %v", tokens)
-	}
-	if !gotSet["hooks"] {
-		t.Errorf("expected 'hooks', got %v", tokens)
-	}
-	// "lifecycle" should be present
-	if !gotSet["lifecycle"] && !gotSet["lifecycl"] {
-		t.Errorf("expected 'lifecycle' or its stem, got %v", tokens)
-	}
-}
-
-func TestScoreRelevanceJapanese(t *testing.T) {
-	t.Parallel()
-	doc := store.DocRow{
-		SectionPath: "Hooks Configuration",
-		Content:     "Configure hooks in .claude/hooks.json to run commands on lifecycle events like SessionStart.",
-	}
-
-	// Japanese prompt — tokenizePrompt splits "hookの設定方法" into ["hook", "の", "設定", "方法"].
-	score := scoreRelevance([]string{"hook"}, "hookの設定方法を教えて", doc, defaultSingleKeywordDampen)
-	if score < 0.30 {
-		t.Errorf("Japanese prompt about hooks should score well, got %.2f", score)
-	}
-
-	// Irrelevant doc for same prompt.
-	irrelevantDoc := store.DocRow{
-		SectionPath: "Authentication Guide",
-		Content:     "OAuth2 authentication flow for third-party integrations.",
-	}
-	irrelevantScore := scoreRelevance([]string{"hook"}, "hookの設定方法を教えて", irrelevantDoc, defaultSingleKeywordDampen)
-	if irrelevantScore >= score {
-		t.Errorf("irrelevant doc should score lower: relevant=%.2f, irrelevant=%.2f", score, irrelevantScore)
-	}
-}
-
-func TestTokenizePrompt(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		input string
-		want  []string
-	}{
-		{"hookの設定方法を教えて", []string{"hook", "の", "設定", "方法", "を", "教え", "て"}},
-		{"フックの設定", []string{"フック", "の", "設定"}},
-		{"how to configure hooks", []string{"how", "to", "configure", "hooks"}},
-		{"MCP server setup", []string{"MCP", "server", "setup"}},
-		{"hook, skill, and rule", []string{"hook", "skill", "and", "rule"}},
-		{"", nil},
-		{"CLAUDE.md の書き方", []string{"CLAUDE", "md", "の", "書き方"}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			t.Parallel()
-			got := tokenizePrompt(tt.input)
-			if len(got) != len(tt.want) {
-				t.Errorf("tokenizePrompt(%q) = %v, want %v", tt.input, got, tt.want)
-				return
-			}
-			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Errorf("tokenizePrompt(%q)[%d] = %q, want %q", tt.input, i, got[i], tt.want[i])
-				}
-			}
-		})
 	}
 }
 
@@ -1258,23 +881,15 @@ func TestHandleUserPromptSubmitEarlyReturns(t *testing.T) {
 	newEmbedder = func() *embedder.Embedder { return nil }
 	t.Cleanup(func() { newEmbedder = origEmb })
 
-	// Test config reminder path.
-	output := captureStdout(t, func() {
-		handleUserPromptSubmit(context.Background(), &hookEvent{Prompt: ".claude/hooks.json を確認して"})
-	})
-	if !strings.Contains(output, "alfred") {
-		t.Error("config path prompt should trigger reminder")
-	}
-
 	// Test short prompt (< 10 runes).
-	output = captureStdout(t, func() {
+	output := captureStdout(t, func() {
 		handleUserPromptSubmit(context.Background(), &hookEvent{Prompt: "hook?"})
 	})
 	if output != "" {
 		t.Errorf("short prompt should produce no output, got %q", output)
 	}
 
-	// Test unrelated prompt — no semantic search, no keyword match → no output.
+	// Test unrelated prompt — no semantic search → no output.
 	output = captureStdout(t, func() {
 		handleUserPromptSubmit(context.Background(), &hookEvent{Prompt: "Fix the login bug in the authentication service please"})
 	})
@@ -1288,188 +903,6 @@ func TestHandleUserPromptSubmitEarlyReturns(t *testing.T) {
 	})
 	if output != "" {
 		t.Errorf("empty prompt should produce no output, got %q", output)
-	}
-}
-
-func TestHandleUserPromptSubmitKeywordFilter(t *testing.T) {
-	// Claude Code related prompts should pass the keyword filter.
-	relatedPrompts := []string{
-		"hookの設定方法を教えてください",
-		"skillを作成したいのですが",
-		"MCP serverの接続方法は？",
-		"claude.md のベストプラクティス",
-		"compaction 後にコンテキストが失われる",
-		"pluginをインストールする方法",
-		"worktreeでの並行作業方法",
-		"subagentの使い方を教えて",
-		"フックの設定ファイルの書き方",
-	}
-
-	for _, prompt := range relatedPrompts {
-		t.Run(prompt, func(t *testing.T) {
-			if !isClaudeCodeRelated(prompt) {
-				t.Errorf("isClaudeCodeRelated(%q) = false, want true", prompt)
-			}
-		})
-	}
-}
-
-func TestHandleUserPromptSubmitFTSPath(t *testing.T) {
-	// Disable semantic search — this tests the legacy FTS path (no longer the primary path).
-	t.Skip("FTS path removed in v5 semantic-first design; handleUserPromptSubmit uses Voyage only")
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	st, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	defer st.Close()
-
-	// Seed docs about hooks configuration.
-	for _, doc := range []store.DocRow{
-		{URL: "https://docs.example.com/hooks", SectionPath: "Hooks Configuration", Content: "Configure hooks in .claude/hooks/hooks.json to run shell commands on lifecycle events like SessionStart and PreToolUse.", SourceType: "docs"},
-		{URL: "https://docs.example.com/skills", SectionPath: "Skills", Content: "Skills are reusable prompt templates stored in .claude/skills/ directories with SKILL.md files.", SourceType: "docs"},
-		{URL: "https://docs.example.com/mcp", SectionPath: "MCP Servers", Content: "MCP servers provide tools to Claude Code. Configure in .mcp.json with command and args.", SourceType: "docs"},
-	} {
-		if _, _, err := st.UpsertDoc(context.Background(), &doc); err != nil {
-			t.Fatalf("UpsertDoc: %v", err)
-		}
-	}
-
-	// Override openStore to use our test DB.
-	origOpen := openStore
-	openStore = func() (*store.Store, error) { return st, nil }
-	t.Cleanup(func() { openStore = origOpen })
-
-	// English prompt about hooks should find relevant docs and inject knowledge.
-	output := captureStdout(t, func() {
-		handleUserPromptSubmit(context.Background(), &hookEvent{Prompt: "How do I configure hooks for SessionStart lifecycle events in Claude Code?"})
-	})
-	if !strings.Contains(output, "Relevant best practices") {
-		t.Errorf("FTS path should inject knowledge, got %q", output)
-	}
-	if !strings.Contains(output, "Hooks") {
-		t.Errorf("should find hooks-related doc, got %q", output)
-	}
-}
-
-func TestHandleUserPromptSubmitFTSNoResults(t *testing.T) {
-	t.Skip("FTS path removed in v5 semantic-first design")
-	// Empty DB: FTS search returns 0 results.
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "empty.db")
-	st, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	defer st.Close()
-
-	origOpen := openStore
-	openStore = func() (*store.Store, error) { return st, nil }
-	t.Cleanup(func() { openStore = origOpen })
-
-	output := captureStdout(t, func() {
-		handleUserPromptSubmit(context.Background(), &hookEvent{Prompt: "How do I configure hooks for SessionStart lifecycle events?"})
-	})
-	if output != "" {
-		t.Errorf("empty DB should produce no output, got %q", output)
-	}
-}
-
-func TestHandleUserPromptSubmitFTSLowRelevance(t *testing.T) {
-	t.Skip("FTS path removed in v5 semantic-first design")
-	// DB has docs but they're irrelevant to the prompt.
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "irrelevant.db")
-	st, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	defer st.Close()
-
-	doc := store.DocRow{
-		URL: "https://docs.example.com/auth", SectionPath: "Authentication",
-		Content: "OAuth2 authentication flow for third-party integrations with token refresh.",
-		SourceType: "docs",
-	}
-	if _, _, err := st.UpsertDoc(context.Background(), &doc); err != nil {
-		t.Fatalf("UpsertDoc: %v", err)
-	}
-
-	origOpen := openStore
-	openStore = func() (*store.Store, error) { return st, nil }
-	t.Cleanup(func() { openStore = origOpen })
-
-	// Prompt about hooks, but only auth docs exist — should be below relevance threshold (0.55).
-	output := captureStdout(t, func() {
-		handleUserPromptSubmit(context.Background(), &hookEvent{Prompt: "How do I configure hooks for SessionStart lifecycle events?"})
-	})
-	if strings.Contains(output, "Authentication") {
-		t.Errorf("irrelevant doc should be filtered by relevance scoring (threshold 0.55), got %q", output)
-	}
-}
-
-func TestHandleUserPromptSubmitWordBoundary(t *testing.T) {
-	t.Skip("FTS path removed in v5 semantic-first design")
-	// Prompt with "webhook" should NOT trigger injection (word boundary).
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "boundary.db")
-	st, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	defer st.Close()
-
-	doc := store.DocRow{
-		URL: "https://docs.example.com/hooks", SectionPath: "Hooks Configuration",
-		Content: "Configure hooks in .claude/hooks.json for lifecycle events.",
-		SourceType: "docs",
-	}
-	if _, _, err := st.UpsertDoc(context.Background(), &doc); err != nil {
-		t.Fatalf("UpsertDoc: %v", err)
-	}
-
-	origOpen := openStore
-	openStore = func() (*store.Store, error) { return st, nil }
-	t.Cleanup(func() { openStore = origOpen })
-
-	// "webhook" should NOT match — word boundary prevents "hook" substring match.
-	output := captureStdout(t, func() {
-		handleUserPromptSubmit(context.Background(), &hookEvent{Prompt: "set up a webhook for GitHub notifications to track deployments"})
-	})
-	if output != "" {
-		t.Errorf("webhook prompt should not trigger injection, got %q", output)
-	}
-}
-
-func TestHandleUserPromptSubmitConfigReminder(t *testing.T) {
-	// Disable semantic search so non-config prompts produce no output.
-	origEmb := newEmbedder
-	newEmbedder = func() *embedder.Embedder { return nil }
-	t.Cleanup(func() { newEmbedder = origEmb })
-
-	tests := []struct {
-		name   string
-		prompt string
-		want   bool
-	}{
-		{"CLAUDE.md mention", "CLAUDE.md を更新して", true},
-		{"MEMORY.md mention", "MEMORY.md を確認して", true},
-		{".mcp.json mention", ".mcp.json の設定を変更したい", true},
-		{".claude/ mention", ".claude/rules/ にルールを追加して", true},
-		{"no config mention", "テストを書いてください", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			output := captureStdout(t, func() {
-				handleUserPromptSubmit(context.Background(), &hookEvent{Prompt: tt.prompt})
-			})
-			gotReminder := strings.Contains(output, "alfred")
-			if gotReminder != tt.want {
-				t.Errorf("config reminder for %q: got=%v, want=%v (output=%q)", tt.prompt, gotReminder, tt.want, output)
-			}
-		})
 	}
 }
 
@@ -1605,10 +1038,10 @@ func TestIngestProjectClaudeMD(t *testing.T) {
 
 	ingestProjectClaudeMD(context.Background(), st, dir)
 
-	// Verify docs were inserted.
-	docs, err := st.SearchDocsFTS(context.Background(),"Commands", "project", 5)
+	// Verify docs were inserted via URL prefix search.
+	docs, err := st.SearchDocsByURLPrefix(context.Background(), "project://", 5)
 	if err != nil {
-		t.Fatalf("SearchDocsFTS: %v", err)
+		t.Fatalf("SearchDocsByURLPrefix: %v", err)
 	}
 	if len(docs) == 0 {
 		t.Error("expected docs after ingestProjectClaudeMD")
@@ -1681,8 +1114,14 @@ func TestResolvedDateUnknown(t *testing.T) {
 
 
 func TestUserPromptSubmitJSONOutput(t *testing.T) {
+	// Stub newEmbedder to return nil so test doesn't depend on VOYAGE_API_KEY.
+	origEmb := newEmbedder
+	newEmbedder = func() *embedder.Embedder { return nil }
+	t.Cleanup(func() { newEmbedder = origEmb })
+
+	// Use a remember-intent prompt to guarantee JSON output without Voyage.
 	output := captureStdout(t, func() {
-		handleUserPromptSubmit(context.Background(), &hookEvent{Prompt: "CLAUDE.md を更新して"})
+		handleUserPromptSubmit(context.Background(), &hookEvent{Prompt: "この設計判断を覚えておいて: SQLiteを採用した理由はパフォーマンス"})
 	})
 
 	var result map[string]any
@@ -1960,58 +1399,7 @@ func TestIsTrivialDecisionJapanese(t *testing.T) {
 	}
 }
 
-func TestEnvFloat(t *testing.T) {
-	// Cannot use t.Parallel with t.Setenv.
-	tests := []struct {
-		name       string
-		env        string
-		defaultVal float64
-		want       float64
-	}{
-		{"valid float", "0.75", 0.40, 0.75},
-		{"empty string", "", 0.40, 0.40},
-		{"invalid string", "notanumber", 0.40, 0.40},
-		{"zero", "0", 0.40, 0.0},
-		{"negative clamped to 0", "-0.5", 0.40, 0.0},
-		{"above 1 clamped to 1", "1.5", 0.40, 1.0},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			key := "TEST_ENVFLOAT_" + tt.name
-			if tt.env != "" {
-				t.Setenv(key, tt.env)
-			}
-			got := envFloat(key, tt.defaultVal)
-			if got != tt.want {
-				t.Errorf("envFloat(%q, %f) = %f, want %f", key, tt.defaultVal, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestProactiveHintsForNextSteps(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name    string
-		session string
-		empty   bool
-	}{
-		{"no next steps section", "## Status\nactive\n", true},
-		{"empty next steps", "## Next Steps\n\n## Blockers\n", true},
-		{"short next steps", "## Next Steps\nabc\n", true},
-		{"no claude keywords", "## Next Steps\n1. Implement user OAuth2 flow\n2. Add database migration\n", true},
-		// Note: "with keywords" case needs a store with data, so tested via integration
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := proactiveHintsForNextSteps(context.Background(), tt.session, nil)
-			if tt.empty && got != "" {
-				t.Errorf("proactiveHintsForNextSteps() = %q, want empty", got)
-			}
-		})
-	}
-}
+// TestProactiveHintsForNextSteps removed: function deleted in simplification.
 
 func TestSafeSnippet(t *testing.T) {
 	t.Parallel()
@@ -2069,60 +1457,6 @@ func TestEnforceSessionSizeLimit(t *testing.T) {
 	})
 }
 
-func TestStripCompactMarkers(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name    string
-		input   string
-		wantSub string // substring that should remain
-		notSub  string // substring that should be removed
-	}{
-		{"empty", "", "", ""},
-		{"no markers", "## Status\nactive\n", "active", ""},
-		{"single trailing marker", "## Status\nactive\n## Compact Marker [2026-01-01]\nstuff\n", "active", "Compact Marker"},
-		{"marker between sections", "## Status\nactive\n## Compact Marker [2026-01-01]\nstuff\n## Next Steps\nfoo\n", "foo", "Compact Marker"},
-		{"multiple markers", "## Status\nactive\n## Compact Marker [1]\na\n## Compact Marker [2]\nb\n## Next Steps\nbar\n", "bar", "Compact Marker"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := stripCompactMarkers(tt.input)
-			if tt.wantSub != "" && !strings.Contains(got, tt.wantSub) {
-				t.Errorf("stripCompactMarkers() missing expected substring %q in result %q", tt.wantSub, got)
-			}
-			if tt.notSub != "" && strings.Contains(got, tt.notSub) {
-				t.Errorf("stripCompactMarkers() should not contain %q in result %q", tt.notSub, got)
-			}
-		})
-	}
-}
-
-func TestCleanSectionContent(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{"empty", "", ""},
-		{"plain text", "hello world", "hello world"},
-		{"heading prefix", "## Foo bar", "Foo bar"},
-		{"bold markers", "**important** stuff", "important stuff"},
-		{"separator", "---", ""},
-		{"mixed", "## Title\n**bold**\n---\nnormal", "Title; bold; normal"},
-		{"shell comment preserved", "set -e", "set -e"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := cleanSectionContent(tt.input)
-			if got != tt.want {
-				t.Errorf("cleanSectionContent(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestDetectRememberIntent(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -2143,78 +1477,6 @@ func TestDetectRememberIntent(t *testing.T) {
 			t.Parallel()
 			if got := detectRememberIntent(tt.prompt); got != tt.want {
 				t.Errorf("detectRememberIntent(%q) = %v, want %v", tt.prompt, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestBuildSessionSummary(t *testing.T) {
-	t.Parallel()
-	session := `# Session: test-task
-
-## Status
-active
-
-## Currently Working On
-認証フロー実装
-
-## Recent Decisions (last 3)
-1. JWT認証を採用
-2. Clerk統合を検討
-
-## Next Steps
-- [ ] テスト追加
-- [x] 設計完了
-
-## Modified Files (this session)
-- auth.go
-- auth_test.go
-
-## Compact Marker [2026-01-01 00:00:00]
-### Pre-Compact Context Snapshot
-This should be stripped
-`
-
-	got := buildSessionSummary(session)
-
-	if !strings.Contains(got, "認証フロー実装") {
-		t.Error("summary should contain working-on content")
-	}
-	if !strings.Contains(got, "JWT認証") {
-		t.Error("summary should contain decision content")
-	}
-	if !strings.Contains(got, "テスト追加") {
-		t.Error("summary should contain next steps")
-	}
-	if !strings.Contains(got, "auth.go") {
-		t.Error("summary should contain modified files")
-	}
-	if strings.Contains(got, "Compact Marker") {
-		t.Error("summary should not contain compact markers")
-	}
-	if strings.Contains(got, "Pre-Compact") {
-		t.Error("summary should not contain compact context snapshot")
-	}
-}
-
-func TestExtractSummaryTitle(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name    string
-		session string
-		want    string
-	}{
-		{"with working on", "## Currently Working On\n認証実装\n## Next Steps\n", "認証実装"},
-		{"multiline working on", "## Currently Working On\nfirst line\nsecond line\n", "first line"},
-		{"no working on", "## Status\nactive\n", "session"},
-		{"empty working on", "## Currently Working On\n\n## Next Steps\n", "session"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := extractSummaryTitle(tt.session)
-			if got != tt.want {
-				t.Errorf("extractSummaryTitle() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -2318,10 +1580,10 @@ func TestPersistChapterMemory(t *testing.T) {
 		t.Error("expected positive doc ID")
 	}
 
-	// Verify FTS search finds the chapter.
-	docs, err := st.SearchDocsFTS(ctx, "hybrid search chapter", "memory", 10)
+	// Verify keyword search finds the chapter.
+	docs, err := st.SearchMemoriesKeyword(ctx, "hybrid search chapter", 10)
 	if err != nil {
-		t.Fatalf("FTS search: %v", err)
+		t.Fatalf("keyword search: %v", err)
 	}
 	found := false
 	for _, d := range docs {
@@ -2331,6 +1593,6 @@ func TestPersistChapterMemory(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("chapter memory should be findable via FTS")
+		t.Error("chapter memory should be findable via keyword search")
 	}
 }

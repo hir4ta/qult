@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"os"
 	"testing"
 
@@ -60,21 +59,6 @@ func TestRunHook_SessionStart(t *testing.T) {
 	}
 	if len(output) > 0 && !containsStr(output, "dispatch-test") {
 		t.Errorf("output should contain task slug, got: %s", output)
-	}
-}
-
-func TestRunHook_UserPromptSubmit_ConfigReminder(t *testing.T) {
-	feedStdin(t, hookEvent{
-		ProjectPath: t.TempDir(),
-		Prompt:      "CLAUDE.md を改善して",
-	})
-
-	output := captureStdout(t, func() {
-		runHook("UserPromptSubmit")
-	})
-
-	if !containsStr(output, "alfred") {
-		t.Errorf("expected config reminder for CLAUDE.md mention, got: %s", output)
 	}
 }
 
@@ -147,7 +131,3 @@ func containsStr(s, substr string) bool {
 // Ensure captureStdout from hooks_test.go is available.
 // It's in the same package so it's accessible.
 
-// Suppress debug output during tests.
-func init() {
-	debugWriter = io.Discard
-}

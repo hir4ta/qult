@@ -54,23 +54,9 @@ func TestRecencyFactor(t *testing.T) {
 			tolerance:  0.02,
 		},
 		{
-			name:       "changelog 30 days ago (one half-life)",
-			crawledAt:  "2026-02-08T12:00:00Z",
-			sourceType: store.SourceChangelog,
-			wantApprox: 0.5, // exp(-ln2 * 30/30) = 0.5, at floor
-			tolerance:  0.02,
-		},
-		{
-			name:       "changelog 90 days ago (clamped to floor)",
-			crawledAt:  "2025-12-10T12:00:00Z",
-			sourceType: store.SourceChangelog,
-			wantApprox: 0.5,
-			tolerance:  0.01,
-		},
-		{
 			name:       "docs no decay",
 			crawledAt:  "2024-01-01T00:00:00Z",
-			sourceType: store.SourceDocs,
+			sourceType: "docs",
 			wantApprox: 1.0,
 			tolerance:  0.001,
 		},
@@ -121,11 +107,9 @@ func TestRecencyHalfLife(t *testing.T) {
 		want       float64
 	}{
 		{store.SourceMemory, recencyHalfLifeMemory},
-		{store.SourceChangelog, recencyHalfLifeChangelog},
-		{store.SourceDocs, 0},
+		{"docs", 0},
 		{store.SourceSpec, 0},
 		{store.SourceProject, 0},
-		{store.SourceEngineering, 0},
 		{"unknown", 0},
 	}
 
@@ -142,8 +126,8 @@ func TestRecencyHalfLife(t *testing.T) {
 func TestApplyRecencySignal_NoDecay(t *testing.T) {
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
 	docs := []store.DocRow{
-		{ID: 1, SourceType: store.SourceDocs, CrawledAt: "2024-01-01T00:00:00Z"},
-		{ID: 2, SourceType: store.SourceDocs, CrawledAt: "2026-03-10T00:00:00Z"},
+		{ID: 1, SourceType: "docs", CrawledAt: "2024-01-01T00:00:00Z"},
+		{ID: 2, SourceType: "docs", CrawledAt: "2026-03-10T00:00:00Z"},
 	}
 
 	result := applyRecencySignal(docs, now)
@@ -178,17 +162,15 @@ func TestApplyRecencySignal_MemoryBoost(t *testing.T) {
 func TestApplyRecencySignal_MixedSourceTypes(t *testing.T) {
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
 	docs := []store.DocRow{
-		{ID: 1, SourceType: store.SourceDocs, CrawledAt: "2024-01-01T00:00:00Z"},     // docs: no decay
-		{ID: 2, SourceType: store.SourceMemory, CrawledAt: "2026-03-10T11:00:00Z"},   // memory: fresh
-		{ID: 3, SourceType: store.SourceChangelog, CrawledAt: "2025-01-01T00:00:00Z"}, // changelog: old
+		{ID: 1, SourceType: "docs", CrawledAt: "2024-01-01T00:00:00Z"},   // docs: no decay
+		{ID: 2, SourceType: store.SourceMemory, CrawledAt: "2026-03-10T11:00:00Z"}, // memory: fresh
 	}
 
 	result := applyRecencySignal(docs, now)
 
 	// Doc 1: posScore=1.0, recency=1.0 (docs) → 1.0
 	// Doc 2: posScore=0.5, recency≈1.0 (fresh memory) → ≈0.5
-	// Doc 3: posScore=0.333, recency=0.75 (old changelog, floored) → ≈0.25
-	// Order: 1, 2, 3
+	// Order: 1, 2
 	if result[0].ID != 1 {
 		t.Error("expected docs (no decay) to stay first")
 	}

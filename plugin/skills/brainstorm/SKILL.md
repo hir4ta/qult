@@ -2,11 +2,12 @@
 name: brainstorm
 description: >
   Divergent thinking with 3 agents (Visionary, Pragmatist, Critic) in parallel.
-  Use when you need more ideas, want to explore options, or surface risks before deciding.
-  Follow up with /alfred:refine to converge on a decision.
+  Use when you need more ideas, want to explore options, or surface risks
+  before deciding. NOT for convergent decision-making (use /alfred:refine).
+  NOT for structured implementation planning (use /alfred:plan).
 user-invocable: true
 disable-model-invocation: true
-argument-hint: "<theme or rough prompt>"
+argument-hint: "theme or rough prompt"
 allowed-tools: Read, Glob, Grep, AskUserQuestion, Agent, WebSearch, WebFetch, mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__spec
 context: fork
 model: sonnet
@@ -21,6 +22,10 @@ richer, more grounded divergent output. The goal is not "deciding" but "expandin
 - This skill's role is **divergence**. It does not judge or decide (decisions are made by /alfred:refine).
 - Where facts are insufficient, explicitly label as "hypothesis" — **never assert speculation as fact**.
 - Prefer breadth over depth — surface many angles, don't deep-dive on one.
+
+## Supporting Files
+
+- **[agent-prompts.md](agent-prompts.md)** — Prompt templates for Visionary, Pragmatist, Critic, and Synthesis moderator agents
 
 ## Phase 0: Intake & Minimal Assumption Check (AskUserQuestion recommended)
 
@@ -43,90 +48,13 @@ Confirm with up to 3 questions (with choices):
 ## Phase 1: Parallel Perspective Generation (3 agents)
 
 Search knowledge for relevant context first, then spawn **all 3 agents in a single
-message** using the Agent tool. Pass each the theme, constraints, and any knowledge
-base results.
-
-**Agent 1: Visionary** — Possibilities, innovation, what-if scenarios
-```
-You are the Visionary. Your role is to think BIG and explore possibilities.
-
-Theme: <theme>
-Constraints: <constraints>
-Knowledge context: <knowledge results if any>
-
-Your job:
-1. Search the web for innovative approaches, emerging trends, and unconventional
-   solutions related to this theme
-2. Generate 5-7 ideas in the "Experimental / Ambitious" category
-3. For each idea: one-liner, 30-second explanation, when it works, biggest upside
-4. Think about what's possible if constraints were loosened
-5. Surface non-obvious connections and analogies from other domains
-
-Format your output as a structured list. Be bold — this is divergence, not judgment.
-```
-
-**Agent 2: Pragmatist** — Feasibility, effort, trade-offs, proven solutions
-```
-You are the Pragmatist. Your role is to find workable, proven approaches.
-
-Theme: <theme>
-Constraints: <constraints>
-Knowledge context: <knowledge results if any>
-
-Your job:
-1. Search the web for proven solutions, established patterns, and case studies
-   related to this theme
-2. Generate 5-7 ideas in the "Conservative / Realistic" category
-3. For each idea: one-liner, 30-second explanation, effort estimate, fit with constraints
-4. Identify trade-off axes (speed/quality, short-term/long-term, etc.)
-5. Surface what solutions others have used successfully in similar situations
-
-Format your output as a structured list. Be practical — ground everything in reality.
-```
-
-**Agent 3: Critic** — Risks, failure modes, edge cases, blind spots
-```
-You are the Critic. Your role is to find what could go wrong and what's missing.
-
-Theme: <theme>
-Constraints: <constraints>
-Knowledge context: <knowledge results if any>
-
-Your job:
-1. Search the web for post-mortems, failure cases, and anti-patterns related
-   to this theme
-2. Identify 5-7 risks, failure patterns, and blind spots
-3. For each: what goes wrong, why it's likely, how to detect early
-4. Challenge the assumptions behind the theme itself — is the question right?
-5. Surface hidden dependencies and second-order effects
-
-Format your output as a structured list. Be thorough — find what others will miss.
-```
+message** using the prompts from [agent-prompts.md](agent-prompts.md). Pass each the
+theme, constraints, and any knowledge base results.
 
 ## Phase 2: Cross-Critique (1 round, parent-mediated)
 
-After collecting all 3 agents' output:
-
-1. Identify **conflicts** between perspectives (Visionary vs Critic, etc.)
-2. Identify **gaps** — topics none of the agents covered
-3. Spawn a **single synthesis agent** with all 3 outputs:
-
-```
-You are a synthesis moderator. Three specialists have generated perspectives on a theme.
-
-Visionary's output: <...>
-Pragmatist's output: <...>
-Critic's output: <...>
-
-Your job:
-1. Identify 3-5 key tension points where the specialists disagree
-2. For each tension: state both sides and why the disagreement matters
-3. Identify 2-3 blind spots that ALL THREE missed
-4. Suggest 2-3 hybrid ideas that combine the best of multiple perspectives
-5. Rank the top 5 ideas across all specialists by "most worth exploring further"
-
-Be concise. Focus on what's NEW from the synthesis, not restating what was already said.
-```
+After collecting all 3 agents' output, spawn the **Synthesis moderator** using
+the prompt from [agent-prompts.md](agent-prompts.md) with all 3 outputs.
 
 ## Phase 3: Final Output (Markdown)
 
@@ -192,6 +120,45 @@ theme maps to a clear task slug, save the brainstorm output for seamless `/alfre
 
 If the user declines to save or the theme is too vague for a slug, skip this step.
 The brainstorm output in the conversation is always usable directly.
+
+## Example
+
+User: `/alfred:brainstorm auth strategy for our API`
+
+```
+# Brainstorm Output: Auth Strategy for API
+
+## Perspectives (3-agent synthesis)
+
+### Visionary — Bold possibilities
+- Passkey-first auth (WebAuthn) — eliminate passwords entirely
+- Decentralized identity (DID) — user-owned credentials
+- ...
+
+### Pragmatist — Proven approaches
+- OAuth2 + PKCE — industry standard, battle-tested
+- API keys + rate limiting — simplest for M2M
+- ...
+
+### Critic — Risks & blind spots
+- OAuth complexity: 6-month implementation, not 2-week
+- Token storage: JWTs in localStorage = XSS vector
+- ...
+
+## Top Ideas (ranked by synthesis)
+1. OAuth2 + PKCE (pragmatist + architect consensus)
+2. Passkey as progressive enhancement (visionary + pragmatist hybrid)
+3. ...
+
+Next: /alfred:refine to converge on a decision
+```
+
+## Troubleshooting
+
+- **Agent fails or returns empty**: Re-read the prompt and retry once. If still fails, proceed with 2 agents and note the missing perspective.
+- **Synthesis agent repeats agents' output**: Prompt explicitly: "Do NOT restate. Focus only on tensions, blind spots, and hybrid ideas."
+- **User wants to go deeper on one idea**: This is convergence territory — redirect to `/alfred:refine`.
+- **Too few ideas generated**: Lower the threshold, ask each agent for 3 more ideas with relaxed constraints.
 
 ## Exit Criteria
 - All 3 specialist agents completed

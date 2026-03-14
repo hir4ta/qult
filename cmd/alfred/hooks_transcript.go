@@ -251,7 +251,6 @@ func extractDecisionsFromData(data []byte) []string {
 	// Transcript format guard.
 	allLines := strings.Split(string(data), "\n")
 	if !checkTranscriptFormat(allLines) {
-		debugf("extractDecisions: transcript format guard triggered")
 		notifyUser("info: transcript format unrecognized, skipping decision extraction")
 		return nil
 	}
@@ -379,7 +378,6 @@ type transcriptContext struct {
 func extractTranscriptContextRich(transcriptPath string) (*transcriptContext, []byte) {
 	data, err := readFileTail(transcriptPath, 128*1024)
 	if err != nil {
-		debugf("PreCompact: read transcript error: %v", err)
 		return nil, nil
 	}
 
@@ -393,7 +391,6 @@ func extractTranscriptContextRich(transcriptPath string) (*transcriptContext, []
 	// may have changed. Parse a sample first to detect this.
 	if !checkTranscriptFormat(lines) {
 		notifyUser("warning: transcript format may have changed")
-		debugf("PreCompact: transcript format guard triggered")
 		return nil, nil
 	}
 

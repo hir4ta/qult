@@ -49,26 +49,13 @@ func TestBundle(t *testing.T) {
 			t.Fatal("hooks key missing or wrong type")
 		}
 
-		for _, event := range []string{"SessionStart", "PreCompact", "UserPromptSubmit", "SessionEnd"} {
+		for _, event := range []string{"SessionStart", "PreCompact", "UserPromptSubmit"} {
 			if _, ok := hooks[event]; !ok {
 				t.Errorf("missing event: %s", event)
 			}
 		}
-		if len(hooks) != 5 {
-			t.Errorf("expected 5 hook events, got %d", len(hooks))
-		}
-
-		// Verify SessionEnd has matcher excluding clear.
-		if sessionEnd, ok := hooks["SessionEnd"].([]any); ok && len(sessionEnd) > 0 {
-			if entry, ok := sessionEnd[0].(map[string]any); ok {
-				matcher, _ := entry["matcher"].(string)
-				if matcher == "" {
-					t.Error("SessionEnd should have a matcher to exclude reason=clear")
-				}
-				if strings.Contains(matcher, "clear") {
-					t.Errorf("SessionEnd matcher should not include clear, got %q", matcher)
-				}
-			}
+		if len(hooks) != 3 {
+			t.Errorf("expected 3 hook events, got %d", len(hooks))
 		}
 
 		// All hook commands should use ${CLAUDE_PLUGIN_ROOT}.

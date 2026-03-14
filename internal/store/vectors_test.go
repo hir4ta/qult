@@ -117,7 +117,7 @@ func TestCosineSimilarity(t *testing.T) {
 	}
 }
 
-func TestInsertGetEmbedding(t *testing.T) {
+func TestInsertEmbedding(t *testing.T) {
 	t.Parallel()
 	st := openTestStore(t)
 
@@ -126,36 +126,10 @@ func TestInsertGetEmbedding(t *testing.T) {
 		t.Fatalf("InsertEmbedding(docs, 42) = %v", err)
 	}
 
-	got, err := st.GetEmbedding("docs", 42)
-	if err != nil {
-		t.Fatalf("GetEmbedding(docs, 42) = _, %v", err)
-	}
-	if len(got) != len(vec) {
-		t.Fatalf("GetEmbedding(docs, 42) length = %d, want %d", len(got), len(vec))
-	}
-	for i := range vec {
-		if got[i] != vec[i] {
-			t.Errorf("GetEmbedding(docs, 42)[%d] = %v, want %v", i, got[i], vec[i])
-		}
-	}
-
-	// Non-existent embedding returns error (sql.ErrNoRows).
-	result, err := st.GetEmbedding("docs", 999)
-	if err == nil {
-		t.Errorf("GetEmbedding(docs, 999) = %v, nil; want _, error", result)
-	}
-
-	// Replace existing embedding.
+	// Replace existing embedding (INSERT OR REPLACE).
 	vec2 := []float32{0.9, 0.8, 0.7}
 	if err := st.InsertEmbedding("docs", 42, "voyage-4-large", vec2); err != nil {
 		t.Fatalf("InsertEmbedding(docs, 42) replace = %v", err)
-	}
-	got2, err := st.GetEmbedding("docs", 42)
-	if err != nil {
-		t.Fatalf("GetEmbedding(docs, 42) after replace = _, %v", err)
-	}
-	if len(got2) != len(vec2) {
-		t.Fatalf("GetEmbedding(docs, 42) after replace length = %d, want %d", len(got2), len(vec2))
 	}
 }
 
@@ -169,17 +143,17 @@ func TestVectorSearch(t *testing.T) {
 		vec []float32
 	}
 	entries := []entry{
-		{1, []float32{1, 0, 0}},      // points along x
-		{2, []float32{0.9, 0.1, 0}},  // mostly x
-		{3, []float32{0, 1, 0}},      // points along y (orthogonal to x)
-		{4, []float32{-1, 0, 0}},     // opposite of x
+		{1, []float32{1, 0, 0}},     // points along x
+		{2, []float32{0.9, 0.1, 0}}, // mostly x
+		{3, []float32{0, 1, 0}},     // points along y (orthogonal to x)
+		{4, []float32{-1, 0, 0}},    // opposite of x
 	}
 	for _, e := range entries {
 		_, _, err := st.UpsertDoc(context.Background(), &DocRow{
 			URL:         "https://example.com/doc",
 			SectionPath: "Section " + string(rune('A'+e.id)),
 			Content:     "content",
-			SourceType:  "seed",
+			SourceType:  "docs",
 		})
 		if err != nil {
 			t.Fatalf("UpsertDoc: %v", err)
@@ -192,7 +166,7 @@ func TestVectorSearch(t *testing.T) {
 	// Query along x-axis. Should match entries 1 and 2 (above threshold 0.3),
 	// entry 3 is orthogonal (~0), entry 4 is opposite (~-1).
 	query := []float32{1, 0, 0}
-	results, err := st.VectorSearch(context.Background(),query, "docs", 10)
+	results, err := st.VectorSearch(context.Background(), query, "docs", 10)
 	if err != nil {
 		t.Fatalf("VectorSearch = _, %v", err)
 	}
@@ -219,7 +193,7 @@ func TestVectorSearch(t *testing.T) {
 	}
 
 	// Limit results.
-	limited, err := st.VectorSearch(context.Background(),query, "docs", 1)
+	limited, err := st.VectorSearch(context.Background(), query, "docs", 1)
 	if err != nil {
 		t.Fatalf("VectorSearch(limit=1) = _, %v", err)
 	}
@@ -228,7 +202,7 @@ func TestVectorSearch(t *testing.T) {
 	}
 
 	// Nil queryVec returns nil.
-	nilResult, err := st.VectorSearch(context.Background(),nil, "docs", 10)
+	nilResult, err := st.VectorSearch(context.Background(), nil, "docs", 10)
 	if err != nil {
 		t.Fatalf("VectorSearch(nil) = _, %v", err)
 	}
@@ -237,57 +211,12 @@ func TestVectorSearch(t *testing.T) {
 	}
 
 	// Non-existent source returns empty.
-	empty, err := st.VectorSearch(context.Background(),query, "nonexistent", 10)
+	empty, err := st.VectorSearch(context.Background(), query, "nonexistent", 10)
 	if err != nil {
 		t.Fatalf("VectorSearch(nonexistent) = _, %v", err)
 	}
 	if len(empty) != 0 {
 		t.Errorf("VectorSearch(nonexistent) returned %d results, want 0", len(empty))
-	}
-}
-
-func TestCountEmbeddings(t *testing.T) {
-	t.Parallel()
-	st := openTestStore(t)
-
-	n, err := st.CountEmbeddings()
-	if err != nil {
-		t.Fatalf("CountEmbeddings(empty): %v", err)
-	}
-	if n != 0 {
-		t.Errorf("CountEmbeddings(empty) = %d, want 0", n)
-	}
-
-	// Insert some embeddings.
-	for i := int64(1); i <= 3; i++ {
-		_, _, err := st.UpsertDoc(context.Background(), &DocRow{
-			URL: "https://example.com/ce", SectionPath: "S" + string(rune('A'+i)),
-			Content: "c", SourceType: "docs",
-		})
-		if err != nil {
-			t.Fatalf("UpsertDoc: %v", err)
-		}
-		if err := st.InsertEmbedding("docs", i, "test", []float32{float32(i), 0, 0}); err != nil {
-			t.Fatalf("InsertEmbedding(%d): %v", i, err)
-		}
-	}
-
-	n, err = st.CountEmbeddings()
-	if err != nil {
-		t.Fatalf("CountEmbeddings: %v", err)
-	}
-	if n != 3 {
-		t.Errorf("CountEmbeddings = %d, want 3", n)
-	}
-}
-
-func TestGetEmbeddingNotFound(t *testing.T) {
-	t.Parallel()
-	st := openTestStore(t)
-
-	_, err := st.GetEmbedding("docs", 999)
-	if err == nil {
-		t.Error("GetEmbedding(nonexistent) should return error")
 	}
 }
 
@@ -306,127 +235,5 @@ func TestInsertEmbeddingDimensionValidation(t *testing.T) {
 	err = st.InsertEmbedding("docs", 2, "test", []float32{1, 2})
 	if err == nil {
 		t.Error("InsertEmbedding(wrong dims) should return error")
-	}
-}
-
-func TestFilterByDocSourceType(t *testing.T) {
-	t.Parallel()
-	st := openTestStore(t)
-	ctx := context.Background()
-
-	// Insert docs of different source types.
-	id1, _, _ := st.UpsertDoc(ctx, &DocRow{
-		URL: "https://example.com/f1", SectionPath: "F1", Content: "c1", SourceType: "docs",
-	})
-	id2, _, _ := st.UpsertDoc(ctx, &DocRow{
-		URL: "https://example.com/f2", SectionPath: "F2", Content: "c2", SourceType: "memory",
-	})
-	id3, _, _ := st.UpsertDoc(ctx, &DocRow{
-		URL: "https://example.com/f3", SectionPath: "F3", Content: "c3", SourceType: "docs",
-	})
-
-	candidates := []HybridMatch{
-		{DocID: id1, RRFScore: 0.5},
-		{DocID: id2, RRFScore: 0.4},
-		{DocID: id3, RRFScore: 0.3},
-	}
-
-	// Filter to only "docs" type.
-	filtered := st.filterByDocSourceType(ctx, candidates, []string{"docs"})
-	if len(filtered) != 2 {
-		t.Errorf("filterByDocSourceType(docs) = %d results, want 2", len(filtered))
-	}
-
-	// Empty candidates.
-	empty := st.filterByDocSourceType(ctx, nil, []string{"docs"})
-	if len(empty) != 0 {
-		t.Errorf("filterByDocSourceType(nil) = %d, want 0", len(empty))
-	}
-
-	// Empty types returns all.
-	all := st.filterByDocSourceType(ctx, candidates, nil)
-	if len(all) != 3 {
-		t.Errorf("filterByDocSourceType(nil types) = %d, want 3", len(all))
-	}
-}
-
-func TestHybridSearch(t *testing.T) {
-	t.Parallel()
-	st := openTestStore(t)
-
-	// Insert docs with content for FTS and embeddings for vector search.
-	docs := []struct {
-		url     string
-		section string
-		content string
-		vec     []float32
-	}{
-		{"https://example.com/hooks", "Hooks", "Hooks allow you to run commands on lifecycle events", []float32{1, 0, 0}},
-		{"https://example.com/skills", "Skills", "Skills are prompt templates that guide Claude", []float32{0, 1, 0}},
-		{"https://example.com/mcp", "MCP", "MCP servers provide tools and hooks integration", []float32{0.7, 0.7, 0}},
-	}
-
-	for i, d := range docs {
-		id, _, err := st.UpsertDoc(context.Background(), &DocRow{
-			URL:         d.url,
-			SectionPath: d.section,
-			Content:     d.content,
-			SourceType:  "seed",
-		})
-		if err != nil {
-			t.Fatalf("UpsertDoc[%d]: %v", i, err)
-		}
-		if err := st.InsertEmbedding("docs", id, "test", d.vec); err != nil {
-			t.Fatalf("InsertEmbedding[%d]: %v", i, err)
-		}
-	}
-
-	// Search with both vector and FTS signals. Query "hooks" with vector close to doc 1.
-	queryVec := []float32{0.9, 0.1, 0}
-	results, err := st.HybridSearch(context.Background(),queryVec, "hooks", "", 5, 20)
-	if err != nil {
-		t.Fatalf("HybridSearch = _, %v", err)
-	}
-	if len(results) == 0 {
-		t.Fatal("HybridSearch returned 0 results, want > 0")
-	}
-
-	// The hooks doc should rank high because it matches both FTS and vector.
-	// Verify RRF scores are positive and sorted descending.
-	for i := range results {
-		if results[i].RRFScore <= 0 {
-			t.Errorf("HybridSearch result[%d] RRFScore=%f, want > 0", i, results[i].RRFScore)
-		}
-		if i > 0 && results[i].RRFScore > results[i-1].RRFScore {
-			t.Errorf("HybridSearch results not sorted: [%d].RRFScore=%f > [%d].RRFScore=%f",
-				i, results[i].RRFScore, i-1, results[i-1].RRFScore)
-		}
-	}
-
-	// FTS-only search (nil vector).
-	ftsOnly, err := st.HybridSearch(context.Background(),nil, "hooks", "", 5, 0)
-	if err != nil {
-		t.Fatalf("HybridSearch(fts-only) = _, %v", err)
-	}
-	if len(ftsOnly) == 0 {
-		t.Fatal("HybridSearch(fts-only) returned 0 results, want > 0")
-	}
-
-	// Vector-only search (empty FTS query).
-	vecOnly, err := st.HybridSearch(context.Background(),queryVec, "", "", 5, 0)
-	if err != nil {
-		t.Fatalf("HybridSearch(vec-only) = _, %v", err)
-	}
-	if len(vecOnly) == 0 {
-		t.Fatal("HybridSearch(vec-only) returned 0 results, want > 0")
-	}
-
-	// Both nil/empty returns nil.
-	empty, err := st.HybridSearch(context.Background(),nil, "", "", 5, 0)
-	if err != nil {
-		t.Fatalf("HybridSearch(empty) = _, %v", err)
-	}
-	if empty != nil {
-		t.Errorf("HybridSearch(empty) = %v, want nil", empty)
 	}
 }

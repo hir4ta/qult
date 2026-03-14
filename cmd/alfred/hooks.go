@@ -10,88 +10,18 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
-
-	"github.com/hir4ta/claude-alfred/internal/spec"
-	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
 // execCommand is a variable so tests can stub it out.
 var execCommand = exec.Command
-
-// debugWriter is set lazily on first debugf() call when ALFRED_DEBUG is non-empty.
-// Log file: ~/.claude-alfred/debug.log
-// The file handle is closed via closeDebugWriter() before process exit.
-var debugWriter io.Writer
-var debugFile *os.File // retained for explicit Close
-var debugOnce sync.Once
-var debugEnabled = os.Getenv("ALFRED_DEBUG") != ""
-
-func debugf(format string, args ...any) {
-	if !debugEnabled {
-		return
-	}
-	debugOnce.Do(func() {
-		home, _ := os.UserHomeDir()
-		dir := filepath.Join(home, ".claude-alfred")
-		_ = os.MkdirAll(dir, 0755) // best-effort: OpenFile below will fail if dir creation fails
-		f, err := os.OpenFile(filepath.Join(dir, "debug.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-		if err != nil {
-			return
-		}
-		debugFile = f
-		debugWriter = f
-	})
-	if debugWriter == nil {
-		return
-	}
-	fmt.Fprintf(debugWriter, time.Now().Format("15:04:05.000")+" "+format+"\n", args...)
-}
-
-// closeDebugWriter flushes and closes the debug log file handle if it was opened.
-func closeDebugWriter() {
-	if debugFile != nil {
-		debugFile.Sync() // fsync before close to flush kernel page cache to disk
-		debugFile.Close()
-	}
-}
-
-// asyncLogWriter returns a writer for a background subprocess stderr log.
-// Logs to ~/.claude-alfred/<name> so failures are diagnosable without
-// ALFRED_DEBUG. Returns nil (discard) if the log file cannot be opened.
-func asyncLogWriter(name string) *os.File {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-	dir := filepath.Join(home, ".claude-alfred")
-	_ = os.MkdirAll(dir, 0o755) // best-effort: OpenFile below will fail if dir creation fails
-	logPath := filepath.Join(dir, name)
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return nil
-	}
-	return f
-}
-
-// asyncEmbedLogWriter returns a writer for background embed subprocess stderr.
-func asyncEmbedLogWriter() *os.File {
-	return asyncLogWriter("embed-errors.log")
-}
-
-// asyncCrawlLogWriter returns a writer for background crawl subprocess stderr.
-func asyncCrawlLogWriter() *os.File {
-	return asyncLogWriter("crawl-errors.log")
-}
 
 // hookEvent is the minimal structure of a Claude Code hook stdin payload.
 // Fields are populated depending on the event type:
 //   - SessionStart: ProjectPath, Source, TranscriptPath
 //   - PreCompact:   ProjectPath, TranscriptPath, Trigger, CustomInstructions
 //   - UserPromptSubmit: ProjectPath, Prompt
-//   - PostToolUse:  ProjectPath, ToolName, ToolInput, ToolResponse
 type hookEvent struct {
 	ProjectPath        string          `json:"cwd"`
 	Source             string          `json:"source"`              // SessionStart: startup/resume/clear/compact
@@ -99,19 +29,8 @@ type hookEvent struct {
 	Trigger            string          `json:"trigger"`             // PreCompact: manual/auto
 	CustomInstructions string          `json:"custom_instructions"` // PreCompact: user's /compact instructions
 	Prompt             string          `json:"prompt"`
-	Reason             string          `json:"reason"`              // SessionEnd: clear/logout/prompt_input_exit/other
 	StopHookActive     bool            `json:"stop_hook_active"`
-	ToolName           string          `json:"tool_name"`           // PreToolUse/PostToolUse
-	ToolInput          json.RawMessage `json:"tool_input"`          // PreToolUse/PostToolUse
-	ToolResponse       json.RawMessage `json:"tool_response"`       // PostToolUse only
 }
-
-// configReminder is the additionalContext message injected when Claude Code
-// accesses configuration files or the user's prompt mentions them.
-const configReminder = `This task involves Claude Code configuration. alfred's MCP tools have specialized, up-to-date knowledge:
-- knowledge: Best practices for .claude/ files, CLAUDE.md, hooks, skills, rules, agents, MCP
-- config-review: Project-wide .claude/ configuration audit
-Call these BEFORE reading or modifying configuration files directly.`
 
 // notifyUser outputs a brief message to stderr so the user can see what
 // alfred did. Stdout is reserved for hook protocol JSON.
@@ -129,65 +48,40 @@ func emitAdditionalContext(eventName, context string) {
 			"additionalContext": context,
 		},
 	}
-	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
-		debugf("emitAdditionalContext: json encode error: %v", err)
-	}
+	_ = json.NewEncoder(os.Stdout).Encode(out) // best-effort; stdout errors are non-recoverable
 }
 
 // runHook handles hook events.
 func runHook(event string) error {
-	defer closeDebugWriter()
-	store.DebugLog = debugf
-	spec.DebugLog = debugf
-	debugf("hook event=%s", event)
-	// Cap stdin to 2 MB to prevent memory exhaustion from oversized payloads.
-	const maxHookInputBytes = 2 << 20
 	var ev hookEvent
-	if err := json.NewDecoder(io.LimitReader(os.Stdin, maxHookInputBytes)).Decode(&ev); err != nil {
-		// Fail-open: decode errors must not block Claude Code.
-		// Hook protocol requires clean exit; errors are logged for debugging.
-		debugf("hook decode error: %v", err)
-		return nil
+	if err := json.NewDecoder(io.LimitReader(os.Stdin, 2<<20)).Decode(&ev); err != nil {
+		return nil // fail-open
 	}
 	if ev.StopHookActive {
-		debugf("hook stop_hook_active=true, exiting")
 		return nil
 	}
-	// Validate and sanitize ProjectPath (defense-in-depth: Claude Code provides
-	// this value, but we clean it to prevent any path traversal issues).
 	if ev.ProjectPath != "" {
 		ev.ProjectPath = filepath.Clean(ev.ProjectPath)
 		if !filepath.IsAbs(ev.ProjectPath) {
-			debugf("hook: non-absolute project path %q, clearing", ev.ProjectPath)
 			ev.ProjectPath = ""
 		} else if resolved, err := filepath.EvalSymlinks(ev.ProjectPath); err == nil {
 			ev.ProjectPath = resolved
 		}
 	}
-	debugf("hook project=%s", ev.ProjectPath)
 
-	// Internal context timeout per hook event.
-	// Set 500ms under Claude Code's external timeout (hooks.json) to allow
-	// graceful cleanup before SIGTERM.
 	var timeout time.Duration
 	switch event {
 	case "SessionStart":
-		timeout = 4500 * time.Millisecond // 500ms headroom before 5s external timeout
+		timeout = 4500 * time.Millisecond
 	case "PreCompact":
-		timeout = 9 * time.Second // 1s headroom before 10s external timeout
+		timeout = 9 * time.Second
 	case "UserPromptSubmit":
-		timeout = 9 * time.Second // 1s headroom before 10s external timeout (Voyage API)
-	case "SessionEnd":
-		timeout = 2500 * time.Millisecond // 500ms headroom before 3s external timeout
-	case "PostToolUse":
-		timeout = 4500 * time.Millisecond // 500ms headroom before 5s external timeout
+		timeout = 9 * time.Second
 	default:
 		timeout = 5 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-
-	start := time.Now()
 
 	switch event {
 	case "SessionStart":
@@ -198,24 +92,6 @@ func runHook(event string) error {
 		}
 	case "UserPromptSubmit":
 		handleUserPromptSubmit(ctx, &ev)
-	case "SessionEnd":
-		handleSessionEnd(ctx, &ev)
-	case "PostToolUse":
-		handlePostToolUse(ctx, &ev)
-	}
-
-	elapsed := time.Since(start)
-	headroom := timeout - elapsed
-	if headroom < 0 {
-		notifyUser("warning: hook %s overtime by %dms", event, (-headroom).Milliseconds())
-		debugf("hook event=%s completed in %s (timeout=%s, OVERTIME by %s)",
-			event, elapsed.Round(time.Millisecond), timeout, (-headroom).Round(time.Millisecond))
-	} else {
-		if headroom < 200*time.Millisecond {
-			notifyUser("warning: hook %s near timeout (headroom: %dms)", event, headroom.Milliseconds())
-		}
-		debugf("hook event=%s completed in %s (timeout=%s, headroom=%s)",
-			event, elapsed.Round(time.Millisecond), timeout, headroom.Round(time.Millisecond))
 	}
 
 	return nil

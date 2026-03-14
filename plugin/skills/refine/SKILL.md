@@ -1,12 +1,14 @@
 ---
 name: refine
 description: >
-  Convergent decision-making: narrow options to 3, score with criteria, decide and move forward.
-  Use when stuck, choosing between options, or turning brainstorm output into actionable decisions.
-  Decisions are saved to spec automatically.
+  Convergent decision-making: narrow options to 3, score with criteria, decide
+  and move forward. Use when stuck, choosing between options, or turning
+  brainstorm output into actionable decisions. Decisions are saved to spec
+  automatically. NOT for divergent thinking (use /alfred:brainstorm). NOT for
+  full implementation planning (use /alfred:plan).
 user-invocable: true
 disable-model-invocation: true
-argument-hint: "<theme or current messy notes>"
+argument-hint: "theme or notes"
 allowed-tools: Read, Glob, Grep, AskUserQuestion, Agent, mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__spec
 model: sonnet
 context: current
@@ -102,6 +104,43 @@ Always use this structure:
 - Completion criteria:
 - Reference @file / commands:
 ```
+
+## Example
+
+User: `/alfred:refine auth strategy`
+
+```
+# Refine Output: Auth Strategy
+
+## One-Line Issue
+I want to decide which auth method to use for the API gateway within 2 weeks.
+
+## Options (max 3)
+1. OAuth2 + PKCE
+2. API keys + HMAC
+3. Passkeys (WebAuthn)
+
+## Evaluation Criteria & Rough Scores (1-5)
+| Criterion    |  1  |  2  |  3  | Notes |
+|--------------|----:|----:|----:|-------|
+| Feasibility  |  5  |  4  |  2  | Passkeys need browser support |
+| Security     |  5  |  3  |  5  | API keys weakest |
+| Effort       |  3  |  5  |  2  | OAuth2 has library support |
+
+## Decision
+- Selected: OAuth2 + PKCE
+- Reason: Best security/feasibility balance, industry standard
+- OUT: API keys (weak security), Passkeys (too early for M2M)
+
+Saved to: .alfred/specs/auth-strategy/decisions.md
+```
+
+## Troubleshooting
+
+- **User can't choose between options**: Add more evaluation criteria or run a quick web search for evidence.
+- **All options score equally**: Ask the user for a tiebreaker criterion ("If you could only optimize for one thing, what would it be?").
+- **Brainstorm handoff fails**: If decisions.md doesn't contain brainstorm output, fall back to Phase 0 intake.
+- **Spec save fails**: Proceed with the decision in conversation; the user can save manually later.
 
 ## Exit Criteria
 - One-line issue is agreed

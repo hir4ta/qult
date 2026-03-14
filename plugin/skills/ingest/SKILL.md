@@ -1,11 +1,13 @@
 ---
 name: ingest
 description: >
-  Ingest reference materials (CSV, TXT, PDF, docs) into structured knowledge that survives
-  compaction and session boundaries. Summarizes, structures, and saves to spec or memory.
-  Use when the user passes large reference files or wants to onboard context for a task.
+  Ingest reference materials (CSV, TXT, PDF, docs) into structured knowledge
+  that survives compaction and session boundaries. Summarizes, structures, and
+  saves to spec or memory. Use when the user passes large reference files or
+  wants to onboard context for a task. NOT for code review (use /alfred:review).
+  NOT for implementation (just ask directly).
 user-invocable: true
-argument-hint: "<file paths or topic>"
+argument-hint: "file-paths or topic"
 allowed-tools: Read, Glob, Grep, AskUserQuestion, mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__spec, mcp__plugin_alfred_alfred__recall
 model: sonnet
 context: current
@@ -86,6 +88,29 @@ Ready for next step. Suggest:
 - /alfred:plan <task> → structured development plan
 - /alfred:brainstorm <theme> → explore options
 ```
+
+## Example
+
+User: `/alfred:ingest docs/api-spec.pdf docs/schema.csv`
+
+```
+Ingested 2 files (340 total lines):
+- Key facts: 12 items
+- Entities: 8 relationships mapped
+- Constraints: 5 rules identified
+- Saved to: spec requirements.md (## Reference Materials)
+
+Ready for next step. Suggest:
+- /alfred:plan api-redesign → structured development plan
+- /alfred:brainstorm api-patterns → explore options
+```
+
+## Troubleshooting
+
+- **PDF too large to read**: Use the `pages` parameter to read in chunks (max 20 pages per request).
+- **File path doesn't exist**: Ask the user to confirm the path. Check with Glob for similar filenames.
+- **Spec save fails**: Fall back to `recall` action=save as permanent memory.
+- **Content is too large (>2000 words)**: Split into multiple summaries by section/topic.
 
 ## Guardrails
 

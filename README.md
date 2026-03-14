@@ -7,23 +7,17 @@
 
 Your silent butler for Claude Code.
 
-Works silently in the background — surfacing relevant knowledge, catching scope violations, and preserving session context across compactions — so you can focus on building.
+Works silently in the background — preserving session context across compactions, surfacing relevant memories, and managing development specs — so you can focus on building.
 
 [日本語版 README](README.ja.md)
 
 ## What alfred does
 
-**Knowledge Injection** — Automatically surfaces relevant best practices from an extensive document knowledge base when you're working on Claude Code configuration, architecture decisions, or any topic covered by the docs.
-
 **Alfred Protocol** — Structured spec management resilient to Compact and session loss. Saves requirements, design, decisions, and session state to `.alfred/specs/`, with automatic context preservation and recovery.
 
-**Profile-Based Quality Review** — 6 specialized review profiles (code, config, security, docs, architecture, testing), each with curated checklists refreshed from the knowledge base. Auto-detects relevant profiles from git diff, spawns parallel sub-reviewers, and produces scored reports with actionable fixes.
+**Profile-Based Quality Review** — 6 specialized review profiles (code, config, security, docs, architecture, testing), each with curated checklists. Auto-detects relevant profiles from git diff, spawns parallel sub-reviewers, and produces scored reports with actionable fixes.
 
-**Persistent Memory** — Remembers past sessions, decisions, and notes across projects. Automatically saves session summaries and design decisions as permanent memory. Search past experience with the `recall` tool — alfred automatically surfaces relevant memories at session start.
-
-**Auto-Crawl** — Knowledge base refreshes in the background on every session start (lock file prevents concurrent runs). Run `alfred harvest` for an immediate manual refresh. Sources: official docs, changelog, engineering blog, Claude product blog, Anthropic news, and Agent SDK docs.
-
-**Proactive Context** — Goes beyond keyword matching: uses your active spec and session context to surface relevant knowledge before you need it. At compaction, gently reminds you of spec goals and open success criteria so you stay on track without manual check-ins.
+**Persistent Memory** — Remembers past sessions, decisions, and notes across projects. Automatically saves session summaries and design decisions as permanent memory. Search past experience with the `recall` tool — alfred automatically surfaces relevant memories via semantic search.
 
 **Compact Resilience** — PreCompact hook auto-extracts decisions, tracks modified files, saves session state in activeContext format, and auto-updates Next Steps completion status. SessionStart hook restores full context after compaction.
 
@@ -44,7 +38,7 @@ In Claude Code
 /plugin install alfred                          # Install the plugin
 ```
 
-Skills, rules, hooks, agents, and MCP configuration will be installed.
+Skills, rules, hooks, agents, and MCP configuration will be installed. No further setup required — alfred auto-initializes the database on first run.
 
 ### 3. Set API key (optional but recommended)
 
@@ -55,29 +49,7 @@ export VOYAGE_API_KEY=your-key  # Add to ~/.zshrc or equivalent
 [Voyage AI](https://voyageai.com/) enables high-precision semantic search with embedding + reranking.
 Cost is near-zero: embedding docs costs ~$0.01, and each search query costs fractions of a cent.
 
-Without Voyage AI, alfred still works using FTS5 keyword search — no API key needed to run.
-
-### 4. Initialize the knowledge base
-
-```bash
-alfred init
-```
-
-Interactive TUI guides you through setup:
-- Prompts for Voyage API key (or press Esc for FTS-only mode)
-- Ingests documentation into SQLite with progress display
-- Generates embeddings if API key is provided
-
-Restart Claude Code to finish setup.
-
-## Updating
-
-```bash
-alfred update
-```
-
-Updates both the binary (via Homebrew or direct download) and the plugin bundle automatically.
-Restart Claude Code after updating.
+Without Voyage AI, alfred still works using keyword search (LIKE) — no API key needed.
 
 ## Skills (10)
 
@@ -94,7 +66,7 @@ Invoke with `/alfred:<skill>` in Claude Code.
 | `/alfred:configure <type> [name]` | Create or polish a single config file (skill, rule, hook, agent, MCP, CLAUDE.md, memory) with independent review |
 | `/alfred:setup` | Project-wide setup wizard — multi-file scan + configuration, or Claude Code feature explainer |
 | `/alfred:ingest <files>` | Ingest reference materials (CSV, TXT, PDF, docs) into structured knowledge that survives compaction |
-| `/alfred:help [feature]` | Quick reference for all capabilities — skills, agents, MCP tools, CLI commands |
+| `/alfred:help [feature]` | Quick reference for all capabilities — skills, agents, MCP tools |
 
 ## Agents (2)
 
@@ -103,42 +75,24 @@ Invoke with `/alfred:<skill>` in Claude Code.
 | `alfred` | Silent butler — Claude Code configuration and best practices support |
 | `code-reviewer` | Multi-agent review orchestrator — spawns 3 sub-reviewers (security, logic, design) in parallel |
 
-## MCP Tools (4)
+## MCP Tools (2)
 
 Backend for skills and agents. Claude calls these automatically as needed.
 
 | Tool | Description |
 |------|-------------|
-| `knowledge` | Hybrid vector + FTS5 + Voyage rerank document search (with recency signal for memories/changelogs) |
-| `config-review` | Deep audit of .claude/ config (file contents, hooks validation, agent analysis, permissions conflict detection, KB cross-reference) |
 | `spec` | Unified spec management (action: init / update / status / switch / delete / history / rollback) |
-| `recall` | Memory search and save — past sessions, decisions, and notes |
+| `recall` | Memory search and save — past sessions, decisions, and notes (vector search + keyword fallback) |
 
-## Hooks (4)
+## Hooks (3)
 
 Run automatically during Claude Code lifecycle. No user action needed.
 
 | Event | Action |
 |-------|--------|
-| SessionStart | Auto-ingest CLAUDE.md + spec context injection (adaptive recovery) + past memory hints + auto-crawl + instinct promotion |
-| PreCompact | Extract context from transcript + auto-detect decisions + track modified files + auto-update Next Steps completion → save session.md → persist decisions as memory → **spec alignment nudge** → emit compaction instructions → async embedding |
-| UserPromptSubmit | Keyword-gated FTS knowledge injection + **spec/session context boost** + memory search — auto-surfaces best practices and past experience (suppressed by `ALFRED_QUIET=1`) |
-| SessionEnd | Persist session summary as permanent memory for future recall (skips on `reason=clear`) |
-
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `init` | Initialize knowledge base (interactive API key setup + TUI progress) |
-| `status [--verbose]` | Show system status — DB stats, API key, active tasks, paths |
-| `doctor` | Run 12 diagnostic checks — DB, schema, FTS, plugin, hooks, Voyage, embeddings, crawl, MCP reachability |
-| `analytics` | Show feedback loop stats — injection activity, top boosted/penalized docs |
-| `export [--all]` | Export memories to JSON (`--all` includes specs) |
-| `memory prune [--confirm]` | Remove old memories (dry-run by default, `--max-age DAYS` supported) |
-| `memory stats` | Show memory statistics by project |
-| `settings` | Configure API keys and preferences (interactive TUI) |
-| `update` | Update to latest version (Homebrew / download / go install) |
-| `version` | Show version |
+| SessionStart | Auto-ingest CLAUDE.md + ensure user rules + spec context injection (adaptive recovery after compact) |
+| PreCompact | Extract context from transcript + auto-detect decisions + track modified files + auto-update Next Steps completion → save session.md → persist decisions as memory → emit compaction instructions → async embedding |
+| UserPromptSubmit | Voyage semantic memory search — auto-surfaces relevant past experience |
 
 ## Architecture
 
@@ -152,11 +106,8 @@ graph TB
             SS["SessionStart"]
             PC["PreCompact"]
             UPS["UserPromptSubmit"]
-            SE["SessionEnd"]
         end
         subgraph MCP["MCP Tools (on demand)"]
-            K["knowledge"]
-            CR["config-review"]
             SP["spec"]
             RC["recall"]
         end
@@ -169,20 +120,15 @@ graph TB
 
     subgraph External["External"]
         VA["Voyage AI\n(optional)"]
-        Docs["code.claude.com\n/docs"]
     end
 
-    SS -->|"CLAUDE.md ingest\n+ spec recovery\n+ memory hints\n+ auto-crawl"| DB
+    SS -->|"CLAUDE.md ingest\n+ spec recovery"| DB
     PC -->|"transcript → decisions\n+ modified files\n+ Next Steps update"| FS
     PC -->|"async embed"| VA
-    PTU -->|".claude/ access\nreminder"| CC
-    UPS -->|"FTS keyword\ninjection"| DB
-    SE -->|"session summary\n→ memory"| DB
-    K & CR -->|"hybrid search\n(vector + FTS + rerank)"| DB
+    UPS -->|"vector search\nmemories"| DB
     SP -->|"init / update\n/ status / switch"| FS
     RC -->|"search / save"| DB
     DB <-->|"embeddings"| VA
-    DB <-.->|"auto-crawl\n(background)"| Docs
 
     style CC fill:#1a1a2e,stroke:#7571F9,color:#fff
     style Hooks fill:#16213e,stroke:#04B575,color:#fff
@@ -208,7 +154,7 @@ sequenceDiagram
 
     Note over U,DB: Normal Work
     U->>CC: coding...
-    H->>DB: UserPromptSubmit → FTS inject
+    H->>DB: UserPromptSubmit → memory search
 
     Note over U,DB: Compact Occurs
     CC->>H: PreCompact trigger
@@ -220,10 +166,6 @@ sequenceDiagram
     CC->>H: SessionStart(compact)
     H->>S: read session.md
     H-->>CC: inject context (adaptive depth)
-
-    Note over U,DB: Session End
-    CC->>H: SessionEnd
-    H->>DB: save session summary as memory
 ```
 
 ### Alfred Protocol File Structure
@@ -286,90 +228,21 @@ None
 - internal/auth/oauth.go
 ```
 
-Compact Marker example:
-```
-## Compact Marker [2025-03-08 14:30:00]
-### Pre-Compact Context Snapshot
-Last user directive: Add error handling to the OAuth callback
-Recent assistant actions:
-- Created internal/auth/oauth.go with provider abstraction
-- Added tests in internal/auth/oauth_test.go
----
-```
-
-## Per-Project Configuration
-
-Create `.alfred/config.json` in any project root to override default thresholds and add custom knowledge sources.
-IDE autocomplete is available via the [JSON Schema](schema/config.schema.json) (`"$schema": "./path/to/schema/config.schema.json"`).
-
-```json
-{
-  "$schema": "https://raw.githubusercontent.com/hir4ta/claude-alfred/main/schema/config.schema.json",
-  "relevance_threshold": 0.35,
-  "high_confidence_threshold": 0.60,
-  "single_keyword_dampen": 0.80,
-  "quiet": false,
-  "custom_sources": [
-    { "url": "https://example.com/docs/page", "label": "Internal API docs" }
-  ]
-}
-```
-
-| Key | Default | Effect |
-|-----|---------|--------|
-| `relevance_threshold` | `0.40` | Min score for knowledge injection. Lower = more results (noisier) |
-| `high_confidence_threshold` | `0.65` | Score needed to inject 2 results instead of 1 |
-| `single_keyword_dampen` | `0.80` | Multiplier for single-keyword matches (reduces noise) |
-| `quiet` | `false` | Suppress knowledge injection (hooks still save state) |
-| `context_boost_disable` | `false` | Disable spec/session context boost in knowledge injection |
-| `custom_sources` | `[]` | Additional documentation URLs to crawl (HTTPS only) |
-
-All fields are optional — only specified values override the defaults.
-
-For global custom sources (shared across all projects), create `~/.claude-alfred/sources.json`:
-
-```json
-[
-  { "url": "https://docs.example.com/guide", "label": "Company style guide" }
-]
-```
-
-Custom sources are crawled alongside official docs during auto-crawl.
-
-## Debugging
-
-Set `ALFRED_DEBUG=1` to output debug logs to `~/.claude-alfred/debug.log`.
-
 ## Dependencies
 
 | Library | Purpose |
 |---------|---------|
 | [mcp-go](https://github.com/mark3labs/mcp-go) | MCP server SDK |
 | [go-sqlite3](https://github.com/ncruces/go-sqlite3) | SQLite driver (pure Go, WASM) |
-| [bubbletea](https://github.com/charmbracelet/bubbletea) | TUI framework (setup screen) |
 | [Voyage AI](https://voyageai.com/) | Embedding + rerank (voyage-4-large, 2048d) |
 
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for version history.
-
 ## Troubleshooting
-
-### Debug logging
-
-```bash
-ALFRED_DEBUG=1 claude   # Enable debug log
-cat ~/.claude-alfred/debug.log  # View logs
-```
 
 ### Common issues
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| "no seed docs found" on serve | Knowledge base not initialized | Run `alfred init` |
-| Hook timeout warnings | Slow FTS search or large transcript | Check `~/.claude-alfred/debug.log` |
-| "VOYAGE_API_KEY is required" on init | API key not set | Run `alfred settings` or `export VOYAGE_API_KEY=your-key` |
-| Knowledge results feel stale | Auto-crawl hasn't run or failed | Run `alfred harvest` to force refresh; check `debug.log` |
+| No memory results | VOYAGE_API_KEY not set | `export VOYAGE_API_KEY=your-key` for semantic search |
 | Hook not firing | Plugin not installed | Run `/plugin install alfred` and restart |
 
 ### Environment variables
@@ -377,25 +250,14 @@ cat ~/.claude-alfred/debug.log  # View logs
 | Variable | Default | Purpose |
 |---|---|---|
 | `VOYAGE_API_KEY` | (none) | Voyage AI API key for vector search + reranking |
-| `ALFRED_DEBUG` | (unset) | Set to `1` to enable debug logging |
-| `ALFRED_RELEVANCE_THRESHOLD` | `0.40` | Minimum score for knowledge injection |
-| `ALFRED_HIGH_CONFIDENCE_THRESHOLD` | `0.65` | Score threshold for injecting 2 results |
-| `ALFRED_SINGLE_KEYWORD_DAMPEN` | `0.80` | Dampening factor for single-keyword matches |
-| `ALFRED_QUIET` | `0` | Set to `1` to suppress knowledge injection |
-| `ALFRED_CONTEXT_BOOST_DISABLE` | `0` | Set to `1` to disable spec/session context boost |
-| `ALFRED_MEMORY_MAX_AGE_DAYS` | `180` | Default cutoff age for `alfred memory prune` |
 
 ### Where to find things
 
 | Topic | Where to look |
 |-------|--------------|
 | All capabilities overview | `/alfred:help` in Claude Code |
-| Current system state | `alfred status` (or `--verbose` for details) |
-| Threshold tuning | `.alfred/config.json` (per-project override) |
 | Hook timeouts & internals | `.claude/rules/hook-internals.md` |
 | Search pipeline details | `.claude/rules/store-internals.md` |
-| Debug logs | `~/.claude-alfred/debug.log` (set `ALFRED_DEBUG=1`) |
-| System diagnostics | `alfred doctor` (12 automated checks) |
 
 ## License
 

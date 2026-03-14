@@ -16,15 +16,17 @@ type execer interface {
 	Exec(query string, args ...any) (sql.Result, error)
 }
 
-// schemaVersion 7 = added instincts table for behavioral pattern learning.
-// Changes from V6:
-//   - Added instincts table (trigger + action + confidence + domain + scope)
-//   - Added indexes for scope/project_hash, domain, confidence
+// schemaVersion 8 = simplification: remove FTS, crawl_meta, doc_feedback, instincts.
+// Changes from V7:
+//   - Dropped docs_fts virtual table + triggers
+//   - Dropped crawl_meta, doc_feedback, instincts tables
+//   - Deleted non-memory/spec rows from docs
+//   - Cleaned orphaned embeddings
 //
 // Migration policy (V4+):
 //   - Incremental migrations preserve existing data (docs, embeddings).
 //   - Legacy schemas (< 3) are still rebuilt from scratch.
-const schemaVersion = 7
+const schemaVersion = 8
 
 // minIncrementalVersion is the lowest version from which we can migrate
 // incrementally (without data loss). Versions below this are rebuilt.
@@ -64,79 +66,11 @@ CREATE TABLE IF NOT EXISTS docs (
     UNIQUE(url, section_path)
 );
 
-CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
-    section_path, content,
-    content='docs', content_rowid='id',
-    tokenize='porter unicode61',
-    prefix='2,3'
-);
-
-INSERT OR IGNORE INTO docs_fts(docs_fts, rank) VALUES('rank', 'bm25(10.0, 1.0)');
-
-CREATE TRIGGER IF NOT EXISTS docs_fts_ai AFTER INSERT ON docs BEGIN
-    INSERT INTO docs_fts(rowid, section_path, content)
-    VALUES (new.id, new.section_path, new.content);
-END;
-
-CREATE TRIGGER IF NOT EXISTS docs_fts_ad AFTER DELETE ON docs BEGIN
-    INSERT INTO docs_fts(docs_fts, rowid, section_path, content)
-    VALUES ('delete', old.id, old.section_path, old.content);
-END;
-
-CREATE TRIGGER IF NOT EXISTS docs_fts_au AFTER UPDATE ON docs BEGIN
-    INSERT INTO docs_fts(docs_fts, rowid, section_path, content)
-    VALUES ('delete', old.id, old.section_path, old.content);
-    INSERT INTO docs_fts(rowid, section_path, content)
-    VALUES (new.id, new.section_path, new.content);
-END;
-
 -- ==========================================================
 -- Indexes
 -- ==========================================================
 CREATE INDEX IF NOT EXISTS idx_docs_source_type ON docs(source_type);
 CREATE INDEX IF NOT EXISTS idx_docs_crawled_at ON docs(crawled_at);
-
--- ==========================================================
--- Crawl metadata (HTTP conditional request caching)
--- ==========================================================
-CREATE TABLE IF NOT EXISTS crawl_meta (
-    url             TEXT PRIMARY KEY,
-    etag            TEXT DEFAULT '',
-    last_modified   TEXT DEFAULT '',
-    last_crawled_at TEXT NOT NULL
-);
-
--- ==========================================================
--- Doc feedback (implicit relevance signals)
--- ==========================================================
-CREATE TABLE IF NOT EXISTS doc_feedback (
-    doc_id         INTEGER PRIMARY KEY,
-    positive_hits  INTEGER DEFAULT 0,
-    negative_hits  INTEGER DEFAULT 0,
-    last_injected  TEXT,
-    last_feedback  TEXT
-);
-
--- ==========================================================
--- Instincts (behavioral pattern learning)
--- ==========================================================
-CREATE TABLE IF NOT EXISTS instincts (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    trigger        TEXT NOT NULL,
-    action         TEXT NOT NULL,
-    confidence     REAL NOT NULL DEFAULT 0.5,
-    domain         TEXT NOT NULL DEFAULT 'general',
-    scope          TEXT NOT NULL DEFAULT 'project',
-    project_hash   TEXT NOT NULL DEFAULT '',
-    source_session TEXT DEFAULT '',
-    evidence       TEXT DEFAULT '',
-    times_applied  INTEGER DEFAULT 0,
-    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_instincts_scope ON instincts(scope, project_hash);
-CREATE INDEX IF NOT EXISTS idx_instincts_domain ON instincts(domain);
-CREATE INDEX IF NOT EXISTS idx_instincts_confidence ON instincts(confidence);
 `
 
 // legacyTables are tables from previous versions that no longer exist.
@@ -205,7 +139,7 @@ var incrementalMigrations = map[int][]string{
 		)`,
 	},
 	6: {
-		// V6 → V7: add instincts table for behavioral pattern learning.
+		// V6 → V7: add instincts table (now removed in V8, but migration path preserved).
 		`CREATE TABLE IF NOT EXISTS instincts (
 			id             INTEGER PRIMARY KEY AUTOINCREMENT,
 			trigger        TEXT NOT NULL,
@@ -223,6 +157,21 @@ var incrementalMigrations = map[int][]string{
 		`CREATE INDEX IF NOT EXISTS idx_instincts_scope ON instincts(scope, project_hash)`,
 		`CREATE INDEX IF NOT EXISTS idx_instincts_domain ON instincts(domain)`,
 		`CREATE INDEX IF NOT EXISTS idx_instincts_confidence ON instincts(confidence)`,
+	},
+	7: {
+		// V7 → V8: simplification — remove FTS, crawl_meta, doc_feedback, instincts.
+		// Drop triggers BEFORE FTS virtual table (SQLite requirement).
+		`DROP TRIGGER IF EXISTS docs_fts_ai`,
+		`DROP TRIGGER IF EXISTS docs_fts_ad`,
+		`DROP TRIGGER IF EXISTS docs_fts_au`,
+		`DROP TABLE IF EXISTS docs_fts`,
+		`DROP TABLE IF EXISTS crawl_meta`,
+		`DROP TABLE IF EXISTS doc_feedback`,
+		`DROP TABLE IF EXISTS instincts`,
+		// Delete non-memory/spec/project rows from docs.
+		`DELETE FROM docs WHERE source_type NOT IN ('memory', 'spec', 'project')`,
+		// Clean orphaned embeddings.
+		`DELETE FROM embeddings WHERE source_id NOT IN (SELECT id FROM docs)`,
 	},
 }
 
@@ -315,7 +264,7 @@ func rebuildFromScratch(db execer) error {
 			return err
 		}
 	}
-	// Drop triggers.
+	// Drop triggers (legacy + docs FTS).
 	for _, trigger := range legacyTriggers {
 		if err := dropSafe(db, "TRIGGER", trigger); err != nil {
 			return err
@@ -328,8 +277,13 @@ func rebuildFromScratch(db execer) error {
 			return err
 		}
 	}
-	// Drop all known tables.
+	// Drop all known tables (including V7-era tables removed in V8).
 	for _, table := range legacyTables {
+		if err := dropSafe(db, "TABLE", table); err != nil {
+			return err
+		}
+	}
+	for _, table := range []string{"crawl_meta", "doc_feedback", "instincts"} {
 		if err := dropSafe(db, "TABLE", table); err != nil {
 			return err
 		}

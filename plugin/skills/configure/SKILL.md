@@ -2,10 +2,12 @@
 name: configure
 description: >
   Create or polish a single Claude Code configuration file (skill, rule, hook,
-  agent, MCP server, CLAUDE.md, or memory) with independent review.
-  For project-wide setup, use /alfred:setup instead.
+  agent, MCP server, CLAUDE.md, or memory) with independent review. Use when
+  creating a new config file, polishing an existing one, or wanting best-practice
+  guidance for a specific config type. NOT for project-wide setup (use
+  /alfred:setup). NOT for auditing existing config (use /alfred:review config).
 user-invocable: true
-argument-hint: "<type> [name]"
+argument-hint: "type [name]"
 context: current
 model: sonnet
 allowed-tools: Read, Write, Edit, Glob, Agent, AskUserQuestion, mcp__plugin_alfred_alfred__knowledge
@@ -95,3 +97,29 @@ Alfred tends to the project's configuration — whether building new or polishin
 - Do NOT hardcode API keys or secrets in any generated file
 - Do NOT create files that exceed type-specific line limits
 - Preserve the user's voice and style when updating existing files
+
+## Example
+
+User: `/alfred:configure hook session-guard`
+
+```
+Created: .claude/hooks.json
+  Event: PreToolUse
+  Matcher: "Bash"
+  Type: prompt
+  Timeout: 10s
+
+Validated against best practices:
+✓ Event name valid
+✓ Timeout in range
+✓ Matcher is specific (not overly broad)
+
+Independent review: PASS (no issues found)
+```
+
+## Troubleshooting
+
+- **knowledge returns no results**: Use best-practices.md as the authoritative reference.
+- **File path conflict**: If target path already exists and user didn't expect it, show current content and ask.
+- **Validation fails after generation**: Re-read best-practices.md, identify the specific violation, and fix inline.
+- **Agent review finds issues**: Apply fixes immediately and re-validate before presenting to user.

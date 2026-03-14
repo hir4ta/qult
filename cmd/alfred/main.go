@@ -38,41 +38,12 @@ func run() error {
 	switch cmd {
 	case "serve":
 		return runServe()
-	case "init":
-		return runSetup()
-	case "setup":
-		// Legacy alias for "init".
-		return runSetup()
-	case "update":
-		return runUpdate()
-	case "status":
-		return runStatus()
-	case "export":
-		return runExport()
-	case "memory":
-		return runMemory()
-	case "settings":
-		return runSettings()
-	case "analytics":
-		return runAnalytics()
-	case "doctor":
-		return runDoctor()
-	case "harvest":
-		return runHarvest()
-	case "crawl-seed":
-		output := "internal/install/seed_docs.json"
-		if len(os.Args) > 2 {
-			output = os.Args[2]
-		}
-		return install.CrawlSeed(output)
 	case "plugin-bundle":
 		outputDir := "./plugin"
 		if len(os.Args) > 2 {
 			outputDir = os.Args[2]
 		}
 		return install.Bundle(outputDir, version)
-	case "crawl-async":
-		return runCrawlAsync()
 	case "embed-async":
 		return runEmbedAsync()
 	case "embed-doc":
@@ -83,7 +54,6 @@ func run() error {
 		}
 		return runHookWithGuard(os.Args[2])
 	case "version", "--version", "-v":
-		// --short flag for machine-readable version (used by run.sh).
 		if slices.Contains(os.Args[1:], "--short") {
 			fmt.Println(resolvedVersion())
 			return nil
@@ -128,19 +98,14 @@ func runServe() error {
 	}
 	defer st.Close()
 
-	// Embedder is optional — graceful degradation to FTS-only search.
+	// Embedder is optional — graceful degradation to keyword-only search.
 	var emb *embedder.Embedder
 	if e, err := embedder.NewEmbedder(); err != nil {
-		fmt.Fprintln(os.Stderr, "Warning: VOYAGE_API_KEY not set — running in FTS-only mode (no vector search or reranking). Run 'alfred settings' to configure.")
+		fmt.Fprintln(os.Stderr, "Warning: VOYAGE_API_KEY not set — running in keyword-only mode (no vector search or reranking).")
 	} else {
 		emb = e
-		// Set expected dimensions and model so searches validate compatibility.
+		// Set expected dimensions so searches validate compatibility.
 		st.ExpectedDims = e.Dims()
-		st.ExpectedModel = e.Model()
-	}
-
-	if count, _ := st.SeedDocsCount(); count == 0 {
-		fmt.Fprintln(os.Stderr, "Warning: no seed docs found. Run 'alfred init' to initialize.")
 	}
 
 	s := mcpserver.New(st, emb, resolvedVersion())
@@ -194,31 +159,26 @@ func resolvedDate() string {
 	return ""
 }
 
+func showVersion() {
+	fmt.Printf("alfred %s", resolvedVersion())
+	if c := resolvedCommit(); c != "" {
+		fmt.Printf(" (%s)", c)
+	}
+	if d := resolvedDate(); d != "" {
+		fmt.Printf(" built %s", d)
+	}
+	fmt.Println()
+}
+
 func printUsage() {
 	fmt.Println(`alfred - Your silent butler for Claude Code
 
-Quick start:
-  alfred init        Set up the knowledge base (first time)
-  alfred status      Check system health
-  /alfred:help       See all capabilities in Claude Code
-
 Usage:
-  alfred [command]
-
-Commands:
-  init           Initialize knowledge base (seed docs + generate embeddings)
-  status         Show system status (DB, API keys, active tasks)
-  doctor         Diagnose common issues (DB, hooks, API keys)
-  settings       Configure API keys and preferences
-  harvest        Crawl live docs and refresh knowledge base
-  export         Export memories to JSON (--all includes specs)
-  memory         Manage memories (prune, stats)
-  analytics      Show feedback loop stats and injection activity
-  update         Update alfred to the latest version
-  version        Show version
-  help           Show this help
+  alfred serve      Start MCP server (called by Claude Code plugin)
+  alfred hook       Handle hook events (called by Claude Code)
+  alfred version    Show version
 
 Environment:
-  VOYAGE_API_KEY     Optional (FTS-only fallback without it). Enables semantic vector search
-                     and Voyage AI reranking. Run 'alfred settings' to configure interactively.`)
+  VOYAGE_API_KEY     Enables semantic vector search and reranking.
+                     Without it, keyword-based (LIKE) search is used.`)
 }

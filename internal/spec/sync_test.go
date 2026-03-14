@@ -72,13 +72,13 @@ func TestSyncSingleFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Verify searchable via FTS
-	docs, err := st.SearchDocsFTS(context.Background(),"Session single-sync", "spec", 5)
+	// Verify searchable via URL prefix.
+	docs, err := st.SearchDocsByURLPrefix(context.Background(), "spec://", 5)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(docs) == 0 {
-		t.Error("expected to find synced doc via FTS search")
+		t.Error("expected to find synced doc via URL prefix search")
 	}
 
 	// Sync again unchanged.

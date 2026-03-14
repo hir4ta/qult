@@ -4,9 +4,13 @@ description: >
   Fully autonomous development orchestrator. Given a task description, runs the
   complete workflow: spec creation with 3-agent deliberation, spec review loop,
   phase-by-phase implementation with review gates, final self-review, test gate,
-  and auto-commit. No user intervention after initial invocation.
+  and auto-commit. No user intervention after initial invocation. Use when
+  wanting end-to-end task completion from spec to commit without manual steps,
+  "implement this", "build this feature", or fully autonomous development.
+  NOT for planning only (use /alfred:plan). NOT for code review only
+  (use /alfred:review).
 user-invocable: true
-argument-hint: "<task-slug> <description>"
+argument-hint: "task-slug description"
 allowed-tools: Read, Write, Edit, Glob, Grep, Agent, Bash(git diff *, git log *, git show *, git status *, git add *, git commit *, git merge-base *, git stash *, go test *, go vet *), AskUserQuestion, mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__spec, mcp__plugin_alfred_alfred__recall
 ---
 
@@ -16,6 +20,7 @@ You are an autonomous development orchestrator. Execute the FULL workflow below
 without asking the user for input (except once at the start if needed).
 
 - For spec creation agent prompts, see [spec-agents.md](spec-agents.md)
+- For example workflows (basic flow, BLOCKED recovery, resume), see [examples.md](examples.md)
 - For review prompt templates, see [review-prompts.md](review-prompts.md)
 - For BLOCKED recovery and error handling, see [recovery.md](recovery.md)
 

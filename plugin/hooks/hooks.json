@@ -1,19 +1,6 @@
 {
-  "description": "Proactive hooks — auto-import, knowledge injection, spec session persistence, memory persistence",
+  "description": "Proactive hooks — auto-import, memory injection, spec session persistence",
   "hooks": {
-    "PostToolUse": [
-      {
-        "hooks": [
-          {
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook PostToolUse",
-            "statusMessage": "alfred: checking changes...",
-            "timeout": 5,
-            "type": "command"
-          }
-        ],
-        "matcher": "Edit|Write"
-      }
-    ],
     "PreCompact": [
       {
         "hooks": [
@@ -24,19 +11,6 @@
             "type": "command"
           }
         ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook SessionEnd",
-            "statusMessage": "alfred: saving session memory...",
-            "timeout": 3,
-            "type": "command"
-          }
-        ],
-        "matcher": "logout|prompt_input_exit|bypass_permissions_disabled|other"
       }
     ],
     "SessionStart": [
@@ -51,23 +25,12 @@
         ]
       }
     ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "prompt": "You are a quality gate for a development workflow. Check the conversation transcript ($ARGUMENTS).\n\nFIRST: Determine if code was actually written or modified in this session (look for Edit/Write tool calls that changed source files). If NO code was changed — only analysis, Q\u0026A, discussion, or planning — respond {\"ok\": true} immediately.\n\nONLY if significant code was written or modified, check:\n1. Was a review done? Look for /alfred:review, self-review discussion, or explicit review.\n2. If a spec is active (.alfred/specs/), was session.md updated with current progress?\n\nIf all applicable conditions are met, respond: {\"ok\": true}\nIf a genuinely important step was skipped, respond: {\"ok\": false, \"reason\": \"Suggestion: [concise action]\"}\n\nIMPORTANT: Respond with ONLY raw JSON. No markdown, no code fences, no explanation.",
-            "timeout": 30,
-            "type": "prompt"
-          }
-        ]
-      }
-    ],
     "UserPromptSubmit": [
       {
         "hooks": [
           {
             "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run.sh\" hook UserPromptSubmit",
-            "statusMessage": "alfred: searching knowledge...",
+            "statusMessage": "alfred: searching memories...",
             "timeout": 10,
             "type": "command"
           }

@@ -23,8 +23,6 @@ var bgEmbedWG sync.WaitGroup
 func WaitBackground() { bgEmbedWG.Wait() }
 
 // recallHandler provides memory-specific search and save operations.
-// Unlike the general "knowledge" tool, recall focuses on user memories:
-// past sessions, decisions, and explicitly saved notes.
 func recallHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		action := req.GetString("action", "search")
@@ -34,18 +32,13 @@ func recallHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandlerFu
 			return recallSearch(ctx, st, emb, req)
 		case "save":
 			return recallSave(ctx, st, emb, req)
-		case "instincts":
-			return recallInstincts(ctx, st, req)
-		case "instinct-feedback":
-			return recallInstinctFeedback(ctx, st, req)
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("unknown action %q: use 'search', 'save', 'instincts', or 'instinct-feedback'", action)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("unknown action %q: use 'search' or 'save'", action)), nil
 		}
 	}
 }
 
-// recallSearch searches memory entries (source_type=store.SourceMemory) using hybrid
-// or FTS-only search depending on embedder availability.
+// recallSearch searches memory entries using vector search with keyword fallback.
 func recallSearch(ctx context.Context, st *store.Store, emb *embedder.Embedder, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	query := req.GetString("query", "")
 	if query == "" {
@@ -69,7 +62,7 @@ func recallSearch(ctx context.Context, st *store.Store, emb *embedder.Embedder, 
 		overRetrieve = 20
 	}
 
-	sr := hybridSearchPipeline(ctx, st, emb, query, store.SourceMemory, limit, overRetrieve)
+	sr := searchPipeline(ctx, st, emb, query, store.SourceMemory, limit, overRetrieve)
 	docs := sr.Docs
 	searchMethod := sr.SearchMethod
 	warnings := sr.Warnings
@@ -158,16 +151,9 @@ func recallSave(ctx context.Context, st *store.Store, emb *embedder.Embedder, re
 			defer cancel()
 			vec, err := emb.EmbedForStorage(embCtx, strings.TrimSpace(content))
 			if err != nil {
-				if store.DebugLog != nil {
-					store.DebugLog("recall save: async embed failed: %v", err)
-				}
 				return
 			}
-			if err := st.InsertEmbedding("docs", id, emb.Model(), vec); err != nil {
-				if store.DebugLog != nil {
-					store.DebugLog("recall save: insert embedding failed: %v", err)
-				}
-			}
+			_ = st.InsertEmbedding("docs", id, emb.Model(), vec)
 		}()
 	}
 
@@ -182,81 +168,5 @@ func recallSave(ctx context.Context, st *store.Store, emb *embedder.Embedder, re
 		"section_path":     sectionPath,
 		"url":              url,
 		"embedding_status": embeddingStatus,
-	})
-}
-
-// recallInstincts lists or searches learned behavioral patterns.
-func recallInstincts(ctx context.Context, st *store.Store, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	query := req.GetString("query", "")
-	project := req.GetString("project", "")
-	limit := req.GetInt("limit", 20)
-	if limit > 100 {
-		limit = 100
-	}
-
-	var instincts []store.Instinct
-	var err error
-	if query != "" {
-		instincts, err = st.SearchInstinctsFTS(ctx, query, project, limit)
-	} else {
-		instincts, err = st.SearchInstincts(ctx, project, "", limit)
-	}
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("instinct search failed: %v", err)), nil
-	}
-
-	results := make([]map[string]any, 0, len(instincts))
-	for _, inst := range instincts {
-		results = append(results, map[string]any{
-			"id":            inst.ID,
-			"trigger":       inst.Trigger,
-			"action":        inst.Action,
-			"confidence":    inst.Confidence,
-			"domain":        inst.Domain,
-			"scope":         inst.Scope,
-			"times_applied": inst.TimesApplied,
-			"updated_at":    inst.UpdatedAt,
-		})
-	}
-
-	return marshalResult(map[string]any{
-		"action":  "instincts",
-		"results": results,
-		"count":   len(results),
-	})
-}
-
-// recallInstinctFeedback allows manual confidence adjustment of an instinct.
-func recallInstinctFeedback(ctx context.Context, st *store.Store, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	instinctID := req.GetInt("instinct_id", 0)
-	if instinctID <= 0 {
-		return mcp.NewToolResultError("instinct_id is required (positive integer)"), nil
-	}
-
-	adjustment := req.GetFloat("adjustment", 0)
-	if adjustment == 0 {
-		return mcp.NewToolResultError("adjustment is required (e.g., 0.1 or -0.2)"), nil
-	}
-	if adjustment < -1 || adjustment > 1 {
-		return mcp.NewToolResultError("adjustment must be between -1.0 and 1.0"), nil
-	}
-
-	if err := st.UpdateInstinctConfidence(ctx, int64(instinctID), adjustment); err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("update failed: %v", err)), nil
-	}
-
-	// Auto-prune if confidence dropped below 0.2.
-	if adjustment < 0 {
-		if _, err := st.PruneInstincts(ctx, 0.2); err != nil {
-			// Best-effort; don't fail the request.
-			_ = err
-		}
-	}
-
-	return marshalResult(map[string]any{
-		"action":      "instinct-feedback",
-		"instinct_id": instinctID,
-		"adjustment":  adjustment,
-		"status":      "updated",
 	})
 }

@@ -20,13 +20,11 @@ import (
 func handlePreCompact(ctx context.Context, projectPath, transcriptPath, customInstructions string) {
 	taskSlug, err := spec.ReadActive(projectPath)
 	if err != nil {
-		debugf("PreCompact: no active spec, skipping")
 		return
 	}
 
 	sd := &spec.SpecDir{ProjectPath: projectPath, TaskSlug: taskSlug}
 	if !sd.Exists() {
-		debugf("PreCompact: spec dir missing for %s", taskSlug)
 		return
 	}
 
@@ -37,11 +35,9 @@ func handlePreCompact(ctx context.Context, projectPath, transcriptPath, customIn
 		txCtx, txData = extractTranscriptContextRich(transcriptPath)
 	} else {
 		notifyUser("warning: transcript_path is empty — session context will not be captured")
-		debugf("PreCompact: transcript_path is empty")
 	}
 	if txCtx == nil && transcriptPath != "" {
 		notifyUser("warning: could not extract context from transcript")
-		debugf("PreCompact: empty context from transcript %s", transcriptPath)
 	}
 
 	// Extract decisions from the already-read transcript data (no re-read).
@@ -76,33 +72,11 @@ func handlePreCompact(ctx context.Context, projectPath, transcriptPath, customIn
 	// recall of early-session conversations after multiple compactions.
 	persistChapterMemory(ctx, projectPath, taskSlug, sd, transcriptPath)
 
-	// Read alignment state from existing session BEFORE rebuild (markers are lost in rebuild).
-	oldSession, _ := sd.ReadFile(spec.FileSession)
-	alignmentCount := countAlignmentShown(oldSession)
-	alignmentAcked := strings.Contains(oldSession, alignmentAckMarker)
-
 	// Build activeContext session.md with rich context, then enforce size limit.
 	session := buildActiveContextSession(sd, taskSlug, txCtx, decisions, modifiedFiles, customInstructions)
 	session = enforceSessionSizeLimit(session)
 
-	// Spec alignment nudge: surface goals before compaction so Claude can self-check.
-	// State is read from old session (above) and persisted in new session (below).
-	workingOn := extractSection(oldSession, "## Currently Working On")
-	if nudge := specAlignmentNudgeFromState(sd, alignmentCount, alignmentAcked, workingOn); nudge != "" {
-		emitAdditionalContext("PreCompact", nudge)
-		alignmentCount++
-		debugf("PreCompact: alignment nudge emitted (shown count: %d)", alignmentCount)
-	}
-
-	// Append alignment state markers AFTER size enforcement so they are never truncated.
-	if alignmentAcked {
-		session += alignmentAckMarker + "\n"
-	}
-	if alignmentCount > 0 {
-		session += formatAlignmentShown(alignmentCount) + "\n"
-	}
 	if err := sd.WriteFile(ctx, spec.FileSession, session); err != nil {
-		debugf("PreCompact: write session error: %v", err)
 		return
 	}
 
@@ -110,11 +84,13 @@ func handlePreCompact(ctx context.Context, projectPath, transcriptPath, customIn
 	st, err := store.OpenDefaultCached()
 	if err != nil {
 		notifyUser("warning: DB open failed, session not synced: %v", err)
-		debugf("PreCompact: DB open error: %v", err)
 		return
 	}
+
+	// Expire old chapter memories (90-day TTL).
+	st.DeleteExpiredDocs(ctx)
+
 	if err := spec.SyncSingleFile(ctx, sd, spec.FileSession, st, nil); err != nil {
-		debugf("PreCompact: sync error: %v", err)
 		return
 	}
 
@@ -125,12 +101,17 @@ func handlePreCompact(ctx context.Context, projectPath, transcriptPath, customIn
 	asyncEmbedSession(sd)
 
 	notifyUser("saved session for task '%s'", taskSlug)
+}
 
-	ctxSize := 0
-	if txCtx != nil {
-		ctxSize = len(txCtx.LastAssistantWork) + len(txCtx.LastUserDirective)
+// significantWords extracts meaningful words (4+ runes) from lowercased text.
+func significantWords(lower string) []string {
+	var words []string
+	for _, w := range strings.Fields(lower) {
+		if len([]rune(w)) >= 4 {
+			words = append(words, w)
+		}
 	}
-	debugf("PreCompact: saved session for %s (context: %d bytes)", taskSlug, ctxSize)
+	return words
 }
 
 // rotateCompactMarkers keeps only the last maxMarkers compact markers in session.md.
@@ -213,7 +194,6 @@ func emitCompactionInstructions(sd *spec.SpecDir, taskSlug string) {
 	}
 
 	fmt.Fprint(os.Stdout, buf.String())
-	debugf("PreCompact: emitted compaction instructions for %s", taskSlug)
 }
 
 // extractFirstLines returns the first n non-empty, non-header lines of content.
@@ -236,7 +216,6 @@ func extractFirstLines(content string, n int) string {
 func asyncEmbedSession(sd *spec.SpecDir) {
 	exe, err := os.Executable()
 	if err != nil {
-		debugf("asyncEmbedSession: executable path error: %v", err)
 		return
 	}
 
@@ -245,25 +224,11 @@ func asyncEmbedSession(sd *spec.SpecDir) {
 		"--task", sd.TaskSlug,
 		"--file", string(spec.FileSession))
 	cmd.Stdout = nil
-	// Route child stderr to a log file so failures are diagnosable without ALFRED_DEBUG.
-	logW := asyncEmbedLogWriter()
-	cmd.Stderr = logW
-	// Detach the child process so it runs independently.
-	// The hook handler exits shortly after; the OS reparents the child to init.
-	// No goroutine needed — cmd.Wait() is intentionally not called.
+	cmd.Stderr = nil
 	if err := cmd.Start(); err != nil {
-		if logW != nil {
-			logW.Close()
-		}
 		notifyUser("warning: async embed failed: %v", err)
-		debugf("asyncEmbedSession: start error: %v", err)
 		return
 	}
-	// Close parent's copy — the child inherited its own fd via fork/exec.
-	if logW != nil {
-		logW.Close()
-	}
-	debugf("asyncEmbedSession: spawned pid=%d for %s/%s", cmd.Process.Pid, sd.TaskSlug, spec.FileSession)
 	_ = cmd.Process.Release()
 }
 
@@ -272,7 +237,6 @@ func asyncEmbedSession(sd *spec.SpecDir) {
 func getModifiedFiles(projectPath string) []string {
 	// Check git availability before running commands.
 	if _, err := exec.LookPath("git"); err != nil {
-		debugf("getModifiedFiles: git not found in PATH")
 		return nil
 	}
 	cmd := execCommand("git", "diff", "--name-only", "HEAD")
@@ -282,19 +246,13 @@ func getModifiedFiles(projectPath string) []string {
 		// Fallback: try unstaged only.
 		cmd = execCommand("git", "diff", "--name-only")
 		cmd.Dir = projectPath
-		out, err = cmd.Output()
-		if err != nil {
-			debugf("git diff unstaged: %v", err)
-		}
+		out, _ = cmd.Output()
 	}
 
 	// Also include staged files.
 	cmd2 := execCommand("git", "diff", "--cached", "--name-only")
 	cmd2.Dir = projectPath
-	staged, err := cmd2.Output()
-	if err != nil {
-		debugf("git diff cached: %v", err)
-	}
+	staged, _ := cmd2.Output()
 
 	seen := make(map[string]bool)
 	var files []string
@@ -350,7 +308,6 @@ func autoAppendDecisions(ctx context.Context, sd *spec.SpecDir, decisions []stri
 		}
 
 		// Check 2: significant word overlap (60%+ threshold).
-		// Use tokenizePrompt for proper Japanese word segmentation.
 		sigWords := significantWords(lower)
 		if len(sigWords) > 0 {
 			hits := 0
@@ -376,11 +333,7 @@ func autoAppendDecisions(ctx context.Context, sd *spec.SpecDir, decisions []stri
 		buf.WriteString(fmt.Sprintf("- %s\n", d))
 	}
 
-	if err := sd.AppendFile(ctx, spec.FileDecisions, buf.String()); err != nil {
-		debugf("autoAppendDecisions: %v", err)
-	} else {
-		debugf("autoAppendDecisions: added %d decisions", len(newDecisions))
-	}
+	_ = sd.AppendFile(ctx, spec.FileDecisions, buf.String()) // best-effort
 }
 
 // buildActiveContextSession constructs session.md in activeContext format.
@@ -625,7 +578,6 @@ func isItemCompleted(itemText, assistantTextLower string) bool {
 func persistDecisionMemory(ctx context.Context, projectPath, taskSlug string, decisions []string) {
 	st, err := store.OpenDefaultCached()
 	if err != nil {
-		debugf("persistDecisionMemory: DB open error: %v", err)
 		return
 	}
 
@@ -645,7 +597,6 @@ func persistDecisionMemory(ctx context.Context, projectPath, taskSlug string, de
 			TTLDays:     0, // permanent
 		})
 		if err != nil {
-			debugf("persistDecisionMemory: upsert error: %v", err)
 			continue
 		}
 		if changed {
@@ -659,7 +610,6 @@ func persistDecisionMemory(ctx context.Context, projectPath, taskSlug string, de
 	asyncEmbedDocs(changedIDs)
 	if saved > 0 {
 		notifyUser("persisted %d decision(s) to memory (%s/%s)", saved, project, taskSlug)
-		debugf("persistDecisionMemory: saved %d decisions for %s/%s (embed: %d)", saved, project, taskSlug, len(changedIDs))
 	}
 }
 
@@ -693,8 +643,7 @@ const maxChapterSectionBytes = 32 * 1024
 // chapterMemoryTTLDays is the TTL for chapter memory entries (90 days).
 // Chapter memories are verbose per-compact-cycle snapshots; unlike condensed
 // session summaries (permanent), they auto-expire to prevent DB bloat.
-// Expiration is enforced by DeleteExpiredDocs, called during auto-crawl,
-// manual harvest, and init.
+// Expiration is enforced by DeleteExpiredDocs, called during PreCompact.
 const chapterMemoryTTLDays = 90
 
 // persistChapterMemory saves the current session context as permanent memory
@@ -708,7 +657,6 @@ const chapterMemoryTTLDays = 90
 func persistChapterMemory(ctx context.Context, projectPath, taskSlug string, sd *spec.SpecDir, transcriptPath string) {
 	st, err := store.OpenDefaultCached()
 	if err != nil {
-		debugf("persistChapterMemory: DB open error: %v", err)
 		return
 	}
 
@@ -747,9 +695,7 @@ func persistChapterMemory(ctx context.Context, projectPath, taskSlug string, sd 
 			SourceType:  store.SourceMemory,
 			TTLDays:     chapterMemoryTTLDays,
 		})
-		if err != nil {
-			debugf("persistChapterMemory: session state upsert error: %v", err)
-		} else if changed {
+		if err == nil && changed {
 			savedCount++
 			changedIDs = append(changedIDs, id)
 		}
@@ -775,7 +721,6 @@ func persistChapterMemory(ctx context.Context, projectPath, taskSlug string, sd 
 				TTLDays:     chapterMemoryTTLDays,
 			})
 			if err != nil {
-				debugf("persistChapterMemory: user context %d upsert error: %v", i+1, err)
 				continue
 			}
 			if changed {
@@ -790,7 +735,6 @@ func persistChapterMemory(ctx context.Context, projectPath, taskSlug string, sd 
 	if savedCount > 0 {
 		notifyUser("saved chapter %d (%d sections) for task '%s' (%s)", chapterNum, savedCount, taskSlug, ts)
 	}
-	debugf("persistChapterMemory: chapter %d for %s — %d sections saved", chapterNum, taskSlug, savedCount)
 }
 
 // extractEarlyUserMessages reads the first portion of the transcript and returns
@@ -801,7 +745,6 @@ func extractEarlyUserMessages(transcriptPath string) []string {
 	// Read the first 512KB of the transcript — enough for large reference materials.
 	data, err := readFileHead(transcriptPath, 512*1024)
 	if err != nil {
-		debugf("extractEarlyUserMessages: read error: %v", err)
 		return nil
 	}
 
@@ -845,4 +788,3 @@ func extractEarlyUserMessages(transcriptPath string) []string {
 
 	return msgs
 }
-

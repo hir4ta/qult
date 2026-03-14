@@ -1,5 +1,5 @@
-// Package store provides SQLite persistence for documents, FTS5 full-text
-// search, and vector embeddings with cosine similarity search.
+// Package store provides SQLite persistence for memories and vector
+// embeddings with cosine similarity search.
 package store
 
 import (
@@ -13,11 +13,6 @@ import (
 	_ "github.com/ncruces/go-sqlite3/embed"
 )
 
-// DebugLog is an optional callback for diagnostic messages from the store layer.
-// Set by the application (e.g., cmd/alfred) to route store debug output to its
-// own logging facility. Nil by default (no logging).
-var DebugLog func(format string, args ...any)
-
 // Store wraps a SQLite database connection.
 type Store struct {
 	db     *sql.DB
@@ -26,15 +21,6 @@ type Store struct {
 	// ExpectedDims is the expected vector dimension count for embeddings.
 	// When > 0, InsertEmbedding validates that vectors match this size.
 	ExpectedDims int
-
-	// ExpectedModel is the current embedding model name (e.g., "voyage-4-large").
-	// When set, VectorSearch logs a warning if stored embeddings use a different model
-	// with the same dimensions (silent correctness degradation risk).
-	ExpectedModel string
-
-	vocabMu    sync.Mutex
-	vocabReady bool
-	vocabTerms map[string]bool
 }
 
 // Open opens (or creates) a SQLite database at dbPath,
@@ -75,9 +61,7 @@ func Open(dbPath string) (*Store, error) {
 	if err := db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil {
 		// Scan failure forces uv=0, which triggers Migrate on every Open.
 		// This is recoverable (Migrate re-checks schema_version table).
-		if DebugLog != nil {
-			DebugLog("store: PRAGMA user_version scan failed: %v", err)
-		}
+		_ = err
 	}
 	if uv != SchemaVersion() {
 		if err := Migrate(db); err != nil {

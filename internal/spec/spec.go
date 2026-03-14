@@ -15,11 +15,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// DebugLog is an optional callback for diagnostic messages from the spec layer.
-// Set by the application (e.g., cmd/alfred) to route spec debug output to its
-// own logging facility. Nil by default (no logging).
-var DebugLog func(format string, args ...any)
-
 // ValidSlug matches URL-safe task identifiers: lowercase letters, digits, hyphens.
 var ValidSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]{0,63}$`)
 
@@ -265,9 +260,6 @@ func (s *SpecDir) WriteFile(ctx context.Context, f SpecFile, content string) err
 	lf, err := s.lockSpecDir(ctx)
 	if err != nil {
 		// Fall back to unprotected write if lock fails (concurrent access risk accepted).
-		if DebugLog != nil {
-			DebugLog("spec: lock timeout for %s/%s, falling back to unprotected write: %v", s.TaskSlug, f, err)
-		}
 		fmt.Fprintf(os.Stderr, "[alfred] warning: spec lock contention on %s — concurrent write possible\n", f)
 		return s.writeFileUnlocked(f, content)
 	}
@@ -299,9 +291,6 @@ func (s *SpecDir) AppendFile(ctx context.Context, f SpecFile, content string) er
 	lf, err := s.lockSpecDir(ctx)
 	if err != nil {
 		// Fall back to unprotected append if lock fails (concurrent access risk accepted).
-		if DebugLog != nil {
-			DebugLog("spec: lock timeout for %s/%s, falling back to unprotected append: %v", s.TaskSlug, f, err)
-		}
 		fmt.Fprintf(os.Stderr, "[alfred] warning: spec lock contention on %s — concurrent write possible\n", f)
 		return s.appendFileUnlocked(f, content)
 	}

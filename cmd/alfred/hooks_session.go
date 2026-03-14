@@ -6,10 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
-	"sync"
-	"syscall"
 	"time"
 
 	"github.com/hir4ta/claude-alfred/internal/embedder"
@@ -31,22 +28,18 @@ func handleSessionStart(ctx context.Context, ev *hookEvent) {
 	st, err := store.OpenDefaultCached()
 	if err != nil {
 		notifyUser("warning: store open failed: %v", err)
-		debugf("hook store open failed: %v", err)
 		return
 	}
 	// Run independent operations in parallel to minimize timeout risk.
-	// All three are fail-open (errors logged internally, never fatal).
+	// Both are fail-open (errors logged internally, never fatal).
 	// Channel-based pattern respects context deadline (WaitGroup.Wait cannot).
-	done := make(chan struct{}, 4)
+	done := make(chan struct{}, 2)
 	go func() { ingestProjectClaudeMD(ctx, st, ev.ProjectPath); done <- struct{}{} }()
-	go func() { checkAndSpawnCrawl(st); done <- struct{}{} }()
 	go func() { ensureUserRules(); done <- struct{}{} }()
-	go func() { checkInstinctPromotion(ctx, st, ev.ProjectPath); done <- struct{}{} }()
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 2; i++ {
 		select {
 		case <-done:
 		case <-ctx.Done():
-			debugf("handleSessionStart: context expired, %d/%d ops completed", i, 4)
 			return
 		}
 	}
@@ -100,7 +93,6 @@ func ingestProjectClaudeMD(ctx context.Context, st *store.Store, projectPath str
 	claudeMD := filepath.Join(projectPath, "CLAUDE.md")
 	content, err := os.ReadFile(claudeMD)
 	if err != nil {
-		debugf("ingestProjectClaudeMD: %s not found or unreadable, skipping", claudeMD)
 		return
 	}
 
@@ -111,17 +103,14 @@ func ingestProjectClaudeMD(ctx context.Context, st *store.Store, projectPath str
 
 	url := "project://" + projectPath + "/CLAUDE.md"
 	for _, sec := range sections {
-		if _, _, err := st.UpsertDoc(ctx, &store.DocRow{
+		_, _, _ = st.UpsertDoc(ctx, &store.DocRow{
 			URL:         url,
 			SectionPath: sec.Path,
 			Content:     sec.Content,
 			SourceType:  store.SourceProject,
 			TTLDays:     1,
-		}); err != nil {
-			debugf("ingestProjectClaudeMD: upsert error: %v", err)
-		}
+		})
 	}
-	debugf("ingestProjectClaudeMD: %d sections from %s", len(sections), claudeMD)
 }
 
 // injectSpecContext outputs spec content to stdout when an active
@@ -130,7 +119,6 @@ func ingestProjectClaudeMD(ctx context.Context, st *store.Store, projectPath str
 func injectSpecContext(ctx context.Context, projectPath, source string, st *store.Store) {
 	taskSlug, err := spec.ReadActive(projectPath)
 	if err != nil {
-		debugf("injectSpecContext: no active spec for %s", projectPath)
 		return
 	}
 
@@ -184,134 +172,18 @@ func injectSpecContext(ctx context.Context, projectPath, source string, st *stor
 		buf.WriteString("--- End Alfred Protocol ---\n")
 		emitAdditionalContext("SessionStart", buf.String())
 		notifyUser("recovered task '%s' (compact #%d)", taskSlug, compactCount)
-		debugf("SessionStart(compact#%d): injected spec context for %s", compactCount, taskSlug)
 	} else {
-		// Normal startup/resume: inject session.md + proactive knowledge for Next Steps.
+		// Normal startup/resume: inject session.md only.
 		session, err := sd.ReadFile(spec.FileSession)
 		if err != nil || session == "" {
 			return
 		}
 		var buf strings.Builder
 		buf.WriteString(fmt.Sprintf("\n--- Alfred Protocol: Active Task '%s' ---\n%s\n", taskSlug, session))
-
-		// Proactive hints: skip in quiet mode (spec context above is structural, always injected).
-		if os.Getenv("ALFRED_QUIET") != "1" {
-			// Run all 3 FTS searches in parallel to reduce latency.
-			var hints, memHints, crossHints string
-			currentProject := projectBaseName(projectPath)
-			var hintWG sync.WaitGroup
-			hintWG.Add(3)
-			go func() {
-				defer hintWG.Done()
-				hints = proactiveHintsForNextSteps(ctx, session, st)
-			}()
-			go func() {
-				defer hintWG.Done()
-				memHints = proactiveMemoryHints(ctx, taskSlug, session, st)
-			}()
-			go func() {
-				defer hintWG.Done()
-				crossHints = proactiveCrossProjectHints(ctx, currentProject, taskSlug, session, st)
-			}()
-			hintWG.Wait()
-
-			// Cap total injection to avoid context overload.
-			// Priority: memory hints (project-specific) > proactive hints > cross-project.
-			const maxHintSections = 2
-			injected := 0
-			if memHints != "" && injected < maxHintSections {
-				buf.WriteString(memHints)
-				injected++
-			}
-			if hints != "" && injected < maxHintSections {
-				buf.WriteString(hints)
-				injected++
-			}
-			if crossHints != "" && injected < maxHintSections {
-				buf.WriteString(crossHints)
-			}
-		}
-
 		buf.WriteString("--- End Alfred Protocol ---\n")
 		emitAdditionalContext("SessionStart", buf.String())
 		notifyUser("injected context for task '%s'", taskSlug)
-		debugf("SessionStart(%s): injected session context for %s", source, taskSlug)
 	}
-}
-
-// proactiveHintsForNextSteps extracts the "## Next Steps" section from session.md,
-// detects Claude Code keywords in it, and pre-fetches relevant knowledge snippets.
-// This makes alfred genuinely proactive: surfacing information before the user asks.
-func proactiveHintsForNextSteps(ctx context.Context, session string, st *store.Store) string {
-	// Extract Next Steps section.
-	nextSteps := extractSection(session, "## Next Steps")
-	if nextSteps == "" || len(strings.TrimSpace(nextSteps)) < 10 {
-		return ""
-	}
-
-	// Detect Claude Code keywords in the next steps.
-	matched := detectClaudeCodeKeywords(nextSteps)
-	if len(matched) == 0 {
-		return ""
-	}
-
-	if st == nil {
-		return ""
-	}
-
-	// Search FTS with matched keywords.
-	var ftsTerms []string
-	for _, kw := range matched {
-		if en, ok := store.TranslateTerm(kw); ok {
-			ftsTerms = append(ftsTerms, en)
-		} else {
-			ftsTerms = append(ftsTerms, kw)
-		}
-	}
-	ftsQuery := store.JoinFTS5Terms(ftsTerms)
-	docs, _ := st.SearchDocsFTS(ctx, ftsQuery, store.SourceDocs, 3) // FTS failure is acceptable; no docs means no hints
-	if len(docs) == 0 {
-		return ""
-	}
-
-	var buf strings.Builder
-	buf.WriteString("\n### Proactive: Relevant knowledge for your Next Steps\n")
-	for _, d := range docs {
-		snippet := safeSnippet(d.Content, 200)
-		fmt.Fprintf(&buf, "- [%s] %s\n", d.SectionPath, snippet)
-	}
-	debugf("SessionStart: proactive injection for next steps keywords=%v, docs=%d", matched, len(docs))
-	return buf.String()
-}
-
-// proactiveMemoryHints searches past memories relevant to the current task
-// and returns formatted hints for injection into the session context.
-func proactiveMemoryHints(ctx context.Context, taskSlug, session string, st *store.Store) string {
-	if st == nil {
-		return ""
-	}
-
-	// Search memories using the task slug and current work context.
-	workingOn := extractSectionFallback(session, "## Currently Working On", "## Current Position")
-	query := taskSlug
-	if workingOn != "" {
-		query = taskSlug + " " + truncateStr(workingOn, 100)
-	}
-
-	docs, err := st.SearchDocsFTS(ctx, query, store.SourceMemory, 3)
-	if err != nil || len(docs) == 0 {
-		return ""
-	}
-
-	var buf strings.Builder
-	buf.WriteString("\n### Past Experience: Related memories\n")
-	for _, d := range docs {
-		snippet := safeSnippet(d.Content, 200)
-		fmt.Fprintf(&buf, "- [%s] %s\n", d.SectionPath, snippet)
-	}
-	notifyUser("found %d related past experience(s)", len(docs))
-	debugf("SessionStart: proactive memory injection for %s, docs=%d", taskSlug, len(docs))
-	return buf.String()
 }
 
 // buildChapterTimeline queries stored chapter memories for the active task and
@@ -330,7 +202,6 @@ func buildChapterTimeline(ctx context.Context, projectPath, taskSlug string, st 
 	urlPrefix := fmt.Sprintf("memory://user/%s/%s/chapter-", project, taskSlug)
 	docs, err := st.SearchDocsByURLPrefix(ctx, urlPrefix, 200)
 	if err != nil {
-		debugf("buildChapterTimeline: URL prefix search error: %v", err)
 		return ""
 	}
 
@@ -340,7 +211,7 @@ func buildChapterTimeline(ctx context.Context, projectPath, taskSlug string, st 
 		num   int
 		label string
 	}
-	seen := make(map[int]string) // chapterNum → label
+	seen := make(map[int]string) // chapterNum -> label
 	for _, d := range docs {
 		if !strings.HasPrefix(d.SectionPath, chapterPrefix) {
 			continue
@@ -387,69 +258,6 @@ func buildChapterTimeline(ctx context.Context, projectPath, taskSlug string, st 
 	}
 	buf.WriteString("\n")
 
-	debugf("buildChapterTimeline: %d chapters for %s/%s", len(chapters), project, taskSlug)
-	return buf.String()
-}
-
-// proactiveCrossProjectHints searches memories from other projects for patterns
-// relevant to the current task. Returns formatted hint string or "".
-func proactiveCrossProjectHints(ctx context.Context, currentProject, taskSlug string, session string, st *store.Store) string {
-	if st == nil {
-		return ""
-	}
-
-	// Build a search query from current work context.
-	workingOn := extractSectionFallback(session, "## Currently Working On", "## Current Position")
-	nextSteps := extractSection(session, "## Next Steps")
-
-	// Combine task slug with context keywords for a meaningful search.
-	query := taskSlug
-	if workingOn != "" {
-		query += " " + truncateStr(workingOn, 80)
-	}
-	if nextSteps != "" {
-		query += " " + truncateStr(nextSteps, 80)
-	}
-	if len(strings.TrimSpace(query)) < 5 {
-		return ""
-	}
-
-	// Search memories broadly (fetch extra to allow filtering).
-	docs, err := st.SearchDocsFTS(ctx, query, store.SourceMemory, 10)
-	if err != nil || len(docs) == 0 {
-		return ""
-	}
-
-	// Filter out results from the current project.
-	// Memory URLs are like: memory://user/{project}/{task-slug}/{date}
-	// Section paths are like: {project} > {task-slug} > session-summary > ...
-	currentPrefix := currentProject + " > "
-	var crossDocs []store.DocRow
-	for _, d := range docs {
-		if strings.HasPrefix(d.SectionPath, currentPrefix) {
-			continue
-		}
-		crossDocs = append(crossDocs, d)
-		if len(crossDocs) >= 2 {
-			break
-		}
-	}
-	if len(crossDocs) == 0 {
-		return ""
-	}
-
-	var buf strings.Builder
-	buf.WriteString("\n### Cross-project insights\n")
-	for _, d := range crossDocs {
-		// Extract project name from section_path (first segment before " > ").
-		project := d.SectionPath
-		if idx := strings.Index(project, " > "); idx > 0 {
-			project = project[:idx]
-		}
-		snippet := safeSnippet(d.Content, 200)
-		fmt.Fprintf(&buf, "- [%s] %s\n", project, snippet)
-	}
-	debugf("SessionStart: cross-project memory injection, docs=%d", len(crossDocs))
 	return buf.String()
 }
 
@@ -489,7 +297,6 @@ func runEmbedAsync() error {
 		return fmt.Errorf("embedder: %w", err)
 	}
 	st.ExpectedDims = emb.Dims()
-	st.ExpectedModel = emb.Model()
 
 	sd := &spec.SpecDir{ProjectPath: projectPath, TaskSlug: taskSlug}
 	sf := spec.SpecFile(fileName)
@@ -502,15 +309,12 @@ func runEmbedAsync() error {
 	var lastErr error
 	for attempt := range 3 {
 		if attempt > 0 {
-			debugf("embed-async: retry attempt %d for %s/%s", attempt+1, taskSlug, fileName)
 			time.Sleep(time.Duration(attempt) * 2 * time.Second)
 		}
 		if err := spec.SyncSingleFile(ctx, sd, sf, st, emb); err != nil {
 			lastErr = err
-			debugf("embed-async: attempt %d failed: %v", attempt+1, err)
 			continue
 		}
-		debugf("embed-async: success for %s/%s", taskSlug, fileName)
 		return nil
 	}
 	return fmt.Errorf("embed-async: all retries failed for %s/%s: %w", taskSlug, fileName, lastErr)
@@ -525,7 +329,6 @@ func asyncEmbedDocs(docIDs []int64) {
 	}
 	exe, err := os.Executable()
 	if err != nil {
-		debugf("asyncEmbedDocs: executable path error: %v", err)
 		return
 	}
 
@@ -535,23 +338,11 @@ func asyncEmbedDocs(docIDs []int64) {
 	}
 	cmd := execCommand(exe, args...)
 	cmd.Stdout = nil
-	// Route child stderr to a log file so failures are diagnosable without ALFRED_DEBUG.
-	logW := asyncEmbedLogWriter()
-	cmd.Stderr = logW
+	cmd.Stderr = nil
 	if err := cmd.Start(); err != nil {
-		if logW != nil {
-			logW.Close()
-		}
-		debugf("asyncEmbedDocs: start error: %v", err)
 		return
 	}
-	// Close parent's copy — the child inherited its own fd via fork/exec.
-	if logW != nil {
-		logW.Close()
-	}
-	pid := cmd.Process.Pid
 	_ = cmd.Process.Release()
-	debugf("asyncEmbedDocs: spawned pid=%d for %d doc(s)", pid, len(docIDs))
 }
 
 // runEmbedDoc is the entry point for the embed-doc subcommand.
@@ -587,14 +378,10 @@ func runEmbedDoc() error {
 		return fmt.Errorf("embedder: %w", err)
 	}
 	st.ExpectedDims = emb.Dims()
-	st.ExpectedModel = emb.Model()
 
 	docs, err := st.GetDocsByIDs(context.Background(), docIDs)
 	if err != nil {
 		return fmt.Errorf("load docs: %w", err)
-	}
-	if len(docs) < len(docIDs) {
-		debugf("embed-doc: requested %d docs, found %d (some may have been deleted)", len(docIDs), len(docs))
 	}
 
 	// Timeout scales with batch size: 30s base + 10s per additional doc.
@@ -615,7 +402,6 @@ func runEmbedDoc() error {
 	if len(errs) > 0 {
 		return fmt.Errorf("embed-doc: %d/%d failed: %s", len(errs), len(docs), strings.Join(errs, "; "))
 	}
-	debugf("embed-doc: all %d docs embedded successfully", len(docs))
 	return nil
 }
 
@@ -623,411 +409,21 @@ func embedDocWithRetry(ctx context.Context, st *store.Store, emb *embedder.Embed
 	var lastErr error
 	for attempt := range 3 {
 		if attempt > 0 {
-			debugf("embed-doc: retry attempt %d for doc_id=%d", attempt+1, docID)
 			time.Sleep(time.Duration(attempt) * 2 * time.Second)
 		}
 		vec, err := emb.EmbedForStorage(ctx, text)
 		if err != nil {
 			lastErr = err
-			debugf("embed-doc: attempt %d failed for doc_id=%d: %v", attempt+1, docID, err)
 			continue
 		}
 		if err := st.InsertEmbedding("docs", docID, emb.Model(), vec); err != nil {
 			return fmt.Errorf("insert embedding: %w", err)
 		}
-		debugf("embed-doc: success for doc_id=%d", docID)
 		return nil
 	}
 	return fmt.Errorf("all retries failed: %w", lastErr)
 }
 
-// ---------------------------------------------------------------------------
-// Background auto-crawl: refresh knowledge base periodically
-// ---------------------------------------------------------------------------
-
-// checkAndSpawnCrawl spawns a background crawl process on every session start.
-// Always crawls to keep the knowledge base fresh (lock file prevents concurrent runs).
-func checkAndSpawnCrawl(st *store.Store) {
-	if _, err := st.LastCrawledAt(); err != nil {
-		// No docs at all — user hasn't run 'alfred init' yet.
-		debugf("checkAndSpawnCrawl: no crawl timestamp: %v", err)
-		return
-	}
-
-	// Prevent concurrent crawls via a lock file.
-	lockPath := crawlLockPath()
-	if lockPath == "" {
-		debugf("checkAndSpawnCrawl: no lock path, skipping")
-		return
-	}
-	if isCrawlRunning(lockPath) {
-		debugf("checkAndSpawnCrawl: crawl already running")
-		return
-	}
-
-	debugf("checkAndSpawnCrawl: spawning background crawl")
-	spawnCrawlAsync()
-}
-
-// crawlLockPath returns the path to the crawl lock file.
-// Returns "" if the home directory cannot be determined.
-func crawlLockPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		debugf("crawlLockPath: no home dir: %v", err)
-		return ""
-	}
-	return filepath.Join(home, ".claude-alfred", "crawl.lock")
-}
-
-// crawlLockMaxAge is the maximum age for a crawl lock file before it is
-// considered stale, regardless of PID liveness. Prevents PID reuse false positives.
-const crawlLockMaxAge = 6 * time.Minute
-
-// isCrawlRunning checks if a crawl process is already running by examining
-// the lock file. Returns false if the lock file is stale (process exited or
-// lock file exceeds crawlLockMaxAge to guard against PID reuse).
-func isCrawlRunning(lockPath string) bool {
-	if lockPath == "" {
-		return false
-	}
-	info, err := os.Stat(lockPath)
-	if err != nil {
-		return false
-	}
-	// Guard against PID reuse: if the lock file is older than the crawl
-	// timeout, the original process is certainly gone regardless of PID.
-	if time.Since(info.ModTime()) > crawlLockMaxAge {
-		_ = os.Remove(lockPath)
-		return false
-	}
-	data, err := os.ReadFile(lockPath)
-	if err != nil {
-		return false
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return false
-	}
-	// Check if process is still alive.
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	// On Unix, FindProcess always succeeds; send signal 0 to check liveness.
-	if err := proc.Signal(syscall.Signal(0)); err != nil {
-		// Process not running — stale lock file.
-		_ = os.Remove(lockPath)
-		return false
-	}
-	return true
-}
-
-// spawnCrawlAsync spawns a detached background process to crawl and refresh docs.
-// Writes the lock file before spawning to prevent TOCTOU races.
-func spawnCrawlAsync() {
-	lockPath := crawlLockPath()
-	if lockPath == "" {
-		debugf("spawnCrawlAsync: no lock path, skipping")
-		return
-	}
-
-	exe, err := os.Executable()
-	if err != nil {
-		debugf("spawnCrawlAsync: executable path error: %v", err)
-		return
-	}
-
-	// Atomic lock acquisition: O_CREATE|O_EXCL fails if file already exists,
-	// preventing TOCTOU races between isCrawlRunning() and lock creation.
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		debugf("spawnCrawlAsync: lock acquire failed (concurrent session?): %v", err)
-		return
-	}
-
-	cmd := execCommand(exe, "crawl-async")
-	cmd.Stdout = nil
-	logW := asyncCrawlLogWriter()
-	cmd.Stderr = logW // capture stderr for diagnostics (nil = discard)
-	if err := cmd.Start(); err != nil {
-		if logW != nil {
-			logW.Close()
-		}
-		_ = f.Close()
-		_ = os.Remove(lockPath)
-		debugf("spawnCrawlAsync: start error: %v", err)
-		return
-	}
-	// Close parent's copy of log fd — the child inherited its own.
-	if logW != nil {
-		logW.Close()
-	}
-	pid := cmd.Process.Pid
-	// Write actual PID immediately so isCrawlRunning() can detect the process.
-	_, _ = fmt.Fprintf(f, "%d", pid)
-	_ = f.Close()
-	_ = cmd.Process.Release()
-	notifyUser("refreshing knowledge base in background (pid=%d)", pid)
-	debugf("spawnCrawlAsync: spawned pid=%d", pid)
-}
-
-// runCrawlAsync is the entry point for the crawl-async subcommand.
-// It fetches fresh documentation and updates the knowledge base.
-func runCrawlAsync() error {
-	// The parent (spawnCrawlAsync) already created the lock file with our PID
-	// via O_CREATE|O_EXCL. We only need to clean it up on exit.
-	lockPath := crawlLockPath()
-	if lockPath == "" {
-		return fmt.Errorf("crawl-async: cannot determine home directory")
-	}
-	defer os.Remove(lockPath)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	st, err := store.OpenDefault()
-	if err != nil {
-		return fmt.Errorf("crawl-async: open store: %w", err)
-	}
-	defer st.Close()
-
-	// Clean up expired docs first.
-	if n, err := st.DeleteExpiredDocs(ctx); err == nil && n > 0 {
-		debugf("crawl-async: cleaned %d expired docs", n)
-	}
-
-	// Crawl fresh docs from live sources (with conditional requests).
-	debugf("crawl-async: starting live crawl")
-	// Load custom sources from project config if available.
-	var customSources []install.CustomSource
-	cwd, _ := os.Getwd()
-	if cfg := loadProjectConfig(cwd); cfg != nil {
-		for _, cs := range cfg.CustomSources {
-			customSources = append(customSources, install.CustomSource{URL: cs.URL, Label: cs.Label})
-		}
-	}
-	// Also load global custom sources from ~/.claude-alfred/sources.json.
-	if globalSources := loadGlobalCustomSources(); len(globalSources) > 0 {
-		customSources = append(customSources, globalSources...)
-	}
-	sf, crawlStats, err := install.Crawl(ctx, nil, st, customSources)
-	if sf == nil {
-		return fmt.Errorf("crawl-async: crawl failed: %w", err)
-	}
-	if err != nil {
-		debugf("crawl-async: crawl warning: %v", err)
-	}
-	if crawlStats != nil {
-		debugf("crawl-async: fetched %d, skipped %d (304)", crawlStats.Fetched, crawlStats.NotModified)
-	}
-
-	// Embedder is optional — FTS-only if VOYAGE_API_KEY not set.
-	var emb *embedder.Embedder
-	if e, err := embedder.NewEmbedder(); err == nil {
-		emb = e
-	}
-
-	res, err := install.ApplySeedData(ctx, st, emb, sf, nil)
-	if err != nil {
-		return fmt.Errorf("crawl-async: apply seed: %w", err)
-	}
-
-	mode := "FTS-only"
-	if emb != nil {
-		mode = fmt.Sprintf("with %d embeddings", res.Embedded)
-	}
-	debugf("crawl-async: done — %d applied, %d unchanged (%s)", res.Applied, res.Unchanged, mode)
-	return nil
-}
-
-// ---------------------------------------------------------------------------
-// SessionEnd: session-summary memory persistence
-// ---------------------------------------------------------------------------
-
-// handleSessionEnd persists a session summary as permanent memory when the
-// session ends. Reads the active spec's session.md and saves a condensed
-// summary to the docs table with source_type="memory".
-func handleSessionEnd(ctx context.Context, ev *hookEvent) {
-	if ev.ProjectPath == "" {
-		return
-	}
-
-	// Skip memory persistence when user intentionally clears the session.
-	if ev.Reason == "clear" {
-		debugf("SessionEnd: reason=clear, skipping memory persistence")
-		return
-	}
-
-	taskSlug, err := spec.ReadActive(ev.ProjectPath)
-	if err != nil {
-		debugf("SessionEnd: no active spec, skipping")
-		return
-	}
-
-	sd := &spec.SpecDir{ProjectPath: ev.ProjectPath, TaskSlug: taskSlug}
-	if !sd.Exists() {
-		return
-	}
-
-	session, err := sd.ReadFile(spec.FileSession)
-	if err != nil || strings.TrimSpace(session) == "" {
-		debugf("SessionEnd: no session.md content for %s", taskSlug)
-		return
-	}
-
-	persistSessionSummary(ctx, ev.ProjectPath, taskSlug, session)
-	extractAndSaveInstincts(ctx, ev.ProjectPath, taskSlug, session)
-}
-
-// persistSessionSummary saves a condensed session summary as permanent memory.
-// Extracts key sections from session.md and stores as source_type="memory".
-func persistSessionSummary(ctx context.Context, projectPath, taskSlug, session string) {
-	// Check context before doing work — Stop hook has a tight 2.5s timeout.
-	if ctx.Err() != nil {
-		debugf("persistSessionSummary: context already expired, skipping")
-		return
-	}
-
-	st, err := store.OpenDefaultCached()
-	if err != nil {
-		notifyUser("warning: session memory save skipped (DB error)")
-		debugf("persistSessionSummary: DB open error: %v", err)
-		return
-	}
-
-	project := projectBaseName(projectPath)
-	date := time.Now().Format("2006-01-02")
-	url := fmt.Sprintf("memory://user/%s/%s/%s", project, taskSlug, date)
-
-	// Build a condensed summary from session.md sections.
-	summary := buildSessionSummary(session)
-	if strings.TrimSpace(summary) == "" {
-		debugf("persistSessionSummary: empty summary, skipping")
-		return
-	}
-
-	sectionPath := fmt.Sprintf("%s > %s > session-summary > %s",
-		project, taskSlug, truncateStr(extractSummaryTitle(session), 60))
-
-	id, changed, err := st.UpsertDoc(ctx, &store.DocRow{
-		URL:         url,
-		SectionPath: sectionPath,
-		Content:     summary,
-		SourceType:  store.SourceMemory,
-		TTLDays:     0, // permanent
-	})
-	if err != nil {
-		debugf("persistSessionSummary: upsert error: %v", err)
-		return
-	}
-	if changed {
-		notifyUser("saved session summary to memory (%s/%s)", project, taskSlug)
-		asyncEmbedDocs([]int64{id})
-		debugf("persistSessionSummary: saved session summary for %s/%s", project, taskSlug)
-	}
-}
-
-// buildSessionSummary extracts key information from session.md into a
-// condensed text suitable for memory storage and future search.
-// Strips compact markers and cleans markdown noise before extraction.
-func buildSessionSummary(session string) string {
-	// Strip compact markers to avoid noise in the summary.
-	cleaned := stripCompactMarkers(session)
-
-	var buf strings.Builder
-
-	workingOn := cleanSectionContent(extractSectionFallback(cleaned, "## Currently Working On", "## Current Position"))
-	if workingOn != "" {
-		buf.WriteString("Working on: " + truncateStr(workingOn, 200) + "\n")
-	}
-
-	decisions := cleanSectionContent(extractSectionFallback(cleaned, "## Recent Decisions", "## Recent Decisions (last 3)"))
-	if decisions != "" {
-		buf.WriteString("Decisions: " + truncateStr(decisions, 200) + "\n")
-	}
-
-	nextSteps := cleanSectionContent(extractSectionFallback(cleaned, "## Next Steps", "## Pending"))
-	if nextSteps != "" {
-		buf.WriteString("Next steps: " + truncateStr(nextSteps, 200) + "\n")
-	}
-
-	modifiedFiles := cleanSectionContent(extractSectionFallback(cleaned, "## Modified Files", "## Modified Files (this session)"))
-	if modifiedFiles != "" {
-		buf.WriteString("Modified files: " + truncateStr(modifiedFiles, 200) + "\n")
-	}
-
-	return buf.String()
-}
-
-// stripCompactMarkers removes all "## Compact Marker [...]" sections and
-// their content from session.md to prevent noise in summaries.
-func stripCompactMarkers(session string) string {
-	const marker = "## Compact Marker ["
-	for {
-		start := strings.Index(session, marker)
-		if start < 0 {
-			return session
-		}
-		// Find end: next "## " heading or "---" separator or EOF.
-		rest := session[start+len(marker):]
-		end := -1
-		for _, delim := range []string{"\n## ", "\n---"} {
-			if idx := strings.Index(rest, delim); idx >= 0 {
-				if end < 0 || idx < end {
-					end = idx
-				}
-			}
-		}
-		if end < 0 {
-			// Marker extends to EOF.
-			session = strings.TrimRight(session[:start], "\n")
-		} else {
-			session = session[:start] + rest[end+1:]
-		}
-	}
-}
-
-// cleanSectionContent removes markdown noise from extracted section content.
-// Strips heading prefixes, collapses whitespace, and removes separators.
-func cleanSectionContent(s string) string {
-	if s == "" {
-		return ""
-	}
-	var lines []string
-	for _, line := range strings.Split(s, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || line == "---" {
-			continue
-		}
-		// Strip markdown heading prefixes (e.g., "## Foo" → "Foo").
-		for _, prefix := range []string{"### ", "## ", "# "} {
-			if strings.HasPrefix(line, prefix) {
-				line = line[len(prefix):]
-				break
-			}
-		}
-		// Strip bold markers.
-		line = strings.ReplaceAll(line, "**", "")
-		if line != "" {
-			lines = append(lines, line)
-		}
-	}
-	return strings.Join(lines, "; ")
-}
-
-// extractSummaryTitle creates a short title from the session's "Currently Working On" section.
-func extractSummaryTitle(session string) string {
-	workingOn := extractSection(session, "## Currently Working On")
-	if workingOn == "" {
-		return "session"
-	}
-	// Take the first line as title.
-	if idx := strings.IndexByte(workingOn, '\n'); idx > 0 {
-		workingOn = workingOn[:idx]
-	}
-	return strings.TrimSpace(workingOn)
-}
 
 // ensureUserRules checks if alfred rules are installed in ~/.claude/rules/
 // and installs them if missing. This ensures rules work even when only
@@ -1048,12 +444,5 @@ func ensureUserRules() {
 		}
 	}
 	// No alfred rules found — install them.
-	n, err := install.InstallUserRules()
-	if err != nil {
-		debugf("ensureUserRules: %v", err)
-		return
-	}
-	if n > 0 {
-		debugf("ensureUserRules: installed %d rule files", n)
-	}
+	_, _ = install.InstallUserRules() // best-effort
 }

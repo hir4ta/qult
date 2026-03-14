@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -15,56 +16,13 @@ import (
 )
 
 // Recency signal constants.
-// Applied post-rerank to boost newer memories and changelogs.
+// Applied post-rerank to boost newer memories.
 // Docs (crawled reference material) are not decayed because crawled_at
 // reflects fetch time, not feature authoring time.
 const (
-	recencyHalfLifeMemory    = 60.0  // days: memory half-life
-	recencyHalfLifeChangelog = 30.0  // days: changelog half-life
-	recencyFloor             = 0.5   // minimum multiplier (never suppress below 50%)
+	recencyHalfLifeMemory = 60.0 // days: memory half-life
+	recencyFloor          = 0.5  // minimum multiplier (never suppress below 50%)
 )
-
-// KBSnippet is a compact knowledge base search result.
-type KBSnippet struct {
-	SectionPath string `json:"section_path"`
-	Content     string `json:"content"`
-	URL         string `json:"url"`
-}
-
-// Suggestion is a structured improvement suggestion with optional KB context.
-type Suggestion struct {
-	Severity     string     `json:"severity"`                 // "info", "warning"
-	Category     string     `json:"category"`                 // "claude_md", "skills", "rules", "hooks", "mcp"
-	Message      string     `json:"message"`
-	Affected     []string   `json:"affected,omitempty"`
-	BestPractice *KBSnippet `json:"best_practice,omitempty"`
-}
-
-// queryKB performs a FTS5 search against the knowledge base and returns
-// compact snippets. Designed for internal use by review/suggest — cheap
-// FTS5 queries with no Voyage API calls.
-// Returns nil when st is nil or query matches nothing.
-func queryKB(ctx context.Context, st *store.Store, query string, limit int) []KBSnippet {
-	if st == nil {
-		return nil
-	}
-	if limit <= 0 {
-		limit = 3
-	}
-	docs, err := st.SearchDocsFTS(ctx, query, store.SourceDocs, limit)
-	if err != nil || len(docs) == 0 {
-		return nil
-	}
-	snippets := make([]KBSnippet, len(docs))
-	for i, d := range docs {
-		snippets[i] = KBSnippet{
-			SectionPath: d.SectionPath,
-			Content:     truncate(d.Content, 300),
-			URL:         d.URL,
-		}
-	}
-	return snippets
-}
 
 // truncate shortens a string to maxLen runes, appending "..." if truncated.
 func truncate(s string, maxLen int) string {
@@ -81,8 +39,6 @@ func recencyHalfLife(sourceType string) float64 {
 	switch sourceType {
 	case store.SourceMemory:
 		return recencyHalfLifeMemory
-	case store.SourceChangelog:
-		return recencyHalfLifeChangelog
 	default:
 		return 0 // no decay
 	}
@@ -121,9 +77,9 @@ type scoredDoc struct {
 }
 
 // applyRecencySignal reorders docs by applying a recency boost.
-// Original ordering (from rerank or RRF) is encoded as a position-based score,
+// Original ordering (from rerank or vector search) is encoded as a position-based score,
 // then multiplied by the recency factor. This preserves semantic relevance as the
-// primary signal while giving a boost to newer memories and changelogs.
+// primary signal while giving a boost to newer memories.
 func applyRecencySignal(docs []store.DocRow, now time.Time) []store.DocRow {
 	if len(docs) == 0 {
 		return docs
@@ -164,126 +120,106 @@ func applyRecencySignal(docs []store.DocRow, now time.Time) []store.DocRow {
 	return result
 }
 
-// hybridSearchResult holds the output of a hybrid search pipeline.
-type hybridSearchResult struct {
+// searchResult holds the output of a search pipeline.
+type searchResult struct {
 	Docs         []store.DocRow
-	SearchMethod string // "hybrid_rrf+rerank", "hybrid_rrf", or "fts5_only"
+	SearchMethod string // "vector+rerank", "vector", or "keyword"
 	Warnings     []string
 }
 
-// hybridSearchPipeline runs the 3-stage search: embed → hybrid RRF → rerank,
-// with automatic FTS-only fallback. Shared by knowledge search and recall.
-func hybridSearchPipeline(ctx context.Context, st *store.Store, emb *embedder.Embedder, query, sourceType string, limit, overRetrieve int) hybridSearchResult {
-	var res hybridSearchResult
-	res.SearchMethod = "fts5_only"
+// parseSourceTypes splits a comma-separated source_type string into individual types.
+// Returns nil for empty input (meaning "all types").
+func parseSourceTypes(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	types := parts[:0]
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			types = append(types, p)
+		}
+	}
+	return types
+}
 
-	// Stage 0: Embed the query.
-	var queryVec []float32
+// searchPipeline runs vector search with rerank and recency signal.
+// Falls back to LIKE-based keyword search when embedder is unavailable.
+func searchPipeline(ctx context.Context, st *store.Store, emb *embedder.Embedder, query, sourceType string, limit, overRetrieve int) searchResult {
+	var res searchResult
+
 	if emb != nil {
-		var embedErr error
-		queryVec, embedErr = emb.EmbedForSearch(ctx, query)
-		if embedErr != nil {
-			res.Warnings = append(res.Warnings, fmt.Sprintf("vector embedding failed, using FTS-only: %v", embedErr))
-		}
-	}
-
-	if queryVec != nil {
-		// Stage 1: Hybrid RRF search (vector + FTS5 combined).
-		matches, hybridErr := st.HybridSearch(ctx, queryVec, query, sourceType, overRetrieve, overRetrieve)
-		if hybridErr != nil {
-			res.Warnings = append(res.Warnings, fmt.Sprintf("hybrid search degraded: %v", hybridErr))
-		}
-		if len(matches) > 0 {
-			ids := make([]int64, len(matches))
-			for i, m := range matches {
-				ids[i] = m.DocID
-			}
-			docs, fetchErr := st.GetDocsByIDs(ctx, ids)
-			if fetchErr != nil {
-				res.Warnings = append(res.Warnings, fmt.Sprintf("doc fetch failed, using FTS-only: %v", fetchErr))
-			} else {
-				// Preserve RRF ordering (GetDocsByIDs returns unordered).
-				docMap := make(map[int64]store.DocRow, len(docs))
-				for _, d := range docs {
-					docMap[d.ID] = d
-				}
-				ordered := make([]store.DocRow, 0, len(ids))
-				for _, id := range ids {
-					if d, ok := docMap[id]; ok {
-						ordered = append(ordered, d)
-					}
-				}
-				res.Docs = ordered
-				res.SearchMethod = "hybrid_rrf"
-
-				// Stage 2: Rerank via Voyage rerank API.
-				if len(res.Docs) > limit {
-					contents := make([]string, len(res.Docs))
-					for i, d := range res.Docs {
-						contents[i] = d.SectionPath + "\n" + d.Content
-					}
-					reranked, rerankErr := emb.Rerank(ctx, query, contents, limit)
-					if rerankErr != nil {
-						res.Warnings = append(res.Warnings, fmt.Sprintf("rerank failed, using RRF order: %v", rerankErr))
-					} else if len(reranked) > 0 {
-						reorderedDocs := make([]store.DocRow, 0, len(reranked))
-						for _, r := range reranked {
-							if r.Index >= 0 && r.Index < len(res.Docs) {
-								reorderedDocs = append(reorderedDocs, res.Docs[r.Index])
-							}
-						}
-						res.Docs = reorderedDocs
-						res.SearchMethod = "hybrid_rrf+rerank"
-					}
-				}
-			}
-		}
-	}
-
-	// Fallback to FTS-only if no results from hybrid pipeline.
-	if len(res.Docs) == 0 {
-		res.SearchMethod = "fts5_only"
-		docs, err := st.SearchDocsFTS(ctx, query, sourceType, limit)
+		queryVec, err := emb.EmbedForSearch(ctx, query)
 		if err != nil {
-			res.Warnings = append(res.Warnings, fmt.Sprintf("FTS search failed: %v", err))
+			res.Warnings = append(res.Warnings, fmt.Sprintf("vector embedding failed: %v", err))
+		} else {
+			types := parseSourceTypes(sourceType)
+			matches, err := st.VectorSearch(ctx, queryVec, "docs", overRetrieve, types...)
+			if err != nil {
+				res.Warnings = append(res.Warnings, fmt.Sprintf("vector search failed: %v", err))
+			} else if len(matches) > 0 {
+				ids := make([]int64, len(matches))
+				for i, m := range matches {
+					ids[i] = m.SourceID
+				}
+				docs, err := st.GetDocsByIDs(ctx, ids)
+				if err != nil {
+					res.Warnings = append(res.Warnings, fmt.Sprintf("doc fetch failed: %v", err))
+				} else {
+					// Preserve vector similarity ordering.
+					docMap := make(map[int64]store.DocRow, len(docs))
+					for _, d := range docs {
+						docMap[d.ID] = d
+					}
+					ordered := make([]store.DocRow, 0, len(ids))
+					for _, id := range ids {
+						if d, ok := docMap[id]; ok {
+							ordered = append(ordered, d)
+						}
+					}
+					res.Docs = ordered
+					res.SearchMethod = "vector"
+
+					// Rerank via Voyage API if we have more results than needed.
+					if len(res.Docs) > limit {
+						contents := make([]string, len(res.Docs))
+						for i, d := range res.Docs {
+							contents[i] = d.SectionPath + "\n" + d.Content
+						}
+						reranked, err := emb.Rerank(ctx, query, contents, limit)
+						if err != nil {
+							res.Warnings = append(res.Warnings, fmt.Sprintf("rerank failed: %v", err))
+						} else if len(reranked) > 0 {
+							reorderedDocs := make([]store.DocRow, 0, len(reranked))
+							for _, r := range reranked {
+								if r.Index >= 0 && r.Index < len(res.Docs) {
+									reorderedDocs = append(reorderedDocs, res.Docs[r.Index])
+								}
+							}
+							res.Docs = reorderedDocs
+							res.SearchMethod = "vector+rerank"
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback to LIKE keyword search if no vector results.
+	if len(res.Docs) == 0 {
+		res.SearchMethod = "keyword"
+		docs, err := st.SearchMemoriesKeyword(ctx, query, limit)
+		if err != nil {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("keyword search failed: %v", err))
 		} else {
 			res.Docs = docs
 		}
 	}
 
-	// Stage 3: Apply feedback boost (promote/demote docs based on user feedback).
-	if len(res.Docs) > 0 {
-		ids := make([]int64, len(res.Docs))
-		for i, d := range res.Docs {
-			ids[i] = d.ID
-		}
-		boosts := st.FeedbackBoostBatch(ctx, ids)
-		if len(boosts) > 0 {
-			type boostedDoc struct {
-				doc   store.DocRow
-				score float64
-			}
-			items := make([]boostedDoc, len(res.Docs))
-			for i, d := range res.Docs {
-				posScore := 1.0 / float64(i+1)
-				if b, ok := boosts[d.ID]; ok {
-					posScore += b - 1.0 // b is ~1.0 ± feedbackBoostScale
-				}
-				items[i] = boostedDoc{doc: d, score: posScore}
-			}
-			sort.SliceStable(items, func(i, j int) bool {
-				return items[i].score > items[j].score
-			})
-			for i, item := range items {
-				res.Docs[i] = item.doc
-			}
-		}
-	}
-
-	// Stage 4: Apply recency signal (boost newer memories/changelogs).
+	// Apply recency signal.
 	res.Docs = applyRecencySignal(res.Docs, time.Now())
 
-	// Trim to requested limit.
 	if len(res.Docs) > limit {
 		res.Docs = res.Docs[:limit]
 	}

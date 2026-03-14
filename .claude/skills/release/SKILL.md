@@ -38,11 +38,7 @@ go vet ./...
 
 ## Version Update
 
-1. Convert `[Unreleased]` section in `CHANGELOG.md` to new version:
-   - Rename `## [Unreleased]` → `## [<VERSION>] - <YYYY-MM-DD>`
-   - Add new empty `## [Unreleased]` section at the top
-   - Update link references at the bottom (`[Unreleased]` and new version comparison links)
-2. Update `plugins[0].version` in `.claude-plugin/marketplace.json`
+1. Update `plugins[0].version` in `.claude-plugin/marketplace.json`
 2. **Check plugin/ source of truth**: `internal/install/content/` (rules, skills, agents) is the source.
    `plugin/` is generated — if plugin/ was edited directly, sync `internal/install/content/` first.
    CI's `Verify plugin bundle is up to date` catches mismatches.
@@ -60,7 +56,7 @@ README.md / README.ja.md のバッジは shields.io の動的バッジ（GitHub 
 
 ## Commit & Tag
 
-1. Stage changed files: `git add CHANGELOG.md .claude-plugin/marketplace.json plugin/`
+1. Stage changed files: `git add .claude-plugin/marketplace.json plugin/`
    - Include other uncommitted files if agreed with user
 2. Commit message: `v<VERSION>: <one-line summary of commits>` (in English)
    - Generate summary from `git log <prev-tag>..HEAD --oneline`

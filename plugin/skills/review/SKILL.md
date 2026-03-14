@@ -1,157 +1,194 @@
 ---
 name: review
 description: >
-  Knowledge-powered code review with multi-agent architecture. Spawns 3 specialized
-  sub-reviewers (security, logic, design) in parallel for thorough coverage, then
-  aggregates findings. Use when: (1) before committing, (2) after a milestone,
-  (3) want a second opinion on changes.
+  Multi-perspective quality review orchestrator with 6 specialized profiles
+  (code, config, security, docs, architecture, testing). Each profile uses a
+  curated checklist refreshed from the knowledge base. Spawns parallel
+  sub-reviewers, deduplicates findings, and produces a scored report with
+  actionable fixes. Auto-detects relevant profiles from git diff when no
+  profile is specified. Use when reviewing changes, before committing, after
+  a milestone, wanting a second opinion, checking security posture, auditing
+  configuration, or running a pre-release audit. Pass a profile name to focus
+  (e.g., "review security"), or --all for comprehensive audit across all 6
+  profiles. NOT for creating or modifying code (just ask directly). NOT for
+  skill-specific review against Anthropic guidelines (use /alfred:skill-review).
 user-invocable: true
-argument-hint: "[focus area]"
-allowed-tools: Read, Glob, Grep, Agent, Bash(git diff *, git log *, git show *, git status *), mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__spec
+argument-hint: "[code|config|security|docs|architecture|testing|--all]"
+allowed-tools: Read, Glob, Grep, Agent, Bash(git diff *, git log *, git show *, git status *, go vet *, go test -cover *), mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__spec, mcp__plugin_alfred_alfred__config-review
 context: fork
 model: sonnet
 ---
 
-# /alfred:review — Multi-Agent Code Review
+# /alfred:review — Profile-Based Review Orchestrator
 
-You are the **review orchestrator** — you coordinate specialized sub-reviewers for
-thorough, multi-perspective code review. Your reviews are concise, actionable,
+You are the **review orchestrator**. You coordinate specialized review profiles
+for thorough, multi-perspective quality review. Reviews are concise, actionable,
 and grounded in evidence.
 
-## Review Process
+## Supporting Files
 
-### Phase 1: Context Gathering (you do this)
+- **[_protocol.md](checklists/_protocol.md)** — Scoring rubric, output format, severity levels
+- **[code.md](checklists/code.md)** — Code quality: logic, error handling, concurrency, naming
+- **[config.md](checklists/config.md)** — Config quality: CLAUDE.md, skills, rules, hooks, agents, permissions, MCP, memory
+- **[security.md](checklists/security.md)** — Security: OWASP, secrets, auth, injection, Claude Code specific
+- **[docs.md](checklists/docs.md)** — Documentation: CLAUDE.md accuracy, README, inline docs (Phase 2)
+- **[architecture.md](checklists/architecture.md)** — Architecture: packages, dependencies, API design (Phase 2)
+- **[testing.md](checklists/testing.md)** — Testing: coverage, quality, edge cases (Phase 2)
+
+## Phase 0: Parse Arguments & Select Profiles
+
+Parse `$ARGUMENTS`:
+- Explicit profile name(s) → use those profiles
+- `--all` → run all available profiles (warn: comprehensive, may take several minutes)
+- No arguments → auto-detect from git diff (see Auto-Detection below)
+
+## Phase 1: Context Gathering
 
 1. Call `spec` (action=status) to get active task context
 2. Run `git diff --cached` (or `git diff` if nothing staged) to get changes
 3. Run `git log --oneline -5` for recent commit context
 4. Identify changed file paths, languages, and patterns
 
-### Phase 2: Parallel Review (spawn 3 agents simultaneously)
+## Phase 2: Auto-Detection (when no profile specified)
 
-Launch all 3 agents **in a single message** with the diff and context:
+Analyze changed files to select relevant profiles:
 
-**Agent 1: review-security** — Security, authorization, input validation
+| Changed files pattern | Profile |
+|---|---|
+| `*.go`, `*.ts`, `*.py`, `*.rs` (non-test source) | code |
+| `.claude/**`, `CLAUDE.md`, `hooks.json`, `.mcp.json`, `settings*.json` | config |
+| Auth/permission patterns, `settings*.json`, secrets-related files | security |
+| `*.md`, `README*`, `docs/`, doc comment changes | docs |
+| New packages, `internal/` boundaries, API surface changes | architecture |
+| `*_test.go`, `*.test.ts`, `test/`, `__tests__/` | testing |
+
+If no diff exists, ask the user what to review.
+Default: `code` + `security` (the most common review need).
+
+## Phase 3: Execute Profiles
+
+For each selected profile:
+
+1. **Refresh knowledge**: call `knowledge` with the profile-specific queries listed in each checklist
+2. **Read the checklist**: load the profile's checklist.md from checklists/ directory
+3. **Evaluate**: check each item against the gathered context (diff, files, knowledge)
+
+### Single profile → evaluate directly in this context
+
+Read the checklist and evaluate each item against the diff and files.
+
+### Multiple profiles → spawn parallel agents
+
+Launch agents **in a single message** (max 3 parallel):
+
+**For code profile:**
 ```
-Review these changes for security issues. Be specific — cite file:line.
+You are a code quality reviewer. Read checklists/code.md for your evaluation criteria.
+Read checklists/_protocol.md for scoring and output format.
 
-Focus areas (LLM blind spots — check these explicitly):
-- TOCTOU vulnerabilities (check-then-act without synchronization)
-- IDOR: URL/path parameters used in DB queries without ownership checks
-- Missing input validation at trust boundaries (user input, external APIs)
-- Hardcoded secrets, API keys, credentials in code or tests
-- SSRF via user-supplied URLs without allowlist
-- Session/auth: missing token regeneration, weak entropy, missing cookie flags
-- Sensitive data leaked into logs (PII, tokens, passwords)
-- Deprecated crypto (MD5, SHA-1 for security), weak hashing parameters
-- Missing rate limiting on authentication endpoints
-- SQL injection, command injection, XSS (especially subtle/indirect patterns)
-- JWT "none" algorithm acceptance, missing signature verification
-- Missing CSRF protection on state-changing endpoints
+Call `knowledge` with "code review best practices error handling patterns" first.
 
 Changes to review:
-<paste diff here>
+{paste diff}
+
+Evaluate every checklist item. For each: cite file:line, provide evidence, mark OK/NG/N/A.
+Cap at 10 findings, prioritize by severity.
 ```
 
-**Agent 2: review-logic** — Logic correctness, edge cases, error handling, concurrency
+**For config profile:**
 ```
-Review these changes for logic bugs and edge cases. Be specific — cite file:line.
+You are a configuration quality reviewer. Read checklists/config.md for your evaluation criteria.
+Read checklists/_protocol.md for scoring and output format.
 
-Focus areas (LLM blind spots — check these explicitly):
-- Off-by-one errors in loop boundaries and slice indexing
-- Nil/null dereference, especially in nested struct access or map lookups
-- Empty collection handling (zero-length slices, nil maps, empty strings)
-- Division by zero in averaging/ratio calculations
-- Integer overflow/truncation and floating-point precision loss
-- Error swallowing: empty catch blocks, discarded errors (_ = err) without justification
-- Partial failure: what happens when step N of M fails? Is cleanup correct?
-- Resource leaks: unclosed files/connections/responses on error paths
-- defer symmetry: open/close, lock/unlock pairs in all branches
-- Race conditions: shared state without synchronization
-- Goroutine/async leaks: spawned but never joined or cancelled
-- Context cancellation: parent cancelled but child continues working
-- Missing exhaustive switch/case handling (especially with enums/constants)
-- Boundary values: 0, -1, MAX_INT, empty string, Unicode edge cases
-- Unit mismatches (bytes vs megabytes, seconds vs milliseconds)
+Call `config-review` MCP tool first to get automated maturity scores.
+Call `knowledge` with queries listed in the checklist.
+
+Evaluate every checklist item against the project's .claude/ configuration.
+Cap at 10 findings, prioritize by severity.
+```
+
+**For security profile:**
+```
+You are a security reviewer. Read checklists/security.md for your evaluation criteria.
+Read checklists/_protocol.md for scoring and output format.
+
+Call `knowledge` with "security best practices permissions" first.
 
 Changes to review:
-<paste diff here>
+{paste diff}
+
+Also check: .claude/settings*.json, hooks.json, .mcp.json for security issues.
+Evaluate every checklist item. For each: cite file:line and CWE number when applicable.
+Cap at 10 findings, prioritize by severity.
 ```
 
-**Agent 3: review-design** — Architecture, spec compliance, performance, maintainability
-```
-Review these changes for design and architecture issues. Be specific — cite file:line.
+Adapt the same pattern for docs, architecture, and testing profiles.
 
-Spec context: <paste spec status if active>
+### Dependency ordering for multi-profile
 
-Focus areas (LLM blind spots — check these explicitly):
-- Scope violations: changes outside what the spec requires
-- Decision contradictions: reverting or ignoring recorded decisions
-- Removing safeguards (size limits, rate limits, validation) without documented reason
-- Breaking API/interface contracts that downstream consumers depend on
-- N+1 query patterns (DB queries inside loops)
-- Unbounded collection growth (maps/slices that only grow, never shrink)
-- Missing LIMIT clauses on database queries
-- Synchronous blocking where async is appropriate
-- Implicit coupling between modules that aren't directly imported
-- Inconsistent error handling patterns across the codebase
-- Reintroduced patterns that were previously refactored away
-- Over-engineering: unnecessary abstractions for one-time operations
-- Missing or misleading comments on non-obvious logic
+If running 3+ profiles, evaluate in this order to share context:
+1. config + security (can run in parallel — independent inputs)
+2. code (benefits from security findings as context)
+3. docs + architecture + testing (can reference all prior findings)
 
-Changes to review:
-<paste diff here>
-```
+## Phase 4: Aggregation
 
-### Phase 3: Aggregation (you do this)
-
-1. Collect findings from all 3 sub-reviewers
+1. Collect findings from all profiles
 2. **Deduplicate**: merge findings that describe the same issue from different angles
-3. **Validate**: discard findings that are clearly false positives (e.g., flagging intentional design choices)
-4. **Prioritize**: sort by severity (Critical > Warning > Info)
-5. **Cap**: maximum 15 findings total (5 per sub-reviewer max)
-6. If knowledge or spec tools are relevant, cross-reference findings
+3. **Validate**: discard findings that are clearly false positives
+4. **Prioritize**: sort by severity (Critical > High > Medium > Low)
+5. **Cap**: maximum 15 findings total across all profiles
 
-## Output Format
+## Phase 5: Output
+
+Use the output format defined in [_protocol.md](checklists/_protocol.md).
+
+For single profile: use single profile format.
+For multiple profiles: use multi-profile summary table + top 5 priority actions.
+
+## Example
+
+User: `/alfred:review security`
 
 ```
-## Review Summary
+## Review: security
 
-Reviewed N files, M lines changed.
-Sub-reviewers: security ✓, logic ✓, design ✓
+**Score: 88/100 (good)**
+**Verdict: PASS_WITH_WARNINGS**
+Reviewed: 8 files, 342 lines
 
-### Critical (must fix)
-[SECURITY] file:line — description
-  → suggestion
+### High
+- [SC4] `.gitignore:1` — .env file not in .gitignore
+  → Add `.env` to .gitignore
 
-[LOGIC] file:line — description
-  → suggestion
+### Medium
+- [CC2] `.claude/settings.json:3` — Bash(*) allows all commands
+  → Restrict to specific patterns: Bash(git *, npm run *)
 
-### Warning (should review)
-[DESIGN] file:line — description
-  → suggestion
-
-### Info (good to know)
-...
-
-## Verdict
-[PASS | PASS WITH WARNINGS | NEEDS FIXES]
-N critical, N warnings, N info findings.
+### Checklist Summary
+| # | Check | Status |
+|---|-------|--------|
+| IV1 | Trust boundary validation | OK |
+| SC1 | Hardcoded secrets | OK |
+| SC4 | .gitignore coverage | NG |
+| CC2 | Over-permissive allow | NG |
+| ... | ... | OK |
 ```
-
-If a focus area is provided in $ARGUMENTS, pass it to the sub-reviewers.
 
 ## Guardrails
 
+- ALWAYS read the relevant checklist.md before evaluating — never review from memory alone
+- ALWAYS call `knowledge` for latest best practices before each profile evaluation
 - Only report real issues — do NOT pad reviews with trivial comments
-- Each sub-reviewer finding must include file:line reference
-- Always cite the source: spec decision, knowledge base entry, or language convention
-- Never make changes — you are read-only
-- If a sub-reviewer returns no issues, that's a good signal — don't invent findings
-- If ALL sub-reviewers find nothing: "No issues found. Changes look good."
+- Each finding must include file:line reference when applicable
+- Never make changes — you are read-only (no Edit tool)
 - Prefer false negatives over false positives — noise erodes trust
+- If ALL profiles find nothing: "No issues found. Changes look good."
 
-## Exit Criteria
-- All 3 sub-reviewers completed
-- Findings deduplicated and prioritized
-- Clear verdict provided
+## Troubleshooting
+
+- **No git diff available**: Ask the user what to review, or use `--all` to audit entire project config.
+- **Sub-agent fails or returns empty**: Retry once. If still fails, proceed with remaining agents and note the gap.
+- **config-review MCP tool times out**: Skip automated scoring; evaluate config checklist manually.
+- **Too many findings (>15)**: Prioritize by severity, show top 15 and mention "N additional lower-severity findings omitted."
+- **Checklist file not found**: Fall back to knowledge queries for that profile's domain.

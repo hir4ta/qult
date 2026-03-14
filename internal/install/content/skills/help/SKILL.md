@@ -114,27 +114,7 @@ User: `/alfred:help hooks`
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `ALFRED_QUIET` | `0` | `1` = suppress knowledge injection (hooks still save state) |
-| `ALFRED_RELEVANCE_THRESHOLD` | `0.40` | Lower = more injections (noisier). Higher = fewer, more precise |
-| `ALFRED_HIGH_CONFIDENCE_THRESHOLD` | `0.65` | Score needed to inject 2 results instead of 1 |
-| `ALFRED_SINGLE_KEYWORD_DAMPEN` | `0.80` | Multiplier for single-keyword matches (reduces noise) |
-| `ALFRED_DEBUG` | unset | `1` = debug logging to ~/.claude-alfred/debug.log |
-
-## Per-Project Config (.alfred/config.json)
-
-Override environment variables per project. All fields optional:
-
-```json
-{
-  "relevance_threshold": 0.35,
-  "high_confidence_threshold": 0.60,
-  "single_keyword_dampen": 0.80,
-  "quiet": false,
-  "custom_sources": [
-    {"url": "https://docs.example.com/api", "label": "Internal API docs"}
-  ]
-}
-```
+| `VOYAGE_API_KEY` | (none) | Voyage AI API key for vector search + reranking |
 
 ## How It Works
 

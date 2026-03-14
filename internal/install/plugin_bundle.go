@@ -44,36 +44,8 @@ func alfredHookEntries(binPath string) map[string]any {
 					map[string]any{
 						"type":          "command",
 						"command":       binPath + " hook UserPromptSubmit",
-						"statusMessage": "alfred: searching knowledge...",
+						"statusMessage": "alfred: searching memories...",
 						"timeout":       10,
-					},
-				},
-			},
-		},
-		// PostToolUse: contextual hints after file edits.
-		"PostToolUse": []any{
-			map[string]any{
-				"matcher": "Edit|Write",
-				"hooks": []any{
-					map[string]any{
-						"type":          "command",
-						"command":       binPath + " hook PostToolUse",
-						"statusMessage": "alfred: checking changes...",
-						"timeout":       5,
-					},
-				},
-			},
-		},
-		// SessionEnd: session summary + instinct extraction.
-		"SessionEnd": []any{
-			map[string]any{
-				"matcher": "logout|prompt_input_exit|bypass_permissions_disabled|other",
-				"hooks": []any{
-					map[string]any{
-						"type":          "command",
-						"command":       binPath + " hook SessionEnd",
-						"statusMessage": "alfred: saving session memory...",
-						"timeout":       3,
 					},
 				},
 			},
@@ -117,7 +89,7 @@ func Bundle(outputDir, version string) error {
 	pluginJSON := map[string]any{
 		"name":        "alfred",
 		"version":     version,
-		"description": "Your silent butler for Claude Code — surfacing knowledge, catching scope violations, and preserving session context across compactions.",
+		"description": "Your silent butler for Claude Code — preserving session context, surfacing relevant memories.",
 		"author":      map[string]string{"name": "hir4ta", "url": "https://github.com/hir4ta"},
 		"homepage":    "https://github.com/hir4ta/claude-alfred",
 		"repository":  "https://github.com/hir4ta/claude-alfred",
@@ -130,7 +102,7 @@ func Bundle(outputDir, version string) error {
 
 	// 3. Write hooks.json — commands invoke the guard/setup wrapper.
 	hooksJSON := map[string]any{
-		"description": "Proactive hooks — auto-import, knowledge injection, spec session persistence, memory persistence",
+		"description": "Proactive hooks — auto-import, memory injection, spec session persistence",
 		"hooks":       alfredHookEntries(runCmd),
 	}
 	if err := writeJSON(filepath.Join(outputDir, "hooks", "hooks.json"), hooksJSON); err != nil {

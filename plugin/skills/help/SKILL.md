@@ -3,6 +3,9 @@ name: help
 description: >
   Show all available alfred capabilities and when to use each one.
   Quick reference for skills, agents, MCP tools, and CLI commands.
+  Use when the user asks what alfred can do, wants to list available commands,
+  or needs guidance on which skill to use. NOT for executing tasks (use the
+  specific skill instead).
 user-invocable: true
 argument-hint: "[feature-name]"
 allowed-tools: mcp__plugin_alfred_alfred__knowledge
@@ -20,11 +23,14 @@ then output a focused explanation. Otherwise, show the full reference below.
 | Skill | Purpose | When to use |
 |-------|---------|-------------|
 | **plan** | Multi-agent spec generation | Starting a new task, organizing a design |
+| **develop** | Autonomous development orchestrator | End-to-end: spec → implement → review → commit |
+| **review** | Profile-based quality review (6 profiles) | Before committing, after a milestone, auditing config/security |
+| **skill-review** | Skill audit against official guide | Auditing skills before publishing, checking quality |
 | **brainstorm** | Divergent thinking (3 agents) | Need ideas, surface risks, expand options |
 | **refine** | Convergent decision-making | Stuck on a choice, need to resolve a blocker |
-| **review** | Multi-agent code review | Before committing, after a milestone |
 | **configure** | Single config file generation | Create/polish one skill, rule, hook, etc. |
 | **setup** | Project-wide setup wizard | First-time project setup, feature explanation |
+| **ingest** | Reference material processor | Onboarding large files, docs, CSV into persistent knowledge |
 | **help** | This reference | Discover what alfred can do |
 
 ## Agents (auto-delegated by Claude)
@@ -58,49 +64,57 @@ then output a focused explanation. Otherwise, show the full reference below.
 
 ```
 Starting a new task?
-  → /alfred:plan        — Multi-agent spec generation
+  → /alfred:plan          — Multi-agent spec generation
+  → /alfred:develop       — Full autonomous pipeline (spec → code → review → commit)
 
 Have a vague idea, need to explore?
-  → /alfred:brainstorm  — Divergent thinking (3 agents)
+  → /alfred:brainstorm    — Divergent thinking (3 agents)
 
 Have options but can't choose?
-  → /alfred:refine      — Narrowing, scoring, deciding
+  → /alfred:refine        — Narrowing, scoring, deciding
 
 Ready to commit code?
-  → /alfred:review      — Multi-agent code review
+  → /alfred:review        — Profile-based quality review (code/config/security/docs/arch/testing)
+  → /alfred:skill-review  — Audit skills against official best practices
 
 Need to set up Claude Code config?
-  → /alfred:setup       — Project-wide wizard
-  → /alfred:configure   — Single file (skill, rule, hook, etc.)
+  → /alfred:setup         — Project-wide wizard
+  → /alfred:configure     — Single file (skill, rule, hook, etc.)
+
+Onboarding reference materials?
+  → /alfred:ingest        — CSV, TXT, PDF → structured persistent knowledge
+```
+
+## Example
+
+User: `/alfred:help hooks`
+
+```
+## Hooks
+
+**What**: Shell commands or LLM prompts that run automatically during Claude Code events.
+
+**When to use**:
+- Enforce coding standards before every edit
+- Auto-format on save
+- Block dangerous commands
+
+**Setup** (copy-pasteable):
+{ "hooks": { "PreToolUse": [{ "matcher": "Edit", "hooks": [{ "type": "command", "command": "./lint.sh" }] }] } }
+
+**Tips**:
+- Keep hooks fast (< 2s for synchronous)
+- Use `matcher` to scope which tools trigger
 ```
 
 **Typical flow:** brainstorm → refine → plan → implement → review
+**Autonomous flow:** /alfred:develop (runs the full pipeline automatically)
 
 ## Environment Variables
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `ALFRED_QUIET` | `0` | `1` = suppress knowledge injection (hooks still save state) |
-| `ALFRED_RELEVANCE_THRESHOLD` | `0.40` | Lower = more injections (noisier). Higher = fewer, more precise |
-| `ALFRED_HIGH_CONFIDENCE_THRESHOLD` | `0.65` | Score needed to inject 2 results instead of 1 |
-| `ALFRED_SINGLE_KEYWORD_DAMPEN` | `0.80` | Multiplier for single-keyword matches (reduces noise) |
-| `ALFRED_DEBUG` | unset | `1` = debug logging to ~/.claude-alfred/debug.log |
-
-## Per-Project Config (.alfred/config.json)
-
-Override environment variables per project. All fields optional:
-
-```json
-{
-  "relevance_threshold": 0.35,
-  "high_confidence_threshold": 0.60,
-  "single_keyword_dampen": 0.80,
-  "quiet": false,
-  "custom_sources": [
-    {"url": "https://docs.example.com/api", "label": "Internal API docs"}
-  ]
-}
-```
+| `VOYAGE_API_KEY` | (none) | Voyage AI API key for vector search + reranking |
 
 ## How It Works
 

@@ -3,7 +3,7 @@
     "name": "hir4ta",
     "url": "https://github.com/hir4ta"
   },
-  "description": "Your silent butler for Claude Code — surfacing knowledge, catching scope violations, and preserving session context across compactions.",
+  "description": "Your silent butler for Claude Code — preserving session context, surfacing relevant memories.",
   "homepage": "https://github.com/hir4ta/claude-alfred",
   "keywords": [
     "alfred",
@@ -16,5 +16,5 @@
   "license": "MIT",
   "name": "alfred",
   "repository": "https://github.com/hir4ta/claude-alfred",
-  "version": "0.67.0"
+  "version": "0.68.0"
 }
