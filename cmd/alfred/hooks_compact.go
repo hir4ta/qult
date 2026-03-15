@@ -692,17 +692,33 @@ func persistChapterMemory(ctx context.Context, projectPath, taskSlug string, sd 
 	var savedCount int
 	var changedIDs []int64
 
-	// Section 1: Session state (the structured summary of this compact cycle).
+	// Section 1: Structured session state (JSON for better search recall).
 	if existing != "" {
-		content := existing
-		if len(content) > maxChapterSectionBytes {
-			content = safeTruncateBytes(content, maxChapterSectionBytes) + "\n... (truncated at 32KB)"
+		structured := buildStructuredChapter(existing, projectPath, taskSlug, chapterNum)
+		// Truncate large fields before marshaling to avoid byte-boundary corruption.
+		if len(structured.Goal) > 1024 {
+			structured.Goal = structured.Goal[:1024]
+		}
+		if len(structured.NextSteps) > 20 {
+			structured.NextSteps = structured.NextSteps[:20]
+		}
+		if len(structured.ModifiedFiles) > 50 {
+			structured.ModifiedFiles = structured.ModifiedFiles[:50]
+		}
+		content, err := json.Marshal(structured)
+		if err != nil {
+			// Fallback to raw markdown with UTF-8-safe truncation.
+			raw := existing
+			if len(raw) > maxChapterSectionBytes {
+				raw = safeTruncateBytes(raw, maxChapterSectionBytes)
+			}
+			content = []byte(raw)
 		}
 		sectionPath := fmt.Sprintf("%s > %s > chapter-%d > %s", project, taskSlug, chapterNum, label)
 		id, changed, err := st.UpsertDoc(ctx, &store.DocRow{
 			URL:         baseURL + "/session-state",
 			SectionPath: sectionPath,
-			Content:     content,
+			Content:     string(content),
 			SourceType:  store.SourceMemory,
 			TTLDays:     chapterMemoryTTLDays,
 		})
@@ -746,6 +762,142 @@ func persistChapterMemory(ctx context.Context, projectPath, taskSlug string, sd 
 	if savedCount > 0 {
 		notifyUser("saved chapter %d (%d sections) for task '%s' (%s)", chapterNum, savedCount, taskSlug, ts)
 	}
+}
+
+// structuredChapter is the JSON schema for chapter memory.
+// Replaces raw session.md markdown with fields optimized for search and recall.
+type structuredChapter struct {
+	Chapter       int      `json:"chapter"`
+	Task          string   `json:"task"`
+	Project       string   `json:"project"`
+	Status        string   `json:"status"`
+	Goal          string   `json:"goal"`
+	Technologies  []string `json:"technologies,omitempty"`
+	ModifiedFiles []string `json:"modified_files,omitempty"`
+	Decisions     []string `json:"decisions,omitempty"`
+	Blockers      []string `json:"blockers,omitempty"`
+	NextSteps     []string `json:"next_steps,omitempty"`
+	CompletedAt   string   `json:"completed_at"`
+}
+
+// buildStructuredChapter extracts structured fields from session.md content.
+func buildStructuredChapter(sessionContent, projectPath, taskSlug string, chapterNum int) structuredChapter {
+	ch := structuredChapter{
+		Chapter:     chapterNum,
+		Task:        taskSlug,
+		Project:     projectBaseName(projectPath),
+		CompletedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	// Status.
+	ch.Status = strings.TrimSpace(extractSection(sessionContent, "## Status"))
+
+	// Goal = "Currently Working On".
+	ch.Goal = strings.TrimSpace(extractSectionFallback(sessionContent, "## Currently Working On", "## Current Position"))
+
+	// Modified files.
+	modSection := ""
+	for _, header := range []string{"## Modified Files", "## Modified Files (this session)"} {
+		modSection = extractSection(sessionContent, header)
+		if modSection != "" {
+			break
+		}
+	}
+	if modSection != "" {
+		for _, line := range strings.Split(modSection, "\n") {
+			f := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "-"))
+			if f != "" {
+				ch.ModifiedFiles = append(ch.ModifiedFiles, f)
+			}
+		}
+	}
+
+	// Decisions.
+	decSection := extractSection(sessionContent, "## Recent Decisions")
+	if decSection == "" {
+		decSection = extractSection(sessionContent, "## Recent Decisions (last 3)")
+	}
+	if decSection != "" {
+		for _, line := range strings.Split(decSection, "\n") {
+			d := strings.TrimSpace(line)
+			// Strip numbered prefix like "1. ".
+			if len(d) > 3 && d[0] >= '0' && d[0] <= '9' && (d[1] == '.' || (d[1] >= '0' && d[1] <= '9' && d[2] == '.')) {
+				idx := strings.Index(d, ". ")
+				if idx > 0 {
+					d = strings.TrimSpace(d[idx+2:])
+				}
+			}
+			if d != "" {
+				ch.Decisions = append(ch.Decisions, d)
+			}
+		}
+	}
+
+	// Blockers.
+	blockSection := extractSectionFallback(sessionContent, "## Blockers", "## Unresolved Issues")
+	if blockSection != "" {
+		lower := strings.ToLower(strings.TrimSpace(blockSection))
+		if lower != "none" && lower != "なし" && lower != "" {
+			for _, line := range strings.Split(blockSection, "\n") {
+				b := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "-"))
+				if b != "" {
+					ch.Blockers = append(ch.Blockers, b)
+				}
+			}
+		}
+	}
+
+	// Next steps (unchecked only).
+	nsSection := extractSection(sessionContent, "## Next Steps")
+	if nsSection != "" {
+		for _, line := range strings.Split(nsSection, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "- [ ] ") {
+				ch.NextSteps = append(ch.NextSteps, strings.TrimPrefix(trimmed, "- [ ] "))
+			}
+		}
+	}
+
+	// Technologies — extract from modified file extensions and content keywords.
+	ch.Technologies = extractTechnologies(sessionContent, ch.ModifiedFiles)
+
+	return ch
+}
+
+// extractTechnologies infers technology keywords from file extensions and content.
+func extractTechnologies(content string, files []string) []string {
+	seen := make(map[string]bool)
+	// From file extensions.
+	extMap := map[string]string{
+		".go": "go", ".ts": "typescript", ".js": "javascript",
+		".py": "python", ".rs": "rust", ".sql": "sqlite",
+		".yaml": "yaml", ".yml": "yaml", ".json": "json",
+		".md": "markdown",
+	}
+	for _, f := range files {
+		for ext, tech := range extMap {
+			if strings.HasSuffix(f, ext) {
+				seen[tech] = true
+			}
+		}
+	}
+	// From content keywords.
+	lower := strings.ToLower(content)
+	keywords := map[string]string{
+		"sqlite": "sqlite", "voyage": "voyage-ai", "bubbletea": "bubbletea",
+		"lipgloss": "lipgloss", "fts5": "fts5", "onnx": "onnx",
+		"docker": "docker", "github actions": "github-actions",
+	}
+	for kw, tech := range keywords {
+		if strings.Contains(lower, kw) {
+			seen[tech] = true
+		}
+	}
+	result := make([]string, 0, len(seen))
+	for t := range seen {
+		result = append(result, t)
+	}
+	return result
 }
 
 // extractEarlyUserMessages reads the first portion of the transcript and returns

@@ -45,16 +45,20 @@ Confirm with up to 3 questions (with choices):
 
 *If the user says "you decide", proceed with reasonable defaults.*
 
-## Phase 1: Parallel Perspective Generation (3 agents)
+## Phase 1: Perspective Generation (staggered, 3 agents)
 
-Search knowledge for relevant context first, then spawn **all 3 agents in a single
-message** using the prompts from [agent-prompts.md](agent-prompts.md). Pass each the
-theme, constraints, and any knowledge base results.
+Search knowledge for relevant context first, then spawn agents in **2 batches**
+to avoid rate limits:
+
+1. **Batch 1**: Spawn **Visionary** + **Pragmatist** in a single message (model: haiku).
+   Pass each the theme, constraints, and knowledge base results.
+2. Wait for both to complete
+3. **Batch 2**: Spawn **Critic** (model: haiku) with Batch 1 outputs as additional context
 
 ## Phase 2: Cross-Critique (1 round, parent-mediated)
 
-After collecting all 3 agents' output, spawn the **Synthesis moderator** using
-the prompt from [agent-prompts.md](agent-prompts.md) with all 3 outputs.
+After collecting all 3 agents' output, spawn the **Synthesis moderator** (model: sonnet)
+using the prompt from [agent-prompts.md](agent-prompts.md) with all 3 outputs.
 
 ## Phase 3: Final Output (Markdown)
 

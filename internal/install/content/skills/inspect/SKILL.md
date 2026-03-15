@@ -77,9 +77,9 @@ For each selected profile:
 
 Read the checklist and evaluate each item against the diff and files.
 
-### Multiple profiles → spawn parallel agents
+### Multiple profiles → spawn agents (staggered, max 2 parallel)
 
-Launch agents **in a single message** (max 3 parallel):
+Launch agents in **batches of 2** to avoid rate limits (model: haiku for each):
 
 **For code profile:**
 ```
@@ -124,12 +124,12 @@ Cap at 10 findings, prioritize by severity.
 
 Adapt the same pattern for docs, architecture, and testing profiles.
 
-### Dependency ordering for multi-profile
+### Dependency ordering for multi-profile (staggered batches)
 
-If running 3+ profiles, evaluate in this order to share context:
-1. config + security (can run in parallel — independent inputs)
-2. code (benefits from security findings as context)
-3. docs + architecture + testing (can reference all prior findings)
+If running 3+ profiles, evaluate in batches of 2 to share context and avoid rate limits:
+1. **Batch 1**: config + security (parallel — independent inputs)
+2. **Batch 2**: code + docs (parallel — benefits from Batch 1 findings as context)
+3. **Batch 3**: architecture + testing (parallel — references all prior findings)
 
 ## Phase 4: Aggregation
 

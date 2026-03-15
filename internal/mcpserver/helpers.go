@@ -206,12 +206,20 @@ func searchPipeline(ctx context.Context, st *store.Store, emb *embedder.Embedder
 		}
 	}
 
-	// Fallback to LIKE keyword search if no vector results.
+	// Fallback to FTS5 search (with alias expansion + fuzzy) if no vector results.
 	if len(res.Docs) == 0 {
-		res.SearchMethod = "keyword"
-		docs, err := st.SearchMemoriesKeyword(ctx, query, limit)
+		res.SearchMethod = "fts5"
+		docs, err := st.SearchMemoriesFTS(ctx, query, limit)
 		if err != nil {
-			res.Warnings = append(res.Warnings, fmt.Sprintf("keyword search failed: %v", err))
+			res.Warnings = append(res.Warnings, fmt.Sprintf("fts5 search failed: %v", err))
+			// Final fallback to LIKE keyword search.
+			res.SearchMethod = "keyword"
+			docs, err = st.SearchMemoriesKeyword(ctx, query, limit)
+			if err != nil {
+				res.Warnings = append(res.Warnings, fmt.Sprintf("keyword search failed: %v", err))
+			} else {
+				res.Docs = docs
+			}
 		} else {
 			res.Docs = docs
 		}

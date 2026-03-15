@@ -37,17 +37,18 @@ func New(st *store.Store, emb *embedder.Embedder, ver string) *server.MCPServer 
 			Tool: mcp.NewTool("dossier",
 				mcp.WithDescription(`Unified spec management for development tasks. Persists context across compaction and sessions.
 
-Actions: status (read-only), init, update, switch, complete, delete (2-phase: preview then confirm=true), history, rollback.
+Actions: status (read-only), init, update, switch, complete, delete (2-phase: preview then confirm=true), history, rollback, review.
 
 task_slug format: lowercase alphanumeric with hyphens (e.g. "my-feature", max 64 chars).
-"status"/"history" are read-only. "init"/"update"/"switch"/"complete"/"delete"/"rollback" modify state.
-Lifecycle: active → complete (preserves files) or delete (removes files).`),
+"status"/"history"/"review" are read-only. "init"/"update"/"switch"/"complete"/"delete"/"rollback" modify state.
+Lifecycle: active → complete (preserves files) or delete (removes files).
+Review: TUI dashboard で承認/コメント → dossier action=review で確認.`),
 				mcp.WithTitleAnnotation("Dossier — Spec Management"),
 				mcp.WithReadOnlyHintAnnotation(false),
 				mcp.WithIdempotentHintAnnotation(false),
 				mcp.WithDestructiveHintAnnotation(true),
 				mcp.WithOpenWorldHintAnnotation(false),
-				mcp.WithString("action", mcp.Description("Action to perform"), mcp.Required(), mcp.Enum("init", "update", "status", "switch", "complete", "delete", "history", "rollback")),
+				mcp.WithString("action", mcp.Description("Action to perform"), mcp.Required(), mcp.Enum("init", "update", "status", "switch", "complete", "delete", "history", "rollback", "review")),
 				mcp.WithString("project_path", mcp.Description("Project root path (defaults to current working directory if omitted)")),
 				mcp.WithString("task_slug", mcp.Description("Task identifier (required for init, switch, delete; optional for update/history/rollback — defaults to active task)")),
 				mcp.WithString("description", mcp.Description("Brief task description (for init)")),
@@ -111,6 +112,7 @@ Do NOT use for: searching documentation (use WebFetch instead), file operations.
 				mcp.WithString("label", mcp.Description("Short label/description for saved memory (required for save)")),
 				mcp.WithString("project", mcp.Description("Project name for context (default: 'general')")),
 				mcp.WithNumber("limit", mcp.Description("Maximum search results (default: 10)")),
+				mcp.WithString("detail", mcp.Description("Response verbosity: compact (labels only), summary (200-char snippets, default), full (complete content)"), mcp.Enum("compact", "summary", "full")),
 			),
 			Handler: recallHandler(st, emb),
 		},

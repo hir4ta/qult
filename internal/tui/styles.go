@@ -2,11 +2,11 @@ package tui
 
 import "charm.land/lipgloss/v2"
 
-// Accent color — single muted teal for the entire UI.
-var accent = lipgloss.Color("#5fafaf")
+// Accent color — muted purple for the entire UI.
+var accent = lipgloss.Color("#af87d7")
 
 // Secondary accent for subtle highlights.
-var accentDim = lipgloss.Color("#3d8585")
+var accentDim = lipgloss.Color("#7a5fa0")
 
 // Tab styles.
 var (

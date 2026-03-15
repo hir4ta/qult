@@ -30,6 +30,10 @@ without asking the user for input (except once at the start if needed).
 2. Call `dossier` action=status with task_slug
 3. **If spec exists with `## Orchestrator State`**:
    - Read state block → determine current phase
+   - If `awaiting_approval: true` → call `dossier` action=review to check status:
+     - approved → advance to Phase 3
+     - changes_requested → read comments, apply fixes, resume at Phase 2.5
+     - pending → remind user to review in dashboard, STOP
    - If `blocked: true` with security reason → ask "Specifically, how did you resolve: {blocked_reason}?" via AskUserQuestion → resume from **same phase** (re-review the fix)
    - If `blocked: true` with non-security reason → ask "Resolved?" → resume from **next phase**
    - Otherwise resume from persisted phase (skip to that phase)
@@ -47,6 +51,7 @@ without asking the user for input (except once at the start if needed).
    - findings_hash:
    - blocked: false
    - blocked_reason:
+   - awaiting_approval: false
    - initial_commit: {sha}
    - phase_start_commit: {sha}
    ```
@@ -55,17 +60,20 @@ without asking the user for input (except once at the start if needed).
 
 Follow the prompts in [spec-agents.md](spec-agents.md):
 1. Research via `knowledge` tool
-2. Spawn 3 agents in parallel (Architect, Devil's Advocate, Researcher)
-3. Synthesize with a Mediator agent (parent writes spec via `dossier` action=update)
-4. Write requirements.md, design.md, decisions.md via `dossier` action=update
-5. Update state: `phase: spec-review, agent_spawns_used: +4`
+2. **Batch 1**: Spawn **Architect** + **Devil's Advocate** in parallel (model: haiku)
+3. **Batch 2**: Spawn **Researcher** (model: haiku) with Batch 1 outputs as context
+4. Synthesize with a **Mediator** agent (model: sonnet) — parent writes spec via `dossier` action=update
+5. Write requirements.md, design.md, decisions.md via `dossier` action=update
+6. Update state: `phase: spec-review, agent_spawns_used: +4`
 
 ## Phase 2: Spec Review Loop
 
 Read prompts from [review-prompts.md](review-prompts.md) § Spec Review.
 
 **Per iteration:**
-1. Spawn 3 review agents in parallel (Agent A/B/C with fixed perspective assignments)
+1. Spawn review agents in **2 batches** (model: haiku for all):
+   - **Batch 1**: Agent A + Agent B in parallel (fixed perspective assignments)
+   - **Batch 2**: Agent C with Batch 1 findings as context
    - Each agent receives: spec files content + perspective assignment
    - Each agent outputs: structured JSON verdict (PASS, NEEDS_IMPROVEMENT, or NEEDS_FIXES)
    - Each agent is read-only (no Write/Edit/Agent tools)
@@ -87,7 +95,25 @@ Read prompts from [review-prompts.md](review-prompts.md) § Spec Review.
 
 If continuing: apply fixes to spec files, increment iteration, update findings_hash, loop.
 
-Update state: `phase: impl-phase-1`
+Update state: `phase: approval-gate`
+
+## Phase 2.5: Approval Gate
+
+After agent review passes, wait for user approval via the TUI dashboard:
+
+1. Update Orchestrator State: `phase: approval-gate, awaiting_approval: true`
+2. Tell the user:
+   ```
+   Spec review complete. Open `alfred dashboard` → Specs tab → select files → 'r' to review.
+   Comment on any line, then Approve or Request Changes.
+   Tell me "承認した" or "approved" when done.
+   ```
+3. **STOP and wait** — do not proceed to implementation until user confirms.
+4. When the user responds, call `dossier` action=review:
+   - `review_status: approved` → update state `awaiting_approval: false`, advance to Phase 3
+   - `review_status: changes_requested` → read comments, apply fixes to spec, re-run Phase 2 (1 iteration), then return to this gate
+   - `review_status: pending` → remind the user to review in the dashboard
+5. Update state: `phase: impl-phase-1`
 
 ## Phase 3: Implementation
 
@@ -105,7 +131,9 @@ Read task breakdown from design.md.
 Read prompts from [review-prompts.md](review-prompts.md) § Code Review.
 
 1. Get diff: `git diff {phase_start_commit}` (only this phase's changes)
-2. Spawn 3 review agents in parallel with diff + spec context
+2. Spawn review agents in **2 batches** (model: haiku for all):
+   - **Batch 1**: 2 review agents in parallel with diff + spec context
+   - **Batch 2**: 1 review agent with Batch 1 findings as context
    - Each agent outputs structured JSON verdict (PASS or NEEDS_FIXES)
 3. Collect → merge → deduplicate
 
@@ -120,7 +148,9 @@ On PASS: mark phase done in session.md, advance to next impl-phase or Phase 5.
 Read prompts from [review-prompts.md](review-prompts.md) § Final Review.
 
 1. Get full diff: `git diff $(git merge-base main HEAD)..HEAD`
-2. Spawn 4 agents in parallel (3 code reviewers + 1 integration validator)
+2. Spawn review agents in **2 batches** (model: haiku for all):
+   - **Batch 1**: 2 code reviewers in parallel with diff + spec context
+   - **Batch 2**: 1 code reviewer + 1 integration validator in parallel with Batch 1 findings
    - Integration validator uses the same verdict format: PASS or NEEDS_FIXES
    - Category `integration` signals requirement gaps
 3. Collect → merge → deduplicate

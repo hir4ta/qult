@@ -16,9 +16,9 @@ type execer interface {
 	Exec(query string, args ...any) (sql.Result, error)
 }
 
-// schemaVersion 1 = fresh start for alfred v1.
-// Three tables: records, embeddings, schema_version.
-const schemaVersion = 1
+// schemaVersion 2 = FTS5 full-text search, tag aliases, fuzzy search support.
+// V1→V2: additive (new virtual table + new table, no column changes).
+const schemaVersion = 2
 
 const ddl = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -45,6 +45,40 @@ CREATE INDEX IF NOT EXISTS idx_records_source_type ON records(source_type);
 CREATE INDEX IF NOT EXISTS idx_records_crawled_at ON records(crawled_at);
 
 -- ==========================================================
+-- Full-Text Search (FTS5)
+-- ==========================================================
+CREATE VIRTUAL TABLE IF NOT EXISTS records_fts USING fts5(
+    content,
+    section_path,
+    content='records',
+    content_rowid='rowid'
+);
+
+CREATE TRIGGER IF NOT EXISTS records_fts_ai AFTER INSERT ON records BEGIN
+    INSERT INTO records_fts(rowid, content, section_path)
+    VALUES (new.rowid, new.content, new.section_path);
+END;
+CREATE TRIGGER IF NOT EXISTS records_fts_ad AFTER DELETE ON records BEGIN
+    INSERT INTO records_fts(records_fts, rowid, content, section_path)
+    VALUES ('delete', old.rowid, old.content, old.section_path);
+END;
+CREATE TRIGGER IF NOT EXISTS records_fts_au AFTER UPDATE ON records BEGIN
+    INSERT INTO records_fts(records_fts, rowid, content, section_path)
+    VALUES ('delete', old.rowid, old.content, old.section_path);
+    INSERT INTO records_fts(rowid, content, section_path)
+    VALUES (new.rowid, new.content, new.section_path);
+END;
+
+-- ==========================================================
+-- Tag Aliases (search expansion)
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS tag_aliases (
+    tag   TEXT NOT NULL,
+    alias TEXT NOT NULL,
+    PRIMARY KEY (tag, alias)
+);
+
+-- ==========================================================
 -- Embeddings (generic vector store)
 -- ==========================================================
 CREATE TABLE IF NOT EXISTS embeddings (
@@ -61,6 +95,8 @@ CREATE TABLE IF NOT EXISTS embeddings (
 
 // legacyTables are tables from all previous versions that should be cleaned up.
 var legacyTables = []string{
+	// V2 tables (must drop before records to avoid stale FTS index)
+	"records_fts", "tag_aliases",
 	// Pre-v1 era
 	"docs", "docs_fts", "crawl_meta", "doc_feedback", "instincts",
 	"patterns", "pattern_tags", "pattern_files", "patterns_fts",
@@ -80,6 +116,8 @@ var legacyTriggers = []string{
 	"patterns_fts_ai", "patterns_fts_ad", "patterns_fts_au",
 	"decisions_fts_ai", "decisions_fts_ad", "decisions_fts_au",
 	"docs_fts_ai", "docs_fts_ad", "docs_fts_au",
+	// V2 triggers (kept here for future rebuild-from-scratch cleanup)
+	"records_fts_ai", "records_fts_ad", "records_fts_au",
 }
 
 var legacyIndexes = []string{
@@ -111,6 +149,7 @@ func (s *Store) SchemaVersionCurrent() int {
 }
 
 // Migrate applies schema migrations. Pre-v1 databases are rebuilt from scratch.
+// V1→V2 is additive (FTS5 + tag_aliases).
 func Migrate(db *sql.DB) error {
 	var current int
 	row := db.QueryRow("SELECT version FROM schema_version LIMIT 1")
@@ -127,15 +166,102 @@ func Migrate(db *sql.DB) error {
 	}
 	defer tx.Rollback()
 
-	// Any pre-v1 schema: rebuild from scratch (no backward compat).
-	if err := rebuildFromScratch(tx); err != nil {
-		return err
+	switch {
+	case current == 1:
+		// V1→V2: additive migration (FTS5, tag_aliases, seed aliases).
+		if err := migrateV1toV2(tx); err != nil {
+			return err
+		}
+	default:
+		// Pre-v1 or unknown: rebuild from scratch.
+		if err := rebuildFromScratch(tx); err != nil {
+			return err
+		}
 	}
 
 	if err := setSchemaVersion(tx, schemaVersion); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// migrateV1toV2 adds FTS5 virtual table, sync triggers, tag_aliases table,
+// and backfills the FTS index from existing records.
+func migrateV1toV2(db execer) error {
+	stmts := []string{
+		// FTS5 virtual table
+		`CREATE VIRTUAL TABLE IF NOT EXISTS records_fts USING fts5(
+			content, section_path,
+			content='records', content_rowid='rowid'
+		)`,
+		// Sync triggers
+		`CREATE TRIGGER IF NOT EXISTS records_fts_ai AFTER INSERT ON records BEGIN
+			INSERT INTO records_fts(rowid, content, section_path)
+			VALUES (new.rowid, new.content, new.section_path);
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS records_fts_ad AFTER DELETE ON records BEGIN
+			INSERT INTO records_fts(records_fts, rowid, content, section_path)
+			VALUES ('delete', old.rowid, old.content, old.section_path);
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS records_fts_au AFTER UPDATE ON records BEGIN
+			INSERT INTO records_fts(records_fts, rowid, content, section_path)
+			VALUES ('delete', old.rowid, old.content, old.section_path);
+			INSERT INTO records_fts(rowid, content, section_path)
+			VALUES (new.rowid, new.content, new.section_path);
+		END`,
+		// Tag aliases table
+		`CREATE TABLE IF NOT EXISTS tag_aliases (
+			tag   TEXT NOT NULL,
+			alias TEXT NOT NULL,
+			PRIMARY KEY (tag, alias)
+		)`,
+		// Backfill FTS index from existing records
+		`INSERT INTO records_fts(rowid, content, section_path)
+		 SELECT rowid, content, section_path FROM records`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("store: v1→v2 migration: %w", err)
+		}
+	}
+	// Seed default tag aliases.
+	if err := seedTagAliases(db); err != nil {
+		return fmt.Errorf("store: seed tag aliases: %w", err)
+	}
+	return nil
+}
+
+// seedTagAliases inserts default tag alias mappings.
+func seedTagAliases(db execer) error {
+	aliases := map[string][]string{
+		"auth":       {"authentication", "login", "認証", "ログイン"},
+		"db":         {"database", "sqlite", "データベース"},
+		"api":        {"endpoint", "rest", "graphql"},
+		"test":       {"testing", "テスト", "spec"},
+		"security":   {"セキュリティ", "vulnerability", "脆弱性"},
+		"config":     {"configuration", "settings", "設定"},
+		"deploy":     {"deployment", "デプロイ", "release"},
+		"perf":       {"performance", "パフォーマンス", "optimization", "最適化"},
+		"error":      {"エラー", "bug", "バグ", "failure"},
+		"hook":       {"hooks", "フック", "lifecycle"},
+		"memory":     {"メモリ", "knowledge", "ナレッジ"},
+		"spec":       {"specification", "仕様", "requirement"},
+		"embed":      {"embedding", "埋め込み", "vector", "ベクトル"},
+		"search":     {"検索", "query", "クエリ"},
+		"refactor":   {"リファクタ", "cleanup", "restructure"},
+		"ci":         {"ci/cd", "pipeline", "github actions"},
+	}
+	for tag, aliasList := range aliases {
+		for _, alias := range aliasList {
+			if _, err := db.Exec(
+				`INSERT OR IGNORE INTO tag_aliases (tag, alias) VALUES (?, ?)`,
+				tag, alias,
+			); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // dropSafe executes a DROP IF EXISTS statement after validating the identifier.
@@ -175,7 +301,8 @@ func rebuildFromScratch(db execer) error {
 	if _, err := db.Exec(ddl); err != nil {
 		return err
 	}
-	return nil
+	// Seed default tag aliases for FTS search expansion.
+	return seedTagAliases(db)
 }
 
 // setSchemaVersion writes the schema version.

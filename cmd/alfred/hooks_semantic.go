@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/hir4ta/claude-alfred/internal/embedder"
@@ -25,7 +26,8 @@ var newEmbedder = func() *embedder.Embedder {
 func handleSemanticSearch(ctx context.Context, ev *hookEvent, prompt string, rememberHint string) bool {
 	emb := newEmbedder()
 	if emb == nil {
-		return false
+		// No Voyage — try FTS5 fallback.
+		return handleFTSFallback(ctx, ev, prompt, rememberHint)
 	}
 
 	st, err := openStore()
@@ -41,6 +43,16 @@ func handleSemanticSearch(ctx context.Context, ev *hookEvent, prompt string, rem
 
 	// Search memories and past specs — long-term knowledge that grows with use.
 	snippets := searchKnowledgeSemantic(ctx, queryVec, st)
+
+	// File context boost: score up memories related to currently changed files.
+	if ev.ProjectPath != "" && len(snippets) < 3 {
+		fileSnippets := searchByChangedFiles(ctx, st, ev.ProjectPath)
+		snippets = append(snippets, fileSnippets...)
+		if len(snippets) > 3 {
+			snippets = snippets[:3]
+		}
+	}
+
 	if len(snippets) == 0 && rememberHint == "" {
 		return true // semantic search ran, just no results
 	}
@@ -59,6 +71,98 @@ func handleSemanticSearch(ctx context.Context, ev *hookEvent, prompt string, rem
 		emitAdditionalContext("UserPromptSubmit", buf.String())
 	}
 	return true
+}
+
+// handleFTSFallback uses FTS5 search when Voyage is unavailable.
+// Returns true if it produced output, false otherwise.
+func handleFTSFallback(ctx context.Context, ev *hookEvent, prompt string, rememberHint string) bool {
+	st, err := openStore()
+	if err != nil {
+		return false
+	}
+
+	docs, err := st.SearchMemoriesFTS(ctx, prompt, 3)
+	if err != nil || (len(docs) == 0 && rememberHint == "") {
+		if rememberHint != "" {
+			emitAdditionalContext("UserPromptSubmit", rememberHint)
+			return true
+		}
+		return false
+	}
+
+	var buf strings.Builder
+	if rememberHint != "" {
+		buf.WriteString(rememberHint + "\n\n")
+	}
+	if len(docs) > 0 {
+		buf.WriteString("Related past experience:\n")
+		for _, d := range docs {
+			snippet := safeSnippet(d.Content, 200)
+			buf.WriteString(fmt.Sprintf("- [memory: %s] %s\n", d.SectionPath, snippet))
+		}
+	}
+	if buf.Len() > 0 {
+		emitAdditionalContext("UserPromptSubmit", buf.String())
+	}
+	return true
+}
+
+// searchByChangedFiles looks up memories related to currently modified files.
+// Returns formatted snippet lines.
+func searchByChangedFiles(ctx context.Context, st *store.Store, projectPath string) []string {
+	files := getChangedFilesQuick(projectPath)
+	if len(files) == 0 {
+		return nil
+	}
+
+	// Build a search query from changed file names (basenames only).
+	var terms []string
+	seen := make(map[string]bool)
+	for _, f := range files {
+		base := filepath.Base(f)
+		base = strings.TrimSuffix(base, filepath.Ext(base))
+		if base != "" && !seen[base] {
+			seen[base] = true
+			terms = append(terms, base)
+		}
+		if len(terms) >= 5 {
+			break
+		}
+	}
+	if len(terms) == 0 {
+		return nil
+	}
+
+	query := strings.Join(terms, " ")
+	docs, err := st.SearchMemoriesFTS(ctx, query, 2)
+	if err != nil || len(docs) == 0 {
+		return nil
+	}
+
+	var results []string
+	for _, d := range docs {
+		snippet := safeSnippet(d.Content, 200)
+		results = append(results, fmt.Sprintf("- [file-context: %s] %s\n", d.SectionPath, snippet))
+	}
+	return results
+}
+
+// getChangedFilesQuick returns changed file paths from git (quick version for hooks).
+func getChangedFilesQuick(projectPath string) []string {
+	cmd := execCommand("git", "diff", "--name-only", "HEAD")
+	cmd.Dir = projectPath
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for _, f := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		f = strings.TrimSpace(f)
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	return files
 }
 
 // searchKnowledgeSemantic searches memories and past specs using vector similarity.

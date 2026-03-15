@@ -182,16 +182,45 @@ func injectSpecContext(ctx context.Context, projectPath, source string, st *stor
 		emitAdditionalContext("SessionStart", buf.String())
 		notifyUser("recovered task '%s' (compact #%d)", taskSlug, compactCount)
 	} else {
-		// Normal startup/resume: inject session.md only.
+		// Normal startup/resume: adaptive context injection based on memory depth.
 		session, err := sd.ReadFile(spec.FileSession)
 		if err != nil || session == "" {
 			return
 		}
+
 		var buf strings.Builder
-		buf.WriteString(fmt.Sprintf("\n--- Alfred Protocol: Active Task '%s' ---\n%s\n", taskSlug, session))
+		buf.WriteString(fmt.Sprintf("\n--- Alfred Protocol: Active Task '%s' ---\n", taskSlug))
+
+		// Onboarding: adapt context depth based on project-scoped memory count.
+		memoryCount := countProjectMemories(ctx, st, projectPath)
+		switch {
+		case memoryCount <= 5:
+			// New project/user: inject full spec for orientation.
+			buf.WriteString("(Full context — new project)\n\n")
+			for _, f := range []spec.SpecFile{spec.FileSession, spec.FileRequirements, spec.FileDesign} {
+				content, err := sd.ReadFile(f)
+				if err != nil || strings.TrimSpace(content) == "" {
+					continue
+				}
+				buf.WriteString(fmt.Sprintf("### %s\n%s\n\n", f, content))
+			}
+		case memoryCount <= 20:
+			// Growing: inject session + summary of requirements.
+			buf.WriteString(session + "\n")
+			if req, err := sd.ReadFile(spec.FileRequirements); err == nil {
+				// Only the Goal section.
+				if goal := extractGoalSection(req); goal != "" {
+					buf.WriteString("\nGoal: " + goal + "\n")
+				}
+			}
+		default:
+			// Experienced: session.md only (lightweight).
+			buf.WriteString(session + "\n")
+		}
+
 		buf.WriteString("--- End Alfred Protocol ---\n")
 		emitAdditionalContext("SessionStart", buf.String())
-		notifyUser("injected context for task '%s'", taskSlug)
+		notifyUser("injected context for task '%s' (memories: %d)", taskSlug, memoryCount)
 	}
 }
 
@@ -454,4 +483,39 @@ func ensureUserRules() {
 	}
 	// No alfred rules found — install them.
 	_, _ = install.InstallUserRules() // best-effort
+}
+
+// countProjectMemories returns the number of memory records scoped to the current project.
+// Uses project-specific URL prefix to avoid counting memories from other projects.
+func countProjectMemories(ctx context.Context, st *store.Store, projectPath string) int64 {
+	if st == nil {
+		return 0
+	}
+	project := projectBaseName(projectPath)
+	n, _ := st.CountDocsByURLPrefix(ctx, fmt.Sprintf("memory://user/%s/", project))
+	return n
+}
+
+// extractGoalSection extracts the Goal section from requirements.md.
+func extractGoalSection(content string) string {
+	lines := strings.Split(content, "\n")
+	inGoal := false
+	var goal strings.Builder
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## Goal") {
+			inGoal = true
+			continue
+		}
+		if inGoal && strings.HasPrefix(trimmed, "## ") {
+			break
+		}
+		if inGoal && trimmed != "" && !strings.HasPrefix(trimmed, "<!--") {
+			if goal.Len() > 0 {
+				goal.WriteByte(' ')
+			}
+			goal.WriteString(trimmed)
+		}
+	}
+	return goal.String()
 }

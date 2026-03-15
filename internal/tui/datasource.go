@@ -51,6 +51,7 @@ type KnowledgeEntry struct {
 
 // DataSource abstracts data retrieval for the TUI.
 type DataSource interface {
+	ProjectPath() string
 	ActiveTask() string
 	TaskDetails() []TaskDetail
 	Specs() []SpecEntry
@@ -70,6 +71,8 @@ type fileDataSource struct {
 func NewFileDataSource(projectPath string, st *store.Store, emb *embedder.Embedder) DataSource {
 	return &fileDataSource{projectPath: projectPath, st: st, emb: emb}
 }
+
+func (ds *fileDataSource) ProjectPath() string { return ds.projectPath }
 
 func (ds *fileDataSource) ActiveTask() string {
 	state, err := spec.ReadActiveState(ds.projectPath)
@@ -338,10 +341,23 @@ func parseSessionSections(content string) parsedSession {
 	return ps
 }
 
+// orderedSection is a header+body pair preserving document order.
+type orderedSection struct {
+	Header string
+	Body   string
+}
+
 // splitSections splits markdown content by ## headers.
-// Returns map[headerText]bodyContent.
+// Returns a map for key-based access AND preserves insertion order via orderedSections.
 func splitSections(content string) map[string]string {
-	sections := make(map[string]string)
+	sections, _ := splitSectionsOrdered(content)
+	return sections
+}
+
+// splitSectionsOrdered splits markdown by ## headers, preserving document order.
+func splitSectionsOrdered(content string) (map[string]string, []orderedSection) {
+	m := make(map[string]string)
+	var ordered []orderedSection
 	var currentHeader string
 	var body strings.Builder
 
@@ -349,7 +365,9 @@ func splitSections(content string) map[string]string {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "## ") {
 			if currentHeader != "" {
-				sections[currentHeader] = body.String()
+				b := body.String()
+				m[currentHeader] = b
+				ordered = append(ordered, orderedSection{Header: currentHeader, Body: b})
 			}
 			currentHeader = strings.TrimPrefix(trimmed, "## ")
 			body.Reset()
@@ -358,9 +376,11 @@ func splitSections(content string) map[string]string {
 		}
 	}
 	if currentHeader != "" {
-		sections[currentHeader] = body.String()
+		b := body.String()
+		m[currentHeader] = b
+		ordered = append(ordered, orderedSection{Header: currentHeader, Body: b})
 	}
-	return sections
+	return m, ordered
 }
 
 func parseCheckboxes(text string) []StepItem {

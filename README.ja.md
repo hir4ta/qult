@@ -4,145 +4,141 @@
 [![Go](https://img.shields.io/badge/go-%3E%3D1.25-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![MIT License](https://img.shields.io/github/license/hir4ta/claude-alfred)](https://github.com/hir4ta/claude-alfred/blob/main/LICENSE)
 
-仕様を管理し、経験を記憶し、品質を見守る開発執事。
+Claude Code の開発執事。
 
 [English README](README.md)
 
-## alfred が解決する痛み
+## 何が辛いのか
 
-**仕様なしの AI コーディングは結果がブレる。** alfred は Claude Code に仕様駆動開発を持ち込む。要件・設計・決定・セッション状態を構造化し、Compact やセッション喪失を跨いで保持する。
+Claude Code で開発してると、こうなる:
 
-**過去の決定やバグ修正が忘れられる。** alfred は覚えている。すべての決定、すべての修正がセマンティックメモリとして保存され、関連する場面で自動的に提示される — Voyage AI のベクトル検索で、毎回のプロンプトで。
+- **忘れる。** Compact するたび、セッション切れるたび、全部消える。20分かけた設計判断、もう一回聞かれる。
+- **行き当たりばったり。** 仕様もなく、計画もなく、ノリで実装。動くけど、壊れる。
+- **誰もレビューしない。** コードがそのまま出ていく。バグは本番で見つかる。
 
-**コードレビューが属人的。** alfred は 6 プロファイル並列レビュー（code, config, security, docs, architecture, testing）をチェックリスト付きで実行し、スコア付きレポートを生成する。
+alfred は3つとも潰す。
 
-**Compact でコンテキストが消える。** alfred の Hook が決定を自動抽出し、変更ファイルを追跡し、コンテキストを復元する。手動操作は不要。
+## 何ができるか
+
+**消えない仕様。** 要件、設計、決定、セッション状態 — 構造化されたMarkdownファイルが Compact を跨いで生き残る。コンテキストは一度も失われない。
+
+**積み重なる記憶。** 「あの時こう決めた」「このバグ前にも見た」「Xは試したけどダメだった」— 全てがセマンティックメモリに保存される。次に似た問題に当たったとき、聞く前に alfred が出してくる。
+
+**スケールするレビュー。** 6つのレビュープロファイル（code, config, security, docs, architecture, testing）、それぞれにチェックリスト。並列エージェント、スコア付きレポート、具体的な修正案。
+
+**承認ゲート。** 実装前に仕様のレビューサイクルを回す。TUI ダッシュボードで任意の行にコメントして、承認か差し戻し — GitHub の PR レビューと同じ体験を、仕様に対してやる。
 
 ## セットアップ
-
-### 1. プラグイン追加
 
 ```
 /plugin marketplace add hir4ta/claude-alfred
 /plugin install alfred
 ```
 
-初回実行時にバイナリが自動ダウンロードされます。
-
-### 2. API キー設定
-
 ```bash
-export VOYAGE_API_KEY=your-key  # ~/.zshrc に追加
+export VOYAGE_API_KEY=your-key  # ~/.zshrc に追加 — セマンティック検索が有効に（1セッション約$0.01）
 ```
 
-[Voyage AI](https://voyageai.com/) でセマンティック検索が有効に（1セッションあたり約 $0.01）。
+これだけ。Hook は自動で動く。記憶は勝手に溜まる。コンテキストは勝手に残る。
 
-### 3. TUI ダッシュボード（オプション）
+Voyage のキーがなくても動く。FTS5 全文検索がフォールバックする。
 
-```bash
-alfred dashboard  # または: alfred dash
-```
+## スキル
 
-タスク進捗・仕様内容・意思決定・ナレッジのセマンティック検索をリアルタイム表示。
-
-## スキル (14)
-
-| スキル | 内容 |
-|--------|------|
-| `/alfred:brief` | 仕様準備 — 3 エージェント（Architect, Devil's Advocate, Researcher）が設計を議論 |
-| `/alfred:attend` | 完全自律 — 仕様作成→実装→レビュー→テスト→コミットまで介入不要 |
-| `/alfred:tdd` | テスト駆動開発 — 自律 red/green/refactor サイクル＋テストパターン記憶 |
-| `/alfred:inspect` | 品質レビュー — 6 プロファイル＋チェックリスト、スコア付きレポート |
-| `/alfred:mend` | バグ修正 — 再現→原因分析（過去のバグ記憶活用）→修正→検証→コミット |
-| `/alfred:survey` | リバースエンジニアリング — 既存コードから仕様を逆生成、信頼度スコア付き |
-| `/alfred:salon` | ブレスト — 3 専門家が並列でアイデア生成→議論 |
-| `/alfred:polish` | 壁打ち — 選択肢を絞り、スコアリングし、決定 |
-| `/alfred:valet` | スキル監査 — Anthropic 公式ガイドに基づく 21 チェック項目 |
-| `/alfred:furnish` | 設定ファイル作成・更新（skill, rule, hook, agent, MCP） |
+| スキル | やること |
+|--------|----------|
+| `/alfred:brief` | 仕様を設計する。3エージェントがアーキテクチャを議論し、ダッシュボードで承認する |
+| `/alfred:attend` | 全自動。仕様→レビュー→承認→実装→テスト→コミットまで放置でOK |
+| `/alfred:tdd` | テスト駆動。red→green→refactor を自律サイクルで回す。テストパターンも記憶する |
+| `/alfred:inspect` | 品質ゲート。6プロファイル並列レビュー、スコア付きレポート |
+| `/alfred:mend` | バグ修正。再現→原因特定（過去のバグ記憶も使う）→修正→検証→コミット |
+| `/alfred:survey` | 既存コードから仕様をリバースエンジニアリング。信頼度スコア付き |
+| `/alfred:salon` | ブレスト。3人の専門家が並列でアイデアを出して、議論する |
+| `/alfred:harvest` | PR レビューコメントからナレッジを抽出して永続メモリに保存 |
+| `/alfred:furnish` | 設定ファイルの作成・ブラッシュアップ |
 | `/alfred:quarters` | プロジェクト全体のセットアップウィザード |
-| `/alfred:archive` | 参照資料を永続ナレッジに変換 |
+| `/alfred:archive` | 参照資料を検索可能なナレッジに変換 |
 | `/alfred:concierge` | 全機能のクイックリファレンス |
 
-## MCP ツール (3)
+## MCP ツール
 
-| ツール | 内容 |
+| ツール | 役割 |
 |--------|------|
-| `dossier` | 仕様管理 — init, update, status, switch, complete, delete, history, rollback |
-| `roster` | エピック管理 — タスクのグループ化＋依存関係＋進捗追跡 |
-| `ledger` | メモリ — 過去の決定・経験の検索・保存 |
+| `dossier` | 仕様のライフサイクル管理 — init, update, status, switch, complete, delete, history, rollback, review |
+| `roster` | エピック管理 — タスクのグループ化、依存関係、進捗追跡 |
+| `ledger` | メモリ — 過去の決定や経験の検索・保存 |
 
-### タスクライフサイクル
+## Hook
 
-```
-init → active → complete（ファイル保持）or delete（ファイル削除）
-```
-
-- **complete**: タスク完了、`completed_at` 記録、次のアクティブタスクに自動切替、エピック同期
-- **delete**: 仕様ファイルごと完全削除（2段階: プレビュー→確認）
-
-## Hook (3)
-
-自動実行。ユーザーが意識する必要なし。
+全自動。触らなくていい。
 
 | イベント | 動作 |
 |----------|------|
-| SessionStart | 仕様コンテキスト復元 + CLAUDE.md 取込（完了タスクはスキップ） |
-| PreCompact | 決定抽出 + 変更ファイル追跡 + セッション状態保存 + メモリ永続化 + エピック進捗同期 |
-| UserPromptSubmit | セマンティック検索 — 関連する過去の経験を自動提示 |
+| SessionStart | 仕様コンテキスト復元 + CLAUDE.md 取込 + プロジェクト成熟度に応じた注入量調整 |
+| PreCompact | 決定抽出 → 構造化チャプターメモリ (JSON) 保存 → エピック進捗同期 |
+| UserPromptSubmit | セマンティック検索 + ファイルコンテキストブースト → 関連する過去の経験を注入 |
+| PostToolUse | Bash エラー検出 → 類似の過去の修正をメモリから検索して提示 |
 
 ## TUI ダッシュボード
 
 ```bash
-alfred dashboard  # alias: alfred dash
+alfred dashboard
 ```
 
-| タブ | 内容 |
-|------|------|
-| Overview | アクティブタスク詳細: 進捗バー、Next Steps、ブロッカー、意思決定、変更ファイル |
-| Tasks | 全タスク一覧: インライン進捗バー、作業内容、ブロッカーマーカー |
-| Specs | 仕様ファイルブラウザ＋コンテンツビューア |
-| Knowledge | セマンティック検索: メモリ＋仕様＋プロジェクトドキュメント横断（Voyage AI） |
+| タブ | 表示内容 |
+|------|----------|
+| Overview | アクティブタスク詳細 — 進捗、Next Steps、ブロッカー、意思決定 |
+| Tasks | 全タスク一覧 — 進捗バー、ステータス |
+| Specs | ファイルブラウザ + インラインレビューモード（行コメント、承認/差し戻し） |
+| Knowledge | セマンティック検索 — メモリと仕様を横断 |
+
+着手中のタスクがシマーで光る。何が進行中か、一目でわかる。
+
+## 検索パイプライン
+
+キーワードマッチだけじゃない。3段階の検索パイプライン:
+
+1. **Voyage AI ベクトル検索** + リランキング（API キーがあるとき）
+2. **FTS5 全文検索** — タグエイリアス展開 + ファジーマッチ付き
+3. **キーワードフォールバック**（LIKE クエリ）
+
+タグエイリアスが検索を自動拡張する: 「auth」で「authentication」「login」「認証」もヒットする。
+
+ファジーマッチがタイポを吸収する:「authetication」でも「authentication」が見つかる。
 
 ## 仕組み
 
 ```
-あなた（開発者）
+あなた
   |
-  |-- /alfred:brief    -> .alfred/specs/{task}/（要件・設計・決定・セッション）
-  |-- /alfred:attend   -> 自律: 仕様 -> レビュー -> 実装 -> レビュー -> テスト -> コミット
-  |-- /alfred:tdd      -> 自律: red -> green -> refactor -> iterate
-  |-- /alfred:mend     -> 再現 -> 原因分析（＋過去バグ記憶）-> 修正 -> 検証 -> コミット
-  +-- /alfred:survey   -> 既存コード -> 信頼度スコア付き仕様ファイル
+  |-- /alfred:brief    -> 仕様 + 3エージェント議論 + ダッシュボード承認
+  |-- /alfred:attend   -> 全自動: 仕様 → 承認 → 実装 → レビュー → コミット
+  |-- /alfred:mend     -> 再現 → 原因分析（＋過去バグ記憶）→ 修正 → 検証
   |
   v
-Hook（自動、バックグラウンド）
-  |-- SessionStart     -> 仕様 + CLAUDE.md からコンテキスト復元
-  |-- PreCompact       -> 決定保存、セッション状態、チャプターメモリ、エピック進捗
-  +-- UserPromptSubmit -> ベクトル検索 -> 関連メモリ注入
+Hook（見えない）
+  |-- SessionStart     -> コンテキスト復元、プロジェクト成熟度に適応
+  |-- PreCompact       -> 決定をJSON保存、チャプターメモリ、エピック進捗
+  |-- UserPromptSubmit -> ベクトル検索 + FTS5 + ファイルブースト → メモリ注入
+  |-- PostToolUse      -> エラー検出 → 関連する過去の修正を提示
   |
   v
 ストレージ
-  |-- .alfred/specs/   -> 仕様ファイル（markdown、バージョン履歴）
-  |-- .alfred/epics/   -> エピック定義（YAML、タスク依存関係）
-  +-- ~/.claude-alfred/alfred.db -> SQLite（docs + Voyage AI embeddings）
+  |-- .alfred/specs/       -> 仕様ファイル + バージョン履歴 + レビュー
+  |-- .alfred/epics/       -> エピック YAML + タスク依存関係
+  |-- .alfred/audit.jsonl  -> 操作監査ログ
+  |-- .alfred/knowledge/   -> エクスポートされたメモリ（Git共有可能）
+  +-- ~/.claude-alfred/    -> SQLite（records + FTS5 + Voyage embeddings）
 ```
-
-## 依存ライブラリ
-
-| ライブラリ | 用途 |
-|-----------|------|
-| [mcp-go](https://github.com/mark3labs/mcp-go) | MCP サーバー SDK |
-| [go-sqlite3](https://github.com/ncruces/go-sqlite3) | SQLite（pure Go, WASM） |
-| [Voyage AI](https://voyageai.com/) | embedding + rerank（voyage-4-large） |
-| [Bubbletea v2](https://github.com/charmbracelet/bubbletea) | TUI フレームワーク |
 
 ## トラブルシューティング
 
 | 症状 | 対処 |
-|---|---|
-| メモリ検索結果がない | `export VOYAGE_API_KEY=your-key` |
-| Hook が発火しない | `/plugin install alfred` して再起動 |
-| ダッシュボードが空 | `.alfred/specs/` があるプロジェクトディレクトリで `alfred dash` を実行 |
+|------|------|
+| メモリ検索で結果が出ない | `export VOYAGE_API_KEY=your-key` — またはFTS5フォールバックの動作確認 |
+| Hook が動かない | `/plugin install alfred` して再起動 |
+| ダッシュボードが空 | `.alfred/specs/` があるディレクトリで `alfred dash` |
+| レート制限エラー | 対策済み — エージェントは段階的バッチ起動（最大2並列） |
 
 ## ライセンス
 

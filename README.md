@@ -6,145 +6,139 @@
 
 Your development butler for Claude Code.
 
-Manages specs, remembers past experience, and watches over quality — so you can focus on building.
-
 [Japanese README](README.ja.md)
 
-## What pain does alfred solve?
+## The problem
 
-**AI coding without specs produces inconsistent results.** alfred brings spec-driven development to Claude Code — structured requirements, design, decisions, and session state that persist across compactions and sessions.
+You're building with Claude Code. It's fast, it's smart, but:
 
-**Past decisions and bug fixes are forgotten.** alfred remembers. Every decision, every fix is stored as semantic memory and automatically surfaced when relevant — via Voyage AI vector search on every prompt.
+- **It forgets.** Every compact, every new session — gone. That auth decision you spent 20 minutes debating? Ask again.
+- **It wings it.** No spec, no plan. Just vibes. Works until it doesn't.
+- **Nobody reviews.** The code ships without a second pair of eyes. You catch the bug in production.
 
-**Code reviews are ad-hoc.** alfred runs 6-profile parallel reviews (code, config, security, docs, architecture, testing) with curated checklists and scored reports.
+alfred fixes all three.
 
-**Context is lost on compact.** alfred's hooks automatically extract decisions, track modified files, and restore context — no manual intervention needed.
+## What it does
 
-## Getting Started
+**Specs that survive.** Requirements, design, decisions, session state — structured markdown files that persist across compacts, sessions, and even project restarts. Your context is never lost.
 
-### 1. Add the plugin
+**Memory that compounds.** Every decision, every bug fix, every "we tried X and it didn't work" gets stored as semantic memory. Next time you hit a similar problem, alfred surfaces the relevant experience automatically — before you even ask.
+
+**Reviews that scale.** Six review profiles (code, config, security, docs, architecture, testing), each with a curated checklist. Parallel agents, scored reports, actionable findings.
+
+**Approval gates.** Specs go through a review cycle before implementation. Comment on any line in the TUI dashboard, approve or request changes — like a GitHub PR review, but for your specs.
+
+## Quick start
 
 ```
 /plugin marketplace add hir4ta/claude-alfred
 /plugin install alfred
 ```
 
-The binary is downloaded automatically on first run.
-
-### 2. Set API key
-
 ```bash
-export VOYAGE_API_KEY=your-key  # Add to ~/.zshrc
+export VOYAGE_API_KEY=your-key  # ~/.zshrc — enables semantic search (~$0.01/session)
 ```
 
-[Voyage AI](https://voyageai.com/) enables semantic search (~$0.01/session).
+That's it. Hooks fire automatically. Memories accumulate. Context persists.
 
-### 3. TUI Dashboard (optional)
+No Voyage key? alfred still works — FTS5 full-text search handles the fallback.
 
-```bash
-alfred dashboard  # or: alfred dash
-```
-
-Real-time overview of tasks, specs, decisions, and semantic knowledge search.
-
-## Skills (14)
+## Skills
 
 | Skill | What it does |
 |-------|-------------|
-| `/alfred:brief` | Prepare a spec — 3 agents (Architect, Devil's Advocate, Researcher) deliberate on design |
-| `/alfred:attend` | Full autopilot — spec, implement, review, test, commit. No intervention needed |
-| `/alfred:tdd` | Test-driven development — autonomous red/green/refactor cycles with pattern memory |
-| `/alfred:inspect` | Quality review — 6 profiles with checklists, scored report |
-| `/alfred:mend` | Fix a bug — reproduce, analyze root cause (with past bug memory), fix, verify, commit |
-| `/alfred:survey` | Reverse-engineer — generate specs from existing code with confidence scores |
-| `/alfred:salon` | Brainstorm — 3 specialists generate ideas in parallel, then debate |
-| `/alfred:polish` | Refine — narrow options, score, decide |
-| `/alfred:valet` | Audit skills against Anthropic's official design guide |
-| `/alfred:furnish` | Create or polish a config file (skill, rule, hook, agent, MCP) |
-| `/alfred:quarters` | Project setup wizard — scan and configure |
-| `/alfred:archive` | Ingest reference materials into persistent knowledge |
-| `/alfred:concierge` | Quick reference for all capabilities |
+| `/alfred:brief` | Design a spec. 3 agents debate your architecture, then you approve it in the dashboard |
+| `/alfred:attend` | Full autopilot. Spec, review, approve, implement, test, commit — no intervention |
+| `/alfred:tdd` | Test-driven. Red, green, refactor — autonomous cycles with pattern memory |
+| `/alfred:inspect` | Quality gate. 6 parallel review profiles, scored report |
+| `/alfred:mend` | Bug fix. Reproduce, root-cause (with past bug recall), fix, verify, commit |
+| `/alfred:survey` | Reverse-engineer specs from existing code, with confidence scores |
+| `/alfred:salon` | Brainstorm. 3 specialists generate ideas in parallel, then debate |
+| `/alfred:harvest` | Extract knowledge from PR review comments into permanent memory |
+| `/alfred:furnish` | Create or polish a config file |
+| `/alfred:quarters` | Project setup wizard |
+| `/alfred:archive` | Ingest reference docs into searchable knowledge |
+| `/alfred:concierge` | Quick reference |
 
-## MCP Tools (3)
+## MCP tools
 
-| Tool | What it does |
-|------|-------------|
-| `dossier` | Spec management — init, update, status, switch, complete, delete, history, rollback |
+| Tool | Purpose |
+|------|---------|
+| `dossier` | Spec lifecycle — init, update, status, switch, complete, delete, history, rollback, review |
 | `roster` | Epic management — group tasks with dependencies, track progress |
 | `ledger` | Memory — search past decisions and experiences, save new ones |
 
-### Task Lifecycle
+## Hooks
 
-```
-init → active → complete (preserves files) or delete (removes files)
-```
-
-- **complete**: Marks task done, sets `completed_at`, auto-switches primary to next active task, syncs epic status
-- **delete**: Removes spec files entirely (2-phase: preview then confirm)
-
-## Hooks (3)
-
-Run automatically. No user action needed.
+Run automatically. You don't touch these.
 
 | Event | What happens |
 |-------|-------------|
-| SessionStart | Restore spec context + ingest CLAUDE.md (skips completed tasks) |
-| PreCompact | Extract decisions + modified files + save session state + persist memories + sync epic progress |
-| UserPromptSubmit | Semantic search — surface relevant past experience |
+| SessionStart | Restores spec context, ingests CLAUDE.md, adapts injection depth to project maturity |
+| PreCompact | Extracts decisions, saves structured chapter memory (JSON), syncs epic progress |
+| UserPromptSubmit | Semantic search + file context boost — surfaces relevant past experience |
+| PostToolUse | Detects Bash errors, searches memory for similar past fixes |
 
-## TUI Dashboard
+## TUI dashboard
 
 ```bash
-alfred dashboard  # alias: alfred dash
+alfred dashboard
 ```
 
-| Tab | Content |
-|-----|---------|
-| Overview | Active task deep-dive: progress bar, next steps, blockers, decisions, modified files |
-| Tasks | All tasks with inline progress bars, focus text, blocker markers |
-| Specs | Spec file browser with content viewer |
-| Knowledge | Semantic search across memories, specs, and project docs (Voyage AI) |
+| Tab | What you see |
+|-----|-------------|
+| Overview | Active task deep-dive — progress, next steps, blockers, decisions |
+| Tasks | All tasks with progress bars and status |
+| Specs | File browser with inline review mode (comment on lines, approve/reject) |
+| Knowledge | Semantic search across all memories and specs |
+
+The first unchecked task shimmers. You know exactly what's in progress.
+
+## Search pipeline
+
+alfred doesn't just do keyword matching. The search pipeline has three tiers:
+
+1. **Voyage AI vector search** + reranking (when API key is set)
+2. **FTS5 full-text search** with tag alias expansion and fuzzy matching
+3. **Keyword fallback** (LIKE queries)
+
+Tag aliases expand your searches automatically: "auth" finds results tagged "authentication", "login", and "認証".
+
+Fuzzy matching catches typos: "authetication" still finds "authentication".
 
 ## How it works
 
 ```
-You (developer)
+You
   |
-  |-- /alfred:brief    -> .alfred/specs/{task}/  (requirements, design, decisions, session)
-  |-- /alfred:attend   -> autonomous: spec -> review -> implement -> review -> test -> commit
-  |-- /alfred:tdd      -> autonomous: red -> green -> refactor -> iterate
-  |-- /alfred:mend     -> reproduce -> root cause (+ past bug memory) -> fix -> verify -> commit
-  +-- /alfred:survey   -> existing code -> spec files with confidence scores
+  |-- /alfred:brief    -> specs + 3-agent debate + dashboard approval
+  |-- /alfred:attend   -> full cycle: spec -> approve -> implement -> review -> commit
+  |-- /alfred:mend     -> reproduce -> root cause (+ past bug memory) -> fix -> verify
   |
   v
-Hooks (automatic, invisible)
-  |-- SessionStart     -> restore context from specs + CLAUDE.md
-  |-- PreCompact       -> save decisions, session state, chapter memory, epic progress
-  +-- UserPromptSubmit -> vector search -> inject relevant memories
+Hooks (invisible)
+  |-- SessionStart     -> restore context, adapt to project maturity
+  |-- PreCompact       -> save decisions as JSON, chapter memory, epic progress
+  |-- UserPromptSubmit -> vector search + FTS5 + file boost -> inject memories
+  |-- PostToolUse      -> detect errors -> surface related past fixes
   |
   v
 Storage
-  |-- .alfred/specs/   -> spec files (markdown, version history)
-  |-- .alfred/epics/   -> epic definitions (YAML, task dependencies)
-  +-- ~/.claude-alfred/alfred.db -> SQLite (docs + Voyage AI embeddings)
+  |-- .alfred/specs/       -> spec files + version history + reviews
+  |-- .alfred/epics/       -> epic YAML + task dependencies
+  |-- .alfred/audit.jsonl  -> operation audit trail
+  |-- .alfred/knowledge/   -> exported memories (Git-shareable)
+  +-- ~/.claude-alfred/    -> SQLite (records + FTS5 + Voyage embeddings)
 ```
-
-## Dependencies
-
-| Library | Purpose |
-|---------|---------|
-| [mcp-go](https://github.com/mark3labs/mcp-go) | MCP server SDK |
-| [go-sqlite3](https://github.com/ncruces/go-sqlite3) | SQLite (pure Go, WASM) |
-| [Voyage AI](https://voyageai.com/) | Embedding + rerank (voyage-4-large) |
-| [Bubbletea v2](https://github.com/charmbracelet/bubbletea) | TUI framework |
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| No memory results | `export VOYAGE_API_KEY=your-key` |
+| No memory results | `export VOYAGE_API_KEY=your-key` — or check FTS5 fallback is working |
 | Hook not firing | `/plugin install alfred` and restart |
-| Dashboard empty | Run `alfred dash` from a project directory with `.alfred/specs/` |
+| Dashboard empty | Run `alfred dash` from a project with `.alfred/specs/` |
+| Rate limit errors | Already mitigated — agents spawn in staggered batches (max 2 parallel) |
 
 ## License
 

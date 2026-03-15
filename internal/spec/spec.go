@@ -57,10 +57,11 @@ const (
 
 // ActiveTask represents a task entry in _active.md.
 type ActiveTask struct {
-	Slug        string `yaml:"slug"`
-	StartedAt   string `yaml:"started_at"`
-	Status      string `yaml:"status,omitempty"`       // "active" (default), "completed"
-	CompletedAt string `yaml:"completed_at,omitempty"` // RFC3339
+	Slug         string       `yaml:"slug"`
+	StartedAt    string       `yaml:"started_at"`
+	Status       string       `yaml:"status,omitempty"`        // "active" (default), "completed"
+	CompletedAt  string       `yaml:"completed_at,omitempty"`  // RFC3339
+	ReviewStatus ReviewStatus `yaml:"review_status,omitempty"` // pending, approved, changes_requested
 }
 
 // ActiveState represents the YAML content of _active.md.
@@ -450,6 +451,40 @@ func CompleteTask(projectPath, taskSlug string) (string, error) {
 // IsActive returns true if the task status is active (or empty, the default).
 func (t ActiveTask) IsActive() bool {
 	return t.Status == "" || t.Status == TaskActive
+}
+
+// SetReviewStatus updates the review_status for a task in _active.md.
+func SetReviewStatus(projectPath, taskSlug string, status ReviewStatus) error {
+	state, err := readActiveState(projectPath)
+	if err != nil {
+		return err
+	}
+	found := false
+	for i := range state.Tasks {
+		if state.Tasks[i].Slug == taskSlug {
+			state.Tasks[i].ReviewStatus = status
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("task %q not found in _active.md", taskSlug)
+	}
+	return writeActiveState(projectPath, state)
+}
+
+// ReviewStatusFor returns the review_status for a task from _active.md.
+func ReviewStatusFor(projectPath, taskSlug string) ReviewStatus {
+	state, err := readActiveState(projectPath)
+	if err != nil {
+		return ""
+	}
+	for _, t := range state.Tasks {
+		if t.Slug == taskSlug {
+			return t.ReviewStatus
+		}
+	}
+	return ""
 }
 
 // RemoveTask removes a task from _active.md and its spec directory.

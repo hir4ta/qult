@@ -81,8 +81,10 @@ func specHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandlerFunc
 			return specDoHistory(req)
 		case "rollback":
 			return specDoRollback(req)
+		case "review":
+			return specDoReview(req)
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("unknown action: %s (valid: init, update, status, switch, complete, delete, history, rollback)", action)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("unknown action: %s (valid: init, update, status, switch, complete, delete, history, rollback, review)", action)), nil
 		}
 	}
 }
@@ -102,6 +104,7 @@ func specDoInit(ctx context.Context, req mcp.CallToolRequest, st *store.Store, e
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("init failed: %v", err)), nil
 	}
+	spec.AppendAudit(projectPath, spec.AuditEntry{Action: "spec.init", Target: taskSlug, Detail: description, User: "mcp"})
 
 	result := map[string]any{
 		"task_slug":   taskSlug,
@@ -350,6 +353,7 @@ func specDoComplete(ctx context.Context, req mcp.CallToolRequest, st *store.Stor
 	}
 
 	// Mark task as completed in _active.md.
+	spec.AppendAudit(projectPath, spec.AuditEntry{Action: "spec.complete", Target: taskSlug, User: "mcp"})
 	newPrimary, err := spec.CompleteTask(projectPath, taskSlug)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("complete failed: %v", err)), nil
@@ -479,6 +483,7 @@ func specDoDelete(ctx context.Context, req mcp.CallToolRequest, st *store.Store)
 	}
 
 	// With confirm: actually delete.
+	spec.AppendAudit(projectPath, spec.AuditEntry{Action: "spec.delete", Target: taskSlug, User: "mcp"})
 	allGone, err := spec.RemoveTask(projectPath, taskSlug)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("delete failed: %v", err)), nil
@@ -613,6 +618,77 @@ type confidenceSummary struct {
 type confidenceItem struct {
 	Section string `json:"section"`
 	Score   int    `json:"score"`
+}
+
+// specDoReview returns the latest review status and comments for a task.
+// Claude Code calls this to check if the user has approved or requested changes.
+func specDoReview(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	projectPath, errResult := validateProjectPath(req.GetString("project_path", ""))
+	if errResult != nil {
+		return errResult, nil
+	}
+
+	taskSlug := req.GetString("task_slug", "")
+	if taskSlug == "" {
+		var err error
+		taskSlug, err = spec.ReadActive(projectPath)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("no active spec: %v", err)), nil
+		}
+	}
+
+	sd := &spec.SpecDir{ProjectPath: projectPath, TaskSlug: taskSlug}
+	if !sd.Exists() {
+		return mcp.NewToolResultError(fmt.Sprintf("spec not found: %s", taskSlug)), nil
+	}
+
+	// Get review status from _active.md.
+	reviewStatus := spec.ReviewStatusFor(projectPath, taskSlug)
+
+	// Get latest review with comments.
+	latest, err := sd.LatestReview()
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("read review: %v", err)), nil
+	}
+
+	result := map[string]any{
+		"task_slug":     taskSlug,
+		"review_status": string(reviewStatus),
+	}
+
+	if latest != nil {
+		result["latest_review"] = map[string]any{
+			"timestamp": latest.Timestamp.Format(time.RFC3339),
+			"status":    string(latest.Status),
+			"summary":   latest.Summary,
+		}
+
+		if len(latest.Comments) > 0 {
+			comments := make([]map[string]any, len(latest.Comments))
+			for i, c := range latest.Comments {
+				comments[i] = map[string]any{
+					"file":     c.File,
+					"line":     c.Line,
+					"body":     c.Body,
+					"resolved": c.Resolved,
+				}
+			}
+			result["comments"] = comments
+		}
+
+		// Count unresolved.
+		unresolved := 0
+		for _, c := range latest.Comments {
+			if !c.Resolved {
+				unresolved++
+			}
+		}
+		result["unresolved_count"] = unresolved
+	} else {
+		result["latest_review"] = nil
+	}
+
+	return marshalResult(result)
 }
 
 // confidenceRe matches <!-- confidence: N --> annotations after section headers.

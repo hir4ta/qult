@@ -30,6 +30,10 @@ type hookEvent struct {
 	CustomInstructions string          `json:"custom_instructions"` // PreCompact: user's /compact instructions
 	Prompt             string          `json:"prompt"`
 	StopHookActive     bool            `json:"stop_hook_active"`
+	// PostToolUse fields.
+	ToolName     string          `json:"tool_name,omitempty"`
+	ToolInput    json.RawMessage `json:"tool_input,omitempty"`
+	ToolResponse json.RawMessage `json:"tool_response,omitempty"`
 }
 
 // notifyUser outputs a brief message to stderr so the user can see what
@@ -77,6 +81,8 @@ func runHook(event string) error {
 		timeout = 9 * time.Second
 	case "UserPromptSubmit":
 		timeout = 9 * time.Second
+	case "PostToolUse":
+		timeout = 5 * time.Second
 	default:
 		timeout = 5 * time.Second
 	}
@@ -92,6 +98,8 @@ func runHook(event string) error {
 		}
 	case "UserPromptSubmit":
 		handleUserPromptSubmit(ctx, &ev)
+	case "PostToolUse":
+		handlePostToolUse(ctx, &ev)
 	}
 
 	return nil

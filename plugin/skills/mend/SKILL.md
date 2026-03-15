@@ -79,7 +79,7 @@ without asking the user for input (except BLOCKED recovery on re-invocation).
 
 Read prompts from [diagnosis.md](diagnosis.md).
 
-1. Spawn 2 agents in parallel:
+1. Spawn 2 agents in parallel (model: haiku for both):
    - **Agent A (Tracer)**: Follow code path from symptom to root cause
    - **Agent B (Pattern Matcher)**: Match against recall results + codebase patterns
 2. Collect outputs → synthesize root cause
@@ -110,7 +110,7 @@ Read prompts from [diagnosis.md](diagnosis.md).
 ## Phase 4: Review + Commit
 
 1. Get diff: `git diff {initial_commit}`
-2. Spawn 2 review agents in parallel:
+2. Spawn 2 review agents in parallel (model: haiku for both):
    - **Agent A (Correctness)**: check fix correctness, edge cases, error handling
    - **Agent B (Security)**: check for security implications of the fix
    - Both output JSON verdict: `{"verdict": "PASS"|"NEEDS_IMPROVEMENT"|"NEEDS_FIXES", "findings": [{"severity": "critical|high|warning|info", "category": "...", "file": "...", "line": 0, "description": "..."}]}`

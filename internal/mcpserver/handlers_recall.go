@@ -68,16 +68,33 @@ func recallSearch(ctx context.Context, st *store.Store, emb *embedder.Embedder, 
 	searchMethod := sr.SearchMethod
 	warnings := sr.Warnings
 
+	// Progressive Disclosure: detail level controls response verbosity.
+	detail := req.GetString("detail", "summary")
+	if detail != "compact" && detail != "summary" && detail != "full" {
+		detail = "summary"
+	}
+
 	results := make([]map[string]any, 0, len(docs))
 	for _, d := range docs {
 		dm := map[string]any{
 			"section_path": d.SectionPath,
-			"content":      d.Content,
-			"url":          d.URL,
 			"source_type":  d.SourceType,
 		}
-		if d.CrawledAt != "" {
-			dm["saved_at"] = d.CrawledAt
+		switch detail {
+		case "compact":
+			// Label + source only — minimal tokens.
+		case "summary":
+			dm["content"] = truncate(d.Content, 200)
+			dm["url"] = d.URL
+			if d.CrawledAt != "" {
+				dm["saved_at"] = d.CrawledAt
+			}
+		case "full":
+			dm["content"] = d.Content
+			dm["url"] = d.URL
+			if d.CrawledAt != "" {
+				dm["saved_at"] = d.CrawledAt
+			}
 		}
 		results = append(results, dm)
 	}

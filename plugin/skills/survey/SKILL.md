@@ -43,14 +43,14 @@ from inferences.
 
 Read prompts from [analysis.md](analysis.md). Agent count depends on scope.
 
-**Package scope (2 agents in parallel):**
+**Package scope (2 agents in parallel, model: haiku):**
 - Agent A (Structure Analyst): types, interfaces, exported functions, entry points
 - Agent B (Dependency Mapper): imports, data flow, shared types
 
-**Project scope (3 agents in parallel):**
-- Agent A (Structure Analyst): same as above, but across all packages
-- Agent B (Dependency Mapper): same as above, inter-package dependencies
-- Agent C (Business Logic Inferrer): goals, requirements from README/CLAUDE.md/tests/comments
+**Project scope (staggered, model: haiku):**
+- **Batch 1**: Agent A (Structure Analyst) + Agent B (Dependency Mapper) in parallel
+- **Batch 2**: Agent C (Business Logic Inferrer) with Batch 1 outputs as context
+  — goals, requirements from README/CLAUDE.md/tests/comments
 
 Each agent outputs structured JSON (see analysis.md for format).
 

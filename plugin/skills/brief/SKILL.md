@@ -48,14 +48,18 @@ multiple agents debate the design, we create specs that are both robust and well
 - Call `knowledge` to search for relevant best practices and patterns
 - Note any relevant prior art or conventions
 
-### 5. [DESIGN DELIBERATION] Spawn 3 specialist agents in parallel
+### 5. [DESIGN DELIBERATION] Spawn specialist agents (staggered)
 
-Launch **all 3 agents in a single message** using the prompts from
-[agent-prompts.md](agent-prompts.md). Pass requirements, constraints, and research findings.
+Using the prompts from [agent-prompts.md](agent-prompts.md), spawn agents in **2 batches**
+to avoid rate limits:
+
+1. **Batch 1**: Spawn **Architect** + **Devil's Advocate** in a single message (model: haiku)
+2. Wait for both to complete
+3. **Batch 2**: Spawn **Researcher** (model: haiku) with Batch 1 outputs as additional context
 
 ### 6. [DEBATE] Cross-critique round (parent-mediated)
 
-After collecting all 3 agents' output, spawn the **Mediator agent** using
+After collecting all 3 agents' output, spawn the **Mediator agent** (model: sonnet) using
 the mediator prompt from [agent-prompts.md](agent-prompts.md) with all 3 outputs.
 
 ### 7. [CREATE SPEC] Save to .alfred/specs/
@@ -105,6 +109,24 @@ Before starting, please decide on these open questions:
 1. <conflict description> — Option A vs Option B
 2. ...
 ```
+
+### 9. [APPROVAL GATE] Wait for user review
+
+After spec creation, set the task to pending review and wait for user approval:
+
+1. Call `dossier` with action=update, file=session.md to set review_status:
+   - Add `## Review Status\npending` to session.md
+2. Tell the user:
+   ```
+   Spec ready for review. Open `alfred dashboard` → Specs tab → select files → press 'r' to review.
+   Comment on any line, then Approve or Request Changes.
+   Tell me "承認した" or "approved" when done.
+   ```
+3. **STOP and wait** — do not proceed until the user confirms.
+4. When the user says they've reviewed, call `dossier` with action=review to check:
+   - If `review_status: approved` → done, present completion summary
+   - If `review_status: changes_requested` → read comments, apply fixes, then go back to step 9
+   - If `review_status: pending` → remind the user to review in the dashboard
 
 ## Resume Mode (from Step 2)
 

@@ -15,6 +15,8 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/glamour"
+
+	"github.com/hir4ta/claude-alfred/internal/spec"
 )
 
 const (
@@ -64,6 +66,17 @@ type Model struct {
 	overlayVP     viewport.Model
 	breadcrumbs   []string // navigation path shown in overlay header
 
+	// Review mode state (within Specs overlay).
+	reviewMode      bool              // true when reviewing a spec file
+	reviewFile      string            // which file is being reviewed (e.g. "design.md")
+	reviewTaskSlug  string            // which task's spec
+	reviewLines     []string          // raw lines of the file
+	reviewCursor    int               // current line (0-based)
+	reviewComments  map[int]string    // line number → comment body (pending)
+	reviewInput     textinput.Model   // comment text input
+	reviewInputLine int               // which line the input is for
+	reviewEditing   bool              // true when typing a comment
+
 	// Data caches.
 	activeSlug string
 	tasks      []TaskDetail
@@ -90,6 +103,9 @@ type Model struct {
 
 	// Loading.
 	loading bool
+
+	// Shimmer animation frame counter.
+	shimmerFrame int
 }
 
 // New creates a new dashboard Model.
@@ -115,7 +131,7 @@ func New(ds DataSource) Model {
 		spinner:     sp,
 		searchInput: ti,
 		progress:    prog,
-		loading:     true,
+		loading:     false, // data loads instantly on first tick (no visible loading state)
 	}
 }
 
@@ -180,6 +196,21 @@ func (m *Model) rebuildOverview() {
 	m.viewport.SetContent(m.renderTaskOverview(task))
 }
 
+// rebuildTaskOverlay updates the Tasks tab overlay content for shimmer animation.
+func (m *Model) rebuildTaskOverlay() {
+	if !m.overlayActive || m.activeTab != tabTasks {
+		return
+	}
+	if m.taskCursor >= len(m.tasks) {
+		return
+	}
+	task := &m.tasks[m.taskCursor]
+	// Preserve scroll position.
+	yOff := m.overlayVP.YOffset()
+	m.overlayVP.SetContent(m.renderTaskOverview(task))
+	m.overlayVP.SetYOffset(yOff)
+}
+
 func (m *Model) findActiveTask() *TaskDetail {
 	for i := range m.tasks {
 		if m.tasks[i].Slug == m.activeSlug {
@@ -203,6 +234,7 @@ func (m Model) contentHeight() int {
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
+		shimmerCmd(),
 		tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
 			return tickMsg(t)
 		}),
@@ -245,6 +277,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.searchBusy = false
 		m.knCursor = 0
 		return m, nil
+
+	case shimmerTickMsg:
+		m.shimmerFrame++
+		// Rebuild viewports that contain shimmer content.
+		m.rebuildOverview()
+		m.rebuildTaskOverlay()
+		cmds = append(cmds, shimmerCmd())
+		return m, tea.Batch(cmds...)
 
 	case spinner.TickMsg:
 		if m.loading || m.searchBusy {
@@ -476,13 +516,295 @@ func (m *Model) openOverlay(title, content string, crumbs ...string) {
 }
 
 func (m *Model) updateOverlay(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if key.Matches(msg, keys.Back) || key.Matches(msg, keys.Quit) {
+	// Review comment editing mode — text input takes all keys.
+	if m.reviewEditing {
+		return m.updateReviewInput(msg)
+	}
+
+	// Review mode navigation.
+	if m.reviewMode {
+		return m.updateReviewMode(msg)
+	}
+
+	switch {
+	case key.Matches(msg, keys.Back), key.Matches(msg, keys.Quit):
 		m.overlayActive = false
 		return m, nil
+	case msg.String() == "r" && m.activeTab == tabSpecs:
+		// Enter review mode — only when task has pending review.
+		if m.specGroupCursor < len(m.specGroups) {
+			slug := m.specGroups[m.specGroupCursor].Slug
+			status := spec.ReviewStatusFor(m.ds.ProjectPath(), slug)
+			if status != spec.ReviewPending {
+				return m, nil // not pending — ignore
+			}
+		}
+		m.enterReviewMode()
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.overlayVP, cmd = m.overlayVP.Update(msg)
+		return m, cmd
 	}
-	var cmd tea.Cmd
-	m.overlayVP, cmd = m.overlayVP.Update(msg)
-	return m, cmd
+}
+
+// enterReviewMode initializes review mode for the currently viewed spec file.
+func (m *Model) enterReviewMode() {
+	if m.specGroupCursor >= len(m.specGroups) {
+		return
+	}
+	g := m.specGroups[m.specGroupCursor]
+	if m.specFileCursor >= len(g.Files) {
+		return
+	}
+	f := g.Files[m.specFileCursor]
+	content := m.ds.SpecContent(f.TaskSlug, f.File)
+
+	m.reviewMode = true
+	m.reviewFile = f.File
+	m.reviewTaskSlug = f.TaskSlug
+	m.reviewLines = strings.Split(content, "\n")
+	m.reviewCursor = 0
+	m.reviewComments = make(map[int]string)
+	m.reviewEditing = false
+
+	ti := textinput.New()
+	ti.Placeholder = "comment..."
+	ti.CharLimit = 500
+	m.reviewInput = ti
+
+	m.rebuildReviewOverlay()
+}
+
+// updateReviewMode handles keys in review navigation mode.
+func (m *Model) updateReviewMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, keys.Back), key.Matches(msg, keys.Quit):
+		m.reviewMode = false
+		// Restore normal overlay content.
+		if m.specGroupCursor < len(m.specGroups) {
+			g := m.specGroups[m.specGroupCursor]
+			if m.specFileCursor < len(g.Files) {
+				f := g.Files[m.specFileCursor]
+				content := m.ds.SpecContent(f.TaskSlug, f.File)
+				m.overlayVP.SetContent(m.renderMarkdown(content))
+				m.overlayTitle = f.File
+			}
+		}
+		return m, nil
+
+	case key.Matches(msg, keys.Down):
+		if m.reviewCursor < len(m.reviewLines)-1 {
+			m.reviewCursor++
+			m.rebuildReviewOverlay()
+		}
+		return m, nil
+
+	case key.Matches(msg, keys.Up):
+		if m.reviewCursor > 0 {
+			m.reviewCursor--
+			m.rebuildReviewOverlay()
+		}
+		return m, nil
+
+	case msg.String() == "c":
+		// Start commenting on current line.
+		m.reviewEditing = true
+		m.reviewInputLine = m.reviewCursor
+		m.reviewInput.SetValue("")
+		if existing, ok := m.reviewComments[m.reviewCursor]; ok {
+			m.reviewInput.SetValue(existing)
+		}
+		m.reviewInput.Focus()
+		return m, nil
+
+	case msg.String() == "a":
+		// Approve.
+		m.submitReview(spec.ReviewApproved)
+		return m, nil
+
+	case msg.String() == "x":
+		// Request Changes.
+		m.submitReview(spec.ReviewChangesRequested)
+		return m, nil
+
+	case msg.String() == "d":
+		// Delete comment on current line.
+		delete(m.reviewComments, m.reviewCursor)
+		m.rebuildReviewOverlay()
+		return m, nil
+
+	default:
+		var cmd tea.Cmd
+		m.overlayVP, cmd = m.overlayVP.Update(msg)
+		return m, cmd
+	}
+}
+
+// updateReviewInput handles keys while typing a comment.
+func (m *Model) updateReviewInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		// Save comment.
+		body := strings.TrimSpace(m.reviewInput.Value())
+		if body != "" {
+			m.reviewComments[m.reviewInputLine] = body
+		}
+		m.reviewEditing = false
+		m.reviewInput.Blur()
+		m.rebuildReviewOverlay()
+		return m, nil
+	case "esc":
+		// Cancel editing.
+		m.reviewEditing = false
+		m.reviewInput.Blur()
+		m.rebuildReviewOverlay()
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.reviewInput, cmd = m.reviewInput.Update(msg)
+		return m, cmd
+	}
+}
+
+// submitReview saves the review and updates the active task's review status.
+func (m *Model) submitReview(status spec.ReviewStatus) {
+	sd := &spec.SpecDir{
+		ProjectPath: m.ds.ProjectPath(),
+		TaskSlug:    m.reviewTaskSlug,
+	}
+
+	// Build review comments.
+	var comments []spec.ReviewComment
+	for line, body := range m.reviewComments {
+		comments = append(comments, spec.ReviewComment{
+			File: m.reviewFile,
+			Line: line + 1, // 1-based
+			Body: body,
+		})
+	}
+
+	review := &spec.Review{
+		Status:   status,
+		Comments: comments,
+	}
+	if len(m.reviewComments) > 0 {
+		review.Summary = fmt.Sprintf("%d comments on %s", len(comments), m.reviewFile)
+	}
+
+	_ = sd.SaveReview(review) // best-effort
+	_ = spec.SetReviewStatus(m.ds.ProjectPath(), m.reviewTaskSlug, status)
+	spec.AppendAudit(m.ds.ProjectPath(), spec.AuditEntry{
+		Action: "review.submit",
+		Target: m.reviewTaskSlug + "/" + m.reviewFile,
+		Detail: fmt.Sprintf("status=%s comments=%d", status, len(comments)),
+		User:   "tui",
+	})
+
+	// Exit review mode.
+	m.reviewMode = false
+	m.overlayTitle = fmt.Sprintf("Review submitted: %s", status)
+	m.overlayVP.SetContent(fmt.Sprintf(
+		"\n  Review saved for %s/%s\n  Status: %s\n  Comments: %d\n\n  %s",
+		m.reviewTaskSlug, m.reviewFile, status, len(comments),
+		dimStyle.Render("press esc to close"),
+	))
+}
+
+// Review mode styles.
+var (
+	reviewCursorStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("#2a2040")).
+				Foreground(lipgloss.Color("#e0d0f0"))
+
+	reviewLineNumStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#666"))
+
+	reviewLineNumCursorStyle = lipgloss.NewStyle().
+					Background(lipgloss.Color("#2a2040")).
+					Foreground(lipgloss.Color("#af87d7")).
+					Bold(true)
+
+	reviewCommentMarker = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#e8a050")).
+				Bold(true)
+
+	reviewCommentStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#e8a050"))
+
+	reviewInputBorder = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("#e8a050")).
+				Padding(0, 1).
+				MarginTop(1)
+)
+
+// rebuildReviewOverlay renders the line-numbered review view into the overlay.
+func (m *Model) rebuildReviewOverlay() {
+	var b strings.Builder
+	w := m.overlayVP.Width() - 2
+	lineW := w - 8 // gutter(4 digits + marker + space) = 7, plus margin
+
+	// Status bar at top.
+	commentCount := len(m.reviewComments)
+	statusLine := dimStyle.Render(fmt.Sprintf("  %s  ", m.reviewFile))
+	if commentCount > 0 {
+		statusLine += reviewCommentMarker.Render(fmt.Sprintf("  %d comment(s)", commentCount))
+	}
+	b.WriteString(statusLine + "\n\n")
+
+	for i, line := range m.reviewLines {
+		lineNum := fmt.Sprintf("%4d", i+1)
+		isCursor := i == m.reviewCursor
+		_, hasComment := m.reviewComments[i]
+
+		// Gutter: line number + comment marker.
+		marker := " "
+		if hasComment {
+			marker = reviewCommentMarker.Render("*")
+		}
+
+		// Truncate line content.
+		text := line
+		runes := []rune(text)
+		if len(runes) > lineW {
+			text = string(runes[:lineW])
+		}
+
+		if isCursor {
+			// Active line: full background highlight.
+			// Pad text to fill width for continuous background.
+			padded := text
+			if len([]rune(padded)) < lineW {
+				padded += strings.Repeat(" ", lineW-len([]rune(padded)))
+			}
+			b.WriteString(reviewLineNumCursorStyle.Render(lineNum) + marker + " " + reviewCursorStyle.Render(padded) + "\n")
+		} else {
+			b.WriteString(reviewLineNumStyle.Render(lineNum) + marker + " " + text + "\n")
+		}
+
+		// Show inline comment below the line.
+		if hasComment {
+			comment := m.reviewComments[i]
+			b.WriteString("      " + reviewCommentStyle.Render("  "+comment) + "\n")
+		}
+	}
+
+	// Comment input area — fixed at bottom, clearly separated.
+	if m.reviewEditing {
+		inputLabel := fmt.Sprintf(" Line %d ", m.reviewInputLine+1)
+		inputContent := reviewInputBorder.Width(min(w-4, 80)).Render(
+			reviewCommentMarker.Render(inputLabel) + "\n" + m.reviewInput.View(),
+		)
+		b.WriteString("\n" + inputContent + "\n")
+	}
+
+	m.overlayTitle = fmt.Sprintf("Review: %s", m.reviewFile)
+	m.overlayVP.SetContent(b.String())
+
+	// Keep cursor centered.
+	targetOffset := max(0, m.reviewCursor-m.overlayVP.Height()/2)
+	m.overlayVP.SetYOffset(targetOffset)
 }
 
 func (m Model) renderOverlayView(bg string) string {
@@ -502,6 +824,21 @@ func (m Model) renderOverlayView(bg string) string {
 	// Title bar.
 	titleBar := overlayTitleStyle.Render(m.overlayTitle)
 	hint := dimStyle.Render("esc: close  j/k: scroll")
+	if m.activeTab == tabSpecs && !m.reviewMode {
+		// Show review hint only when task has pending review.
+		isPending := false
+		if m.specGroupCursor < len(m.specGroups) {
+			slug := m.specGroups[m.specGroupCursor].Slug
+			isPending = spec.ReviewStatusFor(m.ds.ProjectPath(), slug) == spec.ReviewPending
+		}
+		if isPending {
+			hint = dimStyle.Render("esc: close  j/k: scroll  r: review")
+		}
+	} else if m.reviewMode && !m.reviewEditing {
+		hint = dimStyle.Render("esc: back  j/k: move  c: comment  d: del  a: approve  x: request changes")
+	} else if m.reviewEditing {
+		hint = dimStyle.Render("enter: save comment  esc: cancel")
+	}
 
 	header := "  " + crumbLine + "\n  " + titleBar + "  " + hint + "\n"
 
@@ -629,9 +966,10 @@ func (m Model) renderTaskOverview(td *TaskDetail) string {
 		b.WriteString("  " + blockerStyle.Render("! BLOCKER") + "  " + td.BlockerText + "\n\n")
 	}
 
-	// Next Steps.
+	// Next Steps. First unchecked item = currently active → shimmer.
 	if len(td.NextSteps) > 0 {
 		b.WriteString("  " + sectionHeader.Render("Next Steps") + "\n")
+		foundActive := false
 		for _, s := range td.NextSteps {
 			check := checkUndone
 			if s.Done {
@@ -640,6 +978,9 @@ func (m Model) renderTaskOverview(td *TaskDetail) string {
 			text := truncStr(s.Text, maxW-6)
 			if s.Done {
 				b.WriteString("  " + check + " " + dimStyle.Render(text) + "\n")
+			} else if !foundActive {
+				foundActive = true
+				b.WriteString("  " + check + " " + renderShimmerBold(text, m.shimmerFrame) + "\n")
 			} else {
 				b.WriteString("  " + check + " " + text + "\n")
 			}
@@ -706,10 +1047,18 @@ func (m Model) tasksView() string {
 			blocker = blockerStyle.Render("!")
 		}
 
-		line := prefix + slug + " " + progStr + " " + pctStr + "  " + focus + " " + blocker
 		isCompleted := t.Status == "completed" || t.Status == "done" || t.Status == "implementation-complete"
+		isActiveTask := t.Status == "active" || t.Status == "in-progress" || t.Status == "integration"
+
+		// Shimmer on focus text for active task at cursor.
+		displayFocus := focus
+		if i == m.taskCursor && isActiveTask && focus != "" {
+			displayFocus = renderShimmer(focus, m.shimmerFrame)
+		}
+
+		line := prefix + slug + " " + progStr + " " + pctStr + "  " + displayFocus + " " + blocker
 		if i == m.taskCursor {
-			b.WriteString(titleStyle.Render(prefix+slug) + " " + progStr + " " + pctStr + "  " + focus + " " + blocker + "\n")
+			b.WriteString(titleStyle.Render(prefix+slug) + " " + progStr + " " + pctStr + "  " + displayFocus + " " + blocker + "\n")
 		} else if isCompleted {
 			b.WriteString(dimStyle.Render(line) + "\n")
 		} else {
@@ -836,10 +1185,10 @@ func specFileLabel(file string) string {
 }
 
 func renderDecisionsSummary(b *strings.Builder, content string, maxW int) {
-	sections := splitSections(content)
+	_, ordered := splitSectionsOrdered(content)
 	count := 0
-	for header, body := range sections {
-		if header == "" {
+	for _, sec := range ordered {
+		if sec.Header == "" {
 			continue
 		}
 		count++
@@ -847,7 +1196,7 @@ func renderDecisionsSummary(b *strings.Builder, content string, maxW int) {
 		chosen := ""
 		alternatives := ""
 		reason := ""
-		for line := range strings.SplitSeq(body, "\n") {
+		for line := range strings.SplitSeq(sec.Body, "\n") {
 			trimmed := strings.TrimSpace(line)
 			if strings.HasPrefix(trimmed, "- **Chosen:**") || strings.HasPrefix(trimmed, "**Chosen:**") {
 				chosen = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(trimmed, "- "), "**Chosen:**"))
@@ -858,7 +1207,7 @@ func renderDecisionsSummary(b *strings.Builder, content string, maxW int) {
 			}
 		}
 		// Strip date prefix from header if present (e.g. "[2026-03-15] Title").
-		title := header
+		title := sec.Header
 		if len(title) > 13 && title[0] == '[' {
 			if idx := strings.Index(title, "] "); idx > 0 {
 				title = title[idx+2:]
@@ -875,7 +1224,7 @@ func renderDecisionsSummary(b *strings.Builder, content string, maxW int) {
 			b.WriteString("      " + dimStyle.Render(truncStr(reason, maxW-6)) + "\n")
 		}
 		if count >= 5 {
-			remaining := len(sections) - count
+			remaining := len(ordered) - count
 			if remaining > 0 {
 				b.WriteString(dimStyle.Render(fmt.Sprintf("    ... +%d more", remaining)) + "\n")
 			}
@@ -936,17 +1285,17 @@ func renderRequirementsSummary(b *strings.Builder, content string, maxW int) {
 }
 
 func renderDesignSummary(b *strings.Builder, content string, maxW int) {
-	// Show section headers as an outline of the design.
-	sections := splitSections(content)
+	// Show section headers as an outline of the design (document order preserved).
+	_, ordered := splitSectionsOrdered(content)
 	count := 0
-	for header := range sections {
-		if header == "" {
+	for _, sec := range ordered {
+		if sec.Header == "" {
 			continue
 		}
-		b.WriteString("    " + dimStyle.Render("- "+truncStr(header, maxW-6)) + "\n")
+		b.WriteString("    " + dimStyle.Render("- "+truncStr(sec.Header, maxW-6)) + "\n")
 		count++
 		if count >= 5 {
-			remaining := len(sections) - count
+			remaining := len(ordered) - count
 			if remaining > 0 {
 				b.WriteString(dimStyle.Render(fmt.Sprintf("    ... +%d more sections", remaining)) + "\n")
 			}
