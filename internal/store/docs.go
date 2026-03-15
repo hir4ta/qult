@@ -262,9 +262,6 @@ func (s *Store) SearchMemoriesKeyword(ctx context.Context, query string, limit i
 		limit = 10
 	}
 	words := strings.Fields(strings.ToLower(query))
-	if len(words) == 0 {
-		return nil, nil
-	}
 	// Build WHERE clause: each word must match in section_path OR content.
 	var conditions []string
 	var args []any
@@ -274,8 +271,12 @@ func (s *Store) SearchMemoriesKeyword(ctx context.Context, query string, limit i
 		conditions = append(conditions, "(LOWER(section_path) LIKE ? ESCAPE '\\' OR LOWER(content) LIKE ? ESCAPE '\\')")
 		args = append(args, escaped, escaped)
 	}
-	sqlQuery := "SELECT id, url, section_path, content, content_hash, source_type, version, crawled_at, ttl_days FROM records WHERE source_type = ? AND " +
-		strings.Join(conditions, " AND ") + " ORDER BY crawled_at DESC LIMIT ?"
+	where := "source_type = ?"
+	if len(conditions) > 0 {
+		where += " AND " + strings.Join(conditions, " AND ")
+	}
+	sqlQuery := "SELECT id, url, section_path, content, content_hash, source_type, version, crawled_at, ttl_days FROM records WHERE " +
+		where + " ORDER BY crawled_at DESC LIMIT ?"
 	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, sqlQuery, args...)
 	if err != nil {

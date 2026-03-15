@@ -18,17 +18,20 @@ import (
 )
 
 const (
-	tabEpics    = 0
-	tabTasks    = 1
-	tabSpecs    = 2
-	tabMemories = 3
-	tabCount    = 4
+	tabOverview   = 0
+	tabTasks      = 1
+	tabSpecs      = 2
+	tabKnowledge  = 3
+	tabCount      = 4
 )
 
-var tabNames = [tabCount]string{"Epics", "Tasks", "Specs", "Memories"}
+var tabNames = [tabCount]string{"Overview", "Tasks", "Specs", "Knowledge"}
 
 // tickMsg triggers periodic data refresh.
 type tickMsg time.Time
+
+// searchResultMsg carries async semantic search results.
+type searchResultMsg []KnowledgeEntry
 
 // Model is the root bubbletea model.
 type Model struct {
@@ -42,7 +45,6 @@ type Model struct {
 	showHelp  bool
 
 	// Bubbles components.
-	taskTable   table.Model
 	specTable   table.Model
 	viewport    viewport.Model
 	helpModel   help.Model
@@ -51,21 +53,19 @@ type Model struct {
 	progress    progress.Model
 
 	// Data caches.
-	epics    []EpicSummary
-	tasks    []TaskSummary
-	specs    []SpecEntry
-	memories []MemoryEntry
+	activeSlug string
+	tasks      []TaskDetail
+	specs      []SpecEntry
+	knowledge  []KnowledgeEntry
 
-	// Epic drilldown state.
-	epicCursor  int
-	epicExpIdx  int
-	taskCursor  int // cursor within expanded epic
+	// Tasks tab state.
+	taskCursor int
 
-	// Memory state.
-	memCursor   int
-	memExpIdx   int
+	// Knowledge tab state.
+	knCursor    int
 	searching   bool
 	searchQuery string
+	searchBusy  bool
 
 	// Loading.
 	loading bool
@@ -73,30 +73,22 @@ type Model struct {
 
 // New creates a new dashboard Model.
 func New(ds DataSource) Model {
-	// Spinner.
 	sp := spinner.New(
 		spinner.WithSpinner(spinner.Dot),
 		spinner.WithStyle(lipgloss.NewStyle().Foreground(accent)),
 	)
-
-	// Help.
 	h := help.New()
-	h.Styles = help.DefaultStyles(true) // dark mode
-
-	// Search input.
+	h.Styles = help.DefaultStyles(true)
 	ti := textinput.New()
-	ti.Placeholder = "search memories..."
+	ti.Placeholder = "semantic search..."
 	ti.CharLimit = 200
-
-	// Progress bar.
 	prog := progress.New(
 		progress.WithColors(accent, lipgloss.Color("#333")),
 		progress.WithoutPercentage(),
 		progress.WithWidth(20),
 		progress.WithFillCharacters('#', '-'),
 	)
-
-	m := Model{
+	return Model{
 		ds:          ds,
 		helpModel:   h,
 		spinner:     sp,
@@ -104,27 +96,9 @@ func New(ds DataSource) Model {
 		progress:    prog,
 		loading:     true,
 	}
-	return m
 }
 
 func (m *Model) initTables() {
-	// Task table.
-	taskCols := []table.Column{
-		{Title: "TASK", Width: 28},
-		{Title: "EPIC", Width: 16},
-		{Title: "STATUS", Width: 14},
-	}
-	m.taskTable = table.New(
-		table.WithColumns(taskCols),
-		table.WithFocused(true),
-		table.WithHeight(m.contentHeight()),
-	)
-	ts := table.DefaultStyles()
-	ts.Header = ts.Header.Foreground(lipgloss.Color("#666")).Bold(true)
-	ts.Selected = ts.Selected.Foreground(lipgloss.Color("#fff")).Background(lipgloss.Color("#335"))
-	m.taskTable.SetStyles(ts)
-
-	// Spec table.
 	specCols := []table.Column{
 		{Title: "TASK", Width: 24},
 		{Title: "FILE", Width: 20},
@@ -133,49 +107,64 @@ func (m *Model) initTables() {
 	m.specTable = table.New(
 		table.WithColumns(specCols),
 		table.WithFocused(true),
+		table.WithWidth(m.width),
 		table.WithHeight(m.contentHeight()),
 	)
+	ts := table.DefaultStyles()
+	ts.Header = ts.Header.Foreground(lipgloss.Color("#666")).Bold(true)
+	ts.Selected = ts.Selected.Foreground(lipgloss.Color("#fff")).Background(lipgloss.Color("#335"))
 	m.specTable.SetStyles(ts)
 }
 
 func (m *Model) refreshData() {
-	m.epics = m.ds.Epics()
-	m.tasks = m.ds.Tasks()
+	m.activeSlug = m.ds.ActiveTask()
+	m.tasks = m.ds.TaskDetails()
 	m.specs = m.ds.Specs()
-	if m.searching && m.searchQuery != "" {
-		m.memories = m.ds.SearchMemories(m.searchQuery)
-	} else {
-		m.memories = m.ds.Memories(100)
-	}
 
-	// Rebuild table rows.
-	m.rebuildTaskRows()
-	m.rebuildSpecRows()
-	m.loading = false
-}
+	// Rebuild overview viewport content.
+	m.rebuildOverview()
 
-func (m *Model) rebuildTaskRows() {
-	rows := make([]table.Row, len(m.tasks))
-	for i, t := range m.tasks {
-		epicCol := "--"
-		if t.EpicSlug != "" {
-			epicCol = t.EpicSlug
-		}
-		rows[i] = table.Row{t.Slug, epicCol, t.Status}
-	}
-	m.taskTable.SetRows(rows)
-}
-
-func (m *Model) rebuildSpecRows() {
+	// Rebuild spec table.
 	rows := make([]table.Row, len(m.specs))
 	for i, s := range m.specs {
 		rows[i] = table.Row{s.TaskSlug, s.File, formatSize(s.Size)}
 	}
 	m.specTable.SetRows(rows)
+
+	// Refresh knowledge only when not in active search.
+	if !m.searching && m.searchQuery == "" && !m.searchBusy {
+		m.knowledge = m.ds.RecentKnowledge(100)
+	}
+
+	m.loading = false
+}
+
+func (m *Model) rebuildOverview() {
+	if m.activeTab != tabOverview || m.width == 0 {
+		return
+	}
+	task := m.findActiveTask()
+	if task == nil {
+		m.viewport.SetContent(dimStyle.Render("  no active task"))
+		return
+	}
+	m.viewport.SetContent(m.renderTaskOverview(task))
+}
+
+func (m *Model) findActiveTask() *TaskDetail {
+	for i := range m.tasks {
+		if m.tasks[i].Slug == m.activeSlug {
+			return &m.tasks[i]
+		}
+	}
+	if len(m.tasks) > 0 {
+		return &m.tasks[0]
+	}
+	return nil
 }
 
 func (m Model) contentHeight() int {
-	h := m.height - 5 // header + tabs + help
+	h := m.height - 5
 	if h < 3 {
 		return 3
 	}
@@ -186,7 +175,7 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
 		tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
-			return tickMsg(t) // fast first load
+			return tickMsg(t)
 		}),
 	)
 }
@@ -204,7 +193,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			viewport.WithHeight(m.contentHeight()),
 		)
 		m.viewport.SoftWrap = true
-		// help.Model width is set via its view methods, not a field.
 		m.progress = progress.New(
 			progress.WithColors(accent, lipgloss.Color("#333")),
 			progress.WithoutPercentage(),
@@ -220,8 +208,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return tickMsg(t)
 		})
 
+	case searchResultMsg:
+		m.knowledge = []KnowledgeEntry(msg)
+		m.searchBusy = false
+		m.knCursor = 0
+		return m, nil
+
 	case spinner.TickMsg:
-		if m.loading {
+		if m.loading || m.searchBusy {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			cmds = append(cmds, cmd)
@@ -253,13 +247,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, keys.Tab):
 			m.activeTab = (m.activeTab + 1) % tabCount
 			m.expanded = false
+			m.searchBusy = false
+			if m.activeTab == tabOverview {
+				m.rebuildOverview()
+			}
 			return m, nil
 		case key.Matches(msg, keys.BackTab):
 			m.activeTab = (m.activeTab - 1 + tabCount) % tabCount
 			m.expanded = false
+			m.searchBusy = false
+			if m.activeTab == tabOverview {
+				m.rebuildOverview()
+			}
 			return m, nil
 		case key.Matches(msg, keys.Search):
-			if m.activeTab == tabMemories && !m.expanded {
+			if m.activeTab == tabKnowledge && !m.expanded {
 				m.searching = true
 				m.searchInput.Focus()
 				return m, nil
@@ -268,25 +270,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Delegate to active tab.
 		switch m.activeTab {
-		case tabEpics:
-			return m.updateEpics(msg)
+		case tabOverview:
+			m.viewport, _ = m.viewport.Update(msg)
 		case tabTasks:
-			if !m.expanded {
-				m.taskTable, _ = m.taskTable.Update(msg)
-			} else {
-				m.viewport, _ = m.viewport.Update(msg)
-				if key.Matches(msg, keys.Back) {
-					m.expanded = false
-				}
-			}
-			if key.Matches(msg, keys.Enter) && !m.expanded {
-				row := m.taskTable.SelectedRow()
-				if row != nil {
-					content := m.ds.SpecContent(row[0], "session.md")
-					m.viewport.SetContent(content)
-					m.expanded = true
-				}
-			}
+			return m.updateTasks(msg)
 		case tabSpecs:
 			if !m.expanded {
 				m.specTable, _ = m.specTable.Update(msg)
@@ -304,51 +291,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.expanded = false
 				}
 			}
-		case tabMemories:
-			return m.updateMemories(msg)
+		case tabKnowledge:
+			return m.updateKnowledge(msg)
 		}
 	}
 
 	return m, tea.Batch(cmds...)
 }
 
-func (m *Model) updateEpics(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if !m.expanded {
-		switch {
-		case key.Matches(msg, keys.Down):
-			if m.epicCursor < len(m.epics)-1 {
-				m.epicCursor++
-			}
-		case key.Matches(msg, keys.Up):
-			if m.epicCursor > 0 {
-				m.epicCursor--
-			}
-		case key.Matches(msg, keys.Enter):
-			if m.epicCursor < len(m.epics) {
-				m.expanded = true
-				m.epicExpIdx = m.epicCursor
-				m.taskCursor = 0
-			}
-		}
-	} else {
-		ep := m.epics[m.epicExpIdx]
-		switch {
-		case key.Matches(msg, keys.Down):
-			if m.taskCursor < len(ep.Tasks)-1 {
-				m.taskCursor++
-			}
-		case key.Matches(msg, keys.Up):
-			if m.taskCursor > 0 {
-				m.taskCursor--
-			}
-		case key.Matches(msg, keys.Back):
-			m.expanded = false
-		}
-	}
-	return m, nil
-}
-
-func (m *Model) updateMemories(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *Model) updateTasks(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.expanded {
 		m.viewport, _ = m.viewport.Update(msg)
 		if key.Matches(msg, keys.Back) {
@@ -359,24 +310,52 @@ func (m *Model) updateMemories(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	switch {
 	case key.Matches(msg, keys.Down):
-		if m.memCursor < len(m.memories)-1 {
-			m.memCursor++
+		if m.taskCursor < len(m.tasks)-1 {
+			m.taskCursor++
 		}
 	case key.Matches(msg, keys.Up):
-		if m.memCursor > 0 {
-			m.memCursor--
+		if m.taskCursor > 0 {
+			m.taskCursor--
 		}
 	case key.Matches(msg, keys.Enter):
-		if m.memCursor < len(m.memories) {
-			mem := m.memories[m.memCursor]
-			header := fmt.Sprintf("%s\n%s  %s ago\n\n",
-				titleStyle.Render(mem.Label),
-				dimStyle.Render(mem.Project),
-				dimStyle.Render(formatDuration(mem.Age)),
-			)
-			m.viewport.SetContent(header + mem.Content)
+		if m.taskCursor < len(m.tasks) {
+			task := &m.tasks[m.taskCursor]
+			m.viewport.SetContent(m.renderTaskOverview(task))
 			m.expanded = true
-			m.memExpIdx = m.memCursor
+		}
+	}
+	return m, nil
+}
+
+func (m *Model) updateKnowledge(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.expanded {
+		m.viewport, _ = m.viewport.Update(msg)
+		if key.Matches(msg, keys.Back) {
+			m.expanded = false
+		}
+		return m, nil
+	}
+
+	switch {
+	case key.Matches(msg, keys.Down):
+		if m.knCursor < len(m.knowledge)-1 {
+			m.knCursor++
+		}
+	case key.Matches(msg, keys.Up):
+		if m.knCursor > 0 {
+			m.knCursor--
+		}
+	case key.Matches(msg, keys.Enter):
+		if m.knCursor < len(m.knowledge) {
+			k := m.knowledge[m.knCursor]
+			header := titleStyle.Render(k.Label) + "\n"
+			header += dimStyle.Render(k.Source) + "  " + dimStyle.Render(formatDuration(k.Age)+" ago")
+			if k.Score > 0 {
+				header += "  " + scoreStyle.Render(fmt.Sprintf("%.0f%%", k.Score*100))
+			}
+			header += "\n\n"
+			m.viewport.SetContent(header + k.Content)
+			m.expanded = true
 		}
 	}
 	return m, nil
@@ -389,15 +368,28 @@ func (m *Model) updateSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.searchQuery = ""
 		m.searchInput.SetValue("")
 		m.searchInput.Blur()
-		m.refreshData()
+		m.knowledge = m.ds.RecentKnowledge(100)
+		m.knCursor = 0
 		return m, nil
 	case "enter":
 		m.searching = false
 		m.searchQuery = m.searchInput.Value()
 		m.searchInput.Blur()
-		m.memCursor = 0
-		m.refreshData()
-		return m, nil
+		if m.searchQuery == "" {
+			m.knowledge = m.ds.RecentKnowledge(100)
+			m.knCursor = 0
+			return m, nil
+		}
+		m.searchBusy = true
+		m.knCursor = 0
+		ds := m.ds
+		q := m.searchQuery
+		return m, tea.Batch(
+			m.spinner.Tick,
+			func() tea.Msg {
+				return searchResultMsg(ds.SemanticSearch(q, 20))
+			},
+		)
 	default:
 		var cmd tea.Cmd
 		m.searchInput, cmd = m.searchInput.Update(msg)
@@ -419,14 +411,14 @@ func (m Model) View() tea.View {
 		content = "\n" + m.helpModel.FullHelpView(keys.FullHelp())
 	} else {
 		switch m.activeTab {
-		case tabEpics:
-			content = m.epicsView()
+		case tabOverview:
+			content = m.overviewView()
 		case tabTasks:
 			content = m.tasksView()
 		case tabSpecs:
 			content = m.specsView()
-		case tabMemories:
-			content = m.memoriesView()
+		case tabKnowledge:
+			content = m.knowledgeView()
 		}
 	}
 
@@ -435,7 +427,6 @@ func (m Model) View() tea.View {
 		content,
 		m.helpBar(),
 	)
-
 	v := tea.NewView(view)
 	v.AltScreen = true
 	return v
@@ -451,9 +442,8 @@ func (m Model) tabBarView() string {
 		}
 	}
 	bar := lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
-
 	title := headerStyle.Render("alfred")
-	if m.loading {
+	if m.loading || m.searchBusy {
 		title += " " + m.spinner.View()
 	}
 	return title + "\n" + tabBarStyle.Width(m.width).Render(bar)
@@ -467,92 +457,73 @@ func (m Model) helpBar() string {
 // Tab views
 // ---------------------------------------------------------------------------
 
-func (m Model) epicsView() string {
-	if len(m.epics) == 0 {
-		return "\n" + dimStyle.Render("  no epics — use roster to create one")
-	}
-
-	if m.expanded && m.epicExpIdx < len(m.epics) {
-		return m.epicDetailView(m.epics[m.epicExpIdx])
-	}
-
-	var b strings.Builder
-	b.WriteString("\n")
-	for i, e := range m.epics {
-		prefix := "  "
-		if i == m.epicCursor {
-			prefix = "> "
-		}
-
-		// Progress bar via bubbles.
-		pct := float64(0)
-		pctStr := ""
-		if e.Total > 0 {
-			pct = float64(e.Completed) / float64(e.Total)
-			pctStr = fmt.Sprintf(" %d%%", int(pct*100))
-		}
-
-		name := fmt.Sprintf("%-24s", truncStr(e.Name, 24))
-		count := fmt.Sprintf("%d/%d ", e.Completed, e.Total)
-		bar := m.progress.ViewAs(pct)
-
-		line := prefix + name + count + bar + pctStr
-		if i == m.epicCursor {
-			// Highlight entire line - render name/count in accent.
-			line = prefix + titleStyle.Render(fmt.Sprintf("%-24s", truncStr(e.Name, 24))) +
-				count + bar + pctStr
-		}
-		b.WriteString(line + "\n")
-	}
-
-	// Standalone task count.
-	standalone := 0
-	for _, t := range m.tasks {
-		if t.EpicSlug == "" {
-			standalone++
-		}
-	}
-	if standalone > 0 {
-		b.WriteString("\n" + dimStyle.Render(fmt.Sprintf("  (%d standalone tasks)", standalone)))
-	}
-
-	return b.String()
+func (m Model) overviewView() string {
+	return "\n" + m.viewport.View()
 }
 
-func (m Model) epicDetailView(e EpicSummary) string {
+func (m Model) renderTaskOverview(td *TaskDetail) string {
 	var b strings.Builder
+	maxW := m.width - 6
+
+	// Header: slug + status + progress.
+	b.WriteString("  " + titleStyle.Render(td.Slug))
+	b.WriteString("  " + styledStatus(td.Status))
+	if td.Total > 0 {
+		pct := float64(td.Completed) / float64(td.Total)
+		b.WriteString("  " + m.progress.ViewAs(pct))
+		b.WriteString(fmt.Sprintf(" %d/%d", td.Completed, td.Total))
+	}
+	if td.EpicSlug != "" {
+		b.WriteString("  " + dimStyle.Render("epic:"+td.EpicSlug))
+	}
 	b.WriteString("\n")
 
-	// Epic header with progress.
-	pct := float64(0)
-	if e.Total > 0 {
-		pct = float64(e.Completed) / float64(e.Total)
+	// Focus.
+	if td.Focus != "" {
+		b.WriteString("  " + td.Focus + "\n")
 	}
-	b.WriteString("  " + titleStyle.Render(e.Name))
-	b.WriteString("  " + dimStyle.Render(e.Slug))
-	b.WriteString("  " + m.progress.ViewAs(pct))
-	b.WriteString(fmt.Sprintf(" %d/%d", e.Completed, e.Total))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 
-	for i, t := range e.Tasks {
-		prefix := "  "
-		if i == m.taskCursor {
-			prefix = "> "
+	// Blockers (prominent if present).
+	if td.HasBlocker {
+		b.WriteString("  " + blockerStyle.Render("! BLOCKER") + "  " + td.BlockerText + "\n\n")
+	}
+
+	// Next Steps.
+	if len(td.NextSteps) > 0 {
+		b.WriteString("  " + sectionHeader.Render("Next Steps") + "\n")
+		for _, s := range td.NextSteps {
+			check := checkUndone
+			if s.Done {
+				check = checkDone
+			}
+			text := truncStr(s.Text, maxW-6)
+			if s.Done {
+				b.WriteString("  " + check + " " + dimStyle.Render(text) + "\n")
+			} else {
+				b.WriteString("  " + check + " " + text + "\n")
+			}
 		}
-		deps := ""
-		if len(t.DependsOn) > 0 {
-			deps = "  " + dimStyle.Render("depends: "+strings.Join(t.DependsOn, ", "))
+		b.WriteString("\n")
+	}
+
+	// Recent Decisions.
+	if len(td.Decisions) > 0 {
+		b.WriteString("  " + sectionHeader.Render("Recent Decisions") + "\n")
+		for i, d := range td.Decisions {
+			b.WriteString(fmt.Sprintf("  %d. %s\n", i+1, truncStr(d, maxW-5)))
 		}
+		b.WriteString("\n")
+	}
 
-		slug := fmt.Sprintf("%-28s", truncStr(t.Slug, 28))
-		status := styledStatus(t.Status)
-
-		if i == m.taskCursor {
-			b.WriteString(prefix + titleStyle.Render(slug) + " " + status + deps + "\n")
-		} else {
-			b.WriteString(prefix + slug + " " + status + deps + "\n")
+	// Modified Files.
+	if len(td.ModFiles) > 0 {
+		b.WriteString("  " + sectionHeader.Render("Modified Files") + fmt.Sprintf("  %s\n", dimStyle.Render(fmt.Sprintf("(%d)", len(td.ModFiles)))))
+		for _, f := range td.ModFiles {
+			b.WriteString("  " + dimStyle.Render(truncStr(f, maxW-4)) + "\n")
 		}
 	}
+
 	return b.String()
 }
 
@@ -563,7 +534,58 @@ func (m Model) tasksView() string {
 	if m.expanded {
 		return "\n" + m.viewport.View()
 	}
-	return "\n" + m.taskTable.View()
+
+	var b strings.Builder
+	b.WriteString("\n")
+
+	// Visible range.
+	visibleH := m.contentHeight() - 1
+	startIdx, endIdx := visibleRange(m.taskCursor, len(m.tasks), visibleH)
+
+	for i := startIdx; i < endIdx; i++ {
+		t := m.tasks[i]
+		prefix := "  "
+		if i == m.taskCursor {
+			prefix = "> "
+		}
+
+		// Progress bar (inline text, no animation).
+		progStr := "------"
+		pctStr := "  0%"
+		if t.Total > 0 {
+			pct := float64(t.Completed) / float64(t.Total)
+			filled := int(pct * 6)
+			progStr = strings.Repeat("#", filled) + strings.Repeat("-", 6-filled)
+			pctStr = fmt.Sprintf("%3d%%", int(pct*100))
+		}
+
+		slug := fmt.Sprintf("%-24s", truncStr(t.Slug, 24))
+		focus := truncStr(t.Focus, m.width-52)
+		if focus == "" {
+			focus = dimStyle.Render("(no focus)")
+		}
+
+		blocker := " "
+		if t.HasBlocker {
+			blocker = blockerStyle.Render("!")
+		}
+
+		line := prefix + slug + " " + progStr + " " + pctStr + "  " + focus + " " + blocker
+		isCompleted := t.Status == "completed" || t.Status == "done" || t.Status == "implementation-complete"
+		if i == m.taskCursor {
+			b.WriteString(titleStyle.Render(prefix+slug) + " " + progStr + " " + pctStr + "  " + focus + " " + blocker + "\n")
+		} else if isCompleted {
+			b.WriteString(dimStyle.Render(line) + "\n")
+		} else {
+			b.WriteString(line + "\n")
+		}
+	}
+
+	if len(m.tasks) > visibleH {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("\n  %d/%d", m.taskCursor+1, len(m.tasks))))
+	}
+
+	return b.String()
 }
 
 func (m Model) specsView() string {
@@ -576,7 +598,7 @@ func (m Model) specsView() string {
 	return "\n" + m.specTable.View()
 }
 
-func (m Model) memoriesView() string {
+func (m Model) knowledgeView() string {
 	var b strings.Builder
 	b.WriteString("\n")
 
@@ -588,55 +610,58 @@ func (m Model) memoriesView() string {
 		b.WriteString("  " + dimStyle.Render("(/ to search, esc to clear)") + "\n\n")
 	}
 
+	if m.searchBusy {
+		b.WriteString("  " + m.spinner.View() + " searching...\n")
+		return b.String()
+	}
+
 	if m.expanded {
 		return b.String() + m.viewport.View()
 	}
 
-	if len(m.memories) == 0 {
-		b.WriteString(dimStyle.Render("  no memories"))
+	if len(m.knowledge) == 0 {
+		if m.searchQuery != "" {
+			b.WriteString(dimStyle.Render("  no results"))
+		} else {
+			b.WriteString(dimStyle.Render("  no knowledge — memories will appear as you work"))
+		}
 		return b.String()
 	}
 
-	// Header.
-	hdr := fmt.Sprintf("  %-40s %-12s %s", "LABEL", "PROJECT", "AGE")
-	b.WriteString(dimStyle.Render(hdr) + "\n")
-
-	// Visible range (simple pagination).
+	// Visible range.
 	visibleH := m.contentHeight() - 4
-	if visibleH < 1 {
-		visibleH = 1
-	}
-	startIdx := 0
-	if m.memCursor >= visibleH {
-		startIdx = m.memCursor - visibleH + 1
-	}
-	endIdx := startIdx + visibleH
-	if endIdx > len(m.memories) {
-		endIdx = len(m.memories)
-	}
+	startIdx, endIdx := visibleRange(m.knCursor, len(m.knowledge), visibleH)
 
 	for i := startIdx; i < endIdx; i++ {
-		mem := m.memories[i]
+		k := m.knowledge[i]
 		prefix := "  "
-		if i == m.memCursor {
+		if i == m.knCursor {
 			prefix = "> "
 		}
-		line := fmt.Sprintf("%s%-40s %-12s %s",
-			prefix,
-			truncStr(mem.Label, 40),
-			truncStr(mem.Project, 12),
-			formatDuration(mem.Age),
-		)
-		if i == m.memCursor {
-			b.WriteString(titleStyle.Render(line) + "\n")
+
+		// Score + source tag + label + age.
+		scoreStr := "     "
+		if k.Score > 0 {
+			scoreStr = scoreStyle.Render(fmt.Sprintf("%3.0f%% ", k.Score*100))
+		}
+		sourceTag := sourceStyle(k.Source)
+		label := truncStr(k.Label, m.width-36)
+		age := dimStyle.Render(formatDuration(k.Age))
+
+		// Content preview.
+		preview := truncStr(firstContentLine(k.Content), m.width-10)
+
+		if i == m.knCursor {
+			b.WriteString(titleStyle.Render(prefix) + scoreStr + sourceTag + " " + titleStyle.Render(label) + "  " + age + "\n")
+			b.WriteString("    " + dimStyle.Render(preview) + "\n")
 		} else {
-			b.WriteString(line + "\n")
+			b.WriteString(prefix + scoreStr + sourceTag + " " + label + "  " + age + "\n")
+			b.WriteString("    " + dimStyle.Render(preview) + "\n")
 		}
 	}
 
-	// Scroll indicator.
-	if len(m.memories) > visibleH {
-		b.WriteString(dimStyle.Render(fmt.Sprintf("\n  %d/%d", m.memCursor+1, len(m.memories))))
+	if len(m.knowledge) > visibleH {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("\n  %d/%d", m.knCursor+1, len(m.knowledge))))
 	}
 
 	return b.String()
@@ -646,12 +671,33 @@ func (m Model) memoriesView() string {
 // Helpers
 // ---------------------------------------------------------------------------
 
-func truncStr(s string, max int) string {
+func visibleRange(cursor, total, visibleH int) (start, end int) {
+	if visibleH < 1 {
+		visibleH = 1
+	}
+	start = 0
+	if cursor >= visibleH {
+		start = cursor - visibleH + 1
+	}
+	end = start + visibleH
+	if end > total {
+		end = total
+	}
+	return start, end
+}
+
+func truncStr(s string, maxLen int) string {
+	if maxLen <= 0 {
+		return ""
+	}
 	runes := []rune(s)
-	if len(runes) <= max {
+	if len(runes) <= maxLen {
 		return s
 	}
-	return string(runes[:max-1]) + "~"
+	if maxLen < 2 {
+		return string(runes[:1])
+	}
+	return string(runes[:maxLen-1]) + "~"
 }
 
 func formatSize(bytes int64) string {
@@ -676,4 +722,14 @@ func formatDuration(d time.Duration) string {
 	default:
 		return fmt.Sprintf("%dd", int(d.Hours()/24))
 	}
+}
+
+func firstContentLine(s string) string {
+	for line := range strings.SplitSeq(s, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

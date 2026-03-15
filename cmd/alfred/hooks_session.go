@@ -122,6 +122,15 @@ func injectSpecContext(ctx context.Context, projectPath, source string, st *stor
 		return
 	}
 
+	// Skip completed tasks — don't inject stale context.
+	if state, err := spec.ReadActiveState(projectPath); err == nil {
+		for _, t := range state.Tasks {
+			if t.Slug == taskSlug && t.Status == spec.TaskCompleted {
+				return
+			}
+		}
+	}
+
 	sd := &spec.SpecDir{ProjectPath: projectPath, TaskSlug: taskSlug}
 	if !sd.Exists() {
 		return

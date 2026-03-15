@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/hir4ta/claude-alfred/internal/embedder"
 	"github.com/hir4ta/claude-alfred/internal/store"
 	"github.com/hir4ta/claude-alfred/internal/tui"
 )
@@ -16,14 +17,15 @@ func runDashboard() error {
 		return fmt.Errorf("get working directory: %w", err)
 	}
 
-	// Open store for memory access (optional — dashboard works without it).
 	var st *store.Store
 	if s, err := store.OpenDefault(); err == nil {
 		st = s
 		defer st.Close()
 	}
 
-	ds := tui.NewFileDataSource(projectPath, st)
+	emb, _ := embedder.NewEmbedder()
+
+	ds := tui.NewFileDataSource(projectPath, st, emb)
 	model := tui.New(ds)
 
 	p := tea.NewProgram(model)

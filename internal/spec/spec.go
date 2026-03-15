@@ -49,10 +49,18 @@ type Section struct {
 	URL     string
 }
 
+// Task lifecycle statuses.
+const (
+	TaskActive    = "active"
+	TaskCompleted = "completed"
+)
+
 // ActiveTask represents a task entry in _active.md.
 type ActiveTask struct {
-	Slug      string `yaml:"slug"`
-	StartedAt string `yaml:"started_at"`
+	Slug        string `yaml:"slug"`
+	StartedAt   string `yaml:"started_at"`
+	Status      string `yaml:"status,omitempty"`       // "active" (default), "completed"
+	CompletedAt string `yaml:"completed_at,omitempty"` // RFC3339
 }
 
 // ActiveState represents the YAML content of _active.md.
@@ -374,6 +382,7 @@ func writeActiveState(projectPath string, state *ActiveState) error {
 }
 
 // SwitchActive changes the primary task to the given slug.
+// Returns an error if the target task is completed.
 func SwitchActive(projectPath, taskSlug string) error {
 	state, err := readActiveState(projectPath)
 	if err != nil {
@@ -382,6 +391,9 @@ func SwitchActive(projectPath, taskSlug string) error {
 	found := false
 	for _, t := range state.Tasks {
 		if t.Slug == taskSlug {
+			if t.Status == TaskCompleted {
+				return fmt.Errorf("task %q is completed", taskSlug)
+			}
 			found = true
 			break
 		}
@@ -391,6 +403,53 @@ func SwitchActive(projectPath, taskSlug string) error {
 	}
 	state.Primary = taskSlug
 	return writeActiveState(projectPath, state)
+}
+
+// CompleteTask marks a task as completed in _active.md.
+// If the completed task was primary, switches primary to the next active task.
+// Returns the new primary slug (empty if no active tasks remain).
+func CompleteTask(projectPath, taskSlug string) (string, error) {
+	state, err := readActiveState(projectPath)
+	if err != nil {
+		return "", err
+	}
+
+	found := false
+	for i := range state.Tasks {
+		if state.Tasks[i].Slug == taskSlug {
+			if state.Tasks[i].Status == TaskCompleted {
+				return state.Primary, fmt.Errorf("task %q is already completed", taskSlug)
+			}
+			state.Tasks[i].Status = TaskCompleted
+			state.Tasks[i].CompletedAt = time.Now().UTC().Format(time.RFC3339)
+			found = true
+			break
+		}
+	}
+	if !found {
+		return "", fmt.Errorf("task %q not found in _active.md", taskSlug)
+	}
+
+	// If the completed task was primary, switch to the next active task.
+	if state.Primary == taskSlug {
+		state.Primary = ""
+		for _, t := range state.Tasks {
+			if t.Status != TaskCompleted && t.Slug != taskSlug {
+				state.Primary = t.Slug
+				break
+			}
+		}
+	}
+
+	if err := writeActiveState(projectPath, state); err != nil {
+		return "", err
+	}
+	return state.Primary, nil
+}
+
+// IsActive returns true if the task status is active (or empty, the default).
+func (t ActiveTask) IsActive() bool {
+	return t.Status == "" || t.Status == TaskActive
 }
 
 // RemoveTask removes a task from _active.md and its spec directory.

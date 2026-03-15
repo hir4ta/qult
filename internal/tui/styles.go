@@ -32,6 +32,17 @@ var (
 	dimStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#666"))
 
+	sectionHeader = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#999"))
+
+	blockerStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#c66"))
+
+	scoreStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#8a8"))
+
 	statusCompleted = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#8a8"))
 
@@ -43,22 +54,40 @@ var (
 )
 
 // Layout styles.
-var (
-	headerStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(accent)
+var headerStyle = lipgloss.NewStyle().
+	Bold(true).
+	Foreground(accent)
+
+// Checkbox markers.
+const (
+	checkDone   = "[x]"
+	checkUndone = "[ ]"
 )
 
 // styledStatus returns a styled status string.
 func styledStatus(status string) string {
 	switch status {
-	case "completed", "done":
+	case "completed", "done", "implementation-complete":
 		return statusCompleted.Render(status)
-	case "in-progress", "active":
+	case "in-progress", "active", "integration":
 		return statusInProgress.Render(status)
 	case "blocked":
 		return statusBlocked.Render(status)
 	default:
 		return dimStyle.Render(status)
+	}
+}
+
+// sourceStyle returns a styled source type tag.
+func sourceStyle(source string) string {
+	switch source {
+	case "memory":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#af87d7")).Render("mem")
+	case "spec":
+		return lipgloss.NewStyle().Foreground(accent).Render("spec")
+	case "project":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#d7af5f")).Render("proj")
+	default:
+		return dimStyle.Render(source)
 	}
 }

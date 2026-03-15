@@ -324,6 +324,53 @@ func TestRootDir(t *testing.T) {
 	}
 }
 
+func TestCompleteTask(t *testing.T) {
+	tmp := t.TempDir()
+	Init(tmp, "task-a", "")
+	Init(tmp, "task-b", "")
+
+	// task-b is primary (most recently init'd). Complete it.
+	newPrimary, err := CompleteTask(tmp, "task-b")
+	if err != nil {
+		t.Fatalf("CompleteTask(task-b): %v", err)
+	}
+	if newPrimary != "task-a" {
+		t.Errorf("new primary = %q, want %q", newPrimary, "task-a")
+	}
+
+	// Verify state.
+	state, _ := ReadActiveState(tmp)
+	if len(state.Tasks) != 2 {
+		t.Errorf("len(Tasks) = %d, want 2 (completed tasks remain)", len(state.Tasks))
+	}
+	for _, task := range state.Tasks {
+		if task.Slug == "task-b" {
+			if task.Status != TaskCompleted {
+				t.Errorf("task-b status = %q, want %q", task.Status, TaskCompleted)
+			}
+			if task.CompletedAt == "" {
+				t.Error("task-b completed_at should be set")
+			}
+		}
+	}
+
+	// Completing again should error.
+	_, err = CompleteTask(tmp, "task-b")
+	if err == nil {
+		t.Error("completing already-completed task should fail")
+	}
+
+	// IsActive should return false for completed task.
+	for _, task := range state.Tasks {
+		if task.Slug == "task-b" && task.IsActive() {
+			t.Error("completed task should not be active")
+		}
+		if task.Slug == "task-a" && !task.IsActive() {
+			t.Error("active task should be active")
+		}
+	}
+}
+
 func TestRemoveTaskNotFound(t *testing.T) {
 	tmp := t.TempDir()
 	Init(tmp, "exists", "test")

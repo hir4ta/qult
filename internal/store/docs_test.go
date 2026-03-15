@@ -516,21 +516,21 @@ func TestSearchMemoriesKeyword(t *testing.T) {
 		t.Errorf("SearchMemoriesKeyword(hook database) = %d results, want 0", len(results))
 	}
 
-	// Empty query returns nil.
+	// Empty query returns all memories (unfiltered listing).
 	results, err = st.SearchMemoriesKeyword(ctx, "", 10)
 	if err != nil {
 		t.Fatalf("SearchMemoriesKeyword(empty): %v", err)
 	}
-	if results != nil {
-		t.Errorf("SearchMemoriesKeyword(empty) = %v, want nil", results)
+	if len(results) != 3 {
+		t.Errorf("SearchMemoriesKeyword(empty) = %d results, want 3", len(results))
 	}
 
-	// Whitespace-only query returns nil.
+	// Whitespace-only query returns all memories.
 	results, err = st.SearchMemoriesKeyword(ctx, "   ", 10)
 	if err != nil {
 		t.Fatalf("SearchMemoriesKeyword(spaces): %v", err)
 	}
-	if results != nil {
-		t.Errorf("SearchMemoriesKeyword(spaces) = %v, want nil", results)
+	if len(results) != 3 {
+		t.Errorf("SearchMemoriesKeyword(spaces) = %d results, want 3", len(results))
 	}
 }

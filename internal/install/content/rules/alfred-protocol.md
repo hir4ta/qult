@@ -42,5 +42,16 @@ Read spec files in this order to rebuild context:
 3. design.md (how?)
 4. decisions.md (why these choices?)
 
+## Completing a Task
+- When a task is finished, call `dossier` with action=complete to mark it done
+- This preserves spec files for future reference and sets completed_at timestamp
+- Primary automatically switches to the next active task
+- Prefer complete over delete — completed specs serve as searchable past experience
+
+## Task Lifecycle
+- **active** (default): Currently being worked on
+- **completed**: Finished — spec files preserved, excluded from active context injection
+- **deleted**: Removed entirely (use sparingly — prefer complete)
+
 ## Review
 - Before committing, review changes against specs (requirements scope, recorded decisions) and best practices

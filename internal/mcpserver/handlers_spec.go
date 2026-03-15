@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -60,7 +61,7 @@ func specHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandlerFunc
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		action := req.GetString("action", "")
 		if action == "" {
-			return mcp.NewToolResultError("action is required (init, update, status, switch, delete, history, rollback)"), nil
+			return mcp.NewToolResultError("action is required (init, update, status, switch, complete, delete, history, rollback)"), nil
 		}
 
 		switch action {
@@ -72,6 +73,8 @@ func specHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandlerFunc
 			return specDoStatus(req)
 		case "switch":
 			return specDoSwitch(ctx, req)
+		case "complete":
+			return specDoComplete(ctx, req, st)
 		case "delete":
 			return specDoDelete(ctx, req, st)
 		case "history":
@@ -79,7 +82,7 @@ func specHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandlerFunc
 		case "rollback":
 			return specDoRollback(req)
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("unknown action: %s (valid: init, update, status, switch, delete, history, rollback)", action)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("unknown action: %s (valid: init, update, status, switch, complete, delete, history, rollback)", action)), nil
 		}
 	}
 }
@@ -229,6 +232,24 @@ func specDoStatus(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		"spec_dir":  sd.Dir(),
 	}
 
+	// Include lifecycle status from _active.md.
+	if state, err := spec.ReadActiveState(projectPath); err == nil {
+		for _, t := range state.Tasks {
+			if t.Slug == taskSlug {
+				if t.Status == spec.TaskCompleted {
+					result["lifecycle"] = "completed"
+					result["completed_at"] = t.CompletedAt
+				} else {
+					result["lifecycle"] = "active"
+				}
+				if t.StartedAt != "" {
+					result["started_at"] = t.StartedAt
+				}
+				break
+			}
+		}
+	}
+
 	// Read all 4 spec files for complete context restoration.
 	confidence := map[string]any{}
 	for _, f := range spec.AllFiles {
@@ -266,6 +287,15 @@ func specDoSwitch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolRe
 		return mcp.NewToolResultError(fmt.Sprintf("invalid task_slug: %q (pattern: ^[a-z0-9][a-z0-9-]{0,63}$)", taskSlug)), nil
 	}
 
+	// Prevent switching to a completed task.
+	if state, err := spec.ReadActiveState(projectPath); err == nil {
+		for _, t := range state.Tasks {
+			if t.Slug == taskSlug && t.Status == spec.TaskCompleted {
+				return mcp.NewToolResultError(fmt.Sprintf("task %q is completed; use action=init to create a new task or action=delete to remove", taskSlug)), nil
+			}
+		}
+	}
+
 	// Record switch-away in the old primary's session.md.
 	// ReadActive error is non-fatal: no old task simply means nothing to annotate.
 	oldSlug, _ := spec.ReadActive(projectPath)
@@ -290,6 +320,90 @@ func specDoSwitch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolRe
 	}
 
 	return marshalResult(result)
+}
+
+func specDoComplete(ctx context.Context, req mcp.CallToolRequest, st *store.Store) (*mcp.CallToolResult, error) {
+	projectPath, errResult := validateProjectPath(req.GetString("project_path", ""))
+	if errResult != nil {
+		return errResult, nil
+	}
+	taskSlug := req.GetString("task_slug", "")
+	if taskSlug == "" {
+		// Default to primary task.
+		var err error
+		taskSlug, err = spec.ReadActive(projectPath)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("no active spec: %v", err)), nil
+		}
+	}
+	if !spec.ValidSlug.MatchString(taskSlug) {
+		return mcp.NewToolResultError(fmt.Sprintf("invalid task_slug: %q", taskSlug)), nil
+	}
+
+	// Update session.md status to "completed".
+	sd := &spec.SpecDir{ProjectPath: projectPath, TaskSlug: taskSlug}
+	if sd.Exists() {
+		if session, err := sd.ReadFile(spec.FileSession); err == nil {
+			updated := setSessionStatus(session, "completed")
+			_ = sd.WriteFile(ctx, spec.FileSession, updated)
+		}
+	}
+
+	// Mark task as completed in _active.md.
+	newPrimary, err := spec.CompleteTask(projectPath, taskSlug)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("complete failed: %v", err)), nil
+	}
+
+	// Sync epic status if linked.
+	epic.SyncTaskStatus(projectPath, taskSlug, epic.StatusCompleted)
+
+	result := map[string]any{
+		"completed":   taskSlug,
+		"new_primary": newPrimary,
+	}
+
+	// Compute duration.
+	if state, err := spec.ReadActiveState(projectPath); err == nil {
+		for _, t := range state.Tasks {
+			if t.Slug == taskSlug && t.StartedAt != "" && t.CompletedAt != "" {
+				if start, err := time.Parse(time.RFC3339, t.StartedAt); err == nil {
+					if end, err2 := time.Parse(time.RFC3339, t.CompletedAt); err2 == nil {
+						result["duration"] = end.Sub(start).Round(time.Minute).String()
+					}
+				}
+			}
+		}
+	}
+
+	return marshalResult(result)
+}
+
+// setSessionStatus replaces the Status line in session.md content.
+func setSessionStatus(content, newStatus string) string {
+	var b strings.Builder
+	foundHeader := false
+	replaced := false
+	for line := range strings.SplitSeq(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "## Status" {
+			foundHeader = true
+			b.WriteString(line + "\n")
+			continue
+		}
+		if foundHeader && !replaced && trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+			b.WriteString(newStatus + "\n")
+			replaced = true
+			continue
+		}
+		b.WriteString(line + "\n")
+	}
+	// Trim trailing extra newline from loop.
+	result := b.String()
+	if strings.HasSuffix(result, "\n\n") && !strings.HasSuffix(content, "\n\n") {
+		result = result[:len(result)-1]
+	}
+	return result
 }
 
 func specDoDelete(ctx context.Context, req mcp.CallToolRequest, st *store.Store) (*mcp.CallToolResult, error) {
@@ -332,6 +446,20 @@ func specDoDelete(ctx context.Context, req mcp.CallToolRequest, st *store.Store)
 			"files":      files,
 			"total_bytes": totalBytes,
 			"is_primary": isPrimary,
+		}
+		// Include lifecycle status in preview.
+		if state != nil {
+			for _, t := range state.Tasks {
+				if t.Slug == taskSlug {
+					if t.Status == spec.TaskCompleted {
+						preview["task_status"] = "completed"
+						preview["completed_at"] = t.CompletedAt
+					} else {
+						preview["task_status"] = "active"
+					}
+					break
+				}
+			}
 		}
 		if isPrimary && state != nil {
 			for _, t := range state.Tasks {

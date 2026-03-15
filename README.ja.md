@@ -29,20 +29,29 @@
 
 初回実行時にバイナリが自動ダウンロードされます。
 
-### 2. API キー設定（オプション）
+### 2. API キー設定
 
 ```bash
 export VOYAGE_API_KEY=your-key  # ~/.zshrc に追加
 ```
 
-[Voyage AI](https://voyageai.com/) でセマンティック検索が有効に（1セッションあたり約 $0.01）。なくてもキーワード検索で動作する。
+[Voyage AI](https://voyageai.com/) でセマンティック検索が有効に（1セッションあたり約 $0.01）。
 
-## スキル (12)
+### 3. TUI ダッシュボード（オプション）
+
+```bash
+alfred dashboard  # または: alfred dash
+```
+
+タスク進捗・仕様内容・意思決定・ナレッジのセマンティック検索をリアルタイム表示。
+
+## スキル (14)
 
 | スキル | 内容 |
 |--------|------|
 | `/alfred:brief` | 仕様準備 — 3 エージェント（Architect, Devil's Advocate, Researcher）が設計を議論 |
 | `/alfred:attend` | 完全自律 — 仕様作成→実装→レビュー→テスト→コミットまで介入不要 |
+| `/alfred:tdd` | テスト駆動開発 — 自律 red/green/refactor サイクル＋テストパターン記憶 |
 | `/alfred:inspect` | 品質レビュー — 6 プロファイル＋チェックリスト、スコア付きレポート |
 | `/alfred:mend` | バグ修正 — 再現→原因分析（過去のバグ記憶活用）→修正→検証→コミット |
 | `/alfred:survey` | リバースエンジニアリング — 既存コードから仕様を逆生成、信頼度スコア付き |
@@ -54,12 +63,22 @@ export VOYAGE_API_KEY=your-key  # ~/.zshrc に追加
 | `/alfred:archive` | 参照資料を永続ナレッジに変換 |
 | `/alfred:concierge` | 全機能のクイックリファレンス |
 
-## MCP ツール (2)
+## MCP ツール (3)
 
 | ツール | 内容 |
 |--------|------|
-| `dossier` | 仕様管理 — init, update, status, switch, delete, history, rollback |
+| `dossier` | 仕様管理 — init, update, status, switch, complete, delete, history, rollback |
+| `roster` | エピック管理 — タスクのグループ化＋依存関係＋進捗追跡 |
 | `ledger` | メモリ — 過去の決定・経験の検索・保存 |
+
+### タスクライフサイクル
+
+```
+init → active → complete（ファイル保持）or delete（ファイル削除）
+```
+
+- **complete**: タスク完了、`completed_at` 記録、次のアクティブタスクに自動切替、エピック同期
+- **delete**: 仕様ファイルごと完全削除（2段階: プレビュー→確認）
 
 ## Hook (3)
 
@@ -67,30 +86,45 @@ export VOYAGE_API_KEY=your-key  # ~/.zshrc に追加
 
 | イベント | 動作 |
 |----------|------|
-| SessionStart | 仕様コンテキスト復元 + CLAUDE.md 取込 |
-| PreCompact | 決定抽出 + 変更ファイル追跡 + セッション状態保存 + メモリ永続化 |
+| SessionStart | 仕様コンテキスト復元 + CLAUDE.md 取込（完了タスクはスキップ） |
+| PreCompact | 決定抽出 + 変更ファイル追跡 + セッション状態保存 + メモリ永続化 + エピック進捗同期 |
 | UserPromptSubmit | セマンティック検索 — 関連する過去の経験を自動提示 |
+
+## TUI ダッシュボード
+
+```bash
+alfred dashboard  # alias: alfred dash
+```
+
+| タブ | 内容 |
+|------|------|
+| Overview | アクティブタスク詳細: 進捗バー、Next Steps、ブロッカー、意思決定、変更ファイル |
+| Tasks | 全タスク一覧: インライン進捗バー、作業内容、ブロッカーマーカー |
+| Specs | 仕様ファイルブラウザ＋コンテンツビューア |
+| Knowledge | セマンティック検索: メモリ＋仕様＋プロジェクトドキュメント横断（Voyage AI） |
 
 ## 仕組み
 
 ```
 あなた（開発者）
-  │
-  ├── /alfred:brief    → .alfred/specs/{task}/（要件・設計・決定・セッション）
-  ├── /alfred:attend   → 自律: 仕様 → レビュー → 実装 → レビュー → テスト → コミット
-  ├── /alfred:mend     → 再現 → 原因分析（＋過去バグ記憶）→ 修正 → 検証 → コミット
-  └── /alfred:survey   → 既存コード → 信頼度スコア付き仕様ファイル
-  │
-  ▼
+  |
+  |-- /alfred:brief    -> .alfred/specs/{task}/（要件・設計・決定・セッション）
+  |-- /alfred:attend   -> 自律: 仕様 -> レビュー -> 実装 -> レビュー -> テスト -> コミット
+  |-- /alfred:tdd      -> 自律: red -> green -> refactor -> iterate
+  |-- /alfred:mend     -> 再現 -> 原因分析（＋過去バグ記憶）-> 修正 -> 検証 -> コミット
+  +-- /alfred:survey   -> 既存コード -> 信頼度スコア付き仕様ファイル
+  |
+  v
 Hook（自動、バックグラウンド）
-  ├── SessionStart     → 仕様 + CLAUDE.md からコンテキスト復元
-  ├── PreCompact       → 決定保存、セッション状態、チャプターメモリ
-  └── UserPromptSubmit → ベクトル検索 → 関連メモリ注入
-  │
-  ▼
+  |-- SessionStart     -> 仕様 + CLAUDE.md からコンテキスト復元
+  |-- PreCompact       -> 決定保存、セッション状態、チャプターメモリ、エピック進捗
+  +-- UserPromptSubmit -> ベクトル検索 -> 関連メモリ注入
+  |
+  v
 ストレージ
-  ├── .alfred/specs/   → 仕様ファイル（markdown、バージョン履歴）
-  └── ~/.claude-alfred/alfred.db → SQLite（docs + Voyage AI embeddings）
+  |-- .alfred/specs/   -> 仕様ファイル（markdown、バージョン履歴）
+  |-- .alfred/epics/   -> エピック定義（YAML、タスク依存関係）
+  +-- ~/.claude-alfred/alfred.db -> SQLite（docs + Voyage AI embeddings）
 ```
 
 ## 依存ライブラリ
@@ -100,6 +134,7 @@ Hook（自動、バックグラウンド）
 | [mcp-go](https://github.com/mark3labs/mcp-go) | MCP サーバー SDK |
 | [go-sqlite3](https://github.com/ncruces/go-sqlite3) | SQLite（pure Go, WASM） |
 | [Voyage AI](https://voyageai.com/) | embedding + rerank（voyage-4-large） |
+| [Bubbletea v2](https://github.com/charmbracelet/bubbletea) | TUI フレームワーク |
 
 ## トラブルシューティング
 
@@ -107,6 +142,7 @@ Hook（自動、バックグラウンド）
 |---|---|
 | メモリ検索結果がない | `export VOYAGE_API_KEY=your-key` |
 | Hook が発火しない | `/plugin install alfred` して再起動 |
+| ダッシュボードが空 | `.alfred/specs/` があるプロジェクトディレクトリで `alfred dash` を実行 |
 
 ## ライセンス
 

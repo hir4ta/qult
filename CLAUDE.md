@@ -73,7 +73,10 @@ go vet ./...                  # Static analysis
 - dossier tool: DestructiveHint=true, IdempotentHint=false (delete action is destructive; 2-phase confirm provides UX safety)
 - Spec file locking: advisory flock on `.lock` file (exponential backoff 100/200/400/800ms ~1.5s total, context-aware cancellation, graceful fallback + stderr warning)
 - Spec version history: `.history/` dir with max 20 versions per file; rollback saves current first
-- Dossier tool actions: init / update / status / switch / delete / history / rollback
+- Dossier tool actions: init / update / status / switch / complete / delete / history / rollback
+- Task lifecycle: active → complete (preserves spec files, sets completed_at) or delete (removes files)
+- ActiveTask fields: slug, started_at, status (active/completed), completed_at
+- complete action: marks task completed, switches primary to next active task, syncs epic status
 - Spec confidence scoring: 10-point scale via `<!-- confidence: N -->` annotations (1-3 low, 4-6 medium, 7-9 high, 10 certain); status returns avg + low_items count
 
 ### Epic Management
