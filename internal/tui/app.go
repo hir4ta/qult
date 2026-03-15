@@ -2,6 +2,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
@@ -22,14 +23,13 @@ import (
 )
 
 const (
-	tabOverview   = 0
-	tabTasks      = 1
-	tabSpecs      = 2
-	tabKnowledge  = 3
-	tabCount      = 4
+	tabTasks     = 0
+	tabKnowledge = 1
+	tabActivity  = 2
+	tabCount     = 3
 )
 
-var tabNames = [tabCount]string{"Overview", "Tasks", "Specs", "Knowledge"}
+var tabNames = [tabCount]string{"Tasks", "Knowledge", "Activity"}
 
 // specTaskGroup groups spec files by task for the Specs tab.
 type specTaskGroup struct {
@@ -86,16 +86,16 @@ type Model struct {
 
 	// Data caches.
 	activeSlug string
-	tasks      []TaskDetail    // active tasks only (for Tasks tab)
-	allTasks   []TaskDetail    // all tasks including completed (for Overview)
+	allTasks   []TaskDetail
 	specs      []SpecEntry
 	knowledge  []KnowledgeEntry
 	activity   []ActivityEntry
 
 	// Tasks tab state.
 	taskCursor int
+	taskLevel  int // 0=task list, 1=spec files for selected task
 
-	// Specs tab state.
+	// Specs tab state (used in drill-down from Tasks).
 	specGroups      []specTaskGroup
 	specGroupCursor int
 	specFileCursor  int
@@ -103,9 +103,15 @@ type Model struct {
 
 	// Knowledge tab state.
 	knCursor    int
+	knStats     KnowledgeStats
+	promotions  []KnowledgeEntry
+	decisions   []DecisionEntry
 	searching   bool
 	searchQuery string
 	searchBusy  bool
+
+	// Activity tab state.
+	epics []EpicSummary
 
 	// Markdown renderer.
 	mdRenderer *glamour.TermRenderer
@@ -149,23 +155,16 @@ func New(ds DataSource) Model {
 		spinner:     sp,
 		searchInput: ti,
 		progress:    prog,
-		loading:     false, // data loads instantly on first tick (no visible loading state)
+		loading:     true,
 	}
 }
 
 func (m *Model) refreshData() {
 	m.activeSlug = m.ds.ActiveTask()
 
-	// Keep all tasks for Overview, filter active for Tasks tab.
 	m.allTasks = m.ds.TaskDetails()
-	m.tasks = m.tasks[:0]
-	for _, t := range m.allTasks {
-		if t.Status != "completed" {
-			m.tasks = append(m.tasks, t)
-		}
-	}
-	if m.taskCursor >= len(m.tasks) {
-		m.taskCursor = max(0, len(m.tasks)-1)
+	if m.taskCursor >= len(m.allTasks) {
+		m.taskCursor = max(0, len(m.allTasks)-1)
 	}
 
 	// Build spec groups (all tasks, including completed).
@@ -194,31 +193,59 @@ func (m *Model) refreshData() {
 	// Refresh activity timeline.
 	m.activity = m.ds.RecentActivity(50)
 
-	// Rebuild overview viewport content.
-	m.rebuildOverview()
+	// Knowledge stats + epics + decisions.
+	m.knStats = m.ds.KnowledgeStats()
+	m.epics = m.ds.Epics()
+	m.decisions = m.ds.AllDecisions(20)
 
 	// Refresh knowledge only when not in active search.
 	if !m.searching && m.searchQuery == "" && !m.searchBusy {
 		m.knowledge = m.ds.RecentKnowledge(100)
 	}
 
+	// Promotion candidates from knowledge entries.
+	m.promotions = m.promotions[:0]
+	for _, k := range m.knowledge {
+		if k.Source == "memory" {
+			if (k.SubType == "general" && k.HitCount >= 5) || (k.SubType == "pattern" && k.HitCount >= 15) {
+				m.promotions = append(m.promotions, k)
+			}
+		}
+	}
+
+	// Rebuild tasks viewport content.
+	m.rebuildTasksViewport()
+
 	m.loading = false
 }
 
-func (m *Model) rebuildOverview() {
-	if m.activeTab != tabOverview || m.width == 0 {
+func (m *Model) rebuildTasksViewport() {
+	if m.activeTab != tabTasks || m.width == 0 || m.taskLevel != 0 {
 		return
 	}
 
 	var b strings.Builder
 	maxW := m.width - 6
 
-	// Multi-task summary — shows all tasks including completed.
-	if len(m.allTasks) > 1 {
-		b.WriteString("  " + sectionHeader.Render("Tasks") + "\n")
-		for _, t := range m.allTasks {
-			isActive := t.Slug == m.activeSlug
+	// Active task details at top.
+	task := m.findActiveTask()
+	if task != nil {
+		b.WriteString(m.renderTaskOverview(task))
+		b.WriteString("\n  " + strings.Repeat("\u2500", min(maxW, 60)) + "\n\n")
+	}
+
+	// All tasks list with cursor.
+	if len(m.allTasks) > 0 {
+		b.WriteString("  " + sectionHeader.Render("All Tasks") + "\n")
+		for i, t := range m.allTasks {
 			isCompleted := t.Status == "completed" || t.Status == "done" || t.Status == "implementation-complete"
+			isActiveTask := t.Status == "active" || t.Status == "in-progress" || t.Status == "integration"
+
+			marker := "  "
+			if i == m.taskCursor {
+				marker = "> "
+			}
+			slug := fmt.Sprintf("%-24s", truncStr(t.Slug, 24))
 			progBar := ""
 			if t.Total > 0 {
 				pct := float64(t.Completed) / float64(t.Total)
@@ -227,50 +254,30 @@ func (m *Model) rebuildOverview() {
 				progBar = strings.Repeat("#", filled) + strings.Repeat("-", barW-filled)
 				progBar += fmt.Sprintf(" %d%%", int(pct*100))
 			}
-			marker := "  "
-			if isActive {
-				marker = "> "
-			}
-			slug := fmt.Sprintf("%-20s", truncStr(t.Slug, 20))
 			status := styledStatus(t.Status)
-			blocker := ""
+			blocker := " "
 			if t.HasBlocker {
-				blocker = " " + blockerStyle.Render("!")
+				blocker = blockerStyle.Render("!")
 			}
 			focus := ""
 			if t.Focus != "" {
-				focus = "  " + truncStr(t.Focus, maxW-50)
+				focus = truncStr(t.Focus, maxW-50)
 			}
-			line := marker + slug + " " + progBar + " " + status + blocker + focus
-			if isActive {
-				b.WriteString(titleStyle.Render(marker+slug) + " " + progBar + " " + status + blocker + focus + "\n")
+
+			// Shimmer on focus text for active task at cursor.
+			displayFocus := focus
+			if i == m.taskCursor && isActiveTask && focus != "" {
+				displayFocus = renderShimmer(focus, m.shimmerFrame)
+			}
+
+			line := marker + slug + " " + progBar + " " + status + " " + displayFocus + " " + blocker
+			if i == m.taskCursor {
+				b.WriteString(titleStyle.Render(marker+slug) + " " + progBar + " " + status + " " + displayFocus + " " + blocker + "\n")
 			} else if isCompleted {
 				b.WriteString(dimStyle.Render(line) + "\n")
 			} else {
 				b.WriteString(line + "\n")
 			}
-		}
-		b.WriteString("\n")
-	}
-
-	// Active task details.
-	task := m.findActiveTask()
-	if task == nil {
-		b.WriteString(dimStyle.Render("  no active task"))
-	} else {
-		b.WriteString(m.renderTaskOverview(task))
-	}
-
-	// Activity timeline.
-	if len(m.activity) > 0 {
-		b.WriteString("\n  " + sectionHeader.Render("Recent Activity") + "\n")
-		shown := min(8, len(m.activity))
-		for i := range shown {
-			a := m.activity[i]
-			ts := a.Timestamp.Format("15:04")
-			action := dimStyle.Render(formatAuditAction(a.Action))
-			target := truncStr(a.Target, maxW-20)
-			b.WriteString(fmt.Sprintf("  %s  %s  %s\n", dimStyle.Render(ts), action, target))
 		}
 	}
 
@@ -279,13 +286,13 @@ func (m *Model) rebuildOverview() {
 
 // rebuildTaskOverlay updates the Tasks tab overlay content for shimmer animation.
 func (m *Model) rebuildTaskOverlay() {
-	if !m.overlayActive || m.activeTab != tabTasks {
+	if !m.overlayActive || m.activeTab != tabTasks || m.taskLevel != 0 {
 		return
 	}
-	if m.taskCursor >= len(m.tasks) {
+	if m.taskCursor >= len(m.allTasks) {
 		return
 	}
-	task := &m.tasks[m.taskCursor]
+	task := &m.allTasks[m.taskCursor]
 	// Preserve scroll position.
 	yOff := m.overlayVP.YOffset()
 	m.overlayVP.SetContent(m.renderTaskOverview(task))
@@ -293,13 +300,13 @@ func (m *Model) rebuildTaskOverlay() {
 }
 
 func (m *Model) findActiveTask() *TaskDetail {
-	for i := range m.tasks {
-		if m.tasks[i].Slug == m.activeSlug {
-			return &m.tasks[i]
+	for i := range m.allTasks {
+		if m.allTasks[i].Slug == m.activeSlug {
+			return &m.allTasks[i]
 		}
 	}
-	if len(m.tasks) > 0 {
-		return &m.tasks[0]
+	if len(m.allTasks) > 0 {
+		return &m.allTasks[0]
 	}
 	return nil
 }
@@ -307,8 +314,9 @@ func (m *Model) findActiveTask() *TaskDetail {
 func (m *Model) switchTab(tab int) {
 	m.activeTab = tab
 	m.searchBusy = false
-	if tab == tabOverview {
-		m.rebuildOverview()
+	if tab == tabTasks {
+		m.taskLevel = 0
+		m.rebuildTasksViewport()
 	}
 }
 
@@ -413,7 +421,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case shimmerTickMsg:
 		m.shimmerFrame++
 		// Rebuild viewports that contain shimmer content.
-		m.rebuildOverview()
+		m.rebuildTasksViewport()
 		m.rebuildTaskOverlay()
 		cmds = append(cmds, shimmerCmd())
 		return m, tea.Batch(cmds...)
@@ -459,16 +467,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.switchTab((m.activeTab - 1 + tabCount) % tabCount)
 			return m, nil
 		case key.Matches(msg, keys.Tab1) && !m.searching:
-			m.switchTab(tabOverview)
-			return m, nil
-		case key.Matches(msg, keys.Tab2) && !m.searching:
 			m.switchTab(tabTasks)
 			return m, nil
-		case key.Matches(msg, keys.Tab3) && !m.searching:
-			m.switchTab(tabSpecs)
-			return m, nil
-		case key.Matches(msg, keys.Tab4) && !m.searching:
+		case key.Matches(msg, keys.Tab2) && !m.searching:
 			m.switchTab(tabKnowledge)
+			return m, nil
+		case key.Matches(msg, keys.Tab3) && !m.searching:
+			m.switchTab(tabActivity)
 			return m, nil
 		case key.Matches(msg, keys.Search):
 			// Global search — works from any tab.
@@ -480,42 +485,56 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case key.Matches(msg, keys.Review):
-			// Direct review shortcut from Overview tab.
-			if m.activeTab == tabOverview && !m.overlayActive {
+			// Direct review shortcut from Tasks tab.
+			if m.activeTab == tabTasks && m.taskLevel == 0 && !m.overlayActive {
 				return m.tryDirectReview()
 			}
 		}
 
 		// Delegate to active tab.
 		switch m.activeTab {
-		case tabOverview:
-			m.viewport, _ = m.viewport.Update(msg)
 		case tabTasks:
-			return m.updateTasks(msg)
-		case tabSpecs:
+			if m.taskLevel == 0 {
+				return m.updateTasksList(msg)
+			}
 			return m.updateSpecs(msg)
 		case tabKnowledge:
 			return m.updateKnowledge(msg)
+		case tabActivity:
+			m.viewport, _ = m.viewport.Update(msg)
 		}
 	}
 
 	return m, tea.Batch(cmds...)
 }
 
-func (m *Model) updateTasks(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *Model) updateTasksList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Down):
-		if m.taskCursor < len(m.tasks)-1 {
+		if m.taskCursor < len(m.allTasks)-1 {
 			m.taskCursor++
+			m.rebuildTasksViewport()
 		}
 	case key.Matches(msg, keys.Up):
 		if m.taskCursor > 0 {
 			m.taskCursor--
+			m.rebuildTasksViewport()
 		}
 	case key.Matches(msg, keys.Enter):
-		if m.taskCursor < len(m.tasks) {
-			task := &m.tasks[m.taskCursor]
-			m.openOverlay(task.Slug, m.renderTaskOverview(task), "Tasks", task.Slug)
+		if m.taskCursor < len(m.allTasks) {
+			task := m.allTasks[m.taskCursor]
+			// Try to enter spec file view for this task.
+			for gi, g := range m.specGroups {
+				if g.Slug == task.Slug {
+					m.specGroupCursor = gi
+					m.specFileCursor = 0
+					m.specLevel = 1
+					m.taskLevel = 1
+					return m, nil
+				}
+			}
+			// No specs — show task detail in overlay.
+			m.openOverlay(task.Slug, m.renderTaskOverview(&task), "Tasks", task.Slug)
 		}
 	}
 	return m, nil
@@ -538,6 +557,9 @@ func (m *Model) updateSpecs(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.specFileCursor = 0
 				m.specLevel = 1
 			}
+		case key.Matches(msg, keys.Back):
+			m.taskLevel = 0
+			m.rebuildTasksViewport()
 		}
 	case 1: // file list
 		switch {
@@ -567,6 +589,8 @@ func (m *Model) updateSpecs(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, keys.Back):
 			m.specLevel = 0
+			m.taskLevel = 0
+			m.rebuildTasksViewport()
 		}
 	}
 	return m, nil
@@ -587,11 +611,11 @@ func (m *Model) updateKnowledge(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			k := m.knowledge[m.knCursor]
 			title, _ := simplifyKnowledgeLabel(k.Label)
 			if len(title) < 5 {
-				title = firstContentLine(k.Content)
+				title = knowledgeTitle(k.Content)
 			}
 			m.openOverlay(
 				title,
-				m.renderMarkdown(k.Content),
+				m.renderMarkdown(formatKnowledgeContent(k.Content)),
 				"Knowledge", k.Source, title,
 			)
 		}
@@ -690,7 +714,7 @@ func (m *Model) updateOverlay(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Back), key.Matches(msg, keys.Quit):
 		m.overlayActive = false
 		return m, nil
-	case msg.String() == "r" && m.activeTab == tabSpecs:
+	case msg.String() == "r" && m.activeTab == tabTasks && m.taskLevel > 0:
 		// Enter review mode — only when task has pending review.
 		if m.specGroupCursor < len(m.specGroups) {
 			slug := m.specGroups[m.specGroupCursor].Slug
@@ -701,7 +725,7 @@ func (m *Model) updateOverlay(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.enterReviewMode()
 		return m, nil
-	case msg.String() == "d" && m.activeTab == tabSpecs && !m.reviewMode:
+	case msg.String() == "d" && m.activeTab == tabTasks && m.taskLevel > 0 && !m.reviewMode:
 		// Show diff against previous version.
 		m.showSpecDiff()
 		return m, nil
@@ -1228,7 +1252,7 @@ func (m Model) renderOverlayView(bg string) string {
 	// Title bar.
 	titleBar := overlayTitleStyle.Render(m.overlayTitle)
 	hint := dimStyle.Render("esc: close  j/k: scroll")
-	if m.activeTab == tabSpecs && !m.reviewMode {
+	if m.activeTab == tabTasks && m.taskLevel > 0 && !m.reviewMode {
 		// Show review hint only when task has pending review.
 		isPending := false
 		if m.specGroupCursor < len(m.specGroups) {
@@ -1299,14 +1323,16 @@ func (m Model) View() tea.View {
 		content = "\n" + m.helpModel.FullHelpView(keys.FullHelp())
 	} else {
 		switch m.activeTab {
-		case tabOverview:
-			content = m.overviewView()
 		case tabTasks:
-			content = m.tasksView()
-		case tabSpecs:
-			content = m.specsView()
+			if m.taskLevel == 0 {
+				content = m.tasksView()
+			} else {
+				content = m.specsView()
+			}
 		case tabKnowledge:
 			content = m.knowledgeView()
+		case tabActivity:
+			content = m.activityView()
 		}
 	}
 
@@ -1351,40 +1377,31 @@ func (m Model) tabBarView() string {
 func (m Model) tabBadge(tab int) string {
 	switch tab {
 	case tabTasks:
-		if len(m.tasks) == 0 {
+		if len(m.allTasks) == 0 {
 			return ""
 		}
 		hasBlocker := false
-		for _, t := range m.tasks {
+		for _, t := range m.allTasks {
 			if t.HasBlocker {
 				hasBlocker = true
 				break
 			}
 		}
 		if hasBlocker {
-			return fmt.Sprintf("(%d", len(m.tasks)) + blockerStyle.Render("!") + ")"
+			return fmt.Sprintf("(%d", len(m.allTasks)) + blockerStyle.Render("!") + ")"
 		}
-		return fmt.Sprintf("(%d)", len(m.tasks))
-	case tabSpecs:
-		if len(m.specGroups) == 0 {
-			return ""
-		}
-		hasPending := false
-		for _, g := range m.specGroups {
-			if spec.ReviewStatusFor(m.ds.ProjectPath(), g.Slug) == spec.ReviewPending {
-				hasPending = true
-				break
-			}
-		}
-		if hasPending {
-			return fmt.Sprintf("(%d", len(m.specGroups)) + reviewCommentMarker.Render("*") + ")"
-		}
-		return fmt.Sprintf("(%d)", len(m.specGroups))
+		return fmt.Sprintf("(%d)", len(m.allTasks))
 	case tabKnowledge:
-		if len(m.knowledge) == 0 {
+		total := m.knStats.Total
+		if total == 0 {
 			return ""
 		}
-		return fmt.Sprintf("(%d)", len(m.knowledge))
+		return fmt.Sprintf("(%d)", total)
+	case tabActivity:
+		if len(m.activity) == 0 {
+			return ""
+		}
+		return fmt.Sprintf("(%d)", len(m.activity))
 	default:
 		return ""
 	}
@@ -1397,18 +1414,6 @@ func (m Model) helpBar() string {
 // ---------------------------------------------------------------------------
 // Tab views
 // ---------------------------------------------------------------------------
-
-func (m Model) overviewView() string {
-	var hint string
-	task := m.findActiveTask()
-	if task != nil {
-		status := spec.ReviewStatusFor(m.ds.ProjectPath(), task.Slug)
-		if status == spec.ReviewPending {
-			hint = "\n" + reviewCommentMarker.Render("  r: open review for "+task.Slug)
-		}
-	}
-	return "\n" + m.viewport.View() + hint
-}
 
 func (m Model) renderTaskOverview(td *TaskDetail) string {
 	var b strings.Builder
@@ -1481,69 +1486,18 @@ func (m Model) renderTaskOverview(td *TaskDetail) string {
 }
 
 func (m Model) tasksView() string {
-	if len(m.tasks) == 0 {
-		return "\n" + dimStyle.Render("  no tasks — use dossier to create one")
+	if len(m.allTasks) == 0 {
+		return "\n" + dimStyle.Render("  no tasks — use dossier init to start")
 	}
-	var b strings.Builder
-	b.WriteString("\n")
-
-	// Visible range.
-	visibleH := m.contentHeight() - 1
-	startIdx, endIdx := visibleRange(m.taskCursor, len(m.tasks), visibleH)
-
-	for i := startIdx; i < endIdx; i++ {
-		t := m.tasks[i]
-		prefix := "  "
-		if i == m.taskCursor {
-			prefix = "> "
-		}
-
-		// Progress bar (inline text, proportional width).
-		barW := min(max(8, m.width/12), 14)
-		progStr := strings.Repeat("-", barW)
-		pctStr := "  0%"
-		if t.Total > 0 {
-			pct := float64(t.Completed) / float64(t.Total)
-			filled := int(pct * float64(barW))
-			progStr = strings.Repeat("#", filled) + strings.Repeat("-", barW-filled)
-			pctStr = fmt.Sprintf("%3d%%", int(pct*100))
-		}
-
-		slug := fmt.Sprintf("%-24s", truncStr(t.Slug, 24))
-		focus := truncStr(t.Focus, m.width-52)
-		if focus == "" {
-			focus = dimStyle.Render("(no focus)")
-		}
-
-		blocker := " "
-		if t.HasBlocker {
-			blocker = blockerStyle.Render("!")
-		}
-
-		isCompleted := t.Status == "completed" || t.Status == "done" || t.Status == "implementation-complete"
-		isActiveTask := t.Status == "active" || t.Status == "in-progress" || t.Status == "integration"
-
-		// Shimmer on focus text for active task at cursor.
-		displayFocus := focus
-		if i == m.taskCursor && isActiveTask && focus != "" {
-			displayFocus = renderShimmer(focus, m.shimmerFrame)
-		}
-
-		line := prefix + slug + " " + progStr + " " + pctStr + "  " + displayFocus + " " + blocker
-		if i == m.taskCursor {
-			b.WriteString(titleStyle.Render(prefix+slug) + " " + progStr + " " + pctStr + "  " + displayFocus + " " + blocker + "\n")
-		} else if isCompleted {
-			b.WriteString(dimStyle.Render(line) + "\n")
-		} else {
-			b.WriteString(line + "\n")
+	var hint string
+	task := m.findActiveTask()
+	if task != nil {
+		status := spec.ReviewStatusFor(m.ds.ProjectPath(), task.Slug)
+		if status == spec.ReviewPending {
+			hint = "\n" + reviewCommentMarker.Render("  r: open review for "+task.Slug)
 		}
 	}
-
-	if len(m.tasks) > visibleH {
-		b.WriteString(dimStyle.Render(fmt.Sprintf("\n  %d/%d", m.taskCursor+1, len(m.tasks))))
-	}
-
-	return b.String()
+	return "\n" + m.viewport.View() + hint
 }
 
 func (m Model) specsView() string {
@@ -1602,7 +1556,7 @@ func (m Model) specFilesView() string {
 	// Find task status for this spec group.
 	taskStatus := ""
 	reviewStatus := ""
-	for _, t := range m.tasks {
+	for _, t := range m.allTasks {
 		if t.Slug == g.Slug {
 			taskStatus = t.Status
 			break
@@ -1815,6 +1769,38 @@ func (m Model) knowledgeView() string {
 		return b.String()
 	}
 
+	// Summary stats line.
+	if m.knStats.Total > 0 && m.searchQuery == "" && !m.searching {
+		b.WriteString(fmt.Sprintf("  Total: %s  decision: %s  pattern: %s  rule: %s\n\n",
+			titleStyle.Render(fmt.Sprintf("%d", m.knStats.Total)),
+			subTypeDecision.Render(fmt.Sprintf("%d", m.knStats.Decision)),
+			subTypePattern.Render(fmt.Sprintf("%d", m.knStats.Pattern)),
+			subTypeRule.Render(fmt.Sprintf("%d", m.knStats.Rule)),
+		))
+	}
+
+	// Promotion candidates.
+	if len(m.promotions) > 0 && m.searchQuery == "" && !m.searching {
+		b.WriteString("  " + sectionHeader.Render("Promotion Candidates") + "\n")
+		for _, p := range m.promotions {
+			target := "pattern"
+			if p.SubType == "pattern" {
+				target = "rule"
+			}
+			title, _ := simplifyKnowledgeLabel(p.Label)
+			if len(title) < 5 {
+				title = firstContentLine(p.Content)
+			}
+			b.WriteString(fmt.Sprintf("    %s (%s, %dx) -> %s\n",
+				truncStr(title, m.width-40),
+				styledSubType(p.SubType),
+				p.HitCount,
+				target,
+			))
+		}
+		b.WriteString("\n")
+	}
+
 	if len(m.knowledge) == 0 {
 		if m.searchQuery != "" {
 			b.WriteString(dimStyle.Render("  no results"))
@@ -1837,11 +1823,9 @@ func (m Model) knowledgeView() string {
 
 		// Parse label into title + context.
 		title, ctx := simplifyKnowledgeLabel(k.Label)
-		// Use content first line as title if the parsed title is too short.
+		// Use content-derived title if the parsed title is too short.
 		if len(title) < 5 {
-			if cl := firstContentLine(k.Content); cl != "" {
-				title = cl
-			}
+			title = knowledgeTitle(k.Content)
 		}
 		title = truncStr(title, m.width-36)
 
@@ -1887,9 +1871,140 @@ func (m Model) knowledgeView() string {
 	return b.String()
 }
 
+func (m Model) activityView() string {
+	var b strings.Builder
+	b.WriteString("\n")
+	maxW := m.width - 6
+
+	// Timeline section.
+	if len(m.activity) > 0 {
+		b.WriteString("  " + sectionHeader.Render("Timeline") + "\n")
+		shown := min(20, len(m.activity))
+		for i := range shown {
+			a := m.activity[i]
+			ts := a.Timestamp.Format("15:04")
+			action := dimStyle.Render(formatAuditAction(a.Action))
+			target := truncStr(a.Target, maxW-20)
+			b.WriteString(fmt.Sprintf("  %s  %s  %s\n", dimStyle.Render(ts), action, target))
+		}
+		b.WriteString("\n")
+	}
+
+	// Epic progress section.
+	if len(m.epics) > 0 {
+		b.WriteString("  " + sectionHeader.Render("Epics") + "\n")
+		for _, e := range m.epics {
+			status := styledStatus(e.Status)
+			progBar := ""
+			if e.Total > 0 {
+				pct := float64(e.Completed) / float64(e.Total)
+				barW := 10
+				filled := int(pct * float64(barW))
+				progBar = strings.Repeat("#", filled) + strings.Repeat("-", barW-filled)
+				progBar += fmt.Sprintf(" %d%%", int(pct*100))
+			}
+			b.WriteString(fmt.Sprintf("  %-20s %s  %s\n", truncStr(e.Name, 20), progBar, status))
+			// Show epic tasks.
+			for _, t := range e.Tasks {
+				taskStatus := styledStatus(t.Status)
+				b.WriteString(fmt.Sprintf("    - %-16s %s\n", truncStr(t.Slug, 16), taskStatus))
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	// Cross-task decisions section.
+	if len(m.decisions) > 0 {
+		b.WriteString("  " + sectionHeader.Render("Recent Decisions") + "\n")
+		for _, d := range m.decisions {
+			title := truncStr(d.Title, maxW-30)
+			task := dimStyle.Render(d.TaskSlug)
+			b.WriteString("  " + title + "  " + task + "\n")
+			if d.Chosen != "" {
+				b.WriteString("    " + dimStyle.Render("-> "+truncStr(d.Chosen, maxW-7)) + "\n")
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	// Stats summary.
+	b.WriteString("  " + sectionHeader.Render("Stats") + "\n")
+	activeCount := 0
+	completedCount := 0
+	for _, t := range m.allTasks {
+		if t.Status == "completed" || t.Status == "done" {
+			completedCount++
+		} else {
+			activeCount++
+		}
+	}
+	b.WriteString(fmt.Sprintf("  Tasks: %d active, %d completed\n", activeCount, completedCount))
+	if m.knStats.Total > 0 {
+		b.WriteString(fmt.Sprintf("  Knowledge: %d total (%d decisions, %d patterns, %d rules)\n",
+			m.knStats.Total, m.knStats.Decision, m.knStats.Pattern, m.knStats.Rule))
+	}
+
+	if b.Len() < 3 {
+		return "\n" + dimStyle.Render("  no activity yet")
+	}
+
+	return b.String()
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// knowledgeTitle extracts a human-readable title from knowledge content.
+func knowledgeTitle(content string) string {
+	trimmed := strings.TrimSpace(content)
+	if len(trimmed) > 0 && trimmed[0] == '{' {
+		var ch struct {
+			Goal string `json:"goal"`
+		}
+		if json.Unmarshal([]byte(trimmed), &ch) == nil && ch.Goal != "" {
+			return ch.Goal
+		}
+	}
+	return firstContentLine(content)
+}
+
+// formatKnowledgeContent renders knowledge content for the overlay.
+func formatKnowledgeContent(content string) string {
+	trimmed := strings.TrimSpace(content)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return content
+	}
+	var ch map[string]any
+	if json.Unmarshal([]byte(trimmed), &ch) != nil {
+		return content
+	}
+	var sb strings.Builder
+	if v, ok := ch["goal"].(string); ok && v != "" {
+		sb.WriteString("## Goal\n" + v + "\n\n")
+	}
+	if v, ok := ch["status"].(string); ok {
+		sb.WriteString("**Status:** " + v + "\n\n")
+	}
+	if v, ok := ch["decisions"].([]any); ok && len(v) > 0 {
+		sb.WriteString("## Decisions\n")
+		for _, d := range v {
+			sb.WriteString("- " + fmt.Sprint(d) + "\n")
+		}
+		sb.WriteString("\n")
+	}
+	if v, ok := ch["modified_files"].([]any); ok && len(v) > 0 {
+		sb.WriteString("## Modified Files\n")
+		for _, f := range v {
+			sb.WriteString("- " + fmt.Sprint(f) + "\n")
+		}
+		sb.WriteString("\n")
+	}
+	if sb.Len() == 0 {
+		return content
+	}
+	return sb.String()
+}
 
 func visibleRange(cursor, total, visibleH int) (start, end int) {
 	if visibleH < 1 {

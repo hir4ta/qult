@@ -1,27 +1,28 @@
 ---
 name: brief
 description: >
-  Structured spec generation with multi-perspective deliberation (no sub-agents).
+  Structured spec generation with parallel multi-agent review per file.
   Creates requirements, design, decisions, and session files in .alfred/specs/.
-  Each file is reviewed from multiple perspectives before moving to the next.
+  Each file is reviewed by 3 parallel agents before moving to the next.
+  After all files, user approves via `alfred dashboard`.
   Use when starting a new task, organizing a design, planning before implementation,
   or wanting a structured development plan. NOT for divergent brainstorming
   (use /alfred:salon). NOT for autonomous implementation (use /alfred:attend).
 user-invocable: true
 argument-hint: "task-slug [description]"
-allowed-tools: Read, Edit, Glob, Grep, AskUserQuestion, WebSearch, WebFetch, mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__dossier
+allowed-tools: Read, Edit, Glob, Grep, Agent, AskUserQuestion, WebSearch, WebFetch, mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__dossier
 context: current
 ---
 
 # /alfred:brief — Spec Generator with Staged Review
 
 Generate a structured spec through iterative file-by-file creation with
-multi-perspective review after each file. No sub-agents are spawned.
+parallel multi-agent review after each file.
 
 ## Core Principle
-Each spec file is written, then reviewed from 3 perspectives (Architect, Devil's
-Advocate, Researcher) before moving to the next. This catches issues early rather
-than discovering them after all files are written.
+Each spec file is written, then reviewed by 3 parallel agents (Architect, Devil's
+Advocate, Researcher) before moving to the next. After all files are complete,
+the user approves via `alfred dashboard`.
 
 ## Steps
 
@@ -48,12 +49,13 @@ than discovering them after all files are written.
 - Goal, success criteria, out of scope
 - Confidence scores via `<!-- confidence: N -->` on each section
 
-**Review** (inline, 3 perspectives):
-- **Architect**: Are success criteria measurable and achievable?
-- **Devil's Advocate**: Is scope too broad? Missing edge cases? Unrealistic criteria?
-- **Researcher**: Any prior art or existing patterns in the codebase that inform requirements?
+**Review** (3 parallel agents):
+Spawn 3 agents simultaneously via Agent tool. Each reads requirements.md and returns findings.
+- **Agent 1 — Architect**: Are success criteria measurable and achievable? Missing constraints?
+- **Agent 2 — Devil's Advocate**: Is scope too broad? Missing edge cases? Unrealistic criteria?
+- **Agent 3 — Researcher**: Any prior art or existing patterns in the codebase that inform requirements?
 
-**Fix**: Apply review findings, rewrite requirements.md if needed.
+**Fix**: Collect findings from all 3 agents. Apply fixes, rewrite requirements.md if needed.
 
 **Update session.md**: Mark requirements step as done in Next Steps.
 
@@ -65,12 +67,13 @@ than discovering them after all files are written.
 - Alternatives considered and why rejected
 - Confidence scores on each section
 
-**Review** (inline, 3 perspectives):
-- **Architect**: Is the architecture sound? Missing components? Clear interfaces?
-- **Devil's Advocate**: What could go wrong? Hidden complexity? Underestimated effort?
-- **Researcher**: Existing patterns in codebase to reuse? Libraries available?
+**Review** (3 parallel agents):
+Spawn 3 agents simultaneously via Agent tool. Each reads design.md + requirements.md and returns findings.
+- **Agent 1 — Architect**: Is the architecture sound? Missing components? Clear interfaces?
+- **Agent 2 — Devil's Advocate**: What could go wrong? Hidden complexity? Underestimated effort?
+- **Agent 3 — Researcher**: Existing patterns in codebase to reuse? Libraries available?
 
-**Fix**: Apply review findings, rewrite design.md if needed.
+**Fix**: Collect findings from all 3 agents. Apply fixes, rewrite design.md if needed.
 
 **Update session.md**: Mark design step as done in Next Steps.
 
@@ -81,12 +84,13 @@ than discovering them after all files are written.
 - Unresolved conflicts flagged for user decision
 - Confidence scores
 
-**Review** (inline, 3 perspectives):
-- **Architect**: Are decisions consistent with design? Missing decisions?
-- **Devil's Advocate**: Any decision based on faulty assumptions? Reversibility?
-- **Researcher**: Do decisions align with established patterns in this codebase?
+**Review** (3 parallel agents):
+Spawn 3 agents simultaneously via Agent tool. Each reads decisions.md + design.md and returns findings.
+- **Agent 1 — Architect**: Are decisions consistent with design? Missing decisions?
+- **Agent 2 — Devil's Advocate**: Any decision based on faulty assumptions? Reversibility?
+- **Agent 3 — Researcher**: Do decisions align with established patterns in this codebase?
 
-**Fix**: Apply review findings, rewrite decisions.md if needed.
+**Fix**: Collect findings from all 3 agents. Apply fixes, rewrite decisions.md if needed.
 
 **Update session.md**: Mark decisions step as done in Next Steps.
 
@@ -120,19 +124,20 @@ Please decide on these open questions:
 1. <conflict description> — Option A vs Option B
 ```
 
-### 9. [APPROVAL GATE] Wait for user review
+### 9. [APPROVAL GATE] User reviews in dashboard
 
 1. Add `## Review Status\npending` to session.md
 2. Tell the user:
    ```
-   Spec ready for review. Check the files directly or use `alfred dashboard`.
-   Tell me "approved" or give feedback.
+   Spec ready for your review.
+   Run `alfred dashboard` → Tasks tab → select '{task-slug}' → review spec files.
+   Approve or add comments, then tell me.
    ```
 3. **STOP and wait** — do not proceed until the user confirms.
 4. When user responds, call `dossier` action=review to check:
    - `approved` → done
    - `changes_requested` → read comments, apply fixes, go back to step 9
-   - `pending` → remind user to review
+   - `pending` → remind user to review in dashboard
 
 ## Resume Mode (from Step 2)
 
@@ -144,10 +149,10 @@ If an active spec already exists:
 
 ## Guardrails
 
-- Do NOT skip per-file review — each file MUST be reviewed before moving to the next
-- Do NOT spawn sub-agents — all deliberation is inline (rate limit prevention)
+- Do NOT skip per-file review — each file MUST be reviewed by parallel agents before moving to the next
 - Do NOT leave decisions.md empty — record ALL deliberation outcomes
 - Do NOT create tasks without success criteria
+- ALWAYS spawn review agents without model override (uses Claude Code's own model)
 - ALWAYS update session.md after each file is completed (dashboard UX)
 - ALWAYS record alternatives considered with rationale
-- Maximum 20 turns total — force convergence if analysis is not settling
+- ALWAYS direct user to `alfred dashboard` for approval (not text-based approval)

@@ -27,6 +27,9 @@ func (m *mockDataSource) SpecContent(_, _ string) string                 { retur
 func (m *mockDataSource) SemanticSearch(_ string, _ int) []KnowledgeEntry { return m.knowledge }
 func (m *mockDataSource) RecentKnowledge(_ int) []KnowledgeEntry         { return m.knowledge }
 func (m *mockDataSource) RecentActivity(_ int) []ActivityEntry           { return m.activity }
+func (m *mockDataSource) KnowledgeStats() KnowledgeStats                 { return KnowledgeStats{} }
+func (m *mockDataSource) Epics() []EpicSummary                           { return nil }
+func (m *mockDataSource) AllDecisions(_ int) []DecisionEntry             { return nil }
 
 func TestTabBadge(t *testing.T) {
 	ds := &mockDataSource{
@@ -39,8 +42,9 @@ func TestTabBadge(t *testing.T) {
 		},
 	}
 	m := New(ds)
-	m.tasks = ds.tasks
+	m.allTasks = ds.tasks
 	m.knowledge = ds.knowledge
+	m.knStats = KnowledgeStats{Total: 1}
 	m.specGroups = []specTaskGroup{{Slug: "task-1", FileCount: 2}}
 
 	// Tasks badge should show count with blocker indicator.
@@ -53,16 +57,16 @@ func TestTabBadge(t *testing.T) {
 		t.Errorf("Tasks badge should contain count, got %q", badge)
 	}
 
-	// Knowledge badge.
+	// Knowledge badge (uses knStats.Total).
 	badge = m.tabBadge(tabKnowledge)
 	if badge != "(1)" {
 		t.Errorf("Knowledge badge = %q, want (1)", badge)
 	}
 
-	// Overview has no badge.
-	badge = m.tabBadge(tabOverview)
+	// Activity badge (no activity).
+	badge = m.tabBadge(tabActivity)
 	if badge != "" {
-		t.Errorf("Overview badge = %q, want empty", badge)
+		t.Errorf("Activity badge = %q, want empty", badge)
 	}
 }
 
@@ -89,9 +93,9 @@ func TestSwitchTab(t *testing.T) {
 		t.Errorf("activeTab = %d, want %d", m.activeTab, tabKnowledge)
 	}
 
-	m.switchTab(tabOverview)
-	if m.activeTab != tabOverview {
-		t.Errorf("activeTab = %d, want %d", m.activeTab, tabOverview)
+	m.switchTab(tabTasks)
+	if m.activeTab != tabTasks {
+		t.Errorf("activeTab = %d, want %d", m.activeTab, tabTasks)
 	}
 }
 
@@ -201,7 +205,7 @@ func TestFormatAuditAction(t *testing.T) {
 	}
 }
 
-func TestOverviewShowsCompletedTasks(t *testing.T) {
+func TestAllTasksIncludesCompleted(t *testing.T) {
 	ds := &mockDataSource{
 		activeTask: "task-active",
 		tasks: []TaskDetail{
@@ -214,14 +218,9 @@ func TestOverviewShowsCompletedTasks(t *testing.T) {
 	m.height = 40
 	m.refreshData()
 
-	// allTasks should include completed.
+	// allTasks should include both active and completed.
 	if len(m.allTasks) != 2 {
 		t.Errorf("allTasks = %d, want 2", len(m.allTasks))
-	}
-
-	// tasks (active only) should exclude completed.
-	if len(m.tasks) != 1 {
-		t.Errorf("tasks = %d, want 1", len(m.tasks))
 	}
 }
 

@@ -152,10 +152,12 @@ alfred search-eval            # Run search quality benchmark
 - Skills: brief, attend, tdd, inspect, mend, survey, salon, polish, valet, furnish, quarters, archive, concierge, harvest
 - MCP tools: dossier (spec management), roster (epic management), ledger (memory)
 
-### Deliberation Style (Rate Limit Prevention)
+### Deliberation Style
 
-- All skills use inline multi-perspective deliberation (no sub-agents)
-- brief/attend/inspect/salon/mend/survey: 3 perspectives analyzed by parent agent
+- **Spec review**: brief/attend spawn 3 parallel review agents per spec file (Architect, Devil's Advocate, Researcher)
+- **Code review**: attend spawns `alfred:code-reviewer` agent per implementation phase (3 parallel sub-reviewers: security, logic, design)
+- **Other skills**: inspect/salon/mend/survey use inline multi-perspective deliberation (no sub-agents)
+- **Approval gate**: user reviews in `alfred dashboard`, not text-based
 - Session.md updated after each task completion (dashboard real-time progress)
 - attend/mend: MUST call `dossier action=complete` at end to close spec
 

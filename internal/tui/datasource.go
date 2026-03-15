@@ -59,6 +59,40 @@ type ActivityEntry struct {
 	Detail    string
 }
 
+// KnowledgeStats holds memory counts by sub_type.
+type KnowledgeStats struct {
+	Total    int
+	Decision int
+	Pattern  int
+	Rule     int
+	General  int
+}
+
+// EpicSummary holds display data for an epic.
+type EpicSummary struct {
+	Slug      string
+	Name      string
+	Status    string
+	Completed int
+	Total     int
+	Tasks     []EpicTaskSummary
+}
+
+// EpicTaskSummary holds a task's status within an epic.
+type EpicTaskSummary struct {
+	Slug   string
+	Status string
+}
+
+// DecisionEntry holds a single decision from decisions.md across all tasks.
+type DecisionEntry struct {
+	TaskSlug     string
+	Title        string
+	Chosen       string
+	Alternatives string
+	Reason       string
+}
+
 // DataSource abstracts data retrieval for the TUI.
 type DataSource interface {
 	ProjectPath() string
@@ -69,6 +103,9 @@ type DataSource interface {
 	SemanticSearch(query string, limit int) []KnowledgeEntry
 	RecentKnowledge(limit int) []KnowledgeEntry
 	RecentActivity(limit int) []ActivityEntry
+	KnowledgeStats() KnowledgeStats
+	Epics() []EpicSummary
+	AllDecisions(limit int) []DecisionEntry
 }
 
 // fileDataSource implements DataSource by reading .alfred/ files and SQLite.
@@ -277,6 +314,124 @@ func (ds *fileDataSource) RecentActivity(limit int) []ActivityEntry {
 		})
 	}
 	return result
+}
+
+func (ds *fileDataSource) KnowledgeStats() KnowledgeStats {
+	if ds.st == nil {
+		return KnowledgeStats{}
+	}
+	docs, err := ds.st.SearchMemoriesKeyword(context.Background(), "", 10000)
+	if err != nil {
+		return KnowledgeStats{}
+	}
+	var ks KnowledgeStats
+	ks.Total = len(docs)
+	for _, d := range docs {
+		switch d.SubType {
+		case "decision":
+			ks.Decision++
+		case "pattern":
+			ks.Pattern++
+		case "rule":
+			ks.Rule++
+		default:
+			ks.General++
+		}
+	}
+	return ks
+}
+
+func (ds *fileDataSource) Epics() []EpicSummary {
+	epics := epic.ListAll(ds.projectPath)
+	if len(epics) == 0 {
+		return nil
+	}
+
+	taskStatus := make(map[string]string)
+	if state, err := spec.ReadActiveState(ds.projectPath); err == nil {
+		for _, t := range state.Tasks {
+			if t.Status == spec.TaskCompleted {
+				taskStatus[t.Slug] = "completed"
+			} else {
+				taskStatus[t.Slug] = "active"
+			}
+		}
+	}
+
+	summaries := make([]EpicSummary, 0, len(epics))
+	for _, e := range epics {
+		es := EpicSummary{
+			Slug:   e.Slug,
+			Name:   e.Name,
+			Status: e.Status,
+			Total:  len(e.Tasks),
+		}
+		for _, t := range e.Tasks {
+			status := t.Status
+			if s, ok := taskStatus[t.Slug]; ok {
+				status = s
+			}
+			es.Tasks = append(es.Tasks, EpicTaskSummary{
+				Slug:   t.Slug,
+				Status: status,
+			})
+			if status == "completed" {
+				es.Completed++
+			}
+		}
+		summaries = append(summaries, es)
+	}
+	return summaries
+}
+
+func (ds *fileDataSource) AllDecisions(limit int) []DecisionEntry {
+	state, err := spec.ReadActiveState(ds.projectPath)
+	if err != nil {
+		return nil
+	}
+
+	var entries []DecisionEntry
+	for _, at := range state.Tasks {
+		sd := &spec.SpecDir{ProjectPath: ds.projectPath, TaskSlug: at.Slug}
+		content, err := sd.ReadFile(spec.FileDecisions)
+		if err != nil {
+			continue
+		}
+
+		_, ordered := splitSectionsOrdered(content)
+		for _, sec := range ordered {
+			if sec.Header == "" {
+				continue
+			}
+			de := DecisionEntry{TaskSlug: at.Slug}
+
+			title := sec.Header
+			if len(title) > 13 && title[0] == '[' {
+				if idx := strings.Index(title, "] "); idx > 0 {
+					title = title[idx+2:]
+				}
+			}
+			de.Title = title
+
+			for line := range strings.SplitSeq(sec.Body, "\n") {
+				trimmed := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmed, "- **Chosen:**") || strings.HasPrefix(trimmed, "**Chosen:**") {
+					de.Chosen = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(trimmed, "- "), "**Chosen:**"))
+				} else if strings.HasPrefix(trimmed, "- **Alternatives:**") || strings.HasPrefix(trimmed, "**Alternatives:**") {
+					de.Alternatives = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(trimmed, "- "), "**Alternatives:**"))
+				} else if strings.HasPrefix(trimmed, "- **Reason:**") || strings.HasPrefix(trimmed, "**Reason:**") {
+					de.Reason = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(trimmed, "- "), "**Reason:**"))
+				}
+			}
+
+			entries = append(entries, de)
+		}
+	}
+
+	if limit > 0 && len(entries) > limit {
+		entries = entries[:limit]
+	}
+	return entries
 }
 
 func docsToKnowledge(docs []store.DocRow, scoreMap map[int64]float64, limit int) []KnowledgeEntry {

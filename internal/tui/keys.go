@@ -12,7 +12,6 @@ type keyMap struct {
 	Tab1    key.Binding
 	Tab2    key.Binding
 	Tab3    key.Binding
-	Tab4    key.Binding
 	Up      key.Binding
 	Down    key.Binding
 	Enter   key.Binding
@@ -37,16 +36,13 @@ var keys = keyMap{
 	),
 	Tab1: key.NewBinding(
 		key.WithKeys("1"),
-		key.WithHelp("1-4", "jump to tab"),
+		key.WithHelp("1-3", "jump to tab"),
 	),
 	Tab2: key.NewBinding(
 		key.WithKeys("2"),
 	),
 	Tab3: key.NewBinding(
 		key.WithKeys("3"),
-	),
-	Tab4: key.NewBinding(
-		key.WithKeys("4"),
 	),
 	Up: key.NewBinding(
 		key.WithKeys("up", "k"),

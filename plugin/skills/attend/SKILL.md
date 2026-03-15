@@ -2,8 +2,8 @@
 name: attend
 description: >
   Fully autonomous development orchestrator. Given a task description, runs the
-  complete workflow: spec creation with per-file review, user approval gate,
-  phase-by-phase implementation with incremental progress tracking, self-review,
+  complete workflow: spec creation with parallel multi-agent review, user approval
+  via dashboard, phase-by-phase implementation with code-reviewer agent per phase,
   test gate, and auto-commit. Updates session.md after each task completion for
   real-time dashboard progress. Use when wanting end-to-end task completion from
   spec to commit, "implement this", "build this feature", or fully autonomous
@@ -11,7 +11,7 @@ description: >
   only (use /alfred:inspect).
 user-invocable: true
 argument-hint: "task-slug description"
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git diff *, git log *, git show *, git status *, git add *, git commit *, git merge-base *, git stash *, go test *, go vet *), AskUserQuestion, mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__dossier, mcp__plugin_alfred_alfred__ledger
+allowed-tools: Read, Write, Edit, Glob, Grep, Agent, Bash(git diff *, git log *, git show *, git status *, git add *, git commit *, git merge-base *, git stash *, go test *, go vet *), AskUserQuestion, mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__dossier, mcp__plugin_alfred_alfred__ledger
 ---
 
 # /alfred:attend — Autonomous Development Orchestrator
@@ -40,9 +40,9 @@ approval gates and BLOCKED recovery).
 6. Record `initial_commit` = output of `git rev-parse HEAD`
 7. Write initial Orchestrator State to session.md
 
-## Phase 1: Spec Creation (per-file with review)
+## Phase 1: Spec Creation (per-file with parallel agent review)
 
-Create each spec file with inline multi-perspective review. No sub-agents.
+Create each spec file, then spawn 3 review agents in parallel.
 **Update session.md after each file is completed.**
 
 ### 1a. Research
@@ -50,42 +50,51 @@ Create each spec file with inline multi-perspective review. No sub-agents.
 - Read key source files relevant to the task
 
 ### 1b. requirements.md
-- Write requirements with confidence scores
-- Review from 3 perspectives (Architect, Devil's Advocate, Researcher)
-- Apply fixes → save via `dossier` action=update
+- Write requirements with confidence scores → save via `dossier` action=update
+- **Review**: Spawn 3 agents simultaneously:
+  - Architect: Are success criteria measurable? Missing constraints?
+  - Devil's Advocate: Scope too broad? Unrealistic criteria?
+  - Researcher: Prior art or codebase patterns that inform requirements?
+- Collect findings → apply fixes → save
 - **Update session.md**: mark requirements as done
 
 ### 1c. design.md
-- Write design with architecture, components, alternatives
-- Review from 3 perspectives
-- Apply fixes → save via `dossier` action=update
+- Write design with architecture, components, alternatives → save
+- **Review**: Spawn 3 agents simultaneously:
+  - Architect: Sound architecture? Missing components?
+  - Devil's Advocate: Hidden complexity? Underestimated effort?
+  - Researcher: Existing patterns to reuse?
+- Collect findings → apply fixes → save
 - **Update session.md**: mark design as done
 
 ### 1d. decisions.md
-- Write all decisions with rationale, alternatives, source perspective
-- Review from 3 perspectives
-- Apply fixes → save via `dossier` action=update
+- Write all decisions with rationale, alternatives → save
+- **Review**: Spawn 3 agents simultaneously:
+  - Architect: Consistent with design? Missing decisions?
+  - Devil's Advocate: Faulty assumptions? Reversibility?
+  - Researcher: Aligned with codebase patterns?
+- Collect findings → apply fixes → save
 - **Update session.md**: mark decisions as done
 
 ### 1e. session.md
 - Write final session.md with Next Steps task breakdown
 - Update state: `phase: approval-gate`
 
-## Phase 2: Approval Gate
+## Phase 2: Approval Gate (dashboard)
 
-Wait for user approval before proceeding to implementation:
+Wait for user approval via `alfred dashboard` before proceeding:
 
 1. Update Orchestrator State: `awaiting_approval: true`
 2. Tell the user:
    ```
-   Spec complete. Review the files directly or use `alfred dashboard`.
-   Tell me "approved" or give feedback.
+   Spec complete. Run `alfred dashboard` → Tasks tab → select task → review spec files.
+   Approve or add comments, then tell me.
    ```
 3. **STOP and wait** — do not proceed until user confirms.
 4. When user responds, call `dossier` action=review:
    - `approved` → advance to Phase 3
    - `changes_requested` → read comments, fix spec files, return to this gate
-   - `pending` → remind user
+   - `pending` → remind user to review in dashboard
 5. Update state: `awaiting_approval: false, phase: impl-phase-1`
 
 ## Phase 3: Implementation
@@ -102,26 +111,26 @@ Read task breakdown from session.md Next Steps.
 **CRITICAL**: Update session.md after EACH task, not all at once.
 This ensures the dashboard shows real-time progress.
 
-## Phase 4: Per-Task Review (inline)
+## Phase 4: Per-Task Review (code-reviewer agent)
 
 After each implementation task:
 
 1. Get diff: `git diff {phase_start_commit}` (only this task's changes)
-2. Review inline from 3 perspectives:
-   - **Correctness**: Does the code match the spec? Any bugs?
-   - **Security**: Any injection, auth, or data exposure issues?
-   - **Integration**: Does it work with existing code? Breaking changes?
-3. Apply fixes if needed
+2. **Spawn `alfred:code-reviewer` agent** with the diff:
+   - Agent spawns 3 parallel sub-reviewers (security, logic, design)
+   - Returns aggregated findings with severity levels
+3. If Critical findings → fix and re-review (max 2 iterations)
+4. If Warnings only → fix if straightforward, proceed if not
+5. If PASS → advance to next task (Phase 3) or Phase 5 if all tasks done
 
-On PASS: advance to next task (Phase 3) or Phase 5 if all tasks done.
+**IMPORTANT**: Always spawn the code-reviewer agent. Never skip review.
 
-## Phase 5: Final Self-Review
+## Phase 5: Final Self-Review (code-reviewer agent)
 
 1. Get full diff: `git diff {initial_commit}..HEAD`
-2. Review inline from 3 perspectives:
-   - **Code quality**: Style, naming, error handling consistency
-   - **Spec compliance**: Does implementation match requirements + design?
-   - **Integration**: Any cross-cutting concerns missed?
+2. **Spawn `alfred:code-reviewer` agent** with the full diff
+   - Comprehensive review across security, logic, design
+   - Returns aggregated findings
 3. Apply fixes if needed (max 1 iteration)
 4. Security Critical → BLOCKED
 5. Update state: `phase: test-gate`
@@ -162,7 +171,8 @@ After EVERY phase transition and after EVERY task completion:
 
 - NEVER skip review phases — they are mandatory quality gates
 - NEVER commit with unresolved Critical findings
-- NEVER spawn sub-agents for spec creation or review — all inline (rate limit prevention)
+- ALWAYS spawn parallel agents for spec review and code-reviewer for implementation review
+- ALWAYS direct user to `alfred dashboard` for approval (not text-based)
 - ALWAYS update session.md after each individual task completion (not in batch)
 - ALWAYS call `dossier action=complete` at the end — never leave a task open
 - ALWAYS record decisions and trade-offs in decisions.md
