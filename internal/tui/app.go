@@ -3,6 +3,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -43,6 +45,9 @@ type tickMsg time.Time
 // searchResultMsg carries async semantic search results.
 type searchResultMsg []KnowledgeEntry
 
+// debounceTickMsg triggers a debounced search after typing pauses.
+type debounceTickMsg struct{ seq int }
+
 // Model is the root bubbletea model.
 type Model struct {
 	ds     DataSource
@@ -81,9 +86,11 @@ type Model struct {
 
 	// Data caches.
 	activeSlug string
-	tasks      []TaskDetail
+	tasks      []TaskDetail    // active tasks only (for Tasks tab)
+	allTasks   []TaskDetail    // all tasks including completed (for Overview)
 	specs      []SpecEntry
 	knowledge  []KnowledgeEntry
+	activity   []ActivityEntry
 
 	// Tasks tab state.
 	taskCursor int
@@ -108,6 +115,15 @@ type Model struct {
 
 	// Shimmer animation frame counter.
 	shimmerFrame int
+
+	// Tab before global search was invoked (for returning).
+	searchReturnTab int
+	// Debounce sequence for live search.
+	debounceSeq int
+
+	// Review confirmation state.
+	reviewConfirmPending bool
+	reviewConfirmStatus  spec.ReviewStatus
 }
 
 // New creates a new dashboard Model.
@@ -140,10 +156,10 @@ func New(ds DataSource) Model {
 func (m *Model) refreshData() {
 	m.activeSlug = m.ds.ActiveTask()
 
-	// Filter to active tasks only for Overview/Tasks tabs.
-	allTasks := m.ds.TaskDetails()
+	// Keep all tasks for Overview, filter active for Tasks tab.
+	m.allTasks = m.ds.TaskDetails()
 	m.tasks = m.tasks[:0]
-	for _, t := range allTasks {
+	for _, t := range m.allTasks {
 		if t.Status != "completed" {
 			m.tasks = append(m.tasks, t)
 		}
@@ -175,6 +191,9 @@ func (m *Model) refreshData() {
 		m.specGroupCursor = max(0, len(m.specGroups)-1)
 	}
 
+	// Refresh activity timeline.
+	m.activity = m.ds.RecentActivity(50)
+
 	// Rebuild overview viewport content.
 	m.rebuildOverview()
 
@@ -190,12 +209,72 @@ func (m *Model) rebuildOverview() {
 	if m.activeTab != tabOverview || m.width == 0 {
 		return
 	}
+
+	var b strings.Builder
+	maxW := m.width - 6
+
+	// Multi-task summary — shows all tasks including completed.
+	if len(m.allTasks) > 1 {
+		b.WriteString("  " + sectionHeader.Render("Tasks") + "\n")
+		for _, t := range m.allTasks {
+			isActive := t.Slug == m.activeSlug
+			isCompleted := t.Status == "completed" || t.Status == "done" || t.Status == "implementation-complete"
+			progBar := ""
+			if t.Total > 0 {
+				pct := float64(t.Completed) / float64(t.Total)
+				barW := 10
+				filled := int(pct * float64(barW))
+				progBar = strings.Repeat("#", filled) + strings.Repeat("-", barW-filled)
+				progBar += fmt.Sprintf(" %d%%", int(pct*100))
+			}
+			marker := "  "
+			if isActive {
+				marker = "> "
+			}
+			slug := fmt.Sprintf("%-20s", truncStr(t.Slug, 20))
+			status := styledStatus(t.Status)
+			blocker := ""
+			if t.HasBlocker {
+				blocker = " " + blockerStyle.Render("!")
+			}
+			focus := ""
+			if t.Focus != "" {
+				focus = "  " + truncStr(t.Focus, maxW-50)
+			}
+			line := marker + slug + " " + progBar + " " + status + blocker + focus
+			if isActive {
+				b.WriteString(titleStyle.Render(marker+slug) + " " + progBar + " " + status + blocker + focus + "\n")
+			} else if isCompleted {
+				b.WriteString(dimStyle.Render(line) + "\n")
+			} else {
+				b.WriteString(line + "\n")
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	// Active task details.
 	task := m.findActiveTask()
 	if task == nil {
-		m.viewport.SetContent(dimStyle.Render("  no active task"))
-		return
+		b.WriteString(dimStyle.Render("  no active task"))
+	} else {
+		b.WriteString(m.renderTaskOverview(task))
 	}
-	m.viewport.SetContent(m.renderTaskOverview(task))
+
+	// Activity timeline.
+	if len(m.activity) > 0 {
+		b.WriteString("\n  " + sectionHeader.Render("Recent Activity") + "\n")
+		shown := min(8, len(m.activity))
+		for i := range shown {
+			a := m.activity[i]
+			ts := a.Timestamp.Format("15:04")
+			action := dimStyle.Render(formatAuditAction(a.Action))
+			target := truncStr(a.Target, maxW-20)
+			b.WriteString(fmt.Sprintf("  %s  %s  %s\n", dimStyle.Render(ts), action, target))
+		}
+	}
+
+	m.viewport.SetContent(b.String())
 }
 
 // rebuildTaskOverlay updates the Tasks tab overlay content for shimmer animation.
@@ -223,6 +302,39 @@ func (m *Model) findActiveTask() *TaskDetail {
 		return &m.tasks[0]
 	}
 	return nil
+}
+
+func (m *Model) switchTab(tab int) {
+	m.activeTab = tab
+	m.searchBusy = false
+	if tab == tabOverview {
+		m.rebuildOverview()
+	}
+}
+
+// tryDirectReview attempts to enter review mode for the active task from Overview.
+func (m *Model) tryDirectReview() (tea.Model, tea.Cmd) {
+	task := m.findActiveTask()
+	if task == nil {
+		return m, nil
+	}
+	status := spec.ReviewStatusFor(m.ds.ProjectPath(), task.Slug)
+	if status != spec.ReviewPending {
+		return m, nil
+	}
+	// Find the task in specGroups and open review on the first file.
+	for gi, g := range m.specGroups {
+		if g.Slug == task.Slug && len(g.Files) > 0 {
+			m.specGroupCursor = gi
+			m.specFileCursor = 0
+			f := g.Files[0]
+			content := m.ds.SpecContent(f.TaskSlug, f.File)
+			m.openOverlay(f.File, m.renderMarkdown(content), "Specs", g.Slug, f.File)
+			m.enterReviewMode()
+			return m, nil
+		}
+	}
+	return m, nil
 }
 
 func (m Model) contentHeight() int {
@@ -280,6 +392,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.knCursor = 0
 		return m, nil
 
+	case debounceTickMsg:
+		// Fire search only if sequence matches (no newer keystrokes).
+		if msg.seq == m.debounceSeq && m.searching {
+			query := m.searchInput.Value()
+			if query != "" && !m.searchBusy {
+				m.searchBusy = true
+				m.searchQuery = query
+				ds := m.ds
+				return m, tea.Batch(
+					m.spinner.Tick,
+					func() tea.Msg {
+						return searchResultMsg(ds.SemanticSearch(query, 20))
+					},
+				)
+			}
+		}
+		return m, nil
+
 	case shimmerTickMsg:
 		m.shimmerFrame++
 		// Rebuild viewports that contain shimmer content.
@@ -323,24 +453,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showHelp = !m.showHelp
 			return m, nil
 		case key.Matches(msg, keys.Tab):
-			m.activeTab = (m.activeTab + 1) % tabCount
-			m.searchBusy = false
-			if m.activeTab == tabOverview {
-				m.rebuildOverview()
-			}
+			m.switchTab((m.activeTab + 1) % tabCount)
 			return m, nil
 		case key.Matches(msg, keys.BackTab):
-			m.activeTab = (m.activeTab - 1 + tabCount) % tabCount
-			m.searchBusy = false
-			if m.activeTab == tabOverview {
-				m.rebuildOverview()
-			}
+			m.switchTab((m.activeTab - 1 + tabCount) % tabCount)
+			return m, nil
+		case key.Matches(msg, keys.Tab1) && !m.searching:
+			m.switchTab(tabOverview)
+			return m, nil
+		case key.Matches(msg, keys.Tab2) && !m.searching:
+			m.switchTab(tabTasks)
+			return m, nil
+		case key.Matches(msg, keys.Tab3) && !m.searching:
+			m.switchTab(tabSpecs)
+			return m, nil
+		case key.Matches(msg, keys.Tab4) && !m.searching:
+			m.switchTab(tabKnowledge)
 			return m, nil
 		case key.Matches(msg, keys.Search):
-			if m.activeTab == tabKnowledge && !m.overlayActive {
+			// Global search — works from any tab.
+			if !m.overlayActive {
+				m.searchReturnTab = m.activeTab
+				m.activeTab = tabKnowledge
 				m.searching = true
 				m.searchInput.Focus()
 				return m, nil
+			}
+		case key.Matches(msg, keys.Review):
+			// Direct review shortcut from Overview tab.
+			if m.activeTab == tabOverview && !m.overlayActive {
+				return m.tryDirectReview()
 			}
 		}
 
@@ -466,30 +608,43 @@ func (m *Model) updateSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.searchInput.Blur()
 		m.knowledge = m.ds.RecentKnowledge(100)
 		m.knCursor = 0
+		// Return to the tab search was invoked from.
+		if m.searchReturnTab != tabKnowledge {
+			m.switchTab(m.searchReturnTab)
+		}
 		return m, nil
 	case "enter":
-		m.searching = false
-		m.searchQuery = m.searchInput.Value()
-		m.searchInput.Blur()
-		if m.searchQuery == "" {
+		// Immediate search on Enter.
+		query := m.searchInput.Value()
+		if query == "" {
+			m.searching = false
+			m.searchInput.Blur()
 			m.knowledge = m.ds.RecentKnowledge(100)
 			m.knCursor = 0
 			return m, nil
 		}
+		m.searching = false
+		m.searchQuery = query
+		m.searchInput.Blur()
 		m.searchBusy = true
 		m.knCursor = 0
 		ds := m.ds
-		q := m.searchQuery
 		return m, tea.Batch(
 			m.spinner.Tick,
 			func() tea.Msg {
-				return searchResultMsg(ds.SemanticSearch(q, 20))
+				return searchResultMsg(ds.SemanticSearch(query, 20))
 			},
 		)
 	default:
 		var cmd tea.Cmd
 		m.searchInput, cmd = m.searchInput.Update(msg)
-		return m, cmd
+		// Debounced live search: schedule search after 300ms of inactivity.
+		m.debounceSeq++
+		seq := m.debounceSeq
+		debounceCmd := tea.Tick(300*time.Millisecond, func(t time.Time) tea.Msg {
+			return debounceTickMsg{seq: seq}
+		})
+		return m, tea.Batch(cmd, debounceCmd)
 	}
 }
 
@@ -502,8 +657,11 @@ func (m *Model) openOverlay(title, content string, crumbs ...string) {
 	m.overlayTitle = title
 	m.breadcrumbs = crumbs
 
-	// Size the overlay viewport.
-	w := min(m.width-8, 120)
+	// Size the overlay viewport — use 85% of terminal width.
+	w := min(m.width-4, m.width*85/100)
+	if w < 60 {
+		w = min(m.width-4, 60)
+	}
 	h := m.height - 8
 	if h < 5 {
 		h = 5
@@ -543,11 +701,123 @@ func (m *Model) updateOverlay(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.enterReviewMode()
 		return m, nil
+	case msg.String() == "d" && m.activeTab == tabSpecs && !m.reviewMode:
+		// Show diff against previous version.
+		m.showSpecDiff()
+		return m, nil
 	default:
 		var cmd tea.Cmd
 		m.overlayVP, cmd = m.overlayVP.Update(msg)
 		return m, cmd
 	}
+}
+
+// showSpecDiff shows a diff between the current spec file and its last saved version.
+func (m *Model) showSpecDiff() {
+	if m.specGroupCursor >= len(m.specGroups) {
+		return
+	}
+	g := m.specGroups[m.specGroupCursor]
+	if m.specFileCursor >= len(g.Files) {
+		return
+	}
+	f := g.Files[m.specFileCursor]
+	sd := &spec.SpecDir{ProjectPath: m.ds.ProjectPath(), TaskSlug: f.TaskSlug}
+
+	// Get history entries.
+	history, err := sd.History(spec.SpecFile(f.File))
+	if err != nil || len(history) == 0 {
+		m.overlayVP.SetContent(dimStyle.Render("  no previous versions"))
+		m.overlayTitle = "Diff: " + f.File
+		return
+	}
+
+	// Read current and previous version.
+	current := m.ds.SpecContent(f.TaskSlug, f.File)
+	prevData, err := os.ReadFile(history[0].Path)
+	if err != nil {
+		m.overlayVP.SetContent(dimStyle.Render("  cannot read previous version"))
+		m.overlayTitle = "Diff: " + f.File
+		return
+	}
+	previous := string(prevData)
+
+	// Simple line diff.
+	diff := renderSimpleDiff(previous, current)
+	ts, _ := time.Parse("20060102-150405", history[0].Timestamp)
+	age := time.Since(ts)
+	m.overlayTitle = fmt.Sprintf("Diff: %s (vs %s ago)", f.File, formatDuration(age))
+	m.overlayVP.SetContent(diff)
+}
+
+// renderSimpleDiff produces a colored line diff between two texts.
+// Uses bag-of-lines approach: groups removed and added lines separately.
+func renderSimpleDiff(old, new string) string {
+	oldLines := strings.Split(old, "\n")
+	newLines := strings.Split(new, "\n")
+
+	addStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#8a8"))
+	delStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#c66"))
+
+	var b strings.Builder
+
+	// Build line frequency maps for both versions.
+	newCounts := make(map[string]int)
+	for _, l := range newLines {
+		newCounts[l]++
+	}
+	oldCounts := make(map[string]int)
+	for _, l := range oldLines {
+		oldCounts[l]++
+	}
+
+	// Removed lines: in old but not (enough) in new.
+	removedCount := 0
+	remaining := make(map[string]int)
+	for k, v := range newCounts {
+		remaining[k] = v
+	}
+	for _, l := range oldLines {
+		if remaining[l] > 0 {
+			remaining[l]--
+			continue
+		}
+		if removedCount == 0 {
+			b.WriteString(delStyle.Render("  --- removed") + "\n")
+		}
+		b.WriteString(delStyle.Render("  - "+l) + "\n")
+		removedCount++
+	}
+
+	// Added lines: in new but not (enough) in old.
+	addedCount := 0
+	remaining2 := make(map[string]int)
+	for k, v := range oldCounts {
+		remaining2[k] = v
+	}
+	for _, l := range newLines {
+		if remaining2[l] > 0 {
+			remaining2[l]--
+			continue
+		}
+		if addedCount == 0 {
+			if removedCount > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(addStyle.Render("  +++ added") + "\n")
+		}
+		b.WriteString(addStyle.Render("  + "+l) + "\n")
+		addedCount++
+	}
+
+	if removedCount == 0 && addedCount == 0 {
+		b.WriteString(dimStyle.Render("  no changes"))
+	} else {
+		b.WriteString(fmt.Sprintf("\n  %s",
+			dimStyle.Render(fmt.Sprintf("%d removed, %d added", removedCount, addedCount))))
+	}
+
+	return b.String()
 }
 
 // enterReviewMode initializes review mode for the currently viewed spec file.
@@ -569,6 +839,7 @@ func (m *Model) enterReviewMode() {
 	m.reviewCursor = 0
 	m.reviewComments = make(map[int]string)
 	m.reviewEditing = false
+	m.reviewConfirmPending = false
 
 	// Load all review rounds.
 	sd := &spec.SpecDir{ProjectPath: m.ds.ProjectPath(), TaskSlug: f.TaskSlug}
@@ -651,14 +922,30 @@ func (m *Model) updateReviewMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.reviewInput.Focus()
 		return m, nil
 
-	case msg.String() == "a" && isLatestRound:
-		// Approve (only in new round).
-		m.submitReview(spec.ReviewApproved)
+	case msg.String() == "a" && isLatestRound && !m.reviewConfirmPending:
+		// Approve — require confirmation.
+		m.reviewConfirmPending = true
+		m.reviewConfirmStatus = spec.ReviewApproved
+		m.rebuildReviewOverlay()
 		return m, nil
 
-	case msg.String() == "x" && isLatestRound:
-		// Request Changes (only in new round).
-		m.submitReview(spec.ReviewChangesRequested)
+	case msg.String() == "x" && isLatestRound && !m.reviewConfirmPending:
+		// Request Changes — require confirmation.
+		m.reviewConfirmPending = true
+		m.reviewConfirmStatus = spec.ReviewChangesRequested
+		m.rebuildReviewOverlay()
+		return m, nil
+
+	case msg.String() == "y" && m.reviewConfirmPending:
+		// Confirm submission.
+		m.reviewConfirmPending = false
+		m.submitReview(m.reviewConfirmStatus)
+		return m, nil
+
+	case msg.String() == "n" && m.reviewConfirmPending:
+		// Cancel submission.
+		m.reviewConfirmPending = false
+		m.rebuildReviewOverlay()
 		return m, nil
 
 	case msg.String() == "d" && isLatestRound:
@@ -890,6 +1177,16 @@ func (m *Model) rebuildReviewOverlay() {
 		}
 	}
 
+	// Confirmation prompt for review submission.
+	if m.reviewConfirmPending {
+		action := "Approve"
+		if m.reviewConfirmStatus == spec.ReviewChangesRequested {
+			action = "Request Changes"
+		}
+		prompt := reviewCommentMarker.Render(fmt.Sprintf("  %s? (y/n)", action))
+		b.WriteString("\n" + prompt + "\n")
+	}
+
 	// Comment input area — fixed at bottom, clearly separated.
 	if m.reviewEditing {
 		inputLabel := fmt.Sprintf(" Line %d ", m.reviewInputLine+1)
@@ -902,13 +1199,20 @@ func (m *Model) rebuildReviewOverlay() {
 	m.overlayTitle = fmt.Sprintf("Review: %s", m.reviewFile)
 	m.overlayVP.SetContent(b.String())
 
-	// Keep cursor centered.
-	targetOffset := max(0, m.reviewCursor-m.overlayVP.Height()/2)
-	m.overlayVP.SetYOffset(targetOffset)
+	// Scroll position: center on cursor, but force to bottom when confirming.
+	if m.reviewConfirmPending {
+		m.overlayVP.GotoBottom()
+	} else {
+		targetOffset := max(0, m.reviewCursor-m.overlayVP.Height()/2)
+		m.overlayVP.SetYOffset(targetOffset)
+	}
 }
 
 func (m Model) renderOverlayView(bg string) string {
-	w := min(m.width-4, 124)
+	w := min(m.width-2, m.width*87/100)
+	if w < 64 {
+		w = min(m.width-2, 64)
+	}
 	h := m.height - 4
 
 	// Breadcrumb header.
@@ -932,7 +1236,9 @@ func (m Model) renderOverlayView(bg string) string {
 			isPending = spec.ReviewStatusFor(m.ds.ProjectPath(), slug) == spec.ReviewPending
 		}
 		if isPending {
-			hint = dimStyle.Render("esc: close  j/k: scroll  r: review")
+			hint = dimStyle.Render("esc: close  j/k: scroll  r: review  d: diff")
+		} else {
+			hint = dimStyle.Render("esc: close  j/k: scroll  d: diff")
 		}
 	} else if m.reviewMode && !m.reviewEditing {
 		isLatest := m.reviewRoundIdx >= len(m.reviewRounds)
@@ -974,6 +1280,15 @@ func (m Model) renderOverlayView(bg string) string {
 // View
 // ---------------------------------------------------------------------------
 
+// decrpmRe matches DECRPM terminal responses that leak as visible text.
+// Example: [?2026;2$y or [?2028$y
+var decrpmRe = regexp.MustCompile(`\[(\??\d+[;\d]*\$y)`)
+
+// stripDECRPM removes leaked terminal capability responses from rendered output.
+func stripDECRPM(s string) string {
+	return decrpmRe.ReplaceAllString(s, "")
+}
+
 func (m Model) View() tea.View {
 	if m.width == 0 {
 		return tea.NewView(m.spinner.View() + " loading...")
@@ -1009,7 +1324,7 @@ func (m Model) View() tea.View {
 		view = bg
 	}
 
-	v := tea.NewView(view)
+	v := tea.NewView(stripDECRPM(view))
 	v.AltScreen = true
 	return v
 }
@@ -1017,10 +1332,11 @@ func (m Model) View() tea.View {
 func (m Model) tabBarView() string {
 	var tabs []string
 	for i, name := range tabNames {
+		label := name + m.tabBadge(i)
 		if i == m.activeTab {
-			tabs = append(tabs, activeTabStyle.Render(name))
+			tabs = append(tabs, activeTabStyle.Render(label))
 		} else {
-			tabs = append(tabs, inactiveTabStyle.Render(name))
+			tabs = append(tabs, inactiveTabStyle.Render(label))
 		}
 	}
 	bar := lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
@@ -1029,6 +1345,49 @@ func (m Model) tabBarView() string {
 		title += " " + m.spinner.View()
 	}
 	return title + "\n" + tabBarStyle.Width(m.width).Render(bar)
+}
+
+// tabBadge returns a count/alert badge for a given tab.
+func (m Model) tabBadge(tab int) string {
+	switch tab {
+	case tabTasks:
+		if len(m.tasks) == 0 {
+			return ""
+		}
+		hasBlocker := false
+		for _, t := range m.tasks {
+			if t.HasBlocker {
+				hasBlocker = true
+				break
+			}
+		}
+		if hasBlocker {
+			return fmt.Sprintf("(%d", len(m.tasks)) + blockerStyle.Render("!") + ")"
+		}
+		return fmt.Sprintf("(%d)", len(m.tasks))
+	case tabSpecs:
+		if len(m.specGroups) == 0 {
+			return ""
+		}
+		hasPending := false
+		for _, g := range m.specGroups {
+			if spec.ReviewStatusFor(m.ds.ProjectPath(), g.Slug) == spec.ReviewPending {
+				hasPending = true
+				break
+			}
+		}
+		if hasPending {
+			return fmt.Sprintf("(%d", len(m.specGroups)) + reviewCommentMarker.Render("*") + ")"
+		}
+		return fmt.Sprintf("(%d)", len(m.specGroups))
+	case tabKnowledge:
+		if len(m.knowledge) == 0 {
+			return ""
+		}
+		return fmt.Sprintf("(%d)", len(m.knowledge))
+	default:
+		return ""
+	}
 }
 
 func (m Model) helpBar() string {
@@ -1040,7 +1399,15 @@ func (m Model) helpBar() string {
 // ---------------------------------------------------------------------------
 
 func (m Model) overviewView() string {
-	return "\n" + m.viewport.View()
+	var hint string
+	task := m.findActiveTask()
+	if task != nil {
+		status := spec.ReviewStatusFor(m.ds.ProjectPath(), task.Slug)
+		if status == spec.ReviewPending {
+			hint = "\n" + reviewCommentMarker.Render("  r: open review for "+task.Slug)
+		}
+	}
+	return "\n" + m.viewport.View() + hint
 }
 
 func (m Model) renderTaskOverview(td *TaskDetail) string {
@@ -1131,13 +1498,14 @@ func (m Model) tasksView() string {
 			prefix = "> "
 		}
 
-		// Progress bar (inline text, no animation).
-		progStr := "------"
+		// Progress bar (inline text, proportional width).
+		barW := min(max(8, m.width/12), 14)
+		progStr := strings.Repeat("-", barW)
 		pctStr := "  0%"
 		if t.Total > 0 {
 			pct := float64(t.Completed) / float64(t.Total)
-			filled := int(pct * 6)
-			progStr = strings.Repeat("#", filled) + strings.Repeat("-", 6-filled)
+			filled := int(pct * float64(barW))
+			progStr = strings.Repeat("#", filled) + strings.Repeat("-", barW-filled)
 			pctStr = fmt.Sprintf("%3d%%", int(pct*100))
 		}
 
@@ -1231,7 +1599,25 @@ func (m Model) specFilesView() string {
 	var b strings.Builder
 	maxW := m.width - 6
 
+	// Find task status for this spec group.
+	taskStatus := ""
+	reviewStatus := ""
+	for _, t := range m.tasks {
+		if t.Slug == g.Slug {
+			taskStatus = t.Status
+			break
+		}
+	}
+	rs := spec.ReviewStatusFor(m.ds.ProjectPath(), g.Slug)
+	if rs == spec.ReviewPending {
+		reviewStatus = reviewCommentMarker.Render(" [review pending]")
+	}
+
 	b.WriteString("\n  " + titleStyle.Render(g.Slug))
+	if taskStatus != "" {
+		b.WriteString("  " + styledStatus(taskStatus))
+	}
+	b.WriteString(reviewStatus)
 	b.WriteString("  " + dimStyle.Render(fmt.Sprintf("%d files  %s", g.FileCount, formatSize(g.TotalSize))))
 	b.WriteString("\n")
 
@@ -1459,12 +1845,20 @@ func (m Model) knowledgeView() string {
 		}
 		title = truncStr(title, m.width-36)
 
-		// Score + source tag + age.
+		// Score + source tag + sub_type + hit_count + age.
 		scoreStr := "     "
 		if k.Score > 0 {
 			scoreStr = scoreStyle.Render(fmt.Sprintf("%3.0f%% ", k.Score*100))
 		}
 		sourceTag := sourceStyle(k.Source)
+		subTag := ""
+		if k.SubType != "" && k.Source == "memory" {
+			subTag = " " + styledSubType(k.SubType)
+		}
+		hitStr := ""
+		if k.HitCount > 0 {
+			hitStr = " " + hitCountStyle.Render(fmt.Sprintf("x%d", k.HitCount))
+		}
 		age := dimStyle.Render(formatDuration(k.Age))
 
 		// Context line (task slug / type).
@@ -1474,12 +1868,12 @@ func (m Model) knowledgeView() string {
 		}
 
 		if i == m.knCursor {
-			b.WriteString(titleStyle.Render(prefix) + scoreStr + sourceTag + " " + titleStyle.Render(title) + "  " + age + "\n")
+			b.WriteString(titleStyle.Render(prefix) + scoreStr + sourceTag + subTag + " " + titleStyle.Render(title) + "  " + age + hitStr + "\n")
 			if ctxLine != "" {
 				b.WriteString("    " + ctxLine + "\n")
 			}
 		} else {
-			b.WriteString(prefix + scoreStr + sourceTag + " " + title + "  " + age + "\n")
+			b.WriteString(prefix + scoreStr + sourceTag + subTag + " " + title + "  " + age + hitStr + "\n")
 			if ctxLine != "" {
 				b.WriteString("    " + ctxLine + "\n")
 			}
@@ -1576,6 +1970,23 @@ func simplifyKnowledgeLabel(label string) (title, context string) {
 		context = strings.Join(parts[start:len(parts)-1], " / ")
 	}
 	return
+}
+
+func formatAuditAction(action string) string {
+	switch action {
+	case "spec.init":
+		return "created"
+	case "spec.delete":
+		return "deleted"
+	case "spec.complete":
+		return "completed"
+	case "review.submit":
+		return "reviewed"
+	case "epic.link":
+		return "linked"
+	default:
+		return action
+	}
 }
 
 func firstContentLine(s string) string {

@@ -241,7 +241,7 @@ func (s *Store) GetDocsByIDs(ctx context.Context, ids []int64) ([]DocRow, error)
 	}
 
 	// Build query with placeholders.
-	query := "SELECT id, url, section_path, content, content_hash, source_type, sub_type, version, crawled_at, ttl_days FROM records WHERE id IN ("
+	query := "SELECT id, url, section_path, content, content_hash, source_type, sub_type, version, crawled_at, ttl_days, hit_count FROM records WHERE id IN ("
 	args := make([]any, len(ids))
 	for i, id := range ids {
 		if i > 0 {
@@ -263,7 +263,7 @@ func (s *Store) GetDocsByIDs(ctx context.Context, ids []int64) ([]DocRow, error)
 		var d DocRow
 		var version sql.NullString
 		if err := rows.Scan(&d.ID, &d.URL, &d.SectionPath, &d.Content, &d.ContentHash,
-			&d.SourceType, &d.SubType, &version, &d.CrawledAt, &d.TTLDays); err != nil {
+			&d.SourceType, &d.SubType, &version, &d.CrawledAt, &d.TTLDays, &d.HitCount); err != nil {
 			continue // skip malformed rows; query itself succeeded
 		}
 		d.Version = version.String
@@ -296,7 +296,7 @@ func (s *Store) SearchMemoriesKeyword(ctx context.Context, query string, limit i
 	if len(conditions) > 0 {
 		where += " AND " + strings.Join(conditions, " AND ")
 	}
-	sqlQuery := "SELECT id, url, section_path, content, content_hash, source_type, sub_type, version, crawled_at, ttl_days FROM records WHERE " +
+	sqlQuery := "SELECT id, url, section_path, content, content_hash, source_type, sub_type, version, crawled_at, ttl_days, hit_count FROM records WHERE " +
 		where + " ORDER BY crawled_at DESC LIMIT ?"
 	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, sqlQuery, args...)
@@ -308,7 +308,7 @@ func (s *Store) SearchMemoriesKeyword(ctx context.Context, query string, limit i
 	for rows.Next() {
 		var d DocRow
 		var version sql.NullString
-		if err := rows.Scan(&d.ID, &d.URL, &d.SectionPath, &d.Content, &d.ContentHash, &d.SourceType, &d.SubType, &version, &d.CrawledAt, &d.TTLDays); err != nil {
+		if err := rows.Scan(&d.ID, &d.URL, &d.SectionPath, &d.Content, &d.ContentHash, &d.SourceType, &d.SubType, &version, &d.CrawledAt, &d.TTLDays, &d.HitCount); err != nil {
 			continue
 		}
 		d.Version = version.String

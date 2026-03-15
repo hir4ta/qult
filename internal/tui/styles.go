@@ -133,3 +133,28 @@ func sourceStyle(source string) string {
 		return dimStyle.Render(source)
 	}
 }
+
+// Sub-type styles for knowledge maturity visualization.
+var (
+	subTypeRule     = lipgloss.NewStyle().Foreground(lipgloss.Color("#8a8")).Bold(true)
+	subTypeDecision = lipgloss.NewStyle().Foreground(lipgloss.Color("#d7af5f"))
+	subTypePattern  = lipgloss.NewStyle().Foreground(lipgloss.Color("#87afd7"))
+	subTypeGeneral  = lipgloss.NewStyle().Foreground(lipgloss.Color("#666"))
+	hitCountStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#555"))
+)
+
+// styledSubType returns a styled sub_type abbreviation.
+func styledSubType(subType string) string {
+	switch subType {
+	case "rule":
+		return subTypeRule.Render("rule")
+	case "decision":
+		return subTypeDecision.Render("dec")
+	case "pattern":
+		return subTypePattern.Render("pat")
+	case "general":
+		return subTypeGeneral.Render("gen")
+	default:
+		return ""
+	}
+}

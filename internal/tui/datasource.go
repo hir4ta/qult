@@ -42,11 +42,21 @@ type SpecEntry struct {
 
 // KnowledgeEntry holds a search/browse result.
 type KnowledgeEntry struct {
-	Label   string
-	Source  string  // "memory", "spec", "project"
-	Content string
-	Score   float64 // vector similarity (0 if not from search)
-	Age     time.Duration
+	Label    string
+	Source   string  // "memory", "spec", "project"
+	SubType  string  // "general", "decision", "pattern", "rule"
+	HitCount int
+	Content  string
+	Score    float64 // vector similarity (0 if not from search)
+	Age      time.Duration
+}
+
+// ActivityEntry holds a timeline event from audit.jsonl.
+type ActivityEntry struct {
+	Timestamp time.Time
+	Action    string // "spec.init", "review.submit", etc.
+	Target    string // task slug or path
+	Detail    string
 }
 
 // DataSource abstracts data retrieval for the TUI.
@@ -58,6 +68,7 @@ type DataSource interface {
 	SpecContent(taskSlug, file string) string
 	SemanticSearch(query string, limit int) []KnowledgeEntry
 	RecentKnowledge(limit int) []KnowledgeEntry
+	RecentActivity(limit int) []ActivityEntry
 }
 
 // fileDataSource implements DataSource by reading .alfred/ files and SQLite.
@@ -248,6 +259,26 @@ func (ds *fileDataSource) RecentKnowledge(limit int) []KnowledgeEntry {
 	return docsToKnowledge(docs, nil, limit)
 }
 
+func (ds *fileDataSource) RecentActivity(limit int) []ActivityEntry {
+	entries, err := spec.ReadAuditLog(ds.projectPath, limit)
+	if err != nil || len(entries) == 0 {
+		return nil
+	}
+	// Reverse: most recent first.
+	result := make([]ActivityEntry, 0, len(entries))
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		t, _ := time.Parse(time.RFC3339, e.Timestamp)
+		result = append(result, ActivityEntry{
+			Timestamp: t,
+			Action:    e.Action,
+			Target:    e.Target,
+			Detail:    e.Detail,
+		})
+	}
+	return result
+}
+
 func docsToKnowledge(docs []store.DocRow, scoreMap map[int64]float64, limit int) []KnowledgeEntry {
 	now := time.Now()
 	entries := make([]KnowledgeEntry, 0, min(limit, len(docs)))
@@ -266,11 +297,13 @@ func docsToKnowledge(docs []store.DocRow, scoreMap map[int64]float64, limit int)
 			score = scoreMap[d.ID]
 		}
 		entries = append(entries, KnowledgeEntry{
-			Label:   d.SectionPath,
-			Source:  d.SourceType,
-			Content: d.Content,
-			Score:   score,
-			Age:     age,
+			Label:    d.SectionPath,
+			Source:   d.SourceType,
+			SubType:  d.SubType,
+			HitCount: d.HitCount,
+			Content:  d.Content,
+			Score:    score,
+			Age:      age,
 		})
 	}
 	return entries
