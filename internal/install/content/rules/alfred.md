@@ -4,7 +4,7 @@ description: alfred MCP tool usage guidelines — when and how to call knowledge
 
 # alfred MCP Tools
 
-alfred's knowledge base contains extensive curated Claude Code docs and best practices with hybrid vector + FTS search.
+alfred's knowledge base contains extensive curated Claude Code docs and best practices with vector search.
 
 ## knowledge — Search docs and best practices
 

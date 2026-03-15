@@ -1,6 +1,6 @@
 # claude-alfred
 
-Silent butler for Claude Code — MCP server + Hook handler.
+Development butler for Claude Code — MCP server + Hook handler.
 
 ## Stack
 
@@ -10,8 +10,8 @@ Go 1.25 / SQLite (ncruces/go-sqlite3) / Voyage AI (embedding)
 
 | Package | Role |
 |---|---|
-| `internal/mcpserver` | MCP server (2 tools: spec, recall) |
-| `internal/store` | SQLite persistence (docs + embeddings) |
+| `internal/mcpserver` | MCP server (2 tools: dossier, ledger) |
+| `internal/store` | SQLite persistence (records + embeddings) |
 | `internal/embedder` | Voyage AI (voyage-4-large, vector search + rerank-2.5) |
 | `internal/spec` | Spec management: .alfred/specs/ (4 files: requirements/design/decisions/session) |
 | `internal/install` | Plugin bundle + user rules |
@@ -52,12 +52,12 @@ go vet ./...                  # Static analysis
 - SessionStart: CLAUDE.md ingestion + user rules check + spec context injection (2 ops parallel via channels)
 - PreCompact: auto-updates Next Steps completion status from transcript; decision extraction; chapter memory persistence
 - UserPromptSubmit: Voyage vector search for memories → inject relevant past experience
-- Multi-agent architecture: review (6 profiles: code/config/security/docs/architecture/testing with checklist system), brainstorm (3 specialists + synthesis), plan (3 specialists + mediator), develop (spec→implement→review→commit orchestrator)
+- Multi-agent skills: inspect (6 profiles), salon (3 specialists + synthesis), brief (3 specialists + mediator), attend (spec→implement→review→commit orchestrator), mend (reproduce→analyze→fix→verify), survey (code→spec reverse engineering)
 
 ### Database & Schema
 
-- DB schema V8: incremental migration (V3+ preserves data, legacy schemas rebuilt)
-- Tables: docs (memories/specs/project), embeddings (vector search)
+- DB schema V1: fresh start (pre-v1 schemas rebuilt from scratch)
+- Tables: records (memories/specs/project), embeddings (vector search)
 - Store.DB() is test-only; production code uses Store methods (no raw SQL outside internal/store)
 - @.claude/rules/store-internals.md (vector search, SQL safety patterns)
 
@@ -67,19 +67,25 @@ go vet ./...                  # Static analysis
 - task_slug: `^[a-z0-9][a-z0-9\-]{0,63}$`
 - spec delete: dry-run preview (default) → `confirm=true` for actual deletion
 - spec.ValidSlug: exported regex for slug validation across packages
-- spec tool: DestructiveHint=true, IdempotentHint=false (delete action is destructive; 2-phase confirm provides UX safety)
+- dossier tool: DestructiveHint=true, IdempotentHint=false (delete action is destructive; 2-phase confirm provides UX safety)
 - Spec file locking: advisory flock on `.lock` file (exponential backoff 100/200/400/800ms ~1.5s total, context-aware cancellation, graceful fallback + stderr warning)
 - Spec version history: `.history/` dir with max 20 versions per file; rollback saves current first
-- Spec tool actions: init / update / status / switch / delete / history / rollback
+- Dossier tool actions: init / update / status / switch / delete / history / rollback
 - Spec confidence scoring: 10-point scale via `<!-- confidence: N -->` annotations (1-3 low, 4-6 medium, 7-9 high, 10 certain); status returns avg + low_items count
 
 ### Memory & Search
 
-- Memory persistence: source_type="memory" in docs table, TTL=0 (permanent)
+- Memory persistence: source_type="memory" in records table, TTL=0 (permanent)
 - Search pipeline: Voyage vector search → rerank → recency signal; LIKE keyword fallback when Voyage unavailable
 - Recency signal: post-rerank exponential decay for memory (60d half-life); floor at 50%
 - Decision extraction: base score 0.35, min confidence 0.4 — bare keyword matches require at least one positive signal (rationale/alternative/arch term)
 - Background embedding: embed-async/embed-doc subcommands for async Voyage API calls
+- Orphan cleanup: InsertEmbedding auto-removes embeddings referencing non-existent records
+
+### Naming Convention (Butler Theme)
+
+- Skills: brief, attend, inspect, mend, survey, salon, polish, valet, furnish, quarters, archive, concierge
+- MCP tools: dossier (spec management), ledger (memory)
 
 ### Misc
 

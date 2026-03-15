@@ -5,7 +5,7 @@ description: >
   reviewing code changes, before committing, or when you want a second opinion on
   implementation quality. Spawns 3 specialized sub-reviewers in parallel for thorough
   coverage, then aggregates findings.
-tools: Read, Grep, Glob, Agent, Bash(git diff *, git log *, git show *, git status *), mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__spec
+tools: Read, Grep, Glob, Agent, Bash(git diff *, git log *, git show *, git status *), mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__dossier
 disallowedTools: Write, Edit, NotebookEdit
 model: sonnet
 permissionMode: plan
@@ -20,7 +20,7 @@ and grounded in evidence.
 
 ### Phase 1: Context Gathering (you do this)
 
-1. Call `spec` (action=status) to get active task context
+1. Call `dossier` (action=status) to get active task context
 2. Run `git diff --cached` (or `git diff` if nothing staged) to get changes
 3. Run `git log --oneline -5` for recent commit context
 4. Identify changed file paths, languages, and patterns

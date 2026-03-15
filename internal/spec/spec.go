@@ -211,9 +211,9 @@ func (s *SpecDir) ReadFile(f SpecFile) (string, error) {
 // lockSpecDir acquires an advisory flock on a .lock file in the spec directory.
 // Returns the lock file handle (caller must defer unlock+close) or an error.
 // Uses non-blocking lock with exponential backoff (100/200/400/800ms, 1.5s total)
-// to handle concurrent hook invocations (e.g., PreCompact + SessionEnd overlap).
+// to handle concurrent hook invocations (e.g., PreCompact + SessionStart overlap).
 // Respects context cancellation to avoid wasting budget on tight timeouts.
-// Note: 1.5s worst-case consumes ~60% of SessionEnd's 2.5s budget; callers
+// Note: 1.5s worst-case is within PreCompact's 9s budget; callers
 // fall back to unprotected write if the lock times out.
 func (s *SpecDir) lockSpecDir(ctx context.Context) (*os.File, error) {
 	lockPath := filepath.Join(s.Dir(), ".lock")

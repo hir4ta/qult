@@ -9,14 +9,14 @@ import (
 	"time"
 )
 
-// Source type constants for the docs table.
+// Source type constants for the records table.
 const (
 	SourceMemory  = "memory"
 	SourceSpec    = "spec"
 	SourceProject = "project"
 )
 
-// DocRow represents a row in the docs table.
+// DocRow represents a row in the records table.
 type DocRow struct {
 	ID          int64
 	URL         string
@@ -35,7 +35,7 @@ func ContentHashOf(content string) string {
 	return fmt.Sprintf("%x", h)
 }
 
-// UpsertDoc inserts or updates a doc section. Returns the row ID and whether
+// UpsertDoc inserts or updates a record. Returns the row ID and whether
 // the content was actually changed (false if hash matched existing row).
 func (s *Store) UpsertDoc(ctx context.Context, doc *DocRow) (id int64, changed bool, err error) {
 	doc.ContentHash = ContentHashOf(doc.Content)
@@ -53,7 +53,7 @@ func (s *Store) UpsertDoc(ctx context.Context, doc *DocRow) (id int64, changed b
 	var existingID int64
 	var existingHash string
 	err = s.db.QueryRowContext(ctx,
-		`SELECT id, content_hash FROM docs WHERE url = ? AND section_path = ?`,
+		`SELECT id, content_hash FROM records WHERE url = ? AND section_path = ?`,
 		doc.URL, doc.SectionPath,
 	).Scan(&existingID, &existingHash)
 	if err == nil && existingHash == doc.ContentHash {
@@ -61,7 +61,7 @@ func (s *Store) UpsertDoc(ctx context.Context, doc *DocRow) (id int64, changed b
 	}
 
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO docs (url, section_path, content, content_hash, source_type, version, crawled_at, ttl_days)
+		INSERT INTO records (url, section_path, content, content_hash, source_type, version, crawled_at, ttl_days)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(url, section_path) DO UPDATE SET
 			content = excluded.content,
@@ -84,7 +84,7 @@ func (s *Store) UpsertDoc(ctx context.Context, doc *DocRow) (id int64, changed b
 		// Re-query to get the ID; Scan error means row exists but ID lookup
 		// failed — acceptable since the upsert itself succeeded.
 		_ = s.db.QueryRowContext(ctx,
-			`SELECT id FROM docs WHERE url = ? AND section_path = ?`,
+			`SELECT id FROM records WHERE url = ? AND section_path = ?`,
 			doc.URL, doc.SectionPath,
 		).Scan(&id)
 	}
@@ -105,8 +105,8 @@ func escapeLIKEContains(s string) string {
 	return "%" + r.Replace(s) + "%"
 }
 
-// DeleteDocsByURLPrefix removes all docs (and their embeddings) whose URL starts with the given prefix.
-// Returns the number of deleted document rows.
+// DeleteDocsByURLPrefix removes all records (and their embeddings) whose URL starts with the given prefix.
+// Returns the number of deleted record rows.
 func (s *Store) DeleteDocsByURLPrefix(ctx context.Context, prefix string) (int64, error) {
 	if prefix == "" {
 		return 0, fmt.Errorf("store: DeleteDocsByURLPrefix: empty prefix")
@@ -119,18 +119,18 @@ func (s *Store) DeleteDocsByURLPrefix(ctx context.Context, prefix string) (int64
 
 	escaped := escapeLIKEPrefix(prefix)
 	_, err = tx.ExecContext(ctx,
-		`DELETE FROM embeddings WHERE source = 'docs' AND source_id IN (SELECT id FROM docs WHERE url LIKE ? ESCAPE '\')`, escaped)
+		`DELETE FROM embeddings WHERE source = 'records' AND source_id IN (SELECT id FROM records WHERE url LIKE ? ESCAPE '\')`, escaped)
 	if err != nil {
 		return 0, fmt.Errorf("delete embeddings: %w", err)
 	}
 	res, err := tx.ExecContext(ctx,
-		`DELETE FROM docs WHERE url LIKE ? ESCAPE '\'`, escaped)
+		`DELETE FROM records WHERE url LIKE ? ESCAPE '\'`, escaped)
 	if err != nil {
-		return 0, fmt.Errorf("delete docs: %w", err)
+		return 0, fmt.Errorf("delete records: %w", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return 0, fmt.Errorf("store: delete docs rows affected: %w", err)
+		return 0, fmt.Errorf("store: delete records rows affected: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("store: commit delete: %w", err)
@@ -145,11 +145,11 @@ func (s *Store) CountDocsByURLPrefix(ctx context.Context, prefix string) (int64,
 	}
 	var count int64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM docs WHERE url LIKE ? ESCAPE '\'`, escapeLIKEPrefix(prefix)).Scan(&count)
+		`SELECT COUNT(*) FROM records WHERE url LIKE ? ESCAPE '\'`, escapeLIKEPrefix(prefix)).Scan(&count)
 	return count, err
 }
 
-// SearchDocsByURLPrefix returns docs whose URL starts with the given prefix.
+// SearchDocsByURLPrefix returns records whose URL starts with the given prefix.
 // This is an exact prefix match (no tokenization issues).
 // Results are ordered by URL for deterministic output.
 func (s *Store) SearchDocsByURLPrefix(ctx context.Context, prefix string, limit int) ([]DocRow, error) {
@@ -160,7 +160,7 @@ func (s *Store) SearchDocsByURLPrefix(ctx context.Context, prefix string, limit 
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, url, section_path, content, source_type, ttl_days FROM docs WHERE url LIKE ? ESCAPE '\' ORDER BY url LIMIT ?`,
+		`SELECT id, url, section_path, content, source_type, ttl_days FROM records WHERE url LIKE ? ESCAPE '\' ORDER BY url LIMIT ?`,
 		escapeLIKEPrefix(prefix), limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: SearchDocsByURLPrefix: %w", err)
@@ -177,7 +177,7 @@ func (s *Store) SearchDocsByURLPrefix(ctx context.Context, prefix string, limit 
 	return docs, rows.Err()
 }
 
-// DeleteExpiredDocs removes docs whose TTL has expired based on crawled_at + ttl_days.
+// DeleteExpiredDocs removes records whose TTL has expired based on crawled_at + ttl_days.
 // Returns the number of deleted rows.
 func (s *Store) DeleteExpiredDocs(ctx context.Context) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -188,8 +188,8 @@ func (s *Store) DeleteExpiredDocs(ctx context.Context) (int64, error) {
 
 	// Delete associated embeddings first.
 	_, err = tx.ExecContext(ctx,
-		`DELETE FROM embeddings WHERE source = 'docs' AND source_id IN (
-			SELECT id FROM docs WHERE ttl_days > 0
+		`DELETE FROM embeddings WHERE source = 'records' AND source_id IN (
+			SELECT id FROM records WHERE ttl_days > 0
 			AND datetime(crawled_at, '+' || ttl_days || ' days') < datetime('now')
 		)`)
 	if err != nil {
@@ -197,14 +197,14 @@ func (s *Store) DeleteExpiredDocs(ctx context.Context) (int64, error) {
 	}
 
 	res, err := tx.ExecContext(ctx,
-		`DELETE FROM docs WHERE ttl_days > 0
+		`DELETE FROM records WHERE ttl_days > 0
 		AND datetime(crawled_at, '+' || ttl_days || ' days') < datetime('now')`)
 	if err != nil {
-		return 0, fmt.Errorf("store: delete expired docs: %w", err)
+		return 0, fmt.Errorf("store: delete expired records: %w", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return 0, fmt.Errorf("store: expired docs rows affected: %w", err)
+		return 0, fmt.Errorf("store: expired records rows affected: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -213,14 +213,14 @@ func (s *Store) DeleteExpiredDocs(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
-// GetDocsByIDs retrieves multiple docs by their IDs.
+// GetDocsByIDs retrieves multiple records by their IDs.
 func (s *Store) GetDocsByIDs(ctx context.Context, ids []int64) ([]DocRow, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
 
 	// Build query with placeholders.
-	query := "SELECT id, url, section_path, content, content_hash, source_type, version, crawled_at, ttl_days FROM docs WHERE id IN ("
+	query := "SELECT id, url, section_path, content, content_hash, source_type, version, crawled_at, ttl_days FROM records WHERE id IN ("
 	args := make([]any, len(ids))
 	for i, id := range ids {
 		if i > 0 {
@@ -254,7 +254,7 @@ func (s *Store) GetDocsByIDs(ctx context.Context, ids []int64) ([]DocRow, error)
 	return docs, nil
 }
 
-// SearchMemoriesKeyword searches memory docs using LIKE substring matching.
+// SearchMemoriesKeyword searches memory records using LIKE substring matching.
 // This is the fallback when Voyage API is unavailable (no vector search).
 // On ~50-500 memory rows, LIKE is fast enough without FTS indexes.
 func (s *Store) SearchMemoriesKeyword(ctx context.Context, query string, limit int) ([]DocRow, error) {
@@ -274,7 +274,7 @@ func (s *Store) SearchMemoriesKeyword(ctx context.Context, query string, limit i
 		conditions = append(conditions, "(LOWER(section_path) LIKE ? ESCAPE '\\' OR LOWER(content) LIKE ? ESCAPE '\\')")
 		args = append(args, escaped, escaped)
 	}
-	sqlQuery := "SELECT id, url, section_path, content, content_hash, source_type, version, crawled_at, ttl_days FROM docs WHERE source_type = ? AND " +
+	sqlQuery := "SELECT id, url, section_path, content, content_hash, source_type, version, crawled_at, ttl_days FROM records WHERE source_type = ? AND " +
 		strings.Join(conditions, " AND ") + " ORDER BY crawled_at DESC LIMIT ?"
 	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, sqlQuery, args...)

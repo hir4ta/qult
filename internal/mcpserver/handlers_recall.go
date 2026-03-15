@@ -153,7 +153,7 @@ func recallSave(ctx context.Context, st *store.Store, emb *embedder.Embedder, re
 			if err != nil {
 				return
 			}
-			_ = st.InsertEmbedding("docs", id, emb.Model(), vec)
+			_ = st.InsertEmbedding("records", id, emb.Model(), vec)
 		}()
 	}
 

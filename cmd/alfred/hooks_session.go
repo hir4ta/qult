@@ -87,7 +87,7 @@ func splitMarkdownSections(md string) []mdSection {
 }
 
 // ingestProjectClaudeMD reads CLAUDE.md from the project root and upserts
-// each markdown section into the docs table for knowledge search.
+// each markdown section into the records table for knowledge search.
 // Silently skips if the file doesn't exist or is empty.
 func ingestProjectClaudeMD(ctx context.Context, st *store.Store, projectPath string) {
 	claudeMD := filepath.Join(projectPath, "CLAUDE.md")
@@ -189,7 +189,7 @@ func injectSpecContext(ctx context.Context, projectPath, source string, st *stor
 // buildChapterTimeline queries stored chapter memories for the active task and
 // returns a compact timeline showing what happened in each compact cycle.
 // This enables Claude to understand the full session history even after many
-// compactions, and to use the recall tool for detailed context from any chapter.
+// compactions, and to use the ledger tool for detailed context from any chapter.
 func buildChapterTimeline(ctx context.Context, projectPath, taskSlug string, st *store.Store) string {
 	if st == nil {
 		return ""
@@ -248,7 +248,7 @@ func buildChapterTimeline(ctx context.Context, projectPath, taskSlug string, st 
 
 	var buf strings.Builder
 	buf.WriteString(fmt.Sprintf("\n### Session Timeline (%d past compact cycles)\n", len(chapters)))
-	buf.WriteString("Previous session context is stored as permanent memory. Use the `recall` tool to search for details from any chapter.\n\n")
+	buf.WriteString("Previous session context is stored as permanent memory. Use the `ledger` tool to search for details from any chapter.\n\n")
 	for _, ch := range chapters {
 		label := ch.label
 		if label == "" {
@@ -321,7 +321,7 @@ func runEmbedAsync() error {
 }
 
 // asyncEmbedDocs spawns a single background process to generate embeddings
-// for multiple docs already stored in the docs table. Batching avoids
+// for multiple docs already stored in the records table. Batching avoids
 // spawning N processes (and N Voyage API connections) per compact cycle.
 func asyncEmbedDocs(docIDs []int64) {
 	if len(docIDs) == 0 {
@@ -416,7 +416,7 @@ func embedDocWithRetry(ctx context.Context, st *store.Store, emb *embedder.Embed
 			lastErr = err
 			continue
 		}
-		if err := st.InsertEmbedding("docs", docID, emb.Model(), vec); err != nil {
+		if err := st.InsertEmbedding("records", docID, emb.Model(), vec); err != nil {
 			return fmt.Errorf("insert embedding: %w", err)
 		}
 		return nil

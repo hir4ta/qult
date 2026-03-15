@@ -155,7 +155,7 @@ func searchPipeline(ctx context.Context, st *store.Store, emb *embedder.Embedder
 			res.Warnings = append(res.Warnings, fmt.Sprintf("vector embedding failed: %v", err))
 		} else {
 			types := parseSourceTypes(sourceType)
-			matches, err := st.VectorSearch(ctx, queryVec, "docs", overRetrieve, types...)
+			matches, err := st.VectorSearch(ctx, queryVec, "records", overRetrieve, types...)
 			if err != nil {
 				res.Warnings = append(res.Warnings, fmt.Sprintf("vector search failed: %v", err))
 			} else if len(matches) > 0 {

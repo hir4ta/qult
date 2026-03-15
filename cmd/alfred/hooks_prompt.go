@@ -18,7 +18,7 @@ var openStore = func() (*store.Store, error) {
 // ---------------------------------------------------------------------------
 
 // handleUserPromptSubmit performs semantic knowledge injection and detects
-// "remember this" intent for the recall tool.
+// "remember this" intent for the ledger tool.
 //
 // When VOYAGE_API_KEY is set: semantic search (embed + vector similarity)
 // When unavailable: only remember hints are emitted.
@@ -31,7 +31,7 @@ func handleUserPromptSubmit(ctx context.Context, ev *hookEvent) {
 	// Detect "remember this" intent.
 	rememberHint := ""
 	if detectRememberIntent(prompt) {
-		rememberHint = "User wants to save information. Use the recall tool with action=save to persist this as permanent memory. " +
+		rememberHint = "User wants to save information. Use the ledger tool with action=save to persist this as permanent memory. " +
 			"Parameters: content (what to save), label (short description), project (optional context)."
 	}
 

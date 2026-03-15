@@ -1,5 +1,5 @@
 // Package mcpserver implements the MCP tool server for alfred,
-// providing 2 tools: spec management and memory recall.
+// providing 2 tools: dossier (spec management) and ledger (memory).
 package mcpserver
 
 import (
@@ -10,13 +10,13 @@ import (
 	"github.com/hir4ta/claude-alfred/internal/store"
 )
 
-const serverInstructions = `alfred is your silent butler for Claude Code.
+const serverInstructions = `alfred is your development butler for Claude Code.
 
 When to use alfred tools:
-- Starting a new development task → call spec with action=init
-- Making design decisions → call spec with action=update
-- Starting/resuming a session → call spec with action=status
-- Searching past experiences or saving notes → call recall
+- Starting a new development task → call dossier with action=init
+- Making design decisions → call dossier with action=update
+- Starting/resuming a session → call dossier with action=status
+- Searching past experiences or saving notes → call ledger
 `
 
 // New creates a new MCP server with all tools registered.
@@ -32,14 +32,14 @@ func New(st *store.Store, emb *embedder.Embedder, ver string) *server.MCPServer 
 
 	s.AddTools(
 		server.ServerTool{
-			Tool: mcp.NewTool("spec",
+			Tool: mcp.NewTool("dossier",
 				mcp.WithDescription(`Unified spec management for development tasks. Persists context across compaction and sessions.
 
 Actions: status (read-only), init, update, switch, delete (2-phase: preview then confirm=true), history, rollback.
 
 task_slug format: lowercase alphanumeric with hyphens (e.g. "my-feature", max 64 chars).
 "status"/"history" are read-only. "init"/"update"/"switch"/"delete"/"rollback" modify state.`),
-				mcp.WithTitleAnnotation("Spec Management"),
+				mcp.WithTitleAnnotation("Dossier — Spec Management"),
 				mcp.WithReadOnlyHintAnnotation(false),
 				mcp.WithIdempotentHintAnnotation(false),
 				mcp.WithDestructiveHintAnnotation(true),
@@ -58,7 +58,7 @@ task_slug format: lowercase alphanumeric with hyphens (e.g. "my-feature", max 64
 		},
 
 		server.ServerTool{
-			Tool: mcp.NewTool("recall",
+			Tool: mcp.NewTool("ledger",
 				mcp.WithDescription(`Memory search and save — your persistent memory across sessions and projects.
 
 Actions:
@@ -73,7 +73,7 @@ Use for:
 - "Remember this approach for future reference"
 
 Do NOT use for: searching documentation (use WebFetch instead), file operations.`),
-				mcp.WithTitleAnnotation("Memory Recall"),
+				mcp.WithTitleAnnotation("Ledger — Memory"),
 				mcp.WithReadOnlyHintAnnotation(false),
 				mcp.WithIdempotentHintAnnotation(false),
 				mcp.WithOpenWorldHintAnnotation(false),

@@ -16,7 +16,7 @@ type SyncResult struct {
 	Unchanged int `json:"unchanged"`
 }
 
-// SyncToDB syncs all spec files to the docs table with embeddings.
+// SyncToDB syncs all spec files to the records table with embeddings.
 func SyncToDB(ctx context.Context, sd *SpecDir, st *store.Store, emb *embedder.Embedder) (*SyncResult, error) {
 	sections, err := sd.AllSections()
 	if err != nil {
@@ -46,7 +46,7 @@ func SyncToDB(ctx context.Context, sd *SpecDir, st *store.Store, emb *embedder.E
 			if err != nil {
 				return nil, fmt.Errorf("embed %s: %w", sec.File, err)
 			}
-			if err := st.InsertEmbedding("docs", id, emb.Model(), vec); err != nil {
+			if err := st.InsertEmbedding("records", id, emb.Model(), vec); err != nil {
 				return nil, fmt.Errorf("store embedding %s: %w", sec.File, err)
 			}
 			result.Embedded++
@@ -79,7 +79,7 @@ func SyncSingleFile(ctx context.Context, sd *SpecDir, f SpecFile, st *store.Stor
 		if err != nil {
 			return fmt.Errorf("embed: %w", err)
 		}
-		if err := st.InsertEmbedding("docs", id, emb.Model(), vec); err != nil {
+		if err := st.InsertEmbedding("records", id, emb.Model(), vec); err != nil {
 			return fmt.Errorf("store embedding: %w", err)
 		}
 	}

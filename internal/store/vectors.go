@@ -24,6 +24,8 @@ func envIntOrDefault(key string, fallback int) int {
 
 // InsertEmbedding stores a vector embedding as a BLOB.
 // If ExpectedDims is set on the Store, validates that vector dimensions match.
+// Also cleans up orphaned embeddings for the same source that reference
+// non-existent docs (can occur when docs are upserted with new IDs).
 func (s *Store) InsertEmbedding(source string, sourceID int64, model string, vector []float32) error {
 	if s.ExpectedDims > 0 && len(vector) != s.ExpectedDims {
 		return fmt.Errorf("store: insert embedding: dimension mismatch: got %d, expected %d", len(vector), s.ExpectedDims)
@@ -36,6 +38,13 @@ func (s *Store) InsertEmbedding(source string, sourceID int64, model string, vec
 	)
 	if err != nil {
 		return fmt.Errorf("store: insert embedding: %w", err)
+	}
+
+	// Clean up orphaned embeddings: remove entries whose source_id no longer
+	// exists in the records table. This handles cases where records were upserted
+	// with new IDs (e.g., DELETE + INSERT via schema migration or re-init).
+	if source == "records" {
+		_, _ = s.db.Exec(`DELETE FROM embeddings WHERE source = 'records' AND source_id NOT IN (SELECT id FROM records)`)
 	}
 	return nil
 }
@@ -76,13 +85,13 @@ func (s *Store) VectorSearch(ctx context.Context, queryVec []float32, source str
 	// so small thresholds risk missing better matches at higher row IDs.
 	earlyStopCount := max(limit*3, 50)
 
-	// Build query: optionally JOIN with docs to pre-filter by source_type,
-	// avoiding cosine computation on irrelevant document types.
+	// Build query: optionally JOIN with records to pre-filter by source_type,
+	// avoiding cosine computation on irrelevant record types.
 	var queryStr string
 	var queryArgs []any
 	if len(docSourceTypes) > 0 {
 		var qb strings.Builder
-		qb.WriteString("SELECT e.source_id, e.vector FROM embeddings e JOIN docs d ON d.id = e.source_id WHERE e.source = ? AND d.source_type IN (")
+		qb.WriteString("SELECT e.source_id, e.vector FROM embeddings e JOIN records d ON d.id = e.source_id WHERE e.source = ? AND d.source_type IN (")
 		queryArgs = append(queryArgs, source)
 		for i, st := range docSourceTypes {
 			if i > 0 {

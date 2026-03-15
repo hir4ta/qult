@@ -26,7 +26,7 @@ func TestUpsertDoc(t *testing.T) {
 		URL:         "https://docs.example.com/hooks",
 		SectionPath: "Hooks > PreToolUse",
 		Content:     "PreToolUse hooks fire before a tool is called.",
-		SourceType:  "docs",
+		SourceType:  "records",
 		TTLDays:     7,
 	}
 
@@ -78,7 +78,7 @@ func TestGetDocsByIDs(t *testing.T) {
 			URL:         "https://docs.example.com/page",
 			SectionPath: "Section " + string(rune('A'+i)),
 			Content:     "Content for section " + string(rune('A'+i)),
-			SourceType:  "docs",
+			SourceType:  "records",
 		}
 		id, _, err := st.UpsertDoc(context.Background(), doc)
 		if err != nil {
@@ -125,9 +125,9 @@ func TestDeleteDocsByURLPrefix(t *testing.T) {
 
 	// Insert docs with different URL prefixes.
 	for _, d := range []DocRow{
-		{URL: "https://docs.example.com/hooks", SectionPath: "Hooks", Content: "hooks content", SourceType: "docs"},
-		{URL: "https://docs.example.com/skills", SectionPath: "Skills", Content: "skills content", SourceType: "docs"},
-		{URL: "https://other.com/page", SectionPath: "Other", Content: "other content", SourceType: "docs"},
+		{URL: "https://docs.example.com/hooks", SectionPath: "Hooks", Content: "hooks content", SourceType: "records"},
+		{URL: "https://docs.example.com/skills", SectionPath: "Skills", Content: "skills content", SourceType: "records"},
+		{URL: "https://other.com/page", SectionPath: "Other", Content: "other content", SourceType: "records"},
 	} {
 		d2 := d
 		if _, _, err := st.UpsertDoc(context.Background(), &d2); err != nil {
@@ -250,7 +250,7 @@ func TestDeleteDocsByURLPrefix_EmptyPrefix(t *testing.T) {
 	ctx := t.Context()
 
 	// Insert a doc so there's data to accidentally delete.
-	d := DocRow{URL: "https://example.com/page", SectionPath: "A", Content: "content", SourceType: "docs"}
+	d := DocRow{URL: "https://example.com/page", SectionPath: "A", Content: "content", SourceType: "records"}
 	if _, _, err := st.UpsertDoc(ctx, &d); err != nil {
 		t.Fatalf("UpsertDoc: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestDeleteExpiredDocs(t *testing.T) {
 		URL:         "https://example.com/expired",
 		SectionPath: "Expired",
 		Content:     "expired content",
-		SourceType:  "docs",
+		SourceType:  "records",
 		TTLDays:     1,
 		CrawledAt:   time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339),
 	}
@@ -301,7 +301,7 @@ func TestDeleteExpiredDocs(t *testing.T) {
 		URL:         "https://example.com/fresh",
 		SectionPath: "Fresh",
 		Content:     "fresh content",
-		SourceType:  "docs",
+		SourceType:  "records",
 		TTLDays:     30,
 		CrawledAt:   time.Now().UTC().Format(time.RFC3339),
 	}
@@ -365,9 +365,9 @@ func TestSearchDocsByURLPrefix(t *testing.T) {
 	ctx := context.Background()
 
 	docs := []DocRow{
-		{URL: "https://docs.example.com/hooks/overview", SectionPath: "A", Content: "hooks overview", SourceType: "docs"},
-		{URL: "https://docs.example.com/hooks/events", SectionPath: "B", Content: "hooks events", SourceType: "docs"},
-		{URL: "https://docs.example.com/skills/overview", SectionPath: "C", Content: "skills overview", SourceType: "docs"},
+		{URL: "https://docs.example.com/hooks/overview", SectionPath: "A", Content: "hooks overview", SourceType: "records"},
+		{URL: "https://docs.example.com/hooks/events", SectionPath: "B", Content: "hooks events", SourceType: "records"},
+		{URL: "https://docs.example.com/skills/overview", SectionPath: "C", Content: "skills overview", SourceType: "records"},
 	}
 	for i := range docs {
 		if _, _, err := st.UpsertDoc(ctx, &docs[i]); err != nil {
@@ -409,8 +409,8 @@ func TestSchemaVersion(t *testing.T) {
 	t.Parallel()
 
 	v := SchemaVersion()
-	if v < 6 {
-		t.Errorf("SchemaVersion() = %d, want >= 6", v)
+	if v < 1 {
+		t.Errorf("SchemaVersion() = %d, want >= 1", v)
 	}
 }
 
@@ -471,7 +471,7 @@ func TestSearchMemoriesKeyword(t *testing.T) {
 
 	// Also insert a non-memory doc with matching content to verify source_type filter.
 	_, _, err := st.UpsertDoc(ctx, &DocRow{
-		URL: "https://example.com/hooks", SectionPath: "Hooks", Content: "hooks documentation", SourceType: "docs",
+		URL: "https://example.com/hooks", SectionPath: "Hooks", Content: "hooks documentation", SourceType: "records",
 	})
 	if err != nil {
 		t.Fatalf("UpsertDoc(docs): %v", err)

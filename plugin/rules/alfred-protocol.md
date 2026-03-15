@@ -9,12 +9,12 @@ paths:
 When a `.alfred/specs/` directory exists in the project, follow this protocol:
 
 ## Session Start
-- Call `spec` with action=status and project_path to check for an active task
+- Call `dossier` with action=status and project_path to check for an active task
 - If active, read the session state to understand current position and next steps
 - If session.md mentions "Compact Marker", you are resuming after context compaction — read all spec files to restore full context
 
 ## Starting New Work
-- Before implementation, call `spec` with action=init to create a spec
+- Before implementation, call `dossier` with action=init to create a spec
 - Fill in requirements.md and design.md through conversation with the user
 
 ## During Implementation
@@ -35,7 +35,7 @@ Record these autonomously — do not wait for user instruction:
 - Changing files (Modified Files)
 
 ## Compact/Session Recovery
-After compact or new session, `spec` with action=status provides session.md.
+After compact or new session, `dossier` with action=status provides session.md.
 Read spec files in this order to rebuild context:
 1. session.md (where am I?)
 2. requirements.md (what am I building?)

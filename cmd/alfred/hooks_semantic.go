@@ -68,7 +68,7 @@ func searchMemorySemantic(ctx context.Context, queryVec []float32, st *store.Sto
 		return nil
 	}
 
-	matches, err := st.VectorSearch(ctx, queryVec, "docs", 4, store.SourceMemory)
+	matches, err := st.VectorSearch(ctx, queryVec, "records", 4, store.SourceMemory)
 	if err != nil || len(matches) == 0 {
 		return nil
 	}

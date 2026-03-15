@@ -122,13 +122,13 @@ func TestInsertEmbedding(t *testing.T) {
 	st := openTestStore(t)
 
 	vec := []float32{0.1, 0.2, 0.3, 0.4, 0.5}
-	if err := st.InsertEmbedding("docs", 42, "voyage-4-large", vec); err != nil {
+	if err := st.InsertEmbedding("records", 42, "voyage-4-large", vec); err != nil {
 		t.Fatalf("InsertEmbedding(docs, 42) = %v", err)
 	}
 
 	// Replace existing embedding (INSERT OR REPLACE).
 	vec2 := []float32{0.9, 0.8, 0.7}
-	if err := st.InsertEmbedding("docs", 42, "voyage-4-large", vec2); err != nil {
+	if err := st.InsertEmbedding("records", 42, "voyage-4-large", vec2); err != nil {
 		t.Fatalf("InsertEmbedding(docs, 42) replace = %v", err)
 	}
 }
@@ -153,12 +153,12 @@ func TestVectorSearch(t *testing.T) {
 			URL:         "https://example.com/doc",
 			SectionPath: "Section " + string(rune('A'+e.id)),
 			Content:     "content",
-			SourceType:  "docs",
+			SourceType:  "records",
 		})
 		if err != nil {
 			t.Fatalf("UpsertDoc: %v", err)
 		}
-		if err := st.InsertEmbedding("docs", e.id, "test", e.vec); err != nil {
+		if err := st.InsertEmbedding("records", e.id, "test", e.vec); err != nil {
 			t.Fatalf("InsertEmbedding(%d) = %v", e.id, err)
 		}
 	}
@@ -166,7 +166,7 @@ func TestVectorSearch(t *testing.T) {
 	// Query along x-axis. Should match entries 1 and 2 (above threshold 0.3),
 	// entry 3 is orthogonal (~0), entry 4 is opposite (~-1).
 	query := []float32{1, 0, 0}
-	results, err := st.VectorSearch(context.Background(), query, "docs", 10)
+	results, err := st.VectorSearch(context.Background(), query, "records", 10)
 	if err != nil {
 		t.Fatalf("VectorSearch = _, %v", err)
 	}
@@ -193,7 +193,7 @@ func TestVectorSearch(t *testing.T) {
 	}
 
 	// Limit results.
-	limited, err := st.VectorSearch(context.Background(), query, "docs", 1)
+	limited, err := st.VectorSearch(context.Background(), query, "records", 1)
 	if err != nil {
 		t.Fatalf("VectorSearch(limit=1) = _, %v", err)
 	}
@@ -202,7 +202,7 @@ func TestVectorSearch(t *testing.T) {
 	}
 
 	// Nil queryVec returns nil.
-	nilResult, err := st.VectorSearch(context.Background(), nil, "docs", 10)
+	nilResult, err := st.VectorSearch(context.Background(), nil, "records", 10)
 	if err != nil {
 		t.Fatalf("VectorSearch(nil) = _, %v", err)
 	}
@@ -226,13 +226,13 @@ func TestInsertEmbeddingDimensionValidation(t *testing.T) {
 	st.ExpectedDims = 3
 
 	// Correct dimensions.
-	err := st.InsertEmbedding("docs", 1, "test", []float32{1, 2, 3})
+	err := st.InsertEmbedding("records", 1, "test", []float32{1, 2, 3})
 	if err != nil {
 		t.Fatalf("InsertEmbedding(correct dims): %v", err)
 	}
 
 	// Wrong dimensions.
-	err = st.InsertEmbedding("docs", 2, "test", []float32{1, 2})
+	err = st.InsertEmbedding("records", 2, "test", []float32{1, 2})
 	if err == nil {
 		t.Error("InsertEmbedding(wrong dims) should return error")
 	}
