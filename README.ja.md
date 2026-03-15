@@ -20,20 +20,16 @@
 
 ## セットアップ
 
-### 1. インストール
-
-```bash
-brew install hir4ta/alfred/alfred
-```
-
-### 2. プラグイン追加
+### 1. プラグイン追加
 
 ```
 /plugin marketplace add hir4ta/claude-alfred
 /plugin install alfred
 ```
 
-### 3. API キー設定（オプション）
+初回実行時にバイナリが自動ダウンロードされます。
+
+### 2. API キー設定（オプション）
 
 ```bash
 export VOYAGE_API_KEY=your-key  # ~/.zshrc に追加

@@ -183,7 +183,7 @@ func Bundle(outputDir, version string) error {
 }
 
 // generateRunScript creates a bootstrapper script that resolves the alfred binary
-// from PATH (Homebrew/go install), local cache, or GitHub Releases download.
+// from PATH (go install), local cache, or GitHub Releases download.
 func generateRunScript(ver string) string {
 	return fmt.Sprintf(`#!/bin/sh
 # alfred bootstrapper — resolves binary from PATH, cache, or GitHub Releases.
@@ -194,7 +194,7 @@ VERSION="%s"
 CACHE_DIR="${HOME}/.alfred/bin"
 CACHED_BIN="${CACHE_DIR}/alfred"
 
-# 1. Binary in PATH with matching version? (e.g. Homebrew, go install)
+# 1. Binary in PATH with matching version? (e.g. go install)
 if command -v alfred >/dev/null 2>&1; then
   PATH_VER=$(alfred version --short 2>/dev/null || echo "")
   # Strip build metadata (+dirty, +dev, etc.) for comparison
@@ -221,6 +221,7 @@ case "$ARCH" in
   aarch64|arm64) ARCH="arm64" ;;
 esac
 
+RELEASE_URL="https://github.com/${REPO}/releases/tag/v${VERSION}"
 URL="https://github.com/${REPO}/releases/download/v${VERSION}/alfred_${OS}_${ARCH}.tar.gz"
 CHECKSUM_URL="https://github.com/${REPO}/releases/download/v${VERSION}/checksums.txt"
 mkdir -p "$CACHE_DIR"
@@ -229,15 +230,33 @@ DL_DIR=$(mktemp -d)
 trap 'rm -rf "$DL_DIR"' EXIT
 
 if command -v curl >/dev/null 2>&1; then
-  curl -sSfL "$URL" -o "$DL_DIR/alfred.tar.gz"
-  curl -sSfL "$CHECKSUM_URL" -o "$DL_DIR/checksums.txt"
+  DL_CMD="curl"
 elif command -v wget >/dev/null 2>&1; then
-  wget -qO "$DL_DIR/alfred.tar.gz" "$URL"
-  wget -qO "$DL_DIR/checksums.txt" "$CHECKSUM_URL"
+  DL_CMD="wget"
 else
   echo "alfred: curl or wget required to download binary" >&2
-  echo "  Install via Homebrew instead: brew install hir4ta/alfred/alfred" >&2
   exit 1
+fi
+
+# Download binary and checksums with clear error on failure.
+if [ "$DL_CMD" = "curl" ]; then
+  if ! curl -sSfL "$URL" -o "$DL_DIR/alfred.tar.gz" 2>/dev/null; then
+    echo "alfred: failed to download v${VERSION} binary" >&2
+    echo "  Release may not exist yet: ${RELEASE_URL}" >&2
+    echo "  Please try again in a few minutes, or report the issue:" >&2
+    echo "  https://github.com/${REPO}/issues" >&2
+    exit 1
+  fi
+  curl -sSfL "$CHECKSUM_URL" -o "$DL_DIR/checksums.txt"
+else
+  if ! wget -qO "$DL_DIR/alfred.tar.gz" "$URL" 2>/dev/null; then
+    echo "alfred: failed to download v${VERSION} binary" >&2
+    echo "  Release may not exist yet: ${RELEASE_URL}" >&2
+    echo "  Please try again in a few minutes, or report the issue:" >&2
+    echo "  https://github.com/${REPO}/issues" >&2
+    exit 1
+  fi
+  wget -qO "$DL_DIR/checksums.txt" "$CHECKSUM_URL"
 fi
 
 # Verify checksum (required for binary integrity).

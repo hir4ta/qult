@@ -36,13 +36,12 @@ go test ./... -count=1
 go vet ./...
 ```
 
-## Version Update
+## Plugin Bundle Update
 
-1. Update `plugins[0].version` in `.claude-plugin/marketplace.json`
-2. **Check plugin/ source of truth**: `internal/install/content/` (rules, skills, agents) is the source.
+1. **Check plugin/ source of truth**: `internal/install/content/` (rules, skills, agents) is the source.
    `plugin/` is generated — if plugin/ was edited directly, sync `internal/install/content/` first.
    CI's `Verify plugin bundle is up to date` catches mismatches.
-3. Regenerate plugin/ directory (ldflags version injection is **required**):
+2. Regenerate plugin/ directory (ldflags version injection is **required**):
    ```
    go run -ldflags "-X main.version=<VERSION>" ./cmd/alfred plugin-bundle ./plugin
    ```
@@ -54,10 +53,11 @@ README.md / README.ja.md のバッジは shields.io の動的バッジ（GitHub 
 
 ただし Go バージョンバッジ (`go-%3E%3D1.25`) は静的値。`go.mod` の Go バージョンを上げた場合は README のバッジも更新すること。
 
-## Commit & Tag
+## Commit & Tag (Phase 1: Release binary)
 
-1. Stage changed files: `git add .claude-plugin/marketplace.json plugin/`
+1. Stage changed files: `git add plugin/`
    - Include other uncommitted files if agreed with user
+   - **DO NOT stage `.claude-plugin/marketplace.json` yet** (marketplace update is Phase 2)
 2. Commit message: `v<VERSION>: <one-line summary of commits>` (in English)
    - Generate summary from `git log <prev-tag>..HEAD --oneline`
    - Write as if the developer authored it
@@ -75,7 +75,7 @@ go install -ldflags "-X main.version=<VERSION> -X main.commit=$(git rev-parse --
 This ensures `alfred version` immediately returns the new version.
 Without ldflags, `go install` uses `version=dev` and vcs fallback shows the old version.
 
-## Push
+## Push & CI (Phase 1)
 
 **NEVER use `--tags`** (pushes all local tags, causing inconsistencies)
 
@@ -86,11 +86,24 @@ git push origin v<VERSION>
 
 Always push individually.
 
-## CI Monitoring
+### CI Monitoring
 
 1. Check Release workflow started: `gh run list --limit 1`
 2. Watch until completion: `gh run watch <run-id>`
-3. Report result (success/failure + duration)
+3. **If CI fails → abort. Do NOT proceed to Phase 2.** Fix the issue and re-release.
+
+## Marketplace Update (Phase 2: after Release CI succeeds)
+
+**CRITICAL**: Only proceed after GitHub Release is confirmed successful.
+
+1. Verify release assets exist:
+   ```
+   gh release view v<VERSION> --json assets --jq '.assets[].name'
+   ```
+   Must include `alfred_darwin_arm64.tar.gz`, `alfred_darwin_amd64.tar.gz`, `alfred_linux_amd64.tar.gz`, `alfred_linux_arm64.tar.gz`, `checksums.txt`
+2. Update `plugins[0].version` in `.claude-plugin/marketplace.json`
+3. Commit: `chore: update marketplace to v<VERSION>`
+4. Push: `git push origin main`
 
 ## Completion Report
 

@@ -22,20 +22,16 @@ Manages specs, remembers past experience, and watches over quality — so you ca
 
 ## Getting Started
 
-### 1. Install
-
-```bash
-brew install hir4ta/alfred/alfred
-```
-
-### 2. Add the plugin
+### 1. Add the plugin
 
 ```
 /plugin marketplace add hir4ta/claude-alfred
 /plugin install alfred
 ```
 
-### 3. Set API key (optional)
+The binary is downloaded automatically on first run.
+
+### 2. Set API key (optional)
 
 ```bash
 export VOYAGE_API_KEY=your-key  # Add to ~/.zshrc
