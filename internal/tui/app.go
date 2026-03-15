@@ -1351,7 +1351,7 @@ func stripDECRPM(s string) string {
 
 func (m Model) View() tea.View {
 	if m.width == 0 {
-		return tea.NewView(m.spinner.View() + " loading...")
+		return tea.NewView("")
 	}
 
 	var content string
