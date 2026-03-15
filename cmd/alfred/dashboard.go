@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -18,14 +19,21 @@ func runDashboard() error {
 	ds := tui.NewFileDataSource(projectPath, nil, nil)
 	model := tui.New(ds)
 
-	// Filter leaked terminal response fragments (DECRPM, CPR, DA) that
-	// bubbletea v2 fails to parse and delivers as KeyPressMsg.
+	// Workaround for bubbletea v2 bug #1627: DECRPM terminal responses leak
+	// as phantom KeyPressMsg events. Two mitigations:
+	//
+	// 1. Set TERM_PROGRAM=Apple_Terminal to prevent bubbletea from sending
+	//    DECRQM queries (mode 2026/2027) that trigger the responses.
+	if os.Getenv("TERM_PROGRAM") == "" {
+		os.Setenv("TERM_PROGRAM", "Apple_Terminal")
+	}
+
+	// 2. Block all key events for 2 seconds as a safety net for any
+	//    terminal responses still in flight.
+	startedAt := time.Now()
 	filter := func(_ tea.Model, msg tea.Msg) tea.Msg {
-		if kp, ok := msg.(tea.KeyPressMsg); ok && kp.Text != "" && len(kp.Text) == 1 {
-			switch kp.Text[0] {
-			case '$', 'y', 'R', 'c', '?', ';', '[':
-				return nil
-			}
+		if _, ok := msg.(tea.KeyPressMsg); ok && time.Since(startedAt) < 2*time.Second {
+			return nil
 		}
 		return msg
 	}
