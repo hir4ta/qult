@@ -91,6 +91,15 @@ var (
 				Bold(true)
 )
 
+// Review round navigation style.
+var reviewRoundStyle = lipgloss.NewStyle().
+	Foreground(accent).
+	Bold(true)
+
+// Carried-over (unresolved) comment from previous rounds — dimmer orange.
+var reviewCarriedStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.Color("#a07040"))
+
 // Checkbox markers.
 const (
 	checkDone   = "[x]"

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -122,9 +123,113 @@ func specDoInit(ctx context.Context, req mcp.CallToolRequest, st *store.Store, e
 		}
 		result["db_synced"] = true
 		result["db_embedded"] = syncResult.Embedded > 0
+
+		// Knowledge feedback: search related memories for the new task.
+		if description != "" {
+			if suggestions := searchRelatedKnowledge(ctx, st, emb, description, 5); len(suggestions) > 0 {
+				result["suggested_knowledge"] = suggestions
+			}
+		}
 	}
 
 	return marshalResult(result)
+}
+
+// knowledgeSuggestion represents a related memory surfaced during spec init.
+type knowledgeSuggestion struct {
+	Label          string  `json:"label"`
+	Source         string  `json:"source"`
+	SubType        string  `json:"sub_type"`
+	Content        string  `json:"content"`
+	RelevanceScore float64 `json:"relevance_score"`
+}
+
+// subTypeBoost returns the relevance multiplier for a memory sub_type.
+func subTypeBoost(subType string) float64 {
+	switch subType {
+	case store.SubTypeRule:
+		return 2.0
+	case store.SubTypeDecision:
+		return 1.5
+	case store.SubTypePattern:
+		return 1.3
+	default:
+		return 1.0
+	}
+}
+
+// searchRelatedKnowledge searches for memories related to a task description.
+// Uses vector search when available, falling back to FTS5.
+func searchRelatedKnowledge(ctx context.Context, st *store.Store, emb *embedder.Embedder, description string, limit int) []knowledgeSuggestion {
+	var ranked []scoredDoc
+
+	// Try vector search first.
+	if emb != nil {
+		vec, err := emb.EmbedForSearch(ctx, description)
+		if err == nil && vec != nil {
+			matches, err := st.VectorSearch(ctx, vec, "records", limit*3, store.SourceMemory)
+			if err == nil && len(matches) > 0 {
+				ids := make([]int64, len(matches))
+				scores := make(map[int64]float64, len(matches))
+				for i, m := range matches {
+					ids[i] = m.SourceID
+					scores[m.SourceID] = m.Score
+				}
+				fetched, err := st.GetDocsByIDs(ctx, ids)
+				if err == nil {
+					for _, d := range fetched {
+						baseScore := scores[d.ID] // vector similarity in [0, 1]
+						ranked = append(ranked, scoredDoc{doc: d, score: baseScore * subTypeBoost(d.SubType)})
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback to FTS5: use position-based scoring (1.0 for first, decaying).
+	if len(ranked) == 0 {
+		docs, err := st.SearchMemoriesFTS(ctx, description, limit*3)
+		if err != nil || len(docs) == 0 {
+			return nil
+		}
+		for i, d := range docs {
+			baseScore := 1.0 / float64(i+1) // rank-based: 1.0, 0.5, 0.33, ...
+			ranked = append(ranked, scoredDoc{doc: d, score: baseScore * subTypeBoost(d.SubType)})
+		}
+	}
+
+	// Sort by score descending.
+	slices.SortFunc(ranked, func(a, b scoredDoc) int {
+		if a.score > b.score {
+			return -1
+		}
+		if a.score < b.score {
+			return 1
+		}
+		return 0
+	})
+
+	// Build suggestions.
+	if len(ranked) > limit {
+		ranked = ranked[:limit]
+	}
+	suggestions := make([]knowledgeSuggestion, len(ranked))
+	for i, r := range ranked {
+		content := r.doc.Content
+		// Truncate at rune boundary to avoid splitting multi-byte characters.
+		runes := []rune(content)
+		if len(runes) > 500 {
+			content = string(runes[:500]) + "..."
+		}
+		suggestions[i] = knowledgeSuggestion{
+			Label:          r.doc.SectionPath,
+			Source:         r.doc.SourceType,
+			SubType:        r.doc.SubType,
+			Content:        content,
+			RelevanceScore: r.score,
+		}
+	}
+	return suggestions
 }
 
 func specDoUpdate(ctx context.Context, req mcp.CallToolRequest, st *store.Store, emb *embedder.Embedder) (*mcp.CallToolResult, error) {
@@ -272,6 +377,20 @@ func specDoStatus(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	}
 	if len(confidence) > 0 {
 		result["confidence"] = confidence
+	}
+
+	// Collect cross-references.
+	outgoing := spec.CollectOutgoing(projectPath, taskSlug)
+	incoming := spec.CollectIncoming(projectPath, taskSlug)
+	if len(outgoing) > 0 || len(incoming) > 0 {
+		refs := map[string]any{}
+		if len(outgoing) > 0 {
+			refs["outgoing"] = outgoing
+		}
+		if len(incoming) > 0 {
+			refs["incoming"] = incoming
+		}
+		result["references"] = refs
 	}
 
 	// Enrich with session continuity info if available.
@@ -492,6 +611,11 @@ func specDoDelete(ctx context.Context, req mcp.CallToolRequest, st *store.Store)
 			projectBase := filepath.Base(projectPath)
 			n, _ := st.CountDocsByURLPrefix(ctx, fmt.Sprintf("spec://%s/%s/", projectBase, taskSlug))
 			preview["db_doc_count"] = n
+		}
+		// Warn about incoming references that will become dangling.
+		if incoming := spec.CollectIncoming(projectPath, taskSlug); len(incoming) > 0 {
+			preview["dangling_warning"] = fmt.Sprintf("%d reference(s) from other specs will become dangling", len(incoming))
+			preview["incoming_refs"] = incoming
 		}
 		preview["next_step"] = "call again with confirm=true to delete"
 		return marshalResult(preview)

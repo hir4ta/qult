@@ -76,6 +76,8 @@ type Model struct {
 	reviewInput     textinput.Model   // comment text input
 	reviewInputLine int               // which line the input is for
 	reviewEditing   bool              // true when typing a comment
+	reviewRounds    []spec.Review     // all review rounds for the current task
+	reviewRoundIdx  int               // current round index (len-1 = latest)
 
 	// Data caches.
 	activeSlug string
@@ -568,6 +570,12 @@ func (m *Model) enterReviewMode() {
 	m.reviewComments = make(map[int]string)
 	m.reviewEditing = false
 
+	// Load all review rounds.
+	sd := &spec.SpecDir{ProjectPath: m.ds.ProjectPath(), TaskSlug: f.TaskSlug}
+	rounds, _ := sd.AllReviews()
+	m.reviewRounds = rounds
+	m.reviewRoundIdx = len(rounds) // new round (beyond existing)
+
 	ti := textinput.New()
 	ti.Placeholder = "comment..."
 	ti.CharLimit = 500
@@ -578,6 +586,8 @@ func (m *Model) enterReviewMode() {
 
 // updateReviewMode handles keys in review navigation mode.
 func (m *Model) updateReviewMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	isLatestRound := m.reviewRoundIdx >= len(m.reviewRounds)
+
 	switch {
 	case key.Matches(msg, keys.Back), key.Matches(msg, keys.Quit):
 		m.reviewMode = false
@@ -607,8 +617,31 @@ func (m *Model) updateReviewMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case msg.String() == "c":
-		// Start commenting on current line.
+	case msg.String() == "left":
+		// Navigate to previous review round.
+		if m.reviewRoundIdx > 0 {
+			m.reviewRoundIdx--
+			m.reviewComments = m.commentsForRound(m.reviewRoundIdx)
+			m.rebuildReviewOverlay()
+		}
+		return m, nil
+
+	case msg.String() == "right":
+		// Navigate to next review round / new round.
+		if m.reviewRoundIdx < len(m.reviewRounds) {
+			m.reviewRoundIdx++
+			if m.reviewRoundIdx >= len(m.reviewRounds) {
+				// New round: clear comments for fresh editing.
+				m.reviewComments = make(map[int]string)
+			} else {
+				m.reviewComments = m.commentsForRound(m.reviewRoundIdx)
+			}
+			m.rebuildReviewOverlay()
+		}
+		return m, nil
+
+	case msg.String() == "c" && isLatestRound:
+		// Start commenting on current line (only in new/latest round).
 		m.reviewEditing = true
 		m.reviewInputLine = m.reviewCursor
 		m.reviewInput.SetValue("")
@@ -618,18 +651,18 @@ func (m *Model) updateReviewMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.reviewInput.Focus()
 		return m, nil
 
-	case msg.String() == "a":
-		// Approve.
+	case msg.String() == "a" && isLatestRound:
+		// Approve (only in new round).
 		m.submitReview(spec.ReviewApproved)
 		return m, nil
 
-	case msg.String() == "x":
-		// Request Changes.
+	case msg.String() == "x" && isLatestRound:
+		// Request Changes (only in new round).
 		m.submitReview(spec.ReviewChangesRequested)
 		return m, nil
 
-	case msg.String() == "d":
-		// Delete comment on current line.
+	case msg.String() == "d" && isLatestRound:
+		// Delete comment on current line (only in new round).
 		delete(m.reviewComments, m.reviewCursor)
 		m.rebuildReviewOverlay()
 		return m, nil
@@ -639,6 +672,41 @@ func (m *Model) updateReviewMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.overlayVP, cmd = m.overlayVP.Update(msg)
 		return m, cmd
 	}
+}
+
+// commentsForRound extracts comments from a historical review round as a line→body map.
+// Only includes comments for the currently viewed file.
+func (m *Model) commentsForRound(idx int) map[int]string {
+	comments := make(map[int]string)
+	if idx >= len(m.reviewRounds) {
+		return comments
+	}
+	r := m.reviewRounds[idx]
+	for _, c := range r.Comments {
+		if c.File == m.reviewFile {
+			comments[c.Line-1] = c.Body // convert 1-based to 0-based
+		}
+	}
+	return comments
+}
+
+// carriedComments returns unresolved comments from all previous rounds
+// (before the current round) as a line→body map. Used to highlight
+// comments that haven't been addressed yet.
+func (m *Model) carriedComments() map[int]string {
+	carried := make(map[int]string)
+	// Only show carried comments in the latest (new) round.
+	if m.reviewRoundIdx < len(m.reviewRounds) {
+		return carried
+	}
+	for _, r := range m.reviewRounds {
+		for _, c := range r.Comments {
+			if c.File == m.reviewFile && !c.Resolved {
+				carried[c.Line-1] = c.Body
+			}
+		}
+	}
+	return carried
 }
 
 // updateReviewInput handles keys while typing a comment.
@@ -745,13 +813,40 @@ func (m *Model) rebuildReviewOverlay() {
 	w := m.overlayVP.Width() - 2
 	lineW := w - 8 // gutter(4 digits + marker + space) = 7, plus margin
 
-	// Status bar at top.
+	isLatestRound := m.reviewRoundIdx >= len(m.reviewRounds)
+
+	// Round navigation bar.
+	totalRounds := len(m.reviewRounds) + 1 // +1 for new round
+	roundLabel := fmt.Sprintf("Round %d/%d", m.reviewRoundIdx+1, totalRounds)
+	if isLatestRound {
+		roundLabel += " (new)"
+	} else {
+		r := m.reviewRounds[m.reviewRoundIdx]
+		roundLabel += fmt.Sprintf(" [%s]", r.Status)
+	}
+	navHint := ""
+	if m.reviewRoundIdx > 0 {
+		navHint += "<- "
+	}
+	navHint += roundLabel
+	if m.reviewRoundIdx < len(m.reviewRounds) {
+		navHint += " ->"
+	}
+	b.WriteString("  " + reviewRoundStyle.Render(navHint) + "\n")
+
+	// Status bar.
 	commentCount := len(m.reviewComments)
 	statusLine := dimStyle.Render(fmt.Sprintf("  %s  ", m.reviewFile))
 	if commentCount > 0 {
 		statusLine += reviewCommentMarker.Render(fmt.Sprintf("  %d comment(s)", commentCount))
 	}
+	if !isLatestRound {
+		statusLine += dimStyle.Render("  (read-only)")
+	}
 	b.WriteString(statusLine + "\n\n")
+
+	// Collect carried-over (unresolved) comments from previous rounds for highlight.
+	carried := m.carriedComments()
 
 	for i, line := range m.reviewLines {
 		lineNum := fmt.Sprintf("%4d", i+1)
@@ -787,6 +882,11 @@ func (m *Model) rebuildReviewOverlay() {
 		if hasComment {
 			comment := m.reviewComments[i]
 			b.WriteString("      " + reviewCommentStyle.Render("  "+comment) + "\n")
+		}
+
+		// Show carried-over unresolved comments from previous rounds (dimmer).
+		if carriedComment, ok := carried[i]; ok && !hasComment {
+			b.WriteString("      " + reviewCarriedStyle.Render("  [prev] "+carriedComment) + "\n")
 		}
 	}
 
@@ -835,7 +935,12 @@ func (m Model) renderOverlayView(bg string) string {
 			hint = dimStyle.Render("esc: close  j/k: scroll  r: review")
 		}
 	} else if m.reviewMode && !m.reviewEditing {
-		hint = dimStyle.Render("esc: back  j/k: move  c: comment  d: del  a: approve  x: request changes")
+		isLatest := m.reviewRoundIdx >= len(m.reviewRounds)
+		if isLatest {
+			hint = dimStyle.Render("esc: back  j/k: move  </>: rounds  c: comment  d: del  a: approve  x: changes")
+		} else {
+			hint = dimStyle.Render("esc: back  j/k: scroll  </>: rounds  (read-only)")
+		}
 	} else if m.reviewEditing {
 		hint = dimStyle.Render("enter: save comment  esc: cancel")
 	}

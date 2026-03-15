@@ -78,6 +78,10 @@ alfred search-eval            # Run search quality benchmark
 - spec.ValidSlug: exported regex for slug validation across packages
 - dossier tool: DestructiveHint=true, IdempotentHint=false (delete action is destructive; 2-phase confirm provides UX safety)
 - Dossier tool actions: init / update / status / switch / complete / delete / history / rollback / review
+- Spec cross-references: `@spec:task-slug/file.md` format parsed by `spec.ParseRefs()`, resolved against filesystem
+- dossier status: includes `references` (outgoing + incoming), dangling detection
+- dossier init: returns `suggested_knowledge` (related memories via vector search + FTS5 fallback, sub_type boosted)
+- dossier delete preview: warns about incoming refs that will become dangling
 - Spec file locking: advisory flock on `.lock` file (exponential backoff 100/200/400/800ms ~1.5s total, context-aware cancellation, graceful fallback + stderr warning)
 - Spec version history: `.history/` dir with max 20 versions per file; rollback saves current first
 - Task lifecycle: active → complete (preserves spec files, sets completed_at) or delete (removes files)
@@ -114,6 +118,7 @@ alfred search-eval            # Run search quality benchmark
 - Style: purple accent (#af87d7) + orange shimmer (#f0a050) for active items, no emoji
 - Shimmer animation: lipgloss.Blend1D gradient, 50ms tick, on first unchecked Next Steps item
 - Review mode: line-numbered viewer, inline comments (orange), background-highlighted cursor, Approve/Request Changes
+- Review history: round navigation (left/right keys), read-only past rounds, carried-over unresolved comments (dim orange)
 - DataSource interface for testability (internal/tui/datasource.go)
 
 ### Memory & Search
