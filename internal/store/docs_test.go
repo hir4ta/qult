@@ -26,7 +26,7 @@ func TestUpsertDoc(t *testing.T) {
 		URL:         "https://docs.example.com/hooks",
 		SectionPath: "Hooks > PreToolUse",
 		Content:     "PreToolUse hooks fire before a tool is called.",
-		SourceType:  "records",
+		SourceType:  "project",
 		TTLDays:     7,
 	}
 
@@ -78,7 +78,7 @@ func TestGetDocsByIDs(t *testing.T) {
 			URL:         "https://docs.example.com/page",
 			SectionPath: "Section " + string(rune('A'+i)),
 			Content:     "Content for section " + string(rune('A'+i)),
-			SourceType:  "records",
+			SourceType:  "project",
 		}
 		id, _, err := st.UpsertDoc(context.Background(), doc)
 		if err != nil {
@@ -287,7 +287,7 @@ func TestDeleteExpiredDocs(t *testing.T) {
 		URL:         "https://example.com/expired",
 		SectionPath: "Expired",
 		Content:     "expired content",
-		SourceType:  "records",
+		SourceType:  "project",
 		TTLDays:     1,
 		CrawledAt:   time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339),
 	}
@@ -301,7 +301,7 @@ func TestDeleteExpiredDocs(t *testing.T) {
 		URL:         "https://example.com/fresh",
 		SectionPath: "Fresh",
 		Content:     "fresh content",
-		SourceType:  "records",
+		SourceType:  "project",
 		TTLDays:     30,
 		CrawledAt:   time.Now().UTC().Format(time.RFC3339),
 	}

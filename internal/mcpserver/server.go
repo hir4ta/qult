@@ -59,17 +59,18 @@ task_slug format: lowercase alphanumeric with hyphens (e.g. "my-feature", max 64
 
 		server.ServerTool{
 			Tool: mcp.NewTool("ledger",
-				mcp.WithDescription(`Memory search and save — your persistent memory across sessions and projects.
+				mcp.WithDescription(`Long-term knowledge search and save — memories and past specs, searchable across sessions and projects.
 
 Actions:
-- search (default): Search past memories — decisions, session summaries, saved notes
+- search (default): Search past memories AND completed specs — decisions, designs, bug fixes, session summaries
 - save: Save a new memory entry for future retrieval
 
-Memories persist permanently and are searchable across ALL projects (cross-project learning).
+Knowledge persists permanently and grows with use. Past specs (requirements, designs, decisions) are searchable alongside memories.
 
 Use for:
 - "Have I worked on something like this before?"
 - "What decisions did I make about authentication?"
+- "How did we design the auth system last time?"
 - "Remember this approach for future reference"
 
 Do NOT use for: searching documentation (use WebFetch instead), file operations.`),

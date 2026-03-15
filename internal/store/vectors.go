@@ -24,8 +24,6 @@ func envIntOrDefault(key string, fallback int) int {
 
 // InsertEmbedding stores a vector embedding as a BLOB.
 // If ExpectedDims is set on the Store, validates that vector dimensions match.
-// Also cleans up orphaned embeddings for the same source that reference
-// non-existent docs (can occur when docs are upserted with new IDs).
 func (s *Store) InsertEmbedding(source string, sourceID int64, model string, vector []float32) error {
 	if s.ExpectedDims > 0 && len(vector) != s.ExpectedDims {
 		return fmt.Errorf("store: insert embedding: dimension mismatch: got %d, expected %d", len(vector), s.ExpectedDims)
@@ -39,14 +37,18 @@ func (s *Store) InsertEmbedding(source string, sourceID int64, model string, vec
 	if err != nil {
 		return fmt.Errorf("store: insert embedding: %w", err)
 	}
-
-	// Clean up orphaned embeddings: remove entries whose source_id no longer
-	// exists in the records table. This handles cases where records were upserted
-	// with new IDs (e.g., DELETE + INSERT via schema migration or re-init).
-	if source == "records" {
-		_, _ = s.db.Exec(`DELETE FROM embeddings WHERE source = 'records' AND source_id NOT IN (SELECT id FROM records)`)
-	}
 	return nil
+}
+
+// CleanOrphanedEmbeddings removes embeddings whose source_id no longer exists
+// in the records table. Call periodically (e.g., during PreCompact), not on
+// every insert, to avoid per-insert overhead on large databases.
+func (s *Store) CleanOrphanedEmbeddings() (int64, error) {
+	res, err := s.db.Exec(`DELETE FROM embeddings WHERE source = 'records' AND source_id NOT IN (SELECT id FROM records)`)
+	if err != nil {
+		return 0, fmt.Errorf("store: clean orphaned embeddings: %w", err)
+	}
+	return res.RowsAffected()
 }
 
 // minSimilarity is the cosine similarity threshold below which candidates are discarded.

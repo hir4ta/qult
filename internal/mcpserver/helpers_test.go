@@ -126,8 +126,8 @@ func TestRecencyHalfLife(t *testing.T) {
 func TestApplyRecencySignal_NoDecay(t *testing.T) {
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
 	docs := []store.DocRow{
-		{ID: 1, SourceType: "records", CrawledAt: "2024-01-01T00:00:00Z"},
-		{ID: 2, SourceType: "records", CrawledAt: "2026-03-10T00:00:00Z"},
+		{ID: 1, SourceType: "project", CrawledAt: "2024-01-01T00:00:00Z"},
+		{ID: 2, SourceType: "project", CrawledAt: "2026-03-10T00:00:00Z"},
 	}
 
 	result := applyRecencySignal(docs, now)
@@ -162,7 +162,7 @@ func TestApplyRecencySignal_MemoryBoost(t *testing.T) {
 func TestApplyRecencySignal_MixedSourceTypes(t *testing.T) {
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
 	docs := []store.DocRow{
-		{ID: 1, SourceType: "records", CrawledAt: "2024-01-01T00:00:00Z"},   // docs: no decay
+		{ID: 1, SourceType: "project", CrawledAt: "2024-01-01T00:00:00Z"},   // docs: no decay
 		{ID: 2, SourceType: store.SourceMemory, CrawledAt: "2026-03-10T11:00:00Z"}, // memory: fresh
 	}
 

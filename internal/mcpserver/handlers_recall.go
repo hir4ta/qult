@@ -62,7 +62,8 @@ func recallSearch(ctx context.Context, st *store.Store, emb *embedder.Embedder, 
 		overRetrieve = 20
 	}
 
-	sr := searchPipeline(ctx, st, emb, query, store.SourceMemory, limit, overRetrieve)
+	// Search both memories and past specs — long-term knowledge that grows with use.
+	sr := searchPipeline(ctx, st, emb, query, store.SourceMemory+","+store.SourceSpec, limit, overRetrieve)
 	docs := sr.Docs
 	searchMethod := sr.SearchMethod
 	warnings := sr.Warnings
@@ -73,6 +74,7 @@ func recallSearch(ctx context.Context, st *store.Store, emb *embedder.Embedder, 
 			"section_path": d.SectionPath,
 			"content":      d.Content,
 			"url":          d.URL,
+			"source_type":  d.SourceType,
 		}
 		if d.CrawledAt != "" {
 			dm["saved_at"] = d.CrawledAt

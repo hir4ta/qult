@@ -80,7 +80,7 @@ go vet ./...                  # Static analysis
 - Recency signal: post-rerank exponential decay for memory (60d half-life); floor at 50%
 - Decision extraction: base score 0.35, min confidence 0.4 — bare keyword matches require at least one positive signal (rationale/alternative/arch term)
 - Background embedding: embed-async/embed-doc subcommands for async Voyage API calls
-- Orphan cleanup: InsertEmbedding auto-removes embeddings referencing non-existent records
+- Orphan cleanup: CleanOrphanedEmbeddings runs during PreCompact (not per-insert)
 
 ### Naming Convention (Butler Theme)
 

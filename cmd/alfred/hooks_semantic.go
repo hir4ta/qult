@@ -39,9 +39,9 @@ func handleSemanticSearch(ctx context.Context, ev *hookEvent, prompt string, rem
 		return false
 	}
 
-	// Search memories only (docs knowledge base removed).
-	memSnippets := searchMemorySemantic(ctx, queryVec, st)
-	if len(memSnippets) == 0 && rememberHint == "" {
+	// Search memories and past specs — long-term knowledge that grows with use.
+	snippets := searchKnowledgeSemantic(ctx, queryVec, st)
+	if len(snippets) == 0 && rememberHint == "" {
 		return true // semantic search ran, just no results
 	}
 
@@ -49,9 +49,9 @@ func handleSemanticSearch(ctx context.Context, ev *hookEvent, prompt string, rem
 	if rememberHint != "" {
 		buf.WriteString(rememberHint + "\n\n")
 	}
-	if len(memSnippets) > 0 {
+	if len(snippets) > 0 {
 		buf.WriteString("Related past experience:\n")
-		for _, m := range memSnippets {
+		for _, m := range snippets {
 			buf.WriteString(m)
 		}
 	}
@@ -61,20 +61,20 @@ func handleSemanticSearch(ctx context.Context, ev *hookEvent, prompt string, rem
 	return true
 }
 
-// searchMemorySemantic searches memory docs using vector similarity.
-// Returns formatted snippet lines (max 2) or nil.
-func searchMemorySemantic(ctx context.Context, queryVec []float32, st *store.Store) []string {
+// searchKnowledgeSemantic searches memories and past specs using vector similarity.
+// Returns formatted snippet lines (max 3) or nil.
+// Memory and spec results are labeled differently for clarity.
+func searchKnowledgeSemantic(ctx context.Context, queryVec []float32, st *store.Store) []string {
 	if queryVec == nil {
 		return nil
 	}
 
-	matches, err := st.VectorSearch(ctx, queryVec, "records", 4, store.SourceMemory)
+	matches, err := st.VectorSearch(ctx, queryVec, "records", 6, store.SourceMemory, store.SourceSpec)
 	if err != nil || len(matches) == 0 {
 		return nil
 	}
 
-	// Fetch top 2 by similarity.
-	limit := min(2, len(matches))
+	limit := min(3, len(matches))
 	ids := make([]int64, limit)
 	for i := 0; i < limit; i++ {
 		ids[i] = matches[i].SourceID
@@ -87,7 +87,11 @@ func searchMemorySemantic(ctx context.Context, queryVec []float32, st *store.Sto
 	var results []string
 	for _, d := range docs {
 		snippet := safeSnippet(d.Content, 200)
-		results = append(results, fmt.Sprintf("- [%s] %s\n", d.SectionPath, snippet))
+		label := "memory"
+		if d.SourceType == store.SourceSpec {
+			label = "past spec"
+		}
+		results = append(results, fmt.Sprintf("- [%s: %s] %s\n", label, d.SectionPath, snippet))
 	}
 	return results
 }

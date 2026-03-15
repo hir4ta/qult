@@ -153,7 +153,7 @@ func TestVectorSearch(t *testing.T) {
 			URL:         "https://example.com/doc",
 			SectionPath: "Section " + string(rune('A'+e.id)),
 			Content:     "content",
-			SourceType:  "records",
+			SourceType:  "project",
 		})
 		if err != nil {
 			t.Fatalf("UpsertDoc: %v", err)

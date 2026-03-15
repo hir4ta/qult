@@ -97,6 +97,13 @@ func handlePreCompact(ctx context.Context, projectPath, transcriptPath, customIn
 	// Emit spec-aware compaction instructions to stdout.
 	emitCompactionInstructions(sd, taskSlug)
 
+	// Periodic orphan cleanup: remove embeddings for deleted records.
+	if st, err := store.OpenDefaultCached(); err == nil {
+		if n, err := st.CleanOrphanedEmbeddings(); err == nil && n > 0 {
+			notifyUser("cleaned %d orphaned embedding(s)", n)
+		}
+	}
+
 	// Async embedding generation for session.md.
 	asyncEmbedSession(sd)
 
