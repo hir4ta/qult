@@ -17,6 +17,8 @@ When to use alfred tools:
 - Making design decisions → call dossier with action=update
 - Starting/resuming a session → call dossier with action=status
 - Searching past experiences or saving notes → call ledger
+- Grouping related tasks into an epic → call roster with action=init, then link tasks
+- Checking epic progress → call roster with action=status
 `
 
 // New creates a new MCP server with all tools registered.
@@ -55,6 +57,30 @@ task_slug format: lowercase alphanumeric with hyphens (e.g. "my-feature", max 64
 				mcp.WithBoolean("confirm", mcp.Description("Required for delete: first call without confirm to preview, then with confirm=true to execute")),
 			),
 			Handler: specHandler(st, emb),
+		},
+
+		server.ServerTool{
+			Tool: mcp.NewTool("roster",
+				mcp.WithDescription(`Epic management — group related tasks with dependencies and progress tracking.
+
+Actions: init, status, link, unlink, order, list, update, delete (2-phase: preview then confirm=true).
+
+Epics bundle multiple specs (tasks) into a cohesive goal with dependency ordering.
+Tasks (specs) are NOT deleted when an epic is removed — they become standalone.`),
+				mcp.WithTitleAnnotation("Roster — Epic Management"),
+				mcp.WithReadOnlyHintAnnotation(false),
+				mcp.WithDestructiveHintAnnotation(true),
+				mcp.WithOpenWorldHintAnnotation(false),
+				mcp.WithString("action", mcp.Description("Action to perform"), mcp.Required(), mcp.Enum("init", "status", "link", "unlink", "order", "list", "update", "delete")),
+				mcp.WithString("project_path", mcp.Description("Project root path (defaults to cwd)")),
+				mcp.WithString("epic_slug", mcp.Description("Epic identifier (required for most actions)")),
+				mcp.WithString("task_slug", mcp.Description("Task to link/unlink (for link/unlink)")),
+				mcp.WithString("name", mcp.Description("Epic display name (for init/update)")),
+				mcp.WithString("depends_on", mcp.Description("Comma-separated task slugs this task depends on (for link)")),
+				mcp.WithString("status", mcp.Description("Epic status: draft, in-progress, completed, archived (for update)")),
+				mcp.WithBoolean("confirm", mcp.Description("Required for delete: preview first, then confirm=true")),
+			),
+			Handler: epicHandler(),
 		},
 
 		server.ServerTool{

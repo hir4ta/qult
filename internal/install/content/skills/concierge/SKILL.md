@@ -18,12 +18,13 @@ context: current
 If `$ARGUMENTS` names a specific feature, call `knowledge` to provide detailed guidance,
 then output a focused explanation. Otherwise, show the full reference below.
 
-## Skills (12)
+## Skills (14)
 
 | Skill | Purpose | When to use |
 |-------|---------|-------------|
 | **brief** | Multi-agent spec generation | Starting a new task, organizing a design |
 | **attend** | Autonomous development orchestrator | End-to-end: spec → implement → review → commit |
+| **tdd** | Autonomous TDD orchestrator | Test-driven implementation (red/green/refactor) |
 | **inspect** | Profile-based quality review (6 profiles) | Before committing, after a milestone |
 | **mend** | Bug fix with memory-enhanced diagnosis | Fixing bugs, resolving test failures |
 | **survey** | Reverse-engineer specs from code | Onboarding to existing code, documenting legacy |
@@ -49,6 +50,7 @@ then output a focused explanation. Otherwise, show the full reference below.
 | **knowledge** | Search Claude Code docs & best practices | "How do hooks work?" |
 | **config-review** | Audit .claude/ config with scoring | "Is my setup good?" |
 | **dossier** | Task spec management (init/update/status) | "Start task auth-refactor" |
+| **roster** | Epic management (group tasks + dependencies) | "Bundle these tasks into an epic" |
 | **ledger** | Search/save persistent memories | "Have I done this before?" |
 
 ## Which skill should I use?
@@ -57,6 +59,7 @@ then output a focused explanation. Otherwise, show the full reference below.
 Starting a new task?
   → /alfred:brief    — Multi-agent spec generation
   → /alfred:attend   — Full autonomous pipeline (spec → code → review → commit)
+  → /alfred:tdd      — Test-driven implementation (red → green → refactor cycles)
 
 Fixing a bug?
   → /alfred:mend     — Reproduce → root cause (+ past bug memory) → fix → verify
@@ -111,9 +114,11 @@ User: `/alfred:concierge hooks`
 
 ## How It Works
 
-alfred operates on two layers:
+alfred operates on three layers:
 
 1. **Hooks** (automatic): SessionStart injects task context, UserPromptSubmit surfaces
    relevant memories via Voyage AI semantic search, PreCompact preserves session state
-2. **MCP Tools** (on-demand): dossier for spec management, ledger for memory,
-   knowledge for Claude Code best practices, config-review for setup auditing
+   and auto-syncs epic progress
+2. **MCP Tools** (on-demand): dossier for spec management, roster for epic management,
+   ledger for memory, knowledge for Claude Code best practices, config-review for setup auditing
+3. **TUI Dashboard** (`alfred dashboard`): real-time view of epics, tasks, specs, and memories

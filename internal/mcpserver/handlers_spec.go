@@ -14,6 +14,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/hir4ta/claude-alfred/internal/embedder"
+	"github.com/hir4ta/claude-alfred/internal/epic"
 	"github.com/hir4ta/claude-alfred/internal/spec"
 	"github.com/hir4ta/claude-alfred/internal/store"
 )
@@ -354,6 +355,9 @@ func specDoDelete(ctx context.Context, req mcp.CallToolRequest, st *store.Store)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("delete failed: %v", err)), nil
 	}
+
+	// Clean up dangling references in epics.
+	epic.UnlinkTaskFromAllEpics(projectPath, taskSlug)
 
 	result := map[string]any{
 		"deleted":  taskSlug,

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hir4ta/claude-alfred/internal/epic"
 	"github.com/hir4ta/claude-alfred/internal/spec"
 	"github.com/hir4ta/claude-alfred/internal/store"
 )
@@ -79,6 +80,9 @@ func handlePreCompact(ctx context.Context, projectPath, transcriptPath, customIn
 	if err := sd.WriteFile(ctx, spec.FileSession, session); err != nil {
 		return
 	}
+
+	// Sync epic progress from session.md status.
+	syncEpicProgress(projectPath, taskSlug, session)
 
 	// Sync session.md to DB (without embedder — hook is short-lived).
 	st, err := store.OpenDefaultCached()
@@ -794,4 +798,36 @@ func extractEarlyUserMessages(transcriptPath string) []string {
 	}
 
 	return msgs
+}
+
+// syncEpicProgress updates the task's status in its parent epic based on session.md content.
+// This is called during PreCompact to keep epic progress in sync automatically.
+func syncEpicProgress(projectPath, taskSlug, sessionContent string) {
+	// Parse status from session.md.
+	status := parseSessionStatusFromContent(sessionContent)
+	if status == "" {
+		return
+	}
+
+	// Map session status to epic task status.
+	var epicStatus string
+	switch {
+	case status == "active" || status == "in-progress" || strings.HasPrefix(status, "implementation") || strings.HasPrefix(status, "design"):
+		epicStatus = epic.StatusInProgress
+	case status == "completed" || status == "done":
+		epicStatus = epic.StatusCompleted
+	case status == "blocked":
+		epicStatus = epic.StatusBlocked
+	default:
+		epicStatus = epic.StatusInProgress
+	}
+
+	if epic.SyncTaskStatus(projectPath, taskSlug, epicStatus) {
+		notifyUser("synced epic progress for task '%s' → %s", taskSlug, epicStatus)
+	}
+}
+
+// parseSessionStatusFromContent extracts the status value from session.md content.
+func parseSessionStatusFromContent(content string) string {
+	return strings.TrimSpace(extractSection(content, "## Status"))
 }

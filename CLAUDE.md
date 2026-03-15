@@ -4,21 +4,24 @@ Development butler for Claude Code — MCP server + Hook handler.
 
 ## Stack
 
-Go 1.25 / SQLite (ncruces/go-sqlite3) / Voyage AI (embedding)
+Go 1.25 / SQLite (ncruces/go-sqlite3) / Voyage AI (embedding) / Bubbletea v2 (TUI)
 
 ## Structure
 
 | Package | Role |
 |---|---|
-| `internal/mcpserver` | MCP server (2 tools: dossier, ledger) |
+| `internal/mcpserver` | MCP server (3 tools: dossier, roster, ledger) |
 | `internal/store` | SQLite persistence (records + embeddings) |
 | `internal/embedder` | Voyage AI (voyage-4-large, vector search + rerank-2.5) |
 | `internal/spec` | Spec management: .alfred/specs/ (4 files: requirements/design/decisions/session) |
+| `internal/epic` | Epic management: .alfred/epics/ (YAML-based task grouping + dependencies) |
+| `internal/tui` | TUI dashboard: bubbletea v2 (epics/tasks/specs/memories tabs) |
 | `internal/install` | Plugin bundle + user rules |
 | `cmd/alfred/hooks*.go` | Hook handler (SessionStart / PreCompact / UserPromptSubmit) |
 | `cmd/alfred/hooks_compact.go` | PreCompact: decision extraction, session.md rebuild, chapter memory |
 | `cmd/alfred/hooks_semantic.go` | UserPromptSubmit: Voyage semantic search for memory injection |
 | `cmd/alfred/hooks_transcript.go` | Transcript parsing: rich context extraction, decision detection |
+| `cmd/alfred/dashboard.go` | TUI dashboard entry point (`alfred dashboard`) |
 
 ## Commands
 
@@ -50,9 +53,9 @@ go vet ./...                  # Static analysis
 
 - Hook handler: short-lived process. UserPromptSubmit uses Voyage API (semantic search)
 - SessionStart: CLAUDE.md ingestion + user rules check + spec context injection (2 ops parallel via channels)
-- PreCompact: auto-updates Next Steps completion status from transcript; decision extraction; chapter memory persistence
+- PreCompact: auto-updates Next Steps completion status from transcript; decision extraction; chapter memory persistence; epic progress auto-sync
 - UserPromptSubmit: Voyage vector search for memories → inject relevant past experience
-- Multi-agent skills: inspect (6 profiles), salon (3 specialists + synthesis), brief (3 specialists + mediator), attend (spec→implement→review→commit orchestrator), mend (reproduce→analyze→fix→verify), survey (code→spec reverse engineering)
+- Multi-agent skills: inspect (6 profiles), salon (3 specialists + synthesis), brief (3 specialists + mediator), attend (spec→implement→review→commit orchestrator), tdd (red→green→refactor autonomous cycles), mend (reproduce→analyze→fix→verify), survey (code→spec reverse engineering)
 
 ### Database & Schema
 
@@ -73,6 +76,24 @@ go vet ./...                  # Static analysis
 - Dossier tool actions: init / update / status / switch / delete / history / rollback
 - Spec confidence scoring: 10-point scale via `<!-- confidence: N -->` annotations (1-3 low, 4-6 medium, 7-9 high, 10 certain); status returns avg + low_items count
 
+### Epic Management
+
+- Epic files: .alfred/epics/{slug}/epic.yaml (pure YAML, no Markdown)
+- Roster tool: MCP tool for epic CRUD (init/status/link/unlink/order/list/update/delete)
+- Epic→Task: link tasks with dependency ordering (topological sort)
+- Epic progress: auto-synced during PreCompact (session.md status → epic.yaml)
+- spec delete: auto-cleans dangling epic references (UnlinkTaskFromAllEpics)
+- epic delete: tasks (specs) preserved as standalone (not deleted)
+- Epic status auto-transitions: all tasks completed → epic completed
+
+### TUI Dashboard
+
+- `alfred dashboard` (alias: `alfred dash`): bubbletea v2 TUI
+- 4 tabs: Epics (drilldown) / Tasks / Specs (viewport) / Memories (semantic search)
+- Data refresh: 5-second polling
+- Style: monochrome + teal accent, no emoji, `########------` progress bars
+- DataSource interface for testability (internal/tui/datasource.go)
+
 ### Memory & Search
 
 - Memory persistence: source_type="memory" in records table, TTL=0 (permanent)
@@ -84,8 +105,8 @@ go vet ./...                  # Static analysis
 
 ### Naming Convention (Butler Theme)
 
-- Skills: brief, attend, inspect, mend, survey, salon, polish, valet, furnish, quarters, archive, concierge
-- MCP tools: dossier (spec management), ledger (memory)
+- Skills: brief, attend, tdd, inspect, mend, survey, salon, polish, valet, furnish, quarters, archive, concierge
+- MCP tools: dossier (spec management), roster (epic management), ledger (memory)
 
 ### Misc
 

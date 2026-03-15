@@ -36,6 +36,8 @@ func run() error {
 	}
 
 	switch cmd {
+	case "dashboard", "dash":
+		return runDashboard()
 	case "serve":
 		return runServe()
 	case "plugin-bundle":
@@ -174,6 +176,7 @@ func printUsage() {
 	fmt.Println(`alfred - Your silent butler for Claude Code
 
 Usage:
+  alfred dashboard  Open TUI dashboard (alias: dash)
   alfred serve      Start MCP server (called by Claude Code plugin)
   alfred hook       Handle hook events (called by Claude Code)
   alfred version    Show version
