@@ -16,5 +16,18 @@ archives:
   - format: tar.gz
     name_template: "alfred_{{ .Os }}_{{ .Arch }}"
 
+brews:
+  - repository:
+      owner: hir4ta
+      name: homebrew-alfred
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    name: alfred
+    homepage: https://github.com/hir4ta/claude-alfred
+    description: "Your silent butler for Claude Code"
+    license: MIT
+    skip_upload: auto
+    install: |
+      bin.install "alfred"
+
 changelog:
   sort: asc
