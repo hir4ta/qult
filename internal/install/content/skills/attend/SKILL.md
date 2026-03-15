@@ -12,7 +12,6 @@ description: >
 user-invocable: true
 argument-hint: "task-slug description"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git diff *, git log *, git show *, git status *, git add *, git commit *, git merge-base *, git stash *, go test *, go vet *), AskUserQuestion, mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__dossier, mcp__plugin_alfred_alfred__ledger
-model: sonnet
 ---
 
 # /alfred:attend — Autonomous Development Orchestrator

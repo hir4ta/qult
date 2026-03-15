@@ -10,7 +10,6 @@ disable-model-invocation: true
 argument-hint: "theme or rough prompt"
 allowed-tools: Read, Glob, Grep, AskUserQuestion, WebSearch, WebFetch, mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__dossier
 context: fork
-model: sonnet
 ---
 
 # /alfred:salon — Multi-Perspective Divergent Thinking

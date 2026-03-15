@@ -9,7 +9,6 @@ description: >
 user-invocable: true
 argument-hint: "file-paths or topic"
 allowed-tools: Read, Glob, Grep, AskUserQuestion, mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__dossier, mcp__plugin_alfred_alfred__ledger
-model: sonnet
 context: current
 ---
 

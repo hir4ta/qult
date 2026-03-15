@@ -12,7 +12,6 @@ description: >
 user-invocable: true
 argument-hint: "bug-slug description-of-symptom"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git diff *, git log *, git show *, git status *, git add *, git commit *, git merge-base *, git rev-parse *, go test *, go vet *, go run *), mcp__plugin_alfred_alfred__dossier, mcp__plugin_alfred_alfred__ledger
-model: sonnet
 ---
 
 # /alfred:mend — Autonomous Bug Fix Orchestrator

@@ -10,7 +10,6 @@ user-invocable: true
 argument-hint: "<PR-URL>"
 allowed-tools: Bash(gh api *, gh pr view *), mcp__plugin_alfred_alfred__ledger
 context: fork
-model: sonnet
 ---
 
 # /alfred:harvest — PR Knowledge Extractor

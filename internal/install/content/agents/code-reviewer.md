@@ -7,7 +7,6 @@ description: >
   coverage, then aggregates findings.
 tools: Read, Grep, Glob, Agent, Bash(git diff *, git log *, git show *, git status *), mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__dossier
 disallowedTools: Write, Edit, NotebookEdit
-model: sonnet
 permissionMode: plan
 maxTurns: 30
 ---

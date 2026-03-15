@@ -10,7 +10,6 @@ description: >
 user-invocable: true
 argument-hint: "task-slug [description]"
 allowed-tools: Read, Edit, Glob, Grep, AskUserQuestion, WebSearch, WebFetch, mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__dossier
-model: sonnet
 context: current
 ---
 

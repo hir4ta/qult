@@ -22,7 +22,7 @@ paths:
 - Set `maxTurns` to prevent runaway agents
 - Use `disallowedTools` for read-only agents instead of only specifying allowed tools
 - `permissionMode: plan` makes agents read-only (cannot modify files)
-- `model: sonnet` saves cost for agents that don't need opus-level reasoning
+- Omit `model:` to inherit the parent model (avoids separate API calls and rate limits)
 
 ## Hooks
 - Never store secrets in hooks.json — use environment variables

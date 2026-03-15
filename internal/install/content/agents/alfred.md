@@ -8,7 +8,6 @@ description: >
   (4) documentation search for Claude Code features.
   Alfred never interrupts — he only helps when called.
 tools: Read, Grep, Glob, Write, Edit, mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__config-review, mcp__plugin_alfred_alfred__dossier, mcp__plugin_alfred_alfred__ledger
-model: sonnet
 maxTurns: 30
 ---
 

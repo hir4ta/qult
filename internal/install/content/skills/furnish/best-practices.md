@@ -65,7 +65,6 @@ Hook types: command, http, prompt (LLM-gated), agent (multi-turn)
 name: my-agent
 description: When to use this agent
 tools: Read, Grep, Glob
-model: sonnet
 maxTurns: 30
 ---
 ```

@@ -9,7 +9,6 @@ description: >
 user-invocable: true
 argument-hint: "[feature-name]"
 allowed-tools: mcp__plugin_alfred_alfred__knowledge
-model: sonnet
 context: current
 ---
 

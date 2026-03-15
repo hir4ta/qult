@@ -17,7 +17,6 @@ user-invocable: true
 argument-hint: "[skill-path or --all] [--fix]"
 allowed-tools: Read, Edit, Glob, Grep, Agent, mcp__plugin_alfred_alfred__knowledge
 context: fork
-model: sonnet
 ---
 
 # /alfred:valet — Skill Best Practices Auditor

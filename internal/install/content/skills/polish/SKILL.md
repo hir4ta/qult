@@ -10,7 +10,6 @@ user-invocable: true
 disable-model-invocation: true
 argument-hint: "theme or notes"
 allowed-tools: Read, Glob, Grep, AskUserQuestion, Agent, mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__dossier
-model: sonnet
 context: current
 ---
 
