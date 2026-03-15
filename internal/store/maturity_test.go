@@ -10,9 +10,9 @@ func TestSchemaV4Migration(t *testing.T) {
 	t.Parallel()
 	st := openTestStore(t)
 
-	// Schema version should be 4 after migration.
-	if got := st.SchemaVersionCurrent(); got != 4 {
-		t.Fatalf("SchemaVersionCurrent() = %d, want 4", got)
+	// Schema version should be 5 after migration.
+	if got := st.SchemaVersionCurrent(); got != 5 {
+		t.Fatalf("SchemaVersionCurrent() = %d, want 5", got)
 	}
 
 	// Verify hit_count and last_accessed columns exist by inserting and querying.

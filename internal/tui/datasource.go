@@ -42,13 +42,14 @@ type SpecEntry struct {
 
 // KnowledgeEntry holds a search/browse result.
 type KnowledgeEntry struct {
-	Label    string
-	Source   string  // "memory", "spec", "project"
-	SubType  string  // "general", "decision", "pattern", "rule"
-	HitCount int
-	Content  string
-	Score    float64 // vector similarity (0 if not from search)
-	Age      time.Duration
+	Label      string
+	Source     string  // "memory", "spec", "project"
+	SubType    string  // "general", "decision", "pattern", "rule"
+	HitCount   int
+	Content    string
+	Structured string  // JSON structured data (if available)
+	Score      float64 // vector similarity (0 if not from search)
+	Age        time.Duration
 }
 
 // ActivityEntry holds a timeline event from audit.jsonl.
@@ -452,13 +453,14 @@ func docsToKnowledge(docs []store.DocRow, scoreMap map[int64]float64, limit int)
 			score = scoreMap[d.ID]
 		}
 		entries = append(entries, KnowledgeEntry{
-			Label:    d.SectionPath,
-			Source:   d.SourceType,
-			SubType:  d.SubType,
-			HitCount: d.HitCount,
-			Content:  d.Content,
-			Score:    score,
-			Age:      age,
+			Label:      d.SectionPath,
+			Source:     d.SourceType,
+			SubType:    d.SubType,
+			HitCount:   d.HitCount,
+			Content:    d.Content,
+			Structured: d.Structured,
+			Score:      score,
+			Age:        age,
 		})
 	}
 	return entries

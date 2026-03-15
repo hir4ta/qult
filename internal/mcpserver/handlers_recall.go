@@ -2,8 +2,10 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -120,6 +122,10 @@ func recallSearch(ctx context.Context, st *store.Store, emb *embedder.Embedder, 
 				dm["saved_at"] = d.CrawledAt
 			}
 		}
+		// Include structured data when available.
+		if d.Structured != "" {
+			dm["structured"] = json.RawMessage(d.Structured)
+		}
 		results = append(results, dm)
 	}
 
@@ -173,6 +179,85 @@ func recallSave(ctx context.Context, st *store.Store, emb *embedder.Embedder, re
 		return mcp.NewToolResultError("invalid project name: use lowercase letters, digits, and hyphens only (max 64 chars)"), nil
 	}
 
+	// Optional structured fields.
+	title := req.GetString("title", "")
+	contextText := req.GetString("context_text", "")
+	reasoning := req.GetString("reasoning", "")
+	alternatives := req.GetString("alternatives", "")
+	category := req.GetString("category", "")
+	priority := req.GetString("priority", "")
+
+	hasStructured := title != "" || contextText != "" || reasoning != "" ||
+		alternatives != "" || category != "" || priority != ""
+
+	var structured string // JSON for doc.Structured
+	if hasStructured {
+		now := time.Now().UTC().Format(time.RFC3339)
+		switch subType {
+		case store.SubTypeDecision:
+			dec := &store.StructuredDecision{
+				ID:        fmt.Sprintf("dec-%s", sanitizeID(label)),
+				Title:     orDefault(title, label),
+				Context:   contextText,
+				Decision:  strings.TrimSpace(content),
+				Reasoning: reasoning,
+				Tags:      []string{},
+				Status:    "draft",
+				CreatedAt: now,
+			}
+			if alternatives != "" {
+				dec.Alternatives = splitCSV(alternatives)
+			}
+			content = dec.ToContent()
+			data, _ := json.Marshal(dec)
+			structured = string(data)
+			// Best-effort JSON file save.
+			projectPath := resolveProjectPath(req)
+			if _, err := store.SaveDecision(projectPath, dec); err != nil {
+				fmt.Fprintf(os.Stderr, "alfred: save decision json: %v\n", err)
+			}
+		case store.SubTypePattern:
+			pat := &store.StructuredPattern{
+				ID:                    fmt.Sprintf("pat-%s", sanitizeID(label)),
+				Type:                  "good",
+				Title:                 orDefault(title, label),
+				Context:               contextText,
+				Pattern:               strings.TrimSpace(content),
+				ApplicationConditions: reasoning, // reuse reasoning as conditions
+				Tags:                  []string{},
+				Status:                "draft",
+				CreatedAt:             now,
+			}
+			content = pat.ToContent()
+			data, _ := json.Marshal(pat)
+			structured = string(data)
+			projectPath := resolveProjectPath(req)
+			if err := store.SavePattern(projectPath, pat); err != nil {
+				fmt.Fprintf(os.Stderr, "alfred: save pattern json: %v\n", err)
+			}
+		case store.SubTypeRule:
+			rule := &store.StructuredRule{
+				ID:        fmt.Sprintf("rule-%s", sanitizeID(label)),
+				Key:       sanitizeID(label),
+				Text:      strings.TrimSpace(content),
+				Category:  category,
+				Priority:  priority,
+				Rationale: reasoning,
+				Tags:      []string{},
+				Status:    "draft",
+				CreatedAt: now,
+			}
+			content = rule.ToContent()
+			data, _ := json.Marshal(rule)
+			structured = string(data)
+			projectPath := resolveProjectPath(req)
+			if err := store.SaveRule(projectPath, rule); err != nil {
+				fmt.Fprintf(os.Stderr, "alfred: save rule json: %v\n", err)
+			}
+		}
+		// For sub_types without a structured mapping (general), ignore structured fields.
+	}
+
 	ts := time.Now().Format("2006-01-02T150405")
 	url := fmt.Sprintf("memory://user/%s/manual/%s", project, ts)
 	sectionPath := fmt.Sprintf("%s > manual > %s", project, truncate(label, 60))
@@ -184,6 +269,7 @@ func recallSave(ctx context.Context, st *store.Store, emb *embedder.Embedder, re
 		SourceType:  store.SourceMemory,
 		SubType:     subType,
 		TTLDays:     0, // permanent
+		Structured:  structured,
 	})
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("save failed: %v", err)), nil
@@ -364,4 +450,62 @@ func recallReflect(ctx context.Context, st *store.Store, emb *embedder.Embedder)
 	}
 
 	return marshalResult(result)
+}
+
+// sanitizeID converts a label into a lowercase slug suitable for structured IDs.
+func sanitizeID(label string) string {
+	s := strings.ToLower(strings.TrimSpace(label))
+	s = strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			return r
+		}
+		if r == '-' || r == ' ' {
+			return '-'
+		}
+		return -1 // drop non-ASCII
+	}, s)
+	// Collapse consecutive hyphens.
+	for strings.Contains(s, "--") {
+		s = strings.ReplaceAll(s, "--", "-")
+	}
+	s = strings.Trim(s, "-")
+	if len(s) > 40 {
+		s = s[:40]
+	}
+	if s == "" {
+		s = "untitled"
+	}
+	return s
+}
+
+// splitCSV splits a comma-separated string into trimmed non-empty parts.
+func splitCSV(s string) []string {
+	parts := strings.Split(s, ",")
+	result := parts[:0]
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
+// orDefault returns s if non-empty, otherwise def.
+func orDefault(s, def string) string {
+	if s != "" {
+		return s
+	}
+	return def
+}
+
+// resolveProjectPath gets the project path from the request or falls back to cwd.
+func resolveProjectPath(req mcp.CallToolRequest) string {
+	if p := req.GetString("project_path", ""); p != "" {
+		return p
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		return cwd
+	}
+	return "."
 }

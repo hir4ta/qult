@@ -618,7 +618,7 @@ func isItemCompleted(itemText, assistantTextLower string) bool {
 
 // persistDecisionMemory saves extracted decisions as permanent memory docs
 // (source_type="memory"). These survive spec deletion and enable cross-session
-// search for past decisions.
+// search for past decisions. Also persists structured decision JSON files.
 func persistDecisionMemory(ctx context.Context, projectPath, taskSlug string, decisions []string) {
 	st, err := store.OpenDefaultCached()
 	if err != nil {
@@ -628,18 +628,38 @@ func persistDecisionMemory(ctx context.Context, projectPath, taskSlug string, de
 	project := projectBaseName(projectPath)
 	date := time.Now().Format("2006-01-02")
 	url := fmt.Sprintf("memory://user/%s/%s/%s", project, taskSlug, date)
+	now := time.Now().UTC().Format(time.RFC3339)
+	sessionID := os.Getenv("CLAUDE_SESSION_ID")
 
 	saved := 0
 	var changedIDs []int64
 	for i, d := range decisions {
+		// Build structured decision.
+		dec := store.StructuredDecision{
+			ID:         fmt.Sprintf("%s-%d", taskSlug, i),
+			Title:      truncateStr(d, 100),
+			Decision:   d,
+			Status:     "draft",
+			SessionRef: sessionID,
+			TaskRef:    taskSlug,
+			CreatedAt:  now,
+		}
+
+		// Serialize structured data.
+		structuredJSON, err := json.Marshal(dec)
+		if err != nil {
+			structuredJSON = nil // fall back to no structured data
+		}
+
 		sectionPath := fmt.Sprintf("%s > %s > decision > %s#%d", project, taskSlug, truncateDecision(d, 60), i)
 		id, changed, err := st.UpsertDoc(ctx, &store.DocRow{
 			URL:         url,
 			SectionPath: sectionPath,
-			Content:     d,
+			Content:     dec.ToContent(),
 			SourceType:  store.SourceMemory,
 			SubType:     store.SubTypeDecision,
 			TTLDays:     0, // permanent
+			Structured:  string(structuredJSON),
 		})
 		if err != nil {
 			continue
@@ -647,6 +667,11 @@ func persistDecisionMemory(ctx context.Context, projectPath, taskSlug string, de
 		if changed {
 			saved++
 			changedIDs = append(changedIDs, id)
+		}
+
+		// Save structured JSON file (best-effort).
+		if _, err := store.SaveDecision(projectPath, &dec); err != nil {
+			fmt.Fprintf(os.Stderr, "alfred: save decision file: %v\n", err)
 		}
 	}
 	// asyncEmbedDocs spawns a single detached background process (non-blocking cmd.Start).
@@ -748,17 +773,66 @@ func persistChapterMemory(ctx context.Context, projectPath, taskSlug string, sd 
 			}
 			content = []byte(raw)
 		}
+
+		// Build StructuredSession from chapter data.
+		now := time.Now().UTC().Format(time.RFC3339)
+		sessID := fmt.Sprintf("ch%d-%s-%s", chapterNum, taskSlug, time.Now().Format("20060102T150405"))
+		discussions := make([]store.Discussion, 0, len(structured.Decisions))
+		for _, d := range structured.Decisions {
+			discussions = append(discussions, store.Discussion{Topic: d})
+		}
+		filesModified := make([]store.FileChange, 0, len(structured.ModifiedFiles))
+		for _, f := range structured.ModifiedFiles {
+			filesModified = append(filesModified, store.FileChange{Path: f, Action: "edit"})
+		}
+		sess := store.StructuredSession{
+			ID:        sessID,
+			Title:     structured.Goal,
+			CreatedAt: now,
+			Context: store.SessionContext{
+				ProjectName: project,
+				TaskSlug:    taskSlug,
+			},
+			Summary: store.SessionSummary{
+				Goal:    structured.Goal,
+				Outcome: structured.Status,
+			},
+			Discussions:   discussions,
+			Technologies:  structured.Technologies,
+			FilesModified: filesModified,
+			Handoff:       &store.SessionHandoff{NextSteps: structured.NextSteps},
+		}
+
+		// Serialize StructuredSession for the Structured field.
+		structuredJSON, jsonErr := json.Marshal(sess)
+		var structuredStr string
+		if jsonErr == nil {
+			structuredStr = string(structuredJSON)
+		}
+
+		// Use ToContent for human-readable DB content.
+		dbContent := sess.ToContent()
+		if dbContent == "" {
+			dbContent = string(content) // fallback to chapter JSON
+		}
+
 		sectionPath := fmt.Sprintf("%s > %s > chapter-%d > %s", project, taskSlug, chapterNum, label)
 		id, changed, err := st.UpsertDoc(ctx, &store.DocRow{
 			URL:         baseURL + "/session-state",
 			SectionPath: sectionPath,
-			Content:     string(content),
+			Content:     dbContent,
 			SourceType:  store.SourceMemory,
 			TTLDays:     chapterMemoryTTLDays,
+			Structured:  structuredStr,
 		})
 		if err == nil && changed {
 			savedCount++
 			changedIDs = append(changedIDs, id)
+		}
+
+		// Save structured session JSON file (best-effort).
+		if _, err := store.SaveSession(projectPath, &sess); err != nil {
+			fmt.Fprintf(os.Stderr, "alfred: save session file: %v\n", err)
 		}
 	}
 

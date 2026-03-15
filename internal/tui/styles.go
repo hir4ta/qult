@@ -143,6 +143,18 @@ var (
 	hitCountStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#555"))
 )
 
+// styledKnowledgeStatus returns a styled status badge for structured knowledge.
+func styledKnowledgeStatus(status string) string {
+	switch status {
+	case "approved":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#8a8")).Render("[approved]")
+	case "rejected":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#c66")).Render("[rejected]")
+	default:
+		return ""
+	}
+}
+
 // styledSubType returns a styled sub_type abbreviation.
 func styledSubType(subType string) string {
 	switch subType {

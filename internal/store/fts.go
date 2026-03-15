@@ -32,7 +32,7 @@ func (s *Store) SearchFTS(ctx context.Context, query string, sourceType string, 
 
 	if sourceType != "" {
 		sqlQuery = `SELECT r.id, r.url, r.section_path, r.content, r.content_hash,
-			r.source_type, r.sub_type, r.version, r.crawled_at, r.ttl_days,
+			r.source_type, r.sub_type, r.version, r.crawled_at, r.ttl_days, r.structured,
 			bm25(records_fts, 1.0, 3.0) AS rank
 		FROM records_fts f
 		JOIN records r ON r.rowid = f.rowid
@@ -42,7 +42,7 @@ func (s *Store) SearchFTS(ctx context.Context, query string, sourceType string, 
 		args = []any{ftsQuery, sourceType, limit}
 	} else {
 		sqlQuery = `SELECT r.id, r.url, r.section_path, r.content, r.content_hash,
-			r.source_type, r.sub_type, r.version, r.crawled_at, r.ttl_days,
+			r.source_type, r.sub_type, r.version, r.crawled_at, r.ttl_days, r.structured,
 			bm25(records_fts, 1.0, 3.0) AS rank
 		FROM records_fts f
 		JOIN records r ON r.rowid = f.rowid
@@ -65,7 +65,7 @@ func (s *Store) SearchFTS(ctx context.Context, query string, sourceType string, 
 		var version sql.NullString
 		var rank float64
 		if err := rows.Scan(&d.ID, &d.URL, &d.SectionPath, &d.Content, &d.ContentHash,
-			&d.SourceType, &d.SubType, &version, &d.CrawledAt, &d.TTLDays, &rank); err != nil {
+			&d.SourceType, &d.SubType, &version, &d.CrawledAt, &d.TTLDays, &d.Structured, &rank); err != nil {
 			continue
 		}
 		d.Version = version.String
@@ -370,7 +370,7 @@ func (s *Store) SearchMemoriesFTS(ctx context.Context, query string, limit int) 
 // searchFTSMemory runs FTS5 search filtered to memory source_type.
 func (s *Store) searchFTSMemory(ctx context.Context, ftsQuery string, limit int) ([]DocRow, error) {
 	sqlQuery := `SELECT r.id, r.url, r.section_path, r.content, r.content_hash,
-		r.source_type, r.sub_type, r.version, r.crawled_at, r.ttl_days,
+		r.source_type, r.sub_type, r.version, r.crawled_at, r.ttl_days, r.structured,
 		bm25(records_fts, 1.0, 3.0) AS rank
 	FROM records_fts f
 	JOIN records r ON r.rowid = f.rowid
@@ -390,7 +390,7 @@ func (s *Store) searchFTSMemory(ctx context.Context, ftsQuery string, limit int)
 		var version sql.NullString
 		var rank float64
 		if err := rows.Scan(&d.ID, &d.URL, &d.SectionPath, &d.Content, &d.ContentHash,
-			&d.SourceType, &d.SubType, &version, &d.CrawledAt, &d.TTLDays, &rank); err != nil {
+			&d.SourceType, &d.SubType, &version, &d.CrawledAt, &d.TTLDays, &d.Structured, &rank); err != nil {
 			continue
 		}
 		d.Version = version.String
@@ -411,7 +411,7 @@ func (s *Store) fuzzySearchMemories(ctx context.Context, queryWords []string, li
 	}
 
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, url, section_path, content, content_hash, source_type, sub_type, version, crawled_at, ttl_days
+		`SELECT id, url, section_path, content, content_hash, source_type, sub_type, version, crawled_at, ttl_days, structured
 		FROM records WHERE source_type = ? LIMIT 500`, SourceMemory)
 	if err != nil {
 		return nil
@@ -423,7 +423,7 @@ func (s *Store) fuzzySearchMemories(ctx context.Context, queryWords []string, li
 		var d DocRow
 		var version sql.NullString
 		if err := rows.Scan(&d.ID, &d.URL, &d.SectionPath, &d.Content, &d.ContentHash,
-			&d.SourceType, &d.SubType, &version, &d.CrawledAt, &d.TTLDays); err != nil {
+			&d.SourceType, &d.SubType, &version, &d.CrawledAt, &d.TTLDays, &d.Structured); err != nil {
 			continue
 		}
 		d.Version = version.String

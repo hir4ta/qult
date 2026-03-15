@@ -287,10 +287,10 @@ func TestSchemaTablesExist(t *testing.T) {
 		t.Errorf("session_links table not found: %v", err)
 	}
 
-	// Verify schema version is 4.
+	// Verify schema version is 5.
 	v := st.SchemaVersionCurrent()
-	if v != 4 {
-		t.Errorf("SchemaVersionCurrent() = %d, want 4", v)
+	if v != 5 {
+		t.Errorf("SchemaVersionCurrent() = %d, want 5", v)
 	}
 }
 

@@ -609,13 +609,11 @@ func (m *Model) updateKnowledge(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Enter):
 		if m.knCursor < len(m.knowledge) {
 			k := m.knowledge[m.knCursor]
-			title, _ := simplifyKnowledgeLabel(k.Label)
-			if len(title) < 5 {
-				title = knowledgeTitle(k.Content)
-			}
+			title := extractKnowledgeTitle(k)
+			content := renderKnowledgeDetail(k)
 			m.openOverlay(
 				title,
-				m.renderMarkdown(formatKnowledgeContent(k.Content)),
+				m.renderMarkdown(content),
 				"Knowledge", k.Source, title,
 			)
 		}
@@ -1822,11 +1820,8 @@ func (m Model) knowledgeView() string {
 		}
 
 		// Parse label into title + context.
-		title, ctx := simplifyKnowledgeLabel(k.Label)
-		// Use content-derived title if the parsed title is too short.
-		if len(title) < 5 {
-			title = knowledgeTitle(k.Content)
-		}
+		title := extractKnowledgeTitle(k)
+		_, ctx := simplifyKnowledgeLabel(k.Label)
 		title = truncStr(title, m.width-36)
 
 		// Score + source tag + sub_type + hit_count + age.
@@ -1838,6 +1833,15 @@ func (m Model) knowledgeView() string {
 		subTag := ""
 		if k.SubType != "" && k.Source == "memory" {
 			subTag = " " + styledSubType(k.SubType)
+		}
+		statusTag := ""
+		if k.Structured != "" {
+			var raw map[string]any
+			if json.Unmarshal([]byte(k.Structured), &raw) == nil {
+				if s, _ := raw["status"].(string); s != "" && s != "draft" {
+					statusTag = " " + styledKnowledgeStatus(s)
+				}
+			}
 		}
 		hitStr := ""
 		if k.HitCount > 0 {
@@ -1852,12 +1856,12 @@ func (m Model) knowledgeView() string {
 		}
 
 		if i == m.knCursor {
-			b.WriteString(titleStyle.Render(prefix) + scoreStr + sourceTag + subTag + " " + titleStyle.Render(title) + "  " + age + hitStr + "\n")
+			b.WriteString(titleStyle.Render(prefix) + scoreStr + sourceTag + subTag + statusTag + " " + titleStyle.Render(title) + "  " + age + hitStr + "\n")
 			if ctxLine != "" {
 				b.WriteString("    " + ctxLine + "\n")
 			}
 		} else {
-			b.WriteString(prefix + scoreStr + sourceTag + subTag + " " + title + "  " + age + hitStr + "\n")
+			b.WriteString(prefix + scoreStr + sourceTag + subTag + statusTag + " " + title + "  " + age + hitStr + "\n")
 			if ctxLine != "" {
 				b.WriteString("    " + ctxLine + "\n")
 			}
@@ -1954,6 +1958,114 @@ func (m Model) activityView() string {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// extractKnowledgeTitle extracts the best title for a knowledge entry,
+// preferring structured data fields over label parsing.
+func extractKnowledgeTitle(k KnowledgeEntry) string {
+	if k.Structured != "" {
+		var raw map[string]any
+		if json.Unmarshal([]byte(k.Structured), &raw) == nil {
+			if t, ok := raw["title"].(string); ok && t != "" {
+				return t
+			}
+			if t, ok := raw["text"].(string); ok && t != "" {
+				return t
+			}
+		}
+	}
+	title, _ := simplifyKnowledgeLabel(k.Label)
+	if len(title) < 5 {
+		title = knowledgeTitle(k.Content)
+	}
+	return title
+}
+
+// renderKnowledgeDetail renders a knowledge entry for the overlay,
+// using structured data fields when available.
+func renderKnowledgeDetail(k KnowledgeEntry) string {
+	if k.Structured == "" {
+		return formatKnowledgeContent(k.Content)
+	}
+
+	var raw map[string]any
+	if json.Unmarshal([]byte(k.Structured), &raw) != nil {
+		return k.Content
+	}
+
+	var b strings.Builder
+
+	switch k.SubType {
+	case "decision":
+		if v, _ := raw["title"].(string); v != "" {
+			b.WriteString("# " + v + "\n\n")
+		}
+		if v, _ := raw["context"].(string); v != "" {
+			b.WriteString("## Context\n" + v + "\n\n")
+		}
+		if v, _ := raw["decision"].(string); v != "" {
+			b.WriteString("## Decision\n" + v + "\n\n")
+		}
+		if v, _ := raw["reasoning"].(string); v != "" {
+			b.WriteString("## Reasoning\n" + v + "\n\n")
+		}
+		if alts, ok := raw["alternatives"].([]any); ok && len(alts) > 0 {
+			b.WriteString("## Alternatives\n")
+			for _, a := range alts {
+				b.WriteString("- " + fmt.Sprint(a) + "\n")
+			}
+			b.WriteString("\n")
+		}
+		if v, _ := raw["status"].(string); v != "" {
+			b.WriteString("**Status:** " + v + "\n")
+		}
+
+	case "pattern":
+		if v, _ := raw["title"].(string); v != "" {
+			b.WriteString("# " + v + "\n\n")
+		}
+		if v, _ := raw["context"].(string); v != "" {
+			b.WriteString("## Context\n" + v + "\n\n")
+		}
+		if v, _ := raw["pattern"].(string); v != "" {
+			b.WriteString("## Pattern\n" + v + "\n\n")
+		}
+		if v, _ := raw["applicationConditions"].(string); v != "" {
+			b.WriteString("## When to Apply\n" + v + "\n\n")
+		}
+		if v, _ := raw["expectedOutcomes"].(string); v != "" {
+			b.WriteString("## Expected Outcomes\n" + v + "\n\n")
+		}
+		if v, _ := raw["status"].(string); v != "" {
+			b.WriteString("**Status:** " + v + "\n")
+		}
+
+	case "rule":
+		if v, _ := raw["text"].(string); v != "" {
+			b.WriteString("# " + v + "\n\n")
+		}
+		if v, _ := raw["category"].(string); v != "" {
+			b.WriteString("**Category:** " + v)
+		}
+		if v, _ := raw["priority"].(string); v != "" {
+			b.WriteString("  **Priority:** " + v)
+		}
+		b.WriteString("\n\n")
+		if v, _ := raw["rationale"].(string); v != "" {
+			b.WriteString("## Rationale\n" + v + "\n\n")
+		}
+		if v, _ := raw["status"].(string); v != "" {
+			b.WriteString("**Status:** " + v + "\n")
+		}
+
+	default:
+		return formatKnowledgeContent(k.Content)
+	}
+
+	if b.Len() == 0 {
+		return k.Content
+	}
+	return b.String()
+}
 
 // knowledgeTitle extracts a human-readable title from knowledge content.
 func knowledgeTitle(content string) string {

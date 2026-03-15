@@ -16,9 +16,9 @@ type execer interface {
 	Exec(query string, args ...any) (sql.Result, error)
 }
 
-// schemaVersion 4 = hit_count + last_accessed columns on records.
-// V3→V4: additive (new columns with defaults).
-const schemaVersion = 4
+// schemaVersion 5 = structured JSON column on records.
+// V4→V5: additive (new column with default).
+const schemaVersion = 5
 
 const ddl = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS records (
     sub_type      TEXT NOT NULL DEFAULT 'general',
     hit_count     INTEGER NOT NULL DEFAULT 0,
     last_accessed TEXT NOT NULL DEFAULT '',
+    structured    TEXT NOT NULL DEFAULT '',
     UNIQUE(url, section_path)
 );
 
@@ -183,21 +184,32 @@ func Migrate(db *sql.DB) error {
 	defer tx.Rollback()
 
 	switch current {
+	case 4:
+		// V4→V5: additive migration (structured column).
+		if err := migrateV4toV5(tx); err != nil {
+			return err
+		}
 	case 3:
-		// V3→V4: additive migration (hit_count, last_accessed columns).
+		// V3→V4→V5: chain migrations.
 		if err := migrateV3toV4(tx); err != nil {
 			return err
 		}
+		if err := migrateV4toV5(tx); err != nil {
+			return err
+		}
 	case 2:
-		// V2→V3→V4: chain migrations.
+		// V2→V3→V4→V5: chain migrations.
 		if err := migrateV2toV3(tx); err != nil {
 			return err
 		}
 		if err := migrateV3toV4(tx); err != nil {
 			return err
 		}
+		if err := migrateV4toV5(tx); err != nil {
+			return err
+		}
 	case 1:
-		// V1→V2→V3→V4: chain migrations.
+		// V1→V2→V3→V4→V5: chain migrations.
 		if err := migrateV1toV2(tx); err != nil {
 			return err
 		}
@@ -205,6 +217,9 @@ func Migrate(db *sql.DB) error {
 			return err
 		}
 		if err := migrateV3toV4(tx); err != nil {
+			return err
+		}
+		if err := migrateV4toV5(tx); err != nil {
 			return err
 		}
 	default:
@@ -303,6 +318,12 @@ func migrateV3toV4(db execer) error {
 		}
 	}
 	return nil
+}
+
+// migrateV4toV5 adds structured JSON column to records.
+func migrateV4toV5(db execer) error {
+	_, err := db.Exec(`ALTER TABLE records ADD COLUMN structured TEXT NOT NULL DEFAULT ''`)
+	return err
 }
 
 // seedTagAliases inserts default tag alias mappings.
