@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -287,14 +288,69 @@ func (ds *fileDataSource) SemanticSearch(query string, limit int) []KnowledgeEnt
 }
 
 func (ds *fileDataSource) RecentKnowledge(limit int) []KnowledgeEntry {
-	if ds.st == nil {
-		return nil
+	// Read from .alfred/knowledge/ JSON files (no DB needed).
+	var entries []KnowledgeEntry
+
+	// Decisions.
+	decs, _ := store.LoadDecisions(ds.projectPath)
+	for _, d := range decs {
+		entries = append(entries, KnowledgeEntry{
+			Label:      d.Title,
+			Source:     "memory",
+			SubType:    "decision",
+			Content:    d.ToContent(),
+			Structured: mustJSON(d),
+		})
 	}
-	docs, err := ds.st.SearchMemoriesKeyword(context.Background(), "", limit)
+
+	// Patterns.
+	pats, _ := store.LoadPatterns(ds.projectPath)
+	for _, p := range pats {
+		entries = append(entries, KnowledgeEntry{
+			Label:      p.Title,
+			Source:     "memory",
+			SubType:    "pattern",
+			Content:    p.ToContent(),
+			Structured: mustJSON(p),
+		})
+	}
+
+	// Rules.
+	rules, _ := store.LoadRules(ds.projectPath)
+	for _, r := range rules {
+		entries = append(entries, KnowledgeEntry{
+			Label:      r.Text,
+			Source:     "memory",
+			SubType:    "rule",
+			Content:    r.ToContent(),
+			Structured: mustJSON(r),
+		})
+	}
+
+	// Sessions.
+	sessions, _ := store.LoadSessions(ds.projectPath)
+	for _, s := range sessions {
+		entries = append(entries, KnowledgeEntry{
+			Label:      s.Title,
+			Source:     "memory",
+			SubType:    "general",
+			Content:    s.ToContent(),
+			Structured: mustJSON(s),
+		})
+	}
+
+	if len(entries) > limit {
+		entries = entries[:limit]
+	}
+	return entries
+}
+
+func mustJSON(v any) string {
+	b, err := json.Marshal(v)
 	if err != nil {
-		return nil
+		return ""
 	}
-	return docsToKnowledge(docs, nil, limit)
+	return string(b)
 }
 
 func (ds *fileDataSource) RecentActivity(limit int) []ActivityEntry {
@@ -318,27 +374,17 @@ func (ds *fileDataSource) RecentActivity(limit int) []ActivityEntry {
 }
 
 func (ds *fileDataSource) KnowledgeStats() KnowledgeStats {
-	if ds.st == nil {
-		return KnowledgeStats{}
-	}
-	docs, err := ds.st.SearchMemoriesKeyword(context.Background(), "", 10000)
-	if err != nil {
-		return KnowledgeStats{}
-	}
+	// Count from .alfred/knowledge/ JSON files (no DB needed).
 	var ks KnowledgeStats
-	ks.Total = len(docs)
-	for _, d := range docs {
-		switch d.SubType {
-		case "decision":
-			ks.Decision++
-		case "pattern":
-			ks.Pattern++
-		case "rule":
-			ks.Rule++
-		default:
-			ks.General++
-		}
-	}
+	decs, _ := store.LoadDecisions(ds.projectPath)
+	ks.Decision = len(decs)
+	pats, _ := store.LoadPatterns(ds.projectPath)
+	ks.Pattern = len(pats)
+	rules, _ := store.LoadRules(ds.projectPath)
+	ks.Rule = len(rules)
+	sessions, _ := store.LoadSessions(ds.projectPath)
+	ks.General = len(sessions)
+	ks.Total = ks.Decision + ks.Pattern + ks.Rule + ks.General
 	return ks
 }
 
