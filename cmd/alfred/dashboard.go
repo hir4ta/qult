@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -29,28 +28,13 @@ func runDashboard() error {
 	ds := tui.NewFileDataSource(projectPath, st, emb)
 	model := tui.New(ds)
 
-	// Filter out leaked terminal responses (DECRPM, CPR, DA) that bubbletea v2
-	// fails to parse. These arrive as KeyPressMsg with digit characters and cause
-	// phantom tab switches and search activation.
-	startedAt := time.Now()
+	// Filter leaked terminal response fragments (DECRPM, CPR, DA) that
+	// bubbletea v2 fails to parse and delivers as KeyPressMsg.
 	filter := func(_ tea.Model, msg tea.Msg) tea.Msg {
-		if kp, ok := msg.(tea.KeyPressMsg); ok {
-			// Drop all key events during the first 2 seconds (terminal negotiation).
-			if time.Since(startedAt) < 2*time.Second {
+		if kp, ok := msg.(tea.KeyPressMsg); ok && kp.Text != "" && len(kp.Text) == 1 {
+			switch kp.Text[0] {
+			case '$', 'y', 'R', 'c', '?', ';', '[':
 				return nil
-			}
-			// Drop single-char key presses that look like terminal response fragments:
-			// digits 0,4-9 (not 1-3 which are tab shortcuts), $, y, R, c, ?, ;, [
-			if kp.Text != "" && len(kp.Text) == 1 {
-				ch := kp.Text[0]
-				switch {
-				case ch == '$' || ch == 'y' || ch == 'R' || ch == 'c' || ch == '?' || ch == ';' || ch == '[':
-					return nil
-				case ch >= '4' && ch <= '9':
-					return nil
-				case ch == '0':
-					return nil
-				}
 			}
 		}
 		return msg

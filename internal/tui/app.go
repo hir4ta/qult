@@ -130,8 +130,7 @@ type Model struct {
 	mdRenderer *glamour.TermRenderer
 
 	// Loading.
-	loading   bool
-	startedAt time.Time // ignore key presses during startup (DECRPM/CPR filtering)
+	loading bool
 
 	// Shimmer animation frame counter.
 	shimmerFrame int
@@ -170,7 +169,6 @@ func New(ds DataSource) Model {
 		searchInput: ti,
 		progress:    prog,
 		loading:     true,
-		startedAt:   time.Now(),
 	}
 }
 
@@ -488,12 +486,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 
 	case tea.KeyPressMsg:
-		// Ignore key events during the first second after startup.
-		// DECRPM/CPR terminal responses (e.g. [?2028$y, [8;1R) leak as
-		// key presses in bubbletea v2 and trigger tab switches.
-		if time.Since(m.startedAt) < time.Second {
-			return m, nil
-		}
 		// Overlay takes priority — all input goes to the floating window.
 		if m.overlayActive {
 			return m.updateOverlay(msg)
@@ -520,15 +512,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case key.Matches(msg, keys.BackTab):
 			m.switchTab((m.activeTab - 1 + tabCount) % tabCount)
-			return m, nil
-		case key.Matches(msg, keys.Tab1) && !m.searching:
-			m.switchTab(tabTasks)
-			return m, nil
-		case key.Matches(msg, keys.Tab2) && !m.searching:
-			m.switchTab(tabKnowledge)
-			return m, nil
-		case key.Matches(msg, keys.Tab3) && !m.searching:
-			m.switchTab(tabActivity)
 			return m, nil
 		case key.Matches(msg, keys.Search):
 			// Global search — works from any tab.
