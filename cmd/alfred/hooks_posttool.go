@@ -57,7 +57,15 @@ func handlePostToolUse(ctx context.Context, ev *hookEvent) {
 	if resp.ExitCode == 0 {
 		tryAutoCheckNextSteps(ctx, ev.ProjectPath, input.Command, resp.Stdout)
 		warnIfAllStepsDoneButActive(ev.ProjectPath)
-		tryDetectSpecDrift(ctx, ev.ProjectPath, input.Command)
+
+		// Living Spec: auto-append before drift detection so appended files are excluded from warnings.
+		// Share extractChangedFiles result between auto-append and drift detection.
+		cmdLower := strings.ToLower(input.Command)
+		if strings.Contains(cmdLower, "git commit") {
+			changed := extractChangedFiles(ctx, ev.ProjectPath)
+			appended := tryAutoAppendDesignRefs(ctx, ev.ProjectPath, changed)
+			tryDetectSpecDriftWithExclusions(ctx, ev.ProjectPath, changed, appended)
+		}
 		return
 	}
 
@@ -472,6 +480,29 @@ const driftActionConvention = "drift.convention"
 // driftResolutionUnresolved is the default resolution status for drift events.
 const driftResolutionUnresolved = "unresolved"
 
+// tryDetectSpecDriftWithExclusions runs drift detection with pre-computed changed files
+// and excludes files that were already auto-appended by Living Spec.
+func tryDetectSpecDriftWithExclusions(ctx context.Context, projectPath string, changed []string, excludes map[string]bool) {
+	if projectPath == "" || len(changed) == 0 {
+		return
+	}
+
+	// Filter out excluded (auto-appended) files.
+	var filtered []string
+	for _, f := range changed {
+		if !excludes[f] {
+			filtered = append(filtered, f)
+		}
+	}
+
+	taskSlug, err := spec.ReadActive(projectPath)
+	if err != nil {
+		return
+	}
+
+	detectSpecDriftCore(ctx, projectPath, taskSlug, filtered)
+}
+
 // tryDetectSpecDrift runs after a successful git commit command.
 // Compares changed files against the active spec's file references and
 // emits additionalContext warnings for untracked files or modified components.
@@ -491,6 +522,12 @@ func tryDetectSpecDrift(ctx context.Context, projectPath, command string) {
 	}
 
 	changed := extractChangedFiles(ctx, projectPath)
+	detectSpecDriftCore(ctx, projectPath, taskSlug, changed)
+}
+
+// detectSpecDriftCore is the shared drift detection logic used by both
+// tryDetectSpecDrift (standalone) and tryDetectSpecDriftWithExclusions (Living Spec).
+func detectSpecDriftCore(_ context.Context, projectPath, taskSlug string, changed []string) {
 	if len(changed) == 0 {
 		return
 	}

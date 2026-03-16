@@ -12,8 +12,8 @@ import (
 // shimmerTickMsg triggers shimmer animation frame advance.
 type shimmerTickMsg time.Time
 
-// shimmerInterval controls animation smoothness. 50ms = 20 FPS.
-const shimmerInterval = 50 * time.Millisecond
+// shimmerInterval controls animation smoothness. 80ms = 12.5 FPS (~5.5s cycle).
+const shimmerInterval = 80 * time.Millisecond
 
 // shimmerCmd returns a command that ticks the shimmer animation.
 func shimmerCmd() tea.Cmd {
@@ -43,7 +43,7 @@ var shimmerBaseBoldStyle lipgloss.Style
 
 func init() {
 	// Orange shimmer: dark warm → soft orange → dark warm.
-	baseColor := lipgloss.Color("#3a3428") // dark warm
+	baseColor := lipgloss.Color("#5a4a3a") // warm brown (brighter for readability)
 	peakColor := lipgloss.Color("#e69875") // orange
 
 	// Blend1D: base → peak → base (symmetric sweep).

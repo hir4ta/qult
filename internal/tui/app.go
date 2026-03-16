@@ -1475,9 +1475,10 @@ func (m Model) renderTaskOverview(td *TaskDetail) string {
 	}
 	b.WriteString("\n")
 
-	// Focus.
+	// Focus — warm white for readability.
 	if td.Focus != "" {
-		b.WriteString("  " + td.Focus + "\n")
+		focusStyle := lipgloss.NewStyle().Foreground(fgWarm)
+		b.WriteString("  " + focusStyle.Render(td.Focus) + "\n")
 	}
 	b.WriteString("\n")
 
@@ -1502,7 +1503,8 @@ func (m Model) renderTaskOverview(td *TaskDetail) string {
 				foundActive = true
 				b.WriteString("  " + check + " " + renderShimmerBold(text, m.shimmerFrame) + "\n")
 			} else {
-				b.WriteString("  " + check + " " + text + "\n")
+				uncheckedStyle := lipgloss.NewStyle().Foreground(fgWarm)
+				b.WriteString("  " + check + " " + uncheckedStyle.Render(text) + "\n")
 			}
 		}
 		b.WriteString("\n")

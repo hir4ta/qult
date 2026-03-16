@@ -69,7 +69,8 @@ alfred steering-init          # Generate project steering docs (.alfred/steering
 - dossier init suggested_search: always includes ledger search suggestion with description keywords
 - dossier status next_action: review pending → dashboard, all steps done → complete, 3+ active tasks without epic → roster init suggestion
 - SessionStart ledger reflect: suggests `ledger action=reflect` when 20+ memories exist and last reflect >7 days ago
-- PostToolUse: Bash error detection → FTS5 memory search → additionalContext injection; Bash success → session.md Next Steps auto-check (command + action signals matching + file-based matching via git diff); git commit → spec drift detection (file refs vs changed files)
+- PostToolUse: Bash error detection → FTS5 memory search → additionalContext injection; Bash success → session.md Next Steps auto-check (command + action signals matching + file-based matching via git diff); git commit → Living Spec auto-append → spec drift detection (file refs vs changed files)
+- PostToolUse Living Spec: git commit → extractChangedFiles (shared, called once) → shouldAutoAppend filter (.go only, excludes _test/_gen/.pb/_mock/_string/vendor/plugin/.alfred) → matchComponentByPackage → appendFileToComponent (design.md, flock-protected, `<!-- auto-added: ISO8601 -->` marker) → audit.jsonl (living-spec.update). Auto-appended files excluded from drift warnings. File: `hooks_autoappend.go`
 - PostToolUse drift detection: extractChangedFiles (git diff --name-only HEAD~1, 500ms timeout, fail-open) → parseSpecFileRefs (design.md File: + tasks.md Files:) → matchComponentByPackage (directory-level component matching) → reverseMapFileToFR (file→FR reverse lookup via tasks.md) → compare → additionalContext warning + audit.jsonl logging
 - Drift severity: info (test files), warning (source files not in spec), critical (component-level drift — file in same package as spec component)
 - Multi-agent skills: inspect (6 profiles), salon (3 specialists + synthesis), brief (7 spec files with EARS/traceability + 3 specialists per file + approval gate), attend (7-file spec→approve→implement→review→commit orchestrator), tdd (red→green→refactor autonomous cycles), mend (reproduce→analyze→fix→verify), survey (code→spec reverse engineering), harvest (PR comment → memory)
@@ -115,7 +116,7 @@ alfred steering-init          # Generate project steering docs (.alfred/steering
 - Spec version history: `.history/` dir with max 20 versions per file; rollback saves current first
 - Task lifecycle: active → complete (preserves spec files, sets completed_at) or delete (removes files)
 - ActiveTask fields: slug, started_at, status (active/completed), completed_at, review_status (pending/approved/changes_requested), size (S/M/L/XL), spec_type (feature/bugfix)
-- complete action: marks task completed, switches primary to next active task, syncs epic status
+- complete action: marks task completed, switches primary to next active task, syncs epic status. **Approval gate**: M/L/XL specs require review_status="approved" before completion (S/D exempt). Fail-closed: YAML parse errors reject completion
 - Spec v2: 7 files (requirements, design, tasks, test-specs, decisions, research, session); original 4 = CoreFiles, all 7 = AllFiles; bugfix.md = alternative primary file for bugfix type
 - SpecSize: S (3 files), M (4-5 files), L/XL (7 files), D (2 files: delta.md + session.md) — controls file count; auto-detected from description length (< 100 → S, < 300 → M, else L); D and XL are manual-only (never auto-detected)
 - SpecType: feature (default, uses requirements.md), bugfix (uses bugfix.md), delta (uses delta.md) — orthogonal to size; delta auto-set when size=D

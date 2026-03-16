@@ -13,6 +13,7 @@ paths:
 |---|---|---|---|
 | SessionStart | 5s | 4.5s | CLAUDE.md ingestion + user rules check + spec context injection (2 ops parallel via channels) |
 | PreCompact | 10s | 9s | Transcript parsing + decision extraction + session.md |
+| PostToolUse | 5s | 4.5s | Next Steps auto-check + Living Spec auto-append + drift detection |
 | UserPromptSubmit | 10s | 9s | Voyage semantic search (embed + vector search + rerank) |
 | embed-async | 30s | — | Voyage API with 3x exponential backoff (background) |
 | embed-doc | 30s | — | Voyage API with 3x exponential backoff (background) |

@@ -596,6 +596,11 @@ func specDoComplete(ctx context.Context, req mcp.CallToolRequest, st *store.Stor
 		return mcp.NewToolResultError(fmt.Sprintf("invalid task_slug: %q", taskSlug)), nil
 	}
 
+	// Approval gate: M+ specs require review_status == "approved" before completion.
+	if err := requireApprovalGate(projectPath, taskSlug); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
 	// Update session.md status to "completed".
 	sd := &spec.SpecDir{ProjectPath: projectPath, TaskSlug: taskSlug}
 	if sd.Exists() {
@@ -1295,4 +1300,40 @@ func suggestNextAction(sd *spec.SpecDir, _ map[string]any) string {
 	}
 
 	return ""
+}
+
+// requireApprovalGate checks if a task requires review approval before completion.
+// M/L/XL specs must have review_status == "approved". S/D specs are exempt.
+// FAIL-CLOSED: if the active state cannot be read, completion is rejected.
+func requireApprovalGate(projectPath, taskSlug string) error {
+	state, err := spec.ReadActiveState(projectPath)
+	if err != nil {
+		return fmt.Errorf("cannot verify review status for %q — check _active.md integrity: %w", taskSlug, err)
+	}
+
+	var task *spec.ActiveTask
+	for i := range state.Tasks {
+		if state.Tasks[i].Slug == taskSlug {
+			task = &state.Tasks[i]
+			break
+		}
+	}
+	if task == nil {
+		return nil // task not found in state — let CompleteTask handle the error
+	}
+
+	size := task.EffectiveSize()
+	if size == spec.SizeS || size == spec.SizeDelta {
+		return nil // S and D specs are exempt from review
+	}
+
+	switch task.ReviewStatus {
+	case spec.ReviewApproved:
+		return nil
+	case spec.ReviewChangesRequested:
+		return fmt.Errorf("task %q has unresolved review comments — address them and re-submit review in alfred dashboard", taskSlug)
+	default:
+		// pending or empty — require review
+		return fmt.Errorf("task %q (size %s) requires review — open alfred dashboard → Specs tab → select %q → press 'r' to review", taskSlug, size, taskSlug)
+	}
 }
