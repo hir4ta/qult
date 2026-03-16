@@ -65,6 +65,7 @@ func handlePostToolUse(ctx context.Context, ev *hookEvent) {
 			changed := extractChangedFiles(ctx, ev.ProjectPath)
 			appended := tryAutoAppendDesignRefs(ctx, ev.ProjectPath, changed)
 			tryDetectSpecDriftWithExclusions(ctx, ev.ProjectPath, changed, appended)
+			remindKnowledgeSave(ev.ProjectPath)
 		}
 		return
 	}
@@ -145,6 +146,42 @@ func warnIfAllStepsDoneButActive(projectPath string) {
 		fmt.Sprintf("IMPORTANT: All Next Steps for '%s' are completed but the task is still active.\n"+
 			"You MUST call `dossier action=complete task_slug=%s` NOW to close the task.\n"+
 			"Do NOT proceed with other work until this is done.", taskSlug, taskSlug))
+}
+
+// remindKnowledgeSave checks if the active spec has a research.md with substantive content
+// and reminds to save key findings via ledger before they are lost to compaction.
+// Triggers on git commit — the natural checkpoint where knowledge should be persisted.
+func remindKnowledgeSave(projectPath string) {
+	if projectPath == "" {
+		return
+	}
+	taskSlug, err := spec.ReadActive(projectPath)
+	if err != nil {
+		return
+	}
+	sd := &spec.SpecDir{ProjectPath: projectPath, TaskSlug: taskSlug}
+
+	// Check if research.md exists and has substantive content (>500 bytes).
+	research, err := sd.ReadFile(spec.FileResearch)
+	if err != nil || len(research) < 500 {
+		return
+	}
+
+	// Check if decisions.md has entries (DEC-N).
+	decisions, err := sd.ReadFile(spec.FileDecisions)
+	if err != nil {
+		return
+	}
+	decCount := strings.Count(decisions, "## DEC-")
+	if decCount == 0 {
+		return
+	}
+
+	emitAdditionalContext("PostToolUse",
+		fmt.Sprintf("Knowledge reminder: spec '%s' has research.md (%d bytes) and %d decisions.\n"+
+			"Save key findings via `ledger action=save` before they are lost to compaction.\n"+
+			"Consider saving: research insights, design patterns, investigation results.",
+			taskSlug, len(research), decCount))
 }
 
 // extractErrorKeywords pulls meaningful terms from error output.
