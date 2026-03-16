@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/progress"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
@@ -116,12 +117,10 @@ type Model struct {
 	specLevel       int // 0=groups, 1=files
 
 	// Knowledge tab state.
-	knCursor    int
+	knList      list.Model
 	knStats     KnowledgeStats
 	promotions  []KnowledgeEntry
 	decisions   []DecisionEntry
-	searching   bool
-	searchQuery string
 	searchBusy  bool
 
 	// Activity tab state.
@@ -158,6 +157,7 @@ func New(ds DataSource, version string) Model {
 		progress.WithWidth(20),
 		progress.WithFillCharacters('#', '-'),
 	)
+	knl := newKnowledgeList(80, 20) // sized later in WindowSizeMsg
 	return Model{
 		ds:          ds,
 		version:     version,
@@ -165,6 +165,7 @@ func New(ds DataSource, version string) Model {
 		spinner:     sp,
 		searchInput: ti,
 		progress:    prog,
+		knList:      knl,
 	}
 }
 
@@ -172,9 +173,7 @@ func New(ds DataSource, version string) Model {
 // All I/O (DB queries, file reads) happens off the UI thread with a 4s timeout.
 func (m *Model) loadDataCmd() tea.Cmd {
 	ds := m.ds
-	searching := m.searching
-	searchQuery := m.searchQuery
-	searchBusy := m.searchBusy
+	_ = m.searchBusy // kept for future semantic search
 	return func() tea.Msg {
 		done := make(chan dataLoadedMsg, 1)
 		go func() {
@@ -209,9 +208,7 @@ func (m *Model) loadDataCmd() tea.Cmd {
 			msg.epics = ds.Epics()
 			msg.decisions = ds.AllDecisions(20)
 
-			if !searching && searchQuery == "" && !searchBusy {
-				msg.knowledge = ds.RecentKnowledge(100)
-			}
+			msg.knowledge = ds.RecentKnowledge(100)
 			done <- msg
 		}()
 
@@ -243,6 +240,7 @@ func (m *Model) applyDataLoaded(msg dataLoadedMsg) {
 	m.decisions = msg.decisions
 	if msg.knowledge != nil {
 		m.knowledge = msg.knowledge
+		m.knList.SetItems(knowledgeEntriesToItems(m.knowledge))
 	}
 	// Compute promotion candidates from knowledge.
 	m.promotions = m.promotions[:0]
@@ -415,6 +413,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			progress.WithWidth(min(20, m.width/4)),
 			progress.WithFillCharacters('#', '-'),
 		)
+		m.knList.SetSize(m.width-4, m.contentHeight()-4)
 		return m, m.loadDataCmd()
 
 	case dataLoadedMsg:
@@ -430,27 +429,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 
 	case searchResultMsg:
+		// Legacy: kept for potential semantic search integration.
 		m.knowledge = []KnowledgeEntry(msg)
 		m.searchBusy = false
-		m.knCursor = 0
-		return m, nil
-
-	case debounceTickMsg:
-		// Fire search only if sequence matches (no newer keystrokes).
-		if msg.seq == m.debounceSeq && m.searching {
-			query := m.searchInput.Value()
-			if query != "" && !m.searchBusy {
-				m.searchBusy = true
-				m.searchQuery = query
-				ds := m.ds
-				return m, tea.Batch(
-					m.spinner.Tick,
-					func() tea.Msg {
-						return searchResultMsg(ds.SemanticSearch(query, 20))
-					},
-				)
-			}
-		}
+		m.updateKnowledgeListItems()
 		return m, nil
 
 	case shimmerTickMsg:
@@ -478,8 +460,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.overlayActive {
 			return m.updateOverlay(msg)
 		}
-		if m.searching {
-			return m.updateSearch(msg)
+		// List component handles its own filtering when active.
+		if m.activeTab == tabKnowledge && m.knList.FilterState() == list.Filtering {
+			var cmd tea.Cmd
+			m.knList, cmd = m.knList.Update(msg)
+			return m, cmd
 		}
 		if m.showHelp {
 			if key.Matches(msg, keys.Help, keys.Back, keys.Quit) {
@@ -502,10 +487,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.switchTab((m.activeTab - 1 + tabCount) % tabCount)
 			return m, nil
 		case key.Matches(msg, keys.Search):
+			// Knowledge tab: delegate to list's built-in filter (type "/" to search).
 			if m.activeTab == tabKnowledge && !m.overlayActive {
-				m.searching = true
-				m.searchInput.Focus()
-				return m, nil
+				var cmd tea.Cmd
+				m.knList, cmd = m.knList.Update(msg)
+				return m, cmd
 			}
 		case key.Matches(msg, keys.Review):
 			// Direct review shortcut from Tasks tab.
@@ -620,84 +606,42 @@ func (m *Model) updateSpecs(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) updateKnowledge(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch {
-	case key.Matches(msg, keys.Down):
-		if m.knCursor < len(m.knowledge)-1 {
-			m.knCursor++
-		}
-	case key.Matches(msg, keys.Up):
-		if m.knCursor > 0 {
-			m.knCursor--
-		}
-	case key.Matches(msg, keys.Enter):
-		if m.knCursor < len(m.knowledge) {
-			k := m.knowledge[m.knCursor]
-			title := extractKnowledgeTitle(k)
-			content := renderKnowledgeDetail(k)
-			m.openOverlay(
-				title,
-				m.renderMarkdown(content),
-				"Knowledge", k.Source, title,
-			)
-		}
-	case key.Matches(msg, key.NewBinding(key.WithKeys(" ", "space"))): // space to toggle enabled/disabled
-		if m.knCursor < len(m.knowledge) {
-			k := &m.knowledge[m.knCursor]
+	// Space: toggle enabled/disabled.
+	if key.Matches(msg, knowledgeToggleKey) {
+		idx := m.knList.Index()
+		if idx < len(m.knowledge) {
+			k := &m.knowledge[idx]
 			if k.ID > 0 {
 				newState := !k.Enabled
 				if err := m.ds.ToggleEnabled(k.ID, newState); err == nil {
-					k.Enabled = newState
+					m.syncKnowledgeItemEnabled(idx, newState)
 				}
 			}
 		}
+		return m, nil
 	}
-	return m, nil
+
+	// Enter: open detail overlay.
+	if key.Matches(msg, keys.Enter) {
+		if item := m.knList.SelectedItem(); item != nil {
+			ki := item.(knowledgeItem)
+			title := extractKnowledgeTitle(ki.entry)
+			content := renderKnowledgeDetail(ki.entry)
+			m.openOverlay(
+				title,
+				m.renderMarkdown(content),
+				"Knowledge", ki.entry.Source, title,
+			)
+		}
+		return m, nil
+	}
+
+	// Delegate all other keys (up/down/filter/pgup/pgdn) to the list.
+	var cmd tea.Cmd
+	m.knList, cmd = m.knList.Update(msg)
+	return m, cmd
 }
 
-func (m *Model) updateSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		m.searching = false
-		m.searchQuery = ""
-		m.searchInput.SetValue("")
-		m.searchInput.Blur()
-		m.knowledge = m.ds.RecentKnowledge(100)
-		m.knCursor = 0
-		return m, nil
-	case "enter":
-		// Immediate search on Enter.
-		query := m.searchInput.Value()
-		if query == "" {
-			m.searching = false
-			m.searchInput.Blur()
-			m.knowledge = m.ds.RecentKnowledge(100)
-			m.knCursor = 0
-			return m, nil
-		}
-		m.searching = false
-		m.searchQuery = query
-		m.searchInput.Blur()
-		m.searchBusy = true
-		m.knCursor = 0
-		ds := m.ds
-		return m, tea.Batch(
-			m.spinner.Tick,
-			func() tea.Msg {
-				return searchResultMsg(ds.SemanticSearch(query, 20))
-			},
-		)
-	default:
-		var cmd tea.Cmd
-		m.searchInput, cmd = m.searchInput.Update(msg)
-		// Debounced live search: schedule search after 300ms of inactivity.
-		m.debounceSeq++
-		seq := m.debounceSeq
-		debounceCmd := tea.Tick(300*time.Millisecond, func(t time.Time) tea.Msg {
-			return debounceTickMsg{seq: seq}
-		})
-		return m, tea.Batch(cmd, debounceCmd)
-	}
-}
 
 // ---------------------------------------------------------------------------
 // Overlay (floating window)
@@ -1357,7 +1301,7 @@ func (m Model) View() tea.View {
 				content = m.specsView()
 			}
 		case tabKnowledge:
-			content = m.knowledgeView()
+			content = m.knowledgeListView()
 		case tabActivity:
 			content = m.activityView()
 		}
@@ -1787,124 +1731,6 @@ func renderDesignSummary(b *strings.Builder, content string, maxW int) {
 	}
 }
 
-func (m Model) knowledgeView() string {
-	var b strings.Builder
-	b.WriteString("\n")
-
-	// Search bar.
-	if m.searching {
-		b.WriteString("  " + m.searchInput.View() + "\n\n")
-	} else if m.searchQuery != "" {
-		b.WriteString("  search: " + titleStyle.Render(m.searchQuery))
-		b.WriteString("  " + dimStyle.Render("(/ to search, esc to clear)") + "\n\n")
-	}
-
-	if m.searchBusy {
-		b.WriteString("  " + m.spinner.View() + " searching...\n")
-		return b.String()
-	}
-
-	// Summary stats line.
-	if m.knStats.Total > 0 && m.searchQuery == "" && !m.searching {
-		b.WriteString(fmt.Sprintf("  Total: %s  decision: %s  pattern: %s  rule: %s\n\n",
-			titleStyle.Render(fmt.Sprintf("%d", m.knStats.Total)),
-			subTypeDecision.Render(fmt.Sprintf("%d", m.knStats.Decision)),
-			subTypePattern.Render(fmt.Sprintf("%d", m.knStats.Pattern)),
-			subTypeRule.Render(fmt.Sprintf("%d", m.knStats.Rule)),
-		))
-	}
-
-	// Promotion candidates.
-	if len(m.promotions) > 0 && m.searchQuery == "" && !m.searching {
-		b.WriteString("  " + sectionHeader.Render("Promotion Candidates") + "\n")
-		for _, p := range m.promotions {
-			target := "pattern"
-			if p.SubType == "pattern" {
-				target = "rule"
-			}
-			title, _ := simplifyKnowledgeLabel(p.Label)
-			if len(title) < 5 {
-				title = firstContentLine(p.Content)
-			}
-			b.WriteString(fmt.Sprintf("    %s (%s, %dx) -> %s\n",
-				truncStr(title, m.width-40),
-				styledSubType(p.SubType),
-				p.HitCount,
-				target,
-			))
-		}
-		b.WriteString("\n")
-	}
-
-	if len(m.knowledge) == 0 {
-		if m.searchQuery != "" {
-			b.WriteString(dimStyle.Render("  no results"))
-		} else {
-			b.WriteString(dimStyle.Render("  no knowledge — memories will appear as you work"))
-		}
-		return b.String()
-	}
-
-	// Visible range.
-	visibleH := m.contentHeight() - 4
-	startIdx, endIdx := visibleRange(m.knCursor, len(m.knowledge), visibleH)
-
-	for i := startIdx; i < endIdx; i++ {
-		k := m.knowledge[i]
-		enabledMark := "[x] "
-		if !k.Enabled {
-			enabledMark = "[ ] "
-		}
-		prefix := "  " + enabledMark
-		if i == m.knCursor {
-			prefix = "> " + enabledMark
-		}
-
-		// Title: content-based, not label-based for clarity.
-		title := extractKnowledgeTitle(k)
-		maxTitle := m.width - 40
-		if maxTitle < 20 {
-			maxTitle = 20
-		}
-		title = truncStr(title, maxTitle)
-
-		// Tags: sub_type (most important) + age.
-		subTag := styledSubType(k.SubType)
-		age := dimStyle.Render(formatDuration(k.Age))
-		scoreStr := ""
-		if k.Score > 0 {
-			scoreStr = scoreStyle.Render(fmt.Sprintf("%3.0f%%", k.Score*100)) + " "
-		}
-		hitStr := ""
-		if k.HitCount > 0 {
-			hitStr = " " + hitCountStyle.Render(fmt.Sprintf("x%d", k.HitCount))
-		}
-
-		// Context: task slug from label path.
-		_, ctx := simplifyKnowledgeLabel(k.Label)
-
-		if i == m.knCursor {
-			b.WriteString(titleStyle.Render(prefix) + scoreStr + titleStyle.Render(title) + "  " + subTag + "  " + age + hitStr + "\n")
-			if ctx != "" {
-				b.WriteString("      " + dimStyle.Render(ctx) + "\n")
-			}
-		} else if !k.Enabled {
-			line := prefix + scoreStr + title + "  " + subTag + "  " + age + hitStr
-			b.WriteString(dimStyle.Render(line) + "\n")
-		} else {
-			b.WriteString(prefix + scoreStr + title + "  " + subTag + "  " + age + hitStr + "\n")
-			if ctx != "" {
-				b.WriteString("      " + dimStyle.Render(ctx) + "\n")
-			}
-		}
-	}
-
-	if len(m.knowledge) > visibleH {
-		b.WriteString(dimStyle.Render(fmt.Sprintf("\n  %d/%d", m.knCursor+1, len(m.knowledge))))
-	}
-
-	return b.String()
-}
 
 func (m Model) activityView() string {
 	var b strings.Builder

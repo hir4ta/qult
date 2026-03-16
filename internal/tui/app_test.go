@@ -269,7 +269,7 @@ func TestDebounceSequence(t *testing.T) {
 	m := New(ds, "test")
 
 	m.debounceSeq = 5
-	m.searching = true
+	// Knowledge tab now uses list component's built-in filtering.
 
 	// Old tick should not match.
 	oldTick := debounceTickMsg{seq: 3}
