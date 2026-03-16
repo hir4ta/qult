@@ -89,7 +89,7 @@ alfred search-eval            # Run search quality benchmark
 - ActiveTask fields: slug, started_at, status (active/completed), completed_at, review_status (pending/approved/changes_requested)
 - complete action: marks task completed, switches primary to next active task, syncs epic status
 - Spec v2: 7 files (requirements, design, tasks, test-specs, decisions, research, session); original 4 = CoreFiles, all 7 = AllFiles
-- Spec templates: embed.FS in `internal/spec/templates/*.tmpl`, rendered via `text/template` (TemplateData: TaskSlug, Description, Date)
+- Spec templates: embed.FS in `internal/spec/templates/*.tmpl`, rendered via `text/template` (TemplateData: TaskSlug, Description, Date); v3 templates include inline guidance (HTML comments) for granularity heuristics, confidence calibration, EARS pattern selection, ADR lifecycle, test strategy, and done criteria
 - EARS notation: requirements use 6 patterns (Ubiquitous, WHEN, WHILE, WHERE, IF-THEN, Complex)
 - Traceability IDs: FR-N (functional), NFR-N (non-functional), DEC-N (decisions), T-N.N (tasks wave.task), TS-N.N (tests)
 - Traceability matrix: design.md maps Req ID → Component → Task ID → Test ID

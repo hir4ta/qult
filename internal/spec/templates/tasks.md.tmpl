@@ -9,6 +9,13 @@
 ## Wave 1: Foundation
 <!-- required -->
 <!-- Waves are sequential; (P) marks parallelism WITHIN a wave only -->
+<!-- Wave decomposition guidance:
+     - 2 waves (+ closing): Simple tasks — foundation then implementation
+     - 3 waves (+ closing): Medium tasks — foundation, core, polish
+     - 4 waves (+ closing): Large tasks — foundation, core, edge cases, integration/polish
+     Each wave should produce a testable/verifiable increment.
+     If a wave has only 1 task, consider merging it with an adjacent wave.
+-->
 
 - [ ] T-1.1 [{size}] {Task description}
   _Requirements: FR-{N} | Files: {path}_
@@ -40,7 +47,7 @@
 
 - [ ] T-C.1 [S] Self-review (spawn code-reviewer agent or multi-perspective review)
 - [ ] T-C.2 [S] CLAUDE.md update (reflect any new rules, patterns, or architecture changes)
-- [ ] T-C.3 [S] Test verification (`go test ./...` or equivalent passes)
+- [ ] T-C.3 [S] Test verification (run project's test suite — e.g., `go test ./...`, `npm test`, `pytest`)
 - [ ] T-C.4 [S] Knowledge save (save key decisions/patterns via `ledger save` for future sessions)
 
 ## Size Legend

@@ -3,10 +3,29 @@
 ## Architecture Overview
 <!-- confidence: _ | source: code -->
 <!-- required -->
-{Component structure, responsibilities, data flow}
+<!-- Describe the architecture from three perspectives:
+     1. **Layers**: What are the major layers/packages? (e.g., handler → service → store)
+     2. **Data Flow**: How does data move through the system for the primary use case?
+     3. **Boundaries**: Where are the trust/API/module boundaries? What crosses them?
+     If helpful, include an ASCII diagram:
+     ```
+     [input] → [handler] → [service] → [store] → [DB]
+     ```
+-->
+{Describe layers, data flow, and boundaries — see guidance above}
 
 ## Component Design
 <!-- required -->
+<!-- Component granularity guidance:
+     Create a NEW component when:
+     - It has a distinct responsibility (single-responsibility principle)
+     - It could be tested independently
+     - It has its own failure modes
+     EXTEND an existing component when:
+     - The new behavior is a natural extension of its current responsibility
+     - Splitting would create circular dependencies
+     - The "component" would be a single function with no state
+-->
 
 ### Component: {name}
 - **File**: `path/to/file.go`
@@ -58,6 +77,14 @@ CREATE TABLE {table_name} (
 |--------|-----------|-----------|---------|---------|
 | FR-1   | {component} | {interface} | T-1.1 | TS-1.1 |
 | NFR-1  | {component} | {interface} | T-{N.N} | TS-{N.N} |
+
+## Error Handling Design
+<!-- optional: skip for S-sized tasks -->
+<!-- Define error categories and recovery strategies for this feature -->
+
+| Error Category | Example | Recovery Strategy | User Impact |
+|---------------|---------|-------------------|-------------|
+| {category} | {specific error} | {retry/fallback/fail-fast/degrade} | {what user sees} |
 
 ## Migration Strategy
 <!-- optional: skip for S-sized tasks -->

@@ -1,5 +1,15 @@
 # Requirements: {{.TaskSlug}}
 
+<!-- ## Confidence Calibration Guide (reference for all spec files)
+     9-10: Verified — tested, benchmarked, or explicitly confirmed by user
+      7-8: Reviewed — design-reviewed or derived from authoritative docs
+      5-6: Inferred — reasoned from code analysis or domain knowledge
+      3-4: Hypothetical — educated guess, needs validation
+      1-2: Speculative — placeholder, likely to change
+     Source types: user (direct instruction), design-doc, code (analysis), inference, assumption
+     When confidence ≤ 5 AND source = assumption, dossier status will flag a warning.
+-->
+
 ## Goal
 <!-- confidence: _ | source: user -->
 {{.Description}}
@@ -19,6 +29,26 @@
   Unwanted Behavior:           IF {condition}, THEN the {system} SHALL {response}.
   Complex (use sparingly):     WHILE {state}, WHEN {trigger}, the {system} SHALL {response}.
   Prefer simpler patterns; use Complex only when conditions are genuinely inseparable.
+
+  Pattern selection heuristics:
+  - Is this always true regardless of state? → Ubiquitous
+  - Does something trigger this? → WHEN (event-driven)
+  - Is this only true during a specific state? → WHILE (state-driven)
+  - Is this an optional/configurable feature? → WHERE (optional)
+  - Is this about handling failures or bad input? → IF-THEN (unwanted)
+  - Does it need BOTH a state AND a trigger? → Complex (last resort)
+-->
+
+<!-- FR decomposition guidance:
+  Each FR should be ATOMIC: independently testable, independently deliverable.
+  Split an FR if:
+  - It contains "and" connecting two distinct behaviors
+  - It requires tests at different levels (unit vs integration)
+  - Different parts have different confidence levels
+  - Parts could ship independently
+  Keep as one FR if:
+  - The behaviors are meaningless without each other
+  - Splitting would create artificial coupling in tests
 -->
 
 ### FR-1: {Requirement Name}
@@ -58,5 +88,12 @@
 ### NFR-3: Reliability
 - IF {failure condition}, THEN the {system} SHALL {recovery behavior}.
 
+## Assumptions & Constraints
+<!-- required -->
+<!-- Explicit assumptions that, if wrong, would invalidate requirements.
+     Examples: target platform, available APIs, user count, data volume, existing infrastructure -->
+- {Assumption about environment, dependencies, or user context}
+
 ## Out of Scope
+<!-- Be explicit about boundaries to prevent scope creep -->
 - {Explicit non-goals}

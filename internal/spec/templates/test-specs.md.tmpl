@@ -1,5 +1,20 @@
 # Test Specifications: {{.TaskSlug}}
 
+## Test Strategy
+<!-- required -->
+<!-- Define the testing approach BEFORE writing individual test cases.
+     Test level selection guide:
+     - **Unit**: Pure logic, no I/O, fast. Use for: algorithms, validation, parsing, transformations
+     - **Integration**: Real dependencies (DB, filesystem, HTTP). Use for: store operations, API handlers, middleware chains
+     - **E2E**: Full system flow. Use for: critical user journeys, multi-component interactions
+     - **Manual**: Subjective or visual. Use for: TUI rendering, UX flows
+     Rule of thumb: test at the lowest level that gives confidence. Prefer unit > integration > E2E.
+-->
+- **Primary test level**: {Unit / Integration / E2E}
+- **Test framework**: {testing, testify, etc.}
+- **Mocking strategy**: {real dependencies / mocks / fakes / none}
+- **Coverage target**: {percentage or qualitative — e.g., "all happy + error paths for FR-1 through FR-3"}
+
 ## Coverage Matrix
 <!-- required -->
 
