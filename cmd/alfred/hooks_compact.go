@@ -113,6 +113,11 @@ func handlePreCompact(ctx context.Context, projectPath, transcriptPath, customIn
 		return
 	}
 
+	// Detect research/investigation patterns and suggest saving knowledge.
+	if txCtx != nil {
+		suggestKnowledgeSave(txCtx)
+	}
+
 	// Emit spec-aware compaction instructions to stdout.
 	emitCompactionInstructions(sd, taskSlug)
 
@@ -1254,4 +1259,42 @@ func warnLowVitalityMemories(ctx context.Context, st *store.Store) {
 
 	notifyUser("%d memories with very low vitality (< 10) and no access in 180+ days: %s — consider reviewing via 'ledger action=stale'",
 		len(stale), strings.Join(labels, "; "))
+}
+
+// researchPatterns are keywords indicating research/investigation activity in the session.
+var researchPatterns = []string{
+	"調査", "比較", "分析", "ベンチマーク", "競合",
+	"investigate", "research", "benchmark", "compare", "analysis",
+	"findings", "architecture", "performance",
+}
+
+// suggestKnowledgeSave checks if the session contains research patterns
+// and emits a reminder to save knowledge before compaction.
+func suggestKnowledgeSave(txCtx *transcriptContext) {
+	// Combine user messages and assistant actions for pattern detection.
+	var combined strings.Builder
+	for _, msg := range txCtx.UserMessages {
+		combined.WriteString(strings.ToLower(msg))
+		combined.WriteByte(' ')
+	}
+	for _, action := range txCtx.AssistantActions {
+		combined.WriteString(strings.ToLower(action))
+		combined.WriteByte(' ')
+	}
+	text := combined.String()
+
+	hits := 0
+	for _, pattern := range researchPatterns {
+		if strings.Contains(text, pattern) {
+			hits++
+		}
+	}
+
+	// Require 2+ pattern hits to reduce false positives.
+	if hits < 2 {
+		return
+	}
+
+	notifyUser("knowledge detected: this session contains research/analysis patterns. " +
+		"Consider saving key findings with `ledger action=save` before context is compacted.")
 }

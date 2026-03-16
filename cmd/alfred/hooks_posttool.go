@@ -4,19 +4,34 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/hir4ta/claude-alfred/internal/spec"
 )
 
+// exploreCountFile tracks consecutive code exploration tool calls for survey suggestion.
+const exploreCountFile = "/tmp/alfred-explore-count"
+
 // handlePostToolUse fires after a tool executes.
-// Two responsibilities:
+// Responsibilities:
 //  1. On Bash failure: search memory for similar errors and inject solutions.
 //  2. On Bash success: check if the command completes a Next Steps item in session.md.
+//  3. On Read/Grep: track consecutive exploration calls and suggest survey.
 func handlePostToolUse(ctx context.Context, ev *hookEvent) {
+	// Track code exploration patterns (Read/Grep without active spec).
+	if ev.ToolName == "Read" || ev.ToolName == "Grep" {
+		trackExplorationPattern(ev)
+		return
+	}
+
+	// Non-exploration tool resets the counter.
+	os.Remove(exploreCountFile)
+
 	if ev.ToolName != "Bash" {
 		return
 	}
@@ -775,6 +790,37 @@ var frIDPattern = regexp.MustCompile(`FR-(\d+)`)
 
 // taskReqPattern matches Requirements: FR-N entries in tasks.md.
 var taskReqPattern = regexp.MustCompile(`Requirements:\s*(FR-\d+(?:\s*,\s*FR-\d+)*)`)
+
+// trackExplorationPattern counts consecutive Read/Grep calls and suggests survey
+// when the user has been exploring code for a while without an active spec.
+func trackExplorationPattern(ev *hookEvent) {
+	// Read current count.
+	count := 0
+	if data, err := os.ReadFile(exploreCountFile); err == nil {
+		count, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+	}
+	count++
+	os.WriteFile(exploreCountFile, []byte(strconv.Itoa(count)), 0o644)
+
+	// Only suggest after 5+ consecutive exploration calls without an active spec.
+	if count < 5 {
+		return
+	}
+	if ev.ProjectPath != "" {
+		if _, err := spec.ReadActive(ev.ProjectPath); err == nil {
+			return // active spec exists — no need to suggest survey
+		}
+	}
+
+	// Only suggest once per exploration burst (at exactly 5).
+	if count != 5 {
+		return
+	}
+
+	emitAdditionalContext("PostToolUse",
+		"Skill suggestion: /alfred:survey — 既存コードからspec逆生成. "+
+			"You've been exploring code for a while. Consider using survey to systematically reverse-engineer specs from the codebase.")
+}
 
 // uniqueStrings returns deduplicated strings preserving order.
 func uniqueStrings(ss []string) []string {

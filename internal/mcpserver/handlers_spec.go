@@ -175,6 +175,13 @@ func specDoInit(ctx context.Context, req mcp.CallToolRequest, st *store.Store, e
 		result["steering_hint"] = "project steering docs not found — run `alfred steering-init` to generate project context for better specs"
 	}
 
+	// Suggest ledger search before starting work.
+	if description != "" {
+		result["suggested_search"] = fmt.Sprintf(
+			"Before writing specs, search past experience: `ledger action=search query=%q` — you may find related patterns, decisions, or prior work.",
+			truncateForHint(description, 80))
+	}
+
 	return marshalResult(result)
 }
 
@@ -498,6 +505,11 @@ func specDoStatus(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			refs["incoming"] = incoming
 		}
 		result["references"] = refs
+	}
+
+	// Suggest the next logical action based on spec state.
+	if nextAction := suggestNextAction(sd, result); nextAction != "" {
+		result["next_action"] = nextAction
 	}
 
 	// Enrich with session continuity info if available.
@@ -1214,4 +1226,56 @@ func allStepsCompleted(nextSteps string) bool {
 		}
 	}
 	return hasItems
+}
+
+// truncateForHint shortens a string to maxRunes, adding "..." if truncated.
+func truncateForHint(s string, maxRunes int) string {
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes]) + "..."
+}
+
+// hasOnlyCheckedSteps returns true if a Next Steps section has at least one item
+// and all items are checked.
+func hasOnlyCheckedSteps(section string) bool {
+	hasItems := false
+	for _, line := range strings.Split(section, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- [x] ") || strings.HasPrefix(trimmed, "- [X] ") {
+			hasItems = true
+			continue
+		}
+		if strings.HasPrefix(trimmed, "- [ ] ") {
+			return false
+		}
+	}
+	return hasItems
+}
+
+// suggestNextAction returns a contextual next-action hint based on the spec's current state.
+// Returns "" when no specific suggestion is warranted.
+func suggestNextAction(sd *spec.SpecDir, _ map[string]any) string {
+	// Check review status.
+	if state, err := spec.ReadActiveState(sd.ProjectPath); err == nil {
+		for _, t := range state.Tasks {
+			if t.Slug == sd.TaskSlug && t.ReviewStatus == "pending" {
+				return "Run `alfred dashboard` to review and approve the spec before implementation."
+			}
+		}
+	}
+
+	// Check if all Next Steps are completed.
+	session, err := sd.ReadFile(spec.FileSession)
+	if err != nil {
+		return ""
+	}
+
+	nextSection := extractMarkdownSection(session, "## Next Steps")
+	if nextSection != "" && hasOnlyCheckedSteps(nextSection) {
+		return "All Next Steps are completed. Call `dossier action=complete` to close the task and save decisions to memory."
+	}
+
+	return ""
 }

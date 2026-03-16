@@ -115,6 +115,10 @@ var intentRules = []intentRule{
 		"レビューして", "コードレビュー", "品質チェック",
 		"review this", "review the code", "code review", "audit this",
 	}},
+	{"tdd", []string{
+		"テスト駆動", "テストファースト", "tdd",
+		"test first", "test driven", "red green refactor",
+	}},
 }
 
 // classifyIntent detects workflow intents from the prompt using keyword matching.
@@ -167,6 +171,7 @@ var skillRoutes = []skillRoute{
 	{"implement", "/alfred:attend", "spec→承認→実装→レビュー→コミット自律実行", "active_spec"},
 	{"bugfix", "/alfred:mend", "再現→分析→修正→検証の自律バグ修正", ""},
 	{"review", "/alfred:inspect", "6プロファイル品質レビュー", ""},
+	{"tdd", "/alfred:tdd", "テスト駆動開発 — red/green/refactor自律サイクル", ""},
 	{"save-knowledge", "ledger action=save", "知見を永続記憶に保存", ""},
 }
 

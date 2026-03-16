@@ -2046,6 +2046,80 @@ func TestCombineHints(t *testing.T) {
 	})
 }
 
+func TestClassifyIntentTDD(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		prompt string
+		want   string
+	}{
+		{"japanese tdd", "テスト駆動で実装して", "tdd"},
+		{"english tdd", "let's do TDD for this feature", "tdd"},
+		{"test first", "test first approach for the auth module", "tdd"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := classifyIntent(tt.prompt)
+			found := false
+			for _, i := range got {
+				if i == tt.want {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("classifyIntent(%q) = %v, want %q", tt.prompt, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTrackExplorationPattern(t *testing.T) {
+	t.Parallel()
+
+	// Clean up temp file before and after.
+	os.Remove(exploreCountFile)
+	t.Cleanup(func() { os.Remove(exploreCountFile) })
+
+	ev := &hookEvent{ToolName: "Read", ProjectPath: t.TempDir()}
+
+	// 4 calls should not trigger (threshold is 5).
+	for i := 0; i < 4; i++ {
+		trackExplorationPattern(ev)
+	}
+	data, err := os.ReadFile(exploreCountFile)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.TrimSpace(string(data)) != "4" {
+		t.Errorf("count = %q, want 4", string(data))
+	}
+}
+
+func TestSuggestKnowledgeSave(t *testing.T) {
+	t.Parallel()
+
+	t.Run("research patterns detected", func(t *testing.T) {
+		t.Parallel()
+		txCtx := &transcriptContext{
+			UserMessages:     []string{"競合ツールを調査して", "分析結果をまとめて"},
+			AssistantActions: []string{"investigated 3 tools and compared their approaches"},
+		}
+		// This should not panic. The actual output goes to stderr.
+		suggestKnowledgeSave(txCtx)
+	})
+
+	t.Run("no research patterns", func(t *testing.T) {
+		t.Parallel()
+		txCtx := &transcriptContext{
+			UserMessages:     []string{"hello world"},
+			AssistantActions: []string{"printed hello"},
+		}
+		suggestKnowledgeSave(txCtx) // should not suggest
+	})
+}
+
 func TestHasActiveSpecTask(t *testing.T) {
 	t.Parallel()
 
