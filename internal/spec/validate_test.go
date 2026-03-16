@@ -173,9 +173,9 @@ Straightforward implementation.
 			t.Errorf("check %s: %s (%s)", c.Name, c.Status, c.Message)
 		}
 	}
-	// 12 original + 3 new L-applicable checks (content_placeholder, decisions_completeness, research_completeness) = 15 total.
-	if report.Summary != "15/15 checks passed" {
-		t.Errorf("Summary = %q, want '15/15 checks passed'", report.Summary)
+	// 12 original + 3 v6 checks + 1 grounding_coverage (opt-in auto-pass) = 16 total.
+	if report.Summary != "16/16 checks passed" {
+		t.Errorf("Summary = %q, want '16/16 checks passed'", report.Summary)
 	}
 }
 
@@ -948,5 +948,268 @@ func TestValidateBugfixSubstantiveContent(t *testing.T) {
 
 		report, _ := Validate(sd, SizeM, TypeBugfix)
 		assertCheckStatus(t, report, "min_fr_count", "pass")
+	})
+}
+
+// --- v7: Grounding and delta traceability tests ---
+
+func TestValidateGroundingCoverage(t *testing.T) {
+	t.Parallel()
+
+	t.Run("all_grounded_passes", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "grounding-test"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		reqs := `# Requirements
+## Goal
+<!-- confidence: 9 | source: user | grounding: verified -->
+Test
+
+## Functional Requirements
+### FR-1: First
+<!-- confidence: 8 | source: code | grounding: verified -->
+WHEN x, the system SHALL y.
+
+### FR-2: Second
+<!-- confidence: 7 | source: inference | grounding: inferred -->
+WHEN a, the system SHALL b.
+`
+		os.WriteFile(sd.FilePath(FileRequirements), []byte(reqs), 0o644)
+		report, _ := Validate(sd, SizeL, TypeFeature)
+		assertCheckStatus(t, report, "grounding_coverage", "pass")
+	})
+
+	t.Run("legacy_no_grounding_auto_pass", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "legacy-test"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		reqs := `# Requirements
+## Goal
+<!-- confidence: 9 | source: user -->
+Test
+
+## Functional Requirements
+### FR-1: First
+<!-- confidence: 8 | source: code -->
+WHEN x, the system SHALL y.
+`
+		os.WriteFile(sd.FilePath(FileRequirements), []byte(reqs), 0o644)
+		report, _ := Validate(sd, SizeL, TypeFeature)
+		assertCheckMessageContains(t, report, "grounding_coverage", "pass", "opt-in")
+	})
+
+	t.Run("speculative_over_30pct_fails", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "spec-test"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		reqs := `# Requirements
+## Goal
+<!-- confidence: 9 | source: user | grounding: verified -->
+Test
+
+## Functional Requirements
+### FR-1: First
+<!-- confidence: 8 | source: code | grounding: speculative -->
+
+### FR-2: Second
+<!-- confidence: 7 | source: inference | grounding: speculative -->
+
+### FR-3: Third
+<!-- confidence: 6 | source: code | grounding: verified -->
+`
+		os.WriteFile(sd.FilePath(FileRequirements), []byte(reqs), 0o644)
+		report, _ := Validate(sd, SizeL, TypeFeature)
+		assertCheckMessageContains(t, report, "grounding_coverage", "fail", "speculative")
+	})
+
+	t.Run("m_size_skipped", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "m-test"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		reqs := `# Requirements
+## Goal
+<!-- confidence: 9 | source: user | grounding: verified -->
+Test
+`
+		os.WriteFile(sd.FilePath(FileRequirements), []byte(reqs), 0o644)
+		report, _ := Validate(sd, SizeM, TypeFeature)
+		assertCheckAbsent(t, report, "grounding_coverage")
+	})
+
+	t.Run("delta_chg_grounding", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "delta-g-test"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		delta := `# Delta
+## Change Summary
+<!-- confidence: 8 | source: code | grounding: verified -->
+Test change
+
+## Files Affected
+- CHG-1: ` + "`file.go`" + ` — change
+  <!-- confidence: 8 | source: code | grounding: verified -->
+- CHG-2: ` + "`other.go`" + ` — change
+  <!-- confidence: 7 | source: code | grounding: inferred -->
+
+## Before / After
+### CHG-1: test
+**Before:** old
+**After:** new
+
+## Test Plan
+- [x] go test
+`
+		os.WriteFile(sd.FilePath(FileDelta), []byte(delta), 0o644)
+		report, _ := Validate(sd, SizeDelta, TypeDelta)
+		assertCheckStatus(t, report, "grounding_coverage", "pass")
+	})
+}
+
+func TestValidateDeltaChangeIDs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("has_chg_ids", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "chg-test"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		delta := `# Delta
+## Change Summary
+Test
+
+## Files Affected
+- CHG-1: ` + "`file.go`" + ` — modify
+- CHG-2: ` + "`other.go`" + ` — add
+
+## Before / After
+### CHG-1: test
+**Before:** old
+**After:** new
+
+## Test Plan
+- [x] tests pass
+`
+		os.WriteFile(sd.FilePath(FileDelta), []byte(delta), 0o644)
+		report, _ := Validate(sd, SizeDelta, TypeDelta)
+		assertCheckStatus(t, report, "delta_change_ids", "pass")
+	})
+
+	t.Run("no_chg_ids_fails", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "no-chg-test"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		delta := `# Delta
+## Change Summary
+Test
+
+## Files Affected
+- ` + "`file.go`" + ` — modify (old format, no CHG-N)
+
+## Before / After
+Old and new behavior
+
+## Test Plan
+- [x] tests pass
+`
+		os.WriteFile(sd.FilePath(FileDelta), []byte(delta), 0o644)
+		report, _ := Validate(sd, SizeDelta, TypeDelta)
+		assertCheckStatus(t, report, "delta_change_ids", "fail")
+	})
+
+	t.Run("non_delta_skipped", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "feat-test"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		report, _ := Validate(sd, SizeL, TypeFeature)
+		assertCheckAbsent(t, report, "delta_change_ids")
+	})
+}
+
+func TestValidateDeltaBeforeAfter(t *testing.T) {
+	t.Parallel()
+
+	t.Run("has_content_passes", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "ba-test"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		delta := `# Delta
+## Change Summary
+Test
+
+## Files Affected
+- CHG-1: ` + "`file.go`" + ` — modify
+
+## Before / After
+### CHG-1: behavior change
+**Before:** Returns nil error when input is empty
+**After:** Returns ErrEmptyInput when input is empty
+
+## Test Plan
+- [x] tests pass
+`
+		os.WriteFile(sd.FilePath(FileDelta), []byte(delta), 0o644)
+		report, _ := Validate(sd, SizeDelta, TypeDelta)
+		assertCheckStatus(t, report, "delta_before_after", "pass")
+	})
+
+	t.Run("missing_section_fails", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "no-ba-test"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		delta := `# Delta
+## Change Summary
+Test
+
+## Files Affected
+- CHG-1: ` + "`file.go`" + ` — modify
+
+## Test Plan
+- [x] tests pass
+`
+		os.WriteFile(sd.FilePath(FileDelta), []byte(delta), 0o644)
+		report, _ := Validate(sd, SizeDelta, TypeDelta)
+		assertCheckStatus(t, report, "delta_before_after", "fail")
+	})
+
+	t.Run("empty_section_fails", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "empty-ba"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		delta := `# Delta
+## Change Summary
+Test
+
+## Files Affected
+- CHG-1: ` + "`file.go`" + ` — modify
+
+## Before / After
+
+## Test Plan
+- [x] tests pass
+`
+		os.WriteFile(sd.FilePath(FileDelta), []byte(delta), 0o644)
+		report, _ := Validate(sd, SizeDelta, TypeDelta)
+		assertCheckStatus(t, report, "delta_before_after", "fail")
 	})
 }

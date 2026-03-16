@@ -8,10 +8,27 @@
       1-2: Speculative — placeholder, likely to change
      Source types: user (direct instruction), design-doc, code (analysis), inference, assumption
      When confidence ≤ 5 AND source = assumption, dossier status will flag a warning.
+
+     ## Grounding Levels (reliability signal)
+     Grounding indicates how well-evidenced a claim is, orthogonal to source:
+       verified    — proven by code, tests, benchmarks, or direct observation
+       reviewed    — design-reviewed, PR-approved, or user-confirmed (not yet code-proven)
+       inferred    — reasoned from code analysis or domain knowledge (no direct proof)
+       speculative — hypothesis, placeholder, or guess (needs validation)
+     When grounding = speculative AND confidence > 5, dossier status will flag a warning.
+
+     ## Source × Grounding common combinations
+       source: user       + grounding: reviewed    (user stated, confirmed)
+       source: code       + grounding: verified    (code-derived + tested)
+       source: code       + grounding: inferred    (code patterns suggest)
+       source: design-doc + grounding: reviewed    (doc reviewed)
+       source: inference  + grounding: inferred    (reasoned from evidence)
+       source: assumption + grounding: speculative (pure hypothesis)
+     Uncommon: source: assumption + grounding: verified (contradictory — reconsider source)
 -->
 
 ## Goal
-<!-- confidence: _ | source: user -->
+<!-- confidence: _ | source: user | grounding: _ -->
 {{.Description}}
 
 ## User Stories
@@ -55,7 +72,7 @@
 -->
 
 ### FR-1: {Requirement Name}
-<!-- confidence: _ | source: user -->
+<!-- confidence: _ | source: user | grounding: _ -->
 <!-- Depends: — | Priority: P0 | Verify: Unit -->
 
 **EARS Requirements:**
@@ -91,7 +108,7 @@ Scenario Outline example (for parameterized criteria):
 <!-- optional: skip for S-sized tasks -->
 
 ### NFR-1: Performance
-<!-- confidence: _ | source: inference -->
+<!-- confidence: _ | source: inference | grounding: _ -->
 | Metric | Target | Measurement |
 |--------|--------|-------------|
 | {metric} | {target value} | {how to measure} |
@@ -107,7 +124,7 @@ Scenario Outline example (for parameterized criteria):
 <!-- Negative requirements capture what the system SHALL NOT do.
      Use NR-N IDs. Categories: security boundaries, perf anti-patterns, scope limits, data integrity -->
 ### NR-1: {Negative Requirement}
-<!-- confidence: _ | source: _ -->
+<!-- confidence: _ | source: _ | grounding: _ -->
 - The {system} SHALL NOT {prohibited behavior}.
 
 ## Data Dictionary

@@ -2,21 +2,38 @@
 
 ## Change Summary
 <!-- required -->
+<!-- confidence: _ | source: _ | grounding: _ -->
 <!-- One-paragraph description of what is being changed and why. -->
 {{.Description}}
 
 ## Files Affected
 <!-- required -->
-<!-- List all files that will be added, modified, or removed. -->
-
-### ADDED
-- `{path/to/new/file.go}` — {purpose}
+<!-- List all files affected. Each logical change gets a CHG-N identifier.
+     CHG-N scoping: one CHG per logical change (not necessarily per file).
+     A single CHG may span multiple related files; one file may have multiple CHGs. -->
 
 ### MODIFIED
-- `{path/to/existing/file.go}` — {what changes}
+- CHG-1: `{path/to/file.go}` — {what changes}
+  <!-- confidence: _ | source: _ | grounding: _ -->
+
+### ADDED
+- CHG-2: `{path/to/new/file.go}` — {purpose}
+  <!-- confidence: _ | source: _ | grounding: _ -->
 
 ### REMOVED
 <!-- omit if nothing is removed -->
+
+## Before / After
+<!-- required -->
+<!-- Document behavioral changes per CHG-N. Both Before and After must have content. -->
+
+### CHG-1: {brief description}
+**Before:** {current behavior}
+**After:** {new behavior}
+
+### CHG-2: {brief description}
+**Before:** (new file — no previous behavior)
+**After:** {new behavior}
 
 ## Rationale
 <!-- required -->

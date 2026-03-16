@@ -129,6 +129,21 @@ func Validate(sd *SpecDir, size SpecSize, specType SpecType) (*ValidationReport,
 		report.Checks = append(report.Checks, *c)
 	}
 
+	// 20. grounding_coverage: FR/CHG sections have grounding annotations (opt-in, L/XL or D).
+	if c := checkGroundingCoverage(sd, primaryFile, size, specType); c != nil {
+		report.Checks = append(report.Checks, *c)
+	}
+
+	// 21. delta_change_ids: at least one CHG-N in Files Affected (D only).
+	if c := checkDeltaChangeIDs(sd, size); c != nil {
+		report.Checks = append(report.Checks, *c)
+	}
+
+	// 22. delta_before_after: Before/After section with content (D only).
+	if c := checkDeltaBeforeAfter(sd, size); c != nil {
+		report.Checks = append(report.Checks, *c)
+	}
+
 	// Summary.
 	passed := 0
 	for _, c := range report.Checks {
@@ -1106,5 +1121,217 @@ func checkOrphanTasks(sd *SpecDir, primaryFile SpecFile) *ValidationCheck {
 		Name:    "orphan_tasks",
 		Status:  "fail",
 		Message: fmt.Sprintf("orphan task FR references: %s", strings.Join(orphans, ", ")),
+	}
+}
+
+// --- v7: Grounding and delta traceability checks ---
+
+var chgIDPattern = regexp.MustCompile(`CHG-(\d+)`)
+
+// groundingPattern extracts the grounding value from confidence annotations.
+// See also: confidenceRe in internal/mcpserver/handlers_spec.go (full annotation parser).
+var groundingPattern = regexp.MustCompile(`grounding:\s*([\w]+)`)
+
+// checkGroundingCoverage checks that FR/CHG sections have grounding annotations.
+// Opt-in: specs with zero grounding annotations auto-pass.
+// Feature/bugfix: L/XL only, checks FR-N sections.
+// Delta: checks CHG-N entries.
+// Fails if >30% of grounded items are speculative.
+func checkGroundingCoverage(sd *SpecDir, primaryFile SpecFile, size SpecSize, specType SpecType) *ValidationCheck {
+	// Skip for S/M feature/bugfix specs.
+	if specType != TypeDelta && size != SizeL && size != SizeXL {
+		return nil
+	}
+
+	var content string
+	var err error
+	if specType == TypeDelta {
+		content, err = sd.ReadFile(FileDelta)
+	} else {
+		content, err = sd.ReadFile(primaryFile)
+	}
+	if err != nil {
+		return nil
+	}
+
+	// Opt-in: if no grounding annotations exist at all, auto-pass.
+	allGroundings := groundingPattern.FindAllStringSubmatch(content, -1)
+	if len(allGroundings) == 0 {
+		return &ValidationCheck{
+			Name:    "grounding_coverage",
+			Status:  "pass",
+			Message: "no grounding annotations found (opt-in: auto-pass)",
+		}
+	}
+
+	// Determine which sections to check.
+	var sectionLabel string
+	type idSection struct {
+		id      string
+		content string
+	}
+	var sections []idSection
+
+	if specType == TypeDelta {
+		sectionLabel = "CHG"
+		// For delta specs, check CHG-N entries within Files Affected section only.
+		filesSection := extractSectionBody(content, "## Files Affected")
+		if filesSection == "" {
+			return nil
+		}
+		lines := strings.Split(filesSection, "\n")
+		var currentID string
+		var currentLines []string
+		for _, line := range lines {
+			if m := chgIDPattern.FindString(line); m != "" {
+				if currentID != "" {
+					sections = append(sections, idSection{id: currentID, content: strings.Join(currentLines, "\n")})
+				}
+				currentID = m
+				currentLines = []string{line}
+			} else if currentID != "" {
+				currentLines = append(currentLines, line)
+			}
+		}
+		if currentID != "" {
+			sections = append(sections, idSection{id: currentID, content: strings.Join(currentLines, "\n")})
+		}
+	} else {
+		sectionLabel = "FR"
+		headers := frPattern.FindAllStringIndex(content, -1)
+		for i, loc := range headers {
+			start := loc[0]
+			end := len(content)
+			if i+1 < len(headers) {
+				end = headers[i+1][0]
+			}
+			section := content[start:end]
+			id := frPattern.FindString(section)
+			sections = append(sections, idSection{id: id, content: section})
+		}
+	}
+
+	if len(sections) == 0 {
+		return nil
+	}
+
+	var uncovered []string
+	speculativeCount := 0
+	totalWithGrounding := 0
+	for _, sec := range sections {
+		gMatches := groundingPattern.FindStringSubmatch(sec.content)
+		if len(gMatches) < 2 || gMatches[1] == "" {
+			uncovered = append(uncovered, sec.id)
+			continue
+		}
+		totalWithGrounding++
+		if gMatches[1] == "speculative" {
+			speculativeCount++
+		}
+	}
+
+	// Check uncovered first (more actionable for the user), then speculative ratio.
+	total := totalWithGrounding + len(uncovered)
+	if len(uncovered) > 0 {
+		return &ValidationCheck{
+			Name:    "grounding_coverage",
+			Status:  "fail",
+			Message: fmt.Sprintf("%s items missing grounding: %s", sectionLabel, strings.Join(uncovered, ", ")),
+		}
+	}
+
+	if total > 0 && speculativeCount*100/total > 30 {
+		return &ValidationCheck{
+			Name:    "grounding_coverage",
+			Status:  "fail",
+			Message: fmt.Sprintf("%d%% speculative (%d/%d %s items)", speculativeCount*100/total, speculativeCount, total, sectionLabel),
+		}
+	}
+
+	return &ValidationCheck{
+		Name:    "grounding_coverage",
+		Status:  "pass",
+		Message: fmt.Sprintf("all %d %s items have grounding annotations", total, sectionLabel),
+	}
+}
+
+// checkDeltaChangeIDs checks that at least one CHG-N identifier exists in Files Affected.
+// D size only.
+func checkDeltaChangeIDs(sd *SpecDir, size SpecSize) *ValidationCheck {
+	if size != SizeDelta {
+		return nil
+	}
+
+	content, err := sd.ReadFile(FileDelta)
+	if err != nil {
+		return nil
+	}
+
+	// Extract Files Affected section.
+	filesSection := extractSectionBody(content, "## Files Affected")
+	if filesSection == "" {
+		return &ValidationCheck{
+			Name:    "delta_change_ids",
+			Status:  "fail",
+			Message: "Files Affected section not found",
+		}
+	}
+
+	chgIDs := chgIDPattern.FindAllString(filesSection, -1)
+	if len(chgIDs) == 0 {
+		return &ValidationCheck{
+			Name:    "delta_change_ids",
+			Status:  "fail",
+			Message: "no CHG-N identifiers in Files Affected",
+		}
+	}
+
+	// Deduplicate.
+	seen := map[string]bool{}
+	for _, id := range chgIDs {
+		seen[id] = true
+	}
+
+	return &ValidationCheck{
+		Name:    "delta_change_ids",
+		Status:  "pass",
+		Message: fmt.Sprintf("%d change IDs found", len(seen)),
+	}
+}
+
+// checkDeltaBeforeAfter checks that a Before/After section exists with substantive content.
+// D size only.
+func checkDeltaBeforeAfter(sd *SpecDir, size SpecSize) *ValidationCheck {
+	if size != SizeDelta {
+		return nil
+	}
+
+	content, err := sd.ReadFile(FileDelta)
+	if err != nil {
+		return nil
+	}
+
+	heading := "## Before / After"
+	if !strings.Contains(content, heading) {
+		return &ValidationCheck{
+			Name:    "delta_before_after",
+			Status:  "fail",
+			Message: "missing 'Before / After' section",
+		}
+	}
+
+	sectionBody := extractSectionBody(content, heading)
+	if !hasSubstantiveContent(heading + "\n" + sectionBody) {
+		return &ValidationCheck{
+			Name:    "delta_before_after",
+			Status:  "fail",
+			Message: "'Before / After' section has no substantive content",
+		}
+	}
+
+	return &ValidationCheck{
+		Name:    "delta_before_after",
+		Status:  "pass",
+		Message: "Before / After section has content",
 	}
 }

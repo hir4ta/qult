@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -179,6 +180,86 @@ PostgreSQL with pgx driver
 		// Check low_confidence_warnings (score <= 5 + assumption)
 		if len(cs.Warnings) != 1 || cs.Warnings[0] != "Design" {
 			t.Errorf("Warnings = %v, want [Design]", cs.Warnings)
+		}
+	})
+
+	t.Run("grounding field", func(t *testing.T) {
+		t.Parallel()
+		content := `## Goal
+<!-- confidence: 9 | source: user | grounding: verified -->
+## Design
+<!-- confidence: 7 | source: code | grounding: inferred -->
+## Research
+<!-- confidence: 5 | source: assumption | grounding: speculative -->
+## Notes
+<!-- confidence: 8 | source: code -->
+`
+		cs := parseConfidenceScores(content)
+		if cs.Total != 4 {
+			t.Errorf("total = %d, want 4", cs.Total)
+		}
+
+		groundings := map[string]string{}
+		for _, item := range cs.Items {
+			groundings[item.Section] = item.Grounding
+		}
+		if groundings["Goal"] != "verified" {
+			t.Errorf("Goal grounding = %q, want %q", groundings["Goal"], "verified")
+		}
+		if groundings["Design"] != "inferred" {
+			t.Errorf("Design grounding = %q, want %q", groundings["Design"], "inferred")
+		}
+		if groundings["Research"] != "speculative" {
+			t.Errorf("Research grounding = %q, want %q", groundings["Research"], "speculative")
+		}
+		if groundings["Notes"] != "" {
+			t.Errorf("Notes grounding = %q, want empty (legacy)", groundings["Notes"])
+		}
+
+		if cs.GroundingDist["verified"] != 1 {
+			t.Errorf("GroundingDist[verified] = %d, want 1", cs.GroundingDist["verified"])
+		}
+		if cs.GroundingDist["inferred"] != 1 {
+			t.Errorf("GroundingDist[inferred] = %d, want 1", cs.GroundingDist["inferred"])
+		}
+		if cs.GroundingDist["speculative"] != 1 {
+			t.Errorf("GroundingDist[speculative] = %d, want 1", cs.GroundingDist["speculative"])
+		}
+	})
+
+	t.Run("grounding typo warning", func(t *testing.T) {
+		t.Parallel()
+		content := `## Goal
+<!-- confidence: 8 | source: code | grounding: verfied -->
+`
+		cs := parseConfidenceScores(content)
+		if cs.Total != 1 {
+			t.Errorf("total = %d, want 1", cs.Total)
+		}
+		if cs.Items[0].Grounding != "" {
+			t.Errorf("grounding = %q, want empty for typo", cs.Items[0].Grounding)
+		}
+		if len(cs.GroundingWarns) != 1 {
+			t.Errorf("GroundingWarns len = %d, want 1 for unknown value", len(cs.GroundingWarns))
+		}
+	})
+
+	t.Run("high confidence speculative warning", func(t *testing.T) {
+		t.Parallel()
+		content := `## Risky
+<!-- confidence: 8 | source: inference | grounding: speculative -->
+## Safe
+<!-- confidence: 3 | source: assumption | grounding: speculative -->
+`
+		cs := parseConfidenceScores(content)
+		var highConfWarns int
+		for _, w := range cs.GroundingWarns {
+			if strings.Contains(w, "high confidence") {
+				highConfWarns++
+			}
+		}
+		if highConfWarns != 1 {
+			t.Errorf("high confidence grounding warnings = %d, want 1; warns=%v", highConfWarns, cs.GroundingWarns)
 		}
 	})
 }

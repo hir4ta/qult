@@ -865,17 +865,20 @@ func specDoRollback(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 
 // confidenceSummary holds parsed confidence statistics for a spec file.
 type confidenceSummary struct {
-	Avg      float64           `json:"avg"`
-	Total    int               `json:"total_items"`
-	LowCount int              `json:"low_items"`            // items with score <= 5
-	Items    []confidenceItem  `json:"items,omitempty"`
-	Warnings []string          `json:"low_confidence_warnings,omitempty"` // sections with score <= 5 and source=assumption
+	Avg            float64          `json:"avg"`
+	Total          int              `json:"total_items"`
+	LowCount       int              `json:"low_items"`                          // items with score <= 5
+	Items          []confidenceItem `json:"items,omitempty"`
+	Warnings       []string         `json:"low_confidence_warnings,omitempty"`  // sections with score <= 5 and source=assumption
+	GroundingDist  map[string]int   `json:"grounding_distribution,omitempty"`   // count per grounding level
+	GroundingWarns []string         `json:"grounding_warnings,omitempty"`       // high confidence + speculative, unknown values
 }
 
 type confidenceItem struct {
-	Section string `json:"section"`
-	Score   int    `json:"score"`
-	Source  string `json:"source,omitempty"` // user, design-doc, code, inference, assumption
+	Section   string `json:"section"`
+	Score     int    `json:"score"`
+	Source    string `json:"source,omitempty"`    // user, design-doc, code, inference, assumption
+	Grounding string `json:"grounding,omitempty"` // verified, reviewed, inferred, speculative
 }
 
 // specDoReview returns the latest review status and comments for a task.
@@ -990,8 +993,14 @@ func specDoValidate(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return marshalResult(report)
 }
 
-// confidenceRe matches <!-- confidence: N --> or <!-- confidence: N | source: TYPE --> annotations.
-var confidenceRe = regexp.MustCompile(`<!--\s*confidence:\s*(\d{1,2})(?:\s*\|\s*source:\s*([\w][\w-]*))?\s*-->`)
+// confidenceRe matches <!-- confidence: N --> or <!-- confidence: N | source: TYPE --> or
+// <!-- confidence: N | source: TYPE | grounding: LEVEL --> annotations.
+var confidenceRe = regexp.MustCompile(`<!--\s*confidence:\s*(\d{1,2})(?:\s*\|\s*source:\s*([\w][\w-]*))?(?:\s*\|\s*grounding:\s*([\w]+))?\s*-->`)
+
+// validGroundings defines the accepted grounding levels.
+var validGroundings = map[string]bool{
+	"verified": true, "reviewed": true, "inferred": true, "speculative": true,
+}
 
 // parseConfidenceScores extracts confidence annotations from spec file content.
 // Format: <!-- confidence: N --> where N is 1-10, placed after ## section headers.
@@ -1004,6 +1013,7 @@ var confidenceRe = regexp.MustCompile(`<!--\s*confidence:\s*(\d{1,2})(?:\s*\|\s*
 func parseConfidenceScores(content string) confidenceSummary {
 	lines := strings.Split(content, "\n")
 	var items []confidenceItem
+	var groundingWarns []string
 	currentSection := ""
 
 	for _, line := range lines {
@@ -1032,7 +1042,15 @@ func parseConfidenceScores(content string) confidenceSummary {
 		if len(matches) >= 3 {
 			source = matches[2]
 		}
-		items = append(items, confidenceItem{Section: section, Score: score, Source: source})
+		grounding := ""
+		if len(matches) >= 4 && matches[3] != "" {
+			if validGroundings[matches[3]] {
+				grounding = matches[3]
+			} else {
+				groundingWarns = append(groundingWarns, fmt.Sprintf("unknown grounding %q in section: %s", matches[3], section))
+			}
+		}
+		items = append(items, confidenceItem{Section: section, Score: score, Source: source, Grounding: grounding})
 	}
 
 	if len(items) == 0 {
@@ -1042,6 +1060,7 @@ func parseConfidenceScores(content string) confidenceSummary {
 	total := 0
 	lowCount := 0
 	var warnings []string
+	groundingDist := map[string]int{}
 	for _, item := range items {
 		total += item.Score
 		if item.Score <= 5 {
@@ -1050,14 +1069,22 @@ func parseConfidenceScores(content string) confidenceSummary {
 				warnings = append(warnings, item.Section)
 			}
 		}
+		if item.Grounding != "" {
+			groundingDist[item.Grounding]++
+		}
+		if item.Grounding == "speculative" && item.Score > 5 {
+			groundingWarns = append(groundingWarns, fmt.Sprintf("high confidence (%d) with speculative grounding in section: %s", item.Score, item.Section))
+		}
 	}
 
 	return confidenceSummary{
-		Avg:      float64(total) / float64(len(items)),
-		Total:    len(items),
-		LowCount: lowCount,
-		Items:    items,
-		Warnings: warnings,
+		Avg:            float64(total) / float64(len(items)),
+		Total:          len(items),
+		LowCount:       lowCount,
+		Items:          items,
+		Warnings:       warnings,
+		GroundingDist:  groundingDist,
+		GroundingWarns: groundingWarns,
 	}
 }
 
