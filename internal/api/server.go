@@ -23,6 +23,9 @@ type Server struct {
 	sse     *SSEHub
 	httpSrv *http.Server
 
+	// Cancels all request contexts on shutdown (drains SSE connections).
+	cancelAll context.CancelFunc
+
 	// options
 	devProxyURL string
 	embedFS     fs.FS
@@ -103,19 +106,25 @@ func New(ds dashboard.DataSource, specDir string, opts ...Option) *Server {
 
 // ListenAndServe starts the HTTP server on the given address.
 func (s *Server) ListenAndServe(addr string) error {
+	baseCtx, cancel := context.WithCancel(context.Background())
+	s.cancelAll = cancel
 	s.httpSrv = &http.Server{
 		Addr:              addr,
 		Handler:           s.router,
 		ReadHeaderTimeout: 10 * time.Second,
+		BaseContext:       func(_ net.Listener) context.Context { return baseCtx },
 	}
 	return s.httpSrv.ListenAndServe()
 }
 
 // Serve starts the HTTP server on a pre-opened listener (avoids TOCTOU race).
 func (s *Server) Serve(ln net.Listener) error {
+	baseCtx, cancel := context.WithCancel(context.Background())
+	s.cancelAll = cancel
 	s.httpSrv = &http.Server{
 		Handler:           s.router,
 		ReadHeaderTimeout: 10 * time.Second,
+		BaseContext:       func(_ net.Listener) context.Context { return baseCtx },
 	}
 	return s.httpSrv.Serve(ln)
 }
@@ -123,6 +132,10 @@ func (s *Server) Serve(ln net.Listener) error {
 // Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.sse.Close()
+	// Cancel base context to drain SSE connections before httpSrv.Shutdown waits.
+	if s.cancelAll != nil {
+		s.cancelAll()
+	}
 	if s.httpSrv != nil {
 		return s.httpSrv.Shutdown(ctx)
 	}
