@@ -72,12 +72,29 @@ func (s *Server) handleGetSpecs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"specs": filtered})
 }
 
+// validSpecFiles is the allowlist of spec file names that can be read via the API.
+var validSpecFiles = map[string]bool{
+	"requirements.md": true,
+	"design.md":       true,
+	"tasks.md":        true,
+	"test-specs.md":   true,
+	"decisions.md":    true,
+	"research.md":     true,
+	"session.md":      true,
+	"bugfix.md":       true,
+	"delta.md":        true,
+}
+
 func (s *Server) handleGetSpecContent(w http.ResponseWriter, r *http.Request) {
 	slug := chi.URLParam(r, "slug")
 	if !validateSlug(w, slug) {
 		return
 	}
 	file := chi.URLParam(r, "file")
+	if !validSpecFiles[file] {
+		writeError(w, http.StatusBadRequest, "invalid spec file name")
+		return
+	}
 	content, err := s.ds.SpecContent(slug, file)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "spec file not found")

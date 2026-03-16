@@ -1,0 +1,63 @@
+version: "3"
+
+vars:
+  WEB_DIR: web
+  EMBED_DIR: cmd/alfred/web/dist
+
+tasks:
+  default:
+    desc: Build React SPA and install Go binary
+    cmds:
+      - task: build
+
+  build:
+    desc: Build React SPA, copy to embed dir, and go install
+    deps: [web:build]
+    cmds:
+      - mkdir -p {{.EMBED_DIR}}
+      - cp -r {{.WEB_DIR}}/dist/* {{.EMBED_DIR}}/
+      - go install ./cmd/alfred
+
+  web:build:
+    desc: Build React SPA
+    dir: "{{.WEB_DIR}}"
+    cmds:
+      - bun run build
+    sources:
+      - src/**/*
+      - index.html
+      - vite.config.ts
+      - tsconfig.json
+      - package.json
+    generates:
+      - dist/**/*
+
+  web:dev:
+    desc: Start Vite dev server (use with ALFRED_DEV=1 alfred dashboard)
+    dir: "{{.WEB_DIR}}"
+    cmds:
+      - bun run dev
+
+  web:check:
+    desc: Run Biome lint/format check
+    dir: "{{.WEB_DIR}}"
+    cmds:
+      - bun run check
+
+  web:check:fix:
+    desc: Run Biome lint/format auto-fix
+    dir: "{{.WEB_DIR}}"
+    cmds:
+      - bun run check:fix
+
+  install:
+    desc: Install Go binary (assumes web already built)
+    cmds:
+      - mkdir -p {{.EMBED_DIR}}
+      - cp -r {{.WEB_DIR}}/dist/* {{.EMBED_DIR}}/
+      - go install ./cmd/alfred
+
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -rf {{.WEB_DIR}}/dist {{.EMBED_DIR}}

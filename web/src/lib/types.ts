@@ -1,0 +1,183 @@
+// TypeScript mirrors of Go types.
+// Keep in sync manually (DEC-14).
+//
+// Source correspondence:
+//   internal/dashboard/types.go → TaskDetail, SpecEntry, KnowledgeEntry, ActivityEntry,
+//     KnowledgeStats, EpicSummary, EpicTaskSummary, DecisionEntry, MemoryHealthStats, StepItem
+//   internal/spec/validate.go → ValidationReport, ValidationCheck
+//   internal/spec/confidence.go → ConfidenceSummary, ConfidenceItem
+
+// --- dashboard/types.go ---
+
+export interface StepItem {
+	text: string;
+	done: boolean;
+}
+
+export interface TaskDetail {
+	slug: string;
+	epic_slug?: string;
+	status: string;
+	focus?: string;
+	completed: number;
+	total: number;
+	has_blocker: boolean;
+	blocker_text?: string;
+	decisions?: string[];
+	next_steps?: StepItem[];
+	mod_files?: string[];
+	started_at?: string;
+	completed_at?: string;
+	size?: string;
+	spec_type?: string;
+	review_status?: string;
+}
+
+export interface SpecEntry {
+	task_slug: string;
+	file: string;
+	size: number;
+	updated_at: string;
+}
+
+export interface KnowledgeEntry {
+	id: number;
+	label: string;
+	source: string;
+	sub_type: string;
+	hit_count: number;
+	content: string;
+	structured?: string;
+	score?: number;
+	saved_at?: string;
+	enabled: boolean;
+}
+
+export interface ActivityEntry {
+	timestamp: string;
+	action: string;
+	target: string;
+	detail?: string;
+}
+
+export interface KnowledgeStats {
+	total: number;
+	decision: number;
+	pattern: number;
+	rule: number;
+	general: number;
+}
+
+export interface EpicSummary {
+	slug: string;
+	name: string;
+	status: string;
+	completed: number;
+	total: number;
+	tasks?: EpicTaskSummary[];
+}
+
+export interface EpicTaskSummary {
+	slug: string;
+	status: string;
+}
+
+export interface DecisionEntry {
+	task_slug: string;
+	title: string;
+	chosen?: string;
+	alternatives?: string;
+	reason?: string;
+}
+
+export interface MemoryHealthStats {
+	total: number;
+	stale_count: number;
+	conflict_count: number;
+	vitality_dist: [number, number, number, number, number];
+}
+
+// --- spec/validate.go ---
+
+export interface ValidationCheck {
+	name: string;
+	status: string;
+	message: string;
+}
+
+export interface ValidationReport {
+	task_slug: string;
+	size: string;
+	spec_type: string;
+	checks: ValidationCheck[];
+	summary: string;
+}
+
+// --- spec/confidence.go ---
+
+export interface ConfidenceItem {
+	section: string;
+	score: number;
+	source?: string;
+	grounding?: string;
+}
+
+export interface ConfidenceSummary {
+	avg: number;
+	total_items: number;
+	low_items: number;
+	items?: ConfidenceItem[];
+	low_confidence_warnings?: string[];
+	grounding_distribution?: Record<string, number>;
+	grounding_warnings?: string[];
+}
+
+// --- API response wrappers ---
+
+export interface TasksResponse {
+	active: string;
+	tasks: TaskDetail[];
+}
+
+export interface SpecsResponse {
+	specs: SpecEntry[];
+}
+
+export interface SpecContentResponse {
+	content: string;
+}
+
+export interface KnowledgeResponse {
+	entries: KnowledgeEntry[];
+}
+
+export interface KnowledgeSearchResponse {
+	entries: KnowledgeEntry[];
+	method: string;
+	partial: boolean;
+}
+
+export interface ActivityResponse {
+	entries: ActivityEntry[];
+}
+
+export interface EpicsResponse {
+	epics: EpicSummary[];
+}
+
+export interface DecisionsResponse {
+	decisions: DecisionEntry[];
+}
+
+export interface VersionResponse {
+	version: string;
+}
+
+// Brand color map for sub_type badges (DEC-15)
+export const SUB_TYPE_COLORS: Record<string, string> = {
+	session: "#40513b",
+	decision: "#628141",
+	pattern: "#2d8b7a",
+	rule: "#e67e22",
+	general: "#6b7280",
+} as const;
