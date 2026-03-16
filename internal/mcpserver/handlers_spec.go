@@ -947,7 +947,7 @@ func buildCompletionDetail(sd *spec.SpecDir, decisionsSaved int) string {
 
 	// Count modified files from session.md.
 	if session, err := sd.ReadFile(spec.FileSession); err == nil {
-		modSection := extractNextSteps2(session, "## Modified Files")
+		modSection := extractMarkdownSection(session, "## Modified Files")
 		if modSection != "" {
 			count := 0
 			for line := range strings.SplitSeq(modSection, "\n") {
@@ -977,8 +977,8 @@ func buildCompletionDetail(sd *spec.SpecDir, decisionsSaved int) string {
 	return strings.Join(parts, ", ")
 }
 
-// extractNextSteps2 extracts a named section from content (generic version).
-func extractNextSteps2(content, heading string) string {
+// extractMarkdownSection extracts a named section from content.
+func extractMarkdownSection(content, heading string) string {
 	idx := strings.Index(content, heading)
 	if idx < 0 {
 		return ""
