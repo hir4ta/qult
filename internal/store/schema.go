@@ -16,9 +16,9 @@ type execer interface {
 	Exec(query string, args ...any) (sql.Result, error)
 }
 
-// schemaVersion 6 = enabled flag for memory governance.
-// V5→V6: additive (new column with default).
-const schemaVersion = 6
+// schemaVersion 7 = validity windows + memory versioning.
+// V6→V7: additive (valid_until, review_by, superseded_by columns).
+const schemaVersion = 7
 
 const ddl = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -43,6 +43,9 @@ CREATE TABLE IF NOT EXISTS records (
     last_accessed TEXT NOT NULL DEFAULT '',
     structured    TEXT NOT NULL DEFAULT '',
     enabled       INTEGER NOT NULL DEFAULT 1,
+    valid_until   TEXT,
+    review_by     TEXT,
+    superseded_by INTEGER REFERENCES records(id) ON DELETE SET NULL,
     UNIQUE(url, section_path)
 );
 
@@ -185,8 +188,15 @@ func Migrate(db *sql.DB) error {
 	defer tx.Rollback()
 
 	switch current {
+	case 6:
+		if err := migrateV6toV7(tx); err != nil {
+			return err
+		}
 	case 5:
 		if err := migrateV5toV6(tx); err != nil {
+			return err
+		}
+		if err := migrateV6toV7(tx); err != nil {
 			return err
 		}
 	case 4:
@@ -194,6 +204,9 @@ func Migrate(db *sql.DB) error {
 			return err
 		}
 		if err := migrateV5toV6(tx); err != nil {
+			return err
+		}
+		if err := migrateV6toV7(tx); err != nil {
 			return err
 		}
 	case 3:
@@ -204,6 +217,9 @@ func Migrate(db *sql.DB) error {
 			return err
 		}
 		if err := migrateV5toV6(tx); err != nil {
+			return err
+		}
+		if err := migrateV6toV7(tx); err != nil {
 			return err
 		}
 	case 2:
@@ -217,6 +233,9 @@ func Migrate(db *sql.DB) error {
 			return err
 		}
 		if err := migrateV5toV6(tx); err != nil {
+			return err
+		}
+		if err := migrateV6toV7(tx); err != nil {
 			return err
 		}
 	case 1:
@@ -233,6 +252,9 @@ func Migrate(db *sql.DB) error {
 			return err
 		}
 		if err := migrateV5toV6(tx); err != nil {
+			return err
+		}
+		if err := migrateV6toV7(tx); err != nil {
 			return err
 		}
 	default:
@@ -343,6 +365,21 @@ func migrateV4toV5(db execer) error {
 func migrateV5toV6(db execer) error {
 	_, err := db.Exec(`ALTER TABLE records ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1`)
 	return err
+}
+
+// migrateV6toV7 adds validity windows and memory versioning columns.
+func migrateV6toV7(db execer) error {
+	stmts := []string{
+		`ALTER TABLE records ADD COLUMN valid_until TEXT`,
+		`ALTER TABLE records ADD COLUMN review_by TEXT`,
+		`ALTER TABLE records ADD COLUMN superseded_by INTEGER REFERENCES records(id) ON DELETE SET NULL`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("store: v6→v7 migration: %w", err)
+		}
+	}
+	return nil
 }
 
 // seedTagAliases inserts default tag alias mappings.

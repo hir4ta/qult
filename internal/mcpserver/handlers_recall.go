@@ -261,11 +261,25 @@ func recallSave(ctx context.Context, st *store.Store, emb *embedder.Embedder, re
 		// For sub_types without a structured mapping (general), ignore structured fields.
 	}
 
+	// Optional validity window parameters.
+	validUntil := req.GetString("valid_until", "")
+	if validUntil != "" {
+		if _, err := time.Parse(time.RFC3339, validUntil); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid valid_until format (use RFC3339): %v", err)), nil
+		}
+	}
+	reviewBy := req.GetString("review_by", "")
+	if reviewBy != "" {
+		if _, err := time.Parse(time.RFC3339, reviewBy); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid review_by format (use RFC3339): %v", err)), nil
+		}
+	}
+
 	ts := time.Now().Format("2006-01-02T150405")
 	url := fmt.Sprintf("memory://user/%s/manual/%s", project, ts)
 	sectionPath := fmt.Sprintf("%s > manual > %s", project, truncate(label, 60))
 
-	id, changed, err := st.UpsertDoc(ctx, &store.DocRow{
+	doc := &store.DocRow{
 		URL:         url,
 		SectionPath: sectionPath,
 		Content:     strings.TrimSpace(content),
@@ -273,7 +287,10 @@ func recallSave(ctx context.Context, st *store.Store, emb *embedder.Embedder, re
 		SubType:     subType,
 		TTLDays:     0, // permanent
 		Structured:  structured,
-	})
+		ValidUntil:  validUntil,
+		ReviewBy:    reviewBy,
+	}
+	id, changed, err := st.UpsertDoc(ctx, doc)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("save failed: %v", err)), nil
 	}
@@ -281,6 +298,13 @@ func recallSave(ctx context.Context, st *store.Store, emb *embedder.Embedder, re
 	status := "saved"
 	if !changed {
 		status = "unchanged (duplicate)"
+	}
+
+	// Memory versioning: find existing memories with the same section_path
+	// that are not already superseded, and chain them.
+	var supersededID int64
+	if changed {
+		supersededID, _ = versionMemory(ctx, st, id, sectionPath)
 	}
 
 	// Async embedding: generate vector for semantic recall search.
@@ -304,13 +328,18 @@ func recallSave(ctx context.Context, st *store.Store, emb *embedder.Embedder, re
 		embeddingStatus = "pending"
 	}
 
-	return marshalResult(map[string]any{
+	result := map[string]any{
 		"status":           status,
 		"id":               id,
 		"section_path":     sectionPath,
 		"url":              url,
 		"embedding_status": embeddingStatus,
-	})
+	}
+	if supersededID > 0 {
+		result["superseded_id"] = supersededID
+		result["versioning"] = "previous version superseded"
+	}
+	return marshalResult(result)
 }
 
 // recallPromote promotes a memory's sub_type (general→pattern or pattern→rule).
@@ -502,7 +531,52 @@ func recallReflect(ctx context.Context, st *store.Store, emb *embedder.Embedder,
 		result["avg_vitality"] = math.Round(avgVitality*100) / 100
 	}
 
-	// 6. Steering doc freshness check.
+	// 6. Review-due memories.
+	reviewDue, err := st.GetReviewDueMemories(ctx)
+	if err == nil && len(reviewDue) > 0 {
+		reviewList := make([]map[string]any, 0, len(reviewDue))
+		for _, d := range reviewDue {
+			reviewList = append(reviewList, map[string]any{
+				"id":            d.ID,
+				"section_path":  d.SectionPath,
+				"review_by":     d.ReviewBy,
+				"hit_count":     d.HitCount,
+				"last_accessed": d.LastAccessed,
+			})
+		}
+		result["review_due"] = reviewList
+	}
+
+	// 7. Expiring-soon memories (valid_until within 7 days).
+	expiring, err := st.GetExpiringMemories(ctx, 7)
+	if err == nil && len(expiring) > 0 {
+		expiringList := make([]map[string]any, 0, len(expiring))
+		for _, d := range expiring {
+			expiringList = append(expiringList, map[string]any{
+				"id":            d.ID,
+				"section_path":  d.SectionPath,
+				"valid_until":   d.ValidUntil,
+				"sub_type":      d.SubType,
+			})
+		}
+		result["expiring_soon"] = expiringList
+	}
+
+	// 8. Version chain high-churn indicators.
+	chains, err := st.GetVersionChainLengths(ctx, 3)
+	if err == nil && len(chains) > 0 {
+		chainList := make([]map[string]any, 0, len(chains))
+		for _, c := range chains {
+			chainList = append(chainList, map[string]any{
+				"head_id":      c.HeadID,
+				"section_path": c.SectionPath,
+				"chain_length": c.ChainLength,
+			})
+		}
+		result["high_churn"] = chainList
+	}
+
+	// 9. Steering doc freshness check.
 	if projectPath := req.GetString("project_path", ""); projectPath != "" {
 		if steeringWarnings := checkSteeringFreshness(projectPath); len(steeringWarnings) > 0 {
 			result["steering_warnings"] = steeringWarnings
@@ -647,4 +721,49 @@ func resolveProjectPath(req mcp.CallToolRequest) string {
 		return cwd
 	}
 	return "."
+}
+
+// versionMemory finds existing memories with the same section_path (but different ID)
+// that are not already superseded, and sets their superseded_by to the new record.
+// Returns the superseded record ID (0 if none). Also enforces max 5 chain length
+// by pruning the oldest version when exceeded.
+func versionMemory(ctx context.Context, st *store.Store, newID int64, sectionPath string) (int64, error) {
+	// Find existing non-superseded memory with the same section_path.
+	var oldID int64
+	err := st.DB().QueryRowContext(ctx,
+		`SELECT id FROM records
+		 WHERE section_path = ? AND source_type = ? AND id != ?
+		   AND superseded_by IS NULL
+		 ORDER BY crawled_at DESC LIMIT 1`,
+		sectionPath, store.SourceMemory, newID).Scan(&oldID)
+	if err != nil {
+		return 0, nil // no previous version
+	}
+
+	// Cycle detection: walk forward from newID to ensure oldID is not in the chain.
+	chain, err := st.GetVersionChain(ctx, newID, 5)
+	if err != nil {
+		return 0, fmt.Errorf("version chain cycle detected: %w", err)
+	}
+	for _, id := range chain {
+		if id == oldID {
+			return 0, fmt.Errorf("version chain cycle: old record %d found in chain of new record %d", oldID, newID)
+		}
+	}
+
+	// Set superseded_by on old record.
+	if err := st.SetSupersededBy(ctx, oldID, newID); err != nil {
+		return 0, err
+	}
+
+	// Enforce max 5 versions: walk backwards from newID to count chain length.
+	predecessors, _ := st.GetReverseVersionChain(ctx, newID, 6)
+	if len(predecessors) >= 5 {
+		// Prune the oldest (last in the backwards chain).
+		oldestID := predecessors[len(predecessors)-1]
+		// Clear superseded_by on the oldest record (detach from chain).
+		_ = st.SetSupersededBy(ctx, oldestID, 0)
+	}
+
+	return oldID, nil
 }

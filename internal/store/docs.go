@@ -41,6 +41,9 @@ type DocRow struct {
 	LastAccessed string
 	Structured   string
 	Enabled      bool
+	ValidUntil   string // RFC3339 datetime; empty = no expiry
+	ReviewBy     string // RFC3339 datetime; empty = no review deadline
+	SupersededBy int64  // ID of newer version; 0 = current version
 }
 
 // Promotion thresholds: minimum hit_count to qualify as a promotion candidate.
@@ -83,9 +86,18 @@ func (s *Store) UpsertDoc(ctx context.Context, doc *DocRow) (id int64, changed b
 		return existingID, false, nil
 	}
 
+	// Convert empty strings to nil for nullable columns.
+	var validUntil, reviewBy any
+	if doc.ValidUntil != "" {
+		validUntil = doc.ValidUntil
+	}
+	if doc.ReviewBy != "" {
+		reviewBy = doc.ReviewBy
+	}
+
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO records (url, section_path, content, content_hash, source_type, sub_type, version, crawled_at, ttl_days, structured)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO records (url, section_path, content, content_hash, source_type, sub_type, version, crawled_at, ttl_days, structured, valid_until, review_by)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(url, section_path) DO UPDATE SET
 			content = excluded.content,
 			content_hash = excluded.content_hash,
@@ -94,9 +106,12 @@ func (s *Store) UpsertDoc(ctx context.Context, doc *DocRow) (id int64, changed b
 			version = excluded.version,
 			crawled_at = excluded.crawled_at,
 			ttl_days = excluded.ttl_days,
-			structured = excluded.structured`,
+			structured = excluded.structured,
+			valid_until = excluded.valid_until,
+			review_by = excluded.review_by`,
 		doc.URL, doc.SectionPath, doc.Content, doc.ContentHash,
 		doc.SourceType, doc.SubType, doc.Version, doc.CrawledAt, doc.TTLDays, doc.Structured,
+		validUntil, reviewBy,
 	)
 	if err != nil {
 		return 0, false, fmt.Errorf("store: upsert doc: %w", err)
@@ -296,7 +311,7 @@ func (s *Store) SearchMemoriesKeyword(ctx context.Context, query string, limit i
 		conditions = append(conditions, "(LOWER(section_path) LIKE ? ESCAPE '\\' OR LOWER(content) LIKE ? ESCAPE '\\')")
 		args = append(args, escaped, escaped)
 	}
-	where := "source_type = ? AND enabled = 1"
+	where := "source_type = ? AND enabled = 1 AND (valid_until IS NULL OR valid_until > datetime('now')) AND superseded_by IS NULL"
 	if len(conditions) > 0 {
 		where += " AND " + strings.Join(conditions, " AND ")
 	}
@@ -328,7 +343,10 @@ func (s *Store) ListRecentMemories(ctx context.Context, limit int) ([]DocRow, er
 	}
 	sqlQuery := `SELECT id, url, section_path, content, content_hash, source_type, sub_type,
 		version, crawled_at, ttl_days, hit_count, structured
-		FROM records WHERE source_type = ? AND enabled = 1 ORDER BY crawled_at DESC LIMIT ?`
+		FROM records WHERE source_type = ? AND enabled = 1
+		AND (valid_until IS NULL OR valid_until > datetime('now'))
+		AND superseded_by IS NULL
+		ORDER BY crawled_at DESC LIMIT ?`
 	rows, err := s.db.QueryContext(ctx, sqlQuery, SourceMemory, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: list recent memories: %w", err)
@@ -664,6 +682,8 @@ func (s *Store) ListLowVitality(ctx context.Context, threshold float64, limit in
 			version, crawled_at, ttl_days, hit_count, last_accessed
 		 FROM records
 		 WHERE source_type = ? AND enabled = 1
+		   AND (valid_until IS NULL OR valid_until > datetime('now'))
+		   AND superseded_by IS NULL
 		 ORDER BY crawled_at ASC`,
 		SourceMemory)
 	if err != nil {
@@ -696,4 +716,188 @@ func (s *Store) ListLowVitality(ctx context.Context, threshold float64, limit in
 	}
 
 	return results, nil
+}
+
+// GetReviewDueMemories returns memory records whose review_by date has passed.
+// Only returns enabled, non-expired, non-superseded memories.
+func (s *Store) GetReviewDueMemories(ctx context.Context) ([]DocRow, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, url, section_path, content, content_hash, source_type, sub_type,
+			version, crawled_at, ttl_days, hit_count, last_accessed, review_by
+		 FROM records
+		 WHERE source_type = ? AND enabled = 1
+		   AND review_by IS NOT NULL AND review_by != '' AND review_by < datetime('now')
+		   AND (valid_until IS NULL OR valid_until > datetime('now'))
+		   AND superseded_by IS NULL
+		 ORDER BY review_by ASC
+		 LIMIT 50`,
+		SourceMemory)
+	if err != nil {
+		return nil, fmt.Errorf("store: get review due memories: %w", err)
+	}
+	defer rows.Close()
+
+	var docs []DocRow
+	for rows.Next() {
+		var d DocRow
+		var version sql.NullString
+		var reviewBy sql.NullString
+		if err := rows.Scan(&d.ID, &d.URL, &d.SectionPath, &d.Content, &d.ContentHash,
+			&d.SourceType, &d.SubType, &version, &d.CrawledAt, &d.TTLDays,
+			&d.HitCount, &d.LastAccessed, &reviewBy); err != nil {
+			continue
+		}
+		d.Version = version.String
+		d.ReviewBy = reviewBy.String
+		docs = append(docs, d)
+	}
+	return docs, rows.Err()
+}
+
+// GetExpiringMemories returns memories with valid_until within the given days from now.
+// Only returns enabled, non-superseded memories.
+func (s *Store) GetExpiringMemories(ctx context.Context, withinDays int) ([]DocRow, error) {
+	if withinDays <= 0 {
+		withinDays = 7
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, url, section_path, content, source_type, sub_type, hit_count, valid_until
+		 FROM records
+		 WHERE source_type = ? AND enabled = 1
+		   AND valid_until IS NOT NULL AND valid_until != ''
+		   AND valid_until > datetime('now')
+		   AND valid_until <= datetime('now', ? || ' days')
+		   AND superseded_by IS NULL
+		 ORDER BY valid_until ASC
+		 LIMIT 50`,
+		SourceMemory, fmt.Sprintf("+%d", withinDays))
+	if err != nil {
+		return nil, fmt.Errorf("store: get expiring memories: %w", err)
+	}
+	defer rows.Close()
+
+	var docs []DocRow
+	for rows.Next() {
+		var d DocRow
+		var validUntil sql.NullString
+		if err := rows.Scan(&d.ID, &d.URL, &d.SectionPath, &d.Content,
+			&d.SourceType, &d.SubType, &d.HitCount, &validUntil); err != nil {
+			continue
+		}
+		d.ValidUntil = validUntil.String
+		docs = append(docs, d)
+	}
+	return docs, rows.Err()
+}
+
+// SetSupersededBy sets the superseded_by field on a record to point to a newer version.
+// Pass newID=0 to clear the superseded_by link (detach from chain).
+func (s *Store) SetSupersededBy(ctx context.Context, oldID, newID int64) error {
+	var newIDVal any
+	if newID > 0 {
+		newIDVal = newID
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE records SET superseded_by = ? WHERE id = ? AND source_type = ?`,
+		newIDVal, oldID, SourceMemory)
+	if err != nil {
+		return fmt.Errorf("store: set superseded_by: %w", err)
+	}
+	return nil
+}
+
+// GetVersionChain walks the superseded_by chain starting from the given record ID.
+// Returns IDs in order from oldest to newest (excluding startID).
+// Stops at maxHops to prevent infinite loops from corrupted data.
+func (s *Store) GetVersionChain(ctx context.Context, startID int64, maxHops int) ([]int64, error) {
+	if maxHops <= 0 {
+		maxHops = 5
+	}
+	seen := map[int64]bool{startID: true}
+	currentID := startID
+	var chain []int64
+
+	for i := 0; i < maxHops; i++ {
+		var supersededBy sql.NullInt64
+		err := s.db.QueryRowContext(ctx,
+			`SELECT superseded_by FROM records WHERE id = ?`, currentID).Scan(&supersededBy)
+		if err != nil || !supersededBy.Valid || supersededBy.Int64 == 0 {
+			break
+		}
+		nextID := supersededBy.Int64
+		if seen[nextID] {
+			return chain, fmt.Errorf("store: version chain cycle detected at record %d", nextID)
+		}
+		seen[nextID] = true
+		chain = append(chain, nextID)
+		currentID = nextID
+	}
+	return chain, nil
+}
+
+// GetReverseVersionChain walks backwards from a record to find all older versions
+// that point to it (or its predecessors) via superseded_by.
+// Returns IDs from newest to oldest.
+func (s *Store) GetReverseVersionChain(ctx context.Context, newestID int64, maxHops int) ([]int64, error) {
+	if maxHops <= 0 {
+		maxHops = 5
+	}
+	seen := map[int64]bool{newestID: true}
+	currentID := newestID
+	var chain []int64
+
+	for i := 0; i < maxHops; i++ {
+		var olderID int64
+		err := s.db.QueryRowContext(ctx,
+			`SELECT id FROM records WHERE superseded_by = ?`, currentID).Scan(&olderID)
+		if err != nil {
+			break // no more predecessors
+		}
+		if seen[olderID] {
+			return chain, fmt.Errorf("store: reverse version chain cycle detected at record %d", olderID)
+		}
+		seen[olderID] = true
+		chain = append(chain, olderID)
+		currentID = olderID
+	}
+	return chain, nil
+}
+
+// VersionChainInfo holds metadata about a version chain head.
+type VersionChainInfo struct {
+	HeadID      int64
+	SectionPath string
+	ChainLength int
+}
+
+// GetVersionChainLengths returns records that are heads of version chains (superseded_by IS NULL)
+// with chain length > minLength. Used for "high churn" detection in reflect.
+func (s *Store) GetVersionChainLengths(ctx context.Context, minLength int) ([]VersionChainInfo, error) {
+	// Find all non-superseded memory records that have at least one predecessor.
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT r.id, r.section_path FROM records r
+		 WHERE r.source_type = ? AND r.superseded_by IS NULL
+		   AND EXISTS (SELECT 1 FROM records p WHERE p.superseded_by = r.id)`,
+		SourceMemory)
+	if err != nil {
+		return nil, fmt.Errorf("store: get version chain lengths: %w", err)
+	}
+	defer rows.Close()
+
+	var results []VersionChainInfo
+
+	for rows.Next() {
+		var id int64
+		var sp string
+		if err := rows.Scan(&id, &sp); err != nil {
+			continue
+		}
+		// Walk backwards to count chain length.
+		predecessors, _ := s.GetReverseVersionChain(ctx, id, 10)
+		chainLen := len(predecessors) + 1 // include head
+		if chainLen > minLength {
+			results = append(results, VersionChainInfo{HeadID: id, SectionPath: sp, ChainLength: chainLen})
+		}
+	}
+	return results, rows.Err()
 }

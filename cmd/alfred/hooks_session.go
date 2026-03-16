@@ -54,6 +54,9 @@ func handleSessionStart(ctx context.Context, ev *hookEvent) {
 		notifyUser("tip: run `alfred steering-init` to create project steering docs for better spec generation")
 	}
 
+	// Check for past-due review_by memories (lightweight query, fail-open).
+	warnReviewDueMemories(ctx, st)
+
 	// Inject spec context after parallel ops complete.
 	// Must be serial: writes JSON to stdout (protocol integrity).
 	injectSpecContext(ctx, ev.ProjectPath, ev.Source, st)
@@ -243,9 +246,10 @@ func injectSpecContext(ctx context.Context, projectPath, source string, st *stor
 		memoryCount := countProjectMemories(ctx, st, projectPath)
 		switch {
 		case memoryCount <= 5:
-			// New project/user: inject core spec files for orientation (not all 7 — templates have no content yet).
+			// New project/user: inject core spec files for orientation.
+			// For bugfix specs, read bugfix.md instead of requirements.md.
 			buf.WriteString("(Full context — new project)\n\n")
-			for _, f := range spec.CoreFiles {
+			for _, f := range coreFilesForTask(projectPath, taskSlug) {
 				content, err := sd.ReadFile(f)
 				if err != nil || strings.TrimSpace(content) == "" {
 					continue
@@ -253,10 +257,9 @@ func injectSpecContext(ctx context.Context, projectPath, source string, st *stor
 				buf.WriteString(fmt.Sprintf("### %s\n%s\n\n", f, content))
 			}
 		case memoryCount <= 20:
-			// Growing: inject session + summary of requirements.
+			// Growing: inject session + summary of requirements (or bugfix).
 			buf.WriteString(session + "\n")
-			if req, err := sd.ReadFile(spec.FileRequirements); err == nil {
-				// Only the Goal section.
+			if req, err := sd.ReadFile(primaryFileForTask(projectPath, taskSlug)); err == nil {
 				if goal := extractGoalSection(req); goal != "" {
 					buf.WriteString("\nGoal: " + goal + "\n")
 				}
@@ -544,6 +547,19 @@ func countProjectMemories(ctx context.Context, st *store.Store, projectPath stri
 	return n
 }
 
+// warnReviewDueMemories checks for memories past their review_by date
+// and warns the user via stderr. Advisory only — does not affect search results.
+func warnReviewDueMemories(ctx context.Context, st *store.Store) {
+	if st == nil {
+		return
+	}
+	docs, err := st.GetReviewDueMemories(ctx)
+	if err != nil || len(docs) == 0 {
+		return
+	}
+	notifyUser("%d memories past review-by date — run 'ledger action=reflect' for details", len(docs))
+}
+
 // extractGoalSection extracts the Goal section from requirements.md.
 func extractGoalSection(content string) string {
 	lines := strings.Split(content, "\n")
@@ -551,7 +567,8 @@ func extractGoalSection(content string) string {
 	var goal strings.Builder
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "## Goal") {
+		// Match both "## Goal" (feature) and "## Bug Summary" (bugfix).
+		if strings.HasPrefix(trimmed, "## Goal") || strings.HasPrefix(trimmed, "## Bug Summary") {
 			inGoal = true
 			continue
 		}
@@ -566,4 +583,29 @@ func extractGoalSection(content string) string {
 		}
 	}
 	return goal.String()
+}
+
+// primaryFileForTask returns the primary spec file for a task (requirements.md or bugfix.md).
+func primaryFileForTask(projectPath, taskSlug string) spec.SpecFile {
+	if state, err := spec.ReadActiveState(projectPath); err == nil {
+		for _, t := range state.Tasks {
+			if t.Slug == taskSlug && t.EffectiveSpecType() == spec.TypeBugfix {
+				return spec.FileBugfix
+			}
+		}
+	}
+	return spec.FileRequirements
+}
+
+// coreFilesForTask returns the core files list, substituting bugfix.md for requirements.md if needed.
+func coreFilesForTask(projectPath, taskSlug string) []spec.SpecFile {
+	if primaryFileForTask(projectPath, taskSlug) == spec.FileBugfix {
+		return []spec.SpecFile{
+			spec.FileBugfix,
+			spec.FileDesign,
+			spec.FileDecisions,
+			spec.FileSession,
+		}
+	}
+	return spec.CoreFiles
 }

@@ -37,6 +37,8 @@ func (s *Store) SearchFTS(ctx context.Context, query string, sourceType string, 
 		FROM records_fts f
 		JOIN records r ON r.rowid = f.rowid
 		WHERE records_fts MATCH ? AND r.source_type = ? AND r.enabled = 1
+			AND (r.valid_until IS NULL OR r.valid_until > datetime('now'))
+			AND r.superseded_by IS NULL
 		ORDER BY rank
 		LIMIT ?`
 		args = []any{ftsQuery, sourceType, limit}
@@ -47,6 +49,8 @@ func (s *Store) SearchFTS(ctx context.Context, query string, sourceType string, 
 		FROM records_fts f
 		JOIN records r ON r.rowid = f.rowid
 		WHERE records_fts MATCH ? AND r.enabled = 1
+			AND (r.valid_until IS NULL OR r.valid_until > datetime('now'))
+			AND r.superseded_by IS NULL
 		ORDER BY rank
 		LIMIT ?`
 		args = []any{ftsQuery, limit}
@@ -269,7 +273,9 @@ func (s *Store) DetectConflicts(ctx context.Context, threshold float64) ([]Confl
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT e.source_id, e.vector FROM embeddings e
 		 JOIN records r ON r.id = e.source_id
-		 WHERE e.source = 'records' AND r.source_type = ?
+		 WHERE e.source = 'records' AND r.source_type = ? AND r.enabled = 1
+		   AND (r.valid_until IS NULL OR r.valid_until > datetime('now'))
+		   AND r.superseded_by IS NULL
 		 LIMIT 1000`, SourceMemory)
 	if err != nil {
 		return nil, fmt.Errorf("store: detect conflicts query: %w", err)
@@ -437,6 +443,8 @@ func (s *Store) searchFTSMemory(ctx context.Context, ftsQuery string, limit int)
 	FROM records_fts f
 	JOIN records r ON r.rowid = f.rowid
 	WHERE records_fts MATCH ? AND r.source_type = ? AND r.enabled = 1
+		AND (r.valid_until IS NULL OR r.valid_until > datetime('now'))
+		AND r.superseded_by IS NULL
 	ORDER BY rank
 	LIMIT ?`
 
@@ -474,7 +482,9 @@ func (s *Store) fuzzySearchMemories(ctx context.Context, queryWords []string, li
 
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, url, section_path, content, content_hash, source_type, sub_type, version, crawled_at, ttl_days, structured
-		FROM records WHERE source_type = ? AND enabled = 1 LIMIT 500`, SourceMemory)
+		FROM records WHERE source_type = ? AND enabled = 1
+		AND (valid_until IS NULL OR valid_until > datetime('now'))
+		AND superseded_by IS NULL LIMIT 500`, SourceMemory)
 	if err != nil {
 		return nil
 	}

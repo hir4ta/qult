@@ -37,24 +37,27 @@ func New(st *store.Store, emb *embedder.Embedder, ver string) *server.MCPServer 
 			Tool: mcp.NewTool("dossier",
 				mcp.WithDescription(`Unified spec management for development tasks. Persists context across compaction and sessions.
 
-Actions: status (read-only), init, update, switch, complete, delete (2-phase: preview then confirm=true), history, rollback, review.
+Actions: status (read-only), init, update, switch, complete, delete (2-phase: preview then confirm=true), history, rollback, review, validate (read-only).
 
 task_slug format: lowercase alphanumeric with hyphens (e.g. "my-feature", max 64 chars).
-"status"/"history"/"review" are read-only. "init"/"update"/"switch"/"complete"/"delete"/"rollback" modify state.
+"status"/"history"/"review"/"validate" are read-only. "init"/"update"/"switch"/"complete"/"delete"/"rollback" modify state.
 Lifecycle: active → complete (preserves files) or delete (removes files).
+Size-based scaling: init accepts size (S/M/L/XL) and spec_type (feature/bugfix). S=3 files, M=4-5 files, L/XL=7 files.
 Review: TUI dashboard で承認/コメント → dossier action=review で確認.`),
 				mcp.WithTitleAnnotation("Dossier — Spec Management"),
 				mcp.WithReadOnlyHintAnnotation(false),
 				mcp.WithIdempotentHintAnnotation(false),
 				mcp.WithDestructiveHintAnnotation(true),
 				mcp.WithOpenWorldHintAnnotation(false),
-				mcp.WithString("action", mcp.Description("Action to perform"), mcp.Required(), mcp.Enum("init", "update", "status", "switch", "complete", "delete", "history", "rollback", "review")),
+				mcp.WithString("action", mcp.Description("Action to perform"), mcp.Required(), mcp.Enum("init", "update", "status", "switch", "complete", "delete", "history", "rollback", "review", "validate")),
 				mcp.WithString("project_path", mcp.Description("Project root path (defaults to current working directory if omitted)")),
 				mcp.WithString("task_slug", mcp.Description("Task identifier (required for init, switch, delete; optional for update/history/rollback — defaults to active task)")),
 				mcp.WithString("description", mcp.Description("Brief task description (for init)")),
-				mcp.WithString("file", mcp.Description("Spec file (for update/history/rollback)"), mcp.Enum("requirements.md", "design.md", "tasks.md", "test-specs.md", "decisions.md", "research.md", "session.md")),
+				mcp.WithString("file", mcp.Description("Spec file (for update/history/rollback)"), mcp.Enum("requirements.md", "design.md", "tasks.md", "test-specs.md", "decisions.md", "research.md", "session.md", "bugfix.md")),
 				mcp.WithString("content", mcp.Description("Content to write (for update)")),
 				mcp.WithString("mode", mcp.Description("Write mode (for update)"), mcp.Enum("append", "replace")),
+				mcp.WithString("size", mcp.Description("Spec size for init (auto-detected from description if omitted)"), mcp.Enum("S", "M", "L", "XL")),
+				mcp.WithString("spec_type", mcp.Description("Spec type for init (default: feature)"), mcp.Enum("feature", "bugfix")),
 				mcp.WithString("version", mcp.Description("Version timestamp for rollback (use history to list available versions)")),
 				mcp.WithBoolean("confirm", mcp.Description("Required for delete: first call without confirm to preview, then with confirm=true to execute")),
 			),
@@ -128,6 +131,8 @@ Do NOT use for: searching documentation (use WebFetch instead), file operations.
 			mcp.WithString("category", mcp.Description("Structured knowledge: rule category (optional, for rules)")),
 			mcp.WithString("priority", mcp.Description("Structured knowledge: rule priority p0/p1/p2 (optional, for rules)")),
 			mcp.WithString("project_path", mcp.Description("Project root path for structured knowledge JSON file storage (defaults to cwd)")),
+			mcp.WithString("valid_until", mcp.Description("Memory expiry date in RFC3339 format (optional, for save). Expired memories excluded from search.")),
+			mcp.WithString("review_by", mcp.Description("Review deadline in RFC3339 format (optional, for save). Past-due triggers warnings but does not exclude from search.")),
 			),
 			Handler: recallHandler(st, emb),
 		},

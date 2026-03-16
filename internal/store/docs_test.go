@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -701,5 +702,366 @@ func TestSearchMemoriesKeyword(t *testing.T) {
 	}
 	if len(results) != 3 {
 		t.Errorf("SearchMemoriesKeyword(spaces) = %d results, want 3", len(results))
+	}
+}
+
+func TestSchemaV7Migration(t *testing.T) {
+	t.Parallel()
+	st := openTestStore(t)
+
+	// Verify V7 columns exist by inserting a record with them.
+	ctx := context.Background()
+	id, _, err := st.UpsertDoc(ctx, &DocRow{
+		URL:         "memory://test/v7",
+		SectionPath: "project > v7 test",
+		Content:     "v7 content",
+		SourceType:  SourceMemory,
+		ValidUntil:  "2030-01-01T00:00:00Z",
+		ReviewBy:    "2026-06-01T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("UpsertDoc with V7 columns: %v", err)
+	}
+	if id == 0 {
+		t.Fatal("expected non-zero id")
+	}
+
+	// Verify the columns are actually stored.
+	var validUntil, reviewBy sql.NullString
+	err = st.DB().QueryRowContext(ctx,
+		`SELECT valid_until, review_by FROM records WHERE id = ?`, id).Scan(&validUntil, &reviewBy)
+	if err != nil {
+		t.Fatalf("query V7 columns: %v", err)
+	}
+	if !validUntil.Valid || validUntil.String != "2030-01-01T00:00:00Z" {
+		t.Errorf("valid_until = %v, want 2030-01-01T00:00:00Z", validUntil)
+	}
+	if !reviewBy.Valid || reviewBy.String != "2026-06-01T00:00:00Z" {
+		t.Errorf("review_by = %v, want 2026-06-01T00:00:00Z", reviewBy)
+	}
+
+	// Verify superseded_by column exists and defaults to NULL.
+	var supersededBy sql.NullInt64
+	err = st.DB().QueryRowContext(ctx,
+		`SELECT superseded_by FROM records WHERE id = ?`, id).Scan(&supersededBy)
+	if err != nil {
+		t.Fatalf("query superseded_by: %v", err)
+	}
+	if supersededBy.Valid {
+		t.Errorf("superseded_by should be NULL for new record, got %d", supersededBy.Int64)
+	}
+}
+
+func TestValidUntilExclusion(t *testing.T) {
+	t.Parallel()
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	// Insert an expired memory.
+	_, _, err := st.UpsertDoc(ctx, &DocRow{
+		URL:         "memory://test/expired",
+		SectionPath: "project > expired memory",
+		Content:     "this memory has expired",
+		SourceType:  SourceMemory,
+		ValidUntil:  "2020-01-01T00:00:00Z", // past
+	})
+	if err != nil {
+		t.Fatalf("UpsertDoc(expired): %v", err)
+	}
+
+	// Insert a valid memory (no expiry).
+	_, _, err = st.UpsertDoc(ctx, &DocRow{
+		URL:         "memory://test/valid",
+		SectionPath: "project > valid memory",
+		Content:     "this memory is valid",
+		SourceType:  SourceMemory,
+	})
+	if err != nil {
+		t.Fatalf("UpsertDoc(valid): %v", err)
+	}
+
+	// Insert a memory with future expiry.
+	_, _, err = st.UpsertDoc(ctx, &DocRow{
+		URL:         "memory://test/future",
+		SectionPath: "project > future memory",
+		Content:     "this memory expires in the future",
+		SourceType:  SourceMemory,
+		ValidUntil:  "2030-01-01T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("UpsertDoc(future): %v", err)
+	}
+
+	// ListRecentMemories should exclude expired memory.
+	results, err := st.ListRecentMemories(ctx, 50)
+	if err != nil {
+		t.Fatalf("ListRecentMemories: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("ListRecentMemories = %d results, want 2 (expired excluded)", len(results))
+	}
+	for _, r := range results {
+		if r.SectionPath == "project > expired memory" {
+			t.Error("expired memory should not appear in ListRecentMemories")
+		}
+	}
+
+	// SearchMemoriesKeyword should exclude expired memory.
+	results, err = st.SearchMemoriesKeyword(ctx, "memory", 50)
+	if err != nil {
+		t.Fatalf("SearchMemoriesKeyword: %v", err)
+	}
+	for _, r := range results {
+		if r.SectionPath == "project > expired memory" {
+			t.Error("expired memory should not appear in SearchMemoriesKeyword")
+		}
+	}
+}
+
+func TestSupersededByExclusion(t *testing.T) {
+	t.Parallel()
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	// Insert two memories.
+	oldID, _, err := st.UpsertDoc(ctx, &DocRow{
+		URL:         "memory://test/v1",
+		SectionPath: "project > versioned",
+		Content:     "version 1 content",
+		SourceType:  SourceMemory,
+	})
+	if err != nil {
+		t.Fatalf("UpsertDoc(v1): %v", err)
+	}
+
+	newID, _, err := st.UpsertDoc(ctx, &DocRow{
+		URL:         "memory://test/v2",
+		SectionPath: "project > versioned v2",
+		Content:     "version 2 content",
+		SourceType:  SourceMemory,
+	})
+	if err != nil {
+		t.Fatalf("UpsertDoc(v2): %v", err)
+	}
+
+	// Supersede old version.
+	if err := st.SetSupersededBy(ctx, oldID, newID); err != nil {
+		t.Fatalf("SetSupersededBy: %v", err)
+	}
+
+	// ListRecentMemories should exclude superseded memory.
+	results, err := st.ListRecentMemories(ctx, 50)
+	if err != nil {
+		t.Fatalf("ListRecentMemories: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("ListRecentMemories = %d results, want 1 (superseded excluded)", len(results))
+	}
+	if len(results) > 0 && results[0].ID != newID {
+		t.Errorf("expected new version (id=%d), got id=%d", newID, results[0].ID)
+	}
+}
+
+func TestReviewDueMemories(t *testing.T) {
+	t.Parallel()
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	// Insert a memory with past review_by.
+	_, _, err := st.UpsertDoc(ctx, &DocRow{
+		URL:         "memory://test/review-due",
+		SectionPath: "project > needs review",
+		Content:     "this memory needs review",
+		SourceType:  SourceMemory,
+		ReviewBy:    "2020-01-01T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("UpsertDoc(review-due): %v", err)
+	}
+
+	// Insert a memory with future review_by.
+	_, _, err = st.UpsertDoc(ctx, &DocRow{
+		URL:         "memory://test/review-ok",
+		SectionPath: "project > review ok",
+		Content:     "this memory is fine",
+		SourceType:  SourceMemory,
+		ReviewBy:    "2030-01-01T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("UpsertDoc(review-ok): %v", err)
+	}
+
+	// Insert a memory with no review_by.
+	_, _, err = st.UpsertDoc(ctx, &DocRow{
+		URL:         "memory://test/no-review",
+		SectionPath: "project > no review",
+		Content:     "no review date set",
+		SourceType:  SourceMemory,
+	})
+	if err != nil {
+		t.Fatalf("UpsertDoc(no-review): %v", err)
+	}
+
+	// GetReviewDueMemories should return only the past-due one.
+	due, err := st.GetReviewDueMemories(ctx)
+	if err != nil {
+		t.Fatalf("GetReviewDueMemories: %v", err)
+	}
+	if len(due) != 1 {
+		t.Errorf("GetReviewDueMemories = %d results, want 1", len(due))
+	}
+	if len(due) > 0 && due[0].SectionPath != "project > needs review" {
+		t.Errorf("expected 'needs review', got %q", due[0].SectionPath)
+	}
+
+	// Review-due memories should still appear in search results (advisory only).
+	results, err := st.SearchMemoriesKeyword(ctx, "review", 50)
+	if err != nil {
+		t.Fatalf("SearchMemoriesKeyword: %v", err)
+	}
+	found := false
+	for _, r := range results {
+		if r.SectionPath == "project > needs review" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("review-due memory should still appear in search results")
+	}
+}
+
+func TestVersionChain(t *testing.T) {
+	t.Parallel()
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	// Create a chain of 3 versions.
+	id1, _, _ := st.UpsertDoc(ctx, &DocRow{
+		URL: "memory://test/chain1", SectionPath: "project > chain", Content: "v1", SourceType: SourceMemory,
+	})
+	id2, _, _ := st.UpsertDoc(ctx, &DocRow{
+		URL: "memory://test/chain2", SectionPath: "project > chain", Content: "v2", SourceType: SourceMemory,
+	})
+	id3, _, _ := st.UpsertDoc(ctx, &DocRow{
+		URL: "memory://test/chain3", SectionPath: "project > chain", Content: "v3", SourceType: SourceMemory,
+	})
+
+	// Chain: id1 → id2 → id3 (oldest → newest).
+	if err := st.SetSupersededBy(ctx, id1, id2); err != nil {
+		t.Fatalf("SetSupersededBy(1→2): %v", err)
+	}
+	if err := st.SetSupersededBy(ctx, id2, id3); err != nil {
+		t.Fatalf("SetSupersededBy(2→3): %v", err)
+	}
+
+	// Forward chain from id1 should reach id2, id3.
+	chain, err := st.GetVersionChain(ctx, id1, 5)
+	if err != nil {
+		t.Fatalf("GetVersionChain: %v", err)
+	}
+	if len(chain) != 2 {
+		t.Errorf("GetVersionChain = %d hops, want 2", len(chain))
+	}
+
+	// Reverse chain from id3 should reach id2, id1.
+	reverse, err := st.GetReverseVersionChain(ctx, id3, 5)
+	if err != nil {
+		t.Fatalf("GetReverseVersionChain: %v", err)
+	}
+	if len(reverse) != 2 {
+		t.Errorf("GetReverseVersionChain = %d hops, want 2", len(reverse))
+	}
+
+	// Only id3 (head) should appear in search results.
+	results, err := st.ListRecentMemories(ctx, 50)
+	if err != nil {
+		t.Fatalf("ListRecentMemories: %v", err)
+	}
+	for _, r := range results {
+		if r.ID == id1 || r.ID == id2 {
+			t.Errorf("superseded record %d should not appear in search results", r.ID)
+		}
+	}
+}
+
+func TestExpiringMemories(t *testing.T) {
+	t.Parallel()
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	// Insert a memory expiring in 3 days.
+	soon := time.Now().Add(3 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	_, _, err := st.UpsertDoc(ctx, &DocRow{
+		URL:         "memory://test/expiring-soon",
+		SectionPath: "project > expiring soon",
+		Content:     "expires soon",
+		SourceType:  SourceMemory,
+		ValidUntil:  soon,
+	})
+	if err != nil {
+		t.Fatalf("UpsertDoc(expiring-soon): %v", err)
+	}
+
+	// Insert a memory expiring in 30 days.
+	later := time.Now().Add(30 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	_, _, err = st.UpsertDoc(ctx, &DocRow{
+		URL:         "memory://test/expiring-later",
+		SectionPath: "project > expiring later",
+		Content:     "expires later",
+		SourceType:  SourceMemory,
+		ValidUntil:  later,
+	})
+	if err != nil {
+		t.Fatalf("UpsertDoc(expiring-later): %v", err)
+	}
+
+	// GetExpiringMemories(7 days) should return only the soon-expiring one.
+	expiring, err := st.GetExpiringMemories(ctx, 7)
+	if err != nil {
+		t.Fatalf("GetExpiringMemories: %v", err)
+	}
+	if len(expiring) != 1 {
+		t.Errorf("GetExpiringMemories(7) = %d results, want 1", len(expiring))
+	}
+	if len(expiring) > 0 && expiring[0].SectionPath != "project > expiring soon" {
+		t.Errorf("expected 'expiring soon', got %q", expiring[0].SectionPath)
+	}
+}
+
+func TestSetSupersededByClear(t *testing.T) {
+	t.Parallel()
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	id1, _, _ := st.UpsertDoc(ctx, &DocRow{
+		URL: "memory://test/clear1", SectionPath: "project > clear", Content: "v1", SourceType: SourceMemory,
+	})
+	id2, _, _ := st.UpsertDoc(ctx, &DocRow{
+		URL: "memory://test/clear2", SectionPath: "project > clear", Content: "v2", SourceType: SourceMemory,
+	})
+
+	// Set superseded_by.
+	if err := st.SetSupersededBy(ctx, id1, id2); err != nil {
+		t.Fatalf("SetSupersededBy: %v", err)
+	}
+
+	// Clear superseded_by (detach from chain).
+	if err := st.SetSupersededBy(ctx, id1, 0); err != nil {
+		t.Fatalf("SetSupersededBy(clear): %v", err)
+	}
+
+	// id1 should now appear in search results again.
+	results, err := st.ListRecentMemories(ctx, 50)
+	if err != nil {
+		t.Fatalf("ListRecentMemories: %v", err)
+	}
+	found := false
+	for _, r := range results {
+		if r.ID == id1 {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("cleared superseded_by record should appear in search results")
 	}
 }

@@ -13,7 +13,7 @@ Go 1.25 / SQLite (ncruces/go-sqlite3) / Voyage AI (embedding) / Bubbletea v2 (TU
 | `internal/mcpserver` | MCP server (3 tools: dossier, roster, ledger) |
 | `internal/store` | SQLite persistence (records + embeddings + FTS5 full-text search) |
 | `internal/embedder` | Voyage AI (voyage-4-large, vector search + rerank-2.5) |
-| `internal/spec` | Spec management: .alfred/specs/ (7 files: requirements, design, tasks, test-specs, decisions, research, session) + Steering docs: .alfred/steering/ (3 files: product, structure, tech) |
+| `internal/spec` | Spec management: .alfred/specs/ (8 file types: requirements, design, tasks, test-specs, decisions, research, session, bugfix) + Size-based scaling (S/M/L/XL) + SpecType (feature/bugfix) + Validate checker + Steering docs: .alfred/steering/ (3 files: product, structure, tech) |
 | `internal/epic` | Epic management: .alfred/epics/ (YAML-based task grouping + dependencies) |
 | `internal/tui` | TUI dashboard: bubbletea v2 (overview/tasks/specs/knowledge tabs + review mode) |
 | `internal/install` | Plugin bundle + user rules |
@@ -68,8 +68,11 @@ alfred steering-init          # Generate project steering docs (.alfred/steering
 
 ### Database & Schema
 
-- DB schema V6: enabled column for memory governance (V5→V6 additive migration)
+- DB schema V7: validity windows + memory versioning (V6→V7 additive migration)
+- V7 columns: valid_until (DATETIME nullable), review_by (DATETIME nullable), superseded_by (INTEGER REFERENCES records(id) ON DELETE SET NULL)
 - Tables: records (memories/specs/project), embeddings (vector search), records_fts (FTS5), tag_aliases (search expansion), session_links (compaction continuity)
+- Validity windows: expired memories (valid_until < now) excluded from all search like enabled=0; review_by is advisory only (warnings, not exclusion)
+- Memory versioning: superseded_by links old→new; superseded memories excluded from search; max 5 chain depth with cycle detection
 - Store.DB() is test-only; production code uses Store methods (no raw SQL outside internal/store)
 - @.claude/rules/store-internals.md (vector search, SQL safety patterns)
 
@@ -94,7 +97,7 @@ alfred steering-init          # Generate project steering docs (.alfred/steering
 - spec delete: dry-run preview (default) → `confirm=true` for actual deletion
 - spec.ValidSlug: exported regex for slug validation across packages
 - dossier tool: DestructiveHint=true, IdempotentHint=false (delete action is destructive; 2-phase confirm provides UX safety)
-- Dossier tool actions: init / update / status / switch / complete / delete / history / rollback / review
+- Dossier tool actions: init / update / status / switch / complete / delete / history / rollback / review / validate
 - Spec cross-references: `@spec:task-slug/file.md` format parsed by `spec.ParseRefs()`, resolved against filesystem
 - dossier status: includes `references` (outgoing + incoming), dangling detection
 - dossier init: returns `suggested_knowledge` (related memories via vector search + FTS5 fallback, sub_type boosted)
@@ -102,10 +105,18 @@ alfred steering-init          # Generate project steering docs (.alfred/steering
 - Spec file locking: advisory flock on `.lock` file (exponential backoff 100/200/400/800ms ~1.5s total, context-aware cancellation, graceful fallback + stderr warning)
 - Spec version history: `.history/` dir with max 20 versions per file; rollback saves current first
 - Task lifecycle: active → complete (preserves spec files, sets completed_at) or delete (removes files)
-- ActiveTask fields: slug, started_at, status (active/completed), completed_at, review_status (pending/approved/changes_requested)
+- ActiveTask fields: slug, started_at, status (active/completed), completed_at, review_status (pending/approved/changes_requested), size (S/M/L/XL), spec_type (feature/bugfix)
 - complete action: marks task completed, switches primary to next active task, syncs epic status
-- Spec v2: 7 files (requirements, design, tasks, test-specs, decisions, research, session); original 4 = CoreFiles, all 7 = AllFiles
-- Spec templates: embed.FS in `internal/spec/templates/*.tmpl`, rendered via `text/template` (TemplateData: TaskSlug, Description, Date); v4 templates include inline guidance (HTML comments) for: granularity heuristics, confidence calibration, EARS pattern selection + limitations, ADR lifecycle, test strategy, done criteria, FR inter-dependencies + priority + verification method, negative requirements (NR-N), data dictionary, design tenets (Amazon-style), system context (C4 L1), Mermaid sequence diagrams, observability/security design, per-task risk/verify/accept/rollback, test speed categories, regression risk, concurrency tests, property-based tests, performance tests (p50/p95/p99), performance baseline, codebase impact analysis, technical debt assessment, decision scope/validity
+- Spec v2: 7 files (requirements, design, tasks, test-specs, decisions, research, session); original 4 = CoreFiles, all 7 = AllFiles; bugfix.md = alternative primary file for bugfix type
+- SpecSize: S (3 files), M (4-5 files), L/XL (7 files) — controls file count; auto-detected from description length (< 100 → S, < 300 → M, else L)
+- SpecType: feature (default, uses requirements.md), bugfix (uses bugfix.md) — orthogonal to size
+- FilesForSize(size, specType): returns file list for any (size, type) combination
+- Init functional options: WithSize(SpecSize), WithSpecType(SpecType); InitWithResult returns SpecDir + Size + SpecType + Files
+- Bugfix template: templates/bugfix/bugfix.md.tmpl (Bug Summary, Reproduction Steps, Current Behavior, Expected Behavior, Unchanged Behavior with EARS "SHALL CONTINUE TO", Root Cause Analysis, Fix Strategy)
+- dossier init: accepts optional size (S/M/L/XL) and spec_type (feature/bugfix) params; response includes size, spec_type, actual files list
+- dossier validate: read-only progressive structural checker — required_sections, min_fr_count (S:1+, M:3+, L:5+), traceability, confidence_annotations, closing_wave; returns JSON report with checks array
+- Backward compat: legacy _active.md without size/spec_type defaults to L/feature; EffectiveSize()/EffectiveSpecType() helpers
+- Spec templates: embed.FS in `internal/spec/templates/*.tmpl templates/bugfix/*.tmpl`, rendered via `text/template` (TemplateData: TaskSlug, Description, Date, SpecType); v4 templates include inline guidance (HTML comments) for: granularity heuristics, confidence calibration, EARS pattern selection + limitations, ADR lifecycle, test strategy, done criteria, FR inter-dependencies + priority + verification method, negative requirements (NR-N), data dictionary, design tenets (Amazon-style), system context (C4 L1), Mermaid sequence diagrams, observability/security design, per-task risk/verify/accept/rollback, test speed categories, regression risk, concurrency tests, property-based tests, performance tests (p50/p95/p99), performance baseline, codebase impact analysis, technical debt assessment, decision scope/validity
 - EARS notation: requirements use 6 patterns (Ubiquitous, WHEN, WHILE, WHERE, IF-THEN, Complex)
 - Traceability IDs: FR-N (functional), NFR-N (non-functional), DEC-N (decisions), T-N.N (tasks wave.task), TS-N.N (tests)
 - Traceability matrix: design.md maps Req ID → Component → Task ID → Test ID
@@ -114,7 +125,7 @@ alfred steering-init          # Generate project steering docs (.alfred/steering
 - Wave: Closing required in all tasks.md: self-review, CLAUDE.md update, test verification, knowledge save
 - Knowledge tab: DB-first (ListRecentMemories), file fallback (.alfred/knowledge/)
 - Activity tab: shows audit detail (completion summary: files modified, decisions saved)
-- Memory governance: `enabled` column (DB schema V6), disabled memories excluded from all search pipelines (vector, FTS5, keyword, fuzzy)
+- Memory governance: `enabled` column + `valid_until`/`superseded_by` (DB schema V7); disabled/expired/superseded memories excluded from all search pipelines (vector, FTS5, keyword, fuzzy)
 - TUI Knowledge tab: space key toggles enabled/disabled; [x]/[ ] indicator; disabled entries dimmed
 - `alfred export` removed — all knowledge auto-saved via spec complete + hooks
 
