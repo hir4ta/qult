@@ -5,6 +5,7 @@
 # Build outputs
 web/dist/
 web/node_modules/
+.task/
 cmd/alfred/web/dist/*
 !cmd/alfred/web/dist/.gitkeep
 *.db

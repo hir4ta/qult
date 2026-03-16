@@ -18,6 +18,42 @@ tasks:
       - cp -r {{.WEB_DIR}}/dist/* {{.EMBED_DIR}}/
       - go install ./cmd/alfred
 
+  dev:
+    desc: Start Vite dev server (use with ALFRED_DEV=1 alfred dashboard)
+    dir: "{{.WEB_DIR}}"
+    cmds:
+      - bun run dev
+
+  check:
+    desc: Run all checks (Go vet + Biome lint)
+    cmds:
+      - go vet ./...
+      - task: web:check
+
+  fix:
+    desc: Auto-fix Biome lint/format issues
+    dir: "{{.WEB_DIR}}"
+    cmds:
+      - bun run check:fix
+
+  test:
+    desc: Run Go tests
+    cmds:
+      - go test ./...
+
+  install:
+    desc: Install Go binary (assumes web already built)
+    cmds:
+      - mkdir -p {{.EMBED_DIR}}
+      - cp -r {{.WEB_DIR}}/dist/* {{.EMBED_DIR}}/
+      - go install ./cmd/alfred
+
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -rf {{.WEB_DIR}}/dist {{.EMBED_DIR}}
+
+  # Internal tasks (called by others)
   web:build:
     desc: Build React SPA
     dir: "{{.WEB_DIR}}"
@@ -32,32 +68,8 @@ tasks:
     generates:
       - dist/**/*
 
-  web:dev:
-    desc: Start Vite dev server (use with ALFRED_DEV=1 alfred dashboard)
-    dir: "{{.WEB_DIR}}"
-    cmds:
-      - bun run dev
-
   web:check:
     desc: Run Biome lint/format check
     dir: "{{.WEB_DIR}}"
     cmds:
       - bun run check
-
-  web:check:fix:
-    desc: Run Biome lint/format auto-fix
-    dir: "{{.WEB_DIR}}"
-    cmds:
-      - bun run check:fix
-
-  install:
-    desc: Install Go binary (assumes web already built)
-    cmds:
-      - mkdir -p {{.EMBED_DIR}}
-      - cp -r {{.WEB_DIR}}/dist/* {{.EMBED_DIR}}/
-      - go install ./cmd/alfred
-
-  clean:
-    desc: Clean build artifacts
-    cmds:
-      - rm -rf {{.WEB_DIR}}/dist {{.EMBED_DIR}}
