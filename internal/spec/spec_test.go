@@ -15,7 +15,7 @@ func TestInitCreatesAllFiles(t *testing.T) {
 		t.Fatalf("Init failed: %v", err)
 	}
 
-	// Check all 4 spec files exist
+	// Check all 7 spec files exist
 	for _, f := range AllFiles {
 		path := sd.FilePath(f)
 		if _, err := os.Stat(path); err != nil {
@@ -102,6 +102,104 @@ func TestReadActiveNoFile(t *testing.T) {
 	_, err := ReadActive(tmp)
 	if err == nil {
 		t.Error("expected error when _active.md does not exist")
+	}
+}
+
+func TestTemplatesParse(t *testing.T) {
+	t.Parallel()
+	data := TemplateData{
+		TaskSlug:    "test-parse",
+		Description: "Verify all templates parse",
+		Date:        "2026-03-16",
+	}
+	rendered, err := RenderAll(data)
+	if err != nil {
+		t.Fatalf("RenderAll() = error %v", err)
+	}
+	if len(rendered) != len(AllFiles) {
+		t.Errorf("RenderAll() returned %d files, want %d", len(rendered), len(AllFiles))
+	}
+	for _, f := range AllFiles {
+		content, ok := rendered[f]
+		if !ok {
+			t.Errorf("RenderAll() missing file %s", f)
+			continue
+		}
+		if content == "" {
+			t.Errorf("RenderAll() file %s is empty", f)
+		}
+	}
+}
+
+func TestTemplatesSubstitution(t *testing.T) {
+	t.Parallel()
+	data := TemplateData{
+		TaskSlug:    "my-feature",
+		Description: "Build a search engine",
+		Date:        "2026-03-16",
+	}
+	for _, tc := range []struct {
+		file     SpecFile
+		contains string
+	}{
+		{FileRequirements, "# Requirements: my-feature"},
+		{FileRequirements, "Build a search engine"},
+		{FileDesign, "# Design: my-feature"},
+		{FileTasks, "# Tasks: my-feature"},
+		{FileTestSpecs, "# Test Specifications: my-feature"},
+		{FileDecisions, "# Decisions: my-feature"},
+		{FileResearch, "# Research: my-feature"},
+		{FileSession, "# Session: my-feature"},
+	} {
+		t.Run(string(tc.file), func(t *testing.T) {
+			t.Parallel()
+			content, err := RenderTemplate(tc.file, data)
+			if err != nil {
+				t.Fatalf("RenderTemplate(%s) = error %v", tc.file, err)
+			}
+			if !strings.Contains(content, tc.contains) {
+				t.Errorf("RenderTemplate(%s) missing %q", tc.file, tc.contains)
+			}
+		})
+	}
+}
+
+func TestInit7Files(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	sd, err := Init(tmp, "seven-files", "Test all 7 files")
+	if err != nil {
+		t.Fatalf("Init() = error %v", err)
+	}
+	for _, f := range AllFiles {
+		if _, err := os.Stat(sd.FilePath(f)); err != nil {
+			t.Errorf("Init() missing file %s: %v", f, err)
+		}
+	}
+}
+
+func TestAllSectionsBackwardCompat(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+
+	// Create a legacy 4-file spec manually.
+	sd := &SpecDir{ProjectPath: tmp, TaskSlug: "legacy-task"}
+	if err := os.MkdirAll(sd.Dir(), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for _, f := range CoreFiles {
+		if err := os.WriteFile(sd.FilePath(f), []byte("# "+string(f)), 0o644); err != nil {
+			t.Fatalf("write %s: %v", f, err)
+		}
+	}
+
+	// AllSections should succeed with only 4 files (skip missing 3).
+	sections, err := sd.AllSections()
+	if err != nil {
+		t.Fatalf("AllSections() on 4-file spec = error %v", err)
+	}
+	if len(sections) != len(CoreFiles) {
+		t.Errorf("AllSections() = %d sections, want %d (CoreFiles)", len(sections), len(CoreFiles))
 	}
 }
 

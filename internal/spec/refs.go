@@ -7,9 +7,9 @@ import (
 )
 
 // refRe matches @spec:task-slug or @spec:task-slug/file.md references.
-// File component is intentionally restricted to [a-z]+\.md to match only
-// the 4 spec files (requirements.md, design.md, decisions.md, session.md).
-var refRe = regexp.MustCompile(`@spec:([a-z0-9][a-z0-9\-]{0,63})(?:/([a-z]+\.md))?`)
+// File component matches [a-z][\-a-z]*\.md to support all spec files
+// including hyphenated names like test-specs.md.
+var refRe = regexp.MustCompile(`@spec:([a-z0-9][a-z0-9\-]{0,63})(?:/([a-z][\-a-z]*\.md))?`)
 
 // SpecRef represents a parsed cross-reference to another spec.
 type SpecRef struct {

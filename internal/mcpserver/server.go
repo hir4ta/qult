@@ -52,7 +52,7 @@ Review: TUI dashboard で承認/コメント → dossier action=review で確認
 				mcp.WithString("project_path", mcp.Description("Project root path (defaults to current working directory if omitted)")),
 				mcp.WithString("task_slug", mcp.Description("Task identifier (required for init, switch, delete; optional for update/history/rollback — defaults to active task)")),
 				mcp.WithString("description", mcp.Description("Brief task description (for init)")),
-				mcp.WithString("file", mcp.Description("Spec file (for update/history/rollback)"), mcp.Enum("requirements.md", "design.md", "decisions.md", "session.md")),
+				mcp.WithString("file", mcp.Description("Spec file (for update/history/rollback)"), mcp.Enum("requirements.md", "design.md", "tasks.md", "test-specs.md", "decisions.md", "research.md", "session.md")),
 				mcp.WithString("content", mcp.Description("Content to write (for update)")),
 				mcp.WithString("mode", mcp.Description("Write mode (for update)"), mcp.Enum("append", "replace")),
 				mcp.WithString("version", mcp.Description("Version timestamp for rollback (use history to list available versions)")),

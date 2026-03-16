@@ -49,11 +49,22 @@ func validateProjectPath(raw string) (string, *mcp.CallToolResult) {
 }
 
 // validSpecFiles maps allowed file name strings to spec.SpecFile constants.
-var validSpecFiles = map[string]spec.SpecFile{
-	string(spec.FileRequirements): spec.FileRequirements,
-	string(spec.FileDesign):       spec.FileDesign,
-	string(spec.FileDecisions):    spec.FileDecisions,
-	string(spec.FileSession):      spec.FileSession,
+// Derived from spec.AllFiles to stay in sync automatically.
+var validSpecFiles = func() map[string]spec.SpecFile {
+	m := make(map[string]spec.SpecFile, len(spec.AllFiles))
+	for _, f := range spec.AllFiles {
+		m[string(f)] = f
+	}
+	return m
+}()
+
+// validFileList returns a comma-separated list of valid spec file names.
+func validFileList() string {
+	names := make([]string, len(spec.AllFiles))
+	for i, f := range spec.AllFiles {
+		names[i] = string(f)
+	}
+	return strings.Join(names, ", ")
 }
 
 // specHandler is the unified handler for all spec management actions.
@@ -239,7 +250,7 @@ func specDoUpdate(ctx context.Context, req mcp.CallToolRequest, st *store.Store,
 	}
 	fileName := req.GetString("file", "")
 	if fileName == "" {
-		return mcp.NewToolResultError("file is required (one of: requirements.md, design.md, decisions.md, session.md)"), nil
+		return mcp.NewToolResultError("file is required (one of: " + validFileList() + ")"), nil
 	}
 	content := req.GetString("content", "")
 	if content == "" {
@@ -255,7 +266,7 @@ func specDoUpdate(ctx context.Context, req mcp.CallToolRequest, st *store.Store,
 
 	sf, ok := validSpecFiles[fileName]
 	if !ok {
-		return mcp.NewToolResultError(fmt.Sprintf("invalid file: %s (valid: requirements.md, design.md, decisions.md, session.md)", fileName)), nil
+		return mcp.NewToolResultError(fmt.Sprintf("invalid file: %s (valid: %s)", fileName, validFileList())), nil
 	}
 
 	// Accept optional task_slug; fall back to active task if not provided.
@@ -358,7 +369,7 @@ func specDoStatus(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		}
 	}
 
-	// Read all 4 spec files for complete context restoration.
+	// Read all spec files for complete context restoration (skips missing files).
 	confidence := map[string]any{}
 	for _, f := range spec.AllFiles {
 		content, err := sd.ReadFile(f)
@@ -368,11 +379,9 @@ func specDoStatus(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		key := strings.TrimSuffix(string(f), ".md")
 		result[key] = content
 
-		// Parse confidence annotations for requirements and design.
-		if f == spec.FileRequirements || f == spec.FileDesign {
-			if cs := parseConfidenceScores(content); cs.Total > 0 {
-				confidence[key] = cs
-			}
+		// Parse confidence annotations for all files that contain them.
+		if cs := parseConfidenceScores(content); cs.Total > 0 {
+			confidence[key] = cs
 		}
 	}
 	if len(confidence) > 0 {
@@ -655,7 +664,7 @@ func specDoHistory(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	}
 	fileName := req.GetString("file", "")
 	if fileName == "" {
-		return mcp.NewToolResultError("file is required (one of: requirements.md, design.md, decisions.md, session.md)"), nil
+		return mcp.NewToolResultError("file is required (one of: " + validFileList() + ")"), nil
 	}
 	sf, ok := validSpecFiles[fileName]
 	if !ok {
@@ -750,13 +759,15 @@ func specDoRollback(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 type confidenceSummary struct {
 	Avg      float64           `json:"avg"`
 	Total    int               `json:"total_items"`
-	LowCount int              `json:"low_items"`  // items with score <= 5
+	LowCount int              `json:"low_items"`            // items with score <= 5
 	Items    []confidenceItem  `json:"items,omitempty"`
+	Warnings []string          `json:"low_confidence_warnings,omitempty"` // sections with score <= 5 and source=assumption
 }
 
 type confidenceItem struct {
 	Section string `json:"section"`
 	Score   int    `json:"score"`
+	Source  string `json:"source,omitempty"` // user, design-doc, code, inference, assumption
 }
 
 // specDoReview returns the latest review status and comments for a task.
@@ -830,8 +841,8 @@ func specDoReview(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return marshalResult(result)
 }
 
-// confidenceRe matches <!-- confidence: N --> annotations after section headers.
-var confidenceRe = regexp.MustCompile(`<!--\s*confidence:\s*(\d{1,2})\s*-->`)
+// confidenceRe matches <!-- confidence: N --> or <!-- confidence: N | source: TYPE --> annotations.
+var confidenceRe = regexp.MustCompile(`<!--\s*confidence:\s*(\d{1,2})(?:\s*\|\s*source:\s*([\w][\w-]*))?\s*-->`)
 
 // parseConfidenceScores extracts confidence annotations from spec file content.
 // Format: <!-- confidence: N --> where N is 1-10, placed after ## section headers.
@@ -868,7 +879,11 @@ func parseConfidenceScores(content string) confidenceSummary {
 		if section == "" {
 			section = "(unnamed)"
 		}
-		items = append(items, confidenceItem{Section: section, Score: score})
+		source := ""
+		if len(matches) >= 3 {
+			source = matches[2]
+		}
+		items = append(items, confidenceItem{Section: section, Score: score, Source: source})
 	}
 
 	if len(items) == 0 {
@@ -877,10 +892,14 @@ func parseConfidenceScores(content string) confidenceSummary {
 
 	total := 0
 	lowCount := 0
+	var warnings []string
 	for _, item := range items {
 		total += item.Score
 		if item.Score <= 5 {
 			lowCount++
+			if item.Source == "assumption" {
+				warnings = append(warnings, item.Section)
+			}
 		}
 	}
 
@@ -889,5 +908,6 @@ func parseConfidenceScores(content string) confidenceSummary {
 		Total:    len(items),
 		LowCount: lowCount,
 		Items:    items,
+		Warnings: warnings,
 	}
 }

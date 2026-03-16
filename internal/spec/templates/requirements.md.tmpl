@@ -1,0 +1,62 @@
+# Requirements: {{.TaskSlug}}
+
+## Goal
+<!-- confidence: 0 | source: user -->
+{{.Description}}
+
+## User Stories
+<!-- optional: skip for S-sized tasks -->
+- US-1: As a {role}, I want {capability}, so that {benefit}
+
+## Functional Requirements
+
+<!-- required -->
+<!-- EARS Patterns Guide:
+  Ubiquitous (always active):  The {system} SHALL {response}.
+  Event-Driven:                WHEN {trigger}, the {system} SHALL {response}.
+  State-Driven:                WHILE {state}, the {system} SHALL {response}.
+  Optional Feature:            WHERE {feature is included}, the {system} SHALL {response}.
+  Unwanted Behavior:           IF {condition}, THEN the {system} SHALL {response}.
+  Complex (use sparingly):     WHILE {state}, WHEN {trigger}, the {system} SHALL {response}.
+  Prefer simpler patterns; use Complex only when conditions are genuinely inseparable.
+-->
+
+### FR-1: {Requirement Name}
+<!-- confidence: 0 | source: user -->
+
+**EARS Requirements:**
+- WHEN {event occurs}, the {system} SHALL {expected behavior}.
+
+**Acceptance Criteria:**
+- [ ] AC-1.1: Given {precondition}, When {action}, Then {result}
+
+<!-- example:
+### FR-1: User Authentication
+<!-- confidence: 8 | source: user -- >
+**EARS Requirements:**
+- WHEN the user submits the login form, the auth service SHALL validate credentials within 200ms.
+- IF the JWT token is expired, THEN the auth middleware SHALL return HTTP 401 with a refresh token hint.
+- WHILE the system is in maintenance mode, the API SHALL return HTTP 503 with a Retry-After header.
+
+**Acceptance Criteria:**
+- [ ] AC-1.1: Given a registered user, When valid credentials are submitted, Then a JWT token is returned
+- [ ] AC-1.2: Given an expired token, When sent in Authorization header, Then HTTP 401 is returned
+-->
+
+## Non-Functional Requirements
+<!-- optional: skip for S-sized tasks -->
+
+### NFR-1: Performance
+<!-- confidence: 0 | source: inference -->
+| Metric | Target | Measurement |
+|--------|--------|-------------|
+| {metric} | {target value} | {how to measure} |
+
+### NFR-2: Security
+- The {system} SHALL {security constraint}.
+
+### NFR-3: Reliability
+- IF {failure condition}, THEN the {system} SHALL {recovery behavior}.
+
+## Out of Scope
+- {Explicit non-goals}

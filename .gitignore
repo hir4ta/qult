@@ -6,3 +6,10 @@ dist/
 *.db
 .claude/settings.json
 .alfred/
+
+# plugin/ is generated output from `alfred plugin-bundle`.
+# Source of truth: internal/install/content/ (skills, agents, rules)
+# Edit content there, then run: go install ./cmd/alfred && alfred plugin-bundle
+plugin/skills/
+plugin/agents/
+plugin/rules/

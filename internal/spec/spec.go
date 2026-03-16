@@ -24,12 +24,26 @@ type SpecFile string
 const (
 	FileRequirements SpecFile = "requirements.md"
 	FileDesign       SpecFile = "design.md"
+	FileTasks        SpecFile = "tasks.md"
+	FileTestSpecs    SpecFile = "test-specs.md"
 	FileDecisions    SpecFile = "decisions.md"
+	FileResearch     SpecFile = "research.md"
 	FileSession      SpecFile = "session.md"
 )
 
-// AllFiles lists all spec file types.
+// AllFiles lists all spec file types (v2: 7 files).
 var AllFiles = []SpecFile{
+	FileRequirements,
+	FileDesign,
+	FileTasks,
+	FileTestSpecs,
+	FileDecisions,
+	FileResearch,
+	FileSession,
+}
+
+// CoreFiles lists the original 4 files that must always exist after Init.
+var CoreFiles = []SpecFile{
 	FileRequirements,
 	FileDesign,
 	FileDecisions,
@@ -118,67 +132,21 @@ func Init(projectPath, taskSlug, description string) (*SpecDir, error) {
 		return nil, fmt.Errorf("create spec dir: %w", err)
 	}
 
-	templates := map[SpecFile]string{
-		FileRequirements: fmt.Sprintf(`# Requirements: %s
-
-## Goal
-
-%s
-
-## Success Criteria
-
-- [ ]
-
-## Out of Scope
-
--
-`, taskSlug, description),
-
-		FileDesign: fmt.Sprintf(`# Design: %s
-
-## Architecture
-
-
-
-## Tech Decisions
-
-
-`, taskSlug),
-
-		FileDecisions: fmt.Sprintf(`# Decisions: %s
-
-<!-- Format:
-## [YYYY-MM-DD] Decision Title
-- **Chosen:** option
-- **Alternatives:** A, B
-- **Reason:** why
--->
-`, taskSlug),
-
-		FileSession: fmt.Sprintf(`# Session: %s
-
-## Status
-active
-
-## Currently Working On
-Task just initialized.
-
-## Recent Decisions (last 3)
-
-
-## Next Steps
-1.
-
-## Blockers
-None
-
-## Modified Files (this session)
-
-`, taskSlug),
+	data := TemplateData{
+		TaskSlug:    taskSlug,
+		Description: description,
+		Date:        time.Now().UTC().Format("2006-01-02"),
+	}
+	rendered, err := RenderAll(data)
+	if err != nil {
+		os.RemoveAll(sd.Dir()) // clean up partial init
+		return nil, fmt.Errorf("render templates: %w", err)
 	}
 
-	for f, content := range templates {
+	for _, f := range AllFiles {
+		content := rendered[f]
 		if err := os.WriteFile(sd.FilePath(f), []byte(content), 0o644); err != nil {
+			os.RemoveAll(sd.Dir()) // clean up partial init
 			return nil, fmt.Errorf("write %s: %w", f, err)
 		}
 	}
@@ -527,13 +495,17 @@ func RemoveTask(projectPath, taskSlug string) (bool, error) {
 	return false, writeActiveState(projectPath, state)
 }
 
-// AllSections returns all spec files as Sections with content and URL.
+// AllSections returns all existing spec files as Sections with content and URL.
+// Files that don't exist (e.g., new v2 files in a legacy 4-file spec) are skipped.
 func (s *SpecDir) AllSections() ([]Section, error) {
 	projectBase := filepath.Base(s.ProjectPath)
 	var sections []Section
 	for _, f := range AllFiles {
 		content, err := s.ReadFile(f)
 		if err != nil {
+			if os.IsNotExist(err) {
+				continue // skip missing files (backward compat for 4-file specs)
+			}
 			return nil, fmt.Errorf("read %s: %w", f, err)
 		}
 		url := fmt.Sprintf("spec://%s/%s/%s", projectBase, s.TaskSlug, string(f))

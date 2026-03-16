@@ -1,0 +1,47 @@
+# Tasks: {{.TaskSlug}}
+
+## Summary
+<!-- required -->
+- Total: {N} tasks ({N} waves)
+- Estimated: {N}S + {N}M + {N}L + {N}XL
+- Parallel-safe: {N} tasks marked (P)
+
+## Wave 1: Foundation
+<!-- required -->
+<!-- Waves are sequential; (P) marks parallelism WITHIN a wave only -->
+
+- [ ] T-1.1 [{size}] {Task description}
+  _Requirements: FR-{N} | Files: {path}_
+- [ ] T-1.2 [{size}] (P) {Parallel-safe task description}
+  _Requirements: FR-{N} | Files: {path}_
+
+<!-- example:
+- [ ] T-1.1 [S] Create users table migration
+  _Requirements: FR-2 | Files: internal/store/migration.go_
+- [ ] T-1.2 [S] (P) Add JWT dependency to go.mod
+  _Requirements: FR-1 | Files: go.mod_
+-->
+
+## Wave 2: Core Implementation
+
+- [ ] T-2.1 [{size}] {Task description}
+  _Requirements: FR-{N} | Depends: T-1.{N} | Files: {path}_
+
+## Wave 3: Edge Cases & Error Handling
+<!-- optional: skip for S-sized tasks -->
+
+## Wave 4: Polish & Integration
+<!-- optional: skip for S-sized tasks -->
+
+## Size Legend
+- **S**: < 50 lines changed, single file
+- **M**: 50-200 lines, 2-3 files
+- **L**: 200-500 lines, 4+ files
+- **XL**: 500+ lines, architectural change
+
+## Dependency Graph
+<!-- optional: skip for S-sized tasks -->
+```
+T-1.1 ──→ T-2.1 ──→ T-3.1
+T-1.2 ──→ T-2.2 ──↗
+```

@@ -78,6 +78,20 @@ func TestParseRefsFileField(t *testing.T) {
 	}
 }
 
+func TestParseRefsHyphenatedFile(t *testing.T) {
+	t.Parallel()
+	refs := ParseRefs("See @spec:my-task/test-specs.md for details")
+	if len(refs) != 1 {
+		t.Fatalf("ParseRefs() = %d refs, want 1", len(refs))
+	}
+	if refs[0].File != "test-specs.md" {
+		t.Errorf("refs[0].File = %q, want %q", refs[0].File, "test-specs.md")
+	}
+	if refs[0].TaskSlug != "my-task" {
+		t.Errorf("refs[0].TaskSlug = %q, want %q", refs[0].TaskSlug, "my-task")
+	}
+}
+
 func TestResolveRefs(t *testing.T) {
 	tmp := t.TempDir()
 	specsDir := filepath.Join(tmp, ".alfred", "specs")

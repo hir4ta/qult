@@ -1,0 +1,22 @@
+# Decisions: {{.TaskSlug}}
+
+<!-- required -->
+<!-- ADR Format: each decision gets a unique DEC-N ID.
+     Status values: Proposed, Accepted, Deprecated, Superseded
+     Reversibility: Low (hard to undo), Medium (effort needed), High (easy to revert)
+-->
+
+<!-- example:
+## DEC-1: [2026-03-16] SQLite vs PostgreSQL
+<!-- confidence: 9 | source: user -- >
+- **Status**: Accepted
+- **Context**: Single-user local tool; operational simplicity preferred
+- **Chosen**: SQLite (ncruces/go-sqlite3)
+- **Alternatives**:
+  - PostgreSQL: Full-featured but operational overhead
+  - BoltDB: Simple but no FTS support
+- **Rationale**: Single-user constraint makes PostgreSQL unnecessary. FTS5 covers search needs.
+- **Consequences**: Multi-user would require migration
+- **Reversibility**: Medium (migration script needed)
+- **Revisit When**: User count > 1 or concurrent write requirements emerge
+-->

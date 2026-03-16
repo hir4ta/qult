@@ -13,7 +13,7 @@ Go 1.25 / SQLite (ncruces/go-sqlite3) / Voyage AI (embedding) / Bubbletea v2 (TU
 | `internal/mcpserver` | MCP server (3 tools: dossier, roster, ledger) |
 | `internal/store` | SQLite persistence (records + embeddings + FTS5 full-text search) |
 | `internal/embedder` | Voyage AI (voyage-4-large, vector search + rerank-2.5) |
-| `internal/spec` | Spec management: .alfred/specs/ (4 files + reviews + audit log) |
+| `internal/spec` | Spec management: .alfred/specs/ (7 files: requirements, design, tasks, test-specs, decisions, research, session) |
 | `internal/epic` | Epic management: .alfred/epics/ (YAML-based task grouping + dependencies) |
 | `internal/tui` | TUI dashboard: bubbletea v2 (overview/tasks/specs/knowledge tabs + review mode) |
 | `internal/install` | Plugin bundle + user rules |
@@ -46,6 +46,7 @@ alfred search-eval            # Run search quality benchmark
 
 - Always `go install ./cmd/alfred` after changes (`go build` + `cp` breaks macOS code signing)
 - `internal/` packages are private APIs
+- Plugin content source of truth: `internal/install/content/` (skills, agents, rules). `plugin/` is generated output (`alfred plugin-bundle`), gitignored
 - MCP tools return structured JSON
 - MCP server version: dynamically set from resolvedVersion() (not hardcoded)
 
@@ -61,7 +62,8 @@ alfred search-eval            # Run search quality benchmark
 - PreCompact: auto-updates Next Steps completion status from transcript; decision extraction; structured chapter memory (JSON); epic progress auto-sync
 - UserPromptSubmit: Voyage vector search → FTS5 fallback → keyword fallback; file context boost from git diff
 - PostToolUse: Bash error detection → FTS5 memory search → additionalContext injection; Bash success → session.md Next Steps auto-check (command + action signals matching)
-- Multi-agent skills: inspect (6 profiles), salon (3 specialists + synthesis), brief (3 specialists + mediator + approval gate), attend (spec→approve→implement→review→commit orchestrator), tdd (red→green→refactor autonomous cycles), mend (reproduce→analyze→fix→verify), survey (code→spec reverse engineering), harvest (PR comment → memory)
+- Multi-agent skills: inspect (6 profiles), salon (3 specialists + synthesis), brief (7 spec files with EARS/traceability + 3 specialists per file + approval gate), attend (7-file spec→approve→implement→review→commit orchestrator), tdd (red→green→refactor autonomous cycles), mend (reproduce→analyze→fix→verify), survey (code→spec reverse engineering), harvest (PR comment → memory)
+- brief/attend spec generation order: research → requirements → design → tasks → test-specs → decisions → session
 
 ### Database & Schema
 
@@ -87,7 +89,12 @@ alfred search-eval            # Run search quality benchmark
 - Task lifecycle: active → complete (preserves spec files, sets completed_at) or delete (removes files)
 - ActiveTask fields: slug, started_at, status (active/completed), completed_at, review_status (pending/approved/changes_requested)
 - complete action: marks task completed, switches primary to next active task, syncs epic status
-- Spec confidence scoring: 10-point scale via `<!-- confidence: N -->` annotations (1-3 low, 4-6 medium, 7-9 high, 10 certain); status returns avg + low_items count
+- Spec v2: 7 files (requirements, design, tasks, test-specs, decisions, research, session); original 4 = CoreFiles, all 7 = AllFiles
+- Spec templates: embed.FS in `internal/spec/templates/*.tmpl`, rendered via `text/template` (TemplateData: TaskSlug, Description, Date)
+- EARS notation: requirements use 6 patterns (Ubiquitous, WHEN, WHILE, WHERE, IF-THEN, Complex)
+- Traceability IDs: FR-N (functional), NFR-N (non-functional), DEC-N (decisions), T-N.N (tasks wave.task), TS-N.N (tests)
+- Traceability matrix: design.md maps Req ID → Component → Task ID → Test ID
+- Spec confidence scoring: `<!-- confidence: N | source: TYPE -->` annotations (source: user/design-doc/code/inference/assumption); status returns avg + low_items + low_confidence_warnings (score ≤ 5 + assumption)
 
 ### Spec Review & Approval Gate
 

@@ -196,13 +196,7 @@ func injectSpecContext(ctx context.Context, projectPath, source string, st *stor
 		if compactCount <= 1 {
 			// First compact: inject all spec files for full context recovery.
 			buf.WriteString("Full context recovery (first compact):\n\n")
-			recoveryOrder := []spec.SpecFile{
-				spec.FileSession,
-				spec.FileRequirements,
-				spec.FileDesign,
-				spec.FileDecisions,
-			}
-			for _, f := range recoveryOrder {
+			for _, f := range spec.AllFiles {
 				content, err := sd.ReadFile(f)
 				if err != nil || strings.TrimSpace(content) == "" {
 					continue
@@ -244,9 +238,9 @@ func injectSpecContext(ctx context.Context, projectPath, source string, st *stor
 		memoryCount := countProjectMemories(ctx, st, projectPath)
 		switch {
 		case memoryCount <= 5:
-			// New project/user: inject full spec for orientation.
+			// New project/user: inject core spec files for orientation (not all 7 — templates have no content yet).
 			buf.WriteString("(Full context — new project)\n\n")
-			for _, f := range []spec.SpecFile{spec.FileSession, spec.FileRequirements, spec.FileDesign} {
+			for _, f := range spec.CoreFiles {
 				content, err := sd.ReadFile(f)
 				if err != nil || strings.TrimSpace(content) == "" {
 					continue

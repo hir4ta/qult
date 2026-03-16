@@ -1,0 +1,68 @@
+# Design: {{.TaskSlug}}
+
+## Architecture Overview
+<!-- confidence: 0 | source: code -->
+<!-- required -->
+{Component structure, responsibilities, data flow}
+
+## Component Design
+<!-- required -->
+
+### Component: {name}
+- **File**: `path/to/file.go`
+- **Responsibility**: {what it does}
+- **Interface**:
+  ```
+  {interface or function signatures}
+  ```
+- **Dependencies**: {other components}
+
+<!-- example:
+### Component: JWTValidator
+- **File**: `pkg/auth/jwt.go`
+- **Responsibility**: JWT token validation and refresh
+- **Interface**:
+  ```go
+  type JWTValidator interface {
+      ValidateToken(token string) (*Claims, error)
+      RefreshToken(claims *Claims) (string, error)
+  }
+  ```
+- **Dependencies**: `pkg/store`, `pkg/config`
+-->
+
+## Data Models
+<!-- optional: skip for S-sized tasks -->
+
+### Entity: {Name}
+```sql
+CREATE TABLE {table_name} (
+    id   TEXT PRIMARY KEY,
+    -- {fields}
+);
+```
+
+## API Contracts
+<!-- optional: skip for S-sized tasks -->
+
+### {METHOD} {/api/endpoint}
+- **Request**: `{ "field": "type" }`
+- **Response 200**: `{ "field": "type" }`
+- **Response 4xx**: `{ "error": "code" }`
+- **Maps to**: FR-{N}
+
+## Requirements Traceability
+<!-- required -->
+
+| Req ID | Component | Interface | Task ID | Test ID |
+|--------|-----------|-----------|---------|---------|
+| FR-1   | {component} | {interface} | T-1.1 | TS-1.1 |
+| NFR-1  | {component} | {interface} | T-{N.N} | TS-{N.N} |
+
+## Migration Strategy
+<!-- optional: skip for S-sized tasks -->
+1. {Step 1 — backward compatible}
+2. {Step 2}
+
+## Tech Decisions (Quick Reference)
+- **{topic}**: {chosen} → decisions.md #DEC-{N}

@@ -148,6 +148,39 @@ PostgreSQL with pgx driver
 			t.Errorf("total = %d, want 2 (11 out of range)", cs.Total)
 		}
 	})
+
+	t.Run("source field", func(t *testing.T) {
+		t.Parallel()
+		content := `## Goal
+<!-- confidence: 9 | source: user -->
+## Design
+<!-- confidence: 5 | source: assumption -->
+## Notes
+<!-- confidence: 7 -->
+`
+		cs := parseConfidenceScores(content)
+		if cs.Total != 3 {
+			t.Errorf("total = %d, want 3", cs.Total)
+		}
+		// Check source field extraction
+		sources := map[string]string{}
+		for _, item := range cs.Items {
+			sources[item.Section] = item.Source
+		}
+		if sources["Goal"] != "user" {
+			t.Errorf("Goal source = %q, want %q", sources["Goal"], "user")
+		}
+		if sources["Design"] != "assumption" {
+			t.Errorf("Design source = %q, want %q", sources["Design"], "assumption")
+		}
+		if sources["Notes"] != "" {
+			t.Errorf("Notes source = %q, want empty", sources["Notes"])
+		}
+		// Check low_confidence_warnings (score <= 5 + assumption)
+		if len(cs.Warnings) != 1 || cs.Warnings[0] != "Design" {
+			t.Errorf("Warnings = %v, want [Design]", cs.Warnings)
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------

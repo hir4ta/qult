@@ -1,0 +1,75 @@
+# Test Specifications: {{.TaskSlug}}
+
+## Coverage Matrix
+<!-- required -->
+
+| Req ID | Test IDs | Type | Priority | Status |
+|--------|----------|------|----------|--------|
+| FR-1   | TS-1.1, TS-1.2 | Unit | P0 | Pending |
+| NFR-1  | TS-{N.N} | {type} | P1 | Pending |
+
+<!-- Priority: P0 = must-pass, P1 = should-pass, P2 = nice-to-have -->
+
+## Test Cases
+<!-- required -->
+
+### TS-1.1: {Test name} (FR-{N}, Happy Path)
+<!-- source: FR-{N} AC-{N.N} -->
+```gherkin
+Given {precondition}
+When {action}
+Then {expected result}
+```
+
+<!-- example:
+### TS-1.1: Valid login returns token (FR-1, Happy Path)
+<!-- source: FR-1 AC-1.1 -- >
+```gherkin
+Given a registered user with email "user@example.com"
+  And a valid password "correct-password"
+When the user submits the login form
+Then the auth service returns HTTP 200
+  And the response contains a valid JWT token
+  And the response time is under 200ms
+```
+-->
+
+### TS-1.2: {Test name} (FR-{N}, Error Path)
+<!-- source: FR-{N} EARS IF-THEN -->
+```gherkin
+Given {error precondition}
+When {action}
+Then {error response}
+```
+
+## Edge Case Matrix
+<!-- required -->
+
+| Scenario | Input | Expected | Req |
+|----------|-------|----------|-----|
+| {edge case} | {input} | {expected} | FR-{N} |
+
+## Boundary Values
+<!-- optional: skip for S-sized tasks -->
+
+| Parameter | Min | Max | Invalid Below | Invalid Above |
+|-----------|-----|-----|---------------|---------------|
+| {param} | {min} | {max} | {result} | {result} |
+
+## Test Data & Fixtures
+<!-- optional: skip for S-sized tasks -->
+
+### Fixture: {name}
+- **Purpose**: {what this test data covers}
+- **Setup**: {how to create}
+- **Data**:
+  ```json
+  { "field": "value" }
+  ```
+
+## Security Test Cases
+<!-- optional: skip for S-sized tasks -->
+
+| Scenario | Attack Vector | Expected Defense | Req |
+|----------|--------------|-----------------|-----|
+| {scenario} | {vector} | {defense} | NFR-{N} |
