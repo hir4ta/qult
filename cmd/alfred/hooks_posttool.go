@@ -232,6 +232,9 @@ func tryAutoCheckNextSteps(ctx context.Context, projectPath, command, stdout str
 	contextBuf.WriteString(strings.ToLower(stdout))
 	contextText := contextBuf.String()
 
+	// Collect modified files for file-based step matching (reuses hooks_compact.go helper).
+	modifiedFiles := getModifiedFiles(projectPath)
+
 	// Check each unchecked item against the context.
 	lines := strings.Split(nextSteps, "\n")
 	updated := false
@@ -241,7 +244,7 @@ func tryAutoCheckNextSteps(ctx context.Context, projectPath, command, stdout str
 			continue
 		}
 		itemText := strings.TrimPrefix(trimmed, "- [ ] ")
-		if isStepMatchedByAction(itemText, contextText) {
+		if isStepMatchedByAction(itemText, contextText) || isStepMatchedByFiles(itemText, modifiedFiles) {
 			lines[i] = strings.Replace(line, "- [ ] ", "- [x] ", 1)
 			updated = true
 		}
@@ -294,6 +297,44 @@ func isStepMatchedByAction(itemText, contextText string) bool {
 		}
 	}
 	return float64(hits)/float64(len(tokens)) >= 0.5
+}
+
+// stepFileRefRe extracts file paths from backtick-wrapped references in step text.
+// Matches patterns like `internal/spec/validate.go` or `cmd/alfred/hooks.go`.
+var stepFileRefRe = regexp.MustCompile("`([^`]+\\.[a-z]{1,4})`")
+
+// isStepMatchedByFiles checks if a Next Steps item references any of the modified files.
+// Extracts file paths from backtick-wrapped references in the step text,
+// then checks if any modified file matches (exact path or basename).
+func isStepMatchedByFiles(itemText string, modifiedFiles []string) bool {
+	if len(modifiedFiles) == 0 {
+		return false
+	}
+
+	// Extract file references from the step text.
+	refs := stepFileRefRe.FindAllStringSubmatch(itemText, -1)
+	if len(refs) == 0 {
+		return false
+	}
+
+	for _, ref := range refs {
+		refPath := ref[1]
+		for _, modified := range modifiedFiles {
+			// Exact match or basename match (step might say "validate.go", modified is "internal/spec/validate.go").
+			if modified == refPath || strings.HasSuffix(modified, "/"+refPath) || strings.HasSuffix(refPath, "/"+baseName(modified)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// baseName returns the last component of a path.
+func baseName(path string) string {
+	if i := strings.LastIndex(path, "/"); i >= 0 {
+		return path[i+1:]
+	}
+	return path
 }
 
 // syncSessionProgress moves checked items from Next Steps to Completed Steps
