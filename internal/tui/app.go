@@ -754,7 +754,7 @@ func renderUnifiedDiff(old, new string) string {
 
 	addStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#8a8"))
 	delStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#c66"))
-	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#88c"))
+	headerStyle := lipgloss.NewStyle().Foreground(secondary)
 
 	var b strings.Builder
 	addedCount, removedCount := 0, 0
@@ -1042,27 +1042,27 @@ func (m *Model) submitReview(status spec.ReviewStatus) {
 // Review mode styles.
 var (
 	reviewCursorStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#2a2040")).
-				Foreground(lipgloss.Color("#e0d0f0"))
+				Background(lipgloss.Color("#3a2520")).
+				Foreground(lipgloss.Color("#f0ddd0"))
 
 	reviewLineNumStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#666"))
+				Foreground(warmDim)
 
 	reviewLineNumCursorStyle = lipgloss.NewStyle().
-					Background(lipgloss.Color("#2a2040")).
-					Foreground(lipgloss.Color("#af87d7")).
+					Background(lipgloss.Color("#3a2520")).
+					Foreground(accent).
 					Bold(true)
 
 	reviewCommentMarker = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#e8a050")).
+				Foreground(highlight).
 				Bold(true)
 
 	reviewCommentStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#e8a050"))
+				Foreground(highlight)
 
 	reviewInputBorder = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("#e8a050")).
+				BorderForeground(highlight).
 				Padding(0, 1).
 				MarginTop(1)
 )

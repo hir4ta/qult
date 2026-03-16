@@ -157,8 +157,8 @@ alfred steering-init          # Generate project steering docs (.alfred/steering
 - `alfred dashboard` (alias: `alfred dash`): bubbletea v2 TUI
 - 4 tabs: Overview (drilldown) / Tasks / Specs (review mode) / Knowledge (semantic search)
 - Data refresh: 5-second polling
-- Style: purple accent (#af87d7) + orange shimmer (#f0a050) for active items, no emoji
-- Shimmer animation: lipgloss.Blend1D gradient, 50ms tick, on first unchecked Next Steps item
+- Style: Claude Code warm palette — terracotta accent (#da7756), dusty sage (#7c9a92), warm gold (#c49a5c), coral highlight (#e8976b), dusty rose (#b07878), warm neutrals; no emoji
+- Shimmer animation: lipgloss.Blend1D gradient (dark terracotta → warm coral), 50ms tick, on first unchecked Next Steps item
 - Review mode: line-numbered viewer, inline comments (orange), background-highlighted cursor, Approve/Request Changes
 - Review history: round navigation (left/right keys), read-only past rounds, carried-over unresolved comments (dim orange)
 - Spec diff viewer: 'd' key in Tasks/Specs overlay shows unified diff (go-diff/diffmatchpatch) between current and last history version
