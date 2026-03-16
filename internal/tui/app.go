@@ -63,9 +63,10 @@ type dataLoadedMsg struct {
 
 // Model is the root bubbletea model.
 type Model struct {
-	ds     DataSource
-	width  int
-	height int
+	ds      DataSource
+	version string
+	width   int
+	height  int
 
 	// Tab state.
 	activeTab int
@@ -140,8 +141,8 @@ type Model struct {
 	reviewConfirmStatus  spec.ReviewStatus
 }
 
-// New creates a new dashboard Model.
-func New(ds DataSource) Model {
+// New creates a new dashboard Model with version string for the title bar.
+func New(ds DataSource, version string) Model {
 	sp := spinner.New(
 		spinner.WithSpinner(spinner.Dot),
 		spinner.WithStyle(lipgloss.NewStyle().Foreground(accent)),
@@ -159,6 +160,7 @@ func New(ds DataSource) Model {
 	)
 	return Model{
 		ds:          ds,
+		version:     version,
 		helpModel:   h,
 		spinner:     sp,
 		searchInput: ti,
@@ -1371,6 +1373,12 @@ func (m Model) View() tea.View {
 }
 
 func (m Model) tabBarView() string {
+	// Title: "alfred dashboard vX.Y.Z"
+	title := titleBarStyle.Render("alfred dashboard")
+	if m.version != "" {
+		title += " " + versionStyle.Render("v"+m.version)
+	}
+
 	var tabs []string
 	for i, name := range tabNames {
 		label := name + m.tabBadge(i)
@@ -1380,11 +1388,14 @@ func (m Model) tabBarView() string {
 			tabs = append(tabs, inactiveTabStyle.Render(label))
 		}
 	}
-	bar := lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
+	tabRow := lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
 	if m.searchBusy {
-		bar += " " + m.spinner.View()
+		tabRow += " " + m.spinner.View()
 	}
-	return tabBarStyle.Width(m.width).Render(bar)
+
+	return tabBarStyle.Width(m.width).Render(
+		title + "\n" + tabRow,
+	)
 }
 
 // tabBadge returns a count/alert badge for a given tab.

@@ -41,7 +41,7 @@ func TestTabBadge(t *testing.T) {
 			{Label: "mem1", Source: "memory"},
 		},
 	}
-	m := New(ds)
+	m := New(ds, "test")
 	m.allTasks = ds.tasks
 	m.knowledge = ds.knowledge
 	m.knStats = KnowledgeStats{Total: 1}
@@ -72,7 +72,7 @@ func TestTabBadge(t *testing.T) {
 
 func TestTabBadgeEmpty(t *testing.T) {
 	ds := &mockDataSource{}
-	m := New(ds)
+	m := New(ds, "test")
 
 	for tab := range tabCount {
 		badge := m.tabBadge(tab)
@@ -84,7 +84,7 @@ func TestTabBadgeEmpty(t *testing.T) {
 
 func TestSwitchTab(t *testing.T) {
 	ds := &mockDataSource{}
-	m := New(ds)
+	m := New(ds, "test")
 	m.width = 120
 	m.height = 40
 
@@ -215,7 +215,7 @@ func TestAllTasksIncludesCompleted(t *testing.T) {
 			{Slug: "task-done", Status: "completed", Total: 5, Completed: 5},
 		},
 	}
-	m := New(ds)
+	m := New(ds, "test")
 	m.width = 120
 	m.height = 40
 	// Simulate async data load: execute the command and apply the result.
@@ -234,7 +234,7 @@ func TestReviewConfirmReset(t *testing.T) {
 		projectPath: t.TempDir(),
 		tasks:       []TaskDetail{{Slug: "test", Status: "active"}},
 	}
-	m := New(ds)
+	m := New(ds, "test")
 	m.width = 120
 	m.height = 40
 
@@ -265,7 +265,7 @@ func TestReviewConfirmReset(t *testing.T) {
 func TestDebounceSequence(t *testing.T) {
 	// Verify that incrementing debounceSeq invalidates old ticks.
 	ds := &mockDataSource{}
-	m := New(ds)
+	m := New(ds, "test")
 
 	m.debounceSeq = 5
 	m.searching = true
@@ -290,7 +290,7 @@ func TestActivityEntryReversal(t *testing.T) {
 			{Timestamp: time.Now().Add(-time.Hour), Action: "review.submit", Target: "task-2"},
 		},
 	}
-	m := New(ds)
+	m := New(ds, "test")
 	m.activity = ds.activity
 
 	// Most recent should be first.

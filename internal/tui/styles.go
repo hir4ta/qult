@@ -24,6 +24,13 @@ var (
 			BorderBottom(true).
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderForeground(lipgloss.Color("#333"))
+
+	titleBarStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(accent)
+
+	versionStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#666"))
 )
 
 // Content styles.

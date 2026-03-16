@@ -17,7 +17,7 @@ func runDashboard() error {
 	}
 
 	ds := tui.NewFileDataSource(projectPath, nil, nil)
-	model := tui.New(ds)
+	model := tui.New(ds, resolvedVersion())
 
 	p := tea.NewProgram(model, tea.WithColorProfile(colorprofile.TrueColor))
 	if _, err := p.Run(); err != nil {
