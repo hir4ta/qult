@@ -29,6 +29,11 @@ async function fetchJSON<T>(url: string): Promise<T> {
 	return res.json() as Promise<T>;
 }
 
+function taskURL(slug: string, ...segments: string[]): string {
+	const parts = ["/api/tasks", encodeURIComponent(slug), ...segments.map(encodeURIComponent)];
+	return parts.join("/");
+}
+
 // --- Query options (composable) ---
 
 export const tasksQueryOptions = () =>
@@ -41,7 +46,7 @@ export const tasksQueryOptions = () =>
 export const specsQueryOptions = (slug: string) =>
 	queryOptions({
 		queryKey: ["specs", slug],
-		queryFn: () => fetchJSON<SpecsResponse>(`/api/tasks/${slug}/specs`),
+		queryFn: () => fetchJSON<SpecsResponse>(taskURL(slug, "specs")),
 		staleTime: REF_STALE,
 		enabled: !!slug,
 	});
@@ -49,10 +54,7 @@ export const specsQueryOptions = (slug: string) =>
 export const specContentQueryOptions = (slug: string, file: string) =>
 	queryOptions({
 		queryKey: ["spec-content", slug, file],
-		queryFn: () =>
-			fetchJSON<SpecContentResponse>(
-				`/api/tasks/${encodeURIComponent(slug)}/specs/${encodeURIComponent(file)}`,
-			),
+		queryFn: () => fetchJSON<SpecContentResponse>(taskURL(slug, "specs", file)),
 		staleTime: REF_STALE,
 		enabled: !!slug && !!file,
 	});
@@ -117,7 +119,7 @@ export const healthQueryOptions = () =>
 export const confidenceQueryOptions = (slug: string) =>
 	queryOptions({
 		queryKey: ["confidence", slug],
-		queryFn: () => fetchJSON<ConfidenceSummary>(`/api/tasks/${slug}/confidence`),
+		queryFn: () => fetchJSON<ConfidenceSummary>(taskURL(slug, "confidence")),
 		staleTime: REF_STALE,
 		enabled: !!slug,
 	});
@@ -125,7 +127,7 @@ export const confidenceQueryOptions = (slug: string) =>
 export const validationQueryOptions = (slug: string) =>
 	queryOptions({
 		queryKey: ["validation", slug],
-		queryFn: () => fetchJSON<ValidationReport>(`/api/tasks/${slug}/validation`),
+		queryFn: () => fetchJSON<ValidationReport>(taskURL(slug, "validation")),
 		staleTime: REF_STALE,
 		enabled: !!slug,
 	});
@@ -133,7 +135,7 @@ export const validationQueryOptions = (slug: string) =>
 export const reviewQueryOptions = (slug: string) =>
 	queryOptions({
 		queryKey: ["review", slug],
-		queryFn: () => fetchJSON<Review>(`/api/tasks/${slug}/review`),
+		queryFn: () => fetchJSON<Review>(taskURL(slug, "review")),
 		staleTime: REF_STALE,
 		enabled: !!slug,
 	});
@@ -141,7 +143,7 @@ export const reviewQueryOptions = (slug: string) =>
 export const reviewHistoryQueryOptions = (slug: string) =>
 	queryOptions({
 		queryKey: ["review-history", slug],
-		queryFn: () => fetchJSON<ReviewHistoryResponse>(`/api/tasks/${slug}/review/history`),
+		queryFn: () => fetchJSON<ReviewHistoryResponse>(`${taskURL(slug, "review")}/history`),
 		staleTime: REF_STALE,
 		enabled: !!slug,
 	});
@@ -160,7 +162,7 @@ export async function submitReview(
 	status: "approved" | "changes_requested",
 	comments: { file: string; line: number; body: string }[],
 ) {
-	const res = await fetch(`/api/tasks/${slug}/review`, {
+	const res = await fetch(taskURL(slug, "review"), {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ status, comments }),

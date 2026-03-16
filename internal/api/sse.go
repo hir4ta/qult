@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sync"
 )
+
+var validSSEType = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // SSEEvent is a server-sent event.
 type SSEEvent struct {
@@ -28,7 +31,11 @@ func NewSSEHub() *SSEHub {
 }
 
 // Broadcast sends an event to all connected clients (non-blocking).
+// Event type must match [a-zA-Z0-9_-]+ to prevent SSE injection.
 func (h *SSEHub) Broadcast(event SSEEvent) {
+	if !validSSEType.MatchString(event.Type) {
+		return
+	}
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for ch := range h.clients {
