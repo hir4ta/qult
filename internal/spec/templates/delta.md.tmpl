@@ -1,0 +1,41 @@
+# Delta: {{.TaskSlug}}
+
+## Change Summary
+<!-- required -->
+<!-- One-paragraph description of what is being changed and why. -->
+{{.Description}}
+
+## Files Affected
+<!-- required -->
+<!-- List all files that will be added, modified, or removed. -->
+
+### ADDED
+- `{path/to/new/file.go}` — {purpose}
+
+### MODIFIED
+- `{path/to/existing/file.go}` — {what changes}
+
+### REMOVED
+<!-- omit if nothing is removed -->
+
+## Rationale
+<!-- required -->
+<!-- Why is this change needed? Link to issue/bug/request if applicable. -->
+{Brief explanation of the motivation}
+
+## Impact Scope
+<!-- required -->
+<!-- What parts of the system does this change affect? -->
+- **Direct**: {files/packages directly modified}
+- **Indirect**: {downstream consumers, tests, docs}
+- **Risk**: Low / Medium / High
+
+## Test Plan
+<!-- required -->
+<!-- How will this change be verified? -->
+- [ ] {Test command or manual verification step}
+- [ ] Existing tests pass: `go test ./...`
+
+## Rollback Strategy
+<!-- required -->
+- `git revert {commit}` — {any additional steps if needed}

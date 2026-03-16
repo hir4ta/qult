@@ -30,16 +30,18 @@ const (
 	FileResearch     SpecFile = "research.md"
 	FileSession      SpecFile = "session.md"
 	FileBugfix       SpecFile = "bugfix.md"
+	FileDelta        SpecFile = "delta.md"
 )
 
 // SpecSize controls how many spec files are generated.
 type SpecSize string
 
 const (
-	SizeS  SpecSize = "S"
-	SizeM  SpecSize = "M"
-	SizeL  SpecSize = "L"
-	SizeXL SpecSize = "XL"
+	SizeS     SpecSize = "S"
+	SizeM     SpecSize = "M"
+	SizeL     SpecSize = "L"
+	SizeXL    SpecSize = "XL"
+	SizeDelta SpecSize = "D"
 )
 
 // SpecType controls which primary template is used.
@@ -48,6 +50,7 @@ type SpecType string
 const (
 	TypeFeature SpecType = "feature"
 	TypeBugfix  SpecType = "bugfix"
+	TypeDelta   SpecType = "delta"
 )
 
 // AllFiles lists all spec file types (v2: 7 files).
@@ -96,8 +99,10 @@ func ParseSize(s string) (SpecSize, error) {
 		return SizeL, nil
 	case "XL":
 		return SizeXL, nil
+	case "D":
+		return SizeDelta, nil
 	default:
-		return "", fmt.Errorf("invalid spec size %q (valid: S, M, L, XL)", s)
+		return "", fmt.Errorf("invalid spec size %q (valid: S, M, L, XL, D)", s)
 	}
 }
 
@@ -108,8 +113,10 @@ func ParseSpecType(s string) (SpecType, error) {
 		return TypeFeature, nil
 	case "bugfix":
 		return TypeBugfix, nil
+	case "delta":
+		return TypeDelta, nil
 	default:
-		return "", fmt.Errorf("invalid spec type %q (valid: feature, bugfix)", s)
+		return "", fmt.Errorf("invalid spec type %q (valid: feature, bugfix, delta)", s)
 	}
 }
 
@@ -129,7 +136,14 @@ func DetectSize(description string) SpecSize {
 // FilesForSize returns the file list for a given size and spec type combination.
 // Size controls file count; type controls which primary file is used
 // (requirements.md for feature, bugfix.md for bugfix).
+// DeltaFiles lists the 2 files generated for delta-sized specs.
+var DeltaFiles = []SpecFile{FileDelta, FileSession}
+
 func FilesForSize(size SpecSize, specType SpecType) []SpecFile {
+	if size == SizeDelta {
+		return DeltaFiles
+	}
+
 	primary := FileRequirements
 	if specType == TypeBugfix {
 		primary = FileBugfix
@@ -279,6 +293,10 @@ func Init(projectPath, taskSlug, description string, opts ...InitOption) (*SpecD
 	}
 	if cfg.autoSize {
 		cfg.size = DetectSize(description)
+	}
+	// Delta size implies delta spec type.
+	if cfg.size == SizeDelta {
+		cfg.specType = TypeDelta
 	}
 
 	sd := &SpecDir{ProjectPath: projectPath, TaskSlug: taskSlug}
@@ -696,8 +714,8 @@ func RemoveTask(projectPath, taskSlug string) (bool, error) {
 	return false, writeActiveState(projectPath, state)
 }
 
-// allKnownFiles lists all spec files including bugfix.md for AllSections scanning.
-var allKnownFiles = append(append([]SpecFile{}, AllFiles...), FileBugfix)
+// allKnownFiles lists all spec files including bugfix.md and delta.md for AllSections scanning.
+var allKnownFiles = append(append(append([]SpecFile{}, AllFiles...), FileBugfix), FileDelta)
 
 // AllSections returns all existing spec files as Sections with content and URL.
 // Files that don't exist (e.g., new v2 files in a legacy 4-file spec) are skipped.

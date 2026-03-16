@@ -31,10 +31,13 @@ func Validate(sd *SpecDir, size SpecSize, specType SpecType) (*ValidationReport,
 		SpecType: specType,
 	}
 
-	// Determine the primary file (requirements.md or bugfix.md).
+	// Determine the primary file based on spec type.
 	primaryFile := FileRequirements
-	if specType == TypeBugfix {
+	switch specType {
+	case TypeBugfix:
 		primaryFile = FileBugfix
+	case TypeDelta:
+		primaryFile = FileDelta
 	}
 
 	// 1. required_sections: ## Goal (or ## Bug Summary for bugfix) present in primary file.
@@ -89,6 +92,43 @@ func Validate(sd *SpecDir, size SpecSize, specType SpecType) (*ValidationReport,
 		report.Checks = append(report.Checks, *c)
 	}
 
+	// --- v6: Content quality checks ---
+
+	// 13. content_placeholder: FR titles must not be placeholder text.
+	if c := checkContentPlaceholders(sd, primaryFile, specType); c != nil {
+		report.Checks = append(report.Checks, *c)
+	}
+
+	// 14. decisions_completeness: DEC entries must have required fields (L/XL only).
+	if c := checkDecisionsCompleteness(sd, size); c != nil {
+		report.Checks = append(report.Checks, *c)
+	}
+
+	// 15. research_completeness: required sections must have content (L/XL only).
+	if c := checkResearchCompleteness(sd, size); c != nil {
+		report.Checks = append(report.Checks, *c)
+	}
+
+	// 16. confidence_coverage: all FRs must have confidence annotations (XL only).
+	if c := checkConfidenceCoverage(sd, primaryFile, size); c != nil {
+		report.Checks = append(report.Checks, *c)
+	}
+
+	// 17. xl_wave_count: tasks.md must have ≥4 numbered waves (XL only).
+	if c := checkXLWaveCount(sd, size); c != nil {
+		report.Checks = append(report.Checks, *c)
+	}
+
+	// 18. xl_nfr_required: at least one NFR-N must be defined (XL only).
+	if c := checkXLNFRRequired(sd, primaryFile, size); c != nil {
+		report.Checks = append(report.Checks, *c)
+	}
+
+	// 19. delta_sections_present: delta.md must have required sections (D only).
+	if c := checkDeltaSections(sd, size); c != nil {
+		report.Checks = append(report.Checks, *c)
+	}
+
 	// Summary.
 	passed := 0
 	for _, c := range report.Checks {
@@ -113,8 +153,11 @@ func checkRequiredSections(sd *SpecDir, primaryFile SpecFile, specType SpecType)
 	}
 
 	heading := "## Goal"
-	if specType == TypeBugfix {
+	switch specType {
+	case TypeBugfix:
 		heading = "## Bug Summary"
+	case TypeDelta:
+		heading = "## Change Summary"
 	}
 
 	if strings.Contains(content, heading) {
@@ -133,17 +176,34 @@ func checkRequiredSections(sd *SpecDir, primaryFile SpecFile, specType SpecType)
 
 var frPattern = regexp.MustCompile(`### FR-\d+`)
 
+// frTitlePlaceholderRe matches FR titles that are placeholders (TBD, TODO, {template variable}).
+var frTitlePlaceholderRe = regexp.MustCompile(`(?m)^### FR-\d+:\s*(?:TBD|TODO|\{[^}]+\})\s*$`)
+
+// decSectionRe matches DEC-N section headers in decisions.md.
+var decSectionRe = regexp.MustCompile(`(?m)^## DEC-\d+`)
+
+// Decision required field patterns — each must have non-whitespace content after the colon.
+var decStatusRe = regexp.MustCompile(`(?m)^\s*-\s*\*\*Status\*\*:\s*\S`)
+var decContextRe = regexp.MustCompile(`(?m)^\s*-\s*\*\*Context\*\*:\s*\S`)
+var decChosenRe = regexp.MustCompile(`(?m)^\s*-\s*\*\*Chosen\*\*:\s*\S`)
+var decRationaleRe = regexp.MustCompile(`(?m)^\s*-\s*\*\*Rationale\*\*:\s*\S`)
+
+// numberedWaveRe matches numbered wave headers (excluding Closing).
+var numberedWaveRe = regexp.MustCompile(`(?m)^## Wave\s+\d+`)
+
 // checkMinFRCount checks the minimum number of FRs based on size.
 func checkMinFRCount(sd *SpecDir, primaryFile SpecFile, size SpecSize, specType SpecType) ValidationCheck {
 	minFR := 1
 	switch size {
 	case SizeM:
 		minFR = 3
-	case SizeL, SizeXL:
+	case SizeL:
 		minFR = 5
+	case SizeXL:
+		minFR = 8
 	}
 
-	// For bugfix specs, check bugfix.md sections instead (they don't use FR-N).
+	// For bugfix specs, count sections with substantive content (not just headings).
 	if specType == TypeBugfix {
 		content, err := sd.ReadFile(primaryFile)
 		if err != nil {
@@ -153,20 +213,27 @@ func checkMinFRCount(sd *SpecDir, primaryFile SpecFile, size SpecSize, specType 
 				Message: fmt.Sprintf("%s not found", primaryFile),
 			}
 		}
-		// Bugfix uses sections instead of FR-N identifiers.
-		// Count ## sections as requirements (Bug Summary, etc.).
-		sections := strings.Count(content, "\n## ")
-		if sections >= minFR {
+		substantive := countSubstantiveSections(content)
+		if substantive >= minFR {
 			return ValidationCheck{
 				Name:    "min_fr_count",
 				Status:  "pass",
-				Message: fmt.Sprintf("%d sections found (minimum %d for size %s)", sections, minFR, size),
+				Message: fmt.Sprintf("%d substantive sections found (minimum %d for size %s)", substantive, minFR, size),
 			}
 		}
 		return ValidationCheck{
 			Name:    "min_fr_count",
 			Status:  "fail",
-			Message: fmt.Sprintf("%d sections found, minimum %d for size %s", sections, minFR, size),
+			Message: fmt.Sprintf("%d substantive sections found, minimum %d for size %s", substantive, minFR, size),
+		}
+	}
+
+	// Delta specs don't use FR-N — skip this check entirely.
+	if specType == TypeDelta {
+		return ValidationCheck{
+			Name:    "min_fr_count",
+			Status:  "pass",
+			Message: "skipped for delta specs",
 		}
 	}
 
@@ -591,6 +658,400 @@ func checkOrphanTests(sd *SpecDir, primaryFile SpecFile) *ValidationCheck {
 		Name:    "orphan_tests",
 		Status:  "fail",
 		Message: fmt.Sprintf("orphan test references: %s", strings.Join(orphans, ", ")),
+	}
+}
+
+// countSubstantiveSections counts ## sections that contain at least one line
+// with ≥10 non-whitespace characters (excluding HTML comments).
+// Used for bugfix specs where FR-N identifiers are not used.
+func countSubstantiveSections(content string) int {
+	sections := strings.Split(content, "\n## ")
+	count := 0
+	for i, section := range sections {
+		if i == 0 {
+			// First section is before any ## heading (title area).
+			// Check for # heading content.
+			if !strings.HasPrefix(strings.TrimSpace(section), "#") {
+				continue
+			}
+		}
+		if hasSubstantiveContent(section) {
+			count++
+		}
+	}
+	return count
+}
+
+// hasSubstantiveContent returns true if the section body (after the first line/heading)
+// contains at least one line with ≥10 non-whitespace characters, excluding HTML comments.
+func hasSubstantiveContent(section string) bool {
+	lines := strings.Split(section, "\n")
+	inComment := false
+	for _, line := range lines[1:] { // skip heading line
+		trimmed := strings.TrimSpace(line)
+		// Track HTML comment blocks.
+		if strings.Contains(trimmed, "<!--") {
+			inComment = true
+		}
+		if strings.Contains(trimmed, "-->") {
+			inComment = false
+			continue
+		}
+		if inComment {
+			continue
+		}
+		// Count non-whitespace characters.
+		nonWS := 0
+		for _, r := range trimmed {
+			if r != ' ' && r != '\t' {
+				nonWS++
+			}
+		}
+		if nonWS >= 10 {
+			return true
+		}
+	}
+	return false
+}
+
+// checkContentPlaceholders checks that FR titles are not placeholder text (TBD, TODO, {template}).
+// Skipped for bugfix/delta specs (they don't use FR-N).
+func checkContentPlaceholders(sd *SpecDir, primaryFile SpecFile, specType SpecType) *ValidationCheck {
+	if specType == TypeBugfix || specType == TypeDelta {
+		return nil
+	}
+
+	content, err := sd.ReadFile(primaryFile)
+	if err != nil {
+		return nil
+	}
+
+	// Strip HTML comment blocks to avoid false positives on examples.
+	stripped := stripHTMLComments(content)
+
+	matches := frTitlePlaceholderRe.FindAllString(stripped, -1)
+	if len(matches) == 0 {
+		return &ValidationCheck{
+			Name:    "content_placeholder",
+			Status:  "pass",
+			Message: "no placeholder FR titles found",
+		}
+	}
+
+	// Extract FR IDs from placeholder matches.
+	var placeholderFRs []string
+	for _, m := range matches {
+		if ids := frIDPattern.FindString(m); ids != "" {
+			placeholderFRs = append(placeholderFRs, ids)
+		}
+	}
+
+	return &ValidationCheck{
+		Name:    "content_placeholder",
+		Status:  "fail",
+		Message: fmt.Sprintf("placeholder FR titles: %s", strings.Join(placeholderFRs, ", ")),
+	}
+}
+
+// stripHTMLComments removes <!-- ... --> blocks from content.
+func stripHTMLComments(content string) string {
+	var result strings.Builder
+	i := 0
+	for i < len(content) {
+		if i+4 <= len(content) && content[i:i+4] == "<!--" {
+			end := strings.Index(content[i:], "-->")
+			if end >= 0 {
+				i += end + 3
+				continue
+			}
+		}
+		result.WriteByte(content[i])
+		i++
+	}
+	return result.String()
+}
+
+// checkDecisionsCompleteness checks that DEC-N entries in decisions.md have required fields.
+// Skipped for S/M sizes or if decisions.md doesn't exist.
+func checkDecisionsCompleteness(sd *SpecDir, size SpecSize) *ValidationCheck {
+	if size == SizeS || size == SizeM || size == SizeDelta {
+		return nil
+	}
+
+	content, err := sd.ReadFile(FileDecisions)
+	if err != nil {
+		return nil
+	}
+
+	// Split into DEC sections.
+	sections := decSectionRe.Split(content, -1)
+	headers := decSectionRe.FindAllString(content, -1)
+	if len(headers) == 0 {
+		return &ValidationCheck{
+			Name:    "decisions_completeness",
+			Status:  "fail",
+			Message: "no DEC-N entries found in decisions.md",
+		}
+	}
+
+	type fieldCheck struct {
+		name string
+		re   *regexp.Regexp
+	}
+	requiredFields := []fieldCheck{
+		{"Status", decStatusRe},
+		{"Context", decContextRe},
+		{"Chosen", decChosenRe},
+		{"Rationale", decRationaleRe},
+	}
+
+	var incomplete []string
+	for i, header := range headers {
+		body := ""
+		if i+1 < len(sections) {
+			body = sections[i+1]
+		}
+		var missing []string
+		for _, f := range requiredFields {
+			if !f.re.MatchString(body) {
+				missing = append(missing, f.name)
+			}
+		}
+		if len(missing) > 0 {
+			// Extract DEC-N from header.
+			decID := strings.TrimSpace(header)
+			decID = strings.TrimPrefix(decID, "## ")
+			if idx := strings.Index(decID, ":"); idx > 0 {
+				decID = decID[:idx]
+			}
+			incomplete = append(incomplete, fmt.Sprintf("%s: missing %s", decID, strings.Join(missing, ", ")))
+		}
+	}
+
+	if len(incomplete) == 0 {
+		return &ValidationCheck{
+			Name:    "decisions_completeness",
+			Status:  "pass",
+			Message: fmt.Sprintf("all %d DEC entries have required fields", len(headers)),
+		}
+	}
+	return &ValidationCheck{
+		Name:    "decisions_completeness",
+		Status:  "fail",
+		Message: strings.Join(incomplete, "; "),
+	}
+}
+
+// researchRequiredSections lists the sections that must have content in research.md.
+var researchRequiredSections = []string{
+	"## Discovery Summary",
+	"## Gap Analysis",
+	"## Implementation Options",
+	"## Done Criteria",
+}
+
+// checkResearchCompleteness checks that research.md has content in required sections.
+// Skipped for S/M sizes or if research.md doesn't exist.
+func checkResearchCompleteness(sd *SpecDir, size SpecSize) *ValidationCheck {
+	if size == SizeS || size == SizeM || size == SizeDelta {
+		return nil
+	}
+
+	content, err := sd.ReadFile(FileResearch)
+	if err != nil {
+		return nil
+	}
+
+	var empty []string
+	for _, heading := range researchRequiredSections {
+		if !strings.Contains(content, heading) {
+			empty = append(empty, heading)
+			continue
+		}
+		// Extract section body and check for substantive content.
+		sectionBody := extractSectionBody(content, heading)
+		if !hasSubstantiveContent(heading + "\n" + sectionBody) {
+			empty = append(empty, heading)
+		}
+	}
+
+	if len(empty) == 0 {
+		return &ValidationCheck{
+			Name:    "research_completeness",
+			Status:  "pass",
+			Message: "all required research sections have content",
+		}
+	}
+	return &ValidationCheck{
+		Name:    "research_completeness",
+		Status:  "fail",
+		Message: fmt.Sprintf("research sections missing content: %s", strings.Join(empty, ", ")),
+	}
+}
+
+// extractSectionBody returns the content between a heading and the next ## heading.
+func extractSectionBody(content, heading string) string {
+	_, after, found := strings.Cut(content, heading)
+	if !found {
+		return ""
+	}
+	if nextSection, _, ok := strings.Cut(after, "\n## "); ok {
+		return nextSection
+	}
+	return after
+}
+
+// checkConfidenceCoverage checks that every FR-N section has a confidence annotation.
+// XL only — L and below use the existing single-annotation check.
+func checkConfidenceCoverage(sd *SpecDir, primaryFile SpecFile, size SpecSize) *ValidationCheck {
+	if size != SizeXL {
+		return nil
+	}
+
+	content, err := sd.ReadFile(primaryFile)
+	if err != nil {
+		return nil
+	}
+
+	// Split content by FR-N headers and check each has confidence.
+	frHeaders := frPattern.FindAllStringIndex(content, -1)
+	if len(frHeaders) == 0 {
+		return nil
+	}
+
+	var uncovered []string
+	for i, loc := range frHeaders {
+		// Extract section from this FR header to the next (or EOF).
+		start := loc[0]
+		end := len(content)
+		if i+1 < len(frHeaders) {
+			end = frHeaders[i+1][0]
+		}
+		section := content[start:end]
+
+		frID := frIDPattern.FindString(section)
+		if frID == "" {
+			continue
+		}
+
+		if !confidencePattern.MatchString(section) {
+			uncovered = append(uncovered, frID)
+		}
+	}
+
+	if len(uncovered) == 0 {
+		return &ValidationCheck{
+			Name:    "confidence_coverage",
+			Status:  "pass",
+			Message: fmt.Sprintf("all %d FRs have confidence annotations", len(frHeaders)),
+		}
+	}
+	return &ValidationCheck{
+		Name:    "confidence_coverage",
+		Status:  "fail",
+		Message: fmt.Sprintf("FRs missing confidence: %s", strings.Join(uncovered, ", ")),
+	}
+}
+
+// checkXLWaveCount checks that tasks.md has ≥4 numbered waves (XL only).
+func checkXLWaveCount(sd *SpecDir, size SpecSize) *ValidationCheck {
+	if size != SizeXL {
+		return nil
+	}
+
+	content, err := sd.ReadFile(FileTasks)
+	if err != nil {
+		return nil
+	}
+
+	waves := numberedWaveRe.FindAllString(content, -1)
+	count := len(waves)
+
+	if count >= 4 {
+		return &ValidationCheck{
+			Name:    "xl_wave_count",
+			Status:  "pass",
+			Message: fmt.Sprintf("%d waves found (minimum 4 for XL)", count),
+		}
+	}
+	return &ValidationCheck{
+		Name:    "xl_wave_count",
+		Status:  "fail",
+		Message: fmt.Sprintf("%d waves found, minimum 4 for size XL", count),
+	}
+}
+
+// checkXLNFRRequired checks that at least one NFR-N is defined (XL only).
+func checkXLNFRRequired(sd *SpecDir, primaryFile SpecFile, size SpecSize) *ValidationCheck {
+	if size != SizeXL {
+		return nil
+	}
+
+	content, err := sd.ReadFile(primaryFile)
+	if err != nil {
+		return nil
+	}
+
+	nfrs := nfrIDPattern.FindAllString(content, -1)
+	if len(nfrs) > 0 {
+		// Deduplicate.
+		seen := map[string]bool{}
+		unique := 0
+		for _, n := range nfrs {
+			if !seen[n] {
+				seen[n] = true
+				unique++
+			}
+		}
+		return &ValidationCheck{
+			Name:    "xl_nfr_required",
+			Status:  "pass",
+			Message: fmt.Sprintf("%d NFRs defined", unique),
+		}
+	}
+	return &ValidationCheck{
+		Name:    "xl_nfr_required",
+		Status:  "fail",
+		Message: "no NFR-N entries found (required for XL specs)",
+	}
+}
+
+// deltaRequiredSections lists the sections that must exist in delta.md.
+var deltaRequiredSections = []string{
+	"## Change Summary",
+	"## Files Affected",
+	"## Test Plan",
+}
+
+// checkDeltaSections checks that delta.md has required sections (D size only).
+func checkDeltaSections(sd *SpecDir, size SpecSize) *ValidationCheck {
+	if size != SizeDelta {
+		return nil
+	}
+
+	content, err := sd.ReadFile(FileDelta)
+	if err != nil {
+		return nil
+	}
+
+	var missing []string
+	for _, section := range deltaRequiredSections {
+		if !strings.Contains(content, section) {
+			missing = append(missing, section)
+		}
+	}
+
+	if len(missing) == 0 {
+		return &ValidationCheck{
+			Name:    "delta_sections_present",
+			Status:  "pass",
+			Message: "all required delta sections present",
+		}
+	}
+	return &ValidationCheck{
+		Name:    "delta_sections_present",
+		Status:  "fail",
+		Message: fmt.Sprintf("missing delta sections: %s", strings.Join(missing, ", ")),
 	}
 }
 

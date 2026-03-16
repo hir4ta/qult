@@ -2,6 +2,7 @@ package spec
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -132,6 +133,36 @@ The system SHALL respond within 200ms.
 ` + "```gherkin\nGiven a precondition\nWhen an action occurs\nThen the expected result happens\n```\n"
 	sd.WriteFile(context.Background(), FileTestSpecs, testSpecs)
 
+	// Write decisions.md with complete DEC entry.
+	decisions := `# Decisions: validate-test
+
+## DEC-1: [2026-03-16] Test Decision
+<!-- confidence: 8 | source: user -->
+- **Status**: Accepted
+- **Context**: Test context for validation
+- **Chosen**: Option A
+- **Rationale**: Simplicity over complexity
+`
+	sd.WriteFile(context.Background(), FileDecisions, decisions)
+
+	// Write research.md with required sections.
+	research := `# Research: validate-test
+
+## Discovery Summary
+Key findings from research phase.
+
+## Gap Analysis
+Current state and required changes identified.
+
+## Implementation Options
+### Option A: Direct approach
+Straightforward implementation.
+
+## Done Criteria
+- [x] All gaps identified
+`
+	sd.WriteFile(context.Background(), FileResearch, research)
+
 	report, err := Validate(sd, SizeL, TypeFeature)
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
@@ -142,9 +173,9 @@ The system SHALL respond within 200ms.
 			t.Errorf("check %s: %s (%s)", c.Name, c.Status, c.Message)
 		}
 	}
-	// 6 original + 6 new checks = 12 total.
-	if report.Summary != "12/12 checks passed" {
-		t.Errorf("Summary = %q, want '12/12 checks passed'", report.Summary)
+	// 12 original + 3 new L-applicable checks (content_placeholder, decisions_completeness, research_completeness) = 15 total.
+	if report.Summary != "15/15 checks passed" {
+		t.Errorf("Summary = %q, want '15/15 checks passed'", report.Summary)
 	}
 }
 
@@ -509,7 +540,7 @@ func TestValidateOrphanTasks(t *testing.T) {
 func TestValidateBugfix(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()
-	sd, err := Init(tmp, "bugfix-validate", "fix bug", WithSize(SizeS), WithSpecType(TypeBugfix))
+	sd, err := Init(tmp, "bugfix-validate", "fix bug with real content describing the issue in detail", WithSize(SizeS), WithSpecType(TypeBugfix))
 	if err != nil {
 		t.Fatalf("Init: %v", err)
 	}
@@ -525,4 +556,397 @@ func TestValidateBugfix(t *testing.T) {
 			t.Errorf("required_sections should pass for bugfix template: %s", c.Message)
 		}
 	}
+}
+
+// --- v6 Tests ---
+
+func TestValidateContentPlaceholders(t *testing.T) {
+	t.Parallel()
+
+	t.Run("placeholder_TBD_fails", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "placeholder-tbd"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		reqs := "# Requirements\n\n## Goal\n<!-- confidence: 7 | source: user -->\nTest\n\n### FR-1: TBD\n"
+		os.WriteFile(sd.FilePath(FileRequirements), []byte(reqs), 0o644)
+
+		report, _ := Validate(sd, SizeL, TypeFeature)
+		assertCheckMessageContains(t, report, "content_placeholder", "fail", "FR-1")
+	})
+
+	t.Run("placeholder_template_var_fails", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "placeholder-var"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		reqs := "# Requirements\n\n## Goal\n<!-- confidence: 7 | source: user -->\nTest\n\n### FR-1: {Requirement Name}\n"
+		os.WriteFile(sd.FilePath(FileRequirements), []byte(reqs), 0o644)
+
+		report, _ := Validate(sd, SizeL, TypeFeature)
+		assertCheckMessageContains(t, report, "content_placeholder", "fail", "FR-1")
+	})
+
+	t.Run("real_title_passes", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "placeholder-ok"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		reqs := "# Requirements\n\n## Goal\n<!-- confidence: 7 | source: user -->\nTest\n\n### FR-1: User Authentication\n"
+		os.WriteFile(sd.FilePath(FileRequirements), []byte(reqs), 0o644)
+
+		report, _ := Validate(sd, SizeL, TypeFeature)
+		assertCheckStatus(t, report, "content_placeholder", "pass")
+	})
+
+	t.Run("placeholder_in_comment_not_flagged", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "placeholder-comment"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		reqs := "# Requirements\n\n## Goal\n<!-- confidence: 7 | source: user -->\nTest\n\n<!-- example:\n### FR-1: TBD\n-->\n### FR-1: Real Requirement\n"
+		os.WriteFile(sd.FilePath(FileRequirements), []byte(reqs), 0o644)
+
+		report, _ := Validate(sd, SizeL, TypeFeature)
+		assertCheckStatus(t, report, "content_placeholder", "pass")
+	})
+}
+
+func TestValidateDecisionsCompleteness(t *testing.T) {
+	t.Parallel()
+
+	t.Run("complete_DEC_passes", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "dec-pass"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		os.WriteFile(sd.FilePath(FileRequirements), []byte("## Goal\n"), 0o644)
+		dec := "# Decisions\n\n## DEC-1: Test\n- **Status**: Accepted\n- **Context**: Test context\n- **Chosen**: Option A\n- **Rationale**: Simplicity\n"
+		os.WriteFile(sd.FilePath(FileDecisions), []byte(dec), 0o644)
+
+		report, _ := Validate(sd, SizeL, TypeFeature)
+		assertCheckStatus(t, report, "decisions_completeness", "pass")
+	})
+
+	t.Run("missing_Rationale_fails", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "dec-fail"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		os.WriteFile(sd.FilePath(FileRequirements), []byte("## Goal\n"), 0o644)
+		dec := "# Decisions\n\n## DEC-1: Test\n- **Status**: Accepted\n- **Context**: Test context\n- **Chosen**: Option A\n"
+		os.WriteFile(sd.FilePath(FileDecisions), []byte(dec), 0o644)
+
+		report, _ := Validate(sd, SizeL, TypeFeature)
+		assertCheckMessageContains(t, report, "decisions_completeness", "fail", "Rationale")
+	})
+
+	t.Run("S_size_skips", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "dec-skip"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		os.WriteFile(sd.FilePath(FileRequirements), []byte("## Goal\n"), 0o644)
+
+		report, _ := Validate(sd, SizeS, TypeFeature)
+		assertCheckAbsent(t, report, "decisions_completeness")
+	})
+}
+
+func TestValidateConfidenceCoverage(t *testing.T) {
+	t.Parallel()
+
+	t.Run("XL_all_covered_passes", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "conf-cov-pass"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		var b strings.Builder
+		b.WriteString("# Requirements\n\n## Goal\n<!-- confidence: 9 | source: user -->\nTest\n\n")
+		for i := 1; i <= 8; i++ {
+			fmt.Fprintf(&b, "### FR-%d: Requirement %d\n<!-- confidence: 7 | source: code -->\n\n", i, i)
+		}
+		b.WriteString("### NFR-1: Performance\n")
+		os.WriteFile(sd.FilePath(FileRequirements), []byte(b.String()), 0o644)
+
+		report, _ := Validate(sd, SizeXL, TypeFeature)
+		assertCheckStatus(t, report, "confidence_coverage", "pass")
+	})
+
+	t.Run("XL_missing_confidence_fails", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "conf-cov-fail"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		var b strings.Builder
+		b.WriteString("# Requirements\n\n## Goal\n<!-- confidence: 9 | source: user -->\nTest\n\n")
+		for i := 1; i <= 8; i++ {
+			if i == 3 {
+				fmt.Fprintf(&b, "### FR-%d: Requirement %d\n\n", i, i) // no confidence
+			} else {
+				fmt.Fprintf(&b, "### FR-%d: Requirement %d\n<!-- confidence: 7 | source: code -->\n\n", i, i)
+			}
+		}
+		b.WriteString("### NFR-1: Performance\n")
+		os.WriteFile(sd.FilePath(FileRequirements), []byte(b.String()), 0o644)
+
+		report, _ := Validate(sd, SizeXL, TypeFeature)
+		assertCheckMessageContains(t, report, "confidence_coverage", "fail", "FR-3")
+	})
+
+	t.Run("L_size_skips", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "conf-cov-skip"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		os.WriteFile(sd.FilePath(FileRequirements), []byte("## Goal\n<!-- confidence: 7 | source: user -->\n### FR-1: Req\n"), 0o644)
+
+		report, _ := Validate(sd, SizeL, TypeFeature)
+		assertCheckAbsent(t, report, "confidence_coverage")
+	})
+}
+
+func TestValidateXLWaveCount(t *testing.T) {
+	t.Parallel()
+
+	t.Run("4_waves_passes", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "xl-wave-pass"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		os.WriteFile(sd.FilePath(FileRequirements), []byte("## Goal\n"), 0o644)
+		tasks := "# Tasks\n\n## Wave 1: Foundation\n## Wave 2: Core\n## Wave 3: Edge\n## Wave 4: Polish\n## Wave: Closing\n"
+		os.WriteFile(sd.FilePath(FileTasks), []byte(tasks), 0o644)
+
+		report, _ := Validate(sd, SizeXL, TypeFeature)
+		assertCheckStatus(t, report, "xl_wave_count", "pass")
+	})
+
+	t.Run("2_waves_fails", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "xl-wave-fail"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		os.WriteFile(sd.FilePath(FileRequirements), []byte("## Goal\n"), 0o644)
+		tasks := "# Tasks\n\n## Wave 1: Foundation\n## Wave 2: Core\n## Wave: Closing\n"
+		os.WriteFile(sd.FilePath(FileTasks), []byte(tasks), 0o644)
+
+		report, _ := Validate(sd, SizeXL, TypeFeature)
+		assertCheckMessageContains(t, report, "xl_wave_count", "fail", "2 waves")
+	})
+
+	t.Run("L_size_skips", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "xl-wave-skip"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		os.WriteFile(sd.FilePath(FileRequirements), []byte("## Goal\n"), 0o644)
+
+		report, _ := Validate(sd, SizeL, TypeFeature)
+		assertCheckAbsent(t, report, "xl_wave_count")
+	})
+}
+
+func TestValidateXLNFRRequired(t *testing.T) {
+	t.Parallel()
+
+	t.Run("NFR_defined_passes", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "xl-nfr-pass"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		reqs := "# Requirements\n\n## Goal\n<!-- confidence: 7 | source: user -->\nTest\n\n### FR-1: Req\n\n### NFR-1: Performance\n"
+		os.WriteFile(sd.FilePath(FileRequirements), []byte(reqs), 0o644)
+
+		report, _ := Validate(sd, SizeXL, TypeFeature)
+		assertCheckStatus(t, report, "xl_nfr_required", "pass")
+	})
+
+	t.Run("no_NFR_fails", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "xl-nfr-fail"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		reqs := "# Requirements\n\n## Goal\n<!-- confidence: 7 | source: user -->\nTest\n\n### FR-1: Req\n"
+		os.WriteFile(sd.FilePath(FileRequirements), []byte(reqs), 0o644)
+
+		report, _ := Validate(sd, SizeXL, TypeFeature)
+		assertCheckStatus(t, report, "xl_nfr_required", "fail")
+	})
+}
+
+func TestValidateXLMinFRCount(t *testing.T) {
+	t.Parallel()
+
+	t.Run("XL_7_FRs_fails", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "xl-fr-fail"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		var b strings.Builder
+		b.WriteString("# Requirements\n\n## Goal\n<!-- confidence: 7 | source: user -->\nTest\n\n")
+		for i := 1; i <= 7; i++ {
+			fmt.Fprintf(&b, "### FR-%d: Requirement %d\n", i, i)
+		}
+		os.WriteFile(sd.FilePath(FileRequirements), []byte(b.String()), 0o644)
+
+		report, _ := Validate(sd, SizeXL, TypeFeature)
+		assertCheckMessageContains(t, report, "min_fr_count", "fail", "minimum 8")
+	})
+
+	t.Run("XL_8_FRs_passes", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "xl-fr-pass"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		var b strings.Builder
+		b.WriteString("# Requirements\n\n## Goal\n<!-- confidence: 7 | source: user -->\nTest\n\n")
+		for i := 1; i <= 8; i++ {
+			fmt.Fprintf(&b, "### FR-%d: Requirement %d\n", i, i)
+		}
+		os.WriteFile(sd.FilePath(FileRequirements), []byte(b.String()), 0o644)
+
+		report, _ := Validate(sd, SizeXL, TypeFeature)
+		assertCheckStatus(t, report, "min_fr_count", "pass")
+	})
+}
+
+func TestValidateDelta(t *testing.T) {
+	t.Parallel()
+
+	t.Run("init_creates_delta_files", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd, err := Init(tmp, "delta-test", "small fix", WithSize(SizeDelta))
+		if err != nil {
+			t.Fatalf("Init: %v", err)
+		}
+		// delta.md and session.md should exist.
+		if _, err := sd.ReadFile(FileDelta); err != nil {
+			t.Errorf("delta.md should exist: %v", err)
+		}
+		if _, err := sd.ReadFile(FileSession); err != nil {
+			t.Errorf("session.md should exist: %v", err)
+		}
+		// requirements.md should NOT exist.
+		if _, err := sd.ReadFile(FileRequirements); err == nil {
+			t.Error("requirements.md should not exist for delta spec")
+		}
+	})
+
+	t.Run("delta_validation_passes", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "delta-valid"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		delta := "# Delta: delta-valid\n\n## Change Summary\nFix null pointer in validator.\n\n## Files Affected\n- `internal/spec/validate.go` — fix nil check\n\n## Rationale\nBug report from production.\n\n## Impact Scope\nLow risk change.\n\n## Test Plan\n- `go test ./internal/spec/...`\n\n## Rollback Strategy\n- `git revert`\n"
+		os.WriteFile(sd.FilePath(FileDelta), []byte(delta), 0o644)
+
+		report, err := Validate(sd, SizeDelta, TypeDelta)
+		if err != nil {
+			t.Fatalf("Validate: %v", err)
+		}
+		assertCheckStatus(t, report, "required_sections", "pass")
+		assertCheckStatus(t, report, "delta_sections_present", "pass")
+	})
+
+	t.Run("delta_missing_sections_fails", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "delta-fail"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		delta := "# Delta: delta-fail\n\n## Change Summary\nSome change.\n"
+		os.WriteFile(sd.FilePath(FileDelta), []byte(delta), 0o644)
+
+		report, err := Validate(sd, SizeDelta, TypeDelta)
+		if err != nil {
+			t.Fatalf("Validate: %v", err)
+		}
+		assertCheckStatus(t, report, "delta_sections_present", "fail")
+	})
+}
+
+func TestParseSizeDelta(t *testing.T) {
+	t.Parallel()
+	size, err := ParseSize("D")
+	if err != nil {
+		t.Fatalf("ParseSize(D): %v", err)
+	}
+	if size != SizeDelta {
+		t.Errorf("ParseSize(D) = %q, want %q", size, SizeDelta)
+	}
+}
+
+func TestFilesForSizeDelta(t *testing.T) {
+	t.Parallel()
+	files := FilesForSize(SizeDelta, TypeFeature)
+	if len(files) != 2 {
+		t.Fatalf("FilesForSize(D) = %d files, want 2", len(files))
+	}
+	if files[0] != FileDelta {
+		t.Errorf("files[0] = %q, want %q", files[0], FileDelta)
+	}
+	if files[1] != FileSession {
+		t.Errorf("files[1] = %q, want %q", files[1], FileSession)
+	}
+}
+
+func TestDetectSizeNeverReturnsDelta(t *testing.T) {
+	t.Parallel()
+	for _, desc := range []string{"x", strings.Repeat("a", 50), strings.Repeat("b", 200), strings.Repeat("c", 1000)} {
+		size := DetectSize(desc)
+		if size == SizeDelta || size == SizeXL {
+			t.Errorf("DetectSize(%d chars) = %q, should never return D or XL", len(desc), size)
+		}
+	}
+}
+
+func TestValidateBugfixSubstantiveContent(t *testing.T) {
+	t.Parallel()
+
+	t.Run("template_only_fails", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "bugfix-template"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		// Bugfix with only template headings and short placeholder text.
+		bugfix := "# Bugfix\n\n## Bug Summary\n{summary}\n\n## Severity & Impact\n{impact}\n\n## Reproduction Steps\n{steps}\n"
+		os.WriteFile(sd.FilePath(FileBugfix), []byte(bugfix), 0o644)
+
+		report, _ := Validate(sd, SizeM, TypeBugfix)
+		assertCheckStatus(t, report, "min_fr_count", "fail")
+	})
+
+	t.Run("substantive_content_passes", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		sd := &SpecDir{ProjectPath: tmp, TaskSlug: "bugfix-real"}
+		os.MkdirAll(sd.Dir(), 0o755)
+
+		bugfix := "# Bugfix\n\n## Bug Summary\nNull pointer exception when validating empty spec files in production\n\n## Severity & Impact\nP1 - affects all users running validation on newly created specs\n\n## Reproduction Steps\n1. Create a new spec with dossier init\n2. Run dossier validate immediately\n3. Observe crash in checkMinFRCount\n"
+		os.WriteFile(sd.FilePath(FileBugfix), []byte(bugfix), 0o644)
+
+		report, _ := Validate(sd, SizeM, TypeBugfix)
+		assertCheckStatus(t, report, "min_fr_count", "pass")
+	})
 }

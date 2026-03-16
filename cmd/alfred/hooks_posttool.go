@@ -443,13 +443,22 @@ func tryDetectSpecDrift(ctx context.Context, projectPath, command string) {
 		return // no file references in spec — nothing to compare
 	}
 
+	// Read tasks.md for reverse FR mapping.
+	sd := &spec.SpecDir{ProjectPath: projectPath, TaskSlug: taskSlug}
+	tasksContent, _ := sd.ReadFile(spec.FileTasks) // best-effort
+
 	var untracked []string
 	var modifiedComponents []string
 
 	for _, f := range changed {
 		component, inSpec := specRefs[f]
 		if !inSpec {
-			untracked = append(untracked, f)
+			// Check if the file's package matches a component.
+			if comp := matchComponentByPackage(f, specRefs); comp != "" {
+				modifiedComponents = append(modifiedComponents, comp)
+			} else {
+				untracked = append(untracked, f)
+			}
 		} else if component != "" {
 			modifiedComponents = append(modifiedComponents, component)
 		}
@@ -464,7 +473,11 @@ func tryDetectSpecDrift(ctx context.Context, projectPath, command string) {
 		buf.WriteString("SPEC DRIFT: The following changed files are not referenced in the active spec:\n")
 		for _, f := range untracked {
 			severity := classifyDriftSeverity(f, false)
-			buf.WriteString(fmt.Sprintf("  - %s [%s]\n", f, severity))
+			frHint := ""
+			if frs := reverseMapFileToFR(f, tasksContent); len(frs) > 0 {
+				frHint = fmt.Sprintf(" (related: %s)", strings.Join(frs, ", "))
+			}
+			buf.WriteString(fmt.Sprintf("  - %s [%s]%s\n", f, severity, frHint))
 		}
 		buf.WriteString("Consider updating design.md or tasks.md to include these files.\n")
 
@@ -657,6 +670,70 @@ func logDriftEvent(projectPath, action, target string, detail map[string]any) {
 		User:   "hook",
 	})
 }
+
+// matchComponentByPackage checks if a file's directory path matches any component's
+// file path prefix in the spec refs. This allows detecting component-level drift
+// even when the exact file isn't listed in the spec.
+func matchComponentByPackage(filePath string, specRefs map[string]string) string {
+	// Extract the directory of the changed file.
+	fileDir := filePath
+	if idx := strings.LastIndex(filePath, "/"); idx >= 0 {
+		fileDir = filePath[:idx]
+	}
+
+	// Check if any spec ref shares the same directory prefix.
+	for refPath, component := range specRefs {
+		if component == "" {
+			continue
+		}
+		refDir := refPath
+		if idx := strings.LastIndex(refPath, "/"); idx >= 0 {
+			refDir = refPath[:idx]
+		}
+		if fileDir == refDir || strings.HasPrefix(fileDir, refDir+"/") {
+			return component
+		}
+	}
+	return ""
+}
+
+// reverseMapFileToFR finds FR-N references associated with a file path
+// by parsing tasks.md "_Requirements: FR-N | Files: path_" entries.
+func reverseMapFileToFR(filePath, tasksContent string) []string {
+	if tasksContent == "" {
+		return nil
+	}
+
+	var frs []string
+	seen := map[string]bool{}
+
+	for _, line := range strings.Split(tasksContent, "\n") {
+		trimmed := strings.TrimSpace(line)
+		// Match lines containing both Files: and Requirements:.
+		if !strings.Contains(trimmed, "Files:") && !strings.Contains(trimmed, "files:") {
+			continue
+		}
+		if !strings.Contains(trimmed, filePath) {
+			continue
+		}
+		// Extract FR-N from Requirements field.
+		if m := taskReqPattern.FindStringSubmatch(trimmed); len(m) > 1 {
+			for _, fr := range frIDPattern.FindAllString(m[1], -1) {
+				if !seen[fr] {
+					seen[fr] = true
+					frs = append(frs, fr)
+				}
+			}
+		}
+	}
+	return frs
+}
+
+// frIDPattern matches FR-N identifiers (reuse from spec package pattern).
+var frIDPattern = regexp.MustCompile(`FR-(\d+)`)
+
+// taskReqPattern matches Requirements: FR-N entries in tasks.md.
+var taskReqPattern = regexp.MustCompile(`Requirements:\s*(FR-\d+(?:\s*,\s*FR-\d+)*)`)
 
 // uniqueStrings returns deduplicated strings preserving order.
 func uniqueStrings(ss []string) []string {
