@@ -16,7 +16,8 @@ func runDashboard() error {
 		return fmt.Errorf("get working directory: %w", err)
 	}
 
-	ds := tui.NewFileDataSource(projectPath, nil, nil)
+	st, _ := openStore() // best-effort — Knowledge tab still works from files if DB unavailable
+	ds := tui.NewFileDataSource(projectPath, st, nil)
 	model := tui.New(ds, resolvedVersion())
 
 	p := tea.NewProgram(model, tea.WithColorProfile(colorprofile.TrueColor))

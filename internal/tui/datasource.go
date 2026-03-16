@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"time"
 
@@ -288,54 +287,72 @@ func (ds *fileDataSource) SemanticSearch(query string, limit int) []KnowledgeEnt
 }
 
 func (ds *fileDataSource) RecentKnowledge(limit int) []KnowledgeEntry {
-	// Read from .alfred/knowledge/ JSON files (no DB needed).
+	// Prefer DB (has all memories including auto-saved decisions).
+	if ds.st != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		docs, err := ds.st.ListRecentMemories(ctx, limit)
+		if err == nil && len(docs) > 0 {
+			entries := make([]KnowledgeEntry, 0, len(docs))
+			for _, d := range docs {
+				var age time.Duration
+				if t, err := time.Parse(time.RFC3339, d.CrawledAt); err == nil {
+					age = time.Since(t)
+				}
+				entries = append(entries, KnowledgeEntry{
+					Label:      d.SectionPath,
+					Source:     d.SourceType,
+					SubType:    d.SubType,
+					HitCount:   d.HitCount,
+					Content:    d.Content,
+					Structured: d.Structured,
+					Age:        age,
+				})
+			}
+			return entries
+		}
+	}
+
+	// Fallback: read from .alfred/knowledge/ JSON files.
 	var entries []KnowledgeEntry
 
-	// Decisions.
 	decs, _ := store.LoadDecisions(ds.projectPath)
 	for _, d := range decs {
 		entries = append(entries, KnowledgeEntry{
-			Label:      d.Title,
-			Source:     "memory",
-			SubType:    "decision",
-			Content:    d.ToContent(),
-			Structured: mustJSON(d),
+			Label:   d.Title,
+			Source:  "memory",
+			SubType: "decision",
+			Content: d.ToContent(),
 		})
 	}
 
-	// Patterns.
 	pats, _ := store.LoadPatterns(ds.projectPath)
 	for _, p := range pats {
 		entries = append(entries, KnowledgeEntry{
-			Label:      p.Title,
-			Source:     "memory",
-			SubType:    "pattern",
-			Content:    p.ToContent(),
-			Structured: mustJSON(p),
+			Label:   p.Title,
+			Source:  "memory",
+			SubType: "pattern",
+			Content: p.ToContent(),
 		})
 	}
 
-	// Rules.
 	rules, _ := store.LoadRules(ds.projectPath)
 	for _, r := range rules {
 		entries = append(entries, KnowledgeEntry{
-			Label:      r.Text,
-			Source:     "memory",
-			SubType:    "rule",
-			Content:    r.ToContent(),
-			Structured: mustJSON(r),
+			Label:   r.Text,
+			Source:  "memory",
+			SubType: "rule",
+			Content: r.ToContent(),
 		})
 	}
 
-	// Sessions.
 	sessions, _ := store.LoadSessions(ds.projectPath)
 	for _, s := range sessions {
 		entries = append(entries, KnowledgeEntry{
-			Label:      s.Title,
-			Source:     "memory",
-			SubType:    "general",
-			Content:    s.ToContent(),
-			Structured: mustJSON(s),
+			Label:   s.Title,
+			Source:  "memory",
+			SubType: "general",
+			Content: s.ToContent(),
 		})
 	}
 
@@ -345,13 +362,6 @@ func (ds *fileDataSource) RecentKnowledge(limit int) []KnowledgeEntry {
 	return entries
 }
 
-func mustJSON(v any) string {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return ""
-	}
-	return string(b)
-}
 
 func (ds *fileDataSource) RecentActivity(limit int) []ActivityEntry {
 	entries, err := spec.ReadAuditLog(ds.projectPath, limit)

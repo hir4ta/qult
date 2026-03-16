@@ -1917,6 +1917,11 @@ func (m Model) activityView() string {
 			action := dimStyle.Render(formatAuditAction(a.Action))
 			target := truncStr(a.Target, maxW-20)
 			b.WriteString(fmt.Sprintf("  %s  %s  %s\n", dimStyle.Render(ts), action, target))
+			// Show detail on a second line if present (e.g., completion summary).
+			if a.Detail != "" {
+				detail := truncStr(a.Detail, maxW-10)
+				b.WriteString("        " + dimStyle.Render(detail) + "\n")
+			}
 		}
 		b.WriteString("\n")
 	}

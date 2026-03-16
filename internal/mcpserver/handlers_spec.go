@@ -505,8 +505,17 @@ func specDoComplete(ctx context.Context, req mcp.CallToolRequest, st *store.Stor
 		}
 	}
 
+	// Auto-save decisions from decisions.md as permanent memory.
+	savedDecisions := 0
+	if sd.Exists() && st != nil {
+		savedDecisions = persistSpecDecisions(ctx, sd, taskSlug, st)
+	}
+
+	// Build audit detail with summary of what was accomplished.
+	auditDetail := buildCompletionDetail(sd, savedDecisions)
+
 	// Mark task as completed in _active.md.
-	spec.AppendAudit(projectPath, spec.AuditEntry{Action: "spec.complete", Target: taskSlug, User: "mcp"})
+	spec.AppendAudit(projectPath, spec.AuditEntry{Action: "spec.complete", Target: taskSlug, Detail: auditDetail, User: "mcp"})
 	newPrimary, err := spec.CompleteTask(projectPath, taskSlug)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("complete failed: %v", err)), nil
@@ -516,8 +525,9 @@ func specDoComplete(ctx context.Context, req mcp.CallToolRequest, st *store.Stor
 	epic.SyncTaskStatus(projectPath, taskSlug, epic.StatusCompleted)
 
 	result := map[string]any{
-		"completed":   taskSlug,
-		"new_primary": newPrimary,
+		"completed":       taskSlug,
+		"new_primary":     newPrimary,
+		"decisions_saved": savedDecisions,
 	}
 
 	// Compute duration.
@@ -920,6 +930,99 @@ func parseConfidenceScores(content string) confidenceSummary {
 		Items:    items,
 		Warnings: warnings,
 	}
+}
+
+// buildCompletionDetail creates a summary string for the audit log on task completion.
+func buildCompletionDetail(sd *spec.SpecDir, decisionsSaved int) string {
+	parts := []string{}
+
+	// Count modified files from session.md.
+	if session, err := sd.ReadFile(spec.FileSession); err == nil {
+		modSection := extractNextSteps2(session, "## Modified Files")
+		if modSection != "" {
+			count := 0
+			for line := range strings.SplitSeq(modSection, "\n") {
+				if strings.HasPrefix(strings.TrimSpace(line), "- ") {
+					count++
+				}
+			}
+			if count > 0 {
+				parts = append(parts, fmt.Sprintf("%d files modified", count))
+			}
+		}
+	}
+
+	if decisionsSaved > 0 {
+		parts = append(parts, fmt.Sprintf("%d decisions saved", decisionsSaved))
+	}
+
+	// Count spec files present.
+	fileCount := 0
+	for _, f := range spec.AllFiles {
+		if _, err := sd.ReadFile(f); err == nil {
+			fileCount++
+		}
+	}
+	parts = append(parts, fmt.Sprintf("%d spec files", fileCount))
+
+	return strings.Join(parts, ", ")
+}
+
+// extractNextSteps2 extracts a named section from content (generic version).
+func extractNextSteps2(content, heading string) string {
+	idx := strings.Index(content, heading)
+	if idx < 0 {
+		return ""
+	}
+	rest := content[idx+len(heading):]
+	if end := strings.Index(rest, "\n## "); end >= 0 {
+		rest = rest[:end]
+	}
+	return rest
+}
+
+// persistSpecDecisions reads decisions.md and saves each DEC-N entry as a permanent memory.
+// Returns the number of decisions saved.
+func persistSpecDecisions(ctx context.Context, sd *spec.SpecDir, taskSlug string, st *store.Store) int {
+	content, err := sd.ReadFile(spec.FileDecisions)
+	if err != nil || content == "" {
+		return 0
+	}
+
+	// Parse DEC-N sections: split on ## headings.
+	var saved int
+	sections := strings.Split(content, "\n## ")
+	for _, sec := range sections[1:] { // skip header before first ##
+		lines := strings.SplitN(sec, "\n", 2)
+		if len(lines) < 2 {
+			continue
+		}
+		title := strings.TrimSpace(lines[0])
+		body := strings.TrimSpace(lines[1])
+		if title == "" || body == "" {
+			continue
+		}
+		// Skip template/example entries.
+		if strings.Contains(title, "{") || strings.Contains(body, "<!-- example") {
+			continue
+		}
+
+		url := fmt.Sprintf("memory://spec-decision/%s/%s", taskSlug, strings.ReplaceAll(strings.ToLower(title), " ", "-"))
+		label := taskSlug + " > " + title
+
+		_, changed, err := st.UpsertDoc(ctx, &store.DocRow{
+			URL:         url,
+			SectionPath: label,
+			Content:     "## " + title + "\n" + body,
+			SourceType:  store.SourceMemory,
+			SubType:     "decision",
+			TTLDays:     0, // permanent
+		})
+		if err == nil && changed {
+			saved++
+		}
+	}
+	return saved
 }
 
 // extractNextSteps extracts the Next Steps section from session.md content.

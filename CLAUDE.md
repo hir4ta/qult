@@ -95,6 +95,10 @@ alfred search-eval            # Run search quality benchmark
 - Traceability IDs: FR-N (functional), NFR-N (non-functional), DEC-N (decisions), T-N.N (tasks wave.task), TS-N.N (tests)
 - Traceability matrix: design.md maps Req ID → Component → Task ID → Test ID
 - Spec confidence scoring: `<!-- confidence: N | source: TYPE -->` annotations (source: user/design-doc/code/inference/assumption); status returns avg + low_items + low_confidence_warnings (score ≤ 5 + assumption)
+- Spec complete auto-saves: decisions.md entries → permanent memory (source_type=memory, sub_type=decision)
+- Wave: Closing required in all tasks.md: self-review, CLAUDE.md update, test verification, knowledge save
+- Knowledge tab: DB-first (ListRecentMemories), file fallback (.alfred/knowledge/)
+- Activity tab: shows audit detail (completion summary: files modified, decisions saved)
 
 ### Spec Review & Approval Gate
 
