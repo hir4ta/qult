@@ -4,6 +4,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"os"
 	"regexp"
 	"strings"
@@ -15,6 +16,8 @@ import (
 	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/progress"
 	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/table"
+	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	"charm.land/lipgloss/v2"
@@ -82,10 +85,12 @@ type Model struct {
 	progress    progress.Model
 
 	// Overlay (floating window) state.
-	overlayActive bool
-	overlayTitle  string
-	overlayVP     viewport.Model
-	breadcrumbs   []string // navigation path shown in overlay header
+	overlayActive  bool
+	overlayTitle   string
+	overlayVP      viewport.Model
+	overlayRawMD   string   // raw markdown content for clipboard copy
+	breadcrumbs    []string // navigation path shown in overlay header
+	overlayCopied  bool     // flash "Copied!" message
 
 	// Review mode state (within Specs overlay).
 	reviewMode      bool              // true when reviewing a spec file
@@ -94,7 +99,7 @@ type Model struct {
 	reviewLines     []string          // raw lines of the file
 	reviewCursor    int               // current line (0-based)
 	reviewComments  map[int]string    // line number → comment body (pending)
-	reviewInput     textinput.Model   // comment text input
+	reviewInput     textarea.Model    // multi-line comment input
 	reviewInputLine int               // which line the input is for
 	reviewEditing   bool              // true when typing a comment
 	reviewRounds    []spec.Review     // all review rounds for the current task
@@ -125,7 +130,8 @@ type Model struct {
 	searchBusy  bool
 
 	// Activity tab state.
-	epics []EpicSummary
+	activityTable table.Model
+	epics         []EpicSummary
 
 	// Markdown renderer.
 	mdRenderer *glamour.TermRenderer
@@ -145,7 +151,7 @@ type Model struct {
 func New(ds DataSource, version string) Model {
 	sp := spinner.New(
 		spinner.WithSpinner(spinner.Dot),
-		spinner.WithStyle(lipgloss.NewStyle().Foreground(accent)),
+		spinner.WithStyle(lipgloss.NewStyle().Foreground(aqua)),
 	)
 	h := help.New()
 	h.Styles = help.DefaultStyles(true)
@@ -153,20 +159,42 @@ func New(ds DataSource, version string) Model {
 	ti.Placeholder = "semantic search..."
 	ti.CharLimit = 200
 	prog := progress.New(
-		progress.WithColors(accent, lipgloss.Color("#333")),
+		progress.WithColors(aqua, lipgloss.Color("#333")),
 		progress.WithoutPercentage(),
 		progress.WithWidth(20),
 		progress.WithFillCharacters('#', '-'),
 	)
 	knl := newKnowledgeList(80, 20) // sized later in WindowSizeMsg
+
+	// Activity timeline table — non-interactive (Blur), styled header.
+	// Selected must exactly match Cell so cursor row doesn't shift.
+	cellStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#c0bab0")).Padding(0, 1)
+	tblStyles := table.Styles{
+		Header:   lipgloss.NewStyle().Bold(true).Foreground(gold).Padding(0, 1),
+		Cell:     cellStyle,
+		Selected: cellStyle,
+	}
+	actTbl := table.New(
+		table.WithColumns([]table.Column{
+			{Title: "Time", Width: 6},
+			{Title: "Action", Width: 12},
+			{Title: "Target", Width: 24},
+			{Title: "Detail", Width: 36},
+		}),
+		table.WithHeight(10),
+		table.WithStyles(tblStyles),
+	)
+	actTbl.Blur() // read-only, no cursor highlight
+
 	return Model{
-		ds:          ds,
-		version:     version,
-		helpModel:   h,
-		spinner:     sp,
-		searchInput: ti,
-		progress:    prog,
-		knList:      knl,
+		ds:            ds,
+		version:       version,
+		helpModel:     h,
+		spinner:       sp,
+		searchInput:   ti,
+		progress:      prog,
+		knList:        knl,
+		activityTable: actTbl,
 	}
 }
 
@@ -236,6 +264,35 @@ func (m *Model) applyDataLoaded(msg dataLoadedMsg) {
 		m.specGroupCursor = max(0, len(m.specGroups)-1)
 	}
 	m.activity = msg.activity
+	// Rebuild activity table rows from timeline data.
+	// Column widths scale proportionally to terminal width.
+	if len(m.activity) > 0 {
+		shown := min(20, len(m.activity))
+		tblW := max(60, m.width-6)
+		timeW := 6
+		actionW := 12
+		targetW := max(16, tblW*25/100)
+		detailW := max(10, tblW-timeW-actionW-targetW-8) // 8 = cell padding
+		rows := make([]table.Row, 0, shown)
+		for i := range shown {
+			a := m.activity[i]
+			rows = append(rows, table.Row{
+				a.Timestamp.Format("15:04"),
+				formatAuditAction(a.Action),
+				truncStr(a.Target, targetW),
+				truncStr(a.Detail, detailW),
+			})
+		}
+		m.activityTable.SetColumns([]table.Column{
+			{Title: "Time", Width: timeW},
+			{Title: "Action", Width: actionW},
+			{Title: "Target", Width: targetW},
+			{Title: "Detail", Width: detailW},
+		})
+		m.activityTable.SetWidth(tblW)
+		m.activityTable.SetHeight(min(shown+1, 20))
+		m.activityTable.SetRows(rows)
+	}
 	m.knStats = msg.knStats
 	m.epics = msg.epics
 	m.decisions = msg.decisions
@@ -409,13 +466,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 		m.viewport.SoftWrap = true
 		m.progress = progress.New(
-			progress.WithColors(accent, lipgloss.Color("#333")),
+			progress.WithColors(aqua, lipgloss.Color("#333")),
 			progress.WithoutPercentage(),
 			progress.WithWidth(min(20, m.width/4)),
 			progress.WithFillCharacters('#', '-'),
 		)
 		m.knList.SetSize(m.width-4, m.contentHeight()-4)
+		// Resize activity table to fit terminal width (proportional columns).
+		{
+			tblW := max(60, m.width-6)
+			targetW := max(16, tblW*25/100)
+			detailW := max(10, tblW-6-12-targetW-8)
+			m.activityTable.SetColumns([]table.Column{
+				{Title: "Time", Width: 6},
+				{Title: "Action", Width: 12},
+				{Title: "Target", Width: targetW},
+				{Title: "Detail", Width: detailW},
+			})
+			m.activityTable.SetWidth(tblW)
+			m.activityTable.SetHeight(min(20, m.contentHeight()-8))
+		}
 		return m, m.loadDataCmd()
+
+	case clipboardMsg:
+		// Clipboard copy completed — flash resets on next key press.
+		return m, nil
 
 	case dataLoadedMsg:
 		m.applyDataLoaded(msg)
@@ -627,12 +702,16 @@ func (m *Model) updateKnowledge(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if item := m.knList.SelectedItem(); item != nil {
 			ki := item.(knowledgeItem)
 			title := extractKnowledgeTitle(ki.entry)
-			content := renderKnowledgeDetail(ki.entry)
+			// Strip the leading "# title" from body to avoid triple repetition
+			// (breadcrumb + overlay title + body heading).
+			rawMD := renderKnowledgeDetailNoTitle(ki.entry)
 			m.openOverlay(
 				title,
-				m.renderMarkdown(content),
-				"Knowledge", ki.entry.Source, title,
+				m.renderMarkdown(rawMD),
+				"Knowledge", ki.entry.Source,
 			)
+			// Store raw markdown with title for clipboard copy.
+			m.overlayRawMD = "# " + title + "\n\n" + rawMD
 		}
 		return m, nil
 	}
@@ -651,6 +730,8 @@ func (m *Model) updateKnowledge(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m *Model) openOverlay(title, content string, crumbs ...string) {
 	m.overlayActive = true
 	m.overlayTitle = title
+	m.overlayRawMD = ""
+	m.overlayCopied = false
 	m.breadcrumbs = crumbs
 
 	// Size the overlay viewport — use 85% of terminal width.
@@ -682,6 +763,9 @@ func (m *Model) updateOverlay(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.updateReviewMode(msg)
 	}
 
+	// Reset "Copied!" flash on any key press.
+	m.overlayCopied = false
+
 	switch {
 	case key.Matches(msg, keys.Back), key.Matches(msg, keys.Quit):
 		m.overlayActive = false
@@ -697,6 +781,11 @@ func (m *Model) updateOverlay(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.enterReviewMode()
 		return m, nil
+	case msg.String() == "c" && m.overlayRawMD != "":
+		// Copy raw markdown to clipboard.
+		cmd := copyToClipboard(m.overlayRawMD)
+		m.overlayCopied = true
+		return m, cmd
 	case msg.String() == "d" && m.activeTab == tabTasks && m.taskLevel > 0 && !m.reviewMode:
 		// Show diff against previous version.
 		m.showSpecDiff()
@@ -752,9 +841,9 @@ func renderUnifiedDiff(old, new string) string {
 	diffs := dmp.DiffMain(old, new, true)
 	diffs = dmp.DiffCleanupSemantic(diffs)
 
-	addStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#8a8"))
-	delStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#c66"))
-	headerStyle := lipgloss.NewStyle().Foreground(secondary)
+	addStyle := lipgloss.NewStyle().Foreground(green)
+	delStyle := lipgloss.NewStyle().Foreground(red)
+	headerStyle := lipgloss.NewStyle().Foreground(aqua)
 
 	var b strings.Builder
 	addedCount, removedCount := 0, 0
@@ -820,10 +909,12 @@ func (m *Model) enterReviewMode() {
 	m.reviewRounds = rounds
 	m.reviewRoundIdx = len(rounds) // new round (beyond existing)
 
-	ti := textinput.New()
-	ti.Placeholder = "comment..."
-	ti.CharLimit = 500
-	m.reviewInput = ti
+	ta := textarea.New()
+	ta.Placeholder = "comment..."
+	ta.CharLimit = 500
+	ta.SetHeight(3)
+	ta.ShowLineNumbers = false
+	m.reviewInput = ta
 
 	m.rebuildReviewOverlay()
 }
@@ -970,9 +1061,10 @@ func (m *Model) carriedComments() map[int]string {
 }
 
 // updateReviewInput handles keys while typing a comment.
+// ctrl+s saves, esc cancels. Enter inserts newlines in the textarea.
 func (m *Model) updateReviewInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "enter":
+	case "ctrl+s":
 		// Save comment.
 		body := strings.TrimSpace(m.reviewInput.Value())
 		if body != "" {
@@ -1042,27 +1134,27 @@ func (m *Model) submitReview(status spec.ReviewStatus) {
 // Review mode styles.
 var (
 	reviewCursorStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#3a2520")).
-				Foreground(lipgloss.Color("#f0ddd0"))
+				Background(lipgloss.Color("#2e3430")).
+				Foreground(fgWarm)
 
 	reviewLineNumStyle = lipgloss.NewStyle().
-				Foreground(warmDim)
+				Foreground(gray)
 
 	reviewLineNumCursorStyle = lipgloss.NewStyle().
-					Background(lipgloss.Color("#3a2520")).
-					Foreground(accent).
+					Background(lipgloss.Color("#2e3430")).
+					Foreground(aqua).
 					Bold(true)
 
 	reviewCommentMarker = lipgloss.NewStyle().
-				Foreground(highlight).
+				Foreground(gold).
 				Bold(true)
 
 	reviewCommentStyle = lipgloss.NewStyle().
-				Foreground(highlight)
+				Foreground(gold)
 
 	reviewInputBorder = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(highlight).
+				BorderForeground(gold).
 				Padding(0, 1).
 				MarginTop(1)
 )
@@ -1188,51 +1280,45 @@ func (m Model) renderOverlayView(bg string) string {
 	}
 	h := m.height - 4
 
-	// Breadcrumb header.
-	var crumbLine string
-	for i, c := range m.breadcrumbs {
-		if i == len(m.breadcrumbs)-1 {
-			crumbLine += breadcrumbActiveStyle.Render(c)
-		} else {
-			crumbLine += breadcrumbStyle.Render(c+" > ")
-		}
-	}
+	// Title bar only — no breadcrumb.
+	titleBar := "  " + overlayTitleStyle.Render(m.overlayTitle) + "\n"
 
-	// Title bar.
-	titleBar := overlayTitleStyle.Render(m.overlayTitle)
-	hint := dimStyle.Render("esc: close  j/k: scroll")
+	// Viewport content.
+	content := titleBar + m.overlayVP.View()
+
+	// Footer: hints + scroll position.
+	hint := "esc: close  j/k: scroll"
+	if m.overlayRawMD != "" {
+		hint += "  c: copy"
+	}
 	if m.activeTab == tabTasks && m.taskLevel > 0 && !m.reviewMode {
-		// Show review hint only when task has pending review.
 		isPending := false
 		if m.specGroupCursor < len(m.specGroups) {
 			slug := m.specGroups[m.specGroupCursor].Slug
 			isPending = spec.ReviewStatusFor(m.ds.ProjectPath(), slug) == spec.ReviewPending
 		}
 		if isPending {
-			hint = dimStyle.Render("esc: close  j/k: scroll  r: review  d: diff")
+			hint = "esc: close  j/k: scroll  r: review  d: diff"
 		} else {
-			hint = dimStyle.Render("esc: close  j/k: scroll  d: diff")
+			hint = "esc: close  j/k: scroll  d: diff"
 		}
 	} else if m.reviewMode && !m.reviewEditing {
 		isLatest := m.reviewRoundIdx >= len(m.reviewRounds)
 		if isLatest {
-			hint = dimStyle.Render("esc: back  j/k: move  </>: rounds  c: comment  d: del  a: approve  x: changes")
+			hint = "esc: back  j/k: move  </>: rounds  c: comment  d: del  a: approve  x: changes"
 		} else {
-			hint = dimStyle.Render("esc: back  j/k: scroll  </>: rounds  (read-only)")
+			hint = "esc: back  j/k: scroll  </>: rounds  (read-only)"
 		}
 	} else if m.reviewEditing {
-		hint = dimStyle.Render("enter: save comment  esc: cancel")
+		hint = "ctrl+s: save  esc: cancel"
 	}
-
-	header := "  " + crumbLine + "\n  " + titleBar + "  " + hint + "\n"
-
-	// Viewport content.
-	content := header + m.overlayVP.View()
-
-	// Scrollbar indicator.
 	pct := m.overlayVP.ScrollPercent()
-	scrollInfo := dimStyle.Render(fmt.Sprintf("  %d%%", int(pct*100)))
-	content += "\n" + scrollInfo
+	copiedFlash := ""
+	if m.overlayCopied {
+		copiedFlash = "  " + scoreStyle.Render("Copied!")
+	}
+	footer := dimStyle.Render(fmt.Sprintf("  %s  %d%%", hint, int(pct*100))) + copiedFlash
+	content += "\n" + footer
 
 	// Panel with border.
 	panel := overlayStyle.
@@ -1715,23 +1801,11 @@ func (m Model) activityView() string {
 	b.WriteString("\n")
 	maxW := m.width - 6
 
-	// Timeline section.
-	if len(m.activity) > 0 {
+	// Timeline section — rendered as a table.
+	if len(m.activityTable.Rows()) > 0 {
 		b.WriteString("  " + sectionHeader.Render("Timeline") + "\n")
-		shown := min(20, len(m.activity))
-		for i := range shown {
-			a := m.activity[i]
-			ts := a.Timestamp.Format("15:04")
-			action := dimStyle.Render(formatAuditAction(a.Action))
-			target := truncStr(a.Target, maxW-20)
-			b.WriteString(fmt.Sprintf("  %s  %s  %s\n", dimStyle.Render(ts), action, target))
-			// Show detail on a second line if present (e.g., completion summary).
-			if a.Detail != "" {
-				detail := truncStr(a.Detail, maxW-10)
-				b.WriteString("        " + dimStyle.Render(detail) + "\n")
-			}
-		}
-		b.WriteString("\n")
+		b.WriteString(m.activityTable.View())
+		b.WriteString("\n\n")
 	}
 
 	// Epic progress section.
@@ -1771,7 +1845,7 @@ func (m Model) activityView() string {
 		b.WriteString("\n")
 	}
 
-	// Stats summary.
+	// Stats summary — count from both _active.md tasks and audit timeline.
 	b.WriteString("  " + sectionHeader.Render("Stats") + "\n")
 	activeCount := 0
 	completedCount := 0
@@ -1782,11 +1856,17 @@ func (m Model) activityView() string {
 			activeCount++
 		}
 	}
-	b.WriteString(fmt.Sprintf("  Tasks: %d active, %d completed\n", activeCount, completedCount))
-	if m.knStats.Total > 0 {
-		b.WriteString(fmt.Sprintf("  Knowledge: %d total (%d decisions, %d patterns, %d rules)\n",
-			m.knStats.Total, m.knStats.Decision, m.knStats.Pattern, m.knStats.Rule))
+	// Also count completions from audit timeline (covers tasks already removed from _active.md).
+	auditCompleted := 0
+	for _, a := range m.activity {
+		if a.Action == "spec.complete" {
+			auditCompleted++
+		}
 	}
+	if auditCompleted > completedCount {
+		completedCount = auditCompleted
+	}
+	b.WriteString(fmt.Sprintf("  Tasks: %d active, %d completed\n", activeCount, completedCount))
 
 	if b.Len() < 3 {
 		return "\n" + dimStyle.Render("  no activity yet")
@@ -1820,6 +1900,19 @@ func extractKnowledgeTitle(k KnowledgeEntry) string {
 	return title
 }
 
+// renderKnowledgeDetailNoTitle renders a knowledge entry without the leading
+// heading, since the overlay already shows the title in the header bar.
+func renderKnowledgeDetailNoTitle(k KnowledgeEntry) string {
+	full := renderKnowledgeDetail(k)
+	// Strip leading heading line (any level: #, ##, ###) if present.
+	if strings.HasPrefix(full, "#") {
+		if _, after, found := strings.Cut(full, "\n"); found {
+			return strings.TrimLeft(after, "\n")
+		}
+	}
+	return full
+}
+
 // renderKnowledgeDetail renders a knowledge entry for the overlay,
 // using structured data fields when available.
 func renderKnowledgeDetail(k KnowledgeEntry) string {
@@ -1834,29 +1927,38 @@ func renderKnowledgeDetail(k KnowledgeEntry) string {
 
 	var b strings.Builder
 
+	// writeSection writes a markdown section with proper spacing.
+	// Ensures a blank line between heading and content, and between
+	// prose text and bullet lists within the content.
+	writeSection := func(heading, body string) {
+		b.WriteString("## " + heading + "\n\n")
+		b.WriteString(ensureListSpacing(body))
+		b.WriteString("\n\n")
+	}
+
 	switch k.SubType {
 	case "decision":
 		if v, _ := raw["title"].(string); v != "" {
 			b.WriteString("# " + v + "\n\n")
 		}
 		if v, _ := raw["context"].(string); v != "" {
-			b.WriteString("## Context\n" + v + "\n\n")
+			writeSection("Context", v)
 		}
 		if v, _ := raw["decision"].(string); v != "" {
-			b.WriteString("## Decision\n" + v + "\n\n")
+			writeSection("Decision", v)
 		}
 		if v, _ := raw["reasoning"].(string); v != "" {
-			b.WriteString("## Reasoning\n" + v + "\n\n")
+			writeSection("Reasoning", v)
 		}
 		if alts, ok := raw["alternatives"].([]any); ok && len(alts) > 0 {
-			b.WriteString("## Alternatives\n")
+			b.WriteString("## Alternatives\n\n")
 			for _, a := range alts {
 				b.WriteString("- " + fmt.Sprint(a) + "\n")
 			}
 			b.WriteString("\n")
 		}
 		if v, _ := raw["status"].(string); v != "" {
-			b.WriteString("**Status:** " + v + "\n")
+			b.WriteString("---\n\n**Status:** " + v + "\n")
 		}
 
 	case "pattern":
@@ -1864,19 +1966,19 @@ func renderKnowledgeDetail(k KnowledgeEntry) string {
 			b.WriteString("# " + v + "\n\n")
 		}
 		if v, _ := raw["context"].(string); v != "" {
-			b.WriteString("## Context\n" + v + "\n\n")
+			writeSection("Context", v)
 		}
 		if v, _ := raw["pattern"].(string); v != "" {
-			b.WriteString("## Pattern\n" + v + "\n\n")
+			writeSection("Pattern", v)
 		}
 		if v, _ := raw["applicationConditions"].(string); v != "" {
-			b.WriteString("## When to Apply\n" + v + "\n\n")
+			writeSection("When to Apply", v)
 		}
 		if v, _ := raw["expectedOutcomes"].(string); v != "" {
-			b.WriteString("## Expected Outcomes\n" + v + "\n\n")
+			writeSection("Expected Outcomes", v)
 		}
 		if v, _ := raw["status"].(string); v != "" {
-			b.WriteString("**Status:** " + v + "\n")
+			b.WriteString("---\n\n**Status:** " + v + "\n")
 		}
 
 	case "rule":
@@ -1884,17 +1986,16 @@ func renderKnowledgeDetail(k KnowledgeEntry) string {
 			b.WriteString("# " + v + "\n\n")
 		}
 		if v, _ := raw["category"].(string); v != "" {
-			b.WriteString("**Category:** " + v)
+			b.WriteString("**Category:** " + v + "\n\n")
 		}
 		if v, _ := raw["priority"].(string); v != "" {
-			b.WriteString("  **Priority:** " + v)
+			b.WriteString("**Priority:** " + v + "\n\n")
 		}
-		b.WriteString("\n\n")
 		if v, _ := raw["rationale"].(string); v != "" {
-			b.WriteString("## Rationale\n" + v + "\n\n")
+			writeSection("Rationale", v)
 		}
 		if v, _ := raw["status"].(string); v != "" {
-			b.WriteString("**Status:** " + v + "\n")
+			b.WriteString("---\n\n**Status:** " + v + "\n")
 		}
 
 	default:
@@ -1905,6 +2006,27 @@ func renderKnowledgeDetail(k KnowledgeEntry) string {
 		return k.Content
 	}
 	return b.String()
+}
+
+// ensureListSpacing inserts a blank line before a bullet list
+// that immediately follows a non-blank, non-bullet line.
+// This ensures glamour renders the list as a proper markdown list.
+func ensureListSpacing(s string) string {
+	lines := strings.Split(s, "\n")
+	var out strings.Builder
+	for i, line := range lines {
+		if i > 0 && strings.HasPrefix(line, "- ") {
+			prev := lines[i-1]
+			if prev != "" && !strings.HasPrefix(prev, "- ") {
+				out.WriteByte('\n')
+			}
+		}
+		out.WriteString(line)
+		if i < len(lines)-1 {
+			out.WriteByte('\n')
+		}
+	}
+	return out.String()
 }
 
 // knowledgeTitle extracts a human-readable title from knowledge content.
@@ -1971,6 +2093,19 @@ func visibleRange(cursor, total, visibleH int) (start, end int) {
 		end = total
 	}
 	return start, end
+}
+
+// clipboardMsg is sent after clipboard operation completes.
+type clipboardMsg struct{ err error }
+
+// copyToClipboard copies text to system clipboard via pbcopy (macOS).
+func copyToClipboard(text string) tea.Cmd {
+	return func() tea.Msg {
+		cmd := exec.Command("pbcopy")
+		cmd.Stdin = strings.NewReader(text)
+		err := cmd.Run()
+		return clipboardMsg{err}
+	}
 }
 
 func truncStr(s string, maxLen int) string {

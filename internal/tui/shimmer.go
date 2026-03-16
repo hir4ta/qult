@@ -42,9 +42,9 @@ var shimmerBaseStyle lipgloss.Style
 var shimmerBaseBoldStyle lipgloss.Style
 
 func init() {
-	// Claude shimmer: dark terracotta → warm coral → dark terracotta.
-	baseColor := lipgloss.Color("#4a3530") // muted dark warm
-	peakColor := lipgloss.Color("#e8976b") // warm coral
+	// Orange shimmer: dark warm → soft orange → dark warm.
+	baseColor := lipgloss.Color("#3a3428") // dark warm
+	peakColor := lipgloss.Color("#e69875") // orange
 
 	// Blend1D: base → peak → base (symmetric sweep).
 	shimmerGradient = lipgloss.Blend1D(shimmerBandLen, baseColor, peakColor, baseColor)

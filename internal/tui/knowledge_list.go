@@ -156,12 +156,27 @@ func (m *Model) knowledgeListView() string {
 	var b strings.Builder
 	b.WriteString("\n")
 
-	// Stats header.
-	stats := m.knStats
-	if stats.Total > 0 {
+	// Stats header — count from actual list items for consistency.
+	items := m.knList.Items()
+	if len(items) > 0 {
+		dec, pat, rul, gen := 0, 0, 0, 0
+		for _, it := range items {
+			if ki, ok := it.(knowledgeItem); ok {
+				switch ki.entry.SubType {
+				case "decision":
+					dec++
+				case "pattern":
+					pat++
+				case "rule":
+					rul++
+				default:
+					gen++
+				}
+			}
+		}
 		b.WriteString("  " + sectionHeader.Render("Stats") + "\n")
 		fmt.Fprintf(&b, "  Total: %d  |  decision: %d  pattern: %d  rule: %d  general: %d\n\n",
-			stats.Total, stats.Decision, stats.Pattern, stats.Rule, stats.General)
+			len(items), dec, pat, rul, gen)
 	}
 
 	// List component handles everything: filtering, pagination, cursor.

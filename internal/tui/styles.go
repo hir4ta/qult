@@ -2,133 +2,140 @@ package tui
 
 import "charm.land/lipgloss/v2"
 
-// Claude Code color palette — warm, muted tones inspired by Claude's brand.
+// Color palette — Everforest / Gruvbox inspired.
+// 7 accent colors, each with a single clear role.
+//
+//	aqua    #7fbbb3  — navigation: tabs, overlay border, breadcrumb
+//	orange  #e69875  — content titles, warmth, shimmer
+//	gold    #dbbc7f  — section headers, review comments
+//	green   #a7c080  — success, completion, rules
+//	red     #e67e80  — errors, blockers
+//	purple  #d699b6  — memory, subtle info
+//	blue    #7393b3  — in-progress, pattern, project
+//	gray    #859289  — inactive, dim
 var (
-	// Primary accent — muted terracotta (Claude orange).
-	accent = lipgloss.Color("#da7756")
-	// Darker variant for overlay backgrounds.
-	accentDim = lipgloss.Color("#8a4a35")
+	aqua   = lipgloss.Color("#7fbbb3")
+	orange = lipgloss.Color("#e69875")
+	gold   = lipgloss.Color("#dbbc7f")
+	green  = lipgloss.Color("#a7c080")
+	red    = lipgloss.Color("#e67e80")
+	purple = lipgloss.Color("#d699b6")
+	blue   = lipgloss.Color("#7393b3")
 
-	// Secondary accent — dusty sage/teal (cool complement).
-	secondary = lipgloss.Color("#7c9a92")
-
-	// Tertiary — warm gold/amber for decisions and project context.
-	tertiary = lipgloss.Color("#c49a5c")
-
-	// Highlight — warm coral for shimmer and active items.
-	highlight = lipgloss.Color("#e8976b")
-
-	// Dusty rose — for pattern/info type items.
-	dustyRose = lipgloss.Color("#b07878")
-
-	// Neutrals — warm-tinted grays.
-	warmDim    = lipgloss.Color("#7a7270")
-	warmDimmer = lipgloss.Color("#5a5555")
-	warmDark   = lipgloss.Color("#3a3535")
-	warmLight  = lipgloss.Color("#a09595")
+	gray     = lipgloss.Color("#859289")
+	darkGray = lipgloss.Color("#4a4940")
+	fgWarm   = lipgloss.Color("#d3c6aa")
 )
 
-// Tab styles.
+// ── Navigation layer (aqua) ─────────────────────────────────────────
+
 var (
 	activeTabStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(accent).
+			Foreground(aqua).
 			Underline(true).
 			Padding(0, 2)
 
 	inactiveTabStyle = lipgloss.NewStyle().
-				Foreground(warmDim).
+				Foreground(gray).
 				Padding(0, 2)
 
 	tabBarStyle = lipgloss.NewStyle().
 			BorderBottom(true).
 			BorderStyle(lipgloss.NormalBorder()).
-			BorderForeground(warmDark)
+			BorderForeground(darkGray)
 
 	titleBarStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(accent)
+			Foreground(aqua)
 
 	versionStyle = lipgloss.NewStyle().
-			Foreground(warmDim)
+			Foreground(gray)
 )
 
-// Content styles.
+// ── Content layer ───────────────────────────────────────────────────
+
 var (
+	// Content titles — orange (warm, prominent).
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(accent)
+			Foreground(orange)
 
-	dimStyle = lipgloss.NewStyle().
-			Foreground(warmDim)
-
+	// Section headers — gold (secondary emphasis, distinct from title).
 	sectionHeader = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(secondary)
+			Foreground(gold)
+
+	dimStyle = lipgloss.NewStyle().
+			Foreground(gray)
 
 	blockerStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#c66"))
+			Foreground(red)
 
 	scoreStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#8a8"))
-
-	statusCompleted = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#8a8"))
-
-	statusInProgress = lipgloss.NewStyle().
-				Foreground(highlight)
-
-	statusBlocked = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#c66"))
+			Foreground(green)
 )
 
-// Content panel — subtle border around main content.
+// ── Status (each state = unique color) ──────────────────────────────
+
+var (
+	statusCompleted = lipgloss.NewStyle().
+			Foreground(green)
+
+	statusInProgress = lipgloss.NewStyle().
+				Foreground(blue)
+
+	statusBlocked = lipgloss.NewStyle().
+			Foreground(red)
+)
+
+// ── Panels ──────────────────────────────────────────────────────────
+
 var contentPanelStyle = lipgloss.NewStyle().
 	Border(lipgloss.RoundedBorder()).
-	BorderForeground(warmDark).
+	BorderForeground(darkGray).
 	Padding(0, 1)
 
-// Overlay (floating window) styles.
+// ── Overlay (floating window) ───────────────────────────────────────
+
 var (
 	overlayStyle = lipgloss.NewStyle().
 			Border(lipgloss.DoubleBorder()).
-			BorderForeground(accent).
+			BorderForeground(aqua).
 			Padding(1, 2)
 
 	overlayTitleStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("#fff")).
-				Background(accentDim).
+				Foreground(fgWarm).
+				Background(lipgloss.Color("#3a5a58")).
 				Padding(0, 1)
 
 	overlayDimBg = lipgloss.NewStyle().
-			Foreground(warmDark)
+			Foreground(darkGray)
 
-	breadcrumbStyle = lipgloss.NewStyle().
-			Foreground(warmLight)
-
-	breadcrumbActiveStyle = lipgloss.NewStyle().
-				Foreground(accent).
-				Bold(true)
+	// breadcrumbStyle/breadcrumbActiveStyle removed — overlay no longer uses breadcrumbs.
 )
 
-// Review round navigation style.
+// ── Review ──────────────────────────────────────────────────────────
+
 var reviewRoundStyle = lipgloss.NewStyle().
-	Foreground(accent).
+	Foreground(aqua).
 	Bold(true)
 
-// Carried-over (unresolved) comment from previous rounds — dimmer coral.
+// Carried-over (unresolved) comments — dimmed gold.
 var reviewCarriedStyle = lipgloss.NewStyle().
-	Foreground(lipgloss.Color("#a07058"))
+	Foreground(lipgloss.Color("#9a8a60"))
 
-// Checkbox markers.
+// ── Checkbox ────────────────────────────────────────────────────────
+
 const (
 	checkDone   = "[x]"
 	checkUndone = "[ ]"
 )
 
-// styledStatus returns a styled status string.
+// ── Status formatting ───────────────────────────────────────────────
+
 func styledStatus(status string) string {
 	switch status {
 	case "completed", "done", "implementation-complete":
@@ -142,42 +149,42 @@ func styledStatus(status string) string {
 	}
 }
 
-// sourceStyle returns a styled source type tag.
+// ── Source tags (each source = unique color) ─────────────────────────
+
 func sourceStyle(source string) string {
 	switch source {
 	case "memory":
-		return lipgloss.NewStyle().Foreground(highlight).Render("mem")
+		return lipgloss.NewStyle().Foreground(purple).Render("mem")
 	case "spec":
-		return lipgloss.NewStyle().Foreground(accent).Render("spec")
+		return lipgloss.NewStyle().Foreground(aqua).Render("spec")
 	case "project":
-		return lipgloss.NewStyle().Foreground(tertiary).Render("proj")
+		return lipgloss.NewStyle().Foreground(blue).Render("proj")
 	default:
 		return dimStyle.Render(source)
 	}
 }
 
-// Sub-type styles for knowledge maturity visualization.
+// ── Knowledge sub-types (each type = unique color) ──────────────────
+
 var (
-	subTypeRule     = lipgloss.NewStyle().Foreground(lipgloss.Color("#8a8")).Bold(true)
-	subTypeDecision = lipgloss.NewStyle().Foreground(tertiary)
-	subTypePattern  = lipgloss.NewStyle().Foreground(dustyRose)
-	subTypeGeneral  = lipgloss.NewStyle().Foreground(warmDim)
-	hitCountStyle   = lipgloss.NewStyle().Foreground(warmDimmer)
+	subTypeRule     = lipgloss.NewStyle().Foreground(green).Bold(true)
+	subTypeDecision = lipgloss.NewStyle().Foreground(orange)
+	subTypePattern  = lipgloss.NewStyle().Foreground(aqua)
+	subTypeGeneral  = lipgloss.NewStyle().Foreground(gray)
+	hitCountStyle   = lipgloss.NewStyle().Foreground(darkGray)
 )
 
-// styledKnowledgeStatus returns a styled status badge for structured knowledge.
 func styledKnowledgeStatus(status string) string {
 	switch status {
 	case "approved":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#8a8")).Render("[approved]")
+		return lipgloss.NewStyle().Foreground(green).Render("[approved]")
 	case "rejected":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#c66")).Render("[rejected]")
+		return lipgloss.NewStyle().Foreground(red).Render("[rejected]")
 	default:
 		return ""
 	}
 }
 
-// styledSubType returns a styled sub_type abbreviation.
 func styledSubType(subType string) string {
 	switch subType {
 	case "rule":
