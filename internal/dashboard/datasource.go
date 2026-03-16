@@ -474,7 +474,13 @@ func (ds *fileDataSource) MemoryHealth() MemoryHealthStats {
 	if time.Since(ds.conflictAt) > 60*time.Second {
 		conflicts, err := ds.st.DetectConflicts(ctx, 0.70)
 		if err == nil {
-			ds.conflictCount = len(conflicts)
+			count := 0
+			for _, c := range conflicts {
+				if c.Type == "potential_contradiction" {
+					count++
+				}
+			}
+			ds.conflictCount = count
 		}
 		ds.conflictAt = time.Now()
 	}
