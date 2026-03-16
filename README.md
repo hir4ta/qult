@@ -36,7 +36,7 @@ alfred fixes all three.
 
 **Proactive skill suggestions.** alfred doesn't wait to be asked. It detects what you're doing — researching, designing, implementing, fixing bugs — and suggests the right skill at the right time. Explored code for a while? "Try `/alfred:survey`." Got research findings? "Save them with `ledger`." Three tasks piling up? "Group them with `roster`."
 
-**Approval gates that can't be bypassed.** Specs go through a review cycle before implementation. Comment on any line in the TUI dashboard, approve or request changes — like a GitHub PR review, but for your specs. The gate verifies both the review status *and* the existence of a signed review file, so manually editing the status won't get you past it.
+**Approval gates that can't be bypassed.** Specs go through a review cycle before implementation. Comment on any line in the browser dashboard, approve or request changes — like a GitHub PR review, but for your specs. The gate verifies both the review status *and* the existence of a signed review file, so manually editing the status won't get you past it.
 
 **Project context that sticks.** Steering documents (product purpose, code structure, tech stack) are auto-generated from your project and injected into every spec. Your AI always knows your architecture.
 
@@ -91,22 +91,26 @@ Run automatically. You don't touch these.
 | UserPromptSubmit | Semantic search + file context boost + **skill nudge** (detects intent → suggests the right skill) |
 | PostToolUse | Detects Bash errors + searches memory for similar past fixes. After commits: spec drift detection. After 5+ Read/Grep: suggests `/alfred:survey` |
 
-## TUI dashboard
+## Browser dashboard
 
 ```bash
-alfred dashboard
+alfred dashboard              # opens browser at localhost:7575
+alfred dashboard --port 8080  # custom port
+alfred dashboard --url-only   # print URL only
 ```
 
 | Tab | What you see |
 |-----|-------------|
 | **Overview** | Project health at a glance — task progress with validation badges, memory health (stale count, conflicts), confidence distribution across specs, epic progress, recent decisions |
-| **Tasks** | Enriched task cards: current focus, next action, epic context, validation status. Drill into spec files with rich summaries |
-| **Knowledge** | Browse all memories with sub-type tags. `Ctrl+F` for instant local filter, `Ctrl+S` for Voyage AI semantic search with relevance scores. Toggle any memory on/off with `Space` |
-| **Activity** | Timeline of all operations. Press `f` to cycle filters (init/complete/review). Epic drill-down jumps straight to the task |
+| **Tasks** | Enriched task cards: current focus, next action, epic context, validation status. Drill into spec files. Switch to Review tab for inline comments |
+| **Knowledge** | Browse all memories with sub-type tags. Semantic search (Voyage AI) with 300ms debounce. Local text filter. Toggle any memory on/off |
+| **Activity** | Timeline of all operations. Filter by event type (init/complete/review). Epic drill-down with task status badges |
 
-Inline review mode: press `r` on any spec file to get a line-numbered view. Comment on specific lines, navigate between review rounds, approve or request changes — all without leaving the terminal.
+Inline review mode: click any spec file, switch to Review tab. Comment on specific lines, navigate review rounds, approve or request changes — all in the browser.
 
 The first unchecked task shimmers. You know exactly what's in progress.
+
+For development: `ALFRED_DEV=1 alfred dashboard` + `task dev` enables Vite HMR.
 
 ## Search pipeline
 

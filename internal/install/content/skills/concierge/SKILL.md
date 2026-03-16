@@ -120,4 +120,4 @@ alfred operates on three layers:
    and auto-syncs epic progress
 2. **MCP Tools** (on-demand): dossier for spec management, roster for epic management,
    ledger for memory, knowledge for Claude Code best practices, config-review for setup auditing
-3. **TUI Dashboard** (`alfred dashboard`): real-time view of epics, tasks, specs, and memories
+3. **Browser Dashboard** (`alfred dashboard`): real-time view of epics, tasks, specs, and memories

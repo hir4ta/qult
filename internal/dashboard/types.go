@@ -1,5 +1,5 @@
 // Package dashboard provides the DataSource interface and types shared between
-// the HTTP API server and the TUI dashboard.
+// the HTTP API server and the browser dashboard.
 package dashboard
 
 import (

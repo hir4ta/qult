@@ -4,7 +4,7 @@ These rules apply when executing /alfred:attend or any spec-driven workflow.
 
 ## Spec Approval
 
-- Spec approval MUST happen through `alfred dashboard` (TUI review mode)
+- Spec approval MUST happen through `alfred dashboard` (browser review mode)
 - Text-based approval ("承認します", "approved", etc.) is NOT valid
 - The approval gate verifies both _active.md review_status AND review JSON file existence
 - Do NOT manually edit _active.md to set review_status — this will be rejected

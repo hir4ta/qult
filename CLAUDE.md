@@ -15,7 +15,7 @@ Go 1.25 / SQLite (ncruces/go-sqlite3) / Voyage AI (embedding) / React SPA (Vite 
 | `internal/embedder` | Voyage AI (voyage-4-large, vector search + rerank-2.5) |
 | `internal/spec` | Spec management: .alfred/specs/ (8 file types: requirements, design, tasks, test-specs, decisions, research, session, bugfix) + Size-based scaling (S/M/L/XL) + SpecType (feature/bugfix) + Validate checker + Steering docs: .alfred/steering/ (3 files: product, structure, tech) |
 | `internal/epic` | Epic management: .alfred/epics/ (YAML-based task grouping + dependencies) |
-| `internal/dashboard` | Dashboard types: DataSource interface + shared types (extracted from former TUI) |
+| `internal/dashboard` | Dashboard types: DataSource interface + shared types |
 | `internal/api` | HTTP API server: chi router, REST handlers, SSE broadcast hub, SPA serving |
 | `web/` | React SPA: Vite 8, TanStack Router/Query, shadcn/ui, Tailwind CSS v4, Biome |
 | `internal/install` | Plugin bundle + user rules |
@@ -147,7 +147,7 @@ alfred steering-init          # Generate project steering docs (.alfred/steering
 - Knowledge tab: DB-first (ListRecentMemories), file fallback (.alfred/knowledge/)
 - Activity tab: shows audit detail (completion summary: files modified, decisions saved)
 - Memory governance: `enabled` column + `valid_until`/`superseded_by` (DB schema V7); disabled/expired/superseded memories excluded from all search pipelines (vector, FTS5, keyword, fuzzy)
-- TUI Knowledge tab: space key toggles enabled/disabled; [x]/[ ] indicator; disabled entries dimmed
+- Knowledge tab: toggle enabled/disabled via API (PATCH /api/knowledge/{id}/enabled)
 - `alfred export` removed — all knowledge auto-saved via spec complete + hooks
 
 ### Spec Review & Approval Gate
@@ -155,7 +155,7 @@ alfred steering-init          # Generate project steering docs (.alfred/steering
 - Review data: .alfred/specs/{slug}/reviews/review-{timestamp}.json
 - ReviewComment: file, line (1-based), body, resolved
 - Review status: pending → approved or changes_requested (stored in _active.md review_status)
-- TUI review mode: Specs tab → overlay → 'r' key (only when review_status=pending)
+- Web review mode: Tasks tab → View/Review tabs (only when review_status=pending)
 - dossier action=review: read-only, returns latest review + unresolved comments
 - brief Step 9: approval gate after spec creation
 - attend Phase 2.5: approval gate after agent review, awaiting_approval flag in Orchestrator State
@@ -243,7 +243,7 @@ alfred steering-init          # Generate project steering docs (.alfred/steering
 
 - At each meaningful implementation milestone, perform **thorough self-review from multiple perspectives** (delegate to another agent if possible)
 - After self-review, update README.md / README.ja.md / CLAUDE.md to reflect changes
-- Maintain test coverage at **50% or above** (`go test -cover ./...`; TUI packages and hook handlers may be excluded)
+- Maintain test coverage at **50% or above** (`go test -cover ./...`; hook handlers may be excluded)
 
 ## Compact Instructions
 

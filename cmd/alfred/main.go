@@ -196,7 +196,7 @@ func printUsage() {
 	fmt.Println(`alfred - Your silent butler for Claude Code
 
 Usage:
-  alfred dashboard  Open TUI dashboard (alias: dash)
+  alfred dashboard  Open browser dashboard (alias: dash)
   alfred serve      Start MCP server (called by Claude Code plugin)
   alfred hook       Handle hook events (called by Claude Code)
   alfred search-eval  Run search quality benchmark (.alfred/search-eval.yaml)

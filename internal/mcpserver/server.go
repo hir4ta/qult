@@ -43,7 +43,7 @@ task_slug format: lowercase alphanumeric with hyphens (e.g. "my-feature", max 64
 "status"/"history"/"review"/"validate" are read-only. "init"/"update"/"switch"/"complete"/"delete"/"rollback" modify state.
 Lifecycle: active → complete (preserves files) or delete (removes files).
 Size-based scaling: init accepts size (S/M/L/XL) and spec_type (feature/bugfix). S=3 files, M=4-5 files, L/XL=7 files.
-Review: TUI dashboard で承認/コメント → dossier action=review で確認.`),
+Review: alfred dashboard で承認/コメント → dossier action=review で確認.`),
 				mcp.WithTitleAnnotation("Dossier — Spec Management"),
 				mcp.WithReadOnlyHintAnnotation(false),
 				mcp.WithIdempotentHintAnnotation(false),
