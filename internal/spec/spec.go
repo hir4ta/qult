@@ -29,6 +29,25 @@ const (
 	FileDecisions    SpecFile = "decisions.md"
 	FileResearch     SpecFile = "research.md"
 	FileSession      SpecFile = "session.md"
+	FileBugfix       SpecFile = "bugfix.md"
+)
+
+// SpecSize controls how many spec files are generated.
+type SpecSize string
+
+const (
+	SizeS  SpecSize = "S"
+	SizeM  SpecSize = "M"
+	SizeL  SpecSize = "L"
+	SizeXL SpecSize = "XL"
+)
+
+// SpecType controls which primary template is used.
+type SpecType string
+
+const (
+	TypeFeature SpecType = "feature"
+	TypeBugfix  SpecType = "bugfix"
 )
 
 // AllFiles lists all spec file types (v2: 7 files).
@@ -48,6 +67,93 @@ var CoreFiles = []SpecFile{
 	FileDesign,
 	FileDecisions,
 	FileSession,
+}
+
+// SmallFiles lists the 3 files generated for S-sized feature specs.
+var SmallFiles = []SpecFile{
+	FileRequirements,
+	FileTasks,
+	FileSession,
+}
+
+// MediumFiles lists the 5 files generated for M-sized feature specs.
+var MediumFiles = []SpecFile{
+	FileRequirements,
+	FileDesign,
+	FileTasks,
+	FileTestSpecs,
+	FileSession,
+}
+
+// ParseSize validates and returns a SpecSize from a string.
+func ParseSize(s string) (SpecSize, error) {
+	switch strings.ToUpper(s) {
+	case "S":
+		return SizeS, nil
+	case "M":
+		return SizeM, nil
+	case "L":
+		return SizeL, nil
+	case "XL":
+		return SizeXL, nil
+	default:
+		return "", fmt.Errorf("invalid spec size %q (valid: S, M, L, XL)", s)
+	}
+}
+
+// ParseSpecType validates and returns a SpecType from a string.
+func ParseSpecType(s string) (SpecType, error) {
+	switch strings.ToLower(s) {
+	case "feature", "":
+		return TypeFeature, nil
+	case "bugfix":
+		return TypeBugfix, nil
+	default:
+		return "", fmt.Errorf("invalid spec type %q (valid: feature, bugfix)", s)
+	}
+}
+
+// DetectSize auto-detects spec size from description length.
+func DetectSize(description string) SpecSize {
+	n := len([]rune(description))
+	switch {
+	case n < 100:
+		return SizeS
+	case n < 300:
+		return SizeM
+	default:
+		return SizeL
+	}
+}
+
+// FilesForSize returns the file list for a given size and spec type combination.
+// Size controls file count; type controls which primary file is used
+// (requirements.md for feature, bugfix.md for bugfix).
+func FilesForSize(size SpecSize, specType SpecType) []SpecFile {
+	primary := FileRequirements
+	if specType == TypeBugfix {
+		primary = FileBugfix
+	}
+
+	switch size {
+	case SizeS:
+		return []SpecFile{primary, FileTasks, FileSession}
+	case SizeM:
+		if specType == TypeBugfix {
+			return []SpecFile{primary, FileTasks, FileTestSpecs, FileSession}
+		}
+		return []SpecFile{primary, FileDesign, FileTasks, FileTestSpecs, FileSession}
+	default: // L, XL
+		return []SpecFile{
+			primary,
+			FileDesign,
+			FileTasks,
+			FileTestSpecs,
+			FileDecisions,
+			FileResearch,
+			FileSession,
+		}
+	}
 }
 
 // SpecDir represents a task's spec directory.
@@ -76,6 +182,24 @@ type ActiveTask struct {
 	Status       string       `yaml:"status,omitempty"`        // "active" (default), "completed"
 	CompletedAt  string       `yaml:"completed_at,omitempty"`  // RFC3339
 	ReviewStatus ReviewStatus `yaml:"review_status,omitempty"` // pending, approved, changes_requested
+	Size         SpecSize     `yaml:"size,omitempty"`           // S, M, L, XL (default: L for backward compat)
+	TaskSpecType SpecType     `yaml:"spec_type,omitempty"`      // feature, bugfix (default: feature)
+}
+
+// EffectiveSize returns the task's size, defaulting to L for backward compatibility.
+func (t ActiveTask) EffectiveSize() SpecSize {
+	if t.Size == "" {
+		return SizeL
+	}
+	return t.Size
+}
+
+// EffectiveSpecType returns the task's spec type, defaulting to feature.
+func (t ActiveTask) EffectiveSpecType() SpecType {
+	if t.TaskSpecType == "" {
+		return TypeFeature
+	}
+	return t.TaskSpecType
 }
 
 // ActiveState represents the YAML content of _active.md.
@@ -115,10 +239,46 @@ func (s *SpecDir) Exists() bool {
 	return err == nil && info.IsDir()
 }
 
+// initConfig holds the resolved options for Init.
+type initConfig struct {
+	size     SpecSize
+	specType SpecType
+	autoSize bool // true when size is auto-detected
+}
+
+// InitOption configures Init behavior.
+type InitOption func(*initConfig)
+
+// WithSize sets the spec size explicitly.
+func WithSize(size SpecSize) InitOption {
+	return func(c *initConfig) {
+		c.size = size
+		c.autoSize = false
+	}
+}
+
+// WithSpecType sets the spec type (feature or bugfix).
+func WithSpecType(specType SpecType) InitOption {
+	return func(c *initConfig) {
+		c.specType = specType
+	}
+}
+
 // Init creates a new spec directory with template files and sets _active.md.
-func Init(projectPath, taskSlug, description string) (*SpecDir, error) {
+func Init(projectPath, taskSlug, description string, opts ...InitOption) (*SpecDir, error) {
 	if !ValidSlug.MatchString(taskSlug) {
 		return nil, fmt.Errorf("invalid task_slug %q: must be lowercase alphanumeric with hyphens (e.g., 'add-auth')", taskSlug)
+	}
+
+	cfg := initConfig{
+		specType: TypeFeature,
+		autoSize: true,
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if cfg.autoSize {
+		cfg.size = DetectSize(description)
 	}
 
 	sd := &SpecDir{ProjectPath: projectPath, TaskSlug: taskSlug}
@@ -136,14 +296,16 @@ func Init(projectPath, taskSlug, description string) (*SpecDir, error) {
 		TaskSlug:    taskSlug,
 		Description: description,
 		Date:        time.Now().UTC().Format("2006-01-02"),
+		SpecType:    string(cfg.specType),
 	}
-	rendered, err := RenderAll(data)
+	rendered, err := RenderForSize(cfg.size, cfg.specType, data)
 	if err != nil {
 		os.RemoveAll(sd.Dir()) // clean up partial init
 		return nil, fmt.Errorf("render templates: %w", err)
 	}
 
-	for _, f := range AllFiles {
+	files := FilesForSize(cfg.size, cfg.specType)
+	for _, f := range files {
 		content := rendered[f]
 		if err := os.WriteFile(sd.FilePath(f), []byte(content), 0o644); err != nil {
 			os.RemoveAll(sd.Dir()) // clean up partial init
@@ -167,13 +329,52 @@ func Init(projectPath, taskSlug, description string) (*SpecDir, error) {
 		}
 	}
 	if !alreadyListed {
-		state.Tasks = append(state.Tasks, ActiveTask{Slug: taskSlug, StartedAt: now})
+		state.Tasks = append(state.Tasks, ActiveTask{
+			Slug:         taskSlug,
+			StartedAt:    now,
+			Size:         cfg.size,
+			TaskSpecType: cfg.specType,
+		})
 	}
 	if err := writeActiveState(projectPath, state); err != nil {
 		return nil, err
 	}
 
 	return sd, nil
+}
+
+// InitResult holds metadata about a completed Init.
+type InitResult struct {
+	SpecDir  *SpecDir
+	Size     SpecSize
+	SpecType SpecType
+	Files    []SpecFile
+}
+
+// InitWithResult creates a new spec and returns full metadata.
+func InitWithResult(projectPath, taskSlug, description string, opts ...InitOption) (*InitResult, error) {
+	cfg := initConfig{
+		specType: TypeFeature,
+		autoSize: true,
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if cfg.autoSize {
+		cfg.size = DetectSize(description)
+	}
+
+	sd, err := Init(projectPath, taskSlug, description, WithSize(cfg.size), WithSpecType(cfg.specType))
+	if err != nil {
+		return nil, err
+	}
+
+	return &InitResult{
+		SpecDir:  sd,
+		Size:     cfg.size,
+		SpecType: cfg.specType,
+		Files:    FilesForSize(cfg.size, cfg.specType),
+	}, nil
 }
 
 // ReadFile reads the content of a spec file.
@@ -495,12 +696,16 @@ func RemoveTask(projectPath, taskSlug string) (bool, error) {
 	return false, writeActiveState(projectPath, state)
 }
 
+// allKnownFiles lists all spec files including bugfix.md for AllSections scanning.
+var allKnownFiles = append(append([]SpecFile{}, AllFiles...), FileBugfix)
+
 // AllSections returns all existing spec files as Sections with content and URL.
 // Files that don't exist (e.g., new v2 files in a legacy 4-file spec) are skipped.
+// Also checks bugfix.md for bugfix-type specs.
 func (s *SpecDir) AllSections() ([]Section, error) {
 	projectBase := filepath.Base(s.ProjectPath)
 	var sections []Section
-	for _, f := range AllFiles {
+	for _, f := range allKnownFiles {
 		content, err := s.ReadFile(f)
 		if err != nil {
 			if os.IsNotExist(err) {

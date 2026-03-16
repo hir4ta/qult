@@ -10,7 +10,7 @@ import (
 
 func TestInitCreatesAllFiles(t *testing.T) {
 	tmp := t.TempDir()
-	sd, err := Init(tmp, "add-auth", "Add authentication support")
+	sd, err := Init(tmp, "add-auth", "Add authentication support", WithSize(SizeL))
 	if err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestInitCreatesAllFiles(t *testing.T) {
 
 func TestAppendFile(t *testing.T) {
 	tmp := t.TempDir()
-	sd, err := Init(tmp, "test-task", "Test task")
+	sd, err := Init(tmp, "test-task", "Test task", WithSize(SizeL))
 	if err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestAppendFile(t *testing.T) {
 
 func TestAllSections(t *testing.T) {
 	tmp := t.TempDir()
-	sd, err := Init(tmp, "my-feature", "A cool feature")
+	sd, err := Init(tmp, "my-feature", "A cool feature", WithSize(SizeL))
 	if err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestTemplatesSubstitution(t *testing.T) {
 func TestInit7Files(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()
-	sd, err := Init(tmp, "seven-files", "Test all 7 files")
+	sd, err := Init(tmp, "seven-files", "Test all 7 files", WithSize(SizeL))
 	if err != nil {
 		t.Fatalf("Init() = error %v", err)
 	}
@@ -476,6 +476,222 @@ func TestRemoveTaskNotFound(t *testing.T) {
 	_, err := RemoveTask(tmp, "not-found")
 	if err == nil {
 		t.Error("RemoveTask should fail for non-existent task")
+	}
+}
+
+func TestFilesForSize(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		size     SpecSize
+		specType SpecType
+		wantLen  int
+		wantHas  SpecFile
+		wantNot  SpecFile
+	}{
+		{"feature+S", SizeS, TypeFeature, 3, FileRequirements, FileDesign},
+		{"feature+M", SizeM, TypeFeature, 5, FileDesign, FileDecisions},
+		{"feature+L", SizeL, TypeFeature, 7, FileResearch, ""},
+		{"feature+XL", SizeXL, TypeFeature, 7, FileDecisions, ""},
+		{"bugfix+S", SizeS, TypeBugfix, 3, FileBugfix, FileRequirements},
+		{"bugfix+M", SizeM, TypeBugfix, 4, FileTestSpecs, FileDesign},
+		{"bugfix+L", SizeL, TypeBugfix, 7, FileBugfix, FileRequirements},
+		{"bugfix+XL", SizeXL, TypeBugfix, 7, FileBugfix, FileRequirements},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			files := FilesForSize(tc.size, tc.specType)
+			if len(files) != tc.wantLen {
+				t.Errorf("FilesForSize(%s, %s) = %d files, want %d", tc.size, tc.specType, len(files), tc.wantLen)
+			}
+			if tc.wantHas != "" {
+				found := false
+				for _, f := range files {
+					if f == tc.wantHas {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("FilesForSize(%s, %s) missing %s", tc.size, tc.specType, tc.wantHas)
+				}
+			}
+			if tc.wantNot != "" {
+				for _, f := range files {
+					if f == tc.wantNot {
+						t.Errorf("FilesForSize(%s, %s) should not contain %s", tc.size, tc.specType, tc.wantNot)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestParseSize(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		input string
+		want  SpecSize
+		ok    bool
+	}{
+		{"S", SizeS, true},
+		{"s", SizeS, true},
+		{"M", SizeM, true},
+		{"L", SizeL, true},
+		{"XL", SizeXL, true},
+		{"xl", SizeXL, true},
+		{"bugfix", "", false},
+		{"XXL", "", false},
+		{"", "", false},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			t.Parallel()
+			got, err := ParseSize(tc.input)
+			if tc.ok && err != nil {
+				t.Errorf("ParseSize(%q) = error %v, want %s", tc.input, err, tc.want)
+			}
+			if !tc.ok && err == nil {
+				t.Errorf("ParseSize(%q) = %s, want error", tc.input, got)
+			}
+			if tc.ok && got != tc.want {
+				t.Errorf("ParseSize(%q) = %s, want %s", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseSpecType(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		input string
+		want  SpecType
+		ok    bool
+	}{
+		{"feature", TypeFeature, true},
+		{"bugfix", TypeBugfix, true},
+		{"", TypeFeature, true},
+		{"hotfix", "", false},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			t.Parallel()
+			got, err := ParseSpecType(tc.input)
+			if tc.ok && err != nil {
+				t.Errorf("ParseSpecType(%q) = error %v", tc.input, err)
+			}
+			if !tc.ok && err == nil {
+				t.Errorf("ParseSpecType(%q) = %s, want error", tc.input, got)
+			}
+			if tc.ok && got != tc.want {
+				t.Errorf("ParseSpecType(%q) = %s, want %s", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDetectSize(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		desc string
+		want SpecSize
+	}{
+		{"short", "fix typo", SizeS},
+		{"99_chars", strings.Repeat("a", 99), SizeS},
+		{"100_chars", strings.Repeat("a", 100), SizeM},
+		{"medium", strings.Repeat("a", 200), SizeM},
+		{"299_chars", strings.Repeat("a", 299), SizeM},
+		{"300_chars", strings.Repeat("a", 300), SizeL},
+		{"long", strings.Repeat("a", 500), SizeL},
+		{"empty", "", SizeS},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := DetectSize(tc.desc)
+			if got != tc.want {
+				t.Errorf("DetectSize(%d chars) = %s, want %s", len(tc.desc), got, tc.want)
+			}
+		})
+	}
+}
+
+func TestActiveTaskSizeBackwardCompat(t *testing.T) {
+	t.Parallel()
+	// Unmarshal legacy _active.md without size/spec_type fields.
+	tmp := t.TempDir()
+	os.MkdirAll(SpecsDir(tmp), 0o755)
+	legacy := "primary: old-task\ntasks:\n  - slug: old-task\n    started_at: \"2026-01-01T00:00:00Z\"\n"
+	os.WriteFile(ActivePath(tmp), []byte(legacy), 0o644)
+
+	state, err := ReadActiveState(tmp)
+	if err != nil {
+		t.Fatalf("ReadActiveState: %v", err)
+	}
+	task := state.Tasks[0]
+	if task.EffectiveSize() != SizeL {
+		t.Errorf("EffectiveSize() = %s, want L (default)", task.EffectiveSize())
+	}
+	if task.EffectiveSpecType() != TypeFeature {
+		t.Errorf("EffectiveSpecType() = %s, want feature (default)", task.EffectiveSpecType())
+	}
+}
+
+func TestInitWithSizeOptions(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		size     SpecSize
+		specType SpecType
+		wantLen  int
+	}{
+		{"s-feature", SizeS, TypeFeature, 3},
+		{"m-feature", SizeM, TypeFeature, 5},
+		{"l-feature", SizeL, TypeFeature, 7},
+		{"s-bugfix", SizeS, TypeBugfix, 3},
+		{"m-bugfix", SizeM, TypeBugfix, 4},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tmp := t.TempDir()
+			sd, err := Init(tmp, tc.name, "test", WithSize(tc.size), WithSpecType(tc.specType))
+			if err != nil {
+				t.Fatalf("Init: %v", err)
+			}
+			// Count created files.
+			files := FilesForSize(tc.size, tc.specType)
+			for _, f := range files {
+				if _, err := os.Stat(sd.FilePath(f)); err != nil {
+					t.Errorf("expected file %s to exist", f)
+				}
+			}
+			// Verify size/spec_type persisted.
+			state, err := ReadActiveState(tmp)
+			if err != nil {
+				t.Fatalf("ReadActiveState: %v", err)
+			}
+			task := state.Tasks[0]
+			if task.Size != tc.size {
+				t.Errorf("persisted Size = %s, want %s", task.Size, tc.size)
+			}
+			if task.TaskSpecType != tc.specType {
+				t.Errorf("persisted SpecType = %s, want %s", task.TaskSpecType, tc.specType)
+			}
+		})
+	}
+}
+
+func TestInitAutoDetectsSize(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	_, err := Init(tmp, "small-task", "fix typo")
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	state, _ := ReadActiveState(tmp)
+	if state.Tasks[0].Size != SizeS {
+		t.Errorf("auto-detected Size = %s, want S for short description", state.Tasks[0].Size)
 	}
 }
 

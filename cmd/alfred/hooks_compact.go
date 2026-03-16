@@ -215,10 +215,19 @@ func emitCompactionInstructions(sd *spec.SpecDir, taskSlug string) {
 	buf.WriteString(fmt.Sprintf("[Alfred Protocol] Active task: %s\n", taskSlug))
 	buf.WriteString("Preserve the following during compaction:\n")
 
-	if req, err := sd.ReadFile(spec.FileRequirements); err == nil {
+	// Read primary file: bugfix.md for bugfix specs, requirements.md otherwise.
+	primaryFile := spec.FileRequirements
+	if bugfix, err := sd.ReadFile(spec.FileBugfix); err == nil && bugfix != "" {
+		primaryFile = spec.FileBugfix
+	}
+	if req, err := sd.ReadFile(primaryFile); err == nil {
+		label := "Requirements"
+		if primaryFile == spec.FileBugfix {
+			label = "Bugfix"
+		}
 		summary := extractFirstLines(req, 3)
 		if summary != "" {
-			buf.WriteString("Requirements: " + summary + "\n")
+			buf.WriteString(label + ": " + summary + "\n")
 		}
 	}
 	if design, err := sd.ReadFile(spec.FileDesign); err == nil {

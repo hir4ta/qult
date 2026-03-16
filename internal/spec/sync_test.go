@@ -17,12 +17,12 @@ func TestSyncToDB(t *testing.T) {
 	}
 	defer st.Close()
 
-	sd, err := Init(projectDir, "sync-test", "Test sync")
+	sd, err := Init(projectDir, "sync-test", "Test sync", WithSize(SizeL))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// First sync: all upserted
+	// First sync: all upserted (7 feature files)
 	result, err := SyncToDB(context.Background(), sd, st, nil)
 	if err != nil {
 		t.Fatal(err)

@@ -49,12 +49,13 @@ func validateProjectPath(raw string) (string, *mcp.CallToolResult) {
 }
 
 // validSpecFiles maps allowed file name strings to spec.SpecFile constants.
-// Derived from spec.AllFiles to stay in sync automatically.
+// Derived from spec.AllFiles plus bugfix.md to stay in sync automatically.
 var validSpecFiles = func() map[string]spec.SpecFile {
-	m := make(map[string]spec.SpecFile, len(spec.AllFiles))
+	m := make(map[string]spec.SpecFile, len(spec.AllFiles)+1)
 	for _, f := range spec.AllFiles {
 		m[string(f)] = f
 	}
+	m[string(spec.FileBugfix)] = spec.FileBugfix
 	return m
 }()
 
@@ -73,7 +74,7 @@ func specHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandlerFunc
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		action := req.GetString("action", "")
 		if action == "" {
-			return mcp.NewToolResultError("action is required (init, update, status, switch, complete, delete, history, rollback)"), nil
+			return mcp.NewToolResultError("action is required (init, update, status, switch, complete, delete, history, rollback, validate)"), nil
 		}
 
 		switch action {
@@ -95,8 +96,10 @@ func specHandler(st *store.Store, emb *embedder.Embedder) server.ToolHandlerFunc
 			return specDoRollback(req)
 		case "review":
 			return specDoReview(req)
+		case "validate":
+			return specDoValidate(req)
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("unknown action: %s (valid: init, update, status, switch, complete, delete, history, rollback, review)", action)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("unknown action: %s (valid: init, update, status, switch, complete, delete, history, rollback, review, validate)", action)), nil
 		}
 	}
 }
@@ -112,16 +115,38 @@ func specDoInit(ctx context.Context, req mcp.CallToolRequest, st *store.Store, e
 	}
 	description := req.GetString("description", "")
 
-	sd, err := spec.Init(projectPath, taskSlug, description)
+	// Parse size and spec_type options.
+	var opts []spec.InitOption
+	sizeStr := req.GetString("size", "")
+	if sizeStr != "" {
+		size, err := spec.ParseSize(sizeStr)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid size: %v", err)), nil
+		}
+		opts = append(opts, spec.WithSize(size))
+	}
+	specTypeStr := req.GetString("spec_type", "")
+	if specTypeStr != "" {
+		specType, err := spec.ParseSpecType(specTypeStr)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid spec_type: %v", err)), nil
+		}
+		opts = append(opts, spec.WithSpecType(specType))
+	}
+
+	initResult, err := spec.InitWithResult(projectPath, taskSlug, description, opts...)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("init failed: %v", err)), nil
 	}
+	sd := initResult.SpecDir
 	spec.AppendAudit(projectPath, spec.AuditEntry{Action: "spec.init", Target: taskSlug, Detail: description, User: "mcp"})
 
 	result := map[string]any{
 		"task_slug":   taskSlug,
 		"spec_dir":    sd.Dir(),
-		"files":       spec.AllFiles,
+		"size":        string(initResult.Size),
+		"spec_type":   string(initResult.SpecType),
+		"files":       initResult.Files,
 		"db_synced":   false,
 		"db_embedded": false,
 	}
@@ -422,7 +447,7 @@ func specDoStatus(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		"spec_dir":  sd.Dir(),
 	}
 
-	// Include lifecycle status from _active.md.
+	// Include lifecycle status, size, and spec_type from _active.md.
 	if state, err := spec.ReadActiveState(projectPath); err == nil {
 		for _, t := range state.Tasks {
 			if t.Slug == taskSlug {
@@ -435,6 +460,8 @@ func specDoStatus(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				if t.StartedAt != "" {
 					result["started_at"] = t.StartedAt
 				}
+				result["size"] = string(t.EffectiveSize())
+				result["spec_type"] = string(t.EffectiveSpecType())
 				break
 			}
 		}
@@ -922,6 +949,47 @@ func specDoReview(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return marshalResult(result)
 }
 
+func specDoValidate(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	projectPath, errResult := validateProjectPath(req.GetString("project_path", ""))
+	if errResult != nil {
+		return errResult, nil
+	}
+
+	taskSlug := req.GetString("task_slug", "")
+	if taskSlug == "" {
+		var err error
+		taskSlug, err = spec.ReadActive(projectPath)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("no active spec: %v", err)), nil
+		}
+	}
+
+	sd := &spec.SpecDir{ProjectPath: projectPath, TaskSlug: taskSlug}
+	if !sd.Exists() {
+		return mcp.NewToolResultError(fmt.Sprintf("spec not found: %s", taskSlug)), nil
+	}
+
+	// Read size and spec_type from ActiveTask (default L/feature for backward compat).
+	size := spec.SizeL
+	specType := spec.TypeFeature
+	if state, err := spec.ReadActiveState(projectPath); err == nil {
+		for _, t := range state.Tasks {
+			if t.Slug == taskSlug {
+				size = t.EffectiveSize()
+				specType = t.EffectiveSpecType()
+				break
+			}
+		}
+	}
+
+	report, err := spec.Validate(sd, size, specType)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("validate failed: %v", err)), nil
+	}
+
+	return marshalResult(report)
+}
+
 // confidenceRe matches <!-- confidence: N --> or <!-- confidence: N | source: TYPE --> annotations.
 var confidenceRe = regexp.MustCompile(`<!--\s*confidence:\s*(\d{1,2})(?:\s*\|\s*source:\s*([\w][\w-]*))?\s*-->`)
 
@@ -1017,12 +1085,15 @@ func buildCompletionDetail(sd *spec.SpecDir, decisionsSaved int) string {
 		parts = append(parts, fmt.Sprintf("%d decisions saved", decisionsSaved))
 	}
 
-	// Count spec files present.
+	// Count spec files present (check all known files including bugfix.md).
 	fileCount := 0
 	for _, f := range spec.AllFiles {
 		if _, err := sd.ReadFile(f); err == nil {
 			fileCount++
 		}
+	}
+	if _, err := sd.ReadFile(spec.FileBugfix); err == nil {
+		fileCount++
 	}
 	parts = append(parts, fmt.Sprintf("%d spec files", fileCount))
 

@@ -1,0 +1,43 @@
+# Bugfix: {{.TaskSlug}}
+
+<!-- ## Confidence Calibration Guide (reference for all spec files)
+     9-10: Verified — tested, benchmarked, or explicitly confirmed by user
+      7-8: Reviewed — design-reviewed or derived from authoritative docs
+      5-6: Inferred — reasoned from code analysis or domain knowledge
+      3-4: Hypothetical — educated guess, needs validation
+      1-2: Speculative — placeholder, likely to change
+     Source types: user (direct instruction), design-doc, code (analysis), inference, assumption
+     When confidence ≤ 5 AND source = assumption, dossier status will flag a warning.
+-->
+
+## Bug Summary
+<!-- confidence: _ | source: user -->
+{{.Description}}
+
+## Reproduction Steps
+<!-- List the exact steps to reproduce the bug. Include environment details if relevant. -->
+1. Step 1
+2. Step 2
+3. Observe unexpected behavior
+
+## Current Behavior
+<!-- What actually happens (the bug). Be specific about error messages, incorrect output, etc. -->
+
+## Expected Behavior
+<!-- What should happen instead. Reference existing docs/specs if available. -->
+
+## Unchanged Behavior
+<!-- EARS: "SHALL CONTINUE TO" — behaviors that MUST NOT be affected by this fix.
+     Use this to prevent regressions and scope creep. -->
+- The system SHALL CONTINUE TO {existing behavior that must be preserved}
+
+## Root Cause Analysis
+<!-- Identify the root cause. Reference specific files, functions, or logic paths. -->
+<!-- confidence: _ | source: code -->
+
+## Fix Strategy
+<!-- Describe the approach to fix the bug. Keep it minimal and surgical. -->
+
+## Assumptions & Constraints
+- Fix should be minimal and surgical — avoid unrelated refactoring
+- Existing tests must continue to pass
