@@ -177,9 +177,9 @@ func specDoInit(ctx context.Context, req mcp.CallToolRequest, st *store.Store, e
 
 	// Suggest ledger search before starting work.
 	if description != "" {
-		result["suggested_search"] = fmt.Sprintf(
-			"Before writing specs, search past experience: `ledger action=search query=%q` — you may find related patterns, decisions, or prior work.",
-			truncateForHint(description, 80))
+		result["suggested_search"] = "Before writing specs, search past experience: `ledger action=search query=\"" +
+			truncateForHint(description, 80) +
+			"\"` — you may find related patterns, decisions, or prior work."
 	}
 
 	return marshalResult(result)
@@ -1257,8 +1257,10 @@ func hasOnlyCheckedSteps(section string) bool {
 // suggestNextAction returns a contextual next-action hint based on the spec's current state.
 // Returns "" when no specific suggestion is warranted.
 func suggestNextAction(sd *spec.SpecDir, _ map[string]any) string {
+	state, stateErr := spec.ReadActiveState(sd.ProjectPath)
+
 	// Check review status.
-	if state, err := spec.ReadActiveState(sd.ProjectPath); err == nil {
+	if stateErr == nil {
 		for _, t := range state.Tasks {
 			if t.Slug == sd.TaskSlug && t.ReviewStatus == "pending" {
 				return "Run `alfred dashboard` to review and approve the spec before implementation."
@@ -1275,6 +1277,21 @@ func suggestNextAction(sd *spec.SpecDir, _ map[string]any) string {
 	nextSection := extractMarkdownSection(session, "## Next Steps")
 	if nextSection != "" && hasOnlyCheckedSteps(nextSection) {
 		return "All Next Steps are completed. Call `dossier action=complete` to close the task and save decisions to memory."
+	}
+
+	// Suggest epic management when 3+ tasks exist without an epic.
+	if stateErr == nil {
+		activeTasks := 0
+		for _, t := range state.Tasks {
+			if t.IsActive() {
+				activeTasks++
+			}
+		}
+		if activeTasks >= 3 {
+			if len(epic.ListAll(sd.ProjectPath)) == 0 {
+				return "You have " + strconv.Itoa(activeTasks) + " active tasks. Consider grouping them with `roster action=init` for dependency tracking and progress overview."
+			}
+		}
 	}
 
 	return ""

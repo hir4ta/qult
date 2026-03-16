@@ -67,6 +67,8 @@ alfred steering-init          # Generate project steering docs (.alfred/steering
 - PreCompact knowledge detection: transcript research patterns (2+ hits from 13 keywords) → stderr reminder to save findings before compaction
 - dossier status next_action: contextual hint based on spec state (review_status=pending → dashboard, all steps done → complete, etc.)
 - dossier init suggested_search: always includes ledger search suggestion with description keywords
+- dossier status next_action: review pending → dashboard, all steps done → complete, 3+ active tasks without epic → roster init suggestion
+- SessionStart ledger reflect: suggests `ledger action=reflect` when 20+ memories exist and last reflect >7 days ago
 - PostToolUse: Bash error detection → FTS5 memory search → additionalContext injection; Bash success → session.md Next Steps auto-check (command + action signals matching + file-based matching via git diff); git commit → spec drift detection (file refs vs changed files)
 - PostToolUse drift detection: extractChangedFiles (git diff --name-only HEAD~1, 500ms timeout, fail-open) → parseSpecFileRefs (design.md File: + tasks.md Files:) → matchComponentByPackage (directory-level component matching) → reverseMapFileToFR (file→FR reverse lookup via tasks.md) → compare → additionalContext warning + audit.jsonl logging
 - Drift severity: info (test files), warning (source files not in spec), critical (component-level drift — file in same package as spec component)

@@ -1263,9 +1263,9 @@ func warnLowVitalityMemories(ctx context.Context, st *store.Store) {
 
 // researchPatterns are keywords indicating research/investigation activity in the session.
 var researchPatterns = []string{
-	"調査", "比較", "分析", "ベンチマーク", "競合",
-	"investigate", "research", "benchmark", "compare", "analysis",
-	"findings", "architecture", "performance",
+	"調査結果", "比較結果", "分析結果", "ベンチマーク結果", "競合調査",
+	"investigate", "research findings", "benchmark results", "competitive analysis",
+	"compared to", "analysis results", "key findings", "lessons learned",
 }
 
 // suggestKnowledgeSave checks if the session contains research patterns

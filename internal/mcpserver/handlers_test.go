@@ -264,6 +264,52 @@ PostgreSQL with pgx driver
 	})
 }
 
+func TestHasOnlyCheckedSteps(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		section string
+		want    bool
+	}{
+		{"all checked", "- [x] Step 1\n- [x] Step 2\n", true},
+		{"one unchecked", "- [x] Step 1\n- [ ] Step 2\n", false},
+		{"empty", "", false},
+		{"no items", "Some text\n", false},
+		{"uppercase X", "- [X] Step 1\n", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := hasOnlyCheckedSteps(tt.section); got != tt.want {
+				t.Errorf("hasOnlyCheckedSteps(%q) = %v, want %v", tt.section, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTruncateForHint(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		input    string
+		max      int
+		want     string
+	}{
+		{"short", "hello", 10, "hello"},
+		{"exact", "hello", 5, "hello"},
+		{"truncate", "hello world", 5, "hello..."},
+		{"unicode", "日本語テスト", 3, "日本語..."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := truncateForHint(tt.input, tt.max); got != tt.want {
+				t.Errorf("truncateForHint(%q, %d) = %q, want %q", tt.input, tt.max, got, tt.want)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Spec handler tests use specHandler from handlers_spec.go — these are
 // covered by the spec package tests. Integration tests can be added later.

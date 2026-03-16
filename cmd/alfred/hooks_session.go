@@ -57,6 +57,9 @@ func handleSessionStart(ctx context.Context, ev *hookEvent) {
 	// Check for past-due review_by memories (lightweight query, fail-open).
 	warnReviewDueMemories(ctx, st)
 
+	// Suggest ledger reflect when knowledge base has grown but hasn't been reviewed.
+	suggestLedgerReflect(ctx, st)
+
 	// Inject spec context after parallel ops complete.
 	// Must be serial: writes JSON to stdout (protocol integrity).
 	injectSpecContext(ctx, ev.ProjectPath, ev.Source, st)
@@ -549,6 +552,30 @@ func countProjectMemories(ctx context.Context, st *store.Store, projectPath stri
 
 // warnReviewDueMemories checks for memories past their review_by date
 // and warns the user via stderr. Advisory only — does not affect search results.
+// suggestLedgerReflect suggests running ledger reflect when the knowledge base
+// has accumulated enough memories to benefit from a health check.
+// Triggers when 20+ memories exist and the last reflect was >7 days ago (or never).
+func suggestLedgerReflect(ctx context.Context, st *store.Store) {
+	if st == nil {
+		return
+	}
+	count, err := st.CountDocsByURLPrefix(ctx, "memory://")
+	if err != nil || count < 20 {
+		return
+	}
+
+	// Check if a recent reflect has been done (look for ledger-reflect audit entry).
+	// If no audit system for reflect, use a simple file timestamp check.
+	reflectMarker := filepath.Join(os.TempDir(), "alfred-last-reflect")
+	if info, err := os.Stat(reflectMarker); err == nil {
+		if time.Since(info.ModTime()) < 7*24*time.Hour {
+			return // reflected recently
+		}
+	}
+
+	notifyUser("knowledge health: %d memories in your knowledge base. Consider running `ledger action=reflect` for a health report (conflicts, stale items, promotion candidates).", count)
+}
+
 func warnReviewDueMemories(ctx context.Context, st *store.Store) {
 	if st == nil {
 		return

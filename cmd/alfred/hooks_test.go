@@ -2078,17 +2078,20 @@ func TestClassifyIntentTDD(t *testing.T) {
 func TestTrackExplorationPattern(t *testing.T) {
 	t.Parallel()
 
-	// Clean up temp file before and after.
-	os.Remove(exploreCountFile)
-	t.Cleanup(func() { os.Remove(exploreCountFile) })
+	projectPath := t.TempDir()
+	countFile := exploreCountFile(projectPath)
 
-	ev := &hookEvent{ToolName: "Read", ProjectPath: t.TempDir()}
+	// Clean up temp file before and after.
+	os.Remove(countFile)
+	t.Cleanup(func() { os.Remove(countFile) })
+
+	ev := &hookEvent{ToolName: "Read", ProjectPath: projectPath}
 
 	// 4 calls should not trigger (threshold is 5).
 	for i := 0; i < 4; i++ {
 		trackExplorationPattern(ev)
 	}
-	data, err := os.ReadFile(exploreCountFile)
+	data, err := os.ReadFile(countFile)
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}

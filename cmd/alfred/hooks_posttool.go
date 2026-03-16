@@ -14,8 +14,9 @@ import (
 	"github.com/hir4ta/claude-alfred/internal/spec"
 )
 
-// exploreCountFile tracks consecutive code exploration tool calls for survey suggestion.
-const exploreCountFile = "/tmp/alfred-explore-count"
+// exploreCountPrefix is the base path for tracking consecutive code exploration calls.
+// The actual file includes a project-specific suffix to avoid cross-project interference.
+const exploreCountPrefix = "/tmp/alfred-explore-"
 
 // handlePostToolUse fires after a tool executes.
 // Responsibilities:
@@ -29,8 +30,8 @@ func handlePostToolUse(ctx context.Context, ev *hookEvent) {
 		return
 	}
 
-	// Non-exploration tool resets the counter.
-	os.Remove(exploreCountFile)
+	// Any non-Read/Grep tool resets the exploration counter.
+	os.Remove(exploreCountFile(ev.ProjectPath))
 
 	if ev.ToolName != "Bash" {
 		return
@@ -791,16 +792,33 @@ var frIDPattern = regexp.MustCompile(`FR-(\d+)`)
 // taskReqPattern matches Requirements: FR-N entries in tasks.md.
 var taskReqPattern = regexp.MustCompile(`Requirements:\s*(FR-\d+(?:\s*,\s*FR-\d+)*)`)
 
+// exploreCountFile returns the project-specific exploration counter file path.
+var exploreCountFile = func(projectPath string) string {
+	if projectPath == "" {
+		return exploreCountPrefix + "default"
+	}
+	// Use a simple hash of the project path to avoid path-separator issues.
+	h := uint32(0)
+	for _, r := range projectPath {
+		h = h*31 + uint32(r)
+	}
+	return fmt.Sprintf("%s%x", exploreCountPrefix, h)
+}
+
 // trackExplorationPattern counts consecutive Read/Grep calls and suggests survey
 // when the user has been exploring code for a while without an active spec.
 func trackExplorationPattern(ev *hookEvent) {
+	countFile := exploreCountFile(ev.ProjectPath)
+
 	// Read current count.
 	count := 0
-	if data, err := os.ReadFile(exploreCountFile); err == nil {
+	if data, err := os.ReadFile(countFile); err == nil {
 		count, _ = strconv.Atoi(strings.TrimSpace(string(data)))
 	}
 	count++
-	os.WriteFile(exploreCountFile, []byte(strconv.Itoa(count)), 0o644)
+	if err := os.WriteFile(countFile, []byte(strconv.Itoa(count)), 0o600); err != nil {
+		return // can't persist count — skip nudge
+	}
 
 	// Only suggest after 5+ consecutive exploration calls without an active spec.
 	if count < 5 {
