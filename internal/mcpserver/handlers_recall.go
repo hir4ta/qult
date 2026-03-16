@@ -741,13 +741,7 @@ func resolveProjectPath(req mcp.CallToolRequest) string {
 // by pruning the oldest version when exceeded.
 func versionMemory(ctx context.Context, st *store.Store, newID int64, sectionPath string) (int64, error) {
 	// Find existing non-superseded memory with the same section_path.
-	var oldID int64
-	err := st.DB().QueryRowContext(ctx,
-		`SELECT id FROM records
-		 WHERE section_path = ? AND source_type = ? AND id != ?
-		   AND superseded_by IS NULL
-		 ORDER BY crawled_at DESC LIMIT 1`,
-		sectionPath, store.SourceMemory, newID).Scan(&oldID)
+	oldID, err := st.FindNonSupersededByPath(ctx, sectionPath, newID)
 	if err != nil {
 		return 0, nil // no previous version
 	}
@@ -771,10 +765,10 @@ func versionMemory(ctx context.Context, st *store.Store, newID int64, sectionPat
 	// Enforce max 5 versions: walk backwards from newID to count chain length.
 	predecessors, _ := st.GetReverseVersionChain(ctx, newID, 6)
 	if len(predecessors) >= 5 {
-		// Prune the oldest (last in the backwards chain).
+		// Disable the oldest (last in the backwards chain) to prevent it from
+		// reappearing in search results as a phantom current memory.
 		oldestID := predecessors[len(predecessors)-1]
-		// Clear superseded_by on the oldest record (detach from chain).
-		_ = st.SetSupersededBy(ctx, oldestID, 0)
+		_ = st.SetEnabled(ctx, oldestID, false)
 	}
 
 	return oldID, nil
@@ -853,15 +847,27 @@ func recallAuditConventions(ctx context.Context, st *store.Store, req mcp.CallTo
 		return mcp.NewToolResultError("project_path is required for audit-conventions"), nil
 	}
 
+	// Bound the audit to 5 seconds to prevent unbounded I/O.
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
 	docs, err := st.ListPatternRuleMemories(ctx)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("list memories failed: %v", err)), nil
+	}
+
+	// Cap at 100 memories to bound I/O.
+	if len(docs) > 100 {
+		docs = docs[:100]
 	}
 
 	var results []map[string]any
 	valid, drifted, skipped := 0, 0, 0
 
 	for _, d := range docs {
+		if ctx.Err() != nil {
+			break // timeout
+		}
 		fileRefs, codePatterns := extractMemoryFileRefs(d.Content)
 		if len(fileRefs) == 0 && len(codePatterns) == 0 {
 			skipped++

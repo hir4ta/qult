@@ -891,6 +891,22 @@ func (s *Store) GetReverseVersionChain(ctx context.Context, newestID int64, maxH
 	return chain, nil
 }
 
+// FindNonSupersededByPath returns the ID of the most recent non-superseded memory
+// with the given sectionPath, excluding excludeID. Returns 0 if not found.
+func (s *Store) FindNonSupersededByPath(ctx context.Context, sectionPath string, excludeID int64) (int64, error) {
+	var id int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id FROM records
+		 WHERE section_path = ? AND source_type = ? AND id != ?
+		   AND superseded_by IS NULL
+		 ORDER BY crawled_at DESC LIMIT 1`,
+		sectionPath, SourceMemory, excludeID).Scan(&id)
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
 // VersionChainInfo holds metadata about a version chain head.
 type VersionChainInfo struct {
 	HeadID      int64

@@ -1217,7 +1217,7 @@ func parseSessionStatusFromContent(content string) string {
 // and no recent access. This is a read-only operation — memories are never
 // auto-disabled (DEC-6).
 func warnLowVitalityMemories(ctx context.Context, st *store.Store) {
-	docs, err := st.ListLowVitality(ctx, 10, 50)
+	docs, err := st.ListLowVitality(ctx, 25, 50)
 	if err != nil || len(docs) == 0 {
 		return
 	}
