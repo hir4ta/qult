@@ -40,44 +40,59 @@ approval gates and BLOCKED recovery).
 6. Record `initial_commit` = output of `git rev-parse HEAD`
 7. Write initial Orchestrator State to session.md
 
-## Phase 1: Spec Creation (per-file with parallel agent review)
+## Phase 1: Spec Creation (7 files with parallel agent review)
 
 Create each spec file, then spawn 3 review agents in parallel.
 **Update session.md after each file is completed.**
+File generation order: research → requirements → design → tasks → test-specs → decisions → session.
 
-### 1a. Research
+### 1a. research.md
 - Call `knowledge` tool for relevant patterns and best practices
 - Read key source files relevant to the task
+- Write research.md: existing code analysis, gap analysis, implementation options, risks
+- **Review**: Spawn 3 agents → apply fixes → save
+- **Update session.md**: mark research as done
 
 ### 1b. requirements.md
-- Write requirements with confidence scores → save via `dossier` action=update
-- **Review**: Spawn 3 agents simultaneously:
-  - Architect: Are success criteria measurable? Missing constraints?
-  - Devil's Advocate: Scope too broad? Unrealistic criteria?
-  - Researcher: Prior art or codebase patterns that inform requirements?
+- Write requirements in **EARS notation** (FR-N IDs) with confidence + source scores
+- Include acceptance criteria in Given/When/Then format (AC-N.N)
+- Include non-functional requirements (NFR-N) with measurable targets
+- **Review**: Spawn 3 agents:
+  - Architect: EARS patterns correct? Measurable criteria? Missing constraints?
+  - Devil's Advocate: Scope too broad? Missing edge cases? Unrealistic?
+  - Researcher: Prior art or codebase patterns?
 - Collect findings → apply fixes → save
 - **Update session.md**: mark requirements as done
 
 ### 1c. design.md
-- Write design with architecture, components, alternatives → save
-- **Review**: Spawn 3 agents simultaneously:
-  - Architect: Sound architecture? Missing components?
-  - Devil's Advocate: Hidden complexity? Underestimated effort?
-  - Researcher: Existing patterns to reuse?
-- Collect findings → apply fixes → save
+- Write design with architecture, **interfaces**, **data models** (SQL), **API contracts**
+- Include **Requirements Traceability Matrix** (Req ID → Component → Task ID → Test ID)
+- **Review**: Spawn 3 agents → apply fixes → save
 - **Update session.md**: mark design as done
 
-### 1d. decisions.md
-- Write all decisions with rationale, alternatives → save
-- **Review**: Spawn 3 agents simultaneously:
-  - Architect: Consistent with design? Missing decisions?
-  - Devil's Advocate: Faulty assumptions? Reversibility?
-  - Researcher: Aligned with codebase patterns?
-- Collect findings → apply fixes → save
+### 1d. tasks.md
+- Write task decomposition in **Waves** (Foundation → Core → Edge Cases → Polish)
+- Each task: T-N.N [S/M/L/XL] (P) description with `_Requirements: FR-N | Depends: T-N.N | Files: path_`
+- Include summary, size legend, dependency graph
+- **Review**: Spawn 3 agents → apply fixes → save
+- **Update session.md**: mark tasks as done
+
+### 1e. test-specs.md
+- Write **Coverage Matrix** (Req → Test IDs → Type → Priority)
+- Write test cases in **Gherkin** with `<!-- source: FR-N -->` annotations
+- Map EARS: WHILE→Given, WHEN→When, SHALL→Then
+- Include edge case matrix, boundary values, test data, security tests
+- **Review**: Spawn 3 agents → apply fixes → save
+- **Update session.md**: mark test-specs as done
+
+### 1f. decisions.md
+- Write all decisions in **ADR format** (DEC-N IDs)
+- Include Status, Context, Chosen, Alternatives, Rationale, Consequences, **Reversibility**, **Revisit When**
+- **Review**: Spawn 3 agents → apply fixes → save
 - **Update session.md**: mark decisions as done
 
-### 1e. session.md
-- Write final session.md with Next Steps task breakdown
+### 1g. session.md
+- Write final session.md with Next Steps derived from **tasks.md T-IDs**
 - Update state: `phase: approval-gate`
 
 ## Phase 2: Approval Gate (dashboard)
@@ -176,3 +191,9 @@ After EVERY phase transition and after EVERY task completion:
 - ALWAYS update session.md after each individual task completion (not in batch)
 - ALWAYS call `dossier action=complete` at the end — never leave a task open
 - ALWAYS record decisions and trade-offs in decisions.md
+- ALWAYS use EARS notation for requirements (WHEN/WHILE/WHERE/IF-THEN/SHALL keywords)
+- ALWAYS assign unique IDs: FR-N, NFR-N, DEC-N, T-N.N, TS-N.N
+- ALWAYS include traceability matrix in design.md
+- ALWAYS include `<!-- source: FR-N -->` in test-specs.md Gherkin cases
+- Mark `<!-- optional -->` sections as skipped for S-sized tasks
+- ALWAYS include "Wave: Closing" tasks (self-review, CLAUDE.md update, test verification) — these trigger auto-complete when all checked
