@@ -1,18 +1,9 @@
-# Go binary
-/claude-alfred
-/alfred
-*.exe
-
-# TypeScript build output
+# Build output
 dist/
 node_modules/
-
-# Build artifacts
 web/dist/
 web/node_modules/
 .task/
-cmd/alfred/web/dist/*
-!cmd/alfred/web/dist/.gitkeep
 
 # Database
 *.db
