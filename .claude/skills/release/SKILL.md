@@ -35,26 +35,22 @@ npm test
 npm run build
 ```
 
-## Marketplace Update
+## Version Update (3 files)
 
-Update `plugins[0].version` in `.claude-plugin/marketplace.json` to `<VERSION>`.
+1. `npm version <VERSION> --no-git-tag-version` — updates package.json + package-lock.json
+2. Update `plugins[0].version` in `.claude-plugin/marketplace.json` to `<VERSION>`
+3. Update `version` in `plugin/.claude-plugin/plugin.json` to `<VERSION>`
+
+All 3 must match. This is the version that Claude Code uses for plugin caching.
 
 ## Commit & Tag
 
-1. Stage release files: `git add .claude-plugin/marketplace.json`
+1. Stage release files: `git add package.json package-lock.json .claude-plugin/marketplace.json plugin/.claude-plugin/plugin.json`
    - Include other uncommitted files if agreed with user
 2. Commit message: `v<VERSION>: <one-line summary of commits>` (in English)
    - Generate summary from `git log <prev-tag>..HEAD --oneline`
    - **NEVER add Co-Authored-By** (public repository)
 3. `git tag v<VERSION>`
-
-## Update package.json version
-
-```
-npm version <VERSION> --no-git-tag-version
-```
-
-Include the updated package.json + package-lock.json in the release commit.
 
 ## Push & CI
 
