@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "alfred": {
+      "command": "alfred",
+      "args": ["serve"],
+      "env": {
+        "VOYAGE_API_KEY": "${VOYAGE_API_KEY}",
+        "ALFRED_LANG": "${ALFRED_LANG}"
+      }
+    }
+  }
+}

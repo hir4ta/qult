@@ -21,6 +21,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "postinstall": "node dist/postinstall.mjs || true",
     "prepack": "npm run build:web && npm run build"
   },
   "dependencies": {

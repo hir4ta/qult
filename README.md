@@ -1,7 +1,7 @@
 # alfred
 
-[![Version](https://img.shields.io/github/v/tag/hir4ta/claude-alfred?label=version&sort=semver)](https://github.com/hir4ta/claude-alfred/releases)
-[![Go](https://img.shields.io/badge/go-%3E%3D1.25-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Version](https://img.shields.io/npm/v/claude-alfred)](https://www.npmjs.com/package/claude-alfred)
+[![Node](https://img.shields.io/badge/node-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![MIT License](https://img.shields.io/github/license/hir4ta/claude-alfred)](https://github.com/hir4ta/claude-alfred/blob/main/LICENSE)
 
 Your development butler for Claude Code.
@@ -42,25 +42,47 @@ alfred fixes all three.
 
 ## Quick start
 
+### 1. Install
+
+```bash
+npm install -g claude-alfred
+```
+
+This automatically sets up the SQLite database and user rules. Verify with:
+
+```bash
+alfred doctor
+```
+
+### 2. Plugin
+
+In Claude Code:
+
 ```
 /plugin marketplace add hir4ta/claude-alfred
 /plugin install alfred
 ```
 
+### 3. Environment
+
+Add to `~/.zshrc` (or equivalent):
+
 ```bash
-export VOYAGE_API_KEY=your-key  # ~/.zshrc — enables semantic search (~$0.01/session)
-export ALFRED_LANG=en           # ~/.zshrc — output language (en/ja/zh/ko/fr/de/es/pt...)
+export VOYAGE_API_KEY=your-key  # enables semantic search (~$0.01/session)
+export ALFRED_LANG=en           # output language (en/ja/zh/ko/fr/de/es/pt...)
 ```
 
-Then set up your project:
+No Voyage key? alfred still works — FTS5 full-text search handles the fallback.
+
+### 4. Project setup
+
+In Claude Code, from your project root:
 
 ```
-/init    ← select "alfred" when prompted (or type the full command and pick from the list)
+/init    ← select "alfred" when prompted
 ```
 
 This generates steering docs, templates, and indexes existing knowledge.
-
-No Voyage key? alfred still works — FTS5 full-text search handles the fallback.
 
 > **Note**: Use `/init` (short form) instead of `/alfred:init` — Claude Code's autocomplete may misroute the `alfred:` prefix to another skill. This applies to all alfred skills: prefer `/brief`, `/attend`, `/mend` etc.
 
@@ -119,7 +141,7 @@ Inline review mode: click any spec file, switch to Review tab. Comment on specif
 
 The first unchecked task shimmers. You know exactly what's in progress.
 
-For development: `ALFRED_DEV=1 alfred dashboard` + `task dev` enables Vite HMR.
+For development: `ALFRED_DEV=1 alfred dashboard` + `task dev` (in web/) enables Vite HMR.
 
 ## Search pipeline
 

@@ -63,6 +63,57 @@ const main = defineCommand({
         console.log(`plugin-bundle: output=${args.output} (not yet implemented)`);
       },
     }),
+    doctor: defineCommand({
+      meta: { description: 'Check installation health' },
+      async run() {
+        const { existsSync, readdirSync } = await import('node:fs');
+        const { join } = await import('node:path');
+        const { homedir } = await import('node:os');
+        const home = homedir();
+        const version = await resolveVersion();
+
+        console.log(`alfred doctor (v${version})\n`);
+
+        // Node.js version
+        const nodeVer = process.version;
+        const nodeMajor = parseInt(nodeVer.slice(1), 10);
+        check(nodeMajor >= 22, `Node.js ${nodeVer}`, '>=22 required');
+
+        // better-sqlite3
+        try {
+          await import('better-sqlite3');
+          check(true, 'better-sqlite3 loaded');
+        } catch {
+          check(false, 'better-sqlite3', 'not found — run npm rebuild');
+        }
+
+        // DB
+        const dbPath = join(home, '.claude-alfred', 'alfred.db');
+        check(existsSync(dbPath), `DB: ${dbPath}`, 'not found — run: alfred (any command) to create');
+
+        // VOYAGE_API_KEY
+        const hasVoyage = !!process.env['VOYAGE_API_KEY'];
+        check(hasVoyage, 'VOYAGE_API_KEY set', 'not set — semantic search disabled, FTS5 fallback active');
+
+        // ALFRED_LANG
+        const lang = process.env['ALFRED_LANG'];
+        check(true, `ALFRED_LANG: ${lang || '(not set, default: en)'}`);
+
+        // User rules
+        const rulesDir = join(home, '.claude', 'rules');
+        try {
+          const rules = readdirSync(rulesDir).filter(f => f.startsWith('alfred'));
+          check(rules.length > 0, `Rules: ${rulesDir} (${rules.length} alfred files)`, 'no alfred rules found');
+        } catch {
+          check(false, 'Rules', `${rulesDir} not found`);
+        }
+
+        // Project .alfred/
+        const cwd = process.cwd();
+        const hasAlfred = existsSync(join(cwd, '.alfred'));
+        check(hasAlfred, `Project: .alfred/ exists in ${cwd}`, 'not initialized — run /alfred:init in Claude Code');
+      },
+    }),
     version: defineCommand({
       meta: { description: 'Show version' },
       args: {
@@ -79,6 +130,14 @@ const main = defineCommand({
     }),
   },
 });
+
+function check(ok: boolean, label: string, hint?: string): void {
+  if (ok) {
+    console.log(`  ✓ ${label}`);
+  } else {
+    console.log(`  ✗ ${label}${hint ? ` — ${hint}` : ''}`);
+  }
+}
 
 async function resolveVersion(): Promise<string> {
   try {

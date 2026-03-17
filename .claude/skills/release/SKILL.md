@@ -76,6 +76,7 @@ git push origin v<VERSION>
 After CI succeeds:
 ```
 gh release view v<VERSION>
+npm view claude-alfred version
 ```
 
 ## Completion Report
@@ -85,4 +86,5 @@ gh release view v<VERSION>
 | Version | v<VERSION> |
 | Commit | <hash> |
 | CI | success/failure (duration) |
+| npm | https://www.npmjs.com/package/claude-alfred |
 | Release URL | https://github.com/hir4ta/claude-alfred/releases/tag/v<VERSION> |

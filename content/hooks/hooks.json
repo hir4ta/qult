@@ -1,0 +1,41 @@
+{
+  "description": "Proactive hooks — auto-import, memory injection, spec session persistence",
+  "hooks": {
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "command": "alfred hook PreCompact",
+            "statusMessage": "alfred: saving session state...",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "alfred hook SessionStart",
+            "statusMessage": "alfred: restoring session context...",
+            "timeout": 5,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "alfred hook UserPromptSubmit",
+            "statusMessage": "alfred: searching memories...",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,7 +1,7 @@
 # alfred
 
-[![Version](https://img.shields.io/github/v/tag/hir4ta/claude-alfred?label=version&sort=semver)](https://github.com/hir4ta/claude-alfred/releases)
-[![Go](https://img.shields.io/badge/go-%3E%3D1.25-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Version](https://img.shields.io/npm/v/claude-alfred)](https://www.npmjs.com/package/claude-alfred)
+[![Node](https://img.shields.io/badge/node-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![MIT License](https://img.shields.io/github/license/hir4ta/claude-alfred)](https://github.com/hir4ta/claude-alfred/blob/main/LICENSE)
 
 Claude Code の開発執事。
@@ -42,25 +42,47 @@ alfred は3つとも潰す。
 
 ## セットアップ
 
+### 1. インストール
+
+```bash
+npm install -g claude-alfred
+```
+
+SQLite データベースとユーザールールが自動セットアップされる。確認:
+
+```bash
+alfred doctor
+```
+
+### 2. プラグイン
+
+Claude Code 内で:
+
 ```
 /plugin marketplace add hir4ta/claude-alfred
 /plugin install alfred
 ```
 
+### 3. 環境変数
+
+`~/.zshrc` に追加:
+
 ```bash
-export VOYAGE_API_KEY=your-key  # ~/.zshrc に追加 — セマンティック検索が有効に（1セッション約$0.01）
-export ALFRED_LANG=ja           # ~/.zshrc に追加 — 出力言語 (en/ja/zh/ko/fr/de/es/pt...)
+export VOYAGE_API_KEY=your-key  # セマンティック検索が有効に（1セッション約$0.01）
+export ALFRED_LANG=ja           # 出力言語 (en/ja/zh/ko/fr/de/es/pt...)
 ```
 
-次にプロジェクトをセットアップ:
+Voyage のキーがなくても動く。FTS5 全文検索がフォールバックする。
+
+### 4. プロジェクトセットアップ
+
+Claude Code 内で、プロジェクトルートから:
 
 ```
 /init    ← 候補から "alfred" を選択
 ```
 
 ステアリングドキュメント、テンプレート、ナレッジインデックスを生成する。
-
-Voyage のキーがなくても動く。FTS5 全文検索がフォールバックする。
 
 > **注意**: `/alfred:init` ではなく `/init` (短縮形) を使うこと。Claude Code の補完が `alfred:` プレフィックスを別スキルに誤ルーティングする場合がある。全 alfred スキル共通: `/brief`, `/attend`, `/mend` のように短縮形を推奨。
 
@@ -119,7 +141,7 @@ alfred dashboard --url-only   # URLだけ出力
 
 着手中のタスクがシマーで光る。何が進行中か、一目でわかる。
 
-開発用: `ALFRED_DEV=1 alfred dashboard` + `task dev` で Vite HMR が使える。
+開発用: `ALFRED_DEV=1 alfred dashboard` + `task dev`（web/ 内）で Vite HMR が使える。
 
 ## 検索パイプライン
 
