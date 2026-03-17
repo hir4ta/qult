@@ -110,6 +110,7 @@ User: `/alfred:concierge hooks`
 | Variable | Default | Effect |
 |----------|---------|--------|
 | `VOYAGE_API_KEY` | (none) | Voyage AI API key for vector search + reranking |
+| `ALFRED_LANG` | `en` | Output language for all generated content (specs, steering, messages) |
 
 ## How It Works
 

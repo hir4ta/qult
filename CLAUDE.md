@@ -57,6 +57,7 @@ alfred steering-init          # Generate project steering docs (.alfred/steering
 ### Configuration & API
 
 - VOYAGE_API_KEY enables semantic search; without it, FTS5 full-text search is used as fallback
+- ALFRED_LANG sets output language for all generated content (default: en); template headings stay in English
 - @.claude/rules/hook-internals.md (hook timeouts)
 
 ### Hooks & Events

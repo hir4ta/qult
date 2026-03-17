@@ -49,6 +49,7 @@ alfred は3つとも潰す。
 
 ```bash
 export VOYAGE_API_KEY=your-key  # ~/.zshrc に追加 — セマンティック検索が有効に（1セッション約$0.01）
+export ALFRED_LANG=ja           # ~/.zshrc に追加 — 出力言語 (en/ja/zh/ko/fr/de/es/pt...)
 ```
 
 次にプロジェクトをセットアップ:
@@ -236,6 +237,7 @@ Hook（見えない）
 | 症状 | 対処 |
 |------|------|
 | メモリ検索で結果が出ない | `export VOYAGE_API_KEY=your-key` — またはFTS5フォールバックの動作確認 |
+| 出力が意図しない言語 | `export ALFRED_LANG=ja`（または `en`, `zh`, `ko` 等）を `~/.zshrc` に追加 |
 | Hook が動かない | `/plugin install alfred` して再起動 |
 | ダッシュボードが空 | `.alfred/specs/` があるディレクトリで `alfred dash` |
 | レート制限エラー | 対策済み — エージェントは段階的バッチ起動（最大2並列） |

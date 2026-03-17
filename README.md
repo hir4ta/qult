@@ -49,6 +49,7 @@ alfred fixes all three.
 
 ```bash
 export VOYAGE_API_KEY=your-key  # ~/.zshrc — enables semantic search (~$0.01/session)
+export ALFRED_LANG=en           # ~/.zshrc — output language (en/ja/zh/ko/fr/de/es/pt...)
 ```
 
 Then set up your project:
@@ -236,6 +237,7 @@ Nothing is generated at install time. Files appear as you use alfred:
 | Symptom | Fix |
 |---|---|
 | No memory results | `export VOYAGE_API_KEY=your-key` — or check FTS5 fallback is working |
+| Output in wrong language | `export ALFRED_LANG=ja` (or `en`, `zh`, `ko`, etc.) in `~/.zshrc` |
 | Hook not firing | `/plugin install alfred` and restart |
 | Dashboard empty | Run `alfred dash` from a project with `.alfred/specs/` |
 | Rate limit errors | Already mitigated — agents spawn in staggered batches (max 2 parallel) |
