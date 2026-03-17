@@ -54,7 +54,7 @@ README.md / README.ja.md のバッジは shields.io の動的バッジ（GitHub 
 
 ## Commit & Tag (Phase 1: Release binary)
 
-1. Stage changed files: `git add plugin/`
+1. Stage changed files: `git add -f plugin/` (force-add because some plugin/ subdirs may be in .gitignore history)
    - Include other uncommitted files if agreed with user
    - **DO NOT stage `.claude-plugin/marketplace.json` yet** (marketplace update is Phase 2)
 2. Commit message: `v<VERSION>: <one-line summary of commits>` (in English)

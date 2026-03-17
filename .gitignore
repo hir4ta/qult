@@ -14,7 +14,4 @@ cmd/alfred/web/dist/*
 
 # plugin/ is generated output from `alfred plugin-bundle`.
 # Source of truth: internal/install/content/ (skills, agents, rules)
-# Edit content there, then run: go install ./cmd/alfred && alfred plugin-bundle
-plugin/skills/
-plugin/agents/
-plugin/rules/
+# All plugin/ files are tracked (required for marketplace distribution).
