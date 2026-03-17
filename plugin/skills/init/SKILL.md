@@ -48,16 +48,22 @@ After this, the project is ready for `/alfred:brief`, `/alfred:attend`, and all 
 
 ### Phase 2: Steering Document Generation
 
-3. Using the merged profile, generate `.alfred/steering/` documents:
-   - `product.md` — project purpose, users, key features
-   - `structure.md` — directory layout, module boundaries, component interactions
-   - `tech.md` — tech stack, dependencies, architecture patterns
+3. **Read the steering templates first** to get the required section structure:
+   - Check `.alfred/templates/steering/` for user overrides
+   - If not found, read the embedded defaults from `internal/spec/templates/steering/`
+   - Templates define the **exact section headings** (## Purpose, ## Users & Stakeholders, etc.) — follow them
+
+4. Using the merged profile AND the template structure, generate `.alfred/steering/` documents:
+   - `product.md` — fill in every section from the template with project-specific content
+   - `structure.md` — fill in every section from the template with actual directory/module data
+   - `tech.md` — fill in every section from the template with actual stack/dependency data
+   - Replace `{placeholder}` values with real data from Phase 1 analysis
+   - Keep `<!-- comment -->` hints as-is (they guide future editors)
+   - Do NOT add sections not in the template; do NOT skip template sections
 
    If steering docs already exist and `--force` is NOT specified:
    - Show diff between current and proposed docs
    - Ask user if they want to update specific files
-
-   Use the 2-layer template system: check `.alfred/templates/steering/` for user overrides first.
 
 ### Phase 3: Template Setup
 
