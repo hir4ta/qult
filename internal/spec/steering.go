@@ -40,6 +40,11 @@ func SteeringDir(projectPath string) string {
 	return filepath.Join(projectPath, ".alfred", "steering")
 }
 
+// SteeringTemplatesDir returns the .alfred/templates/steering/ directory path.
+func SteeringTemplatesDir(projectPath string) string {
+	return filepath.Join(projectPath, ".alfred", "templates", "steering")
+}
+
 // SteeringExists returns true if the steering directory contains at least one file.
 func SteeringExists(projectPath string) bool {
 	dir := SteeringDir(projectPath)
@@ -55,11 +60,29 @@ func SteeringExists(projectPath string) bool {
 	return false
 }
 
+// readSteeringTemplateRaw reads a steering template, checking user override first.
+func readSteeringTemplateRaw(f SteeringFile, projectPath string) ([]byte, error) {
+	if projectPath != "" {
+		userPath := filepath.Join(SteeringTemplatesDir(projectPath), string(f)+".tmpl")
+		if raw, err := os.ReadFile(userPath); err == nil {
+			return raw, nil
+		}
+	}
+
+	name := string(f) + ".tmpl"
+	raw, err := steeringFS.ReadFile("templates/steering/" + name)
+	if err != nil {
+		return nil, fmt.Errorf("read steering template %s: %w", name, err)
+	}
+	return raw, nil
+}
+
 // RenderSteering renders all 3 steering templates.
-func RenderSteering(data SteeringData) (map[SteeringFile]string, error) {
+// projectPath enables 2-layer template resolution (user override > embedded default).
+func RenderSteering(data SteeringData, projectPath string) (map[SteeringFile]string, error) {
 	result := make(map[SteeringFile]string, len(AllSteeringFiles))
 	for _, f := range AllSteeringFiles {
-		content, err := renderSteeringTemplate(f, data)
+		content, err := renderSteeringTemplate(f, data, projectPath)
 		if err != nil {
 			return nil, err
 		}
@@ -68,14 +91,14 @@ func RenderSteering(data SteeringData) (map[SteeringFile]string, error) {
 	return result, nil
 }
 
-// renderSteeringTemplate renders a single steering template.
-func renderSteeringTemplate(f SteeringFile, data SteeringData) (string, error) {
-	name := string(f) + ".tmpl"
-	raw, err := steeringFS.ReadFile("templates/steering/" + name)
+// renderSteeringTemplate renders a single steering template with 2-layer resolution.
+func renderSteeringTemplate(f SteeringFile, data SteeringData, projectPath string) (string, error) {
+	raw, err := readSteeringTemplateRaw(f, projectPath)
 	if err != nil {
-		return "", fmt.Errorf("read steering template %s: %w", name, err)
+		return "", err
 	}
 
+	name := string(f) + ".tmpl"
 	tmpl, err := template.New(name).Parse(string(raw))
 	if err != nil {
 		return "", fmt.Errorf("parse steering template %s: %w", name, err)

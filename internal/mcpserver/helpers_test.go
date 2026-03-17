@@ -13,120 +13,91 @@ func TestRecencyFactor(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		crawledAt  string
-		sourceType string
+		createdAt  string
 		subType    string
 		wantApprox float64
 		tolerance  float64
 	}{
 		{
-			name:       "memory general today",
-			crawledAt:  "2026-03-10T12:00:00Z",
-			sourceType: store.SourceMemory,
+			name:       "general today",
+			createdAt:  "2026-03-10T12:00:00Z",
 			subType:    store.SubTypeGeneral,
 			wantApprox: 1.0,
 			tolerance:  0.01,
 		},
 		{
-			name:       "memory general 60 days ago (one half-life)",
-			crawledAt:  "2026-01-09T12:00:00Z",
-			sourceType: store.SourceMemory,
+			name:       "general 60 days ago (one half-life)",
+			createdAt:  "2026-01-09T12:00:00Z",
 			subType:    store.SubTypeGeneral,
 			wantApprox: 0.5, // exp(-ln2 * 60/60) = 0.5, exactly at floor
 			tolerance:  0.02,
 		},
 		{
-			name:       "memory general 120 days ago (two half-lives, clamped)",
-			crawledAt:  "2025-11-10T12:00:00Z",
-			sourceType: store.SourceMemory,
+			name:       "general 120 days ago (two half-lives, clamped)",
+			createdAt:  "2025-11-10T12:00:00Z",
 			subType:    store.SubTypeGeneral,
 			wantApprox: 0.5, // exp(-ln2 * 120/60) = 0.25, clamped to floor 0.5
 			tolerance:  0.01,
 		},
 		{
-			name:       "memory rule 60 days ago (half of rule half-life=120)",
-			crawledAt:  "2026-01-09T12:00:00Z",
-			sourceType: store.SourceMemory,
+			name:       "rule 60 days ago (half of rule half-life=120)",
+			createdAt:  "2026-01-09T12:00:00Z",
 			subType:    store.SubTypeRule,
 			wantApprox: 0.707, // exp(-ln2 * 60/120) ≈ 0.707
 			tolerance:  0.02,
 		},
 		{
-			name:       "memory rule 120 days ago (one half-life)",
-			crawledAt:  "2025-11-10T12:00:00Z",
-			sourceType: store.SourceMemory,
+			name:       "rule 120 days ago (one half-life)",
+			createdAt:  "2025-11-10T12:00:00Z",
 			subType:    store.SubTypeRule,
 			wantApprox: 0.5, // exp(-ln2 * 120/120) = 0.5
 			tolerance:  0.02,
 		},
 		{
-			name:       "memory assumption 30 days ago (one half-life)",
-			crawledAt:  "2026-02-08T12:00:00Z",
-			sourceType: store.SourceMemory,
+			name:       "assumption 30 days ago (one half-life)",
+			createdAt:  "2026-02-08T12:00:00Z",
 			subType:    "assumption",
 			wantApprox: 0.5,
 			tolerance:  0.02,
 		},
 		{
-			name:       "memory decision 90 days ago (one half-life)",
-			crawledAt:  "2025-12-10T12:00:00Z",
-			sourceType: store.SourceMemory,
+			name:       "decision 90 days ago (one half-life)",
+			createdAt:  "2025-12-10T12:00:00Z",
 			subType:    store.SubTypeDecision,
 			wantApprox: 0.5,
 			tolerance:  0.02,
 		},
 		{
-			name:       "memory general 30 days ago (half of half-life)",
-			crawledAt:  "2026-02-08T12:00:00Z",
-			sourceType: store.SourceMemory,
+			name:       "general 30 days ago (half of half-life)",
+			createdAt:  "2026-02-08T12:00:00Z",
 			subType:    store.SubTypeGeneral,
 			wantApprox: 0.707, // exp(-ln2 * 30/60) ≈ 0.707
 			tolerance:  0.02,
 		},
 		{
-			name:       "docs no decay",
-			crawledAt:  "2024-01-01T00:00:00Z",
-			sourceType: "records",
-			subType:    "",
-			wantApprox: 1.0,
-			tolerance:  0.001,
-		},
-		{
-			name:       "spec no decay",
-			crawledAt:  "2024-06-15T00:00:00Z",
-			sourceType: store.SourceSpec,
-			subType:    "",
-			wantApprox: 1.0,
-			tolerance:  0.001,
-		},
-		{
-			name:       "empty crawledAt",
-			crawledAt:  "",
-			sourceType: store.SourceMemory,
+			name:       "empty createdAt",
+			createdAt:  "",
 			subType:    store.SubTypeGeneral,
 			wantApprox: 1.0,
 			tolerance:  0.001,
 		},
 		{
 			name:       "sqlite datetime format",
-			crawledAt:  "2026-03-10 12:00:00",
-			sourceType: store.SourceMemory,
+			createdAt:  "2026-03-10 12:00:00",
 			subType:    store.SubTypeGeneral,
 			wantApprox: 1.0,
 			tolerance:  0.01,
 		},
 		{
-			name:       "future crawledAt",
-			crawledAt:  "2026-03-11T12:00:00Z",
-			sourceType: store.SourceMemory,
+			name:       "future createdAt",
+			createdAt:  "2026-03-11T12:00:00Z",
 			subType:    store.SubTypeGeneral,
 			wantApprox: 1.0,
 			tolerance:  0.001,
 		},
 		{
 			name:       "unknown sub_type falls back to general 60d",
-			crawledAt:  "2026-01-09T12:00:00Z",
-			sourceType: store.SourceMemory,
+			createdAt:  "2026-01-09T12:00:00Z",
 			subType:    "unknown",
 			wantApprox: 0.5, // 60 days / 60-day half-life
 			tolerance:  0.02,
@@ -135,10 +106,10 @@ func TestRecencyFactor(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := recencyFactor(tt.crawledAt, tt.sourceType, tt.subType, now)
+			got := recencyFactor(tt.createdAt, tt.subType, now)
 			if math.Abs(got-tt.wantApprox) > tt.tolerance {
-				t.Errorf("recencyFactor(%q, %q, %q) = %f, want ~%f (±%f)",
-					tt.crawledAt, tt.sourceType, tt.subType, got, tt.wantApprox, tt.tolerance)
+				t.Errorf("recencyFactor(%q, %q) = %f, want ~%f (±%f)",
+					tt.createdAt, tt.subType, got, tt.wantApprox, tt.tolerance)
 			}
 		})
 	}
@@ -146,16 +117,16 @@ func TestRecencyFactor(t *testing.T) {
 
 func TestApplyRecencySignal_NoDecay(t *testing.T) {
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
-	docs := []store.DocRow{
-		{ID: 1, SourceType: "project", CrawledAt: "2024-01-01T00:00:00Z"},
-		{ID: 2, SourceType: "project", CrawledAt: "2026-03-10T00:00:00Z"},
+	docs := []store.KnowledgeRow{
+		{ID: 1, SubType: "", CreatedAt: "2024-01-01T00:00:00Z"},
+		{ID: 2, SubType: "", CreatedAt: "2026-03-10T00:00:00Z"},
 	}
 
 	result := applyRecencySignal(docs, now)
 
-	// No source_type needs recency → order preserved.
+	// No sub_type with decay → order preserved.
 	if result[0].ID != 1 || result[1].ID != 2 {
-		t.Errorf("expected order preserved for docs-only, got IDs %d, %d", result[0].ID, result[1].ID)
+		t.Errorf("expected order preserved, got IDs %d, %d", result[0].ID, result[1].ID)
 	}
 }
 
@@ -163,10 +134,10 @@ func TestApplyRecencySignal_MemoryBoost(t *testing.T) {
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
 
 	// 3 docs: #1 very old, #2 medium, #3 brand new.
-	docs3 := []store.DocRow{
-		{ID: 1, SourceType: store.SourceMemory, SubType: store.SubTypeGeneral, CrawledAt: "2025-01-01T00:00:00Z"}, // ~434 days, pos 1
-		{ID: 2, SourceType: store.SourceMemory, SubType: store.SubTypeGeneral, CrawledAt: "2025-06-01T00:00:00Z"}, // ~282 days, pos 2
-		{ID: 3, SourceType: store.SourceMemory, SubType: store.SubTypeGeneral, CrawledAt: "2026-03-10T11:00:00Z"}, // <1 day, pos 3
+	docs3 := []store.KnowledgeRow{
+		{ID: 1, SubType: store.SubTypeGeneral, CreatedAt: "2025-01-01T00:00:00Z"}, // ~434 days, pos 1
+		{ID: 2, SubType: store.SubTypeGeneral, CreatedAt: "2025-06-01T00:00:00Z"}, // ~282 days, pos 2
+		{ID: 3, SubType: store.SubTypeGeneral, CreatedAt: "2026-03-10T11:00:00Z"}, // <1 day, pos 3
 	}
 
 	result3 := applyRecencySignal(docs3, now)
@@ -185,9 +156,9 @@ func TestApplyRecencySignal_SubTypeAware(t *testing.T) {
 
 	// Rule with 60-day age: half-life=120d, so decay = exp(-ln2*60/120) ≈ 0.707
 	// General with 60-day age: half-life=60d, so decay = 0.5 (at floor)
-	docs := []store.DocRow{
-		{ID: 1, SourceType: store.SourceMemory, SubType: store.SubTypeGeneral, CrawledAt: "2026-01-09T12:00:00Z"},
-		{ID: 2, SourceType: store.SourceMemory, SubType: store.SubTypeRule, CrawledAt: "2026-01-09T12:00:00Z"},
+	docs := []store.KnowledgeRow{
+		{ID: 1, SubType: store.SubTypeGeneral, CreatedAt: "2026-01-09T12:00:00Z"},
+		{ID: 2, SubType: store.SubTypeRule, CreatedAt: "2026-01-09T12:00:00Z"},
 	}
 
 	result := applyRecencySignal(docs, now)
@@ -200,29 +171,28 @@ func TestApplyRecencySignal_SubTypeAware(t *testing.T) {
 	}
 }
 
-func TestApplyRecencySignal_MixedSourceTypes(t *testing.T) {
+func TestApplyRecencySignal_MixedSubTypes(t *testing.T) {
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
-	docs := []store.DocRow{
-		{ID: 1, SourceType: "project", CrawledAt: "2024-01-01T00:00:00Z"},                                         // docs: no decay
-		{ID: 2, SourceType: store.SourceMemory, SubType: store.SubTypeGeneral, CrawledAt: "2026-03-10T11:00:00Z"}, // memory: fresh
+	docs := []store.KnowledgeRow{
+		{ID: 1, SubType: store.SubTypeRule, CreatedAt: "2024-01-01T00:00:00Z"},    // rule: slow decay
+		{ID: 2, SubType: store.SubTypeGeneral, CreatedAt: "2026-03-10T11:00:00Z"}, // general: fresh
 	}
 
 	result := applyRecencySignal(docs, now)
 
-	// Doc 1: posScore=1.0, recency=1.0 (docs) → 1.0
-	// Doc 2: posScore=0.5, recency≈1.0 (fresh memory) → ≈0.5
-	// Order: 1, 2
+	// Doc 1: posScore=1.0, rule has slow decay
+	// Doc 2: posScore=0.5, fresh general
 	if result[0].ID != 1 {
-		t.Error("expected docs (no decay) to stay first")
+		t.Error("expected rule to stay first")
 	}
 	if result[1].ID != 2 {
-		t.Error("expected fresh memory at position 2")
+		t.Error("expected fresh general at position 2")
 	}
 }
 
 func TestApplyRecencySignal_SingleDoc(t *testing.T) {
-	docs := []store.DocRow{
-		{ID: 1, SourceType: store.SourceMemory, SubType: store.SubTypeGeneral, CrawledAt: "2025-01-01T00:00:00Z"},
+	docs := []store.KnowledgeRow{
+		{ID: 1, SubType: store.SubTypeGeneral, CreatedAt: "2025-01-01T00:00:00Z"},
 	}
 	result := applyRecencySignal(docs, time.Now())
 	if len(result) != 1 || result[0].ID != 1 {

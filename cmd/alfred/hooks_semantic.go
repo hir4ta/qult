@@ -81,7 +81,7 @@ func handleFTSFallback(ctx context.Context, ev *hookEvent, prompt string, rememb
 		return false
 	}
 
-	docs, err := st.SearchMemoriesFTS(ctx, prompt, 3)
+	docs, err := st.SearchKnowledgeFTS(ctx, prompt, 3)
 	if err != nil || (len(docs) == 0 && rememberHint == "") {
 		if rememberHint != "" {
 			emitAdditionalContext("UserPromptSubmit", rememberHint)
@@ -98,7 +98,7 @@ func handleFTSFallback(ctx context.Context, ev *hookEvent, prompt string, rememb
 		buf.WriteString("Related past experience:\n")
 		for _, d := range docs {
 			snippet := safeSnippet(d.Content, 200)
-			buf.WriteString(fmt.Sprintf("- [memory: %s] %s\n", d.SectionPath, snippet))
+			buf.WriteString(fmt.Sprintf("- [memory: %s] %s\n", d.Title, snippet))
 		}
 	}
 	if buf.Len() > 0 {
@@ -134,7 +134,7 @@ func searchByChangedFiles(ctx context.Context, st *store.Store, projectPath stri
 	}
 
 	query := strings.Join(terms, " ")
-	docs, err := st.SearchMemoriesFTS(ctx, query, 2)
+	docs, err := st.SearchKnowledgeFTS(ctx, query, 2)
 	if err != nil || len(docs) == 0 {
 		return nil
 	}
@@ -142,7 +142,7 @@ func searchByChangedFiles(ctx context.Context, st *store.Store, projectPath stri
 	var results []string
 	for _, d := range docs {
 		snippet := safeSnippet(d.Content, 200)
-		results = append(results, fmt.Sprintf("- [file-context: %s] %s\n", d.SectionPath, snippet))
+		results = append(results, fmt.Sprintf("- [file-context: %s] %s\n", d.Title, snippet))
 	}
 	return results
 }
@@ -173,7 +173,7 @@ func searchKnowledgeSemantic(ctx context.Context, queryVec []float32, st *store.
 		return nil
 	}
 
-	matches, err := st.VectorSearch(ctx, queryVec, "records", 6, store.SourceMemory, store.SourceSpec)
+	matches, err := st.VectorSearchKnowledge(ctx, queryVec, 6)
 	if err != nil || len(matches) == 0 {
 		return nil
 	}
@@ -183,7 +183,7 @@ func searchKnowledgeSemantic(ctx context.Context, queryVec []float32, st *store.
 	for i := 0; i < limit; i++ {
 		ids[i] = matches[i].SourceID
 	}
-	docs, err := st.GetDocsByIDs(ctx, ids)
+	docs, err := st.GetKnowledgeByIDs(ctx, ids)
 	if err != nil || len(docs) == 0 {
 		return nil
 	}
@@ -192,10 +192,10 @@ func searchKnowledgeSemantic(ctx context.Context, queryVec []float32, st *store.
 	for _, d := range docs {
 		snippet := safeSnippet(d.Content, 200)
 		label := "memory"
-		if d.SourceType == store.SourceSpec {
+		if d.SubType == "spec" {
 			label = "past spec"
 		}
-		results = append(results, fmt.Sprintf("- [%s: %s] %s\n", label, d.SectionPath, snippet))
+		results = append(results, fmt.Sprintf("- [%s: %s] %s\n", label, d.Title, snippet))
 	}
 	return results
 }

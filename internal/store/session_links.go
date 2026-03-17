@@ -7,26 +7,27 @@ import (
 )
 
 // SessionLink tracks continuity across auto-compaction boundaries.
-// When Claude Code auto-compacts, it creates a new session ID. This table
-// links that new ID back to the master session that started the work.
 type SessionLink struct {
 	ClaudeSessionID string
 	MasterSessionID string
+	ProjectRemote   string
 	ProjectPath     string
 	TaskSlug        string
+	Branch          string
 	LinkedAt        string
 }
 
 // LinkSession creates a session link from a new Claude session ID to a master session.
-// Idempotent: no-op if the link already exists.
 func (s *Store) LinkSession(ctx context.Context, link *SessionLink) error {
 	if link.LinkedAt == "" {
 		link.LinkedAt = time.Now().UTC().Format(time.RFC3339)
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT OR IGNORE INTO session_links (claude_session_id, master_session_id, project_path, task_slug, linked_at)
-		 VALUES (?, ?, ?, ?, ?)`,
-		link.ClaudeSessionID, link.MasterSessionID, link.ProjectPath, link.TaskSlug, link.LinkedAt,
+		`INSERT OR IGNORE INTO session_links
+		 (claude_session_id, master_session_id, project_remote, project_path, task_slug, branch, linked_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		link.ClaudeSessionID, link.MasterSessionID,
+		link.ProjectRemote, link.ProjectPath, link.TaskSlug, link.Branch, link.LinkedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("store: link session: %w", err)
@@ -35,14 +36,12 @@ func (s *Store) LinkSession(ctx context.Context, link *SessionLink) error {
 }
 
 // ResolveMasterSession follows the session-link chain to find the root master session ID.
-// Walks transitive links (session-3 → session-2 → session-1 resolves to session-1).
-// Returns the input ID if no link exists (i.e., this is already the master).
 func (s *Store) ResolveMasterSession(ctx context.Context, claudeSessionID string) string {
 	id := claudeSessionID
 	seen := make(map[string]bool)
 	for {
 		if seen[id] {
-			return id // cycle guard
+			return id
 		}
 		seen[id] = true
 		var master string

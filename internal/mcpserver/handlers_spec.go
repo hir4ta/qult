@@ -171,7 +171,7 @@ func specDoInit(ctx context.Context, req mcp.CallToolRequest, st *store.Store, e
 	if summary, err := spec.SteeringSummary(projectPath); err == nil && summary != "" {
 		result["steering_context"] = summary
 	} else if !spec.SteeringExists(projectPath) {
-		result["steering_hint"] = "project steering docs not found — run `alfred steering-init` to generate project context for better specs"
+		result["steering_hint"] = "project steering docs not found — run `/alfred:init` to set up project context for better specs"
 	}
 
 	// Suggest ledger search before starting work.
@@ -216,7 +216,7 @@ func searchRelatedKnowledge(ctx context.Context, st *store.Store, emb *embedder.
 	if emb != nil {
 		vec, err := emb.EmbedForSearch(ctx, description)
 		if err == nil && vec != nil {
-			matches, err := st.VectorSearch(ctx, vec, "records", limit*3, store.SourceMemory)
+			matches, err := st.VectorSearchKnowledge(ctx, vec, limit*3)
 			if err == nil && len(matches) > 0 {
 				ids := make([]int64, len(matches))
 				scores := make(map[int64]float64, len(matches))
@@ -224,7 +224,7 @@ func searchRelatedKnowledge(ctx context.Context, st *store.Store, emb *embedder.
 					ids[i] = m.SourceID
 					scores[m.SourceID] = m.Score
 				}
-				fetched, err := st.GetDocsByIDs(ctx, ids)
+				fetched, err := st.GetKnowledgeByIDs(ctx, ids)
 				if err == nil {
 					for _, d := range fetched {
 						baseScore := scores[d.ID] // vector similarity in [0, 1]
@@ -237,7 +237,7 @@ func searchRelatedKnowledge(ctx context.Context, st *store.Store, emb *embedder.
 
 	// Fallback to FTS5: use position-based scoring (1.0 for first, decaying).
 	if len(ranked) == 0 {
-		docs, err := st.SearchMemoriesFTS(ctx, description, limit*3)
+		docs, err := st.SearchKnowledgeFTS(ctx, description, limit*3)
 		if err != nil || len(docs) == 0 {
 			return nil
 		}
@@ -271,8 +271,8 @@ func searchRelatedKnowledge(ctx context.Context, st *store.Store, emb *embedder.
 			content = string(runes[:500]) + "..."
 		}
 		suggestions[i] = knowledgeSuggestion{
-			Label:          r.doc.SectionPath,
-			Source:         r.doc.SourceType,
+			Label:          r.doc.Title,
+			Source:         r.doc.SubType,
 			SubType:        r.doc.SubType,
 			Content:        content,
 			RelevanceScore: r.score,
@@ -740,11 +740,7 @@ func specDoDelete(ctx context.Context, req mcp.CallToolRequest, st *store.Store)
 				}
 			}
 		}
-		if st != nil {
-			projectBase := filepath.Base(projectPath)
-			n, _ := st.CountDocsByURLPrefix(ctx, fmt.Sprintf("spec://%s/%s/", projectBase, taskSlug))
-			preview["db_doc_count"] = n
-		}
+		// DB doc count removed in V8 schema (no URL-based lookup).
 		// Warn about incoming references that will become dangling.
 		if incoming := spec.CollectIncoming(projectPath, taskSlug); len(incoming) > 0 {
 			preview["dangling_warning"] = fmt.Sprintf("%d reference(s) from other specs will become dangling", len(incoming))
@@ -768,11 +764,7 @@ func specDoDelete(ctx context.Context, req mcp.CallToolRequest, st *store.Store)
 		"deleted":  taskSlug,
 		"all_gone": allGone,
 	}
-	if st != nil {
-		projectBase := filepath.Base(projectPath)
-		n, _ := st.DeleteDocsByURLPrefix(ctx, fmt.Sprintf("spec://%s/%s/", projectBase, taskSlug))
-		result["db_docs_deleted"] = n
-	}
+	// DB doc cleanup removed in V8 schema (no URL-based deletion).
 	if !allGone {
 		newPrimary, _ := spec.ReadActive(projectPath)
 		result["new_primary"] = newPrimary
@@ -1071,16 +1063,19 @@ func persistSpecDecisions(ctx context.Context, sd *spec.SpecDir, taskSlug string
 			continue
 		}
 
-		url := fmt.Sprintf("memory://spec-decision/%s/%s", taskSlug, strings.ReplaceAll(strings.ToLower(title), " ", "-"))
+		filePath := fmt.Sprintf("decisions/%s/%s", taskSlug, strings.ReplaceAll(strings.ToLower(title), " ", "-"))
 		label := taskSlug + " > " + title
 
-		_, changed, err := st.UpsertDoc(ctx, &store.DocRow{
-			URL:         url,
-			SectionPath: label,
-			Content:     "## " + title + "\n" + body,
-			SourceType:  store.SourceMemory,
-			SubType:     "decision",
-			TTLDays:     0, // permanent
+		proj := store.DetectProject(sd.ProjectPath)
+		_, changed, err := st.UpsertKnowledge(ctx, &store.KnowledgeRow{
+			FilePath:      filePath,
+			Title:         label,
+			Content:       "## " + title + "\n" + body,
+			SubType:       "decision",
+			ProjectRemote: proj.Remote,
+			ProjectPath:   proj.Path,
+			ProjectName:   proj.Name,
+			Branch:        proj.Branch,
 		})
 		if err == nil && changed {
 			saved++

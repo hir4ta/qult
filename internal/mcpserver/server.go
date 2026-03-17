@@ -133,8 +133,6 @@ Do NOT use for: searching documentation (use WebFetch instead), file operations.
 			mcp.WithString("category", mcp.Description("Structured knowledge: rule category (optional, for rules)")),
 			mcp.WithString("priority", mcp.Description("Structured knowledge: rule priority p0/p1/p2 (optional, for rules)")),
 			mcp.WithString("project_path", mcp.Description("Project root path for structured knowledge JSON file storage (defaults to cwd)")),
-			mcp.WithString("valid_until", mcp.Description("Memory expiry date in RFC3339 format (optional, for save). Expired memories excluded from search.")),
-			mcp.WithString("review_by", mcp.Description("Review deadline in RFC3339 format (optional, for save). Past-due triggers warnings but does not exclude from search.")),
 			),
 			Handler: recallHandler(st, emb),
 		},

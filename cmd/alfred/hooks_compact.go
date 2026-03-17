@@ -100,14 +100,8 @@ func handlePreCompact(ctx context.Context, projectPath, transcriptPath, customIn
 		return
 	}
 
-	// Warn about memories with very low vitality (read-only, never auto-disable).
-	warnLowVitalityMemories(ctx, st)
-
 	// Inject promotion candidates if any exist.
 	injectPromotionCandidates(ctx, st)
-
-	// Expire old chapter memories (90-day TTL).
-	st.DeleteExpiredDocs(ctx)
 
 	if err := spec.SyncSingleFile(ctx, sd, spec.FileSession, st, nil); err != nil {
 		return
@@ -121,7 +115,7 @@ func handlePreCompact(ctx context.Context, projectPath, transcriptPath, customIn
 	// Emit spec-aware compaction instructions to stdout.
 	emitCompactionInstructions(sd, taskSlug)
 
-	// Periodic orphan cleanup: remove embeddings for deleted records.
+	// Periodic orphan cleanup: remove embeddings for deleted knowledge entries.
 	if st, err := store.OpenDefaultCached(); err == nil {
 		if n, err := st.CleanOrphanedEmbeddings(); err == nil && n > 0 {
 			notifyUser("cleaned %d orphaned embedding(s)", n)
@@ -207,7 +201,7 @@ func injectPromotionCandidates(ctx context.Context, st *store.Store) {
 			suggested = store.SubTypeRule
 		}
 		buf.WriteString(fmt.Sprintf("- \"%s\" (hit: %d) → %s candidate [id=%d]\n",
-			truncateStr(d.SectionPath, 60), d.HitCount, suggested, d.ID))
+			truncateStr(d.Title, 60), d.HitCount, suggested, d.ID))
 	}
 	buf.WriteString("Use: ledger action=promote id=ID sub_type=TYPE\n")
 	emitAdditionalContext("PreCompact", buf.String())
@@ -657,9 +651,9 @@ func isItemCompleted(itemText, assistantTextLower string) bool {
 	return false
 }
 
-// persistDecisionMemory saves extracted decisions as permanent memory docs
-// (source_type="memory"). These survive spec deletion and enable cross-session
-// search for past decisions. Also persists structured decision JSON files.
+// persistDecisionMemory saves extracted decisions as permanent knowledge entries.
+// These survive spec deletion and enable cross-session search for past decisions.
+// Also persists structured decision JSON files.
 func persistDecisionMemory(ctx context.Context, projectPath, taskSlug string, decisions []string) {
 	st, err := store.OpenDefaultCached()
 	if err != nil {
@@ -667,8 +661,6 @@ func persistDecisionMemory(ctx context.Context, projectPath, taskSlug string, de
 	}
 
 	project := projectBaseName(projectPath)
-	date := time.Now().Format("2006-01-02")
-	url := fmt.Sprintf("memory://user/%s/%s/%s", project, taskSlug, date)
 	now := time.Now().UTC().Format(time.RFC3339)
 	sessionID := os.Getenv("CLAUDE_SESSION_ID")
 
@@ -686,21 +678,17 @@ func persistDecisionMemory(ctx context.Context, projectPath, taskSlug string, de
 			CreatedAt:  now,
 		}
 
-		// Serialize structured data.
-		structuredJSON, err := json.Marshal(dec)
-		if err != nil {
-			structuredJSON = nil // fall back to no structured data
-		}
-
-		sectionPath := fmt.Sprintf("%s > %s > decision > %s#%d", project, taskSlug, truncateDecision(d, 60), i)
-		id, changed, err := st.UpsertDoc(ctx, &store.DocRow{
-			URL:         url,
-			SectionPath: sectionPath,
-			Content:     dec.ToContent(),
-			SourceType:  store.SourceMemory,
-			SubType:     store.SubTypeDecision,
-			TTLDays:     0, // permanent
-			Structured:  string(structuredJSON),
+		title := fmt.Sprintf("%s > %s > decision > %s#%d", project, taskSlug, truncateDecision(d, 60), i)
+		proj := store.DetectProject(projectPath)
+		id, changed, err := st.UpsertKnowledge(ctx, &store.KnowledgeRow{
+			FilePath:      fmt.Sprintf("decisions/%s-%d", taskSlug, i),
+			Title:         title,
+			Content:       dec.ToContent(),
+			SubType:       store.SubTypeDecision,
+			ProjectRemote: proj.Remote,
+			ProjectPath:   proj.Path,
+			ProjectName:   proj.Name,
+			Branch:        proj.Branch,
 		})
 		if err != nil {
 			continue
@@ -751,11 +739,9 @@ func truncateDecision(d string, maxLen int) string {
 // payloads, while preventing extreme outliers from bloating the DB.
 const maxChapterSectionBytes = 32 * 1024
 
-// chapterMemoryTTLDays is the TTL for chapter memory entries (90 days).
-// Chapter memories are verbose per-compact-cycle snapshots; unlike condensed
-// session summaries (permanent), they auto-expire to prevent DB bloat.
-// Expiration is enforced by DeleteExpiredDocs, called during PreCompact.
-const chapterMemoryTTLDays = 90
+// chapterMemoryTTLDays was the TTL for chapter memory entries.
+// V8: TTL is no longer stored in KnowledgeRow; retained as documentation.
+// const chapterMemoryTTLDays = 90
 
 // persistChapterMemory saves the current session context as permanent memory
 // "chapter" sections before session.md is overwritten by the new compact cycle.
@@ -777,8 +763,6 @@ func persistChapterMemory(ctx context.Context, projectPath, taskSlug string, sd 
 
 	project := projectBaseName(projectPath)
 	ts := time.Now().Format("2006-01-02T15:04:05")
-	baseURL := fmt.Sprintf("memory://user/%s/%s/chapter-%d", project, taskSlug, chapterNum)
-
 	// Create a concise label for timeline display.
 	workingOn := extractSection(existing, "## Currently Working On")
 	if workingOn == "" {
@@ -818,37 +802,13 @@ func persistChapterMemory(ctx context.Context, projectPath, taskSlug string, sd 
 		// Build StructuredSession from chapter data.
 		now := time.Now().UTC().Format(time.RFC3339)
 		sessID := fmt.Sprintf("ch%d-%s-%s", chapterNum, taskSlug, time.Now().Format("20060102T150405"))
-		discussions := make([]store.Discussion, 0, len(structured.Decisions))
-		for _, d := range structured.Decisions {
-			discussions = append(discussions, store.Discussion{Topic: d})
-		}
-		filesModified := make([]store.FileChange, 0, len(structured.ModifiedFiles))
-		for _, f := range structured.ModifiedFiles {
-			filesModified = append(filesModified, store.FileChange{Path: f, Action: "edit"})
-		}
 		sess := store.StructuredSession{
 			ID:        sessID,
 			Title:     structured.Goal,
 			CreatedAt: now,
-			Context: store.SessionContext{
-				ProjectName: project,
-				TaskSlug:    taskSlug,
-			},
-			Summary: store.SessionSummary{
-				Goal:    structured.Goal,
-				Outcome: structured.Status,
-			},
-			Discussions:   discussions,
-			Technologies:  structured.Technologies,
-			FilesModified: filesModified,
-			Handoff:       &store.SessionHandoff{NextSteps: structured.NextSteps},
-		}
-
-		// Serialize StructuredSession for the Structured field.
-		structuredJSON, jsonErr := json.Marshal(sess)
-		var structuredStr string
-		if jsonErr == nil {
-			structuredStr = string(structuredJSON)
+			Goal:      structured.Goal,
+			Outcome:   structured.Status,
+			Summary:   strings.Join(structured.Decisions, "; "),
 		}
 
 		// Use ToContent for human-readable DB content.
@@ -857,14 +817,17 @@ func persistChapterMemory(ctx context.Context, projectPath, taskSlug string, sd 
 			dbContent = string(content) // fallback to chapter JSON
 		}
 
-		sectionPath := fmt.Sprintf("%s > %s > chapter-%d > %s", project, taskSlug, chapterNum, label)
-		id, changed, err := st.UpsertDoc(ctx, &store.DocRow{
-			URL:         baseURL + "/session-state",
-			SectionPath: sectionPath,
-			Content:     dbContent,
-			SourceType:  store.SourceMemory,
-			TTLDays:     chapterMemoryTTLDays,
-			Structured:  structuredStr,
+		chTitle := fmt.Sprintf("%s > %s > chapter-%d > %s", project, taskSlug, chapterNum, label)
+		proj := store.DetectProject(projectPath)
+		id, changed, err := st.UpsertKnowledge(ctx, &store.KnowledgeRow{
+			FilePath:      fmt.Sprintf("chapters/%s/chapter-%d/session-state", taskSlug, chapterNum),
+			Title:         chTitle,
+			Content:       dbContent,
+			SubType:       "chapter",
+			ProjectRemote: proj.Remote,
+			ProjectPath:   proj.Path,
+			ProjectName:   proj.Name,
+			Branch:        proj.Branch,
 		})
 		if err == nil && changed {
 			savedCount++
@@ -888,13 +851,17 @@ func persistChapterMemory(ctx context.Context, projectPath, taskSlug string, sd 
 				content = safeTruncateBytes(content, maxChapterSectionBytes) + "\n... (truncated at 32KB)"
 			}
 			msgLabel := truncateStr(content, 80)
-			sectionPath := fmt.Sprintf("%s > %s > chapter-%d > user-context-%d > %s", project, taskSlug, chapterNum, i+1, msgLabel)
-			id, changed, err := st.UpsertDoc(ctx, &store.DocRow{
-				URL:         fmt.Sprintf("%s/user-context-%d", baseURL, i+1),
-				SectionPath: sectionPath,
-				Content:     content,
-				SourceType:  store.SourceMemory,
-				TTLDays:     chapterMemoryTTLDays,
+			ucTitle := fmt.Sprintf("%s > %s > chapter-%d > user-context-%d > %s", project, taskSlug, chapterNum, i+1, msgLabel)
+			proj := store.DetectProject(projectPath)
+			id, changed, err := st.UpsertKnowledge(ctx, &store.KnowledgeRow{
+				FilePath:      fmt.Sprintf("chapters/%s/chapter-%d/user-context-%d", taskSlug, chapterNum, i+1),
+				Title:         ucTitle,
+				Content:       content,
+				SubType:       "chapter",
+				ProjectRemote: proj.Remote,
+				ProjectPath:   proj.Path,
+				ProjectName:   proj.Name,
+				Branch:        proj.Branch,
 			})
 			if err != nil {
 				continue
@@ -1235,48 +1202,7 @@ func parseSessionStatusFromContent(content string) string {
 	return strings.TrimSpace(extractSection(content, "## Status"))
 }
 
-// warnLowVitalityMemories logs a warning for memories with very low vitality
-// and no recent access. This is a read-only operation — memories are never
-// auto-disabled (DEC-6).
-func warnLowVitalityMemories(ctx context.Context, st *store.Store) {
-	docs, err := st.ListLowVitality(ctx, 25, 50)
-	if err != nil || len(docs) == 0 {
-		return
-	}
-
-	// Filter to those not accessed in 180+ days.
-	cutoff := time.Now().AddDate(0, 0, -180)
-	var stale []store.LowVitalityDoc
-	for _, d := range docs {
-		lastDate := d.LastAccessed
-		if lastDate == "" {
-			lastDate = d.CrawledAt
-		}
-		if t, err := time.Parse(time.RFC3339, lastDate); err == nil && t.Before(cutoff) {
-			stale = append(stale, d)
-		}
-	}
-
-	if len(stale) == 0 {
-		return
-	}
-
-	// Build warning with count and top 3 labels.
-	labels := make([]string, 0, 3)
-	for i, d := range stale {
-		if i >= 3 {
-			break
-		}
-		label := d.SectionPath
-		if len([]rune(label)) > 60 {
-			label = string([]rune(label)[:60]) + "..."
-		}
-		labels = append(labels, label)
-	}
-
-	notifyUser("%d memories with very low vitality (< 10) and no access in 180+ days: %s — consider reviewing via 'ledger action=stale'",
-		len(stale), strings.Join(labels, "; "))
-}
+// warnLowVitalityMemories was removed in V8 (ListLowVitality no longer exists).
 
 // researchPatterns are keywords indicating research/investigation activity in the session.
 var researchPatterns = []string{

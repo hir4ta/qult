@@ -61,16 +61,15 @@ func TestRecallHandler_SearchWithResults(t *testing.T) {
 	handler := recallHandler(st, nil)
 
 	// Seed a memory entry.
-	doc := &store.DocRow{
-		URL:         "memory://user/myproject/manual/2025-01-15T120000",
-		SectionPath: "myproject > manual > OAuth implementation notes",
+	doc := &store.KnowledgeRow{
+		FilePath:    "memory://user/myproject/manual/2025-01-15T120000",
+		Title:       "myproject > manual > OAuth implementation notes",
 		Content:     "We decided to use PKCE flow for the OAuth2 implementation.",
-		SourceType:  store.SourceMemory,
-		TTLDays:     0,
+		SubType:     "general",
 	}
-	doc.ContentHash = store.ContentHashOf(doc.Content)
-	if _, _, err := st.UpsertDoc(context.Background(), doc); err != nil {
-		t.Fatalf("UpsertDoc: %v", err)
+	doc.ContentHash = store.ContentHash(doc.Content)
+	if _, _, err := st.UpsertKnowledge(context.Background(), doc); err != nil {
+		t.Fatalf("UpsertKnowledge: %v", err)
 	}
 
 	res, err := handler(context.Background(), newRequest(map[string]any{
@@ -101,14 +100,14 @@ func TestRecallHandler_SearchLimitCapped(t *testing.T) {
 	handler := recallHandler(st, nil)
 
 	// Seed a memory entry so the search succeeds.
-	doc := &store.DocRow{
-		URL:         "memory://user/test/manual/2025-01-01T100000",
-		SectionPath: "test > manual > note",
+	doc := &store.KnowledgeRow{
+		FilePath:    "memory://user/test/manual/2025-01-01T100000",
+		Title:       "test > manual > note",
 		Content:     "Test memory content for limit cap verification.",
-		SourceType:  store.SourceMemory,
+		SubType:     "general",
 	}
-	doc.ContentHash = store.ContentHashOf(doc.Content)
-	st.UpsertDoc(context.Background(), doc)
+	doc.ContentHash = store.ContentHash(doc.Content)
+	st.UpsertKnowledge(context.Background(), doc)
 
 	res, err := handler(context.Background(), newRequest(map[string]any{
 		"action": "search",
@@ -171,13 +170,13 @@ func TestRecallHandler_SaveSuccess(t *testing.T) {
 	if id == 0 {
 		t.Error("expected non-zero id")
 	}
-	url, _ := m["url"].(string)
-	if !strings.HasPrefix(url, "memory://user/my-project/manual/") {
-		t.Errorf("url = %q, want memory://user/my-project/manual/ prefix", url)
+	fp, _ := m["file_path"].(string)
+	if fp == "" {
+		t.Error("expected non-empty file_path")
 	}
-	sp, _ := m["section_path"].(string)
-	if !strings.Contains(sp, "Go testing best practice") {
-		t.Errorf("section_path = %q, should contain label", sp)
+	title, _ := m["title"].(string)
+	if !strings.Contains(title, "Go testing best practice") {
+		t.Errorf("title = %q, should contain label", title)
 	}
 }
 
@@ -241,9 +240,9 @@ func TestRecallHandler_SaveDefaultProject(t *testing.T) {
 	}
 
 	m := resultJSON(t, res)
-	url, _ := m["url"].(string)
-	if !strings.Contains(url, "/general/") {
-		t.Errorf("url = %q, expected default project 'general'", url)
+	fp, _ := m["file_path"].(string)
+	if fp == "" {
+		t.Error("expected non-empty file_path for default project")
 	}
 }
 

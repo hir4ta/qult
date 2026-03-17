@@ -11,22 +11,17 @@ Go 1.25 / SQLite (ncruces/go-sqlite3) / Voyage AI (embedding) / React SPA (Vite 
 | Package | Role |
 |---|---|
 | `internal/mcpserver` | MCP server (3 tools: dossier, roster, ledger) |
-| `internal/store` | SQLite persistence (records + embeddings + FTS5 full-text search) |
+| `internal/store` | SQLite persistence (knowledge_index + embeddings + FTS5), project detection, Markdown knowledge files |
 | `internal/embedder` | Voyage AI (voyage-4-large, vector search + rerank-2.5) |
-| `internal/spec` | Spec management: .alfred/specs/ (8 file types: requirements, design, tasks, test-specs, decisions, research, session, bugfix) + Size-based scaling (S/M/L/XL) + SpecType (feature/bugfix) + Validate checker + Steering docs: .alfred/steering/ (3 files: product, structure, tech) |
+| `internal/spec` | Spec management: .alfred/specs/ (8 file types) + Size-based scaling (S/M/L/XL) + SpecType (feature/bugfix) + Validate checker + Steering docs |
 | `internal/epic` | Epic management: .alfred/epics/ (YAML-based task grouping + dependencies) |
 | `internal/dashboard` | Dashboard types: DataSource interface + shared types |
 | `internal/api` | HTTP API server: chi router, REST handlers, SSE broadcast hub, SPA serving |
 | `web/` | React SPA: Vite 8, TanStack Router/Query, shadcn/ui, Tailwind CSS v4, Biome |
 | `internal/install` | Plugin bundle + user rules |
 | `cmd/alfred/hooks*.go` | Hook handler (SessionStart / PreCompact / UserPromptSubmit / PostToolUse) |
-| `cmd/alfred/hooks_compact.go` | PreCompact: decision extraction, structured chapter memory (JSON), session.md rebuild |
-| `cmd/alfred/hooks_semantic.go` | UserPromptSubmit: Voyage semantic search + FTS5 fallback + file context boost |
-| `cmd/alfred/hooks_posttool.go` | PostToolUse: Bash error detection → related memory injection; spec drift detection (git commit) |
-| `cmd/alfred/hooks_transcript.go` | Transcript parsing: rich context extraction, decision detection |
 | `cmd/alfred/dashboard.go` | HTTP dashboard entry point (`alfred dashboard` — browser open + go:embed SPA) |
 | `cmd/alfred/steering.go` | Steering doc generation (`alfred steering-init`) |
-| `cmd/alfred/export.go` | Knowledge export (`alfred export` → .alfred/knowledge/memories.yaml) |
 | `cmd/alfred/search_eval.go` | Search quality benchmark (`alfred search-eval`) |
 
 ## Commands
@@ -55,7 +50,7 @@ alfred steering-init          # Generate project steering docs (.alfred/steering
 
 - Always `go install ./cmd/alfred` after changes (`go build` + `cp` breaks macOS code signing)
 - `internal/` packages are private APIs
-- Plugin content source of truth: `internal/install/content/` (skills, agents, rules). `plugin/` is generated output (`alfred plugin-bundle`), gitignored
+- Plugin content source of truth: `internal/install/content/` (skills, agents, rules). `plugin/` is generated output, gitignored
 - MCP tools return structured JSON
 - MCP server version: dynamically set from resolvedVersion() (not hardcoded)
 
@@ -67,30 +62,17 @@ alfred steering-init          # Generate project steering docs (.alfred/steering
 ### Hooks & Events
 
 - Hook handler: short-lived process. UserPromptSubmit uses Voyage API (semantic search) or FTS5 fallback
-- SessionStart: CLAUDE.md ingestion + user rules check + spec context injection (2 ops parallel via channels) + adaptive onboarding (memory count → context depth)
-- PreCompact: auto-updates Next Steps completion status from transcript; decision extraction; structured chapter memory (JSON); epic progress auto-sync
-- UserPromptSubmit: Voyage vector search → FTS5 fallback → keyword fallback; file context boost from git diff; skill nudge (intent detection → skill suggestion via additionalContext)
-- Skill nudge: classifyIntent (7 intents: research/plan/implement/bugfix/review/tdd/save-knowledge, JP+EN bilingual phrase keywords) → buildSkillNudge (intent→skill routing with active spec suppression for plan/implement) → additionalContext injection. save-knowledge suppresses research when both match. No API calls (pure keyword matching, <1ms)
-- PostToolUse exploration detection: consecutive Read/Grep calls tracked via /tmp counter; at 5+ calls without active spec → survey suggestion. Non-Read/Grep tool resets counter
-- PreCompact knowledge detection: transcript research patterns (2+ hits from 13 keywords) → stderr reminder to save findings before compaction
-- dossier status next_action: contextual hint based on spec state (review_status=pending → dashboard, all steps done → complete, etc.)
-- dossier init suggested_search: always includes ledger search suggestion with description keywords
-- dossier status next_action: review pending → dashboard, all steps done → complete, 3+ active tasks without epic → roster init suggestion
-- SessionStart ledger reflect: suggests `ledger action=reflect` when 20+ memories exist and last reflect >7 days ago
-- PostToolUse: Bash error detection → FTS5 memory search → additionalContext injection; Bash success → session.md Next Steps auto-check (command + action signals matching + file-based matching via git diff); git commit → Living Spec auto-append → spec drift detection (file refs vs changed files)
-- PostToolUse Living Spec: git commit → extractChangedFiles (shared, called once) → shouldAutoAppend filter (.go only, excludes _test/_gen/.pb/_mock/_string/vendor/plugin/.alfred) → matchComponentByPackage → appendFileToComponent (design.md, flock-protected, `<!-- auto-added: ISO8601 -->` marker) → audit.jsonl (living-spec.update). Auto-appended files excluded from drift warnings. File: `hooks_autoappend.go`
-- PostToolUse drift detection: extractChangedFiles (git diff --name-only HEAD~1, 500ms timeout, fail-open) → parseSpecFileRefs (design.md File: + tasks.md Files:) → matchComponentByPackage (directory-level component matching) → reverseMapFileToFR (file→FR reverse lookup via tasks.md) → compare → additionalContext warning + audit.jsonl logging
-- Drift severity: info (test files), warning (source files not in spec), critical (component-level drift — file in same package as spec component)
-- Multi-agent skills: inspect (6 profiles), salon (3 specialists + synthesis), brief (7 spec files with EARS/traceability + 3 specialists per file + approval gate), attend (7-file spec→approve→implement→review→commit orchestrator), tdd (red→green→refactor autonomous cycles), mend (reproduce→analyze→fix→verify), survey (code→spec reverse engineering), harvest (PR comment → memory)
+- Multi-agent skills: inspect (6 profiles), salon (3 specialists + synthesis), brief (7 spec files + 3 specialists per file + approval gate), attend (spec→approve→implement→review→commit orchestrator), tdd (red→green→refactor), mend (reproduce→analyze→fix→verify), survey (code→spec reverse engineering), harvest (PR comment → knowledge)
 - brief/attend spec generation order: research → requirements → design → tasks → test-specs → decisions → session
+- @.claude/rules/hook-behavior.md (event pipelines, skill nudge, drift detection, dossier hints)
 
 ### Database & Schema
 
-- DB schema V7: validity windows + memory versioning (V6→V7 additive migration)
-- V7 columns: valid_until (DATETIME nullable), review_by (DATETIME nullable), superseded_by (INTEGER REFERENCES records(id) ON DELETE SET NULL)
-- Tables: records (memories/specs/project), embeddings (vector search), records_fts (FTS5), tag_aliases (search expansion), session_links (compaction continuity)
-- Validity windows: expired memories (valid_until < now) excluded from all search like enabled=0; review_by is advisory only (warnings, not exclusion)
-- Memory versioning: superseded_by links old→new; superseded memories excluded from search; max 5 chain depth with cycle detection
+- DB schema V8: knowledge-first architecture (any pre-V8 DB rebuilt from scratch)
+- Tables: knowledge_index (knowledge entries), embeddings (vector search), knowledge_fts (FTS5), tag_aliases (search expansion), session_links (compaction continuity)
+- Knowledge architecture: `.alfred/knowledge/*.md` (Markdown+frontmatter) = source of truth; DB = derived search index (rebuildable)
+- Project identification: project_remote (git remote URL) + project_path (directory) + branch; UNIQUE constraint on (project_remote, project_path, file_path)
+- SessionStart sync: scans `.alfred/knowledge/` → content_hash comparison → indexes new/changed files
 - Store.DB() is test-only; production code uses Store methods (no raw SQL outside internal/store)
 - @.claude/rules/store-internals.md (vector search, SQL safety patterns)
 
@@ -98,63 +80,23 @@ alfred steering-init          # Generate project steering docs (.alfred/steering
 
 - Steering docs: `.alfred/steering/` (3 files: product.md, structure.md, tech.md)
 - Pure filesystem (no DB storage, read on demand)
-- `alfred steering-init`: analyzes project files (go.mod, CLAUDE.md, README.md, directory tree) to auto-generate steering docs
-- `steering-init --force`: overwrite existing steering docs
+- `/alfred:init`: multi-agent project exploration → steering docs + templates + knowledge sync (preferred entry point)
+- `alfred steering-init`: legacy CLI (redirects to /alfred:init), still functional with `--force`
 - Dossier init: injects `steering_context` (summary) or `steering_hint` (suggestion) in response JSON
 - Dossier update: accepts `file=steering/{filename}` for steering doc updates
-- SessionStart hook: suggests `alfred steering-init` if steering docs are missing
-- PreCompact hook: suggests updating steering docs when architecture-related decisions detected
-- Ledger reflect: checks steering doc freshness (warns if > 30 days old)
 - ValidateSteering: checks tech.md vs go.mod drift, structure.md vs filesystem directory existence
 - Templates: `internal/spec/templates/steering/*.tmpl` (separate embed.FS from spec templates)
 
 ### Spec Management
 
 - Spec files use activeContext format for session.md
-- task_slug: `^[a-z0-9][a-z0-9\-]{0,63}$`
-- spec delete: dry-run preview (default) → `confirm=true` for actual deletion
-- spec.ValidSlug: exported regex for slug validation across packages
-- dossier tool: DestructiveHint=true, IdempotentHint=false (delete action is destructive; 2-phase confirm provides UX safety)
 - Dossier tool actions: init / update / status / switch / complete / delete / history / rollback / review / validate
-- Spec cross-references: `@spec:task-slug/file.md` format parsed by `spec.ParseRefs()`, resolved against filesystem
-- dossier status: includes `references` (outgoing + incoming), dangling detection
-- dossier init: returns `suggested_knowledge` (related memories via vector search + FTS5 fallback, sub_type boosted)
-- dossier delete preview: warns about incoming refs that will become dangling
-- Spec file locking: advisory flock on `.lock` file (exponential backoff 100/200/400/800ms ~1.5s total, context-aware cancellation, graceful fallback + stderr warning)
-- Spec version history: `.history/` dir with max 20 versions per file; rollback saves current first
-- Task lifecycle: active → complete (preserves spec files, sets completed_at) or delete (removes files)
-- ActiveTask fields: slug, started_at, status (active/completed), completed_at, review_status (pending/approved/changes_requested), size (S/M/L/XL), spec_type (feature/bugfix)
-- complete action: marks task completed, switches primary to next active task, syncs epic status. **Approval gate**: M/L/XL specs require review_status="approved" AND approved review JSON file in reviews/ directory before completion (S/D exempt). Fail-closed: YAML parse errors reject completion. Manual _active.md editing cannot bypass the gate
-- Spec v2: 7 files (requirements, design, tasks, test-specs, decisions, research, session); original 4 = CoreFiles, all 7 = AllFiles; bugfix.md = alternative primary file for bugfix type
-- SpecSize: S (3 files), M (4-5 files), L/XL (7 files), D (2 files: delta.md + session.md) — controls file count; auto-detected from description length (< 100 → S, < 300 → M, else L); D and XL are manual-only (never auto-detected)
-- SpecType: feature (default, uses requirements.md), bugfix (uses bugfix.md), delta (uses delta.md) — orthogonal to size; delta auto-set when size=D
-- FilesForSize(size, specType): returns file list for any (size, type) combination
-- Init functional options: WithSize(SpecSize), WithSpecType(SpecType); InitWithResult returns SpecDir + Size + SpecType + Files
-- Bugfix template: templates/bugfix/bugfix.md.tmpl (Bug Summary, Severity & Impact (P0-P3 with SLA targets), Reproduction Steps, Current Behavior, Expected Behavior, Unchanged Behavior with EARS "SHALL CONTINUE TO", Root Cause Analysis with 5 Whys, Fix Strategy, Regression Prevention)
-- Delta template: templates/delta.md.tmpl (Change Summary, Files Affected with CHG-N IDs, Before/After per CHG-N, Rationale, Impact Scope, Test Plan, Rollback Strategy) — CHG-N traceability for brownfield changes, confidence+grounding annotations
-- dossier init: accepts optional size (S/M/L/XL/D) and spec_type (feature/bugfix/delta) params; response includes size, spec_type, actual files list
-- dossier validate: read-only progressive checker — 22 checks: required_sections, min_fr_count (S:1+, M:3+, L:5+, XL:8+; bugfix uses substantive content check), traceability (fr_to_task, task_to_fr), confidence_annotations, closing_wave, design_fr_references, testspec_fr_references, nfr_traceability (L/XL only), gherkin_syntax, orphan_tests, orphan_tasks, content_placeholder (FR title TBD/TODO/{var} detection, HTML comment excluded), decisions_completeness (DEC-N required fields: Status/Context/Chosen/Rationale, L/XL only), research_completeness (required sections with substantive content, L/XL only), confidence_coverage (all FRs must have confidence annotation, XL only), xl_wave_count (≥4 numbered waves, XL only), xl_nfr_required (≥1 NFR-N, XL only), delta_sections_present (Change Summary/Files Affected/Test Plan, D only), grounding_coverage (opt-in: L/XL FR grounding or D CHG grounding, >30% speculative fails), delta_change_ids (CHG-N in Files Affected, D only), delta_before_after (Before/After section with content, D only)
-- Backward compat: legacy _active.md without size/spec_type defaults to L/feature; EffectiveSize()/EffectiveSpecType() helpers
-- Spec templates: embed.FS in `internal/spec/templates/*.tmpl templates/bugfix/*.tmpl`, rendered via `text/template` (TemplateData: TaskSlug, Description, Date, SpecType); v4 templates include inline guidance (HTML comments) for: granularity heuristics, confidence calibration, EARS pattern selection + limitations, ADR lifecycle, test strategy, done criteria, FR inter-dependencies + priority + verification method, negative requirements (NR-N), data dictionary, design tenets (Amazon-style), system context (C4 L1), Mermaid sequence diagrams, observability/security design, per-task risk/verify/accept/rollback, test speed categories, regression risk, concurrency tests, property-based tests, performance tests (p50/p95/p99), performance baseline, codebase impact analysis, technical debt assessment, decision scope/validity
-- EARS notation: requirements use 6 patterns (Ubiquitous, WHEN, WHILE, WHERE, IF-THEN, Complex)
-- Traceability IDs: FR-N (functional), NFR-N (non-functional), DEC-N (decisions), T-N.N (tasks wave.task), TS-N.N (tests)
-- Traceability matrix: design.md maps Req ID → Component → Task ID → Test ID
-- Spec confidence scoring: `<!-- confidence: N | source: TYPE | grounding: LEVEL -->` annotations (source: user/design-doc/code/inference/assumption; grounding: verified/reviewed/inferred/speculative — optional, backward compatible); status returns avg + low_items + low_confidence_warnings (score ≤ 5 + assumption) + grounding_distribution + grounding_warnings (high confidence + speculative, unknown values)
-- Grounding levels: verified (code/test proven) > reviewed (design-reviewed/user-confirmed) > inferred (reasoned from evidence) > speculative (hypothesis); orthogonal to source type
-- CHG-N: delta spec change identifiers (logical change unit, scoped per change not per file); used in Files Affected and Before/After sections
-- Spec complete auto-saves: decisions.md entries → permanent memory (source_type=memory, sub_type=decision)
-- Wave: Closing required in all tasks.md: self-review, CLAUDE.md update, test verification, knowledge save
-- Knowledge tab: DB-first (ListRecentMemories), file fallback (.alfred/knowledge/)
-- Activity tab: shows audit detail (completion summary: files modified, decisions saved)
-- Memory governance: `enabled` column + `valid_until`/`superseded_by` (DB schema V7); disabled/expired/superseded memories excluded from all search pipelines (vector, FTS5, keyword, fuzzy)
-- Knowledge tab: toggle enabled/disabled via API (PATCH /api/knowledge/{id}/enabled)
-- `alfred export` removed — all knowledge auto-saved via spec complete + hooks
+- dossier tool: DestructiveHint=true, IdempotentHint=false (delete is destructive; 2-phase confirm provides UX safety)
+- dossier init: accepts optional size (S/M/L/XL/D) and spec_type (feature/bugfix/delta) params
+- @.claude/rules/spec-details.md (sizes, types, templates, validation, confidence, approval gate)
 
 ### Spec Review & Approval Gate
 
-- Review data: .alfred/specs/{slug}/reviews/review-{timestamp}.json
-- ReviewComment: file, line (1-based), body, resolved
-- Review status: pending → approved or changes_requested (stored in _active.md review_status)
 - Web review mode: Tasks tab → View/Review tabs (only when review_status=pending)
 - dossier action=review: read-only, returns latest review + unresolved comments
 - brief Step 9: approval gate after spec creation
@@ -178,53 +120,31 @@ alfred steering-init          # Generate project steering docs (.alfred/steering
 - Build: `task build` (bun run build → cp dist → go install with go:embed)
 - Dev mode: `ALFRED_DEV=1 alfred dashboard` + `task dev` (Vite HMR proxy)
 - 4 tabs: Overview (/) / Tasks (/tasks) / Knowledge (/knowledge) / Activity (/activity)
-- Overview: task summary cards, memory health, epic progress, recent decisions
-- Tasks: task list sidebar + spec file viewer + review mode (View/Review tabs)
-- Knowledge: Table with semantic search (Voyage AI, 300ms debounce), local filter, toggle enabled
-- Activity: timeline table with filter tabs (all/spec.init/spec.complete/review.submit), epic section
 - Review mode: line-numbered spec viewer, inline comments, Approve/Request Changes with confirmation dialog
 - SSE: EventSource → TanStack Query invalidation for real-time updates
-- Brand palette (DEC-15): session #40513b, decision #628141, pattern #2d8b7a, rule #e67e22, error #c0392b, purple #7b6b8d, dark #44403c; no Tailwind vivid colors
+- Brand palette (DEC-15): session #40513b, decision #628141, pattern #2d8b7a, rule #e67e22, error #c0392b, purple #7b6b8d, dark #44403c
 - DataSource interface: 15 methods (internal/dashboard/types.go)
-- MemoryHealth: DetectConflicts result cached 60s (DEC-6), ListLowVitality for stale count
 - Confidence: spec.ParseConfidence() (extracted from mcpserver to spec package)
 
-### Memory & Search
+### Knowledge & Search
 
-- Memory persistence: source_type="memory" in records table, TTL=0 (permanent), sub_type classification (general/decision/pattern/rule)
-- Memory sub_type boost: rule=2.0x, decision=1.5x, pattern=1.3x, general=1.0x (search relevance)
-- Knowledge maturity: hit_count tracks search result appearances, last_accessed for staleness detection
+- Knowledge persistence: `.alfred/knowledge/` (Markdown+frontmatter) = source of truth; DB `knowledge_index` = derived search index
+- Knowledge file format: YAML frontmatter (id, type, status, created_at, tags) + Markdown body (sections with ## headings)
+- Sub-type classification: general/decision/pattern/rule; boost: rule=2.0x, decision=1.5x, pattern=1.3x, general=1.0x
+- Knowledge maturity: hit_count tracks search appearances, last_accessed for staleness
 - Knowledge promotion: general→pattern (5+ hits), pattern→rule (15+ hits); manual confirmation via ledger promote
-- Ledger tool actions: search, save, promote, candidates, reflect, stale, audit-conventions
-- Convention audit: `ledger action=audit-conventions project_path=...` validates pattern/rule memories against codebase (file existence + code pattern grep)
-- Drift detection audit: drift.spec and drift.convention events logged to audit.jsonl with severity/resolution
-- Drift stats: `ledger action=reflect` includes drift_stats section (by type, severity, unresolved count)
-- Knowledge health (ledger reflect): stats + conflict detection (contradictions vs duplicates) + stale memories + promotion candidates + vitality distribution (5 buckets) + avg_vitality
-- Ledger stale action: returns low-vitality memories with computed scores (threshold parameter, default 20)
-- Search quality benchmark: `alfred search-eval` CLI subcommand with .alfred/search-eval.yaml test cases
-- PreCompact promotion injection: candidates above threshold surfaced in additionalContext
+- Ledger tool actions: search, save, promote, candidates, reflect, audit-conventions
 - Search pipeline: Voyage vector search → rerank → recency signal → hit_count tracking → FTS5 fallback → keyword fallback
-- FTS5: records_fts virtual table with bm25 ranking, auto-synced via triggers
+- FTS5: knowledge_fts virtual table with bm25 ranking, auto-synced via triggers (title weighted 3x)
 - Tag alias expansion: auth→authentication/login/認証, 16 categories bilingual (EN/JP)
-- Fuzzy search: Levenshtein distance on section_path (max dist = min(2, len/3))
-- Conflict detection: DetectConflicts pairwise cosine similarity (threshold 0.70) on memory embeddings; classifyConflict keyword polarity analysis (contradictionPairs) → "potential_contradiction" or "potential_duplicate"
-- Progressive Disclosure: ledger search detail parameter (compact/summary/full)
-- File context boost: git diff → FTS5 search by changed filenames → score boost
-- Recency signal: post-rerank exponential decay with sub-type-aware half-life via store.SubTypeHalfLife (assumption=30d, inference=45d, general=60d, pattern=90d, decision=90d, rule=120d); floor at 50%; replaces former uniform 60d half-life
-- Vitality score: on-demand composite (0-100) = 40% recency_decay + 25% hit_count (cap 50) + 20% sub_type_weight + 15% access_frequency; ComputeVitality/ListLowVitality in store/docs.go
-- PreCompact vitality warnings: warnLowVitalityMemories logs stderr warning for memories with vitality < 10 AND 180+ days unaccessed (read-only, never auto-disable per DEC-6)
-- Structured chapter memory: JSON schema (goal, technologies, modified_files, decisions, blockers)
-- Decision extraction: base score 0.35, min confidence 0.4 — bare keyword matches require at least one positive signal (rationale/alternative/arch term)
-- Background embedding: embed-async/embed-doc subcommands for async Voyage API calls
-- Orphan cleanup: CleanOrphanedEmbeddings runs during PreCompact (not per-insert)
-- Session continuity: PreCompact writes .alfred/.pending-compact.json breadcrumb, SessionStart resolves → session_links table (master session tracking)
-- Auto-complete: PreCompact auto-completes task when session.md Status="completed"/"done" or all Next Steps are checked
-- Onboarding context: SessionStart adapts injection depth by project memory count (0-5: full spec, 6-20: session+goal, 21+: session only)
+- Knowledge governance: `enabled` column in knowledge_index; disabled entries excluded from search
+- Knowledge tab: toggle enabled/disabled via API (PATCH /api/knowledge/{id}/enabled)
+- Knowledge files are git-friendly: team sharing via repository, diff-reviewable in PRs
 
 ### Naming Convention (Butler Theme)
 
 - Skills: brief, attend, tdd, inspect, mend, survey, salon, polish, valet, furnish, quarters, archive, concierge, harvest
-- MCP tools: dossier (spec management), roster (epic management), ledger (memory)
+- MCP tools: dossier (spec management), roster (epic management), ledger (knowledge)
 
 ### Deliberation Style
 
@@ -234,10 +154,6 @@ alfred steering-init          # Generate project steering docs (.alfred/steering
 - **Approval gate**: user reviews in `alfred dashboard`, not text-based
 - Session.md updated after each task completion (dashboard real-time progress)
 - attend/mend: MUST call `dossier action=complete` at end to close spec
-
-### Misc
-
-- Transcript format guard: 20-line sample, 70% parse + 50% structural validity thresholds
 
 ## Quality Gates
 

@@ -121,3 +121,8 @@ If the user has an active spec or the theme maps to a task slug:
 - ALWAYS generate at least 15 ideas across all perspectives
 - ALWAYS identify tensions and blind spots
 - Label speculation as "hypothesis", never assert as fact
+
+## Troubleshooting
+
+- **Theme too vague**: Ask the user to narrow the scope using the Phase 0 intake questions. A clear goal and constraints produce much better divergent output.
+- **Knowledge search returns nothing relevant**: Proceed with general brainstorming based on the theme. The skill works without prior knowledge — it just produces richer output with context.

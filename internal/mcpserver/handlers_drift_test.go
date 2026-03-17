@@ -192,24 +192,24 @@ func TestRecallAuditConventions_WithMemories(t *testing.T) {
 
 	ctx := context.Background()
 	// Insert a pattern memory referencing an existing file.
-	_, _, err := st.UpsertDoc(ctx, &store.DocRow{
-		URL:        "memory://test/1",
-		SectionPath: "test > pattern > existing file",
-		Content:    "Hook handler at cmd/alfred/main.go handles events",
-		SourceType: store.SourceMemory,
-		SubType:    store.SubTypePattern,
+	_, _, err := st.UpsertKnowledge(ctx, &store.KnowledgeRow{
+		FilePath:    "memory://test/1",
+		Title:       "test > pattern > existing file",
+		Content:     "Hook handler at cmd/alfred/main.go handles events",
+		SubType:     store.SubTypePattern,
+		ProjectPath: tmp,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Insert a rule memory referencing a non-existent file.
-	_, _, err = st.UpsertDoc(ctx, &store.DocRow{
-		URL:        "memory://test/2",
-		SectionPath: "test > rule > deleted file",
-		Content:    "Always check internal/old/removed.go for compatibility",
-		SourceType: store.SourceMemory,
-		SubType:    store.SubTypeRule,
+	_, _, err = st.UpsertKnowledge(ctx, &store.KnowledgeRow{
+		FilePath:    "memory://test/2",
+		Title:       "test > rule > deleted file",
+		Content:     "Always check internal/old/removed.go for compatibility",
+		SubType:     store.SubTypeRule,
+		ProjectPath: tmp,
 	})
 	if err != nil {
 		t.Fatal(err)

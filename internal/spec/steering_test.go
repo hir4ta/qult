@@ -20,7 +20,7 @@ func TestRenderSteering(t *testing.T) {
 		Date:         "2026-03-16",
 	}
 
-	rendered, err := RenderSteering(data)
+	rendered, err := RenderSteering(data, "")
 	if err != nil {
 		t.Fatalf("RenderSteering() error: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestWriteAndReadSteering(t *testing.T) {
 		Date:         "2026-03-16",
 	}
 
-	rendered, err := RenderSteering(data)
+	rendered, err := RenderSteering(data, "")
 	if err != nil {
 		t.Fatalf("RenderSteering: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestSteeringSummary(t *testing.T) {
 		Description: "Testing summary",
 		TechStack:   "Go",
 	}
-	rendered, err := RenderSteering(data)
+	rendered, err := RenderSteering(data, "")
 	if err != nil {
 		t.Fatalf("RenderSteering: %v", err)
 	}

@@ -77,7 +77,7 @@ func TestTablesExist(t *testing.T) {
 	}
 	defer s.Close()
 
-	tables := []string{"records", "embeddings", "schema_version"}
+	tables := []string{"knowledge_index", "embeddings", "schema_version", "tag_aliases", "session_links"}
 	for _, tbl := range tables {
 		var name string
 		err := s.DB().QueryRow(

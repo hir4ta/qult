@@ -1119,10 +1119,10 @@ func TestIngestProjectClaudeMD(t *testing.T) {
 
 	ingestProjectClaudeMD(context.Background(), st, dir)
 
-	// Verify docs were inserted via URL prefix search.
-	docs, err := st.SearchDocsByURLPrefix(context.Background(), "project://", 5)
+	// Verify docs were inserted via ListKnowledge.
+	docs, err := st.ListKnowledge(context.Background(), "", dir, 5)
 	if err != nil {
-		t.Fatalf("SearchDocsByURLPrefix: %v", err)
+		t.Fatalf("ListKnowledge: %v", err)
 	}
 	if len(docs) == 0 {
 		t.Error("expected docs after ingestProjectClaudeMD")
@@ -1647,12 +1647,12 @@ func TestPersistChapterMemory(t *testing.T) {
 	// Verify the chapter can be stored and retrieved from DB.
 	project := "chapter-test-project"
 	url := fmt.Sprintf("memory://user/%s/chapter-test/chapter-%d", project, chapterNum)
-	id, _, err := st.UpsertDoc(ctx, &store.DocRow{
-		URL:         url,
-		SectionPath: fmt.Sprintf("%s > chapter-test > chapter-%d > Implementing hybrid search", project, chapterNum),
+	id, _, err := st.UpsertKnowledge(ctx, &store.KnowledgeRow{
+		FilePath:    url,
+		Title:       fmt.Sprintf("%s > chapter-test > chapter-%d > Implementing hybrid search", project, chapterNum),
 		Content:     "## Session State\n" + session + "\n\n## Initial User Context\n" + early,
-		SourceType:  store.SourceMemory,
-		TTLDays:     0,
+		SubType:     "general",
+		ProjectPath: dir,
 	})
 	if err != nil {
 		t.Fatalf("upsert chapter: %v", err)
@@ -1662,13 +1662,13 @@ func TestPersistChapterMemory(t *testing.T) {
 	}
 
 	// Verify keyword search finds the chapter.
-	docs, err := st.SearchMemoriesKeyword(ctx, "hybrid search chapter", 10)
+	docs, err := st.SearchKnowledgeKeyword(ctx, "hybrid search", 10)
 	if err != nil {
 		t.Fatalf("keyword search: %v", err)
 	}
 	found := false
 	for _, d := range docs {
-		if strings.Contains(d.SectionPath, "chapter-2") {
+		if strings.Contains(d.Title, "chapter-2") {
 			found = true
 			break
 		}

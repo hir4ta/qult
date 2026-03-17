@@ -121,3 +121,8 @@ alfred operates on three layers:
 2. **MCP Tools** (on-demand): dossier for spec management, roster for epic management,
    ledger for memory, knowledge for Claude Code best practices, config-review for setup auditing
 3. **Browser Dashboard** (`alfred dashboard`): real-time view of epics, tasks, specs, and memories
+
+## Troubleshooting
+
+- **Knowledge tool returns no results**: Verify alfred is installed (`alfred` in PATH) and the MCP server is running. If no knowledge base exists yet, run `/alfred:init` to set up the project.
+- **Feature name not recognized**: Try broader terms or check `/alfred:concierge` without arguments for the full capability list. Feature names must match skill/tool names exactly.

@@ -78,8 +78,8 @@ func recallSearch(ctx context.Context, st *store.Store, emb *embedder.Embedder, 
 		overRetrieve = 20
 	}
 
-	// Search both memories and past specs — long-term knowledge that grows with use.
-	sr := SearchPipeline(ctx, st, emb, query, store.SourceMemory+","+store.SourceSpec, limit, overRetrieve)
+	// Search knowledge entries — long-term knowledge that grows with use.
+	sr := SearchPipeline(ctx, st, emb, query, limit, overRetrieve)
 	docs := sr.Docs
 	searchMethod := sr.SearchMethod
 	warnings := sr.Warnings
@@ -107,31 +107,26 @@ func recallSearch(ctx context.Context, st *store.Store, emb *embedder.Embedder, 
 	results := make([]map[string]any, 0, len(docs))
 	for _, d := range docs {
 		dm := map[string]any{
-			"section_path": d.SectionPath,
-			"source_type":  d.SourceType,
+			"title": d.Title,
 		}
 		if d.SubType != "" && d.SubType != store.SubTypeGeneral {
 			dm["sub_type"] = d.SubType
 		}
 		switch detail {
 		case "compact":
-			// Label + source only — minimal tokens.
+			// Label only — minimal tokens.
 		case "summary":
 			dm["content"] = truncate(d.Content, 200)
-			dm["url"] = d.URL
-			if d.CrawledAt != "" {
-				dm["saved_at"] = d.CrawledAt
+			dm["file_path"] = d.FilePath
+			if d.CreatedAt != "" {
+				dm["saved_at"] = d.CreatedAt
 			}
 		case "full":
 			dm["content"] = d.Content
-			dm["url"] = d.URL
-			if d.CrawledAt != "" {
-				dm["saved_at"] = d.CrawledAt
+			dm["file_path"] = d.FilePath
+			if d.CreatedAt != "" {
+				dm["saved_at"] = d.CreatedAt
 			}
-		}
-		// Include structured data when available.
-		if d.Structured != "" {
-			dm["structured"] = json.RawMessage(d.Structured)
 		}
 		results = append(results, dm)
 	}
@@ -197,7 +192,6 @@ func recallSave(ctx context.Context, st *store.Store, emb *embedder.Embedder, re
 	hasStructured := title != "" || contextText != "" || reasoning != "" ||
 		alternatives != "" || category != "" || priority != ""
 
-	var structured string // JSON for doc.Structured
 	if hasStructured {
 		now := time.Now().UTC().Format(time.RFC3339)
 		switch subType {
@@ -216,8 +210,6 @@ func recallSave(ctx context.Context, st *store.Store, emb *embedder.Embedder, re
 				dec.Alternatives = splitCSV(alternatives)
 			}
 			content = dec.ToContent()
-			data, _ := json.Marshal(dec)
-			structured = string(data)
 			// Best-effort JSON file save.
 			projectPath := resolveProjectPath(req)
 			if _, err := store.SaveDecision(projectPath, dec); err != nil {
@@ -236,8 +228,6 @@ func recallSave(ctx context.Context, st *store.Store, emb *embedder.Embedder, re
 				CreatedAt:             now,
 			}
 			content = pat.ToContent()
-			data, _ := json.Marshal(pat)
-			structured = string(data)
 			projectPath := resolveProjectPath(req)
 			if err := store.SavePattern(projectPath, pat); err != nil {
 				fmt.Fprintf(os.Stderr, "alfred: save pattern json: %v\n", err)
@@ -255,8 +245,6 @@ func recallSave(ctx context.Context, st *store.Store, emb *embedder.Embedder, re
 				CreatedAt: now,
 			}
 			content = rule.ToContent()
-			data, _ := json.Marshal(rule)
-			structured = string(data)
 			projectPath := resolveProjectPath(req)
 			if err := store.SaveRule(projectPath, rule); err != nil {
 				fmt.Fprintf(os.Stderr, "alfred: save rule json: %v\n", err)
@@ -265,36 +253,23 @@ func recallSave(ctx context.Context, st *store.Store, emb *embedder.Embedder, re
 		// For sub_types without a structured mapping (general), ignore structured fields.
 	}
 
-	// Optional validity window parameters.
-	validUntil := req.GetString("valid_until", "")
-	if validUntil != "" {
-		if _, err := time.Parse(time.RFC3339, validUntil); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("invalid valid_until format (use RFC3339): %v", err)), nil
-		}
-	}
-	reviewBy := req.GetString("review_by", "")
-	if reviewBy != "" {
-		if _, err := time.Parse(time.RFC3339, reviewBy); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("invalid review_by format (use RFC3339): %v", err)), nil
-		}
-	}
-
 	ts := time.Now().Format("2006-01-02T150405")
-	url := fmt.Sprintf("memory://user/%s/manual/%s", project, ts)
-	sectionPath := fmt.Sprintf("%s > manual > %s", project, truncate(label, 60))
+	knowledgePath := fmt.Sprintf("memories/%s/manual/%s", project, ts)
+	knowledgeTitle := fmt.Sprintf("%s > manual > %s", project, truncate(label, 60))
 
-	doc := &store.DocRow{
-		URL:         url,
-		SectionPath: sectionPath,
-		Content:     strings.TrimSpace(content),
-		SourceType:  store.SourceMemory,
-		SubType:     subType,
-		TTLDays:     0, // permanent
-		Structured:  structured,
-		ValidUntil:  validUntil,
-		ReviewBy:    reviewBy,
+	projectPath := resolveProjectPath(req)
+	proj := store.DetectProject(projectPath)
+	row := &store.KnowledgeRow{
+		FilePath:      knowledgePath,
+		Title:         knowledgeTitle,
+		Content:       strings.TrimSpace(content),
+		SubType:       subType,
+		ProjectRemote: proj.Remote,
+		ProjectPath:   proj.Path,
+		ProjectName:   proj.Name,
+		Branch:        proj.Branch,
 	}
-	id, changed, err := st.UpsertDoc(ctx, doc)
+	id, changed, err := st.UpsertKnowledge(ctx, row)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("save failed: %v", err)), nil
 	}
@@ -302,13 +277,6 @@ func recallSave(ctx context.Context, st *store.Store, emb *embedder.Embedder, re
 	status := "saved"
 	if !changed {
 		status = "unchanged (duplicate)"
-	}
-
-	// Memory versioning: find existing memories with the same section_path
-	// that are not already superseded, and chain them.
-	var supersededID int64
-	if changed {
-		supersededID, _ = versionMemory(ctx, st, id, sectionPath)
 	}
 
 	// Async embedding: generate vector for semantic recall search.
@@ -323,7 +291,7 @@ func recallSave(ctx context.Context, st *store.Store, emb *embedder.Embedder, re
 			if err != nil {
 				return
 			}
-			_ = st.InsertEmbedding("records", id, emb.Model(), vec)
+			_ = st.InsertEmbedding("knowledge", id, emb.Model(), vec)
 		}()
 	}
 
@@ -335,13 +303,9 @@ func recallSave(ctx context.Context, st *store.Store, emb *embedder.Embedder, re
 	result := map[string]any{
 		"status":           status,
 		"id":               id,
-		"section_path":     sectionPath,
-		"url":              url,
+		"title":            knowledgeTitle,
+		"file_path":        knowledgePath,
 		"embedding_status": embeddingStatus,
-	}
-	if supersededID > 0 {
-		result["superseded_id"] = supersededID
-		result["versioning"] = "previous version superseded"
 	}
 	return marshalResult(result)
 }
@@ -382,7 +346,7 @@ func recallCandidates(ctx context.Context, st *store.Store) (*mcp.CallToolResult
 		}
 		results = append(results, map[string]any{
 			"id":            d.ID,
-			"section_path":  d.SectionPath,
+			"title":         d.Title,
 			"hit_count":     d.HitCount,
 			"current_type":  d.SubType,
 			"suggested":     suggested,
@@ -394,44 +358,18 @@ func recallCandidates(ctx context.Context, st *store.Store) (*mcp.CallToolResult
 		"candidates": results,
 		"count":      len(results),
 		"thresholds": map[string]int{
-			"general_to_pattern": store.PromoteToPatternHits,
-			"pattern_to_rule":    store.PromoteToRuleHits,
+			"general_to_pattern": 5,
+			"pattern_to_rule":    15,
 		},
 	})
 }
 
-// recallStale returns low-vitality memories with their computed scores.
-func recallStale(ctx context.Context, st *store.Store, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	threshold := float64(req.GetInt("threshold", 20))
-	if threshold <= 0 {
-		threshold = 20.0
-	}
-
-	docs, err := st.ListLowVitality(ctx, threshold, 50)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("stale query failed: %v", err)), nil
-	}
-
-	results := make([]map[string]any, 0, len(docs))
-	for _, d := range docs {
-		accessDate := d.LastAccessed
-		if accessDate == "" {
-			accessDate = d.CrawledAt + " (created, never accessed)"
-		}
-		results = append(results, map[string]any{
-			"id":             d.ID,
-			"section_path":   d.SectionPath,
-			"vitality_score": math.Round(d.Vitality*100) / 100,
-			"hit_count":      d.HitCount,
-			"last_accessed":  accessDate,
-			"sub_type":       d.SubType,
-		})
-	}
-
+// recallStale is a no-op in V8 (vitality tracking removed).
+func recallStale(_ context.Context, _ *store.Store, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return marshalResult(map[string]any{
-		"threshold": threshold,
-		"results":   results,
-		"count":     len(results),
+		"message": "stale/vitality feature removed in schema V8",
+		"results": []any{},
+		"count":   0,
 	})
 }
 
@@ -439,17 +377,17 @@ func recallStale(ctx context.Context, st *store.Store, req mcp.CallToolRequest) 
 func recallReflect(ctx context.Context, st *store.Store, emb *embedder.Embedder, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	result := map[string]any{}
 
-	// 1. Memory stats.
-	stats, err := st.GetMemoryStats(ctx)
+	// 1. Knowledge stats.
+	stats, err := st.GetKnowledgeStats(ctx)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("stats failed: %v", err)), nil
 	}
 	topAccessed := make([]map[string]any, 0, len(stats.TopAccessed))
 	for _, d := range stats.TopAccessed {
 		topAccessed = append(topAccessed, map[string]any{
-			"section_path": d.SectionPath,
-			"hit_count":    d.HitCount,
-			"sub_type":     d.SubType,
+			"title":     d.Title,
+			"hit_count": d.HitCount,
+			"sub_type":  d.SubType,
 		})
 	}
 	result["summary"] = map[string]any{
@@ -461,7 +399,7 @@ func recallReflect(ctx context.Context, st *store.Store, emb *embedder.Embedder,
 
 	// 2. Conflicts (requires embeddings) — lowered threshold to 0.70 for contradiction detection.
 	if emb != nil {
-		conflicts, err := st.DetectConflicts(ctx, 0.70)
+		conflicts, err := st.DetectKnowledgeConflicts(ctx, 0.70)
 		if err != nil {
 			result["conflicts_warning"] = fmt.Sprintf("conflict detection failed: %v", err)
 		} else {
@@ -469,8 +407,8 @@ func recallReflect(ctx context.Context, st *store.Store, emb *embedder.Embedder,
 			var contradictions []map[string]any
 			for _, c := range conflicts {
 				entry := map[string]any{
-					"doc_a":      truncate(c.DocA.SectionPath, 80),
-					"doc_b":      truncate(c.DocB.SectionPath, 80),
+					"doc_a":      truncate(c.A.Title, 80),
+					"doc_b":      truncate(c.B.Title, 80),
 					"similarity": math.Round(c.Similarity*1000) / 1000,
 					"type":       c.Type,
 				}
@@ -487,28 +425,7 @@ func recallReflect(ctx context.Context, st *store.Store, emb *embedder.Embedder,
 		result["conflicts_warning"] = "conflict detection requires VOYAGE_API_KEY (embeddings needed for cosine similarity)"
 	}
 
-	// 3. Stale memories.
-	stale, err := st.GetStaleMemories(ctx, 90)
-	if err != nil {
-		result["stale_warning"] = fmt.Sprintf("stale detection failed: %v", err)
-	} else {
-		staleList := make([]map[string]any, 0, len(stale))
-		for _, d := range stale {
-			accessDate := d.LastAccessed
-			if accessDate == "" {
-				accessDate = d.CrawledAt + " (created, never accessed)"
-			}
-			staleList = append(staleList, map[string]any{
-				"id":            d.ID,
-				"section_path":  d.SectionPath,
-				"last_accessed": accessDate,
-				"hit_count":     d.HitCount,
-			})
-		}
-		result["stale"] = staleList
-	}
-
-	// 4. Promotion candidates.
+	// 3. Promotion candidates.
 	candidates, err := st.GetPromotionCandidates(ctx)
 	if err == nil && len(candidates) > 0 {
 		candList := make([]map[string]any, 0, len(candidates))
@@ -518,69 +435,17 @@ func recallReflect(ctx context.Context, st *store.Store, emb *embedder.Embedder,
 				suggested = store.SubTypeRule
 			}
 			candList = append(candList, map[string]any{
-				"id":           d.ID,
-				"section_path": d.SectionPath,
-				"hit_count":    d.HitCount,
-				"current":      d.SubType,
-				"suggested":    suggested,
+				"id":        d.ID,
+				"title":     d.Title,
+				"hit_count": d.HitCount,
+				"current":   d.SubType,
+				"suggested": suggested,
 			})
 		}
 		result["promotion_candidates"] = candList
 	}
 
-	// 5. Vitality distribution.
-	vitalityDist, avgVitality := computeVitalityDistribution(ctx, st)
-	if vitalityDist != nil {
-		result["vitality_distribution"] = vitalityDist
-		result["avg_vitality"] = math.Round(avgVitality*100) / 100
-	}
-
-	// 6. Review-due memories.
-	reviewDue, err := st.GetReviewDueMemories(ctx)
-	if err == nil && len(reviewDue) > 0 {
-		reviewList := make([]map[string]any, 0, len(reviewDue))
-		for _, d := range reviewDue {
-			reviewList = append(reviewList, map[string]any{
-				"id":            d.ID,
-				"section_path":  d.SectionPath,
-				"review_by":     d.ReviewBy,
-				"hit_count":     d.HitCount,
-				"last_accessed": d.LastAccessed,
-			})
-		}
-		result["review_due"] = reviewList
-	}
-
-	// 7. Expiring-soon memories (valid_until within 7 days).
-	expiring, err := st.GetExpiringMemories(ctx, 7)
-	if err == nil && len(expiring) > 0 {
-		expiringList := make([]map[string]any, 0, len(expiring))
-		for _, d := range expiring {
-			expiringList = append(expiringList, map[string]any{
-				"id":            d.ID,
-				"section_path":  d.SectionPath,
-				"valid_until":   d.ValidUntil,
-				"sub_type":      d.SubType,
-			})
-		}
-		result["expiring_soon"] = expiringList
-	}
-
-	// 8. Version chain high-churn indicators.
-	chains, err := st.GetVersionChainLengths(ctx, 3)
-	if err == nil && len(chains) > 0 {
-		chainList := make([]map[string]any, 0, len(chains))
-		for _, c := range chains {
-			chainList = append(chainList, map[string]any{
-				"head_id":      c.HeadID,
-				"section_path": c.SectionPath,
-				"chain_length": c.ChainLength,
-			})
-		}
-		result["high_churn"] = chainList
-	}
-
-	// 9. Steering doc freshness check.
+	// 4. Steering doc freshness check.
 	projectPath := req.GetString("project_path", "")
 	if projectPath != "" {
 		if steeringWarnings := checkSteeringFreshness(projectPath); len(steeringWarnings) > 0 {
@@ -588,7 +453,7 @@ func recallReflect(ctx context.Context, st *store.Store, emb *embedder.Embedder,
 		}
 	}
 
-	// 10. Drift statistics from audit.jsonl.
+	// 5. Drift statistics from audit.jsonl.
 	if projectPath != "" {
 		if driftStats := aggregateDriftStats(projectPath); len(driftStats) > 0 {
 			result["drift_stats"] = driftStats
@@ -631,50 +496,10 @@ func checkSteeringFreshness(projectPath string) []string {
 	var warnings []string
 	daysSinceUpdate := int(time.Since(oldestMod).Hours() / 24)
 	warnings = append(warnings, fmt.Sprintf(
-		"steering docs last modified %d days ago — consider running `alfred steering-init --force` or updating manually",
+		"steering docs last modified %d days ago — consider running `/alfred:init --force` or updating manually",
 		daysSinceUpdate,
 	))
 	return warnings
-}
-
-// computeVitalityDistribution computes a histogram of vitality scores across all memories.
-// Returns bucket counts and average vitality.
-func computeVitalityDistribution(ctx context.Context, st *store.Store) (map[string]int, float64) {
-	docs, err := st.ListRecentMemories(ctx, 5000) // reasonable upper bound
-	if err != nil || len(docs) == 0 {
-		return nil, 0
-	}
-
-	buckets := map[string]int{
-		"0-20":   0,
-		"21-40":  0,
-		"41-60":  0,
-		"61-80":  0,
-		"81-100": 0,
-	}
-	now := time.Now()
-	var totalVitality float64
-
-	for _, d := range docs {
-		vs := store.ComputeVitalityFromDoc(&d, now)
-		totalVitality += vs.Total
-
-		switch {
-		case vs.Total <= 20:
-			buckets["0-20"]++
-		case vs.Total <= 40:
-			buckets["21-40"]++
-		case vs.Total <= 60:
-			buckets["41-60"]++
-		case vs.Total <= 80:
-			buckets["61-80"]++
-		default:
-			buckets["81-100"]++
-		}
-	}
-
-	avgVitality := totalVitality / float64(len(docs))
-	return buckets, avgVitality
 }
 
 // sanitizeID converts a label into a lowercase slug suitable for structured IDs.
@@ -733,45 +558,6 @@ func resolveProjectPath(req mcp.CallToolRequest) string {
 		return cwd
 	}
 	return "."
-}
-
-// versionMemory finds existing memories with the same section_path (but different ID)
-// that are not already superseded, and sets their superseded_by to the new record.
-// Returns the superseded record ID (0 if none). Also enforces max 5 chain length
-// by pruning the oldest version when exceeded.
-func versionMemory(ctx context.Context, st *store.Store, newID int64, sectionPath string) (int64, error) {
-	// Find existing non-superseded memory with the same section_path.
-	oldID, err := st.FindNonSupersededByPath(ctx, sectionPath, newID)
-	if err != nil {
-		return 0, nil // no previous version
-	}
-
-	// Cycle detection: walk forward from newID to ensure oldID is not in the chain.
-	chain, err := st.GetVersionChain(ctx, newID, 5)
-	if err != nil {
-		return 0, fmt.Errorf("version chain cycle detected: %w", err)
-	}
-	for _, id := range chain {
-		if id == oldID {
-			return 0, fmt.Errorf("version chain cycle: old record %d found in chain of new record %d", oldID, newID)
-		}
-	}
-
-	// Set superseded_by on old record.
-	if err := st.SetSupersededBy(ctx, oldID, newID); err != nil {
-		return 0, err
-	}
-
-	// Enforce max 5 versions: walk backwards from newID to count chain length.
-	predecessors, _ := st.GetReverseVersionChain(ctx, newID, 6)
-	if len(predecessors) >= 5 {
-		// Disable the oldest (last in the backwards chain) to prevent it from
-		// reappearing in search results as a phantom current memory.
-		oldestID := predecessors[len(predecessors)-1]
-		_ = st.SetEnabled(ctx, oldestID, false)
-	}
-
-	return oldID, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -851,9 +637,17 @@ func recallAuditConventions(ctx context.Context, st *store.Store, req mcp.CallTo
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	docs, err := st.ListPatternRuleMemories(ctx)
+	proj := store.DetectProject(projectPath)
+	allDocs, err := st.ListKnowledge(ctx, proj.Remote, proj.Path, 5000)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("list memories failed: %v", err)), nil
+		return mcp.NewToolResultError(fmt.Sprintf("list knowledge failed: %v", err)), nil
+	}
+	// Post-filter to pattern/rule entries only.
+	docs := allDocs[:0]
+	for _, d := range allDocs {
+		if d.SubType == store.SubTypePattern || d.SubType == store.SubTypeRule {
+			docs = append(docs, d)
+		}
 	}
 
 	// Cap at 100 memories to bound I/O.
@@ -885,7 +679,7 @@ func recallAuditConventions(ctx context.Context, st *store.Store, req mcp.CallTo
 				"type":       "convention-drift",
 				"severity":   "warning",
 				"memory_id":  d.ID,
-				"memory_label": d.SectionPath,
+				"memory_label": d.Title,
 				"evidence":   evidence,
 				"resolution": "unresolved",
 			})
@@ -900,12 +694,12 @@ func recallAuditConventions(ctx context.Context, st *store.Store, req mcp.CallTo
 		}
 
 		results = append(results, map[string]any{
-			"id":           d.ID,
-			"section_path": d.SectionPath,
-			"sub_type":     d.SubType,
-			"hit_count":    d.HitCount,
-			"status":       status,
-			"evidence":     evidence,
+			"id":       d.ID,
+			"title":    d.Title,
+			"sub_type": d.SubType,
+			"hit_count": d.HitCount,
+			"status":   status,
+			"evidence": evidence,
 		})
 	}
 

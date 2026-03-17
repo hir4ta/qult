@@ -3,6 +3,8 @@ package spec
 import (
 	"embed"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"text/template"
 )
@@ -18,6 +20,11 @@ type TemplateData struct {
 	SpecType    string // "feature" or "bugfix"
 }
 
+// TemplatesDir returns the .alfred/templates/specs/ directory path.
+func TemplatesDir(projectPath string) string {
+	return filepath.Join(projectPath, ".alfred", "templates", "specs")
+}
+
 // templatePath returns the embed.FS path for a spec file template.
 // Bugfix.md uses templates/bugfix/bugfix.md.tmpl; all others use templates/<file>.tmpl.
 func templatePath(f SpecFile, specType SpecType) string {
@@ -27,17 +34,45 @@ func templatePath(f SpecFile, specType SpecType) string {
 	return "templates/" + string(f) + ".tmpl"
 }
 
-// RenderTemplate renders a single spec file template.
-func RenderTemplate(f SpecFile, data TemplateData) (string, error) {
-	return renderTemplate(f, TypeFeature, data)
-}
+// readTemplateRaw reads a template file, checking the project's .alfred/templates/specs/
+// directory first, then falling back to the embedded default.
+// If projectPath is empty, only the embedded default is used.
+func readTemplateRaw(f SpecFile, specType SpecType, projectPath string) ([]byte, error) {
+	if projectPath != "" {
+		// User override: .alfred/templates/specs/<filename>.tmpl
+		userPath := filepath.Join(TemplatesDir(projectPath), string(f)+".tmpl")
+		if f == FileBugfix {
+			userPath = filepath.Join(TemplatesDir(projectPath), "bugfix", "bugfix.md.tmpl")
+		}
+		if raw, err := os.ReadFile(userPath); err == nil {
+			return raw, nil
+		}
+	}
 
-// renderTemplate renders a template for a specific file and spec type.
-func renderTemplate(f SpecFile, specType SpecType, data TemplateData) (string, error) {
+	// Fallback: embedded default.
 	path := templatePath(f, specType)
 	raw, err := templateFS.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("read template %s: %w", path, err)
+		return nil, fmt.Errorf("read template %s: %w", path, err)
+	}
+	return raw, nil
+}
+
+// RenderTemplate renders a single spec file template using embedded defaults.
+func RenderTemplate(f SpecFile, data TemplateData) (string, error) {
+	return renderTemplateWithProject(f, TypeFeature, data, "")
+}
+
+// renderTemplate renders a template for a specific file and spec type using embedded defaults.
+func renderTemplate(f SpecFile, specType SpecType, data TemplateData) (string, error) {
+	return renderTemplateWithProject(f, specType, data, "")
+}
+
+// renderTemplateWithProject renders a template with 2-layer resolution (user override > embedded default).
+func renderTemplateWithProject(f SpecFile, specType SpecType, data TemplateData, projectPath string) (string, error) {
+	raw, err := readTemplateRaw(f, specType, projectPath)
+	if err != nil {
+		return "", err
 	}
 
 	name := string(f) + ".tmpl"
@@ -67,11 +102,12 @@ func RenderAll(data TemplateData) (map[SpecFile]string, error) {
 }
 
 // RenderForSize renders only the templates appropriate for the given size and type.
-func RenderForSize(size SpecSize, specType SpecType, data TemplateData) (map[SpecFile]string, error) {
+// projectPath enables 2-layer template resolution (user override > embedded default).
+func RenderForSize(size SpecSize, specType SpecType, data TemplateData, projectPath string) (map[SpecFile]string, error) {
 	files := FilesForSize(size, specType)
 	result := make(map[SpecFile]string, len(files))
 	for _, f := range files {
-		content, err := renderTemplate(f, specType, data)
+		content, err := renderTemplateWithProject(f, specType, data, projectPath)
 		if err != nil {
 			return nil, err
 		}

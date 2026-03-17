@@ -17,9 +17,10 @@ import (
 
 // fileDataSource implements DataSource by reading .alfred/ files and SQLite.
 type fileDataSource struct {
-	projectPath string
-	st          *store.Store
-	emb         *embedder.Embedder
+	projectPath   string
+	projectRemote string
+	st            *store.Store
+	emb           *embedder.Embedder
 
 	// Conflict detection cache (DEC-6: 60s TTL).
 	conflictMu    sync.Mutex
@@ -29,7 +30,8 @@ type fileDataSource struct {
 
 // NewFileDataSource creates a DataSource backed by filesystem + SQLite + Voyage.
 func NewFileDataSource(projectPath string, st *store.Store, emb *embedder.Embedder) DataSource {
-	return &fileDataSource{projectPath: projectPath, st: st, emb: emb}
+	proj := store.DetectProject(projectPath)
+	return &fileDataSource{projectPath: proj.Path, projectRemote: proj.Remote, st: st, emb: emb}
 }
 
 func (ds *fileDataSource) ProjectPath() string { return ds.projectPath }
@@ -164,8 +166,7 @@ func (ds *fileDataSource) SemanticSearch(ctx context.Context, query string, limi
 		return nil
 	}
 
-	matches, err := ds.st.VectorSearch(ctx, vec, "records", limit*3,
-		store.SourceMemory, store.SourceSpec, store.SourceProject)
+	matches, err := ds.st.VectorSearchKnowledge(ctx, vec, limit*3)
 	if err != nil || len(matches) == 0 {
 		return nil
 	}
@@ -177,7 +178,7 @@ func (ds *fileDataSource) SemanticSearch(ctx context.Context, query string, limi
 		scoreMap[m.SourceID] = m.Score
 	}
 
-	docs, err := ds.st.GetDocsByIDs(ctx, ids)
+	docs, err := ds.st.GetKnowledgeByIDs(ctx, ids)
 	if err != nil {
 		return nil
 	}
@@ -185,11 +186,11 @@ func (ds *fileDataSource) SemanticSearch(ctx context.Context, query string, limi
 	if len(docs) > 1 {
 		contents := make([]string, len(docs))
 		for i, d := range docs {
-			contents[i] = d.SectionPath + ": " + d.Content
+			contents[i] = d.Title + ": " + d.Content
 		}
 		reranked, err := ds.emb.Rerank(ctx, query, contents, min(limit, len(docs)))
 		if err == nil && len(reranked) > 0 {
-			reordered := make([]store.DocRow, len(reranked))
+			reordered := make([]store.KnowledgeRow, len(reranked))
 			for i, r := range reranked {
 				reordered[i] = docs[r.Index]
 				scoreMap[docs[r.Index].ID] = r.RelevanceScore
@@ -198,28 +199,26 @@ func (ds *fileDataSource) SemanticSearch(ctx context.Context, query string, limi
 		}
 	}
 
-	return docsToKnowledge(docs, scoreMap, limit)
+	return knowledgeToEntries(docs, scoreMap, limit)
 }
 
 func (ds *fileDataSource) RecentKnowledge(limit int) []KnowledgeEntry {
 	if ds.st != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		docs, err := ds.st.ListAllMemories(ctx, limit)
+		docs, err := ds.st.ListAllKnowledge(ctx, ds.projectRemote, ds.projectPath, limit)
 		if err == nil && len(docs) > 0 {
 			entries := make([]KnowledgeEntry, 0, len(docs))
 			for _, d := range docs {
-				savedAt := d.CrawledAt
 				entries = append(entries, KnowledgeEntry{
-					ID:         d.ID,
-					Label:      d.SectionPath,
-					Source:     d.SourceType,
-					SubType:    d.SubType,
-					HitCount:   d.HitCount,
-					Content:    d.Content,
-					Structured: d.Structured,
-					SavedAt:    savedAt,
-					Enabled:    d.Enabled,
+					ID:       d.ID,
+					Label:    d.Title,
+					Source:   "knowledge",
+					SubType:  d.SubType,
+					HitCount: int(d.HitCount),
+					Content:  d.Content,
+					SavedAt:  d.CreatedAt,
+					Enabled:  d.Enabled,
 				})
 			}
 			return entries
@@ -410,7 +409,7 @@ func (ds *fileDataSource) ToggleEnabled(id int64, enabled bool) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	return ds.st.SetEnabled(ctx, id, enabled)
+	return ds.st.SetKnowledgeEnabled(ctx, id, enabled)
 }
 
 func (ds *fileDataSource) Validation(taskSlug string) *spec.ValidationReport {
@@ -446,33 +445,14 @@ func (ds *fileDataSource) MemoryHealth() MemoryHealthStats {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	docs, err := ds.st.ListAllMemories(ctx, 1000)
+	docs, err := ds.st.ListAllKnowledge(ctx, ds.projectRemote, ds.projectPath, 1000)
 	if err == nil {
 		stats.Total = len(docs)
-
-		// Compute vitality distribution: 5 buckets (0-20, 21-40, 41-60, 61-80, 81-100).
-		now := time.Now()
-		for _, d := range docs {
-			v := store.ComputeVitalityFromDoc(&d, now)
-			bucket := int(v.Total / 20)
-			if bucket > 4 {
-				bucket = 4
-			}
-			if bucket < 0 {
-				bucket = 0
-			}
-			stats.VitalityDist[bucket]++
-		}
-	}
-
-	lowDocs, err := ds.st.ListLowVitality(ctx, 20, 1000)
-	if err == nil {
-		stats.StaleCount = len(lowDocs)
 	}
 
 	ds.conflictMu.Lock()
 	if time.Since(ds.conflictAt) > 60*time.Second {
-		conflicts, err := ds.st.DetectConflicts(ctx, 0.70)
+		conflicts, err := ds.st.DetectKnowledgeConflicts(ctx, 0.70)
 		if err == nil {
 			count := 0
 			for _, c := range conflicts {
@@ -524,7 +504,7 @@ func (ds *fileDataSource) ConfidenceStats(taskSlug string) *spec.ConfidenceSumma
 // helpers
 // ---------------------------------------------------------------------------
 
-func docsToKnowledge(docs []store.DocRow, scoreMap map[int64]float64, limit int) []KnowledgeEntry {
+func knowledgeToEntries(docs []store.KnowledgeRow, scoreMap map[int64]float64, limit int) []KnowledgeEntry {
 	entries := make([]KnowledgeEntry, 0, min(limit, len(docs)))
 	for _, d := range docs {
 		if len(entries) >= limit {
@@ -535,16 +515,15 @@ func docsToKnowledge(docs []store.DocRow, scoreMap map[int64]float64, limit int)
 			score = scoreMap[d.ID]
 		}
 		entries = append(entries, KnowledgeEntry{
-			ID:         d.ID,
-			Label:      d.SectionPath,
-			Source:     d.SourceType,
-			SubType:    d.SubType,
-			HitCount:   d.HitCount,
-			Content:    d.Content,
-			Structured: d.Structured,
-			Score:      score,
-			SavedAt:    d.CrawledAt,
-			Enabled:    d.Enabled,
+			ID:       d.ID,
+			Label:    d.Title,
+			Source:   "knowledge",
+			SubType:  d.SubType,
+			HitCount: int(d.HitCount),
+			Content:  d.Content,
+			Score:    score,
+			SavedAt:  d.CreatedAt,
+			Enabled:  d.Enabled,
 		})
 	}
 	return entries

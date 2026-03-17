@@ -69,6 +69,7 @@ func run() error {
 	case "embed-doc":
 		return runEmbedDoc()
 	case "steering-init":
+		fmt.Fprintln(os.Stderr, "steering-init is now part of /alfred:init — use that skill instead for full project setup")
 		return runSteeringInit()
 	case "hook":
 		if len(os.Args) < 3 {
@@ -200,7 +201,7 @@ Usage:
   alfred serve      Start MCP server (called by Claude Code plugin)
   alfred hook       Handle hook events (called by Claude Code)
   alfred search-eval  Run search quality benchmark (.alfred/search-eval.yaml)
-  alfred steering-init  Generate project steering docs (.alfred/steering/)
+  alfred steering-init  Generate steering docs (prefer /alfred:init for full setup)
   alfred version    Show version
 
 Environment:

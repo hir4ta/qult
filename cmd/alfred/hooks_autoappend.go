@@ -15,26 +15,38 @@ import (
 // livingSpecAction is the audit action for Living Spec auto-updates.
 const livingSpecAction = "living-spec.update"
 
+// autoAppendSourceExtensions are file extensions eligible for auto-append.
+var autoAppendSourceExtensions = []string{
+	".go", ".ts", ".tsx", ".js", ".jsx",
+	".py", ".rs", ".java", ".kt", ".swift",
+	".rb", ".ex", ".exs", ".c", ".cpp", ".h",
+}
+
 // autoAppendExclusions are file suffixes excluded from auto-append.
 var autoAppendExclusions = []string{
-	"_test.go",
-	"_gen.go",
-	".pb.go",
-	"_mock.go",
-	"_string.go",
+	"_test.go", "_gen.go", ".pb.go", "_mock.go", "_string.go",
+	".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".spec.ts", ".spec.js",
+	"_test.py", "_test.rs",
+	".d.ts", ".min.js", ".min.css",
 }
 
 // autoAppendDirExclusions are directory prefixes excluded from auto-append.
 var autoAppendDirExclusions = []string{
-	"vendor/",
-	"plugin/",
-	".alfred/",
+	"vendor/", "plugin/", ".alfred/",
+	"node_modules/", "dist/", "build/", "__pycache__/", "target/",
 }
 
 // shouldAutoAppend returns true if the file is eligible for auto-append to design.md.
-// Includes only .go source files, excludes tests, generated, vendor, and non-Go files.
+// Includes source code files, excludes tests, generated, vendor, and non-source files.
 func shouldAutoAppend(filePath string) bool {
-	if !strings.HasSuffix(filePath, ".go") {
+	isSource := false
+	for _, ext := range autoAppendSourceExtensions {
+		if strings.HasSuffix(filePath, ext) {
+			isSource = true
+			break
+		}
+	}
+	if !isSource {
 		return false
 	}
 	for _, excl := range autoAppendExclusions {

@@ -27,7 +27,7 @@ func TestRenderForSizeFeature(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			rendered, err := RenderForSize(tc.size, TypeFeature, data)
+			rendered, err := RenderForSize(tc.size, TypeFeature, data, "")
 			if err != nil {
 				t.Fatalf("RenderForSize(%s, feature) = error %v", tc.size, err)
 			}
@@ -65,7 +65,7 @@ func TestRenderForSizeBugfix(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			rendered, err := RenderForSize(tc.size, TypeBugfix, data)
+			rendered, err := RenderForSize(tc.size, TypeBugfix, data, "")
 			if err != nil {
 				t.Fatalf("RenderForSize(%s, bugfix) = error %v", tc.size, err)
 			}
@@ -92,7 +92,7 @@ func TestRenderForSizeBugfixTemplate(t *testing.T) {
 		SpecType:    "bugfix",
 	}
 
-	rendered, err := RenderForSize(SizeS, TypeBugfix, data)
+	rendered, err := RenderForSize(SizeS, TypeBugfix, data, "")
 	if err != nil {
 		t.Fatalf("RenderForSize(S, bugfix) = error %v", err)
 	}

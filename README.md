@@ -24,7 +24,7 @@ alfred fixes all three.
 
 **Specs that adapt.** Small bug? 3 files. Medium feature? 5. Large system? All 7. alfred auto-detects the right scope — or you can pick a bugfix template with surgical precision (reproduction steps, root cause, fix strategy).
 
-**Memory that compounds.** Every decision, every bug fix, every "we tried X and it didn't work" gets stored as semantic memory with a vitality score. Stale assumptions decay faster than proven rules. Contradictions are detected automatically. Next time you hit a similar problem, alfred surfaces the relevant experience — before you even ask.
+**Memory that compounds.** Every decision, every bug fix, every "we tried X and it didn't work" gets stored as Markdown files in `.alfred/knowledge/` — git-friendly, human-readable, team-shareable. A SQLite search index provides semantic search across all knowledge. Contradictions are detected automatically. Next time you hit a similar problem, alfred surfaces the relevant experience — before you even ask.
 
 **Reliability signals.** Every spec item gets a grounding level — `verified`, `reviewed`, `inferred`, or `speculative`. You can instantly see which requirements are battle-tested and which are guesswork. Typos in grounding values get caught, not silently ignored.
 
@@ -78,7 +78,7 @@ No Voyage key? alfred still works — FTS5 full-text search handles the fallback
 |------|---------|
 | `dossier` | Spec lifecycle — init (with size/type), update, status, switch, complete, delete, history, rollback, review, validate |
 | `roster` | Epic management — group tasks with dependencies, track progress |
-| `ledger` | Memory — search, save (with validity windows), promote, reflect, stale, audit-conventions |
+| `ledger` | Knowledge — search, save (Markdown+frontmatter), promote, reflect, audit-conventions |
 
 ## Hooks
 
@@ -87,7 +87,7 @@ Run automatically. You don't touch these.
 | Event | What happens |
 |-------|-------------|
 | SessionStart | Restores spec context, ingests CLAUDE.md, adapts injection depth to project maturity, suggests `ledger reflect` when knowledge base needs attention |
-| PreCompact | Extracts decisions, saves structured chapter memory (JSON), syncs epic progress, detects research patterns and reminds to save knowledge |
+| PreCompact | Extracts decisions, saves structured chapter memory (Markdown), syncs epic progress, detects research patterns and reminds to save knowledge |
 | UserPromptSubmit | Semantic search + file context boost + **skill nudge** (detects intent → suggests the right skill) |
 | PostToolUse | Detects Bash errors + searches memory for similar past fixes. After commits: spec drift detection. After 5+ Read/Grep: suggests `/alfred:survey` |
 
@@ -124,15 +124,23 @@ Tag aliases expand your searches automatically: "auth" finds results tagged "aut
 
 Fuzzy matching catches typos: "authetication" still finds "authentication".
 
-## Knowledge vitality
+## Knowledge architecture
 
-Memories aren't static. They have a lifecycle:
+Knowledge is stored as Markdown files with YAML frontmatter — the source of truth lives in your project directory, not a binary database.
 
-- **Sub-type decay**: Assumptions decay in 30 days. Proven rules last 120 days. Each memory type has its own half-life.
-- **Vitality score**: 0-100 composite (recency, hit count, type weight, access frequency). Low-vitality memories get flagged, never silently deleted.
-- **Contradiction detection**: When two memories say opposite things ("use JWT" vs "avoid JWT"), alfred flags the conflict.
-- **Validity windows**: Set explicit expiry dates on decisions about fast-changing APIs. Expired memories stop appearing in search.
-- **Memory versioning**: Update a memory and the old version is preserved. Up to 5 versions per chain.
+```
+.alfred/knowledge/
+├── decisions/dec-auth-jwt.md    # design decisions
+├── patterns/pat-error-handling.md  # reusable patterns
+└── rules/rul-no-mock-db.md     # enforced standards
+```
+
+- **Git-friendly**: commit knowledge to share with your team, review in PRs
+- **Human-readable**: `cat` any file to see exactly what alfred knows
+- **Rebuildable**: the SQLite search index is derived from these files — delete the DB, it rebuilds on next session
+- **Sub-type decay**: Assumptions decay in 30 days. Proven rules last 120 days. Each knowledge type has its own half-life.
+- **Contradiction detection**: When two entries say opposite things ("use JWT" vs "avoid JWT"), alfred flags the conflict.
+- **Project-aware**: knowledge is tagged with git remote URL and branch, enabling cross-project search.
 
 ## Adaptive specs
 
@@ -165,7 +173,7 @@ Size auto-detected from description, or set explicitly: `dossier action=init siz
 Project-level context that gets injected into every spec:
 
 ```bash
-alfred steering-init  # auto-generates from go.mod, README, CLAUDE.md
+/alfred:init
 ```
 
 Creates `.alfred/steering/` with:
@@ -193,11 +201,12 @@ Hooks (invisible)
   |
   v
 Storage
+  |-- .alfred/knowledge/   -> Markdown+frontmatter (source of truth, git-friendly)
   |-- .alfred/specs/       -> spec files + version history + reviews
   |-- .alfred/epics/       -> epic YAML + task dependencies
   |-- .alfred/steering/    -> project context (product, structure, tech)
-  |-- .alfred/audit.jsonl  -> operation audit trail + drift events
-  +-- ~/.claude-alfred/    -> SQLite (records + FTS5 + embeddings, schema V7)
+  |-- .alfred/templates/   -> user-customizable spec + steering templates
+  +-- ~/.claude-alfred/    -> SQLite search index (knowledge_index + FTS5 + embeddings, schema V8)
 ```
 
 ## When files are created
@@ -207,10 +216,11 @@ Nothing is generated at install time. Files appear as you use alfred:
 | File / Directory | Created when | Trigger |
 |---|---|---|
 | `~/.claude-alfred/alfred.db` | First Claude Code session after plugin install | SessionStart hook opens the database |
+| `.alfred/knowledge/` | First knowledge save (decision, pattern, rule) | `ledger action=save`, PreCompact decision extraction, spec complete |
 | `.alfred/specs/` | First task is started | `dossier action=init` (via `/alfred:brief`, `/alfred:attend`, etc.) |
 | `.alfred/epics/` | First epic is created | `roster action=init` |
-| `.alfred/decisions/` | First context compaction with design decisions | PreCompact hook extracts decisions automatically |
-| `.alfred/steering/` | Running `alfred steering-init` | CLI command with project analysis |
+| `.alfred/steering/` | Running `/alfred:init` | Project initialization skill |
+| `.alfred/templates/` | User customizes spec or steering templates | Manual creation for template override |
 | `.alfred/audit.jsonl` | First spec operation or commit drift detection | `dossier init`, `dossier delete`, review submission, PostToolUse drift |
 
 ## Troubleshooting

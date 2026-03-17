@@ -51,7 +51,7 @@ the user approves via `alfred dashboard`.
 ### 3. [INIT] Create spec and gather requirements
 1. Call `dossier` action=init to create the spec directory (creates all 7 template files)
    - If response contains `steering_context`, use it as project context for all spec files
-   - If response contains `steering_hint`, inform the user about `alfred steering-init`
+   - If response contains `steering_hint`, inform the user about `/alfred:init`
 2. Call `knowledge` to search for relevant best practices
 3. Ask user (max 3 questions):
    - What is the goal? (one sentence)
@@ -237,3 +237,9 @@ If an active spec already exists:
 - ALWAYS direct user to `alfred dashboard` for approval (not text-based approval)
 - Mark `<!-- optional -->` sections as skipped for S-sized tasks (don't force unnecessary detail)
 - ALWAYS include "Wave: Closing" tasks (self-review, CLAUDE.md update, test verification) — these trigger auto-complete when all checked
+
+## Troubleshooting
+
+- **dossier init fails (spec already exists)**: Use `dossier action=status` to check the existing spec. Either resume it, `dossier action=delete confirm=true` to remove it, or choose a different task-slug.
+- **Agent review divergence (conflicting feedback)**: Prioritize Architect findings for structural issues, Devil's Advocate for scope/risk. Record the conflict in decisions.md and pick the safer option.
+- **User doesn't approve in dashboard**: The skill stops at Step 12. Re-invoke `/alfred:brief` with the same task-slug to check review status and resume from where it left off.

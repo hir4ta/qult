@@ -2,7 +2,6 @@
 description: Hook timeout constraints and environment variable defaults for alfred
 paths:
   - "cmd/alfred/hooks*.go"
-  - "**/hooks/hooks.json"
 ---
 
 # Hook Internals

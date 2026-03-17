@@ -33,12 +33,12 @@ func handleSessionStart(ctx context.Context, ev *hookEvent) {
 		return
 	}
 	// Run independent operations in parallel to minimize timeout risk.
-	// Both are fail-open (errors logged internally, never fatal).
-	// Channel-based pattern respects context deadline (WaitGroup.Wait cannot).
-	done := make(chan struct{}, 2)
+	// All are fail-open (errors logged internally, never fatal).
+	done := make(chan struct{}, 3)
 	go func() { ingestProjectClaudeMD(ctx, st, ev.ProjectPath); done <- struct{}{} }()
 	go func() { ensureUserRules(); done <- struct{}{} }()
-	for i := 0; i < 2; i++ {
+	go func() { syncKnowledgeIndex(ctx, st, ev.ProjectPath); done <- struct{}{} }()
+	for range 3 {
 		select {
 		case <-done:
 		case <-ctx.Done():
@@ -49,12 +49,12 @@ func handleSessionStart(ctx context.Context, ev *hookEvent) {
 	// Handle pending-compact breadcrumb for session continuity.
 	handlePendingCompact(ctx, st, ev.ProjectPath)
 
-	// Suggest steering docs if missing (lightweight file stat, fail-open).
+	// Suggest /alfred:init if steering docs are missing (lightweight file stat, fail-open).
 	if !spec.SteeringExists(ev.ProjectPath) {
-		notifyUser("tip: run `alfred steering-init` to create project steering docs for better spec generation")
+		notifyUser("tip: run `/alfred:init` to set up project steering docs, templates, and knowledge index")
 	}
 
-	// Check for past-due review_by memories (lightweight query, fail-open).
+	// V8: review_by removed; warnReviewDueMemories is a no-op stub.
 	warnReviewDueMemories(ctx, st)
 
 	// Suggest ledger reflect when knowledge base has grown but hasn't been reviewed.
@@ -103,7 +103,7 @@ func splitMarkdownSections(md string) []mdSection {
 }
 
 // ingestProjectClaudeMD reads CLAUDE.md from the project root and upserts
-// each markdown section into the records table for knowledge search.
+// each markdown section into the knowledge_index table for knowledge search.
 // Silently skips if the file doesn't exist or is empty.
 func ingestProjectClaudeMD(ctx context.Context, st *store.Store, projectPath string) {
 	claudeMD := filepath.Join(projectPath, "CLAUDE.md")
@@ -117,14 +117,17 @@ func ingestProjectClaudeMD(ctx context.Context, st *store.Store, projectPath str
 		return
 	}
 
-	url := "project://" + projectPath + "/CLAUDE.md"
+	proj := store.DetectProject(projectPath)
 	for _, sec := range sections {
-		_, _, _ = st.UpsertDoc(ctx, &store.DocRow{
-			URL:         url,
-			SectionPath: sec.Path,
-			Content:     sec.Content,
-			SourceType:  store.SourceProject,
-			TTLDays:     1,
+		_, _, _ = st.UpsertKnowledge(ctx, &store.KnowledgeRow{
+			FilePath:      "CLAUDE.md",
+			Title:         sec.Path,
+			Content:       sec.Content,
+			SubType:       "project",
+			ProjectRemote: proj.Remote,
+			ProjectPath:   proj.Path,
+			ProjectName:   proj.Name,
+			Branch:        proj.Branch,
 		})
 	}
 }
@@ -160,11 +163,14 @@ func handlePendingCompact(ctx context.Context, st *store.Store, projectPath stri
 	// Resolve master: the old session may itself be linked to an earlier master.
 	masterID := st.ResolveMasterSession(ctx, pc.ClaudeSessionID)
 
+	proj := store.DetectProject(projectPath)
 	if err := st.LinkSession(ctx, &store.SessionLink{
 		ClaudeSessionID: currentSessionID,
 		MasterSessionID: masterID,
+		ProjectRemote:   proj.Remote,
 		ProjectPath:     projectPath,
 		TaskSlug:        pc.TaskSlug,
+		Branch:          proj.Branch,
 	}); err != nil {
 		notifyUser("warning: session link failed: %v", err)
 		return
@@ -289,10 +295,9 @@ func buildChapterTimeline(ctx context.Context, projectPath, taskSlug string, st 
 	project := projectBaseName(projectPath)
 	chapterPrefix := fmt.Sprintf("%s > %s > chapter-", project, taskSlug)
 
-	// Use URL prefix search instead of FTS to avoid tokenization issues,
-	// duplicate entries from multi-section chapters, and result cap limits.
-	urlPrefix := fmt.Sprintf("memory://user/%s/%s/chapter-", project, taskSlug)
-	docs, err := st.SearchDocsByURLPrefix(ctx, urlPrefix, 200)
+	// Use ListKnowledge to find chapter memories scoped to this project.
+	proj := store.DetectProject(projectPath)
+	docs, err := st.ListKnowledge(ctx, proj.Remote, proj.Path, 200)
 	if err != nil {
 		return ""
 	}
@@ -305,10 +310,10 @@ func buildChapterTimeline(ctx context.Context, projectPath, taskSlug string, st 
 	}
 	seen := make(map[int]string) // chapterNum -> label
 	for _, d := range docs {
-		if !strings.HasPrefix(d.SectionPath, chapterPrefix) {
+		if !strings.HasPrefix(d.Title, chapterPrefix) {
 			continue
 		}
-		rest := strings.TrimPrefix(d.SectionPath, chapterPrefix)
+		rest := strings.TrimPrefix(d.Title, chapterPrefix)
 		parts := strings.SplitN(rest, " > ", 2)
 		num := 0
 		fmt.Sscanf(parts[0], "%d", &num)
@@ -413,7 +418,7 @@ func runEmbedAsync() error {
 }
 
 // asyncEmbedDocs spawns a single background process to generate embeddings
-// for multiple docs already stored in the records table. Batching avoids
+// for multiple docs already stored in the knowledge_index table. Batching avoids
 // spawning N processes (and N Voyage API connections) per compact cycle.
 func asyncEmbedDocs(docIDs []int64) {
 	if len(docIDs) == 0 {
@@ -471,7 +476,7 @@ func runEmbedDoc() error {
 	}
 	st.ExpectedDims = emb.Dims()
 
-	docs, err := st.GetDocsByIDs(context.Background(), docIDs)
+	docs, err := st.GetKnowledgeByIDs(context.Background(), docIDs)
 	if err != nil {
 		return fmt.Errorf("load docs: %w", err)
 	}
@@ -486,7 +491,7 @@ func runEmbedDoc() error {
 
 	var errs []string
 	for _, doc := range docs {
-		text := doc.SectionPath + "\n" + doc.Content
+		text := doc.Title + "\n" + doc.Content
 		if err := embedDocWithRetry(ctx, st, emb, doc.ID, text); err != nil {
 			errs = append(errs, fmt.Sprintf("doc_id=%d: %v", doc.ID, err))
 		}
@@ -508,7 +513,7 @@ func embedDocWithRetry(ctx context.Context, st *store.Store, emb *embedder.Embed
 			lastErr = err
 			continue
 		}
-		if err := st.InsertEmbedding("records", docID, emb.Model(), vec); err != nil {
+		if err := st.InsertEmbedding("knowledge", docID, emb.Model(), vec); err != nil {
 			return fmt.Errorf("insert embedding: %w", err)
 		}
 		return nil
@@ -539,14 +544,13 @@ func ensureUserRules() {
 	_, _ = install.InstallUserRules() // best-effort
 }
 
-// countProjectMemories returns the number of memory records scoped to the current project.
-// Uses project-specific URL prefix to avoid counting memories from other projects.
+// countProjectMemories returns the number of knowledge entries scoped to the current project.
 func countProjectMemories(ctx context.Context, st *store.Store, projectPath string) int64 {
 	if st == nil {
 		return 0
 	}
-	project := projectBaseName(projectPath)
-	n, _ := st.CountDocsByURLPrefix(ctx, fmt.Sprintf("memory://user/%s/", project))
+	proj := store.DetectProject(projectPath)
+	n, _ := st.CountKnowledge(ctx, proj.Remote, proj.Path)
 	return n
 }
 
@@ -559,7 +563,7 @@ func suggestLedgerReflect(ctx context.Context, st *store.Store) {
 	if st == nil {
 		return
 	}
-	count, err := st.CountDocsByURLPrefix(ctx, "memory://")
+	count, err := st.CountKnowledge(ctx, "", "")
 	if err != nil || count < 20 {
 		return
 	}
@@ -576,15 +580,8 @@ func suggestLedgerReflect(ctx context.Context, st *store.Store) {
 	notifyUser("knowledge health: %d memories in your knowledge base. Consider running `ledger action=reflect` for a health report (conflicts, stale items, promotion candidates).", count)
 }
 
-func warnReviewDueMemories(ctx context.Context, st *store.Store) {
-	if st == nil {
-		return
-	}
-	docs, err := st.GetReviewDueMemories(ctx)
-	if err != nil || len(docs) == 0 {
-		return
-	}
-	notifyUser("%d memories past review-by date — run 'ledger action=reflect' for details", len(docs))
+func warnReviewDueMemories(_ context.Context, _ *store.Store) {
+	// V8: GetReviewDueMemories removed (review_by column no longer exists).
 }
 
 // extractGoalSection extracts the Goal section from requirements.md.
@@ -635,4 +632,37 @@ func coreFilesForTask(projectPath, taskSlug string) []spec.SpecFile {
 		}
 	}
 	return spec.CoreFiles
+}
+
+// syncKnowledgeIndex scans .alfred/knowledge/ for Markdown files and indexes
+// new/changed files into the DB. Uses content_hash for change detection.
+func syncKnowledgeIndex(ctx context.Context, st *store.Store, projectPath string) {
+	files, err := store.ScanKnowledgeFiles(projectPath)
+	if err != nil || len(files) == 0 {
+		return
+	}
+
+	proj := store.DetectProject(projectPath)
+	var synced int
+	for _, relPath := range files {
+		row, err := store.ParseKnowledgeFile(projectPath, relPath)
+		if err != nil {
+			continue
+		}
+		row.ProjectRemote = proj.Remote
+		row.ProjectPath = proj.Path
+		row.ProjectName = proj.Name
+		row.Branch = proj.Branch
+
+		_, changed, err := st.UpsertKnowledge(ctx, row)
+		if err != nil {
+			continue
+		}
+		if changed {
+			synced++
+		}
+	}
+	if synced > 0 {
+		notifyUser("synced %d knowledge files to index", synced)
+	}
 }

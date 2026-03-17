@@ -82,10 +82,10 @@ func runSearchEval(evalFile string) error {
 
 	results := make([]evalResult, 0, len(cfg.Cases))
 	for _, tc := range cfg.Cases {
-		sr := mcpserver.SearchPipeline(ctx, st, emb, tc.Query, store.SourceMemory+","+store.SourceSpec, 5, 20)
+		sr := mcpserver.SearchPipeline(ctx, st, emb, tc.Query, 5, 20)
 		got := make([]string, 0, len(sr.Docs))
 		for _, d := range sr.Docs {
-			got = append(got, d.SectionPath)
+			got = append(got, d.Title)
 		}
 
 		r := evalResult{

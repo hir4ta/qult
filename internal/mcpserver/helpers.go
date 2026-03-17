@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -16,9 +15,7 @@ import (
 )
 
 // Recency signal constants.
-// Applied post-rerank to boost newer memories.
-// Docs (crawled reference material) are not decayed because crawled_at
-// reflects fetch time, not feature authoring time.
+// Applied post-rerank to boost newer knowledge entries.
 const (
 	recencyFloor = 0.5 // minimum multiplier (never suppress below 50%)
 )
@@ -32,20 +29,17 @@ func truncate(s string, maxLen int) string {
 	return string(runes[:maxLen]) + "..."
 }
 
-// recencyFactor computes a multiplicative recency signal for a document.
+// recencyFactor computes a multiplicative recency signal for a knowledge entry.
 // Uses exponential decay with sub-type-aware half-life from store.SubTypeHalfLife.
-// Returns 1.0 for source types other than memory, or missing timestamps.
-func recencyFactor(crawledAt string, sourceType string, subType string, now time.Time) float64 {
-	if sourceType != store.SourceMemory {
-		return 1.0
-	}
+// Returns 1.0 for missing timestamps.
+func recencyFactor(createdAt string, subType string, now time.Time) float64 {
 	halfLife := store.SubTypeHalfLife(subType)
 	if halfLife <= 0 {
 		return 1.0
 	}
-	t, err := time.Parse(time.RFC3339, crawledAt)
+	t, err := time.Parse(time.RFC3339, createdAt)
 	if err != nil {
-		t, err = time.Parse("2006-01-02 15:04:05", crawledAt)
+		t, err = time.Parse("2006-01-02 15:04:05", createdAt)
 		if err != nil {
 			return 1.0
 		}
@@ -61,9 +55,9 @@ func recencyFactor(crawledAt string, sourceType string, subType string, now time
 	return factor
 }
 
-// scoredDoc pairs a DocRow with a sortable score for recency-based reordering.
+// scoredDoc pairs a KnowledgeRow with a sortable score for recency-based reordering.
 type scoredDoc struct {
-	doc   store.DocRow
+	doc   store.KnowledgeRow
 	score float64 // original position score * recency factor
 }
 
@@ -71,20 +65,8 @@ type scoredDoc struct {
 // Original ordering (from rerank or vector search) is encoded as a position-based score,
 // then multiplied by the recency factor. This preserves semantic relevance as the
 // primary signal while giving a boost to newer memories.
-func applyRecencySignal(docs []store.DocRow, now time.Time) []store.DocRow {
+func applyRecencySignal(docs []store.KnowledgeRow, now time.Time) []store.KnowledgeRow {
 	if len(docs) == 0 {
-		return docs
-	}
-
-	// Check if any doc needs recency adjustment.
-	needsAdjust := false
-	for _, d := range docs {
-		if d.SourceType == store.SourceMemory {
-			needsAdjust = true
-			break
-		}
-	}
-	if !needsAdjust {
 		return docs
 	}
 
@@ -92,7 +74,7 @@ func applyRecencySignal(docs []store.DocRow, now time.Time) []store.DocRow {
 	for i, d := range docs {
 		// Position-based score: first doc = 1.0, last = 1/n.
 		posScore := 1.0 / float64(i+1)
-		rf := recencyFactor(d.CrawledAt, d.SourceType, d.SubType, now)
+		rf := recencyFactor(d.CreatedAt, d.SubType, now)
 		stb := store.SubTypeBoost(d.SubType)
 		scored[i] = scoredDoc{doc: d, score: posScore * rf * stb}
 	}
@@ -105,7 +87,7 @@ func applyRecencySignal(docs []store.DocRow, now time.Time) []store.DocRow {
 		})
 	}
 
-	result := make([]store.DocRow, len(scored))
+	result := make([]store.KnowledgeRow, len(scored))
 	for i, s := range scored {
 		result[i] = s.doc
 	}
@@ -114,31 +96,14 @@ func applyRecencySignal(docs []store.DocRow, now time.Time) []store.DocRow {
 
 // SearchResult holds the output of a search pipeline.
 type SearchResult struct {
-	Docs         []store.DocRow
+	Docs         []store.KnowledgeRow
 	SearchMethod string // "vector+rerank", "vector", or "keyword"
 	Warnings     []string
 }
 
-// parseSourceTypes splits a comma-separated source_type string into individual types.
-// Returns nil for empty input (meaning "all types").
-func parseSourceTypes(s string) []string {
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	types := parts[:0]
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			types = append(types, p)
-		}
-	}
-	return types
-}
-
 // searchPipeline runs vector search with rerank and recency signal.
 // Falls back to LIKE-based keyword search when embedder is unavailable.
-func SearchPipeline(ctx context.Context, st *store.Store, emb *embedder.Embedder, query, sourceType string, limit, overRetrieve int) SearchResult {
+func SearchPipeline(ctx context.Context, st *store.Store, emb *embedder.Embedder, query string, limit, overRetrieve int) SearchResult {
 	var res SearchResult
 
 	if emb != nil {
@@ -146,8 +111,7 @@ func SearchPipeline(ctx context.Context, st *store.Store, emb *embedder.Embedder
 		if err != nil {
 			res.Warnings = append(res.Warnings, fmt.Sprintf("vector embedding failed: %v", err))
 		} else {
-			types := parseSourceTypes(sourceType)
-			matches, err := st.VectorSearch(ctx, queryVec, "records", overRetrieve, types...)
+			matches, err := st.VectorSearchKnowledge(ctx, queryVec, overRetrieve)
 			if err != nil {
 				res.Warnings = append(res.Warnings, fmt.Sprintf("vector search failed: %v", err))
 			} else if len(matches) > 0 {
@@ -155,16 +119,16 @@ func SearchPipeline(ctx context.Context, st *store.Store, emb *embedder.Embedder
 				for i, m := range matches {
 					ids[i] = m.SourceID
 				}
-				docs, err := st.GetDocsByIDs(ctx, ids)
+				docs, err := st.GetKnowledgeByIDs(ctx, ids)
 				if err != nil {
 					res.Warnings = append(res.Warnings, fmt.Sprintf("doc fetch failed: %v", err))
 				} else {
 					// Preserve vector similarity ordering.
-					docMap := make(map[int64]store.DocRow, len(docs))
+					docMap := make(map[int64]store.KnowledgeRow, len(docs))
 					for _, d := range docs {
 						docMap[d.ID] = d
 					}
-					ordered := make([]store.DocRow, 0, len(ids))
+					ordered := make([]store.KnowledgeRow, 0, len(ids))
 					for _, id := range ids {
 						if d, ok := docMap[id]; ok {
 							ordered = append(ordered, d)
@@ -177,13 +141,13 @@ func SearchPipeline(ctx context.Context, st *store.Store, emb *embedder.Embedder
 					if len(res.Docs) > limit {
 						contents := make([]string, len(res.Docs))
 						for i, d := range res.Docs {
-							contents[i] = d.SectionPath + "\n" + d.Content
+							contents[i] = d.Title + "\n" + d.Content
 						}
 						reranked, err := emb.Rerank(ctx, query, contents, limit)
 						if err != nil {
 							res.Warnings = append(res.Warnings, fmt.Sprintf("rerank failed: %v", err))
 						} else if len(reranked) > 0 {
-							reorderedDocs := make([]store.DocRow, 0, len(reranked))
+							reorderedDocs := make([]store.KnowledgeRow, 0, len(reranked))
 							for _, r := range reranked {
 								if r.Index >= 0 && r.Index < len(res.Docs) {
 									reorderedDocs = append(reorderedDocs, res.Docs[r.Index])
@@ -201,12 +165,12 @@ func SearchPipeline(ctx context.Context, st *store.Store, emb *embedder.Embedder
 	// Fallback to FTS5 search (with alias expansion + fuzzy) if no vector results.
 	if len(res.Docs) == 0 {
 		res.SearchMethod = "fts5"
-		docs, err := st.SearchMemoriesFTS(ctx, query, limit)
+		docs, err := st.SearchKnowledgeFTS(ctx, query, limit)
 		if err != nil {
 			res.Warnings = append(res.Warnings, fmt.Sprintf("fts5 search failed: %v", err))
 			// Final fallback to LIKE keyword search.
 			res.SearchMethod = "keyword"
-			docs, err = st.SearchMemoriesKeyword(ctx, query, limit)
+			docs, err = st.SearchKnowledgeKeyword(ctx, query, limit)
 			if err != nil {
 				res.Warnings = append(res.Warnings, fmt.Sprintf("keyword search failed: %v", err))
 			} else {
@@ -229,7 +193,7 @@ func SearchPipeline(ctx context.Context, st *store.Store, emb *embedder.Embedder
 
 // TrackHitCounts increments hit_count for the given search results.
 // Call separately from SearchPipeline to allow callers (e.g., benchmarks) to opt out.
-func TrackHitCounts(ctx context.Context, st *store.Store, docs []store.DocRow) {
+func TrackHitCounts(ctx context.Context, st *store.Store, docs []store.KnowledgeRow) {
 	if len(docs) == 0 {
 		return
 	}

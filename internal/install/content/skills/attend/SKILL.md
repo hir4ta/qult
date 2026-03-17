@@ -38,7 +38,7 @@ approval gates and BLOCKED recovery).
 5. **If no spec** → ask 1 question: "Confirm scope: {description}. Proceed?"
    - Init spec via `dossier` action=init
    - If response contains `steering_context`, store it for use across all spec files
-   - If response contains `steering_hint`, inform the user about `alfred steering-init`
+   - If response contains `steering_hint`, inform the user about `/alfred:init`
 6. Record `initial_commit` = output of `git rev-parse HEAD`
 7. Write initial Orchestrator State to session.md
 
@@ -199,3 +199,9 @@ After EVERY phase transition and after EVERY task completion:
 - ALWAYS include `<!-- source: FR-N -->` in test-specs.md Gherkin cases
 - Mark `<!-- optional -->` sections as skipped for S-sized tasks
 - ALWAYS include "Wave: Closing" tasks (self-review, CLAUDE.md update, test verification) — these trigger auto-complete when all checked
+
+## Troubleshooting
+
+- **Test gate failure (Phase 6 loops)**: Check if tests depend on external state or ordering. Run the failing test in isolation to confirm reproducibility before fixing.
+- **Approval timeout (user hasn't reviewed in dashboard)**: The orchestrator stops at Phase 2. Re-invoke `/alfred:attend` with the same task-slug to resume; it will check review status automatically.
+- **Rate limit during parallel agent review**: Reduce concurrency by retrying failed agents sequentially. If persistent, skip to self-review inline and note the degraded review in session.md.

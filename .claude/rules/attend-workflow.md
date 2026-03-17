@@ -1,3 +1,9 @@
+---
+paths:
+  - ".alfred/**"
+  - "internal/spec/**"
+---
+
 # attend Workflow — Required Practices
 
 These rules apply when executing /alfred:attend or any spec-driven workflow.

@@ -316,7 +316,7 @@ func Init(projectPath, taskSlug, description string, opts ...InitOption) (*SpecD
 		Date:        time.Now().UTC().Format("2006-01-02"),
 		SpecType:    string(cfg.specType),
 	}
-	rendered, err := RenderForSize(cfg.size, cfg.specType, data)
+	rendered, err := RenderForSize(cfg.size, cfg.specType, data, projectPath)
 	if err != nil {
 		os.RemoveAll(sd.Dir()) // clean up partial init
 		return nil, fmt.Errorf("render templates: %w", err)

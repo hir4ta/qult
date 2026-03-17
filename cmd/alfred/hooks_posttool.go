@@ -96,7 +96,7 @@ func handlePostToolUse(ctx context.Context, ev *hookEvent) {
 		return
 	}
 
-	docs, err := st.SearchMemoriesFTS(ctx, query, 2)
+	docs, err := st.SearchKnowledgeFTS(ctx, query, 2)
 	if err != nil || len(docs) == 0 {
 		return
 	}
@@ -105,7 +105,7 @@ func handlePostToolUse(ctx context.Context, ev *hookEvent) {
 	buf.WriteString("Related past experience for this error:\n")
 	for _, d := range docs {
 		snippet := safeSnippet(d.Content, 300)
-		buf.WriteString(fmt.Sprintf("- [%s] %s\n", d.SectionPath, snippet))
+		buf.WriteString(fmt.Sprintf("- [%s] %s\n", d.Title, snippet))
 	}
 
 	emitAdditionalContext("PostToolUse", buf.String())

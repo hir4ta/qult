@@ -29,7 +29,7 @@ func runSteeringInit() error {
 		return fmt.Errorf("analyze project: %w", err)
 	}
 
-	rendered, err := spec.RenderSteering(*data)
+	rendered, err := spec.RenderSteering(*data, projectPath)
 	if err != nil {
 		return fmt.Errorf("render steering templates: %w", err)
 	}
