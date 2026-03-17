@@ -24,14 +24,18 @@ Build: tsdown (bundle) / vitest (test) / citty (CLI) / hono (HTTP) / @modelconte
 
 ## Commands
 
+Taskfile (task runner) を使用。`task` コマンドで実行。
+
 ```bash
 task build                    # Build React SPA + tsdown (full pipeline)
-task dev                      # Start Vite dev server (use with ALFRED_DEV=1 alfred dashboard)
+task dev                      # Start Vite dev server (use with ALFRED_DEV=1 node dist/cli.mjs dashboard)
 task check                    # tsc --noEmit + Biome lint
 task fix                      # Biome auto-fix
 task test                     # vitest
-task clean                    # Clean build artifacts
+task clean                    # Clean build artifacts (dist/ + web/dist/)
+node dist/cli.mjs serve       # MCP server (stdio)
 node dist/cli.mjs dashboard   # Open browser dashboard (localhost:7575)
+node dist/cli.mjs hook <Event> # Hook handler (SessionStart/PreCompact/UserPromptSubmit/PostToolUse)
 node dist/cli.mjs version     # Show version
 ```
 
