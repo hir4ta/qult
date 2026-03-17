@@ -23,7 +23,7 @@ jobs:
         run: npm ci
 
       - name: Install web dependencies
-        run: cd web && npm ci
+        run: cd web && npm install
 
       - name: Type check
         run: npm run typecheck
