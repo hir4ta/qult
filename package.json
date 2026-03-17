@@ -24,22 +24,22 @@
     "prepack": "npm run build:web && npm run build"
   },
   "dependencies": {
-    "@hono/node-server": "^1",
-    "@modelcontextprotocol/sdk": "^1.27",
-    "better-sqlite3": "^12",
-    "citty": "^0.2",
-    "eta": "^4",
-    "hono": "^4",
-    "yaml": "^2",
-    "zod": "^3"
+    "better-sqlite3": "^12"
   },
   "devDependencies": {
+    "@hono/node-server": "^1",
+    "@modelcontextprotocol/sdk": "^1.27",
     "@tsconfig/node22": "^22.0.5",
     "@types/better-sqlite3": "^7",
     "@types/node": "^22",
+    "citty": "^0.2",
+    "eta": "^4",
+    "hono": "^4",
     "tsdown": "^0",
     "tsx": "^4",
     "typescript": "^5.8",
-    "vitest": "^3"
+    "vitest": "^3",
+    "yaml": "^2",
+    "zod": "^3"
   }
 }

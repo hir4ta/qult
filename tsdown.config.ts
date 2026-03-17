@@ -7,5 +7,10 @@ export default defineConfig({
   target: 'node22',
   clean: true,
   banner: { js: '#!/usr/bin/env node' },
-  deps: { neverBundle: ['better-sqlite3'] },
+  deps: {
+    // better-sqlite3 は native addon なのでバンドル不可。
+    // それ以外の devDependencies は全てバンドルして dependencies ゼロを実現。
+    neverBundle: ['better-sqlite3'],
+    onlyBundle: false,
+  },
 });

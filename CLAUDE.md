@@ -53,6 +53,7 @@ alfred steering-init          # Generate project steering docs (.alfred/steering
 - Plugin content source of truth: `internal/install/content/` (skills, agents, rules). `plugin/` is generated output, gitignored
 - MCP tools return structured JSON
 - MCP server version: dynamically set from resolvedVersion() (not hardcoded)
+- **npm dependencies は better-sqlite3 のみ** — 他のライブラリは全て devDependencies に書き、tsdown でバンドルする。ユーザーの `npm install` 時に追加ダウンロードを最小化するため
 
 ### Configuration & API
 
