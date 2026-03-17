@@ -107,8 +107,11 @@ After this, the project is ready for `/alfred:brief`, `/alfred:attend`, and all 
 
 - If `--force` is in $ARGUMENTS, overwrite existing steering docs without asking
 - Do NOT create spec files — this skill only sets up the project infrastructure
-- Do NOT modify existing code — only create files under `.alfred/`
+- Do NOT modify existing source code — only create files under `.alfred/`
 - Template files should be the embedded defaults copied out, not custom-generated content
+- Steering docs describe the PROJECT, not this init skill. alfred's other skills (attend, mend, tdd) DO modify code — steering docs should accurately reflect that
+- product.md Out of Scope: do NOT write "does not modify user code" — alfred DOES modify code via attend/mend/tdd. Clarify what is genuinely out of scope (e.g., "not a CI/CD system", "not a project management tool")
+- tech.md: use `/release` not `/project:release` for the release command
 
 ## Troubleshooting
 
