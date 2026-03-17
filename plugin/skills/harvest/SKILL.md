@@ -7,7 +7,7 @@ description: >
   insights for future recall. NOT for code review (use /alfred:inspect).
   NOT for creating PRs (use /create-pr).
 user-invocable: true
-argument-hint: "<PR-URL>"
+argument-hint: "PR-URL"
 allowed-tools: Bash(gh api *, gh pr view *), mcp__plugin_alfred_alfred__ledger
 context: fork
 ---
@@ -94,3 +94,9 @@ Harvested PR #42: Add FTS5 full-text search
 - ALWAYS include the PR number and title in saved memories for traceability
 - Skip comments that are just style nits or formatting suggestions
 - Focus on comments with rationale ("because", "since", "to avoid")
+
+## Troubleshooting
+
+- **gh CLI not authenticated**: Run `gh auth login` to authenticate before invoking this skill. Verify with `gh auth status`.
+- **PR has no review comments**: The skill will report zero items harvested. This is expected for PRs with only approvals or no inline feedback.
+- **Rate limiting from GitHub API**: Wait a few minutes and retry. For large PRs with many comments, the `gh api` calls may hit secondary rate limits.

@@ -268,3 +268,9 @@ Coverage: 45% -> 57.4% (+12.4%)
 Patterns saved: 5
 Agent spawns: 0/4
 ```
+
+## Troubleshooting
+
+- **Test framework not detected**: Specify the test command explicitly in the feature description, or ensure the project has recognizable test files (`*_test.go`, `test_*.py`, `*.test.ts`).
+- **Infinite red loop (test keeps failing after GREEN)**: The test design may be flawed. Revisit the test case — ensure it tests observable behavior, not implementation details. Simplify the assertion.
+- **Coverage measurement unavailable**: Skip coverage tracking and focus on passing tests. Update the Orchestrator State to note `coverage_start: unknown` and omit delta reporting.

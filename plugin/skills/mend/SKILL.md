@@ -104,3 +104,9 @@ After EVERY phase transition:
 - ALWAYS save bug memory after successful fix
 - ALWAYS call `dossier action=complete` at the end
 - ALWAYS update session.md after each phase (not in batch)
+
+## Troubleshooting
+
+- **Cannot reproduce the bug**: Ask the user for exact reproduction steps, environment details, and input data. Check if the bug is environment-specific or requires particular state setup.
+- **Tests are flaky**: Isolate the specific failing test and run it repeatedly (`go test -run TestName -count=10`). Address non-determinism before attempting a fix.
+- **Fix introduces new test failures**: Run the full test suite (`go test ./...`) before committing. If new failures appear, check if the fix changed shared state or interfaces that other tests depend on.

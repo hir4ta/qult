@@ -106,3 +106,9 @@ Reverse-engineered spec for {scope}
 - ALWAYS include file:line references as evidence
 - ALWAYS update session.md after each file (dashboard UX)
 - Label inferred logic clearly as inference, not fact
+
+## Troubleshooting
+
+- **Codebase too large**: Narrow the scope to a specific package or directory (`/alfred:survey task-slug internal/store`). Project-wide surveys on large codebases may hit context limits.
+- **Binary/generated files detected**: Skip them. Focus on source files with meaningful business logic. Generated files (`.pb.go`, `_gen.go`, `_string.go`) add noise without insight.
+- **No clear entry point found**: Ask the user which files or packages to start from. Check for `main.go`, `cmd/`, or test files as alternative entry points.
