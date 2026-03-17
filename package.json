@@ -1,0 +1,45 @@
+{
+  "name": "claude-alfred",
+  "version": "0.1.0-alpha.0",
+  "type": "module",
+  "bin": {
+    "alfred": "dist/cli.mjs"
+  },
+  "files": [
+    "dist/",
+    "web/dist/",
+    "templates/",
+    "content/"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "build:web": "cd web && npm run build",
+    "dev": "tsx watch src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepack": "npm run build:web && npm run build"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1",
+    "@modelcontextprotocol/sdk": "^1.27",
+    "better-sqlite3": "^12",
+    "citty": "^0.2",
+    "eta": "^4",
+    "hono": "^4",
+    "yaml": "^2",
+    "zod": "^3"
+  },
+  "devDependencies": {
+    "@tsconfig/node22": "^22.0.5",
+    "@types/better-sqlite3": "^7",
+    "@types/node": "^22",
+    "tsdown": "^0",
+    "tsx": "^4",
+    "typescript": "^5.8",
+    "vitest": "^3"
+  }
+}

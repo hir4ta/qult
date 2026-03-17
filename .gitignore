@@ -1,16 +1,37 @@
+# Go binary
 /claude-alfred
 /alfred
 *.exe
-.DS_Store
-# Build outputs
+
+# TypeScript build output
+dist/
+node_modules/
+
+# Build artifacts
 web/dist/
 web/node_modules/
 .task/
 cmd/alfred/web/dist/*
 !cmd/alfred/web/dist/.gitkeep
+
+# Database
 *.db
+
+# OS
+.DS_Store
+
+# Editor
+*.swp
+*.swo
+*~
+
+# Config (local)
 .claude/settings.json
 .alfred/
+
+# Test
+coverage/
+*.tsbuildinfo
 
 # plugin/ is generated output from `alfred plugin-bundle`.
 # Source of truth: internal/install/content/ (skills, agents, rules)
