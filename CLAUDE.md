@@ -4,40 +4,35 @@ Development butler for Claude Code — MCP server + Hook handler.
 
 ## Stack
 
-Go 1.25 / SQLite (ncruces/go-sqlite3) / Voyage AI (embedding) / React SPA (Vite 8 + TanStack Router + shadcn/ui)
+TypeScript (Node.js 22+, ESM) / SQLite (better-sqlite3) / Voyage AI (embedding) / React SPA (Vite 8 + TanStack Router + shadcn/ui)
+
+Build: tsdown (bundle) / vitest (test) / citty (CLI) / hono (HTTP) / @modelcontextprotocol/sdk (MCP)
 
 ## Structure
 
 | Package | Role |
 |---|---|
-| `internal/mcpserver` | MCP server (3 tools: dossier, roster, ledger) |
-| `internal/store` | SQLite persistence (knowledge_index + embeddings + FTS5), project detection, Markdown knowledge files |
-| `internal/embedder` | Voyage AI (voyage-4-large, vector search + rerank-2.5) |
-| `internal/spec` | Spec management: .alfred/specs/ (8 file types) + Size-based scaling (S/M/L/XL) + SpecType (feature/bugfix) + Validate checker + Steering docs |
-| `internal/epic` | Epic management: .alfred/epics/ (YAML-based task grouping + dependencies) |
-| `internal/dashboard` | Dashboard types: DataSource interface + shared types |
-| `internal/api` | HTTP API server: chi router, REST handlers, SSE broadcast hub, SPA serving |
+| `src/mcp/` | MCP server (3 tools: dossier, roster, ledger) — @modelcontextprotocol/sdk + Zod |
+| `src/store/` | SQLite persistence (knowledge_index + embeddings + FTS5), project detection |
+| `src/embedder/` | Voyage AI (voyage-4-large, vector search + rerank-2.5) |
+| `src/spec/` | Spec management: .alfred/specs/ (8 file types) + Size-based scaling + Validate + Templates |
+| `src/epic/` | Epic management: .alfred/epics/ (YAML-based task grouping + dependencies) |
+| `src/hooks/` | Hook handlers (SessionStart / PreCompact / UserPromptSubmit / PostToolUse) |
+| `src/api/` | HTTP API server: Hono, REST handlers, SSE, SPA serving |
+| `src/cli.ts` | CLI entry point (citty dispatch) |
 | `web/` | React SPA: Vite 8, TanStack Router/Query, shadcn/ui, Tailwind CSS v4, Biome |
-| `internal/install` | Plugin bundle + user rules |
-| `cmd/alfred/hooks*.go` | Hook handler (SessionStart / PreCompact / UserPromptSubmit / PostToolUse) |
-| `cmd/alfred/dashboard.go` | HTTP dashboard entry point (`alfred dashboard` — browser open + go:embed SPA) |
-| `cmd/alfred/steering.go` | Steering doc generation (`alfred steering-init`) |
-| `cmd/alfred/search_eval.go` | Search quality benchmark (`alfred search-eval`) |
 
 ## Commands
 
 ```bash
-task build                    # Build React SPA + go install (full pipeline)
+task build                    # Build React SPA + tsdown (full pipeline)
 task dev                      # Start Vite dev server (use with ALFRED_DEV=1 alfred dashboard)
-task check                    # Go vet + Biome lint
+task check                    # tsc --noEmit + Biome lint
 task fix                      # Biome auto-fix
-task test                     # Go tests
+task test                     # vitest
 task clean                    # Clean build artifacts
-alfred dashboard              # Open browser dashboard (localhost:7575)
-alfred dashboard --port 8080  # Custom port
-alfred dashboard --url-only   # Print URL only
-alfred search-eval            # Run search quality benchmark
-alfred steering-init          # Generate project steering docs (.alfred/steering/)
+node dist/cli.mjs dashboard   # Open browser dashboard (localhost:7575)
+node dist/cli.mjs version     # Show version
 ```
 
 ## Release
@@ -48,8 +43,7 @@ alfred steering-init          # Generate project steering docs (.alfred/steering
 
 ### Build & Distribution
 
-- Always `go install ./cmd/alfred` after changes (`go build` + `cp` breaks macOS code signing)
-- `internal/` packages are private APIs
+- `npm run build` (tsdown) after src/ changes — output is `dist/cli.mjs`
 - Plugin content source of truth: `internal/install/content/` (skills, agents, rules). `plugin/` is generated output, gitignored
 - MCP tools return structured JSON
 - MCP server version: dynamically set from resolvedVersion() (not hardcoded)
