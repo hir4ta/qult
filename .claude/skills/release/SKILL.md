@@ -2,7 +2,6 @@
 name: release
 description: Release claude-alfred. Version can be specified or auto-detected
 allowed-tools: Bash(go *, git *, gh *), Read, Edit, Glob, Grep, Write
-disable-model-invocation: true
 ---
 
 Release claude-alfred.
