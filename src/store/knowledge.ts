@@ -201,6 +201,19 @@ export function searchKnowledgeKeyword(store: Store, query: string, limit: numbe
   return rows.map(mapRow);
 }
 
+export function getRecentDecisions(
+  store: Store, projectRemote: string, projectPath: string, sinceISO: string, limit: number,
+): Array<{ title: string; content: string; createdAt: string }> {
+  const rows = store.db.prepare(`
+    SELECT title, content, created_at FROM knowledge_index
+    WHERE sub_type = 'decision'
+      AND project_remote = ? AND project_path = ?
+      AND created_at > ? AND enabled = 1
+    ORDER BY created_at DESC LIMIT ?
+  `).all(projectRemote, projectPath, sinceISO, limit) as Array<{ title: string; content: string; created_at: string }>;
+  return rows.map(r => ({ title: r.title, content: r.content, createdAt: r.created_at }));
+}
+
 export function countKnowledge(store: Store, projectRemote: string, projectPath: string): number {
   const row = store.db.prepare(
     'SELECT COUNT(*) as cnt FROM knowledge_index WHERE project_remote = ? AND project_path = ? AND enabled = 1',

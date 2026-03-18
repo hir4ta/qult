@@ -141,10 +141,10 @@ function StatsBar({
 				<>
 					<span>{stats.total} memories</span>
 					<Separator orientation="vertical" className="h-3" />
-					<StatDot count={stats.decision} color={SUB_TYPE_COLORS.decision!} />
-					<StatDot count={stats.pattern} color={SUB_TYPE_COLORS.pattern!} />
-					<StatDot count={stats.rule} color={SUB_TYPE_COLORS.rule!} />
-					<StatDot count={stats.general} color={SUB_TYPE_COLORS.general!} />
+					<StatDot count={stats.bySubType.decision ?? 0} color={SUB_TYPE_COLORS.decision!} />
+					<StatDot count={stats.bySubType.pattern ?? 0} color={SUB_TYPE_COLORS.pattern!} />
+					<StatDot count={stats.bySubType.rule ?? 0} color={SUB_TYPE_COLORS.rule!} />
+					<StatDot count={stats.bySubType.general ?? 0} color={SUB_TYPE_COLORS.general!} />
 				</>
 			)}
 		</div>

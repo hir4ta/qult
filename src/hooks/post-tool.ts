@@ -2,11 +2,14 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { HookEvent } from './dispatcher.js';
-import { notifyUser, emitAdditionalContext, extractSection } from './dispatcher.js';
+import { notifyUser } from './dispatcher.js';
 import { openDefaultCached } from '../store/index.js';
-import { searchKnowledgeFTS } from '../store/fts.js';
+import { searchKnowledgeFTS, detectKnowledgeConflicts } from '../store/fts.js';
 import { readActive, SpecDir } from '../spec/types.js';
 import { truncate } from '../mcp/helpers.js';
+import { extractSection } from './dispatcher.js';
+import type { DirectiveItem } from './directives.js';
+import { emitDirectives } from './directives.js';
 
 const EXPLORE_COUNTER_PATH = join(tmpdir(), 'alfred-explore-count');
 
@@ -21,6 +24,8 @@ function writeExploreCount(n: number): void {
 export async function postToolUse(ev: HookEvent, _signal: AbortSignal): Promise<void> {
   if (!ev.cwd || !ev.tool_name) return;
 
+  const items: DirectiveItem[] = [];
+
   // Exploration detection (persisted across short-lived hook processes via /tmp).
   if (ev.tool_name === 'Read' || ev.tool_name === 'Grep' || ev.tool_name === 'Glob') {
     const count = readExploreCount() + 1;
@@ -29,20 +34,26 @@ export async function postToolUse(ev: HookEvent, _signal: AbortSignal): Promise<
       try {
         readActive(ev.cwd); // has active spec → don't suggest
       } catch {
-        notifyUser('tip: 5+ consecutive %s calls without a spec. Consider `/alfred:survey` to reverse-engineer a spec from the code.', ev.tool_name);
+        items.push({
+          level: 'WARNING',
+          message: `5+ consecutive ${ev.tool_name} calls without a spec. Consider \`/alfred:survey\` to reverse-engineer a spec from the code.`,
+        });
         writeExploreCount(0);
       }
     }
+    emitDirectives('PostToolUse', items);
     return;
   }
   writeExploreCount(0);
 
   if (ev.tool_name === 'Bash') {
-    await handleBashResult(ev);
+    await handleBashResult(ev, items);
   }
+
+  emitDirectives('PostToolUse', items);
 }
 
-async function handleBashResult(ev: HookEvent): Promise<void> {
+async function handleBashResult(ev: HookEvent, items: DirectiveItem[]): Promise<void> {
   const response = ev.tool_response as { stdout?: string; stderr?: string; exitCode?: number } | undefined;
   if (!response) return;
 
@@ -50,21 +61,26 @@ async function handleBashResult(ev: HookEvent): Promise<void> {
   if (response.exitCode && response.exitCode !== 0 && response.stderr) {
     const errorText = typeof response.stderr === 'string' ? response.stderr : '';
     if (errorText.length > 10) {
-      await searchErrorContext(ev.cwd!, errorText);
+      await searchErrorContext(ev.cwd!, errorText, items);
     }
   }
 
-  // On Bash success: auto-check NextSteps in session.md.
+  // On Bash success: auto-check NextSteps + check for git commit.
   if (response.exitCode === 0) {
-    autoCheckNextSteps(ev.cwd!, response.stdout ?? '');
+    const stdout = response.stdout ?? '';
+    autoCheckNextSteps(ev.cwd!, stdout);
+
+    // FR-7: Proactive conflict warning after git commit.
+    if (isGitCommit(stdout)) {
+      await checkKnowledgeConflicts(items);
+    }
   }
 }
 
-async function searchErrorContext(projectPath: string, errorText: string): Promise<void> {
+async function searchErrorContext(projectPath: string, errorText: string, items: DirectiveItem[]): Promise<void> {
   let store;
   try { store = openDefaultCached(); } catch { return; }
 
-  // Take first 200 chars of error for search.
   const query = errorText.slice(0, 200);
   try {
     const docs = searchKnowledgeFTS(store, query, 3);
@@ -72,7 +88,10 @@ async function searchErrorContext(projectPath: string, errorText: string): Promi
       const context = docs.map(d =>
         `- ${d.title}: ${truncate(d.content, 150)}`
       ).join('\n');
-      emitAdditionalContext('PostToolUse', `Related knowledge for this error:\n${context}`);
+      items.push({
+        level: 'CONTEXT',
+        message: `Related knowledge for this error:\n${context}`,
+      });
     }
   } catch { /* search failure is non-fatal */ }
 }
@@ -91,13 +110,10 @@ function autoCheckNextSteps(projectPath: string, stdout: string): void {
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]!;
-      // Match unchecked items: - [ ] description
       const match = line.match(/^- \[ \] (.+)$/);
       if (!match) continue;
 
       const description = match[1]!.toLowerCase();
-
-      // Simple heuristic: check if stdout or command output relates to the step.
       if (stdout && description.split(/\s+/).some(word =>
         word.length > 3 && stdout.toLowerCase().includes(word)
       )) {
@@ -112,4 +128,41 @@ function autoCheckNextSteps(projectPath: string, stdout: string): void {
       sd.writeFile('session.md', updatedSession);
     }
   } catch { /* fail-open */ }
+}
+
+/**
+ * Detect git commit from Bash stdout.
+ * Checks for common git commit output patterns.
+ */
+function isGitCommit(stdout: string): boolean {
+  if (!stdout) return false;
+  // Common patterns in git commit output.
+  return /\[[\w./-]+ [0-9a-f]+\]/.test(stdout) || // [main abc1234], [feature-branch abc1234], etc.
+    (stdout.includes('files changed') && (stdout.includes('insertion') || stdout.includes('deletion')));
+}
+
+/**
+ * FR-7: Check for knowledge conflicts and emit warnings.
+ */
+async function checkKnowledgeConflicts(items: DirectiveItem[]): Promise<void> {
+  let store;
+  try { store = openDefaultCached(); } catch { return; }
+
+  try {
+    const conflicts = detectKnowledgeConflicts(store, 0.70);
+    if (conflicts.length === 0) return;
+
+    // Include contradictions (>= 0.70) and high-similarity duplicates (>= 0.90).
+    const significant = conflicts.filter(c =>
+      c.type === 'potential_contradiction' || c.similarity >= 0.90
+    );
+
+    for (const conflict of significant.slice(0, 3)) {
+      const typeLabel = conflict.type === 'potential_contradiction' ? 'CONTRADICTION' : 'DUPLICATE';
+      items.push({
+        level: 'WARNING',
+        message: `Knowledge ${typeLabel} detected (${Math.round(conflict.similarity * 100)}% similar): "${conflict.a.title}" vs "${conflict.b.title}". Consider resolving via \`ledger action=reflect\`.`,
+      });
+    }
+  } catch { /* conflict detection failure is non-fatal */ }
 }

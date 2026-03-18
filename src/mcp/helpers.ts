@@ -56,12 +56,13 @@ export async function searchPipeline(
   query: string,
   limit: number,
   overRetrieve: number,
+  precomputedVec?: number[],
 ): Promise<SearchResult> {
   const res: SearchResult = { docs: [], searchMethod: '', warnings: [] };
 
   if (emb) {
     try {
-      const queryVec = await emb.embedForSearch(query);
+      const queryVec = precomputedVec ?? await emb.embedForSearch(query);
       const matches = vectorSearchKnowledge(store, queryVec, overRetrieve);
       if (matches.length > 0) {
         const ids = matches.map(m => m.sourceId);

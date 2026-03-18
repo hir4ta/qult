@@ -62,10 +62,8 @@ export interface ActivityEntry {
 
 export interface KnowledgeStats {
 	total: number;
-	decision: number;
-	pattern: number;
-	rule: number;
-	general: number;
+	bySubType: Record<string, number>;
+	avgHitCount: number;
 }
 
 export interface EpicSummary {

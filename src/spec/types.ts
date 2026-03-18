@@ -234,6 +234,64 @@ export function reviewStatusFor(projectPath: string, taskSlug: string): ReviewSt
   }
 }
 
+export interface ReviewVerification {
+  valid: boolean;
+  reason: string;
+}
+
+/**
+ * Verify that a valid review JSON file exists with status=approved and zero unresolved comments.
+ * Does NOT read _active.md (no overlap with reviewStatusFor).
+ *
+ * Legacy mode: if reviews/ directory is absent → valid (backward compat).
+ * If reviews/ exists but is empty → invalid.
+ */
+export function verifyReviewFile(projectPath: string, taskSlug: string): ReviewVerification {
+  const reviewsDir = join(specsDir(projectPath), taskSlug, 'reviews');
+
+  // Legacy mode: no reviews/ directory = pre-enforcement era.
+  if (!existsSync(reviewsDir)) {
+    return { valid: true, reason: 'legacy: no reviews/ directory' };
+  }
+
+  let files: string[];
+  try {
+    files = readdirSync(reviewsDir)
+      .filter(f => f.startsWith('review-') && f.endsWith('.json'))
+      .sort()
+      .reverse();
+  } catch {
+    return { valid: false, reason: 'failed to read reviews/ directory' };
+  }
+
+  if (files.length === 0) {
+    return { valid: false, reason: 'no review JSON files found in reviews/' };
+  }
+
+  // Parse the latest review file.
+  const latestFile = files[0]!;
+  let reviewData: { status?: string; comments?: Array<{ resolved?: boolean }> };
+  try {
+    reviewData = JSON.parse(readFileSync(join(reviewsDir, latestFile), 'utf-8'));
+  } catch {
+    return { valid: false, reason: `failed to parse ${latestFile}` };
+  }
+
+  if (reviewData.status !== 'approved') {
+    return { valid: false, reason: `latest review status is "${reviewData.status ?? 'unknown'}", not "approved"` };
+  }
+
+  // Check for unresolved comments (missing resolved field → treated as unresolved).
+  if (Array.isArray(reviewData.comments)) {
+    const unresolved = reviewData.comments.filter(c => !c.resolved).length;
+    if (unresolved > 0) {
+      return { valid: false, reason: `${unresolved} unresolved review comment(s) remain` };
+    }
+  }
+
+  return { valid: true, reason: `verified via ${latestFile}` };
+}
+
 export function removeTask(projectPath: string, taskSlug: string): boolean {
   const state = readActiveState(projectPath);
   const filtered = state.tasks.filter(t => t.slug !== taskSlug);

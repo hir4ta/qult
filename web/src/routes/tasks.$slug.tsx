@@ -17,6 +17,9 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { FileText, MessageSquareText } from "lucide-react";
 import { useState } from "react";
+import Markdown from "react-markdown";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 
 export const Route = createFileRoute("/tasks/$slug")({
 	component: TaskDetailPage,
@@ -192,9 +195,47 @@ function SpecContentViewer({ content, file }: { content: string; file: string })
 			</CardHeader>
 			<CardContent className="p-0">
 				<ScrollArea className="h-[600px]">
-					<pre className="p-4 text-xs leading-relaxed whitespace-pre-wrap break-words font-mono">
-						{content || "No content."}
-					</pre>
+					<div className="p-4 prose prose-sm prose-stone dark:prose-invert max-w-none
+						prose-headings:text-sm prose-headings:font-semibold prose-headings:mt-4 prose-headings:mb-2
+						prose-p:text-xs prose-p:leading-relaxed prose-p:my-1
+						prose-li:text-xs prose-li:my-0
+						prose-table:text-xs
+						prose-th:px-2 prose-th:py-1 prose-th:text-left prose-th:border prose-th:border-border prose-th:bg-muted/50
+						prose-td:px-2 prose-td:py-1 prose-td:border prose-td:border-border
+						prose-code:text-xs prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded
+						prose-pre:p-0 prose-pre:bg-transparent">
+						{content ? (
+							<Markdown
+								components={{
+									code({ className, children, ...props }) {
+										const match = /language-(\w+)/.exec(className || "");
+										const codeStr = String(children).replace(/\n$/, "");
+										if (match) {
+											return (
+												<SyntaxHighlighter
+													style={oneDark}
+													language={match[1]}
+													PreTag="div"
+													customStyle={{ fontSize: "0.75rem", borderRadius: "0.375rem", margin: 0 }}
+												>
+													{codeStr}
+												</SyntaxHighlighter>
+											);
+										}
+										return (
+											<code className={className} {...props}>
+												{children}
+											</code>
+										);
+									},
+								}}
+							>
+								{content}
+							</Markdown>
+						) : (
+							<p className="text-xs text-muted-foreground">No content.</p>
+						)}
+					</div>
 				</ScrollArea>
 			</CardContent>
 		</Card>

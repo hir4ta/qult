@@ -4,9 +4,12 @@ import type { HookEvent } from './dispatcher.js';
 import { notifyUser, emitAdditionalContext, extractSection } from './dispatcher.js';
 import { openDefaultCached } from '../store/index.js';
 import { detectProject } from '../store/project.js';
-import { upsertKnowledge, countKnowledge } from '../store/knowledge.js';
+import { upsertKnowledge, countKnowledge, getRecentDecisions } from '../store/knowledge.js';
 import { readActive, readActiveState, SpecDir } from '../spec/types.js';
 import type { KnowledgeRow } from '../types.js';
+import type { DirectiveItem } from './directives.js';
+import { emitDirectives } from './directives.js';
+import { truncate } from '../mcp/helpers.js';
 
 export async function sessionStart(ev: HookEvent, _signal: AbortSignal): Promise<void> {
   if (!ev.cwd) return;
@@ -36,7 +39,7 @@ export async function sessionStart(ev: HookEvent, _signal: AbortSignal): Promise
   // Suggest ledger reflect when knowledge base has grown.
   suggestLedgerReflect(store);
 
-  // Inject spec context.
+  // Inject spec context + decision replay.
   injectSpecContext(ev.cwd, ev.source ?? '', store);
 }
 
@@ -200,7 +203,11 @@ function injectSpecContext(projectPath: string, source: string, store: ReturnTyp
     }
 
     buf += '--- End Alfred Protocol ---\n';
-    emitAdditionalContext('SessionStart', buf);
+
+    const compactItems: DirectiveItem[] = [{ level: 'CONTEXT', message: buf }];
+    // Decision replay also during compact recovery.
+    compactItems.push(...injectRecentDecisions(store, projectPath));
+    emitDirectives('SessionStart', compactItems);
     notifyUser("recovered task '%s' (compact #%d)", taskSlug, compactCount);
   } else {
     // Normal startup/resume: adaptive context.
@@ -232,7 +239,42 @@ function injectSpecContext(projectPath: string, source: string, store: ReturnTyp
     }
 
     buf += '--- End Alfred Protocol ---\n';
-    emitAdditionalContext('SessionStart', buf);
-    notifyUser("injected context for task '%s' (memories: %d)", taskSlug, memoryCount);
+
+    // FR-9: Decision replay — inject recent decisions as CONTEXT.
+    const decisionItems = injectRecentDecisions(store, projectPath);
+
+    // Emit combined: spec context + decision replay.
+    const items: DirectiveItem[] = [
+      { level: 'CONTEXT', message: buf },
+      ...decisionItems,
+    ];
+    emitDirectives('SessionStart', items);
+    notifyUser("injected context for task '%s' (memories: %d, decisions: %d)", taskSlug, memoryCount, decisionItems.length);
   }
+}
+
+/**
+ * FR-9: Search for recent decision-type knowledge entries and return as CONTEXT items.
+ * Only fires when an active spec exists. Scoped to current project.
+ */
+function injectRecentDecisions(
+  store: ReturnType<typeof openDefaultCached>,
+  projectPath: string,
+): DirectiveItem[] {
+  // Guard: only inject if active spec exists.
+  try { readActive(projectPath); } catch { return []; }
+
+  const proj = detectProject(projectPath);
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  try {
+    const rows = getRecentDecisions(store, proj.remote, proj.path, sevenDaysAgo, 5);
+    if (rows.length === 0) return [];
+
+    const lines = rows.map(r => `- ${r.title}: ${truncate(r.content, 150)}`);
+    return [{
+      level: 'CONTEXT',
+      message: 'Recent decisions (last 7 days):\n' + lines.join('\n'),
+    }];
+  } catch { return []; }
 }

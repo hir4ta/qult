@@ -1,8 +1,12 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import type { HookEvent } from './dispatcher.js';
-import { notifyUser, emitAdditionalContext } from './dispatcher.js';
 import { openDefaultCached } from '../store/index.js';
 import { Embedder } from '../embedder/index.js';
 import { searchPipeline, trackHitCounts, truncate } from '../mcp/helpers.js';
+import { readActive } from '../spec/types.js';
+import type { DirectiveItem } from './directives.js';
+import { emitDirectives } from './directives.js';
 
 // Intent classification for skill nudge.
 const INTENT_KEYWORDS: Record<string, string[]> = {
@@ -24,6 +28,16 @@ const INTENT_TO_SKILL: Record<string, string> = {
   tdd: '/alfred:tdd',
 };
 
+const INTENT_DESCRIPTIONS: Record<string, string> = {
+  research: 'Investigating, researching, understanding code or concepts',
+  plan: 'Planning, designing, architecting a solution or approach',
+  implement: 'Implementing, adding, creating, building, refactoring code',
+  bugfix: 'Fixing a bug, resolving an error, debugging a problem',
+  review: 'Reviewing, checking, auditing, inspecting, validating code quality',
+  tdd: 'Writing tests, test-driven development, creating test specs',
+  'save-knowledge': 'Saving, remembering, recording information for later use',
+};
+
 export async function userPromptSubmit(ev: HookEvent, signal: AbortSignal): Promise<void> {
   if (!ev.prompt || !ev.cwd) return;
 
@@ -33,40 +47,103 @@ export async function userPromptSubmit(ev: HookEvent, signal: AbortSignal): Prom
   let store;
   try { store = openDefaultCached(); } catch { return; }
 
-  // Semantic search for relevant knowledge.
+  // Embed prompt once — reuse for intent classification + knowledge search.
   let emb: Embedder | null = null;
-  try { emb = Embedder.create(); } catch { /* no Voyage key — FTS fallback */ }
+  let promptVec: number[] | null = null;
+  try {
+    emb = Embedder.create();
+    promptVec = await emb.embedForSearch(prompt, signal);
+  } catch { /* no Voyage key — FTS fallback */ }
 
-  const limit = 5;
-  const result = await searchPipeline(store, emb, prompt, limit, limit * 3);
+  const items: DirectiveItem[] = [];
 
-  const parts: string[] = [];
+  // Intent classification: semantic (if Voyage) → keyword fallback.
+  let intent: string | null = null;
+  if (emb && promptVec) {
+    intent = await classifyIntentSemantic(emb, promptVec, signal);
+  }
+  if (!intent) {
+    intent = classifyIntent(prompt);
+  }
+
+  // FR-5: Spec creation enforcement.
+  const specDirective = checkSpecRequired(ev.cwd, intent);
+  if (specDirective) {
+    items.push(specDirective);
+  }
 
   // Skill nudge.
-  const intent = classifyIntent(prompt);
   if (intent && intent !== 'save-knowledge') {
     const skill = INTENT_TO_SKILL[intent];
     if (skill) {
-      parts.push(`Skill suggestion: ${skill} — ${intentDescription(intent)}`);
+      items.push({
+        level: 'CONTEXT',
+        message: `Skill suggestion: ${skill} — ${intentDescription(intent)}`,
+      });
     }
   }
 
-  // Knowledge context.
+  // Knowledge search — reuse promptVec to avoid double Voyage API call (DEC-2).
+  const limit = 5;
+  const result = await searchPipeline(store, emb, prompt, limit, limit * 3, promptVec ?? undefined);
+
   if (result.docs.length > 0) {
     trackHitCounts(store, result.docs);
     const contextLines = result.docs.map(d => {
-      const label = d.subType !== 'general' ? `[${d.subType}] ` : '';
-      return `- ${label}${d.title}: ${truncate(d.content, 150)}`;
+      const label = d.subType !== 'general' ? `[${d.subType}]` : '';
+      return `- ${label} ${d.title}: ${truncate(d.content, 150)}`;
     });
-    parts.push('Related knowledge:\n' + contextLines.join('\n'));
+    items.push({
+      level: 'CONTEXT',
+      message: 'Related knowledge:\n' + contextLines.join('\n'),
+    });
   }
 
-  if (parts.length > 0) {
-    emitAdditionalContext('UserPromptSubmit', parts.join('\n\n'));
+  emitDirectives('UserPromptSubmit', items);
+}
+
+/**
+ * Semantic intent classification using Voyage embeddings.
+ * Embeds intent descriptions in batch, compares with prompt vector.
+ */
+async function classifyIntentSemantic(
+  emb: Embedder, promptVec: number[], signal: AbortSignal,
+): Promise<string | null> {
+  try {
+    const intents = Object.keys(INTENT_DESCRIPTIONS);
+    const descriptions = intents.map(k => INTENT_DESCRIPTIONS[k]!);
+    // Intent descriptions embedded as documents, prompt as query — correct asymmetric usage
+    // for Voyage's query-document embedding model.
+    const intentVecs = await emb.embedBatchForStorage(descriptions, signal);
+
+    let bestIntent = '';
+    let bestScore = 0;
+    for (let i = 0; i < intents.length; i++) {
+      const score = cosineSim(promptVec, intentVecs[i]!);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIntent = intents[i]!;
+      }
+    }
+
+    return bestScore >= 0.5 ? bestIntent : null;
+  } catch {
+    return null; // Voyage failure → fall through to keyword
   }
 }
 
-function classifyIntent(prompt: string): string | null {
+function cosineSim(a: number[], b: number[]): number {
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i]! * b[i]!;
+    na += a[i]! * a[i]!;
+    nb += b[i]! * b[i]!;
+  }
+  const denom = Math.sqrt(na) * Math.sqrt(nb);
+  return denom > 0 ? dot / denom : 0;
+}
+
+export function classifyIntent(prompt: string): string | null {
   const lower = prompt.toLowerCase();
   let bestIntent = '';
   let bestScore = 0;
@@ -92,6 +169,27 @@ function classifyIntent(prompt: string): string | null {
   }
 
   return bestScore > 0 ? bestIntent : null;
+}
+
+/**
+ * FR-5: Check if spec is required before implementation.
+ * Only fires when: implement/bugfix/tdd intent + no active spec + .alfred/ exists.
+ */
+export function checkSpecRequired(cwd: string, intent: string | null): DirectiveItem | null {
+  if (!intent || !['implement', 'bugfix', 'tdd'].includes(intent)) return null;
+
+  // Only enforce in alfred-initialized projects.
+  if (!existsSync(join(cwd, '.alfred'))) return null;
+
+  try {
+    readActive(cwd); // Has active spec → no enforcement needed.
+    return null;
+  } catch {
+    return {
+      level: 'DIRECTIVE',
+      message: 'MUST create a spec first via /alfred:brief or dossier action=init before implementing. No active spec found.',
+    };
+  }
 }
 
 function intentDescription(intent: string): string {

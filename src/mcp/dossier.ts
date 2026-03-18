@@ -5,7 +5,7 @@ import type { Store } from '../store/index.js';
 import type { Embedder } from '../embedder/index.js';
 import {
   SpecDir, readActive, readActiveState, switchActive,
-  completeTask, removeTask, reviewStatusFor,
+  completeTask, removeTask, reviewStatusFor, verifyReviewFile,
   filesForSize, VALID_SLUG,
 } from '../spec/types.js';
 import type { SpecFile, SpecSize, SpecType } from '../spec/types.js';
@@ -253,6 +253,11 @@ function dossierComplete(projectPath: string, store: Store, params: DossierParam
       const reviewStatus = reviewStatusFor(projectPath, taskSlug);
       if (reviewStatus !== 'approved') {
         return errorResult(`completion requires review_status="approved" for ${size} specs (current: "${reviewStatus || 'pending'}"). Review in alfred dashboard.`);
+      }
+      // Verify review JSON file exists with approved status (FR-1).
+      const verification = verifyReviewFile(projectPath, taskSlug);
+      if (!verification.valid) {
+        return errorResult(`approval gate: ${verification.reason}. Review in alfred dashboard.`);
       }
     }
   }
