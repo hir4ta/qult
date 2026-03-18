@@ -5,7 +5,7 @@ import type { HookEvent } from './dispatcher.js';
 import { openDefaultCached } from '../store/index.js';
 import { Embedder } from '../embedder/index.js';
 import { searchPipeline, trackHitCounts, truncate } from '../mcp/helpers.js';
-import { readActive } from '../spec/types.js';
+import { readActiveState } from '../spec/types.js';
 import type { DirectiveItem } from './directives.js';
 import { emitDirectives } from './directives.js';
 
@@ -183,8 +183,9 @@ export function classifyIntent(prompt: string): string | null {
 }
 
 /**
- * FR-5: Check if spec is required before implementation.
- * Only fires when: implement/bugfix/tdd intent + no active spec + .alfred/ exists.
+ * FR-5/FR-7: Check if spec is required or unapproved before implementation.
+ * Stage 1: No spec exists → DIRECTIVE to create one.
+ * Stage 2: Spec exists but not approved (M/L/XL) → DIRECTIVE to get review.
  */
 export function checkSpecRequired(cwd: string, intent: string | null): DirectiveItem | null {
   if (!intent || !['implement', 'bugfix', 'tdd'].includes(intent)) return null;
@@ -192,15 +193,43 @@ export function checkSpecRequired(cwd: string, intent: string | null): Directive
   // Only enforce in alfred-initialized projects.
   if (!existsSync(join(cwd, '.alfred'))) return null;
 
+  // Read active state once for both Stage 1 and Stage 2.
+  let state;
   try {
-    readActive(cwd); // Has active spec → no enforcement needed.
-    return null;
+    state = readActiveState(cwd);
   } catch {
+    // Stage 1: No active spec (_active.md missing or unparseable).
     return {
       level: 'DIRECTIVE',
       message: 'MUST create a spec first via /alfred:brief or dossier action=init before implementing. No active spec found.',
+      rationalizations: [
+        '"I already have enough context to proceed" → Specs catch assumptions you don\'t know you\'re making',
+        '"The spec would just restate the request" → Specs add structure, traceability, and test criteria',
+        '"Creating a spec would slow things down" → S-size adds <2min. Bugs from no spec cost hours',
+      ],
+      spiritVsLetter: true,
     };
   }
+
+  // Stage 2 (FR-7): Spec exists but not approved (M/L/XL only).
+  try {
+    const taskSlug = state.primary;
+    const task = taskSlug ? state.tasks.find(t => t.slug === taskSlug) : undefined;
+    if (task && ['M', 'L', 'XL'].includes(task.size ?? '') && task.review_status !== 'approved') {
+      return {
+        level: 'DIRECTIVE',
+        message: `Spec '${taskSlug}' (size ${task.size}) requires review approval before implementation. Submit review via \`alfred dashboard\` or run spec self-review first.`,
+        rationalizations: [
+          '"The spec is obvious, review is overkill" → Review catches design bugs that waste 10x more implementation time',
+          '"I\'ll fix issues during implementation" → The approval gate at complete will block you anyway',
+          '"I already ran self-review mentally" → Self-review requires 3 parallel agents, not mental evaluation',
+        ],
+        spiritVsLetter: true,
+      };
+    }
+  } catch { /* ignore parse errors — graceful fallback */ }
+
+  return null;
 }
 
 function intentDescription(intent: string): string {

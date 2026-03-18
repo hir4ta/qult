@@ -5,6 +5,10 @@ export type DirectiveLevel = 'DIRECTIVE' | 'WARNING' | 'CONTEXT';
 export interface DirectiveItem {
   level: DirectiveLevel;
   message: string;
+  /** Counter-arguments to common LLM rationalizations (DIRECTIVE level only, opt-in). */
+  rationalizations?: string[];
+  /** Append "spirit vs letter" anti-rationalization sentence (DIRECTIVE level only, opt-in). */
+  spiritVsLetter?: boolean;
 }
 
 const LEVEL_ORDER: Record<DirectiveLevel, number> = {
@@ -14,6 +18,9 @@ const LEVEL_ORDER: Record<DirectiveLevel, number> = {
 };
 
 const MAX_DIRECTIVES = 3;
+const MAX_DIRECTIVE_BLOCK_CHARS = 500;
+const SPIRIT_VS_LETTER =
+  'Adapting or shortcutting these steps violates the rule, even if you believe the spirit is preserved.';
 
 /**
  * Build a single additionalContext string from directive items.
@@ -38,7 +45,37 @@ export function buildDirectiveOutput(items: DirectiveItem[]): string {
   // Sort by level order, stable.
   const sorted = normalized.slice().sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]);
 
-  return sorted.map(item => `[${item.level}] ${item.message}`).join('\n');
+  return sorted.map(item => {
+    let block = `[${item.level}] ${item.message}`;
+    // Append rationalizations + Spirit vs Letter for DIRECTIVE level only (opt-in).
+    if (item.level === 'DIRECTIVE') {
+      const rats = (item.rationalizations ?? []).slice();
+      const suffix = item.spiritVsLetter ? '\n' + SPIRIT_VS_LETTER : '';
+
+      // NFR-1: Fit within budget. Drop rationalizations from the end first to protect Spirit vs Letter.
+      while (rats.length > 0) {
+        const candidate = block + '\n' + rats.map(r => `- ${r}`).join('\n') + suffix;
+        if (candidate.length <= MAX_DIRECTIVE_BLOCK_CHARS) break;
+        rats.pop();
+      }
+
+      if (rats.length > 0) {
+        block += '\n' + rats.map(r => `- ${r}`).join('\n');
+      }
+      block += suffix;
+
+      // Final safety: if message + suffix still exceeds limit, drop suffix and hard truncate.
+      if (block.length > MAX_DIRECTIVE_BLOCK_CHARS) {
+        const messageOnly = `[${item.level}] ${item.message}`;
+        if (messageOnly.length > MAX_DIRECTIVE_BLOCK_CHARS) {
+          block = messageOnly.slice(0, MAX_DIRECTIVE_BLOCK_CHARS - 3) + '...';
+        } else {
+          block = messageOnly;
+        }
+      }
+    }
+    return block;
+  }).join('\n');
 }
 
 /**

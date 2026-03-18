@@ -1,7 +1,7 @@
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { HookEvent } from './dispatcher.js';
-import { notifyUser, emitAdditionalContext, extractSection } from './dispatcher.js';
+import { notifyUser, extractSection } from './dispatcher.js';
 import { openDefaultCached } from '../store/index.js';
 import { detectProject } from '../store/project.js';
 import { upsertKnowledge, countKnowledge, getRecentDecisions } from '../store/knowledge.js';
@@ -39,8 +39,23 @@ export async function sessionStart(ev: HookEvent, _signal: AbortSignal): Promise
   // Suggest ledger reflect when knowledge base has grown.
   suggestLedgerReflect(store);
 
-  // Inject spec context + decision replay.
-  injectSpecContext(ev.cwd, ev.source ?? '', store);
+  // Collect all directive items for single emit (NFR-4).
+  const items: DirectiveItem[] = [];
+
+  // FR-5: 1% rule — fires regardless of active spec, only needs .alfred/.
+  if (existsSync(join(ev.cwd, '.alfred'))) {
+    items.push({
+      level: 'CONTEXT',
+      message: 'If there is even a small chance an alfred skill applies to this task, invoke it. Check /alfred:concierge for available skills.',
+    });
+  }
+
+  // Spec context + decision replay (returns items, does not emit).
+  items.push(...buildSpecContextItems(ev.cwd, ev.source ?? '', store));
+
+  if (items.length > 0) {
+    emitDirectives('SessionStart', items);
+  }
 }
 
 function ingestProjectClaudeMD(store: ReturnType<typeof openDefaultCached>, projectPath: string): void {
@@ -167,25 +182,25 @@ function suggestLedgerReflect(store: ReturnType<typeof openDefaultCached>): void
   } catch { /* ignore */ }
 }
 
-function injectSpecContext(projectPath: string, source: string, store: ReturnType<typeof openDefaultCached>): void {
+function buildSpecContextItems(projectPath: string, source: string, store: ReturnType<typeof openDefaultCached>): DirectiveItem[] {
   let taskSlug: string;
-  try { taskSlug = readActive(projectPath); } catch { return; }
+  try { taskSlug = readActive(projectPath); } catch { return []; }
 
   // Skip completed tasks.
   try {
     const state = readActiveState(projectPath);
     const task = state.tasks.find(t => t.slug === taskSlug);
-    if (task?.status === 'completed') return;
+    if (task?.status === 'completed') return [];
   } catch { /* ignore */ }
 
   const sd = new SpecDir(projectPath, taskSlug);
-  if (!sd.exists()) return;
+  if (!sd.exists()) return [];
 
   let buf = '';
 
   if (source === 'compact') {
     let session = '';
-    try { session = sd.readFile('session.md'); } catch { return; }
+    try { session = sd.readFile('session.md'); } catch { return []; }
     const compactCount = (session.match(/## Compact Marker \[/g) ?? []).length;
 
     buf += `\n--- Alfred Protocol: Recovering Task '${taskSlug}' (post-compact #${compactCount}) ---\n`;
@@ -204,53 +219,49 @@ function injectSpecContext(projectPath: string, source: string, store: ReturnTyp
 
     buf += '--- End Alfred Protocol ---\n';
 
-    const compactItems: DirectiveItem[] = [{ level: 'CONTEXT', message: buf }];
-    // Decision replay also during compact recovery.
-    compactItems.push(...injectRecentDecisions(store, projectPath));
-    emitDirectives('SessionStart', compactItems);
+    const items: DirectiveItem[] = [{ level: 'CONTEXT', message: buf }];
+    items.push(...injectRecentDecisions(store, projectPath));
     notifyUser("recovered task '%s' (compact #%d)", taskSlug, compactCount);
-  } else {
-    // Normal startup/resume: adaptive context.
-    let session: string;
-    try { session = sd.readFile('session.md'); } catch { return; }
-    if (!session) return;
-
-    const proj = detectProject(projectPath);
-    const memoryCount = countKnowledge(store, proj.remote, proj.path);
-
-    buf += `\n--- Alfred Protocol: Active Task '${taskSlug}' ---\n`;
-
-    if (memoryCount <= 5) {
-      buf += '(Full context — new project)\n\n';
-      for (const section of sd.allSections()) {
-        if (section.content.trim()) {
-          buf += `### ${section.file}\n${section.content}\n\n`;
-        }
-      }
-    } else if (memoryCount <= 20) {
-      buf += session + '\n';
-      try {
-        const req = sd.readFile('requirements.md');
-        const goal = extractSection(req, '## Goal');
-        if (goal) buf += '\nGoal: ' + goal + '\n';
-      } catch { /* ignore */ }
-    } else {
-      buf += session + '\n';
-    }
-
-    buf += '--- End Alfred Protocol ---\n';
-
-    // FR-9: Decision replay — inject recent decisions as CONTEXT.
-    const decisionItems = injectRecentDecisions(store, projectPath);
-
-    // Emit combined: spec context + decision replay.
-    const items: DirectiveItem[] = [
-      { level: 'CONTEXT', message: buf },
-      ...decisionItems,
-    ];
-    emitDirectives('SessionStart', items);
-    notifyUser("injected context for task '%s' (memories: %d, decisions: %d)", taskSlug, memoryCount, decisionItems.length);
+    return items;
   }
+
+  // Normal startup/resume: adaptive context.
+  let session: string;
+  try { session = sd.readFile('session.md'); } catch { return []; }
+  if (!session) return [];
+
+  const proj = detectProject(projectPath);
+  const memoryCount = countKnowledge(store, proj.remote, proj.path);
+
+  buf += `\n--- Alfred Protocol: Active Task '${taskSlug}' ---\n`;
+
+  if (memoryCount <= 5) {
+    buf += '(Full context — new project)\n\n';
+    for (const section of sd.allSections()) {
+      if (section.content.trim()) {
+        buf += `### ${section.file}\n${section.content}\n\n`;
+      }
+    }
+  } else if (memoryCount <= 20) {
+    buf += session + '\n';
+    try {
+      const req = sd.readFile('requirements.md');
+      const goal = extractSection(req, '## Goal');
+      if (goal) buf += '\nGoal: ' + goal + '\n';
+    } catch { /* ignore */ }
+  } else {
+    buf += session + '\n';
+  }
+
+  buf += '--- End Alfred Protocol ---\n';
+
+  const decisionItems = injectRecentDecisions(store, projectPath);
+  const items: DirectiveItem[] = [
+    { level: 'CONTEXT', message: buf },
+    ...decisionItems,
+  ];
+  notifyUser("injected context for task '%s' (memories: %d, decisions: %d)", taskSlug, memoryCount, decisionItems.length);
+  return items;
 }
 
 /**
