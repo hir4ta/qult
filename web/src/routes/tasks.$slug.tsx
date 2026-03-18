@@ -185,7 +185,7 @@ function SpecContentViewer({ content, file }: { content: string; file: string })
 		<Card className="!gap-0 !py-0">
 			<CardContent className="p-0">
 				<ScrollArea className="h-[calc(100vh-220px)]">
-					<div className="p-5 overflow-hidden prose prose-sm prose-stone dark:prose-invert max-w-none
+					<div className="p-5 overflow-hidden prose prose-sm prose-stone dark:prose-invert max-w-[80ch]
 						prose-headings:text-sm prose-headings:font-semibold prose-headings:mt-3 prose-headings:mb-1.5
 						prose-h1:text-base prose-h1:mt-0 prose-h1:mb-2
 						prose-p:text-[13px] prose-p:leading-relaxed prose-p:my-1
