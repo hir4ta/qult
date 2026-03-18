@@ -56,7 +56,42 @@ export function createApp(
   app.get('/api/tasks', (c) => {
     try {
       const state = readActiveState(projectPath);
-      return c.json({ active: state.primary, tasks: state.tasks });
+      const enriched = state.tasks.map(task => {
+        const detail: Record<string, unknown> = { ...task };
+
+        // Enrich from session.md.
+        const sd = new SpecDir(projectPath, task.slug);
+        try {
+          const session = sd.readFile('session.md');
+
+          // Extract "Currently Working On" section.
+          const focusMatch = session.match(/## Currently Working On\s*\n([\s\S]*?)(?=\n##|\n$|$)/);
+          if (focusMatch?.[1]?.trim()) {
+            detail.focus = focusMatch[1].trim().split('\n')[0]!.trim();
+          }
+
+          // Parse Next Steps checkboxes.
+          const steps = session.match(/^- \[[ x]\] .+$/gm);
+          if (steps) {
+            const nextSteps = steps.map(s => ({
+              text: s.replace(/^- \[[ x]\] /, ''),
+              done: s.startsWith('- [x]'),
+            }));
+            detail.next_steps = nextSteps;
+            detail.completed = nextSteps.filter(s => s.done).length;
+            detail.total = nextSteps.length;
+          } else {
+            detail.completed = 0;
+            detail.total = 0;
+          }
+        } catch {
+          detail.completed = 0;
+          detail.total = 0;
+        }
+
+        return detail;
+      });
+      return c.json({ active: state.primary, tasks: enriched });
     } catch {
       return c.json({ active: '', tasks: [] });
     }
