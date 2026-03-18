@@ -233,7 +233,7 @@ export function readActiveState(projectPath: string): ActiveState {
 	// Try YAML first.
 	try {
 		const state = parse(data) as ActiveState;
-		if (state?.primary) return state;
+		if (state?.primary != null || state?.tasks) return state;
 	} catch {
 		/* fall through to legacy */
 	}

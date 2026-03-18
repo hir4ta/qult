@@ -3,7 +3,12 @@ import { join } from "node:path";
 import { truncate } from "../mcp/helpers.js";
 import { readActive, readActiveState, SpecDir } from "../spec/types.js";
 import { openDefaultCached } from "../store/index.js";
-import { countKnowledge, getRecentDecisions, upsertKnowledge } from "../store/knowledge.js";
+import {
+	countKnowledge,
+	deleteOrphanKnowledge,
+	getRecentDecisions,
+	upsertKnowledge,
+} from "../store/knowledge.js";
 import { detectProject } from "../store/project.js";
 import type { KnowledgeRow } from "../types.js";
 import type { DirectiveItem } from "./directives.js";
@@ -67,6 +72,7 @@ function syncKnowledgeIndex(
 	const knowledgeDir = join(projectPath, ".alfred", "knowledge");
 	const proj = detectProject(projectPath);
 	let synced = 0;
+	const validFilePaths = new Set<string>();
 
 	// Walk decisions/, patterns/, rules/ subdirectories for JSON files.
 	for (const typeDir of ["decisions", "patterns", "rules"]) {
@@ -83,6 +89,7 @@ function syncKnowledgeIndex(
 				const raw = readFileSync(join(dir, file), "utf-8");
 				const entry = JSON.parse(raw) as { id?: string; title?: string; createdAt?: string };
 				const filePath = `${typeDir}/${file}`;
+				validFilePaths.add(filePath);
 				const subType =
 					typeDir === "decisions" ? "decision" : typeDir === "patterns" ? "pattern" : "rule";
 				const row: KnowledgeRow = {
@@ -113,6 +120,7 @@ function syncKnowledgeIndex(
 		const mdFiles = readdirSync(knowledgeDir).filter((f) => f.endsWith(".md"));
 		for (const file of mdFiles) {
 			try {
+				validFilePaths.add(file);
 				const content = readFileSync(join(knowledgeDir, file), "utf-8");
 				const { frontmatter, body } = parseFrontmatter(content);
 				const row: KnowledgeRow = {
@@ -145,6 +153,16 @@ function syncKnowledgeIndex(
 		}
 	} catch {
 		/* no legacy files */
+	}
+
+	// Clean orphan entries: DB is a derived index; entries without source files are stale.
+	try {
+		const deleted = deleteOrphanKnowledge(store, proj.remote, proj.path, proj.branch, validFilePaths);
+		if (deleted > 0) {
+			notifyUser("cleaned %d orphan knowledge entries from index", deleted);
+		}
+	} catch (err) {
+		notifyUser("warning: orphan knowledge cleanup failed: %s", err);
 	}
 
 	if (synced > 0) {

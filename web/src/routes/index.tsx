@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Brain, CheckCircle2, Circle, CircleCheck, CircleDot, Clock, Zap } from "lucide-react";
+import { Brain, CheckCircle2, CircleCheck, CircleDot, Clock, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -49,7 +49,6 @@ function OverviewPage() {
 	const { data: decisionsData } = useQuery(decisionsQueryOptions(5));
 
 	const tasks = tasksData?.tasks ?? [];
-	const activeSlug = tasksData?.active ?? "";
 
 	return (
 		<div className="space-y-8">
@@ -94,7 +93,6 @@ function OverviewPage() {
 							<TaskCard
 								key={task.slug}
 								task={task}
-								isActive={task.slug === activeSlug}
 								colorIndex={i}
 							/>
 						))}
@@ -146,11 +144,9 @@ function StatCard({
 
 function TaskCard({
 	task,
-	isActive,
 	colorIndex,
 }: {
 	task: TaskDetail;
-	isActive: boolean;
 	colorIndex: number;
 }) {
 	const progress = task.total > 0 ? (task.completed / task.total) * 100 : 0;
@@ -164,10 +160,8 @@ function TaskCard({
 			<Card
 				className={cn(
 					"h-[140px] !gap-0 !py-0 border-stone-200 transition-all hover:shadow-md hover:border-stone-300 dark:border-stone-700 dark:hover:border-stone-600",
-					isActive && "ring-1",
 					isCompleted && "opacity-60",
 				)}
-				style={isActive ? { borderColor: `rgba(${c.r},${c.g},${c.b},0.3)` } : undefined}
 			>
 				<CardContent className="flex-1 flex flex-col p-4 gap-1.5">
 					{/* Header */}
@@ -175,10 +169,8 @@ function TaskCard({
 						<div className="flex items-center gap-2 min-w-0">
 							{isCompleted ? (
 								<CircleCheck className="size-4 shrink-0" style={{ color: "#2d8b7a" }} />
-							) : isActive ? (
-								<CircleDot className="size-4 shrink-0" style={{ color: accentColor }} />
 							) : (
-								<Circle className="size-4 shrink-0 text-muted-foreground/30" />
+								<CircleDot className="size-4 shrink-0" style={{ color: accentColor }} />
 							)}
 							<span className="text-sm font-semibold truncate">{task.slug}</span>
 						</div>

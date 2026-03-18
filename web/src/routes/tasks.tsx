@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
-import { ChevronDown, Circle, CircleCheck, CircleDot } from "lucide-react";
+import { createFileRoute, Link, Outlet, useParams } from "@tanstack/react-router";
+import { ChevronDown, CircleCheck, CircleDot } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -23,50 +23,37 @@ const SHIMMER_COLORS = [
 
 function TasksLayout() {
 	const { data } = useQuery(tasksQueryOptions());
-	const tasks = data?.tasks ?? [];
-	const activeSlug = data?.active ?? "";
+	const allTasks = data?.tasks ?? [];
+	const { slug: selectedSlug } = useParams({ strict: false }) as { slug?: string };
+	const [showCompleted, setShowCompleted] = useState(false);
 
-	const activeTasks = tasks.filter((t) => t.status !== "completed");
-	const completedTasks = tasks.filter((t) => t.status === "completed");
+	const activeTasks = allTasks.filter((t) => t.status !== "completed");
+	const completedTasks = allTasks.filter((t) => t.status === "completed");
+	const tasks = showCompleted ? allTasks : activeTasks;
 
 	return (
 		<div className="flex gap-6">
-			<div className="w-72 shrink-0 space-y-4 overflow-y-auto max-h-[calc(100vh-100px)]">
-				{/* Active Tasks */}
-				{activeTasks.length > 0 && (
-					<div className="space-y-2">
-						<h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-1">
-							Active
-						</h3>
-						{activeTasks.map((task, i) => (
-							<TaskAccordionCard
-								key={task.slug}
-								task={task}
-								isActive={task.slug === activeSlug}
-								colorIndex={i}
-							/>
-						))}
-					</div>
-				)}
+			<div className="w-72 shrink-0 space-y-2 overflow-y-auto max-h-[calc(100vh-100px)] px-1 pt-1">
+				{tasks.map((task, i) => (
+					<TaskAccordionCard
+						key={task.slug}
+						task={task}
+						isSelected={task.slug === selectedSlug}
+						colorIndex={i}
+					/>
+				))}
 
-				{/* Completed Tasks */}
 				{completedTasks.length > 0 && (
-					<div className="space-y-2">
-						<h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-1">
-							Completed
-						</h3>
-						{completedTasks.map((task, i) => (
-							<TaskAccordionCard
-								key={task.slug}
-								task={task}
-								isActive={false}
-								colorIndex={activeTasks.length + i}
-							/>
-						))}
-					</div>
+					<button
+						type="button"
+						onClick={() => setShowCompleted(!showCompleted)}
+						className="w-full text-[10px] text-muted-foreground hover:text-foreground transition-colors py-1"
+					>
+						{showCompleted ? "Hide completed" : `Show completed (${completedTasks.length})`}
+					</button>
 				)}
 
-				{tasks.length === 0 && <p className="text-sm text-muted-foreground">No tasks found.</p>}
+				{tasks.length === 0 && allTasks.length === 0 && <p className="text-sm text-muted-foreground">No tasks found.</p>}
 			</div>
 			<div className="min-w-0 flex-1">
 				<Outlet />
@@ -77,11 +64,11 @@ function TasksLayout() {
 
 function TaskAccordionCard({
 	task,
-	isActive,
+	isSelected,
 	colorIndex,
 }: {
 	task: TaskDetail;
-	isActive: boolean;
+	isSelected: boolean;
 	colorIndex: number;
 }) {
 	const [expanded, setExpanded] = useState(false);
@@ -96,10 +83,10 @@ function TaskAccordionCard({
 		<div
 			className={cn(
 				"rounded-xl border bg-card text-card-foreground shadow-sm transition-all",
-				isActive && "ring-1",
+				isSelected && "ring-1",
 				isCompleted && "opacity-60",
 			)}
-			style={isActive ? { borderColor: `rgba(${c.r},${c.g},${c.b},0.35)` } : undefined}
+			style={isSelected ? { borderColor: `rgba(${c.r},${c.g},${c.b},0.35)` } : undefined}
 		>
 			{/* Card header — always visible, clickable to navigate */}
 			<Link to="/tasks/$slug" params={{ slug: task.slug }} className="block p-3 pb-2">
@@ -107,10 +94,8 @@ function TaskAccordionCard({
 					<div className="flex items-center gap-2 min-w-0">
 						{isCompleted ? (
 							<CircleCheck className="size-3.5 shrink-0" style={{ color: "#2d8b7a" }} />
-						) : isActive ? (
-							<CircleDot className="size-3.5 shrink-0" style={{ color: accentColor }} />
 						) : (
-							<Circle className="size-3.5 shrink-0 text-muted-foreground/30" />
+							<CircleDot className="size-3.5 shrink-0" style={{ color: accentColor }} />
 						)}
 						<span className="text-sm font-medium truncate">{task.slug}</span>
 					</div>

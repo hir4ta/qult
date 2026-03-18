@@ -273,6 +273,35 @@ export function getRecentDecisions(
 	return rows.map((r) => ({ title: r.title, content: r.content, createdAt: r.created_at }));
 }
 
+export function deleteOrphanKnowledge(
+	store: Store,
+	projectRemote: string,
+	projectPath: string,
+	branch: string,
+	validFilePaths: Set<string>,
+): number {
+	const rows = store.db
+		.prepare(
+			"SELECT id, file_path FROM knowledge_index WHERE project_remote = ? AND project_path = ? AND branch = ?",
+		)
+		.all(projectRemote, projectPath, branch) as Array<{ id: number; file_path: string }>;
+
+	let deleted = 0;
+	const delEmbed = store.db.prepare("DELETE FROM embeddings WHERE source = 'knowledge' AND source_id = ?");
+	const delKnowledge = store.db.prepare("DELETE FROM knowledge_index WHERE id = ?");
+	const txn = store.db.transaction(() => {
+		for (const row of rows) {
+			if (!validFilePaths.has(row.file_path)) {
+				delEmbed.run(row.id);
+				delKnowledge.run(row.id);
+				deleted++;
+			}
+		}
+	});
+	txn();
+	return deleted;
+}
+
 export function countKnowledge(store: Store, projectRemote: string, projectPath: string): number {
 	const row = store.db
 		.prepare(

@@ -80,7 +80,7 @@ function TaskDetailPage() {
 	return (
 		<div className="flex gap-6 h-[calc(100vh-120px)]">
 			{/* Left column — task metadata (sticky) */}
-			<div className="w-[280px] shrink-0 space-y-4 overflow-y-auto">
+			<div className="w-[280px] shrink-0 space-y-4 overflow-y-auto pt-1">
 				<TaskInfoCard task={task} validationData={validationData ?? undefined} />
 
 				{/* Next Steps (if active) */}
@@ -148,7 +148,7 @@ function TaskDetailPage() {
 			</div>
 
 			{/* Right column — spec sections */}
-			<div className="flex-1 min-w-0 overflow-y-auto space-y-3 pb-8">
+			<div className="flex-1 min-w-0 overflow-y-auto space-y-3 pt-1 pb-8">
 				{specs.map((spec, i) => {
 					const content = specContents[i]?.data?.content ?? "";
 					if (!content) return null;

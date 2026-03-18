@@ -52,6 +52,58 @@ export function createApp(
 	const app = new Hono();
 	const proj = detectProject(projectPath);
 
+	function enrichTask(
+		task: { slug: string; status?: string; started_at?: string; completed_at?: string; size?: string; spec_type?: string; review_status?: string },
+		projPath: string,
+		projectName: string,
+	): Record<string, unknown> {
+		const detail: Record<string, unknown> = { ...task, project_name: projectName };
+		const sd = new SpecDir(projPath, task.slug);
+		try {
+			const session = sd.readFile("session.md");
+			const lines = session.split("\n");
+
+			// Extract "Currently Working On".
+			let inFocus = false;
+			for (const line of lines) {
+				if (line.startsWith("## Currently Working On")) { inFocus = true; continue; }
+				if (inFocus) {
+					if (line.startsWith("## ")) break;
+					const trimmed = line.trim();
+					if (trimmed && !trimmed.startsWith("<!--")) { detail.focus = trimmed; break; }
+				}
+			}
+
+			// Parse Next Steps checkboxes.
+			let inNextSteps = false;
+			const stepLines: string[] = [];
+			for (const line of lines) {
+				if (line.startsWith("## Next Steps")) { inNextSteps = true; continue; }
+				if (inNextSteps) {
+					if (line.startsWith("## ")) break;
+					if (line.match(/^- \[[ x]\] /)) stepLines.push(line);
+				}
+			}
+
+			if (stepLines.length > 0) {
+				const nextSteps = stepLines.map((s) => ({
+					text: s.replace(/^- \[[ x]\] /, ""),
+					done: s.startsWith("- [x]"),
+				}));
+				detail.next_steps = nextSteps;
+				detail.completed = nextSteps.filter((s) => s.done).length;
+				detail.total = nextSteps.length;
+			} else {
+				detail.completed = 0;
+				detail.total = 0;
+			}
+		} catch {
+			detail.completed = 0;
+			detail.total = 0;
+		}
+		return detail;
+	}
+
 	// --- API Routes ---
 
 	app.get("/api/version", (c) => c.json({ version }));
@@ -60,69 +112,29 @@ export function createApp(
 	app.get("/api/tasks", (c) => {
 		try {
 			const state = readActiveState(projectPath);
-			const enriched = state.tasks.map((task) => {
-				const detail: Record<string, unknown> = {
-					...task,
-					project_name: proj.name,
-				};
+			const enriched = state.tasks.map((task) => enrichTask(task, projectPath, proj.name));
 
-				// Enrich from session.md.
-				const sd = new SpecDir(projectPath, task.slug);
-				try {
-					const session = sd.readFile("session.md");
+			// Discover completed specs: directories in .alfred/specs/ not in _active.md.
+			const specsDir = join(projectPath, ".alfred", "specs");
+			const activeSlugs = new Set(state.tasks.map((t) => t.slug));
+			let archived: Record<string, unknown>[] = [];
+			try {
+				const dirs = readdirSync(specsDir).filter((d) => {
+					if (d.startsWith("_") || !VALID_SLUG.test(d) || activeSlugs.has(d)) return false;
+					try { return statSync(join(specsDir, d)).isDirectory(); } catch { return false; }
+				});
+				archived = dirs.map((slug) =>
+					enrichTask(
+						{ slug, status: "completed", started_at: "" },
+						projectPath,
+						proj.name,
+					),
+				);
+			} catch {
+				/* no specs dir */
+			}
 
-					// Extract "Currently Working On" — first non-empty, non-heading line after the heading.
-					const lines = session.split("\n");
-					let inFocus = false;
-					for (const line of lines) {
-						if (line.startsWith("## Currently Working On")) {
-							inFocus = true;
-							continue;
-						}
-						if (inFocus) {
-							if (line.startsWith("## ")) break;
-							const trimmed = line.trim();
-							if (trimmed && !trimmed.startsWith("<!--")) {
-								detail.focus = trimmed;
-								break;
-							}
-						}
-					}
-
-					// Parse Next Steps checkboxes — only from ## Next Steps section.
-					let inNextSteps = false;
-					const stepLines: string[] = [];
-					for (const line of lines) {
-						if (line.startsWith("## Next Steps")) {
-							inNextSteps = true;
-							continue;
-						}
-						if (inNextSteps) {
-							if (line.startsWith("## ")) break;
-							if (line.match(/^- \[[ x]\] /)) stepLines.push(line);
-						}
-					}
-
-					if (stepLines.length > 0) {
-						const nextSteps = stepLines.map((s) => ({
-							text: s.replace(/^- \[[ x]\] /, ""),
-							done: s.startsWith("- [x]"),
-						}));
-						detail.next_steps = nextSteps;
-						detail.completed = nextSteps.filter((s) => s.done).length;
-						detail.total = nextSteps.length;
-					} else {
-						detail.completed = 0;
-						detail.total = 0;
-					}
-				} catch {
-					detail.completed = 0;
-					detail.total = 0;
-				}
-
-				return detail;
-			});
-			return c.json({ active: state.primary, tasks: enriched, project_name: proj.name });
+			return c.json({ active: state.primary, tasks: [...enriched, ...archived], project_name: proj.name });
 		} catch {
 			return c.json({ active: "", tasks: [], project_name: proj.name });
 		}
@@ -202,7 +214,7 @@ export function createApp(
       SELECT id, file_path, content_hash, title, content, sub_type,
              project_remote, project_path, project_name, branch,
              created_at, updated_at, hit_count, last_accessed, enabled
-      FROM knowledge_index ORDER BY updated_at DESC LIMIT ?
+      FROM knowledge_index WHERE enabled = 1 ORDER BY updated_at DESC LIMIT ?
     `)
 			.all(limit) as Array<Record<string, unknown>>;
 		const entries = rows.map((r: Record<string, unknown>) => ({
