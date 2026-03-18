@@ -22,7 +22,7 @@ alfred fixes all three.
 
 **Specs that survive.** Requirements, design, decisions, session state — structured markdown files that persist across compacts, sessions, and even project restarts. Your context is never lost.
 
-**Specs that adapt.** Small bug? 3 files. Medium feature? 5. Large system? All 7. alfred auto-detects the right scope — or you can pick a bugfix template with surgical precision (reproduction steps, root cause, fix strategy).
+**Specs that adapt.** Small bug? 3 files. Medium feature? 5. Large system? 6. alfred auto-detects the right scope — or you can pick a bugfix template with surgical precision (reproduction steps, root cause, fix strategy).
 
 **Memory that compounds.** Every decision, every bug fix, every "we tried X and it didn't work" gets stored as structured JSON files in `.alfred/knowledge/` — three types only: **decisions** (one-time choices with reasoning and rejected alternatives), **patterns** (repeatable practices with conditions and expected outcomes), and **rules** (enforceable standards with priority and rationale). Git-friendly, human-readable, team-shareable. A SQLite search index provides semantic search across all knowledge. Contradictions are detected automatically. Next time you hit a similar problem, alfred surfaces the relevant experience — before you even ask.
 
@@ -36,7 +36,9 @@ alfred fixes all three.
 
 **Proactive skill suggestions.** alfred doesn't wait to be asked. It detects what you're doing — researching, designing, implementing, fixing bugs — and suggests the right skill at the right time. Explored code for a while? "Try `/alfred:survey`." Got research findings? "Save them with `ledger`." Three tasks piling up? "Group them with `roster`."
 
-**Approval gates that can't be bypassed.** Specs go through a review cycle before implementation. Comment on any line in the browser dashboard, approve or request changes — like a GitHub PR review, but for your specs. The gate verifies both the review status *and* the existence of a signed review file, so manually editing the status won't get you past it. **Hard enforcement**: PreToolUse hooks physically block Edit/Write operations on unapproved M/L/XL specs. Stop hooks prevent Claude from finishing until all tasks are checked off, self-reviews are done, and the spec is closed.
+**Approval gates that can't be bypassed.** Specs go through a review cycle before implementation. Comment on any line in the browser dashboard, approve or request changes — like a GitHub PR review, but for your specs. The gate verifies both the review status *and* the existence of a signed review file, so manually editing the status won't get you past it. **Three-layer enforcement**: (1) Review gate blocks Edit/Write until spec self-review is completed, (2) Approval gate blocks Edit/Write on unapproved M/L/XL specs, (3) Intent guard blocks implementation without a spec. Stop hook reminds about incomplete items but doesn't block (except for review gates).
+
+**Real-time knowledge extraction.** Decisions saved via `ledger` are immediately searchable. Design patterns extracted from spec components on every update. Review agent findings (critical/high severity) auto-saved as anti-patterns. Knowledge accumulates continuously, not just at task completion.
 
 **Project context that sticks.** Steering documents (product purpose, code structure, tech stack) are auto-generated from your project and injected into every spec. Your AI always knows your architecture.
 
@@ -121,7 +123,7 @@ Run `alfred doctor` to verify both are in sync.
 
 | Tool | Purpose |
 |------|---------|
-| `dossier` | Spec lifecycle — init (with size/type), update, status, switch, complete, delete, history, rollback, review, validate |
+| `dossier` | Spec lifecycle — init (with size/type), update, status, switch, complete, delete, history, rollback, review, validate, gate (review gate management) |
 | `roster` | Epic management — group tasks with dependencies, track progress |
 | `ledger` | Knowledge — search, save (structured JSON: decision/pattern/rule), promote (pattern→rule), reflect, audit-conventions |
 
@@ -135,8 +137,8 @@ Run automatically. You don't touch these.
 | PreCompact | Extracts decisions, saves chapter snapshots, syncs epic progress, detects research patterns |
 | UserPromptSubmit | Semantic search + file context boost + **skill nudge** + **spec approval gate** (blocks implement intent on unapproved M/L/XL specs) |
 | PostToolUse | Detects Bash errors + searches memory. After commits: spec drift detection + auto-save decisions. Edit/Write: auto-check Next Steps progress |
-| **PreToolUse** | **Hard enforcement**: blocks Edit/Write when active M/L/XL spec is not approved. `.alfred/` edits and Read/Grep always allowed |
-| **Stop** | **Quality gate**: blocks Claude from stopping until all Next Steps are checked, Wave self-reviews are done, and `dossier complete` is called |
+| **PreToolUse** | **Three-layer enforcement**: (1) review-gate blocks until spec/wave review done, (2) intent guard blocks implementation without a spec, (3) approval gate blocks unapproved M/L/XL. `.alfred/` edits always allowed |
+| **Stop** | Review gate → block. Other incomplete items → context reminder (no block) |
 
 ## Browser dashboard
 
@@ -208,7 +210,7 @@ Not every task needs 7 spec files.
 |------|----------------|------|
 | **S** (small) | 3: requirements, tasks, session | Bug fix, config change, small tweak |
 | **M** (medium) | 5: + design, test-specs | New endpoint, refactor, moderate feature |
-| **L/XL** (large) | 7: + decisions, research | Architecture change, new subsystem |
+| **L/XL** (large) | 6: + research | Architecture change, new subsystem. Decisions saved via `ledger` directly |
 | **D** (delta) | 2: delta.md (with CHG-N IDs + Before/After), session | Brownfield changes to existing code |
 | **Bugfix** | 3-4: bugfix.md, tasks, session (+ test-specs) | Surgical bug fix with reproduction steps |
 
@@ -256,8 +258,8 @@ Hooks (invisible)
   |-- PreCompact       -> save snapshots, extract decisions, epic progress
   |-- UserPromptSubmit -> vector search + FTS5 + skill nudge + spec approval check
   |-- PostToolUse      -> detect errors, auto-check Next Steps, drift detection
-  |-- PreToolUse       -> BLOCK Edit/Write on unapproved M/L/XL specs
-  |-- Stop             -> BLOCK stop until all tasks done + self-review + complete
+  |-- PreToolUse       -> review-gate + intent guard + approval gate (3-layer enforcement)
+  |-- Stop             -> review-gate block + context reminders (non-blocking)
   |
   v
 Storage
