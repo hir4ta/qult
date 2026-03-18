@@ -32,7 +32,6 @@ These thought patterns signal you are about to violate this skill's rules:
 | design.md | Architecture + data models + API + traceability matrix | — |
 | tasks.md | Wave-based task decomposition + parallel markers | T-N.N |
 | test-specs.md | Gherkin test cases + edge cases + coverage matrix | TS-N.N |
-| decisions.md | ADR format with reversibility analysis | DEC-N |
 | research.md | Investigation + gap analysis + implementation options | — |
 | session.md | Status + next steps + orchestrator state | — |
 
@@ -110,7 +109,7 @@ Spawn 3 agents simultaneously via Agent tool. Each reads research.md and returns
 - **API contracts** (endpoints + request/response + error codes)
 - **Requirements traceability matrix**: Req ID → Component → Task ID → Test ID
 - Migration strategy (if applicable)
-- Tech decisions quick reference (→ decisions.md #DEC-N)
+- Tech decisions quick reference (save via `ledger action=save sub_type=decision`)
 
 **Review** (3 parallel agents):
 - **Agent 1 — Architect**: Sound architecture? Clear interfaces? Missing components?
@@ -154,12 +153,11 @@ Spawn 3 agents simultaneously via Agent tool. Each reads research.md and returns
 
 **Fix**: Apply fixes, rewrite if needed.
 
-### 9. [DECISIONS] Write and review decisions.md
+### 9. [DECISIONS] Save decisions to knowledge
 
-**Write**: Call `dossier` action=update, file=decisions.md with:
-- All decisions in **ADR format** with unique DEC-N IDs:
-  - Status (Proposed/Accepted), Context, Chosen, Alternatives, Rationale
-  - Consequences, **Reversibility** (Low/Medium/High), **Revisit When**
+Save all decisions directly via `ledger action=save sub_type=decision`:
+- title, context, decision, reasoning, alternatives
+- No decisions.md file — decisions go straight to knowledge for cross-task search
 - Include decisions from research.md option selection
 - Unresolved conflicts flagged for user decision
 
@@ -199,8 +197,8 @@ Deliberation: 3 perspectives applied per file (Architect, Devil's Advocate, Rese
 - design.md ✓ (reviewed)
 - tasks.md ✓ (reviewed)
 - test-specs.md ✓ (reviewed)
-- decisions.md ✓ (reviewed)
 - session.md ✓
+- decisions → ledger ✓
 
 Confidence: requirements avg X.X, design avg X.X
 [Items with confidence ≤ 5 and source=assumption listed here]
@@ -236,7 +234,7 @@ If an active spec already exists:
 ## Guardrails
 
 - Do NOT skip per-file review — each file MUST be reviewed by parallel agents before moving to the next
-- Do NOT leave decisions.md empty — record ALL deliberation outcomes
+- Do NOT skip decision recording — save ALL deliberation outcomes via `ledger save sub_type=decision`
 - Do NOT create tasks without success criteria
 - ALWAYS use EARS notation for requirements (WHEN/WHILE/WHERE/IF-THEN/SHALL keywords)
 - ALWAYS assign unique IDs: FR-N, NFR-N, DEC-N, T-N.N, TS-N.N
@@ -252,5 +250,5 @@ If an active spec already exists:
 ## Troubleshooting
 
 - **dossier init fails (spec already exists)**: Use `dossier action=status` to check the existing spec. Either resume it, `dossier action=delete confirm=true` to remove it, or choose a different task-slug.
-- **Agent review divergence (conflicting feedback)**: Prioritize Architect findings for structural issues, Devil's Advocate for scope/risk. Record the conflict in decisions.md and pick the safer option.
+- **Agent review divergence (conflicting feedback)**: Prioritize Architect findings for structural issues, Devil's Advocate for scope/risk. Save the conflict resolution as a decision via `ledger save sub_type=decision` and pick the safer option.
 - **User doesn't approve in dashboard**: The skill stops at Step 12. Re-invoke `/alfred:brief` with the same task-slug to check review status and resume from where it left off.

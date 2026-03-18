@@ -1,3 +1,4 @@
+import { emitAdditionalContext } from "./dispatcher.js";
 import type { HookEvent } from "./dispatcher.js";
 import { isGateActive } from "./review-gate.js";
 import {
@@ -8,15 +9,16 @@ import {
 } from "./spec-guard.js";
 
 /**
- * Stop handler: block Claude from stopping when review gate is active or spec has incomplete items.
+ * Stop handler:
+ * - review-gate active → BLOCK (hard enforcement)
+ * - unchecked Next Steps / self-review / incomplete spec → CONTEXT reminder (no block)
  * DEC-4: stop_hook_active=true → always allow (infinite loop prevention).
  */
 export async function stop(ev: HookEvent): Promise<void> {
 	// DEC-4: Prevent infinite loop — if Stop already triggered once, let Claude stop.
-	// This intentionally overrides both review-gate and Next Steps checks.
 	if (ev.stop_hook_active) return;
 
-	// Review gate check — blocks stop when spec/wave review is pending.
+	// Review gate check — BLOCKS stop when spec/wave review is pending.
 	const gate = isGateActive(ev.cwd);
 	if (gate) {
 		const gateLabel =
@@ -27,34 +29,26 @@ export async function stop(ev: HookEvent): Promise<void> {
 		return;
 	}
 
+	// Everything below is CONTEXT only (no block). User can stop freely.
 	const spec = tryReadActiveSpec(ev.cwd);
-	// No spec or already completed → allow stop.
 	if (!spec || spec.status === "completed") return;
 
-	const issues: string[] = [];
+	const reminders: string[] = [];
 
-	// Unchecked Next Steps.
 	const unchecked = countUncheckedNextSteps(ev.cwd, spec.slug);
 	if (unchecked > 0) {
-		issues.push(`${unchecked} unchecked Next Steps remaining`);
+		reminders.push(`${unchecked} unchecked Next Steps in spec '${spec.slug}'`);
 	}
 
-	// Wave self-review not done.
-	const selfReviewPending = hasUncheckedSelfReview(ev.cwd, spec.slug);
-	if (selfReviewPending) {
-		issues.push(
-			"Wave self-review not completed — run /alfred:inspect or delegate to alfred:code-reviewer",
-		);
+	if (hasUncheckedSelfReview(ev.cwd, spec.slug)) {
+		reminders.push("Self-review not completed");
 	}
 
-	// Spec not completed — only show when all other items are done.
-	if (issues.length === 0) {
-		issues.push("All tasks done. Run `dossier action=complete` to close the spec");
-	}
+	reminders.push("When done, call `dossier action=complete` to close the spec");
 
-	if (issues.length > 0) {
-		blockStop(
-			`Active spec '${spec.slug}' incomplete: ${issues.join("; ")}. Complete all items before stopping.`,
-		);
-	}
+	// Emit as CONTEXT (informational, non-blocking).
+	emitAdditionalContext(
+		"Stop",
+		`[CONTEXT] Spec '${spec.slug}' reminders: ${reminders.join("; ")}`,
+	);
 }

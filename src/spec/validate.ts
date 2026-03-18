@@ -110,7 +110,6 @@ export function validateSpec(
 	const tasksContent = readFile("tasks.md") ?? "";
 	const designContent = readFile("design.md") ?? "";
 	const testSpecsContent = readFile("test-specs.md") ?? "";
-	const decisionsContent = readFile("decisions.md") ?? "";
 	const researchContent = readFile("research.md") ?? "";
 
 	// ---- Delta-specific checks (D only) ----
@@ -343,16 +342,7 @@ export function validateSpec(
 				: { name: "nfr_traceability", status: "warn", message: `NFR not in tasks.md: ${unreferencedNFR.join(", ")}` },
 		);
 
-		// 14. decisions_completeness
-		const decIDs = extractIDs(decisionsContent, ID.DEC);
-		const hasAccepted = /Status:\s*accepted/i.test(decisionsContent);
-		checks.push(
-			decIDs.length > 0 && hasAccepted
-				? { name: "decisions_completeness", status: "pass", message: `${decIDs.length} DEC-N found, at least 1 accepted` }
-				: decIDs.length > 0
-					? { name: "decisions_completeness", status: "warn", message: "DEC-N found but none accepted" }
-					: { name: "decisions_completeness", status: "warn", message: "No DEC-N in decisions.md" },
-		);
+		// 14. (decisions_completeness removed — decisions saved via ledger directly)
 
 		// 15. research_completeness
 		const researchLen = researchContent.replace(/^#.*$/gm, "").replace(/<!--.*?-->/gs, "").trim().length;

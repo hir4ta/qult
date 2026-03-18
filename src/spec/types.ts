@@ -92,7 +92,6 @@ export function filesForSize(size: SpecSize, specType: SpecType): SpecFile[] {
 				"design.md",
 				"tasks.md",
 				"test-specs.md",
-				"decisions.md",
 				"research.md",
 				"session.md",
 			];

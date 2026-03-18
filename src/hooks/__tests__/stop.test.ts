@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HookEvent } from "../dispatcher.js";
+import { writeReviewGate } from "../review-gate.js";
 import { stop } from "../stop.js";
 
 let tmpDir: string;
@@ -53,10 +54,15 @@ function makeEvent(opts?: { stopHookActive?: boolean }): HookEvent {
 function getBlockOutput(): { decision?: string } | null {
 	for (const line of stdoutData) {
 		try {
-			return JSON.parse(line.trim());
+			const parsed = JSON.parse(line.trim());
+			if (parsed.decision) return parsed;
 		} catch {}
 	}
 	return null;
+}
+
+function getContextOutput(): string {
+	return stdoutData.join("");
 }
 
 describe("stop", () => {
@@ -66,47 +72,36 @@ describe("stop", () => {
 		expect(stdoutData.length).toBe(0);
 	});
 
-	it("blocks when unchecked Next Steps remain", async () => {
+	it("does NOT block on unchecked Next Steps (CONTEXT only)", async () => {
 		setupSpec({
 			size: "M",
 			sessionContent: "## Next Steps\n- [x] Done\n- [ ] Todo 1\n- [ ] Todo 2\n",
 		});
 		await stop(makeEvent());
-		const out = getBlockOutput();
-		expect(out?.decision).toBe("block");
+		const block = getBlockOutput();
+		expect(block).toBeNull(); // No block
+		const ctx = getContextOutput();
+		expect(ctx).toContain("unchecked Next Steps");
 	});
 
-	it("blocks when self-review is unchecked (Japanese)", async () => {
+	it("does NOT block on unchecked self-review (CONTEXT only)", async () => {
 		setupSpec({
 			size: "M",
 			sessionContent: "## Next Steps\n- [ ] セルフレビュー\n",
 		});
 		await stop(makeEvent());
-		const out = getBlockOutput();
-		expect(out?.decision).toBe("block");
+		expect(getBlockOutput()).toBeNull();
+		expect(getContextOutput()).toContain("Self-review");
 	});
 
-	it("blocks when self-review is unchecked (English)", async () => {
-		setupSpec({
-			size: "M",
-			sessionContent: "## Next Steps\n- [ ] self-review\n",
-		});
-		await stop(makeEvent());
-		const out = getBlockOutput();
-		expect(out?.decision).toBe("block");
-	});
-
-	it("blocks with dossier complete message when all items checked", async () => {
+	it("emits dossier complete reminder as CONTEXT", async () => {
 		setupSpec({
 			size: "M",
 			sessionContent: "## Next Steps\n- [x] All done\n",
 		});
 		await stop(makeEvent());
-		const out = getBlockOutput();
-		expect(out?.decision).toBe("block");
-		// Should mention dossier complete
-		const reason = stdoutData.join("");
-		expect(reason).toContain("dossier action=complete");
+		expect(getBlockOutput()).toBeNull();
+		expect(getContextOutput()).toContain("dossier action=complete");
 	});
 
 	it("allows stop when no active spec", async () => {
@@ -124,17 +119,15 @@ describe("stop", () => {
 		expect(stdoutData.length).toBe(0);
 	});
 
-	it("blocks with dossier-complete when session.md is missing (fail-open on next-steps)", async () => {
-		// Setup spec without session content — no session.md file
-		const specsDir = join(tmpDir, ".alfred", "specs");
-		mkdirSync(join(specsDir, "test-task"), { recursive: true });
-		const yaml = `primary: test-task\ntasks:\n  - slug: test-task\n    started_at: 2026-01-01T00:00:00Z\n`;
-		writeFileSync(join(specsDir, "_active.md"), yaml);
-		// No session.md written → countUncheckedNextSteps returns 0 (fail-open)
-		// But spec is still active → blocks with dossier complete message
-
+	it("BLOCKS when review-gate is active", async () => {
+		setupSpec({ size: "L", reviewStatus: "approved" });
+		writeReviewGate(tmpDir, {
+			gate: "spec-review",
+			slug: "test-task",
+			reason: "Spec created.",
+		});
 		await stop(makeEvent());
-		const out = getBlockOutput();
-		expect(out?.decision).toBe("block");
+		const block = getBlockOutput();
+		expect(block?.decision).toBe("block");
 	});
 });

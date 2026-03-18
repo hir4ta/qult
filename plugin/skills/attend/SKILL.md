@@ -91,11 +91,9 @@ File generation order: research → requirements → design → tasks → test-s
 - **Review**: Spawn 3 agents → apply fixes → save
 - **Update session.md**: mark test-specs as done
 
-### 1f. decisions.md
-- Write all decisions in **ADR format** (DEC-N IDs)
-- Include Status, Context, Chosen, Alternatives, Rationale, Consequences, **Reversibility**, **Revisit When**
-- **Review**: Spawn 3 agents → apply fixes → save
-- **Update session.md**: mark decisions as done
+### 1f. Decisions → ledger
+- Save decisions directly via `ledger action=save sub_type=decision` (not as a spec file)
+- Include title, context, decision, reasoning, alternatives
 
 ### 1g. session.md
 - Write final session.md with Next Steps derived from **tasks.md T-IDs**
@@ -192,12 +190,9 @@ This is MANDATORY — PreToolUse blocks source Edit/Write until wave-review gate
 3. Stage specific files: `git add <file1> <file2> ...` (never `git add -A`)
 4. **Credential scan**: check `git diff --cached` for potential secrets → BLOCKED if found
 5. Commit: `feat: <task-slug>: <one-line summary>`
-6. **MUST complete the task**: `dossier action=complete task_slug=<task-slug>`
+6. Complete the task: `dossier action=complete task_slug=<task-slug>`
 7. Update state: `phase: done`
 8. Output completion summary
-
-**CRITICAL**: Step 6 is mandatory. Every completed attend run MUST call
-`dossier action=complete` to close the spec. No exceptions.
 
 ## State Persistence
 
@@ -213,8 +208,8 @@ After EVERY phase transition and after EVERY task completion:
 - ALWAYS spawn parallel agents for spec review and code-reviewer for implementation review
 - ALWAYS direct user to `alfred dashboard` for approval (not text-based)
 - ALWAYS update session.md after each individual task completion (not in batch)
-- ALWAYS call `dossier action=complete` at the end — never leave a task open
-- ALWAYS record decisions and trade-offs in decisions.md
+- Call `dossier action=complete` when all tasks are done (user can delay if adding more tasks)
+- ALWAYS record decisions and trade-offs via `ledger action=save sub_type=decision`
 - ALWAYS use EARS notation for requirements (WHEN/WHILE/WHERE/IF-THEN/SHALL keywords)
 - ALWAYS assign unique IDs: FR-N, NFR-N, DEC-N, T-N.N, TS-N.N
 - ALWAYS include traceability matrix in design.md

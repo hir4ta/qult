@@ -16,10 +16,10 @@ After completing each Wave in tasks.md:
 
 ## Spec Completion Rule
 
-After all implementation is done:
-1. MUST call `dossier action=complete` to close the spec
-2. Never leave specs in active state after work is finished
-3. If approval gate blocks completion, submit review via dashboard first
+After all implementation tasks are done:
+1. Call `dossier action=complete` to close the spec
+2. User may delay completion if adding more tasks to the spec
+3. Stop hook will NOT block — completion is a responsibility, not a forced gate
 
 ## Commit Discipline
 

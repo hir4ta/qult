@@ -26,7 +26,6 @@ import { vectorSearchKnowledge } from "../store/vectors.js";
 import type { DecisionEntry, KnowledgeRow, PatternEntry } from "../types.js";
 import { truncate } from "./helpers.js";
 import {
-	extractDecisions,
 	extractPatterns,
 	saveKnowledgeEntries,
 } from "./knowledge-extractor.js";
@@ -249,21 +248,8 @@ function dossierUpdate(projectPath: string, store: Store, params: DossierParams)
 	const result: Record<string, unknown> = { task_slug: taskSlug, file: params.file, mode };
 	const lang = process.env.ALFRED_LANG || "en";
 
-	// FR-1: Immediate decision extraction on decisions.md update.
-	if (file === "decisions.md") {
-		try {
-			const fullContent = sd.readFile("decisions.md");
-			const decisions = extractDecisions(fullContent, taskSlug, lang);
-			if (decisions.length > 0) {
-				const saved = saveKnowledgeEntries(store, projectPath, decisions, "decision");
-				if (saved > 0) result.decisions_extracted = saved;
-			}
-		} catch {
-			/* fail-open */
-		}
-	}
-
-	// FR-2: Immediate pattern extraction on design.md update.
+	// Immediate pattern extraction on design.md update.
+	// (decisions.md removed — decisions saved via ledger directly)
 	if (file === "design.md") {
 		try {
 			const fullContent = sd.readFile("design.md");
@@ -391,21 +377,15 @@ function dossierComplete(projectPath: string, store: Store, params: DossierParam
 		appendAudit(projectPath, { action: "spec.complete", target: taskSlug, user: "mcp" });
 		syncTaskStatus(projectPath, taskSlug, "completed");
 
-		// Auto-save decisions + patterns as permanent knowledge.
-		const lang = process.env.ALFRED_LANG || "en";
+		// Auto-extract patterns from design.md on complete.
+		// (decisions extracted via ledger directly, not from decisions.md)
 		try {
 			const sd2 = new SpecDir(projectPath, taskSlug);
-			try {
-				const decContent = sd2.readFile("decisions.md");
-				const decs = extractDecisions(decContent, taskSlug, lang);
-				saveKnowledgeEntries(store, projectPath, decs, "decision");
-			} catch { /* decisions.md may not exist */ }
-			try {
-				const designContent = sd2.readFile("design.md");
-				const pats = extractPatterns(designContent, taskSlug, lang);
-				saveKnowledgeEntries(store, projectPath, pats, "pattern");
-			} catch { /* design.md may not exist */ }
-		} catch { /* fail-open */ }
+			const lang = process.env.ALFRED_LANG || "en";
+			const designContent = sd2.readFile("design.md");
+			const pats = extractPatterns(designContent, taskSlug, lang);
+			saveKnowledgeEntries(store, projectPath, pats, "pattern");
+		} catch { /* design.md may not exist — fail-open */ }
 
 		const result: Record<string, unknown> = {
 			task_slug: taskSlug,

@@ -72,8 +72,9 @@ describe("filesForSize", () => {
 	it("M feature has 5 files", () => {
 		expect(filesForSize("M", "feature")).toHaveLength(5);
 	});
-	it("L feature has 7 files", () => {
-		expect(filesForSize("L", "feature")).toHaveLength(7);
+	it("L feature has 6 files (decisions.md removed)", () => {
+		expect(filesForSize("L", "feature")).toHaveLength(6);
+		expect(filesForSize("L", "feature")).not.toContain("decisions.md");
 	});
 	it("D has 2 files", () => {
 		expect(filesForSize("D", "delta")).toEqual(["delta.md", "session.md"]);

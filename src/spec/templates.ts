@@ -153,18 +153,6 @@ Then [expected result]
 \`\`\`
 `;
 
-		case "decisions.md":
-			return `# Decisions: ${data.taskSlug}
-
-## DEC-1: [Decision Title]
-
-- Status: proposed
-- Context:
-- Chosen:
-- Rationale:
-- Alternatives:
-`;
-
 		case "research.md":
 			return `# Research: ${data.taskSlug}
 
@@ -321,18 +309,6 @@ Given [前提条件]
 When [操作]
 Then [期待結果]
 \`\`\`
-`;
-
-		case "decisions.md":
-			return `# 意思決定記録: ${data.taskSlug}
-
-## DEC-1: [決定タイトル]
-
-- Status: proposed
-- Context:
-- Chosen:
-- Rationale:
-- Alternatives:
 `;
 
 		case "research.md":
