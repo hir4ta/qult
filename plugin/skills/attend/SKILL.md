@@ -44,7 +44,7 @@ These thought patterns signal you are about to violate this skill's rules:
 4. **If spec exists without Orchestrator State** → ask: "Spec exists from /alfred:brief. Start implementation from Phase 3, or re-run spec review first?"
 5. **If no spec** → ask 1 question: "Confirm scope: {description}. Proceed?"
    - Init spec via `dossier` action=init
-   - If response contains `steering_context`, store it for use across all spec files
+   - If response contains `steering_context`, **read it carefully** — it contains all 3 steering docs (product, structure, tech). Use this as the primary project context for ALL spec files and implementation: architecture decisions, directory layout, tech stack, naming conventions
    - If response contains `steering_hint`, inform the user about `/alfred:init`
 6. Record `initial_commit` = output of `git rev-parse HEAD`
 7. Write initial Orchestrator State to session.md

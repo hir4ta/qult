@@ -135,15 +135,20 @@ async function dossierInit(
 		if (suggestions.length > 0) result.suggested_knowledge = suggestions;
 	}
 
-	// Steering context.
+	// Steering context — inject all 3 steering docs for spec creation context.
 	const steeringDir = join(projectPath, ".alfred", "steering");
-	if (existsSync(join(steeringDir, "product.md"))) {
-		try {
-			const summary = readFileSync(join(steeringDir, "product.md"), "utf-8").slice(0, 500);
-			result.steering_context = summary;
-		} catch {
-			/* ignore */
+	const steeringFiles = ["product.md", "structure.md", "tech.md"];
+	const steeringParts: string[] = [];
+	for (const sf of steeringFiles) {
+		const sfPath = join(steeringDir, sf);
+		if (existsSync(sfPath)) {
+			try {
+				steeringParts.push(readFileSync(sfPath, "utf-8"));
+			} catch { /* ignore */ }
 		}
+	}
+	if (steeringParts.length > 0) {
+		result.steering_context = steeringParts.join("\n\n---\n\n");
 	} else {
 		result.steering_hint =
 			"project steering docs not found — run `/alfred:init` to set up project context";
@@ -288,6 +293,22 @@ function dossierStatus(projectPath: string) {
 	if (task?.completed_at) result.completed_at = task.completed_at;
 
 	result.lang = process.env.ALFRED_LANG || "en";
+
+	// Steering summary for context restoration after compaction.
+	const steeringDir = join(projectPath, ".alfred", "steering");
+	const steeringSummary: string[] = [];
+	for (const sf of ["product.md", "structure.md", "tech.md"]) {
+		const sfPath = join(steeringDir, sf);
+		if (existsSync(sfPath)) {
+			try {
+				// First 300 chars per file for summary.
+				steeringSummary.push(readFileSync(sfPath, "utf-8").slice(0, 300));
+			} catch { /* ignore */ }
+		}
+	}
+	if (steeringSummary.length > 0) {
+		result.steering_summary = steeringSummary.join("\n---\n");
+	}
 
 	// Read all spec file contents.
 	if (sd.exists()) {
