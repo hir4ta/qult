@@ -221,12 +221,13 @@ export function matchTaskDescription(description: string, stdout: string): boole
 		}
 	}
 
-	// Strategy 2: Word matching (same algorithm as autoCheckNextSteps).
+	// Strategy 2: Word matching — stricter than autoCheckNextSteps to avoid false positives.
 	const lowerDesc = description.toLowerCase();
 	const words = lowerDesc.split(/\s+/).filter((w) => w.length > 3);
-	const threshold = words.length >= 3 ? 2 : 1;
+	if (words.length < 2) return false; // too few qualifying words → skip word matching
+	const threshold = Math.max(2, Math.ceil(words.length * 0.4)); // at least 2, or 40% of words
 	const matchCount = words.filter((w) => lowerOut.includes(w)).length;
-	return words.length > 0 && matchCount >= threshold;
+	return matchCount >= threshold;
 }
 
 function autoCheckNextSteps(projectPath: string, stdout: string): void {

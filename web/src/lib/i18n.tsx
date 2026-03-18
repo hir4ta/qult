@@ -94,12 +94,6 @@ const translations = {
 	// Section card
 	"section.approve": { en: "Approve", ja: "承認" },
 	"section.approved": { en: "Approved", ja: "承認済" },
-
-	// Format (relative dates)
-	"format.today": { en: "today", ja: "今日" },
-	"format.yesterday": { en: "yesterday", ja: "昨日" },
-	"format.daysAgo": { en: "d ago", ja: "日前" },
-	"format.weeksAgo": { en: "w ago", ja: "週前" },
 } as const;
 
 export type TranslationKey = keyof typeof translations;

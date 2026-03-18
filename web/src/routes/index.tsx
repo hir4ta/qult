@@ -189,7 +189,7 @@ function TaskCard({
 											{task.size}
 										</Badge>
 									</TooltipTrigger>
-									<TooltipContent>{SIZE_LABEL_KEYS[task.size] ? t(SIZE_LABEL_KEYS[task.size]) : `Size: ${task.size}`}</TooltipContent>
+									<TooltipContent>{SIZE_LABEL_KEYS[task.size] ? t(SIZE_LABEL_KEYS[task.size]) : task.size}</TooltipContent>
 								</Tooltip>
 							)}
 						</div>

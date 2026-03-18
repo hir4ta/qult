@@ -123,9 +123,11 @@ describe("matchTaskDescription", () => {
 			expect(matchTaskDescription(desc, "replaced hardcoded strings in routes")).toBe(true);
 		});
 
-		it("matches with threshold=2 for descriptions with 3+ long words", () => {
-			const desc = "T-1.5: Build verification step";
-			expect(matchTaskDescription(desc, "build verification completed")).toBe(true);
+		it("matches with 40% threshold for longer descriptions", () => {
+			const desc = "T-1.3: Replace hardcoded strings in route files (FR-2)";
+			// 5 qualifying words: "t-1.3:", "replace", "hardcoded", "strings", "route", "files", "(fr-2)"
+			// threshold = max(2, ceil(7*0.4)) = 3
+			expect(matchTaskDescription(desc, "replaced hardcoded strings in routes")).toBe(true);
 		});
 
 		it("does not match unrelated content", () => {
@@ -133,10 +135,11 @@ describe("matchTaskDescription", () => {
 			expect(matchTaskDescription(desc, "git status\nnothing to commit")).toBe(false);
 		});
 
-		it("filters words shorter than 4 chars", () => {
+		it("skips word matching when fewer than 2 qualifying words", () => {
 			const desc = "T-1.1: Add new API for auth";
-			// "Add", "new", "API", "for" are all <= 3 chars → only "auth" qualifies
-			expect(matchTaskDescription(desc, "auth endpoint added")).toBe(true);
+			// "Add", "new", "API", "for" are all <= 3 chars → only "t-1.1:" and "auth" qualify (2 words)
+			// threshold = max(2, ceil(2*0.4)) = 2 → needs both
+			expect(matchTaskDescription(desc, "auth endpoint added")).toBe(false);
 		});
 	});
 
