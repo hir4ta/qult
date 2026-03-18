@@ -18,7 +18,7 @@ export function ensureStateDir(cwd: string): void {
 }
 
 function validateName(name: string): void {
-  if (name.includes('/') || name.includes('\\') || name.includes('..')) {
+  if (!name || name === '.' || name.includes('/') || name.includes('\\') || name.includes('..')) {
     throw new Error(`invalid state file name: ${name}`);
   }
 }

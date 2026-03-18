@@ -1,5 +1,4 @@
-import { ReviewPanel } from "@/components/review/ReviewPanel";
-import { SectionCard, SPEC_FILE_COLORS } from "@/components/section-card";
+import { SectionCard } from "@/components/section-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -14,10 +13,10 @@ import {
 	tasksQueryOptions,
 	validationQueryOptions,
 } from "@/lib/api";
-import type { SpecEntry, TaskDetail, ValidationReport } from "@/lib/types";
+import type { TaskDetail, ValidationReport } from "@/lib/types";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Calendar, CheckCircle2, CircleCheck, CircleDot, MessageSquareText } from "lucide-react";
+import { Calendar, CheckCircle2, CircleCheck, CircleDot } from "lucide-react";
 import { useState } from "react";
 
 export const Route = createFileRoute("/tasks/$slug")({
@@ -39,7 +38,6 @@ function TaskDetailPage() {
 	const { data: specsData } = useQuery(specsQueryOptions(slug));
 	const { data: validationData } = useQuery(validationQueryOptions(slug));
 	const { data: approvalsData } = useQuery(fileApprovalsQueryOptions(slug));
-	const [reviewFile, setReviewFile] = useState<string | null>(null);
 	const [confirmComplete, setConfirmComplete] = useState(false);
 
 	const task = tasksData?.tasks.find((t) => t.slug === slug);
@@ -68,7 +66,8 @@ function TaskDetailPage() {
 		},
 	});
 
-	const isPending = task?.review_status === "pending" || (task?.review_status !== "approved" && !task?.review_status);
+	const needsReview = ["M", "L", "XL"].includes(task?.size ?? "");
+	const isPending = needsReview && task?.review_status !== "approved";
 	const isActive = task?.status !== "completed";
 	const canComplete = isActive && (
 		task?.review_status === "approved" ||
@@ -147,38 +146,25 @@ function TaskDetailPage() {
 
 			{/* Right column — spec sections */}
 			<div className="flex-1 min-w-0 overflow-y-auto space-y-3 pb-8">
-				{reviewFile && isPending ? (
-					<ReviewPanel
-						slug={slug}
-						reviewStatus={task.review_status ?? "pending"}
-						specContent={specContents.find(
-							(_, i) => specs[i]?.file === reviewFile
-						)?.data?.content ?? ""}
-						currentFile={reviewFile}
-					/>
-				) : (
-					<>
-						{specs.map((spec, i) => {
-							const content = specContents[i]?.data?.content ?? "";
-							if (!content) return null;
-							const showApprove = isActive && isPending && spec.file !== "session.md";
-							return (
-								<SectionCard
-									key={spec.file}
-									title={spec.file}
-									content={content}
-									defaultOpen={spec.file === "session.md"}
-									approved={showApprove ? approvals[spec.file] === true : undefined}
-									onApprove={showApprove ? (file, approved) => approveMutation.mutate({ file, approved }) : undefined}
-								/>
-							);
-						})}
-						{specs.length === 0 && (
-							<div className="flex h-40 items-center justify-center rounded-lg border border-dashed">
-								<p className="text-sm text-muted-foreground">No spec files found.</p>
-							</div>
-						)}
-					</>
+				{specs.map((spec, i) => {
+					const content = specContents[i]?.data?.content ?? "";
+					if (!content) return null;
+					const showApprove = isActive && isPending && spec.file !== "session.md";
+					return (
+						<SectionCard
+							key={spec.file}
+							title={spec.file}
+							content={content}
+							defaultOpen={spec.file === "session.md"}
+							approved={showApprove ? approvals[spec.file] === true : undefined}
+							onApprove={showApprove ? (file, approved) => approveMutation.mutate({ file, approved }) : undefined}
+						/>
+					);
+				})}
+				{specs.length === 0 && (
+					<div className="flex h-40 items-center justify-center rounded-lg border border-dashed">
+						<p className="text-sm text-muted-foreground">No spec files found.</p>
+					</div>
 				)}
 			</div>
 		</div>

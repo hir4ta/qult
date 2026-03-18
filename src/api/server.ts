@@ -424,6 +424,9 @@ export function createApp(
     try { body = await c.req.json(); } catch {
       return c.json({ error: 'invalid JSON body' }, 400);
     }
+    if (typeof body.file !== 'string' || typeof body.approved !== 'boolean') {
+      return c.json({ error: 'file (string) and approved (boolean) are required' }, 400);
+    }
 
     const VALID_SPEC_FILES = new Set([
       'requirements.md', 'design.md', 'tasks.md', 'test-specs.md',

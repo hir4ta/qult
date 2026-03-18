@@ -5,7 +5,7 @@ import type {
 	DecisionsResponse,
 	EpicsResponse,
 	KnowledgeResponse,
-	KnowledgeSearchResponse,
+
 	KnowledgeStats,
 	MemoryHealthStats,
 	Review,
@@ -73,16 +73,6 @@ export const knowledgeStatsQueryOptions = () =>
 		staleTime: REF_STALE,
 	});
 
-export const knowledgeSearchQueryOptions = (query: string, limit = 10) =>
-	queryOptions({
-		queryKey: ["knowledge-search", query],
-		queryFn: () =>
-			fetchJSON<KnowledgeSearchResponse>(
-				`/api/knowledge/search?q=${encodeURIComponent(query)}&limit=${limit}`,
-			),
-		staleTime: REF_STALE,
-		enabled: query.length > 0,
-	});
 
 export const activityQueryOptions = (limit = 50, filter?: string) =>
 	queryOptions({
