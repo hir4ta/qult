@@ -367,41 +367,9 @@ function saveKnowledgeOnCommit(projectPath: string): void {
 	const proj = detectProject(projectPath);
 	const ts = new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
 
-	// 1. Save decisions from decisions.md (if exists).
-	try {
-		const decisions = sd.readFile("decisions.md");
-		const decSections = decisions.split(/\n## DEC-\d+/);
-		for (let i = 1; i < decSections.length; i++) {
-			const section = decSections[i]!;
-			const titleMatch = section.match(/^:\s*(.+)/);
-			const title = titleMatch ? titleMatch[1]!.trim() : `Decision ${i}`;
-			const statusMatch = section.match(/(?:- |\*\*)?Status:?\*?\*?\s*(\w+)/i);
-			if (statusMatch && statusMatch[1]!.toLowerCase() === "accepted") {
-				const row: KnowledgeRow = {
-					id: 0,
-					filePath: `decisions/spec/${slug}/dec-${i}`,
-					contentHash: "",
-					title,
-					content: section.slice(0, 1000),
-					subType: "decision",
-					projectRemote: proj.remote,
-					projectPath: proj.path,
-					projectName: proj.name,
-					branch: proj.branch,
-					createdAt: "",
-					updatedAt: "",
-					hitCount: 0,
-					lastAccessed: "",
-					enabled: true,
-				};
-				upsertKnowledge(store, row);
-			}
-		}
-	} catch {
-		/* decisions.md may not exist */
-	}
+	// decisions.md extraction removed — decisions saved via ledger directly.
 
-	// 2. Save session snapshot (like PreCompact chapter memory).
+	// Save session snapshot (like PreCompact chapter memory).
 	try {
 		const session = sd.readFile("session.md");
 		const row: KnowledgeRow = {

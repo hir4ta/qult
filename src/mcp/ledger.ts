@@ -210,7 +210,7 @@ function atomicWriteSync(filePath: string, data: string): void {
 
 /**
  * Write knowledge entry JSON to .alfred/knowledge/{type}/{id}.json.
- * Exported for use by dossier saveDecisionsAsKnowledge.
+ * Exported for use by knowledge-extractor.ts.
  */
 export function writeKnowledgeFile(
 	projectPath: string,

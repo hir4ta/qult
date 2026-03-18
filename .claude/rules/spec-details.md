@@ -23,9 +23,9 @@ paths:
 - Backward compat: legacy _active.md without size/spec_type defaults to L/feature; EffectiveSize()/EffectiveSpecType() helpers
 
 ## Spec Files
-- Spec v2: 7 files (requirements, design, tasks, test-specs, decisions, research, session); original 4 = CoreFiles, all 7 = AllFiles; bugfix.md = alternative primary file for bugfix type
+- Spec v3: 6 files (requirements, design, tasks, test-specs, research, session); decisions.md removed — decisions saved via `ledger save sub_type=decision` directly
 - Spec cross-references: `@spec:task-slug/file.md` format parsed by `spec.ParseRefs()`, resolved against filesystem
-- Spec complete auto-saves: decisions.md entries → permanent knowledge (sub_type=decision)
+- Spec complete auto-extracts: design.md patterns → permanent knowledge (sub_type=pattern)
 - Wave: Closing required in all tasks.md: self-review, CLAUDE.md update, test verification, knowledge save
 
 ## Templates
@@ -48,7 +48,7 @@ paths:
 - Grounding levels: verified (code/test proven) > reviewed (design-reviewed/user-confirmed) > inferred (reasoned from evidence) > speculative (hypothesis)
 
 ## Validation (dossier validate)
-- 22 checks: required_sections, min_fr_count (S:1+, M:3+, L:5+, XL:8+; bugfix uses substantive content check), traceability (fr_to_task, task_to_fr), confidence_annotations, closing_wave, design_fr_references, testspec_fr_references, nfr_traceability (L/XL only), gherkin_syntax, orphan_tests, orphan_tasks, content_placeholder, decisions_completeness (L/XL only), research_completeness (L/XL only), confidence_coverage (XL only), xl_wave_count (>=4, XL only), xl_nfr_required (XL only), delta_sections_present (D only), grounding_coverage (opt-in: L/XL or D, >30% speculative fails), delta_change_ids (D only), delta_before_after (D only)
+- 21 checks: required_sections, min_fr_count (S:1+, M:3+, L:5+, XL:8+; bugfix uses substantive content check), traceability (fr_to_task, task_to_fr), confidence_annotations, closing_wave, design_fr_references, testspec_fr_references, nfr_traceability (L/XL only), gherkin_syntax, orphan_tests, orphan_tasks, content_placeholder, research_completeness (L/XL only), confidence_coverage (XL only), xl_wave_count (>=4, XL only), xl_nfr_required (XL only), delta_sections_present (D only), grounding_coverage (opt-in: L/XL or D, >30% speculative fails), delta_change_ids (D only), delta_before_after (D only). decisions_completeness removed (decisions saved via ledger directly)
 
 ## Approval Gate
 - complete action: M/L/XL specs require review_status="approved" AND approved review JSON file in reviews/ directory (S/D exempt)

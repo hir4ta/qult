@@ -23,13 +23,12 @@ import type { Store } from "../store/index.js";
 import { getKnowledgeByIDs, upsertKnowledge } from "../store/knowledge.js";
 import { detectProject } from "../store/project.js";
 import { vectorSearchKnowledge } from "../store/vectors.js";
-import type { DecisionEntry, KnowledgeRow, PatternEntry } from "../types.js";
+// types used by knowledge-extractor.ts (no longer directly in dossier.ts)
 import { truncate } from "./helpers.js";
 import {
 	extractPatterns,
 	saveKnowledgeEntries,
 } from "./knowledge-extractor.js";
-import { writeKnowledgeFile } from "./ledger.js";
 
 interface DossierParams {
 	action: string;
