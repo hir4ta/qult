@@ -56,7 +56,7 @@ function ingestProjectClaudeMD(store: ReturnType<typeof openDefaultCached>, proj
   const proj = detectProject(projectPath);
   for (const sec of sections) {
     const row: KnowledgeRow = {
-      id: 0, filePath: 'CLAUDE.md', contentHash: '', title: sec.path,
+      id: 0, filePath: `CLAUDE.md#${sec.path}`, contentHash: '', title: sec.path,
       content: sec.content, subType: 'project',
       projectRemote: proj.remote, projectPath: proj.path,
       projectName: proj.name, branch: proj.branch,

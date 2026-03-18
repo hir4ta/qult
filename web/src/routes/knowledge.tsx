@@ -25,7 +25,7 @@ import { SUB_TYPE_COLORS } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Eye, EyeOff, Search } from "lucide-react";
+import { BookOpen, Eye, EyeOff, Flame, Gavel, Lightbulb, Search, Shield } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export const Route = createFileRoute("/knowledge")({
@@ -160,6 +160,22 @@ function StatDot({ count, color }: { count: number; color: string }) {
 	);
 }
 
+const SUB_TYPE_ICONS: Record<string, React.ReactNode> = {
+	rule: <Shield className="size-3.5" />,
+	decision: <Gavel className="size-3.5" />,
+	pattern: <Lightbulb className="size-3.5" />,
+	general: <BookOpen className="size-3.5" />,
+	project: <Flame className="size-3.5" />,
+};
+
+const SUB_TYPE_LABELS: Record<string, string> = {
+	rule: "Rule",
+	decision: "Decision",
+	pattern: "Pattern",
+	general: "General",
+	project: "Project",
+};
+
 function KnowledgeCard({
 	entry,
 	onSelect,
@@ -170,6 +186,7 @@ function KnowledgeCard({
 	const { title, source } = formatLabel(entry.label);
 	const color = SUB_TYPE_COLORS[entry.sub_type] ?? SUB_TYPE_COLORS.general!;
 	const toggleMutation = useToggleEnabledMutation();
+	const icon = SUB_TYPE_ICONS[entry.sub_type] ?? SUB_TYPE_ICONS.general;
 
 	return (
 		<Card
@@ -179,21 +196,25 @@ function KnowledgeCard({
 			)}
 			onClick={onSelect}
 		>
-			<CardContent className="p-4 space-y-2">
-				<div className="flex items-start justify-between gap-2">
-					<Badge
-						variant="outline"
-						className="shrink-0 rounded-full text-[10px] px-1.5 py-0"
-						style={{ borderColor: `${color}50`, color }}
-					>
-						{entry.sub_type}
-					</Badge>
+			<CardContent className="p-4 space-y-2.5">
+				<div className="flex items-center justify-between gap-2">
+					<div className="flex items-center gap-2">
+						<div
+							className="flex size-6 items-center justify-center rounded-md"
+							style={{ backgroundColor: `${color}18`, color }}
+						>
+							{icon}
+						</div>
+						<span className="text-[11px] font-medium" style={{ color }}>
+							{SUB_TYPE_LABELS[entry.sub_type] ?? entry.sub_type}
+						</span>
+					</div>
 					<div className="flex items-center gap-1.5">
-						{entry.score ? (
+						{entry.hit_count > 0 && (
 							<span className="text-[10px] tabular-nums text-muted-foreground">
-								{entry.score.toFixed(2)}
+								{entry.hit_count} hits
 							</span>
-						) : null}
+						)}
 						<Tooltip>
 							<TooltipTrigger asChild>
 								<button
@@ -215,16 +236,10 @@ function KnowledgeCard({
 				<p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
 					{contentPreview(entry.content, 100)}
 				</p>
-				<div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-1">
-					{source && <span className="truncate max-w-[120px]">{source}</span>}
+				<div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+					{source && <span className="truncate max-w-[140px]">{source}</span>}
 					{source && <span>·</span>}
 					<span>{formatDate(entry.saved_at ?? "")}</span>
-					{entry.hit_count > 0 && (
-						<>
-							<span>·</span>
-							<span>{entry.hit_count} hits</span>
-						</>
-					)}
 				</div>
 			</CardContent>
 		</Card>
@@ -242,6 +257,7 @@ function KnowledgeDialog({
 
 	const { title, source } = formatLabel(entry.label);
 	const color = SUB_TYPE_COLORS[entry.sub_type] ?? SUB_TYPE_COLORS.general!;
+	const icon = SUB_TYPE_ICONS[entry.sub_type] ?? SUB_TYPE_ICONS.general;
 	const fields = parseDecisionFields(entry.content);
 	const toggleMutation = useToggleEnabledMutation();
 
@@ -249,15 +265,21 @@ function KnowledgeDialog({
 		<Dialog open={!!entry} onOpenChange={(open) => !open && onClose()}>
 			<DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
 				<DialogHeader>
-					<div className="flex items-center gap-2 mb-1">
-						<Badge
-							variant="outline"
-							className="rounded-full text-xs"
-							style={{ borderColor: `${color}50`, color }}
+					<div className="flex items-center gap-3 mb-2">
+						<div
+							className="flex size-8 items-center justify-center rounded-lg"
+							style={{ backgroundColor: `${color}18`, color }}
 						>
-							{entry.sub_type}
-						</Badge>
-						{source && <span className="text-xs text-muted-foreground">{source}</span>}
+							{icon}
+						</div>
+						<div className="flex items-center gap-2">
+							<span className="text-xs font-semibold" style={{ color }}>
+								{SUB_TYPE_LABELS[entry.sub_type] ?? entry.sub_type}
+							</span>
+							{source && (
+								<span className="text-xs text-muted-foreground">· {source}</span>
+							)}
+						</div>
 					</div>
 					<DialogTitle
 						className="text-lg leading-snug"
@@ -266,10 +288,19 @@ function KnowledgeDialog({
 						{title}
 					</DialogTitle>
 					<DialogDescription asChild>
-						<div className="flex items-center gap-4 text-xs text-muted-foreground">
+						<div className="flex items-center gap-4 text-xs text-muted-foreground mt-1">
 							<span>Saved {formatDate(entry.saved_at ?? "")}</span>
 							<span>{entry.hit_count} hits</span>
-							<span>{entry.enabled ? "Active" : "Disabled"}</span>
+							<Badge
+								variant="outline"
+								className="text-[10px] px-1.5 py-0 rounded-full"
+								style={{
+									borderColor: entry.enabled ? "rgba(45,139,122,0.3)" : "rgba(192,57,43,0.3)",
+									color: entry.enabled ? "#2d8b7a" : "#c0392b",
+								}}
+							>
+								{entry.enabled ? "Active" : "Disabled"}
+							</Badge>
 							<Button
 								size="sm"
 								variant="ghost"
@@ -294,7 +325,7 @@ function KnowledgeDialog({
 
 				<ScrollArea className="flex-1 -mx-6 px-6">
 					{fields.length > 0 ? (
-						<div className="space-y-4 py-2">
+						<div className="space-y-4 py-3">
 							{fields.map((f) => (
 								<div key={f.key}>
 									<p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
@@ -305,7 +336,7 @@ function KnowledgeDialog({
 							))}
 						</div>
 					) : (
-						<pre className="whitespace-pre-wrap break-words text-sm leading-relaxed font-sans py-2">
+						<pre className="whitespace-pre-wrap break-words text-sm leading-relaxed font-sans py-3">
 							{cleanContent(entry.content)}
 						</pre>
 					)}
