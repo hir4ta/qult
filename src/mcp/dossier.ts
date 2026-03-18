@@ -23,7 +23,7 @@ import type { Store } from "../store/index.js";
 import { getKnowledgeByIDs, upsertKnowledge } from "../store/knowledge.js";
 import { detectProject } from "../store/project.js";
 import { vectorSearchKnowledge } from "../store/vectors.js";
-import type { DecisionEntry, KnowledgeRow } from "../types.js";
+import type { DecisionEntry, KnowledgeRow, PatternEntry } from "../types.js";
 import { truncate } from "./helpers.js";
 import { writeKnowledgeFile } from "./ledger.js";
 
@@ -358,12 +358,23 @@ function dossierComplete(projectPath: string, store: Store, params: DossierParam
 		// Auto-save decisions.md entries as permanent knowledge.
 		saveDecisionsAsKnowledge(store, projectPath, taskSlug);
 
+		// Auto-extract patterns from design.md components.
+		const patternCount = savePatternsAsKnowledge(store, projectPath, taskSlug);
+
 		const result: Record<string, unknown> = {
 			task_slug: taskSlug,
 			completed: true,
 			new_primary: newPrimary,
 		};
 		if (closingWarning) result.closing_wave_warning = closingWarning;
+		if (patternCount > 0) result.patterns_extracted = patternCount;
+
+		// Prompt Claude to save additional patterns/rules via ledger.
+		result.knowledge_prompt =
+			"Task completed. Save reusable learnings via `ledger action=save sub_type=pattern`. " +
+			"Consider: implementation approaches that worked, error patterns encountered, testing strategies, " +
+			"architectural decisions that should become rules.";
+
 		return jsonResult(result);
 	} catch (err) {
 		return errorResult(`${err}`);
@@ -672,6 +683,75 @@ function checkClosingWave(tasksContent: string): string | undefined {
 	}
 
 	return undefined;
+}
+
+/**
+ * Extract patterns from design.md Components section.
+ * Each component becomes a pattern entry capturing the architectural approach.
+ */
+function savePatternsAsKnowledge(store: Store, projectPath: string, taskSlug: string): number {
+	let count = 0;
+	try {
+		const sd = new SpecDir(projectPath, taskSlug);
+		const design = sd.readFile("design.md");
+		const proj = detectProject(projectPath);
+		const lang = process.env.ALFRED_LANG || "en";
+		const now = new Date().toISOString();
+
+		// Extract Components section.
+		const compIdx = design.indexOf("## Components");
+		if (compIdx === -1) return 0;
+		const compSection = design.slice(compIdx);
+		const nextSection = compSection.indexOf("\n## ", 3);
+		const body = nextSection === -1 ? compSection : compSection.slice(0, nextSection);
+
+		// Find ### Component headers with descriptions.
+		const compRegex = /###\s+(?:C\d+:\s*)?(.+?)(?:\s*\(.*?\))?\n([\s\S]*?)(?=\n###|\n##|$)/g;
+		let match: RegExpExecArray | null;
+		while ((match = compRegex.exec(body)) !== null) {
+			const compName = match[1]!.trim();
+			const compBody = match[2]!.trim();
+			if (!compName || compBody.length < 20) continue;
+
+			const entry: PatternEntry = {
+				id: `pat-spec-${taskSlug}-${compName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-+$/, "").slice(0, 40)}`,
+				type: "good",
+				title: `${compName} (from ${taskSlug})`,
+				context: `Architectural pattern used in task ${taskSlug}`,
+				pattern: truncate(compBody, 500),
+				applicationConditions: `When building similar ${compName.toLowerCase()} components`,
+				expectedOutcomes: "Consistent architecture following established patterns",
+				tags: [taskSlug, "architecture"],
+				createdAt: now,
+				status: "approved",
+				lang,
+			};
+
+			const filePath = writeKnowledgeFile(projectPath, "pattern", entry.id, entry);
+			const row: KnowledgeRow = {
+				id: 0,
+				filePath,
+				contentHash: "",
+				title: entry.title,
+				content: JSON.stringify(entry),
+				subType: "pattern",
+				projectRemote: proj.remote,
+				projectPath: proj.path,
+				projectName: proj.name,
+				branch: proj.branch,
+				createdAt: "",
+				updatedAt: "",
+				hitCount: 0,
+				lastAccessed: "",
+				enabled: true,
+			};
+			upsertKnowledge(store, row);
+			count++;
+		}
+	} catch {
+		/* design.md may not exist for all spec sizes — fail-open */
+	}
+	return count;
 }
 
 /**
