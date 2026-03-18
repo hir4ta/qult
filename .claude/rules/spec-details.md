@@ -1,7 +1,7 @@
 ---
 description: Spec management internals — sizes, types, templates, validation, confidence
 paths:
-  - "internal/spec/**"
+  - "src/spec/**"
   - ".alfred/specs/**"
 ---
 

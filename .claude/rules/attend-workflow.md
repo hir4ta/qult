@@ -1,7 +1,7 @@
 ---
 paths:
   - ".alfred/**"
-  - "internal/spec/**"
+  - "src/spec/**"
 ---
 
 # attend Workflow — Required Practices

@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import type { Embedder } from "../embedder/index.js";
 import { syncTaskStatus, unlinkTaskFromAllEpics } from "../epic/index.js";
 import { clearReviewGate, readReviewGate, writeReviewGate } from "../hooks/review-gate.js";
+import { readWaveProgress, writeWaveProgress } from "../hooks/state.js";
 import { appendAudit } from "../spec/audit.js";
 import { initSpec } from "../spec/init.js";
 import type { SpecFile, SpecSize, SpecType } from "../spec/types.js";
@@ -643,6 +644,18 @@ function dossierGate(projectPath: string, params: DossierParams) {
 
 			const reason = truncate(params.reason, 500);
 			clearReviewGate(projectPath);
+
+			// FR-1: Update wave-progress reviewed flag on wave-review gate clear.
+			if (gate.gate === "wave-review" && gate.wave !== undefined) {
+				try {
+					const progress = readWaveProgress(projectPath);
+					const waveKey = String(gate.wave);
+					if (progress?.waves[waveKey]) {
+						progress.waves[waveKey]!.reviewed = true;
+						writeWaveProgress(projectPath, progress);
+					}
+				} catch { /* fail-open */ }
+			}
 
 			appendAudit(projectPath, {
 				action: "gate.clear",

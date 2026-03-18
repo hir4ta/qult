@@ -1,6 +1,6 @@
 ---
 paths:
-  - "internal/store/**"
+  - "src/store/**"
 ---
 
 # Store Implementation Patterns

@@ -141,7 +141,7 @@ node dist/cli.mjs version     # Show version
 - ALFRED_LANG: controls knowledge content language (default: en). Passed in ledger/dossier responses as `lang` field for LLM language selection
 - Project identification: project_remote (git remote URL) + project_path (directory) + branch; UNIQUE constraint on (project_remote, project_path, file_path)
 - SessionStart sync: walks `.alfred/knowledge/{decisions,patterns,rules}/*.json` → JSON.parse → content_hash comparison → upsert. Legacy .md fallback retained. CLAUDE.md ingestion removed (v0.3.1)
-- Store.DB() is test-only; production code uses Store methods (no raw SQL outside internal/store)
+- Store.DB() is test-only; production code uses Store methods (no raw SQL outside src/store/)
 - @.claude/rules/store-internals.md (vector search, SQL safety patterns)
 
 ### Steering Docs
