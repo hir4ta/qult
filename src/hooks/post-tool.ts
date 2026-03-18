@@ -21,7 +21,7 @@ function writeExploreCount(n: number): void {
   try { writeFileSync(EXPLORE_COUNTER_PATH, String(n)); } catch { /* best effort */ }
 }
 
-export async function postToolUse(ev: HookEvent, _signal: AbortSignal): Promise<void> {
+export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<void> {
   if (!ev.cwd || !ev.tool_name) return;
 
   const items: DirectiveItem[] = [];
@@ -46,14 +46,14 @@ export async function postToolUse(ev: HookEvent, _signal: AbortSignal): Promise<
   }
   writeExploreCount(0);
 
-  if (ev.tool_name === 'Bash') {
-    await handleBashResult(ev, items);
+  if (ev.tool_name === 'Bash' && !signal.aborted) {
+    await handleBashResult(ev, items, signal);
   }
 
   emitDirectives('PostToolUse', items);
 }
 
-async function handleBashResult(ev: HookEvent, items: DirectiveItem[]): Promise<void> {
+async function handleBashResult(ev: HookEvent, items: DirectiveItem[], signal: AbortSignal): Promise<void> {
   const response = ev.tool_response as { stdout?: string; stderr?: string; exitCode?: number } | undefined;
   if (!response) return;
 
@@ -71,7 +71,7 @@ async function handleBashResult(ev: HookEvent, items: DirectiveItem[]): Promise<
     autoCheckNextSteps(ev.cwd!, stdout);
 
     // FR-7: Proactive conflict warning after git commit.
-    if (isGitCommit(stdout)) {
+    if (isGitCommit(stdout) && !signal.aborted) {
       await checkKnowledgeConflicts(items);
     }
   }
@@ -114,9 +114,10 @@ function autoCheckNextSteps(projectPath: string, stdout: string): void {
       if (!match) continue;
 
       const description = match[1]!.toLowerCase();
-      if (stdout && description.split(/\s+/).some(word =>
-        word.length > 3 && stdout.toLowerCase().includes(word)
-      )) {
+      // Require 2+ word matches to avoid false positives from common words like "test", "build".
+      const words = description.split(/\s+/).filter(w => w.length > 3);
+      const matchCount = words.filter(w => stdout.toLowerCase().includes(w)).length;
+      if (stdout && matchCount >= 2) {
         lines[i] = line.replace('- [ ]', '- [x]');
         changed = true;
       }
@@ -149,7 +150,8 @@ async function checkKnowledgeConflicts(items: DirectiveItem[]): Promise<void> {
   try { store = openDefaultCached(); } catch { return; }
 
   try {
-    const conflicts = detectKnowledgeConflicts(store, 0.70);
+    // Use limit=500 (not default 1000) to stay within 5s PostToolUse timeout budget.
+    const conflicts = detectKnowledgeConflicts(store, 0.70, 500);
     if (conflicts.length === 0) return;
 
     // Include contradictions (>= 0.70) and high-similarity duplicates (>= 0.90).

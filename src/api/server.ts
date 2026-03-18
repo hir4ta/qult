@@ -67,6 +67,13 @@ export function createApp(
     const file = c.req.param('file');
     if (!VALID_SLUG.test(slug)) return c.json({ error: 'invalid slug' }, 400);
 
+    // Validate file parameter against known spec files to prevent path traversal.
+    const VALID_SPEC_FILES = new Set([
+      'requirements.md', 'design.md', 'tasks.md', 'test-specs.md',
+      'decisions.md', 'research.md', 'session.md', 'bugfix.md', 'delta.md',
+    ]);
+    if (!VALID_SPEC_FILES.has(file)) return c.json({ error: 'invalid spec file' }, 400);
+
     const sd = new SpecDir(projectPath, slug);
     try {
       const content = sd.readFile(file as SpecFile);
@@ -238,10 +245,10 @@ export function createApp(
     const review = {
       timestamp: ts,
       status: reviewStatus,
-      comments: rawComments.map(c => ({
-        file: String(c.file ?? '').slice(0, 500),
-        line: Math.max(0, Number(c.line) || 0),
-        body: String(c.body ?? '').slice(0, 10000),
+      comments: rawComments.map(comment => ({
+        file: String(comment.file ?? '').slice(0, 500),
+        line: Math.max(0, Number(comment.line) || 0),
+        body: String(comment.body ?? '').slice(0, 10000),
         resolved: false,
       })),
     };

@@ -118,13 +118,13 @@ function fuzzySearchKnowledge(
   return docs;
 }
 
-export function detectKnowledgeConflicts(store: Store, threshold = 0.70): KnowledgeConflict[] {
+export function detectKnowledgeConflicts(store: Store, threshold = 0.70, limit = 1000): KnowledgeConflict[] {
   const rows = store.db.prepare(`
     SELECT e.source_id, e.vector FROM embeddings e
     JOIN knowledge_index k ON k.id = e.source_id
     WHERE e.source = 'knowledge' AND k.enabled = 1
-    LIMIT 1000
-  `).all() as Array<{ source_id: number; vector: Buffer }>;
+    LIMIT ?
+  `).all(limit) as Array<{ source_id: number; vector: Buffer }>;
 
   const docs = rows.map(r => ({
     id: r.source_id,
