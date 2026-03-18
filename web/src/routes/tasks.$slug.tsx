@@ -1,8 +1,7 @@
 import { ReviewPanel } from "@/components/review/ReviewPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-
+import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -14,12 +13,12 @@ import {
 	validationQueryOptions,
 } from "@/lib/api";
 import type { SpecEntry, TaskDetail, ValidationReport } from "@/lib/types";
-import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { CircleCheck, CircleDot, FileText, MessageSquareText } from "lucide-react";
+import { CircleCheck, CircleDot, MessageSquareText } from "lucide-react";
 import { useState } from "react";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 
@@ -41,12 +40,14 @@ function TaskDetailPage() {
 	const { data: specsData } = useQuery(specsQueryOptions(slug));
 	const { data: validationData } = useQuery(validationQueryOptions(slug));
 	const [selectedFile, setSelectedFile] = useState<string | null>(null);
-	const [mode, setMode] = useState<"view" | "review">("view");
+	const [reviewMode, setReviewMode] = useState(false);
 
 	const task = tasksData?.tasks.find((t) => t.slug === slug);
 	const specs = specsData?.specs ?? [];
-	const { data: contentData } = useQuery(specContentQueryOptions(slug, selectedFile ?? ""));
+	const activeFile = selectedFile ?? specs[0]?.file ?? null;
+	const { data: contentData } = useQuery(specContentQueryOptions(slug, activeFile ?? ""));
 	const content = contentData?.content ?? "";
+	const isPending = task?.review_status === "pending";
 
 	if (!task) {
 		return <p className="text-sm text-muted-foreground">Task not found.</p>;
@@ -103,65 +104,59 @@ function TaskDetailPage() {
 					</Badge>
 				)}
 				{validationData && <ValidationBadge report={validationData} />}
+				{isPending && activeFile && (
+					<Button
+						size="sm"
+						variant="outline"
+						className="ml-auto gap-1.5 text-xs"
+						onClick={() => setReviewMode(!reviewMode)}
+					>
+						<MessageSquareText className="h-3.5 w-3.5" />
+						{reviewMode ? "Exit Review" : "Review"}
+					</Button>
+				)}
 			</div>
 
 			{task.focus && (
-				<p className="text-sm text-muted-foreground pl-8">{task.focus}</p>
+				<p className="text-sm text-muted-foreground">{task.focus}</p>
 			)}
 
 			<Separator />
 
-			{/* File tabs + Spec viewer — full width */}
-			<div className="flex gap-4">
-				<div className="w-44 shrink-0 space-y-1">
-					<SpecFileList specs={specs} selected={selectedFile} onSelect={setSelectedFile} />
-					{selectedFile && task.review_status === "pending" && (
-						<Button
-							size="sm"
-							variant="outline"
-							className="w-full gap-1.5 text-xs mt-2"
-							onClick={() => setMode(mode === "review" ? "view" : "review")}
-						>
-							<MessageSquareText className="h-3.5 w-3.5" />
-							{mode === "review" ? "Exit Review" : "Review"}
-						</Button>
-					)}
-				</div>
-				<div className="min-w-0 flex-1">
-					{selectedFile && task.review_status === "pending" ? (
-						<Tabs value={mode} onValueChange={(v) => setMode(v as "view" | "review")}>
-							<TabsList className="mb-3">
-								<TabsTrigger value="view" className="gap-1 text-xs">
-									<FileText className="h-3.5 w-3.5" />
-									View
-								</TabsTrigger>
-								<TabsTrigger value="review" className="gap-1 text-xs">
-									<MessageSquareText className="h-3.5 w-3.5" />
-									Review
-								</TabsTrigger>
-							</TabsList>
-							<TabsContent value="view">
-								<SpecContentViewer content={content} file={selectedFile} />
-							</TabsContent>
-							<TabsContent value="review">
+			{/* Spec files as tabs — full width */}
+			{specs.length > 0 ? (
+				<Tabs value={activeFile ?? ""} onValueChange={(v) => { setSelectedFile(v); setReviewMode(false); }}>
+					<TabsList className="flex-wrap h-auto gap-1 mb-3">
+						{specs.map((spec) => (
+							<TabsTrigger key={spec.file} value={spec.file} className="text-xs px-2.5 py-1">
+								{spec.file.replace(".md", "")}
+							</TabsTrigger>
+						))}
+					</TabsList>
+
+					{specs.map((spec) => (
+						<TabsContent key={spec.file} value={spec.file}>
+							{reviewMode && isPending ? (
 								<ReviewPanel
 									slug={slug}
 									reviewStatus={task.review_status ?? "pending"}
-									specContent={content}
-									currentFile={selectedFile}
+									specContent={spec.file === activeFile ? content : ""}
+									currentFile={spec.file}
 								/>
-							</TabsContent>
-						</Tabs>
-					) : selectedFile ? (
-						<SpecContentViewer content={content} file={selectedFile} />
-					) : null}
-					{!selectedFile && (
-						<div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-stone-200">
-							<p className="text-sm text-muted-foreground">Select a spec file to view.</p>
-						</div>
-					)}
+							) : (
+								<SpecContentViewer
+									content={spec.file === activeFile ? content : ""}
+									file={spec.file}
+								/>
+							)}
+						</TabsContent>
+					))}
+				</Tabs>
+			) : (
+				<div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-stone-200">
+					<p className="text-sm text-muted-foreground">No spec files.</p>
 				</div>
-			</div>
+			)}
 		</div>
 	);
 }
@@ -185,60 +180,26 @@ function ValidationBadge({ report }: { report: ValidationReport }) {
 	);
 }
 
-function SpecFileList({
-	specs,
-	selected,
-	onSelect,
-}: {
-	specs: SpecEntry[];
-	selected: string | null;
-	onSelect: (file: string) => void;
-}) {
-	return (
-		<div className="space-y-0.5">
-			{specs.map((spec) => (
-				<button
-					type="button"
-					key={spec.file}
-					onClick={() => onSelect(spec.file)}
-					className={cn(
-						"w-full rounded-md px-2 py-1.5 text-left text-[12px] transition-colors",
-						"hover:bg-accent",
-						selected === spec.file && "bg-accent font-medium",
-					)}
-				>
-					{spec.file}
-				</button>
-			))}
-			{specs.length === 0 && <p className="text-xs text-muted-foreground px-2">No spec files.</p>}
-		</div>
-	);
-}
-
 function SpecContentViewer({ content, file }: { content: string; file: string }) {
 	return (
 		<Card className="!gap-0 !py-0">
-			<div className="px-4 py-2.5 border-b border-border">
-				<span className="text-sm font-bold">{file}</span>
-			</div>
 			<CardContent className="p-0">
-				<ScrollArea className="h-[600px]">
-					<div className="p-4 prose prose-sm prose-stone dark:prose-invert max-w-none
+				<ScrollArea className="h-[calc(100vh-220px)]">
+					<div className="p-5 prose prose-sm prose-stone dark:prose-invert max-w-none
 						prose-headings:text-sm prose-headings:font-semibold prose-headings:mt-3 prose-headings:mb-1.5
 						prose-h1:text-base prose-h1:mt-0 prose-h1:mb-2
-						prose-p:text-xs prose-p:leading-relaxed prose-p:my-1
-						prose-li:text-xs prose-li:my-0
-						prose-table:text-[11px]
-						prose-th:px-2 prose-th:py-1 prose-th:text-left prose-th:border prose-th:border-border prose-th:bg-muted/50
-						prose-td:px-2 prose-td:py-1 prose-td:border prose-td:border-border prose-td:break-words
-						prose-code:text-xs prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-foreground prose-code:break-all
-						prose-pre:bg-muted/50 prose-pre:text-foreground prose-pre:rounded-lg prose-pre:overflow-x-hidden
-						[&_table]:w-full
-						[&_pre]:p-0 [&_pre_code]:bg-transparent [&_pre_code]:p-3 [&_pre_code]:block [&_pre_code]:text-[11px] [&_pre_code]:leading-relaxed [&_pre_code]:whitespace-pre-wrap [&_pre_code]:break-all [&_pre_code]:overflow-hidden">
+						prose-p:text-[13px] prose-p:leading-relaxed prose-p:my-1
+						prose-li:text-[13px] prose-li:my-0
+						prose-table:text-[12px]
+						prose-th:px-2 prose-th:py-1.5 prose-th:text-left prose-th:border prose-th:border-border prose-th:bg-muted/50
+						prose-td:px-2 prose-td:py-1.5 prose-td:border prose-td:border-border
+						prose-code:text-[12px] prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-foreground
+						prose-pre:bg-[#1e1e1e] prose-pre:rounded-lg prose-pre:my-2
+						[&_pre]:p-0 [&_pre_code]:bg-transparent [&_pre_code]:p-3 [&_pre_code]:block [&_pre_code]:text-[12px] [&_pre_code]:leading-relaxed [&_pre_code]:whitespace-pre-wrap [&_pre_code]:break-words">
 						{content ? (
 							<Markdown
+								remarkPlugins={[remarkGfm]}
 								components={{
-									// Strip the first H1 title (redundant with file name header).
 									h1({ children }) {
 										return <h1 className="!mt-0 !mb-1 !text-base">{children}</h1>;
 									},
@@ -252,6 +213,7 @@ function SpecContentViewer({ content, file }: { content: string; file: string })
 													language={match[1]}
 													PreTag="div"
 													customStyle={{ fontSize: "0.75rem", borderRadius: "0.375rem", margin: 0 }}
+													wrapLongLines
 												>
 													{codeStr}
 												</SyntaxHighlighter>
@@ -268,7 +230,7 @@ function SpecContentViewer({ content, file }: { content: string; file: string })
 								{content}
 							</Markdown>
 						) : (
-							<p className="text-xs text-muted-foreground">No content.</p>
+							<p className="text-xs text-muted-foreground">Loading...</p>
 						)}
 					</div>
 				</ScrollArea>
