@@ -210,7 +210,7 @@ function KnowledgeCard({
 							{SUB_TYPE_LABELS[entry.sub_type] ?? entry.sub_type}
 						</span>
 					</div>
-					<div className="flex items-center gap-1.5">
+					<div className="flex items-center gap-3">
 						{entry.hit_count > 0 && (
 							<span className="text-[10px] tabular-nums text-muted-foreground">
 								{entry.hit_count} hits
@@ -224,7 +224,8 @@ function KnowledgeCard({
 										e.stopPropagation();
 										toggleMutation.mutate({ id: entry.id, enabled: !entry.enabled });
 									}}
-									className="text-muted-foreground hover:text-foreground transition-colors"
+									className="transition-colors hover:opacity-70"
+									style={{ color: "#7b6b8d" }}
 								>
 									{entry.enabled ? <Archive className="size-3.5" /> : <ArchiveRestore className="size-3.5" />}
 								</button>
@@ -310,7 +311,8 @@ function KnowledgeDialog({
 							<Button
 								size="sm"
 								variant="ghost"
-								className="ml-auto h-7 gap-1 text-xs"
+								className="ml-auto h-7 gap-1.5 text-xs"
+								style={{ color: "#7b6b8d" }}
 								onClick={() => toggleMutation.mutate({ id: entry.id, enabled: !entry.enabled })}
 							>
 								{entry.enabled ? (
