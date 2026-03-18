@@ -41,7 +41,7 @@ function RootLayout() {
 						>
 							alfred
 						</span>
-						<nav className="flex items-center gap-1">
+						<nav className="flex flex-1 items-center justify-center gap-1">
 							{tabs.map((tab) => {
 								const Icon = tab.icon;
 								return (
