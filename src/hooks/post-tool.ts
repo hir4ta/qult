@@ -57,11 +57,20 @@ async function handleBashResult(ev: HookEvent, items: DirectiveItem[], signal: A
   const response = ev.tool_response as { stdout?: string; stderr?: string; exitCode?: number } | undefined;
   if (!response) return;
 
-  // On Bash error: search FTS for similar errors.
-  if (response.exitCode && response.exitCode !== 0 && response.stderr) {
+  // On Bash error: search FTS for similar errors + detect test failures.
+  if (response.exitCode && response.exitCode !== 0) {
     const errorText = typeof response.stderr === 'string' ? response.stderr : '';
+    const stdout = response.stdout ?? '';
     if (errorText.length > 10) {
       await searchErrorContext(ev.cwd!, errorText, items);
+    }
+
+    // FR-4: Test failure rollback suggestion.
+    if (isTestFailure(stdout + '\n' + errorText)) {
+      items.push({
+        level: 'WARNING',
+        message: 'Test failure detected. Investigate the root cause before continuing implementation. Consider reverting recent changes with `git stash` or `git diff` to isolate the issue.',
+      });
     }
   }
 
@@ -129,6 +138,23 @@ function autoCheckNextSteps(projectPath: string, stdout: string): void {
       sd.writeFile('session.md', updatedSession);
     }
   } catch { /* fail-open */ }
+}
+
+/**
+ * FR-4: Detect test failure patterns in command output.
+ */
+function isTestFailure(output: string): boolean {
+  if (!output) return false;
+  const patterns = [
+    /FAIL(ED|URE)?\b/i,              // vitest, jest, generic
+    /\d+ failed/i,                   // generic "N failed"
+    /Tests:\s+\d+ failed/,           // jest summary
+    /✗|✘/,                           // unicode failure marks
+    /AssertionError/i,               // assertion errors
+    /test.*failed/i,                 // generic
+    /npm ERR!.*test/i,               // npm test failure
+  ];
+  return patterns.some(p => p.test(output));
 }
 
 /**

@@ -262,11 +262,21 @@ function dossierComplete(projectPath: string, store: Store, params: DossierParam
     }
   }
 
+  // FR-3: Check closing wave completion.
+  let closingWarning: string | undefined;
+  try {
+    const sd = new SpecDir(projectPath, taskSlug);
+    const tasksContent = sd.readFile('tasks.md');
+    closingWarning = checkClosingWave(tasksContent);
+  } catch { /* tasks.md may not exist for all sizes */ }
+
   try {
     const newPrimary = completeTask(projectPath, taskSlug);
     appendAudit(projectPath, { action: 'spec.complete', target: taskSlug, user: 'mcp' });
     syncTaskStatus(projectPath, taskSlug, 'completed');
-    return jsonResult({ task_slug: taskSlug, completed: true, new_primary: newPrimary });
+    const result: Record<string, unknown> = { task_slug: taskSlug, completed: true, new_primary: newPrimary };
+    if (closingWarning) result['closing_wave_warning'] = closingWarning;
+    return jsonResult(result);
   } catch (err) {
     return errorResult(`${err}`);
   }
@@ -449,4 +459,23 @@ function dossierValidate(projectPath: string, params: DossierParams) {
     checks,
     summary: `${passed}/${checks.length} checks passed`,
   });
+}
+
+/**
+ * FR-3: Check if Closing Wave has at least 1 checked item.
+ * Returns warning message if not, undefined if ok.
+ */
+function checkClosingWave(tasksContent: string): string | undefined {
+  const closingIdx = tasksContent.search(/## Wave:\s*[Cc]losing/);
+  if (closingIdx === -1) return 'No Closing Wave found in tasks.md. Add self-review, CLAUDE.md update, and test verification items.';
+
+  const closingSection = tasksContent.slice(closingIdx);
+  const nextSection = closingSection.indexOf('\n##', 1);
+  const body = nextSection === -1 ? closingSection : closingSection.slice(0, nextSection);
+  const checkedItems = body.match(/^- \[x\] .+$/gm);
+  if (!checkedItems || checkedItems.length === 0) {
+    return 'Closing Wave has no checked items. Complete self-review, CLAUDE.md update, and test verification before finishing.';
+  }
+
+  return undefined;
 }

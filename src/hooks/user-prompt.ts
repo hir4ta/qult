@@ -1,5 +1,6 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import type { HookEvent } from './dispatcher.js';
 import { openDefaultCached } from '../store/index.js';
 import { Embedder } from '../embedder/index.js';
@@ -72,14 +73,20 @@ export async function userPromptSubmit(ev: HookEvent, signal: AbortSignal): Prom
     items.push(specDirective);
   }
 
-  // Skill nudge.
+  // FR-1: Skill nudge with dismissal suppression.
   if (intent && intent !== 'save-knowledge') {
     const skill = INTENT_TO_SKILL[intent];
     if (skill) {
-      items.push({
-        level: 'CONTEXT',
-        message: `Skill suggestion: ${skill} — ${intentDescription(intent)}`,
-      });
+      const impressions = getNudgeImpressions(intent);
+      if (impressions < 3) {
+        items.push({
+          level: 'CONTEXT',
+          message: `Skill suggestion: ${skill} — ${intentDescription(intent)}`,
+        });
+        // Track that we nudged this intent (will be checked next time).
+        recordNudge(intent);
+      }
+      // If dismissed 3+ times, suppress silently.
     }
   }
 
@@ -87,13 +94,15 @@ export async function userPromptSubmit(ev: HookEvent, signal: AbortSignal): Prom
   const limit = 5;
   const result = await searchPipeline(store, emb, prompt, limit, limit * 3, promptVec ?? undefined);
 
+  // FR-2: Knowledge results with natural language relevance explanation.
   if (result.scoredDocs.length > 0) {
     trackHitCounts(store, result.scoredDocs);
     const contextLines = result.scoredDocs.map(sd => {
       const sub = sd.doc.subType !== 'general' ? sd.doc.subType : '';
       const scoreStr = sd.score.toFixed(2);
       const prefix = sub ? `[${sub}|${scoreStr}|${sd.matchReason}]` : `[${scoreStr}|${sd.matchReason}]`;
-      return `- ${prefix} ${sd.doc.title}: ${truncate(sd.doc.content, 150)}`;
+      const explanation = buildRelevanceExplanation(sd);
+      return `- ${prefix} ${sd.doc.title}: ${truncate(sd.doc.content, 150)}${explanation}`;
     });
     items.push({
       level: 'CONTEXT',
@@ -204,4 +213,79 @@ function intentDescription(intent: string): string {
     case 'tdd': return 'Red→Green→Refactor の自律TDD';
     default: return '';
   }
+}
+
+// --- FR-1: Nudge dismissal tracking via /tmp file (survives across short-lived hook processes) ---
+
+const NUDGE_FILE = join(tmpdir(), 'alfred-nudge-dismissals.json');
+
+interface NudgeCounts {
+  [intent: string]: { count: number; lastNudged: string };
+}
+
+function readNudgeCounts(): NudgeCounts {
+  try { return JSON.parse(readFileSync(NUDGE_FILE, 'utf-8')); } catch { return {}; }
+}
+
+function writeNudgeCounts(counts: NudgeCounts): void {
+  try { writeFileSync(NUDGE_FILE, JSON.stringify(counts)); } catch { /* best effort */ }
+}
+
+/** Get how many times this intent's nudge was shown. Suppressed after 3 impressions. */
+function getNudgeImpressions(intent: string): number {
+  const counts = readNudgeCounts();
+  return counts[intent]?.count ?? 0;
+}
+
+/** Record that we nudged this intent. If the user doesn't act on it, this counts as a dismissal. */
+function recordNudge(intent: string): void {
+  const counts = readNudgeCounts();
+  const entry = counts[intent] ?? { count: 0, lastNudged: '' };
+  entry.count++;
+  entry.lastNudged = new Date().toISOString();
+  counts[intent] = entry;
+  writeNudgeCounts(counts);
+}
+
+/** Reset nudge count for an intent (called when user actually follows the nudge). */
+export function resetNudgeCount(intent: string): void {
+  const counts = readNudgeCounts();
+  delete counts[intent];
+  writeNudgeCounts(counts);
+}
+
+// --- FR-2: Natural language relevance explanation ---
+
+import type { ScoredDoc } from '../mcp/helpers.js';
+import { subTypeBoost } from '../store/fts.js';
+
+function buildRelevanceExplanation(sd: ScoredDoc): string {
+  const parts: string[] = [];
+
+  // Search method explanation.
+  if (sd.matchReason === 'vector+rerank') {
+    parts.push('semantic match (reranked)');
+  } else if (sd.matchReason === 'vector') {
+    parts.push('semantic match');
+  } else if (sd.matchReason === 'fts5') {
+    parts.push('keyword match');
+  }
+
+  // Sub-type boost.
+  const boost = subTypeBoost(sd.doc.subType);
+  if (boost > 1.0) {
+    parts.push(`${sd.doc.subType} boost ${boost}x`);
+  }
+
+  // Age context.
+  const ageDays = Math.floor((Date.now() - Date.parse(sd.doc.createdAt)) / (1000 * 60 * 60 * 24));
+  if (ageDays <= 1) {
+    parts.push('today');
+  } else if (ageDays <= 7) {
+    parts.push(`${ageDays}d ago`);
+  } else if (ageDays <= 30) {
+    parts.push(`${Math.floor(ageDays / 7)}w ago`);
+  }
+
+  return parts.length > 0 ? ` (${parts.join(', ')})` : '';
 }

@@ -66,6 +66,8 @@ node dist/cli.mjs version     # Show version
 - Directive utility: `src/hooks/directives.ts` — `buildDirectiveOutput()`, `emitDirectives()`
 - Spec enforcement: UserPromptSubmit detects implement/bugfix/tdd intent + no active spec + .alfred/ exists → DIRECTIVE requiring spec creation
 - Semantic intent classification: Voyage embedding similarity (threshold >= 0.5) with keyword fallback. Prompt embedding reused for knowledge search (DEC-2)
+- Skill nudge learning: impressions tracked in /tmp; suppressed after 3 showings per intent. resetNudgeCount() exported for skill-use detection
+- Test failure detection: PostToolUse recognizes FAIL/FAILED/FAILURE patterns and suggests rollback before continuing
 - PostToolUse: git commit detection → proactive knowledge conflict warning (detectKnowledgeConflicts, threshold 0.70)
 - SessionStart: decision replay — injects up to 5 recent decision-type knowledge entries (last 7 days, project-scoped)
 - Multi-agent skills: inspect (6 profiles), salon (3 specialists + synthesis), brief (7 spec files + 3 specialists per file + approval gate), attend (spec→approve→implement→review→commit orchestrator), tdd (red→green→refactor), mend (reproduce→analyze→fix→verify), survey (code→spec reverse engineering), harvest (PR comment → knowledge)
@@ -107,6 +109,7 @@ node dist/cli.mjs version     # Show version
 - Web review mode: Tasks tab → View/Review tabs (only when review_status=pending)
 - dossier action=review: read-only, returns latest review + unresolved comments
 - Approval gate (M/L/XL): dossier complete checks BOTH _active.md review_status AND verifyReviewFile() (review JSON existence + status=approved + zero unresolved comments)
+- Closing wave check: dossier complete warns if tasks.md Closing Wave has no checked items
 - PreCompact auto-complete: same approval gate applied — M+ specs skip auto-complete if review not approved
 - Legacy backward compat: specs without reviews/ directory pass approval gate (YAML-only, NFR-3)
 - brief Step 9: approval gate after spec creation
