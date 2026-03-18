@@ -1,12 +1,59 @@
 import type { SpecFile, SpecSize, SpecType } from "./types.js";
 import { filesForSize } from "./types.js";
 
+// English templates
+import enRequirements from "./templates/en/requirements.tmpl";
+import enBugfix from "./templates/en/bugfix.tmpl";
+import enDelta from "./templates/en/delta.tmpl";
+import enDesign from "./templates/en/design.tmpl";
+import enTasks from "./templates/en/tasks.tmpl";
+import enTestSpecs from "./templates/en/test-specs.tmpl";
+import enResearch from "./templates/en/research.tmpl";
+import enSession from "./templates/en/session.tmpl";
+
+// Japanese templates
+import jaRequirements from "./templates/ja/requirements.tmpl";
+import jaBugfix from "./templates/ja/bugfix.tmpl";
+import jaDelta from "./templates/ja/delta.tmpl";
+import jaDesign from "./templates/ja/design.tmpl";
+import jaTasks from "./templates/ja/tasks.tmpl";
+import jaTestSpecs from "./templates/ja/test-specs.tmpl";
+import jaResearch from "./templates/ja/research.tmpl";
+import jaSession from "./templates/ja/session.tmpl";
+
 export interface TemplateData {
 	taskSlug: string;
 	description: string;
 	date: string;
 	specType: string;
 }
+
+const EN_TEMPLATES: Record<string, string> = {
+	"requirements.md": enRequirements,
+	"bugfix.md": enBugfix,
+	"delta.md": enDelta,
+	"design.md": enDesign,
+	"tasks.md": enTasks,
+	"test-specs.md": enTestSpecs,
+	"research.md": enResearch,
+	"session.md": enSession,
+};
+
+const JA_TEMPLATES: Record<string, string> = {
+	"requirements.md": jaRequirements,
+	"bugfix.md": jaBugfix,
+	"delta.md": jaDelta,
+	"design.md": jaDesign,
+	"tasks.md": jaTasks,
+	"test-specs.md": jaTestSpecs,
+	"research.md": jaResearch,
+	"session.md": jaSession,
+};
+
+const DEFAULT_DESCRIPTIONS: Record<string, string> = {
+	en: "No description provided.",
+	ja: "説明なし",
+};
 
 export function renderForSize(
 	size: SpecSize,
@@ -23,326 +70,15 @@ export function renderForSize(
 }
 
 function renderTemplate(file: SpecFile, data: TemplateData, lang: string): string {
-	if (lang === "ja") return renderTemplateJa(file, data);
-	return renderTemplateEn(file, data);
-}
-
-// ---------- English templates (default) ----------
-
-function renderTemplateEn(file: SpecFile, data: TemplateData): string {
-	switch (file) {
-		case "requirements.md":
-			return `# Requirements: ${data.taskSlug}
-
-> ${data.description || "No description provided."}
-
-## Goal
-
-<!-- Define the primary goal of this task -->
-
-## Functional Requirements
-
-### FR-1: [Requirement Title]
-
-<!-- confidence: 5 | source: inference | grounding: inferred -->
-
-## Non-Functional Requirements
-
-<!-- NFR-1: Performance, security, etc. -->
-`;
-
-		case "bugfix.md":
-			return `# Bugfix: ${data.taskSlug}
-
-> ${data.description || "No description provided."}
-
-## Bug Summary
-
-## Severity & Impact
-
-<!-- P0-P3 -->
-
-## Reproduction Steps
-
-1.
-
-## Root Cause Analysis
-
-### 5 Whys
-
-1. Why?
-
-## Fix Strategy
-
-## Regression Prevention
-`;
-
-		case "delta.md":
-			return `# Delta: ${data.taskSlug}
-
-> ${data.description || "No description provided."}
-
-## Change Summary
-
-## Files Affected
-
-### CHG-1: [Change description]
-
-- File:
-- Before:
-- After:
-
-## Rationale
-
-## Impact Scope
-
-## Test Plan
-
-## Rollback Strategy
-`;
-
-		case "design.md":
-			return `# Design: ${data.taskSlug}
-
-## System Context
-
-## Components
-
-## Data Flow
-
-## Traceability Matrix
-
-| Req ID | Component | Task ID | Test ID |
-|--------|-----------|---------|---------|
-| FR-1   |           | T-1.1   | TS-1.1  |
-`;
-
-		case "tasks.md":
-			return `# Tasks: ${data.taskSlug}
-
-## Wave 1: Core Implementation
-
-### T-1.1: [Task Title]
-
-- Requirements: FR-1
-- Files:
-- Risk: low
-- Verify:
-
-## Wave: Closing
-
-- [ ] Commit changes
-- [ ] Self-review from multiple perspectives (delegate to alfred:code-reviewer or /alfred:inspect)
-- [ ] Update CLAUDE.md / README if needed
-- [ ] Verify tests pass
-- [ ] Save key learnings to knowledge via \`ledger save\`
-- [ ] Call \`dossier action=complete\` to close the spec
-`;
-
-		case "test-specs.md":
-			return `# Test Specs: ${data.taskSlug}
-
-## TS-1.1: [Test Title]
-
-- Source: FR-1
-- Category: unit
-- Speed: fast
-
-\`\`\`gherkin
-Given [precondition]
-When [action]
-Then [expected result]
-\`\`\`
-`;
-
-		case "research.md":
-			return `# Research: ${data.taskSlug}
-
-## Discovery
-
-## Gap Analysis
-
-## Options
-
-## Done Criteria
-`;
-
-		case "session.md":
-			return `# Session: ${data.taskSlug}
-
-- Date: ${data.date}
-- Status: active
-- Spec Type: ${data.specType}
-
-## Currently Working On
-
-## Next Steps
-
-- [ ] Review generated spec files
-- [ ] Fill in requirements details
-`;
-
-		default:
-			return `# ${file}\n`;
-	}
-}
-
-// ---------- Japanese templates ----------
-
-function renderTemplateJa(file: SpecFile, data: TemplateData): string {
-	switch (file) {
-		case "requirements.md":
-			return `# 要件定義: ${data.taskSlug}
-
-> ${data.description || "説明なし"}
-
-## ゴール
-
-<!-- このタスクの主目標を定義 -->
-
-## 機能要件
-
-### FR-1: [要件タイトル]
-
-<!-- confidence: 5 | source: inference | grounding: inferred -->
-
-## 非機能要件
-
-<!-- NFR-1: パフォーマンス、セキュリティ等 -->
-`;
-
-		case "bugfix.md":
-			return `# バグ修正: ${data.taskSlug}
-
-> ${data.description || "説明なし"}
-
-## バグ概要
-
-## 重要度と影響範囲
-
-<!-- P0-P3 -->
-
-## 再現手順
-
-1.
-
-## 原因分析
-
-### 5 Whys
-
-1. なぜ？
-
-## 修正方針
-
-## リグレッション防止策
-`;
-
-		case "delta.md":
-			return `# 差分変更: ${data.taskSlug}
-
-> ${data.description || "説明なし"}
-
-## 変更概要
-
-## 影響ファイル
-
-### CHG-1: [変更内容]
-
-- File:
-- Before:
-- After:
-
-## 変更理由
-
-## 影響範囲
-
-## テスト計画
-
-## ロールバック手順
-`;
-
-		case "design.md":
-			return `# 設計: ${data.taskSlug}
-
-## システムコンテキスト
-
-## コンポーネント
-
-## データフロー
-
-## トレーサビリティマトリクス
-
-| Req ID | Component | Task ID | Test ID |
-|--------|-----------|---------|---------|
-| FR-1   |           | T-1.1   | TS-1.1  |
-`;
-
-		case "tasks.md":
-			return `# タスク: ${data.taskSlug}
-
-## Wave 1: コア実装
-
-### T-1.1: [タスクタイトル]
-
-- Requirements: FR-1
-- Files:
-- Risk: low
-- Verify:
-
-## Wave: Closing
-
-- [ ] 変更をコミット
-- [ ] 多角的セルフレビュー（alfred:code-reviewer または /alfred:inspect に委譲）
-- [ ] 必要に応じて CLAUDE.md / README を更新
-- [ ] テスト通過を確認
-- [ ] 重要な学びをナレッジに保存（\`ledger save\`）
-- [ ] \`dossier action=complete\` でスペックをクローズ
-`;
-
-		case "test-specs.md":
-			return `# テスト仕様: ${data.taskSlug}
-
-## TS-1.1: [テストタイトル]
-
-- Source: FR-1
-- Category: unit
-- Speed: fast
-
-\`\`\`gherkin
-Given [前提条件]
-When [操作]
-Then [期待結果]
-\`\`\`
-`;
-
-		case "research.md":
-			return `# リサーチ: ${data.taskSlug}
-
-## 調査結果
-
-## ギャップ分析
-
-## 選択肢
-
-## 完了基準
-`;
-
-		case "session.md":
-			return `# セッション: ${data.taskSlug}
-
-- Date: ${data.date}
-- Status: active
-- Spec Type: ${data.specType}
-
-## 現在の作業
-
-## 次のステップ
-
-- [ ] 生成された spec ファイルをレビュー
-- [ ] 要件の詳細を記入
-`;
-
-		default:
-			return `# ${file}\n`;
-	}
+	const templates = lang === "ja" ? JA_TEMPLATES : EN_TEMPLATES;
+	const tmpl = templates[file];
+	if (!tmpl) return `# ${file}\n`;
+
+	const description = data.description || DEFAULT_DESCRIPTIONS[lang] || DEFAULT_DESCRIPTIONS.en!;
+
+	return tmpl
+		.replace(/\{\{taskSlug\}\}/g, data.taskSlug)
+		.replace(/\{\{description\}\}/g, description)
+		.replace(/\{\{date\}\}/g, data.date)
+		.replace(/\{\{specType\}\}/g, data.specType);
 }

@@ -50,7 +50,7 @@ After this, the project is ready for `/alfred:brief`, `/alfred:attend`, and all 
 
 3. **Read the steering templates first** to get the required section structure:
    - Check `.alfred/templates/steering/` for user overrides
-   - If not found, read the embedded defaults from `internal/spec/templates/steering/`
+   - If not found, read the embedded defaults from `src/spec/templates/steering/*.tmpl`
    - Templates define the **exact section headings** (## Purpose, ## Users & Stakeholders, etc.) — follow them
 
 4. Using the merged profile AND the template structure, generate `.alfred/steering/` documents:
@@ -67,10 +67,10 @@ After this, the project is ready for `/alfred:brief`, `/alfred:attend`, and all 
 
 ### Phase 3: Template Setup
 
-4. Copy default spec templates to `.alfred/templates/specs/` if not already present:
-   - requirements.md.tmpl, design.md.tmpl, tasks.md.tmpl, etc.
-   - Copy default steering templates to `.alfred/templates/steering/`
-   - Tell user they can customize these templates
+4. Inform the user about template customization:
+   - Spec templates are in `src/spec/templates/{en,ja}/*.tmpl` (bundled into alfred)
+   - Steering templates are in `src/spec/templates/steering/*.tmpl`
+   - User can override by placing files in `.alfred/templates/specs/` or `.alfred/templates/steering/`
 
 ### Phase 4: Knowledge Sync
 

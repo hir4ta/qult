@@ -8,6 +8,7 @@ export default defineConfig([
     target: 'node22',
     clean: true,
     banner: { js: '#!/usr/bin/env node' },
+    loader: { '.tmpl': 'text' },
     deps: {
       neverBundle: ['better-sqlite3'],
       onlyBundle: false,
@@ -18,6 +19,7 @@ export default defineConfig([
     format: 'esm',
     platform: 'node',
     target: 'node22',
+    loader: { '.tmpl': 'text' },
     deps: {
       neverBundle: ['better-sqlite3'],
       onlyBundle: false,
