@@ -131,10 +131,12 @@ function renderTemplateEn(file: SpecFile, data: TemplateData): string {
 
 ## Wave: Closing
 
-- [ ] Self-review from multiple perspectives
-- [ ] Update CLAUDE.md if needed
+- [ ] Commit changes
+- [ ] Self-review from multiple perspectives (delegate to alfred:code-reviewer or /alfred:inspect)
+- [ ] Update CLAUDE.md / README if needed
 - [ ] Verify tests pass
-- [ ] Save key learnings to knowledge
+- [ ] Save key learnings to knowledge via \`ledger save\`
+- [ ] Call \`dossier action=complete\` to close the spec
 `;
 
 		case "test-specs.md":
@@ -289,10 +291,12 @@ function renderTemplateJa(file: SpecFile, data: TemplateData): string {
 
 ## Wave: Closing
 
-- [ ] 多角的セルフレビュー
-- [ ] 必要に応じて CLAUDE.md を更新
+- [ ] 変更をコミット
+- [ ] 多角的セルフレビュー（alfred:code-reviewer または /alfred:inspect に委譲）
+- [ ] 必要に応じて CLAUDE.md / README を更新
 - [ ] テスト通過を確認
-- [ ] 重要な学びをナレッジに保存
+- [ ] 重要な学びをナレッジに保存（\`ledger save\`）
+- [ ] \`dossier action=complete\` でスペックをクローズ
 `;
 
 		case "test-specs.md":

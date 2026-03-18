@@ -14,6 +14,10 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git diff *, git log *, git sh
 Execute the FULL workflow below without asking the user for input (except
 BLOCKED recovery on re-invocation). No sub-agents are spawned.
 
+This skill follows the **invariant Spec-Driven Development Flow** (see CLAUDE.md):
+Spec > Wave > Task. Self-review is mandatory for all sizes. Call `dossier action=complete`
+when the fix is verified.
+
 ## Red Flags
 
 These thought patterns signal you are about to violate this skill's rules:

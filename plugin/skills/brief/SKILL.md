@@ -37,8 +37,12 @@ These thought patterns signal you are about to violate this skill's rules:
 
 ## Core Principle
 Each spec file is written, then reviewed by 3 parallel agents (Architect, Devil's
-Advocate, Researcher) before moving to the next. After all files are complete,
-the user approves via `alfred dashboard`.
+Advocate, Researcher) before moving to the next. Self-review is mandatory for ALL
+sizes (including S/D). After all files are complete, M/L/XL specs require user
+approval via `alfred dashboard`. S/D specs proceed directly after self-review.
+
+This skill implements the spec creation phase of the **invariant Spec-Driven
+Development Flow** (see CLAUDE.md): Spec > Wave > Task hierarchy.
 
 ## Steps
 
@@ -208,7 +212,9 @@ Please decide on these open questions:
 1. <conflict description> — Option A vs Option B
 ```
 
-### 12. [APPROVAL GATE] User reviews in dashboard
+### 12. [APPROVAL GATE] User reviews in dashboard (M/L/XL only)
+
+**S/D specs**: Skip this step — spec is ready for implementation after self-review.
 
 1. Add `## Review Status\npending` to session.md
 2. Tell the user:

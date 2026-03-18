@@ -14,6 +14,9 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Agent, Bash(git diff *, git log *,
 Execute the FULL workflow below without asking the user for input (except at
 approval gates and BLOCKED recovery).
 
+This skill implements the **invariant Spec-Driven Development Flow** (see CLAUDE.md):
+Spec > Wave > Task hierarchy. All sizes require self-review. M/L/XL require user approval.
+
 - For review prompt templates, see [review-prompts.md](review-prompts.md)
 - For BLOCKED recovery and error handling, see [recovery.md](recovery.md)
 
@@ -106,9 +109,10 @@ dossier action=gate sub_action=clear reason="3-agent review completed for all sp
 ```
 This is MANDATORY — PreToolUse blocks source Edit/Write until gate is cleared.
 
-## Phase 2: Approval Gate (dashboard)
+## Phase 2: Approval Gate (dashboard, M/L/XL only)
 
-Wait for user approval via `alfred dashboard` before proceeding:
+**S/D specs**: Skip this phase — proceed directly to Phase 3 after self-review.
+**M/L/XL specs**: Wait for user approval via `alfred dashboard` before proceeding:
 
 1. Update Orchestrator State: `awaiting_approval: true`
 2. Tell the user:
@@ -151,16 +155,17 @@ After each implementation task:
 
 **IMPORTANT**: Always spawn the code-reviewer agent. Never skip review.
 
-### Wave boundary review gate
+### Wave boundary (commit + review + knowledge)
 
 When all tasks in a Wave are completed (before starting next Wave):
-1. Set wave-review gate: `dossier action=gate sub_action=set gate_type=wave-review wave=N`
-2. Spawn code-reviewer agent for the Wave's full diff
+1. **Commit** changes with Wave number in message
+2. **Self-review**: Spawn code-reviewer agent for the Wave's full diff
 3. Fix any Critical/Warning findings
-4. Clear gate: `dossier action=gate sub_action=clear reason="Wave N review: [summary]"`
-5. Proceed to next Wave
+4. **Knowledge accumulation**: Save learnings via `ledger save` (decision/pattern/rule). If no knowledge to save, state the reason explicitly
+5. Clear gate: `dossier action=gate sub_action=clear reason="Wave N review: [summary]"`
+6. Proceed to next Wave
 
-This is MANDATORY — PreToolUse blocks source Edit/Write until wave-review gate is cleared.
+This is MANDATORY — PostToolUse auto-sets the wave-review gate when a Wave completes. PreToolUse blocks source Edit/Write until the gate is cleared.
 
 ## Phase 5: Final Self-Review (code-reviewer agent)
 

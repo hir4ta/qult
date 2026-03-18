@@ -14,6 +14,10 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Agent, Bash(git diff *, git log *,
 You are an autonomous TDD orchestrator. Execute the FULL workflow below
 without asking the user for input (except BLOCKED recovery on re-invocation).
 
+This skill follows the **invariant Spec-Driven Development Flow** (see CLAUDE.md):
+Spec > Wave > Task. Self-review is mandatory for all sizes. Call `dossier action=complete`
+when all TDD cycles are done.
+
 - For TDD cycle details and gate criteria, see [cycle.md](cycle.md)
 
 ## Red Flags
