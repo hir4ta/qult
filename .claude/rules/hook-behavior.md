@@ -31,11 +31,11 @@ paths:
 ## PostToolUse
 - Bash error detection → FTS5 knowledge search → additionalContext injection
 - Bash success → session.md Next Steps auto-check (command + action signals matching + file-based matching via git diff)
-- Exploration detection: consecutive Read/Grep calls tracked via /tmp counter; at 5+ calls without active spec → survey suggestion. Non-Read/Grep tool resets counter
+- Exploration detection: consecutive Read/Grep calls tracked via .alfred/.state/explore-count; at 5+ calls without active spec → survey suggestion. Non-Read/Grep tool resets counter
 
-## PostToolUse — Living Spec (hooks_autoappend.go)
-- git commit → extractChangedFiles (shared, called once) → shouldAutoAppend filter (.go only, excludes _test/_gen/.pb/_mock/_string/vendor/plugin/.alfred) → matchComponentByPackage → appendFileToComponent (design.md, flock-protected, `<!-- auto-added: ISO8601 -->` marker) → audit.jsonl (living-spec.update)
-- Auto-appended files excluded from drift warnings
+## PostToolUse — Living Spec (src/hooks/living-spec.ts)
+- git commit → extractChangedFiles (git diff --name-only HEAD~1, 500ms timeout) → shouldAutoAppend filter (multi-lang: JS/TS/Python/Go/Ruby, excludes test/gen/mock/vendor/dist/plugin/.alfred) → matchComponent (directory prefix match against design.md component sections) → appendFileToComponent (design.md, `<!-- auto-added: ISO8601 -->` marker) → audit.jsonl (living-spec.update)
+- Language config: `src/hooks/lang-filter.ts` — per-language extension + exclusion patterns, shared DIR_EXCLUSIONS
 
 ## PostToolUse — Drift Detection
 - extractChangedFiles (git diff --name-only HEAD~1, 500ms timeout, fail-open) → parseSpecFileRefs (design.md File: + tasks.md Files:) → matchComponentByPackage → reverseMapFileToFR → compare → additionalContext warning + audit.jsonl
@@ -55,6 +55,7 @@ paths:
 ## Stop (review gate)
 - Blocks stopping when review-gate is active (before existing Next Steps / self-review checks)
 - DEC-4: stop_hook_active=true overrides gate blocking (infinite loop prevention)
+- CONTEXT reminders use `systemMessage` (not hookSpecificOutput — Stop schema doesn't support hookEventName)
 
 ## Misc
 - Background embedding: embed-async/embed-doc subcommands for async Voyage API calls

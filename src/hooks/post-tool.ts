@@ -111,6 +111,14 @@ async function handleBashResult(
 		autoCheckNextSteps(ev.cwd!, `${stdout}\n${commandStr}`);
 
 		if (isGitCommit(stdout) && !signal.aborted) {
+			// Living Spec auto-append: track new source files in design.md.
+			try {
+				const { handleLivingSpec } = await import("./living-spec.js");
+				handleLivingSpec(ev.cwd!);
+			} catch {
+				/* fail-open */
+			}
+
 			// FR-7: Proactive conflict warning after git commit.
 			await checkKnowledgeConflicts(items);
 

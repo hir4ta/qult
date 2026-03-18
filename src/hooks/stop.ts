@@ -1,4 +1,3 @@
-import { emitAdditionalContext } from "./dispatcher.js";
 import type { HookEvent } from "./dispatcher.js";
 import { isGateActive } from "./review-gate.js";
 import {
@@ -46,9 +45,7 @@ export async function stop(ev: HookEvent): Promise<void> {
 
 	reminders.push("When done, call `dossier action=complete` to close the spec");
 
-	// Emit as CONTEXT (informational, non-blocking).
-	emitAdditionalContext(
-		"Stop",
-		`[CONTEXT] Spec '${spec.slug}' reminders: ${reminders.join("; ")}`,
-	);
+	// Emit as systemMessage (Stop hooks don't support hookSpecificOutput).
+	const msg = `[CONTEXT] Spec '${spec.slug}' reminders: ${reminders.join("; ")}`;
+	process.stdout.write(`${JSON.stringify({ systemMessage: msg })}\n`);
 }
