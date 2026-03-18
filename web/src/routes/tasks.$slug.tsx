@@ -288,8 +288,9 @@ function SpecContentViewer({ content, file }: { content: string; file: string })
 						prose-td:px-2 prose-td:py-1 prose-td:border prose-td:border-border
 						prose-code:text-xs prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-foreground
 						prose-pre:p-0 prose-pre:bg-muted/50 prose-pre:text-foreground prose-pre:rounded-lg
-						[&_table]:block [&_table]:overflow-x-auto [&_table]:w-full
-						[&_pre_code]:bg-transparent [&_pre_code]:p-3 [&_pre_code]:block [&_pre_code]:text-[11px] [&_pre_code]:leading-relaxed">
+						[&_table]:w-full [&_table]:table-fixed
+						[&_td]:break-words [&_th]:break-words
+						[&_pre_code]:bg-transparent [&_pre_code]:p-3 [&_pre_code]:block [&_pre_code]:text-[11px] [&_pre_code]:leading-relaxed [&_pre_code]:whitespace-pre-wrap [&_pre_code]:break-words">
 						{content ? (
 							<Markdown
 								components={{

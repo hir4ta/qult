@@ -57,23 +57,44 @@ export function createApp(
     try {
       const state = readActiveState(projectPath);
       const enriched = state.tasks.map(task => {
-        const detail: Record<string, unknown> = { ...task };
+        const detail: Record<string, unknown> = {
+          ...task,
+          project_name: proj.name,
+        };
 
         // Enrich from session.md.
         const sd = new SpecDir(projectPath, task.slug);
         try {
           const session = sd.readFile('session.md');
 
-          // Extract "Currently Working On" section.
-          const focusMatch = session.match(/## Currently Working On\s*\n([\s\S]*?)(?=\n##|\n$|$)/);
-          if (focusMatch?.[1]?.trim()) {
-            detail.focus = focusMatch[1].trim().split('\n')[0]!.trim();
+          // Extract "Currently Working On" — first non-empty, non-heading line after the heading.
+          const lines = session.split('\n');
+          let inFocus = false;
+          for (const line of lines) {
+            if (line.startsWith('## Currently Working On')) { inFocus = true; continue; }
+            if (inFocus) {
+              if (line.startsWith('## ')) break;
+              const trimmed = line.trim();
+              if (trimmed && !trimmed.startsWith('<!--')) {
+                detail.focus = trimmed;
+                break;
+              }
+            }
           }
 
-          // Parse Next Steps checkboxes.
-          const steps = session.match(/^- \[[ x]\] .+$/gm);
-          if (steps) {
-            const nextSteps = steps.map(s => ({
+          // Parse Next Steps checkboxes — only from ## Next Steps section.
+          let inNextSteps = false;
+          const stepLines: string[] = [];
+          for (const line of lines) {
+            if (line.startsWith('## Next Steps')) { inNextSteps = true; continue; }
+            if (inNextSteps) {
+              if (line.startsWith('## ')) break;
+              if (line.match(/^- \[[ x]\] /)) stepLines.push(line);
+            }
+          }
+
+          if (stepLines.length > 0) {
+            const nextSteps = stepLines.map(s => ({
               text: s.replace(/^- \[[ x]\] /, ''),
               done: s.startsWith('- [x]'),
             }));
@@ -91,9 +112,9 @@ export function createApp(
 
         return detail;
       });
-      return c.json({ active: state.primary, tasks: enriched });
+      return c.json({ active: state.primary, tasks: enriched, project_name: proj.name });
     } catch {
-      return c.json({ active: '', tasks: [] });
+      return c.json({ active: '', tasks: [], project_name: proj.name });
     }
   });
 

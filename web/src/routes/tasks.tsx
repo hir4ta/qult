@@ -48,7 +48,7 @@ function TaskListCard({ task, isActive, colorIndex }: { task: TaskDetail; isActi
 	const accentColor = `rgb(${c.r},${c.g},${c.b})`;
 
 	return (
-		<Link to="/tasks/$slug" params={{ slug: task.slug }}>
+		<Link to="/tasks/$slug" params={{ slug: task.slug }} className="block">
 			<Card
 				className={cn(
 					"!gap-0 !py-0 transition-all hover:shadow-sm cursor-pointer",
@@ -79,6 +79,9 @@ function TaskListCard({ task, isActive, colorIndex }: { task: TaskDetail; isActi
 					</div>
 				</CardHeader>
 				<CardContent className="p-3 pt-0 space-y-1.5">
+					{task.project_name && (
+						<p className="text-[10px] font-medium" style={{ color: "#40513b" }}>{task.project_name}</p>
+					)}
 					{task.focus && (
 						<p className="text-[11px] text-muted-foreground line-clamp-1">{task.focus}</p>
 					)}

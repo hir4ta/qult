@@ -31,6 +31,7 @@ export interface TaskDetail {
 	size?: string;
 	spec_type?: string;
 	review_status?: string;
+	project_name?: string;
 }
 
 export interface SpecEntry {

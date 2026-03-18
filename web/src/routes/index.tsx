@@ -142,7 +142,7 @@ function TaskCard({ task, isActive, colorIndex }: { task: TaskDetail; isActive: 
 	const accentColor = `rgb(${c.r},${c.g},${c.b})`;
 
 	return (
-		<Link to="/tasks/$slug" params={{ slug: task.slug }}>
+		<Link to="/tasks/$slug" params={{ slug: task.slug }} className="block">
 			<Card
 				className={cn(
 					"h-[140px] !gap-0 !py-0 border-stone-200 transition-all hover:shadow-md hover:border-stone-300 dark:border-stone-700 dark:hover:border-stone-600",
@@ -180,6 +180,9 @@ function TaskCard({ task, isActive, colorIndex }: { task: TaskDetail; isActive: 
 
 					{/* Focus + shimmer */}
 					<div className="flex-1 flex flex-col justify-center gap-1">
+						{task.project_name && (
+							<p className="text-[10px] font-medium" style={{ color: accentColor }}>{task.project_name}</p>
+						)}
 						{task.focus && (
 							<p className="text-[11px] text-muted-foreground line-clamp-1">{task.focus}</p>
 						)}
