@@ -123,40 +123,42 @@ function TaskDetailPage() {
 
 			<Separator />
 
-			{/* Spec files as tabs — full width */}
-			{specs.length > 0 ? (
-				<Tabs value={activeFile ?? ""} onValueChange={(v) => { setSelectedFile(v); setReviewMode(false); }}>
-					<TabsList className="flex-wrap h-auto gap-1 mb-3">
-						{specs.map((spec) => (
-							<TabsTrigger key={spec.file} value={spec.file} className="text-xs px-2.5 py-1">
-								{spec.file.replace(".md", "")}
-							</TabsTrigger>
-						))}
-					</TabsList>
-
+			{/* File list (left) + Spec viewer (right) */}
+			<div className="flex gap-4">
+				<div className="w-40 shrink-0 space-y-1">
 					{specs.map((spec) => (
-						<TabsContent key={spec.file} value={spec.file}>
-							{reviewMode && isPending ? (
-								<ReviewPanel
-									slug={slug}
-									reviewStatus={task.review_status ?? "pending"}
-									specContent={spec.file === activeFile ? content : ""}
-									currentFile={spec.file}
-								/>
-							) : (
-								<SpecContentViewer
-									content={spec.file === activeFile ? content : ""}
-									file={spec.file}
-								/>
-							)}
-						</TabsContent>
+						<button
+							type="button"
+							key={spec.file}
+							onClick={() => { setSelectedFile(spec.file); setReviewMode(false); }}
+							className={`w-full rounded-md px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-accent ${
+								activeFile === spec.file ? "bg-accent font-medium" : ""
+							}`}
+						>
+							{spec.file.replace(".md", "")}
+						</button>
 					))}
-				</Tabs>
-			) : (
-				<div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-stone-200">
-					<p className="text-sm text-muted-foreground">No spec files.</p>
+					{specs.length === 0 && <p className="text-xs text-muted-foreground">No spec files.</p>}
 				</div>
-			)}
+				<div className="min-w-0 flex-1">
+					{activeFile ? (
+						reviewMode && isPending ? (
+							<ReviewPanel
+								slug={slug}
+								reviewStatus={task.review_status ?? "pending"}
+								specContent={content}
+								currentFile={activeFile}
+							/>
+						) : (
+							<SpecContentViewer content={content} file={activeFile} />
+						)
+					) : (
+						<div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-stone-200">
+							<p className="text-sm text-muted-foreground">Select a spec file to view.</p>
+						</div>
+					)}
+				</div>
+			</div>
 		</div>
 	);
 }
