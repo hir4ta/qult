@@ -27,6 +27,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { BookOpen, Eye, EyeOff, Flame, Gavel, Lightbulb, Search, Shield } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import Markdown from "react-markdown";
 
 export const Route = createFileRoute("/knowledge")({
 	component: KnowledgePage,
@@ -290,7 +291,12 @@ function KnowledgeDialog({
 					<DialogDescription asChild>
 						<div className="flex items-center gap-4 text-xs text-muted-foreground mt-1">
 							<span>Saved {formatDate(entry.saved_at ?? "")}</span>
-							<span>{entry.hit_count} hits</span>
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<span className="cursor-help tabular-nums">{entry.hit_count} hits</span>
+								</TooltipTrigger>
+								<TooltipContent>検索結果に表示された回数 (5+: pattern昇格候補, 15+: rule昇格候補)</TooltipContent>
+							</Tooltip>
 							<Badge
 								variant="outline"
 								className="text-[10px] px-1.5 py-0 rounded-full"
@@ -324,22 +330,14 @@ function KnowledgeDialog({
 				<Separator />
 
 				<ScrollArea className="flex-1 -mx-6 px-6">
-					{fields.length > 0 ? (
-						<div className="space-y-4 py-3">
-							{fields.map((f) => (
-								<div key={f.key}>
-									<p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
-										{f.key}
-									</p>
-									<p className="text-sm leading-relaxed">{f.value}</p>
-								</div>
-							))}
-						</div>
-					) : (
-						<pre className="whitespace-pre-wrap break-words text-sm leading-relaxed font-sans py-3">
-							{cleanContent(entry.content)}
-						</pre>
-					)}
+					<div className="prose prose-sm prose-stone dark:prose-invert max-w-none py-3
+						prose-headings:text-sm prose-headings:font-semibold
+						prose-p:text-sm prose-p:leading-relaxed prose-p:my-1
+						prose-li:text-sm prose-li:my-0.5
+						prose-code:text-xs prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded
+						prose-strong:font-semibold">
+						<Markdown>{cleanContent(entry.content)}</Markdown>
+					</div>
 				</ScrollArea>
 			</DialogContent>
 		</Dialog>
@@ -364,9 +362,16 @@ function cleanContent(content: string): string {
 			(l) =>
 				!l.startsWith("# ") &&
 				!l.startsWith("## ") &&
-				!l.startsWith("<!-- confidence") &&
+				!l.startsWith("<!-- ") &&
 				!l.match(/^-\s*\*\*Status\*\*/),
 		)
+		.map((l) => {
+			// Convert bare `- content` (single item, not a list) to plain text.
+			if (l.match(/^-\s+/) && !l.match(/^-\s+\*\*/)) {
+				return l.replace(/^-\s+/, "");
+			}
+			return l;
+		})
 		.join("\n")
 		.trim();
 }

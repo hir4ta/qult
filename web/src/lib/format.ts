@@ -31,7 +31,7 @@ export function formatDate(iso: string): string {
 	}
 }
 
-// Truncate content for preview, stripping markdown headers and annotations.
+// Truncate content for preview, stripping markdown headers, annotations, and list markers.
 export function contentPreview(content: string, maxLen = 120): string {
 	const lines = content.split("\n");
 	const useful = lines
@@ -42,8 +42,10 @@ export function contentPreview(content: string, maxLen = 120): string {
 				!l.startsWith("- **Status**") &&
 				l.trim().length > 0,
 		)
+		.map((l) => l.replace(/^-\s+/, ""))
 		.join(" ")
 		.replace(/\*\*([^*]+)\*\*/g, "$1")
+		.replace(/`([^`]+)`/g, "$1")
 		.replace(/\s+/g, " ")
 		.trim();
 	return useful.length > maxLen ? `${useful.slice(0, maxLen)}...` : useful;

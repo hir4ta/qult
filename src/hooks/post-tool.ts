@@ -11,7 +11,7 @@ import { extractSection } from './dispatcher.js';
 import type { DirectiveItem } from './directives.js';
 import { emitDirectives } from './directives.js';
 import { detectProject } from '../store/project.js';
-import { upsertKnowledge } from '../store/knowledge.js';
+import { upsertKnowledge, getPromotionCandidates, promoteSubType } from '../store/knowledge.js';
 import type { KnowledgeRow } from '../types.js';
 
 const EXPLORE_COUNTER_PATH = join(tmpdir(), 'alfred-explore-count');
@@ -333,5 +333,15 @@ function saveKnowledgeOnCommit(projectPath: string): void {
       createdAt: '', updatedAt: '', hitCount: 0, lastAccessed: '', enabled: true,
     };
     upsertKnowledge(store, row);
+  } catch { /* fail-open */ }
+
+  // 3. Auto-promote eligible knowledge (general→pattern at 5+ hits, pattern→rule at 15+).
+  try {
+    const candidates = getPromotionCandidates(store);
+    for (const c of candidates) {
+      const newType = c.subType === 'general' ? 'pattern' : 'rule';
+      promoteSubType(store, c.id, newType);
+      notifyUser("auto-promoted knowledge '%s' to %s (%d hits)", c.title, newType, c.hitCount);
+    }
   } catch { /* fail-open */ }
 }
