@@ -25,7 +25,7 @@ import { SUB_TYPE_COLORS } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { BookOpen, Eye, EyeOff, Flame, Gavel, Lightbulb, Search, Shield } from "lucide-react";
+import { Archive, ArchiveRestore, BookOpen, Flame, Gavel, Lightbulb, Search, Shield } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 
@@ -226,10 +226,10 @@ function KnowledgeCard({
 									}}
 									className="text-muted-foreground hover:text-foreground transition-colors"
 								>
-									{entry.enabled ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+									{entry.enabled ? <Archive className="size-3.5" /> : <ArchiveRestore className="size-3.5" />}
 								</button>
 							</TooltipTrigger>
-							<TooltipContent>{entry.enabled ? "Disable" : "Enable"}</TooltipContent>
+							<TooltipContent>{entry.enabled ? "Archive (exclude from search)" : "Restore to search"}</TooltipContent>
 						</Tooltip>
 					</div>
 				</div>
@@ -295,17 +295,17 @@ function KnowledgeDialog({
 								<TooltipTrigger asChild>
 									<span className="cursor-help tabular-nums">{entry.hit_count} hits</span>
 								</TooltipTrigger>
-								<TooltipContent>検索結果に表示された回数 (5+: pattern昇格候補, 15+: rule昇格候補)</TooltipContent>
+								<TooltipContent>Search result appearances (5+: pattern candidate, 15+: rule candidate)</TooltipContent>
 							</Tooltip>
 							<Badge
 								variant="outline"
 								className="text-[10px] px-1.5 py-0 rounded-full"
 								style={{
-									borderColor: entry.enabled ? "rgba(45,139,122,0.3)" : "rgba(192,57,43,0.3)",
-									color: entry.enabled ? "#2d8b7a" : "#c0392b",
+									borderColor: entry.enabled ? "rgba(45,139,122,0.3)" : "rgba(107,114,128,0.3)",
+									color: entry.enabled ? "#2d8b7a" : "#6b7280",
 								}}
 							>
-								{entry.enabled ? "Active" : "Disabled"}
+								{entry.enabled ? "Active" : "Archived"}
 							</Badge>
 							<Button
 								size="sm"
@@ -315,11 +315,11 @@ function KnowledgeDialog({
 							>
 								{entry.enabled ? (
 									<>
-										<EyeOff className="size-3.5" /> Disable
+										<Archive className="size-3.5" /> Archive
 									</>
 								) : (
 									<>
-										<Eye className="size-3.5" /> Enable
+										<ArchiveRestore className="size-3.5" /> Restore
 									</>
 								)}
 							</Button>
