@@ -2,7 +2,7 @@ import { ReviewPanel } from "@/components/review/ReviewPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
+
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -51,8 +51,6 @@ function TaskDetailPage() {
 	if (!task) {
 		return <p className="text-sm text-muted-foreground">Task not found.</p>;
 	}
-
-	const firstUncheckedIdx = task.next_steps?.findIndex((s) => !s.done) ?? -1;
 
 	return (
 		<div className="space-y-4">
@@ -113,75 +111,22 @@ function TaskDetailPage() {
 
 			<Separator />
 
-			{/* Main content: Next Steps (left) + Spec viewer (right) */}
-			<div className="flex gap-5">
-				{/* Left column: Next Steps + File list */}
-				<div className="w-56 shrink-0 space-y-4">
-					{/* Next Steps */}
-					{task.next_steps && task.next_steps.length > 0 && (
-						<div className="space-y-1">
-							<p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-								Next Steps
-							</p>
-							{task.next_steps.map((step, i) => {
-								const isCurrent = i === firstUncheckedIdx;
-								return (
-									<div
-										key={`step-${i}`}
-										className={cn(
-											"relative flex items-start gap-2 rounded-md px-2 py-1 transition-colors",
-											isCurrent && "overflow-hidden",
-										)}
-									>
-										{isCurrent && (
-											<div
-												className="absolute inset-0 animate-shimmer"
-												style={{
-													background:
-														"linear-gradient(90deg, rgba(45,139,122,0.03) 0%, rgba(45,139,122,0.10) 50%, rgba(45,139,122,0.03) 100%)",
-													backgroundSize: "200% 100%",
-												}}
-											/>
-										)}
-										<Checkbox checked={step.done} className="relative mt-0.5" />
-										<span
-											className={cn(
-												"relative text-[11px] leading-relaxed",
-												step.done && "line-through text-muted-foreground",
-												isCurrent && "font-medium",
-											)}
-										>
-											{step.text}
-										</span>
-									</div>
-								);
-							})}
-						</div>
+			{/* File tabs + Spec viewer — full width */}
+			<div className="flex gap-4">
+				<div className="w-44 shrink-0 space-y-1">
+					<SpecFileList specs={specs} selected={selectedFile} onSelect={setSelectedFile} />
+					{selectedFile && task.review_status === "pending" && (
+						<Button
+							size="sm"
+							variant="outline"
+							className="w-full gap-1.5 text-xs mt-2"
+							onClick={() => setMode(mode === "review" ? "view" : "review")}
+						>
+							<MessageSquareText className="h-3.5 w-3.5" />
+							{mode === "review" ? "Exit Review" : "Review"}
+						</Button>
 					)}
-
-					<Separator />
-
-					{/* File list */}
-					<div className="space-y-1">
-						<p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-							Spec Files
-						</p>
-						<SpecFileList specs={specs} selected={selectedFile} onSelect={setSelectedFile} />
-						{selectedFile && task.review_status === "pending" && (
-							<Button
-								size="sm"
-								variant="outline"
-								className="w-full gap-1.5 text-xs mt-2"
-								onClick={() => setMode(mode === "review" ? "view" : "review")}
-							>
-								<MessageSquareText className="h-3.5 w-3.5" />
-								{mode === "review" ? "Exit Review" : "Review"}
-							</Button>
-						)}
-					</div>
 				</div>
-
-				{/* Right column: Spec content */}
 				<div className="min-w-0 flex-1">
 					{selectedFile && (
 						<Tabs value={mode} onValueChange={(v) => setMode(v as "view" | "review")}>
