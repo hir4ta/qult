@@ -64,7 +64,8 @@ export async function runHook(event: string): Promise<void> {
     return; // fail-open
   }
 
-  if (ev.stop_hook_active) return;
+  // stop_hook_active: skip non-enforcement events only. Stop + PreToolUse must still run.
+  if (ev.stop_hook_active && event !== 'Stop' && event !== 'PreToolUse') return;
 
   if (ev.cwd) {
     ev.cwd = resolve(ev.cwd);
@@ -75,6 +76,8 @@ export async function runHook(event: string): Promise<void> {
     PreCompact: 9000,
     UserPromptSubmit: 9000,
     PostToolUse: 5000,
+    PreToolUse: 4500,
+    Stop: 4500,
   };
   const timeout = timeouts[event] ?? 5000;
   const controller = new AbortController();
@@ -93,6 +96,12 @@ export async function runHook(event: string): Promise<void> {
         break;
       case 'PostToolUse':
         await handlePostToolUse(ev, controller.signal);
+        break;
+      case 'PreToolUse':
+        await handlePreToolUse(ev, controller.signal);
+        break;
+      case 'Stop':
+        await handleStop(ev, controller.signal);
         break;
     }
   } finally {
@@ -120,4 +129,14 @@ async function handleUserPromptSubmit(ev: HookEvent, signal: AbortSignal): Promi
 async function handlePostToolUse(ev: HookEvent, signal: AbortSignal): Promise<void> {
   const { postToolUse } = await import('./post-tool.js');
   await postToolUse(ev, signal);
+}
+
+async function handlePreToolUse(ev: HookEvent, _signal: AbortSignal): Promise<void> {
+  const { preToolUse } = await import('./pre-tool.js');
+  await preToolUse(ev);
+}
+
+async function handleStop(ev: HookEvent, _signal: AbortSignal): Promise<void> {
+  const { stop } = await import('./stop.js');
+  await stop(ev);
 }
