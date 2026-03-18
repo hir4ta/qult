@@ -86,9 +86,12 @@ node dist/cli.mjs version     # Show version
 
 - DB schema V8: knowledge-first architecture (any pre-V8 DB rebuilt from scratch)
 - Tables: knowledge_index (knowledge entries), embeddings (vector search), knowledge_fts (FTS5), tag_aliases (search expansion), session_links (compaction continuity)
-- Knowledge architecture: `.alfred/knowledge/*.md` (Markdown+frontmatter) = source of truth; DB = derived search index (rebuildable)
+- Knowledge architecture: `.alfred/knowledge/{decisions,patterns,rules}/*.json` (mneme-compatible JSON) = source of truth; DB = derived search index (rebuildable)
+- Knowledge types: decision (one-time choice + reasoning + alternatives), pattern (repeatable practice + conditions + outcomes), rule (enforceable standard + priority + rationale). `general` abolished, `snapshot` is internal-only (search excluded)
+- Knowledge file write: atomic (temp + rename). writeKnowledgeFile() shared by ledger save + dossier complete
+- ALFRED_LANG: controls knowledge content language (default: en). Passed in ledger/dossier responses as `lang` field for LLM language selection
 - Project identification: project_remote (git remote URL) + project_path (directory) + branch; UNIQUE constraint on (project_remote, project_path, file_path)
-- SessionStart sync: scans `.alfred/knowledge/` → content_hash comparison → indexes new/changed files
+- SessionStart sync: walks `.alfred/knowledge/{decisions,patterns,rules}/*.json` → JSON.parse → content_hash comparison → upsert. Legacy .md fallback retained
 - Store.DB() is test-only; production code uses Store methods (no raw SQL outside internal/store)
 - @.claude/rules/store-internals.md (vector search, SQL safety patterns)
 
@@ -150,11 +153,11 @@ node dist/cli.mjs version     # Show version
 
 ### Knowledge & Search
 
-- Knowledge persistence: `.alfred/knowledge/` (Markdown+frontmatter) = source of truth; DB `knowledge_index` = derived search index
-- Knowledge file format: YAML frontmatter (id, type, status, created_at, tags) + Markdown body (sections with ## headings)
-- Sub-type classification: general/decision/pattern/rule; boost: rule=2.0x, decision=1.5x, pattern=1.3x, general=1.0x
+- Knowledge persistence: `.alfred/knowledge/{decisions,patterns,rules}/*.json` = source of truth; DB `knowledge_index` = derived search index
+- Knowledge file format: JSON (mneme-compatible schemas: DecisionEntry, PatternEntry, RuleEntry)
+- Sub-type classification: decision/pattern/rule (general abolished); boost: rule=2.0x, decision=1.5x, pattern=1.3x
 - Knowledge maturity: hit_count tracks search appearances, last_accessed for staleness
-- Knowledge promotion: general→pattern (5+ hits), pattern→rule (15+ hits); manual confirmation via ledger promote
+- Knowledge promotion: pattern→rule (15+ hits); manual confirmation via ledger promote
 - Ledger tool actions: search, save, promote, candidates, reflect, audit-conventions
 - Search pipeline: Voyage vector search → rerank → recency signal → hit_count tracking → FTS5 fallback → keyword fallback. Returns ScoredDoc[] with per-doc score + matchReason
 - FTS5: knowledge_fts virtual table with bm25 ranking, auto-synced via triggers (title weighted 3x)

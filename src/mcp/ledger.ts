@@ -1,4 +1,5 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, renameSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Store } from '../store/index.js';
 import type { Embedder } from '../embedder/index.js';
@@ -159,14 +160,41 @@ function toLang(): string {
 }
 
 function toKebabId(prefix: string, title: string): string {
-  const slug = title
+  // Try ASCII slug first; fall back to hash for non-ASCII titles.
+  const ascii = title
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, '')
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
     .slice(0, 50)
     .replace(/-$/, '');
-  return `${prefix}-${slug || 'untitled'}`;
+  if (ascii.length >= 3) return `${prefix}-${ascii}`;
+  // Non-ASCII fallback: use short hash of original title.
+  const { createHash } = require('node:crypto') as typeof import('node:crypto');
+  const hash = createHash('sha256').update(title).digest('hex').slice(0, 12);
+  return `${prefix}-${hash}`;
+}
+
+/**
+ * Atomic write: write to temp file then rename (POSIX atomic).
+ */
+function atomicWriteSync(filePath: string, data: string): void {
+  const tmp = filePath + '.tmp.' + process.pid;
+  writeFileSync(tmp, data);
+  renameSync(tmp, filePath);
+}
+
+/**
+ * Write knowledge entry JSON to .alfred/knowledge/{type}/{id}.json.
+ * Exported for use by dossier saveDecisionsAsKnowledge.
+ */
+export function writeKnowledgeFile(projectPath: string, subType: string, id: string, entry: unknown): string {
+  const typeDir = subType === 'decision' ? 'decisions' : subType === 'pattern' ? 'patterns' : 'rules';
+  const knowledgeDir = join(projectPath, '.alfred', 'knowledge', typeDir);
+  mkdirSync(knowledgeDir, { recursive: true });
+  const filePath = join(typeDir, `${id}.json`);
+  atomicWriteSync(join(projectPath, '.alfred', 'knowledge', filePath), JSON.stringify(entry, null, 2) + '\n');
+  return filePath;
 }
 
 function parseTags(tagsStr: string | undefined): string[] {
@@ -238,13 +266,9 @@ async function ledgerSave(store: Store, emb: Embedder | null, params: LedgerPara
       return errorResult('sub_type must be decision, pattern, or rule');
   }
 
-  // Write JSON file to .alfred/knowledge/{type}/{id}.json
+  // Write JSON file to .alfred/knowledge/{type}/{id}.json (atomic).
   const projectPath = params.project_path ?? process.cwd();
-  const typeDir = subType === 'decision' ? 'decisions' : subType === 'pattern' ? 'patterns' : 'rules';
-  const knowledgeDir = join(projectPath, '.alfred', 'knowledge', typeDir);
-  mkdirSync(knowledgeDir, { recursive: true });
-  const filePath = join(typeDir, `${id}.json`);
-  writeFileSync(join(projectPath, '.alfred', 'knowledge', filePath), JSON.stringify(entry, null, 2) + '\n');
+  const filePath = writeKnowledgeFile(projectPath, subType, id, entry);
 
   // DB upsert for search index.
   const projInfo = detectProject(projectPath);

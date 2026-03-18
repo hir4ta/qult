@@ -93,7 +93,7 @@ Actions:
       // Decision fields
       decision: z.string().optional().describe('Decision: what was decided'),
       reasoning: z.string().optional().describe('Decision: why this choice'),
-      alternatives: z.string().optional().describe('Decision: comma-separated rejected alternatives with reasons'),
+      alternatives: z.string().optional().describe('Decision: newline-separated rejected alternatives with reasons'),
       context_text: z.string().optional().describe('Decision/Pattern: context or background'),
       // Pattern fields
       pattern_type: z.enum(['good', 'bad', 'error-solution']).optional().describe('Pattern: type'),

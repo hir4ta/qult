@@ -13,6 +13,7 @@ import { initSpec } from '../spec/init.js';
 import { appendAudit } from '../spec/audit.js';
 import { syncTaskStatus, unlinkTaskFromAllEpics } from '../epic/index.js';
 import { searchPipeline, truncate } from './helpers.js';
+import { writeKnowledgeFile } from './ledger.js';
 import { upsertKnowledge } from '../store/knowledge.js';
 import { detectProject } from '../store/project.js';
 import type { KnowledgeRow, DecisionEntry } from '../types.js';
@@ -528,9 +529,11 @@ function saveDecisionsAsKnowledge(store: Store, projectPath: string, taskSlug: s
           lang,
         };
 
+        // Write JSON file to disk (source of truth).
+        const filePath = writeKnowledgeFile(projectPath, 'decision', entry.id, entry);
+
         const row: KnowledgeRow = {
-          id: 0,
-          filePath: `decisions/${entry.id}.json`,
+          id: 0, filePath,
           contentHash: '', title,
           content: JSON.stringify(entry),
           subType: 'decision',

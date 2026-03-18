@@ -145,8 +145,7 @@ function StatsBar({
 					<StatDot count={stats.bySubType.decision ?? 0} color={SUB_TYPE_COLORS.decision!} />
 					<StatDot count={stats.bySubType.pattern ?? 0} color={SUB_TYPE_COLORS.pattern!} />
 					<StatDot count={stats.bySubType.rule ?? 0} color={SUB_TYPE_COLORS.rule!} />
-					<StatDot count={stats.bySubType.general ?? 0} color={SUB_TYPE_COLORS.general!} />
-				</>
+					</>
 			)}
 		</div>
 	);
@@ -165,16 +164,14 @@ const SUB_TYPE_ICONS: Record<string, React.ReactNode> = {
 	rule: <Shield className="size-3.5" />,
 	decision: <Gavel className="size-3.5" />,
 	pattern: <Lightbulb className="size-3.5" />,
-	general: <BookOpen className="size-3.5" />,
-	project: <Flame className="size-3.5" />,
+	snapshot: <BookOpen className="size-3.5" />,
 };
 
 const SUB_TYPE_LABELS: Record<string, string> = {
 	rule: "Rule",
 	decision: "Decision",
 	pattern: "Pattern",
-	general: "General",
-	project: "Project",
+	snapshot: "Snapshot",
 };
 
 function KnowledgeCard({
@@ -185,9 +182,9 @@ function KnowledgeCard({
 	onSelect: () => void;
 }) {
 	const { title, source } = formatLabel(entry.label);
-	const color = SUB_TYPE_COLORS[entry.sub_type] ?? SUB_TYPE_COLORS.general!;
+	const color = SUB_TYPE_COLORS[entry.sub_type] ?? SUB_TYPE_COLORS.snapshot!;
 	const toggleMutation = useToggleEnabledMutation();
-	const icon = SUB_TYPE_ICONS[entry.sub_type] ?? SUB_TYPE_ICONS.general;
+	const icon = SUB_TYPE_ICONS[entry.sub_type] ?? SUB_TYPE_ICONS.snapshot;
 
 	return (
 		<Card
@@ -262,8 +259,8 @@ function KnowledgeDialog({
 	if (!entry) return null;
 
 	const { title, source } = formatLabel(entry.label);
-	const color = SUB_TYPE_COLORS[entry.sub_type] ?? SUB_TYPE_COLORS.general!;
-	const icon = SUB_TYPE_ICONS[entry.sub_type] ?? SUB_TYPE_ICONS.general;
+	const color = SUB_TYPE_COLORS[entry.sub_type] ?? SUB_TYPE_COLORS.snapshot!;
+	const icon = SUB_TYPE_ICONS[entry.sub_type] ?? SUB_TYPE_ICONS.snapshot;
 	const fields = parseDecisionFields(entry.content);
 	const toggleMutation = useToggleEnabledMutation();
 

@@ -199,6 +199,5 @@ export const SUB_TYPE_COLORS: Record<string, string> = {
 	decision: "#628141",
 	pattern: "#2d8b7a",
 	rule: "#e67e22",
-	general: "#8b7d6b",
-	project: "#40513b",
+	snapshot: "#8b7d6b",
 } as const;
