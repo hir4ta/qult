@@ -48,42 +48,6 @@ export function extractDecisions(content: string, taskSlug: string, lang: string
 	return entries;
 }
 
-// --- Pattern extraction from design.md Components section ---
-
-export function extractPatterns(content: string, taskSlug: string, lang: string): PatternEntry[] {
-	const entries: PatternEntry[] = [];
-	const now = new Date().toISOString();
-
-	const compIdx = content.indexOf("## Components");
-	if (compIdx === -1) return entries;
-	const compSection = content.slice(compIdx);
-	const nextSection = compSection.indexOf("\n## ", 3);
-	const body = nextSection === -1 ? compSection : compSection.slice(0, nextSection);
-
-	const compRegex = /###\s+(?:C\d+:\s*)?(.+?)(?:\s*\(.*?\))?\n([\s\S]*?)(?=\n###|\n##|$)/g;
-	let match: RegExpExecArray | null;
-	while ((match = compRegex.exec(body)) !== null) {
-		const compName = match[1]!.trim();
-		const compBody = match[2]!.trim();
-		if (!compName || compBody.length < 20) continue;
-
-		entries.push({
-			id: `pat-spec-${taskSlug}-${compName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-+$/, "").slice(0, 40)}`,
-			type: "good",
-			title: `${compName} (from ${taskSlug})`,
-			context: `Architectural pattern used in task ${taskSlug}`,
-			pattern: truncate(compBody, 500),
-			applicationConditions: `When building similar ${compName.toLowerCase()} components`,
-			expectedOutcomes: "Consistent architecture following established patterns",
-			tags: [taskSlug, "architecture"],
-			createdAt: now,
-			status: "approved",
-			lang,
-		});
-	}
-	return entries;
-}
-
 // --- Review findings extraction from tool_response text ---
 
 const SEVERITY_PATTERNS = [

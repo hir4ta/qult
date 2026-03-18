@@ -57,7 +57,7 @@ export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<v
 		const filePath = typeof input.file_path === "string" ? input.file_path : "";
 		if (filePath) {
 			autoCheckNextSteps(ev.cwd!, filePath);
-			autoCheckTasks(ev.cwd!, filePath);
+			autoCheckTasks(ev.cwd!, filePath, items);
 		}
 		// Track worked slug for session-scoped Stop hook reminders.
 		try {
@@ -116,7 +116,7 @@ async function handleBashResult(
 				? ((ev.tool_input as { command?: string }).command ?? "")
 				: "";
 		autoCheckNextSteps(ev.cwd!, `${stdout}\n${commandStr}`);
-		autoCheckTasks(ev.cwd!, `${stdout}\n${commandStr}`);
+		autoCheckTasks(ev.cwd!, `${stdout}\n${commandStr}`, items);
 
 		if (isGitCommit(stdout) && !signal.aborted) {
 			// Living Spec auto-append: track new source files in design.md.
@@ -168,7 +168,7 @@ async function searchErrorContext(
  * Auto-check tasks.md checkboxes when implementation matches task descriptions.
  * Uses word matching (like autoCheckNextSteps) plus file path matching for backtick-quoted paths.
  */
-function autoCheckTasks(projectPath: string, stdout: string): void {
+function autoCheckTasks(projectPath: string, stdout: string, items: DirectiveItem[]): void {
 	try {
 		const taskSlug = readActive(projectPath);
 		const sd = new SpecDir(projectPath, taskSlug);
@@ -196,12 +196,11 @@ function autoCheckTasks(projectPath: string, stdout: string): void {
 		}
 
 		if (changed) {
-			sd.writeFile("tasks.md", lines.join("\n"));
-			// Detect wave completion after updating tasks.md — emit directives directly.
-			const waveItems = detectWaveCompletion(projectPath, taskSlug, lines.join("\n"));
-			if (waveItems.length > 0) {
-				emitDirectives("PostToolUse", waveItems);
-			}
+			const updatedContent = lines.join("\n");
+			sd.writeFile("tasks.md", updatedContent);
+			// Detect wave completion — results aggregated into caller's items.
+			const waveItems = detectWaveCompletion(projectPath, taskSlug, updatedContent);
+			items.push(...waveItems);
 		}
 	} catch {
 		/* fail-open */
@@ -233,7 +232,7 @@ export function detectWaveCompletion(
 				continue;
 			}
 
-			// Wave just completed — emit DIRECTIVE and set gate.
+			// Wave just completed — emit DIRECTIVE, set gate, and stop at first newly-completed wave.
 			items.push({
 				level: "DIRECTIVE",
 				message: `Wave ${key} complete (${state.checked}/${state.total} tasks). You MUST now: 1) Commit your changes, 2) Run self-review (delegate to alfred:code-reviewer or /alfred:inspect), 3) Save any learnings via \`ledger save\`. Then clear the gate with \`dossier action=gate sub_action=clear reason="..."\`.`,
@@ -245,6 +244,7 @@ export function detectWaveCompletion(
 				wave: parseInt(key, 10) || 0,
 				reason: `Wave ${key} self-review required`,
 			});
+			break; // One wave at a time — review this wave before proceeding.
 		}
 
 		// Persist progress (tracking).
