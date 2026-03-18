@@ -10,6 +10,9 @@ import { truncate } from '../mcp/helpers.js';
 import { extractSection } from './dispatcher.js';
 import type { DirectiveItem } from './directives.js';
 import { emitDirectives } from './directives.js';
+import { detectProject } from '../store/project.js';
+import { upsertKnowledge } from '../store/knowledge.js';
+import type { KnowledgeRow } from '../types.js';
 
 const EXPLORE_COUNTER_PATH = join(tmpdir(), 'alfred-explore-count');
 
@@ -91,6 +94,10 @@ async function handleBashResult(ev: HookEvent, items: DirectiveItem[], signal: A
     if (isGitCommit(stdout) && !signal.aborted) {
       // FR-7: Proactive conflict warning after git commit.
       await checkKnowledgeConflicts(items);
+
+      // Auto-save decisions + session snapshot on git commit (not just PreCompact).
+      // This ensures knowledge accumulates even with 1M context (no compact).
+      saveKnowledgeOnCommit(ev.cwd!);
     }
   }
 }
@@ -268,4 +275,63 @@ function checkSpecCompletion(projectPath: string, items: DirectiveItem[]): void 
       });
     }
   } catch { /* no active spec or read failure — skip */ }
+}
+
+/**
+ * Save knowledge from spec on git commit — ensures decisions and session
+ * snapshots accumulate even without PreCompact (1M context).
+ */
+function saveKnowledgeOnCommit(projectPath: string): void {
+  let store;
+  try { store = openDefaultCached(); } catch { return; }
+
+  let slug: string;
+  try { slug = readActive(projectPath); } catch { return; }
+
+  const sd = new SpecDir(projectPath, slug);
+  if (!sd.exists()) return;
+
+  const proj = detectProject(projectPath);
+  const ts = new Date().toISOString().replace(/[:.]/g, '').slice(0, 15);
+
+  // 1. Save decisions from decisions.md (if exists).
+  try {
+    const decisions = sd.readFile('decisions.md');
+    const decSections = decisions.split(/\n## DEC-\d+/);
+    for (let i = 1; i < decSections.length; i++) {
+      const section = decSections[i]!;
+      const titleMatch = section.match(/^:\s*(.+)/);
+      const title = titleMatch ? titleMatch[1]!.trim() : `Decision ${i}`;
+      const statusMatch = section.match(/- Status:\s*(\w+)/i);
+      if (statusMatch && statusMatch[1]!.toLowerCase() === 'accepted') {
+        const row: KnowledgeRow = {
+          id: 0,
+          filePath: `decisions/spec/${slug}/dec-${i}`,
+          contentHash: '', title,
+          content: section.slice(0, 1000),
+          subType: 'decision',
+          projectRemote: proj.remote, projectPath: proj.path,
+          projectName: proj.name, branch: proj.branch,
+          createdAt: '', updatedAt: '', hitCount: 0, lastAccessed: '', enabled: true,
+        };
+        upsertKnowledge(store, row);
+      }
+    }
+  } catch { /* decisions.md may not exist */ }
+
+  // 2. Save session snapshot (like PreCompact chapter memory).
+  try {
+    const session = sd.readFile('session.md');
+    const row: KnowledgeRow = {
+      id: 0,
+      filePath: `snapshots/${slug}/commit-${ts}`,
+      contentHash: '', title: `${proj.name} > ${slug} > progress`,
+      content: session.slice(0, 2000),
+      subType: 'general',
+      projectRemote: proj.remote, projectPath: proj.path,
+      projectName: proj.name, branch: proj.branch,
+      createdAt: '', updatedAt: '', hitCount: 0, lastAccessed: '', enabled: true,
+    };
+    upsertKnowledge(store, row);
+  } catch { /* fail-open */ }
 }
