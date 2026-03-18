@@ -68,7 +68,8 @@ node dist/cli.mjs version     # Show version
 - Spec approval gate (entry): UserPromptSubmit Stage 2 detects M/L/XL spec with review_status !== 'approved' → DIRECTIVE every prompt until approved (FR-7)
 - Directive persuasion: DirectiveItem supports opt-in `rationalizations` (counter-arguments) and `spiritVsLetter` (anti-shortcut sentence). Truncation drops rationalizations first to preserve Spirit vs Letter (NFR-1)
 - Semantic intent classification: Voyage embedding similarity (threshold >= 0.5) with keyword fallback. Prompt embedding reused for knowledge search (DEC-2)
-- Skill nudge learning: impressions tracked in /tmp; suppressed after 3 showings per intent. resetNudgeCount() exported for skill-use detection
+- Skill nudge learning: impressions tracked in .alfred/.state/; suppressed after 3 showings per intent. resetNudgeCount(cwd, intent) exported for skill-use detection
+- Hook state persistence: `src/hooks/state.ts` — readStateJSON/writeStateJSON/readStateText/writeStateText. Stores session-local state in `.alfred/.state/` (gitignored). Path traversal guard on file names
 - 1% rule: SessionStart injects "invoke skills if even small chance applies" CONTEXT when .alfred/ exists (regardless of active spec)
 - Test failure detection: PostToolUse recognizes FAIL/FAILED/FAILURE patterns and suggests rollback before continuing
 - PostToolUse: git commit detection → proactive knowledge conflict warning (detectKnowledgeConflicts, threshold 0.70)
@@ -91,7 +92,7 @@ node dist/cli.mjs version     # Show version
 - Knowledge file write: atomic (temp + rename). writeKnowledgeFile() shared by ledger save + dossier complete
 - ALFRED_LANG: controls knowledge content language (default: en). Passed in ledger/dossier responses as `lang` field for LLM language selection
 - Project identification: project_remote (git remote URL) + project_path (directory) + branch; UNIQUE constraint on (project_remote, project_path, file_path)
-- SessionStart sync: walks `.alfred/knowledge/{decisions,patterns,rules}/*.json` → JSON.parse → content_hash comparison → upsert. Legacy .md fallback retained
+- SessionStart sync: walks `.alfred/knowledge/{decisions,patterns,rules}/*.json` → JSON.parse → content_hash comparison → upsert. Legacy .md fallback retained. CLAUDE.md ingestion removed (v0.3.1)
 - Store.DB() is test-only; production code uses Store methods (no raw SQL outside internal/store)
 - @.claude/rules/store-internals.md (vector search, SQL safety patterns)
 

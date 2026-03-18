@@ -26,17 +26,42 @@ function TasksLayout() {
 	const tasks = data?.tasks ?? [];
 	const activeSlug = data?.active ?? "";
 
+	const activeTasks = tasks.filter((t) => t.status !== "completed");
+	const completedTasks = tasks.filter((t) => t.status === "completed");
+
 	return (
 		<div className="flex gap-6">
-			<div className="w-72 shrink-0 space-y-2">
-				{tasks.map((task, i) => (
-					<TaskAccordionCard
-						key={task.slug}
-						task={task}
-						isActive={task.slug === activeSlug}
-						colorIndex={i}
-					/>
-				))}
+			<div className="w-72 shrink-0 space-y-4 overflow-y-auto max-h-[calc(100vh-100px)]">
+				{/* Active Tasks */}
+				{activeTasks.length > 0 && (
+					<div className="space-y-2">
+						<h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-1">Active</h3>
+						{activeTasks.map((task, i) => (
+							<TaskAccordionCard
+								key={task.slug}
+								task={task}
+								isActive={task.slug === activeSlug}
+								colorIndex={i}
+							/>
+						))}
+					</div>
+				)}
+
+				{/* Completed Tasks */}
+				{completedTasks.length > 0 && (
+					<div className="space-y-2">
+						<h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-1">Completed</h3>
+						{completedTasks.map((task, i) => (
+							<TaskAccordionCard
+								key={task.slug}
+								task={task}
+								isActive={false}
+								colorIndex={activeTasks.length + i}
+							/>
+						))}
+					</div>
+				)}
+
 				{tasks.length === 0 && <p className="text-sm text-muted-foreground">No tasks found.</p>}
 			</div>
 			<div className="min-w-0 flex-1">

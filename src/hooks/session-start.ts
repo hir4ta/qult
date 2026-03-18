@@ -23,9 +23,6 @@ export async function sessionStart(ev: HookEvent, _signal: AbortSignal): Promise
   }
 
   // Run independent operations (fail-open, synchronous — Node.js single-threaded).
-  try { ingestProjectClaudeMD(store, ev.cwd); } catch (err) {
-    notifyUser('warning: CLAUDE.md ingest failed: %s', err);
-  }
   try { syncKnowledgeIndex(store, ev.cwd); } catch (err) {
     notifyUser('warning: knowledge sync failed: %s', err);
   }
@@ -56,57 +53,6 @@ export async function sessionStart(ev: HookEvent, _signal: AbortSignal): Promise
   if (items.length > 0) {
     emitDirectives('SessionStart', items);
   }
-}
-
-function ingestProjectClaudeMD(store: ReturnType<typeof openDefaultCached>, projectPath: string): void {
-  const claudeMD = join(projectPath, 'CLAUDE.md');
-  let content: string;
-  try {
-    content = readFileSync(claudeMD, 'utf-8');
-  } catch { return; }
-
-  const sections = splitMarkdownSections(content);
-  if (sections.length === 0) return;
-
-  const proj = detectProject(projectPath);
-  for (const sec of sections) {
-    const row: KnowledgeRow = {
-      id: 0, filePath: `CLAUDE.md#${sec.path}`, contentHash: '', title: sec.path,
-      content: sec.content, subType: 'project',
-      projectRemote: proj.remote, projectPath: proj.path,
-      projectName: proj.name, branch: proj.branch,
-      createdAt: '', updatedAt: '', hitCount: 0, lastAccessed: '', enabled: true,
-    };
-    upsertKnowledge(store, row);
-  }
-}
-
-function splitMarkdownSections(md: string): Array<{ path: string; content: string }> {
-  const lines = md.split('\n');
-  const sections: Array<{ path: string; content: string }> = [];
-  let currentPath = '';
-  let buf: string[] = [];
-
-  const flush = () => {
-    const content = buf.join('\n').trim();
-    if (currentPath && content) {
-      sections.push({ path: currentPath, content });
-    }
-    buf = [];
-  };
-
-  for (const line of lines) {
-    if (line.startsWith('## ')) {
-      flush();
-      currentPath = line.slice(3).trim();
-    } else if (line.startsWith('# ') && !currentPath) {
-      currentPath = line.slice(2).trim();
-    } else if (currentPath) {
-      buf.push(line);
-    }
-  }
-  flush();
-  return sections;
 }
 
 function syncKnowledgeIndex(store: ReturnType<typeof openDefaultCached>, projectPath: string): void {

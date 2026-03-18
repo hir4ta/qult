@@ -1,6 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import type { HookEvent } from './dispatcher.js';
 import { notifyUser } from './dispatcher.js';
 import { openDefaultCached } from '../store/index.js';
@@ -14,14 +12,14 @@ import { detectProject } from '../store/project.js';
 import { upsertKnowledge, getPromotionCandidates, promoteSubType } from '../store/knowledge.js';
 import type { KnowledgeRow } from '../types.js';
 
-const EXPLORE_COUNTER_PATH = join(tmpdir(), 'alfred-explore-count');
+import { readStateText, writeStateText } from './state.js';
 
-function readExploreCount(): number {
-  try { return parseInt(readFileSync(EXPLORE_COUNTER_PATH, 'utf-8'), 10) || 0; } catch { return 0; }
+function readExploreCount(cwd: string): number {
+  return parseInt(readStateText(cwd, 'explore-count', '0'), 10) || 0;
 }
 
-function writeExploreCount(n: number): void {
-  try { writeFileSync(EXPLORE_COUNTER_PATH, String(n)); } catch { /* best effort */ }
+function writeExploreCount(cwd: string, n: number): void {
+  writeStateText(cwd, 'explore-count', String(n));
 }
 
 export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<void> {
@@ -29,10 +27,10 @@ export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<v
 
   const items: DirectiveItem[] = [];
 
-  // Exploration detection (persisted across short-lived hook processes via /tmp).
+  // Exploration detection (persisted across short-lived hook processes via .alfred/.state/).
   if (ev.tool_name === 'Read' || ev.tool_name === 'Grep' || ev.tool_name === 'Glob') {
-    const count = readExploreCount() + 1;
-    writeExploreCount(count);
+    const count = readExploreCount(ev.cwd) + 1;
+    writeExploreCount(ev.cwd, count);
     if (count >= 5) {
       try {
         readActive(ev.cwd); // has active spec → don't suggest
@@ -41,13 +39,13 @@ export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<v
           level: 'WARNING',
           message: `5+ consecutive ${ev.tool_name} calls without a spec. Consider \`/alfred:survey\` to reverse-engineer a spec from the code.`,
         });
-        writeExploreCount(0);
+        writeExploreCount(ev.cwd, 0);
       }
     }
     emitDirectives('PostToolUse', items);
     return;
   }
-  writeExploreCount(0);
+  writeExploreCount(ev.cwd, 0);
 
   if (ev.tool_name === 'Bash' && !signal.aborted) {
     await handleBashResult(ev, items, signal);
@@ -202,7 +200,7 @@ function updateCurrentlyWorkingOn(session: string, newFocus: string): string {
 /**
  * FR-4: Detect test failure patterns in command output.
  */
-function isTestFailure(output: string): boolean {
+export function isTestFailure(output: string): boolean {
   if (!output) return false;
   const patterns = [
     /FAIL(ED|URE)?\b/i,              // vitest, jest, generic
@@ -220,7 +218,7 @@ function isTestFailure(output: string): boolean {
  * Detect git commit from Bash stdout.
  * Checks for common git commit output patterns.
  */
-function isGitCommit(stdout: string): boolean {
+export function isGitCommit(stdout: string): boolean {
   if (!stdout) return false;
   // Common patterns in git commit output.
   return /\[[\w./-]+ [0-9a-f]+\]/.test(stdout) || // [main abc1234], [feature-branch abc1234], etc.

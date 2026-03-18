@@ -131,7 +131,7 @@ Run automatically. You don't touch these.
 
 | Event | What happens |
 |-------|-------------|
-| SessionStart | Restores spec context, ingests CLAUDE.md, adapts injection depth to project maturity, 1% rule skill activation |
+| SessionStart | Restores spec context, syncs knowledge index, adapts injection depth to project maturity, 1% rule skill activation |
 | PreCompact | Extracts decisions, saves chapter snapshots, syncs epic progress, detects research patterns |
 | UserPromptSubmit | Semantic search + file context boost + **skill nudge** + **spec approval gate** (blocks implement intent on unapproved M/L/XL specs) |
 | PostToolUse | Detects Bash errors + searches memory. After commits: spec drift detection + auto-save decisions. Edit/Write: auto-check Next Steps progress |
@@ -149,7 +149,7 @@ alfred dashboard --url-only   # print URL only
 | Tab | What you see |
 |-----|-------------|
 | **Overview** | Project health at a glance — task progress with validation badges, memory health (stale count, conflicts), confidence distribution across specs, epic progress, recent decisions |
-| **Tasks** | Enriched task cards: current focus, next action, epic context, validation status. Drill into spec files. Switch to Review tab for inline comments |
+| **Tasks** | Active/Completed sections. Drill into any task for a 2-column detail view: metadata on the left, collapsible spec sections (color-coded) on the right. Switch to Review tab for inline comments |
 | **Knowledge** | Browse all memories with sub-type tags. Semantic search (Voyage AI) with 300ms debounce. Local text filter. Toggle any memory on/off |
 | **Activity** | Timeline of all operations. Filter by event type (init/complete/review). Epic drill-down with task status badges |
 
@@ -252,7 +252,7 @@ You
   |
   v
 Hooks (invisible)
-  |-- SessionStart     -> restore context, 1% rule, adapt to project maturity
+  |-- SessionStart     -> restore context, sync knowledge, 1% rule, adapt to project maturity
   |-- PreCompact       -> save snapshots, extract decisions, epic progress
   |-- UserPromptSubmit -> vector search + FTS5 + skill nudge + spec approval check
   |-- PostToolUse      -> detect errors, auto-check Next Steps, drift detection
@@ -281,6 +281,7 @@ Nothing is generated at install time. Files appear as you use alfred:
 | `.alfred/epics/` | First epic is created | `roster action=init` |
 | `.alfred/steering/` | Running `/alfred:init` | Project initialization skill |
 | `.alfred/templates/` | User customizes spec or steering templates | Manual creation for template override |
+| `.alfred/.state/` | First hook that needs session-local state | Nudge dismissals, exploration counter (gitignored) |
 | `.alfred/audit.jsonl` | First spec operation or commit drift detection | `dossier init`, `dossier delete`, review submission, PostToolUse drift |
 
 ## Troubleshooting

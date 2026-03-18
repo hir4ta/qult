@@ -7,7 +7,7 @@ paths:
 # Hook Behavior
 
 ## SessionStart
-- CLAUDE.md ingestion + user rules check + spec context injection (2 ops parallel via channels)
+- Knowledge sync + spec context injection (knowledge dir walk + adaptive onboarding)
 - Adaptive onboarding: injection depth by project knowledge count (0-5: full spec, 6-20: session+goal, 21+: session only)
 - Suggests `ledger action=reflect` when 20+ knowledge entries exist and last reflect >7 days ago
 - Suggests `/alfred:init` if steering docs are missing

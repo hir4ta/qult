@@ -10,7 +10,7 @@ paths:
 
 | Event | Timeout | Internal | Rationale |
 |---|---|---|---|
-| SessionStart | 5s | 4.5s | CLAUDE.md ingestion + user rules check + spec context injection (2 ops parallel via channels) |
+| SessionStart | 5s | 4.5s | Knowledge sync + spec context injection + adaptive onboarding |
 | PreCompact | 10s | 9s | Transcript parsing + decision extraction + session.md |
 | PostToolUse | 5s | 4.5s | Next Steps auto-check + Living Spec auto-append + drift detection |
 | UserPromptSubmit | 10s | 9s | Voyage semantic search (embed + vector search + rerank) |
