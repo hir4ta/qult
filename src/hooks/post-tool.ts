@@ -11,7 +11,7 @@ import { emitDirectives } from "./directives.js";
 import type { HookEvent } from "./dispatcher.js";
 import { extractSection, notifyUser } from "./dispatcher.js";
 
-import { readStateText, writeStateText } from "./state.js";
+import { addWorkedSlug, readStateText, writeStateText } from "./state.js";
 
 function readExploreCount(cwd: string): number {
 	return parseInt(readStateText(cwd, "explore-count", "0"), 10) || 0;
@@ -57,6 +57,11 @@ export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<v
 		if (filePath) {
 			autoCheckNextSteps(ev.cwd!, filePath);
 		}
+		// Track worked slug for session-scoped Stop hook reminders.
+		try {
+			const slug = readActive(ev.cwd!);
+			addWorkedSlug(ev.cwd!, slug);
+		} catch { /* no active spec */ }
 	}
 
 	// Check spec completion on any tool that might update spec files (Edit, Write, Bash).

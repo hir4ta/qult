@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HookEvent } from "../dispatcher.js";
 import { writeReviewGate } from "../review-gate.js";
+import { addWorkedSlug, resetWorkedSlugs } from "../state.js";
 import { stop } from "../stop.js";
 
 let tmpDir: string;
@@ -129,5 +130,42 @@ describe("stop", () => {
 		await stop(makeEvent());
 		const block = getBlockOutput();
 		expect(block?.decision).toBe("block");
+	});
+
+	it("skips reminders when primary spec was NOT worked on (session-scoped)", async () => {
+		setupSpec({
+			size: "M",
+			sessionContent: "## Next Steps\n- [ ] Todo 1\n",
+		});
+		// Record a different slug as worked — primary 'test-task' was not worked on.
+		mkdirSync(join(tmpDir, ".alfred", ".state"), { recursive: true });
+		resetWorkedSlugs(tmpDir);
+		addWorkedSlug(tmpDir, "other-task");
+		await stop(makeEvent());
+		expect(stdoutData.length).toBe(0);
+	});
+
+	it("shows reminders when primary spec WAS worked on (session-scoped)", async () => {
+		setupSpec({
+			size: "M",
+			sessionContent: "## Next Steps\n- [ ] Todo 1\n",
+		});
+		mkdirSync(join(tmpDir, ".alfred", ".state"), { recursive: true });
+		resetWorkedSlugs(tmpDir);
+		addWorkedSlug(tmpDir, "test-task");
+		await stop(makeEvent());
+		const ctx = getContextOutput();
+		expect(ctx).toContain("unchecked Next Steps");
+	});
+
+	it("falls back to primary spec when no worked-slugs recorded (read-only session)", async () => {
+		setupSpec({
+			size: "M",
+			sessionContent: "## Next Steps\n- [ ] Todo 1\n",
+		});
+		// No worked-slugs at all (empty array or file doesn't exist).
+		await stop(makeEvent());
+		const ctx = getContextOutput();
+		expect(ctx).toContain("unchecked Next Steps");
 	});
 });

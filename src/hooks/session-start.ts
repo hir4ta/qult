@@ -15,9 +15,15 @@ import type { DirectiveItem } from "./directives.js";
 import { emitDirectives } from "./directives.js";
 import type { HookEvent } from "./dispatcher.js";
 import { extractSection, notifyUser } from "./dispatcher.js";
+import { resetWorkedSlugs } from "./state.js";
 
 export async function sessionStart(ev: HookEvent, _signal: AbortSignal): Promise<void> {
 	if (!ev.cwd) return;
+
+	// Reset session-scoped worked-slugs tracking (for Stop hook scoping).
+	if (existsSync(join(ev.cwd, ".alfred"))) {
+		resetWorkedSlugs(ev.cwd);
+	}
 
 	let store;
 	try {

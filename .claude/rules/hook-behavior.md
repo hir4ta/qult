@@ -27,6 +27,7 @@ paths:
 - File context boost from git diff
 - Skill nudge: classifyIntent (7 intents: research/plan/implement/bugfix/review/tdd/save-knowledge, JP+EN bilingual phrase keywords) → buildSkillNudge (intent→skill routing with active spec suppression for plan/implement) → additionalContext injection
 - save-knowledge suppresses research when both match. No API calls (pure keyword matching, <1ms)
+- Parallel dev guard (Stage 1.5): active spec exists + implement/bugfix/tdd intent + slug NOT in worked-slugs → WARNING prompting AskUserQuestion to confirm same task or new task. Suppressed once user edits files for the spec (slug added to worked-slugs via PostToolUse). Fires after Stage 1 (no spec → DIRECTIVE) and after Stage 2 (M/L/XL unapproved → DIRECTIVE)
 
 ## PostToolUse
 - Bash error detection → FTS5 knowledge search → additionalContext injection
@@ -52,8 +53,9 @@ paths:
 - Enforcement order: .alfred/ exempt → review-gate → approval gate (M/L/XL unapproved)
 - Gate clear: `dossier action=gate sub_action=clear reason="..."` (reason required, audit logged)
 
-## Stop (review gate)
+## Stop (review gate + session scope)
 - Blocks stopping when review-gate is active (before existing Next Steps / self-review checks)
+- Session-scoped reminders: only reminds about specs in worked-slugs. If worked-slugs empty (read-only session), falls back to primary spec
 - DEC-4: stop_hook_active=true overrides gate blocking (infinite loop prevention)
 - CONTEXT reminders use `systemMessage` (not hookSpecificOutput — Stop schema doesn't support hookEventName)
 

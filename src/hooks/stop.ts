@@ -6,11 +6,14 @@ import {
 	hasUncheckedSelfReview,
 	tryReadActiveSpec,
 } from "./spec-guard.js";
+import { readWorkedSlugs } from "./state.js";
 
 /**
  * Stop handler:
  * - review-gate active → BLOCK (hard enforcement)
  * - unchecked Next Steps / self-review / incomplete spec → CONTEXT reminder (no block)
+ * - Session-scoped: only reminds about specs worked on in this session (via worked-slugs).
+ *   Fallback: if no worked-slugs recorded (read-only session), uses current primary.
  * DEC-4: stop_hook_active=true → always allow (infinite loop prevention).
  */
 export async function stop(ev: HookEvent): Promise<void> {
@@ -31,6 +34,15 @@ export async function stop(ev: HookEvent): Promise<void> {
 	// Everything below is CONTEXT only (no block). User can stop freely.
 	const spec = tryReadActiveSpec(ev.cwd);
 	if (!spec || spec.status === "completed") return;
+
+	// Session-scoped: only remind about the *primary* spec if it was actually worked on.
+	// We only check the primary spec (not all worked slugs) because tryReadActiveSpec
+	// reads session.md of the primary only. Fallback: if no worked-slugs recorded
+	// (read-only / Bash-only session), show reminders for primary as before.
+	const workedSlugs = ev.cwd ? readWorkedSlugs(ev.cwd) : [];
+	if (workedSlugs.length > 0 && !workedSlugs.includes(spec.slug)) {
+		return;
+	}
 
 	const reminders: string[] = [];
 

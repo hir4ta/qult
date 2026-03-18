@@ -3,9 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+	addWorkedSlug,
 	ensureStateDir,
 	readStateJSON,
 	readStateText,
+	readWorkedSlugs,
+	resetWorkedSlugs,
 	stateDir,
 	writeStateJSON,
 	writeStateText,
@@ -66,5 +69,24 @@ describe("readStateText / writeStateText", () => {
 
 	it("returns fallback when file missing", () => {
 		expect(readStateText(tmpDir, "missing", "default")).toBe("default");
+	});
+});
+
+describe("worked-slugs", () => {
+	it("returns empty array when no file exists", () => {
+		expect(readWorkedSlugs(tmpDir)).toEqual([]);
+	});
+
+	it("adds slugs with deduplication", () => {
+		addWorkedSlug(tmpDir, "task-a");
+		addWorkedSlug(tmpDir, "task-b");
+		addWorkedSlug(tmpDir, "task-a"); // duplicate
+		expect(readWorkedSlugs(tmpDir)).toEqual(["task-a", "task-b"]);
+	});
+
+	it("resets to empty array", () => {
+		addWorkedSlug(tmpDir, "task-a");
+		resetWorkedSlugs(tmpDir);
+		expect(readWorkedSlugs(tmpDir)).toEqual([]);
 	});
 });

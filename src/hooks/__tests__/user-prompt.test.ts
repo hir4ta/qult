@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { addWorkedSlug, resetWorkedSlugs } from "../state.js";
 import { checkSpecRequired, classifyIntent } from "../user-prompt.js";
 
 let tmpDir: string;
@@ -113,13 +114,42 @@ describe("checkSpecRequired", () => {
 		expect(result!.message).toContain("requires review approval");
 	});
 
-	it("returns null when M spec is approved", () => {
+	it("returns WARNING when M spec is approved (parallel dev guard still applies)", () => {
 		setupSpec({ size: "M", reviewStatus: "approved" });
-		expect(checkSpecRequired(tmpDir, "implement")).toBeNull();
+		const result = checkSpecRequired(tmpDir, "implement");
+		expect(result).not.toBeNull();
+		expect(result!.level).toBe("WARNING");
+		expect(result!.message).toContain("test-task");
 	});
 
-	it("returns null when S spec (exempt)", () => {
+	it("returns null when S spec (exempt from approval gate) but WARNING for parallel dev", () => {
 		setupSpec({ size: "S" });
+		const result = checkSpecRequired(tmpDir, "implement");
+		expect(result).not.toBeNull();
+		expect(result!.level).toBe("WARNING");
+		expect(result!.message).toContain("test-task");
+		expect(result!.message).toContain("AskUserQuestion");
+	});
+
+	it("returns WARNING when active spec exists and implement intent (parallel dev guard)", () => {
+		setupSpec({ size: "S" });
+		const result = checkSpecRequired(tmpDir, "bugfix");
+		expect(result).not.toBeNull();
+		expect(result!.level).toBe("WARNING");
+		expect(result!.message).toContain("test-task");
+	});
+
+	it("returns null when active spec exists and non-implement intent", () => {
+		setupSpec({ size: "S" });
+		expect(checkSpecRequired(tmpDir, "review")).toBeNull();
+		expect(checkSpecRequired(tmpDir, "research")).toBeNull();
+	});
+
+	it("suppresses WARNING when slug is already in worked-slugs (confirmed working)", () => {
+		setupSpec({ size: "S" });
+		mkdirSync(join(tmpDir, ".alfred", ".state"), { recursive: true });
+		resetWorkedSlugs(tmpDir);
+		addWorkedSlug(tmpDir, "test-task");
 		expect(checkSpecRequired(tmpDir, "implement")).toBeNull();
 	});
 

@@ -89,3 +89,27 @@ export function readLastIntent(cwd: string): string | null {
 	if (Date.now() - data.timestamp > INTENT_EXPIRY_MS) return null; // expired
 	return data.intent;
 }
+
+// --- Session-scoped worked slugs tracking ---
+
+const WORKED_SLUGS_FILE = "worked-slugs.json";
+
+/** Read the list of spec slugs worked on in this session. */
+export function readWorkedSlugs(cwd: string): string[] {
+	const data = readStateJSON<string[]>(cwd, WORKED_SLUGS_FILE, []);
+	return Array.isArray(data) ? data : [];
+}
+
+/** Add a slug to the worked-slugs list (deduplicates). */
+export function addWorkedSlug(cwd: string, slug: string): void {
+	const slugs = readWorkedSlugs(cwd);
+	if (!slugs.includes(slug)) {
+		slugs.push(slug);
+		writeStateJSON(cwd, WORKED_SLUGS_FILE, slugs);
+	}
+}
+
+/** Reset worked-slugs at session start. */
+export function resetWorkedSlugs(cwd: string): void {
+	writeStateJSON(cwd, WORKED_SLUGS_FILE, []);
+}

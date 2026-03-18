@@ -135,7 +135,7 @@ Run automatically. You don't touch these.
 |-------|-------------|
 | SessionStart | Restores spec context, syncs knowledge index, adapts injection depth to project maturity, 1% rule skill activation |
 | PreCompact | Extracts decisions, saves chapter snapshots, syncs epic progress, detects research patterns |
-| UserPromptSubmit | Semantic search + file context boost + **skill nudge** + **spec approval gate** (blocks implement intent on unapproved M/L/XL specs) |
+| UserPromptSubmit | Semantic search + file context boost + **skill nudge** + **spec approval gate** (blocks implement intent on unapproved M/L/XL specs) + **parallel dev guard** (WARNING when active spec exists but new task detected) |
 | PostToolUse | Detects Bash errors + searches memory. After commits: spec drift detection + auto-save decisions. Edit/Write: auto-check Next Steps progress |
 | **PreToolUse** | **Three-layer enforcement**: (1) review-gate blocks until spec/wave review done, (2) intent guard blocks implementation without a spec, (3) approval gate blocks unapproved M/L/XL. `.alfred/` edits always allowed |
 | **Stop** | Review gate → block. Other incomplete items → context reminder (no block) |
@@ -256,7 +256,7 @@ You
 Hooks (invisible)
   |-- SessionStart     -> restore context, sync knowledge, 1% rule, adapt to project maturity
   |-- PreCompact       -> save snapshots, extract decisions, epic progress
-  |-- UserPromptSubmit -> vector search + FTS5 + skill nudge + spec approval check
+  |-- UserPromptSubmit -> vector search + FTS5 + skill nudge + spec approval check + parallel dev guard
   |-- PostToolUse      -> detect errors, auto-check Next Steps, drift detection
   |-- PreToolUse       -> review-gate + intent guard + approval gate (3-layer enforcement)
   |-- Stop             -> review-gate block + context reminders (non-blocking)

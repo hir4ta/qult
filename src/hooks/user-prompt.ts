@@ -218,6 +218,7 @@ export function classifyIntent(prompt: string): string | null {
 /**
  * FR-5/FR-7: Check if spec is required or unapproved before implementation.
  * Stage 1: No spec exists → DIRECTIVE to create one.
+ * Stage 1.5: Spec exists + implement intent → WARNING to confirm or create new spec.
  * Stage 2: Spec exists but not approved (M/L/XL) → DIRECTIVE to get review.
  */
 export function checkSpecRequired(cwd: string, intent: string | null): DirectiveItem | null {
@@ -261,6 +262,20 @@ export function checkSpecRequired(cwd: string, intent: string | null): Directive
 				spiritVsLetter: true,
 			};
 		}
+
+		// Stage 1.5: Spec exists + implement intent → WARNING for parallel dev safety.
+		// When an active spec exists, the user might be working on a different task.
+		// Suppressed when the user has already edited files for this spec in this session
+		// (slug present in worked-slugs = confirmed working on this spec).
+		if (taskSlug) {
+			const workedSlugs = readWorkedSlugs(cwd);
+			if (!workedSlugs.includes(taskSlug)) {
+				return {
+					level: "WARNING",
+					message: `Active spec '${taskSlug}' exists. If this is a different task, create a new spec first via /alfred:brief or dossier action=init. Use AskUserQuestion to confirm with the user whether this work is part of '${taskSlug}' or a new task.`,
+				};
+			}
+		}
 	} catch {
 		/* ignore parse errors — graceful fallback */
 	}
@@ -289,7 +304,13 @@ function intentDescription(intent: string): string {
 
 // --- FR-1: Nudge dismissal tracking via .alfred/.state/ (survives across short-lived hook processes) ---
 
-import { IMPLEMENT_INTENTS, readStateJSON, writeLastIntent, writeStateJSON } from "./state.js";
+import {
+	IMPLEMENT_INTENTS,
+	readStateJSON,
+	readWorkedSlugs,
+	writeLastIntent,
+	writeStateJSON,
+} from "./state.js";
 
 interface NudgeCounts {
 	[intent: string]: { count: number; lastNudged: string };
