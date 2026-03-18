@@ -296,7 +296,11 @@ function KnowledgeDialog({
 								<TooltipTrigger asChild>
 									<span className="cursor-help tabular-nums">{entry.hit_count} hits</span>
 								</TooltipTrigger>
-								<TooltipContent>Search result appearances (5+: pattern candidate, 15+: rule candidate)</TooltipContent>
+								<TooltipContent className="text-left">
+									<p>Search result appearances</p>
+									<p className="opacity-75">5+ → pattern candidate</p>
+									<p className="opacity-75">15+ → rule candidate</p>
+								</TooltipContent>
 							</Tooltip>
 							<Badge
 								variant="outline"
