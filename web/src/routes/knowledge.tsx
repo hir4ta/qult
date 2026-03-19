@@ -77,7 +77,7 @@ function KnowledgePage() {
 						/>
 					</div>
 				)}
-				{showGraph && <div className="flex-1" />}
+				<div className="flex-1" />
 				{statsData && <StatsBar stats={statsData} />}
 				<ToggleGroup
 					type="single"
@@ -100,15 +100,15 @@ function KnowledgePage() {
 			{showGraph && (
 				<>
 					{!hasEnoughEntries ? (
-						<div className="flex h-[500px] items-center justify-center rounded-xl border border-dashed border-border">
+						<div className="flex h-[70vh] items-center justify-center rounded-xl border border-dashed border-border">
 							<p className="text-sm text-muted-foreground">{t("knowledge.graphMinEntries")}</p>
 						</div>
 					) : graphLoading ? (
-						<div className="flex h-[500px] items-center justify-center rounded-xl border border-dashed border-border">
+						<div className="flex h-[70vh] items-center justify-center rounded-xl border border-dashed border-border">
 							<p className="text-sm text-muted-foreground">{t("knowledge.graphLoading")}</p>
 						</div>
 					) : graphError ? (
-						<div className="flex h-[500px] items-center justify-center rounded-xl border border-dashed border-border">
+						<div className="flex h-[70vh] items-center justify-center rounded-xl border border-dashed border-border">
 							<p className="text-sm text-muted-foreground">{t("knowledge.graphError")}</p>
 						</div>
 					) : graphData ? (
@@ -387,7 +387,7 @@ function KnowledgeDialog({
 						prose-code:text-xs prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded
 						prose-strong:font-semibold"
 					>
-						<Markdown>{cleanContent(entry.content)}</Markdown>
+						<Markdown>{formatKnowledgeContent(entry.content, entry.sub_type)}</Markdown>
 					</div>
 				</ScrollArea>
 			</DialogContent>
@@ -404,6 +404,51 @@ function parseDecisionFields(content: string): { key: string; value: string }[] 
 		}
 	}
 	return fields;
+}
+
+function formatKnowledgeContent(content: string, subType: string): string {
+	try {
+		const data = JSON.parse(content);
+		if (typeof data !== "object" || data === null) return cleanContent(content);
+
+		const lines: string[] = [];
+
+		if (subType === "decision") {
+			if (data.context) lines.push(`### Context\n${data.context}`);
+			if (data.decision) lines.push(`### Decision\n${data.decision}`);
+			if (data.reasoning) lines.push(`### Reasoning\n${data.reasoning}`);
+			if (data.alternatives) {
+				const alts = Array.isArray(data.alternatives) ? data.alternatives : [data.alternatives];
+				lines.push(`### Alternatives\n${alts.map((a: string) => `- ${a}`).join("\n")}`);
+			}
+		} else if (subType === "pattern") {
+			if (data.context) lines.push(`### Context\n${data.context}`);
+			if (data.type) lines.push(`**Type:** ${data.type}`);
+			if (data.pattern) lines.push(`### Pattern\n${data.pattern}`);
+			if (data.applicationConditions) lines.push(`### When to Apply\n${data.applicationConditions}`);
+			if (data.expectedOutcomes) lines.push(`### Expected Outcomes\n${data.expectedOutcomes}`);
+		} else if (subType === "rule") {
+			if (data.text) lines.push(`### Rule\n${data.text}`);
+			if (data.rationale) lines.push(`### Rationale\n${data.rationale}`);
+			if (data.category) lines.push(`**Category:** ${data.category}`);
+			if (data.priority) lines.push(`**Priority:** ${data.priority}`);
+		} else {
+			// Generic: show all string fields
+			for (const [key, val] of Object.entries(data)) {
+				if (typeof val === "string" && val && !["id", "title", "createdAt", "status", "lang"].includes(key)) {
+					lines.push(`### ${key}\n${val}`);
+				}
+			}
+		}
+
+		if (data.tags && Array.isArray(data.tags) && data.tags.length > 0) {
+			lines.push(`\n**Tags:** ${data.tags.map((t: string) => `\`${t}\``).join(" ")}`);
+		}
+
+		return lines.length > 0 ? lines.join("\n\n") : cleanContent(content);
+	} catch {
+		return cleanContent(content);
+	}
 }
 
 function cleanContent(content: string): string {

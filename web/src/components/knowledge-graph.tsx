@@ -41,7 +41,7 @@ export function KnowledgeGraph({
 }: KnowledgeGraphProps) {
 	const { t } = useI18n();
 	const containerRef = useRef<HTMLDivElement>(null);
-	const [dimensions, setDimensions] = useState({ width: 800, height: 500 });
+	const [dimensions, setDimensions] = useState({ width: 800, height: Math.floor(window.innerHeight * 0.7) });
 	const [themeColors, setThemeColors] = useState({ bg: "#ffffff", fg: "#1a1a1a" });
 
 	// Sub-type filter toggles (local state)
@@ -68,19 +68,25 @@ export function KnowledgeGraph({
 		return () => observer.disconnect();
 	}, []);
 
-	// Track container dimensions
+	// Track container width + window height
 	useEffect(() => {
 		const el = containerRef.current;
 		if (!el) return;
 
+		const updateHeight = () => setDimensions((prev) => ({ ...prev, height: Math.floor(window.innerHeight * 0.7) }));
+		window.addEventListener("resize", updateHeight);
+
 		const observer = new ResizeObserver((entries) => {
 			for (const entry of entries) {
 				const { width } = entry.contentRect;
-				if (width > 0) setDimensions({ width, height: 500 });
+				if (width > 0) setDimensions((prev) => ({ ...prev, width }));
 			}
 		});
 		observer.observe(el);
-		return () => observer.disconnect();
+		return () => {
+			window.removeEventListener("resize", updateHeight);
+			observer.disconnect();
+		};
 	}, []);
 
 	// Filter nodes by active sub_types
@@ -118,45 +124,50 @@ export function KnowledgeGraph({
 		return 4 + Math.log2((node.hit_count || 0) + 1) * 3;
 	}, []);
 
-	// Custom node rendering
+	// Custom node rendering — circle only, label via tooltip
 	const drawNode = useCallback(
-		(node: ForceNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
+		(node: ForceNode, ctx: CanvasRenderingContext2D) => {
 			const size = nodeSize(node);
 			const color = SUB_TYPE_COLORS[node.sub_type] ?? "#8b7d6b";
 			const x = node.x ?? 0;
 			const y = node.y ?? 0;
 
-			// Circle
 			ctx.beginPath();
 			ctx.arc(x, y, size, 0, 2 * Math.PI);
 			ctx.fillStyle = color;
 			ctx.fill();
 
-			// Border
-			ctx.strokeStyle = `${color}40`;
+			ctx.strokeStyle = `${color}60`;
 			ctx.lineWidth = 1.5;
 			ctx.stroke();
-
-			// Label (only show when zoomed in enough)
-			if (globalScale > 1.2) {
-				const label = node.label.length > 24 ? `${node.label.slice(0, 22)}...` : node.label;
-				const fontSize = Math.max(10 / globalScale, 3);
-				ctx.font = `${fontSize}px sans-serif`;
-				ctx.textAlign = "center";
-				ctx.textBaseline = "top";
-				ctx.fillStyle = themeColors.fg;
-				ctx.globalAlpha = 0.8;
-				ctx.fillText(label, x, y + size + 2);
-				ctx.globalAlpha = 1;
-			}
 		},
-		[nodeSize, themeColors.fg],
+		[nodeSize],
 	);
 
-	// Link color with opacity based on score (normalized 0→0.15, 1→0.6)
+	// Node color lookup for link coloring
+	const nodeColorMap = useMemo(() => {
+		const map = new Map<number, string>();
+		for (const n of filteredNodes) {
+			map.set(n.id, SUB_TYPE_COLORS[n.sub_type] ?? "#8b7d6b");
+		}
+		return map;
+	}, [filteredNodes]);
+
+	// Link color — blend source node color with opacity based on score
 	const linkColor = useCallback((link: ForceLink) => {
-		const clamped = Math.min(0.6, Math.max(0.15, 0.15 + link.score * 0.45));
-		return `rgba(150, 150, 150, ${clamped})`;
+		const srcId = typeof link.source === "object" ? link.source.id : link.source;
+		const color = nodeColorMap.get(srcId) ?? "#8b7d6b";
+		const opacity = Math.min(0.7, Math.max(0.2, 0.2 + link.score * 0.5));
+		// Convert hex to rgba
+		const r = parseInt(color.slice(1, 3), 16);
+		const g = parseInt(color.slice(3, 5), 16);
+		const b = parseInt(color.slice(5, 7), 16);
+		return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+	}, [nodeColorMap]);
+
+	// Link tooltip — show similarity score
+	const linkLabel = useCallback((link: ForceLink) => {
+		return `similarity: ${(link.score * 100).toFixed(0)}%`;
 	}, []);
 
 	// Node tooltip
@@ -217,10 +228,10 @@ export function KnowledgeGraph({
 			</div>
 
 			{/* Force graph */}
-			<div className="rounded-xl border border-border overflow-hidden" style={{ height: 500 }}>
+			<div className="rounded-xl border border-border overflow-hidden" style={{ height: "70vh" }}>
 				<ForceGraph2D
 					width={dimensions.width}
-					height={500}
+					height={dimensions.height}
 					graphData={graphData}
 					nodeId="id"
 					nodeCanvasObject={drawNode}
@@ -232,7 +243,8 @@ export function KnowledgeGraph({
 						ctx.fill();
 					}}
 					linkColor={linkColor}
-					linkWidth={1.5}
+					linkWidth={(link: ForceLink) => Math.max(1, link.score * 3)}
+					linkLabel={linkLabel}
 					nodeLabel={nodeLabel}
 					onNodeClick={(node: ForceNode) => onNodeClick(node)}
 					backgroundColor="transparent"
