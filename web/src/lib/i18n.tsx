@@ -91,6 +91,15 @@ const translations = {
 	"knowledge.graphLoading": { en: "Computing graph...", ja: "グラフを計算中..." },
 	"knowledge.graphError": { en: "Failed to load graph", ja: "グラフの読み込みに失敗しました" },
 	"knowledge.graphConnections": { en: "connections", ja: "件の接続" },
+	"knowledge.detail.context": { en: "Context", ja: "背景" },
+	"knowledge.detail.decision": { en: "Decision", ja: "決定内容" },
+	"knowledge.detail.reasoning": { en: "Reasoning", ja: "理由" },
+	"knowledge.detail.alternatives": { en: "Alternatives", ja: "検討した代替案" },
+	"knowledge.detail.pattern": { en: "Pattern", ja: "パターン" },
+	"knowledge.detail.whenToApply": { en: "When to Apply", ja: "適用条件" },
+	"knowledge.detail.expectedOutcomes": { en: "Expected Outcomes", ja: "期待される結果" },
+	"knowledge.detail.rule": { en: "Rule", ja: "ルール" },
+	"knowledge.detail.rationale": { en: "根拠", ja: "根拠" },
 
 	// Activity
 	"activity.all": { en: "All", ja: "すべて" },

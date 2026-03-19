@@ -1,7 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Brain, CheckCircle2, CircleCheck, CircleDot, Clock, Zap } from "lucide-react";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import {
+	Pagination,
+	PaginationContent,
+	PaginationItem,
+	PaginationLink,
+	PaginationNext,
+	PaginationPrevious,
+} from "@/components/ui/pagination";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
@@ -44,8 +53,11 @@ const SIZE_LABEL_KEYS: Record<string, TranslationKey> = {
 	D: "size.D",
 };
 
+const ITEMS_PER_PAGE = 9;
+
 function OverviewPage() {
 	const { t } = useI18n();
+	const [taskPage, setTaskPage] = useState(1);
 	const { data: tasksData, isLoading: tasksLoading } = useQuery(tasksQueryOptions());
 	const { data: healthData } = useQuery(healthQueryOptions());
 	const { data: epicsData } = useQuery(epicsQueryOptions());
@@ -87,25 +99,32 @@ function OverviewPage() {
 			</div>
 
 			{/* Task cards */}
-			{tasks.length > 0 && (
-				<section className="space-y-3">
-					<h2
-						className="text-sm font-semibold uppercase tracking-wider text-muted-foreground"
-						style={{ fontFamily: "var(--font-display)" }}
-					>
-						{t("overview.tasks")}
-					</h2>
-					<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-						{tasks.map((task, i) => (
-							<TaskCard
-								key={task.slug}
-								task={task}
-								colorIndex={i}
-							/>
-						))}
-					</div>
-				</section>
-			)}
+			{tasks.length > 0 && (() => {
+				const totalPages = Math.ceil(tasks.length / ITEMS_PER_PAGE);
+				const paged = tasks.slice((taskPage - 1) * ITEMS_PER_PAGE, taskPage * ITEMS_PER_PAGE);
+				return (
+					<section className="space-y-3">
+						<h2
+							className="text-sm font-semibold uppercase tracking-wider text-muted-foreground"
+							style={{ fontFamily: "var(--font-display)" }}
+						>
+							{t("overview.tasks")}
+						</h2>
+						<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+							{paged.map((task, i) => (
+								<TaskCard
+									key={task.slug}
+									task={task}
+									colorIndex={(taskPage - 1) * ITEMS_PER_PAGE + i}
+								/>
+							))}
+						</div>
+						{totalPages > 1 && (
+							<SimplePagination page={taskPage} totalPages={totalPages} onPageChange={setTaskPage} />
+						)}
+					</section>
+				);
+			})()}
 
 			{/* Bottom row: Epics + Decisions */}
 			<div className="grid gap-6 lg:grid-cols-2">
@@ -201,7 +220,7 @@ function TaskCard({
 					{/* Focus + shimmer */}
 					<div className="flex-1 flex flex-col justify-center gap-1">
 						{task.project_name && (
-							<p className="text-[10px] font-medium" style={{ color: accentColor }}>
+							<p className="text-[10px] font-medium text-muted-foreground">
 								{task.project_name}
 							</p>
 						)}
@@ -381,5 +400,47 @@ function RecentDecisionsCard({ decisions }: { decisions?: DecisionEntry[] }) {
 				</div>
 			</CardContent>
 		</Card>
+	);
+}
+
+function SimplePagination({
+	page,
+	totalPages,
+	onPageChange,
+}: {
+	page: number;
+	totalPages: number;
+	onPageChange: (page: number) => void;
+}) {
+	return (
+		<Pagination>
+			<PaginationContent>
+				<PaginationItem>
+					<PaginationPrevious
+						onClick={() => onPageChange(Math.max(1, page - 1))}
+						aria-disabled={page <= 1}
+						className={page <= 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+					/>
+				</PaginationItem>
+				{Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+					<PaginationItem key={p}>
+						<PaginationLink
+							isActive={p === page}
+							onClick={() => onPageChange(p)}
+							className="cursor-pointer"
+						>
+							{p}
+						</PaginationLink>
+					</PaginationItem>
+				))}
+				<PaginationItem>
+					<PaginationNext
+						onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+						aria-disabled={page >= totalPages}
+						className={page >= totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+					/>
+				</PaginationItem>
+			</PaginationContent>
+		</Pagination>
 	);
 }

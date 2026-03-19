@@ -7,6 +7,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
+	Pagination,
+	PaginationContent,
+	PaginationItem,
+	PaginationLink,
+	PaginationNext,
+	PaginationPrevious,
+} from "@/components/ui/pagination";
+import {
 	Dialog,
 	DialogContent,
 	DialogDescription,
@@ -41,6 +49,7 @@ function KnowledgePage() {
 	const [localFilter, setLocalFilter] = useState("");
 	const [selected, setSelected] = useState<KnowledgeEntry | null>(null);
 	const [view, setView] = useState<"grid" | "graph">("grid");
+	const [page, setPage] = useState(1);
 
 	const { data: browseData, isLoading } = useQuery(knowledgeQueryOptions());
 	const { data: statsData } = useQuery(knowledgeStatsQueryOptions());
@@ -72,7 +81,7 @@ function KnowledgePage() {
 						<Input
 							placeholder={t("knowledge.filter")}
 							value={localFilter}
-							onChange={(e) => setLocalFilter(e.target.value)}
+							onChange={(e) => { setLocalFilter(e.target.value); setPage(1); }}
 							className="pl-9"
 						/>
 					</div>
@@ -141,27 +150,66 @@ function KnowledgePage() {
 			)}
 
 			{/* Grid view */}
-			{!showGraph && (
-				<>
-					{isLoading ? (
-						<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-							{Array.from({ length: 9 }).map((_, i) => (
-								<Skeleton key={i} className="h-28 rounded-xl" />
-							))}
-						</div>
-					) : filtered.length > 0 ? (
-						<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-							{filtered.map((entry) => (
-								<KnowledgeCard key={entry.id} entry={entry} onSelect={() => setSelected(entry)} />
-							))}
-						</div>
-					) : (
-						<div className="flex h-40 items-center justify-center">
-							<p className="text-sm text-muted-foreground">{t("knowledge.noMemories")}</p>
-						</div>
-					)}
-				</>
-			)}
+			{!showGraph && (() => {
+				const perPage = 9;
+				const totalPages = Math.ceil(filtered.length / perPage);
+				const safePage = Math.min(page, Math.max(1, totalPages));
+				const paged = filtered.slice((safePage - 1) * perPage, safePage * perPage);
+				return (
+					<>
+						{isLoading ? (
+							<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+								{Array.from({ length: 9 }).map((_, i) => (
+									<Skeleton key={i} className="h-28 rounded-xl" />
+								))}
+							</div>
+						) : paged.length > 0 ? (
+							<>
+								<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+									{paged.map((entry) => (
+										<KnowledgeCard key={entry.id} entry={entry} onSelect={() => setSelected(entry)} />
+									))}
+								</div>
+								{totalPages > 1 && (
+									<Pagination>
+										<PaginationContent>
+											<PaginationItem>
+												<PaginationPrevious
+													onClick={() => setPage(Math.max(1, safePage - 1))}
+													aria-disabled={safePage <= 1}
+													className={safePage <= 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+												/>
+											</PaginationItem>
+											{Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+												<PaginationItem key={p}>
+													<PaginationLink
+														isActive={p === safePage}
+														onClick={() => setPage(p)}
+														className="cursor-pointer"
+													>
+														{p}
+													</PaginationLink>
+												</PaginationItem>
+											))}
+											<PaginationItem>
+												<PaginationNext
+													onClick={() => setPage(Math.min(totalPages, safePage + 1))}
+													aria-disabled={safePage >= totalPages}
+													className={safePage >= totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+												/>
+											</PaginationItem>
+										</PaginationContent>
+									</Pagination>
+								)}
+							</>
+						) : (
+							<div className="flex h-40 items-center justify-center">
+								<p className="text-sm text-muted-foreground">{t("knowledge.noMemories")}</p>
+							</div>
+						)}
+					</>
+				);
+			})()}
 
 			{/* Detail dialog */}
 			<KnowledgeDialog entry={selected} onClose={() => setSelected(null)} />
@@ -379,16 +427,7 @@ function KnowledgeDialog({
 				<Separator />
 
 				<ScrollArea className="flex-1 -mx-6 px-6">
-					<div
-						className="prose prose-sm prose-stone dark:prose-invert max-w-none py-3
-						prose-headings:text-sm prose-headings:font-semibold
-						prose-p:text-sm prose-p:leading-relaxed prose-p:my-1
-						prose-li:text-sm prose-li:my-0.5
-						prose-code:text-xs prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded
-						prose-strong:font-semibold"
-					>
-						<Markdown>{formatKnowledgeContent(entry.content, entry.sub_type)}</Markdown>
-					</div>
+					<KnowledgeBody content={entry.content} subType={entry.sub_type} />
 				</ScrollArea>
 			</DialogContent>
 		</Dialog>
@@ -406,49 +445,150 @@ function parseDecisionFields(content: string): { key: string; value: string }[] 
 	return fields;
 }
 
-function formatKnowledgeContent(content: string, subType: string): string {
+function KnowledgeSection({ label, children }: { label: string; children: React.ReactNode }) {
+	return (
+		<div className="space-y-1">
+			<p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">{label}</p>
+			<div className="text-sm leading-relaxed">{children}</div>
+		</div>
+	);
+}
+
+function KnowledgeBody({ content, subType }: { content: string; subType: string }) {
+	let data: Record<string, unknown> | null = null;
 	try {
-		const data = JSON.parse(content);
-		if (typeof data !== "object" || data === null) return cleanContent(content);
+		const parsed = JSON.parse(content);
+		if (typeof parsed === "object" && parsed !== null) data = parsed;
+	} catch { /* not JSON */ }
 
-		const lines: string[] = [];
-
-		if (subType === "decision") {
-			if (data.context) lines.push(`### Context\n${data.context}`);
-			if (data.decision) lines.push(`### Decision\n${data.decision}`);
-			if (data.reasoning) lines.push(`### Reasoning\n${data.reasoning}`);
-			if (data.alternatives) {
-				const alts = Array.isArray(data.alternatives) ? data.alternatives : [data.alternatives];
-				lines.push(`### Alternatives\n${alts.map((a: string) => `- ${a}`).join("\n")}`);
-			}
-		} else if (subType === "pattern") {
-			if (data.context) lines.push(`### Context\n${data.context}`);
-			if (data.type) lines.push(`**Type:** ${data.type}`);
-			if (data.pattern) lines.push(`### Pattern\n${data.pattern}`);
-			if (data.applicationConditions) lines.push(`### When to Apply\n${data.applicationConditions}`);
-			if (data.expectedOutcomes) lines.push(`### Expected Outcomes\n${data.expectedOutcomes}`);
-		} else if (subType === "rule") {
-			if (data.text) lines.push(`### Rule\n${data.text}`);
-			if (data.rationale) lines.push(`### Rationale\n${data.rationale}`);
-			if (data.category) lines.push(`**Category:** ${data.category}`);
-			if (data.priority) lines.push(`**Priority:** ${data.priority}`);
-		} else {
-			// Generic: show all string fields
-			for (const [key, val] of Object.entries(data)) {
-				if (typeof val === "string" && val && !["id", "title", "createdAt", "status", "lang"].includes(key)) {
-					lines.push(`### ${key}\n${val}`);
-				}
-			}
-		}
-
-		if (data.tags && Array.isArray(data.tags) && data.tags.length > 0) {
-			lines.push(`\n**Tags:** ${data.tags.map((t: string) => `\`${t}\``).join(" ")}`);
-		}
-
-		return lines.length > 0 ? lines.join("\n\n") : cleanContent(content);
-	} catch {
-		return cleanContent(content);
+	if (!data) {
+		return (
+			<div className="prose prose-sm prose-stone dark:prose-invert max-w-none py-3 prose-p:text-sm prose-p:leading-relaxed">
+				<Markdown>{cleanContent(content)}</Markdown>
+			</div>
+		);
 	}
+
+	const tags = Array.isArray(data.tags) ? (data.tags as string[]) : [];
+
+	return (
+		<div className="space-y-4 py-3">
+			{subType === "decision" && <DecisionBody data={data} />}
+			{subType === "pattern" && <PatternBody data={data} />}
+			{subType === "rule" && <RuleBody data={data} />}
+			{!["decision", "pattern", "rule"].includes(subType) && <GenericBody data={data} />}
+
+			{tags.length > 0 && (
+				<div className="flex flex-wrap gap-1.5 pt-1">
+					{tags.map((tag) => (
+						<Badge key={tag} variant="outline" className="text-[10px] px-2 py-0 rounded-full font-normal">
+							{tag}
+						</Badge>
+					))}
+				</div>
+			)}
+		</div>
+	);
+}
+
+function DecisionBody({ data }: { data: Record<string, unknown> }) {
+	const { t } = useI18n();
+	const alts = Array.isArray(data.alternatives) ? data.alternatives as string[] : data.alternatives ? [String(data.alternatives)] : [];
+	return (
+		<>
+			{data.context && <KnowledgeSection label={t("knowledge.detail.context")}><p>{String(data.context)}</p></KnowledgeSection>}
+			{data.decision && (
+				<KnowledgeSection label={t("knowledge.detail.decision")}>
+					<p className="font-medium" style={{ color: SUB_TYPE_COLORS.decision }}>{String(data.decision)}</p>
+				</KnowledgeSection>
+			)}
+			{data.reasoning && <KnowledgeSection label={t("knowledge.detail.reasoning")}><p>{String(data.reasoning)}</p></KnowledgeSection>}
+			{alts.length > 0 && (
+				<KnowledgeSection label={t("knowledge.detail.alternatives")}>
+					<ul className="list-disc pl-4 space-y-0.5 text-muted-foreground">
+						{alts.map((a, i) => <li key={i}>{a}</li>)}
+					</ul>
+				</KnowledgeSection>
+			)}
+		</>
+	);
+}
+
+function PatternBody({ data }: { data: Record<string, unknown> }) {
+	const { t } = useI18n();
+	const patternType = data.type ? String(data.type) : null;
+	return (
+		<>
+			{data.context && <KnowledgeSection label={t("knowledge.detail.context")}><p>{String(data.context)}</p></KnowledgeSection>}
+			{patternType && (
+				<div>
+					<Badge
+						variant="outline"
+						className="text-[10px] px-2 py-0 rounded-full"
+						style={{
+							borderColor: patternType === "good" ? "#2d8b7a40" : patternType === "bad" ? "#c0392b40" : "#e67e2240",
+							color: patternType === "good" ? "#2d8b7a" : patternType === "bad" ? "#c0392b" : "#e67e22",
+						}}
+					>
+						{patternType}
+					</Badge>
+				</div>
+			)}
+			{data.pattern && (
+				<KnowledgeSection label={t("knowledge.detail.pattern")}>
+					<p className="font-medium" style={{ color: SUB_TYPE_COLORS.pattern }}>{String(data.pattern)}</p>
+				</KnowledgeSection>
+			)}
+			{data.applicationConditions && <KnowledgeSection label={t("knowledge.detail.whenToApply")}><p>{String(data.applicationConditions)}</p></KnowledgeSection>}
+			{data.expectedOutcomes && <KnowledgeSection label={t("knowledge.detail.expectedOutcomes")}><p>{String(data.expectedOutcomes)}</p></KnowledgeSection>}
+		</>
+	);
+}
+
+function RuleBody({ data }: { data: Record<string, unknown> }) {
+	const { t } = useI18n();
+	const priority = data.priority ? String(data.priority) : null;
+	return (
+		<>
+			{data.text && (
+				<KnowledgeSection label={t("knowledge.detail.rule")}>
+					<p className="font-medium" style={{ color: SUB_TYPE_COLORS.rule }}>{String(data.text)}</p>
+				</KnowledgeSection>
+			)}
+			{data.rationale && <KnowledgeSection label={t("knowledge.detail.rationale")}><p>{String(data.rationale)}</p></KnowledgeSection>}
+			<div className="flex items-center gap-3">
+				{data.category && (
+					<Badge variant="outline" className="text-[10px] px-2 py-0 rounded-full font-normal">
+						{String(data.category)}
+					</Badge>
+				)}
+				{priority && (
+					<Badge
+						variant="outline"
+						className="text-[10px] px-2 py-0 rounded-full font-medium"
+						style={{
+							borderColor: priority === "p0" ? "#c0392b40" : priority === "p1" ? "#e67e2240" : "#2d8b7a40",
+							color: priority === "p0" ? "#c0392b" : priority === "p1" ? "#e67e22" : "#2d8b7a",
+						}}
+					>
+						{priority}
+					</Badge>
+				)}
+			</div>
+		</>
+	);
+}
+
+function GenericBody({ data }: { data: Record<string, unknown> }) {
+	const skipKeys = new Set(["id", "title", "createdAt", "status", "lang", "tags"]);
+	return (
+		<>
+			{Object.entries(data).map(([key, val]) => {
+				if (skipKeys.has(key) || typeof val !== "string" || !val) return null;
+				return <KnowledgeSection key={key} label={key}><p>{val}</p></KnowledgeSection>;
+			})}
+		</>
+	);
 }
 
 function cleanContent(content: string): string {
