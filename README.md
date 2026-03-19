@@ -144,6 +144,22 @@ npm install -g claude-alfred        # CLI, hooks, MCP server, dashboard
 | Hook not firing | `/plugin install alfred` + restart Claude Code |
 | Dashboard empty | Run from a directory with `.alfred/specs/` |
 
+## Uninstalling
+
+In Claude Code:
+
+```
+/plugin    # select alfred → remove from marketplace (also removes the plugin)
+```
+
+```bash
+npm uninstall -g claude-alfred
+rm -rf ~/.claude-alfred/                          # SQLite search index
+rm -f ~/.claude/rules/alfred.md                   # user rules
+rm -rf ~/.claude/plugins/cache/claude-alfred/      # plugin cache
+rm -rf .alfred/                                    # project specs, knowledge, steering (per project)
+```
+
 ## License
 
 MIT

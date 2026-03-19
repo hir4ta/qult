@@ -144,6 +144,22 @@ npm install -g claude-alfred        # CLI、hooks、MCP サーバー、ダッシ
 | Hook が動かない | `/plugin install alfred` して Claude Code を再起動 |
 | ダッシュボードが空 | `.alfred/specs/` があるディレクトリで実行 |
 
+## アンインストール
+
+Claude Code で:
+
+```
+/plugin    # alfred を選択 → marketplace から削除（プラグインも一緒に消える）
+```
+
+```bash
+npm uninstall -g claude-alfred
+rm -rf ~/.claude-alfred/                          # SQLite 検索インデックス
+rm -f ~/.claude/rules/alfred.md                   # ユーザールール
+rm -rf ~/.claude/plugins/cache/claude-alfred/      # プラグインキャッシュ
+rm -rf .alfred/                                    # プロジェクトの spec、ナレッジ、ステアリング（プロジェクトごと）
+```
+
 ## ライセンス
 
 MIT
