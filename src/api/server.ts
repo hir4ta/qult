@@ -74,29 +74,17 @@ export function createApp(
 				}
 			}
 
-			// Parse Next Steps checkboxes.
-			let inNextSteps = false;
-			const stepLines: string[] = [];
-			for (const line of lines) {
-				if (line.startsWith("## Next Steps")) { inNextSteps = true; continue; }
-				if (inNextSteps) {
-					if (line.startsWith("## ")) break;
-					if (line.match(/^- \[[ x]\] /)) stepLines.push(line);
+			// Progress source of truth: tasks.md checkboxes (always current via dossier check).
+			const taskLines: string[] = [];
+			try {
+				const tasksContent = sd.readFile("tasks.md");
+				for (const tl of tasksContent.split("\n")) {
+					if (tl.match(/^- \[[ x]\] /)) taskLines.push(tl);
 				}
-			}
+			} catch { /* no tasks.md */ }
 
-			// Fallback to tasks.md checkboxes when session.md has no Next Steps.
-			if (stepLines.length === 0) {
-				try {
-					const tasksContent = sd.readFile("tasks.md");
-					for (const tl of tasksContent.split("\n")) {
-						if (tl.match(/^- \[[ x]\] /)) stepLines.push(tl);
-					}
-				} catch { /* no tasks.md */ }
-			}
-
-			if (stepLines.length > 0) {
-				const nextSteps = stepLines.map((s) => ({
+			if (taskLines.length > 0) {
+				const nextSteps = taskLines.map((s) => ({
 					text: s.replace(/^- \[[ x]\] /, ""),
 					done: s.startsWith("- [x]"),
 				}));

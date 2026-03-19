@@ -405,8 +405,14 @@ function dossierComplete(projectPath: string, store: Store, params: DossierParam
 	}
 
 	try {
+		const currentStatus = effectiveStatus(task?.status);
 		const newPrimary = completeTask(projectPath, taskSlug);
 		appendAudit(projectPath, { action: "spec.complete", target: taskSlug, user: "mcp" });
+		appendAudit(projectPath, {
+			action: "task.status_change",
+			target: taskSlug,
+			detail: `${currentStatus} → done (dossier:complete)`,
+		});
 		syncTaskStatus(projectPath, taskSlug, "done");
 
 		// design.md pattern auto-extraction removed (FR-6).
@@ -896,7 +902,6 @@ function dossierCancel(projectPath: string, params: DossierParams) {
 	// Move primary to next non-terminal task.
 	const state = readActiveState(projectPath);
 	if (state.primary === taskSlug) {
-		const { effectiveStatus } = require("../spec/types.js");
 		state.primary = state.tasks.find((t) => {
 			const s = effectiveStatus(t.status);
 			return s !== "done" && s !== "cancelled" && t.slug !== taskSlug;
