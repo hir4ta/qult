@@ -76,20 +76,17 @@ export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<v
 		}
 	}
 
-	// Auto-check Tasks for Edit/Write using file path + tool name as context.
+	// Track worked slug + auto-transition for Edit/Write.
 	if ((ev.tool_name === "Edit" || ev.tool_name === "Write") && ev.tool_input) {
 		const input = ev.tool_input as Record<string, unknown>;
 		const filePath = typeof input.file_path === "string" ? input.file_path : "";
-		if (filePath) {
-			autoCheckTasks(ev.cwd!, filePath, items);
-		}
 		// Track worked slug for session-scoped Stop hook reminders.
 		try {
 			const slug = readActive(ev.cwd!);
 			addWorkedSlug(ev.cwd!, slug);
 
 			// FR-13: Auto-transition pending → in-progress on first source edit (.alfred/ excluded).
-			if (!isSpecFilePath(ev.cwd!, filePath)) {
+			if (filePath && !isSpecFilePath(ev.cwd!, filePath)) {
 				const state = readActiveState(ev.cwd!);
 				const task = state.tasks.find((t) => t.slug === slug);
 				if (task && effectiveStatus(task.status) === "pending") {
@@ -142,15 +139,9 @@ async function handleBashResult(
 		}
 	}
 
-	// On Bash success: auto-check NextSteps + check for git commit.
+	// On Bash success: check for git commit → living-spec, drift, wave completion.
 	if (response.exitCode === 0) {
 		const stdout = response.stdout ?? "";
-		// Combine stdout + command input for broader matching.
-		const commandStr =
-			typeof ev.tool_input === "object" && ev.tool_input !== null
-				? ((ev.tool_input as { command?: string }).command ?? "")
-				: "";
-		autoCheckTasks(ev.cwd!, `${stdout}\n${commandStr}`, items);
 
 		if (isGitCommit(stdout) && !signal.aborted) {
 			// Living Spec auto-append: track new source files in design.md.
@@ -172,6 +163,17 @@ async function handleBashResult(
 
 			// FR-7: Proactive conflict warning after git commit.
 			await checkKnowledgeConflicts(items);
+
+			// Wave completion detection: check tasks.md after commit.
+			try {
+				const slug = readActive(ev.cwd!);
+				const sd = new SpecDir(ev.cwd!, slug);
+				const tasksContent = sd.readFile("tasks.md");
+				const waveItems = detectWaveCompletion(ev.cwd!, slug, tasksContent);
+				items.push(...waveItems);
+			} catch {
+				/* no active spec or tasks.md */
+			}
 
 			// Auto-save decisions + session snapshot on git commit (not just PreCompact).
 			// This ensures knowledge accumulates even with 1M context (no compact).
@@ -207,58 +209,6 @@ async function searchErrorContext(
 	}
 }
 
-/**
- * Auto-check tasks.md checkboxes when implementation matches task descriptions.
- * Uses word matching (like autoCheckNextSteps) plus file path matching for backtick-quoted paths.
- */
-function autoCheckTasks(projectPath: string, stdout: string, items: DirectiveItem[]): void {
-	try {
-		const taskSlug = readActive(projectPath);
-		const sd = new SpecDir(projectPath, taskSlug);
-
-		let tasks: string;
-		try {
-			tasks = sd.readFile("tasks.md");
-		} catch {
-			return; // no tasks.md
-		}
-
-		const lines = tasks.split("\n");
-		let changed = false;
-		let uncheckedCount = 0;
-
-		for (let i = 0; i < lines.length; i++) {
-			const line = lines[i]!;
-			const match = line.match(/^- \[ \] (.+)$/);
-			if (!match) continue;
-
-			const description = match[1]!;
-			if (matchTaskDescription(description, stdout)) {
-				lines[i] = line.replace("- [ ]", "- [x]");
-				changed = true;
-			} else {
-				uncheckedCount++;
-			}
-		}
-
-		if (changed) {
-			const updatedContent = lines.join("\n");
-			sd.writeFile("tasks.md", updatedContent);
-			// Detect wave completion — results aggregated into caller's items.
-			const waveItems = detectWaveCompletion(projectPath, taskSlug, updatedContent);
-			items.push(...waveItems);
-		} else if (uncheckedCount > 0) {
-			// C fallback: no auto-check matched, but unchecked tasks remain.
-			// Nudge LLM to use dossier check action.
-			items.push({
-				level: "CONTEXT",
-				message: `${uncheckedCount} unchecked task(s) in tasks.md. If you just completed a task, call \`dossier action=check task_id="T-X.Y"\` to mark it done.`,
-			});
-		}
-	} catch {
-		/* fail-open */
-	}
-}
 
 /**
  * Detect wave completion after tasks.md update.
@@ -313,44 +263,6 @@ export function detectWaveCompletion(
 	return items;
 }
 
-/**
- * Match a task description against stdout/file path context.
- * Two strategies:
- * 1. File path match: backtick-quoted paths in description matched against stdout
- * 2. Word match: adaptive threshold (same as autoCheckNextSteps)
- */
-export function matchTaskDescription(description: string, stdout: string): boolean {
-	if (!stdout || !description) return false;
-	const lowerOut = stdout.toLowerCase();
-
-	// Strategy 1: File path matching — extract backtick-quoted paths from description.
-	const backtickPaths = description.match(/`([^`]+\.[a-z]+)`/g);
-	if (backtickPaths) {
-		for (const quoted of backtickPaths) {
-			const path = quoted.slice(1, -1); // strip backticks
-			if (lowerOut.includes(path.toLowerCase())) return true;
-		}
-	}
-
-	// Strategy 3: Filename partial match — extract filenames with extensions from description
-	// (no backticks required). Match against the end of file paths in stdout.
-	const filenamePattern = /\b([\w.-]+\.[a-z]{1,4})\b/gi;
-	const filenames = [...description.matchAll(filenamePattern)]
-		.map((m) => m[1]!.toLowerCase())
-		.filter((f) => f.length > 4 && !f.startsWith(".")); // skip short/hidden files
-	for (const filename of filenames) {
-		// Match filename at end of a path (after / or at start) in stdout
-		if (lowerOut.includes(`/${filename}`) || lowerOut.includes(filename)) return true;
-	}
-
-	// Strategy 2: Word matching — stricter than autoCheckNextSteps to avoid false positives.
-	const lowerDesc = description.toLowerCase();
-	const words = lowerDesc.split(/\s+/).filter((w) => w.length > 3);
-	if (words.length < 2) return false; // too few qualifying words → skip word matching
-	const threshold = Math.max(2, Math.ceil(words.length * 0.4)); // at least 2, or 40% of words
-	const matchCount = words.filter((w) => lowerOut.includes(w)).length;
-	return matchCount >= threshold;
-}
 
 /**
  * FR-4: Detect test failure patterns in command output.

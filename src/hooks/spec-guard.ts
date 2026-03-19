@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { readActiveState } from "../spec/types.js";
 
 export interface SpecState {
 	slug: string;
@@ -8,22 +9,34 @@ export interface SpecState {
 	status: string;
 }
 
+const VALID_SIZES = new Set(["S", "M", "L", "XL", "D", ""]);
+const VALID_REVIEW_STATUSES = new Set(["pending", "approved", "changes_requested", ""]);
+
 /**
- * Read active spec state from _active.md. Returns null on any error (NFR-2: fail-open).
+ * Read active spec state from _active.md via proper YAML parsing.
+ * Returns null on any error (NFR-2: fail-open).
  */
 export function tryReadActiveSpec(cwd: string | undefined): SpecState | null {
 	if (!cwd) return null;
 	try {
-		const content = readFileSync(join(cwd, ".alfred", "specs", "_active.md"), "utf-8");
-		return parseActiveContent(content);
+		const state = readActiveState(cwd);
+		if (!state.primary) return null;
+		const task = state.tasks.find((t) => t.slug === state.primary);
+		if (!task) return null;
+		const size = task.size ?? "";
+		const reviewStatus = task.review_status ?? "pending";
+		const status = task.status ?? "pending";
+		// Enum validation: reject unknown values as malformed.
+		if (!VALID_SIZES.has(size)) return null;
+		if (!VALID_REVIEW_STATUSES.has(reviewStatus)) return null;
+		return { slug: task.slug, size, reviewStatus, status };
 	} catch {
 		return null; // NFR-2: fail-open
 	}
 }
 
 /**
- * Check if _active.md exists but cannot be parsed (malformed state).
- * Returns true if the file exists AND parsing fails — a sign of corruption.
+ * Check if _active.md exists but cannot be parsed or has invalid enum values.
  * Used by PreToolUse to deny edits instead of silently allowing.
  */
 export function isActiveSpecMalformed(cwd: string | undefined): boolean {
@@ -31,45 +44,19 @@ export function isActiveSpecMalformed(cwd: string | undefined): boolean {
 	const path = join(cwd, ".alfred", "specs", "_active.md");
 	if (!existsSync(path)) return false;
 	try {
-		const content = readFileSync(path, "utf-8");
-		return parseActiveContent(content) === null;
+		const state = readActiveState(cwd);
+		if (!state.primary) return true; // no primary = malformed
+		const task = state.tasks.find((t) => t.slug === state.primary);
+		if (!task) return true; // primary not in tasks = malformed
+		// Enum validation.
+		const size = task.size ?? "";
+		const reviewStatus = task.review_status ?? "pending";
+		if (size && !VALID_SIZES.has(size)) return true;
+		if (!VALID_REVIEW_STATUSES.has(reviewStatus)) return true;
+		return false;
 	} catch {
-		return true; // file exists but can't be read → malformed
+		return true; // file exists but can't be read/parsed
 	}
-}
-
-function parseActiveContent(content: string): SpecState | null {
-	let primary = "";
-	const lines = content.split("\n");
-	for (const line of lines) {
-		if (line.startsWith("primary:")) {
-			primary = line.slice(8).trim();
-			break;
-		}
-	}
-	if (!primary) return null;
-
-	// Find the task entry for primary.
-	let inTask = false;
-	let slug = "",
-		size = "",
-		reviewStatus = "",
-		status = "";
-	for (const line of lines) {
-		if (line.trim().startsWith("- slug:")) {
-			const s = line.trim().slice(8).trim();
-			inTask = s === primary;
-			if (inTask) slug = s;
-		} else if (inTask) {
-			if (line.trim().startsWith("size:")) size = line.trim().slice(5).trim();
-			else if (line.trim().startsWith("review_status:"))
-				reviewStatus = line.trim().slice(14).trim();
-			else if (line.trim().startsWith("status:")) status = line.trim().slice(7).trim();
-			else if (line.trim().startsWith("- slug:")) break; // next task
-		}
-	}
-	if (!slug) return null;
-	return { slug, size, reviewStatus, status };
 }
 
 /**
