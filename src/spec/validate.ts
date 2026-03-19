@@ -204,13 +204,16 @@ export function validateSpec(
 	if (expectedFiles.includes("tasks.md") && specType !== "bugfix") {
 		const taskIDs = extractIDs(tasksContent, ID.T);
 		// Check each task has Requirements: line with FR reference
+		// Supports both formats:
+		//   ### T-1.1 header + "- Requirements: FR-N" line
+		//   - [ ] T-1.1 checkbox + "_Requirements: FR-N_" italic line
 		const taskLines = tasksContent.split("\n");
 		const tasksWithFR: Set<string> = new Set();
 		let currentTask = "";
 		for (const line of taskLines) {
-			const taskMatch = line.match(/###\s+(T-\d+\.\d+)/);
+			const taskMatch = line.match(/(?:###\s+|[-*]\s+\[[ x]\]\s+)(T-\d+\.\d+)/);
 			if (taskMatch) currentTask = taskMatch[1]!;
-			if (currentTask && /^-\s*Requirements:\s*FR-/i.test(line)) {
+			if (currentTask && /(?:^[-\s]*|_)Requirements:\s*FR-/i.test(line)) {
 				tasksWithFR.add(currentTask);
 			}
 		}

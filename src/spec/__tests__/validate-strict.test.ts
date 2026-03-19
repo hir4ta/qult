@@ -121,6 +121,20 @@ describe("validateSpec — negative tests (bad specs should fail)", () => {
 		expect(check?.message).toContain("FR-3");
 	});
 
+	it("passes task_to_fr with checkbox format tasks.md", () => {
+		initSpec("test-checkbox-fmt", "M", "feature", {
+			"requirements.md":
+				"# Requirements\n## Functional Requirements\n### FR-1: A\n### FR-2: B\n## Non-Functional Requirements\n",
+			"tasks.md":
+				"# Tasks\n## Wave 1\n- [x] T-1.1 [S] Do A\n  _Requirements: FR-1 | Files: src/a.ts_\n- [ ] T-1.2 [S] Do B\n  _Requirements: FR-2 | Files: src/b.ts_\n## Wave: Closing\n- [ ] T-C.1 Review\n",
+		});
+		const result = validateSpec(tmpDir, "test-checkbox-fmt", "M", "feature");
+		const frToTask = result.checks.find((c) => c.name === "fr_to_task");
+		expect(frToTask?.status).toBe("pass");
+		const taskToFr = result.checks.find((c) => c.name === "task_to_fr");
+		expect(taskToFr?.status).toBe("pass");
+	});
+
 	it("warns on tasks without FR reference in strict → fails", () => {
 		initSpec("test-task-nofr", "M", "feature", {
 			"requirements.md":
