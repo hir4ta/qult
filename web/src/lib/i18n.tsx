@@ -49,6 +49,7 @@ const translations = {
 	"tasks.showCompleted": { en: "Show completed", ja: "完了を表示" },
 	"tasks.noTasks": { en: "No tasks found.", ja: "タスクが見つかりません。" },
 	"tasks.nextSteps": { en: "Next Steps", ja: "次のステップ" },
+	"tasks.waves": { en: "Waves", ja: "Wave" },
 
 	// Task detail
 	"task.completeTask": { en: "Complete Task", ja: "タスクを完了" },

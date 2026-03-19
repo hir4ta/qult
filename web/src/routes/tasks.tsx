@@ -4,10 +4,9 @@ import { ChevronDown, CircleCheck, CircleDashed, CirclePause, CircleX } from "lu
 import { useState } from "react";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { tasksQueryOptions } from "@/lib/api";
-import type { TaskDetail } from "@/lib/types";
+import type { TaskDetail, WaveInfo } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -66,11 +65,12 @@ function TasksLayout() {
 	);
 }
 
-function NextStepsLabel({ completed, total }: { completed: number; total: number }) {
+function WavesLabel({ waves }: { waves: WaveInfo[] }) {
 	const { t } = useI18n();
+	const done = waves.filter((w) => w.checked === w.total && w.total > 0).length;
 	return (
 		<span>
-			{t("tasks.nextSteps")} ({completed}/{total})
+			{t("tasks.waves")} ({done}/{waves.length})
 		</span>
 	);
 }
@@ -87,7 +87,6 @@ function TaskAccordionCard({
 	const [expanded, setExpanded] = useState(false);
 	const progress = task.total > 0 ? (task.completed / task.total) * 100 : 0;
 	const isCompleted = task.status === "completed" || task.status === "done" || task.status === "cancelled";
-	const firstUncheckedIdx = task.next_steps?.findIndex((s) => !s.done) ?? -1;
 	const c = SHIMMER_COLORS[colorIndex % SHIMMER_COLORS.length]!;
 	const accentColor = `rgb(${c.r},${c.g},${c.b})`;
 
@@ -134,8 +133,8 @@ function TaskAccordionCard({
 				</div>
 			</div>
 
-			{/* Accordion toggle — Next Steps */}
-			{task.next_steps && task.next_steps.length > 0 && !isCompleted && (
+			{/* Accordion toggle — Waves */}
+			{task.waves && task.waves.length > 0 && !isCompleted && (
 				<>
 					<button
 						type="button"
@@ -145,23 +144,24 @@ function TaskAccordionCard({
 						}}
 						className="flex w-full items-center justify-between border-t border-border/50 px-3 py-1.5 text-[10px] text-muted-foreground hover:bg-accent/50 transition-colors"
 					>
-						<NextStepsLabel completed={task.completed} total={task.total} />
+						<WavesLabel waves={task.waves} />
 						<ChevronDown className={cn("size-3 transition-transform", expanded && "rotate-180")} />
 					</button>
 
 					{expanded && (
-						<div className="px-3 pb-3 space-y-0.5">
-							{task.next_steps.map((step, i) => {
-								const isCurrent = i === firstUncheckedIdx;
+						<div className="px-3 pb-3 space-y-1">
+							{task.waves.map((wave) => {
+								const waveDone = wave.total > 0 && wave.checked === wave.total;
+								const waveProgress = wave.total > 0 ? (wave.checked / wave.total) * 100 : 0;
 								return (
 									<div
-										key={`step-${i}`}
+										key={`wave-${wave.key}`}
 										className={cn(
-											"relative flex items-start gap-2 rounded-md px-2 py-1 transition-colors",
-											isCurrent && "overflow-hidden",
+											"relative rounded-md px-2 py-1.5 transition-colors",
+											wave.isCurrent && "overflow-hidden",
 										)}
 									>
-										{isCurrent && (
+										{wave.isCurrent && (
 											<div
 												className="absolute inset-0 animate-shimmer"
 												style={{
@@ -170,16 +170,21 @@ function TaskAccordionCard({
 												}}
 											/>
 										)}
-										<Checkbox checked={step.done} className="relative mt-0.5 data-[state=checked]:bg-[#e67e22] data-[state=checked]:border-[#e67e22]" />
-										<span
-											className={cn(
-												"relative text-[10px] leading-relaxed",
-												step.done && "line-through text-muted-foreground",
-												isCurrent && "font-medium",
-											)}
-										>
-											{step.text}
-										</span>
+										<div className="relative flex items-center justify-between mb-0.5">
+											<span
+												className={cn(
+													"text-[10px] font-medium",
+													waveDone && "text-muted-foreground",
+													wave.isCurrent && "font-semibold",
+												)}
+											>
+												{wave.key === "closing" ? "Closing" : `Wave ${wave.key}`}: {wave.title}
+											</span>
+											<span className="text-[10px] tabular-nums text-muted-foreground">
+												{wave.checked}/{wave.total}
+											</span>
+										</div>
+										<Progress value={waveProgress} className={cn("relative h-1", waveDone ? "[&>div]:bg-[#2d8b7a]" : "[&>div]:bg-[#e67e22]")} />
 									</div>
 								);
 							})}

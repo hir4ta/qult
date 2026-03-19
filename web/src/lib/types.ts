@@ -14,6 +14,14 @@ export interface StepItem {
 	done: boolean;
 }
 
+export interface WaveInfo {
+	key: string;
+	title: string;
+	total: number;
+	checked: number;
+	isCurrent: boolean;
+}
+
 export interface TaskDetail {
 	slug: string;
 	epic_slug?: string;
@@ -24,6 +32,7 @@ export interface TaskDetail {
 	has_blocker: boolean;
 	blocker_text?: string;
 	decisions?: string[];
+	waves?: WaveInfo[];
 	next_steps?: StepItem[];
 	mod_files?: string[];
 	started_at?: string;

@@ -177,7 +177,7 @@ function TaskCard({
 	const { t } = useI18n();
 	const progress = task.total > 0 ? (task.completed / task.total) * 100 : 0;
 	const isCompleted = task.status === "completed" || task.status === "done" || task.status === "cancelled";
-	const firstUnchecked = task.next_steps?.find((s) => !s.done);
+	const currentWave = task.waves?.find((w) => w.isCurrent);
 	const c = SHIMMER_COLORS[colorIndex % SHIMMER_COLORS.length]!;
 	const accentColor = `rgb(${c.r},${c.g},${c.b})`;
 
@@ -217,24 +217,21 @@ function TaskCard({
 						</div>
 					</div>
 
-					{/* Focus + shimmer */}
+					{/* Current wave + shimmer */}
 					<div className="flex-1 flex flex-col justify-center gap-1">
 						{task.project_name && (
 							<p className="text-[10px] font-medium text-muted-foreground">
 								{task.project_name}
 							</p>
 						)}
-						{task.focus && (
-							<p className="text-[11px] text-muted-foreground line-clamp-1">{task.focus}</p>
-						)}
-						{firstUnchecked && !isCompleted && (
+						{currentWave && !isCompleted && (
 							<div className="relative overflow-hidden rounded-md px-2 py-1">
 								<div
 									className="absolute inset-0 animate-shimmer"
 									style={{ background: shimmerGradient(colorIndex), backgroundSize: "200% 100%" }}
 								/>
 								<p className="relative text-[11px] line-clamp-1" style={{ color: accentColor }}>
-									→ {firstUnchecked.text}
+									→ {currentWave.key === "closing" ? "Closing" : `Wave ${currentWave.key}`}: {currentWave.title} ({currentWave.checked}/{currentWave.total})
 								</p>
 							</div>
 						)}
