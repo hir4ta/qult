@@ -72,7 +72,7 @@ function RootLayout() {
 											"text-muted-foreground hover:text-foreground hover:bg-accent/60",
 										)}
 										activeProps={{
-											className: "bg-accent text-foreground shadow-sm",
+											className: "bg-accent text-foreground",
 										}}
 									>
 										<Icon className="size-4" />

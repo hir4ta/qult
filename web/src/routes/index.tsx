@@ -55,8 +55,8 @@ function OverviewPage() {
 
 	return (
 		<div className="space-y-8">
-			{/* Stats row */}
-			<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+			{/* Stats row + Health */}
+			<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_1fr_auto]">
 				<StatCard
 					label={t("overview.totalTasks")}
 					value={tasks.length}
@@ -83,6 +83,7 @@ function OverviewPage() {
 					value={healthData?.total ?? 0}
 					icon={<Brain className="size-4" style={{ color: "#628141" }} />}
 				/>
+				<HealthCard stats={healthData} />
 			</div>
 
 			{/* Task cards */}
@@ -106,9 +107,8 @@ function OverviewPage() {
 				</section>
 			)}
 
-			{/* Bottom row: Health + Epics + Decisions */}
-			<div className="grid gap-6 lg:grid-cols-3">
-				<HealthCard stats={healthData} />
+			{/* Bottom row: Epics + Decisions */}
+			<div className="grid gap-6 lg:grid-cols-2">
 				<EpicProgressCard epics={epicsData?.epics?.filter((e) => e.status !== "completed")} />
 				<RecentDecisionsCard decisions={decisionsData?.decisions} />
 			</div>
@@ -166,7 +166,7 @@ function TaskCard({
 		<Link to="/tasks/$slug" params={{ slug: task.slug }} className="block">
 			<Card
 				className={cn(
-					"h-[140px] !gap-0 !py-0 border-stone-200 transition-all hover:shadow-md hover:border-stone-300 dark:border-stone-700 dark:hover:border-stone-600",
+					"h-[140px] !gap-0 !py-0 border-stone-200 transition-[border-color,transform] duration-200 hover:border-stone-300 hover:-translate-y-0.5 dark:border-stone-700 dark:hover:border-stone-600",
 					isCompleted && "opacity-60",
 				)}
 			>
@@ -223,7 +223,7 @@ function TaskCard({
 
 					{/* Progress */}
 					<div className="flex items-center gap-2.5">
-						<Progress value={progress} className="h-1.5 flex-1" />
+						<Progress value={progress} className="flex-1" />
 						<span className="text-[11px] tabular-nums text-muted-foreground">
 							{task.completed}/{task.total}
 						</span>
@@ -238,55 +238,40 @@ function HealthCard({ stats }: { stats?: MemoryHealthStats }) {
 	const { t } = useI18n();
 	if (!stats) return null;
 	return (
-		<Card className="border-stone-200 dark:border-stone-700">
-			<CardHeader className="pb-3">
-				<CardTitle className="text-sm font-semibold" style={{ fontFamily: "var(--font-display)" }}>
-					{t("overview.memoryHealth")}
-				</CardTitle>
-			</CardHeader>
-			<CardContent className="space-y-4">
-				<div className="grid grid-cols-3 gap-3 text-center">
-					<MetricBlock value={stats.total} label={t("overview.total")} />
-					<MetricBlock
-						value={stats.stale_count}
-						label={t("overview.stale")}
-						warn={stats.stale_count > 0}
-						warnColor="#e67e22"
-					/>
-					<MetricBlock
-						value={stats.conflict_count}
-						label={t("overview.conflicts")}
-						warn={stats.conflict_count > 0}
-						warnColor="#c0392b"
-					/>
+		<Card className="border-stone-200 dark:border-stone-700 min-w-[220px]">
+			<CardContent className="flex items-center gap-4 py-4">
+				<div className="flex flex-col gap-2 flex-1">
+					<p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+						{t("overview.memoryHealth")}
+					</p>
+					<div className="flex items-center gap-3">
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<span
+									className="text-sm tabular-nums font-medium cursor-help"
+									style={{ color: stats.stale_count > 0 ? "#e67e22" : undefined }}
+								>
+									{stats.stale_count} <span className="text-[10px] text-muted-foreground">{t("overview.stale")}</span>
+								</span>
+							</TooltipTrigger>
+							<TooltipContent>{t("overview.staleHint")}</TooltipContent>
+						</Tooltip>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<span
+									className="text-sm tabular-nums font-medium cursor-help"
+									style={{ color: stats.conflict_count > 0 ? "#c0392b" : undefined }}
+								>
+									{stats.conflict_count} <span className="text-[10px] text-muted-foreground">{t("overview.conflicts")}</span>
+								</span>
+							</TooltipTrigger>
+							<TooltipContent>{t("overview.conflictsHint")}</TooltipContent>
+						</Tooltip>
+					</div>
+					{stats.vitality_dist && <VitalityBar dist={stats.vitality_dist} />}
 				</div>
-				{stats.vitality_dist && <VitalityDist dist={stats.vitality_dist} />}
 			</CardContent>
 		</Card>
-	);
-}
-
-function MetricBlock({
-	value,
-	label,
-	warn,
-	warnColor,
-}: {
-	value: number;
-	label: string;
-	warn?: boolean;
-	warnColor?: string;
-}) {
-	return (
-		<div className="rounded-lg bg-accent/50 px-2 py-2.5">
-			<p
-				className="text-xl font-bold"
-				style={{ color: warn ? warnColor : undefined, fontFamily: "var(--font-display)" }}
-			>
-				{value}
-			</p>
-			<p className="text-[10px] text-muted-foreground">{label}</p>
-		</div>
 	);
 }
 
@@ -299,28 +284,33 @@ function VitalityLabel() {
 	);
 }
 
-function VitalityDist({ dist }: { dist: [number, number, number, number, number] }) {
-	const labels = ["0-20", "21-40", "41-60", "61-80", "81-100"];
-	const max = Math.max(...dist, 1);
+function VitalityBar({ dist }: { dist: [number, number, number, number, number] }) {
+	const total = dist.reduce((a, b) => a + b, 0) || 1;
 	return (
-		<div className="space-y-1.5">
-			<VitalityLabel />
-			<div className="flex items-end gap-1.5 h-10">
-				{dist.map((count, i) => (
-					<div key={labels[i]} className="flex-1 flex flex-col items-center gap-1">
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<div className="flex h-2 w-full overflow-hidden rounded-full cursor-help">
+					{dist.map((count, i) => (
 						<div
-							className="w-full rounded-sm transition-all"
+							key={i}
 							style={{
-								height: `${Math.max((count / max) * 100, count > 0 ? 8 : 0)}%`,
+								width: `${(count / total) * 100}%`,
 								backgroundColor: "#2d8b7a",
-								opacity: 0.25 + (i / 4) * 0.75,
+								opacity: 0.2 + (i / 4) * 0.8,
 							}}
 						/>
-						<span className="text-[9px] text-muted-foreground">{labels[i]}</span>
-					</div>
-				))}
-			</div>
-		</div>
+					))}
+				</div>
+			</TooltipTrigger>
+			<TooltipContent>
+				<VitalityLabel />
+				<div className="flex gap-2 mt-1 text-[10px]">
+					{["0-20", "21-40", "41-60", "61-80", "81-100"].map((label, i) => (
+						<span key={label} className="tabular-nums">{label}: {dist[i]}</span>
+					))}
+				</div>
+			</TooltipContent>
+		</Tooltip>
 	);
 }
 
@@ -345,7 +335,7 @@ function EpicProgressCard({ epics }: { epics?: EpicSummary[] }) {
 									{epic.completed}/{epic.total}
 								</span>
 							</div>
-							<Progress value={progress} className="h-1.5" />
+							<Progress value={progress} className="" />
 						</div>
 					);
 				})}

@@ -152,7 +152,7 @@ function EpicSection({ epics }: { epics: EpicSummary[] }) {
 							</CardHeader>
 							<CardContent className="space-y-2">
 								<div className="flex items-center gap-2">
-									<Progress value={progress} className="h-1.5 flex-1" />
+									<Progress value={progress} className="flex-1" />
 									<span className="text-xs text-muted-foreground">
 										{epic.completed}/{epic.total}
 									</span>
