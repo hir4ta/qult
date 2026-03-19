@@ -4,6 +4,7 @@ import type {
 	ConfidenceSummary,
 	DecisionsResponse,
 	EpicsResponse,
+	GraphEdgesResponse,
 	KnowledgeResponse,
 	KnowledgeStats,
 	MemoryHealthStats,
@@ -88,6 +89,13 @@ export const epicsQueryOptions = () =>
 		queryKey: ["epics"],
 		queryFn: () => fetchJSON<EpicsResponse>("/api/epics"),
 		staleTime: LIVE_STALE,
+	});
+
+export const graphEdgesQueryOptions = () =>
+	queryOptions({
+		queryKey: ["knowledge", "graph"],
+		queryFn: () => fetchJSON<GraphEdgesResponse>("/api/knowledge/graph"),
+		staleTime: REF_STALE,
 	});
 
 export const decisionsQueryOptions = (limit = 20) =>

@@ -1,8 +1,8 @@
 import type { KnowledgeConflict, KnowledgeRow } from "../types.js";
+import { pairwiseSimilarity } from "./graph.js";
 import type { Store } from "./index.js";
 import type { RawKnowledgeRow } from "./knowledge.js";
 import { getKnowledgeByIDs, mapRow, searchKnowledgeKeyword } from "./knowledge.js";
-import { cosineSimilarity, deserializeFloat32 } from "./vectors.js";
 
 export function subTypeHalfLife(subType: string): number {
 	switch (subType) {
@@ -138,33 +138,17 @@ export function detectKnowledgeConflicts(
 	threshold = 0.7,
 	limit = 1000,
 ): KnowledgeConflict[] {
-	const rows = store.db
-		.prepare(`
-    SELECT e.source_id, e.vector FROM embeddings e
-    JOIN knowledge_index k ON k.id = e.source_id
-    WHERE e.source = 'knowledge' AND k.enabled = 1
-    LIMIT ?
-  `)
-		.all(limit) as Array<{ source_id: number; vector: Buffer }>;
-
-	const docs = rows.map((r) => ({
-		id: r.source_id,
-		vec: deserializeFloat32(r.vector),
-	}));
+	const pairs = pairwiseSimilarity(store, { limit, minScore: threshold });
 
 	const conflicts: KnowledgeConflict[] = [];
-	for (let i = 0; i < docs.length; i++) {
-		for (let j = i + 1; j < docs.length; j++) {
-			if (docs[i]!.vec.length !== docs[j]!.vec.length) continue;
-			const sim = cosineSimilarity(docs[i]!.vec, docs[j]!.vec);
-			if (sim >= threshold) {
-				conflicts.push({
-					a: { id: docs[i]!.id } as KnowledgeRow,
-					b: { id: docs[j]!.id } as KnowledgeRow,
-					similarity: sim,
-					type: "potential_duplicate",
-				});
-			}
+	for (const pair of pairs) {
+		if (pair.score >= threshold) {
+			conflicts.push({
+				a: { id: pair.idA } as KnowledgeRow,
+				b: { id: pair.idB } as KnowledgeRow,
+				similarity: pair.score,
+				type: "potential_duplicate",
+			});
 		}
 	}
 

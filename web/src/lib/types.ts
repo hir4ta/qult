@@ -193,6 +193,20 @@ export interface VersionResponse {
 	version: string;
 }
 
+// --- Knowledge Graph ---
+
+export interface GraphEdge {
+	source: number;
+	target: number;
+	score: number;
+}
+
+export interface GraphEdgesResponse {
+	edges: GraphEdge[];
+	method: "vector" | "keyword";
+	truncated: boolean;
+}
+
 // Task status color map (FR-18)
 export const TASK_STATUS_COLORS: Record<string, { bg: string; text: string; label: string }> = {
 	pending: { bg: "#e5e7eb", text: "#374151", label: "Pending" },

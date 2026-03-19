@@ -18,6 +18,7 @@ import {
 	writeActiveState,
 } from "../spec/types.js";
 import { searchKnowledgeFTS } from "../store/fts.js";
+import { computeGraphEdges } from "../store/graph.js";
 import type { Store } from "../store/index.js";
 import { getKnowledgeStats, setKnowledgeEnabled } from "../store/knowledge.js";
 import { detectProject } from "../store/project.js";
@@ -261,6 +262,27 @@ export function createApp(
 	app.get("/api/knowledge/stats", (c) => {
 		const stats = getKnowledgeStats(store);
 		return c.json(stats);
+	});
+
+	// Graph edges endpoint with single-entry cache
+	let graphCache: { edges: unknown[]; method: string; truncated: boolean } | null = null;
+	let graphCacheKey = "";
+
+	app.get("/api/knowledge/graph", (c) => {
+		// Check if cache is still valid via MAX(updated_at) + COUNT
+		const row = store.db
+			.prepare("SELECT MAX(updated_at) as max_updated, COUNT(*) as cnt FROM knowledge_index WHERE enabled = 1")
+			.get() as { max_updated: string | null; cnt: number };
+		const currentKey = `${row.max_updated ?? ""}:${row.cnt}`;
+
+		if (graphCache && currentKey === graphCacheKey) {
+			return c.json(graphCache);
+		}
+
+		const result = computeGraphEdges(store);
+		graphCache = result;
+		graphCacheKey = currentKey;
+		return c.json(result);
 	});
 
 	app.patch("/api/knowledge/:id/enabled", async (c) => {

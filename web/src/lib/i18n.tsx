@@ -83,6 +83,14 @@ const translations = {
 	"knowledge.pattern": { en: "Pattern", ja: "パターン" },
 	"knowledge.rule": { en: "Rule", ja: "ルール" },
 	"knowledge.snapshot": { en: "Snapshot", ja: "スナップショット" },
+	"knowledge.viewGrid": { en: "Grid", ja: "グリッド" },
+	"knowledge.viewGraph": { en: "Graph", ja: "グラフ" },
+	"knowledge.graphMinEntries": { en: "At least 5 knowledge entries needed for graph view", ja: "グラフ表示には5件以上のナレッジが必要です" },
+	"knowledge.graphTruncated": { en: "Showing top entries by access count", ja: "アクセス数上位のエントリを表示中" },
+	"knowledge.graphMethod": { en: "Edges via", ja: "エッジ計算:" },
+	"knowledge.graphLoading": { en: "Computing graph...", ja: "グラフを計算中..." },
+	"knowledge.graphError": { en: "Failed to load graph", ja: "グラフの読み込みに失敗しました" },
+	"knowledge.graphConnections": { en: "connections", ja: "件の接続" },
 
 	// Activity
 	"activity.all": { en: "All", ja: "すべて" },

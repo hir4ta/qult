@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Archive, ArchiveRestore, BookOpen, Gavel, Lightbulb, Search, Shield } from "lucide-react";
+import { Archive, ArchiveRestore, BookOpen, Gavel, Grid3x3, Lightbulb, Network, Search, Shield } from "lucide-react";
 import { useState } from "react";
 import Markdown from "react-markdown";
 import { Badge } from "@/components/ui/badge";
@@ -17,8 +17,10 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
+	graphEdgesQueryOptions,
 	knowledgeQueryOptions,
 	knowledgeStatsQueryOptions,
 	useToggleEnabledMutation,
@@ -28,6 +30,7 @@ import type { KnowledgeEntry, KnowledgeStats } from "@/lib/types";
 import { SUB_TYPE_COLORS } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { KnowledgeGraph } from "@/components/knowledge-graph";
 
 export const Route = createFileRoute("/knowledge")({
 	component: KnowledgePage,
@@ -37,9 +40,14 @@ function KnowledgePage() {
 	const { t } = useI18n();
 	const [localFilter, setLocalFilter] = useState("");
 	const [selected, setSelected] = useState<KnowledgeEntry | null>(null);
+	const [view, setView] = useState<"grid" | "graph">("grid");
 
 	const { data: browseData, isLoading } = useQuery(knowledgeQueryOptions());
 	const { data: statsData } = useQuery(knowledgeStatsQueryOptions());
+	const { data: graphData, isLoading: graphLoading, isError: graphError } = useQuery({
+		...graphEdgesQueryOptions(),
+		enabled: view === "graph",
+	});
 
 	const entries = browseData?.entries ?? [];
 	const filtered = localFilter
@@ -50,39 +58,111 @@ function KnowledgePage() {
 			)
 		: entries;
 
+	const showGraph = view === "graph";
+	const minEntriesForGraph = 5;
+	const hasEnoughEntries = entries.length >= minEntriesForGraph;
+
 	return (
 		<div className="space-y-5">
-			{/* Filter + stats */}
+			{/* Filter + stats + view toggle */}
 			<div className="flex items-center gap-4">
-				<div className="relative flex-1 max-w-sm">
-					<Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-					<Input
-						placeholder={t("knowledge.filter")}
-						value={localFilter}
-						onChange={(e) => setLocalFilter(e.target.value)}
-						className="pl-9"
-					/>
-				</div>
+				{!showGraph && (
+					<div className="relative flex-1 max-w-sm">
+						<Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+						<Input
+							placeholder={t("knowledge.filter")}
+							value={localFilter}
+							onChange={(e) => setLocalFilter(e.target.value)}
+							className="pl-9"
+						/>
+					</div>
+				)}
+				{showGraph && <div className="flex-1" />}
 				{statsData && <StatsBar stats={statsData} />}
+				<ToggleGroup
+					type="single"
+					value={view}
+					onValueChange={(v) => { if (v) setView(v as "grid" | "graph"); }}
+					className="h-8"
+				>
+					<ToggleGroupItem value="grid" aria-label={t("knowledge.viewGrid")} className="h-8 px-2.5 gap-1.5 text-xs">
+						<Grid3x3 className="size-3.5" />
+						{t("knowledge.viewGrid")}
+					</ToggleGroupItem>
+					<ToggleGroupItem value="graph" aria-label={t("knowledge.viewGraph")} className="h-8 px-2.5 gap-1.5 text-xs">
+						<Network className="size-3.5" />
+						{t("knowledge.viewGraph")}
+					</ToggleGroupItem>
+				</ToggleGroup>
 			</div>
 
-			{/* Grid */}
-			{isLoading ? (
-				<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-					{Array.from({ length: 9 }).map((_, i) => (
-						<Skeleton key={i} className="h-28 rounded-xl" />
-					))}
-				</div>
-			) : filtered.length > 0 ? (
-				<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-					{filtered.map((entry) => (
-						<KnowledgeCard key={entry.id} entry={entry} onSelect={() => setSelected(entry)} />
-					))}
-				</div>
-			) : (
-				<div className="flex h-40 items-center justify-center">
-					<p className="text-sm text-muted-foreground">{t("knowledge.noMemories")}</p>
-				</div>
+			{/* Graph view */}
+			{showGraph && (
+				<>
+					{!hasEnoughEntries ? (
+						<div className="flex h-[500px] items-center justify-center rounded-xl border border-dashed border-border">
+							<p className="text-sm text-muted-foreground">{t("knowledge.graphMinEntries")}</p>
+						</div>
+					) : graphLoading ? (
+						<div className="flex h-[500px] items-center justify-center rounded-xl border border-dashed border-border">
+							<p className="text-sm text-muted-foreground">{t("knowledge.graphLoading")}</p>
+						</div>
+					) : graphError ? (
+						<div className="flex h-[500px] items-center justify-center rounded-xl border border-dashed border-border">
+							<p className="text-sm text-muted-foreground">{t("knowledge.graphError")}</p>
+						</div>
+					) : graphData ? (
+						<div className="space-y-2">
+							<KnowledgeGraph
+								nodes={entries.map((e) => ({
+									id: e.id,
+									label: formatLabel(e.label).title,
+									sub_type: e.sub_type,
+									hit_count: e.hit_count,
+								}))}
+								edges={graphData.edges}
+								method={graphData.method}
+								truncated={graphData.truncated}
+								onNodeClick={(node) => {
+									const entry = entries.find((e) => e.id === node.id);
+									if (entry) setSelected(entry);
+								}}
+							/>
+							<div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+								<span>{t("knowledge.graphMethod")} {graphData.method}</span>
+								{graphData.truncated && (
+									<>
+										<Separator orientation="vertical" className="h-3" />
+										<span>{t("knowledge.graphTruncated")}</span>
+									</>
+								)}
+							</div>
+						</div>
+					) : null}
+				</>
+			)}
+
+			{/* Grid view */}
+			{!showGraph && (
+				<>
+					{isLoading ? (
+						<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+							{Array.from({ length: 9 }).map((_, i) => (
+								<Skeleton key={i} className="h-28 rounded-xl" />
+							))}
+						</div>
+					) : filtered.length > 0 ? (
+						<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+							{filtered.map((entry) => (
+								<KnowledgeCard key={entry.id} entry={entry} onSelect={() => setSelected(entry)} />
+							))}
+						</div>
+					) : (
+						<div className="flex h-40 items-center justify-center">
+							<p className="text-sm text-muted-foreground">{t("knowledge.noMemories")}</p>
+						</div>
+					)}
+				</>
 			)}
 
 			{/* Detail dialog */}
