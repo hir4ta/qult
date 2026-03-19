@@ -44,7 +44,7 @@ This isn't a suggestion. Hooks enforce it. Try to write code without a spec and 
 
 ### Specs that survive
 
-Requirements, design, decisions, session state — structured markdown that persists across compacts and sessions. Your context is never lost. Size adapts to the task: 3 files for a bug fix, 6 for a major feature.
+Requirements, design, tasks, test specs — structured markdown that persists across compacts and sessions. Your context is never lost. Size adapts to the task: 2 files for a bug fix, 5 for a major feature.
 
 ### Memory that compounds
 
@@ -162,7 +162,7 @@ Run `alfred doctor` to verify both are in sync.
 
 | Tool | Purpose |
 |------|---------|
-| `dossier` | Spec lifecycle — init, update, status, switch, complete, delete, history, rollback, review, validate, gate |
+| `dossier` | Spec lifecycle — init, update, status, switch, complete, delete, history, rollback, review, validate, gate, defer, cancel |
 | `roster` | Epic management — group tasks with dependencies, track progress across specs |
 | `ledger` | Knowledge — search, save (decision/pattern/rule), promote (pattern to rule), reflect, audit-conventions |
 
@@ -175,7 +175,7 @@ These run automatically. You don't configure them.
 | SessionStart | Restores spec context, syncs knowledge index, suggests missing setup (`/alfred:init`) |
 | UserPromptSubmit | Semantic search + skill suggestions + spec enforcement (blocks implementation without a spec, blocks unapproved M/L/XL) |
 | PreToolUse | Three-layer enforcement — review gate, intent guard, approval gate. Blocks Edit/Write when gates are active |
-| PostToolUse | Auto-updates task progress in tasks.md and session.md. Detects wave completion and sets review gates. Drift detection after commits. Suggests `/alfred:harvest` after PR merge, `/alfred:archive` for large reference files |
+| PostToolUse | Auto-updates task progress in tasks.md. Auto-transitions task status (pending→in-progress→review). Detects wave completion and sets review gates. Drift detection after commits. Suggests `/alfred:harvest` after PR merge, `/alfred:archive` for large reference files |
 | PreCompact | Saves session snapshots, extracts decisions from transcript, syncs epic progress |
 | Stop | Blocks if review gate is active. Otherwise reminds about unchecked items |
 
@@ -241,11 +241,11 @@ Not every task needs 6 spec files.
 
 | Size | Files | When to use |
 |------|-------|-------------|
-| **S** | 3 (requirements, tasks, session) | Bug fix, config change, small tweak |
-| **M** | 5 (+ design, test-specs) | New endpoint, refactor, moderate feature |
-| **L/XL** | 6 (+ research) | Architecture change, new subsystem |
-| **D** (delta) | 2 (delta.md with CHG-N IDs, session) | Brownfield changes to existing code |
-| **Bugfix** | 3-4 (bugfix.md, tasks, session, +test-specs) | Surgical bug fix with reproduction steps |
+| **S** | 2 (requirements, tasks) | Bug fix, config change, small tweak |
+| **M** | 4 (+ design, test-specs) | New endpoint, refactor, moderate feature |
+| **L/XL** | 5 (+ research) | Architecture change, new subsystem |
+| **D** (delta) | 1 (delta.md with CHG-N IDs) | Brownfield changes to existing code |
+| **Bugfix** | 2-3 (bugfix.md, tasks, +test-specs) | Surgical bug fix with reproduction steps |
 
 Size auto-detected from description length, or set explicitly with `dossier action=init size=S`.
 

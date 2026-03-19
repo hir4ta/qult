@@ -14,7 +14,7 @@ This is the invariant development flow enforced by alfred. All implementation wo
    - NG → Fix and re-review
 3. **User Approval** — M/L/XL specs reviewed via `alfred dashboard`
 4. **Implementation** — Execute Wave by Wave:
-   - Per **Task** completion: tasks.md + tasks.md auto-updated
+   - Per **Task** completion: tasks.md auto-updated
    - Per **Wave** completion: Commit → Self-review → Knowledge save (`ledger save`)
    - Wave self-review gate blocks next Wave until cleared
 5. **Completion** — Final self-review → `dossier action=complete`

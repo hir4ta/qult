@@ -534,8 +534,7 @@ export function createApp(
 		const task = state.tasks.find((t) => t.slug === slug);
 		const size = (task?.size ?? "L") as SpecSize;
 		const specType = (task?.spec_type ?? "feature") as SpecType;
-		// session.md is a status file, not reviewable content — exclude from approval check.
-		const expectedFiles = filesForSize(size, specType).filter((f) => f !== "session.md");
+		const expectedFiles = filesForSize(size, specType);
 		const allApproved = expectedFiles.every((f) => approvals[f] === true);
 
 		if (allApproved && task && task.review_status !== "approved") {
