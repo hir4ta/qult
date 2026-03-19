@@ -19,17 +19,7 @@ const VALID_REVIEW_STATUSES = new Set(["pending", "approved", "changes_requested
 export function tryReadActiveSpec(cwd: string | undefined): SpecState | null {
 	if (!cwd) return null;
 	try {
-		const state = readActiveState(cwd);
-		if (!state.primary) return null;
-		const task = state.tasks.find((t) => t.slug === state.primary);
-		if (!task) return null;
-		const size = task.size ?? "";
-		const reviewStatus = task.review_status ?? "pending";
-		const status = task.status ?? "pending";
-		// Enum validation: reject unknown values as malformed.
-		if (!VALID_SIZES.has(size)) return null;
-		if (!VALID_REVIEW_STATUSES.has(reviewStatus)) return null;
-		return { slug: task.slug, size, reviewStatus, status };
+		return parseSpecState(cwd);
 	} catch {
 		return null; // NFR-2: fail-open
 	}
@@ -44,19 +34,25 @@ export function isActiveSpecMalformed(cwd: string | undefined): boolean {
 	const path = join(cwd, ".alfred", "specs", "_active.md");
 	if (!existsSync(path)) return false;
 	try {
-		const state = readActiveState(cwd);
-		if (!state.primary) return true; // no primary = malformed
-		const task = state.tasks.find((t) => t.slug === state.primary);
-		if (!task) return true; // primary not in tasks = malformed
-		// Enum validation.
-		const size = task.size ?? "";
-		const reviewStatus = task.review_status ?? "pending";
-		if (size && !VALID_SIZES.has(size)) return true;
-		if (!VALID_REVIEW_STATUSES.has(reviewStatus)) return true;
-		return false;
+		return parseSpecState(cwd) === null;
 	} catch {
 		return true; // file exists but can't be read/parsed
 	}
+}
+
+/** Shared parsing logic — single readActiveState call for both functions. */
+function parseSpecState(cwd: string): SpecState | null {
+	const state = readActiveState(cwd);
+	if (!state.primary) return null;
+	const task = state.tasks.find((t) => t.slug === state.primary);
+	if (!task) return null;
+	const size = task.size ?? "";
+	const reviewStatus = task.review_status ?? "pending";
+	const status = task.status ?? "pending";
+	// Enum validation: reject unknown values.
+	if (!VALID_SIZES.has(size)) return null;
+	if (!VALID_REVIEW_STATUSES.has(reviewStatus)) return null;
+	return { slug: task.slug, size, reviewStatus, status };
 }
 
 /**

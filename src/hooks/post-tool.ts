@@ -76,7 +76,7 @@ export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<v
 		}
 	}
 
-	// Track worked slug + auto-transition for Edit/Write.
+	// Track worked slug + auto-transition + nudge for Edit/Write.
 	if ((ev.tool_name === "Edit" || ev.tool_name === "Write") && ev.tool_input) {
 		const input = ev.tool_input as Record<string, unknown>;
 		const filePath = typeof input.file_path === "string" ? input.file_path : "";
@@ -94,6 +94,21 @@ export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<v
 						updateTaskStatus(ev.cwd!, slug, "in-progress", "auto:first-edit");
 					} catch { /* transition error — ignore */ }
 				}
+			}
+
+			// Nudge: remind to check tasks after source edits.
+			if (filePath && !isSpecFilePath(ev.cwd!, filePath)) {
+				const sd = new SpecDir(ev.cwd!, slug);
+				try {
+					const tasks = sd.readFile("tasks.md");
+					const unchecked = (tasks.match(/^- \[ \] /gm) ?? []).length;
+					if (unchecked > 0) {
+						items.push({
+							level: "CONTEXT",
+							message: `${unchecked} unchecked task(s) in tasks.md. Mark completed tasks via \`dossier action=check task_id="T-X.Y"\`.`,
+						});
+					}
+				} catch { /* no tasks.md */ }
 			}
 		} catch { /* no active spec */ }
 	}

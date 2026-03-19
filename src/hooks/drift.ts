@@ -114,13 +114,13 @@ export function parseTasksFileRefs(content: string): string[] {
 	const refs = new Set<string>();
 
 	// Backtick-quoted file paths (e.g., `src/hooks/post-tool.ts`).
-	for (const match of content.matchAll(/`([^`]+\.[a-z]{1,4})`/g)) {
+	for (const match of content.matchAll(/`([^`]+\.[a-z]{1,6})`/g)) {
 		const path = match[1]!.trim();
 		if (path.includes("/")) refs.add(path);
 	}
 
 	// Files: lines (e.g., "Files: src/api/server.ts, src/hooks/stop.ts").
-	for (const match of content.matchAll(/Files:\s*([^\n|_]+)/gi)) {
+	for (const match of content.matchAll(/Files:\s*([^\n|]+)/gi)) {
 		const paths = match[1]!.split(",").map((p) => p.trim());
 		for (const p of paths) {
 			if (p.includes("/") && p.includes(".")) refs.add(p);
