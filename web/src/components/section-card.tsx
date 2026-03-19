@@ -46,7 +46,7 @@ export function SectionCard({
 	const [showDiff, setShowDiff] = useState(false);
 	const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
 	const [versionContent, setVersionContent] = useState<string | null>(null);
-	const borderColor = color ?? SPEC_FILE_COLORS[title] ?? "#44403c";
+	// color prop retained for potential future use but no longer used for left border.
 
 	const { data: historyData } = useQuery({
 		queryKey: ["spec-history", slug, title],
@@ -69,8 +69,10 @@ export function SectionCard({
 
 	return (
 		<div
-			className="rounded-lg border bg-card overflow-hidden transition-colors hover:border-border/80"
-			style={{ borderLeftWidth: 3, borderLeftColor: borderColor }}
+			className={cn(
+				"rounded-lg border overflow-hidden transition-colors hover:border-border/80",
+				open ? "bg-card" : "bg-muted/30",
+			)}
 		>
 			<div className="flex items-center justify-between px-4 py-2.5">
 				<button
