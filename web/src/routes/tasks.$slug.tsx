@@ -86,27 +86,6 @@ function TaskDetailPage() {
 			<div className="w-[280px] shrink-0 space-y-4 overflow-y-auto pt-1">
 				<TaskInfoCard task={task} validationData={validationData ?? undefined} />
 
-				{/* Next Steps (if active) */}
-				{task.status !== "completed" && task.status !== "done" && task.status !== "cancelled" && task.next_steps && task.next_steps.length > 0 && (
-					<div className="rounded-lg border bg-card p-4 space-y-2">
-						<h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-							{t("tasks.nextSteps")}
-						</h3>
-						<div className="space-y-1">
-							{task.next_steps.map((step, i) => (
-								<div key={`step-${i}`} className="flex items-start gap-2">
-									<Checkbox checked={step.done} className="mt-0.5" />
-									<span
-										className={`text-xs leading-relaxed ${step.done ? "line-through text-muted-foreground" : ""}`}
-									>
-										{step.text}
-									</span>
-								</div>
-							))}
-						</div>
-					</div>
-				)}
-
 				{/* Complete button */}
 				{canComplete && (
 					<div className="rounded-lg border bg-card p-4">

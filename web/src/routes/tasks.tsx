@@ -175,7 +175,7 @@ function TaskAccordionCard({
 												}}
 											/>
 										)}
-										<Checkbox checked={step.done} className="relative mt-0.5" />
+										<Checkbox checked={step.done} className="relative mt-0.5 data-[state=checked]:bg-[#e67e22] data-[state=checked]:border-[#e67e22]" />
 										<span
 											className={cn(
 												"relative text-[10px] leading-relaxed",

@@ -69,19 +69,22 @@ describe("detectSize", () => {
 });
 
 describe("filesForSize", () => {
-	it("S feature has 3 files", () => {
-		expect(filesForSize("S", "feature")).toHaveLength(3);
+	it("S feature has 2 files", () => {
+		expect(filesForSize("S", "feature")).toHaveLength(2);
 		expect(filesForSize("S", "feature")).toContain("requirements.md");
+		expect(filesForSize("S", "feature")).not.toContain("session.md");
 	});
-	it("M feature has 5 files", () => {
-		expect(filesForSize("M", "feature")).toHaveLength(5);
+	it("M feature has 4 files", () => {
+		expect(filesForSize("M", "feature")).toHaveLength(4);
+		expect(filesForSize("M", "feature")).not.toContain("session.md");
 	});
-	it("L feature has 6 files (decisions.md removed)", () => {
-		expect(filesForSize("L", "feature")).toHaveLength(6);
+	it("L feature has 5 files (session.md + decisions.md removed)", () => {
+		expect(filesForSize("L", "feature")).toHaveLength(5);
+		expect(filesForSize("L", "feature")).not.toContain("session.md");
 		expect(filesForSize("L", "feature")).not.toContain("decisions.md");
 	});
-	it("D has 2 files", () => {
-		expect(filesForSize("D", "delta")).toEqual(["delta.md", "session.md"]);
+	it("D has 1 file", () => {
+		expect(filesForSize("D", "delta")).toEqual(["delta.md"]);
 	});
 	it("bugfix uses bugfix.md as primary", () => {
 		expect(filesForSize("S", "bugfix")[0]).toBe("bugfix.md");

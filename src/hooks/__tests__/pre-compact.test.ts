@@ -26,14 +26,13 @@ afterEach(() => {
 	rmSync(tmpDir, { recursive: true, force: true });
 });
 
-function setupActiveSpec(slug: string, sessionContent: string, size = "S", reviewStatus = "approved") {
+function setupActiveSpec(slug: string, tasksContent: string, size = "S", reviewStatus = "approved") {
 	const specsDir = join(tmpDir, ".alfred", "specs", slug);
 	mkdirSync(specsDir, { recursive: true });
 	const active = `primary: ${slug}\ntasks:\n  - slug: ${slug}\n    started_at: "2025-01-01"\n    status: active\n    size: ${size}\n    spec_type: feature\n    review_status: ${reviewStatus}\n`;
 	writeFileSync(join(tmpDir, ".alfred", "specs", "_active.md"), active);
-	writeFileSync(join(specsDir, "session.md"), sessionContent);
 	writeFileSync(join(specsDir, "requirements.md"), "# Requirements");
-	writeFileSync(join(specsDir, "tasks.md"), "# Tasks");
+	writeFileSync(join(specsDir, "tasks.md"), tasksContent);
 }
 
 function suppressIO(): { restore: () => void; stderr: string[] } {
@@ -52,7 +51,7 @@ describe("preCompact", () => {
 		].join("\n");
 		const transcriptPath = join(tmpDir, "transcript.jsonl");
 		writeFileSync(transcriptPath, transcript);
-		setupActiveSpec("dec-test", "# Session\n## Status: active");
+		setupActiveSpec("dec-test", "# Tasks\n- [ ] Todo\n");
 
 		const io = suppressIO();
 		try {
@@ -69,7 +68,7 @@ describe("preCompact", () => {
 		const transcript = JSON.stringify({ role: "user", content: "I decided to use PostgreSQL because it scales better." });
 		const transcriptPath = join(tmpDir, "transcript2.jsonl");
 		writeFileSync(transcriptPath, transcript);
-		setupActiveSpec("user-msg", "# Session\n## Status: active");
+		setupActiveSpec("user-msg", "# Tasks\n- [ ] Todo\n");
 
 		const io = suppressIO();
 		try {
@@ -85,7 +84,7 @@ describe("preCompact", () => {
 		const transcript = JSON.stringify({ role: "assistant", content: "We decided on something." });
 		const transcriptPath = join(tmpDir, "transcript3.jsonl");
 		writeFileSync(transcriptPath, transcript);
-		setupActiveSpec("low-score", "# Session\n## Status: active");
+		setupActiveSpec("low-score", "# Tasks\n- [ ] Todo\n");
 
 		const io = suppressIO();
 		try {
@@ -97,8 +96,8 @@ describe("preCompact", () => {
 		expect(rows.length).toBe(0);
 	});
 
-	it("saves chapter memory (session snapshot)", async () => {
-		setupActiveSpec("chapter-test", "# Session\n## Status: active\n## Current Focus\nTesting chapters");
+	it("saves chapter memory (tasks snapshot)", async () => {
+		setupActiveSpec("chapter-test", "# Tasks\n- [x] Step done\n- [ ] Testing chapters");
 
 		const io = suppressIO();
 		try {
@@ -112,7 +111,7 @@ describe("preCompact", () => {
 	});
 
 	it("writes pending-compact breadcrumb", async () => {
-		setupActiveSpec("breadcrumb", "# Session\n## Status: active");
+		setupActiveSpec("breadcrumb", "# Tasks\n- [ ] Todo\n");
 
 		const io = suppressIO();
 		try {
@@ -124,8 +123,8 @@ describe("preCompact", () => {
 		expect(breadcrumb).toContain("breadcrumb");
 	});
 
-	it("auto-completes S spec when status: completed", async () => {
-		setupActiveSpec("auto-s", "# Session\n## Status: completed");
+	it("auto-completes S spec when all tasks checked", async () => {
+		setupActiveSpec("auto-s", "# Tasks\n- [x] Step 1\n- [x] Step 2");
 
 		const io = suppressIO();
 		try {
@@ -137,8 +136,8 @@ describe("preCompact", () => {
 		expect(active).toContain("completed");
 	});
 
-	it("auto-completes when all Next Steps checked", async () => {
-		setupActiveSpec("auto-ns", "# Session\n## Status: active\n## Next Steps\n- [x] Step 1\n- [x] Step 2");
+	it("auto-completes when all tasks checked", async () => {
+		setupActiveSpec("auto-ns", "# Tasks\n- [x] Step 1\n- [x] Step 2");
 
 		const io = suppressIO();
 		try {
@@ -151,7 +150,7 @@ describe("preCompact", () => {
 	});
 
 	it("skips auto-complete for M spec without approval", async () => {
-		setupActiveSpec("m-block", "# Session\n## Status: completed", "M", "pending");
+		setupActiveSpec("m-block", "# Tasks\n- [x] All done", "M", "pending");
 
 		const io = suppressIO();
 		try {

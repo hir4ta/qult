@@ -47,7 +47,7 @@ function setupSpec(opts: {
 	writeFileSync(join(specsDir, "_active.md"), yaml);
 
 	if (opts.sessionContent) {
-		writeFileSync(join(specsDir, slug, "session.md"), opts.sessionContent);
+		writeFileSync(join(specsDir, slug, "tasks.md"), opts.sessionContent);
 	}
 }
 

@@ -102,7 +102,7 @@ describe("dossier update", () => {
 		const result = await handleDossier(store, null, {
 			action: "update",
 			project_path: tmpDir,
-			file: "session.md",
+			file: "tasks.md",
 			content: "\n## New Section\n",
 			mode: "append",
 		});
@@ -120,7 +120,7 @@ describe("dossier update", () => {
 		const result = await handleDossier(store, null, {
 			action: "update",
 			project_path: tmpDir,
-			file: "session.md",
+			file: "tasks.md",
 			content: "# Replaced",
 			mode: "replace",
 		});
@@ -210,7 +210,7 @@ describe("dossier history & rollback", () => {
 		const result = await handleDossier(store, null, {
 			action: "history",
 			project_path: tmpDir,
-			file: "session.md",
+			file: "tasks.md",
 		});
 		expect(parseResult(result).count).toBe(0);
 	});
@@ -224,14 +224,14 @@ describe("dossier history & rollback", () => {
 		await handleDossier(store, null, {
 			action: "update",
 			project_path: tmpDir,
-			file: "session.md",
+			file: "tasks.md",
 			content: "# Updated",
 			mode: "replace",
 		});
 		const result = await handleDossier(store, null, {
 			action: "history",
 			project_path: tmpDir,
-			file: "session.md",
+			file: "tasks.md",
 		});
 		expect(parseResult(result).count).toBeGreaterThan(0);
 	});

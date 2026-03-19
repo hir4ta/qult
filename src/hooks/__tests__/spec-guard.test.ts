@@ -24,7 +24,7 @@ function setupSpec(opts: {
 	size?: string;
 	reviewStatus?: string;
 	status?: string;
-	sessionContent?: string;
+	tasksContent?: string;
 }): void {
 	const slug = opts.primary ?? "test-task";
 	const specsDir = join(tmpDir, ".alfred", "specs");
@@ -36,10 +36,10 @@ function setupSpec(opts: {
 	if (opts.status) yaml += `    status: ${opts.status}\n`;
 	writeFileSync(join(specsDir, "_active.md"), yaml);
 
-	if (opts.sessionContent) {
+	if (opts.tasksContent) {
 		const taskDir = join(specsDir, slug);
 		mkdirSync(taskDir, { recursive: true });
-		writeFileSync(join(taskDir, "session.md"), opts.sessionContent);
+		writeFileSync(join(taskDir, "tasks.md"), opts.tasksContent);
 	}
 }
 
@@ -95,22 +95,21 @@ describe("isSpecFilePath", () => {
 });
 
 describe("countUncheckedNextSteps", () => {
-	it("counts unchecked items", () => {
+	it("counts unchecked items in tasks.md", () => {
 		setupSpec({
-			sessionContent:
-				"# Session\n## Next Steps\n- [x] Done\n- [ ] Todo 1\n- [ ] Todo 2\n## Other\n",
+			tasksContent: "# Tasks\n- [x] Done\n- [ ] Todo 1\n- [ ] Todo 2\n",
 		});
 		expect(countUncheckedNextSteps(tmpDir, "test-task")).toBe(2);
 	});
 
 	it("returns 0 when all checked", () => {
 		setupSpec({
-			sessionContent: "# Session\n## Next Steps\n- [x] Done 1\n- [x] Done 2\n",
+			tasksContent: "# Tasks\n- [x] Done 1\n- [x] Done 2\n",
 		});
 		expect(countUncheckedNextSteps(tmpDir, "test-task")).toBe(0);
 	});
 
-	it("returns 0 when no session.md", () => {
+	it("returns 0 when no tasks.md", () => {
 		expect(countUncheckedNextSteps(tmpDir, "nonexistent")).toBe(0);
 	});
 });
@@ -118,28 +117,28 @@ describe("countUncheckedNextSteps", () => {
 describe("hasUncheckedSelfReview", () => {
 	it("detects unchecked self-review (Japanese)", () => {
 		setupSpec({
-			sessionContent: "## Next Steps\n- [x] Implementation\n- [ ] Wave 1 セルフレビュー\n",
+			tasksContent: "# Tasks\n- [x] Implementation\n- [ ] Wave 1 セルフレビュー\n",
 		});
 		expect(hasUncheckedSelfReview(tmpDir, "test-task")).toBe(true);
 	});
 
 	it("detects unchecked self-review (English)", () => {
 		setupSpec({
-			sessionContent: "## Next Steps\n- [ ] Wave 1 self-review\n",
+			tasksContent: "# Tasks\n- [ ] Wave 1 self-review\n",
 		});
 		expect(hasUncheckedSelfReview(tmpDir, "test-task")).toBe(true);
 	});
 
 	it("returns false when self-review is checked", () => {
 		setupSpec({
-			sessionContent: "## Next Steps\n- [x] Wave 1 セルフレビュー\n- [ ] Other task\n",
+			tasksContent: "# Tasks\n- [x] Wave 1 セルフレビュー\n- [ ] Other task\n",
 		});
 		expect(hasUncheckedSelfReview(tmpDir, "test-task")).toBe(false);
 	});
 
 	it("returns false when no self-review item", () => {
 		setupSpec({
-			sessionContent: "## Next Steps\n- [ ] Implementation\n",
+			tasksContent: "# Tasks\n- [ ] Implementation\n",
 		});
 		expect(hasUncheckedSelfReview(tmpDir, "test-task")).toBe(false);
 	});
