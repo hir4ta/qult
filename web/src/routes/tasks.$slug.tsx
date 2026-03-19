@@ -162,6 +162,7 @@ function TaskDetailPage() {
 							title={spec.file}
 							content={content}
 							defaultOpen={spec.file === "session.md"}
+							slug={slug}
 							approved={showApprove ? approvals[spec.file] === true : undefined}
 							onApprove={
 								showApprove

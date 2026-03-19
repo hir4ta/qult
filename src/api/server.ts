@@ -166,6 +166,48 @@ export function createApp(
 		}
 	});
 
+	// FR-4: Spec file version history
+	app.get("/api/tasks/:slug/specs/:file/history", (c) => {
+		const slug = c.req.param("slug");
+		const file = c.req.param("file");
+		if (!VALID_SLUG.test(slug)) return c.json({ error: "invalid slug" }, 400);
+
+		const sd = new SpecDir(projectPath, slug);
+		const histDir = join(sd.dir(), ".history");
+		const versions: Array<{ timestamp: string; size: number }> = [];
+		try {
+			const entries = readdirSync(histDir)
+				.filter((e: string) => e.startsWith(`${file}.`))
+				.sort()
+				.reverse();
+			for (const e of entries) {
+				const ts = e.slice(file.length + 1);
+				let size = 0;
+				try { size = readFileSync(join(histDir, e), "utf-8").length; } catch {}
+				versions.push({ timestamp: ts, size });
+			}
+		} catch { /* no history */ }
+		return c.json({ versions, count: versions.length });
+	});
+
+	// FR-5: Spec file version content
+	app.get("/api/tasks/:slug/specs/:file/versions/:version", (c) => {
+		const slug = c.req.param("slug");
+		const file = c.req.param("file");
+		const version = c.req.param("version");
+		if (!VALID_SLUG.test(slug)) return c.json({ error: "invalid slug" }, 400);
+		if (!/^[0-9T]{15}$/.test(version)) return c.json({ error: "invalid version format" }, 400);
+
+		const sd = new SpecDir(projectPath, slug);
+		const histPath = join(sd.dir(), ".history", `${file}.${version}`);
+		try {
+			const content = readFileSync(histPath, "utf-8");
+			return c.json({ content, version });
+		} catch {
+			return c.json({ error: "version not found" }, 404);
+		}
+	});
+
 	app.get("/api/tasks/:slug/specs", (c) => {
 		const slug = c.req.param("slug");
 		if (!VALID_SLUG.test(slug)) return c.json({ error: "invalid slug" }, 400);

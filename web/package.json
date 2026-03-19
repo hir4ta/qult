@@ -26,10 +26,12 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.1",
     "@tanstack/router-plugin": "^1",
+    "@types/diff": "^7.0.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/react-syntax-highlighter": "^15.5.13",
     "@vitejs/plugin-react": "^6",
+    "diff": "^8.0.3",
     "tailwindcss": "^4",
     "typescript": "^5.8",
     "vite": "^8"

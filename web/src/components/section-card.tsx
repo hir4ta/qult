@@ -1,9 +1,11 @@
-import { Check, ChevronDown } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Check, ChevronDown, History } from "lucide-react";
 import { useState } from "react";
 import Markdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import remarkGfm from "remark-gfm";
+import { DiffViewer } from "@/components/diff-viewer";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -27,6 +29,7 @@ interface SectionCardProps {
 	defaultOpen?: boolean;
 	approved?: boolean;
 	onApprove?: (file: string, approved: boolean) => void;
+	slug?: string;
 }
 
 export function SectionCard({
@@ -36,10 +39,33 @@ export function SectionCard({
 	defaultOpen = false,
 	approved,
 	onApprove,
+	slug,
 }: SectionCardProps) {
 	const { t } = useI18n();
 	const [open, setOpen] = useState(defaultOpen);
+	const [showDiff, setShowDiff] = useState(false);
+	const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
+	const [versionContent, setVersionContent] = useState<string | null>(null);
 	const borderColor = color ?? SPEC_FILE_COLORS[title] ?? "#44403c";
+
+	const { data: historyData } = useQuery({
+		queryKey: ["spec-history", slug, title],
+		queryFn: async () => {
+			if (!slug) return { versions: [] };
+			const res = await fetch(`/api/tasks/${slug}/specs/${title}/history`);
+			return res.json() as Promise<{ versions: Array<{ timestamp: string; size: number }> }>;
+		},
+		enabled: !!slug && open,
+	});
+
+	const loadVersion = async (ts: string) => {
+		if (!slug) return;
+		const res = await fetch(`/api/tasks/${slug}/specs/${title}/versions/${ts}`);
+		const data = await res.json() as { content: string };
+		setVersionContent(data.content);
+		setSelectedVersion(ts);
+		setShowDiff(true);
+	};
 
 	return (
 		<div
@@ -60,6 +86,19 @@ export function SectionCard({
 						)}
 					/>
 				</button>
+				{slug && historyData && historyData.versions.length > 0 && (
+					<button
+						type="button"
+						onClick={() => setShowDiff(!showDiff)}
+						className={cn(
+							"flex items-center gap-1 rounded-md px-2 py-1 text-[11px] transition-all shrink-0",
+							showDiff ? "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400" : "text-muted-foreground hover:text-foreground",
+						)}
+					>
+						<History className="size-3" />
+						{historyData.versions.length}
+					</button>
+				)}
 				{onApprove && (
 					<button
 						type="button"
@@ -77,7 +116,36 @@ export function SectionCard({
 				)}
 			</div>
 
-			{open && (
+			{open && showDiff && historyData && (
+				<div className="border-t px-4 py-2 bg-muted/20">
+					<div className="flex flex-wrap gap-1 mb-2">
+						{historyData.versions.map((v) => (
+							<button
+								key={v.timestamp}
+								type="button"
+								onClick={() => loadVersion(v.timestamp)}
+								className={cn(
+									"rounded px-2 py-0.5 text-[10px] font-mono transition-colors",
+									selectedVersion === v.timestamp
+										? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+										: "bg-muted text-muted-foreground hover:bg-accent",
+								)}
+							>
+								{v.timestamp.replace("T", " ")}
+							</button>
+						))}
+					</div>
+					{versionContent !== null && (
+						<DiffViewer
+							oldText={versionContent}
+							newText={content}
+							oldLabel={selectedVersion ?? "old"}
+							newLabel="current"
+						/>
+					)}
+				</div>
+			)}
+			{open && !showDiff && (
 				<div className="border-t px-4 py-3">
 					<div
 						className="prose prose-sm prose-stone dark:prose-invert max-w-none
