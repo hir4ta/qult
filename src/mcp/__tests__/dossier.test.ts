@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Store } from "../../store/index.js";
-import { handleDossier } from "../dossier.js";
+import { handleDossier } from "../dossier/index.js";
 
 let tmpDir: string;
 let store: Store;

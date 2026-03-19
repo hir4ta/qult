@@ -3,7 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import type { Embedder } from "../embedder/index.js";
 import type { Store } from "../store/index.js";
-import { handleDossier } from "./dossier.js";
+import { handleDossier } from "./dossier/index.js";
 import { handleLedger } from "./ledger.js";
 import { handleRoster } from "./roster.js";
 

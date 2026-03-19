@@ -35,6 +35,7 @@ function toKnowledgeEntry(r: KnowledgeRow) {
 		content: r.content,
 		saved_at: r.createdAt,
 		enabled: r.enabled,
+		project_name: r.projectName,
 	};
 }
 
@@ -241,7 +242,7 @@ export function createApp(
 		try {
 			state = readActiveState(projectPath);
 		} catch {
-			return c.json({ checks: [] });
+			return c.json({ checks: [], summary: "0/0 passed" });
 		}
 		const task = state.tasks.find((t) => t.slug === slug);
 		const size = (task?.size ?? "L") as SpecSize;
@@ -250,12 +251,13 @@ export function createApp(
 		const checks = expectedFiles.map((f) => {
 			try {
 				sd.readFile(f);
-				return { name: f, status: "pass" };
+				return { name: f, status: "pass", message: `${f} exists` };
 			} catch {
-				return { name: f, status: "fail" };
+				return { name: f, status: "fail", message: `${f} missing` };
 			}
 		});
-		return c.json({ checks });
+		const passed = checks.filter((ch) => ch.status === "pass").length;
+		return c.json({ checks, summary: `${passed}/${checks.length} passed` });
 	});
 
 	app.get("/api/knowledge", (c) => {
@@ -294,6 +296,33 @@ export function createApp(
 	app.get("/api/knowledge/stats", (c) => {
 		const stats = getKnowledgeStats(store);
 		return c.json(stats);
+	});
+
+	app.get("/api/decisions", (c) => {
+		const limit = Math.min(parseInt(c.req.query("limit") ?? "20", 10) || 20, 100);
+		const rows = store.db
+			.prepare(`
+      SELECT id, file_path, content_hash, title, content, sub_type,
+             project_remote, project_path, project_name, branch,
+             created_at, updated_at, hit_count, last_accessed, enabled
+      FROM knowledge_index
+      WHERE enabled = 1 AND sub_type = 'decision'
+      ORDER BY created_at DESC LIMIT ?
+    `)
+			.all(limit) as Array<Record<string, unknown>>;
+		// Reuse the same inline mapping pattern as /api/knowledge (line 272).
+		const mapped = rows.map((r) => ({
+			id: r.id,
+			label: r.title as string,
+			source: r.file_path as string,
+			sub_type: r.sub_type as string,
+			hit_count: r.hit_count as number,
+			content: r.content as string,
+			saved_at: r.created_at as string,
+			enabled: r.enabled === 1,
+			project_name: r.project_name as string,
+		}));
+		return c.json({ decisions: mapped });
 	});
 
 	// Graph edges endpoint with single-entry cache
