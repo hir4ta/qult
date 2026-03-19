@@ -150,12 +150,32 @@ describe("dossier switch", () => {
 });
 
 describe("dossier complete", () => {
-	it("completes S spec without review", async () => {
+	it("completes S spec when closing wave all checked", async () => {
 		await handleDossier(store, null, {
 			action: "init",
 			project_path: tmpDir,
 			task_slug: "done-test",
 			description: "small",
+			size: "S",
+			spec_type: "bugfix",
+		});
+		// Write bugfix.md with substantive content (validation requires it)
+		await handleDossier(store, null, {
+			action: "update",
+			project_path: tmpDir,
+			task_slug: "done-test",
+			file: "bugfix.md",
+			content: "# Bugfix\n\n## Bug Summary\nFix the closing wave enforcement issue.\n\n## Severity & Impact\nP1 — workflow gate broken\n\n## Root Cause Analysis\nTemplate lacks IDs.\n\n## Fix Strategy\nAdd IDs and DENY on incomplete.",
+			mode: "replace",
+		});
+		// Check all closing wave items
+		await handleDossier(store, null, {
+			action: "update",
+			project_path: tmpDir,
+			task_slug: "done-test",
+			file: "tasks.md",
+			content: "# Tasks\n\n## Wave 1\n\n- [x] T-1.1 Done\n  _Requirements: FR-1_\n\n## Wave: Closing\n\n- [x] T-C.1 Commit\n- [x] T-C.2 Self-review\n- [x] T-C.3 CLAUDE.md\n- [x] T-C.4 Tests\n- [x] T-C.5 Knowledge",
+			mode: "replace",
 		});
 		const result = await handleDossier(store, null, {
 			action: "complete",
@@ -163,6 +183,43 @@ describe("dossier complete", () => {
 			task_slug: "done-test",
 		});
 		expect(parseResult(result).completed).toBe(true);
+	});
+
+	it("denies complete when closing wave has unchecked items", async () => {
+		await handleDossier(store, null, {
+			action: "init",
+			project_path: tmpDir,
+			task_slug: "deny-close",
+			description: "incomplete closing",
+			size: "S",
+			spec_type: "bugfix",
+		});
+		await handleDossier(store, null, {
+			action: "update",
+			project_path: tmpDir,
+			task_slug: "deny-close",
+			file: "bugfix.md",
+			content: "# Bugfix\n\n## Bug Summary\nTest bugfix.\n\n## Severity & Impact\nP2\n\n## Root Cause Analysis\nTest.\n\n## Fix Strategy\nTest fix.",
+			mode: "replace",
+		});
+		// Leave closing wave items unchecked
+		await handleDossier(store, null, {
+			action: "update",
+			project_path: tmpDir,
+			task_slug: "deny-close",
+			file: "tasks.md",
+			content: "# Tasks\n\n## Wave 1\n\n- [x] T-1.1 Done\n  _Requirements: FR-1_\n\n## Wave: Closing\n\n- [x] T-C.1 Commit\n- [ ] T-C.2 Self-review\n- [ ] T-C.3 CLAUDE.md\n- [x] T-C.4 Tests\n- [ ] T-C.5 Knowledge",
+			mode: "replace",
+		});
+		const result = await handleDossier(store, null, {
+			action: "complete",
+			project_path: tmpDir,
+			task_slug: "deny-close",
+		});
+		const data = parseResult(result);
+		expect(data.error).toBeDefined();
+		expect(data.error).toContain("closing wave gate");
+		expect(data.error).toContain("3 unchecked");
 	});
 });
 

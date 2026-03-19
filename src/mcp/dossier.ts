@@ -397,12 +397,12 @@ function dossierComplete(projectPath: string, store: Store, params: DossierParam
 		/* fail-open: validation errors don't block completion */
 	}
 
-	// Check closing wave completion.
-	let closingWarning: string | undefined;
+	// Check closing wave completion — DENY if unchecked items remain.
 	try {
 		const sd = new SpecDir(projectPath, taskSlug);
 		const tasksContent = sd.readFile("tasks.md");
-		closingWarning = checkClosingWave(tasksContent);
+		const closingError = checkClosingWave(tasksContent);
+		if (closingError) return errorResult(`closing wave gate: ${closingError}`);
 	} catch {
 		/* tasks.md may not exist for all sizes */
 	}
@@ -426,8 +426,6 @@ function dossierComplete(projectPath: string, store: Store, params: DossierParam
 			completed: true,
 			new_primary: newPrimary,
 		};
-		if (closingWarning) result.closing_wave_warning = closingWarning;
-
 		// Prompt Claude to save additional patterns/rules via ledger.
 		result.knowledge_prompt =
 			"Task completed. Save reusable learnings via `ledger action=save sub_type=pattern`. " +
@@ -744,20 +742,22 @@ function dossierGate(projectPath: string, params: DossierParams) {
 }
 
 /**
- * FR-3: Check if Closing Wave has at least 1 checked item.
- * Returns warning message if not, undefined if ok.
+ * Check that ALL Closing Wave items are checked.
+ * Returns error message listing unchecked items if any, undefined if all done.
  */
 function checkClosingWave(tasksContent: string): string | undefined {
-	const closingIdx = tasksContent.search(/## Wave:\s*[Cc]losing/);
+	const closingIdx = tasksContent.search(/## (?:Wave:\s*)?[Cc]losing(?:\s+[Ww]ave)?/i);
 	if (closingIdx === -1)
 		return "No Closing Wave found in tasks.md. Add self-review, CLAUDE.md update, and test verification items.";
 
 	const closingSection = tasksContent.slice(closingIdx);
 	const nextSection = closingSection.indexOf("\n##", 1);
 	const body = nextSection === -1 ? closingSection : closingSection.slice(0, nextSection);
-	const checkedItems = body.match(/^- \[x\] .+$/gm);
-	if (!checkedItems || checkedItems.length === 0) {
-		return "Closing Wave has no checked items. Complete self-review, CLAUDE.md update, and test verification before finishing.";
+
+	const uncheckedItems = body.match(/^- \[ \] .+$/gm);
+	if (uncheckedItems && uncheckedItems.length > 0) {
+		const items = uncheckedItems.map((line) => line.replace(/^- \[ \] /, "").trim()).join(", ");
+		return `Closing Wave has ${uncheckedItems.length} unchecked item(s): ${items}. Check all items via \`dossier action=check task_id="T-C.N"\` before completing.`;
 	}
 
 	return undefined;
