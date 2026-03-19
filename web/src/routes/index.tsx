@@ -180,7 +180,7 @@ function TaskCard({
 	colorIndex: number;
 }) {
 	const { t } = useI18n();
-	const progress = task.total > 0 ? (task.completed / task.total) * 100 : 0;
+	const progress = (task.total ?? 0) > 0 ? ((task.completed ?? 0) / (task.total ?? 1)) * 100 : 0;
 	const isCompleted = task.status === "completed" || task.status === "done" || task.status === "cancelled";
 	const currentWave = task.waves?.find((w) => w.isCurrent);
 	const c = SHIMMER_COLORS[colorIndex % SHIMMER_COLORS.length]!;
@@ -270,9 +270,9 @@ function HealthCard({ stats }: { stats?: MemoryHealthStats }) {
 							<TooltipTrigger asChild>
 								<span
 									className="text-sm tabular-nums font-medium cursor-help"
-									style={{ color: stats.stale_count > 0 ? "#e67e22" : undefined }}
+									style={{ color: (stats.stale_count ?? 0) > 0 ? "#e67e22" : undefined }}
 								>
-									{stats.stale_count} <span className="text-[10px] text-muted-foreground">{t("overview.stale")}</span>
+									{stats.stale_count ?? 0} <span className="text-[10px] text-muted-foreground">{t("overview.stale")}</span>
 								</span>
 							</TooltipTrigger>
 							<TooltipContent>{t("overview.staleHint")}</TooltipContent>
@@ -281,9 +281,9 @@ function HealthCard({ stats }: { stats?: MemoryHealthStats }) {
 							<TooltipTrigger asChild>
 								<span
 									className="text-sm tabular-nums font-medium cursor-help"
-									style={{ color: stats.conflict_count > 0 ? "#c0392b" : undefined }}
+									style={{ color: (stats.conflict_count ?? 0) > 0 ? "#c0392b" : undefined }}
 								>
-									{stats.conflict_count} <span className="text-[10px] text-muted-foreground">{t("overview.conflicts")}</span>
+									{stats.conflict_count ?? 0} <span className="text-[10px] text-muted-foreground">{t("overview.conflicts")}</span>
 								</span>
 							</TooltipTrigger>
 							<TooltipContent>{t("overview.conflictsHint")}</TooltipContent>
@@ -377,28 +377,38 @@ function RecentDecisionsCard({ decisions }: { decisions?: DecisionEntry[] }) {
 			</CardHeader>
 			<CardContent>
 				<div className="space-y-3">
-					{decisions.map((dec, i) => (
-						<div key={`${dec.task_slug}-${dec.title}-${i}`}>
-							{i > 0 && <Separator className="mb-3" />}
-							<div className="flex items-start gap-3">
-								<div
-									className="mt-1.5 size-2 shrink-0 rounded-full"
-									style={{ backgroundColor: "#628141" }}
-								/>
-								<div className="min-w-0 flex-1">
-									<p className="text-sm font-medium leading-snug">{dec.title}</p>
-									{dec.chosen && (
-										<p className="mt-0.5 text-xs text-muted-foreground line-clamp-1">
-											{dec.chosen}
-										</p>
+					{decisions.map((dec, i) => {
+						// Parse JSON content to extract decision summary.
+						let chosen: string | undefined;
+						try {
+							const parsed = JSON.parse(dec.content);
+							chosen = parsed.decision;
+						} catch { /* raw content */ }
+						return (
+							<div key={`${dec.id}-${i}`}>
+								{i > 0 && <Separator className="mb-3" />}
+								<div className="flex items-start gap-3">
+									<div
+										className="mt-1.5 size-2 shrink-0 rounded-full"
+										style={{ backgroundColor: "#628141" }}
+									/>
+									<div className="min-w-0 flex-1">
+										<p className="text-sm font-medium leading-snug">{dec.label}</p>
+										{chosen && (
+											<p className="mt-0.5 text-xs text-muted-foreground line-clamp-1">
+												{chosen}
+											</p>
+										)}
+									</div>
+									{dec.project_name && (
+										<Badge variant="outline" className="shrink-0 text-[10px] rounded-full">
+											{dec.project_name}
+										</Badge>
 									)}
 								</div>
-								<Badge variant="outline" className="shrink-0 text-[10px] rounded-full">
-									{dec.task_slug}
-								</Badge>
 							</div>
-						</div>
-					))}
+						);
+					})}
 				</div>
 			</CardContent>
 		</Card>

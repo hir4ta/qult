@@ -1,15 +1,14 @@
 import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
 	ActivityResponse,
-	ConfidenceSummary,
 	DecisionsResponse,
 	EpicsResponse,
 	GraphEdgesResponse,
+	HealthResponse,
 	KnowledgeResponse,
 	KnowledgeStats,
-	MemoryHealthStats,
-	Review,
 	ReviewHistoryResponse,
+	ReviewStatusResponse,
 	SpecContentResponse,
 	SpecsResponse,
 	TasksResponse,
@@ -108,16 +107,8 @@ export const decisionsQueryOptions = (limit = 20) =>
 export const healthQueryOptions = () =>
 	queryOptions({
 		queryKey: ["health"],
-		queryFn: () => fetchJSON<MemoryHealthStats>("/api/health"),
+		queryFn: () => fetchJSON<HealthResponse>("/api/health"),
 		staleTime: REF_STALE,
-	});
-
-export const confidenceQueryOptions = (slug: string) =>
-	queryOptions({
-		queryKey: ["confidence", slug],
-		queryFn: () => fetchJSON<ConfidenceSummary>(taskURL(slug, "confidence")),
-		staleTime: REF_STALE,
-		enabled: !!slug,
 	});
 
 export const validationQueryOptions = (slug: string) =>
@@ -131,7 +122,7 @@ export const validationQueryOptions = (slug: string) =>
 export const reviewQueryOptions = (slug: string) =>
 	queryOptions({
 		queryKey: ["review", slug],
-		queryFn: () => fetchJSON<Review>(taskURL(slug, "review")),
+		queryFn: () => fetchJSON<ReviewStatusResponse>(taskURL(slug, "review")),
 		staleTime: REF_STALE,
 		enabled: !!slug,
 	});

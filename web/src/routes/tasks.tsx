@@ -30,8 +30,8 @@ function TasksLayout() {
 	const [showCompleted, setShowCompleted] = useState(false);
 
 	const terminalStatuses = new Set(["completed", "done", "cancelled"]);
-	const activeTasks = allTasks.filter((t) => !terminalStatuses.has(t.status));
-	const completedTasks = allTasks.filter((t) => terminalStatuses.has(t.status));
+	const activeTasks = allTasks.filter((t) => !terminalStatuses.has(t.status ?? ""));
+	const completedTasks = allTasks.filter((t) => terminalStatuses.has(t.status ?? ""));
 	const tasks = showCompleted ? allTasks : activeTasks;
 
 	return (
@@ -85,7 +85,7 @@ function TaskAccordionCard({
 	colorIndex: number;
 }) {
 	const [expanded, setExpanded] = useState(false);
-	const progress = task.total > 0 ? (task.completed / task.total) * 100 : 0;
+	const progress = (task.total ?? 0) > 0 ? ((task.completed ?? 0) / (task.total ?? 1)) * 100 : 0;
 	const isCompleted = task.status === "completed" || task.status === "done" || task.status === "cancelled";
 	const c = SHIMMER_COLORS[colorIndex % SHIMMER_COLORS.length]!;
 
@@ -102,11 +102,11 @@ function TaskAccordionCard({
 			<Link to="/tasks/$slug" params={{ slug: task.slug }} className="block p-3 pb-2">
 				<div className="flex items-center justify-between">
 					<div className="flex items-center gap-2 min-w-0">
-						<TaskStatusIcon status={task.status} />
+						<TaskStatusIcon status={task.status ?? "pending"} />
 						<span className="text-sm font-medium truncate">{task.slug}</span>
 					</div>
 					<div className="flex items-center gap-1 shrink-0">
-						<StatusBadge status={task.status} />
+						<StatusBadge status={task.status ?? "pending"} />
 						<Badge variant="outline" className="text-[10px] px-1 py-0">
 							{task.size ?? "?"}
 						</Badge>
