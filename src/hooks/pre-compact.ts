@@ -65,34 +65,34 @@ export async function preCompact(ev: HookEvent, _signal: AbortSignal): Promise<v
 		}
 	}
 
-	// Save chapter memory (session snapshot).
+	// Save chapter memory (tasks.md snapshot).
 	try {
 		const taskSlug = readActive(projectPath);
 		const sd = new SpecDir(projectPath, taskSlug);
 		if (sd.exists()) {
-			const session = sd.readFile("session.md");
-			const chapterNum = (session.match(/## Compact Marker \[/g) ?? []).length + 1;
-			const project = proj.name;
-			const title = `${project} > ${taskSlug} > chapter-${chapterNum} > session-state`;
-
-			const row: KnowledgeRow = {
-				id: 0,
-				filePath: `chapters/${taskSlug}/chapter-${chapterNum}`,
-				contentHash: "",
-				title,
-				content: session.slice(0, 2000),
-				subType: "snapshot",
-				projectRemote: proj.remote,
-				projectPath: proj.path,
-				projectName: proj.name,
-				branch: proj.branch,
-				createdAt: "",
-				updatedAt: "",
-				hitCount: 0,
-				lastAccessed: "",
-				enabled: true,
-			};
-			upsertKnowledge(store, row);
+			let tasksContent = "";
+			try { tasksContent = sd.readFile("tasks.md"); } catch { /* no tasks.md */ }
+			if (tasksContent) {
+				const title = `${proj.name} > ${taskSlug} > chapter > tasks-state`;
+				const row: KnowledgeRow = {
+					id: 0,
+					filePath: `chapters/${taskSlug}/compact-${Date.now()}`,
+					contentHash: "",
+					title,
+					content: tasksContent.slice(0, 2000),
+					subType: "snapshot",
+					projectRemote: proj.remote,
+					projectPath: proj.path,
+					projectName: proj.name,
+					branch: proj.branch,
+					createdAt: "",
+					updatedAt: "",
+					hitCount: 0,
+					lastAccessed: "",
+					enabled: true,
+				};
+				upsertKnowledge(store, row);
+			}
 
 			// Write pending-compact breadcrumb for SessionStart to pick up.
 			const breadcrumb = {
@@ -109,12 +109,12 @@ export async function preCompact(ev: HookEvent, _signal: AbortSignal): Promise<v
 		/* fail-open */
 	}
 
-	// Auto-complete task if session.md indicates completion.
+	// Auto-complete task if tasks.md indicates all tasks checked.
 	try {
 		const taskSlug = readActive(projectPath);
 		const sd = new SpecDir(projectPath, taskSlug);
-		const session = sd.readFile("session.md");
-		if (isSessionCompleted(session)) {
+		const tasksFile = sd.readFile("tasks.md");
+		if (isTasksCompleted(tasksFile)) {
 			// FR-2: Apply approval gate for M+ specs before auto-complete.
 			const state2 = readActiveState(projectPath);
 			const task2 = state2.tasks.find((t) => t.slug === taskSlug);
@@ -246,13 +246,8 @@ function doAutoComplete(projectPath: string, taskSlug: string): void {
 	notifyUser("auto-completed task '%s'", taskSlug);
 }
 
-function isSessionCompleted(session: string): boolean {
-	const lower = session.toLowerCase();
-	// Check for explicit status markers.
-	if (lower.includes("status: completed") || lower.includes("status: done")) return true;
-
-	// Check if all Next Steps are checked.
-	const nextSteps = session.match(/^- \[[ x]\] .+$/gm);
-	if (!nextSteps || nextSteps.length === 0) return false;
-	return nextSteps.every((step) => step.startsWith("- [x]"));
+function isTasksCompleted(tasksContent: string): boolean {
+	const allSteps = tasksContent.match(/^- \[[ x]\] .+$/gm);
+	if (!allSteps || allSteps.length === 0) return false;
+	return allSteps.every((step) => step.startsWith("- [x]"));
 }

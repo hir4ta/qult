@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { extractSection } from "./dispatcher.js";
 
 export interface SpecState {
 	slug: string;
@@ -64,31 +63,26 @@ export function isSpecFilePath(cwd: string | undefined, filePath: string): boole
 }
 
 /**
- * Count unchecked Next Steps (`- [ ]`) in session.md.
+ * Count unchecked tasks (`- [ ]`) in tasks.md.
  */
 export function countUncheckedNextSteps(cwd: string | undefined, slug: string): number {
 	if (!cwd) return 0;
 	try {
-		const session = readFileSync(join(cwd, ".alfred", "specs", slug, "session.md"), "utf-8");
-		const section = extractSection(session, "## Next Steps");
-		if (!section) return 0;
-		return (section.match(/^- \[ \] /gm) ?? []).length;
+		const tasks = readFileSync(join(cwd, ".alfred", "specs", slug, "tasks.md"), "utf-8");
+		return (tasks.match(/^- \[ \] /gm) ?? []).length;
 	} catch {
 		return 0;
 	}
 }
 
 /**
- * Check if session.md has unchecked self-review items.
+ * Check if tasks.md has unchecked self-review items.
  */
 export function hasUncheckedSelfReview(cwd: string | undefined, slug: string): boolean {
 	if (!cwd) return false;
 	try {
-		const session = readFileSync(join(cwd, ".alfred", "specs", slug, "session.md"), "utf-8");
-		const section = extractSection(session, "## Next Steps");
-		if (!section) return false;
-		const lines = section.split("\n");
-		return lines.some(
+		const tasks = readFileSync(join(cwd, ".alfred", "specs", slug, "tasks.md"), "utf-8");
+		return tasks.split("\n").some(
 			(line) =>
 				line.startsWith("- [ ] ") && (/セルフレビュー/i.test(line) || /self-review/i.test(line)),
 		);

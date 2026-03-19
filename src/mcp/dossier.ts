@@ -812,24 +812,6 @@ function dossierCheck(projectPath: string, params: DossierParams) {
 	const updatedContent = lines.join("\n");
 	sd.writeFile("tasks.md", updatedContent);
 
-	// Sync session.md Next Steps: check matching task ID line.
-	try {
-		const session = sd.readFile("session.md");
-		const sessionLines = session.split("\n");
-		let modified = false;
-		for (let i = 0; i < sessionLines.length; i++) {
-			const sl = sessionLines[i]!;
-			if (sl.match(/^- \[ \] /) && sl.toLowerCase().includes(taskIdLower)) {
-				sessionLines[i] = sl.replace("- [ ]", "- [x]");
-				modified = true;
-				break;
-			}
-		}
-		if (modified) {
-			sd.writeFile("session.md", sessionLines.join("\n"));
-		}
-	} catch { /* session.md sync is best-effort */ }
-
 	// Detect wave completion (reuse logic from post-tool).
 	const waveMessages: string[] = [];
 	try {

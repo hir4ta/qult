@@ -4,13 +4,11 @@ import { updateTaskStatus } from "../spec/status.js";
 import { effectiveStatus, readActive, readActiveState, SpecDir } from "../spec/types.js";
 import { detectKnowledgeConflicts, searchKnowledgeFTS } from "../store/fts.js";
 import { openDefaultCached } from "../store/index.js";
-import { getPromotionCandidates, promoteSubType, upsertKnowledge } from "../store/knowledge.js";
-import { detectProject } from "../store/project.js";
-import type { KnowledgeRow } from "../types.js";
+import { getPromotionCandidates, promoteSubType } from "../store/knowledge.js";
 import type { DirectiveItem } from "./directives.js";
 import { emitDirectives } from "./directives.js";
 import type { HookEvent } from "./dispatcher.js";
-import { extractSection, notifyUser } from "./dispatcher.js";
+import { notifyUser } from "./dispatcher.js";
 
 import { isSpecFilePath } from "./spec-guard.js";
 import { addWorkedSlug, parseWaveProgress, readStateText, readWaveProgress, writeStateText, writeWaveProgress } from "./state.js";
@@ -78,12 +76,11 @@ export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<v
 		}
 	}
 
-	// Auto-check Next Steps + Tasks for Edit/Write using file path + tool name as context.
+	// Auto-check Tasks for Edit/Write using file path + tool name as context.
 	if ((ev.tool_name === "Edit" || ev.tool_name === "Write") && ev.tool_input) {
 		const input = ev.tool_input as Record<string, unknown>;
 		const filePath = typeof input.file_path === "string" ? input.file_path : "";
 		if (filePath) {
-			autoCheckNextSteps(ev.cwd!, filePath);
 			autoCheckTasks(ev.cwd!, filePath, items);
 		}
 		// Track worked slug for session-scoped Stop hook reminders.
@@ -153,7 +150,6 @@ async function handleBashResult(
 			typeof ev.tool_input === "object" && ev.tool_input !== null
 				? ((ev.tool_input as { command?: string }).command ?? "")
 				: "";
-		autoCheckNextSteps(ev.cwd!, `${stdout}\n${commandStr}`);
 		autoCheckTasks(ev.cwd!, `${stdout}\n${commandStr}`, items);
 
 		if (isGitCommit(stdout) && !signal.aborted) {
@@ -347,77 +343,6 @@ export function matchTaskDescription(description: string, stdout: string): boole
 	return matchCount >= threshold;
 }
 
-function autoCheckNextSteps(projectPath: string, stdout: string): void {
-	try {
-		const taskSlug = readActive(projectPath);
-		const sd = new SpecDir(projectPath, taskSlug);
-		const session = sd.readFile("session.md");
-
-		const nextStepsSection = extractSection(session, "## Next Steps");
-		if (!nextStepsSection) return;
-
-		const lines = nextStepsSection.split("\n");
-		let changed = false;
-
-		for (let i = 0; i < lines.length; i++) {
-			const line = lines[i]!;
-			const match = line.match(/^- \[ \] (.+)$/);
-			if (!match) continue;
-
-			const description = match[1]!.toLowerCase();
-			// Adaptive threshold: 2+ matches for descriptions with 3+ qualifying words, 1 match for shorter.
-			const words = description.split(/\s+/).filter((w) => w.length > 3);
-			const threshold = words.length >= 3 ? 2 : 1;
-			const lowerOut = stdout.toLowerCase();
-			const matchCount = words.filter((w) => lowerOut.includes(w)).length;
-			if (stdout && words.length > 0 && matchCount >= threshold) {
-				lines[i] = line.replace("- [ ]", "- [x]");
-				changed = true;
-			}
-		}
-
-		if (changed) {
-			const updatedSection = lines.join("\n");
-			let updatedSession = session.replace(nextStepsSection, updatedSection);
-
-			// Auto-update "Currently Working On" to the next unchecked step.
-			const nextUnchecked = lines.find((l) => l.startsWith("- [ ] "));
-			if (nextUnchecked) {
-				const nextText = nextUnchecked.replace("- [ ] ", "");
-				updatedSession = updateCurrentlyWorkingOn(updatedSession, nextText);
-			}
-
-			sd.writeFile("session.md", updatedSession);
-		}
-	} catch {
-		/* fail-open */
-	}
-}
-
-/** Replace only the first non-empty content line after "## Currently Working On", preserving other content. */
-function updateCurrentlyWorkingOn(session: string, newFocus: string): string {
-	const marker = "## Currently Working On";
-	const idx = session.indexOf(marker);
-	if (idx === -1) return session;
-
-	const afterMarker = session.indexOf("\n", idx);
-	if (afterMarker === -1) return session;
-
-	// Find the first non-empty line after the heading.
-	const lines = session.slice(afterMarker + 1).split("\n");
-	for (let i = 0; i < lines.length; i++) {
-		if (lines[i]!.startsWith("## ")) break; // hit next heading
-		if (lines[i]!.trim()) {
-			// Replace this line only, keep everything else.
-			lines[i] = newFocus;
-			return session.slice(0, afterMarker + 1) + lines.join("\n");
-		}
-	}
-
-	// No content line found — insert after heading.
-	return `${session.slice(0, afterMarker + 1)}\n${newFocus}\n${session.slice(afterMarker + 1)}`;
-}
-
 /**
  * FR-4: Detect test failure patterns in command output.
  */
@@ -507,24 +432,22 @@ function checkSpecCompletion(projectPath: string, items: DirectiveItem[]): void 
 		const status = effectiveStatus(task?.status);
 		if (!task || status === "done" || status === "cancelled") return;
 
+		// Check tasks.md: all checkboxes checked → completion signal.
 		const sd = new SpecDir(projectPath, slug);
-		const session = sd.readFile("session.md");
-
-		// Check completion signals.
-		const lower = session.toLowerCase();
-		const hasCompletedStatus =
-			lower.includes("status: completed") || lower.includes("status: done");
-
-		// Only check checkboxes in the Next Steps section, not the whole file.
-		const nextSteps = extractSection(session, "## Next Steps");
-		const allSteps = nextSteps ? nextSteps.match(/^- \[[ x]\] .+$/gm) : null;
+		let tasksContent: string;
+		try {
+			tasksContent = sd.readFile("tasks.md");
+		} catch {
+			return;
+		}
+		const allSteps = tasksContent.match(/^- \[[ x]\] .+$/gm);
 		const allChecked =
 			allSteps && allSteps.length > 0 && allSteps.every((s) => s.startsWith("- [x]"));
 
-		if (hasCompletedStatus || allChecked) {
+		if (allChecked) {
 			items.push({
 				level: "DIRECTIVE",
-				message: `Task '${slug}' appears complete (${hasCompletedStatus ? "status marker" : "all steps checked"}). MUST call \`dossier action=complete\` to close the spec.`,
+				message: `Task '${slug}' appears complete (all tasks checked). MUST call \`dossier action=complete\` to close the spec.`,
 			});
 		}
 	} catch {
@@ -567,47 +490,7 @@ function saveKnowledgeOnCommit(projectPath: string): void {
 		return;
 	}
 
-	let slug: string;
-	try {
-		slug = readActive(projectPath);
-	} catch {
-		return;
-	}
-
-	const sd = new SpecDir(projectPath, slug);
-	if (!sd.exists()) return;
-
-	const proj = detectProject(projectPath);
-	const ts = new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
-
-	// decisions.md extraction removed — decisions saved via ledger directly.
-
-	// Save session snapshot (like PreCompact chapter memory).
-	try {
-		const session = sd.readFile("session.md");
-		const row: KnowledgeRow = {
-			id: 0,
-			filePath: `snapshots/${slug}/commit-${ts}`,
-			contentHash: "",
-			title: `${proj.name} > ${slug} > progress`,
-			content: session.slice(0, 2000),
-			subType: "snapshot",
-			projectRemote: proj.remote,
-			projectPath: proj.path,
-			projectName: proj.name,
-			branch: proj.branch,
-			createdAt: "",
-			updatedAt: "",
-			hitCount: 0,
-			lastAccessed: "",
-			enabled: true,
-		};
-		upsertKnowledge(store, row);
-	} catch {
-		/* fail-open */
-	}
-
-	// 3. Auto-promote eligible knowledge (pattern→rule at 15+ hits).
+	// Auto-promote eligible knowledge (pattern→rule at 15+ hits).
 	try {
 		const candidates = getPromotionCandidates(store);
 		for (const c of candidates) {

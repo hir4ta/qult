@@ -63,43 +63,28 @@ export function createApp(
 	): Record<string, unknown> {
 		const detail: Record<string, unknown> = { ...task, project_name: projectName };
 		const sd = new SpecDir(projPath, task.slug);
+
+		// Progress + focus from tasks.md (single source of truth).
+		const taskLines: string[] = [];
 		try {
-			const session = sd.readFile("session.md");
-			const lines = session.split("\n");
-
-			// Extract "Currently Working On".
-			let inFocus = false;
-			for (const line of lines) {
-				if (line.startsWith("## Currently Working On")) { inFocus = true; continue; }
-				if (inFocus) {
-					if (line.startsWith("## ")) break;
-					const trimmed = line.trim();
-					if (trimmed && !trimmed.startsWith("<!--")) { detail.focus = trimmed; break; }
-				}
+			const tasksContent = sd.readFile("tasks.md");
+			for (const tl of tasksContent.split("\n")) {
+				if (tl.match(/^- \[[ x]\] /)) taskLines.push(tl);
 			}
+		} catch { /* no tasks.md */ }
 
-			// Progress source of truth: tasks.md checkboxes (always current via dossier check).
-			const taskLines: string[] = [];
-			try {
-				const tasksContent = sd.readFile("tasks.md");
-				for (const tl of tasksContent.split("\n")) {
-					if (tl.match(/^- \[[ x]\] /)) taskLines.push(tl);
-				}
-			} catch { /* no tasks.md */ }
-
-			if (taskLines.length > 0) {
-				const nextSteps = taskLines.map((s) => ({
-					text: s.replace(/^- \[[ x]\] /, ""),
-					done: s.startsWith("- [x]"),
-				}));
-				detail.next_steps = nextSteps;
-				detail.completed = nextSteps.filter((s) => s.done).length;
-				detail.total = nextSteps.length;
-			} else {
-				detail.completed = 0;
-				detail.total = 0;
-			}
-		} catch {
+		if (taskLines.length > 0) {
+			const nextSteps = taskLines.map((s) => ({
+				text: s.replace(/^- \[[ x]\] /, ""),
+				done: s.startsWith("- [x]"),
+			}));
+			detail.next_steps = nextSteps;
+			detail.completed = nextSteps.filter((s) => s.done).length;
+			detail.total = nextSteps.length;
+			// Focus = first unchecked task
+			const firstUnchecked = nextSteps.find((s) => !s.done);
+			if (firstUnchecked) detail.focus = firstUnchecked.text;
+		} else {
 			detail.completed = 0;
 			detail.total = 0;
 		}

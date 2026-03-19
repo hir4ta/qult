@@ -137,20 +137,6 @@ function TaskAccordionCard({
 						{task.completed}/{task.total}
 					</span>
 				</div>
-				{firstUnchecked && !isCompleted && !expanded && (
-					<div className="relative overflow-hidden rounded-md px-2 py-1">
-						<div
-							className="absolute inset-0 animate-shimmer"
-							style={{
-								background: `linear-gradient(90deg, rgba(${c.r},${c.g},${c.b},0.03) 0%, rgba(${c.r},${c.g},${c.b},0.12) 50%, rgba(${c.r},${c.g},${c.b},0.03) 100%)`,
-								backgroundSize: "200% 100%",
-							}}
-						/>
-						<p className="relative text-[10px] line-clamp-1" style={{ color: accentColor }}>
-							→ {firstUnchecked.text}
-						</p>
-					</div>
-				)}
 			</div>
 
 			{/* Accordion toggle — Next Steps */}

@@ -232,71 +232,33 @@ function buildSpecContextItems(
 	const sd = new SpecDir(projectPath, taskSlug);
 	if (!sd.exists()) return [];
 
-	let buf = "";
+	let buf = `\n--- Alfred Protocol: Active Task '${taskSlug}' ---\n`;
 
-	if (source === "compact") {
-		let session = "";
-		try {
-			session = sd.readFile("session.md");
-		} catch {
-			return [];
-		}
-		const compactCount = (session.match(/## Compact Marker \[/g) ?? []).length;
-
-		buf += `\n--- Alfred Protocol: Recovering Task '${taskSlug}' (post-compact #${compactCount}) ---\n`;
-
-		if (compactCount <= 1) {
-			buf += "Full context recovery (first compact):\n\n";
-			for (const section of sd.allSections()) {
-				if (section.content.trim()) {
-					buf += `### ${section.file}\n${section.content}\n\n`;
-				}
-			}
-		} else {
-			buf += "Lightweight recovery (use dossier action=status for full spec):\n\n";
-			buf += `### session.md\n${session}\n\n`;
-		}
-
-		buf += "--- End Alfred Protocol ---\n";
-
-		const items: DirectiveItem[] = [{ level: "CONTEXT", message: buf }];
-		items.push(...injectRecentDecisions(store, projectPath));
-		notifyUser("recovered task '%s' (compact #%d)", taskSlug, compactCount);
-		return items;
-	}
-
-	// Normal startup/resume: adaptive context.
-	let session: string;
-	try {
-		session = sd.readFile("session.md");
-	} catch {
-		return [];
-	}
-	if (!session) return [];
-
+	const isCompact = source === "compact";
 	const proj = detectProject(projectPath);
 	const memoryCount = countKnowledge(store, proj.remote, proj.path);
 
-	buf += `\n--- Alfred Protocol: Active Task '${taskSlug}' ---\n`;
-
-	if (memoryCount <= 5) {
-		buf += "(Full context — new project)\n\n";
+	if (isCompact || memoryCount <= 5) {
+		// Full context recovery: inject all spec files.
+		buf += isCompact ? "Post-compact recovery:\n\n" : "(Full context — new project)\n\n";
 		for (const section of sd.allSections()) {
 			if (section.content.trim()) {
 				buf += `### ${section.file}\n${section.content}\n\n`;
 			}
 		}
-	} else if (memoryCount <= 20) {
-		buf += `${session}\n`;
-		try {
-			const req = sd.readFile("requirements.md");
-			const goal = extractSection(req, "## Goal");
-			if (goal) buf += `\nGoal: ${goal}\n`;
-		} catch {
-			/* ignore */
-		}
 	} else {
-		buf += `${session}\n`;
+		// Lightweight: tasks.md only (progress + next steps).
+		try {
+			const tasks = sd.readFile("tasks.md");
+			buf += `### tasks.md\n${tasks}\n\n`;
+		} catch { /* no tasks.md */ }
+		if (memoryCount <= 20) {
+			try {
+				const req = sd.readFile("requirements.md");
+				const goal = extractSection(req, "## Goal");
+				if (goal) buf += `\nGoal: ${goal}\n`;
+			} catch { /* ignore */ }
+		}
 	}
 
 	buf += "--- End Alfred Protocol ---\n";

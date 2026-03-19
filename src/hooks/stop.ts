@@ -37,7 +37,7 @@ export async function stop(ev: HookEvent): Promise<void> {
 
 	// Session-scoped: only remind about the *primary* spec if it was actually worked on.
 	// We only check the primary spec (not all worked slugs) because tryReadActiveSpec
-	// reads session.md of the primary only. Fallback: if no worked-slugs recorded
+	// reads tasks.md of the primary only. Fallback: if no worked-slugs recorded
 	// (read-only / Bash-only session), show reminders for primary as before.
 	const workedSlugs = ev.cwd ? readWorkedSlugs(ev.cwd) : [];
 	if (workedSlugs.length > 0 && !workedSlugs.includes(spec.slug)) {
