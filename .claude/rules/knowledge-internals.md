@@ -1,3 +1,10 @@
+---
+paths:
+  - "src/store/**"
+  - "src/mcp/**"
+  - ".alfred/knowledge/**"
+---
+
 # Knowledge & Search Internals
 
 - Knowledge persistence: `.alfred/knowledge/{decisions,patterns,rules}/*.json` = source of truth; DB `knowledge_index` = derived search index

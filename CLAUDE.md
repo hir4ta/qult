@@ -172,6 +172,3 @@ node dist/cli.mjs version     # Show version
 - Keep all CLAUDE.md rules intact (re-read from disk after compact)
 - Do NOT discard in-progress implementation context or recent decisions
 
-## Git
-
-- **NEVER** add `Co-Authored-By` to commits (public repository)

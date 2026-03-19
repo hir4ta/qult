@@ -1,7 +1,6 @@
 ---
 paths:
   - "src/hooks/**"
-  - "src/mcp/**"
 ---
 
 # Hook Behavior
