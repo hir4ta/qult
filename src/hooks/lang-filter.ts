@@ -48,6 +48,36 @@ const LANGUAGES: LangConfig[] = [
 		excludeSuffixes: ["_test.rb", "_spec.rb"],
 		excludePrefixes: [],
 	},
+	{
+		// Rust
+		extensions: [".rs"],
+		excludeSuffixes: ["_test.rs", "_bench.rs", ".generated.rs"],
+		excludePrefixes: ["test_"],
+	},
+	{
+		// Java
+		extensions: [".java"],
+		excludeSuffixes: ["Test.java", "Tests.java", "IT.java"],
+		excludePrefixes: [],
+	},
+	{
+		// C#
+		extensions: [".cs"],
+		excludeSuffixes: [".Tests.cs", ".Test.cs", "Tests.cs"],
+		excludePrefixes: [],
+	},
+	{
+		// Swift
+		extensions: [".swift"],
+		excludeSuffixes: ["Tests.swift", "Spec.swift", "Test.swift"],
+		excludePrefixes: [],
+	},
+	{
+		// Kotlin
+		extensions: [".kt", ".kts"],
+		excludeSuffixes: ["Test.kt", "Tests.kt", "Test.kts"],
+		excludePrefixes: [],
+	},
 ];
 
 const DIR_EXCLUSIONS = [
@@ -59,6 +89,11 @@ const DIR_EXCLUSIONS = [
 	"__pycache__/",
 	".venv/",
 	"plugin/",
+	"tests/",
+	"src/test/",
+	".build/",
+	"obj/",
+	"bin/",
 ];
 
 /** Check if a source file should be auto-appended to design.md. */
