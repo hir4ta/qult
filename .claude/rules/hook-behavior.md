@@ -1,7 +1,7 @@
 ---
-description: Hook runtime behavior, event pipelines, and skill nudge logic
 paths:
-  - "cmd/alfred/hooks*.go"
+  - "src/hooks/**"
+  - "src/mcp/**"
 ---
 
 # Hook Behavior

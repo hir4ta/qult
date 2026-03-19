@@ -111,8 +111,6 @@ node dist/cli.mjs version     # Show version
 ### Database & Schema
 - @.claude/rules/store-internals.md (schema V8, vector search, SQL safety, knowledge architecture)
 
-### Steering Docs
-- @.claude/rules/steering-docs.md (steering doc management, validation, templates)
 
 ### Spec Management & Review
 - @.claude/rules/spec-details.md (sizes, types, templates, validation, confidence, approval gate, review)
@@ -129,6 +127,7 @@ node dist/cli.mjs version     # Show version
 
 ### Web Dashboard
 
+- @.claude/rules/frontend.md (Nova style, design system, component patterns, i18n)
 - `alfred dashboard`: HTTP server + browser open (localhost:7575)
 - React SPA: Vite 8 + TanStack Router (file-based) + TanStack Query + shadcn/ui + Tailwind CSS v4
 - Build: `task build` (npm run build:web → tsdown bundle)
