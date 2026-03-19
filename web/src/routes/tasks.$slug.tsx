@@ -2,6 +2,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { createFileRoute } from "@tanstack/react-router";
 import { Calendar, CheckCircle2, CircleCheck, CircleDot } from "lucide-react";
 import { useState } from "react";
+import { ReviewPanel } from "@/components/review/ReviewPanel";
 import { SectionCard } from "@/components/section-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,6 +43,7 @@ function TaskDetailPage() {
 	const { data: validationData } = useQuery(validationQueryOptions(slug));
 	const { data: approvalsData } = useQuery(fileApprovalsQueryOptions(slug));
 	const [confirmComplete, setConfirmComplete] = useState(false);
+	const [reviewModeFiles, setReviewModeFiles] = useState<Set<string>>(new Set());
 
 	const task = tasksData?.tasks.find((t) => t.slug === slug);
 	const specs = specsData?.specs ?? [];
@@ -75,6 +77,15 @@ function TaskDetailPage() {
 	const canComplete =
 		isActive &&
 		(task?.review_status === "approved" || !["M", "L", "XL"].includes(task?.size ?? ""));
+
+	const toggleReviewMode = (file: string) => {
+		setReviewModeFiles((prev) => {
+			const next = new Set(prev);
+			if (next.has(file)) next.delete(file);
+			else next.add(file);
+			return next;
+		});
+	};
 
 	if (!task) {
 		return <p className="text-sm text-muted-foreground">{t("task.notFound")}</p>;
@@ -135,6 +146,8 @@ function TaskDetailPage() {
 					const content = specContents[i]?.data?.content ?? "";
 					if (!content) return null;
 					const showApprove = isActive && isPending && spec.file !== "session.md";
+					const canReview = isActive && isPending && spec.file !== "session.md";
+					const isReviewMode = canReview && reviewModeFiles.has(spec.file);
 					return (
 						<SectionCard
 							key={spec.file}
@@ -148,6 +161,17 @@ function TaskDetailPage() {
 									? (file, approved) => approveMutation.mutate({ file, approved })
 									: undefined
 							}
+							canReview={canReview}
+							isReviewMode={isReviewMode}
+							onToggleReviewMode={() => toggleReviewMode(spec.file)}
+							reviewPanel={isReviewMode ? (
+								<ReviewPanel
+									slug={slug}
+									reviewStatus={task?.review_status ?? "pending"}
+									specContent={content}
+									currentFile={spec.file}
+								/>
+							) : undefined}
 						/>
 					);
 				})}

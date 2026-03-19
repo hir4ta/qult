@@ -114,6 +114,8 @@ const translations = {
 	// Section card
 	"section.approve": { en: "Approve", ja: "承認" },
 	"section.approved": { en: "Approved", ja: "承認済" },
+	"section.reviewMode": { en: "Review", ja: "レビュー" },
+	"section.readMode": { en: "Read", ja: "閲覧" },
 } as const;
 
 export type TranslationKey = keyof typeof translations;
