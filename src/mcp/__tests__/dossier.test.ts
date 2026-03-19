@@ -510,6 +510,70 @@ describe("dossier check", () => {
 		expect(data.error).toContain("not found");
 	});
 
+	it("checks Closing Wave item by T-C.N index", async () => {
+		await handleDossier(store, null, {
+			action: "init",
+			project_path: tmpDir,
+			task_slug: "check-closing",
+		});
+		await handleDossier(store, null, {
+			action: "update",
+			project_path: tmpDir,
+			file: "tasks.md",
+			content: "# Tasks\n\n## Wave 1 (FR-1)\n\n- [x] T-1.1: Done\n\n## Wave: Closing\n\n- [ ] セルフレビュー実施\n- [ ] CLAUDE.md 更新\n- [ ] テスト確認\n- [ ] ナレッジ蓄積",
+			mode: "replace",
+		});
+
+		// Check 2nd item (CLAUDE.md update)
+		const result = await handleDossier(store, null, {
+			action: "check",
+			project_path: tmpDir,
+			task_id: "T-C.2",
+		});
+		const data = parseResult(result);
+		expect(data.status).toBe("checked");
+		expect(data.task_id).toBe("T-C.2");
+
+		// Check 1st item
+		const r2 = await handleDossier(store, null, {
+			action: "check",
+			project_path: tmpDir,
+			task_id: "T-C.1",
+		});
+		expect(parseResult(r2).status).toBe("checked");
+
+		// Re-check 2nd → already_checked
+		const r3 = await handleDossier(store, null, {
+			action: "check",
+			project_path: tmpDir,
+			task_id: "T-C.2",
+		});
+		expect(parseResult(r3).status).toBe("already_checked");
+	});
+
+	it("T-C.N out of range returns error", async () => {
+		await handleDossier(store, null, {
+			action: "init",
+			project_path: tmpDir,
+			task_slug: "check-closing-oor",
+		});
+		await handleDossier(store, null, {
+			action: "update",
+			project_path: tmpDir,
+			file: "tasks.md",
+			content: "# Tasks\n\n## Wave 1 (FR-1)\n\n- [x] T-1.1: Done\n\n## Closing Wave\n\n- [ ] Review\n- [ ] Tests",
+			mode: "replace",
+		});
+
+		const result = await handleDossier(store, null, {
+			action: "check",
+			project_path: tmpDir,
+			task_id: "T-C.5",
+		});
+		const data = parseResult(result);
+		expect(data.error).toContain("Closing Wave has only 2 item(s)");
+	});
+
 	it("case-insensitive task_id matching", async () => {
 		await handleDossier(store, null, {
 			action: "init",

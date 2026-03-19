@@ -260,25 +260,54 @@ export function dossierCheck(projectPath: string, params: DossierParams) {
 	let checked = false;
 	const taskIdLower = taskId.toLowerCase();
 
-	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i]!;
-		// Match unchecked task lines containing the task_id
-		if (line.match(/^- \[ \] /) && line.toLowerCase().includes(taskIdLower)) {
-			lines[i] = line.replace("- [ ]", "- [x]");
-			checked = true;
-			break; // Only check one task per call
+	// T-C.N format: match Nth unchecked checkbox in Closing Wave section.
+	const closingMatch = taskId.match(/^T-C\.(\d+)$/i);
+	if (closingMatch) {
+		const nth = parseInt(closingMatch[1]!, 10);
+		let inClosing = false;
+		let closingIndex = 0;
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i]!;
+			if (/^## (?:Wave:\s*)?[Cc]losing(?:\s+[Ww]ave)?/i.test(line)) {
+				inClosing = true;
+				continue;
+			}
+			if (inClosing && line.startsWith("## ")) break; // Left Closing section
+			if (inClosing && line.match(/^- \[[ x]\] /)) {
+				closingIndex++;
+				if (closingIndex === nth) {
+					if (line.startsWith("- [x] ")) {
+						return jsonResult({ task_id: taskId, status: "already_checked" });
+					}
+					lines[i] = line.replace("- [ ]", "- [x]");
+					checked = true;
+					break;
+				}
+			}
 		}
-	}
+		if (!checked && closingIndex < nth) {
+			return errorResult(`task_id "${taskId}" not found: Closing Wave has only ${closingIndex} item(s)`);
+		}
+	} else {
+		// Standard T-N.N format: match by text inclusion.
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i]!;
+			if (line.match(/^- \[ \] /) && line.toLowerCase().includes(taskIdLower)) {
+				lines[i] = line.replace("- [ ]", "- [x]");
+				checked = true;
+				break;
+			}
+		}
 
-	if (!checked) {
-		// Check if it's already checked
-		const alreadyChecked = lines.some(
-			(l) => l.match(/^- \[x\] /) && l.toLowerCase().includes(taskIdLower),
-		);
-		if (alreadyChecked) {
-			return jsonResult({ task_id: taskId, status: "already_checked" });
+		if (!checked) {
+			const alreadyChecked = lines.some(
+				(l) => l.match(/^- \[x\] /) && l.toLowerCase().includes(taskIdLower),
+			);
+			if (alreadyChecked) {
+				return jsonResult({ task_id: taskId, status: "already_checked" });
+			}
+			return errorResult(`task_id "${taskId}" not found in tasks.md`);
 		}
-		return errorResult(`task_id "${taskId}" not found in tasks.md`);
 	}
 
 	const updatedContent = lines.join("\n");
