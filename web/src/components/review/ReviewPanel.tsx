@@ -20,6 +20,7 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { reviewHistoryQueryOptions, submitReview } from "@/lib/api";
 import type { Review, ReviewComment } from "@/lib/types";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 interface ReviewPanelProps {
@@ -31,6 +32,7 @@ interface ReviewPanelProps {
 
 export function ReviewPanel({ slug, reviewStatus, specContent, currentFile }: ReviewPanelProps) {
 	const queryClient = useQueryClient();
+	const { t } = useI18n();
 	const { data: historyData } = useQuery(reviewHistoryQueryOptions(slug));
 	const [comments, setComments] = useState<ReviewComment[]>([]);
 	const [newComment, setNewComment] = useState("");
@@ -76,8 +78,8 @@ export function ReviewPanel({ slug, reviewStatus, specContent, currentFile }: Re
 				{reviewStatus === "pending" && (
 					<div className="flex gap-2">
 						<ConfirmAction
-							title="Approve spec?"
-							description="This will mark the spec as approved and allow completion."
+							title={t("review.approveTitle")}
+							description={t("review.approveDescription")}
 							action={() => mutation.mutate("approved")}
 							disabled={mutation.isPending}
 						>
@@ -88,12 +90,12 @@ export function ReviewPanel({ slug, reviewStatus, specContent, currentFile }: Re
 								style={{ borderColor: "rgba(45,139,122,0.4)", color: "#2d8b7a" }}
 							>
 								<CheckCircle className="h-3.5 w-3.5" />
-								Approve
+								{t("review.approve")}
 							</Button>
 						</ConfirmAction>
 						<ConfirmAction
-							title="Request changes?"
-							description="The spec author will need to address your comments."
+							title={t("review.requestChangesTitle")}
+							description={t("review.requestChangesDescription")}
 							action={() => mutation.mutate("changes_requested")}
 							disabled={mutation.isPending || comments.length === 0}
 						>
@@ -104,7 +106,7 @@ export function ReviewPanel({ slug, reviewStatus, specContent, currentFile }: Re
 								style={{ borderColor: "rgba(230,126,34,0.4)", color: "#e67e22" }}
 							>
 								<XCircle className="h-3.5 w-3.5" />
-								Request Changes
+								{t("review.requestChanges")}
 							</Button>
 						</ConfirmAction>
 					</div>
@@ -166,18 +168,18 @@ export function ReviewPanel({ slug, reviewStatus, specContent, currentFile }: Re
 				<div className="flex gap-2 items-end">
 					<div className="flex-1 space-y-1">
 						<p className="text-xs text-muted-foreground">
-							Comment on {currentFile}:{selectedLine}
+							{t("review.commentOn")} {currentFile}:{selectedLine}
 						</p>
 						<Textarea
 							value={newComment}
 							onChange={(e) => setNewComment(e.target.value)}
-							placeholder="Add review comment..."
+							placeholder={t("review.addComment")}
 							className="min-h-[60px] text-sm"
 						/>
 					</div>
 					<Button size="sm" onClick={addComment} disabled={!newComment.trim()}>
 						<MessageSquare className="h-3.5 w-3.5 mr-1" />
-						Add
+						{t("review.add")}
 					</Button>
 				</div>
 			)}
@@ -185,7 +187,7 @@ export function ReviewPanel({ slug, reviewStatus, specContent, currentFile }: Re
 			{/* Pending comments summary */}
 			{comments.length > 0 && (
 				<div className="space-y-1">
-					<p className="text-xs text-muted-foreground">{comments.length} pending comment(s)</p>
+					<p className="text-xs text-muted-foreground">{comments.length} {t("review.pendingComments")}</p>
 				</div>
 			)}
 
@@ -250,11 +252,12 @@ function InlineComment({
 }
 
 function ReviewHistory({ reviews }: { reviews: Review[] }) {
+	const { t } = useI18n();
 	return (
 		<Card>
 			<CardHeader className="py-2 px-4">
 				<CardTitle className="text-xs font-medium text-muted-foreground">
-					Review History ({reviews.length} round{reviews.length > 1 ? "s" : ""})
+					{t("review.history")} ({reviews.length} {t("review.rounds")}{reviews.length > 1 ? "s" : ""})
 				</CardTitle>
 			</CardHeader>
 			<CardContent className="p-4 pt-0 space-y-3">
@@ -270,8 +273,8 @@ function ReviewHistory({ reviews }: { reviews: Review[] }) {
 						{review.summary && <p className="text-xs mt-1">{review.summary}</p>}
 						{review.comments && review.comments.length > 0 && (
 							<p className="text-xs text-muted-foreground mt-1">
-								{review.comments.length} comment(s),{" "}
-								{review.comments.filter((c) => !c.resolved).length} unresolved
+								{review.comments.length} {t("review.comments")},{" "}
+								{review.comments.filter((c) => !c.resolved).length} {t("review.unresolved")}
 							</p>
 						)}
 					</div>
@@ -294,6 +297,7 @@ function ConfirmAction({
 	disabled?: boolean;
 	children: React.ReactNode;
 }) {
+	const { t } = useI18n();
 	return (
 		<AlertDialog>
 			<AlertDialogTrigger asChild disabled={disabled}>
@@ -305,8 +309,8 @@ function ConfirmAction({
 					<AlertDialogDescription>{description}</AlertDialogDescription>
 				</AlertDialogHeader>
 				<AlertDialogFooter>
-					<AlertDialogCancel>Cancel</AlertDialogCancel>
-					<AlertDialogAction onClick={action}>Confirm</AlertDialogAction>
+					<AlertDialogCancel>{t("review.cancel")}</AlertDialogCancel>
+					<AlertDialogAction onClick={action}>{t("review.confirm")}</AlertDialogAction>
 				</AlertDialogFooter>
 			</AlertDialogContent>
 		</AlertDialog>

@@ -123,7 +123,7 @@ Search pipeline: Voyage AI vectors with reranking > FTS5 with fuzzy matching > k
 | Size | Files | Good for |
 |------|-------|----------|
 | **S** | 2 | Bug fix, config tweak |
-| **M** | 4 | New endpoint, moderate refactor |
+| **M** | 3-4 | New endpoint, moderate refactor |
 | **L/XL** | 5 | Architecture change, new subsystem |
 | **D** | 1 | Brownfield delta change |
 

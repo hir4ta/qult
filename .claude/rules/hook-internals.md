@@ -15,6 +15,6 @@ paths:
 | UserPromptSubmit | 10s | 9s | Voyage semantic search (embed + vector search + rerank) |
 | PreToolUse | 5s | 4.5s | _active.md read + spec approval check (filesystem only, no DB/API) |
 | Stop | 5s | 4.5s | tasks.md Next Steps check + self-review check + spec completion |
-| embed-async | 30s | — | Voyage API with 3x exponential backoff (background) |
-| embed-doc | 30s | — | Voyage API with 3x exponential backoff (background) |
+| embed-async | 30s | — | Voyage API with 2x exponential backoff (background) |
+| embed-doc | 30s | — | Voyage API with 2x exponential backoff (background) |
 

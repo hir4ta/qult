@@ -63,7 +63,7 @@ paths:
 - Hook state persistence: `src/hooks/state.ts` — readStateJSON/writeStateJSON/readStateText/writeStateText. Stores session-local state in `.alfred/.state/` (gitignored). Path traversal guard on file names
 - Shared spec-guard utilities: `src/hooks/spec-guard.ts` — tryReadActiveSpec, isSpecFilePath, countUncheckedNextSteps, hasUncheckedSelfReview, denyTool, blockStop
 - Spec-first intent guard: UserPromptSubmit writes implement/bugfix/tdd intent to `.alfred/.state/last-intent.json` (30min expiry). PreToolUse blocks Edit/Write when `.alfred/` exists + no active spec + implement intent. Non-implement intents clear last-intent
-- Validation engine: `src/spec/validate.ts` — 22-check validation for all spec sizes
+- Validation engine: `src/spec/validate.ts` — 21-check validation for all spec sizes
 - Multi-agent skills: inspect (6 profiles), salon (3 specialists + synthesis), brief (7 spec files + 3 specialists per file + approval gate), attend (spec→approve→implement→review→commit orchestrator), tdd (red→green→refactor), mend (reproduce→analyze→fix→verify), survey (code→spec reverse engineering), harvest (PR comment → knowledge)
 - brief/attend spec generation order: research → requirements → design → tasks → test-specs → session (decisions saved via ledger directly, not as spec file)
 

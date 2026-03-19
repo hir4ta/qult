@@ -38,11 +38,11 @@ const translations = {
 	"overview.recentDecisions": { en: "Recent Decisions", ja: "最近の意思決定" },
 
 	// Size labels
-	"size.S": { en: "Small — 3 spec files", ja: "Small — スペック3ファイル" },
-	"size.M": { en: "Medium — 4-5 spec files", ja: "Medium — スペック4-5ファイル" },
-	"size.L": { en: "Large — 7 spec files", ja: "Large — スペック7ファイル" },
-	"size.XL": { en: "Extra Large — 7 spec files", ja: "Extra Large — スペック7ファイル" },
-	"size.D": { en: "Delta — 2 spec files", ja: "Delta — スペック2ファイル" },
+	"size.S": { en: "Small — 2 spec files", ja: "Small — スペック2ファイル" },
+	"size.M": { en: "Medium — 3-4 spec files", ja: "Medium — スペック3-4ファイル" },
+	"size.L": { en: "Large — 5 spec files", ja: "Large — スペック5ファイル" },
+	"size.XL": { en: "Extra Large — 5 spec files", ja: "Extra Large — スペック5ファイル" },
+	"size.D": { en: "Delta — 1 spec file", ja: "Delta — スペック1ファイル" },
 
 	// Tasks sidebar
 	"tasks.hideCompleted": { en: "Hide completed", ja: "完了を非表示" },
@@ -116,6 +116,24 @@ const translations = {
 	"section.approved": { en: "Approved", ja: "承認済" },
 	"section.reviewMode": { en: "Review", ja: "レビュー" },
 	"section.readMode": { en: "Read", ja: "閲覧" },
+
+	// Review panel
+	"review.approveTitle": { en: "Approve spec?", ja: "スペックを承認しますか？" },
+	"review.approveDescription": { en: "This will mark the spec as approved and allow completion.", ja: "承認するとスペックの完了が可能になります。" },
+	"review.approve": { en: "Approve", ja: "承認" },
+	"review.requestChangesTitle": { en: "Request changes?", ja: "変更を依頼しますか？" },
+	"review.requestChangesDescription": { en: "The spec author will need to address your comments.", ja: "スペック作成者がコメントに対応する必要があります。" },
+	"review.requestChanges": { en: "Request Changes", ja: "変更を依頼" },
+	"review.commentOn": { en: "Comment on", ja: "コメント対象:" },
+	"review.addComment": { en: "Add review comment...", ja: "レビューコメントを追加..." },
+	"review.add": { en: "Add", ja: "追加" },
+	"review.pendingComments": { en: "pending comment(s)", ja: "件の保留コメント" },
+	"review.cancel": { en: "Cancel", ja: "キャンセル" },
+	"review.confirm": { en: "Confirm", ja: "確認" },
+	"review.history": { en: "Review History", ja: "レビュー履歴" },
+	"review.rounds": { en: "round", ja: "ラウンド" },
+	"review.comments": { en: "comment(s)", ja: "件のコメント" },
+	"review.unresolved": { en: "unresolved", ja: "未解決" },
 } as const;
 
 export type TranslationKey = keyof typeof translations;
