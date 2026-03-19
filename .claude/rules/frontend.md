@@ -44,6 +44,7 @@ Components follow shadcn Nova style (compact, flat, dashboard-optimized):
 
 - shadcn components live in `web/src/components/ui/` — edit directly, do not re-wrap
 - Custom components in `web/src/components/` (section-card, diff-viewer, review panel)
+- Review mode: SectionCard toggles between Markdown view and ReviewPanel (line-numbered viewer + inline comments). Available when review_status=pending on M/L/XL specs
 - Data fetching: TanStack Query hooks in `web/src/lib/api.ts` with `queryOptions()` pattern
 - Stale times: 5s for live data (tasks, knowledge), 60s for reference data (specs, health)
 - SSE via `web/src/lib/sse.ts` → `queryClient.invalidateQueries()` on events

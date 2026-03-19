@@ -47,7 +47,7 @@ paths:
 - Grounding levels: verified (code/test proven) > reviewed (design-reviewed/user-confirmed) > inferred (reasoned from evidence) > speculative (hypothesis)
 
 ## Validation (dossier validate)
-- 21 checks: required_sections, min_fr_count (S:1+, M:3+, L:5+, XL:8+; bugfix uses substantive content check), traceability (fr_to_task, task_to_fr), confidence_annotations, closing_wave, design_fr_references, testspec_fr_references, nfr_traceability (L/XL only), gherkin_syntax, orphan_tests, orphan_tasks, content_placeholder, research_completeness (L/XL only), confidence_coverage (XL only), xl_wave_count (>=4, XL only), xl_nfr_required (XL only), delta_sections_present (D only), grounding_coverage (opt-in: L/XL or D, >30% speculative fails), delta_change_ids (D only), delta_before_after (D only). decisions_completeness removed (decisions saved via ledger directly)
+- 21 checks: required_sections, min_fr_count (S:1+, M:3+, L:5+, XL:8+; bugfix uses substantive content check), traceability (fr_to_task, task_to_fr — supports both `### T-N.N` header and `- [ ] T-N.N` checkbox formats), confidence_annotations, closing_wave, design_fr_references, testspec_fr_references, nfr_traceability (L/XL only), gherkin_syntax, orphan_tests, orphan_tasks, content_placeholder, research_completeness (L/XL only), confidence_coverage (XL only), xl_wave_count (>=4, XL only), xl_nfr_required (XL only), delta_sections_present (D only), grounding_coverage (opt-in: L/XL or D, >30% speculative fails), delta_change_ids (D only), delta_before_after (D only). decisions_completeness removed (decisions saved via ledger directly)
 
 ## Approval Gate
 - complete action: M/L/XL specs require review_status="approved" AND approved review JSON file in reviews/ directory (S/D exempt)

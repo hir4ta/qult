@@ -28,12 +28,16 @@ export function tryReadActiveSpec(cwd: string | undefined): SpecState | null {
 /**
  * Check if _active.md exists but cannot be parsed or has invalid enum values.
  * Used by PreToolUse to deny edits instead of silently allowing.
+ * Returns false when primary is empty (no active spec = valid state).
  */
 export function isActiveSpecMalformed(cwd: string | undefined): boolean {
 	if (!cwd) return false;
 	const path = join(cwd, ".alfred", "specs", "_active.md");
 	if (!existsSync(path)) return false;
 	try {
+		const state = readActiveState(cwd);
+		// No active spec (primary is empty) is a valid state, not malformed.
+		if (!state.primary) return false;
 		return parseSpecState(cwd) === null;
 	} catch {
 		return true; // file exists but can't be read/parsed

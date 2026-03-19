@@ -46,7 +46,7 @@ paths:
 ## PreToolUse
 - Review gate enforcement: reads `.alfred/.state/review-gate.json`, blocks Edit/Write when gate active + slug matches active spec
 - Gate types: `spec-review` (auto-set on dossier init), `wave-review` (set per wave via `dossier action=gate`)
-- Enforcement order: .alfred/ exempt → review-gate → approval gate (M/L/XL unapproved)
+- Enforcement order: .alfred/ exempt → malformed check (empty primary = valid state, not malformed) → review-gate → approval gate (M/L/XL unapproved)
 - Gate clear: `dossier action=gate sub_action=clear reason="..."` (reason required, audit logged)
 
 ## Stop (review gate + session scope)

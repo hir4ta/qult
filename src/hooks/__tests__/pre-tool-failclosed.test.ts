@@ -79,6 +79,21 @@ describe("preToolUse — fail-closed on malformed _active.md", () => {
 		expect(stdoutData.length).toBe(0);
 	});
 
+	it("allows Edit when _active.md has empty primary (all specs completed)", async () => {
+		const specsDir = join(tmpDir, ".alfred", "specs");
+		mkdirSync(specsDir, { recursive: true });
+		writeFileSync(
+			join(specsDir, "_active.md"),
+			'primary: ""\ntasks:\n  - slug: old-task\n    status: done\n    started_at: 2026-03-19T10:00:00Z\n',
+		);
+
+		await preToolUse(makeEvent("Edit", join(tmpDir, "src/index.ts")));
+		// Should NOT deny — empty primary is a valid state (no active spec)
+		const out = getDenyOutput();
+		const isDenied = out?.hookSpecificOutput?.permissionDecision === "deny";
+		expect(isDenied).toBe(false);
+	});
+
 	it("allows Read even when _active.md is malformed (non-blockable)", async () => {
 		const specsDir = join(tmpDir, ".alfred", "specs");
 		mkdirSync(specsDir, { recursive: true });
