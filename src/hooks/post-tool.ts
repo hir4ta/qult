@@ -270,7 +270,7 @@ export function detectWaveCompletion(
 		const prev = readWaveProgress(projectPath);
 
 		for (const [key, state] of Object.entries(progress.waves)) {
-			if (key === "closing") continue; // Closing Wave handled by Stop hook
+			// Closing Wave now also gets review-gate enforcement (FR-1: closing-wave-enforcement).
 			if (state.total === 0 || state.checked < state.total) continue; // not complete
 
 			// Check if this wave was already reviewed (from prev state or current).

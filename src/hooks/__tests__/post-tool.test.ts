@@ -152,7 +152,7 @@ describe("detectWaveCompletion", () => {
 		expect(items.length).toBe(0);
 	});
 
-	it("skips Closing Wave (handled by Stop hook)", () => {
+	it("sets review-gate for Closing Wave (FR-1: closing-wave-enforcement)", () => {
 		const content = `# Tasks: test
 
 ## Wave: Closing
@@ -161,7 +161,14 @@ describe("detectWaveCompletion", () => {
 - [x] Build check
 `;
 		const items = detectWaveCompletion(tmpDir, "test", content);
-		expect(items.length).toBe(0);
+		expect(items.length).toBe(1);
+		expect(items[0]!.level).toBe("DIRECTIVE");
+		expect(items[0]!.message).toContain("self-review");
+
+		// Check review-gate.json was written for closing wave
+		const gate = readStateJSON<ReviewGate | null>(tmpDir, "review-gate.json", null);
+		expect(gate).not.toBeNull();
+		expect(gate!.gate).toBe("wave-review");
 	});
 });
 
