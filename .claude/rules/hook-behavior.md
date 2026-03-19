@@ -59,6 +59,18 @@ paths:
 - DEC-4: stop_hook_active=true overrides gate blocking (infinite loop prevention)
 - CONTEXT reminders use `systemMessage` (not hookSpecificOutput — Stop schema doesn't support hookEventName)
 
+## Hook Output & Directives
+- Hook output: structured directive levels via `emitDirectives()` — [DIRECTIVE] (must comply), [WARNING] (should check), [CONTEXT] (reference). Max 3 DIRECTIVEs per invocation (NFR-5). Single `emitAdditionalContext()` call per hook (NFR-4)
+- Directive utility: `src/hooks/directives.ts` — `buildDirectiveOutput()`, `emitDirectives()`
+- Directive persuasion: DirectiveItem supports opt-in `rationalizations` (counter-arguments) and `spiritVsLetter` (anti-shortcut sentence). Truncation drops rationalizations first to preserve Spirit vs Letter (NFR-1)
+- Semantic intent classification: Voyage embedding similarity (threshold >= 0.5) with keyword fallback. Prompt embedding reused for knowledge search (DEC-2)
+- Hook state persistence: `src/hooks/state.ts` — readStateJSON/writeStateJSON/readStateText/writeStateText. Stores session-local state in `.alfred/.state/` (gitignored). Path traversal guard on file names
+- Shared spec-guard utilities: `src/hooks/spec-guard.ts` — tryReadActiveSpec, isSpecFilePath, countUncheckedNextSteps, hasUncheckedSelfReview, denyTool, blockStop
+- Spec-first intent guard: UserPromptSubmit writes implement/bugfix/tdd intent to `.alfred/.state/last-intent.json` (30min expiry). PreToolUse blocks Edit/Write when `.alfred/` exists + no active spec + implement intent. Non-implement intents clear last-intent
+- Validation engine: `src/spec/validate.ts` — 22-check validation for all spec sizes
+- Multi-agent skills: inspect (6 profiles), salon (3 specialists + synthesis), brief (7 spec files + 3 specialists per file + approval gate), attend (spec→approve→implement→review→commit orchestrator), tdd (red→green→refactor), mend (reproduce→analyze→fix→verify), survey (code→spec reverse engineering), harvest (PR comment → knowledge)
+- brief/attend spec generation order: research → requirements → design → tasks → test-specs → session (decisions saved via ledger directly, not as spec file)
+
 ## Misc
 - Background embedding: embed-async/embed-doc subcommands for async Voyage API calls
 - Orphan cleanup: CleanOrphanedEmbeddings runs during PreCompact (not per-insert)

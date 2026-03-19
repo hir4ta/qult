@@ -25,3 +25,10 @@ paths:
 ## Search
 - SubTypeHalfLife(subType) in fts.ts: assumption=30d, inference=45d, snapshot=30d, pattern=90d, decision=90d, rule=120d
 - DetectKnowledgeConflicts threshold 0.70 with classifyConflict keyword polarity
+
+## Knowledge Architecture (from CLAUDE.md)
+- Knowledge architecture: `.alfred/knowledge/{decisions,patterns,rules}/*.json` (mneme-compatible JSON) = source of truth; DB = derived search index (rebuildable)
+- Knowledge types: decision (one-time choice + reasoning + alternatives), pattern (repeatable practice + conditions + outcomes), rule (enforceable standard + priority + rationale). `general` abolished, `snapshot` is internal-only (search excluded)
+- Knowledge file write: atomic (temp + rename). writeKnowledgeFile() shared by ledger save + dossier complete
+- ALFRED_LANG: controls knowledge content language (default: en). Passed in ledger/dossier responses as `lang` field for LLM language selection
+- SessionStart sync: walks `.alfred/knowledge/{decisions,patterns,rules}/*.json` → JSON.parse → content_hash comparison → upsert. Legacy .md fallback retained

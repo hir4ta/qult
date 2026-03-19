@@ -100,82 +100,22 @@ node dist/cli.mjs version     # Show version
 
 - VOYAGE_API_KEY enables semantic search; without it, FTS5 full-text search is used as fallback
 - ALFRED_LANG sets output language for all generated content (default: en); template headings stay in English
-- @.claude/rules/hook-internals.md (hook timeouts)
 
 ### Hooks & Events
 
 - Hook handler: short-lived process. 6 hooks registered in hooks.json: SessionStart, PreCompact, UserPromptSubmit, PostToolUse, PreToolUse, Stop
-- Hook output: structured directive levels via `emitDirectives()` — [DIRECTIVE] (must comply), [WARNING] (should check), [CONTEXT] (reference). Max 3 DIRECTIVEs per invocation (NFR-5). Single `emitAdditionalContext()` call per hook (NFR-4)
-- Directive utility: `src/hooks/directives.ts` — `buildDirectiveOutput()`, `emitDirectives()`
-- Spec enforcement: UserPromptSubmit detects implement/bugfix/tdd intent + no active spec + .alfred/ exists → DIRECTIVE requiring spec creation
-- Parallel dev guard: UserPromptSubmit Stage 1.5 detects implement intent + active spec exists + slug NOT in worked-slugs → WARNING prompting Claude to AskUserQuestion whether this is the same task or a new one. Suppressed once user edits files for the spec (slug added to worked-slugs)
-- Spec approval gate (entry): UserPromptSubmit Stage 2 detects M/L/XL spec with review_status !== 'approved' → DIRECTIVE every prompt until approved (FR-7)
-- Directive persuasion: DirectiveItem supports opt-in `rationalizations` (counter-arguments) and `spiritVsLetter` (anti-shortcut sentence). Truncation drops rationalizations first to preserve Spirit vs Letter (NFR-1)
-- Semantic intent classification: Voyage embedding similarity (threshold >= 0.5) with keyword fallback. Prompt embedding reused for knowledge search (DEC-2)
-- Skill nudge learning: impressions tracked in .alfred/.state/; suppressed after 3 showings per intent. resetNudgeCount(cwd, intent) exported for skill-use detection
-- Hook state persistence: `src/hooks/state.ts` — readStateJSON/writeStateJSON/readStateText/writeStateText. Stores session-local state in `.alfred/.state/` (gitignored). Path traversal guard on file names
-- 1% rule: SessionStart injects "invoke skills if even small chance applies" CONTEXT when .alfred/ exists (regardless of active spec)
-- Test failure detection: PostToolUse recognizes FAIL/FAILED/FAILURE patterns and suggests rollback before continuing
-- PostToolUse: git commit detection → proactive knowledge conflict warning (detectKnowledgeConflicts, threshold 0.70)
-- PostToolUse: Edit/Write → autoCheckNextSteps with file path context (FR-8: session.md progress auto-update)
-- SessionStart: decision replay — injects up to 5 recent decision-type knowledge entries (last 7 days, project-scoped). buildSpecContextItems returns items (no direct emit, NFR-4 compliant)
-- Review gate: `src/hooks/review-gate.ts` — HARD enforcement via `.alfred/.state/review-gate.json`. Two gate types: `spec-review` (auto-set on dossier init, all sizes) and `wave-review` (set manually per wave). PreToolUse blocks Edit/Write when gate active + slug matches active spec. Gate cleared via `dossier action=gate sub_action=clear reason="..."` (reason required, audit logged). Fail-open on errors.
-- PreToolUse: HARD enforcement — (1) review-gate blocks Edit/Write until spec/wave review completed, (2) approval gate blocks Edit/Write for unapproved M/L/XL specs. Enforcement order: .alfred/ exempt → review-gate → approval gate. Fail-open on errors (NFR-2). .alfred/ edits always allowed
-- Stop: review-gate active → HARD block. Other checks (unchecked Next Steps, self-review, incomplete spec) → CONTEXT reminder only (no block). Session-scoped: only reminds about specs in worked-slugs (fallback to primary if empty). stop_hook_active=true → allow (DEC-4 infinite loop prevention)
-- Worked-slugs tracking: `.alfred/.state/worked-slugs.json` — SessionStart resets, PostToolUse records active slug on Edit/Write. Used by Stop hook (session-scoped reminders) and UserPromptSubmit Stage 1.5 (suppression when already working on spec)
-- Shared spec-guard utilities: `src/hooks/spec-guard.ts` — tryReadActiveSpec, isSpecFilePath, countUncheckedNextSteps, hasUncheckedSelfReview, denyTool, blockStop
-- Dossier gate action: `dossier action=gate` with sub_action=set/clear/status. Set requires gate_type + optional wave. Clear requires reason (audit trail). Both set/clear logged to audit.jsonl
-- Spec-first intent guard: UserPromptSubmit writes implement/bugfix/tdd intent to `.alfred/.state/last-intent.json` (30min expiry). PreToolUse blocks Edit/Write when `.alfred/` exists + no active spec + implement intent. Non-implement intents clear last-intent
-- Validation engine: `src/spec/validate.ts` — 22-check validation for all spec sizes. Called by `dossier validate` and `dossier complete`. Checks: required_sections, min_fr_count, content_placeholder, fr_to_task, task_to_fr, design_fr_references, testspec_fr_references, closing_wave, gherkin_syntax, orphan_tests, orphan_tasks, confidence_annotations + size-conditional (L/XL: nfr_traceability, decisions_completeness, research_completeness; XL: confidence_coverage, xl_wave_count, xl_nfr_required; D: delta_sections/change_ids/before_after; L/XL opt-in: grounding_coverage)
-- Validation gate on complete: `dossier complete` runs validateSpec() for ALL sizes. fail checks → completion rejected. warn checks → allowed
-- Multi-agent skills: inspect (6 profiles), salon (3 specialists + synthesis), brief (7 spec files + 3 specialists per file + approval gate), attend (spec→approve→implement→review→commit orchestrator), tdd (red→green→refactor), mend (reproduce→analyze→fix→verify), survey (code→spec reverse engineering), harvest (PR comment → knowledge)
-- brief/attend spec generation order: research → requirements → design → tasks → test-specs → session (decisions saved via ledger directly, not as spec file)
-- @.claude/rules/hook-behavior.md (event pipelines, skill nudge, drift detection, dossier hints)
+- @.claude/rules/hook-behavior.md (event pipelines, directives, skill nudge, drift detection, enforcement)
+- @.claude/rules/hook-internals.md (hook timeouts)
 - @.claude/rules/implementation-discipline.md (spec-first rule, wave self-review, commit discipline)
 
 ### Database & Schema
-
-- DB schema V8: knowledge-first architecture (any pre-V8 DB rebuilt from scratch)
-- Tables: knowledge_index (knowledge entries), embeddings (vector search), knowledge_fts (FTS5), tag_aliases (search expansion), session_links (compaction continuity)
-- Knowledge architecture: `.alfred/knowledge/{decisions,patterns,rules}/*.json` (mneme-compatible JSON) = source of truth; DB = derived search index (rebuildable)
-- Knowledge types: decision (one-time choice + reasoning + alternatives), pattern (repeatable practice + conditions + outcomes), rule (enforceable standard + priority + rationale). `general` abolished, `snapshot` is internal-only (search excluded)
-- Knowledge file write: atomic (temp + rename). writeKnowledgeFile() shared by ledger save + dossier complete
-- ALFRED_LANG: controls knowledge content language (default: en). Passed in ledger/dossier responses as `lang` field for LLM language selection
-- Project identification: project_remote (git remote URL) + project_path (directory) + branch; UNIQUE constraint on (project_remote, project_path, file_path)
-- SessionStart sync: walks `.alfred/knowledge/{decisions,patterns,rules}/*.json` → JSON.parse → content_hash comparison → upsert. Legacy .md fallback retained. CLAUDE.md ingestion removed (v0.3.1)
-- Store.DB() is test-only; production code uses Store methods (no raw SQL outside src/store/)
-- @.claude/rules/store-internals.md (vector search, SQL safety patterns)
+- @.claude/rules/store-internals.md (schema V8, vector search, SQL safety, knowledge architecture)
 
 ### Steering Docs
+- @.claude/rules/steering-docs.md (steering doc management, validation, templates)
 
-- Steering docs: `.alfred/steering/` (3 files: product.md, structure.md, tech.md)
-- Pure filesystem (no DB storage, read on demand)
-- `/alfred:init`: multi-agent project exploration → steering docs + templates + knowledge sync (preferred entry point)
-- `alfred steering-init`: legacy CLI (redirects to /alfred:init), still functional with `--force`
-- Dossier init: injects `steering_context` (summary) or `steering_hint` (suggestion) in response JSON
-- Dossier update: accepts `file=steering/{filename}` for steering doc updates
-- ValidateSteering: checks tech.md vs package.json drift, structure.md vs filesystem directory existence
-- Templates: steering doc templates are currently not implemented (planned: file-based templates under `src/spec/templates/`)
-
-### Spec Management
-
-- Spec files use activeContext format for session.md
-- Dossier tool actions: init / update / status / switch / complete / delete / history / rollback / review / validate
-- dossier tool: DestructiveHint=true, IdempotentHint=false (delete is destructive; 2-phase confirm provides UX safety)
-- dossier init: accepts optional size (S/M/L/XL/D) and spec_type (feature/bugfix/delta) params
-- @.claude/rules/spec-details.md (sizes, types, templates, validation, confidence, approval gate)
-
-### Spec Review & Approval Gate
-
-- Web review mode: Tasks tab → View/Review tabs (only when review_status=pending)
-- dossier action=review: read-only, returns latest review + unresolved comments
-- Approval gate (M/L/XL): dossier complete checks BOTH _active.md review_status AND verifyReviewFile() (review JSON existence + status=approved + zero unresolved comments)
-- Closing wave check: dossier complete warns if tasks.md Closing Wave has no checked items
-- PreCompact auto-complete: same approval gate applied — M+ specs skip auto-complete if review not approved
-- Legacy backward compat: specs without reviews/ directory pass approval gate (YAML-only, NFR-3)
-- brief Step 9: approval gate after spec creation
-- attend Phase 2.5: approval gate after agent review, awaiting_approval flag in Orchestrator State
-- Audit log: .alfred/audit.jsonl (spec.init, spec.delete, spec.complete, review.submit)
+### Spec Management & Review
+- @.claude/rules/spec-details.md (sizes, types, templates, validation, confidence, approval gate, review)
 
 ### Epic Management
 
@@ -204,18 +144,7 @@ node dist/cli.mjs version     # Show version
 
 ### Knowledge & Search
 
-- Knowledge persistence: `.alfred/knowledge/{decisions,patterns,rules}/*.json` = source of truth; DB `knowledge_index` = derived search index
-- Knowledge file format: JSON (mneme-compatible schemas: DecisionEntry, PatternEntry, RuleEntry)
-- Sub-type classification: decision/pattern/rule (general abolished); boost: rule=2.0x, decision=1.5x, pattern=1.3x
-- Knowledge maturity: hit_count tracks search appearances, last_accessed for staleness
-- Knowledge promotion: pattern→rule (15+ hits); manual confirmation via ledger promote
-- Ledger tool actions: search, save, promote, candidates, reflect, audit-conventions
-- Search pipeline: Voyage vector search → rerank → recency signal → hit_count tracking → FTS5 fallback → keyword fallback. Returns ScoredDoc[] with per-doc score + matchReason
-- FTS5: knowledge_fts virtual table with bm25 ranking, auto-synced via triggers (title weighted 3x)
-- Tag alias expansion: auth→authentication/login/認証, 16 categories bilingual (EN/JP)
-- Knowledge governance: `enabled` column in knowledge_index; disabled entries excluded from search
-- Knowledge tab: toggle enabled/disabled via API (PATCH /api/knowledge/{id}/enabled)
-- Knowledge files are git-friendly: team sharing via repository, diff-reviewable in PRs
+- @.claude/rules/knowledge-internals.md (persistence, search pipeline, governance, promotion)
 
 ### Naming Convention (Butler Theme)
 

@@ -98,6 +98,13 @@ export async function userPromptSubmit(ev: HookEvent, signal: AbortSignal): Prom
 	const specDirective = checkSpecRequired(ev.cwd, intent);
 	if (specDirective) {
 		items.push(specDirective);
+		// FR-7: User-facing explanation when spec creation is first required.
+		if (specDirective.level === "DIRECTIVE") {
+			items.push({
+				level: "CONTEXT",
+				message: "alfred は仕様書 (spec) を使って開発を構造化します。specは自動で作成され、サイズも自動判定されます。実装の追跡・レビュー・ナレッジ蓄積を自動化し、品質を担保します。",
+			});
+		}
 	}
 
 	// FR-1: Skill nudge with dismissal suppression.

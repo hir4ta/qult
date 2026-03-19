@@ -182,6 +182,9 @@ async function dossierInit(
 		result.lang_directive = `Write ALL spec content in ${lang === "ja" ? "Japanese (日本語)" : lang}. Technical terms and IDs (FR-N, T-N.N, etc.) stay in English.`;
 	}
 
+	// FR-8: Onboarding hint for first-time users.
+	result.onboarding_hint = `Spec '${params.task_slug}' created (size: ${initResult.size}). Next: write spec files → self-review → ${["M", "L", "XL"].includes(initResult.size) ? "dashboard approval → " : ""}implement per wave.`;
+
 	// Auto-set spec-review gate (FR-2/FR-6: all sizes, including S/D).
 	try {
 		writeReviewGate(projectPath, {
