@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -23,29 +24,41 @@ export const Route = createFileRoute("/activity")({
 });
 
 const FILTERS = ["all", "spec.init", "spec.complete", "review.submit"] as const;
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 function ActivityPage() {
 	const { t } = useI18n();
 	const [filter, setFilter] = useState<string>("all");
+	const [showAll, setShowAll] = useState(false);
 	const { data: activityData, isLoading } = useQuery(
 		activityQueryOptions(100, filter === "all" ? undefined : filter),
 	);
 	const { data: epicsData } = useQuery(epicsQueryOptions());
 
-	const entries = activityData?.entries ?? [];
+	const allEntries = activityData?.entries ?? [];
+	const entries = useMemo(() => {
+		if (showAll) return allEntries;
+		const cutoff = Date.now() - WEEK_MS;
+		return allEntries.filter((e) => {
+			try { return new Date(e.timestamp).getTime() >= cutoff; } catch { return true; }
+		});
+	}, [allEntries, showAll]);
+	const hasOlder = !showAll && entries.length < allEntries.length;
 	const epics = (epicsData?.epics ?? []).filter((e) => e.status !== "completed" && e.status !== "done");
 
 	return (
 		<div className="space-y-6">
-			<Tabs value={filter} onValueChange={setFilter}>
-				<TabsList>
-					{FILTERS.map((f) => (
-						<TabsTrigger key={f} value={f} className="text-xs">
-							{f === "all" ? t("activity.all") : f}
-						</TabsTrigger>
-					))}
-				</TabsList>
-			</Tabs>
+			<div className="sticky top-0 z-10 bg-background pb-3">
+				<Tabs value={filter} onValueChange={setFilter}>
+					<TabsList>
+						{FILTERS.map((f) => (
+							<TabsTrigger key={f} value={f} className="text-xs">
+								{f === "all" ? t("activity.all") : f}
+							</TabsTrigger>
+						))}
+					</TabsList>
+				</Tabs>
+			</div>
 
 			{isLoading ? (
 				<div className="space-y-2">
@@ -54,7 +67,16 @@ function ActivityPage() {
 					))}
 				</div>
 			) : (
-				<ActivityTable entries={entries} />
+				<>
+					<ActivityTable entries={entries} />
+					{hasOlder && (
+						<div className="flex justify-center">
+							<Button variant="outline" size="sm" onClick={() => setShowAll(true)}>
+								{t("activity.showOlder")}
+							</Button>
+						</div>
+					)}
+				</>
 			)}
 
 			{epics.length > 0 && <EpicSection epics={epics} />}

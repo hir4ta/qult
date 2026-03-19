@@ -37,11 +37,9 @@ interface SectionCardProps {
 export function SectionCard({
 	title,
 	content,
-	color,
 	defaultOpen = false,
 	approved,
 	onApprove,
-	slug,
 	canReview,
 	isReviewMode,
 	onToggleReviewMode,

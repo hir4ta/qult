@@ -41,32 +41,14 @@ export function KnowledgeGraph({
 }: KnowledgeGraphProps) {
 	const { t } = useI18n();
 	const containerRef = useRef<HTMLDivElement>(null);
+	// biome-ignore lint/suspicious/noExplicitAny: react-force-graph-2d ref type is complex
+	const fgRef = useRef<any>(null);
 	const [dimensions, setDimensions] = useState({ width: 800, height: Math.floor(window.innerHeight * 0.7) });
-	const [themeColors, setThemeColors] = useState({ bg: "#ffffff", fg: "#1a1a1a" });
 
 	// Sub-type filter toggles (local state)
 	const [activeTypes, setActiveTypes] = useState<Set<string>>(
 		() => filterSubTypes ?? new Set(["decision", "pattern", "rule"]),
 	);
-
-	// Read theme colors from CSS custom properties, re-read on dark mode change
-	useEffect(() => {
-		const el = containerRef.current;
-		if (!el) return;
-
-		const readColors = () => {
-			const styles = getComputedStyle(el);
-			const bg = styles.getPropertyValue("--background")?.trim();
-			const fg = styles.getPropertyValue("--foreground")?.trim();
-			if (bg) setThemeColors((prev) => ({ ...prev, bg: `oklch(${bg})` }));
-			if (fg) setThemeColors((prev) => ({ ...prev, fg: `oklch(${fg})` }));
-		};
-		readColors();
-
-		const observer = new MutationObserver(readColors);
-		observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
-		return () => observer.disconnect();
-	}, []);
 
 	// Track container width + window height
 	useEffect(() => {
@@ -106,6 +88,14 @@ export function KnowledgeGraph({
 			.map((e) => ({ source: e.source, target: e.target, score: e.score }));
 		return { nodes: forceNodes, links: forceLinks };
 	}, [filteredNodes, filteredNodeIds, edges]);
+
+	// Adjust d3 force parameters for better node spacing
+	useEffect(() => {
+		const fg = fgRef.current;
+		if (!fg) return;
+		fg.d3Force("charge")?.strength(-200);
+		fg.d3Force("link")?.distance(120);
+	}, [graphData]);
 
 	// Count connections per node for tooltip
 	const connectionCounts = useMemo(() => {
@@ -249,8 +239,9 @@ export function KnowledgeGraph({
 					onNodeClick={(node: ForceNode) => onNodeClick(node)}
 					backgroundColor="transparent"
 					cooldownTicks={100}
-					d3AlphaDecay={0.03}
-					d3VelocityDecay={0.3}
+					d3AlphaDecay={0.02}
+					d3VelocityDecay={0.25}
+					ref={fgRef}
 				/>
 			</div>
 		</div>

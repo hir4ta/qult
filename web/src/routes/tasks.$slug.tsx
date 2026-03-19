@@ -6,7 +6,6 @@ import { ReviewPanel } from "@/components/review/ReviewPanel";
 import { SectionCard } from "@/components/section-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -225,7 +224,7 @@ function TaskInfoCard({
 								{task.size}
 							</Badge>
 						</TooltipTrigger>
-						<TooltipContent>{SIZE_LABEL_KEYS[task.size] ? t(SIZE_LABEL_KEYS[task.size]) : task.size}</TooltipContent>
+						<TooltipContent>{SIZE_LABEL_KEYS[task.size] ? t(SIZE_LABEL_KEYS[task.size]!) : task.size}</TooltipContent>
 					</Tooltip>
 				)}
 				{task.spec_type && <Badge variant="outline">{task.spec_type}</Badge>}

@@ -287,7 +287,7 @@ function KnowledgeCard({ entry, onSelect }: { entry: KnowledgeEntry; onSelect: (
 							{icon}
 						</div>
 						<span className="text-[11px] font-medium" style={{ color }}>
-							{SUB_TYPE_LABEL_KEYS[entry.sub_type] ? t(SUB_TYPE_LABEL_KEYS[entry.sub_type]) : entry.sub_type}
+							{SUB_TYPE_LABEL_KEYS[entry.sub_type] ? t(SUB_TYPE_LABEL_KEYS[entry.sub_type]!) : entry.sub_type}
 						</span>
 					</div>
 					<div className="flex items-center gap-3">
@@ -353,7 +353,6 @@ function KnowledgeDialog({
 	const { title, source } = formatLabel(entry.label);
 	const color = SUB_TYPE_COLORS[entry.sub_type] ?? SUB_TYPE_COLORS.snapshot!;
 	const icon = SUB_TYPE_ICONS[entry.sub_type] ?? SUB_TYPE_ICONS.snapshot;
-	const _fields = parseDecisionFields(entry.content);
 	const toggleMutation = useToggleEnabledMutation();
 
 	return (
@@ -369,7 +368,7 @@ function KnowledgeDialog({
 						</div>
 						<div className="flex items-center gap-2">
 							<span className="text-xs font-semibold" style={{ color }}>
-								{SUB_TYPE_LABEL_KEYS[entry.sub_type] ? t(SUB_TYPE_LABEL_KEYS[entry.sub_type]) : entry.sub_type}
+								{SUB_TYPE_LABEL_KEYS[entry.sub_type] ? t(SUB_TYPE_LABEL_KEYS[entry.sub_type]!) : entry.sub_type}
 							</span>
 							{source && <span className="text-xs text-muted-foreground">· {source}</span>}
 						</div>
@@ -432,17 +431,6 @@ function KnowledgeDialog({
 			</DialogContent>
 		</Dialog>
 	);
-}
-
-function parseDecisionFields(content: string): { key: string; value: string }[] {
-	const fields: { key: string; value: string }[] = [];
-	for (const line of content.split("\n")) {
-		const match = line.match(/^-\s*\*\*([^*]+)\*\*:?\s*(.+)/);
-		if (match?.[1] && match[2]) {
-			fields.push({ key: match[1], value: match[2] });
-		}
-	}
-	return fields;
 }
 
 function KnowledgeSection({ label, children }: { label: string; children: React.ReactNode }) {
@@ -557,11 +545,11 @@ function RuleBody({ data }: { data: Record<string, unknown> }) {
 			)}
 			{data.rationale && <KnowledgeSection label={t("knowledge.detail.rationale")}><p>{String(data.rationale)}</p></KnowledgeSection>}
 			<div className="flex items-center gap-3">
-				{data.category && (
+				{data.category ? (
 					<Badge variant="outline" className="text-[10px] px-2 py-0 rounded-full font-normal">
 						{String(data.category)}
 					</Badge>
-				)}
+				) : null}
 				{priority && (
 					<Badge
 						variant="outline"

@@ -88,7 +88,6 @@ function TaskAccordionCard({
 	const progress = task.total > 0 ? (task.completed / task.total) * 100 : 0;
 	const isCompleted = task.status === "completed" || task.status === "done" || task.status === "cancelled";
 	const c = SHIMMER_COLORS[colorIndex % SHIMMER_COLORS.length]!;
-	const accentColor = `rgb(${c.r},${c.g},${c.b})`;
 
 	return (
 		<div

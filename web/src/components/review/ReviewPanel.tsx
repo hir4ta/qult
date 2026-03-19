@@ -203,7 +203,7 @@ function ReviewStatusBadge({ status }: { status: string }) {
 		approved: { color: "#2d8b7a", bg: "rgba(45,139,122,0.15)" },
 		changes_requested: { color: "#e67e22", bg: "rgba(230,126,34,0.15)" },
 	};
-	const s = styles[status] ?? styles.pending;
+	const s = styles[status] ?? styles.pending ?? { color: "#6b7280", bg: "rgba(107,114,128,0.15)" };
 	return (
 		<span
 			className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium"

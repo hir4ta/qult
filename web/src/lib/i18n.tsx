@@ -109,6 +109,7 @@ const translations = {
 	"activity.target": { en: "Target", ja: "対象" },
 	"activity.detail": { en: "Detail", ja: "詳細" },
 	"activity.noActivity": { en: "No activity found.", ja: "アクティビティが見つかりません。" },
+	"activity.showOlder": { en: "Show older activity", ja: "過去のアクティビティを表示" },
 	"activity.epics": { en: "Epics", ja: "エピック" },
 
 	// Section card

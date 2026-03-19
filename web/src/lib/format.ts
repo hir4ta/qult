@@ -12,15 +12,16 @@ export function formatLabel(raw: string): { title: string; source: string } {
 	return { title: cleaned || last, source };
 }
 
-// Format ISO date to relative or short date.
+// Format ISO date to relative or short date using calendar day boundaries (local timezone).
 // When called without locale (from contexts without i18n), defaults to English.
 export function formatDate(iso: string, locale?: "en" | "ja"): string {
 	if (!iso) return "";
 	try {
 		const d = new Date(iso);
 		const now = new Date();
-		const diffMs = now.getTime() - d.getTime();
-		const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+		// Compare by local calendar date, not elapsed milliseconds
+		const toLocalDay = (dt: Date) => new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).getTime();
+		const diffDays = Math.round((toLocalDay(now) - toLocalDay(d)) / (1000 * 60 * 60 * 24));
 
 		const isJa = locale === "ja";
 		if (diffDays === 0) return isJa ? "今日" : "today";
