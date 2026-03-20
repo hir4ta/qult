@@ -1,4 +1,5 @@
 import { Archive, ArchiveRestore } from "lucide-react";
+import { useCallback, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import { SUB_TYPE_ICONS, SUB_TYPE_LABEL_KEYS } from "@/components/knowledge-card";
 import { Badge } from "@/components/ui/badge";
@@ -110,9 +111,9 @@ export function KnowledgeDialog({
 
 				<Separator />
 
-				<ScrollArea className="flex-1 -mx-6 px-6">
+				<ScrollFadeArea>
 					<KnowledgeBody content={entry.content} subType={entry.sub_type} />
-				</ScrollArea>
+				</ScrollFadeArea>
 			</DialogContent>
 		</Dialog>
 	);
@@ -345,4 +346,38 @@ function cleanContent(content: string): string {
 		return cleaned.replace(/。/g, "。\n\n").replace(/\.\s+/g, ".\n\n");
 	}
 	return cleaned;
+}
+
+/** ScrollArea with bottom gradient fade when content overflows. */
+function ScrollFadeArea({ children }: { children: React.ReactNode }) {
+	const [atBottom, setAtBottom] = useState(false);
+	const [hasOverflow, setHasOverflow] = useState(false);
+	const ref = useRef<HTMLDivElement>(null);
+
+	const handleScroll = useCallback(() => {
+		const el = ref.current;
+		if (!el) return;
+		const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 8;
+		setAtBottom(isAtBottom);
+		setHasOverflow(el.scrollHeight > el.clientHeight + 8);
+	}, []);
+
+	return (
+		<div className="relative flex-1 -mx-6 min-h-0">
+			<div
+				ref={ref}
+				onScroll={handleScroll}
+				className="h-full overflow-y-auto px-6"
+				// biome-ignore lint/correctness/useExhaustiveDependencies: measure on mount
+				onLoad={handleScroll}
+			>
+				<div ref={(el) => { if (el) { const parent = el.parentElement; if (parent) { setHasOverflow(parent.scrollHeight > parent.clientHeight + 8); } } }}>
+					{children}
+				</div>
+			</div>
+			{hasOverflow && !atBottom && (
+				<div className="pointer-events-none absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-background to-transparent" />
+			)}
+		</div>
+	);
 }

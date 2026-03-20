@@ -1,7 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { createRootRouteWithContext, Link, Outlet } from "@tanstack/react-router";
-import { Activity, BookOpen, LayoutDashboard, ListChecks } from "lucide-react";
+import { Activity, BookOpen, Globe, LayoutDashboard, ListChecks } from "lucide-react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useI18n } from "@/lib/i18n";
 import type { TranslationKey } from "@/lib/i18n";
@@ -29,11 +29,10 @@ function LanguageToggle() {
 		<button
 			type="button"
 			onClick={() => setLocale(locale === "en" ? "ja" : "en")}
-			className="flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+			className="flex items-center gap-1.5 rounded-lg border border-border/60 px-2.5 h-8 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 		>
-			<span className={cn("transition-opacity", locale === "en" ? "opacity-100" : "opacity-40")}>EN</span>
-			<span className="text-border">/</span>
-			<span className={cn("transition-opacity", locale === "ja" ? "opacity-100" : "opacity-40")}>JA</span>
+			<Globe className="size-4" />
+			<span>{locale === "en" ? "EN" : "JA"}</span>
 		</button>
 	);
 }

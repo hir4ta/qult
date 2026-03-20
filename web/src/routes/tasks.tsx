@@ -210,6 +210,6 @@ function TaskStatusIcon({ status }: { status: string }) {
 		case "pending":
 			return <CircleDashed className="size-3.5 shrink-0" style={{ color: "#9ca3af" }} />;
 		default: // in-progress, active
-			return <CircleDashed className="size-3.5 shrink-0 animate-spin" style={{ color: "#628141", animationDuration: "3s" }} />;
+			return <CircleDashed className="size-3.5 shrink-0 animate-spin" style={{ color: "#628141", animationDuration: "1.5s" }} />;
 	}
 }

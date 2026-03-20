@@ -252,7 +252,7 @@ function InlineComment({
 }
 
 function ReviewHistory({ reviews }: { reviews: Review[] }) {
-	const { t } = useI18n();
+	const { t, locale } = useI18n();
 	return (
 		<Card>
 			<CardHeader className="py-2 px-4">
@@ -267,7 +267,7 @@ function ReviewHistory({ reviews }: { reviews: Review[] }) {
 						<div className="flex items-center gap-2">
 							<ReviewStatusBadge status={review.status} />
 							<span className="text-xs text-muted-foreground">
-								{formatTimestamp(review.timestamp)}
+								{formatTimestamp(review.timestamp, locale)}
 							</span>
 						</div>
 						{review.summary && <p className="text-xs mt-1">{review.summary}</p>}
@@ -317,9 +317,9 @@ function ConfirmAction({
 	);
 }
 
-function formatTimestamp(ts: string): string {
+function formatTimestamp(ts: string, locale: "en" | "ja" = "en"): string {
 	try {
-		return new Date(ts).toLocaleString("ja-JP", {
+		return new Date(ts).toLocaleString(locale === "ja" ? "ja-JP" : "en-US", {
 			month: "2-digit",
 			day: "2-digit",
 			hour: "2-digit",
