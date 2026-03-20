@@ -8,6 +8,20 @@ import { DiffViewer } from "@/components/diff-viewer";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
+/** Brand color dot per spec file type */
+function specFileColor(filename: string): string {
+	const colors: Record<string, string> = {
+		"requirements.md": "#40513b",  // session green
+		"design.md": "#628141",        // decision green
+		"tasks.md": "#e67e22",         // rule orange
+		"test-specs.md": "#7b6b8d",    // purple
+		"research.md": "#2d8b7a",      // pattern teal
+		"bugfix.md": "#c0392b",        // error red
+		"delta.md": "#44403c",         // dark
+	};
+	return colors[filename] ?? "#6b7280";
+}
+
 /** Parse delta.md CHG-N Before/After sections for diff display. */
 function parseDeltaSections(content: string): { id: string; before: string; after: string }[] {
 	const results: { id: string; before: string; after: string }[] = [];
@@ -88,6 +102,7 @@ export function SectionCard({
 				onClick={() => setOpen(!open)}
 			>
 				<div className="flex items-center gap-2 flex-1 min-w-0">
+					<div className="size-2 rounded-full shrink-0" style={{ backgroundColor: specFileColor(title) }} />
 					<span className="text-sm font-medium">{title.replace(".md", "")}</span>
 					<ChevronDown
 						className={cn(

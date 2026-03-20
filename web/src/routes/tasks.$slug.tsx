@@ -239,14 +239,18 @@ function TaskInfoCard({
 				{task.size && (
 					<Tooltip>
 						<TooltipTrigger asChild>
-							<Badge variant="outline" className="cursor-help">
+							<Badge variant="outline" className="cursor-help" style={{ borderColor: "rgba(123,107,141,0.4)", color: "#7b6b8d" }}>
 								{task.size}
 							</Badge>
 						</TooltipTrigger>
 						<TooltipContent>{SIZE_LABEL_KEYS[task.size] ? t(SIZE_LABEL_KEYS[task.size]!) : task.size}</TooltipContent>
 					</Tooltip>
 				)}
-				{task.spec_type && <Badge variant="outline">{task.spec_type}</Badge>}
+				{task.spec_type && (
+					<Badge variant="outline" style={{ borderColor: "rgba(98,129,65,0.4)", color: "#628141" }}>
+						{task.spec_type}
+					</Badge>
+				)}
 				{task.review_status && (
 					<Badge
 						variant="outline"
@@ -294,7 +298,7 @@ function TaskInfoCard({
 				<>
 					<Separator />
 					<div>
-						<p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+						<p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "#7b6b8d" }}>
 							{t("task.focus")}
 						</p>
 						<p className="text-xs leading-relaxed">{task.focus}</p>
