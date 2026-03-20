@@ -61,6 +61,52 @@ const main = defineCommand({
 				await runHook(args.event as string);
 			},
 		}),
+		projects: defineCommand({
+			meta: { description: "Manage registered projects" },
+			args: {
+				action: { type: "positional", description: "list | archive | unarchive | cleanup", default: "list" },
+				id: { type: "positional", description: "Project ID (for archive/unarchive)", required: false },
+			},
+			async run({ args }) {
+				const { Store } = await import("./store/index.js");
+				const { listProjects, updateProject, cleanupMissingProjects, detectMissingProjects } = await import("./store/project-registry.js");
+				const store = Store.openDefault();
+				const action = args.action as string;
+
+				if (action === "list") {
+					detectMissingProjects(store);
+					const projects = listProjects(store);
+					if (projects.length === 0) {
+						console.log("No registered projects.");
+						return;
+					}
+					for (const p of projects) {
+						const statusIcon = p.status === "active" ? "●" : p.status === "archived" ? "○" : "✗";
+						console.log(`  ${statusIcon} ${p.name} (${p.status})`);
+						console.log(`    ID:   ${p.id}`);
+						console.log(`    Path: ${p.path}`);
+						if (p.remote) console.log(`    Remote: ${p.remote}`);
+						console.log(`    Last seen: ${p.lastSeenAt}`);
+						console.log();
+					}
+				} else if (action === "archive" && args.id) {
+					updateProject(store, args.id as string, { status: "archived" });
+					console.log(`Project ${args.id} archived.`);
+				} else if (action === "unarchive" && args.id) {
+					updateProject(store, args.id as string, { status: "active" });
+					console.log(`Project ${args.id} restored.`);
+				} else if (action === "cleanup") {
+					const result = cleanupMissingProjects(store);
+					if (result.deleted === 0) {
+						console.log("No missing projects to clean up.");
+					} else {
+						console.log(`Cleaned up ${result.deleted} missing project(s): ${result.projects.join(", ")}`);
+					}
+				} else {
+					console.log("Usage: alfred projects [list|archive|unarchive|cleanup] [id]");
+				}
+			},
+		}),
 		"plugin-bundle": defineCommand({
 			meta: { description: "Generate plugin bundle" },
 			args: {

@@ -1,6 +1,9 @@
 import type Database from "better-sqlite3";
 
-export const SCHEMA_VERSION = 8;
+import { basename } from "node:path";
+import { randomUUID } from "node:crypto";
+
+export const SCHEMA_VERSION = 9;
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -233,6 +236,135 @@ function setSchemaVersion(db: Database.Database, ver: number): void {
 	db.pragma(`user_version = ${ver}`);
 }
 
+// ── V9 DDL ──────────────────────────────────────────────
+
+const V9_PROJECTS = `
+CREATE TABLE IF NOT EXISTS projects (
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    remote          TEXT DEFAULT '',
+    path            TEXT NOT NULL,
+    branch          TEXT DEFAULT '',
+    registered_at   TEXT NOT NULL,
+    last_seen_at    TEXT NOT NULL,
+    status          TEXT DEFAULT 'active',
+    metadata        TEXT DEFAULT '{}'
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_remote_path ON projects(remote, path);
+`;
+
+const V9_SPEC_INDEX = `
+CREATE TABLE IF NOT EXISTS spec_index (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id      TEXT NOT NULL,
+    slug            TEXT NOT NULL,
+    file_name       TEXT NOT NULL,
+    content_hash    TEXT NOT NULL,
+    title           TEXT NOT NULL DEFAULT '',
+    content         TEXT NOT NULL,
+    size            TEXT NOT NULL DEFAULT 'M',
+    spec_type       TEXT NOT NULL DEFAULT 'feature',
+    status          TEXT NOT NULL DEFAULT 'active',
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    UNIQUE(project_id, slug, file_name)
+);
+CREATE INDEX IF NOT EXISTS idx_spec_project ON spec_index(project_id);
+CREATE INDEX IF NOT EXISTS idx_spec_slug ON spec_index(slug);
+`;
+
+const V9_SPEC_FTS = `
+CREATE VIRTUAL TABLE IF NOT EXISTS spec_fts USING fts5(
+    title, content, slug,
+    content='spec_index',
+    content_rowid='id'
+);
+`;
+
+const V9_SPEC_FTS_TRIGGERS = `
+CREATE TRIGGER IF NOT EXISTS si_fts_ai AFTER INSERT ON spec_index BEGIN
+    INSERT INTO spec_fts(rowid, title, content, slug)
+    VALUES (new.id, new.title, new.content, new.slug);
+END;
+CREATE TRIGGER IF NOT EXISTS si_fts_ad AFTER DELETE ON spec_index BEGIN
+    INSERT INTO spec_fts(spec_fts, rowid, title, content, slug)
+    VALUES ('delete', old.id, old.title, old.content, old.slug);
+END;
+CREATE TRIGGER IF NOT EXISTS si_fts_au AFTER UPDATE ON spec_index BEGIN
+    INSERT INTO spec_fts(spec_fts, rowid, title, content, slug)
+    VALUES ('delete', old.id, old.title, old.content, old.slug);
+    INSERT INTO spec_fts(rowid, title, content, slug)
+    VALUES (new.id, new.title, new.content, new.slug);
+END;
+`;
+
+function migrateV8toV9(db: Database.Database): void {
+	// Step 1: Regular tables + ALTER TABLE (transactional)
+	db.transaction(() => {
+		// 1a. Create projects table
+		db.exec(V9_PROJECTS);
+
+		// 1b. Generate project records from existing knowledge_index
+		const rows = db.prepare(
+			"SELECT DISTINCT project_remote, project_path, project_name, branch FROM knowledge_index",
+		).all() as Array<{ project_remote: string; project_path: string; project_name: string; branch: string }>;
+		const now = new Date().toISOString();
+		const insertProject = db.prepare(
+			"INSERT OR IGNORE INTO projects (id, name, remote, path, branch, registered_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		);
+		for (const row of rows) {
+			insertProject.run(
+				randomUUID(),
+				row.project_name || basename(row.project_path),
+				row.project_remote,
+				row.project_path,
+				row.branch,
+				now,
+				now,
+			);
+		}
+
+		// 1c. Add project_id column to knowledge_index + backfill
+		db.exec("ALTER TABLE knowledge_index ADD COLUMN project_id TEXT DEFAULT ''");
+		db.exec("CREATE INDEX IF NOT EXISTS idx_ki_project_id ON knowledge_index(project_id)");
+		db.exec(`UPDATE knowledge_index SET project_id = COALESCE(
+			(SELECT p.id FROM projects p WHERE p.remote = knowledge_index.project_remote AND p.path = knowledge_index.project_path),
+			''
+		)`);
+
+		// 1d. Create spec_index table
+		db.exec(V9_SPEC_INDEX);
+	})();
+
+	// Step 2: FTS5 virtual table + triggers (outside transaction — DDL)
+	db.exec(V9_SPEC_FTS);
+	db.exec(V9_SPEC_FTS_TRIGGERS);
+
+	// Step 3: Post-migration verification
+	const orphans = db.prepare("SELECT COUNT(*) as cnt FROM knowledge_index WHERE project_id = ''").get() as { cnt: number };
+	if (orphans.cnt > 0) {
+		process.stderr.write(`[alfred] V9 migration: ${orphans.cnt} knowledge entries have no project_id (will be assigned on next access)\n`);
+	}
+
+	const requiredTables = ["projects", "spec_index"];
+	const allExist = requiredTables.every((t) =>
+		db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(t),
+	);
+	if (!allExist) {
+		process.stderr.write("[alfred] V9 migration verification failed — falling back to rebuild\n");
+		rebuildFromScratch(db);
+		setSchemaVersion(db, SCHEMA_VERSION);
+		return;
+	}
+
+	setSchemaVersion(db, SCHEMA_VERSION);
+}
+
+// ── V9 DDL for full rebuild ─────────────────────────────
+
+const V9_FULL_DDL = `${V9_PROJECTS}\n${V9_SPEC_INDEX}`;
+const V9_FULL_FTS = `${V9_SPEC_FTS}\n${V9_SPEC_FTS_TRIGGERS}`;
+
 export function migrate(db: Database.Database): void {
 	let current = 0;
 	try {
@@ -245,9 +377,18 @@ export function migrate(db: Database.Database): void {
 	}
 	if (current === SCHEMA_VERSION) return;
 
+	// V8 → V9: incremental migration (preserve data)
+	if (current === 8) {
+		migrateV8toV9(db);
+		return;
+	}
+
+	// Pre-V8 or unknown: full rebuild
 	const txn = db.transaction(() => {
 		rebuildFromScratch(db);
+		db.exec(V9_FULL_DDL);
 		setSchemaVersion(db, SCHEMA_VERSION);
 	});
 	txn();
+	db.exec(V9_FULL_FTS);
 }
