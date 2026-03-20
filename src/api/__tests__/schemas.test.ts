@@ -28,7 +28,7 @@ describe("API schemas smoke test", () => {
 			enabled: true,
 			project_name: "alfred",
 		};
-		expect(KnowledgeEntrySchema.parse(data)).toEqual(data);
+		expect(KnowledgeEntrySchema.parse(data)).toEqual({ ...data, tags: [] });
 	});
 
 	it("KnowledgeEntry rejects missing required fields", () => {

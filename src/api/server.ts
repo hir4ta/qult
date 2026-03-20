@@ -20,7 +20,7 @@ import {
 import { searchKnowledgeFTS } from "../store/fts.js";
 import { computeGraphEdges } from "../store/graph.js";
 import type { Store } from "../store/index.js";
-import { getKnowledgeStats, setKnowledgeEnabled } from "../store/knowledge.js";
+import { getKnowledgeStats, getPromotionCandidates, promoteSubType, setKnowledgeEnabled } from "../store/knowledge.js";
 import { detectProject } from "../store/project.js";
 import type { KnowledgeRow } from "../types.js";
 
@@ -355,6 +355,22 @@ export function createApp(
 		const body = await c.req.json<{ enabled: boolean }>();
 		setKnowledgeEnabled(store, id, body.enabled);
 		return c.json({ ok: true });
+	});
+
+	app.get("/api/knowledge/candidates", (c) => {
+		const candidates = getPromotionCandidates(store).map(toKnowledgeEntry);
+		return c.json({ candidates });
+	});
+
+	app.post("/api/knowledge/:id/promote", (c) => {
+		const id = parseInt(c.req.param("id"), 10);
+		if (Number.isNaN(id)) return c.json({ error: "invalid id" }, 400);
+		try {
+			promoteSubType(store, id, "rule");
+			return c.json({ promoted: true, new_sub_type: "rule" });
+		} catch (e) {
+			return c.json({ error: (e as Error).message }, 400);
+		}
 	});
 
 	app.get("/api/activity", (c) => {

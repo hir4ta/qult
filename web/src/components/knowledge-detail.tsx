@@ -14,7 +14,19 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useToggleEnabledMutation } from "@/lib/api";
+import { promoteKnowledge, useToggleEnabledMutation } from "@/lib/api";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+	AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { formatDate, formatLabel } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import type { KnowledgeEntry } from "@/lib/types";
@@ -29,6 +41,17 @@ export function KnowledgeDialog({
 }) {
 	const { t, locale } = useI18n();
 	const toggleMutation = useToggleEnabledMutation();
+	const queryClient = useQueryClient();
+	const promoteMutation = useMutation({
+		mutationFn: (id: number) => promoteKnowledge(id),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["knowledge"] });
+			queryClient.invalidateQueries({ queryKey: ["knowledge-stats"] });
+			queryClient.invalidateQueries({ queryKey: ["knowledge-candidates"] });
+			onClose();
+		},
+	});
+	const canPromote = entry?.sub_type === "pattern" && (entry?.hit_count ?? 0) >= 15;
 	if (!entry) return null;
 
 	const { title, source } = formatLabel(entry.label);
@@ -88,6 +111,27 @@ export function KnowledgeDialog({
 							>
 								{entry.enabled ? t("knowledge.active") : t("knowledge.archived")}
 							</Badge>
+							{canPromote && (
+								<AlertDialog>
+									<AlertDialogTrigger asChild>
+										<Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" style={{ color: "#e67e22", borderColor: "rgba(230,126,34,0.3)" }}>
+											{t("knowledge.promote")}
+										</Button>
+									</AlertDialogTrigger>
+									<AlertDialogContent>
+										<AlertDialogHeader>
+											<AlertDialogTitle className="text-base">{t("knowledge.promoteTitle")}</AlertDialogTitle>
+											<AlertDialogDescription>{t("knowledge.promoteDescription")}</AlertDialogDescription>
+										</AlertDialogHeader>
+										<AlertDialogFooter>
+											<AlertDialogCancel>{t("task.cancel")}</AlertDialogCancel>
+											<AlertDialogAction onClick={() => promoteMutation.mutate(entry.id)}>
+												{t("knowledge.promote")}
+											</AlertDialogAction>
+										</AlertDialogFooter>
+									</AlertDialogContent>
+								</AlertDialog>
+							)}
 							<Button
 								size="sm"
 								variant="ghost"

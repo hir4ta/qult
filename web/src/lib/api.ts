@@ -72,6 +72,19 @@ export const knowledgeStatsQueryOptions = () =>
 		staleTime: REF_STALE,
 	});
 
+export const knowledgeCandidatesQueryOptions = () =>
+	queryOptions({
+		queryKey: ["knowledge-candidates"],
+		queryFn: () => fetchJSON<{ candidates: KnowledgeEntry[] }>("/api/knowledge/candidates"),
+		staleTime: REF_STALE,
+	});
+
+export async function promoteKnowledge(id: number): Promise<{ promoted: boolean; new_sub_type: string }> {
+	const res = await fetch(`/api/knowledge/${id}/promote`, { method: "POST" });
+	if (!res.ok) throw new Error(await res.text());
+	return res.json();
+}
+
 export const activityQueryOptions = (limit = 50, filter?: string) =>
 	queryOptions({
 		queryKey: ["activity", limit, filter],
