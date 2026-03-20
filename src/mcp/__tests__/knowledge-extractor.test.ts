@@ -71,8 +71,11 @@ describe("extractDecisions", () => {
 - **Rationale:** Reason
 `;
 		const entries = extractDecisions(content, "slug", "en");
-		// The regex expects `: title` after DEC-N — empty title falls back
+		// Empty title after colon — regex `^:\s*(.+)` captures whatever follows on the line
+		// This documents actual behavior (may not be "Decision N" fallback)
 		expect(entries).toHaveLength(1);
+		expect(entries[0]!.title).toBeDefined();
+		expect(entries[0]!.title.length).toBeGreaterThan(0);
 	});
 
 	it("handles missing alternatives", () => {
@@ -160,11 +163,10 @@ describe("extractReviewFindings", () => {
 	});
 
 	it("skips findings with very short descriptions (< 10 chars)", () => {
-		const text = "[CRITICAL] OK\nSecond line\nThird line for padding to make response > 50 chars total length here";
+		// [CRITICAL] with short text + empty lines → 3-line join yields "X  " (< 10 chars) → skipped
+		const text = "[CRITICAL] X\n\n\nPadding text to make the overall response longer than fifty characters here.";
 		const entries = extractReviewFindings(text, "slug", "en");
-		// "OK Second line Third line..." after stripping [CRITICAL] should be > 10 chars
-		// This depends on the actual content after stripping
-		expect(entries.length).toBeLessThanOrEqual(1);
+		expect(entries).toHaveLength(0);
 	});
 
 	it("handles JSON response via stringifyResponse", () => {

@@ -19,18 +19,11 @@ describe("createMCPServer", () => {
 		rmSync(tmpDir, { recursive: true, force: true });
 	});
 
-	it("creates MCP server instance without error", () => {
+	it("creates MCP server with null embedder without error", () => {
 		const server = createMCPServer(store, null, "0.0.0-test");
 		expect(server).toBeDefined();
-	});
-
-	it("creates server with null embedder (no Voyage key)", () => {
-		const server = createMCPServer(store, null, "0.0.0-test");
-		expect(server).toBeDefined();
-	});
-
-	it("accepts version string", () => {
-		const server = createMCPServer(store, null, "1.2.3");
-		expect(server).toBeDefined();
+		// Note: McpServer does not expose a public API to list registered tools.
+		// This smoke test verifies that tool registration (dossier, ledger, roster)
+		// completes without Zod schema errors or import failures.
 	});
 });
