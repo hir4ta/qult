@@ -137,38 +137,29 @@ Read task breakdown from tasks.md waves.
 **CRITICAL**: Update tasks.md after EACH task, not all at once.
 This ensures the dashboard shows real-time progress.
 
-## Phase 4: Per-Task Review (code-reviewer agent)
+## Phase 4: Wave Boundary (commit + review + knowledge)
 
-After each implementation task:
-
-1. Get diff: `git diff {phase_start_commit}` (only this task's changes)
-2. **Spawn `alfred:code-reviewer` agent** with the diff:
-   - Agent spawns 3 parallel sub-reviewers (security, logic, design)
-   - Returns aggregated findings with severity levels
-3. If Critical findings → fix and re-review (max 2 iterations)
-4. If Warnings only → fix if straightforward, proceed if not
-5. If PASS → advance to next task (Phase 3) or Phase 5 if all tasks done
-
-**IMPORTANT**: Always spawn the code-reviewer agent. Never skip review.
-
-### Wave boundary (commit + review + knowledge)
+Per-task review is NOT required. Review happens at Wave boundaries.
 
 When all tasks in a Wave are completed (before starting next Wave):
 1. **Commit** changes with Wave number in message
-2. **Self-review**: Spawn code-reviewer agent for the Wave's full diff
-3. Fix any Critical/Warning findings
-4. **Knowledge accumulation**: Save learnings via `ledger save` (decision/pattern/rule). If no knowledge to save, state the reason explicitly
-5. Clear gate: `dossier action=gate sub_action=clear reason="Wave N review: [summary]"`
-6. Proceed to next Wave
+2. **Self-review**: Spawn `alfred:code-reviewer` agent **in foreground** (NOT background) with the Wave's full diff. The agent returns aggregated findings directly — read and act on them immediately
+3. If Critical findings → fix and re-review (max 2 iterations)
+4. If Warnings only → fix if straightforward, proceed if not
+5. **Knowledge accumulation**: Save learnings via `ledger save` (decision/pattern/rule). If no knowledge to save, state the reason explicitly
+6. Clear gate: `dossier action=gate sub_action=clear reason="Wave N review: [summary]"`
+7. Proceed to next Wave
+
+**IMPORTANT**: Always spawn code-reviewer in **foreground** (default). Do NOT use `run_in_background` — background agents' results are difficult to retrieve and parse. Foreground execution blocks until the review completes, but the results are directly usable.
 
 This is MANDATORY — PostToolUse auto-sets the wave-review gate when a Wave completes. PreToolUse blocks source Edit/Write until the gate is cleared.
 
 ## Phase 5: Final Self-Review (code-reviewer agent)
 
 1. Get full diff: `git diff {initial_commit}..HEAD`
-2. **Spawn `alfred:code-reviewer` agent** with the full diff
+2. **Spawn `alfred:code-reviewer` agent in foreground** with the full diff
    - Comprehensive review across security, logic, design
-   - Returns aggregated findings
+   - Returns aggregated findings directly
 3. Apply fixes if needed (max 1 iteration)
 4. Security Critical → BLOCKED
 5. Update state: `phase: test-gate`
@@ -206,7 +197,7 @@ After EVERY phase transition and after EVERY task completion:
 
 - NEVER skip review phases — they are mandatory quality gates
 - NEVER commit with unresolved Critical findings
-- ALWAYS spawn parallel agents for spec review and code-reviewer for implementation review
+- ALWAYS spawn parallel agents for spec review and code-reviewer (foreground, NOT background) for Wave boundary review
 - ALWAYS direct user to `alfred dashboard` for approval (not text-based)
 - ALWAYS update tasks.md after each individual task completion (not in batch)
 - Call `dossier action=complete` when all tasks are done (user can delay if adding more tasks)
