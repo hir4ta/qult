@@ -95,9 +95,9 @@ function TaskDetailPage() {
 	}
 
 	return (
-		<div className="space-y-3 h-[calc(100vh-120px)] overflow-y-auto pb-8">
-			{/* Header — slug + badges + wave + complete */}
-			<div className="flex items-center gap-2.5 flex-wrap">
+		<div className="flex flex-col h-[calc(100vh-120px)]">
+			{/* Header — sticky, no scroll */}
+			<div className="flex items-center gap-2.5 flex-wrap shrink-0 pb-3">
 				{(task.status === "completed" || task.status === "done") ? (
 					<CircleCheck className="size-4 shrink-0" style={{ color: "#2d8b7a" }} />
 				) : (
@@ -124,7 +124,9 @@ function TaskDetailPage() {
 				</div>
 			)}
 
-				{/* Spec documents */}
+				{/* Scrollable content */}
+			<div className="flex-1 overflow-y-auto space-y-3 pb-8">
+			{/* Spec documents */}
 				{specs.map((spec, i) => {
 					const content = specContents[i]?.data?.content ?? "";
 					if (!content) return null;
@@ -174,6 +176,7 @@ function TaskDetailPage() {
 				{validationData && validationData.checks.length > 0 && (
 					<CoverageHeatmap checks={validationData.checks} />
 				)}
+		</div>
 		</div>
 	);
 }
