@@ -33,8 +33,10 @@ export function SpecHistory({ slug, file }: SpecHistoryProps) {
 		);
 	}
 
+	const newVersionTs = newVersion !== "current" ? newVersion : "";
+	const { data: newVersionData } = useQuery(specVersionQueryOptions(slug, file, newVersionTs));
 	const oldText = oldData?.content ?? "";
-	const newText = newVersion === "current" ? (currentData?.content ?? "") : "";
+	const newText = newVersion === "current" ? (currentData?.content ?? "") : (newVersionData?.content ?? "");
 
 	return (
 		<div className="space-y-3">
