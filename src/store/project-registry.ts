@@ -201,18 +201,15 @@ export function detectMissingProjects(store: Store): number {
 
 export function cleanupMissingProjects(store: Store): { deleted: number; projects: string[] } {
 	const missing = store.db.prepare("SELECT id, name FROM projects WHERE status = 'missing'").all() as Array<{ id: string; name: string }>;
-	if (missing.length === 0) return { deleted: 0, projects: [] };
-
-	const names = missing.map((r) => r.name);
-	// Transactional cleanup to avoid partial state
-	store.db.transaction(() => {
-		for (const row of missing) {
-			store.db.prepare("DELETE FROM embeddings WHERE source = 'knowledge' AND source_id IN (SELECT id FROM knowledge_index WHERE project_id = ?)").run(row.id);
-			store.db.prepare("DELETE FROM embeddings WHERE source = 'spec' AND source_id IN (SELECT id FROM spec_index WHERE project_id = ?)").run(row.id);
-			store.db.prepare("DELETE FROM knowledge_index WHERE project_id = ?").run(row.id);
-			store.db.prepare("DELETE FROM spec_index WHERE project_id = ?").run(row.id);
-			store.db.prepare("DELETE FROM projects WHERE id = ?").run(row.id);
-		}
-	})();
+	const names: string[] = [];
+	for (const row of missing) {
+		// Delete knowledge, spec_index, embeddings for this project
+		store.db.prepare("DELETE FROM embeddings WHERE source = 'knowledge' AND source_id IN (SELECT id FROM knowledge_index WHERE project_id = ?)").run(row.id);
+		store.db.prepare("DELETE FROM embeddings WHERE source = 'spec' AND source_id IN (SELECT id FROM spec_index WHERE project_id = ?)").run(row.id);
+		store.db.prepare("DELETE FROM knowledge_index WHERE project_id = ?").run(row.id);
+		store.db.prepare("DELETE FROM spec_index WHERE project_id = ?").run(row.id);
+		store.db.prepare("DELETE FROM projects WHERE id = ?").run(row.id);
+		names.push(row.name);
+	}
 	return { deleted: names.length, projects: names };
 }

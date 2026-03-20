@@ -26,10 +26,8 @@ CREATE TABLE IF NOT EXISTS knowledge_index (
     hit_count       INTEGER DEFAULT 0,
     last_accessed   TEXT DEFAULT '',
     enabled         INTEGER DEFAULT 1,
-    project_id      TEXT DEFAULT '',
     UNIQUE(project_remote, project_path, file_path)
 );
-CREATE INDEX IF NOT EXISTS idx_ki_project_id ON knowledge_index(project_id);
 
 CREATE INDEX IF NOT EXISTS idx_ki_project ON knowledge_index(project_remote, project_path);
 CREATE INDEX IF NOT EXISTS idx_ki_sub_type ON knowledge_index(sub_type);
@@ -216,9 +214,6 @@ function rebuildFromScratch(db: Database.Database): void {
 		dropSafe(db, "TABLE", table);
 	}
 	for (const table of [
-		"spec_fts",
-		"spec_index",
-		"projects",
 		"knowledge_fts",
 		"knowledge_index",
 		"embeddings",
@@ -227,9 +222,6 @@ function rebuildFromScratch(db: Database.Database): void {
 		"schema_version",
 	]) {
 		dropSafe(db, "TABLE", table);
-	}
-	for (const trigger of ["si_fts_ai", "si_fts_ad", "si_fts_au"]) {
-		dropSafe(db, "TRIGGER", trigger);
 	}
 	for (const idx of LEGACY_INDEXES) {
 		dropSafe(db, "INDEX", idx);
@@ -332,14 +324,9 @@ function migrateV8toV9(db: Database.Database): void {
 			);
 		}
 
-		// 1c. Backfill project_id on knowledge_index (column now in base DDL for fresh installs;
-		//      ALTER TABLE for V8→V9 upgrade where column doesn't exist yet)
-		try {
-			db.exec("ALTER TABLE knowledge_index ADD COLUMN project_id TEXT DEFAULT ''");
-			db.exec("CREATE INDEX IF NOT EXISTS idx_ki_project_id ON knowledge_index(project_id)");
-		} catch {
-			// Column already exists (e.g., partial migration retry) — safe to ignore
-		}
+		// 1c. Add project_id column to knowledge_index + backfill
+		db.exec("ALTER TABLE knowledge_index ADD COLUMN project_id TEXT DEFAULT ''");
+		db.exec("CREATE INDEX IF NOT EXISTS idx_ki_project_id ON knowledge_index(project_id)");
 		db.exec(`UPDATE knowledge_index SET project_id = COALESCE(
 			(SELECT p.id FROM projects p WHERE p.remote = knowledge_index.project_remote AND p.path = knowledge_index.project_path),
 			''
