@@ -245,9 +245,13 @@ export function validateSpec(
 		const lines = testSpecsContent.split("\n");
 		let currentTS = "";
 		for (const line of lines) {
-			const tsMatch = line.match(/##\s+(TS-\d+\.\d+)/);
+			const tsMatch = line.match(/#{2,3}\s+(TS-\d+\.\d+)/);
 			if (tsMatch) currentTS = tsMatch[1]!;
-			if (currentTS && /^-\s*Source:\s*(FR-\d+|NFR-\d+)/i.test(line)) {
+			if (
+				currentTS &&
+				(/^-\s*Source:\s*(FR-\d+|NFR-\d+)/i.test(line) ||
+					/<!--\s*source:\s*(FR-\d+|NFR-\d+)/i.test(line))
+			) {
 				tsWithSource.add(currentTS);
 			}
 		}
