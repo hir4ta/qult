@@ -36,6 +36,12 @@ interface ForceLink {
 	score: number;
 }
 
+function getLinkNodeIds(link: ForceLink): [number, number] {
+	const src = typeof link.source === "object" ? link.source.id : link.source;
+	const tgt = typeof link.target === "object" ? link.target.id : link.target;
+	return [src, tgt];
+}
+
 export function KnowledgeGraph({
 	nodes,
 	edges,
@@ -47,6 +53,7 @@ export function KnowledgeGraph({
 	// biome-ignore lint/suspicious/noExplicitAny: react-force-graph-2d ref type is complex
 	const fgRef = useRef<any>(null);
 	const [dimensions, setDimensions] = useState({ width: 800, height: Math.floor(window.innerHeight * 0.7) });
+	const [hoverNodeId, setHoverNodeId] = useState<number | null>(null);
 
 	// Sub-type filter toggles (local state)
 	const [activeTypes, setActiveTypes] = useState<Set<string>>(
@@ -100,41 +107,89 @@ export function KnowledgeGraph({
 		fg.d3Force("link")?.distance(120);
 	}, [graphData]);
 
+	// Connected nodes for hover highlight
+	const connectedNodesMap = useMemo(() => {
+		const map = new Map<number, Set<number>>();
+		for (const link of graphData.links) {
+			const [src, tgt] = getLinkNodeIds(link);
+			if (!map.has(src)) map.set(src, new Set());
+			if (!map.has(tgt)) map.set(tgt, new Set());
+			map.get(src)!.add(tgt);
+			map.get(tgt)!.add(src);
+		}
+		return map;
+	}, [graphData.links]);
+
 	// Count connections per node for tooltip
 	const connectionCounts = useMemo(() => {
 		const counts = new Map<number, number>();
 		for (const edge of graphData.links) {
-			const srcId = typeof edge.source === "object" ? edge.source.id : edge.source;
-			const tgtId = typeof edge.target === "object" ? edge.target.id : edge.target;
+			const [srcId, tgtId] = getLinkNodeIds(edge);
 			counts.set(srcId, (counts.get(srcId) ?? 0) + 1);
 			counts.set(tgtId, (counts.get(tgtId) ?? 0) + 1);
 		}
 		return counts;
 	}, [graphData.links]);
 
+	// Is node highlighted (hovered or connected to hovered)?
+	const isNodeHighlighted = useCallback((nodeId: number) => {
+		if (hoverNodeId === null) return true; // no hover = all visible
+		if (nodeId === hoverNodeId) return true;
+		return connectedNodesMap.get(hoverNodeId)?.has(nodeId) ?? false;
+	}, [hoverNodeId, connectedNodesMap]);
+
 	// Node size from hit_count (log scale)
 	const nodeSize = useCallback((node: ForceNode) => {
 		return calcNodeSize(node.hit_count);
 	}, []);
 
-	// Custom node rendering — circle only, label via tooltip
+	// Custom node rendering with hover highlight
 	const drawNode = useCallback(
 		(node: ForceNode, ctx: CanvasRenderingContext2D) => {
 			const size = nodeSize(node);
 			const color = SUB_TYPE_COLORS[node.sub_type] ?? "#8b7d6b";
 			const x = node.x ?? 0;
 			const y = node.y ?? 0;
+			const highlighted = isNodeHighlighted(node.id);
+			const isHovered = hoverNodeId === node.id;
+			const dimmed = hoverNodeId !== null && !highlighted;
 
+			// Glow ring for hovered node
+			if (isHovered) {
+				ctx.beginPath();
+				ctx.arc(x, y, size + 4, 0, 2 * Math.PI);
+				ctx.fillStyle = `${color}30`;
+				ctx.fill();
+			}
+
+			// Connected node pulse ring
+			if (highlighted && !isHovered && hoverNodeId !== null) {
+				ctx.beginPath();
+				ctx.arc(x, y, size + 2, 0, 2 * Math.PI);
+				ctx.strokeStyle = `${color}50`;
+				ctx.lineWidth = 1.5;
+				ctx.stroke();
+			}
+
+			// Main circle
 			ctx.beginPath();
 			ctx.arc(x, y, size, 0, 2 * Math.PI);
-			ctx.fillStyle = color;
+			ctx.fillStyle = dimmed ? `${color}30` : color;
 			ctx.fill();
 
-			ctx.strokeStyle = `${color}60`;
-			ctx.lineWidth = 1.5;
+			ctx.strokeStyle = dimmed ? `${color}20` : `${color}60`;
+			ctx.lineWidth = isHovered ? 2.5 : 1.5;
 			ctx.stroke();
+
+			// Label for hovered node
+			if (isHovered) {
+				ctx.font = "10px var(--font-sans, sans-serif)";
+				ctx.textAlign = "center";
+				ctx.fillStyle = color;
+				ctx.fillText(node.label.slice(0, 30), x, y + size + 12);
+			}
 		},
-		[nodeSize],
+		[nodeSize, isNodeHighlighted, hoverNodeId],
 	);
 
 	// Node color lookup for link coloring
@@ -146,13 +201,30 @@ export function KnowledgeGraph({
 		return map;
 	}, [filteredNodes]);
 
-	// Link color — blend source node color with opacity based on score
+	// Link color + width with hover highlight
 	const linkColor = useCallback((link: ForceLink) => {
-		const srcId = typeof link.source === "object" ? link.source.id : link.source;
+		const [srcId, tgtId] = getLinkNodeIds(link);
 		const color = nodeColorMap.get(srcId) ?? "#8b7d6b";
+
+		if (hoverNodeId !== null) {
+			const isConnected = srcId === hoverNodeId || tgtId === hoverNodeId;
+			if (isConnected) return hexToRgba(color, 0.8);
+			return hexToRgba(color, 0.05);
+		}
+
 		const opacity = Math.min(0.7, Math.max(0.2, 0.2 + link.score * 0.5));
 		return hexToRgba(color, opacity);
-	}, [nodeColorMap]);
+	}, [nodeColorMap, hoverNodeId]);
+
+	const linkWidth = useCallback((link: ForceLink) => {
+		if (hoverNodeId !== null) {
+			const [srcId, tgtId] = getLinkNodeIds(link);
+			const isConnected = srcId === hoverNodeId || tgtId === hoverNodeId;
+			if (isConnected) return Math.max(2.5, link.score * 5);
+			return 0.3;
+		}
+		return Math.max(1, link.score * 3);
+	}, [hoverNodeId]);
 
 	// Link tooltip — show similarity score
 	const linkLabel = useCallback((link: ForceLink) => {
@@ -253,10 +325,11 @@ export function KnowledgeGraph({
 						ctx.fill();
 					}}
 					linkColor={linkColor}
-					linkWidth={(link: ForceLink) => Math.max(1, link.score * 3)}
+					linkWidth={linkWidth}
 					linkLabel={linkLabel}
 					nodeLabel={nodeLabel}
 					onNodeClick={(node: ForceNode) => onNodeClick(node)}
+					onNodeHover={(node: ForceNode | null) => setHoverNodeId(node?.id ?? null)}
 					backgroundColor="transparent"
 					cooldownTicks={100}
 					d3AlphaDecay={0.02}
