@@ -37,9 +37,9 @@ export function CoverageHeatmap({ checks }: { checks: ValidationCheck[] }) {
 								/>
 							</TooltipTrigger>
 							<TooltipContent>
-								<p className="text-xs font-medium">{check.name}</p>
-								{check.message && <p className="text-[10px] text-muted-foreground">{check.message}</p>}
-								<p className="text-[10px]" style={{ color: check.status === "pass" ? "#2d8b7a" : "#c0392b" }}>
+								<p className="text-xs font-medium text-white">{check.name}</p>
+								{check.message && <p className="text-[10px] text-white/70">{check.message}</p>}
+								<p className="text-[10px] font-medium" style={{ color: check.status === "pass" ? "#6ee7b7" : "#fca5a5" }}>
 									{check.status}
 								</p>
 							</TooltipContent>
