@@ -172,6 +172,30 @@ export const translations = {
 	"knowledge.zoomIn": { en: "Zoom in", ja: "拡大" },
 	"knowledge.zoomOut": { en: "Zoom out", ja: "縮小" },
 	"knowledge.zoomReset": { en: "Fit all", ja: "全体表示" },
+
+	// Keyboard shortcuts
+	"shortcuts.title": { en: "Keyboard Shortcuts", ja: "キーボードショートカット" },
+	"shortcuts.nextTask": { en: "Next task", ja: "次のタスク" },
+	"shortcuts.prevTask": { en: "Previous task", ja: "前のタスク" },
+	"shortcuts.toggleExpand": { en: "Toggle expand", ja: "展開/折りたたみ" },
+	"shortcuts.help": { en: "Show shortcuts", ja: "ショートカット表示" },
+
+	// Epic dependencies
+	"epic.dependencies": { en: "Dependencies", ja: "依存関係" },
+	"epic.blockedBy": { en: "Blocked by", ja: "ブロック元" },
+	"epic.noDeps": { en: "No dependencies", ja: "依存関係なし" },
+
+	// Activity export & date range
+	"activity.exportCsv": { en: "Export CSV", ja: "CSV エクスポート" },
+	"activity.fromDate": { en: "From", ja: "開始日" },
+	"activity.toDate": { en: "To", ja: "終了日" },
+
+	// Traceability & coverage
+	"task.traceability": { en: "Traceability", ja: "トレーサビリティ" },
+	"task.coverage": { en: "Coverage", ja: "カバレッジ" },
+	"task.requirement": { en: "Requirement", ja: "要件" },
+	"task.taskId": { en: "Task", ja: "タスク" },
+	"task.testId": { en: "Test", ja: "テスト" },
 } as const;
 
 export type TranslationKey = keyof typeof translations;

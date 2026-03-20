@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import { EpicDependencies } from "@/components/epic-deps";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -199,6 +200,7 @@ function EpicSection({ epics }: { epics: EpicSummary[] }) {
 										))}
 									</div>
 								)}
+								<EpicDependencies epic={epic} />
 							</CardContent>
 						</Card>
 					);

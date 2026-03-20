@@ -2,9 +2,12 @@ import type { QueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { createRootRouteWithContext, Link, Outlet } from "@tanstack/react-router";
 import { Activity, BookOpen, Globe, LayoutDashboard, ListChecks } from "lucide-react";
+import { useMemo, useState } from "react";
 import { GlobalSearch } from "@/components/global-search";
+import { KeyboardHelpDialog } from "@/components/keyboard-help";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useI18n } from "@/lib/i18n";
+import { useKeyboardShortcuts } from "@/lib/keyboard";
 import type { TranslationKey } from "@/lib/i18n";
 import { versionQueryOptions } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -48,8 +51,11 @@ function VersionBadge() {
 
 function RootLayout() {
 	const { t } = useI18n();
+	const [showHelp, setShowHelp] = useState(false);
+	useKeyboardShortcuts(useMemo(() => ({ "?": () => setShowHelp(true) }), []));
 	return (
 		<TooltipProvider>
+			<KeyboardHelpDialog open={showHelp} onClose={() => setShowHelp(false)} />
 			<div className="flex min-h-screen flex-col bg-background">
 				<header className="sticky top-0 z-50 border-b border-border/60 bg-card/90 backdrop-blur-md">
 					<div className="mx-auto flex h-14 max-w-7xl items-center gap-8 px-6">

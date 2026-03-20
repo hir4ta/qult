@@ -124,6 +124,7 @@ export const ActivityResponseSchema = z.object({
 export const EpicTaskSummarySchema = z.object({
 	slug: z.string(),
 	status: z.string(),
+	depends_on: z.array(z.string()).default([]),
 });
 
 export const EpicSummarySchema = z.object({
