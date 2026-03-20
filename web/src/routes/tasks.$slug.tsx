@@ -146,9 +146,7 @@ function TaskDetailPage() {
 			<div className="flex-1 min-w-0 overflow-y-auto space-y-3 pt-1 pb-8">
 				{/* Wave timeline */}
 				{task.waves && task.waves.length > 0 && (
-					<div className="rounded-xl border border-border bg-card px-4 py-3 flex items-center justify-center">
-						<WaveTimeline waves={task.waves} />
-					</div>
+					<WaveTimeline waves={task.waves} />
 				)}
 				{/* Traceability + Coverage */}
 				{(() => {
