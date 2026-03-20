@@ -31,6 +31,8 @@ function ActivityPage() {
 	const { t } = useI18n();
 	const [filter, setFilter] = useState<string>("all");
 	const [showAll, setShowAll] = useState(false);
+	const [dateFrom, setDateFrom] = useState("");
+	const [dateTo, setDateTo] = useState("");
 	const { data: activityData, isLoading } = useQuery(
 		activityQueryOptions(100, filter === "all" ? undefined : filter),
 	);
@@ -38,12 +40,15 @@ function ActivityPage() {
 
 	const allEntries = activityData?.entries ?? [];
 	const entries = useMemo(() => {
-		if (showAll) return allEntries;
-		const cutoff = Date.now() - WEEK_MS;
-		return allEntries.filter((e) => {
-			try { return new Date(e.timestamp).getTime() >= cutoff; } catch { return true; }
-		});
-	}, [allEntries, showAll]);
+		let result = allEntries;
+		if (!showAll && !dateFrom && !dateTo) {
+			const cutoff = Date.now() - WEEK_MS;
+			result = result.filter((e) => { try { return new Date(e.timestamp).getTime() >= cutoff; } catch { return true; } });
+		}
+		if (dateFrom) { const f = new Date(dateFrom).getTime(); result = result.filter((e) => { try { return new Date(e.timestamp).getTime() >= f; } catch { return true; } }); }
+		if (dateTo) { const t = new Date(dateTo).getTime() + 86400000; result = result.filter((e) => { try { return new Date(e.timestamp).getTime() < t; } catch { return true; } }); }
+		return result;
+	}, [allEntries, showAll, dateFrom, dateTo]);
 	const hasOlder = !showAll && entries.length < allEntries.length;
 	const epics = (epicsData?.epics ?? []).filter((e) => e.status !== "completed" && e.status !== "done");
 
@@ -59,6 +64,20 @@ function ActivityPage() {
 						))}
 					</TabsList>
 				</Tabs>
+				<div className="flex items-center gap-2 text-xs ml-auto">
+					<span className="text-muted-foreground">{t("activity.fromDate")}</span>
+					<input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="rounded-lg border bg-card px-2 py-1 text-xs h-7" />
+					<span className="text-muted-foreground">{t("activity.toDate")}</span>
+					<input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="rounded-lg border bg-card px-2 py-1 text-xs h-7" />
+					<Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => {
+						const header = "timestamp,action,target,detail\n";
+						const rows = entries.map((e) => `${e.timestamp},${e.action},${e.target},"${(e.detail ?? "").replace(/"/g, '""')}"`).join("\n");
+						const blob = new Blob([header + rows], { type: "text/csv" });
+						const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "activity.csv"; a.click(); URL.revokeObjectURL(url);
+					}}>
+						{t("activity.exportCsv")}
+					</Button>
+				</div>
 			</div>
 
 			{isLoading ? (

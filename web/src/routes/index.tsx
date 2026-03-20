@@ -13,7 +13,6 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
-	decisionsQueryOptions,
 	epicsQueryOptions,
 	healthQueryOptions,
 	tasksQueryOptions,
@@ -23,7 +22,6 @@ import { useI18n } from "@/lib/i18n";
 import { StatCard } from "@/components/overview/stat-card";
 import { TaskCard } from "@/components/overview/task-card";
 import { EpicProgressCard } from "@/components/overview/epic-card";
-import { RecentDecisionsCard } from "@/components/overview/decision-card";
 
 export const Route = createFileRoute("/")({
 	component: OverviewPage,
@@ -37,7 +35,7 @@ function OverviewPage() {
 	const { data: tasksData, isLoading: tasksLoading } = useQuery(tasksQueryOptions());
 	const { data: healthData } = useQuery(healthQueryOptions());
 	const { data: epicsData } = useQuery(epicsQueryOptions());
-	const { data: decisionsData } = useQuery(decisionsQueryOptions(5));
+	// decisionsData removed — recent decisions section removed per user request
 
 	const tasks = [...(tasksData?.tasks ?? [])].sort((a, b) => {
 		const aTime = a.started_at ?? "";
@@ -90,7 +88,7 @@ function OverviewPage() {
 						>
 							{t("overview.tasks")}
 						</h2>
-						<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+						<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" style={{ minHeight: "calc(140px * 3 + 16px * 2)" }}>
 							{paged.map((task, i) => (
 								<TaskCard
 									key={task.slug}
@@ -106,11 +104,8 @@ function OverviewPage() {
 				);
 			})()}
 
-			{/* Bottom row: Epics + Decisions */}
-			<div className="grid gap-6 lg:grid-cols-2">
-				<EpicProgressCard epics={epicsData?.epics?.filter((e) => e.status !== "completed")} />
-				<RecentDecisionsCard decisions={decisionsData?.decisions} />
-			</div>
+			{/* Epics */}
+			<EpicProgressCard epics={epicsData?.epics?.filter((e) => e.status !== "completed")} />
 		</div>
 	);
 }

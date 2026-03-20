@@ -114,7 +114,7 @@ describe("API schemas smoke test", () => {
 			total: 3,
 			tasks: [{ slug: "task-1", status: "done" }],
 		};
-		expect(EpicSummarySchema.parse(data)).toEqual(data);
+		expect(EpicSummarySchema.parse(data)).toEqual({ ...data, tasks: [{ slug: "task-1", status: "done", depends_on: [] }] });
 	});
 
 	it("DecisionEntry matches KnowledgeEntry shape", () => {

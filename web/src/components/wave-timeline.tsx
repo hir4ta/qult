@@ -10,24 +10,40 @@ export function WaveTimeline({ waves }: WaveTimelineProps) {
 	if (waves.length === 0) return null;
 
 	return (
-		<div className="flex items-center gap-0 overflow-x-auto pb-1">
+		<div className="flex items-start gap-0 overflow-x-auto pb-1">
 			{waves.map((wave, i) => {
 				const isComplete = wave.checked >= wave.total && wave.total > 0;
 				const isCurrent = wave.isCurrent;
+				const prevComplete = i > 0 && (waves[i - 1]?.checked ?? 0) >= (waves[i - 1]?.total ?? 1) && (waves[i - 1]?.total ?? 0) > 0;
 				const label = wave.key === "closing" ? "Closing" : `Wave ${wave.key}`;
 
 				return (
-					<div key={wave.key} className="flex items-center">
-						{/* Connector line */}
+					<div key={wave.key} className="flex items-start">
+						{/* Connector — aligned to circle center (size-7 = 28px, center = 14px) */}
 						{i > 0 && (
-							<div
-								className="h-0.5 w-6 shrink-0"
-								style={{
-									backgroundColor: isComplete || (waves[i - 1]?.checked ?? 0) >= (waves[i - 1]?.total ?? 1)
-										? "#2d8b7a"
-										: "var(--color-border)",
-								}}
-							/>
+							<div className="flex items-center shrink-0" style={{ height: "28px" }}>
+								<div
+									className="w-6 overflow-hidden"
+									style={{ height: "2px" }}
+								>
+									{isCurrent ? (
+										<div
+											className="h-full w-full animate-shimmer"
+											style={{
+												background: "linear-gradient(90deg, #2d8b7a, #e67e22, #2d8b7a)",
+												backgroundSize: "200% 100%",
+											}}
+										/>
+									) : (
+										<div
+											className="h-full w-full"
+											style={{
+												backgroundColor: isComplete || prevComplete ? "#2d8b7a" : "var(--color-border)",
+											}}
+										/>
+									)}
+								</div>
+							</div>
 						)}
 
 						{/* Step */}
