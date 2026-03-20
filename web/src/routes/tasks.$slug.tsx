@@ -4,6 +4,7 @@ import { Calendar, CheckCircle2, CircleCheck, CircleDot } from "lucide-react";
 import { useState } from "react";
 import { ReviewPanel } from "@/components/review/ReviewPanel";
 import { SectionCard } from "@/components/section-card";
+import { WaveTimeline } from "@/components/wave-timeline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -139,8 +140,14 @@ function TaskDetailPage() {
 				)}
 			</div>
 
-			{/* Right column — spec sections */}
+			{/* Right column — wave timeline + spec sections */}
 			<div className="flex-1 min-w-0 overflow-y-auto space-y-3 pt-1 pb-8">
+				{/* Wave timeline */}
+				{task.waves && task.waves.length > 0 && (
+					<div className="rounded-xl border border-border bg-card px-4 py-3">
+						<WaveTimeline waves={task.waves} />
+					</div>
+				)}
 				{specs.map((spec, i) => {
 					const content = specContents[i]?.data?.content ?? "";
 					if (!content) return null;
