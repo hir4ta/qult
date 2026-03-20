@@ -2,8 +2,10 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { createFileRoute } from "@tanstack/react-router";
 import { Calendar, CheckCircle2, CircleCheck, CircleDot } from "lucide-react";
 import { useState } from "react";
+import { CoverageHeatmap } from "@/components/coverage-heatmap";
 import { ReviewPanel } from "@/components/review/ReviewPanel";
 import { SectionCard } from "@/components/section-card";
+import { TraceabilityMatrix } from "@/components/traceability";
 import { WaveTimeline } from "@/components/wave-timeline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -148,6 +150,19 @@ function TaskDetailPage() {
 						<WaveTimeline waves={task.waves} />
 					</div>
 				)}
+				{/* Traceability + Coverage */}
+				{(() => {
+					const contentMap: Record<string, string> = {};
+					for (let i = 0; i < specs.length; i++) {
+						const c = specContents[i]?.data?.content;
+						if (c) contentMap[specs[i]!.file] = c;
+					}
+					return Object.keys(contentMap).length > 0 ? <TraceabilityMatrix specContents={contentMap} /> : null;
+				})()}
+				{validationData && validationData.checks.length > 0 && (
+					<CoverageHeatmap checks={validationData.checks} />
+				)}
+
 				{specs.map((spec, i) => {
 					const content = specContents[i]?.data?.content ?? "";
 					if (!content) return null;
