@@ -42,17 +42,6 @@ function getLinkNodeIds(link: ForceLink): [number, number] {
 	return [src, tgt];
 }
 
-// Smooth easing: ease-out cubic
-function easeOut(t: number): number {
-	return 1 - (1 - t) ** 3;
-}
-
-// Animation timing
-const HOVER_FADE_IN = 400;   // ms for hovered node to fully highlight
-const SPREAD_DELAY = 150;    // ms delay before connected nodes start revealing
-const SPREAD_DURATION = 500; // ms for connected nodes to fully reveal
-const FADE_OUT = 300;        // ms to fade back to normal
-
 export function KnowledgeGraph({
 	nodes,
 	edges,
@@ -64,15 +53,7 @@ export function KnowledgeGraph({
 	// biome-ignore lint/suspicious/noExplicitAny: react-force-graph-2d ref type is complex
 	const fgRef = useRef<any>(null);
 	const [dimensions, setDimensions] = useState({ width: 800, height: Math.floor(window.innerHeight * 0.7) });
-
-	// Animation state (refs to avoid re-renders every frame)
-	const hoverIdRef = useRef<number | null>(null);
-	const hoverStartRef = useRef<number>(0);
-	const prevHoverIdRef = useRef<number | null>(null);
-	const fadeOutStartRef = useRef<number>(0);
-	// Force re-render trigger for canvas updates
-	const [, setTick] = useState(0);
-	const animFrameRef = useRef<number>(0);
+	const [hoverNodeId, setHoverNodeId] = useState<number | null>(null);
 
 	// Sub-type filter toggles (local state)
 	const [activeTypes, setActiveTypes] = useState<Set<string>>(
@@ -98,45 +79,6 @@ export function KnowledgeGraph({
 			window.removeEventListener("resize", updateHeight);
 			observer.disconnect();
 		};
-	}, []);
-
-	// Animation loop — runs while hover is active or fading out
-	useEffect(() => {
-		let running = true;
-		const animate = () => {
-			if (!running) return;
-			setTick((t) => t + 1); // trigger canvas redraw
-			const now = performance.now();
-			const isHovering = hoverIdRef.current !== null;
-			const isFading = prevHoverIdRef.current !== null && now - fadeOutStartRef.current < FADE_OUT;
-			if (isHovering || isFading) {
-				animFrameRef.current = requestAnimationFrame(animate);
-			}
-		};
-		const isHovering = hoverIdRef.current !== null;
-		const isFading = prevHoverIdRef.current !== null;
-		if (isHovering || isFading) {
-			animFrameRef.current = requestAnimationFrame(animate);
-		}
-		return () => {
-			running = false;
-			cancelAnimationFrame(animFrameRef.current);
-		};
-	});
-
-	// Handle hover changes
-	const handleNodeHover = useCallback((node: ForceNode | null) => {
-		const now = performance.now();
-		if (node) {
-			prevHoverIdRef.current = null;
-			hoverIdRef.current = node.id;
-			hoverStartRef.current = now;
-		} else {
-			prevHoverIdRef.current = hoverIdRef.current;
-			fadeOutStartRef.current = now;
-			hoverIdRef.current = null;
-		}
-		setTick((t) => t + 1);
 	}, []);
 
 	// Filter nodes by active sub_types
@@ -165,7 +107,7 @@ export function KnowledgeGraph({
 		fg.d3Force("link")?.distance(120);
 	}, [graphData]);
 
-	// Connected nodes map
+	// Connected nodes for hover highlight
 	const connectedNodesMap = useMemo(() => {
 		const map = new Map<number, Set<number>>();
 		for (const link of graphData.links) {
@@ -189,103 +131,65 @@ export function KnowledgeGraph({
 		return counts;
 	}, [graphData.links]);
 
-	// Compute animation intensity for a node (0 = fully dimmed, 1 = fully highlighted)
-	const getNodeIntensity = useCallback((nodeId: number): number => {
-		const now = performance.now();
-		const hoverId = hoverIdRef.current;
-		const prevId = prevHoverIdRef.current;
-
-		// Fade-out from previous hover
-		if (hoverId === null && prevId !== null) {
-			const fadeProgress = Math.min(1, (now - fadeOutStartRef.current) / FADE_OUT);
-			if (fadeProgress >= 1) return 1; // fully faded out = normal
-			const wasHighlighted = nodeId === prevId || (connectedNodesMap.get(prevId)?.has(nodeId) ?? false);
-			if (!wasHighlighted) return 1;
-			// Lerp from highlighted back to normal
-			return easeOut(fadeProgress); // 0→1 means highlighted→normal, but we want inverse
-		}
-
-		if (hoverId === null) return 1; // no hover = normal
-
-		const elapsed = now - hoverStartRef.current;
-
-		// Hovered node itself
-		if (nodeId === hoverId) {
-			return easeOut(Math.min(1, elapsed / HOVER_FADE_IN));
-		}
-
-		// Connected node — delayed reveal
-		const isConnected = connectedNodesMap.get(hoverId)?.has(nodeId) ?? false;
-		if (isConnected) {
-			const spreadElapsed = elapsed - SPREAD_DELAY;
-			if (spreadElapsed <= 0) return 0;
-			return easeOut(Math.min(1, spreadElapsed / SPREAD_DURATION));
-		}
-
-		// Non-connected — dim down
-		return 0;
-	}, [connectedNodesMap]);
+	// Is node highlighted (hovered or connected to hovered)?
+	const isNodeHighlighted = useCallback((nodeId: number) => {
+		if (hoverNodeId === null) return true; // no hover = all visible
+		if (nodeId === hoverNodeId) return true;
+		return connectedNodesMap.get(hoverNodeId)?.has(nodeId) ?? false;
+	}, [hoverNodeId, connectedNodesMap]);
 
 	// Node size from hit_count (log scale)
 	const nodeSize = useCallback((node: ForceNode) => {
 		return calcNodeSize(node.hit_count);
 	}, []);
 
-	// Custom node rendering with animated hover highlight
+	// Custom node rendering with hover highlight
 	const drawNode = useCallback(
 		(node: ForceNode, ctx: CanvasRenderingContext2D) => {
 			const size = nodeSize(node);
 			const color = SUB_TYPE_COLORS[node.sub_type] ?? "#8b7d6b";
 			const x = node.x ?? 0;
 			const y = node.y ?? 0;
-			const hoverId = hoverIdRef.current;
-			const isHovering = hoverId !== null || prevHoverIdRef.current !== null;
-			const intensity = isHovering ? getNodeIntensity(node.id) : 1;
-			const isHovered = node.id === hoverId;
+			const highlighted = isNodeHighlighted(node.id);
+			const isHovered = hoverNodeId === node.id;
+			const dimmed = hoverNodeId !== null && !highlighted;
 
-			if (isHovering) {
-				if (isHovered) {
-					// Glow ring — grows with intensity
-					const glowSize = size + 2 + intensity * 4;
-					ctx.beginPath();
-					ctx.arc(x, y, glowSize, 0, 2 * Math.PI);
-					ctx.fillStyle = hexToRgba(color, 0.15 * intensity);
-					ctx.fill();
-				} else if (intensity > 0.1) {
-					// Connected node ripple ring
-					const ringSize = size + 1 + intensity * 2;
-					ctx.beginPath();
-					ctx.arc(x, y, ringSize, 0, 2 * Math.PI);
-					ctx.strokeStyle = hexToRgba(color, 0.4 * intensity);
-					ctx.lineWidth = 1.5 * intensity;
-					ctx.stroke();
-				}
+			// Glow ring for hovered node
+			if (isHovered) {
+				ctx.beginPath();
+				ctx.arc(x, y, size + 4, 0, 2 * Math.PI);
+				ctx.fillStyle = `${color}30`;
+				ctx.fill();
+			}
+
+			// Connected node pulse ring
+			if (highlighted && !isHovered && hoverNodeId !== null) {
+				ctx.beginPath();
+				ctx.arc(x, y, size + 2, 0, 2 * Math.PI);
+				ctx.strokeStyle = `${color}50`;
+				ctx.lineWidth = 1.5;
+				ctx.stroke();
 			}
 
 			// Main circle
-			const alpha = isHovering
-				? (isHovered ? 1 : Math.max(0.15, intensity))
-				: 1;
 			ctx.beginPath();
 			ctx.arc(x, y, size, 0, 2 * Math.PI);
-			ctx.fillStyle = hexToRgba(color, alpha);
+			ctx.fillStyle = dimmed ? `${color}30` : color;
 			ctx.fill();
 
-			ctx.strokeStyle = hexToRgba(color, alpha * 0.5);
+			ctx.strokeStyle = dimmed ? `${color}20` : `${color}60`;
 			ctx.lineWidth = isHovered ? 2.5 : 1.5;
 			ctx.stroke();
 
 			// Label for hovered node
-			if (isHovered && intensity > 0.5) {
-				ctx.globalAlpha = intensity;
+			if (isHovered) {
 				ctx.font = "10px var(--font-sans, sans-serif)";
 				ctx.textAlign = "center";
 				ctx.fillStyle = color;
 				ctx.fillText(node.label.slice(0, 30), x, y + size + 12);
-				ctx.globalAlpha = 1;
 			}
 		},
-		[nodeSize, getNodeIntensity],
+		[nodeSize, isNodeHighlighted, hoverNodeId],
 	);
 
 	// Node color lookup for link coloring
@@ -297,41 +201,30 @@ export function KnowledgeGraph({
 		return map;
 	}, [filteredNodes]);
 
-	// Link color + width with animated hover highlight
+	// Link color + width with hover highlight
 	const linkColor = useCallback((link: ForceLink) => {
 		const [srcId, tgtId] = getLinkNodeIds(link);
 		const color = nodeColorMap.get(srcId) ?? "#8b7d6b";
-		const hoverId = hoverIdRef.current;
-		const isHovering = hoverId !== null || prevHoverIdRef.current !== null;
 
-		if (isHovering && hoverId !== null) {
-			const isConnected = srcId === hoverId || tgtId === hoverId;
-			if (isConnected) {
-				const connectedNodeId = srcId === hoverId ? tgtId : srcId;
-				const intensity = getNodeIntensity(connectedNodeId);
-				return hexToRgba(color, 0.2 + 0.6 * intensity);
-			}
-			return hexToRgba(color, 0.04);
+		if (hoverNodeId !== null) {
+			const isConnected = srcId === hoverNodeId || tgtId === hoverNodeId;
+			if (isConnected) return hexToRgba(color, 0.8);
+			return hexToRgba(color, 0.05);
 		}
 
 		const opacity = Math.min(0.7, Math.max(0.2, 0.2 + link.score * 0.5));
 		return hexToRgba(color, opacity);
-	}, [nodeColorMap, getNodeIntensity]);
+	}, [nodeColorMap, hoverNodeId]);
 
 	const linkWidth = useCallback((link: ForceLink) => {
-		const hoverId = hoverIdRef.current;
-		if (hoverId !== null) {
+		if (hoverNodeId !== null) {
 			const [srcId, tgtId] = getLinkNodeIds(link);
-			const isConnected = srcId === hoverId || tgtId === hoverId;
-			if (isConnected) {
-				const connectedNodeId = srcId === hoverId ? tgtId : srcId;
-				const intensity = getNodeIntensity(connectedNodeId);
-				return 0.5 + intensity * Math.max(2, link.score * 5);
-			}
+			const isConnected = srcId === hoverNodeId || tgtId === hoverNodeId;
+			if (isConnected) return Math.max(2.5, link.score * 5);
 			return 0.3;
 		}
 		return Math.max(1, link.score * 3);
-	}, [getNodeIntensity]);
+	}, [hoverNodeId]);
 
 	// Link tooltip — show similarity score
 	const linkLabel = useCallback((link: ForceLink) => {
@@ -436,7 +329,7 @@ export function KnowledgeGraph({
 					linkLabel={linkLabel}
 					nodeLabel={nodeLabel}
 					onNodeClick={(node: ForceNode) => onNodeClick(node)}
-					onNodeHover={handleNodeHover}
+					onNodeHover={(node: ForceNode | null) => setHoverNodeId(node?.id ?? null)}
 					backgroundColor="transparent"
 					cooldownTicks={100}
 					d3AlphaDecay={0.02}

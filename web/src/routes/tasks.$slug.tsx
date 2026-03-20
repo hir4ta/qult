@@ -95,62 +95,36 @@ function TaskDetailPage() {
 	}
 
 	return (
-		<div className="flex gap-6 h-[calc(100vh-120px)]">
-			{/* Left column — task metadata (sticky) */}
-			<div className="w-[280px] shrink-0 space-y-4 overflow-y-auto pt-1">
-				<TaskInfoCard task={task} validationData={validationData ?? undefined} />
-
-				{/* Complete button */}
-				{canComplete && (
-					<div className="rounded-lg border bg-card p-4">
-						{!confirmComplete ? (
-							<Button
-								size="sm"
-								variant="brutalist"
-								className="w-full gap-1.5 text-xs"
-								onClick={() => setConfirmComplete(true)}
-							>
-								<CheckCircle2 className="size-3.5" />
-								{t("task.completeTask")}
-							</Button>
-						) : (
-							<div className="space-y-2">
-								<p className="text-xs text-muted-foreground">{t("task.confirmComplete")}</p>
-								<div className="flex gap-2">
-									<Button
-										size="sm"
-										className="flex-1 text-xs"
-										onClick={() => completeMutation.mutate()}
-										disabled={completeMutation.isPending}
-									>
-										{completeMutation.isPending ? "..." : t("task.confirm")}
-									</Button>
-									<Button
-										size="sm"
-										variant="outline"
-										className="flex-1 text-xs"
-										onClick={() => setConfirmComplete(false)}
-									>
-										{t("task.cancel")}
-									</Button>
-								</div>
-								{completeMutation.isError && (
-									<p className="text-xs text-red-500">{completeMutation.error.message}</p>
-								)}
-							</div>
-						)}
-					</div>
+		<div className="space-y-3 h-[calc(100vh-120px)] overflow-y-auto pb-8">
+			{/* Header bar — metadata inline */}
+			<div className="flex items-center gap-3 flex-wrap">
+				{(task.status === "completed" || task.status === "done") ? (
+					<CircleCheck className="size-4 shrink-0" style={{ color: "#2d8b7a" }} />
+				) : (
+					<CircleDot className="size-4 shrink-0" style={{ color: "#40513b" }} />
+				)}
+				<h2 className="text-lg font-semibold font-mono">{task.slug}</h2>
+				{task.size && <Badge variant="outline" style={{ borderColor: "rgba(123,107,141,0.4)", color: "#7b6b8d" }}>{task.size}</Badge>}
+				{task.spec_type && <Badge variant="outline" style={{ borderColor: "rgba(98,129,65,0.4)", color: "#628141" }}>{task.spec_type}</Badge>}
+				{task.review_status && <Badge variant="outline" style={{ borderColor: task.review_status === "approved" ? "rgba(45,139,122,0.4)" : task.review_status === "changes_requested" ? "rgba(230,126,34,0.4)" : "rgba(107,114,128,0.3)", color: task.review_status === "approved" ? "#2d8b7a" : task.review_status === "changes_requested" ? "#e67e22" : "#6b7280" }}>{task.review_status}</Badge>}
+				{validationData && <ValidationBadge report={validationData} />}
+				{task.started_at && <span className="text-[10px] text-muted-foreground">{formatDate(task.started_at, locale)}</span>}
+				{task.project_name && <span className="text-[10px] text-muted-foreground">&middot; {task.project_name}</span>}
+				{task.waves && task.waves.length > 0 && <div className="ml-auto"><WaveTimeline waves={task.waves} /></div>}
+				{canComplete && !confirmComplete && (
+					<Button size="sm" variant="brutalist" className="gap-1.5 text-xs shrink-0" onClick={() => setConfirmComplete(true)}>
+						<CheckCircle2 className="size-3.5" />{t("task.completeTask")}
+					</Button>
 				)}
 			</div>
-
-			{/* Right column — spec sections */}
-			<div className="flex-1 min-w-0 overflow-y-auto space-y-3 pb-8">
-				{/* Wave timeline — compact, filter-bar style */}
-				{task.waves && task.waves.length > 0 && (
-					<div className="pb-1">
-						<WaveTimeline waves={task.waves} />
-					</div>
-				)}
+			{confirmComplete && (
+				<div className="flex items-center gap-3 rounded-lg border bg-card px-4 py-2">
+					<p className="text-xs text-muted-foreground">{t("task.confirmComplete")}</p>
+					<Button size="sm" className="text-xs" onClick={() => completeMutation.mutate()} disabled={completeMutation.isPending}>{completeMutation.isPending ? "..." : t("task.confirm")}</Button>
+					<Button size="sm" variant="outline" className="text-xs" onClick={() => setConfirmComplete(false)}>{t("task.cancel")}</Button>
+					{completeMutation.isError && <p className="text-xs text-red-500">{completeMutation.error.message}</p>}
+				</div>
+			)}
 
 				{/* Spec documents */}
 				{specs.map((spec, i) => {
@@ -202,7 +176,6 @@ function TaskDetailPage() {
 				{validationData && validationData.checks.length > 0 && (
 					<CoverageHeatmap checks={validationData.checks} />
 				)}
-			</div>
 		</div>
 	);
 }
