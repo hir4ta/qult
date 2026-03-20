@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 160" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Butler with monocle searching -->
+  <!-- Head -->
+  <circle cx="100" cy="40" r="14" />
+  <!-- Top hat -->
+  <path d="M86 33h28M88 33v-8h24v8" />
+  <!-- Monocle -->
+  <circle cx="108" cy="39" r="6" stroke-width="2" />
+  <path d="M114 42q4 8 8 12" />
+  <!-- Eyes (one squinting through monocle) -->
+  <circle cx="95" cy="39" r="1.5" fill="currentColor" stroke="none" />
+  <!-- Body leaning forward -->
+  <path d="M90 54v26q0 6 6 6h8q6 0 6-6V54" />
+  <!-- Collar -->
+  <path d="M95 54l5 4 5-4" />
+  <!-- Arms - one hand on chin, thoughtful -->
+  <path d="M90 60q-10 5-8 15" />
+  <path d="M110 60q8 0 10 8" />
+  <!-- Legs -->
+  <path d="M96 86v26M104 86v26" />
+  <!-- Shoes -->
+  <path d="M92 112h8M100 112h8" />
+</svg>

@@ -16,6 +16,7 @@
     "@tanstack/react-router": "^1",
     "class-variance-authority": "^0.7",
     "clsx": "^2",
+    "motion": "^12.38.0",
     "radix-ui": "^1.4.3",
     "react": "^19",
     "react-dom": "^19",

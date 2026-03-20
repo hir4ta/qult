@@ -5,6 +5,7 @@ import { useState } from "react";
 import { KnowledgeCard } from "@/components/knowledge-card";
 import { KnowledgeDialog } from "@/components/knowledge-detail";
 import { KnowledgeGraph } from "@/components/knowledge-graph";
+import { ButlerEmpty } from "@/components/butler-empty";
 import { Input } from "@/components/ui/input";
 import {
 	Pagination,
@@ -257,9 +258,7 @@ function KnowledgePage() {
 									)}
 								</>
 							) : (
-								<div className="flex h-40 items-center justify-center">
-									<p className="text-sm text-muted-foreground">{t("knowledge.noMemories")}</p>
-								</div>
+								<ButlerEmpty scene="bookshelf" messageKey="empty.noMemories" />
 							)}
 						</>
 					);

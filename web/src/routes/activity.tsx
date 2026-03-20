@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { EpicDependencies } from "@/components/epic-deps";
+import { ButlerEmpty } from "@/components/butler-empty";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -147,8 +148,8 @@ function ActivityTable({ entries }: { entries: ActivityEntry[] }) {
 				})}
 				{entries.length === 0 && (
 					<TableRow>
-						<TableCell colSpan={4} className="text-center text-sm text-muted-foreground">
-							{t("activity.noActivity")}
+						<TableCell colSpan={4}>
+							<ButlerEmpty scene="bow" messageKey="empty.noActivity" />
 						</TableCell>
 					</TableRow>
 				)}

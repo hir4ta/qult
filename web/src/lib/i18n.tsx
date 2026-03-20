@@ -196,6 +196,14 @@ export const translations = {
 	"task.requirement": { en: "Requirement", ja: "要件" },
 	"task.taskId": { en: "Task", ja: "タスク" },
 	"task.testId": { en: "Test", ja: "テスト" },
+
+	// Butler empty states
+	"empty.noTasks": { en: "Nothing requiring your attention at the moment, sir.", ja: "ただいま、ご用件はございません。" },
+	"empty.noSpecs": { en: "No specifications on file, sir. Shall I prepare one?", ja: "仕様書はございません。ご用意いたしましょうか？" },
+	"empty.noMemories": { en: "The archives are empty, sir. Knowledge awaits discovery.", ja: "記録はございません。知見の蓄積をお待ちしております。" },
+	"empty.noResults": { en: "I've searched thoroughly, sir. Nothing matches your inquiry.", ja: "くまなく探しましたが、該当するものが見つかりません。" },
+	"empty.noActivity": { en: "All quiet on the front, sir. No recent activity to report.", ja: "静かな時でございます。直近の活動はございません。" },
+	"empty.error": { en: "My apologies, sir. Something has gone awry.", ja: "申し訳ございません。不具合が生じております。" },
 } as const;
 
 export type TranslationKey = keyof typeof translations;

@@ -7,6 +7,7 @@ import { ReviewPanel } from "@/components/review/ReviewPanel";
 import { SectionCard } from "@/components/section-card";
 import { TraceabilityMatrix } from "@/components/traceability";
 import { WaveTimeline } from "@/components/wave-timeline";
+import { ButlerEmpty } from "@/components/butler-empty";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -195,9 +196,7 @@ function TaskDetailPage() {
 					);
 				})}
 				{specs.length === 0 && (
-					<div className="flex h-40 items-center justify-center rounded-lg border border-dashed">
-						<p className="text-sm text-muted-foreground">{t("task.noSpecs")}</p>
-					</div>
+					<ButlerEmpty scene="empty-tray" messageKey="empty.noSpecs" />
 				)}
 			</div>
 		</div>
@@ -223,7 +222,7 @@ function TaskInfoCard({
 				) : (
 					<CircleDot className="size-5 shrink-0" style={{ color: "#40513b" }} />
 				)}
-				<h2 className="text-base font-semibold truncate">{task.slug}</h2>
+				<h2 className="text-base font-semibold font-mono truncate">{task.slug}</h2>
 			</div>
 
 			{/* Badges */}

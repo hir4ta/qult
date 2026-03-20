@@ -1,6 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
-import { createRootRouteWithContext, Link, Outlet } from "@tanstack/react-router";
+import { createRootRouteWithContext, Link, Outlet, useLocation } from "@tanstack/react-router";
 import { Activity, BookOpen, Globe, LayoutDashboard, ListChecks } from "@animated-color-icons/lucide-react";
 import { useMemo, useState } from "react";
 import { GlobalSearch } from "@/components/global-search";
@@ -21,10 +21,10 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 });
 
 const tabs = [
-	{ to: "/", labelKey: "nav.overview" as TranslationKey, icon: LayoutDashboard },
-	{ to: "/tasks", labelKey: "nav.tasks" as TranslationKey, icon: ListChecks },
-	{ to: "/knowledge", labelKey: "nav.knowledge" as TranslationKey, icon: BookOpen },
-	{ to: "/activity", labelKey: "nav.activity" as TranslationKey, icon: Activity },
+	{ to: "/", labelKey: "nav.overview" as TranslationKey, icon: LayoutDashboard, color: "#40513b" },
+	{ to: "/tasks", labelKey: "nav.tasks" as TranslationKey, icon: ListChecks, color: "#628141" },
+	{ to: "/knowledge", labelKey: "nav.knowledge" as TranslationKey, icon: BookOpen, color: "#2d8b7a" },
+	{ to: "/activity", labelKey: "nav.activity" as TranslationKey, icon: Activity, color: "#7b6b8d" },
 ] as const;
 
 function LanguageToggle() {
@@ -49,14 +49,25 @@ function VersionBadge() {
 	);
 }
 
+function useAmbientTint() {
+	const location = useLocation();
+	const path = location.pathname;
+	const tab = tabs.find((t) => (t.to === "/" ? path === "/" : path.startsWith(t.to)));
+	return tab?.color ?? tabs[0].color;
+}
+
 function RootLayout() {
 	const { t } = useI18n();
 	const [showHelp, setShowHelp] = useState(false);
+	const ambientColor = useAmbientTint();
 	useKeyboardShortcuts(useMemo(() => ({ "?": () => setShowHelp(true) }), []));
 	return (
 		<TooltipProvider>
 			<KeyboardHelpDialog open={showHelp} onClose={() => setShowHelp(false)} />
-			<div className="flex min-h-screen flex-col bg-background">
+			<div
+				className="grain-overlay flex min-h-screen flex-col bg-background transition-colors duration-500"
+				style={{ backgroundColor: `${ambientColor}08` }}
+			>
 				<header className="sticky top-0 z-50 border-b border-border/60 bg-card/90 backdrop-blur-md">
 					<div className="mx-auto flex h-14 max-w-7xl items-center gap-8 px-6">
 						<span
@@ -74,7 +85,7 @@ function RootLayout() {
 										to={tab.to}
 										activeOptions={{ exact: tab.to === "/" }}
 										className={cn(
-											"al-icon-wrapper flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all",
+											"al-icon-wrapper flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
 											"text-muted-foreground hover:text-foreground hover:bg-accent/60",
 										)}
 										activeProps={{

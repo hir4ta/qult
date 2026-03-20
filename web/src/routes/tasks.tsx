@@ -3,6 +3,7 @@ import { createFileRoute, Link, Outlet, useParams } from "@tanstack/react-router
 import { ChevronDown, CircleCheck, CircleDashed, CirclePause, CircleX } from "@animated-color-icons/lucide-react";
 import { useState } from "react";
 import { StatusBadge } from "@/components/status-badge";
+import { ButlerEmpty } from "@/components/butler-empty";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { tasksQueryOptions } from "@/lib/api";
@@ -84,7 +85,7 @@ function TasksLayout() {
 					</button>
 				)}
 
-				{tasks.length === 0 && allTasks.length === 0 && <p className="text-sm text-muted-foreground">{t("tasks.noTasks")}</p>}
+				{tasks.length === 0 && allTasks.length === 0 && <ButlerEmpty scene="empty-tray" messageKey="empty.noTasks" />}
 			</div>
 			<div className="min-w-0 flex-1">
 				<Outlet />
@@ -131,7 +132,7 @@ function TaskAccordionCard({
 				<div className="flex items-center justify-between">
 					<div className="flex items-center gap-2 min-w-0">
 						<TaskStatusIcon status={task.status ?? "pending"} />
-						<span className="text-sm font-medium truncate">{task.slug}</span>
+						<span className="text-sm font-medium font-mono truncate">{task.slug}</span>
 					</div>
 					<div className="flex items-center gap-1 shrink-0">
 						<StatusBadge status={task.status ?? "pending"} />

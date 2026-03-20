@@ -11,6 +11,7 @@ import {
 	PaginationPrevious,
 } from "@/components/ui/pagination";
 import { Card, CardContent } from "@/components/ui/card";
+import { WaveDivider } from "@/components/wave-divider";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
 	epicsQueryOptions,
@@ -76,6 +77,7 @@ function OverviewPage() {
 				<HealthCard stats={healthData} />
 			</div>
 
+			<WaveDivider />
 			{/* Task cards */}
 			{tasks.length > 0 && (() => {
 				const totalPages = Math.ceil(tasks.length / ITEMS_PER_PAGE);
@@ -83,7 +85,7 @@ function OverviewPage() {
 				return (
 					<section className="space-y-3">
 						<h2
-							className="text-sm font-semibold uppercase tracking-wider text-muted-foreground"
+							className="text-2xl font-semibold tracking-tight text-foreground"
 							style={{ fontFamily: "var(--font-display)" }}
 						>
 							{t("overview.tasks")}

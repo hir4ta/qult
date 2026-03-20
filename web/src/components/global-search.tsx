@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Brain, ListChecks, Search } from "@animated-color-icons/lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ButlerEmpty } from "@/components/butler-empty";
 import { Input } from "@/components/ui/input";
 import { knowledgeQueryOptions, tasksQueryOptions } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -107,8 +108,8 @@ export function GlobalSearch() {
 				</div>
 			)}
 			{open && query.length >= 2 && results.length === 0 && (
-				<div className="absolute top-full mt-1 w-72 rounded-lg border bg-card z-50 py-3 shadow-lg">
-					<p className="text-xs text-muted-foreground text-center">{t("search.noResults")}</p>
+				<div className="absolute top-full mt-1 w-72 rounded-lg border bg-card z-50 py-2 shadow-lg">
+					<ButlerEmpty scene="monocle" messageKey="empty.noResults" className="!py-4" />
 				</div>
 			)}
 		</div>

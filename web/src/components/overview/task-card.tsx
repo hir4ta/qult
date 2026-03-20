@@ -74,7 +74,7 @@ export function TaskCard({
 							) : (
 								<CircleDot className="size-4 shrink-0" style={{ color: accentColor }} />
 							)}
-							<span className="text-sm font-semibold truncate">{task.slug}</span>
+							<span className="text-sm font-semibold font-mono truncate">{task.slug}</span>
 						</div>
 						<div className="flex shrink-0 gap-1.5">
 							{task.size && (
