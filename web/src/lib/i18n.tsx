@@ -14,7 +14,7 @@ function getInitialLocale(): Locale {
 	return "en";
 }
 
-const translations = {
+export const translations = {
 	// Header tabs
 	"nav.overview": { en: "Overview", ja: "概要" },
 	"nav.tasks": { en: "Specs", ja: "スペック" },

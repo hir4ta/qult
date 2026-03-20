@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SUB_TYPE_COLORS } from "@/lib/types";
 import type { GraphEdge } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
+import { nodeSize as calcNodeSize, hexToRgba } from "@/lib/graph-utils";
 
 export interface GraphNode {
 	id: number;
@@ -111,7 +112,7 @@ export function KnowledgeGraph({
 
 	// Node size from hit_count (log scale)
 	const nodeSize = useCallback((node: ForceNode) => {
-		return 4 + Math.log2((node.hit_count || 0) + 1) * 3;
+		return calcNodeSize(node.hit_count);
 	}, []);
 
 	// Custom node rendering — circle only, label via tooltip
@@ -148,11 +149,7 @@ export function KnowledgeGraph({
 		const srcId = typeof link.source === "object" ? link.source.id : link.source;
 		const color = nodeColorMap.get(srcId) ?? "#8b7d6b";
 		const opacity = Math.min(0.7, Math.max(0.2, 0.2 + link.score * 0.5));
-		// Convert hex to rgba
-		const r = parseInt(color.slice(1, 3), 16);
-		const g = parseInt(color.slice(3, 5), 16);
-		const b = parseInt(color.slice(5, 7), 16);
-		return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+		return hexToRgba(color, opacity);
 	}, [nodeColorMap]);
 
 	// Link tooltip — show similarity score
