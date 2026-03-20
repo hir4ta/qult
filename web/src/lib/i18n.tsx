@@ -135,6 +135,13 @@ export const translations = {
 	"review.rounds": { en: "round", ja: "ラウンド" },
 	"review.comments": { en: "comment(s)", ja: "件のコメント" },
 	"review.unresolved": { en: "unresolved", ja: "未解決" },
+
+	// Action hints (overview cards)
+	"action.completed": { en: "Completed", ja: "完了" },
+	"action.awaitingReview": { en: "Awaiting review", ja: "レビュー待ち" },
+	"action.changesRequested": { en: "Changes requested", ja: "変更依頼あり" },
+	"action.implementing": { en: "Implementing", ja: "実装中" },
+	"action.specCreation": { en: "Creating spec", ja: "スペック作成中" },
 } as const;
 
 export type TranslationKey = keyof typeof translations;
