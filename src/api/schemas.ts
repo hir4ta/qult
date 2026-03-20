@@ -74,6 +74,7 @@ export const KnowledgeEntrySchema = z.object({
 	saved_at: z.string().optional(),
 	enabled: z.boolean(),
 	project_name: z.string().optional(),
+	tags: z.array(z.string()).default([]),
 });
 
 export const KnowledgeResponseSchema = z.object({

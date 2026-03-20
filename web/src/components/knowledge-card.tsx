@@ -95,6 +95,17 @@ export function KnowledgeCard({
 				<p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
 					{contentPreview(entry.content, 100)}
 				</p>
+				{/* Tags */}
+				{entry.tags && entry.tags.length > 0 && (
+					<div className="flex flex-wrap gap-1">
+						{entry.tags.slice(0, 3).map((tag) => (
+							<span key={tag} className="rounded-full border px-1.5 py-0 text-[10px] text-muted-foreground">{tag}</span>
+						))}
+						{entry.tags.length > 3 && (
+							<span className="rounded-full border px-1.5 py-0 text-[10px] text-muted-foreground">+{entry.tags.length - 3}</span>
+						)}
+					</div>
+				)}
 				<div className="flex items-center gap-2 text-[10px] text-muted-foreground">
 					{entry.project_name && (
 						<>

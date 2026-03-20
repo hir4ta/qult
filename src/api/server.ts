@@ -26,6 +26,8 @@ import type { KnowledgeRow } from "../types.js";
 
 /** Map KnowledgeRow to frontend KnowledgeEntry shape. */
 function toKnowledgeEntry(r: KnowledgeRow) {
+	let tags: string[] = [];
+	try { tags = JSON.parse(r.content).tags ?? []; } catch { /* raw content */ }
 	return {
 		id: r.id,
 		label: r.title,
@@ -36,6 +38,7 @@ function toKnowledgeEntry(r: KnowledgeRow) {
 		saved_at: r.createdAt,
 		enabled: Boolean(r.enabled),
 		project_name: r.projectName,
+		tags,
 	};
 }
 

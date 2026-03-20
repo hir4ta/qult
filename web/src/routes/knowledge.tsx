@@ -37,6 +37,7 @@ function KnowledgePage() {
 	const [selected, setSelected] = useState<KnowledgeEntry | null>(null);
 	const [view, setView] = useState<"grid" | "graph">("grid");
 	const [page, setPage] = useState(1);
+	const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
 
 	const { data: browseData, isLoading } = useQuery(knowledgeQueryOptions());
 	const { data: statsData } = useQuery(knowledgeStatsQueryOptions());
@@ -50,13 +51,32 @@ function KnowledgePage() {
 	});
 
 	const entries = browseData?.entries ?? [];
-	const filtered = localFilter
-		? entries.filter(
-				(e) =>
-					e.label.toLowerCase().includes(localFilter.toLowerCase()) ||
-					e.content.toLowerCase().includes(localFilter.toLowerCase()),
-			)
-		: entries;
+
+	// Collect all unique tags for filter pills
+	const allTags = [...new Set(entries.flatMap((e) => e.tags ?? []))].sort();
+
+	const toggleTag = (tag: string) => {
+		setSelectedTags((prev) => {
+			const next = new Set(prev);
+			if (next.has(tag)) next.delete(tag); else next.add(tag);
+			return next;
+		});
+		setPage(1);
+	};
+
+	const filtered = entries.filter((e) => {
+		if (localFilter) {
+			const q = localFilter.toLowerCase();
+			if (!e.label.toLowerCase().includes(q) && !e.content.toLowerCase().includes(q)) return false;
+		}
+		if (selectedTags.size > 0) {
+			const entryTags = new Set(e.tags ?? []);
+			for (const tag of selectedTags) {
+				if (!entryTags.has(tag)) return false;
+			}
+		}
+		return true;
+	});
 
 	const showGraph = view === "graph";
 	const minEntriesForGraph = 5;
@@ -108,6 +128,26 @@ function KnowledgePage() {
 					</ToggleGroupItem>
 				</ToggleGroup>
 			</div>
+
+			{/* Tag filter pills */}
+			{!showGraph && allTags.length > 0 && (
+				<div className="flex flex-wrap gap-1">
+					{allTags.slice(0, 20).map((tag) => (
+						<button
+							key={tag}
+							type="button"
+							onClick={() => toggleTag(tag)}
+							className={`rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors ${
+								selectedTags.has(tag)
+									? "bg-accent text-foreground border-border"
+									: "text-muted-foreground border-transparent hover:bg-accent/50"
+							}`}
+						>
+							{tag}
+						</button>
+					))}
+				</div>
+			)}
 
 			{/* Graph view */}
 			{showGraph &&
