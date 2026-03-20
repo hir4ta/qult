@@ -54,7 +54,7 @@ function ActivityPage() {
 
 	return (
 		<div className="space-y-6">
-			<div className="sticky top-0 z-10 bg-background pb-3">
+			<div className="sticky top-14 z-10 bg-background pb-3 flex items-center gap-4">
 				<Tabs value={filter} onValueChange={setFilter}>
 					<TabsList>
 						{FILTERS.map((f) => (

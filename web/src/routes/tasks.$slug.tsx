@@ -142,14 +142,15 @@ function TaskDetailPage() {
 				)}
 			</div>
 
-			{/* Right column — wave timeline + spec sections */}
-			<div className="flex-1 min-w-0 overflow-y-auto space-y-3 pt-1 pb-8">
-				{/* Wave timeline */}
+			{/* Right column — wave timeline (sticky) + spec sections (scrollable) */}
+			<div className="flex-1 min-w-0 flex flex-col">
+				{/* Wave timeline — sticky top */}
 				{task.waves && task.waves.length > 0 && (
-					<div className="rounded-xl border border-border bg-card px-4 py-3">
+					<div className="rounded-xl border border-border bg-card px-4 py-3 mb-3 shrink-0 flex items-center justify-center">
 						<WaveTimeline waves={task.waves} />
 					</div>
 				)}
+				<div className="flex-1 min-w-0 overflow-y-auto space-y-3 pb-8">
 				{/* Traceability + Coverage */}
 				{(() => {
 					const contentMap: Record<string, string> = {};
@@ -201,6 +202,7 @@ function TaskDetailPage() {
 						<p className="text-sm text-muted-foreground">{t("task.noSpecs")}</p>
 					</div>
 				)}
+			</div>
 			</div>
 		</div>
 	);
