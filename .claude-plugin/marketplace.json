@@ -10,8 +10,8 @@
     {
       "name": "alfred",
       "source": "./plugin",
-      "description": "Silent butler — best practice skills, session intelligence, independent review",
-      "version": "0.3.18"
+      "description": "Silent butler \u2014 best practice skills, session intelligence, independent review",
+      "version": "0.3.19"
     }
   ]
 }
