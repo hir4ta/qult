@@ -1,5 +1,7 @@
 import ForceGraph2D from "react-force-graph-2d";
+import { Maximize2, Minus, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SUB_TYPE_COLORS } from "@/lib/types";
 import type { GraphEdge } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
@@ -215,7 +217,28 @@ export function KnowledgeGraph({
 			</div>
 
 			{/* Force graph */}
-			<div className="rounded-xl border border-border overflow-hidden" style={{ height: "70vh" }}>
+			<div className="relative rounded-xl border border-border overflow-hidden" style={{ height: "70vh" }}>
+				{/* Zoom controls */}
+				<div className="absolute top-2 right-2 z-10 flex flex-col gap-1">
+					<Tooltip><TooltipTrigger asChild>
+						<button type="button" onClick={() => { const fg = fgRef.current; if (fg) { const z = fg.zoom(); fg.zoom(z * 1.5, 300); } }}
+							className="flex size-7 items-center justify-center rounded-lg border bg-card/90 backdrop-blur-sm transition-colors hover:bg-accent">
+							<Plus className="size-3.5 text-muted-foreground" />
+						</button>
+					</TooltipTrigger><TooltipContent side="left">{t("knowledge.zoomIn")}</TooltipContent></Tooltip>
+					<Tooltip><TooltipTrigger asChild>
+						<button type="button" onClick={() => { const fg = fgRef.current; if (fg) { const z = fg.zoom(); fg.zoom(z * 0.67, 300); } }}
+							className="flex size-7 items-center justify-center rounded-lg border bg-card/90 backdrop-blur-sm transition-colors hover:bg-accent">
+							<Minus className="size-3.5 text-muted-foreground" />
+						</button>
+					</TooltipTrigger><TooltipContent side="left">{t("knowledge.zoomOut")}</TooltipContent></Tooltip>
+					<Tooltip><TooltipTrigger asChild>
+						<button type="button" onClick={() => { const fg = fgRef.current; if (fg) fg.zoomToFit(400); }}
+							className="flex size-7 items-center justify-center rounded-lg border bg-card/90 backdrop-blur-sm transition-colors hover:bg-accent">
+							<Maximize2 className="size-3.5 text-muted-foreground" />
+						</button>
+					</TooltipTrigger><TooltipContent side="left">{t("knowledge.zoomReset")}</TooltipContent></Tooltip>
+				</div>
 				<ForceGraph2D
 					width={dimensions.width}
 					height={dimensions.height}

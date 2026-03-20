@@ -79,7 +79,7 @@ function KnowledgePage() {
 	});
 
 	const showGraph = view === "graph";
-	const minEntriesForGraph = 5;
+	const minEntriesForGraph = 2;
 	const hasEnoughEntries = entries.length >= minEntriesForGraph;
 
 	return (
