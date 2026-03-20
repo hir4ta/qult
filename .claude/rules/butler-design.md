@@ -75,7 +75,6 @@ Nova Style を廃止。alfred 独自のデザインシステム "Butler Design" 
 - **Tab ambient tint**: アクティブタブの brand color が背景に 3% opacity でにじむ
 - **Wave 色相シフト**: 進捗に応じて cool blue (#3b82f6) → warm amber (#f59e0b) → green (#22c55e)
 - **Archived/disabled**: 彩度 50% 減 + opacity 0.6
-- **時間帯パレット** (optional): 18:00-06:00 はカラーテーマが +2% warm shift
 - `SUB_TYPE_COLORS` は従来の brand palette を維持
 
 ## 9. Signature Visualization — Wave Timeline
@@ -83,7 +82,7 @@ Nova Style を廃止。alfred 独自のデザインシステム "Butler Design" 
 - 現在のステップ UI を Canvas/SVG カスタム描画に置き換え
 - 曲線コネクタ（直線ではなく bezier curve）
 - 有機的なノード形状（完全な円ではなく、微妙に揺らいだ shape）
-- 手書き風ライン（rough.js または SVG stroke-dasharray による表現）
+- 手書き風ライン（SVG stroke-dasharray による表現）
 - alfred のシグネチャ・ビジュアルとして位置づけ
 
 ## 10. Butler Identity — 全体を貫くメタファー
@@ -93,8 +92,8 @@ Nova Style を廃止。alfred 独自のデザインシステム "Butler Design" 
 - **コピー**: 空状態やツールチップに執事口調の人格を持たせる
 - **Progressive disclosure**: 情報を一度に全部見せず、必要な時に差し出す
 - **フォント運用**:
-  - Display (Quicksand) はページヘッダーに大胆に使用（48-64px）
-  - ID・スラッグ (`T-1.3`, `FR-5`) にはモノスペース (JetBrains Mono)
+  - Display (Quicksand) はページヘッダーに大胆に使用（text-2xl 以上）
+  - ID・スラッグ (`T-1.3`, `FR-5`) にはモノスペース (Tailwind font-mono (system monospace))
   - 本文 (Nunito) はそのまま維持
 
 ## Rules (Do / Don't)

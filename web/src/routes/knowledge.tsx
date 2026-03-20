@@ -6,6 +6,7 @@ import { KnowledgeCard } from "@/components/knowledge-card";
 import { KnowledgeDialog } from "@/components/knowledge-detail";
 import { KnowledgeGraph } from "@/components/knowledge-graph";
 import { ButlerEmpty } from "@/components/butler-empty";
+import { StaggerContainer } from "@/components/stagger-container";
 import { Input } from "@/components/ui/input";
 import {
 	Pagination,
@@ -210,7 +211,7 @@ function KnowledgePage() {
 								</div>
 							) : paged.length > 0 ? (
 								<>
-									<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+									<StaggerContainer className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 										{paged.map((entry) => (
 											<KnowledgeCard
 												key={entry.id}
@@ -218,7 +219,7 @@ function KnowledgePage() {
 												onSelect={() => setSelected(entry)}
 											/>
 										))}
-									</div>
+									</StaggerContainer>
 									{totalPages > 1 && (
 										<Pagination>
 											<PaginationContent>

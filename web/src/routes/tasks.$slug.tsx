@@ -106,7 +106,7 @@ function TaskDetailPage() {
 						{!confirmComplete ? (
 							<Button
 								size="sm"
-								variant="outline"
+								variant="brutalist"
 								className="w-full gap-1.5 text-xs"
 								onClick={() => setConfirmComplete(true)}
 							>

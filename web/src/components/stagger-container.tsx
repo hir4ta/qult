@@ -5,6 +5,7 @@ import { butlerSpring, butlerStagger, fadeSlideUp } from "@/lib/motion";
 interface StaggerContainerProps {
 	children: ReactNode;
 	className?: string;
+	style?: React.CSSProperties;
 }
 
 const containerVariants = {
@@ -16,10 +17,11 @@ const containerVariants = {
 	},
 };
 
-export function StaggerContainer({ children, className }: StaggerContainerProps) {
+export function StaggerContainer({ children, className, style }: StaggerContainerProps) {
 	return (
 		<motion.div
 			className={className}
+			style={style}
 			variants={containerVariants}
 			initial="hidden"
 			animate="visible"

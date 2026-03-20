@@ -47,7 +47,7 @@ Before evaluating, call `knowledge` with: "butler design system animated icons g
 | V2 | CTA flat shadow | MEDIUM | Primary action buttons (Complete, Approve) missing flat offset shadow |
 | V3 | Shadow policy | HIGH | Cards/buttons/inputs using `shadow-xs`, `shadow-sm`, `shadow-md` (forbidden) |
 | V4 | Section dividers | LOW | Sections separated by `<hr>` or `border-bottom` instead of wave-divider |
-| V5 | Display font sizing | LOW | Page headers not using Quicksand at 48-64px for dramatic hierarchy |
+| V5 | Display font sizing | LOW | Page headers not using Quicksand at text-2xl or above for dramatic hierarchy |
 | V6 | Monospace IDs | LOW | Task/FR IDs (`T-1.3`, `FR-5`) not using monospace font |
 
 ## Color

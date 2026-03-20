@@ -1,3 +1,4 @@
+import { AnimatedCounter } from "@/components/animated-counter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -22,9 +23,7 @@ export function StatCard({
 					{loading ? (
 						<Skeleton className="h-7 w-12" />
 					) : (
-						<p className="text-2xl font-bold" style={{ fontFamily: "var(--font-display)" }}>
-							{value}
-						</p>
+						<AnimatedCounter value={value} className="text-2xl font-bold" style={{ fontFamily: "var(--font-display)" }} />
 					)}
 					<p className="text-xs text-muted-foreground">{label}</p>
 				</div>

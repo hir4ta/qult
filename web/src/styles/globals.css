@@ -155,9 +155,6 @@
 
 /* Butler Design: Reduced motion */
 @media (prefers-reduced-motion: reduce) {
-	.grain-overlay::before {
-		animation: none;
-	}
 	.animate-shimmer {
 		animation: none;
 	}

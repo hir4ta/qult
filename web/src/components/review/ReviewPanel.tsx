@@ -108,9 +108,8 @@ export function ReviewPanel({ slug, reviewStatus, specContent, currentFile }: Re
 						>
 							<Button
 								size="sm"
-								variant="outline"
+								variant="brutalist"
 								className="gap-1 text-xs"
-								style={{ borderColor: "rgba(45,139,122,0.4)", color: "#2d8b7a" }}
 							>
 								<CheckCircle className="h-3.5 w-3.5" />
 								{t("review.approve")}

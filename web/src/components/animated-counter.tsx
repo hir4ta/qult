@@ -5,9 +5,10 @@ import { butlerSpring } from "@/lib/motion";
 interface AnimatedCounterProps {
 	value: number;
 	className?: string;
+	style?: React.CSSProperties;
 }
 
-export function AnimatedCounter({ value, className }: AnimatedCounterProps) {
+export function AnimatedCounter({ value, className, style }: AnimatedCounterProps) {
 	const motionValue = useMotionValue(0);
 	const spring = useSpring(motionValue, butlerSpring);
 	const display = useTransform(spring, (v) => Math.round(v));
@@ -27,7 +28,7 @@ export function AnimatedCounter({ value, className }: AnimatedCounterProps) {
 	}, [display]);
 
 	return (
-		<motion.span ref={ref} className={className}>
+		<motion.span ref={ref} className={className} style={style}>
 			{value}
 		</motion.span>
 	);

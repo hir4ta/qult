@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/pagination";
 import { Card, CardContent } from "@/components/ui/card";
 import { WaveDivider } from "@/components/wave-divider";
+import { StaggerContainer } from "@/components/stagger-container";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
 	epicsQueryOptions,
@@ -90,7 +91,7 @@ function OverviewPage() {
 						>
 							{t("overview.tasks")}
 						</h2>
-						<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" style={{ minHeight: "calc(140px * 3 + 16px * 2)" }}>
+						<StaggerContainer className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" style={{ minHeight: "calc(140px * 3 + 16px * 2)" }}>
 							{paged.map((task, i) => (
 								<TaskCard
 									key={task.slug}
@@ -98,7 +99,7 @@ function OverviewPage() {
 									colorIndex={(taskPage - 1) * ITEMS_PER_PAGE + i}
 								/>
 							))}
-						</div>
+						</StaggerContainer>
 						{totalPages > 1 && (
 							<SimplePagination page={taskPage} totalPages={totalPages} onPageChange={setTaskPage} />
 						)}
