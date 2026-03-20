@@ -132,23 +132,28 @@ export function KnowledgeDialog({
 									</AlertDialogContent>
 								</AlertDialog>
 							)}
-							<Button
-								size="sm"
-								variant="ghost"
-								className="ml-auto h-7 gap-1.5 text-xs"
-								style={{ color: "#7b6b8d" }}
-								onClick={() => toggleMutation.mutate({ id: entry.id, enabled: !entry.enabled })}
-							>
-								{entry.enabled ? (
-									<>
-										<Archive className="size-3.5" /> {t("knowledge.archive")}
-									</>
-								) : (
-									<>
-										<ArchiveRestore className="size-3.5" /> {t("knowledge.restore")}
-									</>
-								)}
-							</Button>
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<Button
+										size="sm"
+										variant="ghost"
+										className="ml-auto h-7 gap-1.5 text-xs"
+										style={{ color: "#7b6b8d" }}
+										onClick={() => toggleMutation.mutate({ id: entry.id, enabled: !entry.enabled })}
+									>
+										{entry.enabled ? (
+											<>
+												<Archive className="size-3.5" /> {t("knowledge.archive")}
+											</>
+										) : (
+											<>
+												<ArchiveRestore className="size-3.5" /> {t("knowledge.restore")}
+											</>
+										)}
+									</Button>
+								</TooltipTrigger>
+								<TooltipContent>{entry.enabled ? t("knowledge.archive") : t("knowledge.restore")}</TooltipContent>
+							</Tooltip>
 						</div>
 					</DialogDescription>
 				</DialogHeader>

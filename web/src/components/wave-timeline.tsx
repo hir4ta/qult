@@ -85,7 +85,7 @@ export function WaveTimeline({ waves }: WaveTimelineProps) {
 							</TooltipTrigger>
 							<TooltipContent>
 								<p className="text-xs font-medium">{wave.title || label}</p>
-								<p className="text-[10px] text-muted-foreground tabular-nums">
+								<p className="text-[10px] text-white/60 tabular-nums">
 									{wave.checked}/{wave.total} tasks
 								</p>
 							</TooltipContent>

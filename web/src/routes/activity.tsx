@@ -17,6 +17,8 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { activityQueryOptions, epicsQueryOptions } from "@/lib/api";
 import { useI18n, dateLocale } from "@/lib/i18n";
 import type { ActivityEntry, EpicSummary } from "@/lib/types";
@@ -66,10 +68,27 @@ function ActivityPage() {
 					</TabsList>
 				</Tabs>
 				<div className="flex items-center gap-2 text-xs ml-auto">
-					<span className="text-muted-foreground">{t("activity.fromDate")}</span>
-					<input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="rounded-lg border bg-card px-2 py-1 text-xs h-7" />
-					<span className="text-muted-foreground">{t("activity.toDate")}</span>
-					<input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="rounded-lg border bg-card px-2 py-1 text-xs h-7" />
+					<Popover>
+						<PopoverTrigger asChild>
+							<Button size="sm" variant="outline" className="h-7 text-xs gap-1">
+								{dateFrom || t("activity.fromDate")}
+							</Button>
+						</PopoverTrigger>
+						<PopoverContent className="w-auto p-0" align="start">
+							<Calendar mode="single" selected={dateFrom ? new Date(dateFrom) : undefined} onSelect={(d) => setDateFrom(d ? d.toISOString().slice(0, 10) : "")} />
+						</PopoverContent>
+					</Popover>
+					<span className="text-muted-foreground">—</span>
+					<Popover>
+						<PopoverTrigger asChild>
+							<Button size="sm" variant="outline" className="h-7 text-xs gap-1">
+								{dateTo || t("activity.toDate")}
+							</Button>
+						</PopoverTrigger>
+						<PopoverContent className="w-auto p-0" align="end">
+							<Calendar mode="single" selected={dateTo ? new Date(dateTo) : undefined} onSelect={(d) => setDateTo(d ? d.toISOString().slice(0, 10) : "")} />
+						</PopoverContent>
+					</Popover>
 					<Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => {
 						const header = "timestamp,action,target,detail\n";
 						const rows = entries.map((e) => `${e.timestamp},${e.action},${e.target},"${(e.detail ?? "").replace(/"/g, '""')}"`).join("\n");
