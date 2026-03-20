@@ -96,8 +96,8 @@ function TaskDetailPage() {
 
 	return (
 		<div className="space-y-3 h-[calc(100vh-120px)] overflow-y-auto pb-8">
-			{/* Header bar — metadata inline */}
-			<div className="flex items-center gap-3 flex-wrap">
+			{/* Header — row 1: slug + badges */}
+			<div className="flex items-center gap-2.5 flex-wrap">
 				{(task.status === "completed" || task.status === "done") ? (
 					<CircleCheck className="size-4 shrink-0" style={{ color: "#2d8b7a" }} />
 				) : (
@@ -108,6 +108,9 @@ function TaskDetailPage() {
 				{task.spec_type && <Badge variant="outline" style={{ borderColor: "rgba(98,129,65,0.4)", color: "#628141" }}>{task.spec_type}</Badge>}
 				{task.review_status && <Badge variant="outline" style={{ borderColor: task.review_status === "approved" ? "rgba(45,139,122,0.4)" : task.review_status === "changes_requested" ? "rgba(230,126,34,0.4)" : "rgba(107,114,128,0.3)", color: task.review_status === "approved" ? "#2d8b7a" : task.review_status === "changes_requested" ? "#e67e22" : "#6b7280" }}>{task.review_status}</Badge>}
 				{validationData && <ValidationBadge report={validationData} />}
+			</div>
+			{/* Header — row 2: dates + project + wave + complete */}
+			<div className="flex items-center gap-3 flex-wrap">
 				{task.started_at && <span className="text-[10px] text-muted-foreground">{formatDate(task.started_at, locale)}</span>}
 				{task.project_name && <span className="text-[10px] text-muted-foreground">&middot; {task.project_name}</span>}
 				{task.waves && task.waves.length > 0 && <div className="ml-auto"><WaveTimeline waves={task.waves} /></div>}
