@@ -144,24 +144,15 @@ function TaskDetailPage() {
 			</div>
 
 			{/* Right column — spec sections */}
-			<div className="flex-1 min-w-0 overflow-y-auto space-y-3 pt-1 pb-8">
-				{/* Wave timeline */}
+			<div className="flex-1 min-w-0 overflow-y-auto space-y-3 pb-8">
+				{/* Wave timeline — compact, filter-bar style */}
 				{task.waves && task.waves.length > 0 && (
-					<WaveTimeline waves={task.waves} />
-				)}
-				{/* Traceability + Coverage */}
-				{(() => {
-					const contentMap: Record<string, string> = {};
-					for (let i = 0; i < specs.length; i++) {
-						const c = specContents[i]?.data?.content;
-						if (c) contentMap[specs[i]!.file] = c;
-					}
-					return Object.keys(contentMap).length > 0 ? <TraceabilityMatrix specContents={contentMap} /> : null;
-				})()}
-				{validationData && validationData.checks.length > 0 && (
-					<CoverageHeatmap checks={validationData.checks} />
+					<div className="pb-1">
+						<WaveTimeline waves={task.waves} />
+					</div>
 				)}
 
+				{/* Spec documents */}
 				{specs.map((spec, i) => {
 					const content = specContents[i]?.data?.content ?? "";
 					if (!content) return null;
@@ -197,6 +188,19 @@ function TaskDetailPage() {
 				})}
 				{specs.length === 0 && (
 					<ButlerEmpty scene="empty-tray" messageKey="empty.noSpecs" />
+				)}
+
+				{/* Traceability + Coverage — after spec documents */}
+				{(() => {
+					const contentMap: Record<string, string> = {};
+					for (let i = 0; i < specs.length; i++) {
+						const c = specContents[i]?.data?.content;
+						if (c) contentMap[specs[i]!.file] = c;
+					}
+					return Object.keys(contentMap).length > 0 ? <TraceabilityMatrix specContents={contentMap} /> : null;
+				})()}
+				{validationData && validationData.checks.length > 0 && (
+					<CoverageHeatmap checks={validationData.checks} />
 				)}
 			</div>
 		</div>

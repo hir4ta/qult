@@ -73,7 +73,7 @@ function TasksLayout() {
 
 				{tasks.length === 0 && allTasks.length === 0 && <ButlerEmpty scene="empty-tray" messageKey="empty.noTasks" />}
 			</div>
-			<div className="min-w-0 flex-1 pt-[52px]">
+			<div className="min-w-0 flex-1">
 				<Outlet />
 			</div>
 		</div>
