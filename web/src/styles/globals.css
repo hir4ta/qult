@@ -51,11 +51,11 @@
 
 :root {
 	--radius: 0.625rem;
-	--background: oklch(0.98 0.005 75);
+	--background: oklch(0.96 0.012 80);
 	--foreground: oklch(0.22 0.01 56);
-	--card: oklch(1 0 0);
+	--card: oklch(0.97 0.008 80);
 	--card-foreground: oklch(0.22 0.01 56);
-	--popover: oklch(1 0 0);
+	--popover: oklch(0.97 0.008 80);
 	--popover-foreground: oklch(0.22 0.01 56);
 	--primary: oklch(0.37 0.011 56);
 	--primary-foreground: oklch(0.98 0.005 75);
@@ -129,22 +129,38 @@
 	animation: shimmer 3s ease-in-out infinite;
 }
 
-/* Butler Design: Grain texture overlay */
+/* Butler Design: Paper texture overlay (2 layers: fiber + noise) */
 .grain-overlay {
 	position: relative;
 }
+/* Layer 1: coarse fiber texture (paper grain) */
 .grain-overlay::before {
 	content: "";
 	position: fixed;
 	inset: 0;
 	z-index: 0;
 	pointer-events: none;
-	opacity: 0.08;
+	opacity: 0.12;
 	mix-blend-mode: multiply;
-	background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+	background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.35' numOctaves='5' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23f)'/%3E%3C/svg%3E");
+}
+/* Layer 2: fine noise (speckle) */
+.grain-overlay::after {
+	content: "";
+	position: fixed;
+	inset: 0;
+	z-index: 0;
+	pointer-events: none;
+	opacity: 0.06;
+	mix-blend-mode: multiply;
+	background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 .dark .grain-overlay::before {
-	opacity: 0.06;
+	opacity: 0.08;
+	mix-blend-mode: overlay;
+}
+.dark .grain-overlay::after {
+	opacity: 0.04;
 	mix-blend-mode: overlay;
 }
 
