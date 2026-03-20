@@ -28,14 +28,10 @@ function TasksLayout() {
 	const { data } = useQuery(tasksQueryOptions());
 	const allTasks = data?.tasks ?? [];
 	const { slug: selectedSlug } = useParams({ strict: false }) as { slug?: string };
-	const [showCompleted, setShowCompleted] = useState(false);
 	const [statusFilter, setStatusFilter] = useState<string>("all");
 	const [sizeFilter, setSizeFilter] = useState<Set<string>>(new Set());
 	const terminalStatuses = new Set(["completed", "done", "cancelled"]);
-	const activeTasks = allTasks.filter((t) => !terminalStatuses.has(t.status ?? ""));
-	const completedTasks = allTasks.filter((t) => terminalStatuses.has(t.status ?? ""));
-	const baseTasks = showCompleted ? allTasks : activeTasks;
-	const tasks = baseTasks.filter((task) => {
+	const tasks = allTasks.filter((task) => {
 		if (statusFilter === "active" && terminalStatuses.has(task.status ?? "")) return false;
 		if (statusFilter === "review" && task.review_status !== "pending") return false;
 		if (statusFilter === "done" && !terminalStatuses.has(task.status ?? "")) return false;
@@ -45,7 +41,7 @@ function TasksLayout() {
 	const toggleSize = (size: string) => setSizeFilter((prev) => { const n = new Set(prev); if (n.has(size)) n.delete(size); else n.add(size); return n; });
 
 	return (
-		<div className="flex gap-6">
+		<div className="flex gap-6 items-start">
 			<div className="w-72 shrink-0 space-y-2 overflow-y-auto max-h-[calc(100vh-100px)] px-1 pt-1">
 				{/* Status + size filter */}
 				<div className="flex flex-wrap gap-1 pb-1">
@@ -75,19 +71,9 @@ function TasksLayout() {
 					/>
 				))}
 
-				{completedTasks.length > 0 && (
-					<button
-						type="button"
-						onClick={() => setShowCompleted(!showCompleted)}
-						className="w-full text-[10px] text-muted-foreground hover:text-foreground transition-colors py-1"
-					>
-						{showCompleted ? t("tasks.hideCompleted") : `${t("tasks.showCompleted")} (${completedTasks.length})`}
-					</button>
-				)}
-
 				{tasks.length === 0 && allTasks.length === 0 && <ButlerEmpty scene="empty-tray" messageKey="empty.noTasks" />}
 			</div>
-			<div className="min-w-0 flex-1">
+			<div className="min-w-0 flex-1 pt-[52px]">
 				<Outlet />
 			</div>
 		</div>
