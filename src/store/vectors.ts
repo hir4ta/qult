@@ -36,22 +36,32 @@ export function insertEmbedding(
 }
 
 export function cleanOrphanedEmbeddings(store: Store): number {
-	const result = store.db
+	const r1 = store.db
 		.prepare(`
     DELETE FROM embeddings WHERE source = 'knowledge'
     AND source_id NOT IN (SELECT id FROM knowledge_index)
   `)
 		.run();
-	return result.changes;
+	const r2 = store.db
+		.prepare(`
+    DELETE FROM embeddings WHERE source = 'spec'
+    AND source_id NOT IN (SELECT id FROM spec_index)
+  `)
+		.run();
+	return r1.changes + r2.changes;
 }
 
-export function vectorSearchKnowledge(
+export type VectorSource = "knowledge" | "spec";
+
+export function vectorSearch(
 	store: Store,
 	queryVec: number[],
+	sources: VectorSource[],
 	limit: number,
 ): VectorMatch[] {
 	if (!queryVec || queryVec.length === 0) return [];
 	if (limit <= 0) limit = 10;
+	if (sources.length === 0) return [];
 
 	const maxCandidates = envIntOrDefault(
 		"ALFRED_MAX_VECTOR_CANDIDATES",
@@ -59,34 +69,48 @@ export function vectorSearchKnowledge(
 	);
 	const earlyStopCount = Math.max(limit * 3, 50);
 
-	const rows = store.db
-		.prepare(`
-    SELECT e.source_id, e.vector FROM embeddings e
-    JOIN knowledge_index k ON k.id = e.source_id
-    WHERE e.source = 'knowledge' AND k.enabled = 1
-    LIMIT ?
-  `)
-		.all(maxCandidates) as Array<{ source_id: number; vector: Buffer }>;
+	const allCandidates: VectorMatch[] = [];
 
-	const candidates: VectorMatch[] = [];
-	let highQualityCount = 0;
+	for (const source of sources) {
+		const joinTable = source === "knowledge" ? "knowledge_index" : "spec_index";
+		const filter = source === "knowledge" ? "AND t.enabled = 1" : "";
 
-	for (const row of rows) {
-		const vec = deserializeFloat32(row.vector);
-		if (vec.length !== queryVec.length) continue;
+		const rows = store.db
+			.prepare(`
+      SELECT e.source_id, e.source, e.vector FROM embeddings e
+      JOIN ${joinTable} t ON t.id = e.source_id
+      WHERE e.source = ? ${filter}
+      LIMIT ?
+    `)
+			.all(source, maxCandidates) as Array<{ source_id: number; source: string; vector: Buffer }>;
 
-		const sim = cosineSimilarity(queryVec, vec);
-		if (sim < MIN_SIMILARITY) continue;
+		let highQualityCount = 0;
+		for (const row of rows) {
+			const vec = deserializeFloat32(row.vector);
+			if (vec.length !== queryVec.length) continue;
 
-		candidates.push({ sourceId: row.source_id, score: sim });
-		if (sim >= EARLY_STOP_THRESHOLD) {
-			highQualityCount++;
-			if (highQualityCount >= earlyStopCount) break;
+			const sim = cosineSimilarity(queryVec, vec);
+			if (sim < MIN_SIMILARITY) continue;
+
+			allCandidates.push({ sourceId: row.source_id, score: sim, source: row.source as VectorSource });
+			if (sim >= EARLY_STOP_THRESHOLD) {
+				highQualityCount++;
+				if (highQualityCount >= earlyStopCount) break;
+			}
 		}
 	}
 
-	candidates.sort((a, b) => b.score - a.score);
-	return candidates.slice(0, limit);
+	allCandidates.sort((a, b) => b.score - a.score);
+	return allCandidates.slice(0, limit);
+}
+
+/** Backward-compatible wrapper for knowledge-only vector search. */
+export function vectorSearchKnowledge(
+	store: Store,
+	queryVec: number[],
+	limit: number,
+): VectorMatch[] {
+	return vectorSearch(store, queryVec, ["knowledge"], limit);
 }
 
 export function cosineSimilarity(a: number[], b: number[]): number {

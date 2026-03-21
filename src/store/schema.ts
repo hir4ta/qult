@@ -1,32 +1,44 @@
 import type Database from "better-sqlite3";
 
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS projects (
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    remote          TEXT DEFAULT '',
+    path            TEXT NOT NULL,
+    branch          TEXT DEFAULT '',
+    registered_at   TEXT NOT NULL,
+    last_seen_at    TEXT NOT NULL,
+    status          TEXT DEFAULT 'active',
+    metadata        TEXT DEFAULT '{}'
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_remote_path
+    ON projects(remote, path);
+
 CREATE TABLE IF NOT EXISTS knowledge_index (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     file_path       TEXT NOT NULL,
     content_hash    TEXT NOT NULL,
     title           TEXT NOT NULL,
     content         TEXT NOT NULL,
     sub_type        TEXT NOT NULL DEFAULT 'decision',
-    project_remote  TEXT DEFAULT '',
-    project_path    TEXT NOT NULL,
-    project_name    TEXT NOT NULL DEFAULT '',
     branch          TEXT DEFAULT '',
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
     hit_count       INTEGER DEFAULT 0,
     last_accessed   TEXT DEFAULT '',
     enabled         INTEGER DEFAULT 1,
-    UNIQUE(project_remote, project_path, file_path)
+    UNIQUE(project_id, file_path)
 );
 
-CREATE INDEX IF NOT EXISTS idx_ki_project ON knowledge_index(project_remote, project_path);
+CREATE INDEX IF NOT EXISTS idx_ki_project ON knowledge_index(project_id);
 CREATE INDEX IF NOT EXISTS idx_ki_sub_type ON knowledge_index(sub_type);
 CREATE INDEX IF NOT EXISTS idx_ki_updated ON knowledge_index(updated_at);
 
@@ -51,6 +63,49 @@ CREATE TRIGGER IF NOT EXISTS ki_fts_au AFTER UPDATE ON knowledge_index BEGIN
     VALUES ('delete', old.id, old.title, old.content, old.sub_type);
     INSERT INTO knowledge_fts(rowid, title, content, sub_type)
     VALUES (new.id, new.title, new.content, new.sub_type);
+END;
+
+CREATE TABLE IF NOT EXISTS spec_index (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    slug            TEXT NOT NULL,
+    file_name       TEXT NOT NULL,
+    content_hash    TEXT NOT NULL,
+    title           TEXT NOT NULL DEFAULT '',
+    content         TEXT NOT NULL,
+    size            TEXT NOT NULL DEFAULT 'M',
+    spec_type       TEXT NOT NULL DEFAULT 'feature',
+    status          TEXT NOT NULL DEFAULT 'active',
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    UNIQUE(project_id, slug, file_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_si_project ON spec_index(project_id);
+CREATE INDEX IF NOT EXISTS idx_si_slug ON spec_index(slug);
+CREATE INDEX IF NOT EXISTS idx_si_status ON spec_index(status);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS spec_fts USING fts5(
+    title,
+    content,
+    slug,
+    content='spec_index',
+    content_rowid='id'
+);
+
+CREATE TRIGGER IF NOT EXISTS si_fts_ai AFTER INSERT ON spec_index BEGIN
+    INSERT INTO spec_fts(rowid, title, content, slug)
+    VALUES (new.id, new.title, new.content, new.slug);
+END;
+CREATE TRIGGER IF NOT EXISTS si_fts_ad AFTER DELETE ON spec_index BEGIN
+    INSERT INTO spec_fts(spec_fts, rowid, title, content, slug)
+    VALUES ('delete', old.id, old.title, old.content, old.slug);
+END;
+CREATE TRIGGER IF NOT EXISTS si_fts_au AFTER UPDATE ON spec_index BEGIN
+    INSERT INTO spec_fts(spec_fts, rowid, title, content, slug)
+    VALUES ('delete', old.id, old.title, old.content, old.slug);
+    INSERT INTO spec_fts(rowid, title, content, slug)
+    VALUES (new.id, new.title, new.content, new.slug);
 END;
 
 CREATE TABLE IF NOT EXISTS tag_aliases (
@@ -104,8 +159,6 @@ const TAG_ALIASES: Record<string, string[]> = {
 const LEGACY_TABLES = [
 	"records_fts",
 	"records",
-	"session_links",
-	"tag_aliases",
 	"docs",
 	"docs_fts",
 	"crawl_meta",
@@ -160,6 +213,9 @@ const LEGACY_TRIGGERS = [
 	"ki_fts_ai",
 	"ki_fts_ad",
 	"ki_fts_au",
+	"si_fts_ai",
+	"si_fts_ad",
+	"si_fts_au",
 ];
 
 const LEGACY_INDEXES = [
@@ -183,6 +239,10 @@ const LEGACY_INDEXES = [
 	"idx_ki_project",
 	"idx_ki_sub_type",
 	"idx_ki_updated",
+	"idx_si_project",
+	"idx_si_slug",
+	"idx_si_status",
+	"idx_projects_remote_path",
 ];
 
 const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
@@ -211,9 +271,12 @@ function rebuildFromScratch(db: Database.Database): void {
 		dropSafe(db, "TABLE", table);
 	}
 	for (const table of [
+		"spec_fts",
+		"spec_index",
 		"knowledge_fts",
 		"knowledge_index",
 		"embeddings",
+		"projects",
 		"session_links",
 		"tag_aliases",
 		"schema_version",

@@ -77,9 +77,8 @@ export function searchKnowledgeFTS(store: Store, query: string, limit: number): 
 function searchFTSKnowledge(store: Store, ftsQuery: string, limit: number): KnowledgeRow[] {
 	const rows = store.db
 		.prepare(`
-    SELECT k.id, k.file_path, k.content_hash, k.title, k.content, k.sub_type,
-      k.project_remote, k.project_path, k.project_name, k.branch,
-      k.created_at, k.updated_at, k.hit_count, k.last_accessed, k.enabled,
+    SELECT k.id, k.project_id, k.file_path, k.content_hash, k.title, k.content, k.sub_type,
+      k.branch, k.created_at, k.updated_at, k.hit_count, k.last_accessed, k.enabled,
       bm25(knowledge_fts, 3.0, 1.0, 1.0) AS rank
     FROM knowledge_fts f
     JOIN knowledge_index k ON k.id = f.rowid
@@ -90,6 +89,135 @@ function searchFTSKnowledge(store: Store, ftsQuery: string, limit: number): Know
 		.all(ftsQuery, limit) as Array<RawKnowledgeRow & { rank: number }>;
 
 	return rows.map(mapRow);
+}
+
+// --- Unified search (knowledge + spec) ---
+
+export type UnifiedSource = "knowledge" | "spec";
+
+export interface UnifiedSearchResult {
+	id: number;
+	source: UnifiedSource;
+	title: string;
+	content: string;
+	projectId: string;
+	projectName: string;
+	score: number;
+	// knowledge-specific
+	subType?: string;
+	hitCount?: number;
+	// spec-specific
+	slug?: string;
+	fileName?: string;
+	specStatus?: string;
+}
+
+export function searchUnified(
+	store: Store,
+	query: string,
+	options?: {
+		sources?: UnifiedSource[];
+		projectId?: string;
+		limit?: number;
+	},
+): UnifiedSearchResult[] {
+	const limit = options?.limit ?? 20;
+	const sources = options?.sources ?? ["knowledge", "spec"];
+	const projectId = options?.projectId;
+
+	const q = query.trim();
+	if (!q) return [];
+
+	const words = q.split(/\s+/);
+	let expanded: string[];
+	try {
+		expanded = expandAliases(store, words);
+	} catch {
+		expanded = words;
+	}
+	const ftsTerms: string[] = [];
+	for (const w of expanded) {
+		const sanitized = sanitizeFTSTerm(w);
+		if (sanitized) ftsTerms.push(`"${sanitized}"`);
+	}
+	if (ftsTerms.length === 0) return [];
+	const ftsQuery = ftsTerms.join(" OR ");
+
+	const results: UnifiedSearchResult[] = [];
+
+	if (sources.includes("knowledge")) {
+		const projectFilter = projectId ? "AND k.project_id = ?" : "";
+		const params: unknown[] = [ftsQuery];
+		if (projectId) params.push(projectId);
+		params.push(limit);
+
+		try {
+			const rows = store.db
+				.prepare(`
+        SELECT k.id, k.project_id, k.title, k.content, k.sub_type, k.hit_count,
+               COALESCE(p.name, '') as project_name,
+               bm25(knowledge_fts, 3.0, 1.0, 1.0) AS rank
+        FROM knowledge_fts f
+        JOIN knowledge_index k ON k.id = f.rowid
+        LEFT JOIN projects p ON p.id = k.project_id
+        WHERE knowledge_fts MATCH ? AND k.enabled = 1 ${projectFilter}
+        ORDER BY rank
+        LIMIT ?
+      `)
+				.all(...params) as Array<{
+				id: number; project_id: string; title: string; content: string;
+				sub_type: string; hit_count: number; project_name: string; rank: number;
+			}>;
+
+			for (const r of rows) {
+				results.push({
+					id: r.id, source: "knowledge", title: r.title, content: r.content,
+					projectId: r.project_id, projectName: r.project_name,
+					score: -r.rank, // BM25 rank is negative (lower = better)
+					subType: r.sub_type, hitCount: r.hit_count,
+				});
+			}
+		} catch { /* FTS error — skip knowledge results */ }
+	}
+
+	if (sources.includes("spec")) {
+		const projectFilter = projectId ? "AND s.project_id = ?" : "";
+		const params: unknown[] = [ftsQuery];
+		if (projectId) params.push(projectId);
+		params.push(limit);
+
+		try {
+			const rows = store.db
+				.prepare(`
+        SELECT s.id, s.project_id, s.title, s.content, s.slug, s.file_name, s.status,
+               COALESCE(p.name, '') as project_name,
+               bm25(spec_fts, 3.0, 1.0, 1.0) AS rank
+        FROM spec_fts f
+        JOIN spec_index s ON s.id = f.rowid
+        LEFT JOIN projects p ON p.id = s.project_id
+        WHERE spec_fts MATCH ? ${projectFilter}
+        ORDER BY rank
+        LIMIT ?
+      `)
+				.all(...params) as Array<{
+				id: number; project_id: string; title: string; content: string;
+				slug: string; file_name: string; status: string; project_name: string; rank: number;
+			}>;
+
+			for (const r of rows) {
+				results.push({
+					id: r.id, source: "spec", title: r.title, content: r.content,
+					projectId: r.project_id, projectName: r.project_name,
+					score: -r.rank,
+					slug: r.slug, fileName: r.file_name, specStatus: r.status,
+				});
+			}
+		} catch { /* FTS error — skip spec results */ }
+	}
+
+	// Sort by score descending, truncate
+	results.sort((a, b) => b.score - a.score);
+	return results.slice(0, limit);
 }
 
 function fuzzySearchKnowledge(
@@ -103,9 +231,8 @@ function fuzzySearchKnowledge(
 
 	const rows = store.db
 		.prepare(`
-    SELECT id, file_path, content_hash, title, content, sub_type,
-           project_remote, project_path, project_name, branch,
-           created_at, updated_at, hit_count, last_accessed, enabled
+    SELECT id, project_id, file_path, content_hash, title, content, sub_type,
+           branch, created_at, updated_at, hit_count, last_accessed, enabled
     FROM knowledge_index WHERE enabled = 1 LIMIT 500
   `)
 		.all() as RawKnowledgeRow[];

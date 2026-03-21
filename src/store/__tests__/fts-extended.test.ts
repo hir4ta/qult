@@ -12,12 +12,22 @@ import {
 import { Store } from "../index.js";
 import { upsertKnowledge } from "../knowledge.js";
 
+function insertTestProject(store: Store, id = "test-project-id"): string {
+	store.db.prepare(`
+		INSERT OR IGNORE INTO projects (id, name, remote, path, branch, registered_at, last_seen_at, status)
+		VALUES (?, 'test', '', '/test', '', datetime('now'), datetime('now'), 'active')
+	`).run(id);
+	return id;
+}
+
 let store: Store;
 let tmpDir: string;
+let projectId: string;
 
 beforeEach(() => {
 	tmpDir = mkdtempSync(join(tmpdir(), "fts-ext-test-"));
 	store = Store.open(join(tmpDir, "test.db"));
+	projectId = insertTestProject(store);
 });
 
 afterEach(() => {
@@ -28,8 +38,8 @@ afterEach(() => {
 function makeRow(overrides: Partial<KnowledgeRow> = {}): KnowledgeRow {
 	return {
 		id: 0, filePath: "decisions/test.json", contentHash: "", title: "Test",
-		content: "test content", subType: "decision", projectRemote: "", projectPath: tmpDir,
-		projectName: "test", branch: "main", createdAt: new Date().toISOString(),
+		content: "test content", subType: "decision", projectId,
+		branch: "main", createdAt: new Date().toISOString(),
 		updatedAt: "", hitCount: 0, lastAccessed: "", enabled: true, ...overrides,
 	};
 }

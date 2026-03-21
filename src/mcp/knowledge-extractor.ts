@@ -2,7 +2,7 @@ import { appendAudit } from "../spec/audit.js";
 import { SpecDir } from "../spec/types.js";
 import type { Store } from "../store/index.js";
 import { upsertKnowledge } from "../store/knowledge.js";
-import { detectProject } from "../store/project.js";
+import { resolveOrRegisterProject } from "../store/project.js";
 import type { DecisionEntry, KnowledgeRow, PatternEntry } from "../types.js";
 import { truncate } from "./helpers.js";
 import { writeKnowledgeFile } from "./ledger.js";
@@ -127,7 +127,7 @@ export function saveKnowledgeEntries(
 	entries: Array<DecisionEntry | PatternEntry>,
 	subType: "decision" | "pattern",
 ): number {
-	const proj = detectProject(projectPath);
+	const proj = resolveOrRegisterProject(store, projectPath);
 	let saved = 0;
 
 	for (const entry of entries) {
@@ -135,14 +135,12 @@ export function saveKnowledgeEntries(
 			const filePath = writeKnowledgeFile(projectPath, subType, entry.id, entry);
 			const row: KnowledgeRow = {
 				id: 0,
+				projectId: proj.id,
 				filePath,
 				contentHash: "",
 				title: entry.title,
 				content: JSON.stringify(entry),
 				subType,
-				projectRemote: proj.remote,
-				projectPath: proj.path,
-				projectName: proj.name,
 				branch: proj.branch,
 				createdAt: "",
 				updatedAt: "",

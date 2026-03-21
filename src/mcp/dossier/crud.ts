@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { unlinkTaskFromAllEpics } from "../../epic/index.js";
 import { clearReviewGate, readReviewGate } from "../../hooks/review-gate.js";
 import { appendAudit } from "../../spec/audit.js";
+import { stripTemplate } from "../../spec/templates.js";
 import type { SpecFile, SpecSize, SpecType } from "../../spec/types.js";
 import {
 	readActive,
@@ -40,7 +41,11 @@ export function dossierUpdate(projectPath: string, store: Store, params: Dossier
 		if (mode === "replace") {
 			sd.writeFile(file, params.content);
 		} else {
-			sd.appendFile(file, params.content);
+			// Strip template content before appending (FR-16)
+			let existing = "";
+			try { existing = sd.readFile(file); } catch { /* file may not exist */ }
+			const stripped = stripTemplate(existing);
+			sd.writeFile(file, stripped + params.content);
 		}
 	} catch (err) {
 		return errorResult(`${mode} failed: ${err}`);

@@ -1,19 +1,44 @@
 export interface KnowledgeRow {
 	id: number;
+	projectId: string;
 	filePath: string;
 	contentHash: string;
 	title: string;
 	content: string;
 	subType: string;
-	projectRemote: string;
-	projectPath: string;
-	projectName: string;
 	branch: string;
 	createdAt: string;
 	updatedAt: string;
 	hitCount: number;
 	lastAccessed: string;
 	enabled: boolean;
+}
+
+export interface ProjectRecord {
+	id: string;
+	name: string;
+	remote: string;
+	path: string;
+	branch: string;
+	registeredAt: string;
+	lastSeenAt: string;
+	status: string;
+	metadata: string;
+}
+
+export interface SpecIndexRow {
+	id: number;
+	projectId: string;
+	slug: string;
+	fileName: string;
+	contentHash: string;
+	title: string;
+	content: string;
+	size: string;
+	specType: string;
+	status: string;
+	createdAt: string;
+	updatedAt: string;
 }
 
 export interface KnowledgeStats {
@@ -30,6 +55,7 @@ export interface LowVitalityRow extends KnowledgeRow {
 export interface VectorMatch {
 	sourceId: number;
 	score: number;
+	source?: "knowledge" | "spec";
 }
 
 export interface KnowledgeConflict {

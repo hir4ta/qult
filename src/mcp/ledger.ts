@@ -11,7 +11,7 @@ import {
 	promoteSubType,
 	upsertKnowledge,
 } from "../store/knowledge.js";
-import { detectProject } from "../store/project.js";
+import { resolveOrRegisterProject } from "../store/project.js";
 import type { DecisionEntry, KnowledgeRow, PatternEntry, RuleEntry } from "../types.js";
 import { VALID_SUB_TYPES } from "../types.js";
 import { searchPipeline, trackHitCounts, truncate } from "./helpers.js";
@@ -413,17 +413,15 @@ async function ledgerSave(store: Store, emb: Embedder | null, params: LedgerPara
 	const filePath = writeKnowledgeFile(projectPath, subType, id, entry);
 
 	// DB upsert for search index.
-	const projInfo = detectProject(projectPath);
+	const projInfo = resolveOrRegisterProject(store, projectPath);
 	const row: KnowledgeRow = {
 		id: 0,
+		projectId: projInfo.id,
 		filePath,
 		contentHash: "",
 		title: params.title,
 		content: JSON.stringify(entry),
 		subType,
-		projectRemote: projInfo.remote,
-		projectPath: projInfo.path,
-		projectName: projInfo.name,
 		branch: projInfo.branch,
 		createdAt: "",
 		updatedAt: "",

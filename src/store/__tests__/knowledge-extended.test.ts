@@ -20,12 +20,22 @@ import {
 	upsertKnowledge,
 } from "../knowledge.js";
 
+function insertTestProject(store: Store, id = "test-project-id"): string {
+	store.db.prepare(`
+		INSERT OR IGNORE INTO projects (id, name, remote, path, branch, registered_at, last_seen_at, status)
+		VALUES (?, 'test', '', '/project', '', datetime('now'), datetime('now'), 'active')
+	`).run(id);
+	return id;
+}
+
 let store: Store;
 let tmpDir: string;
+let projectId: string;
 
 beforeEach(() => {
 	tmpDir = mkdtempSync(join(tmpdir(), "knowledge-ext-test-"));
 	store = Store.open(join(tmpDir, "test.db"));
+	projectId = insertTestProject(store);
 });
 
 afterEach(() => {
@@ -36,8 +46,8 @@ afterEach(() => {
 function makeRow(overrides: Partial<KnowledgeRow> = {}): KnowledgeRow {
 	return {
 		id: 0, filePath: "decisions/test.json", contentHash: "", title: "Test",
-		content: "test content", subType: "decision", projectRemote: "origin",
-		projectPath: "/project", projectName: "test", branch: "main",
+		content: "test content", subType: "decision", projectId,
+		branch: "main",
 		createdAt: new Date().toISOString(), updatedAt: "", hitCount: 0,
 		lastAccessed: "", enabled: true, ...overrides,
 	};
@@ -168,7 +178,7 @@ describe("getRecentDecisions", () => {
 		}));
 
 		const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-		const results = getRecentDecisions(store, "origin", "/project", sevenDaysAgo, 5);
+		const results = getRecentDecisions(store, projectId, sevenDaysAgo, 5);
 		expect(results.length).toBeGreaterThanOrEqual(1);
 	});
 
@@ -179,7 +189,7 @@ describe("getRecentDecisions", () => {
 		}));
 
 		const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-		const results = getRecentDecisions(store, "origin", "/project", sevenDaysAgo, 5);
+		const results = getRecentDecisions(store, projectId, sevenDaysAgo, 5);
 		expect(results.length).toBe(0);
 	});
 });
@@ -191,7 +201,7 @@ describe("deleteOrphanKnowledge", () => {
 		}));
 
 		const validFiles = new Set<string>(); // empty = all are orphans
-		const deleted = deleteOrphanKnowledge(store, "origin", "/project", "main", validFiles);
+		const deleted = deleteOrphanKnowledge(store, projectId, "main", validFiles);
 		expect(deleted).toBe(1);
 	});
 
@@ -201,7 +211,7 @@ describe("deleteOrphanKnowledge", () => {
 		}));
 
 		const validFiles = new Set(["decisions/keep.json"]);
-		const deleted = deleteOrphanKnowledge(store, "origin", "/project", "main", validFiles);
+		const deleted = deleteOrphanKnowledge(store, projectId, "main", validFiles);
 		expect(deleted).toBe(0);
 	});
 });
@@ -246,10 +256,10 @@ describe("countKnowledge", () => {
 			filePath: "decisions/c2.json",
 		}));
 
-		expect(countKnowledge(store, "origin", "/project")).toBe(2);
+		expect(countKnowledge(store, projectId)).toBe(2);
 	});
 
 	it("returns 0 for empty project", () => {
-		expect(countKnowledge(store, "none", "/none")).toBe(0);
+		expect(countKnowledge(store, "nonexistent-project")).toBe(0);
 	});
 });

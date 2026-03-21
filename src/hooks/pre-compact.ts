@@ -12,7 +12,7 @@ import {
 } from "../spec/types.js";
 import { openDefaultCached } from "../store/index.js";
 import { upsertKnowledge } from "../store/knowledge.js";
-import { detectProject } from "../store/project.js";
+import { resolveOrRegisterProject } from "../store/project.js";
 import type { KnowledgeRow } from "../types.js";
 import type { HookEvent } from "./dispatcher.js";
 import { notifyUser } from "./dispatcher.js";
@@ -28,7 +28,7 @@ export async function preCompact(ev: HookEvent, _signal: AbortSignal): Promise<v
 	}
 
 	const projectPath = ev.cwd;
-	const proj = detectProject(projectPath);
+	const proj = resolveOrRegisterProject(store, projectPath);
 
 	// Extract decisions from transcript if available.
 	if (ev.transcript_path) {
@@ -41,14 +41,12 @@ export async function preCompact(ev: HookEvent, _signal: AbortSignal): Promise<v
 					const dec = decisions[idx]!;
 					const row: KnowledgeRow = {
 						id: 0,
+						projectId: proj.id,
 						filePath: `decisions/compact/${ts}-${idx}`,
 						contentHash: "",
 						title: dec.title,
 						content: dec.content,
 						subType: "decision",
-						projectRemote: proj.remote,
-						projectPath: proj.path,
-						projectName: proj.name,
 						branch: proj.branch,
 						createdAt: "",
 						updatedAt: "",
@@ -76,14 +74,12 @@ export async function preCompact(ev: HookEvent, _signal: AbortSignal): Promise<v
 				const title = `${proj.name} > ${taskSlug} > chapter > tasks-state`;
 				const row: KnowledgeRow = {
 					id: 0,
+					projectId: proj.id,
 					filePath: `chapters/${taskSlug}/compact-${Date.now()}`,
 					contentHash: "",
 					title,
 					content: tasksContent.slice(0, 2000),
 					subType: "snapshot",
-					projectRemote: proj.remote,
-					projectPath: proj.path,
-					projectName: proj.name,
 					branch: proj.branch,
 					createdAt: "",
 					updatedAt: "",

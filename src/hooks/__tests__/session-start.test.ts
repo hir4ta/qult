@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Store } from "../../store/index.js";
 import { countKnowledge, upsertKnowledge } from "../../store/knowledge.js";
@@ -22,6 +23,7 @@ vi.mock("../../store/index.js", async (importOriginal) => {
 beforeEach(() => {
 	tmpDir = mkdtempSync(join(tmpdir(), "session-start-test-"));
 	store = Store.open(join(tmpDir, "test.db"));
+	insertTestProject(store.db);
 });
 
 afterEach(() => {
@@ -29,11 +31,21 @@ afterEach(() => {
 	rmSync(tmpDir, { recursive: true, force: true });
 });
 
+const TEST_PROJECT_ID = "test-project-id";
+
+function insertTestProject(db: Database.Database, id = TEST_PROJECT_ID): string {
+	db.prepare(`
+		INSERT OR IGNORE INTO projects (id, name, remote, path, branch, registered_at, last_seen_at, status)
+		VALUES (?, 'test', '', '/test', '', datetime('now'), datetime('now'), 'active')
+	`).run(id);
+	return id;
+}
+
 function makeKnowledgeRow(overrides: Partial<KnowledgeRow> = {}): KnowledgeRow {
 	return {
 		id: 0, filePath: "decisions/test.json", contentHash: "", title: "Test",
 		content: '{"id":"test","title":"Test"}', subType: "decision",
-		projectRemote: "", projectPath: tmpDir, projectName: "test-project",
+		projectId: TEST_PROJECT_ID,
 		branch: "main", createdAt: new Date().toISOString(), updatedAt: "",
 		hitCount: 0, lastAccessed: "", enabled: true, ...overrides,
 	};
@@ -122,14 +134,14 @@ describe("sessionStart", () => {
 	});
 
 	it("cleans orphan entries", async () => {
-		// Use detectProject to match the projectRemote/Path that sessionStart uses
-		const { detectProject } = await import("../../store/project.js");
-		const proj = detectProject(tmpDir);
+		// Use resolveOrRegisterProject to get a project_id that sessionStart will use
+		const { resolveOrRegisterProject } = await import("../../store/project.js");
+		const projRecord = resolveOrRegisterProject(store, tmpDir);
 
 		// Insert entry with matching project info but no corresponding file
 		upsertKnowledge(store, makeKnowledgeRow({
 			filePath: "decisions/orphan.json", title: "Orphan",
-			projectRemote: proj.remote, projectPath: proj.path, branch: proj.branch,
+			projectId: projRecord.id, branch: projRecord.branch,
 		}));
 		expect((store.db.prepare("SELECT COUNT(*) as c FROM knowledge_index").get() as any).c).toBe(1);
 

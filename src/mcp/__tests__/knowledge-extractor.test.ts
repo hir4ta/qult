@@ -189,6 +189,7 @@ describe("extractReviewFindings", () => {
 
 vi.mock("../../store/project.js", () => ({
 	detectProject: () => ({ remote: "test-remote", path: "/test/path", name: "test-project", branch: "main" }),
+	resolveOrRegisterProject: () => ({ id: "test-project-id", name: "test-project", remote: "test-remote", path: "/test/path", branch: "main", registeredAt: new Date().toISOString(), lastSeenAt: new Date().toISOString(), status: "active", metadata: "{}" }),
 }));
 
 describe("saveKnowledgeEntries", () => {
@@ -198,6 +199,11 @@ describe("saveKnowledgeEntries", () => {
 	beforeEach(() => {
 		tmpDir = mkdtempSync(join(tmpdir(), "ke-test-"));
 		store = Store.open(join(tmpDir, "test.db"));
+		// Insert test project to satisfy FK constraint
+		store.db.prepare(`
+			INSERT OR IGNORE INTO projects (id, name, remote, path, branch, registered_at, last_seen_at, status)
+			VALUES ('test-project-id', 'test', 'test-remote', '/test/path', 'main', datetime('now'), datetime('now'), 'active')
+		`).run();
 		// Create .alfred/knowledge directories
 		mkdirSync(join(tmpDir, ".alfred", "knowledge", "decisions"), { recursive: true });
 		mkdirSync(join(tmpDir, ".alfred", "knowledge", "patterns"), { recursive: true });

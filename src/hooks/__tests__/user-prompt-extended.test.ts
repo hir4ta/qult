@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { KnowledgeRow } from "../../types.js";
 import type { ScoredDoc } from "../../mcp/helpers.js";
@@ -53,9 +54,7 @@ describe("buildRelevanceExplanation", () => {
 				title: "Test",
 				content: "{}",
 				subType: overrides.subType ?? "decision",
-				projectRemote: "",
-				projectPath: "",
-				projectName: "",
+				projectId: "",
 				branch: "",
 				createdAt: overrides.createdAt ?? new Date().toISOString(),
 				updatedAt: "",
@@ -166,6 +165,16 @@ describe("intentDescription", () => {
 
 // ---- T-1.3: Pipeline integration tests ----
 
+const TEST_PROJECT_ID = "test-project-id";
+
+function insertTestProject(db: Database.Database, id = TEST_PROJECT_ID): string {
+	db.prepare(`
+		INSERT OR IGNORE INTO projects (id, name, remote, path, branch, registered_at, last_seen_at, status)
+		VALUES (?, 'test', '', '/test', '', datetime('now'), datetime('now'), 'active')
+	`).run(id);
+	return id;
+}
+
 // Re-import after mocks are set up
 let store: Store;
 let tmpDir: string;
@@ -205,6 +214,7 @@ describe("userPromptSubmit pipeline", () => {
 	beforeEach(() => {
 		tmpDir = mkdtempSync(join(tmpdir(), "user-prompt-ext-"));
 		store = Store.open(join(tmpDir, "test.db"));
+		insertTestProject(store.db);
 		emittedItems = [];
 	});
 
@@ -252,9 +262,7 @@ describe("userPromptSubmit pipeline", () => {
 			title: "Test knowledge entry for login auth",
 			content: JSON.stringify({ title: "Test login auth decision" }),
 			subType: "decision",
-			projectRemote: "test",
-			projectPath: tmpDir,
-			projectName: "test",
+			projectId: TEST_PROJECT_ID,
 			branch: "main",
 			createdAt: new Date().toISOString(),
 			updatedAt: new Date().toISOString(),

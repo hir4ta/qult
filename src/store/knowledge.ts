@@ -20,9 +20,9 @@ export function upsertKnowledge(store: Store, row: KnowledgeRow): UpsertResult {
 	// Check if content unchanged.
 	const existing = store.db
 		.prepare(
-			"SELECT id, content_hash FROM knowledge_index WHERE project_remote = ? AND project_path = ? AND file_path = ?",
+			"SELECT id, content_hash FROM knowledge_index WHERE project_id = ? AND file_path = ?",
 		)
-		.get(row.projectRemote, row.projectPath, row.filePath) as
+		.get(row.projectId, row.filePath) as
 		| { id: number; content_hash: string }
 		| undefined;
 
@@ -34,28 +34,24 @@ export function upsertKnowledge(store: Store, row: KnowledgeRow): UpsertResult {
 	const result = store.db
 		.prepare(`
     INSERT INTO knowledge_index
-    (file_path, content_hash, title, content, sub_type,
-     project_remote, project_path, project_name, branch,
-     created_at, updated_at, hit_count, last_accessed, enabled)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, '', 1)
-    ON CONFLICT(project_remote, project_path, file_path) DO UPDATE SET
+    (project_id, file_path, content_hash, title, content, sub_type,
+     branch, created_at, updated_at, hit_count, last_accessed, enabled)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, '', 1)
+    ON CONFLICT(project_id, file_path) DO UPDATE SET
      content_hash = excluded.content_hash,
      title = excluded.title,
      content = excluded.content,
      sub_type = excluded.sub_type,
-     project_name = excluded.project_name,
      branch = excluded.branch,
      updated_at = excluded.updated_at
   `)
 		.run(
+			row.projectId,
 			row.filePath,
 			row.contentHash,
 			row.title,
 			row.content,
 			row.subType,
-			row.projectRemote,
-			row.projectPath,
-			row.projectName,
 			row.branch,
 			row.createdAt,
 			row.updatedAt,
@@ -76,20 +72,19 @@ export function deleteKnowledge(store: Store, id: number): void {
 
 export function deleteKnowledgeByProject(
 	store: Store,
-	projectRemote: string,
-	projectPath: string,
+	projectId: string,
 ): number {
 	const txn = store.db.transaction(() => {
 		store.db
 			.prepare(`
       DELETE FROM embeddings WHERE source = 'knowledge' AND source_id IN
-      (SELECT id FROM knowledge_index WHERE project_remote = ? AND project_path = ?)
+      (SELECT id FROM knowledge_index WHERE project_id = ?)
     `)
-			.run(projectRemote, projectPath);
+			.run(projectId);
 
 		const result = store.db
-			.prepare("DELETE FROM knowledge_index WHERE project_remote = ? AND project_path = ?")
-			.run(projectRemote, projectPath);
+			.prepare("DELETE FROM knowledge_index WHERE project_id = ?")
+			.run(projectId);
 		return result.changes;
 	});
 	return txn() as number;
@@ -98,9 +93,8 @@ export function deleteKnowledgeByProject(
 export function getKnowledgeByID(store: Store, id: number): KnowledgeRow | undefined {
 	const row = store.db
 		.prepare(`
-    SELECT id, file_path, content_hash, title, content, sub_type,
-           project_remote, project_path, project_name, branch,
-           created_at, updated_at, hit_count, last_accessed, enabled
+    SELECT id, project_id, file_path, content_hash, title, content, sub_type,
+           branch, created_at, updated_at, hit_count, last_accessed, enabled
     FROM knowledge_index WHERE id = ?
   `)
 		.get(id) as RawKnowledgeRow | undefined;
@@ -112,9 +106,8 @@ export function getKnowledgeByIDs(store: Store, ids: number[]): KnowledgeRow[] {
 	const placeholders = ids.map(() => "?").join(",");
 	const rows = store.db
 		.prepare(`
-    SELECT id, file_path, content_hash, title, content, sub_type,
-           project_remote, project_path, project_name, branch,
-           created_at, updated_at, hit_count, last_accessed, enabled
+    SELECT id, project_id, file_path, content_hash, title, content, sub_type,
+           branch, created_at, updated_at, hit_count, last_accessed, enabled
     FROM knowledge_index WHERE id IN (${placeholders})
   `)
 		.all(...ids) as RawKnowledgeRow[];
@@ -123,39 +116,24 @@ export function getKnowledgeByIDs(store: Store, ids: number[]): KnowledgeRow[] {
 
 export function listKnowledge(
 	store: Store,
-	projectRemote: string,
-	projectPath: string,
-	limit: number,
+	opts?: { projectId?: string; limit?: number; includeDisabled?: boolean },
 ): KnowledgeRow[] {
-	const rows = store.db
-		.prepare(`
-    SELECT id, file_path, content_hash, title, content, sub_type,
-           project_remote, project_path, project_name, branch,
-           created_at, updated_at, hit_count, last_accessed, enabled
-    FROM knowledge_index
-    WHERE project_remote = ? AND project_path = ? AND enabled = 1
-    ORDER BY updated_at DESC LIMIT ?
-  `)
-		.all(projectRemote, projectPath, limit) as RawKnowledgeRow[];
-	return rows.map(mapRow);
-}
+	const limit = opts?.limit ?? 50;
+	const enabledFilter = opts?.includeDisabled ? "" : "AND ki.enabled = 1";
+	const projectFilter = opts?.projectId ? "AND ki.project_id = ?" : "";
+	const params: unknown[] = [];
+	if (opts?.projectId) params.push(opts.projectId);
+	params.push(limit);
 
-export function listAllKnowledge(
-	store: Store,
-	projectRemote: string,
-	projectPath: string,
-	limit: number,
-): KnowledgeRow[] {
 	const rows = store.db
 		.prepare(`
-    SELECT id, file_path, content_hash, title, content, sub_type,
-           project_remote, project_path, project_name, branch,
-           created_at, updated_at, hit_count, last_accessed, enabled
-    FROM knowledge_index
-    WHERE project_remote = ? AND project_path = ?
-    ORDER BY updated_at DESC LIMIT ?
+    SELECT ki.id, ki.project_id, ki.file_path, ki.content_hash, ki.title, ki.content, ki.sub_type,
+           ki.branch, ki.created_at, ki.updated_at, ki.hit_count, ki.last_accessed, ki.enabled
+    FROM knowledge_index ki
+    WHERE 1=1 ${enabledFilter} ${projectFilter}
+    ORDER BY ki.updated_at DESC LIMIT ?
   `)
-		.all(projectRemote, projectPath, limit) as RawKnowledgeRow[];
+		.all(...params) as RawKnowledgeRow[];
 	return rows.map(mapRow);
 }
 
@@ -188,9 +166,8 @@ export function promoteSubType(store: Store, id: number, newSubType: string): vo
 export function getPromotionCandidates(store: Store): KnowledgeRow[] {
 	const rows = store.db
 		.prepare(`
-    SELECT id, file_path, content_hash, title, content, sub_type,
-           project_remote, project_path, project_name, branch,
-           created_at, updated_at, hit_count, last_accessed, enabled
+    SELECT id, project_id, file_path, content_hash, title, content, sub_type,
+           branch, created_at, updated_at, hit_count, last_accessed, enabled
     FROM knowledge_index
     WHERE enabled = 1
       AND (sub_type = 'pattern' AND hit_count >= 15)
@@ -200,32 +177,34 @@ export function getPromotionCandidates(store: Store): KnowledgeRow[] {
 	return rows.map(mapRow);
 }
 
-export function getKnowledgeStats(store: Store): KnowledgeStats {
+export function getKnowledgeStats(store: Store, projectId?: string): KnowledgeStats {
+	const projectFilter = projectId ? "AND project_id = ?" : "";
+	const params: unknown[] = projectId ? [projectId] : [];
+
 	const agg = store.db
 		.prepare(
-			"SELECT COUNT(*) as total, COALESCE(AVG(hit_count), 0) as avg_hits FROM knowledge_index WHERE enabled = 1",
+			`SELECT COUNT(*) as total, COALESCE(AVG(hit_count), 0) as avg_hits FROM knowledge_index WHERE enabled = 1 ${projectFilter}`,
 		)
-		.get() as { total: number; avg_hits: number } | undefined;
+		.get(...params) as { total: number; avg_hits: number } | undefined;
 
 	const bySubType: Record<string, number> = {};
 	const subtypeRows = store.db
 		.prepare(
-			"SELECT sub_type, COUNT(*) as cnt FROM knowledge_index WHERE enabled = 1 GROUP BY sub_type",
+			`SELECT sub_type, COUNT(*) as cnt FROM knowledge_index WHERE enabled = 1 ${projectFilter} GROUP BY sub_type`,
 		)
-		.all() as Array<{ sub_type: string; cnt: number }>;
+		.all(...params) as Array<{ sub_type: string; cnt: number }>;
 	for (const r of subtypeRows) {
 		bySubType[r.sub_type] = r.cnt;
 	}
 
 	const topRows = store.db
 		.prepare(`
-    SELECT id, file_path, content_hash, title, content, sub_type,
-           project_remote, project_path, project_name, branch,
-           created_at, updated_at, hit_count, last_accessed, enabled
-    FROM knowledge_index WHERE enabled = 1
+    SELECT id, project_id, file_path, content_hash, title, content, sub_type,
+           branch, created_at, updated_at, hit_count, last_accessed, enabled
+    FROM knowledge_index WHERE enabled = 1 ${projectFilter}
     ORDER BY hit_count DESC LIMIT 5
   `)
-		.all() as RawKnowledgeRow[];
+		.all(...params) as RawKnowledgeRow[];
 
 	return {
 		total: agg?.total ?? 0,
@@ -239,9 +218,8 @@ export function searchKnowledgeKeyword(store: Store, query: string, limit: numbe
 	const escaped = escapeLIKEContains(query);
 	const rows = store.db
 		.prepare(`
-    SELECT id, file_path, content_hash, title, content, sub_type,
-           project_remote, project_path, project_name, branch,
-           created_at, updated_at, hit_count, last_accessed, enabled
+    SELECT id, project_id, file_path, content_hash, title, content, sub_type,
+           branch, created_at, updated_at, hit_count, last_accessed, enabled
     FROM knowledge_index
     WHERE enabled = 1 AND (content LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\')
     ORDER BY hit_count DESC LIMIT ?
@@ -252,8 +230,7 @@ export function searchKnowledgeKeyword(store: Store, query: string, limit: numbe
 
 export function getRecentDecisions(
 	store: Store,
-	projectRemote: string,
-	projectPath: string,
+	projectId: string,
 	sinceISO: string,
 	limit: number,
 ): Array<{ title: string; content: string; createdAt: string }> {
@@ -261,11 +238,11 @@ export function getRecentDecisions(
 		.prepare(`
     SELECT title, content, created_at FROM knowledge_index
     WHERE sub_type = 'decision'
-      AND project_remote = ? AND project_path = ?
+      AND project_id = ?
       AND created_at > ? AND enabled = 1
     ORDER BY created_at DESC LIMIT ?
   `)
-		.all(projectRemote, projectPath, sinceISO, limit) as Array<{
+		.all(projectId, sinceISO, limit) as Array<{
 		title: string;
 		content: string;
 		created_at: string;
@@ -275,16 +252,15 @@ export function getRecentDecisions(
 
 export function deleteOrphanKnowledge(
 	store: Store,
-	projectRemote: string,
-	projectPath: string,
+	projectId: string,
 	branch: string,
 	validFilePaths: Set<string>,
 ): number {
 	const rows = store.db
 		.prepare(
-			"SELECT id, file_path FROM knowledge_index WHERE project_remote = ? AND project_path = ? AND branch = ?",
+			"SELECT id, file_path FROM knowledge_index WHERE project_id = ? AND branch = ?",
 		)
-		.all(projectRemote, projectPath, branch) as Array<{ id: number; file_path: string }>;
+		.all(projectId, branch) as Array<{ id: number; file_path: string }>;
 
 	let deleted = 0;
 	const delEmbed = store.db.prepare("DELETE FROM embeddings WHERE source = 'knowledge' AND source_id = ?");
@@ -302,12 +278,12 @@ export function deleteOrphanKnowledge(
 	return deleted;
 }
 
-export function countKnowledge(store: Store, projectRemote: string, projectPath: string): number {
+export function countKnowledge(store: Store, projectId: string): number {
 	const row = store.db
 		.prepare(
-			"SELECT COUNT(*) as cnt FROM knowledge_index WHERE project_remote = ? AND project_path = ? AND enabled = 1",
+			"SELECT COUNT(*) as cnt FROM knowledge_index WHERE project_id = ? AND enabled = 1",
 		)
-		.get(projectRemote, projectPath) as { cnt: number };
+		.get(projectId) as { cnt: number };
 	return row.cnt;
 }
 
@@ -320,14 +296,12 @@ function escapeLIKEContains(s: string): string {
 
 export interface RawKnowledgeRow {
 	id: number;
+	project_id: string;
 	file_path: string;
 	content_hash: string;
 	title: string;
 	content: string;
 	sub_type: string;
-	project_remote: string;
-	project_path: string;
-	project_name: string;
 	branch: string;
 	created_at: string;
 	updated_at: string;
@@ -339,14 +313,12 @@ export interface RawKnowledgeRow {
 export function mapRow(r: RawKnowledgeRow): KnowledgeRow {
 	return {
 		id: r.id,
+		projectId: r.project_id,
 		filePath: r.file_path,
 		contentHash: r.content_hash,
 		title: r.title,
 		content: r.content,
 		subType: r.sub_type,
-		projectRemote: r.project_remote,
-		projectPath: r.project_path,
-		projectName: r.project_name,
 		branch: r.branch,
 		createdAt: r.created_at,
 		updatedAt: r.updated_at,

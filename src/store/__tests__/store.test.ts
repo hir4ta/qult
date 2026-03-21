@@ -37,12 +37,22 @@ import {
 	vectorSearchKnowledge,
 } from "../vectors.js";
 
+function insertTestProject(store: Store, id = "test-project-id", path = "/test"): string {
+	store.db.prepare(`
+		INSERT OR IGNORE INTO projects (id, name, remote, path, branch, registered_at, last_seen_at, status)
+		VALUES (?, 'test', '', ?, '', datetime('now'), datetime('now'), 'active')
+	`).run(id, path);
+	return id;
+}
+
 let store: Store;
 let tmpDir: string;
+let projectId: string;
 
 beforeEach(() => {
 	tmpDir = mkdtempSync(join(tmpdir(), "alfred-test-"));
 	store = Store.open(join(tmpDir, "test.db"));
+	projectId = insertTestProject(store);
 });
 
 afterEach(() => {
@@ -51,7 +61,7 @@ afterEach(() => {
 });
 
 describe("Store", () => {
-	it("opens and migrates to V8", () => {
+	it("opens and migrates to V9", () => {
 		expect(store.schemaVersionCurrent()).toBe(SCHEMA_VERSION);
 	});
 
@@ -70,9 +80,7 @@ describe("Knowledge CRUD", () => {
 		title: "Test Entry",
 		content: "This is test content",
 		subType: "decision",
-		projectRemote: "github.com/user/repo",
-		projectPath: "/tmp/repo",
-		projectName: "repo",
+		projectId: projectId,
 		branch: "main",
 		createdAt: "",
 		updatedAt: "",
@@ -119,11 +127,12 @@ describe("Knowledge CRUD", () => {
 	});
 
 	it("lists knowledge for a project", () => {
+		const otherProjectId = insertTestProject(store, "other-project-id", "/other");
 		upsertKnowledge(store, makeRow({ filePath: "a.md", title: "A" }));
 		upsertKnowledge(store, makeRow({ filePath: "b.md", title: "B" }));
-		upsertKnowledge(store, makeRow({ filePath: "c.md", title: "C", projectPath: "/other" }));
+		upsertKnowledge(store, makeRow({ filePath: "c.md", title: "C", projectId: otherProjectId }));
 
-		const rows = listKnowledge(store, "github.com/user/repo", "/tmp/repo", 10);
+		const rows = listKnowledge(store, { projectId, limit: 10 });
 		expect(rows).toHaveLength(2);
 	});
 
@@ -157,7 +166,7 @@ describe("Knowledge CRUD", () => {
 	it("counts knowledge", () => {
 		upsertKnowledge(store, makeRow({ filePath: "a.md" }));
 		upsertKnowledge(store, makeRow({ filePath: "b.md" }));
-		expect(countKnowledge(store, "github.com/user/repo", "/tmp/repo")).toBe(2);
+		expect(countKnowledge(store, projectId)).toBe(2);
 	});
 
 	it("returns knowledge stats", () => {
@@ -219,9 +228,7 @@ describe("Vectors", () => {
 			title: "A",
 			content: "A",
 			subType: "decision",
-			projectRemote: "",
-			projectPath: "/tmp",
-			projectName: "test",
+			projectId: projectId,
 			branch: "",
 			createdAt: "",
 			updatedAt: "",
@@ -250,9 +257,7 @@ describe("Vectors", () => {
 			title: "A",
 			content: "A",
 			subType: "decision",
-			projectRemote: "",
-			projectPath: "/tmp",
-			projectName: "test",
+			projectId: projectId,
 			branch: "",
 			createdAt: "",
 			updatedAt: "",
@@ -278,9 +283,7 @@ describe("FTS", () => {
 			title: "React Hooks Guide",
 			content: "useCallback and useMemo patterns",
 			subType: "pattern",
-			projectRemote: "",
-			projectPath: "/tmp",
-			projectName: "test",
+			projectId: projectId,
 			branch: "",
 			createdAt: "",
 			updatedAt: "",

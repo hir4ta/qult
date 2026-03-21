@@ -25,7 +25,7 @@ import { detectProject } from "../store/project.js";
 import type { KnowledgeRow } from "../types.js";
 
 /** Map KnowledgeRow to frontend KnowledgeEntry shape. */
-function toKnowledgeEntry(r: KnowledgeRow) {
+function toKnowledgeEntry(r: KnowledgeRow, projectName?: string) {
 	let tags: string[] = [];
 	try { tags = JSON.parse(r.content).tags ?? []; } catch { /* raw content */ }
 	return {
@@ -37,7 +37,7 @@ function toKnowledgeEntry(r: KnowledgeRow) {
 		content: r.content,
 		saved_at: r.createdAt,
 		enabled: Boolean(r.enabled),
-		project_name: r.projectName,
+		project_name: projectName ?? "",
 		tags,
 	};
 }
@@ -268,10 +268,13 @@ export function createApp(
 		// Show all projects — cross-project knowledge dashboard.
 		const rows = store.db
 			.prepare(`
-      SELECT id, file_path, content_hash, title, content, sub_type,
-             project_remote, project_path, project_name, branch,
-             created_at, updated_at, hit_count, last_accessed, enabled
-      FROM knowledge_index WHERE enabled = 1 ORDER BY updated_at DESC LIMIT ?
+      SELECT ki.id, ki.file_path, ki.content_hash, ki.title, ki.content, ki.sub_type,
+             ki.project_id, ki.branch,
+             ki.created_at, ki.updated_at, ki.hit_count, ki.last_accessed, ki.enabled,
+             COALESCE(p.name, '') as project_name
+      FROM knowledge_index ki
+      LEFT JOIN projects p ON p.id = ki.project_id
+      WHERE ki.enabled = 1 ORDER BY ki.updated_at DESC LIMIT ?
     `)
 			.all(limit) as Array<Record<string, unknown>>;
 		const entries = rows.map((r: Record<string, unknown>) => ({
@@ -293,7 +296,7 @@ export function createApp(
 		if (!query) return c.json({ error: "query parameter 'q' is required" }, 400);
 		const limit = Math.min(parseInt(c.req.query("limit") ?? "10", 10) || 10, 500);
 		const entries = searchKnowledgeFTS(store, query, limit);
-		return c.json({ entries: entries.map(toKnowledgeEntry), method: "fts5" });
+		return c.json({ entries: entries.map((r) => toKnowledgeEntry(r)), method: "fts5" });
 	});
 
 	app.get("/api/knowledge/stats", (c) => {
@@ -305,15 +308,17 @@ export function createApp(
 		const limit = Math.min(parseInt(c.req.query("limit") ?? "20", 10) || 20, 100);
 		const rows = store.db
 			.prepare(`
-      SELECT id, file_path, content_hash, title, content, sub_type,
-             project_remote, project_path, project_name, branch,
-             created_at, updated_at, hit_count, last_accessed, enabled
-      FROM knowledge_index
-      WHERE enabled = 1 AND sub_type = 'decision'
-      ORDER BY created_at DESC LIMIT ?
+      SELECT ki.id, ki.file_path, ki.content_hash, ki.title, ki.content, ki.sub_type,
+             ki.project_id, ki.branch,
+             ki.created_at, ki.updated_at, ki.hit_count, ki.last_accessed, ki.enabled,
+             COALESCE(p.name, '') as project_name
+      FROM knowledge_index ki
+      LEFT JOIN projects p ON p.id = ki.project_id
+      WHERE ki.enabled = 1 AND ki.sub_type = 'decision'
+      ORDER BY ki.created_at DESC LIMIT ?
     `)
 			.all(limit) as Array<Record<string, unknown>>;
-		// Reuse the same inline mapping pattern as /api/knowledge (line 272).
+		// Reuse the same inline mapping pattern as /api/knowledge.
 		const mapped = rows.map((r) => ({
 			id: r.id,
 			label: r.title as string,
@@ -358,7 +363,7 @@ export function createApp(
 	});
 
 	app.get("/api/knowledge/candidates", (c) => {
-		const candidates = getPromotionCandidates(store).map(toKnowledgeEntry);
+		const candidates = getPromotionCandidates(store).map((r) => toKnowledgeEntry(r));
 		return c.json({ candidates });
 	});
 

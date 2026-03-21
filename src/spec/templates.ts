@@ -61,6 +61,8 @@ export function renderForSize(
 	return rendered;
 }
 
+export const TEMPLATE_MARKER = "<!-- alfred:template -->";
+
 function renderTemplate(file: SpecFile, data: TemplateData, lang: string): string {
 	const templates = lang === "ja" ? JA_TEMPLATES : EN_TEMPLATES;
 	const tmpl = templates[file];
@@ -68,9 +70,17 @@ function renderTemplate(file: SpecFile, data: TemplateData, lang: string): strin
 
 	const description = data.description || DEFAULT_DESCRIPTIONS[lang] || DEFAULT_DESCRIPTIONS.en!;
 
-	return tmpl
+	const rendered = tmpl
 		.replace(/\{\{taskSlug\}\}/g, data.taskSlug)
 		.replace(/\{\{description\}\}/g, description)
 		.replace(/\{\{date\}\}/g, data.date)
 		.replace(/\{\{specType\}\}/g, data.specType);
+
+	return `${TEMPLATE_MARKER}\n${rendered}`;
+}
+
+/** Strip template content from a file if the marker is present. Returns empty string if template-only. */
+export function stripTemplate(content: string): string {
+	if (!content.includes(TEMPLATE_MARKER)) return content;
+	return "";
 }

@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Store } from "../../store/index.js";
 import { upsertKnowledge } from "../../store/knowledge.js";
@@ -10,9 +11,20 @@ import { recencyFactor, searchPipeline, trackHitCounts, truncate } from "../help
 let tmpDir: string;
 let store: Store;
 
+const TEST_PROJECT_ID = "test-project-id";
+
+function insertTestProject(db: Database.Database, id = TEST_PROJECT_ID): string {
+	db.prepare(`
+		INSERT OR IGNORE INTO projects (id, name, remote, path, branch, registered_at, last_seen_at, status)
+		VALUES (?, 'test', '', '/test', '', datetime('now'), datetime('now'), 'active')
+	`).run(id);
+	return id;
+}
+
 beforeEach(() => {
 	tmpDir = mkdtempSync(join(tmpdir(), "helpers-test-"));
 	store = Store.open(join(tmpDir, "test.db"));
+	insertTestProject(store.db);
 });
 
 afterEach(() => {
@@ -23,8 +35,8 @@ afterEach(() => {
 function makeRow(overrides: Partial<KnowledgeRow> = {}): KnowledgeRow {
 	return {
 		id: 0, filePath: "decisions/test.json", contentHash: "", title: "Test",
-		content: '{"id":"test"}', subType: "decision", projectRemote: "", projectPath: tmpDir,
-		projectName: "test", branch: "main", createdAt: new Date().toISOString(), updatedAt: "",
+		content: '{"id":"test"}', subType: "decision", projectId: TEST_PROJECT_ID,
+		branch: "main", createdAt: new Date().toISOString(), updatedAt: "",
 		hitCount: 0, lastAccessed: "", enabled: true, ...overrides,
 	};
 }

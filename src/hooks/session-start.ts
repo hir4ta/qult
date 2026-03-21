@@ -9,7 +9,7 @@ import {
 	getRecentDecisions,
 	upsertKnowledge,
 } from "../store/knowledge.js";
-import { detectProject } from "../store/project.js";
+import { resolveOrRegisterProject } from "../store/project.js";
 import type { KnowledgeRow } from "../types.js";
 import type { DirectiveItem } from "./directives.js";
 import { emitDirectives } from "./directives.js";
@@ -77,7 +77,7 @@ function syncKnowledgeIndex(
 	projectPath: string,
 ): void {
 	const knowledgeDir = join(projectPath, ".alfred", "knowledge");
-	const proj = detectProject(projectPath);
+	const proj = resolveOrRegisterProject(store, projectPath);
 	let synced = 0;
 	const validFilePaths = new Set<string>();
 
@@ -101,14 +101,12 @@ function syncKnowledgeIndex(
 					typeDir === "decisions" ? "decision" : typeDir === "patterns" ? "pattern" : "rule";
 				const row: KnowledgeRow = {
 					id: 0,
+					projectId: proj.id,
 					filePath,
 					contentHash: "",
 					title: entry.title ?? entry.id ?? file.replace(".json", ""),
 					content: raw,
 					subType,
-					projectRemote: proj.remote,
-					projectPath: proj.path,
-					projectName: proj.name,
 					branch: proj.branch,
 					createdAt: entry.createdAt ?? "",
 					updatedAt: "",
@@ -132,6 +130,7 @@ function syncKnowledgeIndex(
 				const { frontmatter, body } = parseFrontmatter(content);
 				const row: KnowledgeRow = {
 					id: 0,
+					projectId: proj.id,
 					filePath: file,
 					contentHash: "",
 					title: frontmatter.id ?? file.replace(".md", ""),
@@ -144,9 +143,6 @@ function syncKnowledgeIndex(
 								: frontmatter.type === "rule"
 									? "rule"
 									: "snapshot",
-					projectRemote: proj.remote,
-					projectPath: proj.path,
-					projectName: proj.name,
 					branch: proj.branch,
 					createdAt: frontmatter.created_at ?? "",
 					updatedAt: "",
@@ -164,7 +160,7 @@ function syncKnowledgeIndex(
 
 	// Clean orphan entries: DB is a derived index; entries without source files are stale.
 	try {
-		const deleted = deleteOrphanKnowledge(store, proj.remote, proj.path, proj.branch, validFilePaths);
+		const deleted = deleteOrphanKnowledge(store, proj.id, proj.branch, validFilePaths);
 		if (deleted > 0) {
 			notifyUser("cleaned %d orphan knowledge entries from index", deleted);
 		}
@@ -198,7 +194,7 @@ function parseFrontmatter(content: string): { frontmatter: Record<string, string
 
 function suggestLedgerReflect(store: ReturnType<typeof openDefaultCached>): void {
 	try {
-		const count = countKnowledge(store, "", "");
+		const count = countKnowledge(store, "");
 		if (count < 20) return;
 		notifyUser(
 			"knowledge health: %d memories. Consider `ledger action=reflect` for a health report.",
@@ -236,8 +232,8 @@ function buildSpecContextItems(
 	let buf = `\n--- Alfred Protocol: Active Task '${taskSlug}' ---\n`;
 
 	const isCompact = source === "compact";
-	const proj = detectProject(projectPath);
-	const memoryCount = countKnowledge(store, proj.remote, proj.path);
+	const proj = resolveOrRegisterProject(store, projectPath);
+	const memoryCount = countKnowledge(store, proj.id);
 
 	if (isCompact || memoryCount <= 5) {
 		// Full context recovery: inject all spec files.
@@ -290,11 +286,11 @@ function injectRecentDecisions(
 		return [];
 	}
 
-	const proj = detectProject(projectPath);
+	const proj = resolveOrRegisterProject(store, projectPath);
 	const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
 	try {
-		const rows = getRecentDecisions(store, proj.remote, proj.path, sevenDaysAgo, 5);
+		const rows = getRecentDecisions(store, proj.id, sevenDaysAgo, 5);
 		if (rows.length === 0) return [];
 
 		const lines = rows.map((r) => `- ${r.title}: ${truncate(r.content, 150)}`);
