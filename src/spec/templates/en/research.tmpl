@@ -1,9 +1,58 @@
 # Research: {{taskSlug}}
 
-## Discovery
+## Existing Code Analysis
+
+<!--
+Read relevant code and document the current state:
+- Record file paths and line numbers
+- Note existing patterns, types, APIs
+- Identify reusable components
+-->
 
 ## Gap Analysis
 
-## Options
+<!--
+| Current State | Required | Gap | Difficulty |
+|---------------|----------|-----|-----------|
+| ... | ... | ... | S/M/L |
+
+Map: current → desired → delta
+-->
+
+## Implementation Options
+
+<!--
+For each option, document:
+- **Pros / Cons**
+- **Effort estimate** (S/M/L)
+- **Risks**
+- **Recommendation rationale**
+
+Minimum 2 options. "Do nothing" is a valid option.
+-->
+
+### Option A: [Recommended]
+
+### Option B: [Alternative]
+
+## Risks & Unknowns
+
+<!--
+Each risk should have a confidence score:
+  <!-- confidence: N | source: code/inference/assumption -->
+
+1M context considerations:
+- This research may be lost during compaction → persist key findings via ledger save
+- For cross-session work, this file is the sole context source → write self-contained
+-->
 
 ## Done Criteria
+
+<!--
+Conditions for research to be considered "complete":
+- [ ] All relevant code has been read
+- [ ] Gaps are clearly identified
+- [ ] At least 2 options compared
+- [ ] Risks enumerated
+- [ ] Recommended option selected with rationale
+-->

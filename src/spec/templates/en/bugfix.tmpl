@@ -4,20 +4,73 @@
 
 ## Bug Summary
 
+<!-- 1-2 sentences describing the problem. What happens vs. what should happen. -->
+
 ## Severity & Impact
 
-<!-- P0-P3 -->
+<!--
+| Field | Value |
+|-------|-------|
+| Severity | P0 (service down) / P1 (major feature broken) / P2 (workaround exists) / P3 (minor) |
+| Impact | Affected users / features / components |
+| Frequency | Always / under specific conditions / rare |
+| Workaround | Yes (describe) / None |
+-->
 
 ## Reproduction Steps
 
 1.
+2.
+3.
+
+<!-- If not reproducible, record environment info (OS, Node version, alfred version) -->
 
 ## Root Cause Analysis
 
 ### 5 Whys
 
-1. Why?
+1. Why? →
+2. Why? →
+3. Why? →
+4. Why? →
+5. Why (root cause)? →
+
+### Code Trace
+
+<!--
+- **Symptom location**: `src/path/to/file.ts:line` — what happens
+- **Root cause location**: `src/path/to/file.ts:line` — why it happens
+- **Data flow**: input → processing → point of failure
+-->
 
 ## Fix Strategy
 
+<!--
+- **Files to change**: paths and change summary
+- **Chosen approach**: what and how
+- **Rejected alternatives**: other approaches and why they were dismissed
+- **Risk**: potential side effects of the fix
+-->
+
+## Unchanged Behavior
+
+<!--
+What MUST NOT break:
+- All existing tests pass
+- Backward compatibility of affected APIs/UI
+- Related features continue to work
+-->
+
 ## Regression Prevention
+
+<!--
+- Test to add: TS-N.N (also document in test-specs.md in Gherkin format)
+- What the test prevents: directly tests the bug's recurrence condition
+
+```gherkin
+Scenario: [Bug condition is fixed]
+  Given [precondition that triggered the bug]
+  When [action that caused the bug]
+  Then [correct behavior is observed]
+```
+-->

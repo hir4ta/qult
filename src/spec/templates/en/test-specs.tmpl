@@ -1,13 +1,73 @@
 # Test Specs: {{taskSlug}}
 
-## TS-1.1: [Test Title]
+## Coverage Matrix
 
-- Source: FR-1
-- Category: unit
-- Speed: fast
+<!--
+Verify every FR is covered by tests.
+
+| Req ID | Test IDs | Type | Priority | Status |
+|--------|----------|------|----------|--------|
+| FR-1   | TS-1.1   | unit | P0       | planned |
+
+Type: unit / integration / e2e / manual / perf
+Priority: P0 (must-have) / P1 (important) / P2 (nice-to-have)
+-->
+
+| Req ID | Test IDs | Type | Priority | Status |
+|--------|----------|------|----------|--------|
+| FR-1   | TS-1.1   | unit | P0       | planned |
+
+## Test Cases
+
+<!--
+Write in Gherkin format. Each test must have a source annotation:
+  <!-- source: FR-N -->
+
+EARS → Gherkin mapping:
+- WHILE (state) → Given
+- WHEN (event) → When
+- SHALL (response) → Then
+
+Test names should describe behavior (not implementation).
+-->
+
+### TS-1.1: [Test Title]
+<!-- source: FR-1 -->
 
 ```gherkin
-Given [precondition]
-When [action]
-Then [expected result]
+Scenario: [Scenario name]
+  Given [precondition]
+  When [action]
+  Then [expected result]
 ```
+
+## Edge Case Matrix
+
+<!--
+| Scenario | Input | Expected | Req |
+|----------|-------|----------|-----|
+
+Cover: boundary values, error cases, concurrency, large data sets.
+-->
+
+| Scenario | Input | Expected | Req |
+|----------|-------|----------|-----|
+|          |       |          |     |
+
+## Test Data & Fixtures
+
+<!--
+Data required for tests:
+- Mock/stub strategy: when to mock vs. use real data
+- Fixture files: paths and content overview
+- Environment variables: test-specific configuration
+-->
+
+## Unchanged Behavior (Regression)
+
+<!--
+Existing behavior that MUST NOT break:
+- Existing tests continue to pass
+- Backward compatibility of existing APIs
+- `task test` all passing
+-->

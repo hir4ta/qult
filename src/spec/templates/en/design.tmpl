@@ -1,12 +1,68 @@
 # Design: {{taskSlug}}
 
-## System Context
+## Architecture Overview
 
-## Components
+<!--
+Show the overall structure using ASCII or code block.
+Clarify component dependencies, data flow, and external system boundaries.
+-->
 
-## Data Flow
+## Component Design
+
+<!--
+For each component:
+- **File path**: `src/path/to/file.ts`
+- **Responsibility**: What this component does (1 sentence)
+- **Interface**: Function signatures, type definitions (TypeScript)
+- **Dependencies**: Relationships with other components
+
+IDD principle: Document Why (rationale) and What (external contracts).
+Minimize How (internal implementation details) — AI decides during implementation.
+-->
+
+## Data Models
+
+<!--
+If new tables, columns, or types are introduced:
+- SQL DDL (table definitions, indexes, constraints)
+- TypeScript interfaces
+- Migration strategy (impact on existing data)
+-->
+
+## API Contracts
+
+<!--
+If new/changed endpoints:
+- HTTP method + path + parameters
+- Request/response types
+- Error cases
+- Zod schema names (if added to schemas.ts)
+-->
+
+## Design Decisions
+
+<!--
+| Decision | Choice | Rationale | Alternatives |
+|----------|--------|-----------|--------------|
+
+Important decisions should be persisted via `ledger save sub_type=decision`.
+Design decisions are the only context that survives compaction.
+-->
+
+## Constraints & Non-Goals
+
+<!--
+What this design intentionally does NOT address:
+- Explicit "won't build" prevents AI scope creep
+- Align with Out of Scope in requirements.md
+-->
 
 ## Traceability Matrix
+
+<!--
+Verify every FR maps to a design component → task → test.
+No orphan FRs (without tests) or orphan tasks (without FRs).
+-->
 
 | Req ID | Component | Task ID | Test ID |
 |--------|-----------|---------|---------|
