@@ -160,7 +160,7 @@ describe("ActiveState management", () => {
 		expect(() => switchActive(tmpDir, "task-b")).toThrow("done");
 	});
 
-	it("completes task and switches primary", () => {
+	it("completes task, removes it from _active.md, and switches primary", () => {
 		writeTestState({
 			primary: "task-a",
 			tasks: [
@@ -171,7 +171,18 @@ describe("ActiveState management", () => {
 		const newPrimary = completeTask(tmpDir, "task-a");
 		expect(newPrimary).toBe("task-b");
 		const state = readActiveState(tmpDir);
-		expect(state.tasks.find((t) => t.slug === "task-a")?.status).toBe("done");
+		expect(state.tasks.find((t) => t.slug === "task-a")).toBeUndefined();
+		expect(state.tasks).toHaveLength(1);
+	});
+
+	it("deletes _active.md when last task is completed", () => {
+		writeTestState({
+			primary: "task-a",
+			tasks: [{ slug: "task-a", started_at: "2026-01-01T00:00:00Z" }],
+		});
+		const newPrimary = completeTask(tmpDir, "task-a");
+		expect(newPrimary).toBe("");
+		expect(() => readActiveState(tmpDir)).toThrow();
 	});
 
 	it("manages review status", () => {

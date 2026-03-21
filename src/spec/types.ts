@@ -304,6 +304,17 @@ export function completeTask(projectPath: string, taskSlug: string): string {
 				return s !== "done" && s !== "cancelled" && t.slug !== taskSlug;
 			})?.slug ?? "";
 	}
+
+	// Issue #22: Remove completed entry from _active.md to prevent accumulation.
+	state.tasks = state.tasks.filter((t) => t.slug !== taskSlug);
+	if (state.tasks.length === 0) {
+		try {
+			rmSync(activePath(projectPath));
+		} catch {
+			/* ignore */
+		}
+		return state.primary;
+	}
 	writeActiveState(projectPath, state);
 	return state.primary;
 }
