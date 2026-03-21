@@ -180,7 +180,7 @@ export function validateSpec(
 				const inlineFRs = extractIDs(line, ID.FR);
 				if (inlineFRs.length > 0) tasksWithFR.add(currentTask);
 			}
-			if (currentTask && /(?:^[-\s]*|_)Requirements:\s*FR-/i.test(line)) {
+			if (currentTask && /(?:^[-\s]*|_)Requirements:\s*(?:FR-|NFR-|全|all\b)/i.test(line)) {
 				tasksWithFR.add(currentTask);
 			}
 		}
@@ -210,16 +210,27 @@ export function validateSpec(
 		// Check each TS has Source: FR-N
 		const tsWithSource: Set<string> = new Set();
 		const lines = testSpecsContent.split("\n");
-		let currentTS = "";
+		let currentTSList: string[] = [];
 		for (const line of lines) {
-			const tsMatch = line.match(/#{2,3}\s+(TS-\d+\.\d+)/);
-			if (tsMatch) currentTS = tsMatch[1]!;
+			// Single TS header: ### TS-1.1: ...
+			const tsSingle = line.match(/#{2,3}\s+(TS-\d+\.\d+)(?:\s|:)/);
+			// Range TS header: ### TS-3.2 - TS-3.5: ...
+			const tsRange = line.match(/#{2,3}\s+TS-(\d+)\.(\d+)\s*[-–]\s*TS-\d+\.(\d+)/);
+			if (tsRange) {
+				const wave = tsRange[1]!;
+				const from = parseInt(tsRange[2]!, 10);
+				const to = parseInt(tsRange[3]!, 10);
+				currentTSList = [];
+				for (let i = from; i <= to; i++) currentTSList.push(`TS-${wave}.${i}`);
+			} else if (tsSingle) {
+				currentTSList = [tsSingle[1]!];
+			}
 			if (
-				currentTS &&
+				currentTSList.length > 0 &&
 				(/^-\s*Source:\s*(FR-\d+|NFR-\d+)/i.test(line) ||
 					/<!--\s*source:\s*(FR-\d+|NFR-\d+)/i.test(line))
 			) {
-				tsWithSource.add(currentTS);
+				for (const ts of currentTSList) tsWithSource.add(ts);
 			}
 		}
 		const noSource = tsIDs.filter((ts) => !tsWithSource.has(ts));
