@@ -79,9 +79,10 @@ describe("preToolUse", () => {
 		expect(getDecision()).toBe("allow");
 	});
 
-	it("allows Edit on D spec regardless of review status (skips prompt hook)", async () => {
+	it("allows Edit on legacy D spec (VALID_SIZES updated in Wave 2)", async () => {
 		setupSpec({ size: "D" });
 		await preToolUse(makeEvent("Edit", join(tmpDir, "src/index.ts")));
+		// D still in spec-guard VALID_SIZES until Wave 2 (T-2.1) updates it
 		expect(getDecision()).toBe("allow");
 	});
 
