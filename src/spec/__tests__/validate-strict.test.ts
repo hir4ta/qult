@@ -135,6 +135,20 @@ describe("validateSpec — negative tests (bad specs should fail)", () => {
 		expect(taskToFr?.status).toBe("pass");
 	});
 
+	it("passes task_to_fr with inline FR reference on checkbox line", () => {
+		initSpec("test-inline-fr", "M", "feature", {
+			"requirements.md":
+				"# Requirements\n## Functional Requirements\n### FR-1: A\n### FR-2: B\n### FR-3: C\n## Non-Functional Requirements\n",
+			"tasks.md":
+				"# Tasks\n## Wave 1\n- [ ] T-1.1 (FR-1, FR-2): Do A and B\n- [ ] T-1.2 (FR-3): Do C\n## Wave: Closing\n- [ ] T-C.1 Review\n",
+		});
+		const result = validateSpec(tmpDir, "test-inline-fr", "M", "feature");
+		const taskToFr = result.checks.find((c) => c.name === "task_to_fr");
+		expect(taskToFr?.status).toBe("pass");
+		const frToTask = result.checks.find((c) => c.name === "fr_to_task");
+		expect(frToTask?.status).toBe("pass");
+	});
+
 	it("warns on tasks without FR reference in strict → fails", () => {
 		initSpec("test-task-nofr", "M", "feature", {
 			"requirements.md":

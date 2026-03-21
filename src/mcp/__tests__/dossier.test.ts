@@ -126,6 +126,60 @@ describe("dossier update", () => {
 		});
 		expect(parseResult(result).mode).toBe("replace");
 	});
+
+	it("returns validation_hints when spec has issues", async () => {
+		await handleDossier(store, null, {
+			action: "init",
+			project_path: tmpDir,
+			task_slug: "val-test",
+			size: "S",
+		});
+		// Write requirements with FRs but no tasks referencing them
+		await handleDossier(store, null, {
+			action: "update",
+			project_path: tmpDir,
+			file: "requirements.md",
+			content: "# Requirements\n\nFR-1: Something\nFR-2: Another\n",
+			mode: "replace",
+		});
+		const result = await handleDossier(store, null, {
+			action: "update",
+			project_path: tmpDir,
+			file: "tasks.md",
+			content: "# Tasks\n\n## Wave 1\n\n- [ ] T-1.1: Do something\n\n## Closing Wave\n\n- [ ] Review\n",
+			mode: "replace",
+		});
+		const data = parseResult(result);
+		expect(data.validation_hints).toBeDefined();
+		expect(data.validation_hints.length).toBeGreaterThan(0);
+		expect(data.validation_hints.some((h: string) => h.includes("FR"))).toBe(true);
+	});
+
+	it("omits validation_hints when spec is valid", async () => {
+		await handleDossier(store, null, {
+			action: "init",
+			project_path: tmpDir,
+			task_slug: "valid-test",
+			size: "S",
+			spec_type: "bugfix",
+		});
+		await handleDossier(store, null, {
+			action: "update",
+			project_path: tmpDir,
+			file: "bugfix.md",
+			content: "# Bugfix\n\n" + "A".repeat(250) + "\n",
+			mode: "replace",
+		});
+		const result = await handleDossier(store, null, {
+			action: "update",
+			project_path: tmpDir,
+			file: "tasks.md",
+			content: "# Tasks\n\n## Wave 1\n\n- [ ] T-1.1: Fix\n\n## Closing Wave\n\n- [ ] Review\n",
+			mode: "replace",
+		});
+		const data = parseResult(result);
+		expect(data.validation_hints).toBeUndefined();
+	});
 });
 
 describe("dossier switch", () => {

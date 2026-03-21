@@ -57,6 +57,23 @@ export function dossierUpdate(projectPath: string, store: Store, params: Dossier
 		result.lang = lang;
 	}
 
+	// Early validation feedback: run validateSpec after write and include hints.
+	try {
+		const state = readActiveState(projectPath);
+		const task = state.tasks.find((t) => t.slug === taskSlug);
+		const size = (task?.size ?? "L") as SpecSize;
+		const specType = (task?.spec_type ?? "feature") as SpecType;
+		const valResult = validateSpec(projectPath, taskSlug, size, specType);
+		const issues = valResult.checks
+			.filter((c) => c.status === "fail" || c.status === "warn")
+			.map((c) => `[${c.status}] ${c.message}`);
+		if (issues.length > 0) {
+			result.validation_hints = issues;
+		}
+	} catch {
+		/* fail-open: validation errors don't block update */
+	}
+
 	return jsonResult(result);
 }
 
