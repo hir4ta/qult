@@ -9,6 +9,9 @@ export interface ReviewGate {
 	wave?: number;
 	set_at: string;
 	reason: string;
+	/** When true, Edit/Write is allowed for applying fixes, but gate stays logically active.
+	 *  Next `gate clear` fully removes the gate. Enables review→fix→re-review loop (#15/#20). */
+	fix_mode?: boolean;
 }
 
 /**

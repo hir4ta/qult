@@ -90,12 +90,19 @@ export async function preToolUse(ev: HookEvent): Promise<void> {
 	// Review gate: blocks source edits until spec/wave review is completed.
 	const gate = isGateActive(ev.cwd);
 	if (gate) {
+		// fix_mode: allow Edit/Write for applying fixes, but gate stays active (#15/#20).
+		// Re-review is required before the gate can be fully cleared.
+		if (gate.fix_mode) {
+			allowTool(`Fix mode active for '${gate.slug}' — editing allowed, re-review required before clear`);
+			return;
+		}
 		const gateLabel =
 			gate.gate === "wave-review" ? `Wave ${gate.wave ?? "?"} review` : "Spec self-review";
 		const reason = [
 			`${gateLabel} required for spec '${gate.slug}'. Complete review, then run: dossier action=gate sub_action=clear reason="<review summary>"`,
 			`- Gate reason: ${gate.reason}`,
 			'- "I already reviewed mentally" → Run actual review (3-agent or /alfred:inspect), then clear the gate',
+			`- Need to apply fixes first? Run: dossier action=gate sub_action=fix reason="fixing Critical findings"`,
 		].join("\n");
 		denyTool(reason);
 		return;

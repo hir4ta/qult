@@ -140,6 +140,31 @@ describe("preToolUse — review gate", () => {
 		expect(getDecision()).toBe("deny");
 	});
 
+	it("allows Edit when gate is in fix_mode (#15/#20)", async () => {
+		setupSpec({ size: "L", reviewStatus: "approved" });
+		writeReviewGate(tmpDir, {
+			gate: "wave-review",
+			slug: "test-task",
+			wave: 1,
+			reason: "[fix_mode] fixing Critical findings",
+			fix_mode: true,
+		});
+		await preToolUse(makeEvent("Edit", join(tmpDir, "src/index.ts")));
+		expect(getDecision()).toBe("allow");
+	});
+
+	it("denies Edit when gate is active without fix_mode (#15/#20)", async () => {
+		setupSpec({ size: "L", reviewStatus: "approved" });
+		writeReviewGate(tmpDir, {
+			gate: "wave-review",
+			slug: "test-task",
+			wave: 1,
+			reason: "Wave 1 review.",
+		});
+		await preToolUse(makeEvent("Edit", join(tmpDir, "src/index.ts")));
+		expect(getDecision()).toBe("deny");
+	});
+
 	it("allows Edit to project-external file when gate is active (#16)", async () => {
 		setupSpec({ size: "L", reviewStatus: "approved" });
 		writeReviewGate(tmpDir, {

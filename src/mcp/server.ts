@@ -74,7 +74,7 @@ Size-based scaling: init accepts size (S/M/L/XL) and spec_type (feature/bugfix).
 				.optional()
 				.describe("Required for delete: preview first, then confirm=true"),
 			sub_action: z
-				.enum(["set", "clear", "status"])
+				.enum(["set", "clear", "fix", "status"])
 				.optional()
 				.describe("Gate sub-action (for gate action)"),
 			gate_type: z

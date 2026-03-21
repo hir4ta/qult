@@ -46,8 +46,9 @@ paths:
 ## PreToolUse
 - Review gate enforcement: reads `.alfred/.state/review-gate.json`, blocks Edit/Write when gate active + slug matches active spec
 - Gate types: `spec-review` (auto-set on dossier init), `wave-review` (set per wave via `dossier action=gate`)
-- Enforcement order: .alfred/ exempt → malformed check (empty primary = valid state, not malformed) → review-gate → approval gate (M/L/XL unapproved)
+- Enforcement order: .alfred/ exempt → gate-exempt paths (docs/, .md, .claude/, project-external) → malformed check (empty primary = valid state, not malformed) → review-gate → approval gate (M/L/XL unapproved)
 - Gate clear: `dossier action=gate sub_action=clear reason="..."` (reason required, audit logged)
+- Gate fix mode: `dossier action=gate sub_action=fix reason="..."` — switches gate to `fix_mode: true`, allowing Edit/Write for applying fixes while keeping gate logically active. After fixes, re-run review then `gate clear` to fully remove. Enables review→fix→re-review loop (#15/#20)
 - Spec-first guard: command handler only (prompt-type LLM judge removed in #19). When no active spec and no polish mode, emits stderr advisory warning + `allowTool()`. Enforcement of spec-first rule is via UserPromptSubmit DIRECTIVE (Stage 1), not PreToolUse
 - Active spec optimization: command handler calls `allowTool()` when spec exists and all gates pass. This covers: .alfred/ files, deferred/cancelled specs, and active specs with cleared gates
 

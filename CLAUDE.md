@@ -59,7 +59,7 @@ Build: tsdown (bundle) / vitest (test) / citty (CLI) / hono (HTTP) / @modelconte
 |------|-----------|-------|
 | Spec required | UserPromptSubmit DIRECTIVE + PreToolUse advisory | DIRECTIVE/CONTEXT |
 | Spec approval (M/L/XL) | PreToolUse + dossier complete | DENY |
-| Wave self-review | review-gate.json via PreToolUse | DENY |
+| Wave self-review | review-gate.json via PreToolUse (fix_mode for review→fix→re-review loop) | DENY (fix_mode: ALLOW) |
 | Wave commit + knowledge | PostToolUse DIRECTIVE | DIRECTIVE |
 | Task progress update | Explicit `dossier action=check` | Manual |
 | Final self-review | Closing Wave checkbox + Stop hook | CONTEXT |

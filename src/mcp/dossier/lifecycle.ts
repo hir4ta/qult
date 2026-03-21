@@ -239,6 +239,39 @@ export function dossierGate(projectPath: string, params: DossierParams) {
 			return jsonResult({ cleared: true, reason });
 		}
 
+		case "fix": {
+			// Enter fix_mode: allows Edit/Write while keeping gate logically active (#15/#20).
+			// After applying fixes, re-run review then `gate clear` to fully remove.
+			const gate = readReviewGate(projectPath);
+			if (!gate) {
+				return jsonResult({ fix_mode: false, reason: "no active review gate" });
+			}
+			if (gate.fix_mode) {
+				return jsonResult({ fix_mode: true, reason: "already in fix mode" });
+			}
+
+			const fixReason = params.reason ? truncate(params.reason, 500) : "Applying review fixes";
+			writeReviewGate(projectPath, {
+				...gate,
+				fix_mode: true,
+				reason: `[fix_mode] ${fixReason} (original: ${gate.reason})`,
+			});
+
+			appendAudit(projectPath, {
+				action: "gate.fix",
+				target: gate.slug,
+				detail: fixReason,
+				user: "mcp",
+			});
+
+			return jsonResult({
+				fix_mode: true,
+				slug: gate.slug,
+				reason: fixReason,
+				hint: "Edit/Write now allowed. After fixes, re-run review then `dossier gate clear reason=\"re-review: 0 Critical\"` to fully clear.",
+			});
+		}
+
 		case "status": {
 			const gate = readReviewGate(projectPath);
 			if (!gate) return jsonResult({ gate: null });
@@ -246,7 +279,7 @@ export function dossierGate(projectPath: string, params: DossierParams) {
 		}
 
 		default:
-			return errorResult(`unknown gate sub_action: ${subAction} (valid: set/clear/status)`);
+			return errorResult(`unknown gate sub_action: ${subAction} (valid: set/clear/fix/status)`);
 	}
 }
 
