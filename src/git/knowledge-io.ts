@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from "node:fs";
 import { join, basename, relative } from "node:path";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import { contentHash } from "../store/knowledge.js";
 import { levenshtein } from "../store/fts.js";
 
@@ -99,12 +99,16 @@ export function importKnowledge(
 			}
 		}
 
+		// Sanitize id to prevent path traversal
+		const safeId = (obj.id as string).replace(/[^a-zA-Z0-9_\-]/g, "-");
+		if (!safeId) continue;
+
 		// Determine sub_type from entry structure
 		const subType = detectSubType(obj);
 		const dir = join(knowledgeDir, subType);
 		mkdirSync(dir, { recursive: true });
 
-		const fileName = `${obj.id}.json`;
+		const fileName = `${safeId}.json`;
 		writeFileSync(join(dir, fileName), entryJson, "utf-8");
 		existingHashes.add(hash);
 		result.imported++;
@@ -160,8 +164,8 @@ export function showKnowledgeDiff(projectPath: string): DiffResult {
 			result.deleted.push(filePath);
 		} else if (status === "M") {
 			try {
-				const oldContent = execSync(
-					`git show HEAD:"${filePath}"`,
+				const oldContent = execFileSync(
+					"git", ["show", `HEAD:${filePath}`],
 					{ cwd: projectPath, encoding: "utf-8", timeout: 5000 },
 				);
 				const newContent = readFileSync(join(projectPath, filePath), "utf-8");

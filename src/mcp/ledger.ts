@@ -337,6 +337,8 @@ async function ledgerSave(store: Store, emb: Embedder | null, params: LedgerPara
 	const now = new Date().toISOString();
 	const lang = toLang();
 	const tags = parseTags(params.tags);
+	const projectPath = params.project_path ?? process.cwd();
+	const author = getGitUserName(projectPath);
 	let entry: DecisionEntry | PatternEntry | RuleEntry;
 	let id: string;
 
@@ -356,6 +358,7 @@ async function ledgerSave(store: Store, emb: Embedder | null, params: LedgerPara
 				createdAt: now,
 				status: "approved",
 				lang,
+				author,
 			} satisfies DecisionEntry;
 			break;
 		}
@@ -374,6 +377,7 @@ async function ledgerSave(store: Store, emb: Embedder | null, params: LedgerPara
 				createdAt: now,
 				status: "approved",
 				lang,
+				author,
 			} satisfies PatternEntry;
 			break;
 		}
@@ -402,6 +406,7 @@ async function ledgerSave(store: Store, emb: Embedder | null, params: LedgerPara
 				createdAt: now,
 				status: "approved",
 				lang,
+				author,
 			} satisfies RuleEntry;
 			break;
 		}
@@ -410,12 +415,6 @@ async function ledgerSave(store: Store, emb: Embedder | null, params: LedgerPara
 	}
 
 	// Write JSON file to .alfred/knowledge/{type}/{id}.json (atomic).
-	const projectPath = params.project_path ?? process.cwd();
-	const author = getGitUserName(projectPath);
-	// Set author on entry before writing
-	if (typeof entry === "object" && entry !== null) {
-		(entry as unknown as Record<string, unknown>).author = author;
-	}
 	const filePath = writeKnowledgeFile(projectPath, subType, id, entry);
 
 	// DB upsert for search index.
