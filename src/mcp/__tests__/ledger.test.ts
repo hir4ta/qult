@@ -207,6 +207,73 @@ describe("ledger save", () => {
 		expect(data.error).toContain("key field");
 	});
 
+	it("rejects JSON object in title", async () => {
+		const result = await handleLedger(store, null, {
+			action: "save", sub_type: "decision", title: '{"status":"completed","prompt":"You are a reviewer"}',
+			label: "test", decision: "X", reasoning: "Y", project_path: tmpDir,
+		});
+		const data = parseResult(result);
+		expect(data.error).toContain("natural language");
+		expect(data.error).toContain("not JSON");
+	});
+
+	it("rejects JSON array in title", async () => {
+		const result = await handleLedger(store, null, {
+			action: "save", sub_type: "pattern", title: '[{"type":"text"}]',
+			label: "test", pattern: "X", project_path: tmpDir,
+		});
+		const data = parseResult(result);
+		expect(data.error).toContain("not JSON");
+	});
+
+	it("rejects title exceeding 200 characters", async () => {
+		const result = await handleLedger(store, null, {
+			action: "save", sub_type: "decision", title: "A".repeat(201),
+			label: "test", decision: "X", reasoning: "Y", project_path: tmpDir,
+		});
+		const data = parseResult(result);
+		expect(data.error).toContain("200");
+	});
+
+	it("rejects JSON in decision field", async () => {
+		const result = await handleLedger(store, null, {
+			action: "save", sub_type: "decision", title: "Valid Title",
+			label: "test", decision: '{"key":"value"}', reasoning: "Y", project_path: tmpDir,
+		});
+		const data = parseResult(result);
+		expect(data.error).toContain("decision");
+		expect(data.error).toContain("not JSON");
+	});
+
+	it("rejects JSON in pattern field", async () => {
+		const result = await handleLedger(store, null, {
+			action: "save", sub_type: "pattern", title: "Valid Title",
+			label: "test", pattern: '{"status":"completed","content":[]}', project_path: tmpDir,
+		});
+		const data = parseResult(result);
+		expect(data.error).toContain("pattern");
+		expect(data.error).toContain("not JSON");
+	});
+
+	it("rejects whitespace-only title", async () => {
+		const result = await handleLedger(store, null, {
+			action: "save", sub_type: "decision", title: "   ",
+			label: "test", decision: "X", reasoning: "Y",
+		});
+		const data = parseResult(result);
+		expect(data.error).toContain("empty");
+	});
+
+	it("rejects JSON in label", async () => {
+		const result = await handleLedger(store, null, {
+			action: "save", sub_type: "decision", title: "Valid",
+			label: '{"foo":"bar"}', decision: "X", reasoning: "Y",
+		});
+		const data = parseResult(result);
+		expect(data.error).toContain("label");
+		expect(data.error).toContain("not JSON");
+	});
+
 	it("second save with same content returns saved (idempotent file overwrite)", async () => {
 		const params = {
 			action: "save", sub_type: "decision", title: "Dup Test",

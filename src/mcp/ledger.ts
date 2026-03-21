@@ -230,11 +230,95 @@ export function writeKnowledgeFile(
 	return filePath;
 }
 
+const MAX_EMBEDDING_LENGTH = 1500;
+
+/**
+ * Build embedding text optimized per sub_type for vector search.
+ * Truncated to MAX_EMBEDDING_LENGTH to avoid model token limits.
+ */
+function buildEmbeddingText(subType: string, params: LedgerParams): string {
+	let parts: string[];
+	switch (subType) {
+		case "decision":
+			parts = [
+				params.title ?? "",
+				params.context_text ?? "",
+				params.decision ?? "",
+				params.alternatives ?? "",
+			];
+			break;
+		case "pattern":
+			parts = [
+				params.title ?? "",
+				params.context_text ?? "",
+				params.pattern ?? "",
+				params.application_conditions ?? "",
+			];
+			break;
+		case "rule":
+			parts = [
+				params.title ?? "",
+				params.text ?? "",
+				params.rationale ?? "",
+				params.category ?? "",
+			];
+			break;
+		default:
+			parts = [params.title ?? "", params.context_text ?? ""];
+	}
+	const text = parts.filter(Boolean).join(" ");
+	return text.length > MAX_EMBEDDING_LENGTH ? text.slice(0, MAX_EMBEDDING_LENGTH) : text;
+}
+
 function parseTags(tagsStr: string | undefined): string[] {
 	return (tagsStr ?? "")
 		.split(",")
 		.map((t) => t.trim())
 		.filter(Boolean);
+}
+
+const MAX_TITLE_LENGTH = 200;
+
+/**
+ * Detect serialized JSON objects/arrays dumped into text fields.
+ */
+function looksLikeJSON(s: string): boolean {
+	const t = s.trim();
+	return (t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"));
+}
+
+/**
+ * Validate knowledge fields before saving. Rejects garbage data early.
+ */
+function validateKnowledgeFields(params: LedgerParams): string | null {
+	// Title validation
+	if (params.title && looksLikeJSON(params.title)) {
+		return "title must be natural language, not JSON. Provide a concise summary sentence.";
+	}
+	if (params.title && params.title.length > MAX_TITLE_LENGTH) {
+		return `title must be ${MAX_TITLE_LENGTH} characters or less (got ${params.title.length})`;
+	}
+	if (params.label && looksLikeJSON(params.label)) {
+		return "label must be natural language, not JSON.";
+	}
+
+	// Content field validation (decision / pattern / text)
+	for (const [field, value] of [
+		["decision", params.decision],
+		["pattern", params.pattern],
+		["text", params.text],
+		["reasoning", params.reasoning],
+	] as const) {
+		if (value && looksLikeJSON(value)) {
+			return `${field} must be natural language, not JSON. Describe the ${field} in plain text.`;
+		}
+	}
+
+	// Whitespace-only detection for required fields
+	if (params.title?.trim() === "") return "title must not be empty or whitespace-only";
+	if (params.label?.trim() === "") return "label must not be empty or whitespace-only";
+
+	return null; // valid
 }
 
 async function ledgerSave(store: Store, emb: Embedder | null, params: LedgerParams) {
@@ -244,6 +328,10 @@ async function ledgerSave(store: Store, emb: Embedder | null, params: LedgerPara
 	}
 	if (!params.title) return errorResult("title is required for save");
 	if (!params.label) return errorResult("label is required for save");
+
+	// Validate field quality before constructing entry.
+	const validationError = validateKnowledgeFields(params);
+	if (validationError) return errorResult(validationError);
 
 	const now = new Date().toISOString();
 	const lang = toLang();
@@ -349,7 +437,7 @@ async function ledgerSave(store: Store, emb: Embedder | null, params: LedgerPara
 	let embeddingStatus = "none";
 	if (emb && changed) {
 		const model = emb.model;
-		const embText = `${params.title} ${params.context_text ?? ""} ${params.decision ?? params.pattern ?? params.text ?? ""}`;
+		const embText = buildEmbeddingText(subType, params);
 		emb
 			.embedForStorage(embText)
 			.then(async (vec) => {

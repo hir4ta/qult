@@ -124,56 +124,164 @@ Actions: init, status, link, unlink, order, list, update, delete (2-phase: previ
 		},
 	);
 
-	server.tool(
-		"ledger",
-		`Long-term knowledge search, save, and health management — memories and past specs, searchable across sessions and projects.
+	const lang = (process.env.ALFRED_LANG || "en").toLowerCase();
+	const ledgerDesc =
+		lang === "ja"
+			? `ナレッジの検索・保存・管理。セッションやプロジェクトを跨いで検索可能。
 
 Actions:
-- search (default): Search past memories AND completed specs
-- save: Save a new memory entry for future retrieval
-- promote: Promote a memory's sub_type (pattern→rule)
-- candidates: List patterns that qualify for promotion to rule based on hit_count
+- search: 過去のナレッジを検索
+- save: 新しいナレッジを保存（下記ガイドに従うこと）
+- promote: pattern→rule に昇格
+- candidates: 昇格候補の一覧
+- reflect: ヘルスレポート（統計、矛盾検出、昇格候補）
+
+## save ガイド（全フィールドを日本語で記述すること）
+
+### decision（意思決定）— 技術的な選択とその根拠
+- title: 1行の要約（例: 「認証にJWTではなくセッションCookieを採用」）
+- decision: 何を決めたか（例: 「セッションCookieベースの認証を採用する」）
+- reasoning: なぜその選択か、具体的な根拠（例: 「XSSリスク軽減のため。HttpOnly + SameSiteで保護可能」）
+- alternatives: 却下した選択肢と理由を改行区切りで（例: 「JWT: トークン失効管理が複雑」）
+- context_text: 背景・制約条件
+
+### pattern（パターン）— 再利用可能な手法・アンチパターン
+- title: 1行の要約（例: 「大規模リファクタリング前にgrepで影響範囲を列挙する」）
+- pattern_type: good（推奨）/ bad（アンチパターン）/ error-solution（エラー解決策）
+- pattern: 問題と解決策を具体的に（例: 「問題: 変更漏れによるランタイムエラー。解決: grep -r で全参照を列挙してからリファクタ開始」）
+- application_conditions: いつ適用するか / しないか
+- expected_outcomes: 期待される結果
+
+### rule（ルール）— 常に従うべき規約
+- title: 1行の要約（例: 「テストではモックDBではなく実DBを使用する」）
+- key: 機械可読キー（例: use-real-db-in-tests）
+- text: 命令形のルール本文（例: 「テストでは常に実データベースに接続すること。モックDBは使用禁止」）
+- priority: p0（必須）/ p1（推奨）/ p2（参考）
+- rationale: なぜこのルールが必要か
+- category: 分類（style / security / architecture / testing）`
+			: `Long-term knowledge search, save, and management — searchable across sessions and projects.
+
+Actions:
+- search: Search past knowledge entries
+- save: Save a new knowledge entry (follow the guide below)
+- promote: Promote pattern→rule
+- candidates: List promotion candidates
 - reflect: Health report — stats, conflicts, promotion candidates
-- audit-conventions: Check pattern/rule memories against the codebase for drift`,
+
+## save guide (write all fields in English)
+
+### decision — Technical choices and their rationale
+- title: One-line summary (e.g. "Adopt session cookies over JWT for auth")
+- decision: What was decided (e.g. "Use session cookie-based authentication")
+- reasoning: Why this choice, with specific rationale (e.g. "Reduces XSS risk. HttpOnly + SameSite provides protection")
+- alternatives: Rejected alternatives with reasons, newline-separated (e.g. "JWT: token revocation management is complex")
+- context_text: Background and constraints
+
+### pattern — Reusable techniques or anti-patterns
+- title: One-line summary (e.g. "Grep all references before large-scale refactoring")
+- pattern_type: good (recommended) / bad (anti-pattern) / error-solution (error fix)
+- pattern: Problem and solution concretely (e.g. "Problem: runtime errors from missed references. Solution: grep -r all references before starting refactor")
+- application_conditions: When to apply / when NOT to apply
+- expected_outcomes: Expected results
+
+### rule — Conventions to always follow
+- title: One-line summary (e.g. "Use real DB, not mocks, in tests")
+- key: Machine-readable key (e.g. use-real-db-in-tests)
+- text: Imperative rule text (e.g. "Always connect to a real database in tests. Mock DBs are prohibited")
+- priority: p0 (must) / p1 (should) / p2 (reference)
+- rationale: Why this rule is needed
+- category: Classification (style / security / architecture / testing)`;
+
+	server.tool(
+		"ledger",
+		ledgerDesc,
 		{
 			action: z
 				.enum(["search", "save", "promote", "candidates", "reflect", "stale", "audit-conventions"])
 				.describe("Action to perform"),
 			id: z.number().optional().describe("Record ID (required for promote)"),
 			query: z.string().optional().describe("Search query"),
-			label: z.string().optional().describe("Short label for saved entry (REQUIRED for save)"),
+			label: z
+				.string()
+				.optional()
+				.describe("Short label for saved entry, natural language (REQUIRED for save)"),
 			limit: z.number().optional().describe("Maximum search results (default: 10)"),
 			detail: z.enum(["compact", "summary", "full"]).optional().describe("Response verbosity"),
 			sub_type: z
 				.enum(["decision", "pattern", "rule"])
 				.optional()
 				.describe("Knowledge type (REQUIRED for save)"),
-			title: z.string().optional().describe("Entry title (REQUIRED for save)"),
+			title: z
+				.string()
+				.optional()
+				.describe(
+					"Natural language title, max 200 chars. NOT JSON. (REQUIRED for save)",
+				),
 			// Decision fields
-			decision: z.string().optional().describe("Decision: what was decided (REQUIRED for decision)"),
-			reasoning: z.string().optional().describe("Decision: why this choice (REQUIRED for decision)"),
+			decision: z
+				.string()
+				.optional()
+				.describe(
+					"Decision: what was decided, in plain text (REQUIRED for decision)",
+				),
+			reasoning: z
+				.string()
+				.optional()
+				.describe(
+					"Decision: why this choice, with specific rationale (REQUIRED for decision)",
+				),
 			alternatives: z
 				.string()
 				.optional()
-				.describe("Decision: newline-separated rejected alternatives with reasons"),
-			context_text: z.string().optional().describe("Decision/Pattern: context or background"),
+				.describe(
+					"Decision: rejected alternatives with reasons, newline-separated",
+				),
+			context_text: z
+				.string()
+				.optional()
+				.describe("Background, constraints, or trigger for this knowledge entry"),
 			// Pattern fields
-			pattern_type: z.enum(["good", "bad", "error-solution"]).optional().describe("Pattern: type (REQUIRED for pattern)"),
-			pattern: z.string().optional().describe("Pattern: concrete steps (REQUIRED for pattern)"),
-			application_conditions: z.string().optional().describe("Pattern: when to apply"),
-			expected_outcomes: z.string().optional().describe("Pattern: expected results"),
+			pattern_type: z
+				.enum(["good", "bad", "error-solution"])
+				.optional()
+				.describe("Pattern classification (REQUIRED for pattern)"),
+			pattern: z
+				.string()
+				.optional()
+				.describe(
+					"Pattern: problem and solution in plain text (REQUIRED for pattern)",
+				),
+			application_conditions: z
+				.string()
+				.optional()
+				.describe("Pattern: when to apply / when NOT to apply"),
+			expected_outcomes: z
+				.string()
+				.optional()
+				.describe("Pattern: expected results when applied"),
 			// Rule fields
-			key: z.string().optional().describe("Rule: machine-readable key (REQUIRED for rule)"),
-			text: z.string().optional().describe("Rule: imperative text (REQUIRED for rule)"),
-			category: z.string().optional().describe("Rule: category"),
-			priority: z.enum(["p0", "p1", "p2"]).optional().describe("Rule: priority"),
-			rationale: z.string().optional().describe("Rule: rationale"),
+			key: z
+				.string()
+				.optional()
+				.describe("Rule: machine-readable key, kebab-case (REQUIRED for rule)"),
+			text: z
+				.string()
+				.optional()
+				.describe(
+					"Rule: imperative text — what to do or not do (REQUIRED for rule)",
+				),
+			category: z
+				.string()
+				.optional()
+				.describe("Rule: category (style / security / architecture / testing)"),
+			priority: z.enum(["p0", "p1", "p2"]).optional().describe("Rule: p0=must, p1=should, p2=reference"),
+			rationale: z.string().optional().describe("Rule: why this rule is needed"),
 			source_ref: z
 				.string()
 				.optional()
 				.describe('Rule: source reference JSON {"type":"pattern","id":"..."}'),
 			// Common
-			tags: z.string().optional().describe("Comma-separated tags"),
+			tags: z.string().optional().describe("Comma-separated tags for search"),
 			project_path: z.string().optional().describe("Project root path"),
 		},
 		async (params) => {
