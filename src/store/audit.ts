@@ -169,6 +169,9 @@ export async function syncAuditJsonl(
 					continue;
 				}
 
+				const detail = entry.detail
+					? (typeof entry.detail === "string" ? entry.detail : JSON.stringify(entry.detail))
+					: "{}";
 				insertStmt.run(
 					projectId,
 					ts,
@@ -176,7 +179,7 @@ export async function syncAuditJsonl(
 					entry.user ?? "unknown",   // jsonl.user → audit_log.actor
 					entry.target ?? "",        // jsonl.target → audit_log.slug
 					"",                        // audit_log.action (sub-action, not in jsonl)
-					entry.detail ? JSON.stringify(entry.detail) : "{}",
+					detail,
 				);
 				imported++;
 			} catch {
@@ -226,17 +229,22 @@ export function getSpecCompletionStats(
 	const params: unknown[] = opts?.projectId ? [opts.projectId] : [];
 
 	// Use audit_log to compute spec completion time:
-	// spec.init → spec.complete timestamp difference
+	// earliest spec.init → latest spec.complete per slug (avoids cartesian on re-init)
 	const rows = store.db
 		.prepare(`
 			SELECT
-				a1.detail as init_detail,
-				a1.timestamp as init_ts,
-				a2.timestamp as complete_ts
-			FROM audit_log a1
-			JOIN audit_log a2 ON a1.slug = a2.slug AND a1.project_id = a2.project_id
-			WHERE a1.event = 'spec.init' AND a2.event = 'spec.complete'
-			${projectFilter}
+				inits.detail as init_detail,
+				inits.init_ts,
+				completes.complete_ts
+			FROM (
+				SELECT slug, project_id, MIN(timestamp) as init_ts, detail
+				FROM audit_log WHERE event = 'spec.init' GROUP BY slug, project_id
+			) inits
+			JOIN (
+				SELECT slug, project_id, MAX(timestamp) as complete_ts
+				FROM audit_log WHERE event = 'spec.complete' GROUP BY slug, project_id
+			) completes ON inits.slug = completes.slug AND inits.project_id = completes.project_id
+			WHERE 1=1 ${projectFilter ? "AND inits.project_id = ?" : ""}
 		`)
 		.all(...params) as Array<{ init_detail: string; init_ts: string; complete_ts: string }>;
 
