@@ -109,9 +109,11 @@ export function initTeamConfig(projectPath: string, opts?: Partial<TeamConfig["t
 	const filePath = join(projectPath, TEAM_YAML_PATH);
 	mkdirSync(dirname(filePath), { recursive: true });
 
+	// Sanitize team name to prevent YAML injection
+	const safeName = (team.name ?? "").replace(/["\n\r\\]/g, "");
 	const yaml = `# Alfred Team Configuration
 team:
-  name: "${team.name}"
+  name: "${safeName}"
   spec_tracking: ${team.spec_tracking}
   review_required: ${team.review_required}
   knowledge_sharing: ${team.knowledge_sharing}
