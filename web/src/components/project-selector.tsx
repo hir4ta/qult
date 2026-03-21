@@ -22,10 +22,11 @@ export function ProjectSelector() {
 
 	return (
 		<Select
-			value={search.project ?? ""}
+			value={search.project ?? "__all__"}
 			onValueChange={(val) => {
+				const projectId = val === "__all__" ? undefined : val;
 				const params = new URLSearchParams(window.location.search);
-				if (val) params.set("project", val);
+				if (projectId) params.set("project", projectId);
 				else params.delete("project");
 				navigate({
 					to: ".",
@@ -37,7 +38,7 @@ export function ProjectSelector() {
 				<SelectValue placeholder={t("projects.allProjects")} />
 			</SelectTrigger>
 			<SelectContent>
-				<SelectItem value="">{t("projects.allProjects")}</SelectItem>
+				<SelectItem value="__all__">{t("projects.allProjects")}</SelectItem>
 				{activeProjects.map((p) => (
 					<SelectItem key={p.id} value={p.id}>
 						{p.name}

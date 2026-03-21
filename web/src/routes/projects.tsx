@@ -6,7 +6,7 @@ import type { ProjectRecord } from "@/lib/types";
 import { Archive, ArchiveRestore, Pencil } from "@animated-color-icons/lucide-react";
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
-import { ButlerEmpty } from "@/components/butler-empty";
+
 
 export const Route = createFileRoute("/projects")({
 	component: ProjectsPage,
@@ -26,7 +26,7 @@ function ProjectsPage() {
 				{t("projects.title")}
 			</h1>
 			{projects.length === 0 ? (
-				<ButlerEmpty scene="empty-tray" messageKey="empty.noTasks" />
+				<p className="text-muted-foreground text-sm">{t("projects.noProjects")}</p>
 			) : (
 				<div className="space-y-3">
 					{projects.map((p) => (
@@ -46,7 +46,7 @@ function ProjectCard({ project }: { project: ProjectRecord }) {
 
 	const mutation = useMutation({
 		mutationFn: async (body: { name?: string; status?: string }) => {
-			const res = await fetch(`/api/projects/${project.id}`, {
+			const res = await fetch(`/api/projects/${encodeURIComponent(project.id)}`, {
 				method: "PATCH",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(body),
@@ -85,7 +85,7 @@ function ProjectCard({ project }: { project: ProjectRecord }) {
 								className="text-xs font-medium"
 								style={{ color: "var(--color-brand-dark)" }}
 							>
-								Save
+								{t("projects.save")}
 							</button>
 						</form>
 					) : (

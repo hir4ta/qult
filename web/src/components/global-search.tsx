@@ -98,7 +98,7 @@ export function GlobalSearch() {
 								)}
 								<div className="min-w-0 flex-1">
 									<div className="text-sm font-medium truncate">
-										{r.title || r.slug || "Untitled"}
+										{r.title || r.slug || t("search.untitled")}
 									</div>
 									<div className="flex items-center gap-2 text-[11px] text-muted-foreground">
 										<span className="font-mono">{r.source}</span>

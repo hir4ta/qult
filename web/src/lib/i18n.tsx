@@ -157,6 +157,8 @@ export const translations = {
 	"projects.missing": { en: "Missing", ja: "不明" },
 	"projects.archived": { en: "Archived", ja: "アーカイブ済み" },
 	"projects.noProjects": { en: "No projects registered yet. Use alfred in a project directory to register it.", ja: "まだプロジェクトが登録されていません。プロジェクトディレクトリで alfred を使用すると自動登録されます。" },
+	"projects.save": { en: "Save", ja: "保存" },
+	"search.untitled": { en: "Untitled", ja: "無題" },
 	"nav.projects": { en: "Projects", ja: "プロジェクト" },
 
 	// Filters
