@@ -2,7 +2,6 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { createFileRoute } from "@tanstack/react-router";
 import { Calendar, CircleCheck, CircleDot } from "@animated-color-icons/lucide-react";
 import { useState } from "react";
-import { CoverageHeatmap } from "@/components/coverage-heatmap";
 import { ReviewPanel } from "@/components/review/ReviewPanel";
 import { SectionCard } from "@/components/section-card";
 import { TraceabilityMatrix } from "@/components/traceability";
@@ -146,9 +145,7 @@ function TaskDetailPage() {
 					}
 					return Object.keys(contentMap).length > 0 ? <TraceabilityMatrix specContents={contentMap} /> : null;
 				})()}
-				{validationData && validationData.checks.length > 0 && (
-					<CoverageHeatmap checks={validationData.checks} />
-				)}
+
 		</div>
 		</div>
 	);

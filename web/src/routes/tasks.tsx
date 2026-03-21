@@ -131,7 +131,7 @@ function TaskAccordionCard({
 			</Link>
 
 			{/* Compact info — always visible */}
-			<div className="px-3 pb-2 space-y-1.5">
+			<div className="px-3 pb-3 space-y-1.5">
 				{(task.project_name || task.started_at) && (
 					<p className="text-[10px] font-medium" style={{ color: "#40513b" }}>
 						{task.project_name}{task.project_name && task.started_at && " · "}{task.started_at && <span className="text-muted-foreground/70 font-normal">{formatDate(task.started_at)}</span>}
