@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { effectiveStatus } from "../spec/types.js";
 import type { HookEvent } from "./dispatcher.js";
 import { isGateActive } from "./review-gate.js";
@@ -11,6 +12,34 @@ import {
 import { readStateJSON } from "./state.js";
 
 const BLOCKABLE_TOOLS = new Set(["Edit", "Write"]);
+
+/**
+ * Check if a file path is outside the project directory or in a known non-code
+ * location. These files should never be blocked by review/approval gates.
+ * (#16: gate scope was too broad, blocking memory/docs/CLAUDE.md edits)
+ */
+function isGateExemptPath(cwd: string | undefined, filePath: string): boolean {
+	if (!cwd || !filePath) return false;
+	const resolved = resolve(cwd, filePath);
+	const cwdPrefix = cwd.endsWith("/") ? cwd : `${cwd}/`;
+
+	// Files outside the project directory (e.g., ~/.claude/memory/)
+	if (!resolved.startsWith(cwdPrefix) && resolved !== cwd) return true;
+
+	// Relative path within project
+	const rel = resolved.slice(cwdPrefix.length);
+
+	// docs/ directory
+	if (rel.startsWith("docs/")) return true;
+
+	// Root-level markdown files (CLAUDE.md, README.md, etc.)
+	if (!rel.includes("/") && rel.endsWith(".md")) return true;
+
+	// .claude/ directory (rules, memory, settings — not .alfred/)
+	if (rel.startsWith(".claude/")) return true;
+
+	return false;
+}
 
 /**
  * PreToolUse handler: block Edit/Write on review-gate or unapproved spec.
@@ -49,6 +78,13 @@ export async function preToolUse(ev: HookEvent): Promise<void> {
 			allowTool("Deferred/cancelled spec");
 			return;
 		}
+	}
+
+	// Gate-exempt paths: files outside project or in non-code locations (#16).
+	// These should never be blocked by review/approval gates.
+	if (filePath && isGateExemptPath(ev.cwd, filePath)) {
+		allowTool("Gate-exempt path (non-code file)");
+		return;
 	}
 
 	// Review gate: blocks source edits until spec/wave review is completed.

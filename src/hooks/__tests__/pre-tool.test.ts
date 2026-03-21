@@ -140,6 +140,51 @@ describe("preToolUse — review gate", () => {
 		expect(getDecision()).toBe("deny");
 	});
 
+	it("allows Edit to project-external file when gate is active (#16)", async () => {
+		setupSpec({ size: "L", reviewStatus: "approved" });
+		writeReviewGate(tmpDir, {
+			gate: "spec-review",
+			slug: "test-task",
+			reason: "Spec created.",
+		});
+		// File outside project dir (e.g., ~/.claude/memory/)
+		await preToolUse(makeEvent("Edit", "/Users/someone/.claude/memory/test.md"));
+		expect(getDecision()).toBe("allow");
+	});
+
+	it("allows Edit to docs/ when gate is active (#16)", async () => {
+		setupSpec({ size: "L", reviewStatus: "approved" });
+		writeReviewGate(tmpDir, {
+			gate: "spec-review",
+			slug: "test-task",
+			reason: "Spec created.",
+		});
+		await preToolUse(makeEvent("Edit", join(tmpDir, "docs/roadmap/v0.4.md")));
+		expect(getDecision()).toBe("allow");
+	});
+
+	it("allows Edit to root-level .md when gate is active (#16)", async () => {
+		setupSpec({ size: "L", reviewStatus: "approved" });
+		writeReviewGate(tmpDir, {
+			gate: "spec-review",
+			slug: "test-task",
+			reason: "Spec created.",
+		});
+		await preToolUse(makeEvent("Edit", join(tmpDir, "CLAUDE.md")));
+		expect(getDecision()).toBe("allow");
+	});
+
+	it("still denies Edit to src/ when gate is active (#16)", async () => {
+		setupSpec({ size: "L", reviewStatus: "approved" });
+		writeReviewGate(tmpDir, {
+			gate: "spec-review",
+			slug: "test-task",
+			reason: "Spec created.",
+		});
+		await preToolUse(makeEvent("Edit", join(tmpDir, "src/index.ts")));
+		expect(getDecision()).toBe("deny");
+	});
+
 	it("allows Edit when gate slug does not match active spec (stale gate ignored)", async () => {
 		setupSpec({ size: "L", reviewStatus: "approved" });
 		writeReviewGate(tmpDir, {
