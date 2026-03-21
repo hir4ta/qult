@@ -142,6 +142,7 @@ export function saveKnowledgeEntries(
 				content: JSON.stringify(entry),
 				subType,
 				branch: proj.branch,
+				author: "",
 				createdAt: "",
 				updatedAt: "",
 				hitCount: 0,

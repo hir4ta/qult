@@ -87,6 +87,7 @@ describe("Knowledge CRUD", () => {
 		hitCount: 0,
 		lastAccessed: "",
 		enabled: true,
+		author: "",
 		...overrides,
 	});
 
@@ -230,6 +231,7 @@ describe("Vectors", () => {
 			subType: "decision",
 			projectId: projectId,
 			branch: "",
+			author: "",
 			createdAt: "",
 			updatedAt: "",
 			hitCount: 0,
@@ -259,6 +261,7 @@ describe("Vectors", () => {
 			subType: "decision",
 			projectId: projectId,
 			branch: "",
+			author: "",
 			createdAt: "",
 			updatedAt: "",
 			hitCount: 0,
@@ -285,6 +288,7 @@ describe("FTS", () => {
 			subType: "pattern",
 			projectId: projectId,
 			branch: "",
+			author: "",
 			createdAt: "",
 			updatedAt: "",
 			hitCount: 0,

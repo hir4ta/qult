@@ -61,6 +61,7 @@ describe("buildRelevanceExplanation", () => {
 				hitCount: 0,
 				lastAccessed: "",
 				enabled: true,
+			author: "",
 			},
 		};
 	}
@@ -269,6 +270,7 @@ describe("userPromptSubmit pipeline", () => {
 			hitCount: 0,
 			lastAccessed: "",
 			enabled: true,
+			author: "",
 		};
 		upsertKnowledge(store, row);
 

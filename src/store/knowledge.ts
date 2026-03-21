@@ -35,8 +35,8 @@ export function upsertKnowledge(store: Store, row: KnowledgeRow): UpsertResult {
 		.prepare(`
     INSERT INTO knowledge_index
     (project_id, file_path, content_hash, title, content, sub_type,
-     branch, created_at, updated_at, hit_count, last_accessed, enabled)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, '', 1)
+     branch, author, created_at, updated_at, hit_count, last_accessed, enabled)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, '', 1)
     ON CONFLICT(project_id, file_path) DO UPDATE SET
      content_hash = excluded.content_hash,
      title = excluded.title,
@@ -53,6 +53,7 @@ export function upsertKnowledge(store: Store, row: KnowledgeRow): UpsertResult {
 			row.content,
 			row.subType,
 			row.branch,
+			row.author ?? "",
 			row.createdAt,
 			row.updatedAt,
 		);
@@ -94,7 +95,7 @@ export function getKnowledgeByID(store: Store, id: number): KnowledgeRow | undef
 	const row = store.db
 		.prepare(`
     SELECT id, project_id, file_path, content_hash, title, content, sub_type,
-           branch, created_at, updated_at, hit_count, last_accessed, enabled
+           branch, author, created_at, updated_at, hit_count, last_accessed, enabled
     FROM knowledge_index WHERE id = ?
   `)
 		.get(id) as RawKnowledgeRow | undefined;
@@ -107,7 +108,7 @@ export function getKnowledgeByIDs(store: Store, ids: number[]): KnowledgeRow[] {
 	const rows = store.db
 		.prepare(`
     SELECT id, project_id, file_path, content_hash, title, content, sub_type,
-           branch, created_at, updated_at, hit_count, last_accessed, enabled
+           branch, author, created_at, updated_at, hit_count, last_accessed, enabled
     FROM knowledge_index WHERE id IN (${placeholders})
   `)
 		.all(...ids) as RawKnowledgeRow[];
@@ -167,7 +168,7 @@ export function getPromotionCandidates(store: Store): KnowledgeRow[] {
 	const rows = store.db
 		.prepare(`
     SELECT id, project_id, file_path, content_hash, title, content, sub_type,
-           branch, created_at, updated_at, hit_count, last_accessed, enabled
+           branch, author, created_at, updated_at, hit_count, last_accessed, enabled
     FROM knowledge_index
     WHERE enabled = 1
       AND (sub_type = 'pattern' AND hit_count >= 15)
@@ -200,7 +201,7 @@ export function getKnowledgeStats(store: Store, projectId?: string): KnowledgeSt
 	const topRows = store.db
 		.prepare(`
     SELECT id, project_id, file_path, content_hash, title, content, sub_type,
-           branch, created_at, updated_at, hit_count, last_accessed, enabled
+           branch, author, created_at, updated_at, hit_count, last_accessed, enabled
     FROM knowledge_index WHERE enabled = 1 ${projectFilter}
     ORDER BY hit_count DESC LIMIT 5
   `)
@@ -219,7 +220,7 @@ export function searchKnowledgeKeyword(store: Store, query: string, limit: numbe
 	const rows = store.db
 		.prepare(`
     SELECT id, project_id, file_path, content_hash, title, content, sub_type,
-           branch, created_at, updated_at, hit_count, last_accessed, enabled
+           branch, author, created_at, updated_at, hit_count, last_accessed, enabled
     FROM knowledge_index
     WHERE enabled = 1 AND (content LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\')
     ORDER BY hit_count DESC LIMIT ?
@@ -303,6 +304,7 @@ export interface RawKnowledgeRow {
 	content: string;
 	sub_type: string;
 	branch: string;
+	author: string;
 	created_at: string;
 	updated_at: string;
 	hit_count: number;
@@ -320,6 +322,7 @@ export function mapRow(r: RawKnowledgeRow): KnowledgeRow {
 		content: r.content,
 		subType: r.sub_type,
 		branch: r.branch,
+		author: r.author ?? "",
 		createdAt: r.created_at,
 		updatedAt: r.updated_at,
 		hitCount: r.hit_count,

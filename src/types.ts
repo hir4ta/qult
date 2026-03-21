@@ -7,6 +7,7 @@ export interface KnowledgeRow {
 	content: string;
 	subType: string;
 	branch: string;
+	author: string;
 	createdAt: string;
 	updatedAt: string;
 	hitCount: number;
@@ -113,6 +114,8 @@ export interface DecisionEntry {
 	updatedAt?: string;
 	status: "draft" | "approved";
 	lang?: string;
+	author?: string;
+	updated_by?: string;
 }
 
 export interface PatternEntry {
@@ -128,6 +131,8 @@ export interface PatternEntry {
 	updatedAt?: string;
 	status: "draft" | "approved";
 	lang?: string;
+	author?: string;
+	updated_by?: string;
 }
 
 export interface RuleEntry {
@@ -144,4 +149,6 @@ export interface RuleEntry {
 	updatedAt?: string;
 	status: "draft" | "approved";
 	lang?: string;
+	author?: string;
+	updated_by?: string;
 }

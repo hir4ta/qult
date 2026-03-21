@@ -37,7 +37,7 @@ function makeRow(overrides: Partial<KnowledgeRow> = {}): KnowledgeRow {
 		id: 0, filePath: "decisions/test.json", contentHash: "", title: "Test",
 		content: '{"id":"test"}', subType: "decision", projectId: TEST_PROJECT_ID,
 		branch: "main", createdAt: new Date().toISOString(), updatedAt: "",
-		hitCount: 0, lastAccessed: "", enabled: true, ...overrides,
+		hitCount: 0, lastAccessed: "", enabled: true, author: "", ...overrides,
 	};
 }
 

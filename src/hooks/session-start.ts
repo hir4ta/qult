@@ -10,6 +10,7 @@ import {
 	upsertKnowledge,
 } from "../store/knowledge.js";
 import { resolveOrRegisterProject } from "../store/project.js";
+import { refreshGitUserCache } from "../team/config.js";
 import type { KnowledgeRow } from "../types.js";
 import type { DirectiveItem } from "./directives.js";
 import { emitDirectives } from "./directives.js";
@@ -24,6 +25,7 @@ export async function sessionStart(ev: HookEvent, _signal: AbortSignal): Promise
 	if (existsSync(join(ev.cwd, ".alfred"))) {
 		resetWorkedSlugs(ev.cwd);
 		writeStateJSON(ev.cwd, "spec-prompt.json", {});
+		refreshGitUserCache(ev.cwd);
 	}
 
 	let store;
@@ -94,7 +96,7 @@ function syncKnowledgeIndex(
 		for (const file of files) {
 			try {
 				const raw = readFileSync(join(dir, file), "utf-8");
-				const entry = JSON.parse(raw) as { id?: string; title?: string; createdAt?: string };
+				const entry = JSON.parse(raw) as { id?: string; title?: string; createdAt?: string; author?: string };
 				const filePath = `${typeDir}/${file}`;
 				validFilePaths.add(filePath);
 				const subType =
@@ -108,6 +110,7 @@ function syncKnowledgeIndex(
 					content: raw,
 					subType,
 					branch: proj.branch,
+					author: entry.author ?? "",
 					createdAt: entry.createdAt ?? "",
 					updatedAt: "",
 					hitCount: 0,
@@ -144,6 +147,7 @@ function syncKnowledgeIndex(
 									? "rule"
 									: "snapshot",
 					branch: proj.branch,
+					author: "",
 					createdAt: frontmatter.created_at ?? "",
 					updatedAt: "",
 					hitCount: 0,

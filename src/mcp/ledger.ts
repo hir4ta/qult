@@ -12,6 +12,7 @@ import {
 	upsertKnowledge,
 } from "../store/knowledge.js";
 import { resolveOrRegisterProject } from "../store/project.js";
+import { getGitUserName } from "../team/config.js";
 import type { DecisionEntry, KnowledgeRow, PatternEntry, RuleEntry } from "../types.js";
 import { VALID_SUB_TYPES } from "../types.js";
 import { searchPipeline, trackHitCounts, truncate } from "./helpers.js";
@@ -410,6 +411,11 @@ async function ledgerSave(store: Store, emb: Embedder | null, params: LedgerPara
 
 	// Write JSON file to .alfred/knowledge/{type}/{id}.json (atomic).
 	const projectPath = params.project_path ?? process.cwd();
+	const author = getGitUserName(projectPath);
+	// Set author on entry before writing
+	if (typeof entry === "object" && entry !== null) {
+		(entry as unknown as Record<string, unknown>).author = author;
+	}
 	const filePath = writeKnowledgeFile(projectPath, subType, id, entry);
 
 	// DB upsert for search index.
@@ -423,6 +429,7 @@ async function ledgerSave(store: Store, emb: Embedder | null, params: LedgerPara
 		content: JSON.stringify(entry),
 		subType,
 		branch: projInfo.branch,
+		author,
 		createdAt: "",
 		updatedAt: "",
 		hitCount: 0,

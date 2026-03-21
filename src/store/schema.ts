@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS knowledge_index (
     content         TEXT NOT NULL,
     sub_type        TEXT NOT NULL DEFAULT 'decision',
     branch          TEXT DEFAULT '',
+    author          TEXT DEFAULT '',
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
     hit_count       INTEGER DEFAULT 0,
@@ -41,6 +42,7 @@ CREATE TABLE IF NOT EXISTS knowledge_index (
 CREATE INDEX IF NOT EXISTS idx_ki_project ON knowledge_index(project_id);
 CREATE INDEX IF NOT EXISTS idx_ki_sub_type ON knowledge_index(sub_type);
 CREATE INDEX IF NOT EXISTS idx_ki_updated ON knowledge_index(updated_at);
+CREATE INDEX IF NOT EXISTS idx_ki_author ON knowledge_index(author);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
     title,
@@ -135,6 +137,22 @@ CREATE TABLE IF NOT EXISTS session_links (
     linked_at         TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_session_links_master ON session_links(master_session_id);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    timestamp       TEXT NOT NULL,
+    event           TEXT NOT NULL,
+    actor           TEXT DEFAULT '',
+    slug            TEXT DEFAULT '',
+    action          TEXT DEFAULT '',
+    detail          TEXT DEFAULT '{}',
+    UNIQUE(project_id, timestamp, event, actor, slug)
+);
+CREATE INDEX IF NOT EXISTS idx_audit_project_time
+    ON audit_log(project_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_actor
+    ON audit_log(actor);
 `;
 
 const TAG_ALIASES: Record<string, string[]> = {
@@ -271,6 +289,7 @@ function rebuildFromScratch(db: Database.Database): void {
 		dropSafe(db, "TABLE", table);
 	}
 	for (const table of [
+		"audit_log",
 		"spec_fts",
 		"spec_index",
 		"knowledge_fts",
