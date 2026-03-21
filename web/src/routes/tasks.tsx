@@ -108,7 +108,7 @@ function TaskAccordionCard({
 	return (
 		<div
 			className={cn(
-				"rounded-xl border bg-card text-card-foreground transition-colors",
+				"rounded-xl border bg-card text-card-foreground transition-colors overflow-hidden",
 				isSelected && "ring-1",
 				isCompleted && "opacity-60",
 			)}
@@ -131,7 +131,7 @@ function TaskAccordionCard({
 			</Link>
 
 			{/* Compact info — always visible */}
-			<div className="px-3 pb-3 space-y-1.5">
+			<div className="px-3 pb-4 space-y-1.5">
 				{(task.project_name || task.started_at) && (
 					<p className="text-[10px] font-medium" style={{ color: "#40513b" }}>
 						{task.project_name}{task.project_name && task.started_at && " · "}{task.started_at && <span className="text-muted-foreground/70 font-normal">{formatDate(task.started_at)}</span>}
