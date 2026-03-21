@@ -72,7 +72,9 @@ export function vectorSearch(
 	const allCandidates: VectorMatch[] = [];
 
 	for (const source of sources) {
-		const joinTable = source === "knowledge" ? "knowledge_index" : "spec_index";
+		const ALLOWED_TABLES: Record<string, string> = { knowledge: "knowledge_index", spec: "spec_index" };
+		const joinTable = ALLOWED_TABLES[source];
+		if (!joinTable) throw new Error(`vectorSearch: invalid source "${source}"`);
 		const filter = source === "knowledge" ? "AND t.enabled = 1" : "";
 
 		const rows = store.db

@@ -79,8 +79,16 @@ function renderTemplate(file: SpecFile, data: TemplateData, lang: string): strin
 	return `${TEMPLATE_MARKER}\n${rendered}`;
 }
 
-/** Strip template content from a file if the marker is present. Returns empty string if template-only. */
+/**
+ * Strip template content from a file if the marker is present.
+ * Template content = everything from the marker line to the end of the file
+ * (since templates are the initial file content from init).
+ * If the file has been manually edited after the template (content added
+ * before the marker somehow), only the marker and content after it are stripped.
+ * In practice, the marker is always at line 1, so this returns "".
+ */
 export function stripTemplate(content: string): string {
 	if (!content.includes(TEMPLATE_MARKER)) return content;
+	// Marker is at the start (init places it at line 1). Return empty.
 	return "";
 }

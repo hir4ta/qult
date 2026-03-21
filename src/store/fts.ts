@@ -177,7 +177,7 @@ export function searchUnified(
 					subType: r.sub_type, hitCount: r.hit_count,
 				});
 			}
-		} catch { /* FTS error — skip knowledge results */ }
+		} catch (e) { process.stderr.write(`alfred: FTS knowledge search error: ${e}\n`); }
 	}
 
 	if (sources.includes("spec")) {
@@ -212,7 +212,7 @@ export function searchUnified(
 					slug: r.slug, fileName: r.file_name, specStatus: r.status,
 				});
 			}
-		} catch { /* FTS error — skip spec results */ }
+		} catch (e) { process.stderr.write(`alfred: FTS spec search error: ${e}\n`); }
 	}
 
 	// Sort by score descending, truncate

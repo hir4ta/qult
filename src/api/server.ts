@@ -21,7 +21,7 @@ import { searchKnowledgeFTS } from "../store/fts.js";
 import { computeGraphEdges } from "../store/graph.js";
 import type { Store } from "../store/index.js";
 import { getKnowledgeStats, getPromotionCandidates, promoteSubType, setKnowledgeEnabled } from "../store/knowledge.js";
-import { detectProject } from "../store/project.js";
+import { detectProject, resolveOrRegisterProject } from "../store/project.js";
 import type { KnowledgeRow } from "../types.js";
 
 /** Map KnowledgeRow to frontend KnowledgeEntry shape. */
@@ -55,7 +55,7 @@ export function createApp(
 	version: string,
 ): Hono {
 	const app = new Hono();
-	const proj = detectProject(projectPath);
+	const proj = resolveOrRegisterProject(store, projectPath);
 	const VALID_SPEC_FILES = new Set([
 		"requirements.md", "design.md", "tasks.md", "test-specs.md",
 		"decisions.md", "research.md", "session.md", "bugfix.md",
