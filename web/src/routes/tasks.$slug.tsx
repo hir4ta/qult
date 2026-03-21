@@ -1,6 +1,6 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Calendar, CheckCircle2, CircleCheck, CircleDot } from "@animated-color-icons/lucide-react";
+import { Calendar, CircleCheck, CircleDot } from "@animated-color-icons/lucide-react";
 import { useState } from "react";
 import { CoverageHeatmap } from "@/components/coverage-heatmap";
 import { ReviewPanel } from "@/components/review/ReviewPanel";
@@ -13,7 +13,6 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
-	completeTask,
 	fileApprovalsQueryOptions,
 	setFileApproval,
 	specContentQueryOptions,
@@ -43,7 +42,6 @@ function TaskDetailPage() {
 	const { data: specsData } = useQuery(specsQueryOptions(slug));
 	const { data: validationData } = useQuery(validationQueryOptions(slug));
 	const { data: approvalsData } = useQuery(fileApprovalsQueryOptions(slug));
-	const [confirmComplete, setConfirmComplete] = useState(false);
 	const [reviewModeFiles, setReviewModeFiles] = useState<Set<string>>(new Set());
 
 	const task = tasksData?.tasks.find((t) => t.slug === slug);
@@ -55,13 +53,6 @@ function TaskDetailPage() {
 		queries: specs.map((spec) => specContentQueryOptions(slug, spec.file)),
 	});
 
-	const completeMutation = useMutation({
-		mutationFn: () => completeTask(slug),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["tasks"] });
-			setConfirmComplete(false);
-		},
-	});
 
 	const approveMutation = useMutation({
 		mutationFn: ({ file, approved }: { file: string; approved: boolean }) =>
@@ -75,9 +66,6 @@ function TaskDetailPage() {
 	const needsReview = ["M", "L"].includes(task?.size ?? "");
 	const isPending = needsReview && task?.review_status !== "approved";
 	const isActive = task?.status !== "completed" && task?.status !== "done" && task?.status !== "cancelled";
-	const canComplete =
-		isActive &&
-		(task?.review_status === "approved" || !["M", "L"].includes(task?.size ?? ""));
 
 	const toggleReviewMode = (file: string) => {
 		setReviewModeFiles((prev) => {
@@ -107,20 +95,7 @@ function TaskDetailPage() {
 				{task.review_status && <Badge variant="outline" style={{ borderColor: task.review_status === "approved" ? "rgba(45,139,122,0.4)" : task.review_status === "changes_requested" ? "rgba(230,126,34,0.4)" : "rgba(107,114,128,0.3)", color: task.review_status === "approved" ? "#2d8b7a" : task.review_status === "changes_requested" ? "#e67e22" : "#6b7280" }}>{task.review_status}</Badge>}
 				{validationData && <ValidationBadge report={validationData} />}
 				{task.waves && task.waves.length > 0 && <div className="ml-auto"><WaveTimeline waves={task.waves} /></div>}
-				{canComplete && !confirmComplete && (
-					<Button size="sm" variant="brutalist" className="gap-1.5 text-xs shrink-0" onClick={() => setConfirmComplete(true)}>
-						<CheckCircle2 className="size-3.5" />{t("task.completeTask")}
-					</Button>
-				)}
 			</div>
-			{confirmComplete && (
-				<div className="flex items-center gap-3 rounded-lg border bg-card px-4 py-2">
-					<p className="text-xs text-muted-foreground">{t("task.confirmComplete")}</p>
-					<Button size="sm" className="text-xs" onClick={() => completeMutation.mutate()} disabled={completeMutation.isPending}>{completeMutation.isPending ? "..." : t("task.confirm")}</Button>
-					<Button size="sm" variant="outline" className="text-xs" onClick={() => setConfirmComplete(false)}>{t("task.cancel")}</Button>
-					{completeMutation.isError && <p className="text-xs text-red-500">{completeMutation.error.message}</p>}
-				</div>
-			)}
 
 				{/* Scrollable content */}
 			<div className="flex-1 overflow-y-auto space-y-3 pb-8">
