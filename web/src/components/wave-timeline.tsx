@@ -16,6 +16,7 @@ export function WaveTimeline({ waves }: WaveTimelineProps) {
 				const isCurrent = wave.isCurrent;
 				const prevComplete = i > 0 && (waves[i - 1]?.checked ?? 0) >= (waves[i - 1]?.total ?? 1) && (waves[i - 1]?.total ?? 0) > 0;
 				const label = wave.key === "closing" ? "Closing" : `Wave ${wave.key}`;
+				const completeColor = "#7b6b8d"; // purple for completed waves
 
 				// Connector type: flowing dots when connecting complete→current
 				const showFlowingDots = isCurrent && prevComplete;
@@ -27,9 +28,9 @@ export function WaveTimeline({ waves }: WaveTimelineProps) {
 							<div className="flex items-center shrink-0" style={{ height: "28px" }}>
 								{showFlowingDots ? (
 									<div className="w-8 flex items-center justify-between px-0.5">
-										<div className="size-1 rounded-full animate-flow-dot-1" style={{ backgroundColor: "#2d8b7a" }} />
-										<div className="size-1 rounded-full animate-flow-dot-2" style={{ backgroundColor: "#2d8b7a" }} />
-										<div className="size-1 rounded-full animate-flow-dot-3" style={{ backgroundColor: "#2d8b7a" }} />
+										<div className="size-1 rounded-full animate-flow-dot-1" style={{ backgroundColor: completeColor }} />
+										<div className="size-1 rounded-full animate-flow-dot-2" style={{ background: `linear-gradient(to right, ${completeColor} 50%, #e67e22 50%)` }} />
+										<div className="size-1 rounded-full animate-flow-dot-3" style={{ backgroundColor: "#e67e22" }} />
 									</div>
 								) : (
 									<div
@@ -39,7 +40,7 @@ export function WaveTimeline({ waves }: WaveTimelineProps) {
 										<div
 											className="h-full w-full"
 											style={{
-												backgroundColor: isComplete || prevComplete ? "#2d8b7a" : "var(--color-border)",
+												backgroundColor: isComplete || prevComplete ? completeColor : "var(--color-border)",
 											}}
 										/>
 									</div>
@@ -55,15 +56,15 @@ export function WaveTimeline({ waves }: WaveTimelineProps) {
 										className="flex size-7 items-center justify-center rounded-full transition-colors"
 										style={{
 											backgroundColor: isComplete
-												? "#2d8b7a18"
+												? `${completeColor}18`
 												: isCurrent
 													? "#e67e2218"
 													: "var(--color-accent)",
-											border: `2px solid ${isComplete ? "#2d8b7a" : isCurrent ? "#e67e22" : "var(--color-border)"}`,
+											border: `2px solid ${isComplete ? completeColor : isCurrent ? "#e67e22" : "var(--color-border)"}`,
 										}}
 									>
 										{isComplete ? (
-											<Check className="size-3.5" style={{ color: "#2d8b7a" }} />
+											<Check className="size-3.5" style={{ color: completeColor }} />
 										) : isCurrent ? (
 											<CircleDot className="size-3.5 animate-pulse" style={{ color: "#e67e22" }} />
 										) : (
@@ -74,7 +75,7 @@ export function WaveTimeline({ waves }: WaveTimelineProps) {
 										className="text-[10px] font-medium whitespace-nowrap"
 										style={{
 											color: isComplete
-												? "#2d8b7a"
+												? completeColor
 												: isCurrent
 													? "#e67e22"
 													: "var(--color-muted-foreground)",
