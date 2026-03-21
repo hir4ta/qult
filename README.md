@@ -56,6 +56,32 @@ Most spec tools give you slash commands that say "you should write a spec first.
 
 **A dashboard that's actually useful.** `alfred dashboard` opens `localhost:7575` with live task progress, spec review with line-level comments, file-by-file approval, knowledge health, and activity timeline. English/Japanese toggle.
 
+## Why alfred in 2026
+
+Claude Code is powerful, but unstructured AI coding has well-documented failure modes:
+
+- **~30% first-attempt success rate** — without spec grounding, Claude hallucinates completions, skips edge cases, and claims "done" when it isn't. alfred's 3-layer gate system (spec → review → approval) catches these before they reach your codebase.
+- **Context loss across sessions** — even with 1M context (Opus 4.6), compaction eventually fires and wipes your working state. alfred persists decisions, patterns, and progress as structured JSON files that survive any compaction, any session boundary, any model swap.
+- **Infinite refactoring loops** — without bounded iteration, Claude can spend hours rewriting the same code. alfred's wave-based implementation enforces commit → review → advance. Max 2 fix rounds per wave, then escalate.
+- **Security blind spots** — 45% of AI-generated code contains vulnerabilities (per industry research). alfred spawns parallel code-review agents at every wave boundary, with security as a dedicated review perspective.
+- **Spec-implementation drift** — specs go stale the moment coding starts. alfred's living spec auto-appends changed files to design.md on every commit. Your spec stays honest automatically.
+
+### SDD meets IDD
+
+The industry is converging on two complementary paradigms: **Spec-Driven Development** (structured specs as source of truth) and **Intent-Driven Development** (capture *why* and *what*, let AI handle *how*). alfred bridges both:
+
+- **Full SDD** for M/L/XL features — requirements, design, tasks, tests, with traceability and review gates
+- **Lightweight IDD** for S/D changes — just requirements + decisions, no design overhead
+- **Immutable decisions** via `ledger save` — like ADRs, but semantically searchable across projects and sessions
+
+### Built for 1M context
+
+With Opus 4.6's 1M context window, compaction is rarer but more destructive when it hits. alfred is designed for this reality:
+
+- **PreCompact hook** captures structured chapter memory (goal, decisions, summary) before context is lost
+- **Knowledge persistence** (`.alfred/knowledge/`) is the only data that guaranteed survives compaction, session restarts, and model changes
+- **Adaptive injection** — new projects get full context on session start; mature projects get just the current task. No context bloat.
+
 ## Skills
 
 | Skill | One-liner |
