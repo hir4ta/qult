@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { searchQueryOptions } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
-import { useSearch } from "@tanstack/react-router";
+import { useSearch, useNavigate } from "@tanstack/react-router";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { BookOpen, FileText, Search } from "@animated-color-icons/lucide-react";
@@ -38,9 +38,21 @@ export function GlobalSearch() {
 		if (open) setTimeout(() => inputRef.current?.focus(), 100);
 	}, [open]);
 
+	const navigate = useNavigate();
 	const { data, isLoading } = useQuery(
 		searchQueryOptions(debouncedQuery, { projectId: search.project }),
 	);
+
+	function handleResultClick(r: { source: string; slug?: string; id: number }) {
+		setOpen(false);
+		setQuery("");
+		if (r.source === "spec" && r.slug) {
+			navigate({ to: "/tasks/$slug", params: { slug: r.slug } });
+		} else {
+			// Knowledge: navigate to knowledge page (detail opens via hash)
+			navigate({ to: "/knowledge", search: { highlight: String(r.id) } });
+		}
+	}
 
 	return (
 		<>
@@ -81,9 +93,11 @@ export function GlobalSearch() {
 								</p>
 							)}
 						{data?.results?.map((r) => (
-							<div
+							<button
+								type="button"
 								key={`${r.source}-${r.id}`}
-								className="flex items-start gap-3 px-3 py-2 rounded-lg hover:bg-muted/50 cursor-default"
+								className="flex items-start gap-3 px-3 py-2 rounded-lg hover:bg-muted/50 cursor-pointer w-full text-left transition-colors"
+								onClick={() => handleResultClick(r)}
 							>
 								{r.source === "knowledge" ? (
 									<BookOpen
@@ -112,7 +126,7 @@ export function GlobalSearch() {
 										)}
 									</div>
 								</div>
-							</div>
+							</button>
 						))}
 					</div>
 				</DialogContent>
