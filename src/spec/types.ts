@@ -67,6 +67,7 @@ export interface ActiveTask {
 	review_status?: ReviewStatus;
 	size?: SpecSize;
 	spec_type?: SpecType;
+	owner?: string;
 }
 
 export interface ActiveState {
@@ -420,4 +421,56 @@ export function removeTask(projectPath: string, taskSlug: string): boolean {
 	}
 	writeActiveState(projectPath, state);
 	return false;
+}
+
+export type ApprovalStatus = "approved" | "changes_requested" | "pending";
+
+/**
+ * Check multi-reviewer approval status.
+ * Reads all review JSON files and determines aggregate status.
+ */
+export function checkApprovalStatus(
+	reviewDir: string,
+	requiredApprovers: number,
+): ApprovalStatus {
+	if (!existsSync(reviewDir)) return "pending";
+
+	const files = readdirSync(reviewDir)
+		.filter((f) => f.startsWith("review-") && f.endsWith(".json"))
+		.sort(); // chronological by timestamp in filename
+
+	if (files.length === 0) return "pending";
+
+	// Collect latest review per reviewer
+	const latestByReviewer = new Map<string, { status: string; timestamp: string }>();
+	for (const file of files) {
+		try {
+			const content = JSON.parse(readFileSync(join(reviewDir, file), "utf-8")) as {
+				status?: string;
+				reviewer?: string;
+				timestamp?: string;
+			};
+			const reviewer = content.reviewer || "";
+			const existing = latestByReviewer.get(reviewer);
+			if (!existing || (content.timestamp ?? "") > existing.timestamp) {
+				latestByReviewer.set(reviewer, {
+					status: content.status ?? "approved",
+					timestamp: content.timestamp ?? "",
+				});
+			}
+		} catch { /* skip invalid */ }
+	}
+
+	// Any changes_requested → block
+	for (const review of latestByReviewer.values()) {
+		if (review.status === "changes_requested") return "changes_requested";
+	}
+
+	// Count distinct approvers
+	let approvedCount = 0;
+	for (const review of latestByReviewer.values()) {
+		if (review.status === "approved") approvedCount++;
+	}
+
+	return approvedCount >= requiredApprovers ? "approved" : "pending";
 }

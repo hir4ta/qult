@@ -36,6 +36,7 @@ export const TaskDetailSchema = z.object({
 	size: z.string().optional(),
 	spec_type: z.string().optional(),
 	review_status: z.string().optional(),
+	owner: z.string().optional(),
 	project_name: z.string().optional(),
 });
 
@@ -73,6 +74,7 @@ export const KnowledgeEntrySchema = z.object({
 	content: z.string(),
 	saved_at: z.string().optional(),
 	enabled: z.boolean(),
+	author: z.string().optional(),
 	project_name: z.string().optional(),
 	tags: z.array(z.string()).default([]),
 });
@@ -185,6 +187,7 @@ export const ReviewSchema = z.object({
 	status: z.enum(["approved", "changes_requested"]),
 	comments: z.array(ReviewCommentSchema).optional(),
 	summary: z.string().optional(),
+	reviewer: z.string().optional(),
 });
 
 export const ReviewStatusResponseSchema = z.object({

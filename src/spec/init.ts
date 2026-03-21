@@ -1,4 +1,5 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { getGitUserName } from "../team/config.js";
 import type { TemplateData } from "./templates.js";
 import { renderForSize } from "./templates.js";
 import type { ActiveState, InitResult, SpecSize, SpecType } from "./types.js";
@@ -74,6 +75,7 @@ export function initSpec(
 			status: "pending",
 			size,
 			spec_type: specType,
+			owner: getGitUserName(projectPath),
 		});
 	}
 	writeActiveState(projectPath, state);

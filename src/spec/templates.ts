@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { SpecFile, SpecSize, SpecType } from "./types.js";
 import { filesForSize } from "./types.js";
 
@@ -51,14 +53,33 @@ export function renderForSize(
 	size: SpecSize,
 	specType: SpecType,
 	data: TemplateData,
+	projectPath?: string,
 ): Map<SpecFile, string> {
 	const lang = (process.env.ALFRED_LANG || "en").toLowerCase();
 	const files = filesForSize(size, specType);
 	const rendered = new Map<SpecFile, string>();
 	for (const f of files) {
-		rendered.set(f, renderTemplate(f, data, lang));
+		// 2-layer resolution: custom template > built-in default
+		const custom = projectPath ? tryReadCustomTemplate(projectPath, f) : undefined;
+		rendered.set(f, custom ?? renderTemplate(f, data, lang));
 	}
 	return rendered;
+}
+
+function tryReadCustomTemplate(projectPath: string, file: SpecFile): string | undefined {
+	const customPath = join(projectPath, ".alfred", "templates", "specs", file);
+	if (!existsSync(customPath)) return undefined;
+	try {
+		const content = readFileSync(customPath, "utf-8");
+		if (!content.trim()) {
+			process.stderr.write(`warning: custom template ${file} is empty, using default\n`);
+			return undefined;
+		}
+		return content;
+	} catch (err) {
+		process.stderr.write(`warning: cannot read custom template ${file}: ${err}\n`);
+		return undefined;
+	}
 }
 
 export const TEMPLATE_MARKER = "<!-- alfred:template -->";

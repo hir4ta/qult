@@ -44,6 +44,7 @@ function toKnowledgeEntry(r: KnowledgeRow, projectName?: string) {
 		content: r.content,
 		saved_at: r.createdAt,
 		enabled: Boolean(r.enabled),
+		author: r.author ?? "",
 		project_name: projectName ?? "",
 		tags,
 	};
@@ -79,7 +80,7 @@ export function createApp(
 	}
 
 	function enrichTask(
-		task: { slug: string; status?: string; started_at?: string; completed_at?: string; size?: string; spec_type?: string; review_status?: string },
+		task: { slug: string; status?: string; started_at?: string; completed_at?: string; size?: string; spec_type?: string; review_status?: string; owner?: string },
 		projPath: string,
 		projectName: string,
 		projectId?: string,
@@ -592,9 +593,12 @@ export function createApp(
 
 		const ts = new Date().toISOString();
 		const rawComments = Array.isArray(body.comments) ? body.comments.slice(0, 100) : [];
+		const { getGitUserName } = await import("../team/config.js");
+		const reviewer = getGitUserName(projectPath);
 		const review = {
 			timestamp: ts,
 			status: reviewStatus,
+			reviewer,
 			comments: rawComments.map((comment) => ({
 				file: String(comment.file ?? "").slice(0, 500),
 				line: Math.max(0, Number(comment.line) || 0),
