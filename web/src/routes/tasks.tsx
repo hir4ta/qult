@@ -140,9 +140,11 @@ function TaskAccordionCard({
 					</div>
 					<div className="flex items-center gap-1 shrink-0">
 						<StatusBadge status={task.status ?? "pending"} />
-						<Badge variant="outline" className="text-[10px] px-1 py-0">
-							{task.size ?? "?"}
-						</Badge>
+						{task.size && (
+							<Badge variant="outline" className="text-[10px] px-1 py-0">
+								{task.size}
+							</Badge>
+						)}
 					</div>
 				</div>
 			</Link>
