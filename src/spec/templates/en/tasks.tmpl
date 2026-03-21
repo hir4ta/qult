@@ -1,16 +1,37 @@
 # Tasks: {{taskSlug}}
 
-## Wave 1: Core Implementation
+## Summary
 
-### T-1.1: [Task Title]
-- Requirements: FR-1
-- Files:
-- [ ] [Implementation details]
+<!--
+- Total: N tasks across M waves (+ Closing Wave)
+- Size: NS, NM, NL
+- Parallel-safe: T-X.Y / T-X.Z (tasks in same wave that can run in parallel)
+-->
+
+## Wave 1: [Wave Name]
+
+<!-- Order waves by build sequence: Foundation → Core → Integration → Polish -->
+
+- [ ] T-1.1 [S/M/L] [Task Title]
+  _Requirements: FR-1 | Depends: — | Files: src/path/to/file.ts_
+  - [Implementation detail 1]
+  - [Implementation detail 2]
+  - Verify: [Done condition — tests pass, curl check, etc.]
+
+<!--
+Task definition rules:
+- Each task MUST have Requirements (linked FR), Depends (dependency), Files (targets)
+- Verify must be concrete: "task test passes" "curl returns 200" etc.
+- S: ~30min, 1 file | M: ~1-2h, multi-file | L: ~2-4h, complex logic
+- (P) suffix marks parallel-safe tasks
+-->
 
 ### T-1.R: Wave 1 Review
-- [ ] Commit changes
-- [ ] Self-review (`/alfred:inspect` or delegate to `alfred:code-reviewer`)
-- [ ] Save learnings (`ledger save`)
+- [ ] Commit changes (include wave number in message)
+- [ ] Self-review (delegate to `alfred:code-reviewer` agent, run in foreground)
+- [ ] Critical/High → `dossier gate fix` → apply fixes → re-review → confirm 0 findings
+- [ ] Save learnings to knowledge (`ledger save`)
+- [ ] `dossier gate clear reason="Wave 1 review: [summary]"`
 
 ## Wave: Closing
 
@@ -18,5 +39,11 @@
 - [ ] T-C.2 Update CLAUDE.md / README if needed
 - [ ] T-C.3 Verify tests pass (`task test`)
 - [ ] T-C.4 Save key learnings to knowledge via `ledger save`
+
+## Dependency Graph
+
+```
+T-1.1 ──→ T-1.2
+```
 
 When all items checked → `dossier action=complete` to close the spec.

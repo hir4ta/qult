@@ -1,16 +1,37 @@
 # タスク: {{taskSlug}}
 
-## Wave 1: コア実装
+## サマリー
 
-### T-1.1: [タスクタイトル]
-- Requirements: FR-1
-- Files:
-- [ ] [実装内容]
+<!--
+- Total: N tasks across M waves (+ Closing Wave)
+- Size: NS, NM, NL
+- Parallel-safe: T-X.Y / T-X.Z (同 Wave 内で並列実行可能なタスク)
+-->
+
+## Wave 1: [Wave 名]
+
+<!-- Wave はビルド順に並べる: Foundation → Core → Integration → Polish -->
+
+- [ ] T-1.1 [S/M/L] [タスクタイトル]
+  _Requirements: FR-1 | Depends: — | Files: src/path/to/file.ts_
+  - [実装内容 1]
+  - [実装内容 2]
+  - Verify: [完了条件 — テスト通過、動作確認等]
+
+<!--
+タスク定義ルール:
+- 各タスクに Requirements (紐づく FR), Depends (依存タスク), Files (変更対象) を書く
+- Verify は具体的に: "task test パス" "curl で応答確認" 等
+- S: ~30min, 1 ファイル | M: ~1-2h, 複数ファイル | L: ~2-4h, 複雑なロジック
+- (P) をタイトルに付けると並列実行可能マーク
+-->
 
 ### T-1.R: Wave 1 レビュー
-- [ ] 変更をコミット
-- [ ] セルフレビュー（`/alfred:inspect` または `alfred:code-reviewer` に委譲）
+- [ ] 変更をコミット（Wave 番号をメッセージに含める）
+- [ ] セルフレビュー（`alfred:code-reviewer` エージェントに委譲。foreground で実行）
+- [ ] Critical/High → `dossier gate fix` → 修正 → 再レビュー → 0 件確認
 - [ ] 学びをナレッジに保存（`ledger save`）
+- [ ] `dossier gate clear reason="Wave 1 review: [summary]"`
 
 ## Wave: Closing
 
@@ -18,5 +39,11 @@
 - [ ] T-C.2 必要に応じて CLAUDE.md / README を更新
 - [ ] T-C.3 テスト通過を確認（`task test`）
 - [ ] T-C.4 重要な学びをナレッジに保存（`ledger save`）
+
+## 依存関係グラフ
+
+```
+T-1.1 ──→ T-1.2
+```
 
 全項目チェック後 → `dossier action=complete` でスペックをクローズ。
