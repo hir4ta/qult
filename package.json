@@ -1,6 +1,6 @@
 {
   "name": "claude-alfred",
-  "version": "0.3.21",
+  "version": "0.3.22",
   "type": "module",
   "bin": {
     "alfred": "dist/cli.mjs"
