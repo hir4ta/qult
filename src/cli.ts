@@ -159,6 +159,63 @@ const main = defineCommand({
 					`Project: .alfred/ exists in ${cwd}`,
 					"not initialized — run /alfred:init in Claude Code",
 				);
+
+				// Team checks
+				const { loadTeamConfig, getGitUserName } = await import("./team/config.js");
+				const teamConfig = loadTeamConfig(cwd);
+				check(!!teamConfig, "Team: .alfred/team.yaml", "not found — run 'alfred team init' for team features");
+
+				const gitUser = getGitUserName(cwd);
+				check(
+					gitUser !== "unknown",
+					`Git user.name: ${gitUser}`,
+					"not set — run: git config --global user.name 'Your Name'",
+				);
+
+				try {
+					const { execFileSync: exec } = await import("node:child_process");
+					const driver = exec("git", ["config", "merge.alfred-knowledge.driver"], {
+						cwd, encoding: "utf-8", timeout: 3000,
+					}).trim();
+					check(!!driver, "Merge driver: configured");
+				} catch {
+					check(false, "Merge driver", "not registered — run 'alfred team init'");
+				}
+			},
+		}),
+		team: defineCommand({
+			meta: { description: "Team collaboration management" },
+			subCommands: {
+				init: defineCommand({
+					meta: { description: "Initialize team configuration" },
+					args: {
+						name: { type: "string", default: "", description: "Team name" },
+					},
+					async run({ args }) {
+						const { teamInit } = await import("./team/init.js");
+						const result = teamInit(process.cwd(), { name: args.name });
+						if (result.teamYaml) console.log("  ✓ Created .alfred/team.yaml");
+						if (result.gitattributes) console.log("  ✓ Added merge driver to .gitattributes");
+						if (result.mergeDriver) console.log("  ✓ Registered git merge driver");
+						if (result.gitignore) console.log("  ✓ Adjusted .gitignore for spec tracking");
+						if (result.templatesDir) console.log("  ✓ Created .alfred/templates/specs/");
+						console.log("\nTeam init complete. Share this repo and run 'alfred team join' on other machines.");
+					},
+				}),
+				join: defineCommand({
+					meta: { description: "Join an existing team" },
+					async run() {
+						const { teamJoin } = await import("./team/init.js");
+						try {
+							const result = teamJoin(process.cwd());
+							console.log("Team join complete:\n");
+							console.log(result.summary);
+						} catch (err) {
+							console.error(`Error: ${err instanceof Error ? err.message : err}`);
+							process.exit(1);
+						}
+					},
+				}),
 			},
 		}),
 		knowledge: defineCommand({
