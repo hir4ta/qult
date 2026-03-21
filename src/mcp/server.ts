@@ -141,30 +141,30 @@ Actions:
 				.describe("Action to perform"),
 			id: z.number().optional().describe("Record ID (required for promote)"),
 			query: z.string().optional().describe("Search query"),
-			label: z.string().optional().describe("Short label for saved entry"),
+			label: z.string().optional().describe("Short label for saved entry (REQUIRED for save)"),
 			limit: z.number().optional().describe("Maximum search results (default: 10)"),
 			detail: z.enum(["compact", "summary", "full"]).optional().describe("Response verbosity"),
 			sub_type: z
 				.enum(["decision", "pattern", "rule"])
 				.optional()
-				.describe("Knowledge type (required for save)"),
-			title: z.string().optional().describe("Entry title"),
+				.describe("Knowledge type (REQUIRED for save)"),
+			title: z.string().optional().describe("Entry title (REQUIRED for save)"),
 			// Decision fields
-			decision: z.string().optional().describe("Decision: what was decided"),
-			reasoning: z.string().optional().describe("Decision: why this choice"),
+			decision: z.string().optional().describe("Decision: what was decided (REQUIRED for decision)"),
+			reasoning: z.string().optional().describe("Decision: why this choice (REQUIRED for decision)"),
 			alternatives: z
 				.string()
 				.optional()
 				.describe("Decision: newline-separated rejected alternatives with reasons"),
 			context_text: z.string().optional().describe("Decision/Pattern: context or background"),
 			// Pattern fields
-			pattern_type: z.enum(["good", "bad", "error-solution"]).optional().describe("Pattern: type"),
-			pattern: z.string().optional().describe("Pattern: concrete steps"),
+			pattern_type: z.enum(["good", "bad", "error-solution"]).optional().describe("Pattern: type (REQUIRED for pattern)"),
+			pattern: z.string().optional().describe("Pattern: concrete steps (REQUIRED for pattern)"),
 			application_conditions: z.string().optional().describe("Pattern: when to apply"),
 			expected_outcomes: z.string().optional().describe("Pattern: expected results"),
 			// Rule fields
-			key: z.string().optional().describe("Rule: machine-readable key"),
-			text: z.string().optional().describe("Rule: imperative text"),
+			key: z.string().optional().describe("Rule: machine-readable key (REQUIRED for rule)"),
+			text: z.string().optional().describe("Rule: imperative text (REQUIRED for rule)"),
 			category: z.string().optional().describe("Rule: category"),
 			priority: z.enum(["p0", "p1", "p2"]).optional().describe("Rule: priority"),
 			rationale: z.string().optional().describe("Rule: rationale"),
