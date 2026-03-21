@@ -61,7 +61,12 @@ export function renderForSize(
 	for (const f of files) {
 		// 2-layer resolution: custom template > built-in default
 		const custom = projectPath ? tryReadCustomTemplate(projectPath, f) : undefined;
-		rendered.set(f, custom ?? renderTemplate(f, data, lang));
+		if (custom) {
+			// Apply same variable substitution to custom templates
+			rendered.set(f, applyTemplateVars(custom, data, lang));
+		} else {
+			rendered.set(f, renderTemplate(f, data, lang));
+		}
 	}
 	return rendered;
 }
@@ -80,6 +85,15 @@ function tryReadCustomTemplate(projectPath: string, file: SpecFile): string | un
 		process.stderr.write(`warning: cannot read custom template ${file}: ${err}\n`);
 		return undefined;
 	}
+}
+
+function applyTemplateVars(tmpl: string, data: TemplateData, lang: string): string {
+	const description = data.description || DEFAULT_DESCRIPTIONS[lang] || DEFAULT_DESCRIPTIONS.en!;
+	return `${TEMPLATE_MARKER}\n${tmpl
+		.replace(/\{\{taskSlug\}\}/g, data.taskSlug)
+		.replace(/\{\{description\}\}/g, description)
+		.replace(/\{\{date\}\}/g, data.date)
+		.replace(/\{\{specType\}\}/g, data.specType)}`;
 }
 
 export const TEMPLATE_MARKER = "<!-- alfred:template -->";

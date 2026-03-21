@@ -441,7 +441,7 @@ export function checkApprovalStatus(
 
 	if (files.length === 0) return "pending";
 
-	// Collect latest review per reviewer
+	// Collect latest review per reviewer (skip empty/unknown reviewers from count)
 	const latestByReviewer = new Map<string, { status: string; timestamp: string }>();
 	for (const file of files) {
 		try {
@@ -451,6 +451,7 @@ export function checkApprovalStatus(
 				timestamp?: string;
 			};
 			const reviewer = content.reviewer || "";
+			if (!reviewer || reviewer === "unknown") continue; // skip unidentified reviewers
 			const existing = latestByReviewer.get(reviewer);
 			if (!existing || (content.timestamp ?? "") > existing.timestamp) {
 				latestByReviewer.set(reviewer, {

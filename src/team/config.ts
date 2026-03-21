@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 
 // ── Git User Cache ──
 
@@ -17,7 +17,7 @@ export function getGitUserName(projectPath: string): string {
 
 	// Fallback to git config
 	try {
-		const name = execSync("git config user.name", {
+		const name = execFileSync("git", ["config", "user.name"], {
 			cwd: projectPath,
 			encoding: "utf-8",
 			timeout: 3000,
@@ -34,7 +34,7 @@ export function getGitUserName(projectPath: string): string {
 
 export function refreshGitUserCache(projectPath: string): void {
 	try {
-		const name = execSync("git config user.name", {
+		const name = execFileSync("git", ["config", "user.name"], {
 			cwd: projectPath,
 			encoding: "utf-8",
 			timeout: 3000,
