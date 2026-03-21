@@ -197,7 +197,9 @@ export function createApp(
 		try { body = await c.req.json(); } catch { return c.json({ error: "invalid JSON" }, 400); }
 
 		if (body.name && typeof body.name === "string") {
-			renameProject(store, id, body.name);
+			const trimmed = body.name.trim();
+			if (!trimmed || trimmed.length > 255) return c.json({ error: "name must be 1-255 chars" }, 400);
+			renameProject(store, id, trimmed);
 		}
 		if (body.status && ["active", "archived"].includes(body.status)) {
 			updateProjectStatus(store, id, body.status as "active" | "archived");
@@ -245,25 +247,22 @@ export function createApp(
 		if (!VALID_SLUG.test(slug)) return c.json({ error: "invalid slug" }, 400);
 		if (!VALID_SPEC_FILES.has(file)) return c.json({ error: "invalid spec file" }, 400);
 
-		// Try current project first, then search all projects
-		const sd = new SpecDir(projectPath, slug);
+		// Resolve project: explicit ?project= param, or default to current project
+		const filterProjectId = getProjectFilter(c.req.query("project"));
+		let targetPath = projectPath;
+		if (filterProjectId) {
+			const filterProj = getProject(store, filterProjectId);
+			if (!filterProj) return c.json({ error: "project not found" }, 404);
+			targetPath = filterProj.path;
+		}
+
+		const sd = new SpecDir(targetPath, slug);
 		try {
 			const content = sd.readFile(file as SpecFile);
 			return c.json({ content });
-		} catch { /* not in current project */ }
-
-		// Search in other projects
-		const activeProjects = listActiveProjects(store);
-		for (const p of activeProjects) {
-			if (p.id === proj.id) continue;
-			const otherSd = new SpecDir(p.path, slug);
-			try {
-				const content = otherSd.readFile(file as SpecFile);
-				return c.json({ content });
-			} catch { /* not here either */ }
+		} catch {
+			return c.json({ error: "spec file not found" }, 404);
 		}
-
-		return c.json({ error: "spec file not found" }, 404);
 	});
 
 	app.get("/api/tasks/:slug/specs/:file/history", (c) => {
