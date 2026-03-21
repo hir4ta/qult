@@ -293,10 +293,6 @@ export function completeTask(projectPath: string, taskSlug: string): string {
 	const current = effectiveStatus(task.status);
 	if (current === "done") throw new Error(`task "${taskSlug}" is already done`);
 	if (current === "cancelled") throw new Error(`task "${taskSlug}" is cancelled`);
-	// Allow completion from review (normal flow) or in-progress (forced complete)
-	task.status = "done";
-	task.completed_at = new Date().toISOString();
-
 	if (state.primary === taskSlug) {
 		state.primary =
 			state.tasks.find((t) => {

@@ -175,6 +175,22 @@ describe("ActiveState management", () => {
 		expect(state.tasks).toHaveLength(1);
 	});
 
+	it("completes non-primary task without changing primary", () => {
+		writeTestState({
+			primary: "task-a",
+			tasks: [
+				{ slug: "task-a", started_at: "2026-01-01T00:00:00Z" },
+				{ slug: "task-b", started_at: "2026-01-02T00:00:00Z" },
+			],
+		});
+		const newPrimary = completeTask(tmpDir, "task-b");
+		expect(newPrimary).toBe("task-a");
+		const state = readActiveState(tmpDir);
+		expect(state.tasks.find((t) => t.slug === "task-b")).toBeUndefined();
+		expect(state.tasks).toHaveLength(1);
+		expect(state.primary).toBe("task-a");
+	});
+
 	it("deletes _active.md when last task is completed", () => {
 		writeTestState({
 			primary: "task-a",
