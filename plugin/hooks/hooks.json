@@ -58,11 +58,6 @@
             "statusMessage": "alfred: checking spec approval...",
             "timeout": 5,
             "type": "command"
-          },
-          {
-            "type": "prompt",
-            "prompt": "You are a spec-driven development gatekeeper. An Edit/Write tool is about to execute. The command handler already passed deterministic checks (review-gate, approval-gate).\n\nCheck the conversation context:\n1. If an active spec ALREADY EXISTS (dossier init was called, or spec context is visible in the conversation), respond {\"ok\": true} — the spec requirement is satisfied.\n2. If NO spec exists and this is a TRIVIAL change (typo fix, documentation update, config tweak, comment edit, style fix, renaming, version bump), respond {\"ok\": true} — no spec needed.\n3. If NO spec exists and this is SUBSTANTIAL work (new feature, bug fix requiring investigation, refactoring, architecture change), respond {\"ok\": false, \"reason\": \"This change requires a spec. Create one with: dossier action=init (use size=S for small changes, size=D for delta changes)\"}.\n\nWhen in doubt, allow it — false blocks are worse than missing specs.",
-            "timeout": 10
           }
         ]
       }

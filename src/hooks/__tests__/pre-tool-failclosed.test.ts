@@ -64,9 +64,10 @@ describe("preToolUse — fail-closed on malformed _active.md", () => {
 	});
 
 	it("allows Edit when no _active.md exists (no .alfred/specs/)", async () => {
-		// No .alfred directory at all — should allow freely
+		// No .alfred directory at all — emits allowTool with advisory (#19)
 		await preToolUse(makeEvent("Edit", join(tmpDir, "src/index.ts")));
-		expect(stdoutData.length).toBe(0);
+		const out = JSON.parse(stdoutData[0]);
+		expect(out?.hookSpecificOutput?.permissionDecision).toBe("allow");
 	});
 
 	it("allows Edit to .alfred/ paths even when _active.md is malformed", async () => {

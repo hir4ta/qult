@@ -72,7 +72,14 @@ export async function preToolUse(ev: HookEvent): Promise<void> {
 			allowTool(`Polish mode (post-complete '${polish.slug}')`);
 			return;
 		}
-		// No polish mode → let the prompt hook (LLM judge) decide if a spec is needed.
+		// No active spec, no polish mode → allow but warn via stderr.
+		// Spec-first enforcement is handled by UserPromptSubmit DIRECTIVE (Stage 1).
+		// PreToolUse no longer uses a prompt-type LLM judge (removed: parallel hook
+		// execution causes allow/deny conflicts, see #19).
+		process.stderr.write(
+			"[alfred] No active spec. Consider creating one: dossier action=init\n",
+		);
+		allowTool("No active spec (advisory warning emitted)");
 		return;
 	}
 

@@ -48,8 +48,8 @@ paths:
 - Gate types: `spec-review` (auto-set on dossier init), `wave-review` (set per wave via `dossier action=gate`)
 - Enforcement order: .alfred/ exempt → malformed check (empty primary = valid state, not malformed) → review-gate → approval gate (M/L/XL unapproved)
 - Gate clear: `dossier action=gate sub_action=clear reason="..."` (reason required, audit logged)
-- Spec-first guard: prompt-type hook handler (LLM judge). When command handler passes and no active spec, a prompt hook evaluates conversation context to determine if the change is trivial (typo, docs, config → allow) or substantial (new feature, refactoring → block with spec creation guidance). Replaces the previous intent-guard mechanism (last-intent.json based)
-- Active spec optimization: command handler calls `allowTool()` when spec exists and all gates pass, skipping prompt hook evaluation entirely. This covers: .alfred/ files, deferred/cancelled specs, and active specs with cleared gates
+- Spec-first guard: command handler only (prompt-type LLM judge removed in #19). When no active spec and no polish mode, emits stderr advisory warning + `allowTool()`. Enforcement of spec-first rule is via UserPromptSubmit DIRECTIVE (Stage 1), not PreToolUse
+- Active spec optimization: command handler calls `allowTool()` when spec exists and all gates pass. This covers: .alfred/ files, deferred/cancelled specs, and active specs with cleared gates
 
 ## Stop (review gate + session scope)
 - Blocks stopping when review-gate is active (before existing Next Steps / self-review checks)
@@ -64,7 +64,7 @@ paths:
 - Semantic intent classification: Voyage embedding similarity (threshold >= 0.5) with keyword fallback. Prompt embedding reused for knowledge search (DEC-2)
 - Hook state persistence: `src/hooks/state.ts` — readStateJSON/writeStateJSON/readStateText/writeStateText. Stores session-local state in `.alfred/.state/` (gitignored). Path traversal guard on file names
 - Shared spec-guard utilities: `src/hooks/spec-guard.ts` — tryReadActiveSpec, isSpecFilePath, countUncheckedNextSteps, hasUncheckedSelfReview, allowTool, denyTool, blockStop
-- Spec-first guard: delegated to prompt-type hook handler (see PreToolUse section). Previous intent-guard mechanism (last-intent.json) removed
+- Spec-first guard: command handler handles all cases (allowTool/denyTool). Prompt-type LLM judge removed (#19: parallel hook execution causes allow/deny conflicts). No-spec case emits stderr advisory + allowTool; enforcement is via UserPromptSubmit DIRECTIVE (Stage 1)
 - Validation engine: `src/spec/validate.ts` — 21-check validation for all spec sizes
 - Multi-agent skills: inspect (6 profiles), salon (3 specialists + synthesis), brief (requirements+design agent review loop + inline check for others + approval gate), attend (spec→approve→implement→review→commit orchestrator), tdd (red→green→refactor), mend (reproduce→analyze→fix→verify), survey (code→spec reverse engineering), harvest (PR comment → knowledge)
 - brief/attend spec generation order: research → requirements → design → tasks → test-specs → session (decisions saved via ledger directly, not as spec file)

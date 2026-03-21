@@ -91,10 +91,10 @@ describe("preToolUse", () => {
 		expect(getDecision()).toBe("allow");
 	});
 
-	it("passes through when no active spec (prompt hook evaluates)", async () => {
+	it("allows Edit with advisory when no active spec (#19: prompt hook removed)", async () => {
 		await preToolUse(makeEvent("Edit", join(tmpDir, "src/index.ts")));
-		// No output — prompt hook will evaluate next
-		expect(stdoutData.length).toBe(0);
+		// Now emits allowTool() with advisory — prompt hook no longer exists
+		expect(getDecision()).toBe("allow");
 	});
 
 	it("allows non-blockable tools (Read)", async () => {
