@@ -125,15 +125,20 @@ export async function searchRelatedKnowledge(
 			const ids = matches.map((m) => m.sourceId);
 			const scores = new Map(matches.map((m) => [m.sourceId, m.score]));
 			const docs = getKnowledgeByIDs(store, ids);
+			const { getProject } = await import("../../store/project.js");
 			return docs
-				.map((d) => ({
-					label: d.title,
-					source: d.subType,
-					sub_type: d.subType,
-					content: truncate(d.content, 500),
-					relevance_score:
-						Math.round((scores.get(d.id) ?? 0) * subTypeBoost(d.subType) * 100) / 100,
-				}))
+				.map((d) => {
+					const proj = getProject(store, d.projectId);
+					return {
+						label: d.title,
+						source: d.subType,
+						sub_type: d.subType,
+						content: truncate(d.content, 500),
+						project_name: proj?.name ?? "",
+						relevance_score:
+							Math.round((scores.get(d.id) ?? 0) * subTypeBoost(d.subType) * 100) / 100,
+					};
+				})
 				.sort((a, b) => (b.relevance_score as number) - (a.relevance_score as number))
 				.slice(0, limit);
 		}

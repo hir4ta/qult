@@ -149,6 +149,8 @@ export function deserializeFloat32(blob: Buffer): number[] {
 export interface SimilarityPair {
 	idA: number;
 	idB: number;
+	projectIdA?: string;
+	projectIdB?: string;
 	score: number;
 }
 
@@ -159,36 +161,142 @@ export interface SimilarityPair {
  */
 export function pairwiseSimilarity(
 	store: Store,
-	options?: { limit?: number; minScore?: number },
+	options?: { limit?: number; minScore?: number; crossProjectOnly?: boolean; subType?: string },
 ): SimilarityPair[] {
 	const limit = options?.limit ?? 1000;
 	const minScore = options?.minScore ?? 0;
+	const subTypeFilter = options?.subType ? "AND k.sub_type = ?" : "";
+	const params: unknown[] = options?.subType ? [options.subType, limit] : [limit];
 
 	const rows = store.db
 		.prepare(`
-    SELECT e.source_id, e.vector FROM embeddings e
+    SELECT e.source_id, e.vector, k.project_id FROM embeddings e
     JOIN knowledge_index k ON k.id = e.source_id
-    WHERE e.source = 'knowledge' AND k.enabled = 1
+    WHERE e.source = 'knowledge' AND k.enabled = 1 ${subTypeFilter}
     ORDER BY k.hit_count DESC
     LIMIT ?
   `)
-		.all(limit) as Array<{ source_id: number; vector: Buffer }>;
+		.all(...params) as Array<{ source_id: number; vector: Buffer; project_id: string }>;
 
 	const docs = rows.map((r) => ({
 		id: r.source_id,
+		projectId: r.project_id,
 		vec: deserializeFloat32(r.vector),
 	}));
 
 	const pairs: SimilarityPair[] = [];
 	for (let i = 0; i < docs.length; i++) {
 		for (let j = i + 1; j < docs.length; j++) {
+			// Skip same-project pairs if crossProjectOnly
+			if (options?.crossProjectOnly && docs[i]!.projectId === docs[j]!.projectId) continue;
 			if (docs[i]!.vec.length !== docs[j]!.vec.length) continue;
 			const sim = cosineSimilarity(docs[i]!.vec, docs[j]!.vec);
 			if (sim >= minScore) {
-				pairs.push({ idA: docs[i]!.id, idB: docs[j]!.id, score: sim });
+				pairs.push({
+					idA: docs[i]!.id,
+					idB: docs[j]!.id,
+					projectIdA: docs[i]!.projectId,
+					projectIdB: docs[j]!.projectId,
+					score: sim,
+				});
 			}
 		}
 	}
 
 	return pairs;
+}
+
+export interface SimilarSpecResult {
+	id: number;
+	slug: string;
+	fileName: string;
+	projectId: string;
+	projectName: string;
+	similarity: number;
+}
+
+/**
+ * Find specs similar to a given spec by vector similarity.
+ * Falls back to FTS5 keyword match if no embedder.
+ */
+export function findSimilarSpecs(
+	store: Store,
+	specId: number,
+	opts?: { limit?: number; minSimilarity?: number },
+): SimilarSpecResult[] {
+	const limit = opts?.limit ?? 5;
+	const minSim = opts?.minSimilarity ?? 0.60;
+
+	// Get the target spec's embedding
+	const targetRow = store.db
+		.prepare("SELECT vector FROM embeddings WHERE source = 'spec' AND source_id = ?")
+		.get(specId) as { vector: Buffer } | undefined;
+
+	if (!targetRow) {
+		// FTS5 fallback: keyword match on spec content
+		const specRow = store.db
+			.prepare("SELECT slug, content FROM spec_index WHERE id = ?")
+			.get(specId) as { slug: string; content: string } | undefined;
+		if (!specRow) return [];
+
+		const words = specRow.content.split(/\s+/).slice(0, 10).join(" ");
+		const ftsRows = store.db
+			.prepare(`
+				SELECT s.id, s.slug, s.file_name, s.project_id, p.name as project_name,
+					bm25(spec_fts) as score
+				FROM spec_fts f
+				JOIN spec_index s ON s.id = f.rowid
+				JOIN projects p ON p.id = s.project_id
+				WHERE spec_fts MATCH ? AND s.id != ?
+				ORDER BY score LIMIT ?
+			`)
+			.all(words, specId, limit) as Array<{
+				id: number; slug: string; file_name: string;
+				project_id: string; project_name: string; score: number;
+			}>;
+		return ftsRows.map((r) => ({
+			id: r.id,
+			slug: r.slug,
+			fileName: r.file_name,
+			projectId: r.project_id,
+			projectName: r.project_name,
+			similarity: Math.abs(r.score), // BM25 returns negative scores
+		}));
+	}
+
+	const targetVec = deserializeFloat32(targetRow.vector);
+
+	// Get all other spec embeddings
+	const rows = store.db
+		.prepare(`
+			SELECT e.source_id, e.vector, s.slug, s.file_name, s.project_id, p.name as project_name
+			FROM embeddings e
+			JOIN spec_index s ON s.id = e.source_id
+			JOIN projects p ON p.id = s.project_id
+			WHERE e.source = 'spec' AND e.source_id != ?
+		`)
+		.all(specId) as Array<{
+			source_id: number; vector: Buffer; slug: string;
+			file_name: string; project_id: string; project_name: string;
+		}>;
+
+	const results: SimilarSpecResult[] = [];
+	for (const r of rows) {
+		const vec = deserializeFloat32(r.vector);
+		if (vec.length !== targetVec.length) continue;
+		const sim = cosineSimilarity(targetVec, vec);
+		if (sim >= minSim) {
+			results.push({
+				id: r.source_id,
+				slug: r.slug,
+				fileName: r.file_name,
+				projectId: r.project_id,
+				projectName: r.project_name,
+				similarity: Math.round(sim * 1000) / 1000,
+			});
+		}
+	}
+
+	results.sort((a, b) => b.similarity - a.similarity);
+	return results.slice(0, limit);
 }

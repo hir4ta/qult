@@ -522,6 +522,28 @@ export function createApp(
 		return c.json({ hitRanking, completionStats });
 	});
 
+	app.get("/api/conflicts", async (c) => {
+		const { detectCrossProjectConflicts } = await import("../store/conflicts.js");
+		const limit = parseInt(c.req.query("limit") ?? "20", 10) || 20;
+		const result = detectCrossProjectConflicts(store, { limit });
+		return c.json(result);
+	});
+
+	app.get("/api/specs/:slug/similar", async (c) => {
+		const { findSimilarSpecs } = await import("../store/vectors.js");
+		const slug = c.req.param("slug");
+		const limit = parseInt(c.req.query("limit") ?? "5", 10) || 5;
+
+		// Find spec_index id for this slug
+		const specRow = store.db
+			.prepare("SELECT id FROM spec_index WHERE slug = ? LIMIT 1")
+			.get(slug) as { id: number } | undefined;
+		if (!specRow) return c.json({ similar: [] });
+
+		const similar = findSimilarSpecs(store, specRow.id, { limit });
+		return c.json({ similar });
+	});
+
 	app.get("/api/epics", (c) => {
 		const epics = listAllEpics(projectPath);
 		return c.json({ epics });

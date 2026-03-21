@@ -541,6 +541,25 @@ async function ledgerReflect(store: Store, emb: Embedder | null, _params: Ledger
 		suggested: "rule",
 	}));
 
+	// Cross-project pattern mining (Voyage required)
+	let crossProjectPatterns: Array<Record<string, unknown>> = [];
+	let patternMiningTruncated = false;
+	if (emb) {
+		try {
+			const { mineCommonPatterns } = await import("../store/pattern-mining.js");
+			const mining = mineCommonPatterns(store);
+			crossProjectPatterns = mining.commonPatterns.map((p) => ({
+				pattern: p.pattern,
+				projects: p.projects,
+				similarity: p.similarity,
+				entry_count: p.entryIds.length,
+			}));
+			patternMiningTruncated = mining.truncated;
+		} catch (err) {
+			console.error(`[alfred] pattern mining failed: ${err}`);
+		}
+	}
+
 	return jsonResult({
 		summary: {
 			total_memories: stats.total,
@@ -555,6 +574,8 @@ async function ledgerReflect(store: Store, emb: Embedder | null, _params: Ledger
 		duplicates,
 		contradictions,
 		promotion_candidates: promotionCandidates,
+		cross_project_patterns: crossProjectPatterns,
+		pattern_mining_truncated: patternMiningTruncated,
 		lang,
 	});
 }
