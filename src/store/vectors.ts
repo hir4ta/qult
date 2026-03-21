@@ -239,7 +239,10 @@ export function findSimilarSpecs(
 			.get(specId) as { slug: string; content: string } | undefined;
 		if (!specRow) return [];
 
-		const words = specRow.content.split(/\s+/).slice(0, 10).join(" ");
+		const words = specRow.content.split(/\s+/).slice(0, 10)
+			.map((w) => w.replace(/["*^{}]/g, "")).filter(Boolean)
+			.map((w) => `"${w}"`).join(" OR ");
+		if (!words) return [];
 		const ftsRows = store.db
 			.prepare(`
 				SELECT s.id, s.slug, s.file_name, s.project_id, p.name as project_name,
@@ -274,6 +277,7 @@ export function findSimilarSpecs(
 			JOIN spec_index s ON s.id = e.source_id
 			JOIN projects p ON p.id = s.project_id
 			WHERE e.source = 'spec' AND e.source_id != ?
+		LIMIT 1000
 		`)
 		.all(specId) as Array<{
 			source_id: number; vector: Buffer; slug: string;
