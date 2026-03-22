@@ -24,7 +24,6 @@ export const WaveInfoSchema = z.object({
 
 export const TaskDetailSchema = z.object({
 	slug: z.string(),
-	epic_slug: z.string().optional(),
 	status: z.string().optional(),
 	focus: z.string().optional(),
 	completed: z.number().optional(),
@@ -94,20 +93,6 @@ export const KnowledgeStatsSchema = z.object({
 	avgHitCount: z.number(),
 });
 
-// --- Knowledge Graph ---
-
-export const GraphEdgeSchema = z.object({
-	source: z.number(),
-	target: z.number(),
-	score: z.number(),
-});
-
-export const GraphEdgesResponseSchema = z.object({
-	edges: z.array(GraphEdgeSchema),
-	method: z.enum(["vector", "keyword"]),
-	truncated: z.boolean(),
-});
-
 // --- Activity ---
 
 export const ActivityEntrySchema = z.object({
@@ -150,27 +135,6 @@ export const AnalyticsResponseSchema = z.object({
 		avgDays: z.number(),
 		count: z.number(),
 	})),
-});
-
-// --- Epics ---
-
-export const EpicTaskSummarySchema = z.object({
-	slug: z.string(),
-	status: z.string(),
-	depends_on: z.array(z.string()).default([]),
-});
-
-export const EpicSummarySchema = z.object({
-	slug: z.string(),
-	name: z.string(),
-	status: z.string(),
-	completed: z.number(),
-	total: z.number(),
-	tasks: z.array(EpicTaskSummarySchema).optional(),
-});
-
-export const EpicsResponseSchema = z.object({
-	epics: z.array(EpicSummarySchema),
 });
 
 // --- Decisions ---
@@ -257,13 +221,8 @@ export type KnowledgeEntry = z.infer<typeof KnowledgeEntrySchema>;
 export type KnowledgeResponse = z.infer<typeof KnowledgeResponseSchema>;
 export type KnowledgeSearchResponse = z.infer<typeof KnowledgeSearchResponseSchema>;
 export type KnowledgeStats = z.infer<typeof KnowledgeStatsSchema>;
-export type GraphEdge = z.infer<typeof GraphEdgeSchema>;
-export type GraphEdgesResponse = z.infer<typeof GraphEdgesResponseSchema>;
 export type ActivityEntry = z.infer<typeof ActivityEntrySchema>;
 export type ActivityResponse = z.infer<typeof ActivityResponseSchema>;
-export type EpicTaskSummary = z.infer<typeof EpicTaskSummarySchema>;
-export type EpicSummary = z.infer<typeof EpicSummarySchema>;
-export type EpicsResponse = z.infer<typeof EpicsResponseSchema>;
 export type DecisionEntry = z.infer<typeof DecisionEntrySchema>;
 export type DecisionsResponse = z.infer<typeof DecisionsResponseSchema>;
 export type ValidationCheck = z.infer<typeof ValidationCheckSchema>;

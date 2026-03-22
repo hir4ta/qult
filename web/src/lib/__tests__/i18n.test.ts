@@ -17,9 +17,7 @@ describe("i18n translations", () => {
 
 	it("has nav keys", () => {
 		expect(translations).toHaveProperty("nav.overview");
-		expect(translations).toHaveProperty("nav.tasks");
 		expect(translations).toHaveProperty("nav.knowledge");
-		expect(translations).toHaveProperty("nav.activity");
 	});
 
 	it("has review keys", () => {

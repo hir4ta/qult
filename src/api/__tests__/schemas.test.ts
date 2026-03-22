@@ -2,8 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
 	ActivityEntrySchema,
 	DecisionEntrySchema,
-	EpicSummarySchema,
-	GraphEdgesResponseSchema,
 	HealthResponseSchema,
 	KnowledgeEntrySchema,
 	KnowledgeStatsSchema,
@@ -49,21 +47,6 @@ describe("API schemas smoke test", () => {
 		expect(TasksResponseSchema.parse(data)).toEqual(data);
 	});
 
-	it("GraphEdgesResponse parses vector method", () => {
-		const data = {
-			edges: [{ source: 1, target: 2, score: 0.85 }],
-			method: "vector" as const,
-			truncated: false,
-		};
-		expect(GraphEdgesResponseSchema.parse(data)).toEqual(data);
-	});
-
-	it("GraphEdgesResponse rejects invalid method", () => {
-		expect(() =>
-			GraphEdgesResponseSchema.parse({ edges: [], method: "invalid", truncated: false }),
-		).toThrow();
-	});
-
 	it("ReviewStatusResponse parses wrapper shape", () => {
 		const data = {
 			review_status: "approved",
@@ -103,18 +86,6 @@ describe("API schemas smoke test", () => {
 	it("ActivityEntry parses audit log entry", () => {
 		const data = { timestamp: "2026-03-19", action: "spec.init", target: "my-task" };
 		expect(ActivityEntrySchema.parse(data)).toMatchObject(data);
-	});
-
-	it("EpicSummary parses with tasks", () => {
-		const data = {
-			slug: "my-epic",
-			name: "Test Epic",
-			status: "in-progress",
-			completed: 1,
-			total: 3,
-			tasks: [{ slug: "task-1", status: "done" }],
-		};
-		expect(EpicSummarySchema.parse(data)).toEqual({ ...data, tasks: [{ slug: "task-1", status: "done", depends_on: [] }] });
 	});
 
 	it("DecisionEntry matches KnowledgeEntry shape", () => {

@@ -142,8 +142,13 @@ export async function searchPipeline(
 	return res;
 }
 
+const MIN_HIT_SCORE = 0.6;
+
 export function trackHitCounts(store: Store, scoredDocs: ScoredDoc[]): void {
 	if (scoredDocs.length === 0) return;
-	const ids = scoredDocs.filter((sd) => sd.doc.id > 0).map((sd) => sd.doc.id);
+	const ids = scoredDocs
+		.filter((sd) => sd.doc.id > 0 && sd.score >= MIN_HIT_SCORE)
+		.map((sd) => sd.doc.id);
+	if (ids.length === 0) return;
 	incrementHitCount(store, ids);
 }

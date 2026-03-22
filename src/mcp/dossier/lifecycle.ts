@@ -1,4 +1,3 @@
-import { syncTaskStatus } from "../../epic/index.js";
 import { clearReviewGate, readReviewGate, writeReviewGate } from "../../hooks/review-gate.js";
 import { ensureStateDir, readWaveProgress, writeStateJSON, writeWaveProgress } from "../../hooks/state.js";
 import { appendAudit } from "../../spec/audit.js";
@@ -93,8 +92,6 @@ export function dossierComplete(projectPath: string, store: Store, params: Dossi
 			target: taskSlug,
 			detail: `${currentStatus} → done (dossier:complete)`,
 		});
-		syncTaskStatus(projectPath, taskSlug, "done");
-
 		// design.md pattern auto-extraction removed (FR-6).
 		// Knowledge accumulation happens intentionally at Wave boundaries via ledger.
 
@@ -126,7 +123,7 @@ export function dossierComplete(projectPath: string, store: Store, params: Dossi
  * Check that ALL Closing Wave items are checked.
  * Returns error message listing unchecked items if any, undefined if all done.
  */
-export function checkClosingWave(tasksContent: string): string | undefined {
+function checkClosingWave(tasksContent: string): string | undefined {
 	const closingIdx = tasksContent.search(/## (?:Wave:\s*)?[Cc]losing(?:\s+[Ww]ave)?/i);
 	if (closingIdx === -1)
 		return "No Closing Wave found in tasks.md. Add self-review, CLAUDE.md update, and test verification items.";

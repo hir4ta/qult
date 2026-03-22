@@ -1,13 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useSearch } from "@tanstack/react-router";
-import { Grid3X3, Network, Search } from "@animated-color-icons/lucide-react";
 import { useState } from "react";
 import { KnowledgeCard } from "@/components/knowledge-card";
 import { KnowledgeDialog } from "@/components/knowledge-detail";
-import { KnowledgeGraph } from "@/components/knowledge-graph";
 import { ButlerEmpty } from "@/components/butler-empty";
 import { StaggerContainer } from "@/components/stagger-container";
-import { Input } from "@/components/ui/input";
 import {
 	Pagination,
 	PaginationContent,
@@ -18,13 +15,10 @@ import {
 } from "@/components/ui/pagination";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
-	graphEdgesQueryOptions,
 	knowledgeQueryOptions,
 	knowledgeStatsQueryOptions,
 } from "@/lib/api";
-import { formatLabel } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import type { KnowledgeEntry, KnowledgeStats } from "@/lib/types";
 import { SUB_TYPE_COLORS } from "@/lib/types";
@@ -34,175 +28,29 @@ export const Route = createFileRoute("/knowledge")({
 });
 
 function KnowledgePage() {
-	const { t } = useI18n();
-	const [localFilter, setLocalFilter] = useState("");
 	const [selected, setSelected] = useState<KnowledgeEntry | null>(null);
-	const [view, setView] = useState<"grid" | "graph">("grid");
 	const [page, setPage] = useState(1);
-	const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
 
 	const search = useSearch({ strict: false }) as { project?: string };
 	const projectId = search.project;
 	const { data: browseData, isLoading } = useQuery(knowledgeQueryOptions(undefined, projectId));
 	const { data: statsData } = useQuery(knowledgeStatsQueryOptions(projectId));
-	const {
-		data: graphData,
-		isLoading: graphLoading,
-		isError: graphError,
-	} = useQuery({
-		...graphEdgesQueryOptions(),
-		enabled: view === "graph",
-	});
 
 	const entries = browseData?.entries ?? [];
 
-	// Collect all unique tags for filter pills
-	const allTags = [...new Set(entries.flatMap((e) => e.tags ?? []))].sort();
-
-	const toggleTag = (tag: string) => {
-		setSelectedTags((prev) => {
-			const next = new Set(prev);
-			if (next.has(tag)) next.delete(tag); else next.add(tag);
-			return next;
-		});
-		setPage(1);
-	};
-
-	const filtered = entries.filter((e) => {
-		if (localFilter) {
-			const q = localFilter.toLowerCase();
-			if (!e.label.toLowerCase().includes(q) && !e.content.toLowerCase().includes(q)) return false;
-		}
-		if (selectedTags.size > 0) {
-			const entryTags = new Set(e.tags ?? []);
-			for (const tag of selectedTags) {
-				if (!entryTags.has(tag)) return false;
-			}
-		}
-		return true;
-	});
-
-	const showGraph = view === "graph";
-	const minEntriesForGraph = 2;
-	const hasEnoughEntries = entries.length >= minEntriesForGraph;
-
 	return (
 		<div className="space-y-5">
-			{/* Filter + stats + view toggle */}
-			<div className="flex items-center gap-4">
-				{!showGraph && (
-					<div className="relative flex-1 max-w-sm">
-						<Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-						<Input
-							placeholder={t("knowledge.filter")}
-							value={localFilter}
-							onChange={(e) => {
-								setLocalFilter(e.target.value);
-								setPage(1);
-							}}
-							className="pl-9 bg-card rounded-full"
-						/>
-					</div>
-				)}
-				<div className="flex-1" />
+			{/* Stats */}
+			<div className="flex items-center justify-end">
 				{statsData && <StatsBar stats={statsData} />}
-				<ToggleGroup
-					type="single"
-					value={view}
-					onValueChange={(v) => {
-						if (v) setView(v as "grid" | "graph");
-					}}
-					className="h-8"
-				>
-					<ToggleGroupItem
-						value="grid"
-						aria-label={t("knowledge.viewGrid")}
-						className="h-8 px-2.5 gap-1.5 text-xs"
-					>
-						<Grid3X3 className="size-3.5" />
-						{t("knowledge.viewGrid")}
-					</ToggleGroupItem>
-					<ToggleGroupItem
-						value="graph"
-						aria-label={t("knowledge.viewGraph")}
-						className="h-8 px-2.5 gap-1.5 text-xs"
-					>
-						<Network className="size-3.5" />
-						{t("knowledge.viewGraph")}
-					</ToggleGroupItem>
-				</ToggleGroup>
 			</div>
 
-			{/* Tag filter pills */}
-			{!showGraph && allTags.length > 0 && (
-				<div className="flex flex-wrap gap-1">
-					{allTags.slice(0, 20).map((tag) => (
-						<button
-							key={tag}
-							type="button"
-							onClick={() => toggleTag(tag)}
-							className={`rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors ${
-								selectedTags.has(tag)
-									? "bg-card text-foreground border-border"
-									: "bg-card text-muted-foreground border-border/40 hover:text-foreground"
-							}`}
-						>
-							{tag}
-						</button>
-					))}
-				</div>
-			)}
-
-			{/* Graph view */}
-			{showGraph &&
-				(!hasEnoughEntries ? (
-					<div className="flex h-[70vh] items-center justify-center rounded-xl border border-dashed border-border">
-						<p className="text-sm text-muted-foreground">{t("knowledge.graphMinEntries")}</p>
-					</div>
-				) : graphLoading ? (
-					<div className="flex h-[70vh] items-center justify-center rounded-xl border border-dashed border-border">
-						<p className="text-sm text-muted-foreground">{t("knowledge.graphLoading")}</p>
-					</div>
-				) : graphError ? (
-					<div className="flex h-[70vh] items-center justify-center rounded-xl border border-dashed border-border">
-						<p className="text-sm text-muted-foreground">{t("knowledge.graphError")}</p>
-					</div>
-				) : graphData ? (
-					<div className="space-y-2">
-						<KnowledgeGraph
-							nodes={entries.map((e) => ({
-								id: e.id,
-								label: formatLabel(e.label).title,
-								sub_type: e.sub_type,
-								hit_count: e.hit_count,
-							}))}
-							edges={graphData.edges}
-							onNodeClick={(node) => {
-								const entry = entries.find((e) => e.id === node.id);
-								if (entry) setSelected(entry);
-							}}
-						/>
-						<div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-							<span>
-								{t("knowledge.graphMethod")} {graphData.method}
-							</span>
-							{graphData.truncated && (
-								<>
-									<Separator orientation="vertical" className="h-3" />
-									<span>{t("knowledge.graphTruncated")}</span>
-								</>
-							)}
-						</div>
-					</div>
-				) : null)}
-
 			{/* Grid view */}
-			{!showGraph &&
-				(() => {
+			{(() => {
 					const perPage = 9;
-					const totalPages = Math.ceil(filtered.length / perPage);
+					const totalPages = Math.ceil(entries.length / perPage);
 					const safePage = Math.min(page, Math.max(1, totalPages));
-					const paged = filtered.slice((safePage - 1) * perPage, safePage * perPage);
+					const paged = entries.slice((safePage - 1) * perPage, safePage * perPage);
 					return (
 						<>
 							{isLoading ? (

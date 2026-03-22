@@ -4,16 +4,7 @@ import { tmpdir } from "node:os";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Store } from "../index.js";
 import { syncProjectSpecs } from "../spec-sync.js";
-
-function insertTestProject(store: Store, id: string, path: string): string {
-	store.db
-		.prepare(
-			`INSERT OR IGNORE INTO projects (id, name, remote, path, branch, registered_at, last_seen_at, status)
-     VALUES (?, 'test', '', ?, '', datetime('now'), datetime('now'), 'active')`,
-		)
-		.run(id, path);
-	return id;
-}
+import { insertTestProject } from "../../__tests__/test-utils.js";
 
 describe("syncProjectSpecs", () => {
 	let tmpDir: string;

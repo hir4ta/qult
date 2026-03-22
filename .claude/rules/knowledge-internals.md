@@ -18,4 +18,4 @@ paths:
 - Tag alias expansion: auth→authentication/login/認証, 16 categories bilingual (EN/JP)
 - Knowledge governance: `enabled` column in knowledge_index; disabled entries excluded from search
 - Knowledge tab: toggle enabled/disabled via API (PATCH /api/knowledge/{id}/enabled)
-- Knowledge files are git-friendly: team sharing via repository, diff-reviewable in PRs
+- Knowledge files are git-friendly: sharing via repository, diff-reviewable in PRs

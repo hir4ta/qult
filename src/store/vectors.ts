@@ -1,7 +1,7 @@
 import type { VectorMatch } from "../types.js";
 import type { Store } from "./index.js";
 
-const MIN_SIMILARITY = 0.3;
+const MIN_SIMILARITY = 0.6;
 const DEFAULT_MAX_VECTOR_CANDIDATES = 10_000;
 const EARLY_STOP_THRESHOLD = 0.7;
 

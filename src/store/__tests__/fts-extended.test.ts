@@ -11,14 +11,7 @@ import {
 } from "../fts.js";
 import { Store } from "../index.js";
 import { upsertKnowledge } from "../knowledge.js";
-
-function insertTestProject(store: Store, id = "test-project-id"): string {
-	store.db.prepare(`
-		INSERT OR IGNORE INTO projects (id, name, remote, path, branch, registered_at, last_seen_at, status)
-		VALUES (?, 'test', '', '/test', '', datetime('now'), datetime('now'), 'active')
-	`).run(id);
-	return id;
-}
+import { insertTestProject } from "../../__tests__/test-utils.js";
 
 let store: Store;
 let tmpDir: string;
@@ -61,7 +54,6 @@ describe("subTypeHalfLife", () => {
 	it("snapshot has 30 day half-life", () => expect(subTypeHalfLife("snapshot")).toBe(30));
 	it("unknown defaults to 60", () => expect(subTypeHalfLife("unknown")).toBe(60));
 });
-
 
 describe("searchKnowledgeFTS", () => {
 	it("finds entries matching query", () => {

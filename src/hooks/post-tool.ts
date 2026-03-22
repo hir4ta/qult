@@ -2,7 +2,7 @@ import { extractReviewFindings, saveKnowledgeEntries } from "../mcp/knowledge-ex
 import { truncate } from "../mcp/helpers.js";
 import { updateTaskStatus } from "../spec/status.js";
 import { effectiveStatus, readActive, readActiveState, SpecDir } from "../spec/types.js";
-import { detectKnowledgeConflicts, searchKnowledgeFTS } from "../store/fts.js";
+import { searchKnowledgeFTS } from "../store/fts.js";
 import { openDefaultCached } from "../store/index.js";
 import { getPromotionCandidates, promoteSubType } from "../store/knowledge.js";
 import type { DirectiveItem } from "./directives.js";
@@ -65,15 +65,6 @@ export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<v
 	if (ev.tool_name === "Bash" && !signal.aborted) {
 		await handleBashResult(ev, items, signal);
 
-		// Harvest nudge: suggest /alfred:harvest after PR merge.
-		const bashResponse = ev.tool_response as { stdout?: string } | undefined;
-		const bashStdout = bashResponse?.stdout ?? "";
-		if (isPRMerge(bashStdout)) {
-			items.push({
-				level: "CONTEXT",
-				message: "PR merged. Consider `/alfred:harvest` to extract review insights as permanent knowledge.",
-			});
-		}
 	}
 
 	// Track worked slug + auto-transition + nudge for Edit/Write.
@@ -175,9 +166,6 @@ async function handleBashResult(
 			} catch {
 				/* fail-open */
 			}
-
-			// FR-7: Proactive conflict warning after git commit.
-			await checkKnowledgeConflicts(items);
 
 			// Wave completion detection: check tasks.md after commit.
 			try {
@@ -310,12 +298,6 @@ export function isGitCommit(stdout: string): boolean {
 	);
 }
 
-/** Detect PR merge from gh CLI output. */
-function isPRMerge(stdout: string): boolean {
-	if (!stdout) return false;
-	return /✓ Merged|Pull request #\d+ merged|already merged/.test(stdout);
-}
-
 /** Detect large reference files suitable for /alfred:archive. */
 function isArchivableFile(filePath: string): boolean {
 	if (!filePath) return false;
@@ -323,38 +305,6 @@ function isArchivableFile(filePath: string): boolean {
 	return ["pdf", "csv", "tsv", "xlsx", "docx", "txt"].includes(ext);
 }
 
-/**
- * FR-7: Check for knowledge conflicts and emit warnings.
- */
-async function checkKnowledgeConflicts(items: DirectiveItem[]): Promise<void> {
-	let store;
-	try {
-		store = openDefaultCached();
-	} catch {
-		return;
-	}
-
-	try {
-		// Use limit=500 (not default 1000) to stay within 5s PostToolUse timeout budget.
-		const conflicts = detectKnowledgeConflicts(store, 0.7, 500);
-		if (conflicts.length === 0) return;
-
-		// Include contradictions (>= 0.70) and high-similarity duplicates (>= 0.90).
-		const significant = conflicts.filter(
-			(c) => c.type === "potential_contradiction" || c.similarity >= 0.9,
-		);
-
-		for (const conflict of significant.slice(0, 3)) {
-			const typeLabel = conflict.type === "potential_contradiction" ? "CONTRADICTION" : "DUPLICATE";
-			items.push({
-				level: "WARNING",
-				message: `Knowledge ${typeLabel} detected (${Math.round(conflict.similarity * 100)}% similar): "${conflict.a.title}" vs "${conflict.b.title}". Consider resolving via \`ledger action=reflect\`.`,
-			});
-		}
-	} catch {
-		/* conflict detection failure is non-fatal */
-	}
-}
 
 /**
  * Check if active spec should be completed after a git commit.

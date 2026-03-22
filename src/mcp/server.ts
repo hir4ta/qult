@@ -5,7 +5,6 @@ import type { Embedder } from "../embedder/index.js";
 import type { Store } from "../store/index.js";
 import { handleDossier } from "./dossier/index.js";
 import { handleLedger } from "./ledger.js";
-import { handleRoster } from "./roster.js";
 
 const SERVER_INSTRUCTIONS = `alfred is your development butler for Claude Code.
 
@@ -14,8 +13,6 @@ When to use alfred tools:
 - Making design decisions → call dossier with action=update
 - Starting/resuming a session → call dossier with action=status
 - Searching past experiences or saving notes → call ledger
-- Grouping related tasks into an epic → call roster with action=init, then link tasks
-- Checking epic progress → call roster with action=status
 `;
 
 export function createMCPServer(store: Store, emb: Embedder | null, version: string): McpServer {
@@ -93,34 +90,6 @@ Size-based scaling: init accepts size (S/M/L) and spec_type (feature/bugfix). S=
 		},
 		async (params) => {
 			return handleDossier(store, emb, params);
-		},
-	);
-
-	server.tool(
-		"roster",
-		`Epic management — group related tasks with dependencies and progress tracking.
-
-Actions: init, status, link, unlink, order, list, update, delete (2-phase: preview then confirm=true).`,
-		{
-			action: z
-				.enum(["init", "status", "link", "unlink", "order", "list", "update", "delete"])
-				.describe("Action to perform"),
-			project_path: z.string().optional().describe("Project root path (defaults to cwd)"),
-			epic_slug: z.string().optional().describe("Epic identifier"),
-			task_slug: z.string().optional().describe("Task to link/unlink"),
-			name: z.string().optional().describe("Epic display name"),
-			depends_on: z.string().optional().describe("Comma-separated task slugs this task depends on"),
-			status: z
-				.string()
-				.optional()
-				.describe("Epic status: draft, in-progress, completed, archived"),
-			confirm: z
-				.boolean()
-				.optional()
-				.describe("Required for delete: preview first, then confirm=true"),
-		},
-		async (params) => {
-			return handleRoster(store, params);
 		},
 	);
 

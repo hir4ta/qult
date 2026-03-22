@@ -17,7 +17,7 @@ paths:
 - SearchKnowledgeKeyword: LIKE-based fallback for no-Voyage-key mode
 
 ## Schema
-- DB schema V10: team sharing architecture (V10 is full rewrite via rebuildFromScratch; any pre-V10 DB rebuilt)
+- DB schema V10: multi-project architecture (V10 is full rewrite via rebuildFromScratch; any pre-V10 DB rebuilt)
 - Tables: projects (UUID registry), knowledge_index (FK→projects, author), spec_index (FK→projects), audit_log (FK→projects, UNIQUE dedup), embeddings (source: "knowledge"|"spec"), schema_version, knowledge_fts (FTS5), spec_fts (FTS5), tag_aliases, session_links
 - `projects` table: UUID v4 id, name, remote, path, status (active/archived/missing). `resolveOrRegisterProject()` auto-registers on first use
 - `knowledge_index`: project_id FK (ON DELETE CASCADE), UNIQUE(project_id, file_path), `author` column (git user.name)

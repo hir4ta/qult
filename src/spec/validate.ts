@@ -26,13 +26,13 @@ const ID = {
 	CHG: /CHG-\d+/g,
 };
 
-export function extractIDs(content: string, pattern: RegExp): string[] {
+function extractIDs(content: string, pattern: RegExp): string[] {
 	return [...new Set(content.match(pattern) ?? [])];
 }
 
 // --- Gherkin validation ---
 
-export function validateGherkin(content: string): { valid: boolean; issues: string[] } {
+function validateGherkin(content: string): { valid: boolean; issues: string[] } {
 	const issues: string[] = [];
 	// Find gherkin blocks (inside ```gherkin ... ```)
 	const gherkinBlocks = content.match(/```gherkin\n([\s\S]*?)```/g);

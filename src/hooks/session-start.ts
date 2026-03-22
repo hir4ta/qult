@@ -10,7 +10,6 @@ import {
 	upsertKnowledge,
 } from "../store/knowledge.js";
 import { resolveOrRegisterProject } from "../store/project.js";
-import { refreshGitUserCache } from "../team/config.js";
 import type { KnowledgeRow } from "../types.js";
 import type { DirectiveItem } from "./directives.js";
 import { emitDirectives } from "./directives.js";
@@ -25,7 +24,6 @@ export async function sessionStart(ev: HookEvent, _signal: AbortSignal): Promise
 	if (existsSync(join(ev.cwd, ".alfred"))) {
 		resetWorkedSlugs(ev.cwd);
 		writeStateJSON(ev.cwd, "spec-prompt.json", {});
-		refreshGitUserCache(ev.cwd);
 	}
 
 	let store;

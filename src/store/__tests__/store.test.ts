@@ -28,6 +28,7 @@ import {
 import { detectProject, normalizeRemoteURL } from "../project.js";
 import { SCHEMA_VERSION } from "../schema.js";
 import { getSessionContinuity, linkSession, resolveMasterSession } from "../session-links.js";
+import { insertTestProject } from "../../__tests__/test-utils.js";
 import {
 	cleanOrphanedEmbeddings,
 	cosineSimilarity,
@@ -36,14 +37,6 @@ import {
 	serializeFloat32,
 	vectorSearchKnowledge,
 } from "../vectors.js";
-
-function insertTestProject(store: Store, id = "test-project-id", path = "/test"): string {
-	store.db.prepare(`
-		INSERT OR IGNORE INTO projects (id, name, remote, path, branch, registered_at, last_seen_at, status)
-		VALUES (?, 'test', '', ?, '', datetime('now'), datetime('now'), 'active')
-	`).run(id, path);
-	return id;
-}
 
 let store: Store;
 let tmpDir: string;

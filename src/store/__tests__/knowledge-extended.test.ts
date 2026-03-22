@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { KnowledgeRow } from "../../types.js";
 import { Store } from "../index.js";
+import { insertTestProject } from "../../__tests__/test-utils.js";
 import {
 	countKnowledge,
 	deleteKnowledge,
@@ -19,14 +20,6 @@ import {
 	setKnowledgeEnabled,
 	upsertKnowledge,
 } from "../knowledge.js";
-
-function insertTestProject(store: Store, id = "test-project-id"): string {
-	store.db.prepare(`
-		INSERT OR IGNORE INTO projects (id, name, remote, path, branch, registered_at, last_seen_at, status)
-		VALUES (?, 'test', '', '/project', '', datetime('now'), datetime('now'), 'active')
-	`).run(id);
-	return id;
-}
 
 let store: Store;
 let tmpDir: string;

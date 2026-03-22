@@ -1,6 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { syncTaskStatus } from "../epic/index.js";
 import { appendAudit } from "../spec/audit.js";
 import {
 	completeTask,
@@ -133,17 +132,6 @@ export async function preCompact(ev: HookEvent, _signal: AbortSignal): Promise<v
 		/* fail-open */
 	}
 
-	// Epic progress sync.
-	try {
-		const state = readActiveState(projectPath);
-		for (const task of state.tasks) {
-			if (task.status === "completed") {
-				syncTaskStatus(projectPath, task.slug, "completed");
-			}
-		}
-	} catch {
-		/* fail-open */
-	}
 }
 
 interface Decision {
@@ -234,7 +222,6 @@ function extractDecisions(transcript: string): Decision[] {
 
 function doAutoComplete(projectPath: string, taskSlug: string): void {
 	completeTask(projectPath, taskSlug);
-	syncTaskStatus(projectPath, taskSlug, "completed");
 	appendAudit(projectPath, {
 		action: "spec.complete",
 		target: taskSlug,

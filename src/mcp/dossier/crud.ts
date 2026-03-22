@@ -1,6 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { unlinkTaskFromAllEpics } from "../../epic/index.js";
 import { clearReviewGate, readReviewGate } from "../../hooks/review-gate.js";
 import { appendAudit } from "../../spec/audit.js";
 import { stripTemplate } from "../../spec/templates.js";
@@ -165,8 +164,6 @@ export function dossierDelete(projectPath: string, params: DossierParams) {
 
 	try {
 		const allRemoved = removeTask(projectPath, params.task_slug);
-		unlinkTaskFromAllEpics(projectPath, params.task_slug);
-
 		// FR-8: Clean up review gate if it belongs to the deleted spec.
 		try {
 			const gate = readReviewGate(projectPath);

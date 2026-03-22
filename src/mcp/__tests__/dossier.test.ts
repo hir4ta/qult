@@ -4,13 +4,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Store } from "../../store/index.js";
 import { handleDossier } from "../dossier/index.js";
+import { parseResult } from "../../__tests__/test-utils.js";
 
 let tmpDir: string;
 let store: Store;
-
-function parseResult(result: { content: Array<{ type: string; text: string }> }) {
-	return JSON.parse(result.content[0]!.text);
-}
 
 beforeEach(() => {
 	tmpDir = mkdtempSync(join(tmpdir(), "alfred-dossier-test-"));

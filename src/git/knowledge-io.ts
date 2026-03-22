@@ -6,7 +6,7 @@ import { levenshtein } from "../store/fts.js";
 
 // ── Export ──
 
-export interface ExportResult {
+interface ExportResult {
 	entries: Record<string, unknown>[];
 	count: number;
 }
@@ -33,7 +33,7 @@ export function exportKnowledge(projectPath: string): ExportResult {
 
 // ── Import ──
 
-export interface ImportResult {
+interface ImportResult {
 	imported: number;
 	skipped: number;
 	similar: number;
@@ -126,13 +126,13 @@ function detectSubType(entry: Record<string, unknown>): string {
 
 // ── Diff ──
 
-export interface FieldDiff {
+interface FieldDiff {
 	field: string;
 	before: string;
 	after: string;
 }
 
-export interface DiffResult {
+interface DiffResult {
 	added: string[];
 	modified: Array<{ path: string; changes: FieldDiff[] }>;
 	deleted: string[];

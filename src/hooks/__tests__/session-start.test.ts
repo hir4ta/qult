@@ -7,6 +7,7 @@ import { Store } from "../../store/index.js";
 import { countKnowledge, upsertKnowledge } from "../../store/knowledge.js";
 import type { KnowledgeRow } from "../../types.js";
 import { resetWorkedSlugs, readWorkedSlugs } from "../state.js";
+import { insertTestProject, TEST_PROJECT_ID } from "../../__tests__/test-utils.js";
 
 let tmpDir: string;
 let store: Store;
@@ -30,16 +31,6 @@ afterEach(() => {
 	store.close();
 	rmSync(tmpDir, { recursive: true, force: true });
 });
-
-const TEST_PROJECT_ID = "test-project-id";
-
-function insertTestProject(db: Database.Database, id = TEST_PROJECT_ID): string {
-	db.prepare(`
-		INSERT OR IGNORE INTO projects (id, name, remote, path, branch, registered_at, last_seen_at, status)
-		VALUES (?, 'test', '', '/test', '', datetime('now'), datetime('now'), 'active')
-	`).run(id);
-	return id;
-}
 
 function makeKnowledgeRow(overrides: Partial<KnowledgeRow> = {}): KnowledgeRow {
 	return {

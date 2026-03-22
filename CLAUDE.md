@@ -14,13 +14,11 @@ Build: tsdown (bundle) / vitest (test) / citty (CLI) / hono (HTTP) / @modelconte
 
 | Package | Role |
 |---|---|
-| `src/mcp/` | MCP server (3 tools: dossier, roster, ledger) — @modelcontextprotocol/sdk + Zod. dossier split into `src/mcp/dossier/{index,helpers,init,lifecycle,crud}.ts` |
-| `src/store/` | SQLite persistence (projects + knowledge_index + spec_index + audit_log + embeddings + FTS5), project registry, spec sync, audit sync, conflict detection, pattern mining |
-| `src/git/` | Git integration: knowledge merge driver, export/import/diff |
-| `src/team/` | Team config (team.yaml), git user.name cache, team init/join |
+| `src/mcp/` | MCP server (2 tools: dossier, ledger) — @modelcontextprotocol/sdk + Zod. dossier split into `src/mcp/dossier/{index,helpers,init,lifecycle,crud}.ts` |
+| `src/store/` | SQLite persistence (projects + knowledge_index + spec_index + audit_log + embeddings + FTS5), project registry, spec sync, audit sync |
+| `src/git/` | Git integration: export/import/diff, user.name resolution |
 | `src/embedder/` | Voyage AI (voyage-4-large, vector search + rerank-2.5) |
 | `src/spec/` | Spec management: .alfred/specs/ (8 file types) + Size-based scaling + Validate + Templates |
-| `src/epic/` | Epic management: .alfred/epics/ (YAML-based task grouping + dependencies) |
 | `src/hooks/` | Hook handlers (SessionStart / PreCompact / UserPromptSubmit / PostToolUse / PreToolUse / Stop) |
 | `src/api/` | HTTP API server: Hono, REST handlers, SSE, SPA serving. `schemas.ts` = Zod schema (API型の single source of truth, frontend は `import type` で参照) |
 | `src/cli.ts` | CLI entry point (citty dispatch) |
@@ -118,16 +116,6 @@ node dist/cli.mjs version     # Show version
 ### Spec Management & Review
 - @.claude/rules/spec-details.md (sizes, types, templates, validation, confidence, approval gate, review)
 
-### Epic Management
-
-- Epic files: .alfred/epics/{slug}/epic.yaml (pure YAML, no Markdown)
-- Roster tool: MCP tool for epic CRUD (init/status/link/unlink/order/list/update/delete)
-- Epic→Task: link tasks with dependency ordering (topological sort)
-- Epic progress: auto-synced during PreCompact (tasks.md status → epic.yaml)
-- spec delete: auto-cleans dangling epic references (UnlinkTaskFromAllEpics)
-- epic delete: tasks (specs) preserved as standalone (not deleted)
-- Epic status auto-transitions: all tasks completed → epic completed
-
 ### Web Dashboard
 
 - @.claude/rules/frontend.md (component patterns, i18n)
@@ -152,8 +140,8 @@ node dist/cli.mjs version     # Show version
 
 ### Naming Convention (Butler Theme)
 
-- Skills: brief, attend, tdd, inspect, mend, survey, salon, polish, archive, harvest
-- MCP tools: dossier (spec management), roster (epic management), ledger (knowledge)
+- Skills: brief, attend, tdd, inspect, mend, survey, salon, polish, archive
+- MCP tools: dossier (spec management), ledger (knowledge)
 
 ### Deliberation Style
 

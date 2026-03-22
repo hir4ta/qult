@@ -133,40 +133,48 @@ function TaskAccordionCard({
 			)}
 			style={isSelected ? { borderColor: "var(--color-brand-dark)" } : undefined}
 		>
-			{/* Card header — always visible, clickable to navigate */}
-			<Link to="/tasks/$slug" params={{ slug: task.slug }} search={projectId ? { project: projectId } : {}} className="block p-3 pb-2">
-				<div className="flex items-center justify-between">
-					<div className="flex items-center gap-2 min-w-0">
-						<TaskStatusIcon status={task.status ?? "pending"} />
-						<span className="text-sm font-medium font-mono truncate">{task.slug}</span>
-					</div>
-					<div className="flex items-center gap-1 shrink-0">
-						<StatusBadge status={task.status ?? "pending"} />
-						{task.size && (
-							<Badge variant="outline" className="text-[10px] px-1 py-0">
-								{task.size}
-							</Badge>
-						)}
-					</div>
-				</div>
-			</Link>
+			{/* Card header — clickable to navigate */}
+		<Link to="/tasks/$slug" params={{ slug: task.slug }} search={projectId ? { project: projectId } : {}} className="block p-3 pb-2 space-y-1.5">
+			{/* Row 1: Spec name */}
+			<div className="flex items-center gap-2 min-w-0">
+				<TaskStatusIcon status={task.status ?? "pending"} />
+				<span className="text-sm font-medium font-mono truncate">{task.slug}</span>
+			</div>
 
-			{/* Compact info — always visible */}
-			<div className="px-3 pb-3 space-y-1.5">
-				{(task.project_name || task.started_at) && (
-					<p className="text-[10px] font-medium" style={{ color: "#40513b" }}>
-						{task.project_name}{task.project_name && task.started_at && " · "}{task.started_at && <span className="text-muted-foreground/70 font-normal">{formatDate(task.started_at)}</span>}
-					</p>
+			{/* Row 2: Project name, date */}
+			<p className="text-[10px] text-muted-foreground truncate">
+				{task.project_name}{task.project_name && task.started_at ? " \u00b7 " : ""}{task.started_at ? formatDate(task.started_at) : ""}
+			</p>
+
+			{/* Row 3: Status + Size badges */}
+			<div className="flex items-center gap-1.5 flex-wrap">
+				<StatusBadge status={task.status ?? "pending"} />
+				{task.size && (
+					<Badge variant="outline" className="text-[10px] px-1.5 py-0 rounded-full">
+						{task.size}
+					</Badge>
 				)}
-				{task.focus && (
-					<p className="text-[11px] text-muted-foreground line-clamp-1">{task.focus}</p>
+				{task.spec_type && task.spec_type !== "feature" && (
+					<Badge variant="outline" className="text-[10px] px-1.5 py-0" style={{ borderColor: "rgba(98,129,65,0.4)", color: "#628141" }}>
+						{task.spec_type}
+					</Badge>
 				)}
-				<div className="flex items-center gap-2">
-					<Progress value={progress} className="h-1 flex-1 [&>div]:bg-[#e67e22]" />
-					<span className="text-[10px] tabular-nums text-muted-foreground">
-						{task.completed}/{task.total}
-					</span>
-				</div>
+			</div>
+
+			{/* Row 4: Progress bar */}
+			<div className="flex items-center gap-2">
+				<Progress value={progress} className="h-1 flex-1 [&>div]:bg-[#e67e22]" />
+				<span className="text-[10px] tabular-nums text-muted-foreground">
+					{task.completed}/{task.total}
+				</span>
+			</div>
+		</Link>
+
+		{/* Compact info */}
+		<div className="px-3 pb-3 space-y-1.5">
+			{task.focus && (
+				<p className="text-[11px] text-muted-foreground line-clamp-1">{task.focus}</p>
+			)}
 
 			</div>
 

@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Embedder } from "../embedder/index.js";
-import { detectKnowledgeConflicts } from "../store/fts.js";
 import type { Store } from "../store/index.js";
 import {
 	getKnowledgeByID,
@@ -11,8 +10,8 @@ import {
 	promoteSubType,
 	upsertKnowledge,
 } from "../store/knowledge.js";
+import { getGitUserName as getGitUser } from "../git/user.js";
 import { resolveOrRegisterProject } from "../store/project.js";
-import { getGitUserName } from "../team/config.js";
 import type { DecisionEntry, KnowledgeRow, PatternEntry, RuleEntry } from "../types.js";
 import { VALID_SUB_TYPES } from "../types.js";
 import { searchPipeline, trackHitCounts, truncate } from "./helpers.js";
@@ -338,7 +337,7 @@ async function ledgerSave(store: Store, emb: Embedder | null, params: LedgerPara
 	const lang = toLang();
 	const tags = parseTags(params.tags);
 	const projectPath = params.project_path ?? process.cwd();
-	const author = getGitUserName(projectPath);
+	const author = getGitUser(projectPath);
 	let entry: DecisionEntry | PatternEntry | RuleEntry;
 	let id: string;
 
@@ -512,27 +511,6 @@ async function ledgerReflect(store: Store, emb: Embedder | null, _params: Ledger
 	const candidates = getPromotionCandidates(store);
 	const lang = toLang();
 
-	const duplicates: Array<Record<string, unknown>> = [];
-	const contradictions: Array<Record<string, unknown>> = [];
-
-	if (emb) {
-		try {
-			const conflicts = detectKnowledgeConflicts(store);
-			for (const c of conflicts) {
-				const entry = {
-					doc_a: truncate(c.a.title, 60),
-					doc_b: truncate(c.b.title, 60),
-					similarity: Math.round(c.similarity * 100) / 100,
-					type: c.type,
-				};
-				if (c.type === "potential_contradiction") contradictions.push(entry);
-				else duplicates.push(entry);
-			}
-		} catch (err) {
-			console.error(`[alfred] conflict detection failed: ${err}`);
-		}
-	}
-
 	const promotionCandidates = candidates.map((d) => ({
 		id: d.id,
 		title: d.title,
@@ -540,25 +518,6 @@ async function ledgerReflect(store: Store, emb: Embedder | null, _params: Ledger
 		current: d.subType,
 		suggested: "rule",
 	}));
-
-	// Cross-project pattern mining (Voyage required)
-	let crossProjectPatterns: Array<Record<string, unknown>> = [];
-	let patternMiningTruncated = false;
-	if (emb) {
-		try {
-			const { mineCommonPatterns } = await import("../store/pattern-mining.js");
-			const mining = mineCommonPatterns(store);
-			crossProjectPatterns = mining.commonPatterns.map((p) => ({
-				pattern: p.pattern,
-				projects: p.projects,
-				similarity: p.similarity,
-				entry_count: p.entryIds.length,
-			}));
-			patternMiningTruncated = mining.truncated;
-		} catch (err) {
-			console.error(`[alfred] pattern mining failed: ${err}`);
-		}
-	}
 
 	return jsonResult({
 		summary: {
@@ -571,11 +530,7 @@ async function ledgerReflect(store: Store, emb: Embedder | null, _params: Ledger
 				sub_type: d.subType,
 			})),
 		},
-		duplicates,
-		contradictions,
 		promotion_candidates: promotionCandidates,
-		cross_project_patterns: crossProjectPatterns,
-		pattern_mining_truncated: patternMiningTruncated,
 		lang,
 	});
 }

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { renderForSize } from "../templates.js";
 import type { SpecFile, SpecSize, SpecType } from "../types.js";
-import { extractIDs, validateGherkin, validateSpec } from "../validate.js";
+import { validateSpec } from "../validate.js";
 
 let tmpDir: string;
 
@@ -36,38 +36,6 @@ function initSpec(
 		writeFileSync(join(specDir, file), overrides?.[file] ?? content);
 	}
 }
-
-describe("extractIDs", () => {
-	it("extracts FR-N IDs", () => {
-		expect(extractIDs("FR-1 and FR-2 and FR-1 again", /FR-\d+/g)).toEqual(["FR-1", "FR-2"]);
-	});
-
-	it("extracts T-N.N IDs", () => {
-		expect(extractIDs("T-1.1 and T-2.3", /T-\d+\.\d+/g)).toEqual(["T-1.1", "T-2.3"]);
-	});
-
-	it("returns empty for no matches", () => {
-		expect(extractIDs("no ids here", /FR-\d+/g)).toEqual([]);
-	});
-});
-
-describe("validateGherkin", () => {
-	it("passes valid gherkin", () => {
-		const content = "```gherkin\nGiven x\nWhen y\nThen z\n```";
-		expect(validateGherkin(content).valid).toBe(true);
-	});
-
-	it("warns on missing Then", () => {
-		const content = "```gherkin\nGiven x\nWhen y\n```";
-		const result = validateGherkin(content);
-		expect(result.valid).toBe(false);
-		expect(result.issues[0]).toContain("Then");
-	});
-
-	it("passes when no gherkin blocks", () => {
-		expect(validateGherkin("no gherkin here").valid).toBe(true);
-	});
-});
 
 describe("validateSpec — template defaults", () => {
 	it("S spec defaults have no fail checks (NFR-3)", () => {

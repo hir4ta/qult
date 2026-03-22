@@ -15,7 +15,6 @@ paths:
 - Auto-updates Next Steps completion status from transcript
 - Decision extraction: base score 0.35, min confidence 0.4 — bare keyword matches require at least one positive signal (rationale/alternative/arch term)
 - Structured chapter memory (JSON): goal, decisions, summary
-- Epic progress auto-sync
 - Knowledge detection: transcript research patterns (2+ hits from 13 keywords) → stderr reminder to save findings
 - Auto-completes task when tasks.md Status="completed"/"done" or all Next Steps are checked
 - Suggests updating steering docs when architecture-related decisions detected
@@ -39,7 +38,7 @@ paths:
 - Timeout warning: stderr notification when git diff times out (design.md not updated for that commit)
 
 ## Dossier Hints
-- dossier status next_action: contextual hint based on spec state (review_status=pending → dashboard, all steps done → complete, 3+ active tasks without epic → roster init suggestion)
+- dossier status next_action: contextual hint based on spec state (review_status=pending → dashboard, all steps done → complete)
 - dossier init suggested_search: always includes ledger search suggestion with description keywords
 - dossier init: returns `suggested_knowledge` (related knowledge via vector search + FTS5 fallback, sub_type boosted)
 
@@ -67,7 +66,7 @@ paths:
 - Shared spec-guard utilities: `src/hooks/spec-guard.ts` — tryReadActiveSpec, isSpecFilePath, countUncheckedNextSteps, hasUncheckedSelfReview, allowTool, denyTool, blockStop
 - Spec-first guard: command handler handles all cases (allowTool/denyTool). Prompt-type LLM judge removed (#19: parallel hook execution causes allow/deny conflicts). No-spec case emits stderr advisory + allowTool; enforcement is via UserPromptSubmit DIRECTIVE (Stage 1)
 - Validation engine: `src/spec/validate.ts` — 21-check validation for all spec sizes
-- Multi-agent skills: inspect (6 profiles), salon (3 specialists + synthesis), brief (requirements+design agent review loop + inline check for others + approval gate), attend (spec→approve→implement→review→commit orchestrator), tdd (red→green→refactor), mend (reproduce→analyze→fix→verify), survey (code→spec reverse engineering), harvest (PR comment → knowledge)
+- Multi-agent skills: inspect (6 profiles), salon (3 specialists + synthesis), brief (requirements+design agent review loop + inline check for others + approval gate), attend (spec→approve→implement→review→commit orchestrator), tdd (red→green→refactor), mend (reproduce→analyze→fix→verify), survey (code→spec reverse engineering)
 - brief/attend spec generation order: research → requirements → design → tasks → test-specs → session (decisions saved via ledger directly, not as spec file)
 
 ## Misc

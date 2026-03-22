@@ -19,7 +19,6 @@ export const translations = {
 	"nav.overview": { en: "Overview", ja: "概要" },
 	"nav.tasks": { en: "Specs", ja: "スペック" },
 	"nav.knowledge": { en: "Knowledge", ja: "ナレッジ" },
-	"nav.activity": { en: "Activity", ja: "アクティビティ" },
 
 	// Overview stats
 	"overview.totalTasks": { en: "Total Specs", ja: "スペック合計" },
@@ -34,7 +33,6 @@ export const translations = {
 	"overview.conflicts": { en: "Conflicts", ja: "競合" },
 	"overview.conflictsHint": { en: "Knowledge entries that may contradict each other", ja: "互いに矛盾の可能性があるナレッジ" },
 	"overview.vitality": { en: "Vitality", ja: "活性度" },
-	"overview.epics": { en: "Epics", ja: "エピック" },
 	"overview.recentDecisions": { en: "Recent Decisions", ja: "最近の意思決定" },
 
 	// Size labels
@@ -82,14 +80,6 @@ export const translations = {
 	"knowledge.pattern": { en: "Pattern", ja: "パターン" },
 	"knowledge.rule": { en: "Rule", ja: "ルール" },
 	"knowledge.snapshot": { en: "Snapshot", ja: "スナップショット" },
-	"knowledge.viewGrid": { en: "Grid", ja: "グリッド" },
-	"knowledge.viewGraph": { en: "Graph", ja: "グラフ" },
-	"knowledge.graphMinEntries": { en: "At least 5 knowledge entries needed for graph view", ja: "グラフ表示には5件以上のナレッジが必要です" },
-	"knowledge.graphTruncated": { en: "Showing top entries by access count", ja: "アクセス数上位のエントリを表示中" },
-	"knowledge.graphMethod": { en: "Edges via", ja: "エッジ計算:" },
-	"knowledge.graphLoading": { en: "Computing graph...", ja: "グラフを計算中..." },
-	"knowledge.graphError": { en: "Failed to load graph", ja: "グラフの読み込みに失敗しました" },
-	"knowledge.graphConnections": { en: "connections", ja: "件の接続" },
 	"knowledge.detail.context": { en: "Context", ja: "背景" },
 	"knowledge.detail.decision": { en: "Decision", ja: "決定内容" },
 	"knowledge.detail.reasoning": { en: "Reasoning", ja: "理由" },
@@ -108,11 +98,8 @@ export const translations = {
 	"activity.detail": { en: "Detail", ja: "詳細" },
 	"activity.noActivity": { en: "No activity found.", ja: "アクティビティが見つかりません。" },
 	"activity.showOlder": { en: "Show older activity", ja: "過去のアクティビティを表示" },
-	"activity.epics": { en: "Epics", ja: "エピック" },
 
 	// Section card
-	"section.approve": { en: "Approve", ja: "承認" },
-	"section.approved": { en: "Approved", ja: "承認済" },
 	"section.reviewMode": { en: "Review", ja: "レビュー" },
 	"section.readMode": { en: "Read", ja: "閲覧" },
 
@@ -195,9 +182,6 @@ export const translations = {
 	"shortcuts.help": { en: "Show shortcuts", ja: "ショートカット表示" },
 
 	// Epic dependencies
-	"epic.dependencies": { en: "Dependencies", ja: "依存関係" },
-	"epic.blockedBy": { en: "Blocked by", ja: "ブロック元" },
-	"epic.noDeps": { en: "No dependencies", ja: "依存関係なし" },
 
 	// Activity export & date range
 	"activity.exportCsv": { en: "Export CSV", ja: "CSV エクスポート" },

@@ -46,19 +46,19 @@ Most spec tools give you slash commands that say "you should write a spec first.
 
 **Enforcement, not suggestions.** Three layers gate your code edits. An intent guard blocks implementation without a spec. A review gate blocks the next wave until you've reviewed the last one. An approval gate blocks M/L specs until a human signs off in the dashboard. You can't YAML-edit your way past it — the signed review file gets checked too.
 
-**Knowledge that grows up.** Every decision, pattern, and hard-won lesson goes to `.alfred/knowledge/` as structured JSON. Patterns auto-promote to rules after 15+ search hits. Each knowledge type has its own half-life — rules stay relevant for 120 days, assumptions fade after 30. Contradictions are detected automatically. Git-friendly, team-shareable, and alfred surfaces relevant experience before you ask.
+**Knowledge that grows up.** Every decision, pattern, and hard-won lesson goes to `.alfred/knowledge/` as structured JSON. Patterns auto-promote to rules after 15+ search hits. Each knowledge type has its own half-life — rules stay relevant for 120 days, assumptions fade after 30. Git-friendly, team-shareable, and alfred surfaces relevant experience before you ask.
 
 **Specs that stay honest.** After every commit, alfred diffs your changes against the design doc. Touched a component not in the spec? You'll hear about it. New source files get auto-appended to the right component section — your spec stays in sync without manual updates.
 
 **Context that adapts.** alfred adjusts how much it injects based on project maturity. A new project gets full spec context on session start. A mature one with 20+ knowledge entries gets just the current task and goal — no context bloat.
 
-**Skills that show up on their own.** Researching? alfred suggests `/brief`. Fixing a bug? `/mend`. Merged a PR? `/harvest`. No memorization needed — it classifies your intent (semantic or keyword, bilingual) and nudges the right skill.
+**Skills that show up on their own.** Researching? alfred suggests `/brief`. Fixing a bug? `/mend`. No memorization needed — it classifies your intent (semantic or keyword, bilingual) and nudges the right skill.
 
 **A dashboard that's actually useful.** `alfred dashboard` opens `localhost:7575` with live task progress, spec review with line-level comments, file-by-file approval, knowledge health, and activity timeline. Cross-project view with `Cmd+K` global search. English/Japanese toggle.
 
 **Cross-project intelligence.** alfred sees across all your projects. Contradictory design decisions between projects? Flagged automatically. Starting a new auth feature? Past decisions from your other projects surface before you ask. Common patterns across 3+ projects get detected and promoted.
 
-**Team sharing via git.** Knowledge files are structured JSON — commit, review in PRs, share with your team. `alfred team init` sets up a custom merge driver for conflict-free knowledge merging. `team.yaml` configures multi-reviewer approval, spec tracking, and cross-project search. No server needed — git is the transport.
+**Team sharing via git.** Knowledge files are structured JSON — commit, review in PRs, share with your team. No server needed — git is the transport.
 
 ## Why alfred in 2026
 
@@ -97,7 +97,6 @@ With Opus 4.6's 1M context window, compaction is rarer but more destructive when
 | `/alfred:inspect` | 6-profile quality review. Parallel agents, scored findings |
 | `/alfred:survey` | Reverse-engineer specs from existing code, with confidence scores |
 | `/alfred:salon` | Brainstorm. 3 specialists ideate in parallel, then debate tradeoffs |
-| `/alfred:harvest` | Extract knowledge from PR review comments into permanent memory |
 | `/alfred:archive` | Ingest reference docs (PDF, CSV, big text) into searchable knowledge |
 | `/alfred:init` | Project onboarding. Multi-agent codebase exploration + steering docs |
 
@@ -114,15 +113,13 @@ Hooks (invisible)
   |-- UserPromptSubmit -> semantic search + skill nudge + spec enforcement
   |-- PreToolUse       -> review gate + intent guard + approval gate (3-layer)
   |-- PostToolUse      -> auto-update progress, auto-transition status, drift detection
-  |-- PreCompact       -> snapshot tasks, extract decisions, sync epics
+  |-- PreCompact       -> snapshot tasks, extract decisions
   |-- Stop             -> review gate block + reminders
   v
 Storage
   |-- .alfred/knowledge/   -> JSON (decisions/, patterns/, rules/) — source of truth
   |-- .alfred/specs/       -> spec files + version history + reviews
-  |-- .alfred/epics/       -> epic YAML + task dependencies
   |-- .alfred/steering/    -> project context (product, structure, tech)
-  |-- .alfred/team.yaml    -> team config (review count, spec tracking, cross-project)
   +-- ~/.claude-alfred/    -> SQLite search index + audit log (rebuildable)
 ```
 
@@ -131,7 +128,6 @@ Storage
 | Tool | What it manages |
 |------|----------------|
 | `dossier` | Spec lifecycle — init, update, complete, defer, cancel, review, gate, and more |
-| `roster` | Epics — group tasks with dependencies, track progress across specs |
 | `ledger` | Knowledge — search, save, promote patterns to rules, health reports |
 
 ## Knowledge
@@ -145,7 +141,7 @@ Knowledge lives as JSON files you can commit, review in PRs, and share with your
   rules/        # "Always do X. Priority: P0. Because: Y."
 ```
 
-Patterns auto-promote to rules after 15+ search hits. Contradictions detected automatically.
+Patterns auto-promote to rules after 15+ search hits.
 
 Search pipeline: Voyage AI vectors with reranking > FTS5 with fuzzy matching > keyword fallback. "auth" finds "authentication", "login", and more.
 
@@ -179,7 +175,6 @@ npm install -g claude-alfred        # CLI, hooks, MCP server, dashboard
 | Wrong language | `export ALFRED_LANG=ja` in `~/.zshrc` |
 | Hook not firing | `/plugin install alfred` + restart Claude Code |
 | Dashboard empty | Run from a directory with `.alfred/specs/`, or any directory for cross-project view |
-| Merge conflicts in knowledge | Run `alfred team init` to set up the merge driver |
 
 ## Uninstalling
 

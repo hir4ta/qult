@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Store } from "../../store/index.js";
+import { suppressIO } from "../../__tests__/test-utils.js";
 
 let tmpDir: string;
 let store: Store;
@@ -25,20 +26,6 @@ afterEach(() => {
 	store.close();
 	rmSync(tmpDir, { recursive: true, force: true });
 });
-
-function suppressIO(): { restore: () => void; stderr: string[]; stdout: string[] } {
-	const stderrLines: string[] = [];
-	const stdoutLines: string[] = [];
-	const origErr = process.stderr.write;
-	const origOut = process.stdout.write;
-	process.stderr.write = ((chunk: string | Buffer) => { stderrLines.push(String(chunk)); return true; }) as typeof process.stderr.write;
-	process.stdout.write = ((chunk: string | Buffer) => { stdoutLines.push(String(chunk)); return true; }) as typeof process.stdout.write;
-	return {
-		restore: () => { process.stderr.write = origErr; process.stdout.write = origOut; },
-		stderr: stderrLines,
-		stdout: stdoutLines,
-	};
-}
 
 function setupActiveSpec(slug: string) {
 	const specsDir = join(tmpDir, ".alfred", "specs", slug);
@@ -167,17 +154,3 @@ describe("postToolUse archive nudge", () => {
 	});
 });
 
-describe("postToolUse harvest nudge", () => {
-	it("suggests harvest after PR merge", async () => {
-		const io = suppressIO();
-		try {
-			const { postToolUse } = await import("../post-tool.js");
-			await postToolUse({
-				cwd: tmpDir, tool_name: "Bash",
-				tool_response: { exitCode: 0, stdout: "✓ Merged pull request #42" },
-			} as any, AbortSignal.timeout(5000));
-			const output = io.stdout.join("");
-			expect(output).toContain("harvest");
-		} finally { io.restore(); }
-	});
-});

@@ -7,19 +7,10 @@ import { Store } from "../../store/index.js";
 import { upsertKnowledge } from "../../store/knowledge.js";
 import type { KnowledgeRow } from "../../types.js";
 import { recencyFactor, searchPipeline, trackHitCounts, truncate } from "../helpers.js";
+import { insertTestProject, TEST_PROJECT_ID } from "../../__tests__/test-utils.js";
 
 let tmpDir: string;
 let store: Store;
-
-const TEST_PROJECT_ID = "test-project-id";
-
-function insertTestProject(db: Database.Database, id = TEST_PROJECT_ID): string {
-	db.prepare(`
-		INSERT OR IGNORE INTO projects (id, name, remote, path, branch, registered_at, last_seen_at, status)
-		VALUES (?, 'test', '', '/test', '', datetime('now'), datetime('now'), 'active')
-	`).run(id);
-	return id;
-}
 
 beforeEach(() => {
 	tmpDir = mkdtempSync(join(tmpdir(), "helpers-test-"));

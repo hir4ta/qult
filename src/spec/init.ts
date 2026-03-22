@@ -1,5 +1,5 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { getGitUserName } from "../team/config.js";
+import { getGitUserName } from "../git/user.js";
 import type { TemplateData } from "./templates.js";
 import { renderForSize } from "./templates.js";
 import type { ActiveState, InitResult, SpecSize, SpecType } from "./types.js";

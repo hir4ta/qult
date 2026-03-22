@@ -1,7 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { createRootRouteWithContext, Link, Outlet, useLocation } from "@tanstack/react-router";
-import { Activity, BookOpen, Globe, LayoutDashboard, ListChecks } from "@animated-color-icons/lucide-react";
+import { BookOpen, Globe, LayoutDashboard, ListChecks } from "@animated-color-icons/lucide-react";
 import { useMemo, useState } from "react";
 import { KeyboardHelpDialog } from "@/components/keyboard-help";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -23,7 +23,6 @@ const tabs = [
 	{ to: "/", labelKey: "nav.overview" as TranslationKey, icon: LayoutDashboard, color: "#40513b" },
 	{ to: "/tasks", labelKey: "nav.tasks" as TranslationKey, icon: ListChecks, color: "#628141" },
 	{ to: "/knowledge", labelKey: "nav.knowledge" as TranslationKey, icon: BookOpen, color: "#2d8b7a" },
-	{ to: "/activity", labelKey: "nav.activity" as TranslationKey, icon: Activity, color: "#7b6b8d" },
 ] as const;
 
 function LanguageToggle() {

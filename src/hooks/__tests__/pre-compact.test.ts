@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Store } from "../../store/index.js";
 import type { KnowledgeRow } from "../../types.js";
+import { suppressIO } from "../../__tests__/test-utils.js";
 
 let tmpDir: string;
 let store: Store;
@@ -33,15 +34,6 @@ function setupActiveSpec(slug: string, tasksContent: string, size = "S", reviewS
 	writeFileSync(join(tmpDir, ".alfred", "specs", "_active.md"), active);
 	writeFileSync(join(specsDir, "requirements.md"), "# Requirements");
 	writeFileSync(join(specsDir, "tasks.md"), tasksContent);
-}
-
-function suppressIO(): { restore: () => void; stderr: string[] } {
-	const stderrLines: string[] = [];
-	const origErr = process.stderr.write;
-	const origOut = process.stdout.write;
-	process.stderr.write = ((chunk: string | Buffer) => { stderrLines.push(String(chunk)); return true; }) as typeof process.stderr.write;
-	process.stdout.write = (() => true) as typeof process.stdout.write;
-	return { restore: () => { process.stderr.write = origErr; process.stdout.write = origOut; }, stderr: stderrLines };
 }
 
 describe("preCompact", () => {

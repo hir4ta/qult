@@ -7,23 +7,10 @@ import { Store } from "../../store/index.js";
 import { upsertKnowledge } from "../../store/knowledge.js";
 import type { KnowledgeRow } from "../../types.js";
 import { handleLedger } from "../ledger.js";
+import { insertTestProject, parseResult, TEST_PROJECT_ID } from "../../__tests__/test-utils.js";
 
 let tmpDir: string;
 let store: Store;
-
-const TEST_PROJECT_ID = "test-project-id";
-
-function insertTestProject(db: Database.Database, id = TEST_PROJECT_ID): string {
-	db.prepare(`
-		INSERT OR IGNORE INTO projects (id, name, remote, path, branch, registered_at, last_seen_at, status)
-		VALUES (?, 'test', '', '/test', '', datetime('now'), datetime('now'), 'active')
-	`).run(id);
-	return id;
-}
-
-function parseResult(result: { content: Array<{ type: string; text: string }> }) {
-	return JSON.parse(result.content[0]!.text);
-}
 
 function makeRow(overrides: Partial<KnowledgeRow> = {}): KnowledgeRow {
 	return {
@@ -384,8 +371,7 @@ describe("ledger reflect", () => {
 		const data = parseResult(result);
 		expect(data.summary.total_memories).toBeGreaterThanOrEqual(1);
 		expect(data.summary.by_sub_type).toBeDefined();
-		expect(data.duplicates).toBeDefined();
-		expect(data.contradictions).toBeDefined();
+		expect(data.promotion_candidates).toBeDefined();
 	});
 });
 

@@ -1,10 +1,6 @@
 import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
-	ActivityResponse,
 	DecisionsResponse,
-	EpicsResponse,
-	GraphEdgesResponse,
-	HealthResponse,
 	KnowledgeEntry,
 	KnowledgeResponse,
 	KnowledgeStats,
@@ -123,31 +119,6 @@ export async function promoteKnowledge(id: number): Promise<{ promoted: boolean;
 	return res.json();
 }
 
-export const activityQueryOptions = (limit = 50, filter?: string, projectId?: string) =>
-	queryOptions({
-		queryKey: ["activity", limit, filter, projectId],
-		queryFn: () => {
-			const params = new URLSearchParams({ limit: String(limit) });
-			if (filter) params.set("filter", filter);
-			if (projectId) params.set("project", projectId);
-			return fetchJSON<ActivityResponse>(`/api/activity?${params}`);
-		},
-		staleTime: LIVE_STALE,
-	});
-
-export const epicsQueryOptions = () =>
-	queryOptions({
-		queryKey: ["epics"],
-		queryFn: () => fetchJSON<EpicsResponse>("/api/epics"),
-		staleTime: LIVE_STALE,
-	});
-
-export const graphEdgesQueryOptions = () =>
-	queryOptions({
-		queryKey: ["knowledge", "graph"],
-		queryFn: () => fetchJSON<GraphEdgesResponse>("/api/knowledge/graph"),
-		staleTime: REF_STALE,
-	});
 
 export const decisionsQueryOptions = (limit = 20, projectId?: string) =>
 	queryOptions({
@@ -160,12 +131,6 @@ export const decisionsQueryOptions = (limit = 20, projectId?: string) =>
 		staleTime: LIVE_STALE,
 	});
 
-export const healthQueryOptions = () =>
-	queryOptions({
-		queryKey: ["health"],
-		queryFn: () => fetchJSON<HealthResponse>("/api/health"),
-		staleTime: REF_STALE,
-	});
 
 export const validationQueryOptions = (slug: string, projectId?: string) =>
 	queryOptions({
@@ -247,28 +212,6 @@ export async function completeTask(slug: string) {
 		throw new Error(body.error ?? `HTTP ${res.status}`);
 	}
 	return res.json();
-}
-
-export const fileApprovalsQueryOptions = (slug: string, projectId?: string) =>
-	queryOptions({
-		queryKey: ["file-approvals", slug, projectId],
-		queryFn: () =>
-			fetchJSON<{ approvals: Record<string, boolean> }>(taskURLWithProject(slug, projectId, "file-approvals")),
-		staleTime: LIVE_STALE,
-		enabled: !!slug,
-	});
-
-export async function setFileApproval(slug: string, file: string, approved: boolean, projectId?: string) {
-	const res = await fetch(taskURLWithProject(slug, projectId, "file-approvals"), {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ file, approved }),
-	});
-	if (!res.ok) {
-		const body = await res.json().catch(() => ({ error: res.statusText }));
-		throw new Error(body.error ?? `HTTP ${res.status}`);
-	}
-	return res.json() as Promise<{ approvals: Record<string, boolean>; all_approved: boolean }>;
 }
 
 // --- Hooks (convenience wrappers) ---

@@ -75,7 +75,7 @@ interface IntentState {
 	timestamp: number;
 }
 
-export function writeLastIntent(cwd: string, intent: string | null): void {
+function writeLastIntent(cwd: string, intent: string | null): void {
 	if (!intent) {
 		writeStateJSON(cwd, INTENT_FILE, null);
 		return;

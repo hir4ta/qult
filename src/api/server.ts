@@ -5,7 +5,6 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import type { Embedder } from "../embedder/index.js";
-import { listAllEpics } from "../epic/index.js";
 import { appendAudit } from "../spec/audit.js";
 import type { ReviewStatus, SpecFile, SpecSize, SpecType } from "../spec/types.js";
 import {
@@ -18,7 +17,6 @@ import {
 	writeActiveState,
 } from "../spec/types.js";
 import { searchKnowledgeFTS, searchUnified } from "../store/fts.js";
-import { computeGraphEdges } from "../store/graph.js";
 import type { Store } from "../store/index.js";
 import { getKnowledgeStats, getPromotionCandidates, promoteSubType, setKnowledgeEnabled } from "../store/knowledge.js";
 import {
@@ -106,6 +104,24 @@ export function createApp(
 
 		detail.completed = totalChecked;
 		detail.total = totalAll;
+
+		// Infer size and dates from spec directory for archived tasks
+		if (!detail.size || !detail.started_at) {
+			try {
+				const dirPath = sd.dir();
+				const specFiles = readdirSync(dirPath).filter((f) => f.endsWith(".md") && !f.startsWith("_"));
+				if (!detail.size) {
+					if (specFiles.length <= 3) detail.size = "S";
+					else if (specFiles.length <= 4) detail.size = "M";
+					else detail.size = "L";
+				}
+				if (!detail.started_at) {
+					const dirStat = statSync(dirPath);
+					detail.started_at = dirStat.birthtime.toISOString();
+				}
+			} catch { /* no spec dir */ }
+		}
+
 		return detail;
 	}
 
@@ -447,24 +463,6 @@ export function createApp(
 		return c.json({ decisions: mapped });
 	});
 
-	// Graph edges
-	let graphCache: { edges: unknown[]; method: string; truncated: boolean } | null = null;
-	let graphCacheKey = "";
-
-	app.get("/api/knowledge/graph", (c) => {
-		const row = store.db
-			.prepare("SELECT MAX(updated_at) as max_updated, COUNT(*) as cnt FROM knowledge_index WHERE enabled = 1")
-			.get() as { max_updated: string | null; cnt: number };
-		const currentKey = `${row.max_updated ?? ""}:${row.cnt}`;
-
-		if (graphCache && currentKey === graphCacheKey) return c.json(graphCache);
-
-		const result = computeGraphEdges(store);
-		graphCache = result;
-		graphCacheKey = currentKey;
-		return c.json(result);
-	});
-
 	app.patch("/api/knowledge/:id/enabled", async (c) => {
 		const id = parseInt(c.req.param("id"), 10);
 		if (Number.isNaN(id)) return c.json({ error: "invalid id" }, 400);
@@ -535,13 +533,6 @@ export function createApp(
 		return c.json({ hitRanking, completionStats });
 	});
 
-	app.get("/api/conflicts", async (c) => {
-		const { detectCrossProjectConflicts } = await import("../store/conflicts.js");
-		const limit = parseInt(c.req.query("limit") ?? "20", 10) || 20;
-		const result = detectCrossProjectConflicts(store, { limit });
-		return c.json(result);
-	});
-
 	app.get("/api/specs/:slug/similar", async (c) => {
 		const { findSimilarSpecs } = await import("../store/vectors.js");
 		const slug = c.req.param("slug");
@@ -555,11 +546,6 @@ export function createApp(
 
 		const similar = findSimilarSpecs(store, specRow.id, { limit });
 		return c.json({ similar });
-	});
-
-	app.get("/api/epics", (c) => {
-		const epics = listAllEpics(projectPath);
-		return c.json({ epics });
 	});
 
 	app.get("/api/health", (c) => {
@@ -639,7 +625,7 @@ export function createApp(
 
 		const ts = new Date().toISOString();
 		const rawComments = Array.isArray(body.comments) ? body.comments.slice(0, 100) : [];
-		const { getGitUserName } = await import("../team/config.js");
+		const { getGitUserName } = await import("../git/user.js");
 		const reviewer = getGitUserName(projectPath);
 		const review = {
 			timestamp: ts,
@@ -710,72 +696,6 @@ export function createApp(
 		} catch (err) {
 			return c.json({ error: String(err) }, 500);
 		}
-	});
-
-	// --- File-level Approval API ---
-
-	app.get("/api/tasks/:slug/file-approvals", (c) => {
-		const slug = c.req.param("slug");
-		if (!VALID_SLUG.test(slug)) return c.json({ error: "invalid slug" }, 400);
-
-		const approvalsPath = join(new SpecDir(projectPath, slug).dir(), "file-approvals.json");
-		try {
-			const data = JSON.parse(readFileSync(approvalsPath, "utf-8")) as Record<string, boolean>;
-			return c.json({ approvals: data });
-		} catch {
-			return c.json({ approvals: {} });
-		}
-	});
-
-	app.post("/api/tasks/:slug/file-approvals", async (c) => {
-		const slug = c.req.param("slug");
-		if (!VALID_SLUG.test(slug)) return c.json({ error: "invalid slug" }, 400);
-
-		const sd = new SpecDir(projectPath, slug);
-		if (!sd.exists()) return c.json({ error: "spec not found" }, 404);
-
-		let body: { file: string; approved: boolean };
-		try { body = await c.req.json(); } catch { return c.json({ error: "invalid JSON body" }, 400); }
-		if (typeof body.file !== "string" || typeof body.approved !== "boolean") {
-			return c.json({ error: "file (string) and approved (boolean) are required" }, 400);
-		}
-		if (!VALID_SPEC_FILES.has(body.file)) return c.json({ error: "invalid spec file" }, 400);
-
-		const approvalsPath = join(sd.dir(), "file-approvals.json");
-		let approvals: Record<string, boolean> = {};
-		try { approvals = JSON.parse(readFileSync(approvalsPath, "utf-8")); } catch { /* new file */ }
-
-		approvals[body.file] = body.approved;
-		writeFileSync(approvalsPath, JSON.stringify(approvals, null, 2));
-
-		let state;
-		try { state = readActiveState(projectPath); } catch { return c.json({ approvals }); }
-		const task = state.tasks.find((t) => t.slug === slug);
-		const size = (task?.size ?? "L") as SpecSize;
-		const specType = (task?.spec_type ?? "feature") as SpecType;
-		const expectedFiles = filesForSize(size, specType);
-		const allApproved = expectedFiles.every((f) => approvals[f] === true);
-
-		if (allApproved && task && task.review_status !== "approved") {
-			const ts = new Date().toISOString();
-			const review = { timestamp: ts, status: "approved", comments: [] };
-			const reviewsDir = join(sd.dir(), "reviews");
-			mkdirSync(reviewsDir, { recursive: true });
-			const filename = `review-${ts.replace(/[:.]/g, "")}-${Date.now() % 10000}.json`;
-			writeFileSync(join(reviewsDir, filename), JSON.stringify(review, null, 2));
-
-			task.review_status = "approved" as ReviewStatus;
-			writeActiveState(projectPath, state);
-
-			appendAudit(projectPath, {
-				action: "review.submit",
-				target: slug,
-				detail: "approved (all files approved via dashboard)",
-				user: "dashboard",
-			});
-		}
-
-		return c.json({ approvals, all_approved: allApproved });
 	});
 
 	// --- SSE (T-2.4: FR-14) ---

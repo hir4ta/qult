@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Copy, Download, MessageSquareText, BookOpen } from "@animated-color-icons/lucide-react";
+import { Check, ChevronDown, Copy, MessageSquareText, BookOpen } from "@animated-color-icons/lucide-react";
 import { useCallback, useState } from "react";
 import Markdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -37,8 +37,6 @@ interface SectionCardProps {
 	content: string;
 	color?: string;
 	defaultOpen?: boolean;
-	approved?: boolean;
-	onApprove?: (file: string, approved: boolean) => void;
 	slug?: string;
 	canReview?: boolean;
 	isReviewMode?: boolean;
@@ -50,8 +48,6 @@ export function SectionCard({
 	title,
 	content,
 	defaultOpen = false,
-	approved,
-	onApprove,
 	canReview,
 	isReviewMode,
 	onToggleReviewMode,
@@ -106,36 +102,6 @@ export function SectionCard({
 							)}
 						</button>
 					)}
-					{onApprove && (
-						<button
-							type="button"
-							onClick={(e) => { e.stopPropagation(); onApprove(title, !approved); }}
-							className={cn(
-								"flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors shrink-0",
-								approved
-									? "bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800"
-									: "bg-muted text-muted-foreground border border-transparent hover:border-border hover:bg-accent",
-							)}
-						>
-							<Check className={cn("size-3", approved ? "opacity-100" : "opacity-30")} />
-							{approved ? t("section.approved") : t("section.approve")}
-						</button>
-					)}
-					<button
-						type="button"
-						onClick={(e) => {
-							e.stopPropagation();
-							const blob = new Blob([content], { type: "text/markdown" });
-							const url = URL.createObjectURL(blob);
-							const a = document.createElement("a");
-							a.href = url; a.download = title; a.click();
-							URL.revokeObjectURL(url);
-						}}
-						className="flex items-center justify-center rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-						title="Download"
-					>
-						<Download className="size-3.5" />
-					</button>
 				</div>
 			</div>
 
