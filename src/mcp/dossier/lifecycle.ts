@@ -103,10 +103,12 @@ export async function dossierComplete(projectPath: string, store: Store, params:
 		/* fail-open: validation errors don't block completion */
 	}
 
-	// Check closing wave completion — DENY if unchecked items remain.
+	// Check ALL wave tasks — DENY if unchecked items remain (#24).
 	try {
 		const sd = new SpecDir(projectPath, taskSlug);
 		const tasksContent = sd.readFile("tasks.md");
+		const wavesError = checkAllWaveTasks(tasksContent);
+		if (wavesError) return errorResult(`task completion gate: ${wavesError}`);
 		const closingError = checkClosingWave(tasksContent);
 		if (closingError) return errorResult(`closing wave gate: ${closingError}`);
 	} catch {
@@ -158,6 +160,54 @@ export async function dossierComplete(projectPath: string, store: Store, params:
 	} catch (err) {
 		return errorResult(`${err}`);
 	}
+}
+
+/**
+ * Check that ALL Wave tasks (excluding Closing Wave) are checked.
+ * Returns error message listing unchecked items if any, undefined if all done.
+ * Fixes #24: dossier complete was only checking Closing Wave.
+ */
+function checkAllWaveTasks(tasksContent: string): string | undefined {
+	const lines = tasksContent.split("\n");
+	const uncheckedByWave: Array<{ wave: string; count: number }> = [];
+	let currentWave: string | null = null;
+	let isClosing = false;
+
+	for (const line of lines) {
+		// Detect wave headers: "## Wave 1: ...", "## Wave 2", etc.
+		const waveMatch = line.match(/^## (?:Wave[:\s]*)?(\d+[\w\s:：—-]*)/i);
+		if (waveMatch) {
+			currentWave = waveMatch[1]!.trim();
+			isClosing = false;
+			continue;
+		}
+		// Detect Closing Wave header — stop counting
+		if (/^## (?:Wave:\s*)?[Cc]losing(?:\s+[Ww]ave)?/i.test(line)) {
+			currentWave = null;
+			isClosing = true;
+			continue;
+		}
+		// Stop at next ## section after closing
+		if (line.startsWith("## ") && isClosing) {
+			isClosing = false;
+			continue;
+		}
+		// Count unchecked items in non-Closing waves
+		if (currentWave && /^- \[ \] /.test(line)) {
+			const existing = uncheckedByWave.find((w) => w.wave === currentWave);
+			if (existing) {
+				existing.count++;
+			} else {
+				uncheckedByWave.push({ wave: currentWave, count: 1 });
+			}
+		}
+	}
+
+	if (uncheckedByWave.length === 0) return undefined;
+
+	const total = uncheckedByWave.reduce((s, w) => s + w.count, 0);
+	const details = uncheckedByWave.map((w) => `Wave ${w.wave}: ${w.count}`).join(", ");
+	return `${total} unchecked task(s) in implementation waves (${details}). Check all tasks via \`dossier action=check task_id="T-X.Y"\` before completing.`;
 }
 
 /**
@@ -234,9 +284,9 @@ export function dossierGate(projectPath: string, params: DossierParams) {
 		}
 
 		case "clear": {
-			if (!params.reason || params.reason.trim() === "") {
+			if (!params.reason || params.reason.trim().length < 30) {
 				return errorResult(
-					'reason is required for gate clear — describe what was reviewed (e.g., "3-agent review completed, 0 critical issues")',
+					'reason must be at least 30 characters — include: review method (code-reviewer/inspect/manual), findings count (Critical/High/Medium), and fix summary. Example: "code-reviewer: 0 Critical, 2 Medium fixed (regex normalization, error message)"',
 				);
 			}
 
@@ -292,6 +342,7 @@ export function dossierGate(projectPath: string, params: DossierParams) {
 			writeReviewGate(projectPath, {
 				...gate,
 				fix_mode: true,
+				fix_mode_at: new Date().toISOString(),
 				reason: `[fix_mode] ${fixReason} (original: ${gate.reason})`,
 			});
 
@@ -359,10 +410,10 @@ export function dossierCheck(projectPath: string, params: DossierParams) {
 				continue;
 			}
 			if (inClosing && line.startsWith("## ")) break; // Left Closing section
-			if (inClosing && line.match(/^- \[[ x]\] /)) {
+			if (inClosing && line.match(/^- \[[ xX]\] /)) {
 				closingIndex++;
 				if (closingIndex === nth) {
-					if (line.startsWith("- [x] ")) {
+					if (/^- \[[xX]\] /.test(line)) {
 						return jsonResult({ task_id: taskId, status: "already_checked" });
 					}
 					lines[i] = line.replace("- [ ]", "- [x]");
@@ -387,7 +438,7 @@ export function dossierCheck(projectPath: string, params: DossierParams) {
 
 		if (!checked) {
 			const alreadyChecked = lines.some(
-				(l) => l.match(/^- \[x\] /) && l.toLowerCase().includes(taskIdLower),
+				(l) => /^- \[[xX]\] /.test(l) && l.toLowerCase().includes(taskIdLower),
 			);
 			if (alreadyChecked) {
 				return jsonResult({ task_id: taskId, status: "already_checked" });

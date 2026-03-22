@@ -12,6 +12,8 @@ export interface ReviewGate {
 	/** When true, Edit/Write is allowed for applying fixes, but gate stays logically active.
 	 *  Next `gate clear` fully removes the gate. Enables review→fix→re-review loop (#15/#20). */
 	fix_mode?: boolean;
+	/** ISO8601 timestamp when fix_mode was entered. Auto-expires after 60 minutes. */
+	fix_mode_at?: string;
 }
 
 /**
@@ -41,6 +43,17 @@ export function isGateActive(cwd: string): ReviewGate | null {
 
 	// Slug mismatch = stale gate from previous spec. Ignore.
 	if (gate.slug !== spec.slug) return null;
+
+	// Fix mode timeout: auto-expire after 60 minutes.
+	if (gate.fix_mode && gate.fix_mode_at) {
+		const elapsed = Date.now() - Date.parse(gate.fix_mode_at);
+		if (elapsed > 60 * 60 * 1000) {
+			gate.fix_mode = false;
+			gate.fix_mode_at = undefined;
+			writeStateJSON(cwd, GATE_FILE, { ...gate, set_at: gate.set_at });
+			process.stderr.write("[alfred] fix_mode expired (60 min timeout). Gate re-activated — run review before clearing.\n");
+		}
+	}
 
 	return gate;
 }

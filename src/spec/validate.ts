@@ -173,7 +173,7 @@ export function validateSpec(
 		const tasksWithFR: Set<string> = new Set();
 		let currentTask = "";
 		for (const line of taskLines) {
-			const taskMatch = line.match(/(?:###\s+|[-*]\s+\[[ x]\]\s+)(T-\d+\.\d+)/);
+			const taskMatch = line.match(/(?:###\s+|[-*]\s+\[[ xX]\]\s+)(T-\d+\.\d+)/);
 			if (taskMatch) {
 				currentTask = taskMatch[1]!;
 				// Inline FR reference on the same line: T-1.1 (FR-1, FR-2): ...

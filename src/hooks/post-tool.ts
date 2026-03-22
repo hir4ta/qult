@@ -330,9 +330,9 @@ function checkSpecCompletion(projectPath: string, items: DirectiveItem[]): void 
 		} catch {
 			return;
 		}
-		const allSteps = tasksContent.match(/^- \[[ x]\] .+$/gm);
+		const allSteps = tasksContent.match(/^- \[[ xX]\] .+$/gm);
 		const allChecked =
-			allSteps && allSteps.length > 0 && allSteps.every((s) => s.startsWith("- [x]"));
+			allSteps && allSteps.length > 0 && allSteps.every((s) => /^- \[[xX]\]/.test(s));
 
 		if (allChecked) {
 			items.push({

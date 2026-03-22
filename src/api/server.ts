@@ -142,9 +142,9 @@ export function createApp(
 			} else if (closingMatch) {
 				current = { key: "closing", title: "Closing", total: 0, checked: 0 };
 				waves.push(current);
-			} else if (current && line.match(/^- \[[ x]\] /)) {
+			} else if (current && line.match(/^- \[[ xX]\] /)) {
 				current.total++;
-				if (line.startsWith("- [x] ")) current.checked++;
+				if (/^- \[[xX]\] /.test(line)) current.checked++;
 			}
 		}
 

@@ -394,7 +394,7 @@ describe("dossier gate", () => {
 			action: "gate",
 			project_path: tmpDir,
 			sub_action: "clear",
-			reason: "Self-review completed",
+			reason: "code-reviewer: 0 Critical, 0 High findings. Self-review completed.",
 		});
 		const data = parseResult(result);
 		expect(data.cleared).toBe(true);
@@ -646,5 +646,100 @@ describe("dossier check", () => {
 		});
 		const data = parseResult(result);
 		expect(data.status).toBe("checked");
+	});
+});
+
+// --- Wave Enforcement Tests (#24, #25) ---
+
+describe("wave-enforcement", () => {
+	it("#24: blocks complete when Wave 1 tasks are unchecked", async () => {
+		await handleDossier(store, null, {
+			action: "init", project_path: tmpDir, task_slug: "wave-block",
+			size: "S", spec_type: "bugfix",
+		});
+		await handleDossier(store, null, {
+			action: "update", project_path: tmpDir, task_slug: "wave-block",
+			file: "bugfix.md", mode: "replace",
+			content: "# Bugfix\n\n## Bug Summary\nTest bugfix for wave enforcement validation. The system fails to check implementation wave tasks before allowing spec completion.\n\n## Severity & Impact\nP0 — Core enforcement broken.\n\n## Root Cause Analysis\ncheckClosingWave only validates Closing section checkboxes, ignoring Wave 1-N tasks entirely.\n\n## Fix Strategy\nAdd checkAllWaveTasks function to validate all waves before completion.",
+		});
+		await handleDossier(store, null, {
+			action: "update", project_path: tmpDir, task_slug: "wave-block",
+			file: "tasks.md", mode: "replace",
+			content: "# Tasks\n\n## Wave 1: Core\n\n- [ ] T-1.1 Implement feature\n\n## Wave: Closing\n\n- [x] T-C.1 Self-review\n- [x] T-C.2 CLAUDE.md\n- [x] T-C.3 Tests\n- [x] T-C.4 Knowledge",
+		});
+		const result = await handleDossier(store, null, {
+			action: "complete", project_path: tmpDir, task_slug: "wave-block",
+		});
+		const data = parseResult(result);
+		expect(data.error).toBeDefined();
+		expect(data.error).toContain("unchecked task");
+	});
+
+	it("#24: allows complete when all Wave tasks are checked", async () => {
+		await handleDossier(store, null, {
+			action: "init", project_path: tmpDir, task_slug: "wave-pass",
+			size: "S", spec_type: "bugfix",
+		});
+		await handleDossier(store, null, {
+			action: "update", project_path: tmpDir, task_slug: "wave-pass",
+			file: "bugfix.md", mode: "replace",
+			content: "# Bugfix\n\n## Bug Summary\nTest bugfix for wave enforcement validation. The system fails to check implementation wave tasks before allowing spec completion.\n\n## Severity & Impact\nP0 — Core enforcement broken.\n\n## Root Cause Analysis\ncheckClosingWave only validates Closing section checkboxes.\n\n## Fix Strategy\nAdd checkAllWaveTasks function.",
+		});
+		await handleDossier(store, null, {
+			action: "update", project_path: tmpDir, task_slug: "wave-pass",
+			file: "tasks.md", mode: "replace",
+			content: "# Tasks\n\n## Wave 1: Core\n\n- [x] T-1.1 Done\n\n## Wave: Closing\n\n- [x] T-C.1 Self-review\n- [x] T-C.2 CLAUDE.md\n- [x] T-C.3 Tests\n- [x] T-C.4 Knowledge",
+		});
+		const result = await handleDossier(store, null, {
+			action: "complete", project_path: tmpDir, task_slug: "wave-pass",
+		});
+		const data = parseResult(result);
+		expect(data.completed).toBe(true);
+	});
+
+	it("#25: blocks gate clear with short reason (<30 chars)", async () => {
+		await handleDossier(store, null, {
+			action: "init",
+			project_path: tmpDir,
+			task_slug: "gate-short",
+		});
+		await handleDossier(store, null, {
+			action: "gate",
+			project_path: tmpDir,
+			sub_action: "set",
+			gate_type: "wave-review",
+			wave: 1,
+		});
+		const result = await handleDossier(store, null, {
+			action: "gate",
+			project_path: tmpDir,
+			sub_action: "clear",
+			reason: "reviewed",
+		});
+		const data = parseResult(result);
+		expect(data.error).toBeDefined();
+		expect(data.error).toContain("30 characters");
+	});
+
+	it("checkbox: recognizes uppercase [X] as checked", async () => {
+		await handleDossier(store, null, {
+			action: "init", project_path: tmpDir, task_slug: "upper-x",
+			size: "S", spec_type: "bugfix",
+		});
+		await handleDossier(store, null, {
+			action: "update", project_path: tmpDir, task_slug: "upper-x",
+			file: "bugfix.md", mode: "replace",
+			content: "# Bugfix\n\n## Bug Summary\nTest uppercase X checkbox recognition. Checkboxes marked with [X] should be treated as checked.\n\n## Severity & Impact\nP1 — Usability issue.\n\n## Root Cause Analysis\nRegex only matches lowercase x.\n\n## Fix Strategy\nUpdate regex to match both x and X.",
+		});
+		await handleDossier(store, null, {
+			action: "update", project_path: tmpDir, task_slug: "upper-x",
+			file: "tasks.md", mode: "replace",
+			content: "# Tasks\n\n## Wave 1\n\n- [X] T-1.1 Done with uppercase\n\n## Wave: Closing\n\n- [X] T-C.1 Review\n- [X] T-C.2 Docs\n- [X] T-C.3 Tests\n- [X] T-C.4 Knowledge",
+		});
+		const result = await handleDossier(store, null, {
+			action: "complete", project_path: tmpDir, task_slug: "upper-x",
+		});
+		const data = parseResult(result);
+		expect(data.completed).toBe(true);
 	});
 });

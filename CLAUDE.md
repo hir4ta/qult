@@ -139,6 +139,7 @@ node dist/cli.mjs version     # Show version
 - Knowledge lifecycle: verification badges (verified/overdue/pending), Knowledge Gaps collapsible section, `GET /api/knowledge/gaps`
 - Verification: knowledge_index に verification_due/last_verified/verification_count カラム (ALTER TABLE, V10 維持). `ledger action=verify` で Leitner 方式検証. SessionStart で期限切れ通知
 - Gap detection: UserPromptSubmit で bestScore < 0.3 + implement intent → `.alfred/.state/knowledge-gaps.jsonl` に記録
+- Wave enforcement (#24/#25): dossier complete は全 Wave のタスクチェックを検証（Closing Wave だけでなく）。gate clear は reason 30文字以上必須。fix_mode は 60分タイムアウト。チェックボックスは大文字 X にも対応
 
 ### Knowledge & Search
 

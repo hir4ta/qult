@@ -162,9 +162,9 @@ export function parseWaveProgress(tasksContent: string, slug: string): WaveProgr
 		} else if (closingHeader) {
 			currentWaveKey = "closing";
 			waves[currentWaveKey] = { total: 0, checked: 0, reviewed: false };
-		} else if (currentWaveKey && line.match(/^- \[[ x]\] /)) {
+		} else if (currentWaveKey && line.match(/^- \[[ xX]\] /)) {
 			waves[currentWaveKey]!.total++;
-			if (line.startsWith("- [x] ")) {
+			if (/^- \[[xX]\] /.test(line)) {
 				waves[currentWaveKey]!.checked++;
 			}
 		}

@@ -232,7 +232,7 @@ function doAutoComplete(projectPath: string, taskSlug: string): void {
 }
 
 function isTasksCompleted(tasksContent: string): boolean {
-	const allSteps = tasksContent.match(/^- \[[ x]\] .+$/gm);
+	const allSteps = tasksContent.match(/^- \[[ xX]\] .+$/gm);
 	if (!allSteps || allSteps.length === 0) return false;
-	return allSteps.every((step) => step.startsWith("- [x]"));
+	return allSteps.every((step) => /^- \[[xX]\]/.test(step));
 }

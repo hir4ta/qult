@@ -41,9 +41,14 @@ After all spec documents are created:
 1. **Commit** — Commit at Wave boundaries, include Wave number in message
 2. **Self-Review** — MUST run self-review before proceeding to next Wave
    - Enforced: review-gate.json DENY blocks Edit/Write until cleared
-   - Clear via `dossier action=gate sub_action=clear reason="..."`
+   - If review finds Critical/High: enter fix_mode → fix → re-review → clear (loop until 0 findings)
+   - fix_mode has 60-minute timeout — auto-expires to DENY if not cleared
+   - Clear via `dossier action=gate sub_action=clear reason="..."` (reason ≥ 30 chars required)
+   - reason MUST include: review method, findings count (Critical/High/Medium), fix summary
+   - Example: `reason="code-reviewer: 0 Critical, 2 Medium fixed (regex normalization, error message)"`
 3. **Knowledge Accumulation** — Save learnings via `ledger save` (decision/pattern/rule)
    - If no knowledge to save, state the reason explicitly
+4. **Continue to next Wave** — After gate clear, proceed immediately to next Wave or Closing Wave. Do NOT stop and wait for user input
 
 ## Step 5: Completion
 
