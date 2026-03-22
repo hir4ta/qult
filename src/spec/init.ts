@@ -76,6 +76,7 @@ export function initSpec(
 			size,
 			spec_type: specType,
 			owner: getGitUserName(projectPath),
+			...(["M", "L"].includes(size) ? { review_status: "pending" as const } : {}),
 		});
 	}
 	writeActiveState(projectPath, state);
