@@ -1,12 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { CheckSquare, History, MessageSquare, Square } from "@animated-color-icons/lucide-react";
-import { useCallback, useMemo, useState } from "react";
-import CodeMirror from "@uiw/react-codemirror";
-import { markdown } from "@codemirror/lang-markdown";
-import { EditorView, Decoration, type DecorationSet, ViewPlugin, type ViewUpdate, gutter, GutterMarker } from "@codemirror/view";
-import { StateField, StateEffect, RangeSetBuilder } from "@codemirror/state";
+import { useCallback, useState } from "react";
 import { SpecHistory } from "./SpecHistory";
 import { Card } from "@/components/ui/card";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { reviewHistoryQueryOptions } from "@/lib/api";
@@ -67,35 +64,7 @@ export function ReviewPanel({
 		setSelectedLine(null);
 	}, [newComment, selectedLine, onAddComment]);
 
-	// Compute highlighted lines (lines with comments)
-	const commentedLines = useMemo(() => {
-		const lines = new Set<number>();
-		for (const c of comments) lines.add(c.line);
-		for (const c of unresolvedFromPrevious) lines.add(c.line);
-		return lines;
-	}, [comments, unresolvedFromPrevious]);
-
-	const handleLineClick = useCallback((line: number) => {
-		if (reviewStatus !== "pending") return;
-		setSelectedLine((prev) => (prev === line ? null : line));
-	}, [reviewStatus]);
-
-	// CM6 extensions
-	const extensions = useMemo(() => [
-		markdown(),
-		EditorView.editable.of(false),
-		EditorView.lineWrapping,
-		EditorView.theme({
-			"&": { fontSize: "12px", fontFamily: "var(--font-mono, monospace)" },
-			".cm-content": { padding: "8px 0" },
-			".cm-line": { padding: "1px 8px" },
-			".cm-gutters": { borderRight: "1px solid rgba(0,0,0,0.08)", backgroundColor: "transparent", cursor: "pointer" },
-			".cm-lineNumbers .cm-gutterElement": { padding: "0 8px 0 4px", minWidth: "2.5em", color: "rgba(0,0,0,0.3)" },
-			".cm-activeLine": { backgroundColor: "rgba(98,129,65,0.08)" },
-			".cm-comment-line": { backgroundColor: "rgba(230,126,34,0.06)" },
-			".cm-selected-line": { backgroundColor: "rgba(45,139,122,0.12)" },
-		}),
-	], []);
+	const lines = specContent.split("\n");
 
 	return (
 		<div className="space-y-3">
@@ -112,68 +81,99 @@ export function ReviewPanel({
 
 			{activeTab === "review" && (
 				<>
-					{/* CodeMirror viewer with line click */}
-					<div className="rounded-lg border border-border/60 overflow-hidden">
-						<LineClickCodeMirror
-							content={specContent}
-							extensions={extensions}
-							selectedLine={selectedLine}
-							commentedLines={commentedLines}
-							onLineClick={handleLineClick}
-						/>
-					</div>
-
-					{/* Inline comments display */}
-					{(comments.length > 0 || unresolvedFromPrevious.length > 0) && (
-						<div className="space-y-1.5">
-							{unresolvedFromPrevious.map((c, i) => (
-								<InlineComment
-									key={`prev-${i}`}
-									file={currentFile}
-									comment={c}
-									isPrevious
-									resolved={isResolved(c)}
-									onToggleResolved={() => togglePreviousResolved(c)}
-								/>
-							))}
-							{comments.map((c, i) => (
-								<InlineComment
-									key={`new-${i}`}
-									file={currentFile}
-									comment={{ ...c, resolved: false }}
-									onRemove={() => onRemoveComment?.(c.line, c.body)}
-								/>
-							))}
-						</div>
-					)}
-
-					{/* Add comment */}
-					{selectedLine !== null && reviewStatus === "pending" && (
-						<div className="flex gap-2 items-end">
-							<div className="flex-1 space-y-1">
-								<p className="text-xs text-muted-foreground">
-									{t("review.commentOn")} {currentFile}:{selectedLine}
-								</p>
-								<Textarea
-									value={newComment}
-									onChange={(e) => setNewComment(e.target.value)}
-									placeholder={t("review.addComment")}
-									className="min-h-[60px] text-sm"
-									autoFocus
-									onKeyDown={(e) => {
-										if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-											e.preventDefault();
-											addComment();
-										}
-									}}
-								/>
+					{/* Line-numbered viewer */}
+					<Card className="overflow-hidden">
+						<ScrollArea className="h-[500px]">
+							<div className="font-mono text-xs">
+								{lines.map((line, i) => {
+									const lineNum = i + 1;
+									const hasNewComment = comments.some((c) => c.line === lineNum);
+									const hasPrevComment = unresolvedFromPrevious.some((c) => c.line === lineNum);
+									const isSelected = selectedLine === lineNum;
+									return (
+										<div key={lineNum}>
+											<div
+												className={cn(
+													"flex hover:bg-accent/40 cursor-pointer group",
+													isSelected && "bg-[rgba(45,139,122,0.12)]",
+													!isSelected && hasNewComment && "bg-[rgba(98,129,65,0.08)]",
+													!isSelected && hasPrevComment && "bg-[rgba(230,126,34,0.06)]",
+												)}
+												onClick={() => reviewStatus === "pending" && setSelectedLine(isSelected ? null : lineNum)}
+											>
+												<span className="w-10 shrink-0 text-right pr-2 py-[2px] text-muted-foreground/40 select-none border-r border-border/20 group-hover:text-muted-foreground/70">
+													{lineNum}
+												</span>
+												<span className="flex-1 px-3 py-[2px] whitespace-pre-wrap break-all">{line || " "}</span>
+												{reviewStatus === "pending" && (
+													<span className="w-6 shrink-0 flex items-center justify-center opacity-0 group-hover:opacity-40 text-muted-foreground">
+														+
+													</span>
+												)}
+											</div>
+											{/* Inline comments anchored to this line */}
+											{unresolvedFromPrevious
+												.filter((c) => c.line === lineNum)
+												.map((c, ci) => (
+													<InlineCommentRow
+														key={`prev-${lineNum}-${ci}`}
+														comment={c}
+														isPrevious
+														resolved={isResolved(c)}
+														onToggleResolved={() => togglePreviousResolved(c)}
+													/>
+												))}
+											{comments
+												.filter((c) => c.line === lineNum)
+												.map((c, ci) => (
+													<InlineCommentRow
+														key={`new-${lineNum}-${ci}`}
+														comment={{ ...c, resolved: false }}
+														onRemove={() => onRemoveComment?.(c.line, c.body)}
+													/>
+												))}
+											{/* Comment input inline when this line is selected */}
+											{isSelected && reviewStatus === "pending" && (
+												<div className="ml-10 mr-2 my-1 flex gap-2 items-end">
+													<div className="flex-1 space-y-1">
+														<p className="text-[10px] text-muted-foreground">
+															{currentFile}:{lineNum}
+														</p>
+														<Textarea
+															value={newComment}
+															onChange={(e) => setNewComment(e.target.value)}
+															placeholder={t("review.addComment")}
+															className="min-h-[50px] text-xs"
+															autoFocus
+															onKeyDown={(e) => {
+																if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+																	e.preventDefault();
+																	addComment();
+																}
+																if (e.key === "Escape") {
+																	setSelectedLine(null);
+																	setNewComment("");
+																}
+															}}
+														/>
+													</div>
+													<div className="flex flex-col gap-1 pb-1">
+														<Button size="sm" onClick={addComment} disabled={!newComment.trim()} className="text-xs h-7 px-2">
+															<MessageSquare className="h-3 w-3 mr-1" />
+															{t("review.add")}
+														</Button>
+														<Button size="sm" variant="ghost" onClick={() => { setSelectedLine(null); setNewComment(""); }} className="text-xs h-7 px-2 text-muted-foreground">
+															Esc
+														</Button>
+													</div>
+												</div>
+											)}
+										</div>
+									);
+								})}
 							</div>
-							<Button size="sm" onClick={addComment} disabled={!newComment.trim()}>
-								<MessageSquare className="h-3.5 w-3.5 mr-1" />
-								{t("review.add")}
-							</Button>
-						</div>
-					)}
+						</ScrollArea>
+					</Card>
 
 					{reviews.length > 0 && <ReviewHistory reviews={reviews} />}
 				</>
@@ -182,109 +182,15 @@ export function ReviewPanel({
 	);
 }
 
-// --- CodeMirror with line click handling ---
+// --- Inline Comment Row ---
 
-function LineClickCodeMirror({
-	content,
-	extensions,
-	selectedLine,
-	commentedLines,
-	onLineClick,
-}: {
-	content: string;
-	extensions: ReturnType<typeof markdown>[];
-	selectedLine: number | null;
-	commentedLines: Set<number>;
-	onLineClick: (line: number) => void;
-}) {
-	const handleClick = useCallback(
-		(e: React.MouseEvent<HTMLDivElement>) => {
-			const target = e.target as HTMLElement;
-			// Find the CM line from the click target
-			const lineEl = target.closest(".cm-line") ?? target.closest(".cm-gutterElement");
-			if (!lineEl) return;
-
-			const cmContent = (e.currentTarget as HTMLElement).querySelector(".cm-content");
-			if (!cmContent) return;
-
-			// For gutter clicks, extract line number from text
-			if (target.closest(".cm-gutterElement")) {
-				const num = parseInt(target.textContent ?? "", 10);
-				if (!Number.isNaN(num)) onLineClick(num);
-				return;
-			}
-
-			// For content clicks, find line index
-			const lines = cmContent.querySelectorAll(".cm-line");
-			for (let i = 0; i < lines.length; i++) {
-				if (lines[i] === lineEl || lines[i]?.contains(lineEl)) {
-					onLineClick(i + 1);
-					return;
-				}
-			}
-		},
-		[onLineClick],
-	);
-
-	// Build className overrides for highlighted lines
-	const lineStyles = useMemo(() => {
-		const styles: string[] = [];
-		if (selectedLine) {
-			styles.push(`&.cm-editor .cm-content > .cm-line:nth-child(${selectedLine}) { background-color: rgba(45,139,122,0.12); }`);
-		}
-		for (const line of commentedLines) {
-			if (line !== selectedLine) {
-				styles.push(`&.cm-editor .cm-content > .cm-line:nth-child(${line}) { background-color: rgba(230,126,34,0.06); }`);
-			}
-		}
-		return EditorView.theme(Object.fromEntries(styles.map((s, i) => [`&_hl${i}`, {}])));
-	}, [selectedLine, commentedLines]);
-
-	// Use CSS injection for line highlighting (CM6 decoration API requires editor state)
-	const highlightCSS = useMemo(() => {
-		const rules: string[] = [];
-		if (selectedLine) {
-			rules.push(`.cm-content > .cm-line:nth-child(${selectedLine}) { background-color: rgba(45,139,122,0.12) !important; }`);
-		}
-		for (const line of commentedLines) {
-			if (line !== selectedLine) {
-				rules.push(`.cm-content > .cm-line:nth-child(${line}) { background-color: rgba(230,126,34,0.06) !important; }`);
-			}
-		}
-		return rules.join("\n");
-	}, [selectedLine, commentedLines]);
-
-	return (
-		<div onClick={handleClick} className="relative">
-			{highlightCSS && <style>{highlightCSS}</style>}
-			<CodeMirror
-				value={content}
-				extensions={extensions}
-				editable={false}
-				basicSetup={{
-					lineNumbers: true,
-					foldGutter: false,
-					highlightActiveLine: false,
-					highlightSelectionMatches: false,
-					drawSelection: false,
-				}}
-				maxHeight="500px"
-			/>
-		</div>
-	);
-}
-
-// --- InlineComment ---
-
-function InlineComment({
-	file,
+function InlineCommentRow({
 	comment,
 	isPrevious,
 	resolved,
 	onRemove,
 	onToggleResolved,
 }: {
-	file: string;
 	comment: ReviewComment;
 	isPrevious?: boolean;
 	resolved?: boolean;
@@ -295,21 +201,18 @@ function InlineComment({
 	return (
 		<div
 			className={cn(
-				"rounded-lg px-3 py-2 text-xs border",
-				isPrevious ? "border-brand-rule/20 bg-brand-rule/[0.04]" : "border-brand-decision/20 bg-brand-decision/[0.04]",
-				isR && "opacity-50",
+				"ml-10 mr-2 my-0.5 rounded-lg px-3 py-1.5 text-xs border-l-2",
+				isPrevious ? "border-l-[#e67e22] bg-[rgba(230,126,34,0.04)]" : "border-l-[#628141] bg-[rgba(98,129,65,0.04)]",
+				isR && "opacity-40",
 			)}
+			onClick={(e) => e.stopPropagation()}
 		>
 			<div className="flex items-start justify-between gap-2">
-				<div className="space-y-0.5">
-					<span className="font-mono text-[10px] text-muted-foreground">{file}:{comment.line}</span>
-					<p className="whitespace-pre-wrap">{comment.body}</p>
-				</div>
+				<p className="whitespace-pre-wrap">{comment.body}</p>
 				<div className="flex items-center gap-1 shrink-0">
 					{isPrevious && onToggleResolved && (
 						<button type="button" onClick={onToggleResolved}
 							className="text-muted-foreground hover:text-foreground transition-colors"
-							title={isR ? "Mark unresolved" : "Mark resolved"}
 						>
 							{isR ? <CheckSquare className="size-3.5" /> : <Square className="size-3.5" />}
 						</button>
@@ -325,7 +228,7 @@ function InlineComment({
 	);
 }
 
-// --- ReviewHistory ---
+// --- Review History ---
 
 function ReviewHistory({ reviews }: { reviews: Review[] }) {
 	const { t, locale } = useI18n();
