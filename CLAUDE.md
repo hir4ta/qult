@@ -133,6 +133,9 @@ node dist/cli.mjs version     # Show version
 - Brand palette (DEC-15): session #40513b, decision #628141, pattern #2d8b7a, rule #e67e22, error #c0392b, purple #7b6b8d, dark #44403c
 - Dashboard API: Hono REST endpoints (src/api/server.ts). KnowledgeRow → KnowledgeEntry mapping via toKnowledgeEntry()
 - Confidence: spec.ParseConfidence() (extracted from mcpserver to spec package)
+- Activity tab: Rework Rate (bar chart, pending=half-opacity) + Cycle Time breakdown (stacked bar: planning/approval/implementation) + Audit log table (server-side pagination 50/page)
+- Feedback metrics: spec.complete records changed_files in audit detail, PostToolUse tracks first_commit per spec, getReworkRates() + getCycleTimeBreakdown() in src/store/audit.ts
+- recharts: devDependency, Vite frontend bundle only (not in tsdown backend)
 
 ### Knowledge & Search
 
