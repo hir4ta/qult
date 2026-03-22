@@ -55,7 +55,7 @@ export function KnowledgeCard({
 			onFocus={() => setIsRevealed(true)}
 			onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setIsRevealed(false); }}
 		>
-			<CardContent className="p-4 h-[72px] overflow-hidden relative">
+			<CardContent className="p-4 h-[88px] overflow-hidden relative">
 				{/* Row 1: Sub-type icon + label + actions */}
 				<div className="flex items-center justify-between gap-2">
 					<div className="flex items-center gap-2">
