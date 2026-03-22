@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ButlerEmpty } from "@/components/butler-empty";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { VerificationBadge } from "@/components/verification-badge";
+import { Badge } from "@/components/ui/badge";
 import type { KnowledgeEntry } from "@/lib/types";
-import { formatLabel } from "@/lib/format";
+import { SUB_TYPE_COLORS } from "@/lib/types";
+import { formatLabel, formatDate } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
 
 const SPINE_W = 56;
 const GAP = 4;
 const PAD = 16;
-const SHELF_H = 310; // approx height per shelf row (max spine + plank + padding + gap)
+const SHELF_H = 310;
 
 const HEIGHTS: Record<string, number> = { rule: 240, decision: 270, pattern: 220, snapshot: 200 };
 
-// Soft pastel palette
 const SPINE_COLORS = [
 	"#8fbc8f", "#b0c4de", "#deb887", "#d4a574", "#a0b89e",
 	"#c4a882", "#b8a9c9", "#d4927a", "#9cb4b0", "#c9b99a",
@@ -31,64 +34,84 @@ function splitShelves(entries: KnowledgeEntry[], perShelf: number): KnowledgeEnt
 }
 
 function BookSpine({ entry, onClick }: { entry: KnowledgeEntry; onClick: () => void }) {
+	const { locale } = useI18n();
 	const color = SPINE_COLORS[entry.id % SPINE_COLORS.length]!;
 	const edge = darken(color);
 	const h = HEIGHTS[entry.sub_type] ?? 210;
 	const { title } = formatLabel(entry.label);
+	const subColor = SUB_TYPE_COLORS[entry.sub_type] ?? "#44403c";
 	const w = entry.content.length > 300 ? 64 : entry.content.length > 100 ? 56 : 48;
 
 	return (
-		<button
-			type="button"
-			onClick={onClick}
-			className="relative flex flex-col items-center justify-between rounded-[2px] cursor-pointer shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
-			style={{
-				width: w,
-				height: h,
-				backgroundColor: color,
-				boxShadow: "3px 1px 8px rgba(0,0,0,0.12), inset 1px 0 0 rgba(255,255,255,0.08)",
-				transition: "transform 0.25s cubic-bezier(0.22,1,0.36,1), box-shadow 0.25s ease",
-			}}
-			title={title}
-			aria-label={title}
-			onMouseEnter={(e) => {
-				e.currentTarget.style.transform = "translateY(-6px)";
-				e.currentTarget.style.boxShadow = "6px 8px 20px rgba(0,0,0,0.18), inset 1px 0 0 rgba(255,255,255,0.08)";
-			}}
-			onMouseLeave={(e) => {
-				e.currentTarget.style.transform = "translateY(0)";
-				e.currentTarget.style.boxShadow = "3px 1px 8px rgba(0,0,0,0.12), inset 1px 0 0 rgba(255,255,255,0.08)";
-			}}
-		>
-			<div className="absolute inset-y-0 left-0 w-[3px] rounded-l-[2px]" style={{ backgroundColor: edge }} />
-			<div className="pt-3 px-1.5 shrink-0">
-				{entry.verification_due ? (
-					<VerificationBadge entry={entry} />
-				) : (
-					<div className="w-5 h-[2px] bg-black/10 rounded-full mx-auto" />
-				)}
-			</div>
-			<div className="flex-1" />
-			<div className="pb-2.5 px-1.5 shrink-0">
-				{(entry.hit_count ?? 0) > 0 ? (
-					<span className="text-[9px] text-black/30 font-mono tabular-nums">{entry.hit_count}</span>
-				) : (
-					<div className="w-4 h-4 rounded-full border border-black/10 flex items-center justify-center">
-						<span className="text-[7px] text-black/30 font-bold uppercase">{entry.sub_type.charAt(0)}</span>
+		<HoverCard openDelay={300} closeDelay={100}>
+			<HoverCardTrigger asChild>
+				<button
+					type="button"
+					onClick={onClick}
+					className="relative flex flex-col items-center justify-between rounded-[2px] cursor-pointer shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
+					style={{
+						width: w,
+						height: h,
+						backgroundColor: color,
+						boxShadow: "3px 1px 8px rgba(0,0,0,0.12), inset 1px 0 0 rgba(255,255,255,0.08)",
+						transition: "transform 0.25s cubic-bezier(0.22,1,0.36,1), box-shadow 0.25s ease",
+					}}
+					aria-label={title}
+					onMouseEnter={(e) => {
+						e.currentTarget.style.transform = "translateY(-6px)";
+						e.currentTarget.style.boxShadow = "6px 8px 20px rgba(0,0,0,0.18), inset 1px 0 0 rgba(255,255,255,0.08)";
+					}}
+					onMouseLeave={(e) => {
+						e.currentTarget.style.transform = "translateY(0)";
+						e.currentTarget.style.boxShadow = "3px 1px 8px rgba(0,0,0,0.12), inset 1px 0 0 rgba(255,255,255,0.08)";
+					}}
+				>
+					<div className="absolute inset-y-0 left-0 w-[3px] rounded-l-[2px]" style={{ backgroundColor: edge }} />
+					<div className="pt-3 px-1.5 shrink-0">
+						{entry.verification_due ? (
+							<VerificationBadge entry={entry} />
+						) : (
+							<div className="w-5 h-[2px] bg-black/10 rounded-full mx-auto" />
+						)}
 					</div>
-				)}
-			</div>
-		</button>
+					<div className="flex-1" />
+					<div className="pb-2.5 px-1.5 shrink-0">
+						{(entry.hit_count ?? 0) > 0 ? (
+							<span className="text-[9px] text-black/30 font-mono tabular-nums">{entry.hit_count}</span>
+						) : (
+							<div className="w-4 h-4 rounded-full border border-black/10 flex items-center justify-center">
+								<span className="text-[7px] text-black/30 font-bold uppercase">{entry.sub_type.charAt(0)}</span>
+							</div>
+						)}
+					</div>
+				</button>
+			</HoverCardTrigger>
+			<HoverCardContent side="top" className="w-72 p-3">
+				<div className="space-y-1.5">
+					<p className="text-sm font-semibold leading-snug" style={{ fontFamily: "var(--font-display)" }}>
+						{title}
+					</p>
+					<div className="flex items-center gap-2">
+						<Badge variant="outline" className="text-[10px] px-1.5 py-0 rounded-full" style={{ borderColor: `${subColor}40`, color: subColor }}>
+							{entry.sub_type}
+						</Badge>
+						{entry.saved_at && (
+							<span className="text-[10px] text-muted-foreground">{formatDate(entry.saved_at, locale)}</span>
+						)}
+						{(entry.hit_count ?? 0) > 0 && (
+							<span className="text-[10px] text-muted-foreground tabular-nums">{entry.hit_count} hits</span>
+						)}
+					</div>
+				</div>
+			</HoverCardContent>
+		</HoverCard>
 	);
 }
 
 function Shelf({ entries, onSelect }: { entries: KnowledgeEntry[]; onSelect: (e: KnowledgeEntry) => void }) {
 	return (
 		<div className="relative">
-			<div
-				className="flex items-end gap-[3px] px-3 pt-8 pb-0"
-				style={{ scrollbarWidth: "none" }}
-			>
+			<div className="flex items-end gap-[3px] px-3 pt-8 pb-0">
 				{entries.map((e) => (
 					<BookSpine key={e.id} entry={e} onClick={() => onSelect(e)} />
 				))}
@@ -114,7 +137,7 @@ export function BookshelfView({ entries, onSelect }: { entries: KnowledgeEntry[]
 	const calc = useCallback(() => {
 		if (!ref.current) return;
 		const w = ref.current.clientWidth;
-		const h = window.innerHeight - ref.current.getBoundingClientRect().top - 80; // leave room for pagination
+		const h = window.innerHeight - ref.current.getBoundingClientRect().top - 80;
 		setPerShelf(Math.max(3, Math.floor((w - PAD * 2) / (SPINE_W + GAP))));
 		setMaxShelves(Math.max(1, Math.floor(h / SHELF_H)));
 	}, []);
@@ -127,7 +150,6 @@ export function BookshelfView({ entries, onSelect }: { entries: KnowledgeEntry[]
 		return () => { obs.disconnect(); window.removeEventListener("resize", calc); };
 	}, [calc]);
 
-	// Reset page when entries change
 	useEffect(() => setPage(0), [entries.length]);
 
 	if (entries.length === 0) return <ButlerEmpty scene="bookshelf" messageKey="empty.noMemories" />;
@@ -139,17 +161,15 @@ export function BookshelfView({ entries, onSelect }: { entries: KnowledgeEntry[]
 	const shelves = splitShelves(paged, perShelf);
 
 	return (
-		<div ref={ref} className="flex flex-col min-h-[50vh]">
-			{/* Shelves — centered */}
+		<div ref={ref} className="flex flex-col min-h-[50vh] overflow-hidden">
 			<div className="flex-1 flex items-center justify-center">
-				<div className="w-full space-y-2">
+				<div className="w-full max-w-full space-y-2 overflow-hidden">
 					{shelves.map((shelf, i) => (
 						<Shelf key={i} entries={shelf} onSelect={onSelect} />
 					))}
 				</div>
 			</div>
 
-			{/* Pagination */}
 			{totalPages > 1 && (
 				<div className="flex items-center justify-center gap-3 pt-4">
 					<button
