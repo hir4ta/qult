@@ -88,20 +88,9 @@ export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<v
 				}
 			}
 
-			// Nudge: remind to check tasks after source edits.
-			if (filePath && !isSpecFilePath(ev.cwd!, filePath)) {
-				const sd = new SpecDir(ev.cwd!, slug);
-				try {
-					const tasks = sd.readFile("tasks.md");
-					const unchecked = (tasks.match(/^- \[ \] /gm) ?? []).length;
-					if (unchecked > 0) {
-						items.push({
-							level: "CONTEXT",
-							message: `${unchecked} unchecked task(s) in tasks.md. Mark completed tasks via \`dossier action=check task_id="T-X.Y"\`.`,
-						});
-					}
-				} catch { /* no tasks.md */ }
-			}
+			// Nudge: remind to check tasks — only after git commit (wave boundary),
+			// NOT after every Edit/Write (causes Claude to stall on large specs, #27).
+
 		} catch { /* no active spec */ }
 	}
 
