@@ -257,15 +257,6 @@ export const translations = {
 	"knowledge.gaps.query": { en: "Query", ja: "クエリ" },
 	"knowledge.gaps.score": { en: "Score", ja: "スコア" },
 	"knowledge.sort.verificationDue": { en: "Verification Due", ja: "検証期限順" },
-	// Briefing
-	"briefing.greeting": { en: "Hello.", ja: "こんにちは。" },
-	"briefing.waveProgress": { en: "Working on {slug} — Wave {current}/{total}, {remaining} tasks remaining.", ja: "{slug} を進行中 — Wave {current}/{total}、残り {remaining} タスク。" },
-	"briefing.multiSpec": { en: "{count} active specs in progress.", ja: "{count} 件のスペックが進行中。" },
-	"briefing.completedToday": { en: "{count} spec(s) completed today.", ja: "本日 {count} 件のスペックが完了。" },
-	"briefing.overdueKnowledge": { en: "{count} knowledge entries overdue for verification.", ja: "{count} 件のナレッジが検証期限超過。" },
-	"briefing.noTasks": { en: "No active specs.", ja: "アクティブなスペックはありません。" },
-	"briefing.knowledgeTotal": { en: "Knowledge base: {total} entries.", ja: "ナレッジベース: {total} 件。" },
-
 	// View Switcher
 	"view.list": { en: "List", ja: "リスト" },
 	"view.card": { en: "Card", ja: "カード" },

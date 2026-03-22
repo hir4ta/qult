@@ -1,6 +1,5 @@
 import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
-	BriefingResponse as BriefingData,
 	DecisionsResponse,
 	KnowledgeEntry,
 	KnowledgeResponse,
@@ -182,18 +181,6 @@ export const versionQueryOptions = () =>
 		queryKey: ["version"],
 		queryFn: () => fetchJSON<VersionResponse>("/api/version"),
 		staleTime: REF_STALE,
-	});
-
-// --- Briefing ---
-
-export const briefingQueryOptions = (projectId?: string) =>
-	queryOptions({
-		queryKey: ["briefing", projectId],
-		queryFn: () => {
-			const url = projectId ? `/api/briefing?project=${projectId}` : "/api/briefing";
-			return fetchJSON<BriefingData>(url);
-		},
-		staleTime: LIVE_STALE,
 	});
 
 // --- Heatmap ---

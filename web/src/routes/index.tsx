@@ -12,14 +12,13 @@ import {
 } from "@/components/ui/pagination";
 import { StaggerContainer } from "@/components/stagger-container";
 import {
-	briefingQueryOptions,
 	knowledgeStatsQueryOptions,
 	tasksQueryOptions,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { StatCard } from "@/components/overview/stat-card";
 import { TaskCard } from "@/components/overview/task-card";
-import { ButlerBriefing } from "@/components/overview/butler-briefing";
+
 import { HeroTile } from "@/components/overview/hero-tile";
 
 export const Route = createFileRoute("/")({
@@ -35,7 +34,6 @@ function OverviewPage() {
 	const projectId = search.project;
 	const { data: tasksData, isLoading: tasksLoading } = useQuery(tasksQueryOptions(projectId));
 	const { data: statsData } = useQuery(knowledgeStatsQueryOptions(projectId));
-	const { data: briefingData, isLoading: briefingLoading } = useQuery(briefingQueryOptions(projectId));
 
 	const tasks = [...(tasksData?.tasks ?? [])].sort((a, b) => {
 		const aTime = a.started_at ?? "";
@@ -54,11 +52,6 @@ function OverviewPage() {
 		<div className="space-y-6">
 			{/* Bento Grid */}
 			<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-				{/* Briefing — full width */}
-				<div className="col-span-full">
-					<ButlerBriefing data={briefingData} isLoading={briefingLoading} />
-				</div>
-
 				{/* Stats row */}
 				<StatCard
 					label={t("overview.totalTasks")}

@@ -244,26 +244,6 @@ export const VersionResponseSchema = z.object({
 	version: z.string(),
 });
 
-// --- Briefing ---
-
-export const BriefingActiveSpecSchema = z.object({
-	slug: z.string(),
-	currentWave: z.number(),
-	totalWaves: z.number(),
-	remainingTasks: z.number(),
-});
-
-export const BriefingSchema = z.object({
-	activeSpecs: z.array(BriefingActiveSpecSchema),
-	completedToday: z.number(),
-	knowledgeTotal: z.number(),
-	overdueVerifications: z.number(),
-	recentCompletions: z.array(z.object({
-		slug: z.string(),
-		completedAt: z.string(),
-	})),
-});
-
 // --- Heatmap ---
 
 export const HeatmapEntrySchema = z.object({
@@ -301,7 +281,6 @@ export type ReviewStatusResponse = z.infer<typeof ReviewStatusResponseSchema>;
 export type ReviewHistoryResponse = z.infer<typeof ReviewHistoryResponseSchema>;
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 export type VersionResponse = z.infer<typeof VersionResponseSchema>;
-export type BriefingActiveSpec = z.infer<typeof BriefingActiveSpecSchema>;
-export type BriefingResponse = z.infer<typeof BriefingSchema>;
+
 export type HeatmapEntry = z.infer<typeof HeatmapEntrySchema>;
 export type HeatmapResponse = z.infer<typeof HeatmapSchema>;

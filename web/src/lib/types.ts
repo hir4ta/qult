@@ -25,7 +25,7 @@ export type {
 	ValidationReport,
 	VersionResponse,
 	WaveInfo,
-	BriefingResponse,
+
 	HeatmapEntry,
 	HeatmapResponse,
 } from "@api-types";
