@@ -51,8 +51,9 @@ function TaskDetailPage() {
 	const showApproval = isActive && needsReview && task?.review_status === "pending";
 
 	const reviewMutation = useMutation({
-		mutationFn: (status: "approved" | "changes_requested") => submitReview(slug, status, allComments),
-		onSuccess: (_data, status) => {
+		mutationFn: ({ status, comments }: { status: "approved" | "changes_requested"; comments: typeof allComments }) =>
+			submitReview(slug, status, comments),
+		onSuccess: (_data, { status, comments }) => {
 			queryClient.invalidateQueries({ queryKey: ["review", slug] });
 			queryClient.invalidateQueries({ queryKey: ["review-history", slug] });
 			queryClient.invalidateQueries({ queryKey: ["tasks"] });
@@ -62,7 +63,7 @@ function TaskDetailPage() {
 			} else {
 				toast(
 					t("toast.changesRequested"),
-					`${allComments.length} ${t("toast.changesRequested.desc")}`,
+					`${comments.length} ${t("toast.changesRequested.desc")}`,
 				);
 			}
 		},
@@ -112,7 +113,7 @@ function TaskDetailPage() {
 								{allComments.length > 0 && (
 									<button
 										type="button"
-										onClick={() => reviewMutation.mutate("changes_requested")}
+										onClick={() => reviewMutation.mutate({ status: "changes_requested", comments: allComments })}
 										disabled={reviewMutation.isPending}
 										className="al-icon-wrapper flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium cursor-pointer hover:opacity-90 border"
 										style={{ borderColor: "rgba(192,57,43,0.4)", color: "#c0392b" }}
@@ -124,7 +125,7 @@ function TaskDetailPage() {
 								)}
 								<button
 									type="button"
-									onClick={() => reviewMutation.mutate("approved")}
+									onClick={() => reviewMutation.mutate({ status: "approved", comments: allComments })}
 									disabled={reviewMutation.isPending}
 									className="al-icon-wrapper flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium text-white cursor-pointer hover:opacity-90"
 									style={{ backgroundColor: "#628141" }}
