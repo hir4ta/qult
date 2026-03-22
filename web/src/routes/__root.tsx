@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import { createRootRouteWithContext, Link, Outlet, useLocation } from "@tanstack/react-router";
 import { Activity, BookOpen, Globe, LayoutDashboard, ListChecks } from "@animated-color-icons/lucide-react";
 import { useMemo, useState } from "react";
-import { Toaster } from "sonner";
 import { KeyboardHelpDialog } from "@/components/keyboard-help";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useI18n } from "@/lib/i18n";
@@ -63,7 +62,6 @@ function RootLayout() {
 	useKeyboardShortcuts(useMemo(() => ({ "?": () => setShowHelp(true) }), []));
 	return (
 		<TooltipProvider>
-			<Toaster position="top-right" richColors />
 			<KeyboardHelpDialog open={showHelp} onClose={() => setShowHelp(false)} />
 			<div
 				className="grain-overlay flex min-h-screen flex-col bg-background transition-colors duration-500"

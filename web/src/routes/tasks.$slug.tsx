@@ -2,7 +2,7 @@ import { useQueries, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { CheckCircle, CircleCheck, CircleDot, XCircle } from "@animated-color-icons/lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ReviewPanel } from "@/components/review/ReviewPanel";
 import { SectionCard } from "@/components/section-card";
@@ -58,13 +58,12 @@ function TaskDetailPage() {
 			queryClient.invalidateQueries({ queryKey: ["tasks"] });
 			setAllComments([]);
 			if (status === "approved") {
-				toast.success("承認しました", {
-					description: "Claude Code に戻って実装を開始してください。",
-				});
+				toast("承認しました", "Claude Code に戻って実装を開始してください。", "success");
 			} else {
-				toast("修正を依頼しました", {
-					description: `${allComments.length} 件のコメントを送信しました。Claude Code で「レビューコメントに対応して」と伝えてください。`,
-				});
+				toast(
+					"修正を依頼しました",
+					`${allComments.length} 件のコメントを送信しました。Claude Code で「レビューコメントに対応して」と伝えてください。`,
+				);
 			}
 		},
 	});
