@@ -183,6 +183,26 @@ export const versionQueryOptions = () =>
 		staleTime: REF_STALE,
 	});
 
+// --- Briefing ---
+
+export interface BriefingResponse {
+	activeSpecs: Array<{ slug: string; currentWave: number; totalWaves: number; remainingTasks: number }>;
+	completedToday: number;
+	knowledgeTotal: number;
+	overdueVerifications: number;
+	recentCompletions: Array<{ slug: string; completedAt: string }>;
+}
+
+export const briefingQueryOptions = (projectId?: string) =>
+	queryOptions({
+		queryKey: ["briefing", projectId],
+		queryFn: () => {
+			const url = projectId ? `/api/briefing?project=${projectId}` : "/api/briefing";
+			return fetchJSON<BriefingResponse>(url);
+		},
+		staleTime: LIVE_STALE,
+	});
+
 // --- Activity / Analytics ---
 
 export interface AnalyticsResponse {

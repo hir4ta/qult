@@ -12,18 +12,21 @@ import {
 } from "@/components/ui/pagination";
 import { StaggerContainer } from "@/components/stagger-container";
 import {
+	briefingQueryOptions,
 	knowledgeStatsQueryOptions,
 	tasksQueryOptions,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { StatCard } from "@/components/overview/stat-card";
 import { TaskCard } from "@/components/overview/task-card";
+import { ButlerBriefing } from "@/components/overview/butler-briefing";
+import { HeroTile } from "@/components/overview/hero-tile";
 
 export const Route = createFileRoute("/")({
 	component: OverviewPage,
 });
 
-const ITEMS_PER_PAGE = 9;
+const ITEMS_PER_PAGE = 6;
 
 function OverviewPage() {
 	const { t } = useI18n();
@@ -32,6 +35,7 @@ function OverviewPage() {
 	const projectId = search.project;
 	const { data: tasksData, isLoading: tasksLoading } = useQuery(tasksQueryOptions(projectId));
 	const { data: statsData } = useQuery(knowledgeStatsQueryOptions(projectId));
+	const { data: briefingData, isLoading: briefingLoading } = useQuery(briefingQueryOptions(projectId));
 
 	const tasks = [...(tasksData?.tasks ?? [])].sort((a, b) => {
 		const aTime = a.started_at ?? "";
@@ -39,10 +43,23 @@ function OverviewPage() {
 		return bTime.localeCompare(aTime);
 	});
 
+	const activeTasks = tasks.filter((t) => {
+		const s = t.status;
+		return s !== "completed" && s !== "done" && s !== "cancelled";
+	});
+	const heroTask = activeTasks[0];
+	const remainingTasks = heroTask ? tasks.filter((t) => t.slug !== heroTask.slug) : tasks;
+
 	return (
-		<div className="space-y-8">
-			{/* Stats row */}
-			<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+		<div className="space-y-6">
+			{/* Bento Grid */}
+			<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+				{/* Briefing — full width */}
+				<div className="col-span-full">
+					<ButlerBriefing data={briefingData} isLoading={briefingLoading} />
+				</div>
+
+				{/* Stats row */}
 				<StatCard
 					label={t("overview.totalTasks")}
 					value={tasks.length}
@@ -51,10 +68,7 @@ function OverviewPage() {
 				/>
 				<StatCard
 					label={t("overview.active")}
-					value={tasks.filter((t) => {
-						const s = t.status;
-						return s !== "completed" && s !== "done" && s !== "cancelled";
-					}).length}
+					value={activeTasks.length}
 					icon={<Clock className="size-4" style={{ color: "#40513b" }} />}
 					loading={tasksLoading}
 				/>
@@ -69,12 +83,19 @@ function OverviewPage() {
 					value={statsData?.total ?? 0}
 					icon={<Brain className="size-4" style={{ color: "#628141" }} />}
 				/>
+
+				{/* Hero tile — 2 col span, only if active spec exists */}
+				{heroTask && (
+					<div className="sm:col-span-2">
+						<HeroTile task={heroTask} />
+					</div>
+				)}
 			</div>
 
-			{/* Task cards */}
-			{tasks.length > 0 && (() => {
-				const totalPages = Math.ceil(tasks.length / ITEMS_PER_PAGE);
-				const paged = tasks.slice((taskPage - 1) * ITEMS_PER_PAGE, taskPage * ITEMS_PER_PAGE);
+			{/* Remaining task cards */}
+			{remainingTasks.length > 0 && (() => {
+				const totalPages = Math.ceil(remainingTasks.length / ITEMS_PER_PAGE);
+				const paged = remainingTasks.slice((taskPage - 1) * ITEMS_PER_PAGE, taskPage * ITEMS_PER_PAGE);
 				return (
 					<section className="space-y-3">
 						<h2
@@ -83,7 +104,7 @@ function OverviewPage() {
 						>
 							{t("overview.tasks")}
 						</h2>
-						<StaggerContainer className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" style={{ minHeight: "calc(140px * 3 + 16px * 2)" }}>
+						<StaggerContainer className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 							{paged.map((task, i) => (
 								<TaskCard
 									key={task.slug}

@@ -257,6 +257,31 @@ export const translations = {
 	"knowledge.gaps.query": { en: "Query", ja: "クエリ" },
 	"knowledge.gaps.score": { en: "Score", ja: "スコア" },
 	"knowledge.sort.verificationDue": { en: "Verification Due", ja: "検証期限順" },
+	// Briefing
+	"briefing.greeting": { en: "Hello.", ja: "こんにちは。" },
+	"briefing.waveProgress": { en: "Working on {slug} — Wave {current}/{total}, {remaining} tasks remaining.", ja: "{slug} を進行中 — Wave {current}/{total}、残り {remaining} タスク。" },
+	"briefing.multiSpec": { en: "{count} active specs in progress.", ja: "{count} 件のスペックが進行中。" },
+	"briefing.completedToday": { en: "{count} spec(s) completed today.", ja: "本日 {count} 件のスペックが完了。" },
+	"briefing.overdueKnowledge": { en: "{count} knowledge entries overdue for verification.", ja: "{count} 件のナレッジが検証期限超過。" },
+	"briefing.noTasks": { en: "No active specs.", ja: "アクティブなスペックはありません。" },
+	"briefing.knowledgeTotal": { en: "Knowledge base: {total} entries.", ja: "ナレッジベース: {total} 件。" },
+
+	// View Switcher
+	"view.list": { en: "List", ja: "リスト" },
+	"view.card": { en: "Card", ja: "カード" },
+
+	// Drawer
+	"drawer.metadata": { en: "Metadata", ja: "メタデータ" },
+	"drawer.tags": { en: "Tags", ja: "タグ" },
+	"drawer.relatedSpec": { en: "Related Spec", ja: "関連スペック" },
+	"drawer.eventDetail": { en: "Event Detail", ja: "イベント詳細" },
+
+	// Heatmap
+	"heatmap.title": { en: "Activity Heatmap", ja: "アクティビティ・ヒートマップ" },
+	"heatmap.tooltip": { en: "{date}: {count} events", ja: "{date}: {count} イベント" },
+	"heatmap.less": { en: "Less", ja: "少" },
+	"heatmap.more": { en: "More", ja: "多" },
+
 	// Toast messages
 	"toast.approved": { en: "Approved", ja: "承認しました" },
 	"toast.approved.desc": { en: "Go back to Claude Code to start implementation.", ja: "Claude Code に戻って実装を開始してください。" },
@@ -269,7 +294,7 @@ export type TranslationKey = keyof typeof translations;
 interface I18nContextValue {
 	locale: Locale;
 	setLocale: (locale: Locale) => void;
-	t: (key: TranslationKey) => string;
+	t: (key: TranslationKey, vars?: Record<string, string | number>) => string;
 }
 
 const I18nContext = createContext<I18nContextValue | null>(null);
@@ -287,9 +312,15 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
 	}, []);
 
 	const t = useCallback(
-		(key: TranslationKey): string => {
+		(key: TranslationKey, vars?: Record<string, string | number>): string => {
 			const entry = translations[key];
-			return entry?.[locale] ?? key;
+			let text: string = entry?.[locale] ?? key;
+			if (vars) {
+				for (const [k, v] of Object.entries(vars)) {
+					text = text.replaceAll(`{${k}}`, String(v));
+				}
+			}
+			return text;
 		},
 		[locale],
 	);
