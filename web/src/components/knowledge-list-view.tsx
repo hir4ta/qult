@@ -19,7 +19,7 @@ export function KnowledgeListView({
 	entries: KnowledgeEntry[];
 	onSelect: (entry: KnowledgeEntry) => void;
 }) {
-	const { t, locale } = useI18n();
+	const { locale } = useI18n();
 
 	return (
 		<div className="space-y-0.5">

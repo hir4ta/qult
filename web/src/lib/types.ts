@@ -2,30 +2,21 @@
 // Only `import type` is used — Zod runtime code is NOT included in the frontend bundle.
 
 export type {
-	ActivityEntry,
-	ActivityResponse,
-	DecisionEntry,
-	DecisionsResponse,
-	HealthResponse,
 	KnowledgeEntry,
 	KnowledgeResponse,
-	KnowledgeSearchResponse,
 	KnowledgeStats,
 	Review,
 	ReviewComment,
 	ReviewHistoryResponse,
 	ReviewStatusResponse,
 	SpecContentResponse,
-	SpecEntry,
 	SpecsResponse,
-	StepItem,
 	TaskDetail,
 	TasksResponse,
 	ValidationCheck,
 	ValidationReport,
 	VersionResponse,
 	WaveInfo,
-
 	HeatmapEntry,
 	HeatmapResponse,
 } from "@api-types";
@@ -43,35 +34,23 @@ export interface ProjectRecord {
 	status: string;
 }
 
-export interface UnifiedSearchResult {
-	id: number;
-	source: "knowledge" | "spec";
-	title: string;
-	content: string;
-	projectId: string;
-	projectName: string;
-	score: number;
-	subType?: string;
-	hitCount?: number;
-	slug?: string;
-	fileName?: string;
-	specStatus?: string;
-}
-
 export interface SearchResponse {
-	results: UnifiedSearchResult[];
+	results: Array<{
+		id: number;
+		source: "knowledge" | "spec";
+		title: string;
+		content: string;
+		projectId: string;
+		projectName: string;
+		score: number;
+		subType?: string;
+		hitCount?: number;
+		slug?: string;
+		fileName?: string;
+		specStatus?: string;
+	}>;
 	method: string;
 	count: number;
-}
-
-// --- Frontend-only types (not in API responses) ---
-
-export interface MemoryHealthStats {
-	total: number;
-	bySubType: Record<string, number>;
-	stale_count?: number;
-	conflict_count?: number;
-	vitality_dist?: [number, number, number, number, number];
 }
 
 // Task status color map (FR-18)

@@ -35,7 +35,6 @@ export function ReviewPanel({
 	onAddComment,
 	onRemoveComment,
 }: ReviewPanelProps) {
-	const { t } = useI18n();
 	const { data: historyData } = useQuery(reviewHistoryQueryOptions(slug));
 	const [resolvedOverrides, setResolvedOverrides] = useState<Map<string, boolean>>(new Map());
 

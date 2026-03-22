@@ -1,7 +1,5 @@
-import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import type {
-	DecisionsResponse,
-	KnowledgeEntry,
 	KnowledgeResponse,
 	KnowledgeStats,
 	ProjectRecord,
@@ -106,30 +104,11 @@ export const knowledgeStatsQueryOptions = (projectId?: string) =>
 		staleTime: REF_STALE,
 	});
 
-export const knowledgeCandidatesQueryOptions = () =>
-	queryOptions({
-		queryKey: ["knowledge-candidates"],
-		queryFn: () => fetchJSON<{ candidates: KnowledgeEntry[] }>("/api/knowledge/candidates"),
-		staleTime: REF_STALE,
-	});
-
 export async function promoteKnowledge(id: number): Promise<{ promoted: boolean; new_sub_type: string }> {
 	const res = await fetch(`/api/knowledge/${id}/promote`, { method: "POST" });
 	if (!res.ok) throw new Error(await res.text());
 	return res.json();
 }
-
-
-export const decisionsQueryOptions = (limit = 20, projectId?: string) =>
-	queryOptions({
-		queryKey: ["decisions", limit, projectId],
-		queryFn: () => {
-			const params = new URLSearchParams({ limit: String(limit) });
-			if (projectId) params.set("project", projectId);
-			return fetchJSON<DecisionsResponse>(`/api/decisions?${params}`);
-		},
-		staleTime: LIVE_STALE,
-	});
 
 
 export const validationQueryOptions = (slug: string, projectId?: string) =>
@@ -215,15 +194,6 @@ export interface AnalyticsResponse {
 	}>;
 }
 
-export interface ActivityLogEntry {
-	timestamp: string;
-	action: string;
-	target: string;
-	detail: string;
-	actor: string;
-	project_name?: string;
-}
-
 export const analyticsQueryOptions = (projectId?: string) =>
 	queryOptions({
 		queryKey: ["analytics", projectId],
@@ -234,32 +204,13 @@ export const analyticsQueryOptions = (projectId?: string) =>
 		staleTime: REF_STALE,
 	});
 
-export interface KnowledgeGapEntry {
-	query: string;
-	intent: string;
-	best_score: number;
-	result_count: number;
-	timestamp: string;
-	spec_slug?: string;
-}
-
-export const knowledgeGapsQueryOptions = (projectId?: string) =>
-	queryOptions({
-		queryKey: ["knowledge-gaps", projectId],
-		queryFn: () => {
-			const url = projectId ? `/api/knowledge/gaps?project=${projectId}` : "/api/knowledge/gaps";
-			return fetchJSON<{ entries: KnowledgeGapEntry[]; total: number }>(url);
-		},
-		staleTime: REF_STALE,
-	});
-
 export const activityQueryOptions = (page = 0, projectId?: string) =>
 	queryOptions({
 		queryKey: ["activity", page, projectId],
 		queryFn: () => {
 			const params = new URLSearchParams({ limit: "50", offset: String(page * 50) });
 			if (projectId) params.set("project", projectId);
-			return fetchJSON<{ entries: ActivityLogEntry[]; total: number }>(`/api/activity?${params}`);
+			return fetchJSON<{ entries: Array<{ timestamp: string; action: string; target: string; detail: string; actor: string; project_name?: string }>; total: number }>(`/api/activity?${params}`);
 		},
 		staleTime: LIVE_STALE,
 	});
@@ -297,10 +248,6 @@ export async function completeTask(slug: string) {
 
 // --- Hooks (convenience wrappers) ---
 
-export function useTasksQuery() {
-	return useQuery(tasksQueryOptions());
-}
-
 export function useToggleEnabledMutation() {
 	const queryClient = useQueryClient();
 	return useMutation({
@@ -314,7 +261,6 @@ export function useToggleEnabledMutation() {
 		},
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["knowledge"] });
-			queryClient.invalidateQueries({ queryKey: ["health"] });
 		},
 	});
 }

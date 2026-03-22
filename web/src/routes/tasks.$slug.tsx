@@ -16,7 +16,6 @@ import {
 	specsQueryOptions,
 	tasksQueryOptions,
 	validationQueryOptions,
-	reviewQueryOptions,
 	submitReview,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
