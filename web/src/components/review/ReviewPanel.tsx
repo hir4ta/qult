@@ -144,16 +144,16 @@ export function ReviewPanel({
 										{/* Code line */}
 										<div
 											className={cn(
-												"flex group text-xs leading-5 cursor-pointer",
+												"flex group text-xs leading-5",
 												(inSelection || isSingleSel) && "bg-[#ddf4ff] dark:bg-[#1a3a4a]",
 												!inSelection && !isSingleSel && hasComment && "bg-[#fff8e1] dark:bg-[#2a2518]",
 												!inSelection && !isSingleSel && !hasComment && "hover:bg-[#f6f8fa] dark:hover:bg-[#161b22]",
 											)}
-											onClick={(e) => isPending && handleLineClick(lineNum, e.shiftKey)}
 										>
 											{/* Gutter: line number + add button */}
 											<div
-												className="w-12 shrink-0 flex items-center justify-end pr-2 select-none border-r border-border/20 relative"
+												className="w-12 shrink-0 flex items-center justify-end pr-2 select-none cursor-pointer border-r border-border/20 relative"
+												onClick={(e) => { e.stopPropagation(); isPending && handleLineClick(lineNum, e.shiftKey); }}
 											>
 												{isPending && (
 													<span className="absolute left-1 opacity-0 group-hover:opacity-100 text-blue-500 text-[10px] font-bold">
@@ -227,7 +227,7 @@ const CommentForm = forwardRef<HTMLTextAreaElement, {
 	const rangeLabel = endLine ? `L${startLine}-L${endLine}` : `L${startLine}`;
 
 	return (
-		<div className="mx-3 my-2 rounded-lg border border-blue-200 dark:border-blue-800 bg-white dark:bg-[#0d1117] overflow-hidden">
+		<div className="mx-3 my-2 rounded-lg border border-blue-200 dark:border-blue-800 bg-white dark:bg-[#0d1117] overflow-hidden" onClick={(e) => e.stopPropagation()}>
 			{/* Header */}
 			<div className="flex items-center gap-2 px-3 py-1.5 bg-[#f6f8fa] dark:bg-[#161b22] border-b border-blue-200/50 dark:border-blue-800/50">
 				<span className="text-[10px] font-mono text-blue-600 dark:text-blue-400 font-medium">{rangeLabel}</span>
