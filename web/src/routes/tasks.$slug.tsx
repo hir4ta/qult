@@ -64,8 +64,8 @@ function TaskDetailPage() {
 		},
 	});
 
-	const addComment = (file: string, line: number, body: string) => {
-		setAllComments((prev) => [...prev, { file, line, body }]);
+	const addComment = (file: string, line: number, body: string, endLine?: number) => {
+		setAllComments((prev) => [...prev, { file, line, body, ...(endLine ? { endLine } : {}) }]);
 	};
 	const removeComment = (index: number) => {
 		setAllComments((prev) => prev.filter((_, i) => i !== index));
@@ -149,7 +149,7 @@ function TaskDetailPage() {
 									specContent={content}
 									currentFile={spec.file}
 									comments={allComments.filter((c) => c.file === spec.file)}
-									onAddComment={(line, body) => addComment(spec.file, line, body)}
+									onAddComment={(line, body, endLine) => addComment(spec.file, line, body, endLine)}
 									onRemoveComment={(line, body) => {
 										const idx = allComments.findIndex((c) => c.file === spec.file && c.line === line && c.body === body);
 										if (idx >= 0) removeComment(idx);
