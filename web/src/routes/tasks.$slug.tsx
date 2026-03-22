@@ -106,22 +106,17 @@ function TaskDetailPage() {
 						{showApproval && (
 							<div className="flex gap-2 shrink-0">
 								{allComments.length > 0 && (
-									<ConfirmAction
-										title={t("review.requestChangesTitle")}
-										description={t("review.requestChangesDescription")}
-										action={() => reviewMutation.mutate("changes_requested")}
+									<button
+										type="button"
+										onClick={() => reviewMutation.mutate("changes_requested")}
 										disabled={reviewMutation.isPending}
+										className="al-icon-wrapper flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium cursor-pointer hover:opacity-90 border"
+										style={{ borderColor: "rgba(192,57,43,0.4)", color: "#c0392b" }}
 									>
-										<button
-											type="button"
-											className="al-icon-wrapper flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium cursor-pointer hover:opacity-90 border"
-											style={{ borderColor: "rgba(230,126,34,0.4)", color: "#e67e22" }}
-										>
-											<XCircle className="size-4" />
-											{t("review.requestChanges")}
-											<span className="text-[10px] ml-0.5">({allComments.length})</span>
-										</button>
-									</ConfirmAction>
+										<XCircle className="size-4" />
+										{t("review.requestChanges")}
+										<span className="text-[10px] ml-0.5">({allComments.length})</span>
+									</button>
 								)}
 								<ConfirmAction
 									title={t("review.approveTitle")}
