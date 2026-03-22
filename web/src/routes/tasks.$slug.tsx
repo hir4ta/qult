@@ -104,21 +104,41 @@ function TaskDetailPage() {
 					<div className="pt-1 flex items-center gap-4">
 						<div className="flex-1"><WaveTimeline waves={task.waves} /></div>
 						{showApproval && (
-							<ConfirmAction
-								title={t("review.approveTitle")}
-								description={t("review.approveDescription")}
-								action={() => reviewMutation.mutate("approved")}
-								disabled={reviewMutation.isPending}
-							>
-								<button
-									type="button"
-									className="al-icon-wrapper flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium text-white cursor-pointer hover:opacity-90"
-									style={{ backgroundColor: "#628141" }}
+							<div className="flex gap-2 shrink-0">
+								{allComments.length > 0 && (
+									<ConfirmAction
+										title={t("review.requestChangesTitle")}
+										description={t("review.requestChangesDescription")}
+										action={() => reviewMutation.mutate("changes_requested")}
+										disabled={reviewMutation.isPending}
+									>
+										<button
+											type="button"
+											className="al-icon-wrapper flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium cursor-pointer hover:opacity-90 border"
+											style={{ borderColor: "rgba(230,126,34,0.4)", color: "#e67e22" }}
+										>
+											<XCircle className="size-4" />
+											{t("review.requestChanges")}
+											<span className="text-[10px] ml-0.5">({allComments.length})</span>
+										</button>
+									</ConfirmAction>
+								)}
+								<ConfirmAction
+									title={t("review.approveTitle")}
+									description={t("review.approveDescription")}
+									action={() => reviewMutation.mutate("approved")}
+									disabled={reviewMutation.isPending}
 								>
-									<CheckCircle className="size-4" />
-									{t("review.approve")}
-								</button>
-							</ConfirmAction>
+									<button
+										type="button"
+										className="al-icon-wrapper flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium text-white cursor-pointer hover:opacity-90"
+										style={{ backgroundColor: "#628141" }}
+									>
+										<CheckCircle className="size-4" />
+										{t("review.approve")}
+									</button>
+								</ConfirmAction>
+							</div>
 						)}
 					</div>
 				)}

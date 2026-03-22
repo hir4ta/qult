@@ -101,12 +101,18 @@ export function ReviewPanel({
 
 	const lines = specContent.split("\n");
 
-	// Group comments by their start line for rendering
-	const commentsByLine = new Map<number, ReviewCommentWithRange[]>();
-	for (const c of [...unresolvedFromPrevious, ...comments]) {
-		const arr = commentsByLine.get(c.line) ?? [];
+	// Group comments by their start line for rendering (thread appears after last line of range)
+	const allComments = [...unresolvedFromPrevious, ...comments] as ReviewCommentWithRange[];
+	const commentsByAnchor = new Map<number, ReviewCommentWithRange[]>();
+	const commentedLineSet = new Set<number>();
+	for (const c of allComments) {
+		const anchor = (c as ReviewCommentWithRange).endLine ?? c.line;
+		const arr = commentsByAnchor.get(anchor) ?? [];
 		arr.push(c as ReviewCommentWithRange);
-		commentsByLine.set(c.line, arr);
+		commentsByAnchor.set(anchor, arr);
+		// Mark all lines in range as commented
+		const end = (c as ReviewCommentWithRange).endLine ?? c.line;
+		for (let l = c.line; l <= end; l++) commentedLineSet.add(l);
 	}
 
 	// Determine where to show the comment form (after the last line of selection)
@@ -129,8 +135,8 @@ export function ReviewPanel({
 								const lineNum = i + 1;
 								const inSelection = selMin !== null && selMax !== null && lineNum >= selMin && lineNum <= selMax;
 								const isSingleSel = selStart === lineNum && selEnd === null;
-								const hasComment = commentsByLine.has(lineNum);
-								const lineComments = commentsByLine.get(lineNum);
+								const hasComment = commentedLineSet.has(lineNum);
+								const lineComments = commentsByAnchor.get(lineNum);
 								const showForm = commentFormLine === lineNum;
 
 								return (
