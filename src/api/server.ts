@@ -644,7 +644,7 @@ export function createApp(
 
 	app.get("/api/analytics/heatmap", (c) => {
 		const filterProjectId = getProjectFilter(c.req.query("project")) || undefined;
-		const weeks = Math.min(Number(c.req.query("weeks") || 16), 52);
+		const weeks = Math.min(Math.max(Math.floor(Number(c.req.query("weeks"))) || 16, 1), 52);
 		const since = new Date();
 		since.setDate(since.getDate() - weeks * 7);
 		const sinceStr = since.toISOString();
