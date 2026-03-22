@@ -104,32 +104,21 @@ function TaskDetailPage() {
 					<div className="pt-1 flex items-center gap-4">
 						<div className="flex-1"><WaveTimeline waves={task.waves} /></div>
 						{showApproval && (
-							<div className="flex gap-2 shrink-0">
-								<ConfirmAction
-									title={t("review.approveTitle")}
-									description={t("review.approveDescription")}
-									action={() => reviewMutation.mutate("approved")}
-									disabled={reviewMutation.isPending}
+							<ConfirmAction
+								title={t("review.approveTitle")}
+								description={t("review.approveDescription")}
+								action={() => reviewMutation.mutate("approved")}
+								disabled={reviewMutation.isPending}
+							>
+								<button
+									type="button"
+									className="al-icon-wrapper flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium text-white transition-colors"
+									style={{ backgroundColor: "#2d8b7a" }}
 								>
-									<Button size="sm" variant="brutalist" className="gap-1 text-xs">
-										<CheckCircle className="h-3.5 w-3.5" />
-										{t("review.approve")}
-									</Button>
-								</ConfirmAction>
-								<ConfirmAction
-									title={t("review.requestChangesTitle")}
-									description={t("review.requestChangesDescription")}
-									action={() => reviewMutation.mutate("changes_requested")}
-									disabled={reviewMutation.isPending || allComments.length === 0}
-								>
-									<Button size="sm" variant="outline" className="gap-1 text-xs"
-										style={{ borderColor: "rgba(230,126,34,0.4)", color: "#e67e22" }}>
-										<XCircle className="h-3.5 w-3.5" />
-										{t("review.requestChanges")}
-										{allComments.length > 0 && <span className="ml-1 text-[10px]">({allComments.length})</span>}
-									</Button>
-								</ConfirmAction>
-							</div>
+									<CheckCircle className="size-4" />
+									{t("review.approve")}
+								</button>
+							</ConfirmAction>
 						)}
 					</div>
 				)}
