@@ -252,7 +252,7 @@ export const activityQueryOptions = (page = 0, projectId?: string) =>
 export async function submitReview(
 	slug: string,
 	status: "approved" | "changes_requested",
-	comments: { file: string; line: number; body: string }[],
+	comments: { file: string; line: number; body: string; endLine?: number }[],
 ) {
 	const res = await fetch(taskURL(slug, "review"), {
 		method: "POST",

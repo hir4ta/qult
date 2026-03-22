@@ -208,6 +208,7 @@ export const ValidationReportSchema = z.object({
 export const ReviewCommentSchema = z.object({
 	file: z.string(),
 	line: z.number(),
+	endLine: z.number().optional(),
 	body: z.string(),
 	resolved: z.boolean().optional(),
 });
