@@ -121,9 +121,6 @@ export function BookshelfView({ entries, onSelect }: { entries: KnowledgeEntry[]
 			/>
 			<div className="h-2 bg-gradient-to-b from-black/[0.04] to-transparent" />
 
-			{/* Scroll fade hints */}
-			<div className="absolute top-0 right-0 bottom-5 w-8 bg-gradient-to-l from-background to-transparent pointer-events-none" />
-			<div className="absolute top-0 left-0 bottom-5 w-8 bg-gradient-to-r from-background to-transparent pointer-events-none" />
 		</div>
 	);
 }
