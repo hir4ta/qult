@@ -1,9 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import {
-	BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, Legend,
-} from "recharts";
 import { activityQueryOptions, analyticsQueryOptions } from "@/lib/api";
 import type { AnalyticsResponse } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -88,7 +85,7 @@ function SummaryCards({ analytics }: { analytics: AnalyticsResponse }) {
 			{cards.map((card) => (
 				<div
 					key={card.label}
-					className="rounded-organic border border-border/60 bg-card py-4 px-4 hover:-translate-y-0.5 transition-transform"
+					className="rounded-organic border border-border/60 bg-card py-4 px-4"
 				>
 					<p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">{card.label}</p>
 					<p className="mt-1 text-2xl font-bold" style={{ fontFamily: "var(--font-display)", color: card.color }}>
@@ -101,49 +98,52 @@ function SummaryCards({ analytics }: { analytics: AnalyticsResponse }) {
 	);
 }
 
-// --- Rework Rate Chart ---
+// --- Rework Rate Chart (CSS-based bar chart) ---
 
 function ReworkChart({ analytics }: { analytics: AnalyticsResponse }) {
 	const { t } = useI18n();
 	if (analytics.reworkRates.length === 0) return null;
 
-	const data = analytics.reworkRates.map((r) => ({
-		slug: r.slug.length > 16 ? `${r.slug.slice(0, 14)}..` : r.slug,
-		rate: Math.round(r.reworkRate * 100),
-		pending: r.pending,
-	}));
+	const maxRate = Math.max(...analytics.reworkRates.map((r) => r.reworkRate), 0.01);
 
 	return (
 		<div className="rounded-organic border border-border/60 bg-card py-4 px-4">
 			<h3 className="text-sm font-semibold mb-3">{t("activity.rework.title")}</h3>
-			<ResponsiveContainer width="100%" height={220}>
-				<BarChart data={data} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
-					<XAxis dataKey="slug" tick={{ fontSize: 10 }} />
-					<YAxis tick={{ fontSize: 10 }} unit="%" />
-					<Tooltip formatter={(v: number) => `${v}%`} />
-					<Bar dataKey="rate" name={t("activity.rework.rate")} radius={[4, 4, 0, 0]}>
-						{data.map((entry, i) => (
-							<Cell
-								key={i}
-								fill={entry.pending ? "#e67e22" : "#2d8b7a"}
-								fillOpacity={entry.pending ? 0.5 : 1}
-							/>
-						))}
-					</Bar>
-				</BarChart>
-			</ResponsiveContainer>
-			{data.some((d) => d.pending) && (
-				<p className="text-[10px] text-muted-foreground mt-1">{t("activity.rework.pending")}</p>
+			<div className="space-y-2">
+				{analytics.reworkRates.map((r) => {
+					const pct = Math.round(r.reworkRate * 100);
+					const width = Math.max((r.reworkRate / maxRate) * 100, 2);
+					const slug = r.slug.length > 20 ? `${r.slug.slice(0, 18)}..` : r.slug;
+					return (
+						<div key={r.slug} className="flex items-center gap-2">
+							<span className="text-[10px] font-mono text-muted-foreground w-24 shrink-0 truncate">{slug}</span>
+							<div className="flex-1 h-5 bg-muted/30 rounded overflow-hidden">
+								<div
+									className="h-full rounded transition-all duration-300"
+									style={{
+										width: `${width}%`,
+										backgroundColor: r.pending ? "#e67e22" : "#2d8b7a",
+										opacity: r.pending ? 0.5 : 1,
+									}}
+								/>
+							</div>
+							<span className="text-[10px] font-mono w-8 text-right">{pct}%</span>
+						</div>
+					);
+				})}
+			</div>
+			{analytics.reworkRates.some((r) => r.pending) && (
+				<p className="text-[10px] text-muted-foreground mt-2">{t("activity.rework.pending")}</p>
 			)}
 		</div>
 	);
 }
 
-// --- Cycle Time Chart ---
+// --- Cycle Time Chart (CSS-based stacked bar) ---
 
 const PHASE_COLORS = {
 	planning: "#628141",
-	approvalWait: "#e67e22",
+	approval: "#e67e22",
 	implementation: "#2d8b7a",
 };
 
@@ -151,27 +151,45 @@ function CycleTimeChart({ analytics }: { analytics: AnalyticsResponse }) {
 	const { t } = useI18n();
 	if (analytics.cycleTimeBreakdown.length === 0) return null;
 
-	const data = analytics.cycleTimeBreakdown.map((r) => ({
-		slug: r.slug.length > 16 ? `${r.slug.slice(0, 14)}..` : r.slug,
-		planning: r.phases.planning ?? 0,
-		approval: r.phases.approvalWait ?? 0,
-		implementation: r.phases.implementation ?? 0,
-	}));
+	const maxTotal = Math.max(...analytics.cycleTimeBreakdown.map((r) => r.phases.total), 0.1);
 
 	return (
 		<div className="rounded-organic border border-border/60 bg-card py-4 px-4">
 			<h3 className="text-sm font-semibold mb-3">{t("activity.cycleTime.title")}</h3>
-			<ResponsiveContainer width="100%" height={220}>
-				<BarChart data={data} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
-					<XAxis dataKey="slug" tick={{ fontSize: 10 }} />
-					<YAxis tick={{ fontSize: 10 }} unit="d" />
-					<Tooltip />
-					<Legend wrapperStyle={{ fontSize: 11 }} />
-					<Bar dataKey="planning" name={t("activity.cycleTime.planning")} stackId="a" fill={PHASE_COLORS.planning} radius={[0, 0, 0, 0]} />
-					<Bar dataKey="approval" name={t("activity.cycleTime.approval")} stackId="a" fill={PHASE_COLORS.approvalWait} />
-					<Bar dataKey="implementation" name={t("activity.cycleTime.implementation")} stackId="a" fill={PHASE_COLORS.implementation} radius={[4, 4, 0, 0]} />
-				</BarChart>
-			</ResponsiveContainer>
+			<div className="space-y-2">
+				{analytics.cycleTimeBreakdown.map((r) => {
+					const slug = r.slug.length > 20 ? `${r.slug.slice(0, 18)}..` : r.slug;
+					const p = r.phases;
+					const planW = ((p.planning ?? 0) / maxTotal) * 100;
+					const apprW = ((p.approvalWait ?? 0) / maxTotal) * 100;
+					const implW = ((p.implementation ?? 0) / maxTotal) * 100;
+					return (
+						<div key={r.slug} className="flex items-center gap-2">
+							<span className="text-[10px] font-mono text-muted-foreground w-24 shrink-0 truncate">{slug}</span>
+							<div className="flex-1 h-5 bg-muted/30 rounded overflow-hidden flex">
+								{planW > 0 && (
+									<div className="h-full" style={{ width: `${planW}%`, backgroundColor: PHASE_COLORS.planning }} title={`${t("activity.cycleTime.planning")}: ${p.planning}d`} />
+								)}
+								{apprW > 0 && (
+									<div className="h-full" style={{ width: `${apprW}%`, backgroundColor: PHASE_COLORS.approval }} title={`${t("activity.cycleTime.approval")}: ${p.approvalWait}d`} />
+								)}
+								{implW > 0 && (
+									<div className="h-full" style={{ width: `${implW}%`, backgroundColor: PHASE_COLORS.implementation }} title={`${t("activity.cycleTime.implementation")}: ${p.implementation}d`} />
+								)}
+							</div>
+							<span className="text-[10px] font-mono w-8 text-right">{p.total.toFixed(1)}d</span>
+						</div>
+					);
+				})}
+			</div>
+			<div className="flex gap-4 mt-3">
+				{Object.entries(PHASE_COLORS).map(([key, color]) => (
+					<span key={key} className="flex items-center gap-1 text-[10px] text-muted-foreground">
+						<span className="size-2 rounded-sm" style={{ backgroundColor: color }} />
+						{t(`activity.cycleTime.${key === "approval" ? "approval" : key}` as "activity.cycleTime.planning")}
+					</span>
+				))}
+			</div>
 		</div>
 	);
 }
