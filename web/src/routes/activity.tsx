@@ -115,7 +115,7 @@ function ReworkChart({ analytics }: { analytics: AnalyticsResponse }) {
 					const width = Math.max((r.reworkRate / maxRate) * 100, 2);
 					return (
 						<div key={r.slug} className="flex items-center gap-3">
-							<span className="text-[10px] font-mono text-muted-foreground w-32 shrink-0 truncate" title={r.slug}>{r.slug}</span>
+							<span className="text-[10px] font-mono text-muted-foreground w-44 shrink-0 truncate" title={r.slug}>{r.slug}</span>
 							<div className="flex-1 h-5 bg-muted/30 rounded overflow-hidden">
 								<div
 									className="h-full rounded"
@@ -163,7 +163,7 @@ function CycleTimeChart({ analytics }: { analytics: AnalyticsResponse }) {
 					const implW = ((p.implementation ?? 0) / maxTotal) * 100;
 					return (
 						<div key={r.slug} className="flex items-center gap-3">
-							<span className="text-[10px] font-mono text-muted-foreground w-32 shrink-0 truncate" title={r.slug}>{r.slug}</span>
+							<span className="text-[10px] font-mono text-muted-foreground w-44 shrink-0 truncate" title={r.slug}>{r.slug}</span>
 							<div className="flex-1 h-5 bg-muted/30 rounded overflow-hidden flex">
 								{planW > 0 && (
 									<div className="h-full" style={{ width: `${planW}%`, backgroundColor: PHASE_COLORS.planning }} title={`${t("activity.cycleTime.planning")}: ${p.planning?.toFixed(1)}d`} />
