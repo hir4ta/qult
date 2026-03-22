@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useRef, useState } from "react";
 import { ButlerEmpty } from "@/components/butler-empty";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { VerificationBadge } from "@/components/verification-badge";
@@ -7,11 +6,6 @@ import type { KnowledgeEntry } from "@/lib/types";
 import { SUB_TYPE_COLORS } from "@/lib/types";
 import { formatLabel, formatDate } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
-
-const SPINE_W = 56;
-const GAP = 4;
-const PAD = 16;
-const SHELF_H = 310;
 
 const HEIGHTS: Record<string, number> = { rule: 240, decision: 270, pattern: 220, snapshot: 200 };
 
@@ -25,12 +19,6 @@ function darken(hex: string): string {
 	const g = Math.max(0, parseInt(hex.slice(3, 5), 16) - 30);
 	const b = Math.max(0, parseInt(hex.slice(5, 7), 16) - 30);
 	return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
-}
-
-function splitShelves(entries: KnowledgeEntry[], perShelf: number): KnowledgeEntry[][] {
-	const out: KnowledgeEntry[][] = [];
-	for (let i = 0; i < entries.length; i += perShelf) out.push(entries.slice(i, i + perShelf));
-	return out;
 }
 
 function BookSpine({ entry, onClick }: { entry: KnowledgeEntry; onClick: () => void }) {
@@ -108,14 +96,22 @@ function BookSpine({ entry, onClick }: { entry: KnowledgeEntry; onClick: () => v
 	);
 }
 
-function Shelf({ entries, onSelect }: { entries: KnowledgeEntry[]; onSelect: (e: KnowledgeEntry) => void }) {
+export function BookshelfView({ entries, onSelect }: { entries: KnowledgeEntry[]; onSelect: (e: KnowledgeEntry) => void }) {
+	if (entries.length === 0) return <ButlerEmpty scene="bookshelf" messageKey="empty.noMemories" />;
+
 	return (
 		<div className="relative">
-			<div className="flex items-end gap-[3px] px-3 pt-8 pb-0">
+			{/* Horizontal scroll shelf */}
+			<div
+				className="flex items-end gap-[3px] px-3 pt-8 pb-0 overflow-x-auto"
+				style={{ scrollbarWidth: "thin" }}
+			>
 				{entries.map((e) => (
 					<BookSpine key={e.id} entry={e} onClick={() => onSelect(e)} />
 				))}
 			</div>
+
+			{/* Shelf plank */}
 			<div
 				className="h-3 relative z-10"
 				style={{
@@ -124,75 +120,10 @@ function Shelf({ entries, onSelect }: { entries: KnowledgeEntry[]; onSelect: (e:
 				}}
 			/>
 			<div className="h-2 bg-gradient-to-b from-black/[0.04] to-transparent" />
-		</div>
-	);
-}
 
-export function BookshelfView({ entries, onSelect }: { entries: KnowledgeEntry[]; onSelect: (e: KnowledgeEntry) => void }) {
-	const ref = useRef<HTMLDivElement>(null);
-	const [perShelf, setPerShelf] = useState(8);
-	const [maxShelves, setMaxShelves] = useState(3);
-	const [page, setPage] = useState(0);
-
-	const calc = useCallback(() => {
-		if (!ref.current) return;
-		const w = ref.current.clientWidth;
-		const h = window.innerHeight - ref.current.getBoundingClientRect().top - 80;
-		setPerShelf(Math.max(3, Math.floor((w - PAD * 2) / (SPINE_W + GAP))));
-		setMaxShelves(Math.max(1, Math.floor(h / SHELF_H)));
-	}, []);
-
-	useEffect(() => {
-		calc();
-		const obs = new ResizeObserver(calc);
-		if (ref.current) obs.observe(ref.current);
-		window.addEventListener("resize", calc);
-		return () => { obs.disconnect(); window.removeEventListener("resize", calc); };
-	}, [calc]);
-
-	useEffect(() => setPage(0), [entries.length]);
-
-	if (entries.length === 0) return <ButlerEmpty scene="bookshelf" messageKey="empty.noMemories" />;
-
-	const perPage = perShelf * maxShelves;
-	const totalPages = Math.ceil(entries.length / perPage);
-	const safePage = Math.min(page, totalPages - 1);
-	const paged = entries.slice(safePage * perPage, (safePage + 1) * perPage);
-	const shelves = splitShelves(paged, perShelf);
-
-	return (
-		<div ref={ref} className="flex flex-col min-h-[50vh] overflow-hidden">
-			<div className="flex-1 flex items-center justify-center">
-				<div className="w-full max-w-full space-y-2 overflow-hidden">
-					{shelves.map((shelf, i) => (
-						<Shelf key={i} entries={shelf} onSelect={onSelect} />
-					))}
-				</div>
-			</div>
-
-			{totalPages > 1 && (
-				<div className="flex items-center justify-center gap-3 pt-4">
-					<button
-						type="button"
-						onClick={() => setPage(Math.max(0, safePage - 1))}
-						disabled={safePage <= 0}
-						className="px-3 py-1 text-xs rounded-full border border-border/40 disabled:opacity-30 hover:bg-muted/50 transition-colors"
-					>
-						&larr;
-					</button>
-					<span className="text-xs text-muted-foreground tabular-nums">
-						{safePage + 1} / {totalPages}
-					</span>
-					<button
-						type="button"
-						onClick={() => setPage(Math.min(totalPages - 1, safePage + 1))}
-						disabled={safePage >= totalPages - 1}
-						className="px-3 py-1 text-xs rounded-full border border-border/40 disabled:opacity-30 hover:bg-muted/50 transition-colors"
-					>
-						&rarr;
-					</button>
-				</div>
-			)}
+			{/* Scroll fade hints */}
+			<div className="absolute top-0 right-0 bottom-5 w-8 bg-gradient-to-l from-background to-transparent pointer-events-none" />
+			<div className="absolute top-0 left-0 bottom-5 w-8 bg-gradient-to-r from-background to-transparent pointer-events-none" />
 		</div>
 	);
 }
