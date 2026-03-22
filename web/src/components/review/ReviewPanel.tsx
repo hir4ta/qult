@@ -1,12 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { CheckSquare, History, MessageSquare, Square } from "@animated-color-icons/lucide-react";
+import { CheckSquare, MessageSquare, Square } from "@animated-color-icons/lucide-react";
 import { useCallback, useRef, useState } from "react";
-import { SpecHistory } from "./SpecHistory";
-import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { reviewHistoryQueryOptions } from "@/lib/api";
-import type { Review, ReviewComment } from "@/lib/types";
+import type { ReviewComment } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -39,7 +37,6 @@ export function ReviewPanel({
 }: ReviewPanelProps) {
 	const { t } = useI18n();
 	const { data: historyData } = useQuery(reviewHistoryQueryOptions(slug));
-	const [activeTab, setActiveTab] = useState<"review" | "history">("review");
 	const [resolvedOverrides, setResolvedOverrides] = useState<Map<string, boolean>>(new Map());
 
 	// Selection state for multi-line
@@ -117,20 +114,7 @@ export function ReviewPanel({
 
 	return (
 		<div className="space-y-3">
-			{/* Tab bar */}
-			<div className="flex items-center gap-2">
-				<button type="button" onClick={() => setActiveTab("review")}
-					className={cn("text-sm font-medium px-2 py-0.5 rounded-lg", activeTab === "review" ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}
-				>Review</button>
-				<button type="button" onClick={() => setActiveTab("history")}
-					className={cn("text-sm font-medium px-2 py-0.5 rounded-lg flex items-center gap-1", activeTab === "history" ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}
-				><History className="size-3.5" />{t("review.history")}</button>
-			</div>
-
-			{activeTab === "history" && <SpecHistory slug={slug} file={currentFile} />}
-
-			{activeTab === "review" && (
-				<>
+			<>
 					{/* GitHub-style file viewer */}
 					<div className="rounded-lg border border-border/60 overflow-hidden">
 						{/* File header */}
@@ -215,9 +199,7 @@ export function ReviewPanel({
 						</div>
 					</div>
 
-					{reviews.length > 0 && <ReviewHistory reviews={reviews} />}
-				</>
-			)}
+			</>
 		</div>
 	);
 }
@@ -337,46 +319,3 @@ function CommentThread({
 	);
 }
 
-// --- Review History ---
-
-function ReviewHistory({ reviews }: { reviews: Review[] }) {
-	const { t, locale } = useI18n();
-	return (
-		<Card className="p-3">
-			<p className="text-xs font-medium text-muted-foreground mb-2">
-				{t("review.history")} ({reviews.length})
-			</p>
-			<div className="space-y-2">
-				{reviews.map((review) => (
-					<div key={review.timestamp} className="flex items-center gap-2 text-xs">
-						<ReviewStatusBadge status={review.status} />
-						<span className="text-muted-foreground">
-							{new Date(review.timestamp).toLocaleString(locale === "ja" ? "ja-JP" : "en-US", {
-								month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
-							})}
-						</span>
-						{review.comments && review.comments.length > 0 && (
-							<span className="text-muted-foreground/60">
-								{review.comments.length} {t("review.comments")}
-							</span>
-						)}
-					</div>
-				))}
-			</div>
-		</Card>
-	);
-}
-
-function ReviewStatusBadge({ status }: { status: string }) {
-	const colors: Record<string, { color: string; bg: string }> = {
-		pending: { color: "#6b7280", bg: "rgba(107,114,128,0.15)" },
-		approved: { color: "#2d8b7a", bg: "rgba(45,139,122,0.15)" },
-		changes_requested: { color: "#e67e22", bg: "rgba(230,126,34,0.15)" },
-	};
-	const s = colors[status] ?? colors.pending!;
-	return (
-		<span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium"
-			style={{ backgroundColor: s.bg, color: s.color }}
-		>{status}</span>
-	);
-}
