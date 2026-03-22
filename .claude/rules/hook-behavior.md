@@ -29,7 +29,8 @@ paths:
 
 ## PostToolUse
 - Bash error detection → FTS5 knowledge search → additionalContext injection
-- Bash success → tasks.md Next Steps auto-check (command + action signals matching + file-based matching via git diff)
+- Auto-check tasks: Edit/Write file path matching + Bash stdout matching against tasks.md descriptions (backtick paths + filename matching). No unchecked count CONTEXT emitted (#27: causes Claude to stall on large specs)
+- Bash success → git commit detection → living-spec + drift + wave completion
 - Exploration detection: consecutive Read/Grep calls tracked via .alfred/.state/explore-count; at 5+ calls without active spec → survey suggestion. Non-Read/Grep tool resets counter
 
 ## PostToolUse — Living Spec (src/hooks/living-spec.ts)

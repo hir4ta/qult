@@ -34,8 +34,8 @@ After all spec documents are created:
 ## Step 4: Implementation (Per Wave)
 
 ### Per Task Completion
-- tasks.md checkbox auto-updated by PostToolUse hook (autoCheckTasks)
-- tasks.md Next Steps auto-updated by PostToolUse hook (autoCheckNextSteps)
+- tasks.md checkbox auto-updated by PostToolUse hook (autoCheckTasks): file path matching for Edit/Write, stdout matching for Bash
+- Explicit update also available: `dossier action=check task_id="T-X.Y"`
 
 ### Per Wave Completion
 1. **Commit** — Commit at Wave boundaries, include Wave number in message

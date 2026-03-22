@@ -68,10 +68,14 @@ export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<v
 
 	}
 
-	// Track worked slug + auto-transition + nudge for Edit/Write.
+	// Track worked slug + auto-check tasks + auto-transition for Edit/Write.
 	if ((ev.tool_name === "Edit" || ev.tool_name === "Write") && ev.tool_input) {
 		const input = ev.tool_input as Record<string, unknown>;
 		const filePath = typeof input.file_path === "string" ? input.file_path : "";
+		// Auto-check tasks when file matches task description.
+		if (filePath) {
+			autoCheckTasks(ev.cwd!, filePath, items);
+		}
 		// Track worked slug for session-scoped Stop hook reminders.
 		try {
 			const slug = readActive(ev.cwd!);
@@ -135,9 +139,15 @@ async function handleBashResult(
 		}
 	}
 
-	// On Bash success: check for git commit → living-spec, drift, wave completion.
+	// On Bash success: auto-check tasks + check for git commit.
 	if (response.exitCode === 0) {
 		const stdout = response.stdout ?? "";
+		// Auto-check tasks from Bash output (command + stdout).
+		const commandStr =
+			typeof ev.tool_input === "object" && ev.tool_input !== null
+				? ((ev.tool_input as { command?: string }).command ?? "")
+				: "";
+		autoCheckTasks(ev.cwd!, `${stdout}\n${commandStr}`, items);
 
 		if (isGitCommit(stdout) && !signal.aborted) {
 			// FR-2 (feedback-metrics): Track first commit for cycle time breakdown.
@@ -205,6 +215,83 @@ async function searchErrorContext(
 	}
 }
 
+
+/**
+ * Auto-check tasks.md checkboxes when implementation matches task descriptions.
+ * Uses file path matching for backtick-quoted paths + filename matching.
+ * NOTE: Does NOT emit unchecked count CONTEXT — that caused Claude to stall (#27).
+ */
+function autoCheckTasks(projectPath: string, context: string, items: DirectiveItem[]): void {
+	try {
+		const taskSlug = readActive(projectPath);
+		const sd = new SpecDir(projectPath, taskSlug);
+
+		let tasks: string;
+		try {
+			tasks = sd.readFile("tasks.md");
+		} catch {
+			return; // no tasks.md
+		}
+
+		const lines = tasks.split("\n");
+		let changed = false;
+
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i]!;
+			const match = line.match(/^- \[ \] (.+)$/);
+			if (!match) continue;
+
+			const description = match[1]!;
+			if (matchTaskDescription(description, context)) {
+				lines[i] = line.replace("- [ ]", "- [x]");
+				changed = true;
+			}
+		}
+
+		if (changed) {
+			const updatedContent = lines.join("\n");
+			sd.writeFile("tasks.md", updatedContent);
+			// Detect wave completion after auto-check.
+			const waveItems = detectWaveCompletion(projectPath, taskSlug, updatedContent);
+			items.push(...waveItems);
+		}
+		// #27 fix: Do NOT emit unchecked count CONTEXT here.
+		// Unchecked task nudges caused Claude to stall on large specs (14+ min bake).
+	} catch {
+		/* fail-open */
+	}
+}
+
+/**
+ * Match a task description against context (stdout/file path).
+ * Strategies:
+ * 1. Backtick-quoted paths in description matched against context
+ * 2. Filename matching (extension-bearing words matched against context)
+ */
+export function matchTaskDescription(description: string, context: string): boolean {
+	if (!context || !description) return false;
+	const lowerCtx = context.toLowerCase();
+
+	// Strategy 1: File path matching — extract backtick-quoted paths.
+	const backtickPaths = description.match(/`([^`]+\.[a-z]+)`/g);
+	if (backtickPaths) {
+		for (const quoted of backtickPaths) {
+			const path = quoted.slice(1, -1); // strip backticks
+			if (lowerCtx.includes(path.toLowerCase())) return true;
+		}
+	}
+
+	// Strategy 2: Filename matching — extract filenames with extensions.
+	const filenamePattern = /\b([\w.-]+\.[a-z]{1,4})\b/gi;
+	const filenames = [...description.matchAll(filenamePattern)]
+		.map((m) => m[1]!.toLowerCase())
+		.filter((f) => f.length > 4 && !f.startsWith(".")); // skip short/hidden files
+	for (const fname of filenames) {
+		if (lowerCtx.includes(fname)) return true;
+	}
+
+	return false;
+}
 
 /**
  * Detect wave completion after tasks.md update.
