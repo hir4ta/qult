@@ -426,24 +426,50 @@ export function dossierCheck(projectPath: string, params: DossierParams) {
 			return errorResult(`task_id "${taskId}" not found: Closing Wave has only ${closingIndex} item(s)`);
 		}
 	} else {
-		// Standard T-N.N format: match by text inclusion.
-		for (let i = 0; i < lines.length; i++) {
-			const line = lines[i]!;
-			if (line.match(/^- \[ \] /) && line.toLowerCase().includes(taskIdLower)) {
-				lines[i] = line.replace("- [ ]", "- [x]");
-				checked = true;
-				break;
+		// Standard T-N.N format: match by text inclusion in checkbox line.
+		// Also supports T-N.R: find `### T-N.R` header → check the first checkbox below it.
+		const reviewHeaderMatch = taskId.match(/^T-\d+\.R$/i);
+		if (reviewHeaderMatch) {
+			const headerPattern = new RegExp(`^###\\s+${taskId.replace(".", "\\.")}\\b`, "i");
+			let foundHeader = false;
+			for (let i = 0; i < lines.length; i++) {
+				const line = lines[i]!;
+				if (headerPattern.test(line)) {
+					foundHeader = true;
+					continue;
+				}
+				if (foundHeader && /^- \[ \] /.test(line)) {
+					lines[i] = line.replace("- [ ]", "- [x]");
+					checked = true;
+					break;
+				}
+				if (foundHeader && /^- \[[xX]\] /.test(line)) {
+					return jsonResult({ task_id: taskId, status: "already_checked" });
+				}
+				if (foundHeader && /^##[# ]/.test(line)) break; // Left section
 			}
-		}
+			if (!checked && !foundHeader) {
+				return errorResult(`task_id "${taskId}" not found in tasks.md`);
+			}
+		} else {
+			for (let i = 0; i < lines.length; i++) {
+				const line = lines[i]!;
+				if (line.match(/^- \[ \] /) && line.toLowerCase().includes(taskIdLower)) {
+					lines[i] = line.replace("- [ ]", "- [x]");
+					checked = true;
+					break;
+				}
+			}
 
-		if (!checked) {
-			const alreadyChecked = lines.some(
-				(l) => /^- \[[xX]\] /.test(l) && l.toLowerCase().includes(taskIdLower),
-			);
-			if (alreadyChecked) {
-				return jsonResult({ task_id: taskId, status: "already_checked" });
+			if (!checked) {
+				const alreadyChecked = lines.some(
+					(l) => /^- \[[xX]\] /.test(l) && l.toLowerCase().includes(taskIdLower),
+				);
+				if (alreadyChecked) {
+					return jsonResult({ task_id: taskId, status: "already_checked" });
+				}
+				return errorResult(`task_id "${taskId}" not found in tasks.md`);
 			}
-			return errorResult(`task_id "${taskId}" not found in tasks.md`);
 		}
 	}
 
