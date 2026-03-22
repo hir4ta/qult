@@ -144,16 +144,16 @@ export function ReviewPanel({
 										{/* Code line */}
 										<div
 											className={cn(
-												"flex group text-xs leading-5",
+												"flex group text-xs leading-5 cursor-pointer",
 												(inSelection || isSingleSel) && "bg-[#ddf4ff] dark:bg-[#1a3a4a]",
 												!inSelection && !isSingleSel && hasComment && "bg-[#fff8e1] dark:bg-[#2a2518]",
 												!inSelection && !isSingleSel && !hasComment && "hover:bg-[#f6f8fa] dark:hover:bg-[#161b22]",
 											)}
+											onClick={(e) => isPending && handleLineClick(lineNum, e.shiftKey)}
 										>
 											{/* Gutter: line number + add button */}
 											<div
-												className="w-12 shrink-0 flex items-center justify-end pr-2 select-none cursor-pointer border-r border-border/20 relative"
-												onClick={(e) => handleLineClick(lineNum, e.shiftKey)}
+												className="w-12 shrink-0 flex items-center justify-end pr-2 select-none border-r border-border/20 relative"
 											>
 												{isPending && (
 													<span className="absolute left-1 opacity-0 group-hover:opacity-100 text-blue-500 text-[10px] font-bold">

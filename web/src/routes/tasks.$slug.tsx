@@ -58,11 +58,11 @@ function TaskDetailPage() {
 			queryClient.invalidateQueries({ queryKey: ["tasks"] });
 			setAllComments([]);
 			if (status === "approved") {
-				toast("承認しました", "Claude Code に戻って実装を開始してください。", "success");
+				toast(t("toast.approved"), t("toast.approved.desc"), "success");
 			} else {
 				toast(
-					"修正を依頼しました",
-					`${allComments.length} 件のコメントを送信しました。Claude Code で「レビューコメントに対応して」と伝えてください。`,
+					t("toast.changesRequested"),
+					`${allComments.length} ${t("toast.changesRequested.desc")}`,
 				);
 			}
 		},

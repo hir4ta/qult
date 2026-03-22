@@ -257,6 +257,11 @@ export const translations = {
 	"knowledge.gaps.query": { en: "Query", ja: "クエリ" },
 	"knowledge.gaps.score": { en: "Score", ja: "スコア" },
 	"knowledge.sort.verificationDue": { en: "Verification Due", ja: "検証期限順" },
+	// Toast messages
+	"toast.approved": { en: "Approved", ja: "承認しました" },
+	"toast.approved.desc": { en: "Go back to Claude Code to start implementation.", ja: "Claude Code に戻って実装を開始してください。" },
+	"toast.changesRequested": { en: "Changes requested", ja: "修正を依頼しました" },
+	"toast.changesRequested.desc": { en: "comments sent. Tell Claude Code: \"Address the review comments\".", ja: "件のコメントを送信しました。Claude Code で「レビューコメントに対応して」と伝えてください。" },
 } as const;
 
 export type TranslationKey = keyof typeof translations;
