@@ -50,11 +50,6 @@ function KnowledgePage() {
 
 	return (
 		<div className="space-y-5">
-			{/* Gaps section */}
-			{(gapsData?.entries?.length ?? 0) > 0 && (
-				<GapsSection entries={gapsData!.entries} />
-			)}
-
 			{/* Stats + View Switcher */}
 			<div className="flex items-center justify-between">
 				<ViewSwitcher current={viewMode} onChange={setViewMode} />
@@ -134,6 +129,11 @@ function KnowledgePage() {
 						</>
 					);
 				})()}
+
+			{/* Gaps section */}
+			{(gapsData?.entries?.length ?? 0) > 0 && (
+				<GapsSection entries={gapsData!.entries} />
+			)}
 
 			{/* Detail drawer */}
 			<DetailDrawer
