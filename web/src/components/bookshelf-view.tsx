@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ButlerEmpty } from "@/components/butler-empty";
 import { VerificationBadge } from "@/components/verification-badge";
 import type { KnowledgeEntry } from "@/lib/types";
-import { SUB_TYPE_COLORS } from "@/lib/types";
 import { formatLabel } from "@/lib/format";
 
 const SPINE_W = 56;
@@ -12,13 +11,25 @@ const PAD = 16;
 // Height variation by type — creates visual rhythm on the shelf
 const HEIGHTS: Record<string, number> = { rule: 240, decision: 270, pattern: 220, snapshot: 200 };
 
-// Slightly darker shades for the spine edge
-const EDGE_COLORS: Record<string, string> = {
-	rule: "#c06a18",
-	decision: "#4d6b33",
-	pattern: "#227060",
-	snapshot: "#5d5244",
-};
+// Brand color palette — assigned by entry id hash for variety
+const BRAND_COLORS = [
+	"#40513b", // session (dark green)
+	"#628141", // decision (mid green)
+	"#2d8b7a", // pattern (teal)
+	"#e67e22", // rule (orange)
+	"#7b6b8d", // purple
+	"#44403c", // dark stone
+	"#532300", // deep brown
+	"#1b247f", // deep blue
+];
+
+// Darken a hex color for the spine edge
+function darken(hex: string): string {
+	const r = Math.max(0, parseInt(hex.slice(1, 3), 16) - 30);
+	const g = Math.max(0, parseInt(hex.slice(3, 5), 16) - 30);
+	const b = Math.max(0, parseInt(hex.slice(5, 7), 16) - 30);
+	return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+}
 
 function splitShelves(entries: KnowledgeEntry[], perShelf: number): KnowledgeEntry[][] {
 	const out: KnowledgeEntry[][] = [];
@@ -27,11 +38,10 @@ function splitShelves(entries: KnowledgeEntry[], perShelf: number): KnowledgeEnt
 }
 
 function BookSpine({ entry, onClick }: { entry: KnowledgeEntry; onClick: () => void }) {
-	const color = SUB_TYPE_COLORS[entry.sub_type as keyof typeof SUB_TYPE_COLORS] ?? "#44403c";
-	const edge = EDGE_COLORS[entry.sub_type] ?? "#333";
+	const color = BRAND_COLORS[entry.id % BRAND_COLORS.length]!;
+	const edge = darken(color);
 	const h = HEIGHTS[entry.sub_type] ?? 210;
 	const { title } = formatLabel(entry.label);
-	// Width varies slightly with content length for organic feel
 	const w = entry.content.length > 300 ? 64 : entry.content.length > 100 ? 56 : 48;
 	const label = title.length > 16 ? `${title.slice(0, 16)}…` : title;
 
@@ -39,7 +49,7 @@ function BookSpine({ entry, onClick }: { entry: KnowledgeEntry; onClick: () => v
 		<button
 			type="button"
 			onClick={onClick}
-			className="relative flex flex-col items-center justify-between rounded-[2px] cursor-pointer shrink-0 group focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
+			className="relative flex flex-col items-center justify-between rounded-[2px] cursor-pointer shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
 			style={{
 				width: w,
 				height: h,
@@ -100,9 +110,9 @@ function BookSpine({ entry, onClick }: { entry: KnowledgeEntry; onClick: () => v
 function Shelf({ entries, onSelect }: { entries: KnowledgeEntry[]; onSelect: (e: KnowledgeEntry) => void }) {
 	return (
 		<div className="relative">
-			{/* Books — bottom-aligned */}
+			{/* Books — bottom-aligned, top padding so hover doesn't clip */}
 			<div
-				className="flex items-end gap-[3px] overflow-x-auto px-3 pb-0"
+				className="flex items-end gap-[3px] overflow-x-auto px-3 pt-8 pb-0"
 				style={{ scrollbarWidth: "none" }}
 			>
 				{entries.map((e) => (
@@ -110,7 +120,7 @@ function Shelf({ entries, onSelect }: { entries: KnowledgeEntry[]; onSelect: (e:
 				))}
 			</div>
 
-			{/* Shelf plank — wood-like gradient */}
+			{/* Shelf plank */}
 			<div
 				className="h-3 relative z-10"
 				style={{
@@ -118,7 +128,6 @@ function Shelf({ entries, onSelect }: { entries: KnowledgeEntry[]; onSelect: (e:
 					boxShadow: "0 3px 10px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.05)",
 				}}
 			/>
-			{/* Shelf underside shadow */}
 			<div className="h-2 bg-gradient-to-b from-black/[0.04] to-transparent" />
 
 			{/* Mobile scroll fade */}
@@ -145,11 +154,15 @@ export function BookshelfView({ entries, onSelect }: { entries: KnowledgeEntry[]
 
 	if (entries.length === 0) return <ButlerEmpty scene="bookshelf" messageKey="empty.noMemories" />;
 
+	const shelves = splitShelves(entries, perShelf);
+
 	return (
-		<div ref={ref} className="space-y-4">
-			{splitShelves(entries, perShelf).map((shelf, i) => (
-				<Shelf key={i} entries={shelf} onSelect={onSelect} />
-			))}
+		<div ref={ref} className="flex flex-col items-center justify-center min-h-[50vh]">
+			<div className="w-full space-y-4">
+				{shelves.map((shelf, i) => (
+					<Shelf key={i} entries={shelf} onSelect={onSelect} />
+				))}
+			</div>
 		</div>
 	);
 }
