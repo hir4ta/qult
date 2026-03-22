@@ -21,24 +21,24 @@ function ActivityPage() {
 	);
 
 	return (
-		<div className="space-y-6">
+		<div className="flex flex-col gap-6 h-[calc(100vh-8rem)]">
 			<h1
-				className="text-2xl font-bold tracking-tight"
+				className="text-2xl font-bold tracking-tight shrink-0"
 				style={{ fontFamily: "var(--font-display)" }}
 			>
 				{t("activity.title")}
 			</h1>
 
 			{hasMetrics ? (
-				<>
+				<div className="shrink-0 space-y-6">
 					<SummaryCards analytics={analytics!} />
 					<div className="grid gap-6 lg:grid-cols-2">
 						<ReworkChart analytics={analytics!} />
 						<CycleTimeChart analytics={analytics!} />
 					</div>
-				</>
+				</div>
 			) : (
-				<div className="flex flex-col items-center justify-center py-16 text-center">
+				<div className="flex flex-col items-center justify-center py-12 text-center shrink-0">
 					<p className="text-lg font-medium text-muted-foreground" style={{ fontFamily: "var(--font-display)" }}>
 						{t("activity.empty.title")}
 					</p>
@@ -113,13 +113,12 @@ function ReworkChart({ analytics }: { analytics: AnalyticsResponse }) {
 				{analytics.reworkRates.map((r) => {
 					const pct = Math.round(r.reworkRate * 100);
 					const width = Math.max((r.reworkRate / maxRate) * 100, 2);
-					const slug = r.slug.length > 20 ? `${r.slug.slice(0, 18)}..` : r.slug;
 					return (
-						<div key={r.slug} className="flex items-center gap-2">
-							<span className="text-[10px] font-mono text-muted-foreground w-24 shrink-0 truncate">{slug}</span>
+						<div key={r.slug} className="flex items-center gap-3">
+							<span className="text-[10px] font-mono text-muted-foreground w-32 shrink-0 truncate" title={r.slug}>{r.slug}</span>
 							<div className="flex-1 h-5 bg-muted/30 rounded overflow-hidden">
 								<div
-									className="h-full rounded transition-all duration-300"
+									className="h-full rounded"
 									style={{
 										width: `${width}%`,
 										backgroundColor: r.pending ? "#e67e22" : "#2d8b7a",
@@ -127,7 +126,7 @@ function ReworkChart({ analytics }: { analytics: AnalyticsResponse }) {
 									}}
 								/>
 							</div>
-							<span className="text-[10px] font-mono w-8 text-right">{pct}%</span>
+							<span className="text-[10px] font-mono w-8 text-right shrink-0">{pct}%</span>
 						</div>
 					);
 				})}
@@ -158,35 +157,34 @@ function CycleTimeChart({ analytics }: { analytics: AnalyticsResponse }) {
 			<h3 className="text-sm font-semibold mb-3">{t("activity.cycleTime.title")}</h3>
 			<div className="space-y-2">
 				{analytics.cycleTimeBreakdown.map((r) => {
-					const slug = r.slug.length > 20 ? `${r.slug.slice(0, 18)}..` : r.slug;
 					const p = r.phases;
 					const planW = ((p.planning ?? 0) / maxTotal) * 100;
 					const apprW = ((p.approvalWait ?? 0) / maxTotal) * 100;
 					const implW = ((p.implementation ?? 0) / maxTotal) * 100;
 					return (
-						<div key={r.slug} className="flex items-center gap-2">
-							<span className="text-[10px] font-mono text-muted-foreground w-24 shrink-0 truncate">{slug}</span>
+						<div key={r.slug} className="flex items-center gap-3">
+							<span className="text-[10px] font-mono text-muted-foreground w-32 shrink-0 truncate" title={r.slug}>{r.slug}</span>
 							<div className="flex-1 h-5 bg-muted/30 rounded overflow-hidden flex">
 								{planW > 0 && (
-									<div className="h-full" style={{ width: `${planW}%`, backgroundColor: PHASE_COLORS.planning }} title={`${t("activity.cycleTime.planning")}: ${p.planning}d`} />
+									<div className="h-full" style={{ width: `${planW}%`, backgroundColor: PHASE_COLORS.planning }} title={`${t("activity.cycleTime.planning")}: ${p.planning?.toFixed(1)}d`} />
 								)}
 								{apprW > 0 && (
-									<div className="h-full" style={{ width: `${apprW}%`, backgroundColor: PHASE_COLORS.approval }} title={`${t("activity.cycleTime.approval")}: ${p.approvalWait}d`} />
+									<div className="h-full" style={{ width: `${apprW}%`, backgroundColor: PHASE_COLORS.approval }} title={`${t("activity.cycleTime.approval")}: ${p.approvalWait?.toFixed(1)}d`} />
 								)}
 								{implW > 0 && (
-									<div className="h-full" style={{ width: `${implW}%`, backgroundColor: PHASE_COLORS.implementation }} title={`${t("activity.cycleTime.implementation")}: ${p.implementation}d`} />
+									<div className="h-full" style={{ width: `${implW}%`, backgroundColor: PHASE_COLORS.implementation }} title={`${t("activity.cycleTime.implementation")}: ${p.implementation?.toFixed(1)}d`} />
 								)}
 							</div>
-							<span className="text-[10px] font-mono w-8 text-right">{p.total.toFixed(1)}d</span>
+							<span className="text-[10px] font-mono w-12 text-right shrink-0">{p.total.toFixed(1)}d</span>
 						</div>
 					);
 				})}
 			</div>
 			<div className="flex gap-4 mt-3">
-				{Object.entries(PHASE_COLORS).map(([key, color]) => (
+				{(["planning", "approval", "implementation"] as const).map((key) => (
 					<span key={key} className="flex items-center gap-1 text-[10px] text-muted-foreground">
-						<span className="size-2 rounded-sm" style={{ backgroundColor: color }} />
-						{t(`activity.cycleTime.${key === "approval" ? "approval" : key}` as "activity.cycleTime.planning")}
+						<span className="size-2 rounded-sm" style={{ backgroundColor: PHASE_COLORS[key] }} />
+						{t(`activity.cycleTime.${key}` as "activity.cycleTime.planning")}
 					</span>
 				))}
 			</div>
@@ -194,7 +192,16 @@ function CycleTimeChart({ analytics }: { analytics: AnalyticsResponse }) {
 	);
 }
 
-// --- Audit Log Table ---
+// --- Audit Log Table (sticky header, scrollable body) ---
+
+interface AuditEntry {
+	timestamp: string;
+	action: string;
+	target: string;
+	detail: string;
+	actor: string;
+	project_name?: string;
+}
 
 function AuditLogTable({
 	entries,
@@ -202,7 +209,7 @@ function AuditLogTable({
 	page,
 	onPageChange,
 }: {
-	entries: Array<{ timestamp: string; event: string; slug: string; actor: string; detail: string }>;
+	entries: AuditEntry[];
 	total: number;
 	page: number;
 	onPageChange: (p: number) => void;
@@ -211,64 +218,100 @@ function AuditLogTable({
 	const totalPages = Math.ceil(total / 50);
 
 	return (
-		<div className="rounded-organic border border-border/60 bg-card py-4 px-4">
-			<h3 className="text-sm font-semibold mb-3">{t("activity.log.title")}</h3>
-			{entries.length === 0 ? (
-				<p className="text-sm text-muted-foreground py-4 text-center">{t("activity.noMetrics")}</p>
-			) : (
-				<>
-					<div className="overflow-x-auto">
-						<table className="w-full text-sm">
-							<thead>
-								<tr className="border-b border-border/40 text-left text-[11px] text-muted-foreground uppercase tracking-wider">
-									<th className="py-2 pr-3">{t("activity.log.time")}</th>
-									<th className="py-2 pr-3">{t("activity.log.event")}</th>
-									<th className="py-2 pr-3">{t("activity.log.slug")}</th>
-									<th className="py-2 pr-3">{t("activity.log.actor")}</th>
-									<th className="py-2">{t("activity.log.detail")}</th>
-								</tr>
-							</thead>
-							<tbody>
-								{entries.map((e, i) => (
-									<tr key={i} className="border-b border-border/20 last:border-0">
-										<td className="py-1.5 pr-3 text-[11px] text-muted-foreground font-mono whitespace-nowrap">
-											{new Date(e.timestamp).toLocaleString()}
-										</td>
-										<td className="py-1.5 pr-3 font-mono text-[11px]">{e.event}</td>
-										<td className="py-1.5 pr-3 font-mono text-[11px]">{e.slug}</td>
-										<td className="py-1.5 pr-3 text-[11px]">{e.actor}</td>
-										<td className="py-1.5 text-[11px] text-muted-foreground max-w-[200px] truncate">{e.detail}</td>
-									</tr>
-								))}
-							</tbody>
-						</table>
+		<div className="rounded-organic border border-border/60 bg-card flex flex-col min-h-0 flex-1">
+			<div className="flex items-center justify-between py-3 px-4 border-b border-border/30 shrink-0">
+				<h3 className="text-sm font-semibold">{t("activity.log.title")}</h3>
+				{totalPages > 1 && (
+					<div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+						<span>{total} {t("activity.log.entries")}</span>
+						<button
+							type="button"
+							disabled={page === 0}
+							onClick={() => onPageChange(page - 1)}
+							className="px-2 py-0.5 rounded border border-border/40 disabled:opacity-30"
+						>
+							{t("activity.log.prev")}
+						</button>
+						<span>{page + 1}/{totalPages}</span>
+						<button
+							type="button"
+							disabled={page >= totalPages - 1}
+							onClick={() => onPageChange(page + 1)}
+							className="px-2 py-0.5 rounded border border-border/40 disabled:opacity-30"
+						>
+							{t("activity.log.next")}
+						</button>
 					</div>
-					{totalPages > 1 && (
-						<div className="flex items-center justify-between mt-3 text-[11px] text-muted-foreground">
-							<span>{total} {t("activity.log.entries")}</span>
-							<div className="flex gap-2">
-								<button
-									type="button"
-									disabled={page === 0}
-									onClick={() => onPageChange(page - 1)}
-									className="px-2 py-0.5 rounded border border-border/40 disabled:opacity-30"
-								>
-									{t("activity.log.prev")}
-								</button>
-								<span>{page + 1} / {totalPages}</span>
-								<button
-									type="button"
-									disabled={page >= totalPages - 1}
-									onClick={() => onPageChange(page + 1)}
-									className="px-2 py-0.5 rounded border border-border/40 disabled:opacity-30"
-								>
-									{t("activity.log.next")}
-								</button>
-							</div>
-						</div>
-					)}
-				</>
+				)}
+			</div>
+			{entries.length === 0 ? (
+				<p className="text-sm text-muted-foreground py-8 text-center">{t("activity.noMetrics")}</p>
+			) : (
+				<div className="overflow-auto flex-1 min-h-0">
+					<table className="w-full text-sm">
+						<thead className="sticky top-0 bg-card z-10">
+							<tr className="border-b border-border/40 text-left text-[11px] text-muted-foreground uppercase tracking-wider">
+								<th className="py-2 px-4 whitespace-nowrap">{t("activity.log.time")}</th>
+								<th className="py-2 pr-3 whitespace-nowrap">{t("activity.log.event")}</th>
+								<th className="py-2 pr-3 whitespace-nowrap">{t("activity.log.slug")}</th>
+								<th className="py-2 pr-3 whitespace-nowrap">{t("activity.log.actor")}</th>
+								<th className="py-2 pr-4">{t("activity.log.detail")}</th>
+							</tr>
+						</thead>
+						<tbody>
+							{entries.map((e, i) => (
+								<tr key={i} className="border-b border-border/10 last:border-0 hover:bg-muted/20">
+									<td className="py-1.5 px-4 text-[11px] text-muted-foreground font-mono whitespace-nowrap">
+										{formatTimestamp(e.timestamp)}
+									</td>
+									<td className="py-1.5 pr-3">
+										<EventBadge event={e.action} />
+									</td>
+									<td className="py-1.5 pr-3 font-mono text-[11px]">{e.target}</td>
+									<td className="py-1.5 pr-3 text-[11px] text-muted-foreground">{e.actor}</td>
+									<td className="py-1.5 pr-4 text-[11px] text-muted-foreground max-w-[300px] truncate" title={e.detail}>{e.detail}</td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+				</div>
 			)}
 		</div>
 	);
+}
+
+// --- Event Badge ---
+
+const EVENT_COLORS: Record<string, { bg: string; text: string }> = {
+	"spec.init": { bg: "#40513b20", text: "#40513b" },
+	"spec.complete": { bg: "#62814120", text: "#628141" },
+	"review.submit": { bg: "#2d8b7a20", text: "#2d8b7a" },
+	"gate.set": { bg: "#e67e2220", text: "#e67e22" },
+	"gate.clear": { bg: "#62814120", text: "#628141" },
+	"gate.fix": { bg: "#e67e2220", text: "#e67e22" },
+	"first_commit": { bg: "#7b6b8d20", text: "#7b6b8d" },
+	"task.status_change": { bg: "#44403c15", text: "#44403c" },
+	"living-spec.update": { bg: "#2d8b7a15", text: "#2d8b7a" },
+	"rework.checked": { bg: "#c0392b20", text: "#c0392b" },
+};
+
+function EventBadge({ event }: { event: string }) {
+	const colors = EVENT_COLORS[event] ?? { bg: "#44403c10", text: "#44403c" };
+	return (
+		<span
+			className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium font-mono whitespace-nowrap"
+			style={{ backgroundColor: colors.bg, color: colors.text }}
+		>
+			{event}
+		</span>
+	);
+}
+
+function formatTimestamp(ts: string): string {
+	const d = new Date(ts);
+	const month = String(d.getMonth() + 1).padStart(2, "0");
+	const day = String(d.getDate()).padStart(2, "0");
+	const hours = String(d.getHours()).padStart(2, "0");
+	const mins = String(d.getMinutes()).padStart(2, "0");
+	return `${month}/${day} ${hours}:${mins}`;
 }

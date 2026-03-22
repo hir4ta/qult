@@ -200,10 +200,11 @@ export interface AnalyticsResponse {
 
 export interface ActivityLogEntry {
 	timestamp: string;
-	event: string;
-	slug: string;
-	actor: string;
+	action: string;
+	target: string;
 	detail: string;
+	actor: string;
+	project_name?: string;
 }
 
 export const analyticsQueryOptions = (projectId?: string) =>
