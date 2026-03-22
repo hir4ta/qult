@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { CheckSquare, MessageSquare, Square } from "@animated-color-icons/lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { reviewHistoryQueryOptions } from "@/lib/api";
@@ -66,34 +66,32 @@ export function ReviewPanel({
 		return resolvedOverrides.get(key) ?? comment.resolved ?? false;
 	};
 
-	// Line click: single click = start, shift+click = extend range
-	const handleLineClick = useCallback((lineNum: number, shiftKey: boolean) => {
+	// Line click: single click = start, shift+click = extend range (no useCallback to avoid stale closures)
+	const handleLineClick = (lineNum: number, shiftKey: boolean) => {
 		if (!isPending) return;
 		if (shiftKey && selStart !== null) {
-			// Extend selection
 			setSelEnd(lineNum);
 		} else {
-			// New selection
 			setSelStart(lineNum);
 			setSelEnd(null);
 			setCommentDraft("");
 		}
 		setTimeout(() => textareaRef.current?.focus(), 50);
-	}, [isPending, selStart]);
+	};
 
-	const cancelSelection = useCallback(() => {
+	const cancelSelection = () => {
 		setSelStart(null);
 		setSelEnd(null);
 		setCommentDraft("");
-	}, []);
+	};
 
-	const submitComment = useCallback(() => {
+	const submitComment = () => {
 		if (!commentDraft.trim() || selStart === null || !onAddComment) return;
 		const startLine = selEnd !== null ? Math.min(selStart, selEnd) : selStart;
 		const endLine = selEnd !== null ? Math.max(selStart, selEnd) : undefined;
 		onAddComment(startLine, commentDraft.trim(), endLine !== startLine ? endLine : undefined);
 		cancelSelection();
-	}, [commentDraft, selStart, selEnd, onAddComment, cancelSelection]);
+	};
 
 	// Compute which lines are in the active selection
 	const selMin = selStart !== null && selEnd !== null ? Math.min(selStart, selEnd) : selStart;
