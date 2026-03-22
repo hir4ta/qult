@@ -34,7 +34,7 @@ export function KnowledgeListView({
 						type="button"
 						onClick={() => onSelect(entry)}
 						className={cn(
-							"flex items-center gap-3 w-full h-10 px-3 rounded-lg border border-transparent text-left transition-colors hover:bg-accent/50",
+							"flex items-center gap-3 w-full h-10 px-3 rounded-organic border border-transparent text-left transition-colors hover:bg-accent/50",
 							!entry.enabled && "opacity-60",
 						)}
 					>

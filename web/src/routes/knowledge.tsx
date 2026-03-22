@@ -34,7 +34,8 @@ export const Route = createFileRoute("/knowledge")({
 function KnowledgePage() {
 	const [selected, setSelected] = useState<KnowledgeEntry | null>(null);
 	const [page, setPage] = useState(1);
-	const [viewMode, setViewMode] = useViewMode("knowledge", "card");
+	const [viewMode, setViewModeRaw] = useViewMode("knowledge", "card");
+	const setViewMode = (mode: "list" | "card") => { setViewModeRaw(mode); setPage(1); };
 
 	const search = useSearch({ strict: false }) as { project?: string };
 	const projectId = search.project;

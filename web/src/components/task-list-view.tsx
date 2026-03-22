@@ -41,7 +41,7 @@ export function TaskListView({
 						params={{ slug: task.slug }}
 						search={projectId ? { project: projectId } : {}}
 						className={cn(
-							"flex items-center gap-3 h-10 px-3 rounded-lg border border-transparent transition-colors hover:bg-accent/50",
+							"flex items-center gap-3 h-10 px-3 rounded-organic border border-transparent transition-colors hover:bg-accent/50",
 							task.slug === selectedSlug && "border-border bg-accent/30",
 							isCompleted && "opacity-60",
 						)}
