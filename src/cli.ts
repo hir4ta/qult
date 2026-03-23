@@ -141,6 +141,68 @@ const main = defineCommand({
 				);
 			},
 		}),
+		update: defineCommand({
+			meta: { description: "Update alfred to the latest version" },
+			async run() {
+				const { execFileSync } = await import("node:child_process");
+				const { writeFileSync, chmodSync, renameSync, unlinkSync } = await import("node:fs");
+				const { join } = await import("node:path");
+				const { homedir, platform, arch } = await import("node:os");
+
+				const REPO = "hir4ta/claude-alfred";
+				const current = await resolveVersion();
+
+				// Detect platform
+				const os = platform() === "darwin" ? "darwin" : "linux";
+				const cpu = arch() === "arm64" ? "arm64" : "x64";
+				const platformStr = `${os}-${cpu}`;
+
+				// Fetch latest version
+				console.log("Checking for updates...");
+				let latest: string;
+				try {
+					const resp = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
+					if (!resp.ok) throw new Error(`GitHub API: ${resp.status}`);
+					const data = (await resp.json()) as { tag_name: string };
+					latest = data.tag_name.replace(/^v/, "");
+				} catch (err) {
+					console.error(`Failed to check for updates: ${err}`);
+					process.exit(1);
+				}
+
+				if (current === latest) {
+					console.log(`alfred ${current} is already up to date.`);
+					return;
+				}
+
+				console.log(`Updating alfred ${current} → ${latest}...`);
+
+				// Download new binary
+				const url = `https://github.com/${REPO}/releases/download/v${latest}/alfred-${platformStr}`;
+				const installDir = join(homedir(), ".local", "bin");
+				const alfredPath = join(installDir, "alfred");
+				const tmpPath = `${alfredPath}.tmp`;
+
+				try {
+					const resp = await fetch(url);
+					if (!resp.ok) throw new Error(`Download failed: ${resp.status}`);
+					const buf = await resp.arrayBuffer();
+					writeFileSync(tmpPath, Buffer.from(buf));
+					chmodSync(tmpPath, 0o755);
+					// Atomic replace
+					try { unlinkSync(`${alfredPath}.bak`); } catch {}
+					try { renameSync(alfredPath, `${alfredPath}.bak`); } catch {}
+					renameSync(tmpPath, alfredPath);
+					try { unlinkSync(`${alfredPath}.bak`); } catch {}
+				} catch (err) {
+					try { unlinkSync(tmpPath); } catch {}
+					console.error(`Update failed: ${err}`);
+					process.exit(1);
+				}
+
+				console.log(`alfred updated to ${latest}.`);
+			},
+		}),
 		tui: defineCommand({
 			meta: { description: "Open TUI spec progress viewer" },
 			async run() {
