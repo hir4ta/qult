@@ -95,7 +95,7 @@ bun dist/cli.mjs version     # Show version
 - Plugin content source of truth: `content/` (hooks, mcp config). `plugin/` is git-tracked for marketplace distribution
 - MCP tools return structured JSON
 - MCP server version: dynamically set from resolvedVersion() (not hardcoded)
-- **npm dependencies はゼロ** — bun:sqlite (built-in) を使用、他のライブラリは全て devDependencies に書き tsdown でバンドル。ユーザーの `bun install` 時に追加ダウンロードを最小化するため
+- **dependencies はゼロ** — bun:sqlite (built-in) を使用、他のライブラリは全て devDependencies に書き tsdown でバンドル
 
 ### Configuration & API
 

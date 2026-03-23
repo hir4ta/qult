@@ -19,7 +19,7 @@ tasks:
     desc: Start Vite dev server (use with ALFRED_DEV=1 alfred dashboard)
     dir: "{{.WEB_DIR}}"
     cmds:
-      - npm run dev
+      - bun run dev
 
   dashboard:
     desc: Open web dashboard (localhost:7575)
@@ -62,7 +62,7 @@ tasks:
     desc: Build React SPA
     dir: "{{.WEB_DIR}}"
     cmds:
-      - npm run build
+      - bun run build
     sources:
       - src/**/*
       - index.html

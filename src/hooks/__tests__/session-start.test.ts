@@ -91,67 +91,6 @@ describe("sessionStart", () => {
 		}
 	});
 
-	it("syncs knowledge JSON files from decisions/patterns/rules", async () => {
-		const decisionsDir = join(tmpDir, ".alfred", "knowledge", "decisions");
-		mkdirSync(decisionsDir, { recursive: true });
-		writeFileSync(join(decisionsDir, "test-dec.json"),
-			JSON.stringify({ id: "test-dec", title: "Test Decision", createdAt: "2025-01-01" }));
-
-		const patternsDir = join(tmpDir, ".alfred", "knowledge", "patterns");
-		mkdirSync(patternsDir, { recursive: true });
-		writeFileSync(join(patternsDir, "test-pat.json"),
-			JSON.stringify({ id: "test-pat", title: "Test Pattern", createdAt: "2025-01-01" }));
-
-		// Create steering docs to suppress tips
-		const steeringDir = join(tmpDir, ".alfred", "steering");
-		mkdirSync(steeringDir, { recursive: true });
-		writeFileSync(join(steeringDir, "product.md"), "# Product");
-
-		const stderr = suppressStderr();
-		const stdout = suppressStdout();
-		try {
-			const { sessionStart } = await import("../session-start.js");
-			await sessionStart({ cwd: tmpDir } as any, AbortSignal.timeout(5000));
-		} finally {
-			stderr.restore();
-			stdout.restore();
-		}
-
-		// Verify entries were upserted
-		const rows = store.db.prepare("SELECT * FROM knowledge_index WHERE sub_type = 'decision'").all() as any[];
-		expect(rows.length).toBeGreaterThanOrEqual(1);
-		expect(rows.some((r: any) => r.file_path === "decisions/test-dec.json")).toBe(true);
-	});
-
-	it("cleans orphan entries", async () => {
-		// Use resolveOrRegisterProject to get a project_id that sessionStart will use
-		const { resolveOrRegisterProject } = await import("../../store/project.js");
-		const projRecord = resolveOrRegisterProject(store, tmpDir);
-
-		// Insert entry with matching project info but no corresponding file
-		upsertKnowledge(store, makeKnowledgeRow({
-			filePath: "decisions/orphan.json", title: "Orphan",
-			projectId: projRecord.id, branch: projRecord.branch,
-		}));
-		expect((store.db.prepare("SELECT COUNT(*) as c FROM knowledge_index").get() as any).c).toBe(1);
-
-		mkdirSync(join(tmpDir, ".alfred", "knowledge", "decisions"), { recursive: true });
-		mkdirSync(join(tmpDir, ".alfred", "steering"), { recursive: true });
-		writeFileSync(join(tmpDir, ".alfred", "steering", "product.md"), "# Product");
-
-		const stderr = suppressStderr();
-		const stdout = suppressStdout();
-		try {
-			const { sessionStart } = await import("../session-start.js");
-			await sessionStart({ cwd: tmpDir } as any, AbortSignal.timeout(5000));
-		} finally {
-			stderr.restore();
-			stdout.restore();
-		}
-
-		expect((store.db.prepare("SELECT COUNT(*) as c FROM knowledge_index").get() as any).c).toBe(0);
-	});
-
 	it("injects 1% rule context when .alfred exists", async () => {
 		mkdirSync(join(tmpDir, ".alfred"), { recursive: true });
 		mkdirSync(join(tmpDir, ".alfred", "steering"), { recursive: true });

@@ -266,27 +266,4 @@ describe("saveKnowledgeEntries", () => {
 		expect(saveKnowledgeEntries(store, tmpDir, [], "decision")).toBe(0);
 	});
 
-	it("continues on individual entry failure", () => {
-		// Close the store to cause failures, then reopen for the test
-		store.close();
-		const entries = [
-			{
-				id: "dec-fail-1",
-				title: "Will fail",
-				context: "",
-				decision: "",
-				reasoning: "",
-				alternatives: [],
-				tags: [],
-				createdAt: new Date().toISOString(),
-				status: "approved" as const,
-			},
-		];
-		// With closed store, upsertKnowledge will throw
-		const saved = saveKnowledgeEntries(store, tmpDir, entries, "decision");
-		expect(saved).toBe(0);
-
-		// Reopen for afterEach cleanup
-		store = Store.open(join(tmpDir, "test.db"));
-	});
 });

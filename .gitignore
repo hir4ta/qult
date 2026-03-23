@@ -1,9 +1,14 @@
 # Build output
 dist/
+dist/binaries/
 node_modules/
 web/dist/
 web/node_modules/
 .task/
+
+# Lock files (bun.lock is tracked; npm lock files are not)
+package-lock.json
+web/package-lock.json
 
 # Database
 *.db

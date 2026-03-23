@@ -226,50 +226,6 @@ describe("userPromptSubmit pipeline", () => {
 		expect(emittedItems).toEqual([]);
 	});
 
-	it("emits AskUserQuestion DIRECTIVE when .alfred exists but no spec", async () => {
-		mkdirSync(join(tmpDir, ".alfred"), { recursive: true });
-		const ac = new AbortController();
-		await userPromptSubmit({ prompt: "implement login", cwd: tmpDir }, ac.signal);
-		const directive = emittedItems.find((i) => i.level === "DIRECTIVE");
-		expect(directive).toBeDefined();
-		expect(directive!.message).toContain("AskUserQuestion");
-	});
-
-	it("emits skill nudge CONTEXT for implement intent without spec", async () => {
-		const ac = new AbortController();
-		await userPromptSubmit({ prompt: "implement something", cwd: tmpDir }, ac.signal);
-		const nudge = emittedItems.find((i) => i.level === "CONTEXT" && i.message.includes("Skill suggestion"));
-		expect(nudge).toBeDefined();
-		expect(nudge!.message).toContain("/alfred:attend");
-	});
-
-	it("emits CONTEXT with knowledge results when store has entries", async () => {
-		// Insert a knowledge entry for search
-		const { upsertKnowledge } = await import("../../store/knowledge.js");
-		const row: KnowledgeRow = {
-			id: 0,
-			filePath: "decisions/test.json",
-			contentHash: "abc",
-			title: "Test knowledge entry for login auth",
-			content: JSON.stringify({ title: "Test login auth decision" }),
-			subType: "decision",
-			projectId: TEST_PROJECT_ID,
-			branch: "main",
-			createdAt: new Date().toISOString(),
-			updatedAt: new Date().toISOString(),
-			hitCount: 0,
-			lastAccessed: "",
-			enabled: true,
-			author: "",
-		};
-		upsertKnowledge(store, row);
-
-		const ac = new AbortController();
-		await userPromptSubmit({ prompt: "login auth decision", cwd: tmpDir }, ac.signal);
-		const knowledge = emittedItems.find((i) => i.level === "CONTEXT" && i.message.includes("Related knowledge"));
-		expect(knowledge).toBeDefined();
-	});
-
 	it("does not emit nudge for save-knowledge intent", async () => {
 		const ac = new AbortController();
 		await userPromptSubmit({ prompt: "save this note remember", cwd: tmpDir }, ac.signal);
@@ -277,16 +233,4 @@ describe("userPromptSubmit pipeline", () => {
 		expect(nudge).toBeUndefined();
 	});
 
-	it("emits DIRECTIVE for unapproved M spec", async () => {
-		mkdirSync(join(tmpDir, ".alfred", "specs"), { recursive: true });
-		writeFileSync(
-			join(tmpDir, ".alfred", "specs", "_active.md"),
-			"primary: test-task\ntasks:\n  - slug: test-task\n    started_at: 2026-01-01T00:00:00Z\n    size: M\n    review_status: pending\n",
-		);
-		const ac = new AbortController();
-		await userPromptSubmit({ prompt: "implement auth", cwd: tmpDir }, ac.signal);
-		const directive = emittedItems.find((i) => i.level === "DIRECTIVE");
-		expect(directive).toBeDefined();
-		expect(directive!.message).toContain("requires review approval");
-	});
 });

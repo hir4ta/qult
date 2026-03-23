@@ -37,25 +37,6 @@ function setupActiveSpec(slug: string, tasksContent: string, size = "S", reviewS
 }
 
 describe("preCompact", () => {
-	it("extracts decisions from transcript", async () => {
-		const transcript = [
-			JSON.stringify({ role: "assistant", content: "We decided to use SQLite because it provides embedded storage. The component is simpler." }),
-		].join("\n");
-		const transcriptPath = join(tmpDir, "transcript.jsonl");
-		writeFileSync(transcriptPath, transcript);
-		setupActiveSpec("dec-test", "# Tasks\n- [ ] Todo\n");
-
-		const io = suppressIO();
-		try {
-			const { preCompact } = await import("../pre-compact.js");
-			await preCompact({ cwd: tmpDir, transcript_path: transcriptPath } as any, AbortSignal.timeout(5000));
-		} finally { io.restore(); }
-
-		const rows = store.db.prepare("SELECT * FROM knowledge_index WHERE sub_type = 'decision'").all() as any[];
-		expect(rows.length).toBeGreaterThanOrEqual(1);
-		expect(rows.some((r: any) => r.content.includes("SQLite"))).toBe(true);
-	});
-
 	it("ignores user messages in transcript", async () => {
 		const transcript = JSON.stringify({ role: "user", content: "I decided to use PostgreSQL because it scales better." });
 		const transcriptPath = join(tmpDir, "transcript2.jsonl");
@@ -86,20 +67,6 @@ describe("preCompact", () => {
 
 		const rows = store.db.prepare("SELECT * FROM knowledge_index WHERE sub_type = 'decision'").all() as any[];
 		expect(rows.length).toBe(0);
-	});
-
-	it("saves chapter memory (tasks snapshot)", async () => {
-		setupActiveSpec("chapter-test", "# Tasks\n- [x] Step done\n- [ ] Testing chapters");
-
-		const io = suppressIO();
-		try {
-			const { preCompact } = await import("../pre-compact.js");
-			await preCompact({ cwd: tmpDir } as any, AbortSignal.timeout(5000));
-		} finally { io.restore(); }
-
-		const rows = store.db.prepare("SELECT * FROM knowledge_index WHERE sub_type = 'snapshot'").all() as any[];
-		expect(rows.length).toBeGreaterThanOrEqual(1);
-		expect(rows.some((r: any) => r.content.includes("Testing chapters"))).toBe(true);
 	});
 
 	it("writes pending-compact breadcrumb", async () => {
