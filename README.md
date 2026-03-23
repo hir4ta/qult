@@ -147,18 +147,6 @@ Each entry tracks its author (via `git user.name`).
 | **M** | 4 | New endpoint, moderate refactor |
 | **L** | 5 | Architecture change, new subsystem |
 
-## Updating
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/hir4ta/claude-alfred/main/install.sh | bash
-```
-
-```
-/plugin update alfred              # skills, agents, rules (in Claude Code)
-```
-
-`alfred doctor` checks everything is in sync.
-
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -168,21 +156,28 @@ curl -fsSL https://raw.githubusercontent.com/hir4ta/claude-alfred/main/install.s
 | Hook not firing | `/plugin install alfred` + restart Claude Code |
 | Dashboard empty | Run from a directory with `.alfred/specs/`, or any directory for cross-project view |
 
-## Uninstalling
-
-In Claude Code:
-
-```
-/plugin    # select alfred → remove from marketplace (also removes the plugin)
-```
+## Updating
 
 ```bash
-npm uninstall -g claude-alfred
-rm -rf ~/.claude-alfred/                          # SQLite search index
-rm -f ~/.claude/rules/alfred.md                   # user rules
-rm -rf ~/.claude/plugins/cache/claude-alfred/      # plugin cache
-rm -rf .alfred/                                    # project specs, knowledge (per project)
+alfred update    # downloads latest binary from GitHub Releases
 ```
+
+```
+/plugin update alfred    # update skills, agents, rules (in Claude Code)
+```
+
+## Uninstalling
+
+```bash
+alfred uninstall    # removes binary, database, user rules, plugin cache
+```
+
+Then in Claude Code:
+```
+/plugin    # select alfred → remove from marketplace
+```
+
+Note: `.alfred/` directories in your projects (specs + knowledge) are preserved.
 
 ## License
 

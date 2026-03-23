@@ -144,7 +144,6 @@ const main = defineCommand({
 		update: defineCommand({
 			meta: { description: "Update alfred to the latest version" },
 			async run() {
-				const { execFileSync } = await import("node:child_process");
 				const { writeFileSync, chmodSync, renameSync, unlinkSync } = await import("node:fs");
 				const { join } = await import("node:path");
 				const { homedir, platform, arch } = await import("node:os");
@@ -168,6 +167,11 @@ const main = defineCommand({
 				} catch (err) {
 					console.error(`Failed to check for updates: ${err}`);
 					process.exit(1);
+				}
+
+				if (current === "dev") {
+					console.log("Running in dev mode — use `git pull` to update.");
+					return;
 				}
 
 				if (current === latest) {
@@ -201,6 +205,68 @@ const main = defineCommand({
 				}
 
 				console.log(`alfred updated to ${latest}.`);
+			},
+		}),
+		uninstall: defineCommand({
+			meta: { description: "Remove alfred from this system" },
+			async run() {
+				const { existsSync, rmSync, unlinkSync } = await import("node:fs");
+				const { join } = await import("node:path");
+				const { homedir } = await import("node:os");
+				const readline = await import("node:readline");
+				const home = homedir();
+
+				// Confirm
+				const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+				const answer = await new Promise<string>((resolve) => {
+					rl.question("Remove alfred binary, database, and user rules? [y/N] ", resolve);
+				});
+				rl.close();
+				if (answer.toLowerCase() !== "y") {
+					console.log("Cancelled.");
+					return;
+				}
+
+				const removed: string[] = [];
+				const skip = (path: string) => console.log(`  skip: ${path} (not found)`);
+
+				// Binary
+				const binPath = join(home, ".local", "bin", "alfred");
+				if (existsSync(binPath)) {
+					unlinkSync(binPath);
+					removed.push(binPath);
+				} else skip(binPath);
+
+				// Database
+				const dbDir = join(home, ".claude-alfred");
+				if (existsSync(dbDir)) {
+					rmSync(dbDir, { recursive: true, force: true });
+					removed.push(dbDir);
+				} else skip(dbDir);
+
+				// User rules
+				const rulesDir = join(home, ".claude", "rules");
+				for (const rule of ["alfred.md", "alfred-protocol.md"]) {
+					const p = join(rulesDir, rule);
+					if (existsSync(p)) {
+						unlinkSync(p);
+						removed.push(p);
+					}
+				}
+
+				// Plugin cache
+				const pluginCache = join(home, ".claude", "plugins", "cache", "claude-alfred");
+				if (existsSync(pluginCache)) {
+					rmSync(pluginCache, { recursive: true, force: true });
+					removed.push(pluginCache);
+				}
+
+				console.log("");
+				for (const p of removed) console.log(`  ✓ removed: ${p}`);
+				console.log("");
+				console.log("alfred uninstalled.");
+				console.log("Note: .alfred/ directories in your projects are preserved (specs + knowledge).");
+				console.log("To remove plugin from Claude Code: /plugin → select alfred → remove");
 			},
 		}),
 		tui: defineCommand({
