@@ -28,13 +28,13 @@ export function openDatabaseSync(dbPath: string): DbDatabase {
 			const stmt = db.prepare(sql);
 			return {
 				run(...params: unknown[]) {
-					return stmt.run(...params) as { changes: number; lastInsertRowid: number | bigint };
+					return stmt.run(...(params as any[])) as { changes: number; lastInsertRowid: number | bigint };
 				},
 				get(...params: unknown[]) {
-					return stmt.get(...params);
+					return stmt.get(...(params as any[]));
 				},
 				all(...params: unknown[]) {
-					return stmt.all(...params);
+					return stmt.all(...(params as any[]));
 				},
 			};
 		},
