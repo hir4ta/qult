@@ -22,7 +22,7 @@ export function createMCPServer(store: Store, emb: Embedder | null, version: str
 		"dossier",
 		`Unified spec management for development tasks. Persists context across compaction and sessions.
 
-Actions: status (read-only), init, update, switch, complete, delete (2-phase: preview then confirm=true), history, rollback, review, validate (read-only), gate (review gate management), check (mark task completed), defer (toggle deferred/resume), cancel.
+Actions: status (read-only), init, update, switch, complete, delete (2-phase: preview then confirm=true), validate (read-only), gate (review gate management), check (mark task completed), defer (toggle deferred/resume), cancel.
 
 task_slug format: lowercase alphanumeric with hyphens (e.g. "my-feature", max 64 chars).
 Size-based scaling: init accepts size (S/M/L) and spec_type (feature/bugfix). S=3 files, M=4 files, L=5 files.`,
@@ -35,9 +35,6 @@ Size-based scaling: init accepts size (S/M/L) and spec_type (feature/bugfix). S=
 					"switch",
 					"complete",
 					"delete",
-					"history",
-					"rollback",
-					"review",
 					"validate",
 					"gate",
 					"check",
@@ -60,12 +57,11 @@ Size-based scaling: init accepts size (S/M/L) and spec_type (feature/bugfix). S=
 					"bugfix.md",
 				])
 				.optional()
-				.describe("Spec file (for update/history/rollback)"),
+				.describe("Spec file (for update)"),
 			content: z.string().optional().describe("Content to write (for update)"),
 			mode: z.enum(["append", "replace"]).optional().describe("Write mode (for update)"),
 			size: z.enum(["S", "M", "L"]).optional().describe("Spec size for init"),
 			spec_type: z.enum(["feature", "bugfix"]).optional().describe("Spec type for init"),
-			version: z.string().optional().describe("Version timestamp for rollback"),
 			confirm: z
 				.boolean()
 				.optional()
@@ -166,7 +162,7 @@ Actions:
 		ledgerDesc,
 		{
 			action: z
-				.enum(["search", "save", "promote", "candidates", "reflect", "stale", "audit-conventions"])
+				.enum(["search", "save", "promote", "candidates", "verify", "stale", "audit-conventions"])
 				.describe("Action to perform"),
 			id: z.number().optional().describe("Record ID (required for promote)"),
 			query: z.string().optional().describe("Search query"),

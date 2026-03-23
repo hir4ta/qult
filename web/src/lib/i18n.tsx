@@ -19,7 +19,6 @@ export const translations = {
 	"nav.overview": { en: "Overview", ja: "概要" },
 	"nav.tasks": { en: "Specs", ja: "スペック" },
 	"nav.knowledge": { en: "Knowledge", ja: "ナレッジ" },
-	"nav.activity": { en: "Activity", ja: "アクティビティ" },
 
 	// Overview stats
 	"overview.totalTasks": { en: "Total Specs", ja: "スペック合計" },
@@ -75,24 +74,9 @@ export const translations = {
 	"knowledge.verification.overdue": { en: "Overdue", ja: "期限切れ" },
 	"knowledge.verification.pending": { en: "Pending", ja: "未検証" },
 
-	// Section card
-	"section.reviewMode": { en: "Review", ja: "レビュー" },
-
-	// Review panel
-	"review.approve": { en: "Approve", ja: "承認" },
-	"review.requestChanges": { en: "Request Changes", ja: "変更を依頼" },
-	"review.addComment": { en: "Add review comment...", ja: "レビューコメントを追加..." },
-	"review.add": { en: "Add", ja: "追加" },
-	"review.noHistory": { en: "No version history", ja: "バージョン履歴なし" },
-	"review.oldVersion": { en: "Old", ja: "旧" },
-	"review.newVersion": { en: "New", ja: "新" },
-	"review.currentVersion": { en: "Current", ja: "現在" },
-	"review.loadingVersions": { en: "Loading versions...", ja: "バージョン読み込み中..." },
-
 	// Filters (dynamic via t(`filter.${s}`))
 	"filter.all": { en: "All", ja: "全て" },
 	"filter.active": { en: "Active", ja: "アクティブ" },
-	"filter.review": { en: "Review", ja: "レビュー" },
 	"filter.done": { en: "Done", ja: "完了" },
 
 	// Projects
@@ -109,31 +93,6 @@ export const translations = {
 	"shortcuts.prevTask": { en: "Previous task", ja: "前のタスク" },
 	"shortcuts.toggleExpand": { en: "Toggle expand", ja: "展開/折りたたみ" },
 	"shortcuts.help": { en: "Show shortcuts", ja: "ショートカット表示" },
-
-	// Activity
-	"activity.title": { en: "Activity", ja: "アクティビティ" },
-	"activity.avgCycleTime": { en: "Avg Cycle Time", ja: "平均サイクルタイム" },
-	"activity.avgReworkRate": { en: "Avg Rework Rate", ja: "平均手戻り率" },
-	"activity.totalSpecs": { en: "Completed Specs", ja: "完了スペック" },
-	"activity.days": { en: "days", ja: "日" },
-	"activity.rework.title": { en: "Rework Rate by Spec", ja: "スペック別手戻り率" },
-	"activity.rework.pending": { en: "Pending (< 21 days)", ja: "確定前（21日未経過）" },
-	"activity.cycleTime.title": { en: "Cycle Time Breakdown", ja: "サイクルタイム内訳" },
-	"activity.cycleTime.planning": { en: "Planning", ja: "計画" },
-	"activity.cycleTime.approval": { en: "Approval", ja: "承認待ち" },
-	"activity.cycleTime.implementation": { en: "Implementation", ja: "実装" },
-	"activity.log.title": { en: "Audit Log", ja: "監査ログ" },
-	"activity.log.event": { en: "Event", ja: "イベント" },
-	"activity.log.slug": { en: "Spec", ja: "スペック" },
-	"activity.log.actor": { en: "Actor", ja: "実行者" },
-	"activity.log.detail": { en: "Detail", ja: "詳細" },
-	"activity.log.time": { en: "Time", ja: "日時" },
-	"activity.empty.title": { en: "No activity recorded yet, sir.", ja: "まだアクティビティはございません。" },
-	"activity.empty.description": { en: "Complete a spec to see metrics here.", ja: "スペックを完了すると、ここにメトリクスが表示されます。" },
-	"activity.noMetrics": { en: "Complete a spec to unlock metrics.", ja: "スペックを完了するとメトリクスが表示されます。" },
-	"activity.log.prev": { en: "Prev", ja: "前へ" },
-	"activity.log.next": { en: "Next", ja: "次へ" },
-	"activity.log.entries": { en: "entries", ja: "件" },
 
 	// Traceability
 	"task.traceability": { en: "Traceability", ja: "トレーサビリティ" },
@@ -152,17 +111,6 @@ export const translations = {
 	"view.list": { en: "List", ja: "リスト" },
 	"view.card": { en: "Card", ja: "カード" },
 
-	// Heatmap
-	"heatmap.title": { en: "Activity Heatmap", ja: "アクティビティ・ヒートマップ" },
-	"heatmap.tooltip": { en: "{date}: {count} events", ja: "{date}: {count} イベント" },
-	"heatmap.less": { en: "Less", ja: "少" },
-	"heatmap.more": { en: "More", ja: "多" },
-
-	// Toast messages
-	"toast.approved": { en: "Approved", ja: "承認しました" },
-	"toast.approved.desc": { en: "Go back to Claude Code to start implementation.", ja: "Claude Code に戻って実装を開始してください。" },
-	"toast.changesRequested": { en: "Changes requested", ja: "修正を依頼しました" },
-	"toast.changesRequested.desc": { en: "comments sent. Tell Claude Code: \"Address the review comments\".", ja: "件のコメントを送信しました。Claude Code で「レビューコメントに対応して」と伝えてください。" },
 } as const;
 
 export type TranslationKey = keyof typeof translations;

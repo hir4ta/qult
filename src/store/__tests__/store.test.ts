@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { KnowledgeRow, SessionLink } from "../../types.js";
+import type { KnowledgeRow } from "../../types.js";
 import {
 	expandAliases,
 	fuzzyMatch,
@@ -27,7 +27,6 @@ import {
 } from "../knowledge.js";
 import { detectProject, normalizeRemoteURL } from "../project.js";
 import { SCHEMA_VERSION } from "../schema.js";
-import { getSessionContinuity, linkSession, resolveMasterSession } from "../session-links.js";
 import { insertTestProject } from "../../__tests__/test-utils.js";
 import {
 	cleanOrphanedEmbeddings,
@@ -327,73 +326,6 @@ describe("Levenshtein & fuzzy", () => {
 		expect(fuzzyMatch("hooks", "books")).toBe(true);
 		expect(fuzzyMatch("ab", "cd")).toBe(false); // too short
 		expect(fuzzyMatch("react", "angular")).toBe(false);
-	});
-});
-
-describe("Session Links", () => {
-	it("links and resolves sessions", () => {
-		const link: SessionLink = {
-			claudeSessionId: "session-2",
-			masterSessionId: "session-1",
-			projectRemote: "",
-			projectPath: "/tmp",
-			taskSlug: "task-a",
-			branch: "main",
-			linkedAt: "",
-		};
-		linkSession(store, link);
-
-		const master = resolveMasterSession(store, "session-2");
-		expect(master).toBe("session-1");
-	});
-
-	it("follows session chains", () => {
-		linkSession(store, {
-			claudeSessionId: "session-2",
-			masterSessionId: "session-1",
-			projectRemote: "",
-			projectPath: "/tmp",
-			taskSlug: "",
-			branch: "",
-			linkedAt: "",
-		});
-		linkSession(store, {
-			claudeSessionId: "session-3",
-			masterSessionId: "session-2",
-			projectRemote: "",
-			projectPath: "/tmp",
-			taskSlug: "",
-			branch: "",
-			linkedAt: "",
-		});
-
-		expect(resolveMasterSession(store, "session-3")).toBe("session-1");
-	});
-
-	it("gets session continuity", () => {
-		linkSession(store, {
-			claudeSessionId: "session-2",
-			masterSessionId: "session-1",
-			projectRemote: "",
-			projectPath: "/tmp",
-			taskSlug: "",
-			branch: "",
-			linkedAt: "",
-		});
-		linkSession(store, {
-			claudeSessionId: "session-3",
-			masterSessionId: "session-1",
-			projectRemote: "",
-			projectPath: "/tmp",
-			taskSlug: "",
-			branch: "",
-			linkedAt: "",
-		});
-
-		const sc = getSessionContinuity(store, "session-1");
-		expect(sc.compactCount).toBe(2);
-		expect(sc.linkedSessions).toContain("session-2");
-		expect(sc.linkedSessions).toContain("session-3");
 	});
 });
 

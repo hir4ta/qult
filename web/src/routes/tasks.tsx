@@ -32,7 +32,6 @@ function TasksLayout() {
 	const tasks = allTasks
 		.filter((task) => {
 			if (statusFilter === "active" && terminalStatuses.has(task.status ?? "")) return false;
-			if (statusFilter === "review" && task.review_status !== "pending") return false;
 			if (statusFilter === "done" && !terminalStatuses.has(task.status ?? "")) return false;
 			if (sizeFilter.size > 0 && !sizeFilter.has(task.size ?? "")) return false;
 			return true;

@@ -24,7 +24,6 @@ const CONFIG_BASENAMES = new Set([
 	"Taskfile.yml",
 	"Makefile",
 	"README.md",
-	"README.ja.md",
 	"CLAUDE.md",
 	"LICENSE",
 	".gitignore",

@@ -34,7 +34,6 @@ export const TaskDetailSchema = z.object({
 	completed_at: z.string().optional(),
 	size: z.string().optional(),
 	spec_type: z.string().optional(),
-	review_status: z.string().optional(),
 	owner: z.string().optional(),
 	project_name: z.string().optional(),
 });
@@ -96,73 +95,6 @@ export const KnowledgeStatsSchema = z.object({
 	avgHitCount: z.number(),
 });
 
-// --- Activity ---
-
-export const ActivityEntrySchema = z.object({
-	timestamp: z.string(),
-	action: z.string(),
-	target: z.string(),
-	detail: z.string().optional(),
-});
-
-export const ActivityResponseSchema = z.object({
-	entries: z.array(ActivityEntrySchema),
-});
-
-export const AuditLogEntrySchema = z.object({
-	id: z.number(),
-	projectId: z.string(),
-	project_name: z.string().optional(),
-	timestamp: z.string(),
-	event: z.string(),
-	actor: z.string(),
-	slug: z.string(),
-	action: z.string(),
-	detail: z.string(),
-});
-
-export const AuditLogResponseSchema = z.object({
-	entries: z.array(AuditLogEntrySchema),
-	total: z.number(),
-});
-
-export const ReworkRateSchema = z.object({
-	slug: z.string(),
-	size: z.string(),
-	completedAt: z.string(),
-	reworkRate: z.number(),
-	reworkedCount: z.number(),
-	totalCount: z.number(),
-	pending: z.boolean(),
-});
-
-export const CycleTimeSchema = z.object({
-	slug: z.string(),
-	size: z.string(),
-	phases: z.object({
-		planning: z.number().nullable(),
-		approvalWait: z.number().nullable(),
-		implementation: z.number().nullable(),
-		total: z.number(),
-	}),
-});
-
-export const AnalyticsResponseSchema = z.object({
-	hitRanking: z.array(z.object({
-		id: z.number(),
-		title: z.string(),
-		hitCount: z.number(),
-		projectName: z.string(),
-	})),
-	completionStats: z.array(z.object({
-		size: z.string(),
-		avgDays: z.number(),
-		count: z.number(),
-	})),
-	reworkRates: z.array(ReworkRateSchema),
-	cycleTimeBreakdown: z.array(CycleTimeSchema),
-});
-
 export const KnowledgeGapSchema = z.object({
 	query: z.string(),
 	intent: z.string(),
@@ -203,34 +135,6 @@ export const ValidationReportSchema = z.object({
 	summary: z.string().optional(),
 });
 
-// --- Review ---
-
-export const ReviewCommentSchema = z.object({
-	file: z.string(),
-	line: z.number(),
-	endLine: z.number().optional(),
-	body: z.string(),
-	resolved: z.boolean().optional(),
-});
-
-export const ReviewSchema = z.object({
-	timestamp: z.string(),
-	status: z.enum(["approved", "changes_requested"]),
-	comments: z.array(ReviewCommentSchema).optional(),
-	summary: z.string().optional(),
-	reviewer: z.string().optional(),
-});
-
-export const ReviewStatusResponseSchema = z.object({
-	review_status: z.string(),
-	latest_review: z.unknown().nullable(),
-	unresolved_count: z.number(),
-});
-
-export const ReviewHistoryResponseSchema = z.object({
-	reviews: z.array(ReviewSchema),
-});
-
 // --- Health ---
 
 export const HealthResponseSchema = z.object({
@@ -242,18 +146,6 @@ export const HealthResponseSchema = z.object({
 
 export const VersionResponseSchema = z.object({
 	version: z.string(),
-});
-
-// --- Heatmap ---
-
-export const HeatmapEntrySchema = z.object({
-	date: z.string(),
-	count: z.number(),
-});
-
-export const HeatmapSchema = z.object({
-	data: z.array(HeatmapEntrySchema),
-	weeks: z.number(),
 });
 
 // --- Inferred types ---
@@ -269,18 +161,10 @@ export type KnowledgeEntry = z.infer<typeof KnowledgeEntrySchema>;
 export type KnowledgeResponse = z.infer<typeof KnowledgeResponseSchema>;
 export type KnowledgeSearchResponse = z.infer<typeof KnowledgeSearchResponseSchema>;
 export type KnowledgeStats = z.infer<typeof KnowledgeStatsSchema>;
-export type ActivityEntry = z.infer<typeof ActivityEntrySchema>;
-export type ActivityResponse = z.infer<typeof ActivityResponseSchema>;
 export type DecisionEntry = z.infer<typeof DecisionEntrySchema>;
 export type DecisionsResponse = z.infer<typeof DecisionsResponseSchema>;
 export type ValidationCheck = z.infer<typeof ValidationCheckSchema>;
 export type ValidationReport = z.infer<typeof ValidationReportSchema>;
-export type ReviewComment = z.infer<typeof ReviewCommentSchema>;
-export type Review = z.infer<typeof ReviewSchema>;
-export type ReviewStatusResponse = z.infer<typeof ReviewStatusResponseSchema>;
-export type ReviewHistoryResponse = z.infer<typeof ReviewHistoryResponseSchema>;
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 export type VersionResponse = z.infer<typeof VersionResponseSchema>;
 
-export type HeatmapEntry = z.infer<typeof HeatmapEntrySchema>;
-export type HeatmapResponse = z.infer<typeof HeatmapSchema>;

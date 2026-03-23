@@ -20,8 +20,8 @@ describe("i18n translations", () => {
 		expect(translations).toHaveProperty("nav.knowledge");
 	});
 
-	it("has review keys", () => {
-		expect(translations).toHaveProperty("review.approve");
-		expect(translations).toHaveProperty("review.requestChanges");
+	it("has knowledge keys", () => {
+		expect(translations).toHaveProperty("knowledge.entries");
+		expect(translations).toHaveProperty("knowledge.decision");
 	});
 });

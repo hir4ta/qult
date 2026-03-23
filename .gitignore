@@ -29,9 +29,8 @@ web/package-lock.json
 coverage/
 *.tsbuildinfo
 
-# plugin/ is generated output from `alfred plugin-bundle`.
-# Source of truth: internal/install/content/ (skills, agents, rules)
-# All plugin/ files are tracked (required for marketplace distribution).
+# plugin/ is git-tracked for marketplace distribution.
+# Source of truth: content/ (hooks, mcp config).
 
 # serena mcp 
 .serena

@@ -12,10 +12,10 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Agent, Bash(git diff *, git log *,
 # /alfred:attend — Autonomous Development Orchestrator
 
 Execute the FULL workflow below without asking the user for input (except at
-approval gates and BLOCKED recovery).
+BLOCKED recovery).
 
 This skill implements the **invariant Spec-Driven Development Flow** (see CLAUDE.md):
-Spec > Wave > Task hierarchy. All sizes require self-review. M/L/XL require user approval.
+Spec > Wave > Task hierarchy. All sizes require self-review.
 
 - For review prompt templates, see [review-prompts.md](review-prompts.md)
 - For BLOCKED recovery and error handling, see [recovery.md](recovery.md)
@@ -26,7 +26,6 @@ These thought patterns signal you are about to violate this skill's rules:
 
 - "I'll skip the spec review since it's simple" → Every spec gets 3-agent review. Complexity is misjudged most when it seems low.
 - "Let me just commit without the code reviewer" → Per-task review is mandatory. Skipping it means shipping unreviewed code.
-- "I can approve this myself instead of using the dashboard" → Text-based approval is explicitly rejected. Dashboard review exists for a reason.
 - "Session.md doesn't need updating after this small step" → Dashboard progress depends on tasks.md. Update after EVERY task, not in batch.
 
 ## Phase 0: Initialize
@@ -35,13 +34,9 @@ These thought patterns signal you are about to violate this skill's rules:
 2. Call `dossier` action=status with task_slug
 3. **If spec exists with `## Orchestrator State`**:
    - Read state block → determine current phase
-   - If `awaiting_approval: true` → call `dossier` action=review to check status:
-     - approved → advance to Phase 3
-     - changes_requested → read comments, apply fixes, resume at Phase 2
-     - pending → remind user to review, STOP
    - If `blocked: true` → ask how it was resolved via AskUserQuestion → resume
    - Otherwise resume from persisted phase
-4. **If spec exists without Orchestrator State** → ask: "Spec exists from /alfred:brief. Start implementation from Phase 3, or re-run spec review first?"
+4. **If spec exists without Orchestrator State** → ask: "Spec exists from /alfred:brief. Start implementation from Phase 2, or re-run spec review first?"
 5. **If no spec** → ask 1 question: "Confirm scope: {description}. Proceed?"
    - Init spec via `dossier` action=init
 6. Record `initial_commit` = output of `git rev-parse HEAD`
@@ -102,25 +97,7 @@ dossier action=gate sub_action=clear reason="requirements + design review loop c
 ```
 This is MANDATORY — PreToolUse blocks source Edit/Write until gate is cleared.
 
-## Phase 2: Approval Gate (dashboard, M/L/XL only)
-
-**S/D specs**: Skip this phase — proceed directly to Phase 3 after self-review.
-**M/L/XL specs**: Wait for user approval via `alfred dashboard` before proceeding:
-
-1. Update Orchestrator State: `awaiting_approval: true`
-2. Tell the user:
-   ```
-   Spec complete. Run `alfred dashboard` → Tasks tab → select task → review spec files.
-   Approve or add comments, then tell me.
-   ```
-3. **STOP and wait** — do not proceed until user confirms.
-4. When user responds, call `dossier` action=review:
-   - `approved` → advance to Phase 3
-   - `changes_requested` → read comments, fix spec files, return to this gate
-   - `pending` → remind user to review in dashboard
-5. Update state: `awaiting_approval: false, phase: impl-phase-1`
-
-## Phase 3: Implementation
+## Phase 2: Implementation
 
 Read task breakdown from tasks.md waves.
 
@@ -128,12 +105,12 @@ Read task breakdown from tasks.md waves.
 1. Read the next unchecked task from tasks.md
 2. Implement using Edit/Write/Bash — work directly
 3. **Immediately update tasks.md**: mark this task as `[x]` done
-4. Continue to next task in the same Wave, or proceed to Phase 4 (Wave boundary) if all tasks in the Wave are done
+4. Continue to next task in the same Wave, or proceed to Phase 3 (Wave boundary) if all tasks in the Wave are done
 
 **CRITICAL**: Update tasks.md after EACH task, not all at once.
 This ensures the dashboard shows real-time progress.
 
-## Phase 4: Wave Boundary (commit + review + knowledge)
+## Phase 3: Wave Boundary (commit + review + knowledge)
 
 Per-task review is NOT required. Review happens at Wave boundaries.
 
@@ -150,7 +127,7 @@ When all tasks in a Wave are completed (before starting next Wave):
 
 This is MANDATORY — PostToolUse auto-sets the wave-review gate when a Wave completes. PreToolUse blocks source Edit/Write until the gate is cleared.
 
-## Phase 5: Final Self-Review (code-reviewer agent)
+## Phase 4: Final Self-Review (code-reviewer agent)
 
 1. Get full diff: `git diff {initial_commit}..HEAD`
 2. **Spawn `alfred:code-reviewer` agent in foreground** with the full diff
@@ -160,7 +137,7 @@ This is MANDATORY — PostToolUse auto-sets the wave-review gate when a Wave com
 4. Security Critical → BLOCKED
 5. Update state: `phase: test-gate`
 
-## Phase 6: Test Gate
+## Phase 5: Test Gate
 
 1. Run `go test ./...` (timeout: 120s)
 2. Run `go vet ./...` (timeout: 120s)
@@ -186,7 +163,6 @@ This is MANDATORY — PostToolUse auto-sets the wave-review gate when a Wave com
 
 After EVERY phase transition and after EVERY task completion:
 - Update `## Orchestrator State` in tasks.md via `dossier` action=update
-- Include: phase, iteration, blocked status, awaiting_approval
 - Mark completed tasks as `[x]` via `dossier action=check task_id="T-N.N"`
 
 ## Guardrails
@@ -194,7 +170,6 @@ After EVERY phase transition and after EVERY task completion:
 - NEVER skip review phases — they are mandatory quality gates
 - NEVER commit with unresolved Critical findings
 - ALWAYS spawn parallel agents for spec review and code-reviewer (foreground, NOT background) for Wave boundary review
-- ALWAYS direct user to `alfred dashboard` for approval (not text-based)
 - ALWAYS update tasks.md after each individual task completion (not in batch)
 - Call `dossier action=complete` when all tasks are done (user can delay if adding more tasks)
 - ALWAYS record decisions and trade-offs via `ledger action=save sub_type=decision`
@@ -207,6 +182,5 @@ After EVERY phase transition and after EVERY task completion:
 
 ## Troubleshooting
 
-- **Test gate failure (Phase 6 loops)**: Check if tests depend on external state or ordering. Run the failing test in isolation to confirm reproducibility before fixing.
-- **Approval timeout (user hasn't reviewed in dashboard)**: The orchestrator stops at Phase 2. Re-invoke `/alfred:attend` with the same task-slug to resume; it will check review status automatically.
+- **Test gate failure (Phase 5 loops)**: Check if tests depend on external state or ordering. Run the failing test in isolation to confirm reproducibility before fixing.
 - **Rate limit during parallel agent review**: Reduce concurrency by retrying failed agents sequentially. If persistent, skip to self-review inline and note the degraded review in tasks.md.

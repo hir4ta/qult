@@ -2,8 +2,7 @@
 name: brief
 description: >
   Use when starting a new task, organizing a design, planning before implementation,
-  or wanting a structured development plan. NOT for divergent brainstorming
-  (use /alfred:salon). NOT for autonomous implementation (use /alfred:attend).
+  or wanting a structured development plan. NOT for autonomous implementation (use /alfred:attend).
 user-invocable: true
 argument-hint: "task-slug [description]"
 allowed-tools: Read, Edit, Glob, Grep, Agent, AskUserQuestion, WebSearch, WebFetch, mcp__plugin_alfred_alfred__knowledge, mcp__plugin_alfred_alfred__dossier
@@ -59,10 +58,6 @@ Agent review follows a **fix-and-re-review loop**:
 
 Max 3 iterations to prevent infinite loops. If Critical/High persist after 3
 rounds, flag to user and proceed.
-
-### Approval
-After all files are complete, M/L/XL specs require user approval via
-`alfred dashboard`. S/D specs proceed directly after self-review.
 
 This skill implements the spec creation phase of the **invariant Spec-Driven
 Development Flow** (see CLAUDE.md): Spec > Wave > Task hierarchy.
@@ -204,22 +199,6 @@ Please decide on these open questions:
 1. <conflict description> — Option A vs Option B
 ```
 
-### 12. [APPROVAL GATE] User reviews in dashboard (M/L/XL only)
-
-**S/D specs**: Skip this step — spec is ready for implementation after self-review.
-
-1. Tell the user:
-   ```
-   Spec ready for your review.
-   Run `alfred dashboard` → Tasks tab → select '{task-slug}' → review spec files.
-   Approve or add comments, then tell me.
-   ```
-3. **STOP and wait** — do not proceed until the user confirms.
-4. When user responds, call `dossier` action=review to check:
-   - `approved` → done
-   - `changes_requested` → read comments, apply fixes, go back to step 12
-   - `pending` → remind user to review in dashboard
-
 ## Resume Mode (from Step 2)
 
 If an active spec already exists:
@@ -240,7 +219,6 @@ If an active spec already exists:
 - ALWAYS spawn review agents without model override (uses Claude Code's own model)
 - ALWAYS update tasks.md after each file is completed (dashboard UX)
 - ALWAYS record alternatives considered with rationale
-- ALWAYS direct user to `alfred dashboard` for approval (not text-based approval)
 - Mark `<!-- optional -->` sections as skipped for S-sized tasks (don't force unnecessary detail)
 - ALWAYS include "Wave: Closing" tasks (self-review, CLAUDE.md update, test verification) — these trigger auto-complete when all checked
 
@@ -248,4 +226,3 @@ If an active spec already exists:
 
 - **dossier init fails (spec already exists)**: Use `dossier action=status` to check the existing spec. Either resume it, `dossier action=delete confirm=true` to remove it, or choose a different task-slug.
 - **Agent review divergence (conflicting feedback)**: Prioritize Architect findings for structural issues, Devil's Advocate for scope/risk. Save the conflict resolution as a decision via `ledger save sub_type=decision` and pick the safer option.
-- **User doesn't approve in dashboard**: The skill stops at Step 12. Re-invoke `/alfred:brief` with the same task-slug to check review status and resume from where it left off.

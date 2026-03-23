@@ -127,32 +127,6 @@ CREATE TABLE IF NOT EXISTS embeddings (
     UNIQUE (source, source_id)
 );
 
-CREATE TABLE IF NOT EXISTS session_links (
-    claude_session_id TEXT PRIMARY KEY,
-    master_session_id TEXT NOT NULL,
-    project_remote    TEXT DEFAULT '',
-    project_path      TEXT NOT NULL DEFAULT '',
-    task_slug         TEXT NOT NULL DEFAULT '',
-    branch            TEXT DEFAULT '',
-    linked_at         TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_session_links_master ON session_links(master_session_id);
-
-CREATE TABLE IF NOT EXISTS audit_log (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    timestamp       TEXT NOT NULL,
-    event           TEXT NOT NULL,
-    actor           TEXT DEFAULT '',
-    slug            TEXT DEFAULT '',
-    action          TEXT DEFAULT '',
-    detail          TEXT DEFAULT '{}',
-    UNIQUE(project_id, timestamp, event, actor, slug)
-);
-CREATE INDEX IF NOT EXISTS idx_audit_project_time
-    ON audit_log(project_id, timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_audit_actor
-    ON audit_log(actor);
 `;
 
 const TAG_ALIASES: Record<string, string[]> = {
@@ -290,13 +264,13 @@ function rebuildFromScratch(db: DbDatabase): void {
 	}
 	for (const table of [
 		"audit_log",
+		"session_links",
 		"spec_fts",
 		"spec_index",
 		"knowledge_fts",
 		"knowledge_index",
 		"embeddings",
 		"projects",
-		"session_links",
 		"tag_aliases",
 		"schema_version",
 	]) {
