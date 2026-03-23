@@ -156,7 +156,7 @@ function App() {
 		const proj = resolveProject(store);
 		setProjName(proj.name);
 		const allTasks = loadTasks(proj.path, proj.name);
-		setTasks(allTasks.filter((t) => t.status === "active"));
+		setTasks(allTasks.filter((t) => t.status !== "done" && t.status !== "completed" && t.status !== "cancelled"));
 	}, []);
 
 	useEffect(() => {

@@ -27,7 +27,6 @@ export interface TaskInfo {
 	status: string;
 	size: string;
 	specType: string;
-	reviewStatus: string;
 	startedAt: string;
 	focus: string;
 	completed: number;
@@ -38,12 +37,12 @@ export interface TaskInfo {
 
 // --- Active state parser ---
 
-function readActiveState(projPath: string): { primary: string; tasks: Array<{ slug: string; status?: string; started_at?: string; size?: string; spec_type?: string; review_status?: string }> } {
+function readActiveState(projPath: string): { primary: string; tasks: Array<{ slug: string; status?: string; started_at?: string; size?: string; spec_type?: string }> } {
 	const activePath = join(projPath, ".alfred", "specs", "_active.md");
 	if (!existsSync(activePath)) return { primary: "", tasks: [] };
 
 	const content = readFileSync(activePath, "utf-8");
-	type Task = { slug: string; status?: string; started_at?: string; size?: string; spec_type?: string; review_status?: string };
+	type Task = { slug: string; status?: string; started_at?: string; size?: string; spec_type?: string };
 	const tasks: Task[] = [];
 	let primary = "";
 	let current: Task | null = null;
@@ -69,7 +68,6 @@ function readActiveState(projPath: string): { primary: string; tasks: Array<{ sl
 				else if (key === "started_at") current.started_at = v;
 				else if (key === "size") current.size = v;
 				else if (key === "spec_type") current.spec_type = v;
-				else if (key === "review_status") current.review_status = v;
 			}
 		}
 	}
@@ -147,7 +145,6 @@ export function loadTasks(projPath: string, projName: string): TaskInfo[] {
 			status: task.status ?? "active",
 			size: task.size ?? "M",
 			specType: task.spec_type ?? "feature",
-			reviewStatus: task.review_status ?? "pending",
 			startedAt: task.started_at ?? "",
 			focus,
 			completed,
@@ -162,9 +159,17 @@ export function loadTasks(projPath: string, projName: string): TaskInfo[] {
 
 export function resolveProject(store: Store): { path: string; name: string } {
 	const cwd = process.cwd();
+	// Try cwd first — even without DB registration, if .alfred/ exists here, use it
+	if (existsSync(join(cwd, ".alfred", "specs", "_active.md"))) {
+		const row = store.db.prepare("SELECT name FROM projects WHERE path = ? LIMIT 1").get(cwd) as { name: string } | undefined;
+		return { path: cwd, name: row?.name ?? cwd.split("/").pop() ?? "project" };
+	}
+	// Fall back to DB registered projects
 	const row = store.db.prepare("SELECT id, name, path FROM projects WHERE path = ? AND status = 'active' LIMIT 1").get(cwd) as { id: string; name: string; path: string } | undefined;
 	if (row) return { path: row.path, name: row.name };
-	const fallback = store.db.prepare("SELECT id, name, path FROM projects WHERE status = 'active' ORDER BY last_seen_at DESC LIMIT 1").get() as { id: string; name: string; path: string } | undefined;
-	if (fallback) return { path: fallback.path, name: fallback.name };
-	return { path: cwd, name: "unknown" };
+	try {
+		const fallback = store.db.prepare("SELECT id, name, path FROM projects WHERE status = 'active' ORDER BY rowid DESC LIMIT 1").get() as { id: string; name: string; path: string } | undefined;
+		if (fallback) return { path: fallback.path, name: fallback.name };
+	} catch { /* last_seen_at may not exist */ }
+	return { path: cwd, name: cwd.split("/").pop() ?? "unknown" };
 }
