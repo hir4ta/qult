@@ -1,6 +1,6 @@
 import { createCliRenderer } from "@opentui/core";
 import { createRoot, useKeyboard, useRenderer } from "@opentui/react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, createElement } from "react";
 import { openDefaultCached } from "../store/index.js";
 import { type TaskInfo, loadTasks, resolveProject } from "./data.js";
 
@@ -141,7 +141,9 @@ function SpecDetail({ task, focused }: { task: TaskInfo; focused: boolean }) {
 	);
 }
 
-// --- App ---
+// --- App (exported for cli.ts integration) ---
+
+export { App };
 
 function App() {
 	const [tasks, setTasks] = useState<TaskInfo[]>([]);

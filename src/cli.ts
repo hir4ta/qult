@@ -221,6 +221,22 @@ const main = defineCommand({
 				}),
 			},
 		}),
+		tui: defineCommand({
+			meta: { description: "Open TUI spec progress viewer" },
+			async run() {
+				const { fileURLToPath } = await import("node:url");
+				const { join } = await import("node:path");
+				const { execSync } = await import("node:child_process");
+				const thisDir = fileURLToPath(new URL(".", import.meta.url));
+				// TUI is a standalone Bun script (requires OpenTUI + JSX)
+				const tuiPath = join(thisDir, "..", "src", "tui", "main.tsx");
+				try {
+					execSync(`bun "${tuiPath}"`, { stdio: "inherit" });
+				} catch {
+					process.exit(1);
+				}
+			},
+		}),
 		version: defineCommand({
 			meta: { description: "Show version" },
 			args: {

@@ -26,14 +26,11 @@ You just say what to build. alfred handles the rest.
 
 ## Get started
 
-**Requires [Bun](https://bun.sh/) runtime** (v1.3+):
-
 ```bash
-curl -fsSL https://bun.sh/install | bash
-npm install -g claude-alfred
+curl -fsSL https://raw.githubusercontent.com/hir4ta/claude-alfred/main/install.sh | bash
 ```
 
-In Claude Code:
+Then in Claude Code:
 
 ```
 /plugin marketplace add hir4ta/claude-alfred
@@ -161,7 +158,7 @@ Each entry tracks its author (via `git user.name`). Export/import knowledge betw
 ## Updating
 
 ```bash
-npm install -g claude-alfred        # CLI, hooks, MCP server, dashboard
+curl -fsSL https://raw.githubusercontent.com/hir4ta/claude-alfred/main/install.sh | bash
 ```
 
 ```
