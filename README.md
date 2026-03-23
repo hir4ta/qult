@@ -26,7 +26,10 @@ You just say what to build. alfred handles the rest.
 
 ## Get started
 
+**Requires [Bun](https://bun.sh/) runtime** (v1.3+):
+
 ```bash
+curl -fsSL https://bun.sh/install | bash
 npm install -g claude-alfred
 ```
 

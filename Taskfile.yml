@@ -21,6 +21,16 @@ tasks:
     cmds:
       - npm run dev
 
+  dashboard:
+    desc: Open web dashboard (localhost:7575)
+    cmds:
+      - bun dist/cli.mjs dashboard
+
+  tui:
+    desc: Open TUI spec progress viewer
+    cmds:
+      - bun src/tui/main.tsx
+
   check:
     desc: Run all checks (tsc + Biome lint)
     cmds:

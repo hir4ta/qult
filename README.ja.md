@@ -26,7 +26,10 @@ alfred: spec を作成（要件 + 設計 + タスク）→
 
 ## はじめる
 
+**[Bun](https://bun.sh/) ランタイム（v1.3+）が必要です:**
+
 ```bash
+curl -fsSL https://bun.sh/install | bash
 npm install -g claude-alfred
 ```
 
