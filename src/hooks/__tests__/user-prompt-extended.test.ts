@@ -140,7 +140,7 @@ describe("intentDescription", () => {
 	});
 
 	it("returns description for plan", () => {
-		expect(intentDescription("plan")).toBe("Spec creation → approval → implementation");
+		expect(intentDescription("plan")).toBe("Spec creation → implementation");
 	});
 
 	it("returns same description for implement as plan", () => {

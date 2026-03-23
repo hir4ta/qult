@@ -231,10 +231,9 @@ export function classifyIntent(prompt: string): string | null {
 }
 
 /**
- * FR-5/FR-7: Check if spec is required or unapproved before implementation.
- * Stage 1: No spec exists → DIRECTIVE to create one.
+ * FR-5: Propose spec creation before implementation (CONTEXT level, not DIRECTIVE).
+ * Stage 1: No spec exists → CONTEXT proposal to create one.
  * Stage 1.5: Spec exists + implement intent → WARNING to confirm or create new spec.
- * Stage 2: Spec exists but not approved (M/L) → DIRECTIVE to get review.
  */
 export function checkSpecRequired(cwd: string, intent: string | null): DirectiveItem | null {
 	if (!intent || !["implement", "bugfix", "tdd"].includes(intent)) return null;
@@ -285,9 +284,9 @@ export function intentDescription(intent: string): string {
 		case "research":
 			return "Research and investigation structuring";
 		case "plan":
-			return "Spec creation → approval → implementation";
+			return "Spec creation → implementation";
 		case "implement":
-			return "Spec creation → approval → implementation";
+			return "Spec creation → implementation";
 		case "bugfix":
 			return "Reproduce → analyze → fix → verify";
 		case "review":

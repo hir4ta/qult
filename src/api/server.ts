@@ -163,7 +163,7 @@ export function createApp(
 		active: string;
 		tasks: Record<string, unknown>[];
 	} {
-		let state: { primary: string; tasks: Array<{ slug: string; status?: string; started_at?: string; completed_at?: string; size?: string; spec_type?: string; review_status?: string; owner?: string }> };
+		let state: { primary: string; tasks: Array<{ slug: string; status?: string; started_at?: string; completed_at?: string; size?: string; spec_type?: string; owner?: string }> };
 		try {
 			state = readActiveState(projPath);
 		} catch {

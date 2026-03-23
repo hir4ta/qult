@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { clearReviewGate, readReviewGate, writeReviewGate } from "../../hooks/review-gate.js";
 import { shouldAutoAppend } from "../../hooks/lang-filter.js";
-import { ensureStateDir, readWaveProgress, writeStateJSON, writeWaveProgress } from "../../hooks/state.js";
+import { readWaveProgress, writeWaveProgress } from "../../hooks/state.js";
 import { updateTaskStatus } from "../../spec/status.js";
 import type { SpecSize, SpecType } from "../../spec/types.js";
 import {
@@ -42,14 +42,6 @@ function getChangedFilesForSpec(projectPath: string, startedAt: string): Promise
 				resolve(files);
 			},
 		);
-	});
-}
-
-function ensurePolishState(projectPath: string, slug: string): void {
-	ensureStateDir(projectPath);
-	writeStateJSON(projectPath, "polish.json", {
-		slug,
-		completed_at: new Date().toISOString(),
 	});
 }
 
@@ -106,13 +98,6 @@ export async function dossierComplete(projectPath: string, store: Store, params:
 		const newPrimary = completeTask(projectPath, taskSlug);
 		// design.md pattern auto-extraction removed (FR-6).
 		// Knowledge accumulation happens intentionally at Wave boundaries via ledger.
-
-		// Enable polish mode — allows edits without a new spec
-		try {
-			ensurePolishState(projectPath, taskSlug);
-		} catch {
-			/* best-effort */
-		}
 
 		const result: Record<string, unknown> = {
 			task_slug: taskSlug,

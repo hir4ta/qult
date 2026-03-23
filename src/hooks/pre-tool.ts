@@ -15,7 +15,7 @@ const BLOCKABLE_TOOLS = new Set(["Edit", "Write"]);
 
 /**
  * Check if a file path is outside the project directory or in a known non-code
- * location. These files should never be blocked by review/approval gates.
+ * location. These files should never be blocked by review gates.
  * (#16: gate scope was too broad, blocking memory/docs/CLAUDE.md edits)
  */
 function isGateExemptPath(cwd: string | undefined, filePath: string): boolean {
@@ -42,8 +42,8 @@ function isGateExemptPath(cwd: string | undefined, filePath: string): boolean {
 }
 
 /**
- * PreToolUse handler: block Edit/Write on review-gate or unapproved spec.
- * Enforcement order: .alfred/ exempt → malformed check → review-gate → approval gate.
+ * PreToolUse handler: block Edit/Write on review-gate.
+ * Enforcement order: .alfred/ exempt → malformed check → review-gate → allow.
  * Uses allowTool() for: .alfred/ files, deferred/cancelled specs, and active specs with cleared gates.
  * Only falls through to prompt hook (LLM judge) when NO active spec exists.
  */
@@ -81,7 +81,7 @@ export async function preToolUse(ev: HookEvent): Promise<void> {
 	}
 
 	// Gate-exempt paths: files outside project or in non-code locations (#16).
-	// These should never be blocked by review/approval gates.
+	// These should never be blocked by review gates.
 	if (filePath && isGateExemptPath(ev.cwd, filePath)) {
 		allowTool("Gate-exempt path (non-code file)");
 		return;

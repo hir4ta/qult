@@ -5,10 +5,6 @@ export type {
 	KnowledgeEntry,
 	KnowledgeResponse,
 	KnowledgeStats,
-	Review,
-	ReviewComment,
-	ReviewHistoryResponse,
-	ReviewStatusResponse,
 	SpecContentResponse,
 	SpecsResponse,
 	TaskDetail,
@@ -17,8 +13,6 @@ export type {
 	ValidationReport,
 	VersionResponse,
 	WaveInfo,
-	HeatmapEntry,
-	HeatmapResponse,
 } from "@api-types";
 
 // --- Cross-project types ---

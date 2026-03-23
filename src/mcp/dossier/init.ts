@@ -1,8 +1,6 @@
-import { unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { Embedder } from "../../embedder/index.js";
 import { writeReviewGate } from "../../hooks/review-gate.js";
-import { stateDir } from "../../hooks/state.js";
 import { initSpec } from "../../spec/init.js";
 import type { SpecSize, SpecType } from "../../spec/types.js";
 import { searchKnowledgeFTS, subTypeBoost } from "../../store/fts.js";
@@ -33,15 +31,6 @@ export async function dossierInit(
 		return errorResult(`init failed: ${err}`);
 	}
 
-
-	// Clear polish mode — new spec starts, polish period ends.
-	// Note: in parallel sessions on the same branch, this may clear another session's polish.
-	// This is acceptable — the other session can create a new S spec if blocked.
-	try {
-		unlinkSync(join(stateDir(projectPath), "polish.json"));
-	} catch {
-		/* file may not exist */
-	}
 
 	const result: Record<string, unknown> = {
 		task_slug: params.task_slug,
