@@ -22,7 +22,7 @@ paths:
 - File context boost from git diff
 - Skill nudge: classifyIntent (7 intents: research/plan/implement/bugfix/review/tdd/save-knowledge, JP+EN bilingual phrase keywords) → buildSkillNudge (intent→skill routing with active spec suppression for plan/implement) → additionalContext injection
 - save-knowledge suppresses research when both match. No API calls (pure keyword matching, <1ms)
-- Spec proposal (Stage 1): no active spec + implement intent → CONTEXT proposing spec creation. Always proposes, never silently skips. User can say "skip"
+- Spec proposal (Stage 1): no active spec + implement intent → DIRECTIVE requiring AskUserQuestion to confirm spec creation. Always proposes, never silently skips. User can say "skip". Guard resets per session (SessionStart clears spec-prompt.json)
 - Parallel dev guard (Stage 1.5): active spec exists + implement/bugfix/tdd intent + slug NOT in worked-slugs → WARNING prompting AskUserQuestion
 
 ## PostToolUse

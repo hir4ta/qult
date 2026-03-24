@@ -14,9 +14,9 @@ This file enforces the invariant Spec-Driven Development Flow defined in CLAUDE.
 
 Before writing implementation code (new features, bug fixes, refactors):
 1. Check if an active spec exists via `dossier action=status`
-2. If no spec → propose spec creation to user (CONTEXT level, not DIRECTIVE)
+2. If no spec → DIRECTIVE: use AskUserQuestion to ask user about spec creation (S/M/L/Skip)
 3. Always propose — never silently skip. User can say "skip" to proceed without spec
-4. Enforced: UserPromptSubmit CONTEXT + PreToolUse advisory
+4. Enforced: UserPromptSubmit DIRECTIVE + PreToolUse advisory. Guard resets per session
 
 ## Step 2: Self-Review Rule (All Sizes)
 

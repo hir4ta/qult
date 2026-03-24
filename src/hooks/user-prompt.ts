@@ -231,8 +231,8 @@ export function classifyIntent(prompt: string): string | null {
 }
 
 /**
- * FR-5: Propose spec creation before implementation (CONTEXT level, not DIRECTIVE).
- * Stage 1: No spec exists → CONTEXT proposal to create one.
+ * FR-5: Propose spec creation before implementation (DIRECTIVE level).
+ * Stage 1: No spec exists → DIRECTIVE to ask user about spec creation.
  * Stage 1.5: Spec exists + implement intent → WARNING to confirm or create new spec.
  */
 export function checkSpecRequired(cwd: string, intent: string | null): DirectiveItem | null {
@@ -241,8 +241,9 @@ export function checkSpecRequired(cwd: string, intent: string | null): Directive
 	// Only enforce in alfred-initialized projects.
 	if (!existsSync(join(cwd, ".alfred"))) return null;
 
-	// Stage 1: No active spec → propose spec creation (CONTEXT level, not DIRECTIVE).
-	// Always propose, never silently skip. But user can say "skip" to proceed without spec.
+	// Stage 1: No active spec → DIRECTIVE to ask user about spec creation.
+	// Always propose, never silently skip. User can say "skip" to proceed without spec.
+	// Guard resets per session (SessionStart clears spec-prompt.json).
 	let state;
 	try {
 		state = readActiveState(cwd);
@@ -253,7 +254,7 @@ export function checkSpecRequired(cwd: string, intent: string | null): Directive
 		const lang = (process.env.ALFRED_LANG || "en").toLowerCase();
 		writeStateJSON(cwd, "spec-prompt.json", { prompted: true, at: new Date().toISOString() });
 		return {
-			level: "CONTEXT",
+			level: "DIRECTIVE",
 			message: lang.startsWith("ja")
 				? "新しい実装タスクです。AskUserQuestion で「spec を作成しますか？ (S/M/L/スキップ)」とユーザーに確認してください。ユーザーが「スキップ」を選んだ場合、そのまま実装に進んでください。"
 				: "New implementation task. Use AskUserQuestion to ask the user: 'Create a spec? (S/M/L/Skip)'. If the user selects Skip, proceed without a spec.",

@@ -78,21 +78,21 @@ describe("checkSpecRequired", () => {
 		setupAlfred();
 		const result = checkSpecRequired(tmpDir, "implement");
 		expect(result).not.toBeNull();
-		expect(result!.level).toBe("CONTEXT");
+		expect(result!.level).toBe("DIRECTIVE");
 	});
 
 	it("returns DIRECTIVE when no spec and bugfix intent", () => {
 		setupAlfred();
 		const result = checkSpecRequired(tmpDir, "bugfix");
 		expect(result).not.toBeNull();
-		expect(result!.level).toBe("CONTEXT");
+		expect(result!.level).toBe("DIRECTIVE");
 	});
 
 	it("returns DIRECTIVE when no spec and tdd intent", () => {
 		setupAlfred();
 		const result = checkSpecRequired(tmpDir, "tdd");
 		expect(result).not.toBeNull();
-		expect(result!.level).toBe("CONTEXT");
+		expect(result!.level).toBe("DIRECTIVE");
 	});
 
 	it("returns null for review intent (no spec required)", () => {
@@ -148,10 +148,10 @@ describe("checkSpecRequired", () => {
 		expect(checkSpecRequired(tmpDir, "implement")).toBeNull();
 	});
 
-	it("returns CONTEXT level (proposal, not DIRECTIVE)", () => {
+	it("returns DIRECTIVE level (mandatory proposal)", () => {
 		setupAlfred();
 		const result = checkSpecRequired(tmpDir, "implement");
 		expect(result).not.toBeNull();
-		expect(result!.level).toBe("CONTEXT");
+		expect(result!.level).toBe("DIRECTIVE");
 	});
 });

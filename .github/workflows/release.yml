@@ -53,8 +53,32 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}
 
+  package-web-assets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "latest"
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build web assets
+        run: bun run build:web
+
+      - name: Create web assets archive
+        run: tar -czf alfred-web-assets.tar.gz -C web/dist .
+
+      - name: Upload web assets
+        uses: actions/upload-artifact@v6
+        with:
+          name: alfred-web-assets
+          path: alfred-web-assets.tar.gz
+
   release:
-    needs: build-binaries
+    needs: [build-binaries, package-web-assets]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -66,7 +90,7 @@ jobs:
           merge-multiple: true
 
       - name: Make binaries executable
-        run: chmod +x binaries/alfred-*
+        run: chmod +x binaries/alfred-darwin-* binaries/alfred-linux-*
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -77,3 +101,4 @@ jobs:
             binaries/alfred-darwin-x64
             binaries/alfred-linux-arm64
             binaries/alfred-linux-x64
+            binaries/alfred-web-assets.tar.gz

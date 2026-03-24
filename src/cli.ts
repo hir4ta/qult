@@ -204,6 +204,28 @@ const main = defineCommand({
 					process.exit(1);
 				}
 
+				// Download and extract web assets for dashboard
+				const { mkdirSync } = await import("node:fs");
+				const webAssetsUrl = `https://github.com/${REPO}/releases/download/v${latest}/alfred-web-assets.tar.gz`;
+				const shareDir = join(homedir(), ".local", "share", "alfred", "web", "dist");
+				try {
+					const webResp = await fetch(webAssetsUrl);
+					if (webResp.ok) {
+						const tarBuf = Buffer.from(await webResp.arrayBuffer());
+						if (tarBuf.byteLength < 1000) throw new Error("Download too small");
+						mkdirSync(shareDir, { recursive: true });
+						const { spawnSync } = await import("node:child_process");
+						const tarTmp = join(homedir(), ".local", "share", "alfred", "web-assets.tar.gz");
+						writeFileSync(tarTmp, tarBuf);
+						const r = spawnSync("tar", ["-xzf", tarTmp, "-C", shareDir], { stdio: "pipe" });
+						try { unlinkSync(tarTmp); } catch {}
+						if (r.status !== 0) throw new Error(`tar failed: ${r.stderr?.toString()}`);
+						console.log("Dashboard assets updated.");
+					}
+				} catch {
+					console.log("Note: Dashboard assets download skipped (not critical).");
+				}
+
 				console.log(`alfred updated to ${latest}.`);
 			},
 		}),
@@ -244,6 +266,13 @@ const main = defineCommand({
 					removed.push(dbDir);
 				} else skip(dbDir);
 
+				// Shared data (web assets)
+				const shareDir = join(home, ".local", "share", "alfred");
+				if (existsSync(shareDir)) {
+					rmSync(shareDir, { recursive: true, force: true });
+					removed.push(shareDir);
+				} else skip(shareDir);
+
 				// User rules
 				const rulesDir = join(home, ".claude", "rules");
 				for (const rule of ["alfred.md", "alfred-protocol.md"]) {
@@ -275,14 +304,15 @@ const main = defineCommand({
 				const { fileURLToPath } = await import("node:url");
 				const { join } = await import("node:path");
 				const { execSync } = await import("node:child_process");
-				// Resolve TUI path relative to this script's location (works from any cwd)
 				const { existsSync } = await import("node:fs");
 				const thisDir = fileURLToPath(new URL(".", import.meta.url));
-				// In dev: thisDir = .../src/ → ../src/tui/main.tsx
-				// In dist: thisDir = .../dist/ → ../src/tui/main.tsx
+				// In dev: thisDir = .../dist/ → ../src/tui/main.tsx (works)
+				// In compiled binary: thisDir = /$bunfs/... → path doesn't exist
 				const tuiPath = join(thisDir, "..", "src", "tui", "main.tsx");
 				if (!existsSync(tuiPath)) {
-					process.stderr.write(`Error: TUI script not found at ${tuiPath}\n`);
+					process.stderr.write("Error: TUI is not available in the compiled binary.\n");
+					process.stderr.write("Use the web dashboard instead: alfred dashboard\n");
+					process.stderr.write("Or run from the source: cd claude-alfred && bun src/tui/main.tsx\n");
 					process.exit(1);
 				}
 				try {

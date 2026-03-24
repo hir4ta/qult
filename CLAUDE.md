@@ -53,7 +53,7 @@ Build: tsdown (bundle) / vitest (test) / citty (CLI) / hono (HTTP, Bun.serve) / 
 
 | Step | Mechanism | Level |
 |------|-----------|-------|
-| Spec suggested | UserPromptSubmit CONTEXT (必ず提案、サイレントスキップ禁止) | CONTEXT |
+| Spec suggested | UserPromptSubmit DIRECTIVE (AskUserQuestion で確認必須) | DIRECTIVE |
 | Wave self-review | review-gate.json via PreToolUse (fix_mode for review→fix→re-review loop) | DENY (fix_mode: ALLOW) |
 | Wave commit + knowledge | PostToolUse DIRECTIVE | DIRECTIVE |
 | Task progress update | Explicit `dossier action=check` | Manual |

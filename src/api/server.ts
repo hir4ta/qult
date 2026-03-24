@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serveStatic } from "hono/bun";
@@ -610,12 +611,17 @@ export function createApp(
 		});
 	} else {
 		const webDistPath = resolveWebDist();
-		if (webDistPath && existsSync(webDistPath)) {
+		if (webDistPath) {
 			app.use("/*", serveStatic({ root: webDistPath }));
 			app.get("*", (c) => {
 				const indexPath = join(webDistPath, "index.html");
 				try { return c.html(readFileSync(indexPath, "utf-8")); }
-				catch { return c.text("Dashboard not built. Run: npm run build:web", 404); }
+				catch { return c.text("Dashboard not built. Run: task build", 404); }
+			});
+		} else {
+			app.get("*", (c) => {
+				if (c.req.path.startsWith("/api/")) return c.notFound();
+				return c.text("Dashboard assets not found.\nRun: alfred update (downloads web assets)\nOr build from source: cd claude-alfred && task build", 404);
 			});
 		}
 	}
@@ -668,13 +674,18 @@ function readAuditEntries(auditPath: string, entries: unknown[], projectName: st
 	} catch { /* no audit file */ }
 }
 
-function resolveWebDist(): string {
+function resolveWebDist(): string | null {
 	const thisDir = fileURLToPath(new URL(".", import.meta.url));
-	const candidates = [join(thisDir, "..", "web", "dist"), join(thisDir, "..", "..", "web", "dist")];
+	const candidates = [
+		join(thisDir, "..", "web", "dist"),           // dev: dist/ → ../web/dist
+		join(thisDir, "..", "..", "web", "dist"),      // dev: src/ → ../../web/dist
+		join(homedir(), ".local", "share", "alfred", "web", "dist"), // installed binary
+		join(process.cwd(), "web", "dist"),            // legacy fallback
+	];
 	for (const p of candidates) {
 		if (existsSync(join(p, "index.html"))) return p;
 	}
-	return join(process.cwd(), "web", "dist");
+	return null;
 }
 
 function dirMaxMtime(dir: string, depth = 3): number {
