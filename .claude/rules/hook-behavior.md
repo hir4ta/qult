@@ -16,15 +16,16 @@ paths:
 - Session continuity: writes .alfred/.pending-compact.json breadcrumb, SessionStart resolves → session_links table
 
 ## UserPromptSubmit
-- **Hybrid**: command hook (knowledge search + spec guard) + prompt hook (Haiku intent classification)
-- Command hook: Voyage vector search → FTS5 fallback → keyword fallback for knowledge search
-- Prompt hook (Haiku): 7 intents (research/plan/implement/bugfix/review/tdd/save-knowledge) を LLM 分類 → skill 推薦を additionalContext で出力
+- **Command hook only**: knowledge search + spec guard + LLM intent classification (Anthropic API direct call)
+- Knowledge search: Voyage vector search → FTS5 fallback → keyword fallback
+- Intent classification: Haiku via Anthropic Messages API (ANTHROPIC_API_KEY required, fail-open without key). Runs in parallel with knowledge search
+- 7 intents (research/plan/implement/bugfix/review/tdd/save-knowledge) → skill suggestion via additionalContext
 - Spec proposal (Stage 1): no active spec + implementation keywords → DIRECTIVE requiring AskUserQuestion. Guard resets per session
 - Parallel dev guard (Stage 1.5): active spec exists + implementation keywords + slug NOT in worked-slugs → WARNING
 
 ## PostToolUse
+- **Command hook only** (prompt/agent hooks removed: incompatible response format)
 - Bash error detection → FTS5 knowledge search → additionalContext injection
-- Task completion: agent hook (Haiku) が Edit/Write/Bash 後にタスク完了候補を additionalContext で提案 → Claude 本体が dossier check を呼ぶ（旧 autoCheckTasks は削除済み）
 - Bash success → git commit detection → living-spec + drift + wave completion
 - FR-9: Agent レビューレスポンス検出時に review-gate.json の re_reviewed フラグをセット（fix_mode 中のみ）
 

@@ -9,10 +9,10 @@ import type { ScoredDoc } from "../mcp/helpers.js";
 import type { DirectiveItem } from "./directives.js";
 import { emitDirectives } from "./directives.js";
 import type { HookEvent } from "./dispatcher.js";
+import { classifyIntent } from "./llm.js";
 import { readStateJSON, readWorkedSlugs, writeStateJSON } from "./state.js";
 
 // Simplified implementation-intent check for spec proposal guard (DEC-4).
-// Full intent classification is handled by the prompt hook (FR-1).
 // Word-boundary matching to avoid false positives on common words like "add a comment".
 const IMPL_PATTERNS = [
 	/\bimplement/i, /\brefactor/i, /\bbugfix/i, /\btdd\b/i,
@@ -63,9 +63,20 @@ export async function userPromptSubmit(ev: HookEvent, signal: AbortSignal): Prom
 		}
 	}
 
-	// Knowledge search — reuse promptVec to avoid double Voyage API call (DEC-2).
+	// Run knowledge search and intent classification in parallel.
 	const limit = 5;
-	const result = await searchPipeline(store, emb, prompt, limit, limit * 3, promptVec ?? undefined);
+	const [result, intentResult] = await Promise.all([
+		searchPipeline(store, emb, prompt, limit, limit * 3, promptVec ?? undefined),
+		classifyIntent(prompt, signal),
+	]);
+
+	// Intent classification → skill suggestion.
+	if (intentResult?.skill) {
+		items.push({
+			level: "CONTEXT",
+			message: `Skill suggestion: ${intentResult.skill} (${intentResult.intent})`,
+		});
+	}
 
 	// Knowledge results with relevance context.
 	if (result.scoredDocs.length > 0) {

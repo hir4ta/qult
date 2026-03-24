@@ -46,17 +46,6 @@
             "type": "command"
           }
         ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "prompt",
-            "prompt": "You are an intent classifier. Output ONLY a JSON object, nothing else. No explanation, no analysis, no markdown.\n\nIntents:\n- research → /alfred:brief\n- plan → /alfred:attend\n- implement → /alfred:attend\n- bugfix → /alfred:mend\n- review → /alfred:inspect\n- tdd → /alfred:tdd\n- save-knowledge → none\n- none (chat, questions, unclear, short fragments) → none\n\nRules:\n- Compound prompts: pick PRIMARY intent\n- Chat/greetings/unclear/fragments → none\n- The prompt may be in any language (Japanese, English, etc.)\n\nUser prompt:\n$ARGUMENTS\n\nIf intent matches a skill, respond with EXACTLY:\n{\"additionalContext\": \"[CONTEXT] Skill suggestion: /alfred:<skill> (<intent>)\"}\n\nIf intent is none or save-knowledge, respond with EXACTLY:\n{\"additionalContext\": \"\"}\n\nIMPORTANT: Your entire response must be a single JSON object. Do not output any other text.",
-            "model": "claude-haiku-4-5-20251001",
-            "statusMessage": "alfred: classifying intent...",
-            "timeout": 30
-          }
-        ]
       }
     ],
     "PostToolUse": [
@@ -67,18 +56,6 @@
             "statusMessage": "alfred: checking context...",
             "timeout": 5,
             "type": "command"
-          }
-        ]
-      },
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "agent",
-            "prompt": "You are a task completion evaluator for alfred, a spec-driven development tool.\n\n## Prerequisite\nFirst, check if .alfred/specs/_active.json exists. If it does not exist, return empty immediately.\nIf it exists, read it. It is JSON: {\"primary\": \"slug-name\", \"tasks\": [...]}.\nIf \"primary\" is empty string or missing, return empty immediately — there is no active spec.\n\n## Steps (only if primary is non-empty)\n1. Read .alfred/specs/{primary}/tasks.json\n2. Find unchecked tasks (checked: false)\n3. Compare the tool execution below against each unchecked task's title, files, and subtasks\n4. Only suggest tasks where you have HIGH confidence the work matches\n\n## Tool execution\n$ARGUMENTS\n\n## Rules\n- Only suggest tasks with strong evidence (file path matches task.files, or task description clearly matches the change)\n- If unsure, do NOT suggest — false positives are worse than missed completions\n- If no tasks match or no active spec, return empty additionalContext\n\n## Output\nReturn JSON: {\"hookSpecificOutput\": {\"hookEventName\": \"PostToolUse\", \"additionalContext\": \"[CONTEXT] Task completion candidates: T-X.Y: <title> (reason: <evidence>)\"}}\nIf nothing to report, return: {\"hookSpecificOutput\": {\"hookEventName\": \"PostToolUse\", \"additionalContext\": \"\"}}",
-            "model": "claude-haiku-4-5-20251001",
-            "statusMessage": "alfred: evaluating task completion...",
-            "timeout": 60
           }
         ]
       }
