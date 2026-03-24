@@ -334,6 +334,79 @@ const main = defineCommand({
 				}
 			},
 		}),
+		"hook-internal": defineCommand({
+			meta: { description: "[internal] Hook-internal commands for agent hooks" },
+			subCommands: {
+				"save-decision": defineCommand({
+					meta: { description: "Save a decision entry from PreCompact agent hook" },
+					args: {
+						title: { type: "string", required: true, description: "Decision title (max 200 chars)" },
+						decision: { type: "string", required: true, description: "What was decided" },
+						reasoning: { type: "string", required: true, description: "Why this choice" },
+						alternatives: { type: "string", default: "", description: "Rejected alternatives (newline-separated)" },
+					},
+					async run({ args }) {
+						const { mkdirSync, writeFileSync } = await import("node:fs");
+						const { join } = await import("node:path");
+						const { Store } = await import("./store/index.js");
+						const { upsertKnowledge } = await import("./store/knowledge.js");
+						const { resolveOrRegisterProject } = await import("./store/project.js");
+						const { getGitUserName } = await import("./git/user.js");
+
+						const cwd = process.cwd();
+						const store = Store.openDefault();
+						const proj = resolveOrRegisterProject(store, cwd);
+						const author = await getGitUserName(cwd);
+
+						const title = args.title.slice(0, 200);
+						const decision = args.decision.slice(0, 1000);
+						const reasoning = args.reasoning.slice(0, 1000);
+						const alternatives = (args.alternatives ?? "").slice(0, 1000);
+
+						// Build DecisionEntry JSON
+						const id = `dec-compact-${Date.now()}`;
+						const entry = {
+							id,
+							title,
+							context: "",
+							decision,
+							reasoning,
+							alternatives: alternatives ? alternatives.split("\n").filter(Boolean) : [],
+							tags: [],
+							createdAt: new Date().toISOString(),
+							status: "approved" as const,
+							lang: process.env.ALFRED_LANG || "en",
+						};
+
+						// Write to .alfred/knowledge/decisions/
+						const decisionsDir = join(cwd, ".alfred", "knowledge", "decisions");
+						mkdirSync(decisionsDir, { recursive: true });
+						const filePath = `decisions/${id}.json`;
+						writeFileSync(join(cwd, ".alfred", "knowledge", filePath), JSON.stringify(entry, null, 2) + "\n");
+
+						// Upsert to DB
+						upsertKnowledge(store, {
+							id: 0,
+							projectId: proj.id,
+							filePath,
+							contentHash: "",
+							title,
+							content: `${decision}\n\nReasoning: ${reasoning}${alternatives ? `\n\nAlternatives: ${alternatives}` : ""}`,
+							subType: "decision",
+							branch: proj.branch,
+							author,
+							createdAt: "",
+							updatedAt: "",
+							hitCount: 0,
+							lastAccessed: "",
+							enabled: true,
+						});
+
+						console.log(`Saved decision: ${title}`);
+					},
+				}),
+			},
+		}),
 		version: defineCommand({
 			meta: { description: "Show version" },
 			args: {

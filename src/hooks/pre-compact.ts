@@ -1,9 +1,8 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	completeTask,
 	readActive,
-	readActiveState,
 	SpecDir,
 } from "../spec/types.js";
 import { openDefaultCached } from "../store/index.js";
@@ -26,39 +25,9 @@ export async function preCompact(ev: HookEvent, _signal: AbortSignal): Promise<v
 	const projectPath = ev.cwd;
 	const proj = resolveOrRegisterProject(store, projectPath);
 
-	// Extract decisions from transcript if available.
-	if (ev.transcript_path) {
-		try {
-			const transcript = readFileSync(ev.transcript_path, "utf-8");
-			const decisions = extractDecisions(transcript);
-			if (decisions.length > 0) {
-				const ts = new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
-				for (let idx = 0; idx < decisions.length; idx++) {
-					const dec = decisions[idx]!;
-					const row: KnowledgeRow = {
-						id: 0,
-						projectId: proj.id,
-						filePath: `decisions/compact/${ts}-${idx}`,
-						contentHash: "",
-						title: dec.title,
-						content: dec.content,
-						subType: "decision",
-						branch: proj.branch,
-						author: "",
-						createdAt: "",
-						updatedAt: "",
-						hitCount: 0,
-						lastAccessed: "",
-						enabled: true,
-					};
-					upsertKnowledge(store, row);
-				}
-				notifyUser("extracted %d decisions from transcript", decisions.length);
-			}
-		} catch {
-			/* transcript read failure is non-fatal */
-		}
-	}
+	// Decision extraction is now handled by the PreCompact agent hook (FR-5/FR-6).
+	// The agent hook reads the transcript via Read tool and saves decisions via
+	// `alfred hook-internal save-decision` Bash command.
 
 	// Save chapter memory (tasks.json snapshot).
 	try {
@@ -118,94 +87,7 @@ export async function preCompact(ev: HookEvent, _signal: AbortSignal): Promise<v
 
 }
 
-interface Decision {
-	title: string;
-	content: string;
-}
-
-const DECISION_KEYWORDS = [
-	"decided",
-	"決定した",
-	"going with",
-	"we'll",
-	"chose",
-	"chosen",
-	"architecture",
-	"アーキテクチャ",
-	"design choice",
-	"decided to",
-];
-
-const RATIONALE_SIGNALS = ["because", "since", "reason", "rationale", "なぜなら", "理由"];
-const ALTERNATIVE_SIGNALS = ["instead of", "rather than", "alternative", "considered", "代わりに"];
-const ARCH_TERMS = ["component", "module", "layer", "service", "interface", "pattern", "migration"];
-
-function extractDecisions(transcript: string): Decision[] {
-	const decisions: Decision[] = [];
-	const lines = transcript.split("\n");
-
-	for (const line of lines) {
-		let entry: {
-			type?: string;
-			role?: string;
-			content?: string;
-			message?: { role?: string; content?: string };
-		};
-		try {
-			entry = JSON.parse(line);
-		} catch {
-			continue;
-		}
-
-		const text =
-			typeof entry.content === "string"
-				? entry.content
-				: typeof entry.message?.content === "string"
-					? entry.message.content
-					: "";
-		if (!text) continue;
-
-		// Only look at assistant messages for decisions.
-		const role = entry.role ?? entry.message?.role;
-		if (role !== "assistant") continue;
-
-		const lower = text.toLowerCase();
-
-		// Base score from keyword matches.
-		let score = 0;
-		for (const kw of DECISION_KEYWORDS) {
-			if (lower.includes(kw)) {
-				score = 0.35;
-				break;
-			}
-		}
-		if (score === 0) continue;
-
-		// Bonus signals.
-		if (RATIONALE_SIGNALS.some((s) => lower.includes(s))) score += 0.15;
-		if (ALTERNATIVE_SIGNALS.some((s) => lower.includes(s))) score += 0.15;
-		for (const term of ARCH_TERMS) {
-			if (lower.includes(term)) {
-				score += 0.05;
-				break;
-			}
-		}
-
-		if (score < 0.4) continue;
-
-		// Extract a title from the first sentence.
-		const firstSentence = text.split(/[.!?\n]/)[0]?.trim() ?? "Decision";
-		decisions.push({
-			title: firstSentence.slice(0, 100),
-			content: text.slice(0, 1000),
-		});
-	}
-
-	return decisions;
-}
-
 function doAutoComplete(projectPath: string, taskSlug: string): void {
 	completeTask(projectPath, taskSlug);
 	notifyUser("auto-completed task '%s'", taskSlug);
 }
-

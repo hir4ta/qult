@@ -11,6 +11,17 @@
             "type": "command"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "agent",
+            "prompt": "You are a decision extractor for alfred, a spec-driven development tool.\n\n## Task\nExtract technical decisions from the session transcript and save them.\n\n## Steps\n1. The transcript path is in the input below (transcript_path field). Read it.\n2. Scan for technical decisions: technology choices, design trade-offs, architecture decisions, rejection of alternatives.\n3. Exclude: routine implementation steps, user's direct instructions repeated verbatim, trivial choices.\n4. For each decision found, run this Bash command to save it:\n   cd $CWD && alfred hook-internal save-decision --title \"<title>\" --decision \"<what was decided>\" --reasoning \"<why>\" --alternatives \"<rejected options>\"\n   Replace $CWD with the cwd field from the input.\n5. If no decisions found, do nothing.\n\n## Input\n$ARGUMENTS\n\n## Quality rules\n- Max 5 decisions per session (pick the most impactful)\n- Title should be a single clear sentence (max 100 chars)\n- If alfred is not in PATH, try: bun dist/cli.mjs hook-internal save-decision ...",
+            "model": "claude-haiku-4-5-20251001",
+            "statusMessage": "alfred: extracting decisions...",
+            "timeout": 60
+          }
+        ]
       }
     ],
     "SessionStart": [
