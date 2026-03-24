@@ -1,8 +1,3 @@
----
-paths:
-  - ".alfred/**"
----
-
 # Alfred Protocol — Spec-Driven Development
 
 When a `.alfred/specs/` directory exists in the project, follow this protocol strictly.
