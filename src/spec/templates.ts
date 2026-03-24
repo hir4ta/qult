@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { SpecFile, SpecSize, SpecType } from "./types.js";
+import type { BugfixFile, SpecFile, SpecSize, SpecType, TasksFile, TestSpecsFile } from "./types.js";
 import { filesForSize } from "./types.js";
 
 // English templates
@@ -59,16 +59,109 @@ export function renderForSize(
 	const files = filesForSize(size, specType);
 	const rendered = new Map<SpecFile, string>();
 	for (const f of files) {
-		// 2-layer resolution: custom template > built-in default
+		// JSON files: generate from TypeScript functions
+		if (f.endsWith(".json")) {
+			rendered.set(f, generateJsonTemplate(f, data, lang));
+			continue;
+		}
+		// Markdown files: 2-layer resolution: custom template > built-in default
 		const custom = projectPath ? tryReadCustomTemplate(projectPath, f) : undefined;
 		if (custom) {
-			// Apply same variable substitution to custom templates
 			rendered.set(f, applyTemplateVars(custom, data, lang));
 		} else {
 			rendered.set(f, renderTemplate(f, data, lang));
 		}
 	}
 	return rendered;
+}
+
+function generateJsonTemplate(file: SpecFile, data: TemplateData, lang: string): string {
+	switch (file) {
+		case "tasks.json":
+			return JSON.stringify(generateTasksTemplate(data, lang), null, 2) + "\n";
+		case "test-specs.json":
+			return JSON.stringify(generateTestSpecsTemplate(data, lang), null, 2) + "\n";
+		case "bugfix.json":
+			return JSON.stringify(generateBugfixTemplate(data, lang), null, 2) + "\n";
+		default:
+			return "{}\n";
+	}
+}
+
+function generateTasksTemplate(data: TemplateData, lang: string): TasksFile {
+	const isJa = lang === "ja";
+	return {
+		slug: data.taskSlug,
+		waves: [
+			{
+				key: 1,
+				title: isJa ? "[Wave 名]" : "[Wave Name]",
+				tasks: [
+					{
+						id: "T-1.1",
+						title: isJa ? "[タスクタイトル]" : "[Task Title]",
+						size: "M",
+						checked: false,
+						requirements: ["FR-1"],
+						files: [],
+						verify: isJa ? "[完了条件]" : "[Done condition]",
+					},
+				],
+			},
+		],
+		closing: {
+			key: "closing",
+			title: "Closing",
+			tasks: [
+				{ id: "T-C.1", title: isJa ? "最終セルフレビュー" : "Final self-review", checked: false },
+				{ id: "T-C.2", title: isJa ? "CLAUDE.md / README 更新" : "Update CLAUDE.md / README if needed", checked: false },
+				{ id: "T-C.3", title: isJa ? "テスト通過確認" : "Verify tests pass", checked: false },
+				{ id: "T-C.4", title: isJa ? "ナレッジ保存" : "Save key learnings via ledger save", checked: false },
+			],
+		},
+	};
+}
+
+function generateTestSpecsTemplate(data: TemplateData, lang: string): TestSpecsFile {
+	const isJa = lang === "ja";
+	return {
+		specs: [
+			{
+				id: "TS-1.1",
+				title: isJa ? "[テスト名]" : "[Test Name]",
+				source: "FR-1",
+				scenarios: [
+					{
+						name: isJa ? "[シナリオ名]" : "[Scenario Name]",
+						steps: [
+							isJa ? "Given [前提条件]" : "Given [precondition]",
+							isJa ? "When [操作]" : "When [action]",
+							isJa ? "Then [期待結果]" : "Then [expected result]",
+						],
+					},
+				],
+			},
+		],
+	};
+}
+
+function generateBugfixTemplate(data: TemplateData, lang: string): BugfixFile {
+	const isJa = lang === "ja";
+	return {
+		summary: data.description || (isJa ? "[バグの概要]" : "[Bug Summary]"),
+		severity: "P2",
+		impact: isJa ? "[影響範囲]" : "[Impact]",
+		reproduction_steps: [
+			isJa ? "[手順1]" : "[Step 1]",
+			isJa ? "[手順2]" : "[Step 2]",
+		],
+		root_cause: isJa ? "[根本原因]" : "[Root Cause]",
+		five_whys: [
+			isJa ? "なぜ？→" : "Why? →",
+		],
+		fix_strategy: isJa ? "[修正方針]" : "[Fix Strategy]",
+		regression_prevention: isJa ? "[回帰防止策]" : "[Regression Prevention]",
+	};
 }
 
 function tryReadCustomTemplate(projectPath: string, file: SpecFile): string | undefined {

@@ -13,12 +13,72 @@ import { parse as parseYAML } from "yaml";
 export type SpecFile =
 	| "requirements.md"
 	| "design.md"
+	| "research.md"
+	| "tasks.json"
+	| "test-specs.json"
+	| "bugfix.json"
+	// Legacy markdown (read-only, for backward compatibility)
 	| "tasks.md"
 	| "test-specs.md"
+	| "bugfix.md"
 	| "decisions.md"
 	| "research.md"
-	| "session.md"
-	| "bugfix.md";
+	| "session.md";
+
+// --- JSON spec schemas ---
+
+export interface SpecTask {
+	id: string;
+	title: string;
+	size?: "S" | "M" | "L";
+	checked: boolean;
+	requirements?: string[];
+	depends?: string[];
+	files?: string[];
+	verify?: string;
+	subtasks?: string[];
+}
+
+export interface SpecWave {
+	key: number | "closing";
+	title: string;
+	tasks: SpecTask[];
+}
+
+export interface TasksFile {
+	slug: string;
+	waves: SpecWave[];
+	closing: SpecWave;
+	dependency_graph?: Record<string, string[]>;
+}
+
+export interface TestScenario {
+	name: string;
+	steps: string[];
+}
+
+export interface TestSpec {
+	id: string;
+	title: string;
+	source?: string;
+	scenarios: TestScenario[];
+}
+
+export interface TestSpecsFile {
+	specs: TestSpec[];
+}
+
+export interface BugfixFile {
+	summary: string;
+	severity: "P0" | "P1" | "P2" | "P3";
+	impact?: string;
+	reproduction_steps: string[];
+	root_cause: string;
+	five_whys?: string[];
+	fix_strategy: string;
+	regression_prevention?: string;
+	confidence?: number;
+}
 
 export type SpecSize = "S" | "M" | "L";
 export type SpecType = "feature" | "bugfix";
@@ -109,14 +169,14 @@ export function detectSize(description: string): SpecSize {
 }
 
 export function filesForSize(size: SpecSize, specType: SpecType): SpecFile[] {
-	const primary: SpecFile = specType === "bugfix" ? "bugfix.md" : "requirements.md";
+	const primary: SpecFile = specType === "bugfix" ? "bugfix.json" : "requirements.md";
 	switch (size) {
 		case "S":
-			return [primary, "design.md", "tasks.md"];
+			return [primary, "design.md", "tasks.json"];
 		case "M":
-			return [primary, "design.md", "tasks.md", "test-specs.md"];
+			return [primary, "design.md", "tasks.json", "test-specs.json"];
 		case "L":
-			return [primary, "design.md", "tasks.md", "test-specs.md", "research.md"];
+			return [primary, "design.md", "tasks.json", "test-specs.json", "research.md"];
 	}
 }
 
