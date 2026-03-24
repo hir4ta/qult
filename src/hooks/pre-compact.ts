@@ -60,13 +60,13 @@ export async function preCompact(ev: HookEvent, _signal: AbortSignal): Promise<v
 		}
 	}
 
-	// Save chapter memory (tasks.md snapshot).
+	// Save chapter memory (tasks.json snapshot).
 	try {
 		const taskSlug = readActive(projectPath);
 		const sd = new SpecDir(projectPath, taskSlug);
 		if (sd.exists()) {
 			let tasksContent = "";
-			try { tasksContent = sd.readFile("tasks.md"); } catch { /* no tasks.md */ }
+			try { tasksContent = sd.readFile("tasks.json"); } catch { /* no tasks.json */ }
 			if (tasksContent) {
 				const title = `${proj.name} > ${taskSlug} > chapter > tasks-state`;
 				const row: KnowledgeRow = {
@@ -103,12 +103,13 @@ export async function preCompact(ev: HookEvent, _signal: AbortSignal): Promise<v
 		/* fail-open */
 	}
 
-	// Auto-complete task if tasks.md indicates all tasks checked.
+	// Auto-complete task if tasks.json indicates all tasks checked.
 	try {
 		const taskSlug = readActive(projectPath);
 		const sd = new SpecDir(projectPath, taskSlug);
-		const tasksFile = sd.readFile("tasks.md");
-		if (isTasksCompleted(tasksFile)) {
+		const tasksData = JSON.parse(sd.readFile("tasks.json"));
+		const allTasks = [...(tasksData.waves ?? []).flatMap((w: any) => w.tasks), ...(tasksData.closing?.tasks ?? [])];
+		if (allTasks.length > 0 && allTasks.every((t: any) => t.checked)) {
 			doAutoComplete(projectPath, taskSlug);
 		}
 	} catch {
@@ -208,8 +209,3 @@ function doAutoComplete(projectPath: string, taskSlug: string): void {
 	notifyUser("auto-completed task '%s'", taskSlug);
 }
 
-function isTasksCompleted(tasksContent: string): boolean {
-	const allSteps = tasksContent.match(/^- \[[ xX]\] .+$/gm);
-	if (!allSteps || allSteps.length === 0) return false;
-	return allSteps.every((step) => /^- \[[xX]\]/.test(step));
-}

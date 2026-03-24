@@ -11,7 +11,7 @@ import type { HookEvent } from "./dispatcher.js";
 import { notifyUser } from "./dispatcher.js";
 
 import { isSpecFilePath } from "./spec-guard.js";
-import { addWorkedSlug, parseWaveProgress, readStateJSON, readWaveProgress, writeStateJSON, writeWaveProgress } from "./state.js";
+import { addWorkedSlug, readStateJSON, readWaveProgress, writeStateJSON, writeWaveProgress } from "./state.js";
 import { writeReviewGate } from "./review-gate.js";
 
 export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<void> {
@@ -131,15 +131,13 @@ async function handleBashResult(
 				/* fail-open */
 			}
 
-			// Wave completion detection: check tasks.md after commit.
+			// Wave completion detection: check tasks.json after commit.
 			try {
 				const slug = readActive(ev.cwd!);
-				const sd = new SpecDir(ev.cwd!, slug);
-				const tasksContent = sd.readFile("tasks.md");
-				const waveItems = detectWaveCompletion(ev.cwd!, slug, tasksContent);
+				const waveItems = detectWaveCompletion(ev.cwd!, slug);
 				items.push(...waveItems);
 			} catch {
-				/* no active spec or tasks.md */
+				/* no active spec or tasks.json */
 			}
 
 			// Auto-save decisions + session snapshot on git commit (not just PreCompact).
@@ -178,42 +176,38 @@ async function searchErrorContext(
 
 
 /**
- * Auto-check tasks.md checkboxes when implementation matches task descriptions.
- * Uses file path matching for backtick-quoted paths + filename matching.
- * NOTE: Does NOT emit unchecked count CONTEXT — that caused Claude to stall (#27).
+ * Auto-check tasks.json tasks when implementation matches task descriptions.
+ * Uses file path matching against task.files and task.title.
  */
 function autoCheckTasks(projectPath: string, context: string, items: DirectiveItem[]): void {
 	try {
 		const taskSlug = readActive(projectPath);
 		const sd = new SpecDir(projectPath, taskSlug);
 
-		let tasks: string;
+		let tasksData: { waves: Array<{ tasks: Array<{ id: string; title: string; checked: boolean; files?: string[] }> }>; closing: { tasks: Array<{ id: string; title: string; checked: boolean; files?: string[] }> } };
 		try {
-			tasks = sd.readFile("tasks.md");
+			tasksData = JSON.parse(sd.readFile("tasks.json"));
 		} catch {
-			return; // no tasks.md
+			return; // no tasks.json
 		}
 
-		const lines = tasks.split("\n");
 		let changed = false;
+		const allWaves = [...tasksData.waves, tasksData.closing];
 
-		for (let i = 0; i < lines.length; i++) {
-			const line = lines[i]!;
-			const match = line.match(/^- \[ \] (.+)$/);
-			if (!match) continue;
-
-			const description = match[1]!;
-			if (matchTaskDescription(description, context)) {
-				lines[i] = line.replace("- [ ]", "- [x]");
-				changed = true;
+		for (const wave of allWaves) {
+			for (const task of wave.tasks) {
+				if (task.checked) continue;
+				if (matchTaskDescription(task.title, context) || matchTaskFiles(task.files, context)) {
+					task.checked = true;
+					changed = true;
+				}
 			}
 		}
 
 		if (changed) {
-			const updatedContent = lines.join("\n");
-			sd.writeFile("tasks.md", updatedContent);
+			sd.writeFile("tasks.json", JSON.stringify(tasksData, null, 2) + "\n");
 			// Detect wave completion after auto-check.
-			const waveItems = detectWaveCompletion(projectPath, taskSlug, updatedContent);
+			const waveItems = detectWaveCompletion(projectPath, taskSlug);
 			items.push(...waveItems);
 		}
 		// #27 fix: Do NOT emit unchecked count CONTEXT here.
@@ -233,20 +227,18 @@ export function matchTaskDescription(description: string, context: string): bool
 	if (!context || !description) return false;
 	const lowerCtx = context.toLowerCase();
 
-	// Strategy 1: File path matching — extract backtick-quoted paths.
 	const backtickPaths = description.match(/`([^`]+\.[a-z]+)`/g);
 	if (backtickPaths) {
 		for (const quoted of backtickPaths) {
-			const path = quoted.slice(1, -1); // strip backticks
+			const path = quoted.slice(1, -1);
 			if (lowerCtx.includes(path.toLowerCase())) return true;
 		}
 	}
 
-	// Strategy 2: Filename matching — extract filenames with extensions.
 	const filenamePattern = /\b([\w.-]+\.[a-z]{1,4})\b/gi;
 	const filenames = [...description.matchAll(filenamePattern)]
-		.map((m) => m[1]!.toLowerCase())
-		.filter((f) => f.length > 4 && !f.startsWith(".")); // skip short/hidden files
+		.map(m => m[1]!.toLowerCase())
+		.filter(f => f.length > 4 && !f.startsWith("."));
 	for (const fname of filenames) {
 		if (lowerCtx.includes(fname)) return true;
 	}
@@ -254,41 +246,49 @@ export function matchTaskDescription(description: string, context: string): bool
 	return false;
 }
 
+function matchTaskFiles(files: string[] | undefined, context: string): boolean {
+	if (!files || !context) return false;
+	const lowerCtx = context.toLowerCase();
+	return files.some(f => lowerCtx.includes(f.toLowerCase()));
+}
+
 /**
- * Detect wave completion after tasks.md update.
- * When all tasks in a wave are checked: emit DIRECTIVE + set review gate.
+ * Detect wave completion after tasks.json update.
+ * JSON-based: reads tasks.json directly.
  */
 export function detectWaveCompletion(
 	projectPath: string,
 	taskSlug: string,
-	tasksContent: string,
 ): DirectiveItem[] {
 	const items: DirectiveItem[] = [];
 	try {
-		const progress = parseWaveProgress(tasksContent, taskSlug);
+		const sd = new SpecDir(projectPath, taskSlug);
+		const tasksData = JSON.parse(sd.readFile("tasks.json"));
+		const allWaves = [...(tasksData.waves ?? []), tasksData.closing].filter(Boolean);
 		const prev = readWaveProgress(projectPath);
 
-		for (const [key, state] of Object.entries(progress.waves)) {
-			// Closing Wave now also gets review-gate enforcement (FR-1: closing-wave-enforcement).
-			if (state.total === 0 || state.checked < state.total) continue; // not complete
+		const progress: { slug: string; current_wave: number; waves: Record<string, { total: number; checked: number; reviewed: boolean }> } = {
+			slug: taskSlug, current_wave: 1, waves: {},
+		};
 
-			// Check if this wave was already reviewed (from prev state or current).
-			const prevWave = prev?.waves[key];
-			if (prevWave?.reviewed) {
-				state.reviewed = true;
-				continue;
-			}
+		for (const wave of allWaves) {
+			const key = String(wave.key);
+			const total = wave.tasks.length;
+			const checked = wave.tasks.filter((t: { checked: boolean }) => t.checked).length;
+			const prevReviewed = prev?.waves[key]?.reviewed ?? false;
+			progress.waves[key] = { total, checked, reviewed: prevReviewed };
 
-			// Wave just completed — emit DIRECTIVE, set gate, and stop at first newly-completed wave.
+			if (total === 0 || checked < total) continue;
+			if (prevReviewed) continue;
+
 			items.push({
 				level: "DIRECTIVE",
-				message: `Wave ${key} complete (${state.checked}/${state.total} tasks). You MUST now: 1) Commit your changes, 2) Run self-review (delegate to alfred:code-reviewer or /alfred:inspect), 3) Save any learnings via \`ledger save\`. Then clear the gate with \`dossier action=gate sub_action=clear reason="..."\`.`,
+				message: `Wave ${key} complete (${checked}/${total} tasks). You MUST now: 1) Commit your changes, 2) Run self-review (delegate to alfred:code-reviewer or /alfred:inspect), 3) Save any learnings via \`ledger save\`. Then clear the gate with \`dossier action=gate sub_action=clear reason="..."\`.`,
 			});
 
-			// FR-14: Auto-transition in-progress → review on wave completion.
 			try {
 				updateTaskStatus(projectPath, taskSlug, "review", "auto:wave-complete");
-			} catch { /* transition error — may already be in review */ }
+			} catch { /* transition error */ }
 
 			writeReviewGate(projectPath, {
 				gate: "wave-review",
@@ -296,10 +296,9 @@ export function detectWaveCompletion(
 				wave: parseInt(key, 10) || 0,
 				reason: `Wave ${key} self-review required`,
 			});
-			break; // One wave at a time — review this wave before proceeding.
+			break;
 		}
 
-		// Persist progress (tracking).
 		writeWaveProgress(projectPath, progress);
 	} catch {
 		/* fail-open */

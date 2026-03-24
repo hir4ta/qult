@@ -62,64 +62,57 @@ function readCancelState(projPath: string): StateFile {
 
 // --- Wave + task parser ---
 
-function parseWaves(content: string): WaveInfo[] {
-	const waves: Array<{ key: string; title: string; total: number; checked: number; tasks: TaskItem[] }> = [];
-	let current: (typeof waves)[number] | null = null;
+// --- JSON → WaveInfo conversion ---
 
-	for (const line of content.split("\n")) {
-		const waveMatch = line.match(/^## Wave\s+(\d+)(?::\s*(.+))?/i);
-		const closingMatch = line.match(/^## (?:Wave:\s*)?Closing(?:\s+Wave)?/i);
+interface TasksJson {
+	slug: string;
+	waves: Array<{ key: number | string; title: string; tasks: Array<{ id: string; title: string; checked: boolean }> }>;
+	closing: { key: number | string; title: string; tasks: Array<{ id: string; title: string; checked: boolean }> };
+}
 
-		if (waveMatch) {
-			current = { key: waveMatch[1]!, title: waveMatch[2]?.trim() || `Wave ${waveMatch[1]}`, total: 0, checked: 0, tasks: [] };
-			waves.push(current);
-		} else if (closingMatch) {
-			current = { key: "closing", title: "Closing", total: 0, checked: 0, tasks: [] };
-			waves.push(current);
-		} else if (current && /^- \[[ xX]\] /.test(line)) {
-			const isChecked = /^- \[[xX]\] /.test(line);
-			const label = line.replace(/^- \[[ xX]\] /, "").trim();
-			// Extract task ID (e.g., "T-1.2 Do something" → id="T-1.2", label="Do something")
-			const idMatch = label.match(/^(T-\d+\.\d+)\s+(.*)/);
-			const id = idMatch ? idMatch[1]! : label.slice(0, 10);
-			const displayLabel = idMatch ? `${idMatch[1]} ${idMatch[2]}` : label;
-
-			current.total++;
-			if (isChecked) current.checked++;
-			current.tasks.push({ id, label: displayLabel, checked: isChecked });
-		}
-	}
+function jsonToWaves(data: TasksJson): WaveInfo[] {
+	const allWaves = [...data.waves, data.closing];
+	const result: WaveInfo[] = allWaves.map(w => {
+		const tasks = w.tasks.map(t => ({
+			id: t.id,
+			label: `${t.id} ${t.title}`,
+			checked: t.checked,
+		}));
+		const checked = tasks.filter(t => t.checked).length;
+		return {
+			key: String(w.key),
+			title: w.title,
+			total: tasks.length,
+			checked,
+			isCurrent: false,
+			tasks,
+		};
+	});
 
 	// Determine current wave
-	let currentKey = "";
-	const nonClosing = waves.filter((w) => w.key !== "closing");
-	const firstIncomplete = nonClosing.find((w) => w.checked < w.total);
+	const nonClosing = result.filter(w => w.key !== "closing");
+	const firstIncomplete = nonClosing.find(w => w.checked < w.total);
 	if (firstIncomplete) {
-		currentKey = firstIncomplete.key;
+		firstIncomplete.isCurrent = true;
 	} else {
-		const closing = waves.find((w) => w.key === "closing");
-		if (closing && closing.checked < closing.total) currentKey = "closing";
+		const closing = result.find(w => w.key === "closing");
+		if (closing && closing.checked < closing.total) closing.isCurrent = true;
 	}
 
-	return waves.map((w) => ({ ...w, isCurrent: w.key === currentKey }));
+	return result;
 }
 
 // --- Load tasks ---
 
 export function loadTasks(projPath: string, projName: string, opts?: { showAll?: boolean }): TaskInfo[] {
 	const state = readActiveState(projPath);
+	const tasks: TaskInfo[] = state.tasks.map(task => buildTaskInfo(projPath, projName, task));
 
-	// Build task list from _active.json entries
-	const tasks: TaskInfo[] = state.tasks.map((task) => buildTaskInfo(projPath, projName, task));
-
-	// When showAll, add completed and cancelled specs from their JSON files
 	if (opts?.showAll) {
-		const complete = readCompleteState(projPath);
-		for (const task of complete.tasks) {
+		for (const task of readCompleteState(projPath).tasks) {
 			tasks.push(buildTaskInfo(projPath, projName, task));
 		}
-		const cancel = readCancelState(projPath);
-		for (const task of cancel.tasks) {
+		for (const task of readCancelState(projPath).tasks) {
 			tasks.push(buildTaskInfo(projPath, projName, task));
 		}
 	}
@@ -127,24 +120,30 @@ export function loadTasks(projPath: string, projName: string, opts?: { showAll?:
 	return tasks;
 }
 
-function buildTaskInfo(
-	projPath: string,
-	projName: string,
-	task: TaskEntry,
-): TaskInfo {
+function buildTaskInfo(projPath: string, projName: string, task: TaskEntry): TaskInfo {
 	let waves: WaveInfo[] = [];
 	let focus = "";
 	let completed = 0;
 	let total = 0;
-	const specDir = join(projPath, ".alfred", "specs", task.slug);
 
 	try {
-		const tasksContent = readFileSync(join(specDir, "tasks.md"), "utf-8");
-		waves = parseWaves(tasksContent);
+		const raw = readFileSync(join(projPath, ".alfred", "specs", task.slug, "tasks.json"), "utf-8");
+		const data: TasksJson = JSON.parse(raw);
+		waves = jsonToWaves(data);
 		for (const w of waves) { completed += w.checked; total += w.total; }
-		const cur = waves.find((w) => w.isCurrent);
+		const cur = waves.find(w => w.isCurrent);
 		if (cur) focus = cur.title;
-	} catch { /* no tasks.md */ }
+	} catch {
+		// Fallback: try legacy tasks.md (for completed specs before migration)
+		try {
+			const md = readFileSync(join(projPath, ".alfred", "specs", task.slug, "tasks.md"), "utf-8");
+			// Simple line counting for legacy display
+			const checked = (md.match(/^- \[[xX]\] /gm) ?? []).length;
+			const unchecked = (md.match(/^- \[ \] /gm) ?? []).length;
+			completed = checked;
+			total = checked + unchecked;
+		} catch { /* no tasks file */ }
+	}
 
 	return {
 		slug: task.slug,
