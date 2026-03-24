@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -6,13 +6,11 @@ import {
 	addWorkedSlug,
 	ensureStateDir,
 	readStateJSON,
-	readStateText,
 	readWaveProgress,
 	readWorkedSlugs,
 	resetWorkedSlugs,
 	stateDir,
 	writeStateJSON,
-	writeStateText,
 	writeWaveProgress,
 } from "../state.js";
 import type { WaveProgress } from "../state.js";
@@ -59,19 +57,9 @@ describe("readStateJSON / writeStateJSON", () => {
 	});
 
 	it("returns fallback on invalid JSON", () => {
-		writeStateText(tmpDir, "bad.json", "not json");
+		ensureStateDir(tmpDir);
+		writeFileSync(join(stateDir(tmpDir), "bad.json"), "not json");
 		expect(readStateJSON(tmpDir, "bad.json", [])).toEqual([]);
-	});
-});
-
-describe("readStateText / writeStateText", () => {
-	it("round-trips text data", () => {
-		writeStateText(tmpDir, "counter", "42");
-		expect(readStateText(tmpDir, "counter", "0")).toBe("42");
-	});
-
-	it("returns fallback when file missing", () => {
-		expect(readStateText(tmpDir, "missing", "default")).toBe("default");
 	});
 });
 
@@ -93,7 +81,6 @@ describe("worked-slugs", () => {
 		expect(readWorkedSlugs(tmpDir)).toEqual([]);
 	});
 });
-
 
 describe("wave progress persistence (TS-1.4)", () => {
 	it("round-trips wave progress", () => {

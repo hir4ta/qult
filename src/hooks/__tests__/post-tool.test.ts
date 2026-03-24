@@ -2,10 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { isGitCommit, isTestFailure, detectWaveCompletion } from "../post-tool.js";
+import { isGitCommit, detectWaveCompletion } from "../post-tool.js";
 import { readStateJSON, writeWaveProgress } from "../state.js";
 import type { ReviewGate } from "../review-gate.js";
-import { readStateText, writeStateText } from "../state.js";
 
 let tmpDir: string;
 
@@ -26,44 +25,6 @@ function setupTasksJson(slug: string, tasksJson: object) {
 	writeFileSync(join(specsDir, "tasks.json"), JSON.stringify(tasksJson));
 	writeFileSync(join(specsDir, "requirements.md"), "# Requirements");
 }
-
-describe("explore count via state", () => {
-	it("starts at 0", () => {
-		const count = parseInt(readStateText(tmpDir, "explore-count", "0"), 10) || 0;
-		expect(count).toBe(0);
-	});
-
-	it("increments correctly", () => {
-		writeStateText(tmpDir, "explore-count", "1");
-		const count = parseInt(readStateText(tmpDir, "explore-count", "0"), 10);
-		expect(count).toBe(1);
-	});
-
-	it("resets to 0", () => {
-		writeStateText(tmpDir, "explore-count", "5");
-		writeStateText(tmpDir, "explore-count", "0");
-		const count = parseInt(readStateText(tmpDir, "explore-count", "0"), 10);
-		expect(count).toBe(0);
-	});
-
-	it("reaches threshold at 5", () => {
-		for (let i = 1; i <= 5; i++) {
-			writeStateText(tmpDir, "explore-count", String(i));
-		}
-		const count = parseInt(readStateText(tmpDir, "explore-count", "0"), 10);
-		expect(count).toBe(5);
-		expect(count >= 5).toBe(true);
-	});
-});
-
-describe("isTestFailure", () => {
-	it("detects FAIL", () => expect(isTestFailure("FAIL src/test.ts")).toBe(true));
-	it("detects FAILED", () => expect(isTestFailure("Tests FAILED")).toBe(true));
-	it("detects FAILURE", () => expect(isTestFailure("FAILURE in test suite")).toBe(true));
-	it('detects "N failed"', () => expect(isTestFailure("3 failed, 10 passed")).toBe(true));
-	it("does not detect passing tests", () => expect(isTestFailure("All tests passed")).toBe(false));
-	it("returns false for empty string", () => expect(isTestFailure("")).toBe(false));
-});
 
 describe("isGitCommit", () => {
 	it("detects branch commit pattern", () => expect(isGitCommit("[main abc1234] fix: something")).toBe(true));

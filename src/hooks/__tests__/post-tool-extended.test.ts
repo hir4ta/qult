@@ -37,20 +37,7 @@ function setupActiveSpec(slug: string) {
 	writeFileSync(join(specsDir, "tasks.md"), "# Tasks\n## Wave 1\n- [ ] T-1.1: Add `src/hooks/test.ts`\n- [ ] T-1.2: Update documentation");
 }
 
-describe("postToolUse Bash error handling", () => {
-	it("emits test failure warning on test error", async () => {
-		const io = suppressIO();
-		try {
-			const { postToolUse } = await import("../post-tool.js");
-			await postToolUse({
-				cwd: tmpDir, tool_name: "Bash",
-				tool_response: { exitCode: 1, stdout: "3 failed, 10 passed", stderr: "" },
-			} as any, AbortSignal.timeout(5000));
-			const output = io.stdout.join("");
-			expect(output).toContain("failure");
-		} finally { io.restore(); }
-	});
-
+describe("postToolUse Bash handling", () => {
 	it("handles normal Bash success without error", async () => {
 		const io = suppressIO();
 		try {
