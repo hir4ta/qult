@@ -15,7 +15,7 @@ export default defineConfig({
     '__ALFRED_VERSION__': JSON.stringify(pkg.version),
   },
   deps: {
-    neverBundle: ['bun:sqlite'],
+    neverBundle: ['bun:sqlite', '@opentui/core', '@opentui/react', 'react'],
     onlyBundle: false,
   },
 });

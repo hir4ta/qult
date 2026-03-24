@@ -1,6 +1,5 @@
 {
   "lockfileVersion": 1,
-  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "claude-alfred",
@@ -14,6 +13,7 @@
         "citty": "^0.2",
         "eta": "^4",
         "hono": "^4",
+        "react": "19.2.4",
         "tsdown": "^0",
         "typescript": "^5.8",
         "vitest": "^3",

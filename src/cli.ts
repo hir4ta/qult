@@ -301,24 +301,18 @@ const main = defineCommand({
 		tui: defineCommand({
 			meta: { description: "Open TUI spec progress viewer" },
 			async run() {
-				const { fileURLToPath } = await import("node:url");
-				const { join } = await import("node:path");
-				const { execSync } = await import("node:child_process");
-				const { existsSync } = await import("node:fs");
-				const thisDir = fileURLToPath(new URL(".", import.meta.url));
-				// In dev: thisDir = .../dist/ → ../src/tui/main.tsx (works)
-				// In compiled binary: thisDir = /$bunfs/... → path doesn't exist
-				const tuiPath = join(thisDir, "..", "src", "tui", "main.tsx");
-				if (!existsSync(tuiPath)) {
-					process.stderr.write("Error: TUI is not available in the compiled binary.\n");
-					process.stderr.write("Use the web dashboard instead: alfred dashboard\n");
-					process.stderr.write("Or run from the source: cd claude-alfred && bun src/tui/main.tsx\n");
-					process.exit(1);
-				}
 				try {
-					execSync(`bun "${tuiPath}"`, { stdio: "inherit" });
-				} catch {
-					process.exit(1);
+					const { runTui } = await import("./tui/main.js");
+					await runTui();
+				} catch (err: unknown) {
+					const msg = err instanceof Error ? err.message : String(err);
+					if (msg.includes("Cannot find module") || msg.includes("MODULE_NOT_FOUND")) {
+						process.stderr.write("Error: TUI requires @opentui packages (not bundled in binary).\n");
+						process.stderr.write("Install dependencies: cd claude-alfred && bun install\n");
+						process.stderr.write("Or use the web dashboard: alfred dashboard\n");
+						process.exit(1);
+					}
+					throw err;
 				}
 			},
 		}),
