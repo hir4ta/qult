@@ -146,8 +146,8 @@ export const versionQueryOptions = () =>
 
 // --- Mutations ---
 
-export async function completeTask(slug: string) {
-	const res = await fetch(taskURL(slug, "complete"), {
+export async function completeTask(slug: string, projectId?: string) {
+	const res = await fetch(taskURLWithProject(slug, projectId, "complete"), {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 	});

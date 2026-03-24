@@ -509,18 +509,25 @@ export function createApp(
 		const slug = c.req.param("slug");
 		if (!VALID_SLUG.test(slug)) return c.json({ error: "invalid slug" }, 400);
 
-		const sd = new SpecDir(projectPath, slug);
+		const filterProjectId = getProjectFilter(c.req.query("project"));
+		let targetPath = projectPath;
+		if (filterProjectId) {
+			const filterProj = getProject(store, filterProjectId);
+			if (!filterProj) return c.json({ error: "project not found" }, 404);
+			targetPath = filterProj.path;
+		}
+		const sd = new SpecDir(targetPath, slug);
 		if (!sd.exists()) return c.json({ error: "spec not found" }, 404);
 
 		let state;
-		try { state = readActiveState(projectPath); }
+		try { state = readActiveState(targetPath); }
 		catch { return c.json({ error: "failed to read active state" }, 500); }
 		const task = state.tasks.find((t) => t.slug === slug);
 		if (!task) return c.json({ error: "task not found" }, 404);
 		if (task.status === "completed") return c.json({ error: "task already completed" }, 400);
 
 		try {
-			const newPrimary = completeTask(projectPath, slug);
+			const newPrimary = completeTask(targetPath, slug);
 			return c.json({ ok: true, new_primary: newPrimary });
 		} catch (err) {
 			return c.json({ error: String(err) }, 500);
