@@ -133,7 +133,12 @@ function buildTaskInfo(projPath: string, projName: string, task: TaskEntry): Tas
 		for (const w of waves) { completed += w.checked; total += w.total; }
 		const cur = waves.find(w => w.isCurrent);
 		if (cur) focus = cur.title;
-	} catch { /* no tasks.json */
+	} catch {
+		// No tasks.json — for completed/cancelled specs, show as 100%
+		if (task.status === "completed" || task.status === "cancelled") {
+			completed = 1;
+			total = 1;
+		}
 	}
 
 	return {

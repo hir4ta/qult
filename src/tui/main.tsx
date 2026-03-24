@@ -110,6 +110,11 @@ function SpecDetail({ task, focused }: { task: TaskInfo; focused: boolean }) {
 	return (
 		<box style={{ borderStyle: "rounded", borderColor: focused ? C.accent : C.border, flexDirection: "column", flexGrow: 1 }}>
 		<scrollbox focused={focused} style={{ contentOptions: { flexDirection: "column", padding: 1, gap: 1 } }}>
+			{task.waves.length === 0 && (
+				<box style={{ padding: 1 }}>
+					<text fg={C.fgMuted}>{task.status === "completed" ? "✓ Completed" : task.status === "cancelled" ? "✗ Cancelled" : "No tasks.json"}</text>
+				</box>
+			)}
 			{task.waves.map((wave) => {
 				const done = wave.total > 0 && wave.checked === wave.total;
 				const isCur = wave.isCurrent;
