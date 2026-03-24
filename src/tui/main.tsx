@@ -217,31 +217,27 @@ function App() {
 }
 
 // --- Entry point (exported for cli.ts integration) ---
-export async function runTui() {
-	const renderer = await createCliRenderer({
-		exitOnCtrlC: true,
-	});
+export function runTui() {
+	return new Promise<void>((resolve, reject) => {
+		createCliRenderer({
+			exitOnCtrlC: true,
+			onDestroy: () => {
+				process.stdout.write("\x1b[?1000l\x1b[?1003l\x1b[?1006l");
+				resolve();
+			},
+		}).then((renderer) => {
+			process.once("uncaughtException", (err) => {
+				renderer.destroy();
+				console.error(err);
+				process.exit(1);
+			});
+			process.once("unhandledRejection", (err) => {
+				renderer.destroy();
+				console.error(err);
+				process.exit(1);
+			});
 
-	const done = new Promise<void>((resolve) => {
-		const origDestroy = renderer.destroy.bind(renderer);
-		renderer.destroy = () => {
-			process.stdout.write("\x1b[?1000l\x1b[?1003l\x1b[?1006l");
-			origDestroy();
-			resolve();
-		};
+			createRoot(renderer).render(<App />);
+		}).catch(reject);
 	});
-
-	process.once("uncaughtException", (err) => {
-		renderer.destroy();
-		console.error(err);
-		process.exit(1);
-	});
-	process.once("unhandledRejection", (err) => {
-		renderer.destroy();
-		console.error(err);
-		process.exit(1);
-	});
-
-	createRoot(renderer).render(<App />);
-	return done;
 }

@@ -366,9 +366,9 @@ export function dossierCheck(projectPath: string, params: DossierParams) {
 		// Fallback: match checkbox line containing T-N.R text.
 		const reviewHeaderMatch = taskId.match(/^T-\d+\.R$/i);
 		if (reviewHeaderMatch) {
-			const headerPattern = new RegExp(`^###\\s+${taskId.replace(".", "\\.")}\\b`, "i");
+			const headerPattern = new RegExp(`^###\\s+${taskId.replaceAll(".", "\\.")}\\b`, "i");
 			let foundHeader = false;
-			let allAlreadyChecked = true;
+			let subItemCount = 0;
 			for (let i = 0; i < lines.length; i++) {
 				const line = lines[i]!;
 				if (headerPattern.test(line)) {
@@ -379,14 +379,17 @@ export function dossierCheck(projectPath: string, params: DossierParams) {
 				if (foundHeader && /^- \[ \] /.test(line)) {
 					lines[i] = line.replace("- [ ]", "- [x]");
 					checked = true;
-					allAlreadyChecked = false;
+					subItemCount++;
 				}
 				if (foundHeader && /^- \[[xX]\] /.test(line)) {
-					// Already checked — continue to find unchecked ones
+					subItemCount++;
 				}
 			}
-			if (foundHeader && !checked && allAlreadyChecked) {
+			if (foundHeader && !checked && subItemCount > 0) {
 				return jsonResult({ task_id: taskId, status: "already_checked" });
+			}
+			if (foundHeader && !checked && subItemCount === 0) {
+				return errorResult(`task_id "${taskId}" header found but no checkbox items beneath it`);
 			}
 			if (!foundHeader) {
 				// Fallback: T-N.R written as checkbox line instead of header (e.g. "- [ ] T-1.R ...")
