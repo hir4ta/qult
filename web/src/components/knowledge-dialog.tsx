@@ -26,7 +26,7 @@ export function KnowledgeDialog({
 				<div className="px-6 pb-6 pt-5 space-y-4">
 					<DialogHeader>
 						<DialogTitle
-							className="text-xl font-bold tracking-tight"
+							className="text-xl font-bold tracking-tight pr-8"
 							style={{ fontFamily: "var(--font-display)" }}
 						>
 							{title}

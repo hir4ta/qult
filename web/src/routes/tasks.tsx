@@ -18,7 +18,6 @@ function TasksLayout() {
 	const allTasks = data?.tasks ?? [];
 	const { slug: selectedSlug } = useParams({ strict: false }) as { slug?: string };
 	const [statusFilter, setStatusFilter] = useState<string>("all");
-	const [sizeFilter, setSizeFilter] = useState<Set<string>>(new Set());
 	const terminalStatuses = new Set(["completed", "done", "cancelled"]);
 	const navigate = Route.useNavigate();
 
@@ -33,7 +32,6 @@ function TasksLayout() {
 		.filter((task) => {
 			if (statusFilter === "active" && terminalStatuses.has(task.status ?? "")) return false;
 			if (statusFilter === "done" && !terminalStatuses.has(task.status ?? "")) return false;
-			if (sizeFilter.size > 0 && !sizeFilter.has(task.size ?? "")) return false;
 			return true;
 		})
 		.sort((a, b) => {
@@ -43,7 +41,6 @@ function TasksLayout() {
 			if (aTerminal !== bTerminal) return aTerminal - bTerminal;
 			return (b.started_at ?? "").localeCompare(a.started_at ?? "");
 		});
-	const toggleSize = (size: string) => setSizeFilter((prev) => { const n = new Set(prev); if (n.has(size)) n.delete(size); else n.add(size); return n; });
 
 	return (
 		<div className="flex gap-6 items-start">
@@ -59,15 +56,6 @@ function TasksLayout() {
 							>{t(`filter.${s}` as never)}</button>
 						))}
 					</div>
-				</div>
-				<div className="flex flex-wrap gap-1 pb-1">
-					{["S", "M", "L"].map((s) => (
-						<button key={s} type="button" onClick={() => toggleSize(s)}
-							className={cn("rounded-full px-1.5 py-0 text-[10px] font-medium transition-colors border",
-								sizeFilter.has(s) ? "bg-card text-foreground border-border" : "bg-card text-muted-foreground border-border/40 hover:text-foreground"
-							)}
-						>{s}</button>
-					))}
 				</div>
 
 				<TaskListView tasks={tasks} selectedSlug={selectedSlug} />

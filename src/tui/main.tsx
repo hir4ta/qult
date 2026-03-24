@@ -4,18 +4,22 @@ import { useState, useEffect, useCallback, createElement } from "react";
 import { openDefaultCached } from "../store/index.js";
 import { type TaskInfo, loadTasks, resolveProject } from "./data.js";
 
-// --- Gruvbox Dark palette ---
+// --- Everforest Dark palette ---
 const C = {
-	fg: "#ebdbb2",         // primary text
-	fgBright: "#fbf1c7",   // emphasized text
-	fgMuted: "#a89984",    // secondary text
-	fgDim: "#665c54",      // subtle / disabled
-	accent: "#83a598",     // active items (blue)
-	accentBright: "#b8d4c3", // shimmer highlight
-	done: "#b8bb26",       // completed (green)
-	progress: "#fabd2f",   // in-progress (yellow)
-	border: "#504945",     // borders
-	selectedBg: "#3c3836", // selected item bg
+	fg: "#d3c6aa",         // primary text
+	fgBright: "#e6ddc4",   // emphasized text
+	fgMuted: "#9da9a0",    // secondary text
+	fgDim: "#5c6a72",      // subtle / disabled
+	accent: "#7fbbb3",     // aqua — active items, focused borders
+	accentBright: "#a7d4cb", // shimmer highlight
+	green: "#a7c080",      // completed tasks
+	yellow: "#dbbc7f",     // in-progress
+	orange: "#e69875",     // wave headers
+	red: "#e67e80",        // closing wave
+	purple: "#d699b6",     // review tasks
+	blue: "#7fbbb3",       // progress bar filled
+	border: "#414b50",     // borders
+	selectedBg: "#343f44", // selected item bg
 };
 
 // --- Shimmer ---
@@ -29,7 +33,7 @@ function useShimmer(speed = 150) {
 	return frame;
 }
 
-function ShimmerText({ text, baseColor = "#fe8019", brightColor = "#ffc07a", speed = 120, width = 3 }: {
+function ShimmerText({ text, baseColor = "#e69875", brightColor = "#f0c5a0", speed = 120, width = 3 }: {
 	text: string; baseColor?: string; brightColor?: string; speed?: number; width?: number;
 }) {
 	const frame = useShimmer(speed);
@@ -53,10 +57,10 @@ function ShimmerText({ text, baseColor = "#fe8019", brightColor = "#ffc07a", spe
 
 // --- Components ---
 
-function ProgressBar({ value, total, width = 20, showPercent = false }: { value: number; total: number; width?: number; showPercent?: boolean }) {
+function ProgressBar({ value, total, width = 20, showPercent = false, color: overrideColor }: { value: number; total: number; width?: number; showPercent?: boolean; color?: string }) {
 	const pct = total > 0 ? value / total : 0;
 	const filled = Math.round(pct * width);
-	const color = pct >= 1 ? C.done : C.progress;
+	const color = overrideColor ?? (pct >= 1 ? C.green : C.blue);
 	const label = showPercent ? `${Math.round(pct * 100)}%` : `${value}/${total}`;
 
 	return (
@@ -109,24 +113,39 @@ function SpecDetail({ task, focused }: { task: TaskInfo; focused: boolean }) {
 			{task.waves.map((wave) => {
 				const done = wave.total > 0 && wave.checked === wave.total;
 				const isCur = wave.isCurrent;
-				const waveLabel = wave.key === "closing" ? "Closing" : `Wave ${wave.key}`;
+				const isClosing = wave.key === "closing";
+				const waveLabel = isClosing ? "Closing" : `Wave ${wave.key}`;
 				const headerText = `${waveLabel}: ${wave.title}`;
+				// Color per wave type
+				const waveColor = isClosing ? C.red : done ? C.green : isCur ? C.orange : C.fgMuted;
+				const barColor = isClosing ? C.red : done ? C.green : C.blue;
 
 				return (
 					<box key={wave.key} style={{ flexDirection: "column" }}>
 						{/* Wave header */}
 						{isCur
 							? <ShimmerText text={`▸ ${headerText}`} speed={100} width={4} />
-							: <text content={`  ${headerText}`} fg={done ? C.done : C.fgMuted} />
+							: <text content={`  ${headerText}`} fg={waveColor} />
 						}
 						{/* Wave progress */}
 						<box style={{ paddingLeft: 4 }}>
-							<ProgressBar value={wave.checked} total={wave.total} width={20} />
+							<ProgressBar value={wave.checked} total={wave.total} width={20} color={barColor} />
 						</box>
 						{/* Individual tasks */}
 						{wave.tasks && wave.tasks.map((t) => {
-							const icon = t.checked ? "✓" : isCur ? "○" : "·";
-							const color = t.checked ? C.done : isCur ? C.fg : C.fgDim;
+							const isReview = /T-\d+\.R\b/i.test(t.id) || /review|レビュー/i.test(t.label);
+							let icon: string;
+							let color: string;
+							if (t.checked) {
+								icon = "✓";
+								color = isClosing ? C.red : isReview ? C.purple : C.green;
+							} else if (isCur) {
+								icon = "○";
+								color = isReview ? C.purple : C.fg;
+							} else {
+								icon = "·";
+								color = C.fgDim;
+							}
 							return (
 								<box key={t.id} style={{ paddingLeft: 4 }}>
 									<text content={`${icon} ${t.label}`} fg={color} />
@@ -145,7 +164,7 @@ function SpecDetail({ task, focused }: { task: TaskInfo; focused: boolean }) {
 
 export { App };
 
-function App() {
+function App({ showAll = false }: { showAll?: boolean }) {
 	const [tasks, setTasks] = useState<TaskInfo[]>([]);
 	const [selectedIdx, setSelectedIdx] = useState(0);
 	const [projName, setProjName] = useState("");
@@ -155,9 +174,9 @@ function App() {
 		const store = openDefaultCached();
 		const proj = resolveProject(store);
 		setProjName(proj.name);
-		const allTasks = loadTasks(proj.path, proj.name);
-		setTasks(allTasks.filter((t) => t.status !== "done" && t.status !== "completed" && t.status !== "cancelled"));
-	}, []);
+		const allTasks = loadTasks(proj.path, proj.name, { showAll });
+		setTasks(showAll ? allTasks : allTasks.filter((t) => t.status !== "done" && t.status !== "completed" && t.status !== "cancelled"));
+	}, [showAll]);
 
 	useEffect(() => {
 		refresh();
@@ -217,7 +236,8 @@ function App() {
 }
 
 // --- Entry point (exported for cli.ts integration) ---
-export function runTui() {
+export function runTui(opts?: { showAll?: boolean }) {
+	const showAll = opts?.showAll ?? false;
 	return new Promise<void>((resolve, reject) => {
 		createCliRenderer({
 			exitOnCtrlC: true,
@@ -237,7 +257,13 @@ export function runTui() {
 				process.exit(1);
 			});
 
-			createRoot(renderer).render(<App />);
+			createRoot(renderer).render(<App showAll={showAll} />);
 		}).catch(reject);
 	});
+}
+
+// Auto-run when executed directly (e.g. `bun src/tui/main.tsx --all`)
+if (import.meta.main) {
+	const showAll = process.argv.includes("--all");
+	runTui({ showAll });
 }

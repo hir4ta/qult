@@ -69,38 +69,57 @@ export function KnowledgeDrawerContent({
 				</div>
 			</div>
 
-			{/* Metadata row */}
-			<div className="flex items-center flex-wrap gap-3 text-xs text-muted-foreground">
-				<span>
-					{t("knowledge.saved")} {formatDate(entry.saved_at ?? "", locale)}
-				</span>
-				<Tooltip>
-					<TooltipTrigger asChild>
-						<span className="cursor-help tabular-nums">
-							{entry.hit_count} {t("knowledge.hits")}
-						</span>
-					</TooltipTrigger>
-					<TooltipContent className="text-left">
-						<p>{t("knowledge.searchAppearances")}</p>
-						<p className="opacity-75">{t("knowledge.patternCandidate")}</p>
-						<p className="opacity-75">{t("knowledge.ruleCandidate")}</p>
-					</TooltipContent>
-				</Tooltip>
-				<Badge
-					variant="outline"
-					className="text-[10px] px-1.5 py-0 rounded-full"
-					style={{
-						borderColor: entry.enabled ? "rgba(45,139,122,0.3)" : "rgba(107,114,128,0.3)",
-						color: entry.enabled ? "#2d8b7a" : "#6b7280",
-					}}
+			{/* Metadata row with archive button */}
+			<div className="flex items-center gap-3 text-xs text-muted-foreground">
+				<div className="flex items-center flex-wrap gap-3 flex-1">
+					<span>
+						{t("knowledge.saved")} {formatDate(entry.saved_at ?? "", locale)}
+					</span>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<span className="cursor-help tabular-nums">
+								{entry.hit_count} {t("knowledge.hits")}
+							</span>
+						</TooltipTrigger>
+						<TooltipContent className="text-left">
+							<p>{t("knowledge.searchAppearances")}</p>
+							<p className="opacity-75">{t("knowledge.patternCandidate")}</p>
+							<p className="opacity-75">{t("knowledge.ruleCandidate")}</p>
+						</TooltipContent>
+					</Tooltip>
+					<Badge
+						variant="outline"
+						className="text-[10px] px-1.5 py-0 rounded-full"
+						style={{
+							borderColor: entry.enabled ? "rgba(45,139,122,0.3)" : "rgba(107,114,128,0.3)",
+							color: entry.enabled ? "#2d8b7a" : "#6b7280",
+						}}
+					>
+						{entry.enabled ? t("knowledge.active") : t("knowledge.archived")}
+					</Badge>
+				</div>
+				<Button
+					size="sm"
+					variant="ghost"
+					className="h-7 gap-1.5 text-xs shrink-0"
+					style={{ color: "#7b6b8d" }}
+					onClick={() => toggleMutation.mutate({ id: entry.id, enabled: !entry.enabled })}
 				>
-					{entry.enabled ? t("knowledge.active") : t("knowledge.archived")}
-				</Badge>
+					{entry.enabled ? (
+						<>
+							<Archive className="size-3.5" /> {t("knowledge.archive")}
+						</>
+					) : (
+						<>
+							<ArchiveRestore className="size-3.5" /> {t("knowledge.restore")}
+						</>
+					)}
+				</Button>
 			</div>
 
-			{/* Actions */}
-			<div className="flex items-center gap-2">
-				{canPromote && (
+			{/* Promote action (only when eligible) */}
+			{canPromote && (
+				<div className="flex items-center gap-2">
 					<AlertDialog>
 						<AlertDialogTrigger asChild>
 							<Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" style={{ color: "#e67e22", borderColor: "rgba(230,126,34,0.3)" }}>
@@ -120,25 +139,8 @@ export function KnowledgeDrawerContent({
 							</AlertDialogFooter>
 						</AlertDialogContent>
 					</AlertDialog>
-				)}
-				<Button
-					size="sm"
-					variant="ghost"
-					className="h-7 gap-1.5 text-xs"
-					style={{ color: "#7b6b8d" }}
-					onClick={() => toggleMutation.mutate({ id: entry.id, enabled: !entry.enabled })}
-				>
-					{entry.enabled ? (
-						<>
-							<Archive className="size-3.5" /> {t("knowledge.archive")}
-						</>
-					) : (
-						<>
-							<ArchiveRestore className="size-3.5" /> {t("knowledge.restore")}
-						</>
-					)}
-				</Button>
-			</div>
+				</div>
+			)}
 
 			<Separator />
 
@@ -376,4 +378,3 @@ function cleanContent(content: string): string {
 	}
 	return cleaned;
 }
-

@@ -5,9 +5,9 @@ vars:
 
 tasks:
   default:
-    desc: Build React SPA + TypeScript CLI
+    desc: Show available commands
     cmds:
-      - task: build
+      - task --list
 
   build:
     desc: Build React SPA and TypeScript CLI
@@ -26,10 +26,15 @@ tasks:
     cmds:
       - bun dist/cli.mjs dashboard
 
-  tui:
-    desc: Open TUI spec progress viewer
+  active:
+    desc: Show active specs in TUI
     cmds:
       - bun src/tui/main.tsx
+
+  specs:
+    desc: Show all specs in TUI (including completed)
+    cmds:
+      - bun src/tui/main.tsx --all
 
   check:
     desc: Run all checks (tsc + Biome lint)

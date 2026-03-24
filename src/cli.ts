@@ -298,12 +298,30 @@ const main = defineCommand({
 				console.log("To remove plugin from Claude Code: /plugin → select alfred → remove");
 			},
 		}),
-		tui: defineCommand({
-			meta: { description: "Open TUI spec progress viewer" },
+		active: defineCommand({
+			meta: { description: "Show active specs in TUI" },
 			async run() {
 				try {
 					const { runTui } = await import("./tui/main.js");
-					await runTui();
+					await runTui({ showAll: false });
+				} catch (err: unknown) {
+					const msg = err instanceof Error ? err.message : String(err);
+					if (msg.includes("Cannot find module") || msg.includes("MODULE_NOT_FOUND")) {
+						process.stderr.write("Error: TUI requires @opentui packages (not bundled in binary).\n");
+						process.stderr.write("Install dependencies: cd claude-alfred && bun install\n");
+						process.stderr.write("Or use the web dashboard: alfred dashboard\n");
+						process.exit(1);
+					}
+					throw err;
+				}
+			},
+		}),
+		specs: defineCommand({
+			meta: { description: "Show all specs in TUI (including completed)" },
+			async run() {
+				try {
+					const { runTui } = await import("./tui/main.js");
+					await runTui({ showAll: true });
 				} catch (err: unknown) {
 					const msg = err instanceof Error ? err.message : String(err);
 					if (msg.includes("Cannot find module") || msg.includes("MODULE_NOT_FOUND")) {

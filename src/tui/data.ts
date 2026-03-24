@@ -121,38 +121,81 @@ function parseWaves(content: string): WaveInfo[] {
 
 // --- Load tasks ---
 
-export function loadTasks(projPath: string, projName: string): TaskInfo[] {
+export function loadTasks(projPath: string, projName: string, opts?: { showAll?: boolean }): TaskInfo[] {
 	const state = (() => {
 		try { return readActiveState(projPath); } catch { return { primary: "", tasks: [] }; }
 	})();
 
-	return state.tasks.map((task) => {
-		let waves: WaveInfo[] = [];
-		let focus = "";
-		let completed = 0;
-		let total = 0;
+	const activeSlugs = new Set(state.tasks.map((t) => t.slug));
 
-		try {
-			const tasksContent = readFileSync(join(projPath, ".alfred", "specs", task.slug, "tasks.md"), "utf-8");
-			waves = parseWaves(tasksContent);
-			for (const w of waves) { completed += w.checked; total += w.total; }
-			const cur = waves.find((w) => w.isCurrent);
-			if (cur) focus = cur.title;
-		} catch { /* no tasks.md */ }
+	// Build task list from _active.md entries
+	const tasks: TaskInfo[] = state.tasks.map((task) => buildTaskInfo(projPath, projName, task));
 
-		return {
-			slug: task.slug,
-			status: task.status ?? "active",
-			size: task.size ?? "M",
-			specType: task.spec_type ?? "feature",
-			startedAt: task.started_at ?? "",
-			focus,
-			completed,
-			total,
-			waves,
-			projectName: projName,
-		};
-	});
+	// When showAll, also scan spec directories for completed specs not in _active.md
+	if (opts?.showAll) {
+		const specsDir = join(projPath, ".alfred", "specs");
+		if (existsSync(specsDir)) {
+			for (const entry of readdirSync(specsDir)) {
+				if (activeSlugs.has(entry)) continue;
+				if (!VALID_SLUG.test(entry)) continue;
+				const specDir = join(specsDir, entry);
+				if (!statSync(specDir).isDirectory()) continue;
+				if (!existsSync(join(specDir, "tasks.md"))) continue;
+				tasks.push(buildTaskInfo(projPath, projName, { slug: entry, status: "completed" }));
+			}
+		}
+	}
+
+	return tasks;
+}
+
+function detectSize(specDir: string): string {
+	const specFiles = ["requirements.md", "bugfix.md", "design.md", "tasks.md", "test-specs.md", "research.md"];
+	let count = 0;
+	for (const f of specFiles) {
+		if (existsSync(join(specDir, f))) count++;
+	}
+	if (count <= 3) return "S";
+	if (count <= 4) return "M";
+	return "L";
+}
+
+function detectSpecType(specDir: string): string {
+	if (existsSync(join(specDir, "bugfix.md"))) return "bugfix";
+	return "feature";
+}
+
+function buildTaskInfo(
+	projPath: string,
+	projName: string,
+	task: { slug: string; status?: string; started_at?: string; size?: string; spec_type?: string },
+): TaskInfo {
+	let waves: WaveInfo[] = [];
+	let focus = "";
+	let completed = 0;
+	let total = 0;
+	const specDir = join(projPath, ".alfred", "specs", task.slug);
+
+	try {
+		const tasksContent = readFileSync(join(specDir, "tasks.md"), "utf-8");
+		waves = parseWaves(tasksContent);
+		for (const w of waves) { completed += w.checked; total += w.total; }
+		const cur = waves.find((w) => w.isCurrent);
+		if (cur) focus = cur.title;
+	} catch { /* no tasks.md */ }
+
+	return {
+		slug: task.slug,
+		status: task.status ?? "active",
+		size: task.size ?? detectSize(specDir),
+		specType: task.spec_type ?? detectSpecType(specDir),
+		startedAt: task.started_at ?? "",
+		focus,
+		completed,
+		total,
+		waves,
+		projectName: projName,
+	};
 }
 
 // --- Project resolution ---
