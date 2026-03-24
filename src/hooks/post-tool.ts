@@ -1,8 +1,6 @@
 import { extractReviewFindings, saveKnowledgeEntries } from "../mcp/knowledge-extractor.js";
-import { truncate } from "../mcp/helpers.js";
 import { updateTaskStatus } from "../spec/status.js";
 import { effectiveStatus, readActive, readActiveState, SpecDir } from "../spec/types.js";
-import { searchKnowledgeFTS } from "../store/fts.js";
 import { openDefaultCached } from "../store/index.js";
 import { getPromotionCandidates, promoteSubType } from "../store/knowledge.js";
 import type { DirectiveItem } from "./directives.js";
@@ -26,20 +24,17 @@ export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<v
 
 	if (ev.tool_name === "Bash" && !signal.aborted) {
 		await handleBashResult(ev, items, signal);
-
 	}
 
 	// Track worked slug + auto-transition for Edit/Write.
-	// Task completion is now handled by the PostToolUse agent hook (FR-3/FR-4).
 	if ((ev.tool_name === "Edit" || ev.tool_name === "Write") && ev.tool_input) {
 		const input = ev.tool_input as Record<string, unknown>;
 		const filePath = typeof input.file_path === "string" ? input.file_path : "";
-		// Track worked slug for session-scoped Stop hook reminders.
 		try {
 			const slug = readActive(ev.cwd!);
 			addWorkedSlug(ev.cwd!, slug);
 
-			// FR-13: Auto-transition pending → in-progress on first source edit (.alfred/ excluded).
+			// Auto-transition pending → in-progress on first source edit (.alfred/ excluded).
 			if (filePath && !isSpecFilePath(ev.cwd!, filePath)) {
 				const state = readActiveState(ev.cwd!);
 				const task = state.tasks.find((t) => t.slug === slug);
@@ -49,20 +44,10 @@ export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<v
 					} catch { /* transition error — ignore */ }
 				}
 			}
-
-			// Nudge: remind to check tasks — only after git commit (wave boundary),
-			// NOT after every Edit/Write (causes Claude to stall on large specs, #27).
-
 		} catch { /* no active spec */ }
 	}
 
-	// Check spec completion on any tool that might update spec files (Edit, Write, Bash).
-	if (["Edit", "Write", "Bash"].includes(ev.tool_name)) {
-		checkSpecCompletion(ev.cwd!, items);
-	}
-
-	// FR-3: Extract knowledge from review agent findings.
-	// FR-9: Mark re_reviewed flag when review is detected in fix_mode.
+	// Extract knowledge from review agent findings + mark re-reviewed flag.
 	if (ev.tool_name === "Agent" && ev.tool_response) {
 		extractReviewKnowledge(ev.cwd!, ev.tool_response);
 		markReReviewedIfFixMode(ev.cwd!, ev.tool_response);
@@ -81,46 +66,17 @@ async function handleBashResult(
 		| undefined;
 	if (!response) return;
 
-	// On Bash error: search FTS for similar errors + detect test failures.
-	if (response.exitCode && response.exitCode !== 0) {
-		const errorText = typeof response.stderr === "string" ? response.stderr : "";
-		const stdout = response.stdout ?? "";
-		if (errorText.length > 10) {
-			await searchErrorContext(ev.cwd!, errorText, items);
-		}
-
-		// FR-4: Test failure rollback suggestion.
-		if (isTestFailure(`${stdout}\n${errorText}`)) {
-			items.push({
-				level: "WARNING",
-				message:
-					"Test failure detected. Investigate the root cause before continuing implementation. Consider reverting recent changes with `git stash` or `git diff` to isolate the issue.",
-			});
-		}
-	}
-
-	// On Bash success: auto-check tasks + check for git commit.
+	// On Bash success: detect git commit → living spec + wave completion + knowledge.
 	if (response.exitCode === 0) {
 		const stdout = response.stdout ?? "";
-		// Task completion is now handled by the PostToolUse agent hook (FR-3/FR-4).
 
 		if (isGitCommit(stdout) && !signal.aborted) {
-			// FR-2 (feedback-metrics): Track first commit for cycle time breakdown.
 			trackFirstCommit(ev.cwd!, stdout);
 
 			// Living Spec auto-append: track new source files in design.md.
-			let appendedFiles = new Set<string>();
 			try {
 				const { handleLivingSpec } = await import("./living-spec.js");
-				appendedFiles = handleLivingSpec(ev.cwd!);
-			} catch {
-				/* fail-open */
-			}
-
-			// Drift detection: warn about source files not referenced in spec.
-			try {
-				const { detectDrift } = await import("./drift.js");
-				detectDrift(ev.cwd!, appendedFiles, items);
+				handleLivingSpec(ev.cwd!);
 			} catch {
 				/* fail-open */
 			}
@@ -134,45 +90,26 @@ async function handleBashResult(
 				/* no active spec or tasks.json */
 			}
 
-			// Auto-save decisions + session snapshot on git commit (not just PreCompact).
-			// This ensures knowledge accumulates even with 1M context (no compact).
+			// Auto-promote eligible knowledge (pattern→rule at 15+ hits).
 			saveKnowledgeOnCommit(ev.cwd!);
 		}
 	}
 }
 
-async function searchErrorContext(
-	_projectPath: string,
-	errorText: string,
-	items: DirectiveItem[],
-): Promise<void> {
-	let store;
-	try {
-		store = openDefaultCached();
-	} catch {
-		return;
-	}
-
-	const query = errorText.slice(0, 200);
-	try {
-		const docs = searchKnowledgeFTS(store, query, 3);
-		if (docs.length > 0) {
-			const context = docs.map((d) => `- ${d.title}: ${truncate(d.content, 150)}`).join("\n");
-			items.push({
-				level: "CONTEXT",
-				message: `Related knowledge for this error:\n${context}`,
-			});
-		}
-	} catch {
-		/* search failure is non-fatal */
-	}
+/**
+ * Detect git commit from Bash stdout.
+ */
+export function isGitCommit(stdout: string): boolean {
+	if (!stdout) return false;
+	return (
+		/\[[\w./-]+ [0-9a-f]+\]/.test(stdout) ||
+		(stdout.includes("files changed") &&
+			(stdout.includes("insertion") || stdout.includes("deletion")))
+	);
 }
 
-
-
 /**
- * Detect wave completion after tasks.json update.
- * JSON-based: reads tasks.json directly.
+ * Detect wave completion after git commit.
  */
 export function detectWaveCompletion(
 	projectPath: string,
@@ -224,122 +161,18 @@ export function detectWaveCompletion(
 	return items;
 }
 
-
-/**
- * FR-4: Detect test failure patterns in command output.
- */
-export function isTestFailure(output: string): boolean {
-	if (!output) return false;
-	const patterns = [
-		/FAIL(ED|URE)?\b/i, // vitest, jest, generic
-		/\d+ failed/i, // generic "N failed"
-		/Tests:\s+\d+ failed/, // jest summary
-		/✗|✘/, // unicode failure marks
-		/AssertionError/i, // assertion errors
-		/test.*failed/i, // generic
-		/npm ERR!.*test/i, // npm test failure
-	];
-	return patterns.some((p) => p.test(output));
-}
-
-/**
- * Detect git commit from Bash stdout.
- * Checks for common git commit output patterns.
- */
-export function isGitCommit(stdout: string): boolean {
-	if (!stdout) return false;
-	// Common patterns in git commit output.
-	return (
-		/\[[\w./-]+ [0-9a-f]+\]/.test(stdout) || // [main abc1234], [feature-branch abc1234], etc.
-		(stdout.includes("files changed") &&
-			(stdout.includes("insertion") || stdout.includes("deletion")))
-	);
-}
-
-/**
- * Check if active spec should be completed after a git commit.
- * Detects: all Next Steps checked OR session status=completed, but spec still active.
- */
-function checkSpecCompletion(projectPath: string, items: DirectiveItem[]): void {
-	try {
-		const slug = readActive(projectPath);
-		const state = readActiveState(projectPath);
-		const task = state.tasks.find((t) => t.slug === slug);
-		const status = effectiveStatus(task?.status);
-		if (!task || status === "done" || status === "cancelled") return;
-
-		// Check tasks.json: all tasks checked → completion signal.
-		const sd = new SpecDir(projectPath, slug);
-		let allChecked = false;
-		try {
-			const data = JSON.parse(sd.readFile("tasks.json"));
-			const allTasks = [...(data.waves ?? []).flatMap((w: any) => w.tasks), ...(data.closing?.tasks ?? [])];
-			allChecked = allTasks.length > 0 && allTasks.every((t: any) => t.checked);
-		} catch {
-			return; // no tasks.json
-		}
-
-		if (allChecked) {
-			items.push({
-				level: "DIRECTIVE",
-				message: `Task '${slug}' appears complete (all tasks checked). MUST call \`dossier action=complete\` to close the spec.`,
-			});
-		}
-	} catch {
-		/* no active spec or read failure — skip */
-	}
-}
-
-/**
- * Save knowledge from spec on git commit — ensures decisions and session
- * snapshots accumulate even without PreCompact (1M context).
- */
-function extractReviewKnowledge(projectPath: string, toolResponse: unknown): void {
-	try {
-		const lang = process.env.ALFRED_LANG || "en";
-		let taskSlug = "";
-		try {
-			taskSlug = readActive(projectPath);
-		} catch {
-			taskSlug = "unknown";
-		}
-
-		const findings = extractReviewFindings(toolResponse, taskSlug, lang);
-		if (findings.length === 0) return;
-
-		const store = openDefaultCached();
-		const saved = saveKnowledgeEntries(store, projectPath, findings, "pattern");
-		if (saved > 0) {
-			notifyUser("extracted %d pattern(s) from review findings", saved);
-		}
-	} catch {
-		/* fail-open: review extraction errors don't affect PostToolUse */
-	}
-}
-
-/**
- * FR-2 (feedback-metrics): Track first commit for active spec.
- * Idempotent — only records once per spec via state file.
- */
 function trackFirstCommit(projectPath: string, stdout: string): void {
 	try {
 		const slug = readActive(projectPath);
 		const stateFile = `first-commit-${slug}.json`;
 		const existing = readStateJSON<{ slug?: string } | null>(projectPath, stateFile, null);
-		if (existing?.slug) return; // Already tracked
+		if (existing?.slug) return;
 
-		// Parse commit hash from git output: [branch hash]
 		const hashMatch = stdout.match(/\[[\w./-]+ ([0-9a-f]+)\]/);
 		const commit = hashMatch?.[1] ?? "unknown";
 
-		writeStateJSON(projectPath, stateFile, {
-			slug,
-			commit,
-			timestamp: new Date().toISOString(),
-		});
-	} catch {
-		/* no active spec — skip */
-	}
+		writeStateJSON(projectPath, stateFile, { slug, commit, timestamp: new Date().toISOString() });
+	} catch { /* no active spec */ }
 }
 
 function saveKnowledgeOnCommit(projectPath: string): void {
@@ -350,40 +183,44 @@ function saveKnowledgeOnCommit(projectPath: string): void {
 		return;
 	}
 
-	// Auto-promote eligible knowledge (pattern→rule at 15+ hits).
 	try {
 		const candidates = getPromotionCandidates(store);
 		for (const c of candidates) {
 			promoteSubType(store, c.id, "rule");
 			notifyUser("auto-promoted knowledge '%s' to rule (%d hits)", c.title, c.hitCount);
 		}
-	} catch {
-		/* fail-open */
-	}
+	} catch { /* fail-open */ }
 }
 
-/**
- * FR-9: Mark re_reviewed flag on review-gate when a review agent response is detected in fix_mode.
- * Uses the same review finding patterns as extractReviewFindings.
- */
+function extractReviewKnowledge(projectPath: string, toolResponse: unknown): void {
+	try {
+		const lang = process.env.ALFRED_LANG || "en";
+		let taskSlug = "";
+		try { taskSlug = readActive(projectPath); } catch { taskSlug = "unknown"; }
+
+		const findings = extractReviewFindings(toolResponse, taskSlug, lang);
+		if (findings.length === 0) return;
+
+		const store = openDefaultCached();
+		const saved = saveKnowledgeEntries(store, projectPath, findings, "pattern");
+		if (saved > 0) {
+			notifyUser("extracted %d pattern(s) from review findings", saved);
+		}
+	} catch { /* fail-open */ }
+}
+
 function markReReviewedIfFixMode(projectPath: string, toolResponse: unknown): void {
 	try {
 		const gate = readReviewGate(projectPath);
 		if (!gate?.fix_mode || gate.re_reviewed) return;
 
-		// Check if the agent response looks like a review result.
-		// Require at least 1 structural pattern AND 1 severity pattern to avoid false positives.
-		const text = typeof toolResponse === "string"
-			? toolResponse
-			: JSON.stringify(toolResponse);
+		const text = typeof toolResponse === "string" ? toolResponse : JSON.stringify(toolResponse);
 		const structuralPatterns = [
 			/\bfinding/i, /\bverdict/i, /\breview\s+summary/i,
 			/PASS\s+(WITH\s+)?WARNING/i, /NEEDS\s+FIX/i,
 			/\breview\b.*\bcomplete/i, /\d+\s+critical/i,
 		];
-		const severityPatterns = [
-			/\bcritical\b/i, /\bhigh\b/i, /\bmedium\b/i, /\blow\b/i,
-		];
+		const severityPatterns = [/\bcritical\b/i, /\bhigh\b/i, /\bmedium\b/i, /\blow\b/i];
 		const hasStructural = structuralPatterns.some((p) => p.test(text));
 		const hasSeverity = severityPatterns.some((p) => p.test(text));
 		if (!hasStructural || !hasSeverity) return;
@@ -392,7 +229,5 @@ function markReReviewedIfFixMode(projectPath: string, toolResponse: unknown): vo
 		gate.re_reviewed_at = new Date().toISOString();
 		writeStateJSON(projectPath, "review-gate.json", gate);
 		notifyUser("re-review detected — gate clear is now allowed");
-	} catch {
-		/* fail-open */
-	}
+	} catch { /* fail-open */ }
 }
