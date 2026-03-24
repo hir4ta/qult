@@ -333,10 +333,10 @@ export function dossierCheck(projectPath: string, params: DossierParams) {
 	const waveMessages: string[] = [];
 	for (const wave of allWaves) {
 		if (wave.tasks.every(t => t.checked) && wave.tasks.length > 0) {
-			const label = wave.key === "closing" ? "closing" : `Wave ${wave.key}`;
+			const label = wave.key === "closing" ? "Closing" : `Wave ${wave.key}`;
 			const total = wave.tasks.length;
 			waveMessages.push(
-				`Wave ${label} complete (${total}/${total} tasks). You MUST now: 1) Commit your changes, 2) Run self-review (delegate to alfred:code-reviewer or /alfred:inspect), 3) Save any learnings via \`ledger save\`. Then clear the gate with \`dossier action=gate sub_action=clear reason="..."\`.`
+				`${label} complete (${total}/${total} tasks). You MUST now: 1) Commit your changes, 2) Run self-review (delegate to alfred:code-reviewer or /alfred:inspect), 3) Save any learnings via \`ledger save\`. Then clear the gate with \`dossier action=gate sub_action=clear reason="..."\`.`
 			);
 		}
 	}

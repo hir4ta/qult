@@ -350,17 +350,16 @@ function checkSpecCompletion(projectPath: string, items: DirectiveItem[]): void 
 		const status = effectiveStatus(task?.status);
 		if (!task || status === "done" || status === "cancelled") return;
 
-		// Check tasks.md: all checkboxes checked → completion signal.
+		// Check tasks.json: all tasks checked → completion signal.
 		const sd = new SpecDir(projectPath, slug);
-		let tasksContent: string;
+		let allChecked = false;
 		try {
-			tasksContent = sd.readFile("tasks.md");
+			const data = JSON.parse(sd.readFile("tasks.json"));
+			const allTasks = [...(data.waves ?? []).flatMap((w: any) => w.tasks), ...(data.closing?.tasks ?? [])];
+			allChecked = allTasks.length > 0 && allTasks.every((t: any) => t.checked);
 		} catch {
-			return;
+			return; // no tasks.json
 		}
-		const allSteps = tasksContent.match(/^- \[[ xX]\] .+$/gm);
-		const allChecked =
-			allSteps && allSteps.length > 0 && allSteps.every((s) => /^- \[[xX]\]/.test(s));
 
 		if (allChecked) {
 			items.push({

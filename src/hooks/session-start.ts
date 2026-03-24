@@ -255,11 +255,11 @@ function buildSpecContextItems(
 			}
 		}
 	} else {
-		// Lightweight: tasks.md only (progress + next steps).
+		// Lightweight: tasks.json for progress.
 		try {
-			const tasks = sd.readFile("tasks.md");
-			buf += `### tasks.md\n${tasks}\n\n`;
-		} catch { /* no tasks.md */ }
+			const tasks = sd.readFile("tasks.json");
+			buf += `### tasks.json\n${tasks}\n\n`;
+		} catch { /* no tasks.json */ }
 		if (memoryCount <= 20) {
 			try {
 				const req = sd.readFile("requirements.md");

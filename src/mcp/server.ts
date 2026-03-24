@@ -49,12 +49,16 @@ Size-based scaling: init accepts size (S/M/L) and spec_type (feature/bugfix). S=
 				.enum([
 					"requirements.md",
 					"design.md",
+					"research.md",
+					"tasks.json",
+					"test-specs.json",
+					"bugfix.json",
+					// Legacy (backward compat)
 					"tasks.md",
 					"test-specs.md",
-					"decisions.md",
-					"research.md",
-					"session.md",
 					"bugfix.md",
+					"decisions.md",
+					"session.md",
 				])
 				.optional()
 				.describe("Spec file (for update)"),

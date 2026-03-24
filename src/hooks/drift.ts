@@ -59,15 +59,14 @@ export function detectDrift(
 			/* no design.md */
 		}
 
-		// tasks.md file references (backtick-quoted paths + Files: lines).
+		// tasks.json file references (task.files arrays).
 		try {
-			const tasksContent = sd.readFile("tasks.md");
-			for (const ref of parseTasksFileRefs(tasksContent)) {
-				specRefs.add(ref);
+			const data = JSON.parse(sd.readFile("tasks.json"));
+			const allTasks = [...(data.waves ?? []).flatMap((w: any) => w.tasks), ...(data.closing?.tasks ?? [])];
+			for (const t of allTasks) {
+				for (const f of (t.files ?? [])) specRefs.add(f);
 			}
-		} catch {
-			/* no tasks.md */
-		}
+		} catch { /* no tasks.json */ }
 
 		if (specRefs.size === 0) return; // no file refs in spec — skip
 

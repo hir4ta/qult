@@ -22,7 +22,6 @@ export type SpecFile =
 	| "test-specs.md"
 	| "bugfix.md"
 	| "decisions.md"
-	| "research.md"
 	| "session.md";
 
 // --- JSON spec schemas ---

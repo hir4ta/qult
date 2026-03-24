@@ -17,12 +17,10 @@ export interface SpecSyncResult {
 const SPEC_FILES = new Set([
 	"requirements.md",
 	"design.md",
-	"tasks.md",
-	"test-specs.md",
 	"research.md",
-	"bugfix.md",
-	"session.md",
-	"decisions.md",
+	"tasks.json",
+	"test-specs.json",
+	"bugfix.json",
 ]);
 
 function sha256(content: string): string {

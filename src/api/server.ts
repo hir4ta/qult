@@ -58,8 +58,8 @@ export interface DashboardOptions {
 }
 
 const VALID_SPEC_FILES = new Set([
-	"requirements.md", "design.md", "tasks.md", "test-specs.md",
-	"decisions.md", "research.md", "session.md", "bugfix.md",
+	"requirements.md", "design.md", "research.md",
+	"tasks.json", "test-specs.json", "bugfix.json",
 ]);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -92,18 +92,26 @@ export function createApp(
 		let totalChecked = 0;
 		let totalAll = 0;
 		try {
-			const tasksContent = sd.readFile("tasks.md");
-			const waves = parseWavesFromTasks(tasksContent);
-			detail.waves = waves;
-
-			for (const w of waves) {
-				totalChecked += w.checked;
-				totalAll += w.total;
+			const data = JSON.parse(sd.readFile("tasks.json"));
+			const allWaves = [...(data.waves ?? []), data.closing].filter(Boolean);
+			const waves = allWaves.map((w: any) => {
+				const tasks = w.tasks ?? [];
+				const checked = tasks.filter((t: any) => t.checked).length;
+				return { key: String(w.key), title: w.title, total: tasks.length, checked, isCurrent: false };
+			});
+			// Determine current wave
+			const nonClosing = waves.filter((w: any) => w.key !== "closing");
+			const firstIncomplete = nonClosing.find((w: any) => w.checked < w.total);
+			if (firstIncomplete) firstIncomplete.isCurrent = true;
+			else {
+				const closing = waves.find((w: any) => w.key === "closing");
+				if (closing && closing.checked < closing.total) closing.isCurrent = true;
 			}
-
-			const currentWave = waves.find((w) => w.isCurrent);
+			detail.waves = waves;
+			for (const w of waves) { totalChecked += w.checked; totalAll += w.total; }
+			const currentWave = waves.find((w: any) => w.isCurrent);
 			if (currentWave) detail.focus = currentWave.title;
-		} catch { /* no tasks.md */ }
+		} catch { /* no tasks.json */ }
 
 		detail.completed = totalChecked;
 		detail.total = totalAll;

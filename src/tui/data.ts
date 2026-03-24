@@ -133,16 +133,7 @@ function buildTaskInfo(projPath: string, projName: string, task: TaskEntry): Tas
 		for (const w of waves) { completed += w.checked; total += w.total; }
 		const cur = waves.find(w => w.isCurrent);
 		if (cur) focus = cur.title;
-	} catch {
-		// Fallback: try legacy tasks.md (for completed specs before migration)
-		try {
-			const md = readFileSync(join(projPath, ".alfred", "specs", task.slug, "tasks.md"), "utf-8");
-			// Simple line counting for legacy display
-			const checked = (md.match(/^- \[[xX]\] /gm) ?? []).length;
-			const unchecked = (md.match(/^- \[ \] /gm) ?? []).length;
-			completed = checked;
-			total = checked + unchecked;
-		} catch { /* no tasks file */ }
+	} catch { /* no tasks.json */
 	}
 
 	return {
