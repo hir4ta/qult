@@ -1,8 +1,8 @@
 # alfred
 
-A development butler for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Specs, memory, reviews — all automatic.
+A development butler for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Spec-driven development with persistent knowledge and self-review at every step.
 
-**Other tools suggest. alfred enforces.**
+**Takes longer. Ships better.**
 
 ## 30-second version
 
@@ -10,13 +10,13 @@ A development butler for [Claude Code](https://docs.anthropic.com/en/docs/claude
 You: "Add user authentication"
 
 alfred: creates spec (requirements + design + tasks) →
-        3 agents review the architecture →
-        you approve in the browser dashboard →
-        implements wave by wave, committing + reviewing each →
+        self-reviews the spec (fix loop until 0 Critical) →
+        implements wave by wave →
+        self-reviews code at each wave boundary →
         saves what it learned for next time
 ```
 
-You just say what to build. alfred handles the rest.
+You get slower, more deliberate development — and higher-quality output. Every decision is recorded. Every wave is reviewed. Every lesson carries forward.
 
 ## Get started
 
@@ -35,73 +35,74 @@ Optional: add `export VOYAGE_API_KEY=your-key` to `~/.zshrc` for semantic search
 
 ## What makes it different
 
-Most spec tools give you slash commands that say "you should write a spec first." alfred uses Claude Code's hook system to **physically block** Edit and Write until you do. That's the core difference — enforcement happens at the tool level, not the prompt level.
+Most spec tools give you a slash command and hope you use it. alfred uses Claude Code's hook system to **enforce** the workflow — no spec, no code edits.
 
-**Enforcement, not suggestions.** Three layers gate your code edits. An intent guard blocks implementation without a spec. A review gate blocks the next wave until you've reviewed the last one. An approval gate blocks M/L specs until a human signs off in the dashboard. You can't YAML-edit your way past it — the signed review file gets checked too.
+**Enforcement, not suggestions.** Two gates protect your code. A spec gate blocks implementation until a spec exists. A review gate blocks the next wave until the current one passes self-review. This isn't prompt-level advice — it's PreToolUse hooks that physically deny Edit and Write.
 
-**Knowledge that grows up.** Every decision, pattern, and hard-won lesson goes to `.alfred/knowledge/` as structured JSON. Patterns auto-promote to rules after 15+ search hits. Each knowledge type has its own half-life — rules stay relevant for 120 days, assumptions fade after 30. Git-friendly, team-shareable, and alfred surfaces relevant experience before you ask.
+**Self-review at every boundary.** alfred spawns parallel code-review agents (security, logic, design) at every wave boundary. Critical or high findings must be fixed before the gate opens. This adds time — but catches issues that would cost more later.
+
+**Knowledge that compounds.** Every decision, pattern, and hard-won lesson goes to `.alfred/knowledge/` as structured JSON. Patterns auto-promote to rules after 15+ search hits. Each knowledge type has its own half-life — rules stay relevant for 120 days, assumptions fade after 30. Before you start a new task, alfred searches past experience and surfaces what's relevant.
 
 **Specs that stay honest.** After every commit, alfred diffs your changes against the design doc. Touched a component not in the spec? You'll hear about it. New source files get auto-appended to the right component section — your spec stays in sync without manual updates.
 
 **Context that adapts.** alfred adjusts how much it injects based on project maturity. A new project gets full spec context on session start. A mature one with 20+ knowledge entries gets just the current task and goal — no context bloat.
 
-**Skills that show up on their own.** Researching? alfred suggests `/brief`. Fixing a bug? `/mend`. No memorization needed — it classifies your intent (semantic or keyword, bilingual) and nudges the right skill.
+**Skills that show up on their own.** Researching? alfred suggests `/brief`. Fixing a bug? `/mend`. It classifies your intent (semantic or keyword, bilingual EN/JA) and nudges the right skill.
 
-**A dashboard that's actually useful.** `alfred dashboard` opens `localhost:7575` with live task progress, spec review with line-level comments, file-by-file approval, knowledge health, and activity timeline. Cross-project view with `Cmd+K` global search. English/Japanese toggle.
-
-**Cross-project intelligence.** alfred sees across all your projects. Contradictory design decisions between projects? Flagged automatically. Starting a new auth feature? Past decisions from your other projects surface before you ask. Common patterns across 3+ projects get detected and promoted.
+**A dashboard for visibility.** `alfred dashboard` opens `localhost:7575` with real-time task progress (SSE), spec viewing, and knowledge health. Cross-project view. English/Japanese toggle.
 
 **Team sharing via git.** Knowledge files are structured JSON — commit, review in PRs, share with your team. No server needed — git is the transport.
 
-## Why alfred in 2026
+## The trade-off
 
-Claude Code is powerful, but unstructured AI coding has well-documented failure modes:
+alfred is deliberately slower than other AI coding tools. Here's why:
 
-- **~30% first-attempt success rate** — without spec grounding, Claude hallucinates completions, skips edge cases, and claims "done" when it isn't. alfred's 3-layer gate system (spec → review → approval) catches these before they reach your codebase.
-- **Context loss across sessions** — even with 1M context (Opus 4.6), compaction eventually fires and wipes your working state. alfred persists decisions, patterns, and progress as structured JSON files that survive any compaction, any session boundary, any model swap.
-- **Infinite refactoring loops** — without bounded iteration, Claude can spend hours rewriting the same code. alfred's wave-based implementation enforces commit → review → advance. Max 2 fix rounds per wave, then escalate.
-- **Security blind spots** — 45% of AI-generated code contains vulnerabilities (per industry research). alfred spawns parallel code-review agents at every wave boundary, with security as a dedicated review perspective.
-- **Spec-implementation drift** — specs go stale the moment coding starts. alfred's living spec auto-appends changed files to design.md on every commit. Your spec stays honest automatically.
+- **Self-review loops add time.** Every wave boundary triggers a code review. Findings above Medium must be fixed before proceeding. This means a feature that takes 10 minutes with raw Claude might take 30 with alfred.
+- **Spec-first means planning before coding.** You write requirements and design before implementation. For a quick script, that's overhead. For anything you'll maintain, it's an investment.
+- **Knowledge accumulation pays off over time.** The first project is the slowest. By the third, alfred surfaces past decisions, avoids repeated mistakes, and generates specs grounded in real experience.
 
-### SDD meets IDD
+The bet: **time spent on review and knowledge now saves debugging and rework later.**
 
-The industry is converging on two complementary paradigms: **Spec-Driven Development** (structured specs as source of truth) and **Intent-Driven Development** (capture *why* and *what*, let AI handle *how*). alfred bridges both:
+## Why SDD in 2026
 
-- **Full SDD** for M/L features — requirements, design, tasks, tests, with traceability and review gates
-- **Lightweight IDD** for S/D changes — just requirements + decisions, no design overhead
-- **Immutable decisions** via `ledger save` — like ADRs, but semantically searchable across projects and sessions
+Claude Code is powerful, but unstructured AI coding has failure modes:
+
+- **Context loss across sessions** — even with 1M context, compaction eventually fires and wipes your working state. alfred persists decisions, patterns, and progress as structured JSON files that survive compaction, session boundaries, and model changes.
+- **Infinite refactoring loops** — without bounded iteration, Claude can spend hours rewriting the same code. alfred's wave-based implementation enforces commit → review → advance.
+- **Spec-implementation drift** — specs go stale the moment coding starts. alfred's living spec auto-appends changed files to design.md on every commit.
+- **Security blind spots** — alfred spawns parallel code-review agents at every wave boundary, with security as a dedicated review perspective.
 
 ### Built for 1M context
 
 With Opus 4.6's 1M context window, compaction is rarer but more destructive when it hits. alfred is designed for this reality:
 
 - **PreCompact hook** captures structured chapter memory (goal, decisions, summary) before context is lost
-- **Knowledge persistence** (`.alfred/knowledge/`) is the only data that guaranteed survives compaction, session restarts, and model changes
-- **Adaptive injection** — new projects get full context on session start; mature projects get just the current task. No context bloat.
+- **Knowledge persistence** (`.alfred/knowledge/`) survives compaction, session restarts, and model changes
+- **Adaptive injection** — new projects get full context on session start; mature projects get just the current task
 
 ## Skills
 
 | Skill | One-liner |
 |-------|-----------|
-| `/alfred:attend` | Full autopilot. Spec, approval, implementation, review, commit. Walk away |
-| `/alfred:brief` | Generate a spec. 3 agents debate your architecture, then you approve in the dashboard |
-| `/alfred:mend` | Bug fix. Reproduce, root-cause (with past bug memory), fix, verify |
-| `/alfred:tdd` | Test-driven. Red, green, refactor — remembers patterns across sessions |
-| `/alfred:inspect` | 6-profile quality review. Parallel agents, scored findings |
+| `/alfred:attend` | Full autopilot. Spec → implement (wave by wave) → review → commit |
+| `/alfred:brief` | Generate a spec. Self-review loop until 0 Critical/High findings |
+| `/alfred:mend` | Bug fix. Reproduce → root-cause (with past bug knowledge) → fix → verify |
+| `/alfred:tdd` | Test-driven. Red → green → refactor — remembers patterns across sessions |
+| `/alfred:inspect` | Multi-perspective code review. Parallel agents, scored findings |
 
 ## How it works
 
 ```
 You
-  |-- /alfred:brief    -> spec + 3-agent debate + dashboard approval
-  |-- /alfred:attend   -> spec -> approve -> implement (wave by wave) -> review -> commit
-  |-- /alfred:mend     -> reproduce -> root cause (+ past bug memory) -> fix -> verify
+  |-- /alfred:brief    -> spec + self-review loop
+  |-- /alfred:attend   -> spec -> implement (wave by wave) -> review -> commit
+  |-- /alfred:mend     -> reproduce -> root cause (+ past knowledge) -> fix -> verify
   v
 Hooks (invisible)
   |-- SessionStart     -> restore context, sync knowledge
   |-- UserPromptSubmit -> semantic search + skill nudge + spec enforcement
-  |-- PreToolUse       -> review gate + intent guard + approval gate (3-layer)
-  |-- PostToolUse      -> auto-update progress, auto-transition status, drift detection
+  |-- PreToolUse       -> spec gate + review gate
+  |-- PostToolUse      -> auto-update progress, living spec, drift detection
   |-- PreCompact       -> snapshot tasks, extract decisions
   |-- Stop             -> review gate block + reminders
   v
@@ -115,8 +116,8 @@ Storage
 
 | Tool | What it manages |
 |------|----------------|
-| `dossier` | Spec lifecycle — init, update, complete, defer, cancel, review, gate, and more |
-| `ledger` | Knowledge — search, save, promote patterns to rules, health reports |
+| `dossier` | Spec lifecycle — init, update, complete, validate, gate, check, and more |
+| `ledger` | Knowledge — search, save, promote patterns to rules, audit conventions |
 
 ## Knowledge
 
@@ -131,7 +132,7 @@ Knowledge lives as JSON files you can commit, review in PRs, and share with your
 
 Patterns auto-promote to rules after 15+ search hits.
 
-Search pipeline: Voyage AI vectors with reranking > FTS5 with fuzzy matching > keyword fallback. "auth" finds "authentication", "login", and more.
+Search pipeline: Voyage AI vectors with reranking > FTS5 with BM25 ranking > keyword fallback. Tag aliases expand queries bilingually — "auth" finds "authentication", "login", "認証", and more.
 
 Each entry tracks its author (via `git user.name`).
 
@@ -147,7 +148,7 @@ Each entry tracks its author (via `git user.name`).
 
 | Symptom | Fix |
 |---------|-----|
-| No memory results | Set `VOYAGE_API_KEY`, or verify FTS5 fallback works |
+| No search results | Set `VOYAGE_API_KEY`, or verify FTS5 fallback works |
 | Wrong language | `export ALFRED_LANG=ja` in `~/.zshrc` |
 | Hook not firing | `/plugin install alfred` + restart Claude Code |
 | Dashboard empty | Run from a directory with `.alfred/specs/`, or any directory for cross-project view |
@@ -155,7 +156,7 @@ Each entry tracks its author (via `git user.name`).
 ## Updating
 
 ```bash
-alfred update    # downloads latest binary from GitHub Releases
+alfred update    # downloads latest binary + dashboard assets from GitHub Releases
 ```
 
 ```
@@ -165,7 +166,7 @@ alfred update    # downloads latest binary from GitHub Releases
 ## Uninstalling
 
 ```bash
-alfred uninstall    # removes binary, database, user rules, plugin cache
+alfred uninstall    # removes binary, database, dashboard assets, user rules, plugin cache
 ```
 
 Then in Claude Code:
