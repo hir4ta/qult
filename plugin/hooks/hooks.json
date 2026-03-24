@@ -35,6 +35,17 @@
             "type": "command"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "You are an intent classifier for alfred, a Claude Code development butler.\n\nClassify the user's prompt into ONE of these intents and recommend the matching skill:\n\n| Intent | Description | Skill |\n|--------|-------------|-------|\n| research | Investigation, learning, understanding | /alfred:brief |\n| plan | Design, architecture, planning | /alfred:attend |\n| implement | Implementation, feature addition, refactoring | /alfred:attend |\n| bugfix | Bug fix, error resolution, debugging | /alfred:mend |\n| review | Code review, quality audit | /alfred:inspect |\n| tdd | Test-driven development, writing tests | /alfred:tdd |\n| save-knowledge | Saving notes, remembering information | (none) |\n| none | Chat, questions, unclear intent | (none) |\n\nRules:\n- For compound prompts, pick the PRIMARY intent\n- If save-knowledge and research both match, prefer save-knowledge\n- For chat/greetings/unclear → none\n\nUser prompt:\n$ARGUMENTS\n\nRespond with ONLY a JSON object: {\"additionalContext\": \"[CONTEXT] Skill suggestion: /alfred:<skill> — <skill description in 10 chars> (<intent>: <brief reason>)\"}\nIf intent is none or save-knowledge, respond with: {\"additionalContext\": \"\"}",
+            "model": "claude-haiku-4-5-20251001",
+            "statusMessage": "alfred: classifying intent...",
+            "timeout": 30
+          }
+        ]
       }
     ],
     "PostToolUse": [
