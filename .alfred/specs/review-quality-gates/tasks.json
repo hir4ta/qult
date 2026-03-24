@@ -1,0 +1,151 @@
+{
+  "slug": "review-quality-gates",
+  "waves": [
+    {
+      "key": 1,
+      "title": "プロンプト改修 (FR-1〜5)",
+      "tasks": [
+        {
+          "id": "T-1.1",
+          "title": "code-reviewer.md トリアージ強化 (Phase 1 hunk抽出 + Phase 3 スコープフィルタ + severity再分類 + 構造化findings出力)",
+          "checked": true,
+          "requirements": "FR-1, FR-3",
+          "files": [
+            "plugin/agents/code-reviewer.md"
+          ]
+        },
+        {
+          "id": "T-1.2",
+          "title": "attend SKILL.md findings永続化 + オシレーション検出 (構造比較, findingId hash)",
+          "checked": true,
+          "requirements": "FR-2, FR-5",
+          "files": [
+            "plugin/skills/attend/SKILL.md"
+          ]
+        },
+        {
+          "id": "T-1.3",
+          "title": "attend SKILL.md Fix検証強化 (re-review時の前回findings入力 + バリデーション指示)",
+          "checked": true,
+          "requirements": "FR-4, FR-5",
+          "files": [
+            "plugin/skills/attend/SKILL.md"
+          ]
+        },
+        {
+          "id": "T-1.R",
+          "title": "Wave 1 レビュー",
+          "checked": true
+        }
+      ]
+    },
+    {
+      "key": 2,
+      "title": "ナレッジ品質ゲート (FR-6〜8)",
+      "tasks": [
+        {
+          "id": "T-2.1",
+          "title": "quality-gate.ts 新規作成 (qualityGate関数 + セマンティック重複検出 + 矛盾検出 + embedding再利用)",
+          "checked": true,
+          "requirements": "FR-6, FR-8, NFR-1, NFR-2, NFR-3",
+          "files": [
+            "src/mcp/quality-gate.ts"
+          ]
+        },
+        {
+          "id": "T-2.2",
+          "title": "checkActionability 実装 (日英対応 ACTIONABILITY_PATTERNS + sub_type別判定)",
+          "checked": true,
+          "requirements": "FR-7",
+          "files": [
+            "src/mcp/quality-gate.ts"
+          ]
+        },
+        {
+          "id": "T-2.3",
+          "title": "ledgerSave 統合 (qualityGate呼び出し + レスポンス拡張 + vectorSearchKnowledge minScore追加)",
+          "checked": true,
+          "requirements": "FR-6, FR-8, NFR-3",
+          "files": [
+            "src/mcp/ledger.ts",
+            "src/store/vectors.ts"
+          ]
+        },
+        {
+          "id": "T-2.4",
+          "title": "品質ゲート ユニットテスト (重複検出, アクショナビリティ, 矛盾検出, タイムアウト, Voyage未設定フォールバック)",
+          "checked": true,
+          "requirements": "NFR-1, NFR-2",
+          "files": [
+            "src/mcp/__tests__/quality-gate.test.ts"
+          ]
+        },
+        {
+          "id": "T-2.R",
+          "title": "Wave 2 レビュー",
+          "checked": true
+        }
+      ]
+    },
+    {
+      "key": 3,
+      "title": "レビューキャリブレーション (FR-9〜10)",
+      "tasks": [
+        {
+          "id": "T-3.1",
+          "title": "extractReviewFindings 改修 (review-findingタグ + enabled=0保存 + メタデータ付与)",
+          "checked": true,
+          "requirements": "FR-9",
+          "files": [
+            "src/mcp/knowledge-extractor.ts"
+          ]
+        },
+        {
+          "id": "T-3.2",
+          "title": "ledgerVerify outcome追加 (confirmed/rejected + Zodスキーマ更新 + review-findingタグガード)",
+          "checked": true,
+          "requirements": "FR-10, NFR-3",
+          "files": [
+            "src/mcp/ledger.ts",
+            "src/mcp/server.ts"
+          ]
+        },
+        {
+          "id": "T-3.3",
+          "title": "キャリブレーション ユニットテスト (finding追跡, outcome記録, 後方互換性)",
+          "checked": true,
+          "files": [
+            "src/mcp/__tests__/knowledge-extractor.test.ts",
+            "src/mcp/__tests__/ledger.test.ts"
+          ]
+        },
+        {
+          "id": "T-3.R",
+          "title": "Wave 3 レビュー",
+          "checked": true
+        }
+      ]
+    },
+    {
+      "key": "closing",
+      "title": "Closing",
+      "tasks": [
+        {
+          "id": "T-C.1",
+          "title": "セルフレビュー",
+          "checked": true
+        },
+        {
+          "id": "T-C.2",
+          "title": "CLAUDE.md 更新",
+          "checked": true
+        },
+        {
+          "id": "T-C.3",
+          "title": "ナレッジ保存",
+          "checked": true
+        }
+      ]
+    }
+  ]
+}

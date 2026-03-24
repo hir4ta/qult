@@ -26,6 +26,15 @@
       "spec_type": "bugfix",
       "owner": "unknown",
       "completed_at": "2026-03-24T21:41:09.164Z"
+    },
+    {
+      "slug": "review-quality-gates",
+      "started_at": "2026-03-24T22:30:09.536Z",
+      "status": "completed",
+      "size": "L",
+      "spec_type": "feature",
+      "owner": "unknown",
+      "completed_at": "2026-03-24T23:10:37.136Z"
     }
   ]
 }

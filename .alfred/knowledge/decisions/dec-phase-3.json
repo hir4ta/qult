@@ -1,0 +1,22 @@
+{
+  "id": "dec-phase-3",
+  "title": "レビュートリアージはPhase 3プロンプト強化で実装（独立エージェント追加ではない）",
+  "context": "",
+  "decision": "code-reviewer.mdの既存Phase 3集約フェーズにトリアージ基準を追加する。独立トリアージエージェントは追加しない",
+  "reasoning": "エージェント数を3のまま据え置き、レイテンシを抑える。効果不十分なら後からエージェント追加に移行可能",
+  "alternatives": [
+    "独立トリアージエージェント追加: 精度は上がるがエージェント4体でレイテンシ・コスト増"
+  ],
+  "tags": [
+    "review",
+    "triage",
+    "code-reviewer"
+  ],
+  "createdAt": "2026-03-24T22:46:29.036Z",
+  "status": "approved",
+  "lang": "ja",
+  "author": "unknown",
+  "verification_due": "2026-05-08T22:46:29.036Z",
+  "verification_count": 0,
+  "last_verified": null
+}

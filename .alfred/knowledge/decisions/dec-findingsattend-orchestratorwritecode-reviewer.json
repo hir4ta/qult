@@ -1,0 +1,23 @@
+{
+  "id": "dec-findingsattend-orchestratorwritecode-reviewer",
+  "title": "findings永続化はattend orchestratorがWriteする（code-reviewerではない）",
+  "context": "",
+  "decision": "review findingsの.alfred/.state/への書き込みはattend SKILL.md（orchestrator）が行う",
+  "reasoning": "code-reviewerはdisallowedTools: Write,Editが設定されており、ファイル書き込み不可。エージェントの責務を分析と出力に限定し、永続化はorchestrator側で行う",
+  "alternatives": [
+    "code-reviewerにBashでecho > fileさせる: fragile\\nMCP tool新設（dossier save-findings）: オーバーエンジニアリング"
+  ],
+  "tags": [
+    "review",
+    "findings",
+    "attend",
+    "code-reviewer"
+  ],
+  "createdAt": "2026-03-24T22:46:38.661Z",
+  "status": "approved",
+  "lang": "ja",
+  "author": "unknown",
+  "verification_due": "2026-05-08T22:46:38.661Z",
+  "verification_count": 0,
+  "last_verified": null
+}
