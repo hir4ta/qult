@@ -45,6 +45,9 @@ jobs:
             --compile \
             --minify \
             --target=${{ matrix.target }} \
+            --external @opentui/core \
+            --external @opentui/react \
+            --external react \
             --outfile=${{ matrix.artifact }}
 
       - name: Upload artifact
