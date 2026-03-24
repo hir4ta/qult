@@ -10,25 +10,23 @@ paths:
 - Adaptive onboarding: injection depth by project knowledge count (0-5: full spec, 6-20: session+goal, 21+: session only)
 
 ## PreCompact
-- Auto-updates Next Steps completion status from transcript
-- Decision extraction: base score 0.35, min confidence 0.4 — bare keyword matches require at least one positive signal (rationale/alternative/arch term)
-- Structured chapter memory (JSON): goal, decisions, summary
-- Knowledge detection: transcript research patterns (2+ hits from 13 keywords) → stderr reminder to save findings
-- Auto-completes task when tasks.json Status="completed"/"done" or all Next Steps are checked
+- Decision extraction: agent hook (Haiku) が transcript を Read → 意思決定を構造化 → `alfred hook-internal save-decision` で DB 保存（旧キーワードスコアリングは削除済み）
+- Structured chapter memory (JSON): tasks.json snapshot
+- Auto-completes task when tasks.json all tasks checked
 - Session continuity: writes .alfred/.pending-compact.json breadcrumb, SessionStart resolves → session_links table
 
 ## UserPromptSubmit
-- Voyage vector search → FTS5 fallback → keyword fallback
-- File context boost from git diff
-- Skill nudge: classifyIntent (7 intents: research/plan/implement/bugfix/review/tdd/save-knowledge, JP+EN bilingual phrase keywords) → buildSkillNudge (intent→skill routing with active spec suppression for plan/implement) → additionalContext injection
-- save-knowledge suppresses research when both match. No API calls (pure keyword matching, <1ms)
-- Spec proposal (Stage 1): no active spec + implement intent → DIRECTIVE requiring AskUserQuestion to confirm spec creation. Always proposes, never silently skips. User can say "skip". Guard resets per session (SessionStart clears spec-prompt.json)
-- Parallel dev guard (Stage 1.5): active spec exists + implement/bugfix/tdd intent + slug NOT in worked-slugs → WARNING prompting AskUserQuestion
+- **Hybrid**: command hook (knowledge search + spec guard) + prompt hook (Haiku intent classification)
+- Command hook: Voyage vector search → FTS5 fallback → keyword fallback for knowledge search
+- Prompt hook (Haiku): 7 intents (research/plan/implement/bugfix/review/tdd/save-knowledge) を LLM 分類 → skill 推薦を additionalContext で出力
+- Spec proposal (Stage 1): no active spec + implementation keywords → DIRECTIVE requiring AskUserQuestion. Guard resets per session
+- Parallel dev guard (Stage 1.5): active spec exists + implementation keywords + slug NOT in worked-slugs → WARNING
 
 ## PostToolUse
 - Bash error detection → FTS5 knowledge search → additionalContext injection
-- Auto-check tasks: Edit/Write file path matching + Bash stdout matching against tasks.json descriptions (backtick paths + filename matching)
+- Task completion: agent hook (Haiku) が Edit/Write/Bash 後にタスク完了候補を additionalContext で提案 → Claude 本体が dossier check を呼ぶ（旧 autoCheckTasks は削除済み）
 - Bash success → git commit detection → living-spec + drift + wave completion
+- FR-9: Agent レビューレスポンス検出時に review-gate.json の re_reviewed フラグをセット（fix_mode 中のみ）
 
 ## PostToolUse — Living Spec (src/hooks/living-spec.ts)
 - git commit → extractChangedFiles (git diff --name-only HEAD~1, 2s timeout) → shouldAutoAppend filter (multi-lang: JS/TS/Python/Go/Ruby/Rust/Java/C#/Swift/Kotlin, excludes test/gen/mock/vendor/dist/plugin/.alfred) → matchComponent (exact directory match against design.md component sections) → appendFileToComponent (design.md, `<!-- auto-added: ISO8601 -->` marker)

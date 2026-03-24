@@ -213,6 +213,15 @@ export function dossierGate(projectPath: string, params: DossierParams) {
 				return jsonResult({ cleared: false, reason: "no active review gate to clear" });
 			}
 
+			// FR-9: Block gate clear if fix_mode is active but no re-review was performed.
+			if (gate.fix_mode && !gate.re_reviewed) {
+				return errorResult(
+					"fix_mode で修正後、レビューを再実行してから gate clear してください。" +
+					"alfred:code-reviewer agent または /alfred:inspect でレビューを実行し、" +
+					"その後 dossier action=gate sub_action=clear を再度呼んでください。",
+				);
+			}
+
 			const reason = truncate(params.reason, 500);
 			clearReviewGate(projectPath);
 

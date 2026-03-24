@@ -18,7 +18,9 @@ import { type DossierParams, errorResult, jsonResult } from "./helpers.js";
 export function dossierUpdate(projectPath: string, store: Store, params: DossierParams) {
 	if (!params.file) return errorResult("file is required for update");
 	if (!params.content) return errorResult("content is required for update");
-	const mode = params.mode ?? "append";
+	// FR-10: JSON files MUST use replace mode — append creates invalid JSON.
+	const isJson = typeof params.file === "string" && params.file.endsWith(".json");
+	const mode = isJson ? "replace" : (params.mode ?? "append");
 
 	// Resolve task slug.
 	let taskSlug = params.task_slug;

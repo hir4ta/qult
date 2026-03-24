@@ -14,6 +14,11 @@ export interface ReviewGate {
 	fix_mode?: boolean;
 	/** ISO8601 timestamp when fix_mode was entered. Auto-expires after 60 minutes. */
 	fix_mode_at?: string;
+	/** FR-9: Set to true when a review is executed after entering fix_mode.
+	 *  Gate clear is blocked while fix_mode=true and re_reviewed=false. */
+	re_reviewed?: boolean;
+	/** ISO8601 timestamp when re_reviewed was set to true. */
+	re_reviewed_at?: string;
 }
 
 /**
@@ -50,6 +55,8 @@ export function isGateActive(cwd: string): ReviewGate | null {
 		if (Number.isNaN(elapsed) || elapsed > 60 * 60 * 1000) {
 			gate.fix_mode = false;
 			gate.fix_mode_at = undefined;
+			gate.re_reviewed = false;
+			gate.re_reviewed_at = undefined;
 			writeStateJSON(cwd, GATE_FILE, gate);
 			process.stderr.write("[alfred] fix_mode expired (60 min timeout). Gate re-activated — run review before clearing.\n");
 		}

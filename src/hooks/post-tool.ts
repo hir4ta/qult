@@ -12,7 +12,7 @@ import { notifyUser } from "./dispatcher.js";
 
 import { isSpecFilePath } from "./spec-guard.js";
 import { addWorkedSlug, readStateJSON, readWaveProgress, writeStateJSON, writeWaveProgress } from "./state.js";
-import { writeReviewGate } from "./review-gate.js";
+import { readReviewGate, writeReviewGate } from "./review-gate.js";
 
 export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<void> {
 	if (!ev.cwd || !ev.tool_name) return;
@@ -62,8 +62,10 @@ export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<v
 	}
 
 	// FR-3: Extract knowledge from review agent findings.
+	// FR-9: Mark re_reviewed flag when review is detected in fix_mode.
 	if (ev.tool_name === "Agent" && ev.tool_response) {
 		extractReviewKnowledge(ev.cwd!, ev.tool_response);
+		markReReviewedIfFixMode(ev.cwd!, ev.tool_response);
 	}
 
 	emitDirectives("PostToolUse", items);
@@ -355,6 +357,36 @@ function saveKnowledgeOnCommit(projectPath: string): void {
 			promoteSubType(store, c.id, "rule");
 			notifyUser("auto-promoted knowledge '%s' to rule (%d hits)", c.title, c.hitCount);
 		}
+	} catch {
+		/* fail-open */
+	}
+}
+
+/**
+ * FR-9: Mark re_reviewed flag on review-gate when a review agent response is detected in fix_mode.
+ * Uses the same review finding patterns as extractReviewFindings.
+ */
+function markReReviewedIfFixMode(projectPath: string, toolResponse: unknown): void {
+	try {
+		const gate = readReviewGate(projectPath);
+		if (!gate?.fix_mode || gate.re_reviewed) return;
+
+		// Check if the agent response looks like a review result.
+		const text = typeof toolResponse === "string"
+			? toolResponse
+			: JSON.stringify(toolResponse);
+		const reviewPatterns = [
+			/\bcritical\b/i, /\bhigh\b/i, /\bmedium\b/i, /\blow\b/i,
+			/\bfinding/i, /\bverdict/i, /\breview\s+summary/i,
+			/PASS|NEEDS\s+FIX/i,
+		];
+		const matchCount = reviewPatterns.filter((p) => p.test(text)).length;
+		if (matchCount < 2) return; // Need at least 2 patterns to confirm it's a review
+
+		gate.re_reviewed = true;
+		gate.re_reviewed_at = new Date().toISOString();
+		writeStateJSON(projectPath, "review-gate.json", gate);
+		notifyUser("re-review detected — gate clear is now allowed");
 	} catch {
 		/* fail-open */
 	}

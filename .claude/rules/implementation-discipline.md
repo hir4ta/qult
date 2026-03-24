@@ -28,14 +28,15 @@ After all spec documents are created:
 ## Step 3: Implementation (Per Wave)
 
 ### Per Task Completion
-- tasks.json checkbox auto-updated by PostToolUse hook (autoCheckTasks): file path matching for Edit/Write, stdout matching for Bash
-- Explicit update also available: `dossier action=check task_id="T-X.Y"`
+- PostToolUse agent hook (Haiku) がタスク完了候補を additionalContext で提案 → Claude 本体が `dossier action=check` を呼ぶ
+- 明示的更新: `dossier action=check task_id="T-X.Y"`
 
 ### Per Wave Completion
 1. **Commit** — Commit at Wave boundaries, include Wave number in message
 2. **Self-Review** — MUST run self-review before proceeding to next Wave
    - Enforced: review-gate.json DENY blocks Edit/Write until cleared
    - If review finds Critical/High: enter fix_mode → fix → re-review → clear (loop until 0 findings)
+   - FR-9: fix_mode 後の gate clear は `re_reviewed=true` が必須（PostToolUse が Agent レビューレスポンスを検出して自動セット）
    - fix_mode has 60-minute timeout — auto-expires to DENY if not cleared
    - Clear via `dossier action=gate sub_action=clear reason="..."` (reason ≥ 30 chars required)
    - reason MUST include: review method, findings count (Critical/High/Medium), fix summary
