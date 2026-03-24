@@ -30,8 +30,8 @@ afterEach(() => {
 function setupActiveSpec(slug: string) {
 	const specsDir = join(tmpDir, ".alfred", "specs", slug);
 	mkdirSync(specsDir, { recursive: true });
-	writeFileSync(join(tmpDir, ".alfred", "specs", "_active.md"),
-		`primary: ${slug}\ntasks:\n  - slug: ${slug}\n    started_at: "2025-01-01"\n    status: active\n    size: S\n    spec_type: feature\n`);
+	const state = { primary: slug, tasks: [{ slug, started_at: "2025-01-01", status: "active", size: "S", spec_type: "feature" }] };
+	writeFileSync(join(tmpDir, ".alfred", "specs", "_active.json"), JSON.stringify(state));
 	writeFileSync(join(specsDir, "session.md"), "# Session\n## Status: active\n## Next Steps\n- [ ] Run tests\n- [ ] Fix bugs");
 	writeFileSync(join(specsDir, "requirements.md"), "# Requirements");
 	writeFileSync(join(specsDir, "tasks.md"), "# Tasks\n## Wave 1\n- [ ] T-1.1: Add `src/hooks/test.ts`\n- [ ] T-1.2: Update documentation");

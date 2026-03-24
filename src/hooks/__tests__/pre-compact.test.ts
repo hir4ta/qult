@@ -30,8 +30,8 @@ afterEach(() => {
 function setupActiveSpec(slug: string, tasksContent: string, size = "S") {
 	const specsDir = join(tmpDir, ".alfred", "specs", slug);
 	mkdirSync(specsDir, { recursive: true });
-	const active = `primary: ${slug}\ntasks:\n  - slug: ${slug}\n    started_at: "2025-01-01"\n    status: active\n    size: ${size}\n    spec_type: feature\n`;
-	writeFileSync(join(tmpDir, ".alfred", "specs", "_active.md"), active);
+	const state = { primary: slug, tasks: [{ slug, started_at: "2025-01-01", status: "active", size, spec_type: "feature" }] };
+	writeFileSync(join(tmpDir, ".alfred", "specs", "_active.json"), JSON.stringify(state));
 	writeFileSync(join(specsDir, "requirements.md"), "# Requirements");
 	writeFileSync(join(specsDir, "tasks.md"), tasksContent);
 }
@@ -91,12 +91,9 @@ describe("preCompact", () => {
 			await preCompact({ cwd: tmpDir } as any, AbortSignal.timeout(5000));
 		} finally { io.restore(); }
 
-		// completeTask removes done entries from _active.md; file may not exist
-		const exists = existsSync(join(tmpDir, ".alfred", "specs", "_active.md"));
-		if (exists) {
-			const active = readFileSync(join(tmpDir, ".alfred", "specs", "_active.md"), "utf-8");
-			expect(active).not.toContain("status: active");
-		}
+		// completeTask moves entry to _complete.json; _active.json should have empty tasks
+		const active = JSON.parse(readFileSync(join(tmpDir, ".alfred", "specs", "_active.json"), "utf-8"));
+		expect(active.tasks.some((t: any) => t.status === "active")).toBe(false);
 	});
 
 	it("auto-completes when all tasks checked", async () => {
@@ -108,12 +105,9 @@ describe("preCompact", () => {
 			await preCompact({ cwd: tmpDir } as any, AbortSignal.timeout(5000));
 		} finally { io.restore(); }
 
-		// completeTask removes done entries from _active.md; file may not exist
-		const exists = existsSync(join(tmpDir, ".alfred", "specs", "_active.md"));
-		if (exists) {
-			const active = readFileSync(join(tmpDir, ".alfred", "specs", "_active.md"), "utf-8");
-			expect(active).not.toContain("status: active");
-		}
+		// completeTask moves entry to _complete.json; _active.json should have empty tasks
+		const active = JSON.parse(readFileSync(join(tmpDir, ".alfred", "specs", "_active.json"), "utf-8"));
+		expect(active.tasks.some((t: any) => t.status === "active")).toBe(false);
 	});
 
 	it("returns early when cwd is empty", async () => {

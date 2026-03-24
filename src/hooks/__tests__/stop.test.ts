@@ -39,10 +39,16 @@ function setupSpec(opts: {
 	const specsDir = join(tmpDir, ".alfred", "specs");
 	mkdirSync(join(specsDir, slug), { recursive: true });
 
-	let yaml = `primary: ${slug}\ntasks:\n  - slug: ${slug}\n    started_at: 2026-01-01T00:00:00Z\n`;
-	if (opts.size) yaml += `    size: ${opts.size}\n`;
-	if (opts.status) yaml += `    status: ${opts.status}\n`;
-	writeFileSync(join(specsDir, "_active.md"), yaml);
+	const state = {
+		primary: slug,
+		tasks: [{
+			slug,
+			started_at: "2026-01-01T00:00:00Z",
+			...(opts.size ? { size: opts.size } : {}),
+			...(opts.status ? { status: opts.status } : {}),
+		}],
+	};
+	writeFileSync(join(specsDir, "_active.json"), JSON.stringify(state));
 
 	if (opts.sessionContent) {
 		writeFileSync(join(specsDir, slug, "tasks.md"), opts.sessionContent);

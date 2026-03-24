@@ -6,6 +6,12 @@ import { Store } from "../index.js";
 import { syncProjectSpecs } from "../spec-sync.js";
 import { insertTestProject } from "../../__tests__/test-utils.js";
 
+function writeActiveJson(tmpDir: string, state: { primary: string; tasks: Array<Record<string, unknown>> }) {
+	const specsRoot = join(tmpDir, ".alfred", "specs");
+	mkdirSync(specsRoot, { recursive: true });
+	writeFileSync(join(specsRoot, "_active.json"), JSON.stringify(state));
+}
+
 describe("syncProjectSpecs", () => {
 	let tmpDir: string;
 	let store: Store;
@@ -23,25 +29,21 @@ describe("syncProjectSpecs", () => {
 	});
 
 	it("indexes new spec files", async () => {
-		// Create spec directory
 		const specDir = join(tmpDir, ".alfred", "specs", "my-feature");
 		mkdirSync(specDir, { recursive: true });
 		writeFileSync(join(specDir, "requirements.md"), "# Requirements\n\nFR-1: Test");
 		writeFileSync(join(specDir, "design.md"), "# Design\n\nArchitecture overview");
 
-		// Create _active.md
-		const specsRoot = join(tmpDir, ".alfred", "specs");
-		writeFileSync(
-			join(specsRoot, "_active.md"),
-			"primary: my-feature\ntasks:\n  - slug: my-feature\n    size: M\n    spec_type: feature\n    status: active\n",
-		);
+		writeActiveJson(tmpDir, {
+			primary: "my-feature",
+			tasks: [{ slug: "my-feature", size: "M", spec_type: "feature", status: "active" }],
+		});
 
 		const result = await syncProjectSpecs(store, PROJECT_ID, tmpDir);
 		expect(result.inserted).toBe(2);
 		expect(result.updated).toBe(0);
 		expect(result.deleted).toBe(0);
 
-		// Verify DB entries
 		const rows = store.db
 			.prepare("SELECT slug, file_name, status FROM spec_index WHERE project_id = ? ORDER BY file_name")
 			.all(PROJECT_ID) as Array<{ slug: string; file_name: string; status: string }>;
@@ -54,10 +56,7 @@ describe("syncProjectSpecs", () => {
 		const specDir = join(tmpDir, ".alfred", "specs", "my-feature");
 		mkdirSync(specDir, { recursive: true });
 		writeFileSync(join(specDir, "requirements.md"), "# Requirements");
-		writeFileSync(
-			join(tmpDir, ".alfred", "specs", "_active.md"),
-			"primary: my-feature\ntasks:\n  - slug: my-feature\n",
-		);
+		writeActiveJson(tmpDir, { primary: "my-feature", tasks: [{ slug: "my-feature" }] });
 
 		const r1 = await syncProjectSpecs(store, PROJECT_ID, tmpDir);
 		expect(r1.inserted).toBe(1);
@@ -71,14 +70,10 @@ describe("syncProjectSpecs", () => {
 		const specDir = join(tmpDir, ".alfred", "specs", "my-feature");
 		mkdirSync(specDir, { recursive: true });
 		writeFileSync(join(specDir, "requirements.md"), "# Requirements v1");
-		writeFileSync(
-			join(tmpDir, ".alfred", "specs", "_active.md"),
-			"primary: my-feature\ntasks:\n  - slug: my-feature\n",
-		);
+		writeActiveJson(tmpDir, { primary: "my-feature", tasks: [{ slug: "my-feature" }] });
 
 		await syncProjectSpecs(store, PROJECT_ID, tmpDir);
 
-		// Modify file
 		writeFileSync(join(specDir, "requirements.md"), "# Requirements v2");
 		const r2 = await syncProjectSpecs(store, PROJECT_ID, tmpDir);
 		expect(r2.updated).toBe(1);
@@ -88,15 +83,11 @@ describe("syncProjectSpecs", () => {
 		const specDir = join(tmpDir, ".alfred", "specs", "my-feature");
 		mkdirSync(specDir, { recursive: true });
 		writeFileSync(join(specDir, "requirements.md"), "# Requirements");
-		writeFileSync(
-			join(tmpDir, ".alfred", "specs", "_active.md"),
-			"primary: my-feature\ntasks:\n  - slug: my-feature\n",
-		);
+		writeActiveJson(tmpDir, { primary: "my-feature", tasks: [{ slug: "my-feature" }] });
 
 		await syncProjectSpecs(store, PROJECT_ID, tmpDir);
 		expect(store.db.prepare("SELECT COUNT(*) as c FROM spec_index").get()).toMatchObject({ c: 1 });
 
-		// Remove spec directory
 		rmSync(specDir, { recursive: true });
 		const r2 = await syncProjectSpecs(store, PROJECT_ID, tmpDir);
 		expect(r2.deleted).toBe(1);
@@ -104,12 +95,11 @@ describe("syncProjectSpecs", () => {
 	});
 
 	it("marks completed specs correctly", async () => {
-		// Create spec dir but do NOT list in _active.md (simulates completed spec)
+		// Create spec dir but do NOT list in _active.json (simulates completed spec)
 		const specDir = join(tmpDir, ".alfred", "specs", "old-feature");
 		mkdirSync(specDir, { recursive: true });
 		writeFileSync(join(specDir, "requirements.md"), "# Old Requirements");
 
-		// Empty active state (or no active.md)
 		mkdirSync(join(tmpDir, ".alfred", "specs"), { recursive: true });
 
 		const result = await syncProjectSpecs(store, PROJECT_ID, tmpDir);

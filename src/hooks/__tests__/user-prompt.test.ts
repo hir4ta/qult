@@ -23,9 +23,15 @@ function setupSpec(opts: { size?: string }): void {
 	setupAlfred();
 	const specsDir = join(tmpDir, ".alfred", "specs");
 	mkdirSync(specsDir, { recursive: true });
-	let yaml = `primary: test-task\ntasks:\n  - slug: test-task\n    started_at: 2026-01-01T00:00:00Z\n`;
-	if (opts.size) yaml += `    size: ${opts.size}\n`;
-	writeFileSync(join(specsDir, "_active.md"), yaml);
+	const state = {
+		primary: "test-task",
+		tasks: [{
+			slug: "test-task",
+			started_at: "2026-01-01T00:00:00Z",
+			...(opts.size ? { size: opts.size } : {}),
+		}],
+	};
+	writeFileSync(join(specsDir, "_active.json"), JSON.stringify(state));
 }
 
 describe("classifyIntent", () => {

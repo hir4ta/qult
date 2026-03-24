@@ -39,12 +39,11 @@ function getDenyOutput(): { hookSpecificOutput?: { permissionDecision?: string; 
 	return null;
 }
 
-describe("preToolUse — fail-closed on malformed _active.md", () => {
-	it("denies Edit when _active.md exists but has no primary", async () => {
+describe("preToolUse — fail-closed on malformed _active.json", () => {
+	it("denies Edit when _active.json exists but has corrupt JSON", async () => {
 		const specsDir = join(tmpDir, ".alfred", "specs");
 		mkdirSync(specsDir, { recursive: true });
-		// File exists but has no valid primary: field
-		writeFileSync(join(specsDir, "_active.md"), "some garbage content\nno primary here");
+		writeFileSync(join(specsDir, "_active.json"), "some garbage content\nno json here");
 
 		await preToolUse(makeEvent("Edit", join(tmpDir, "src/index.ts")));
 		const out = getDenyOutput();
@@ -52,54 +51,49 @@ describe("preToolUse — fail-closed on malformed _active.md", () => {
 		expect(String(out?.hookSpecificOutput?.permissionDecisionReason)).toContain("Failed to read spec state");
 	});
 
-	it("denies Edit when _active.md has primary but no matching slug", async () => {
+	it("denies Edit when _active.json has primary but no matching slug", async () => {
 		const specsDir = join(tmpDir, ".alfred", "specs");
 		mkdirSync(specsDir, { recursive: true });
-		// Has primary but tasks array doesn't match
-		writeFileSync(join(specsDir, "_active.md"), "primary: ghost-task\ntasks:\n  - slug: other-task\n");
+		const state = { primary: "ghost-task", tasks: [{ slug: "other-task", started_at: "2026-01-01T00:00:00Z" }] };
+		writeFileSync(join(specsDir, "_active.json"), JSON.stringify(state));
 
 		await preToolUse(makeEvent("Edit", join(tmpDir, "src/index.ts")));
 		const out = getDenyOutput();
 		expect(out?.hookSpecificOutput?.permissionDecision).toBe("deny");
 	});
 
-	it("allows Edit when no _active.md exists (no .alfred/specs/)", async () => {
-		// No .alfred directory at all — emits allowTool with advisory (#19)
+	it("allows Edit when no _active.json exists (no .alfred/specs/)", async () => {
 		await preToolUse(makeEvent("Edit", join(tmpDir, "src/index.ts")));
 		const out = JSON.parse(stdoutData[0] ?? "{}");
 		expect(out?.hookSpecificOutput?.permissionDecision).toBe("allow");
 	});
 
-	it("allows Edit to .alfred/ paths even when _active.md is malformed", async () => {
+	it("allows Edit to .alfred/ paths even when _active.json is malformed", async () => {
 		const specsDir = join(tmpDir, ".alfred", "specs");
 		mkdirSync(specsDir, { recursive: true });
-		writeFileSync(join(specsDir, "_active.md"), "broken content");
+		writeFileSync(join(specsDir, "_active.json"), "broken content");
 
-		// .alfred/ exempt check happens BEFORE fail-closed check
 		await preToolUse(makeEvent("Edit", join(tmpDir, ".alfred/specs/test/design.md")));
 		const out = getDenyOutput();
 		expect(out?.hookSpecificOutput?.permissionDecision).toBe("allow");
 	});
 
-	it("allows Edit when _active.md has empty primary (all specs completed)", async () => {
+	it("allows Edit when _active.json has empty primary (all specs completed)", async () => {
 		const specsDir = join(tmpDir, ".alfred", "specs");
 		mkdirSync(specsDir, { recursive: true });
-		writeFileSync(
-			join(specsDir, "_active.md"),
-			'primary: ""\ntasks:\n  - slug: old-task\n    status: done\n    started_at: 2026-03-19T10:00:00Z\n',
-		);
+		const state = { primary: "", tasks: [{ slug: "old-task", status: "done", started_at: "2026-03-19T10:00:00Z" }] };
+		writeFileSync(join(specsDir, "_active.json"), JSON.stringify(state));
 
 		await preToolUse(makeEvent("Edit", join(tmpDir, "src/index.ts")));
-		// Should NOT deny — empty primary is a valid state (no active spec)
 		const out = getDenyOutput();
 		const isDenied = out?.hookSpecificOutput?.permissionDecision === "deny";
 		expect(isDenied).toBe(false);
 	});
 
-	it("allows Read even when _active.md is malformed (non-blockable)", async () => {
+	it("allows Read even when _active.json is malformed (non-blockable)", async () => {
 		const specsDir = join(tmpDir, ".alfred", "specs");
 		mkdirSync(specsDir, { recursive: true });
-		writeFileSync(join(specsDir, "_active.md"), "broken");
+		writeFileSync(join(specsDir, "_active.json"), "broken");
 
 		await preToolUse(makeEvent("Read"));
 		expect(stdoutData.length).toBe(0);

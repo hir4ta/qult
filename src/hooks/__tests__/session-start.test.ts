@@ -102,8 +102,8 @@ describe("sessionStart", () => {
 		// Setup active spec
 		const specsDir = join(tmpDir, ".alfred", "specs", "ctx-test");
 		mkdirSync(specsDir, { recursive: true });
-		writeFileSync(join(tmpDir, ".alfred", "specs", "_active.md"),
-			"primary: ctx-test\ntasks:\n  - slug: ctx-test\n    started_at: '2025-01-01'\n    status: active\n    size: S\n");
+		writeFileSync(join(tmpDir, ".alfred", "specs", "_active.json"),
+			JSON.stringify({ primary: "ctx-test", tasks: [{ slug: "ctx-test", started_at: "2025-01-01", status: "active", size: "S" }] }));
 		writeFileSync(join(specsDir, "session.md"), "# Session\n## Status: active\n## Current Focus\nTesting");
 		writeFileSync(join(specsDir, "requirements.md"), "# Requirements\n## FR-1: Test feature");
 		writeFileSync(join(specsDir, "tasks.md"), "# Tasks\n- [ ] T-1.1: Do thing");

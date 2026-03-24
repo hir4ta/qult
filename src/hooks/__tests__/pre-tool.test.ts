@@ -26,10 +26,16 @@ afterEach(() => {
 function setupSpec(opts: { size?: string; status?: string }): void {
 	const specsDir = join(tmpDir, ".alfred", "specs");
 	mkdirSync(specsDir, { recursive: true });
-	let yaml = `primary: test-task\ntasks:\n  - slug: test-task\n    started_at: 2026-01-01T00:00:00Z\n`;
-	if (opts.size) yaml += `    size: ${opts.size}\n`;
-	if (opts.status) yaml += `    status: ${opts.status}\n`;
-	writeFileSync(join(specsDir, "_active.md"), yaml);
+	const state = {
+		primary: "test-task",
+		tasks: [{
+			slug: "test-task",
+			started_at: "2026-01-01T00:00:00Z",
+			...(opts.size ? { size: opts.size } : {}),
+			...(opts.status ? { status: opts.status } : {}),
+		}],
+	};
+	writeFileSync(join(specsDir, "_active.json"), JSON.stringify(state));
 }
 
 function makeEvent(toolName: string, filePath?: string): HookEvent {

@@ -28,10 +28,8 @@ function setupSpec(slug: string): void {
 	setupAlfred();
 	const specsDir = join(tmpDir, ".alfred", "specs");
 	mkdirSync(specsDir, { recursive: true });
-	writeFileSync(
-		join(specsDir, "_active.md"),
-		`primary: ${slug}\ntasks:\n  - slug: ${slug}\n    started_at: 2026-01-01T00:00:00Z\n    size: L\n`,
-	);
+	const state = { primary: slug, tasks: [{ slug, started_at: "2026-01-01T00:00:00Z", size: "L" }] };
+	writeFileSync(join(specsDir, "_active.json"), JSON.stringify(state));
 }
 
 describe("readReviewGate", () => {

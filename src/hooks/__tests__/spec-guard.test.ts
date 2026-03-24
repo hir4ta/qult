@@ -29,10 +29,16 @@ function setupSpec(opts: {
 	const specsDir = join(tmpDir, ".alfred", "specs");
 	mkdirSync(specsDir, { recursive: true });
 
-	let yaml = `primary: ${slug}\ntasks:\n  - slug: ${slug}\n    started_at: 2026-01-01T00:00:00Z\n`;
-	if (opts.size) yaml += `    size: ${opts.size}\n`;
-	if (opts.status) yaml += `    status: ${opts.status}\n`;
-	writeFileSync(join(specsDir, "_active.md"), yaml);
+	const state = {
+		primary: slug,
+		tasks: [{
+			slug,
+			started_at: "2026-01-01T00:00:00Z",
+			...(opts.size ? { size: opts.size } : {}),
+			...(opts.status ? { status: opts.status } : {}),
+		}],
+	};
+	writeFileSync(join(specsDir, "_active.json"), JSON.stringify(state));
 
 	if (opts.tasksContent) {
 		const taskDir = join(specsDir, slug);
@@ -42,7 +48,7 @@ function setupSpec(opts: {
 }
 
 describe("tryReadActiveSpec", () => {
-	it("returns spec state from _active.md", () => {
+	it("returns spec state from _active.json", () => {
 		setupSpec({ size: "M", status: "active" });
 		const spec = tryReadActiveSpec(tmpDir);
 		expect(spec).not.toBeNull();
@@ -50,7 +56,7 @@ describe("tryReadActiveSpec", () => {
 		expect(spec!.size).toBe("M");
 	});
 
-	it("returns null when _active.md missing (fail-open)", () => {
+	it("returns null when _active.json missing (fail-open)", () => {
 		expect(tryReadActiveSpec(tmpDir)).toBeNull();
 	});
 
@@ -61,7 +67,7 @@ describe("tryReadActiveSpec", () => {
 	it("returns null when primary is empty", () => {
 		const specsDir = join(tmpDir, ".alfred", "specs");
 		mkdirSync(specsDir, { recursive: true });
-		writeFileSync(join(specsDir, "_active.md"), 'primary: ""\ntasks: []\n');
+		writeFileSync(join(specsDir, "_active.json"), JSON.stringify({ primary: "", tasks: [] }));
 		expect(tryReadActiveSpec(tmpDir)).toBeNull();
 	});
 });
