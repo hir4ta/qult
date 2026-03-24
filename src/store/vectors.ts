@@ -58,6 +58,7 @@ export function vectorSearch(
 	queryVec: number[],
 	sources: VectorSource[],
 	limit: number,
+	minScore?: number,
 ): VectorMatch[] {
 	if (!queryVec || queryVec.length === 0) return [];
 	if (limit <= 0) limit = 10;
@@ -92,7 +93,7 @@ export function vectorSearch(
 			if (vec.length !== queryVec.length) continue;
 
 			const sim = cosineSimilarity(queryVec, vec);
-			if (sim < MIN_SIMILARITY) continue;
+			if (sim < (minScore ?? MIN_SIMILARITY)) continue;
 
 			allCandidates.push({ sourceId: row.source_id, score: sim, source: row.source as VectorSource });
 			if (sim >= EARLY_STOP_THRESHOLD) {
@@ -111,8 +112,9 @@ export function vectorSearchKnowledge(
 	store: Store,
 	queryVec: number[],
 	limit: number,
+	minScore?: number,
 ): VectorMatch[] {
-	return vectorSearch(store, queryVec, ["knowledge"], limit);
+	return vectorSearch(store, queryVec, ["knowledge"], limit, minScore);
 }
 
 export function cosineSimilarity(a: number[], b: number[]): number {

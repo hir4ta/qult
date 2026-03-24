@@ -334,7 +334,7 @@ const CONTRADICTION_PAIRS: [string, string][] = [
 	["include", "exclude"],
 ];
 
-function classifyConflict(
+export function classifyConflict(
 	contentA: string,
 	contentB: string,
 ): "potential_duplicate" | "potential_contradiction" {

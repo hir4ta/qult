@@ -16,6 +16,7 @@ import { resolveOrRegisterProject } from "../store/project.js";
 import type { DecisionEntry, KnowledgeRow, PatternEntry, RuleEntry } from "../types.js";
 import { VALID_SUB_TYPES } from "../types.js";
 import { searchPipeline, trackHitCounts, truncate } from "./helpers.js";
+import { qualityGate } from "./quality-gate.js";
 
 interface LedgerParams {
 	action: string;
@@ -428,6 +429,11 @@ async function ledgerSave(store: Store, emb: Embedder | null, params: LedgerPara
 	(entry as unknown as Record<string, unknown>).verification_count = 0;
 	(entry as unknown as Record<string, unknown>).last_verified = null;
 
+	// Quality gate: duplicate/contradiction/actionability checks (FR-6, FR-7, FR-8).
+	const embText = buildEmbeddingText(subType, params);
+	const entryContent = JSON.stringify(entry);
+	const gate = await qualityGate(store, emb, embText, entryContent, subType, params);
+
 	// Write JSON file to .alfred/knowledge/{type}/{id}.json (atomic).
 	const filePath = writeKnowledgeFile(projectPath, subType, id, entry);
 
@@ -439,7 +445,7 @@ async function ledgerSave(store: Store, emb: Embedder | null, params: LedgerPara
 		filePath,
 		contentHash: "",
 		title: params.title,
-		content: JSON.stringify(entry),
+		content: entryContent,
 		subType,
 		branch: projInfo.branch,
 		author,
@@ -458,21 +464,28 @@ async function ledgerSave(store: Store, emb: Embedder | null, params: LedgerPara
 			.run(verificationDue, dbId);
 	} catch { /* columns may not exist yet */ }
 
-	// Async embedding.
+	// Embedding: reuse vector from quality gate if available, else async fallback.
 	let embeddingStatus = "none";
 	if (emb && changed) {
-		const model = emb.model;
-		const embText = buildEmbeddingText(subType, params);
-		emb
-			.embedForStorage(embText)
-			.then(async (vec) => {
-				const { insertEmbedding } = await import("../store/vectors.js");
-				insertEmbedding(store, "knowledge", dbId, model, vec);
-			})
-			.catch((err) => {
-				console.error(`[alfred] embedding failed for ${dbId}: ${err}`);
-			});
-		embeddingStatus = "pending";
+		if (gate.embedding) {
+			// Reuse the vector computed during quality gate (no second API call).
+			const { insertEmbedding } = await import("../store/vectors.js");
+			insertEmbedding(store, "knowledge", dbId, emb.model, gate.embedding);
+			embeddingStatus = "saved";
+		} else {
+			// Fallback: async embedding (quality gate timed out or no API key).
+			const model = emb.model;
+			emb
+				.embedForStorage(embText)
+				.then(async (vec) => {
+					const { insertEmbedding } = await import("../store/vectors.js");
+					insertEmbedding(store, "knowledge", dbId, model, vec);
+				})
+				.catch((err) => {
+					console.error(`[alfred] embedding failed for ${dbId}: ${err}`);
+				});
+			embeddingStatus = "pending";
+		}
 	}
 
 	return jsonResult({
@@ -483,6 +496,8 @@ async function ledgerSave(store: Store, emb: Embedder | null, params: LedgerPara
 		file_path: filePath,
 		embedding_status: embeddingStatus,
 		lang,
+		...(gate.warnings.length > 0 ? { quality_warnings: gate.warnings } : {}),
+		...(gate.similarExisting.length > 0 ? { similar_existing: gate.similarExisting } : {}),
 	});
 }
 
