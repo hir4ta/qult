@@ -11,20 +11,25 @@ permissions:
 jobs:
   build-binaries:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             target: bun-linux-x64
             artifact: alfred-linux-x64
+            opentui_platform: "@opentui/core-linux-x64@0.1.90"
           - os: ubuntu-latest
             target: bun-linux-arm64
             artifact: alfred-linux-arm64
+            opentui_platform: "@opentui/core-linux-arm64@0.1.90"
           - os: macos-latest
             target: bun-darwin-arm64
             artifact: alfred-darwin-arm64
+            opentui_platform: "@opentui/core-darwin-arm64@0.1.90"
           - os: macos-15-intel
             target: bun-darwin-x64
             artifact: alfred-darwin-x64
+            opentui_platform: "@opentui/core-darwin-x64@0.1.90"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
@@ -35,6 +40,9 @@ jobs:
 
       - name: Install dependencies
         run: bun install
+
+      - name: Install target platform native package
+        run: bun add --no-save ${{ matrix.opentui_platform }}
 
       - name: Patch @opentui/core for static platform import
         run: |
