@@ -82,30 +82,30 @@ describe("filesForSize", () => {
 	it("S feature has 3 files (requirements + design + tasks)", () => {
 		const files = filesForSize("S", "feature");
 		expect(files).toHaveLength(3);
-		expect(files).toEqual(["requirements.md", "design.md", "tasks.md"]);
+		expect(files).toEqual(["requirements.md", "design.md", "tasks.json"]);
 	});
 	it("S bugfix has 3 files (bugfix + design + tasks)", () => {
 		const files = filesForSize("S", "bugfix");
 		expect(files).toHaveLength(3);
-		expect(files).toEqual(["bugfix.md", "design.md", "tasks.md"]);
+		expect(files).toEqual(["bugfix.json", "design.md", "tasks.json"]);
 	});
 	it("M feature has 4 files", () => {
 		const files = filesForSize("M", "feature");
 		expect(files).toHaveLength(4);
-		expect(files).toEqual(["requirements.md", "design.md", "tasks.md", "test-specs.md"]);
+		expect(files).toEqual(["requirements.md", "design.md", "tasks.json", "test-specs.json"]);
 	});
 	it("M bugfix has 4 files (design.md included)", () => {
 		const files = filesForSize("M", "bugfix");
 		expect(files).toHaveLength(4);
-		expect(files).toEqual(["bugfix.md", "design.md", "tasks.md", "test-specs.md"]);
+		expect(files).toEqual(["bugfix.json", "design.md", "tasks.json", "test-specs.json"]);
 	});
 	it("L feature has 5 files", () => {
 		const files = filesForSize("L", "feature");
 		expect(files).toHaveLength(5);
-		expect(files).toEqual(["requirements.md", "design.md", "tasks.md", "test-specs.md", "research.md"]);
+		expect(files).toEqual(["requirements.md", "design.md", "tasks.json", "test-specs.json", "research.md"]);
 	});
-	it("bugfix uses bugfix.md as primary", () => {
-		expect(filesForSize("S", "bugfix")[0]).toBe("bugfix.md");
+	it("bugfix uses bugfix.json as primary", () => {
+		expect(filesForSize("S", "bugfix")[0]).toBe("bugfix.json");
 	});
 });
 
