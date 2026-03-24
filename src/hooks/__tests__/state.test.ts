@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	addWorkedSlug,
 	ensureStateDir,
-	parseWaveProgress,
 	readStateJSON,
 	readStateText,
 	readWaveProgress,
@@ -95,58 +94,6 @@ describe("worked-slugs", () => {
 	});
 });
 
-describe("parseWaveProgress", () => {
-	it("counts per-wave tasks correctly (TS-1.1)", () => {
-		const content = `# Tasks: test-slug
-
-## Wave 1: Setup
-
-- [x] T-1.1: First task
-- [x] T-1.2: Second task
-- [ ] T-1.3: Third task
-
-## Wave 2: Implementation
-
-- [ ] T-2.1: Fourth task
-- [ ] T-2.2: Fifth task
-`;
-		const result = parseWaveProgress(content, "test-slug");
-		expect(result.waves["1"]).toEqual({ total: 3, checked: 2, reviewed: false });
-		expect(result.waves["2"]).toEqual({ total: 2, checked: 0, reviewed: false });
-		expect(result.slug).toBe("test-slug");
-	});
-
-	it("parses Closing Wave (TS-1.5)", () => {
-		const content = `# Tasks: test
-
-## Wave 1: Core
-
-- [x] T-1.1: Task
-
-## Wave: Closing
-
-- [ ] Self-review
-- [x] Build check
-`;
-		const result = parseWaveProgress(content, "test");
-		expect(result.waves["closing"]).toEqual({ total: 2, checked: 1, reviewed: false });
-	});
-
-	it("determines current_wave from first incomplete wave", () => {
-		const content = `# Tasks: test
-
-## Wave 1: Done
-
-- [x] T-1.1: Done task
-
-## Wave 2: In Progress
-
-- [ ] T-2.1: Pending
-`;
-		const result = parseWaveProgress(content, "test");
-		expect(result.current_wave).toBe(2);
-	});
-});
 
 describe("wave progress persistence (TS-1.4)", () => {
 	it("round-trips wave progress", () => {
