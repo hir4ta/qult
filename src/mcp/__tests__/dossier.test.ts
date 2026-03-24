@@ -593,6 +593,52 @@ describe("dossier check", () => {
 		const data = parseResult(result);
 		expect(data.status).toBe("checked");
 	});
+
+	it("T-N.R as checkbox line (fallback from header format)", async () => {
+		await handleDossier(store, null, {
+			action: "init",
+			project_path: tmpDir,
+			task_slug: "check-review-cb",
+		});
+		await handleDossier(store, null, {
+			action: "update",
+			project_path: tmpDir,
+			file: "tasks.md",
+			content: "# Tasks\n\n## Wave 1: Fix\n\n- [x] T-1.1 Implement fix\n- [ ] T-1.R レビュー + コミット\n\n## Wave: Closing\n\n- [ ] T-C.1 セルフレビュー\n- [ ] T-C.2 テスト確認",
+			mode: "replace",
+		});
+
+		const result = await handleDossier(store, null, {
+			action: "check",
+			project_path: tmpDir,
+			task_id: "T-1.R",
+		});
+		const data = parseResult(result);
+		expect(data.status).toBe("checked");
+	});
+
+	it("T-N.R as checkbox line already checked", async () => {
+		await handleDossier(store, null, {
+			action: "init",
+			project_path: tmpDir,
+			task_slug: "check-review-done",
+		});
+		await handleDossier(store, null, {
+			action: "update",
+			project_path: tmpDir,
+			file: "tasks.md",
+			content: "# Tasks\n\n## Wave 1: Fix\n\n- [x] T-1.1 Implement fix\n- [x] T-1.R レビュー完了\n\n## Wave: Closing\n\n- [ ] T-C.1 レビュー",
+			mode: "replace",
+		});
+
+		const result = await handleDossier(store, null, {
+			action: "check",
+			project_path: tmpDir,
+			task_id: "T-1.R",
+		});
+		const data = parseResult(result);
+		expect(data.status).toBe("already_checked");
+	});
 });
 
 // --- Wave Enforcement Tests (#24, #25) ---

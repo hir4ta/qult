@@ -385,7 +385,24 @@ export function dossierCheck(projectPath: string, params: DossierParams) {
 				if (foundHeader && /^##[# ]/.test(line)) break; // Left section
 			}
 			if (!checked && !foundHeader) {
-				return errorResult(`task_id "${taskId}" not found in tasks.md`);
+				// Fallback: T-N.R written as checkbox line instead of header (e.g. "- [ ] T-1.R ...")
+				for (let i = 0; i < lines.length; i++) {
+					const line = lines[i]!;
+					if (line.match(/^- \[ \] /) && line.toLowerCase().includes(taskIdLower)) {
+						lines[i] = line.replace("- [ ]", "- [x]");
+						checked = true;
+						break;
+					}
+				}
+				if (!checked) {
+					const alreadyChecked = lines.some(
+						(l) => /^- \[[xX]\] /.test(l) && l.toLowerCase().includes(taskIdLower),
+					);
+					if (alreadyChecked) {
+						return jsonResult({ task_id: taskId, status: "already_checked" });
+					}
+					return errorResult(`task_id "${taskId}" not found in tasks.md`);
+				}
 			}
 		} else {
 			for (let i = 0; i < lines.length; i++) {
