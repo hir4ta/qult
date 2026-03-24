@@ -120,7 +120,7 @@ export function createApp(
 		if (!detail.size || !detail.started_at) {
 			try {
 				const dirPath = sd.dir();
-				const specFiles = readdirSync(dirPath).filter((f) => f.endsWith(".md") && !f.startsWith("_"));
+				const specFiles = readdirSync(dirPath).filter((f) => (f.endsWith(".md") || f.endsWith(".json")) && !f.startsWith("_"));
 				if (!detail.size) {
 					if (specFiles.length <= 3) detail.size = "S";
 					else if (specFiles.length <= 4) detail.size = "M";
@@ -134,39 +134,6 @@ export function createApp(
 		}
 
 		return detail;
-	}
-
-	function parseWavesFromTasks(content: string): Array<{ key: string; title: string; total: number; checked: number; isCurrent: boolean }> {
-		const waves: Array<{ key: string; title: string; total: number; checked: number }> = [];
-		let current: { key: string; title: string; total: number; checked: number } | null = null;
-
-		for (const line of content.split("\n")) {
-			const waveMatch = line.match(/^## Wave\s+(\d+)(?::\s*(.+))?/i);
-			const closingMatch = line.match(/^## (?:Wave:\s*)?Closing(?:\s+Wave)?/i);
-
-			if (waveMatch) {
-				current = { key: waveMatch[1]!, title: waveMatch[2]?.trim() || `Wave ${waveMatch[1]}`, total: 0, checked: 0 };
-				waves.push(current);
-			} else if (closingMatch) {
-				current = { key: "closing", title: "Closing", total: 0, checked: 0 };
-				waves.push(current);
-			} else if (current && line.match(/^- \[[ xX]\] /)) {
-				current.total++;
-				if (/^- \[[xX]\] /.test(line)) current.checked++;
-			}
-		}
-
-		let currentKey = "";
-		const nonClosing = waves.filter((w) => w.key !== "closing");
-		const firstIncomplete = nonClosing.find((w) => w.checked < w.total);
-		if (firstIncomplete) {
-			currentKey = firstIncomplete.key;
-		} else {
-			const closing = waves.find((w) => w.key === "closing");
-			if (closing && closing.checked < closing.total) currentKey = "closing";
-		}
-
-		return waves.map((w) => ({ ...w, isCurrent: w.key === currentKey }));
 	}
 
 	/** Collect tasks from a single project path. */

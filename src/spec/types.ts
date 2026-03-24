@@ -248,12 +248,10 @@ export class SpecDir {
 		const allFiles: SpecFile[] = [
 			"requirements.md",
 			"design.md",
-			"tasks.md",
-			"test-specs.md",
-			"decisions.md",
 			"research.md",
-			"session.md",
-			"bugfix.md",
+			"tasks.json",
+			"test-specs.json",
+			"bugfix.json",
 		];
 		const sections: Section[] = [];
 		for (const f of allFiles) {

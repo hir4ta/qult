@@ -55,7 +55,7 @@ export function isSpecFilePath(cwd: string | undefined, filePath: string): boole
 	return resolved.startsWith(`${alfredDir}/`) || resolved === alfredDir;
 }
 
-// --- JSON helper for tasks.json with fallback to tasks.md ---
+// --- JSON helper for tasks.json with reads tasks.json ---
 
 function readTasksJson(cwd: string, slug: string): { tasks: Array<{ id: string; title: string; checked: boolean }> } | null {
 	try {

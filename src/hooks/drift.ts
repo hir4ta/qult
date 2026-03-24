@@ -90,36 +90,12 @@ export function detectDrift(
 		const extra = drifted.length > 5 ? ` (+${drifted.length - 5} more)` : "";
 		items.push({
 			level: "WARNING",
-			message: `Source file(s) changed but not referenced in spec '${slug}':\n${shown.map((f) => `- ${f}`).join("\n")}${extra}\nConsider adding to design.md \`**File**:\` references or tasks.md \`Files:\` line.`,
+			message: `Source file(s) changed but not referenced in spec '${slug}':\n${shown.map((f) => `- ${f}`).join("\n")}${extra}\nConsider adding to design.md \`**File**:\` references or tasks.json \`files\` array.`,
 		});
 
 	} catch {
 		/* fail-open: drift detection errors don't affect PostToolUse */
 	}
-}
-
-/**
- * Extract file path references from tasks.md.
- * Matches backtick-quoted paths and Files: comma-separated paths.
- */
-export function parseTasksFileRefs(content: string): string[] {
-	const refs = new Set<string>();
-
-	// Backtick-quoted file paths (e.g., `src/hooks/post-tool.ts`).
-	for (const match of content.matchAll(/`([^`]+\.[a-z]{1,6})`/g)) {
-		const path = match[1]!.trim();
-		if (path.includes("/")) refs.add(path);
-	}
-
-	// Files: lines (e.g., "Files: src/api/server.ts, src/hooks/stop.ts").
-	for (const match of content.matchAll(/Files:\s*([^\n|]+)/gi)) {
-		const paths = match[1]!.split(",").map((p) => p.trim());
-		for (const p of paths) {
-			if (p.includes("/") && p.includes(".")) refs.add(p);
-		}
-	}
-
-	return [...refs];
 }
 
 /** Check if a file should be tracked for drift (source files only, not config/test/generated). */
