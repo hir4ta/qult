@@ -71,11 +71,11 @@
         ]
       },
       {
-        "matcher": "Edit|Write|Bash",
+        "matcher": "Edit|Write",
         "hooks": [
           {
             "type": "agent",
-            "prompt": "You are a task completion evaluator for alfred, a spec-driven development tool.\n\n## Prerequisite\nFirst, check if .alfred/specs/ contains an _active.json file. If not, do nothing and return empty.\n\n## Steps\n1. Read _active.json (JSON: {\"primary\": \"slug-name\", \"tasks\": [...]}) to find the primary slug\n2. Read .alfred/specs/{slug}/tasks.json\n3. Find unchecked tasks (checked: false)\n4. Compare the tool execution below against each unchecked task's title, files, and subtasks\n5. Only suggest tasks where you have HIGH confidence the work matches\n\n## Tool execution\n$ARGUMENTS\n\n## Rules\n- Only suggest tasks with strong evidence (file path matches task.files, or task description clearly matches the change)\n- If unsure, do NOT suggest — false positives are worse than missed completions\n- If no tasks match, return empty additionalContext\n\n## Output\nReturn JSON: {\"hookSpecificOutput\": {\"hookEventName\": \"PostToolUse\", \"additionalContext\": \"[CONTEXT] Task completion candidates: T-X.Y: <title> (reason: <evidence>)\"}}",
+            "prompt": "You are a task completion evaluator for alfred, a spec-driven development tool.\n\n## Prerequisite\nFirst, check if .alfred/specs/_active.json exists. If it does not exist, return empty immediately.\nIf it exists, read it. It is JSON: {\"primary\": \"slug-name\", \"tasks\": [...]}.\nIf \"primary\" is empty string or missing, return empty immediately — there is no active spec.\n\n## Steps (only if primary is non-empty)\n1. Read .alfred/specs/{primary}/tasks.json\n2. Find unchecked tasks (checked: false)\n3. Compare the tool execution below against each unchecked task's title, files, and subtasks\n4. Only suggest tasks where you have HIGH confidence the work matches\n\n## Tool execution\n$ARGUMENTS\n\n## Rules\n- Only suggest tasks with strong evidence (file path matches task.files, or task description clearly matches the change)\n- If unsure, do NOT suggest — false positives are worse than missed completions\n- If no tasks match or no active spec, return empty additionalContext\n\n## Output\nReturn JSON: {\"hookSpecificOutput\": {\"hookEventName\": \"PostToolUse\", \"additionalContext\": \"[CONTEXT] Task completion candidates: T-X.Y: <title> (reason: <evidence>)\"}}\nIf nothing to report, return: {\"hookSpecificOutput\": {\"hookEventName\": \"PostToolUse\", \"additionalContext\": \"\"}}",
             "model": "claude-haiku-4-5-20251001",
             "statusMessage": "alfred: evaluating task completion...",
             "timeout": 60
