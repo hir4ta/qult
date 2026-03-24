@@ -1,9 +1,11 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { getGitUserName } from "../git/user.js";
 import type { TemplateData } from "./templates.js";
 import { renderForSize } from "./templates.js";
-import type { ActiveState, InitResult, SpecSize, SpecType } from "./types.js";
+import type { InitResult, SpecSize, SpecType } from "./types.js";
 import {
+	cancelPath,
+	completePath,
 	detectSize,
 	filesForSize,
 	readActiveState,
@@ -59,14 +61,9 @@ export function initSpec(
 		throw new Error(`write template files: ${err}`);
 	}
 
-	// Update _active.json.
+	// Update _active.json + ensure _complete.json / _cancel.json exist.
 	const now = new Date().toISOString();
-	let state: ActiveState;
-	try {
-		state = readActiveState(projectPath);
-	} catch {
-		state = { primary: "", tasks: [] };
-	}
+	const state = readActiveState(projectPath);
 	state.primary = taskSlug;
 	if (!state.tasks.some((t) => t.slug === taskSlug)) {
 		state.tasks.push({
@@ -79,6 +76,13 @@ export function initSpec(
 		});
 	}
 	writeActiveState(projectPath, state);
+
+	// Ensure terminal state files exist (empty if new)
+	for (const p of [completePath(projectPath), cancelPath(projectPath)]) {
+		if (!existsSync(p)) {
+			writeFileSync(p, JSON.stringify({ tasks: [] }, null, 2) + "\n");
+		}
+	}
 
 	return { specDir: sd, size, specType, files };
 }
