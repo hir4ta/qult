@@ -23,10 +23,11 @@ web/package-lock.json
 
 # Config (local)
 .claude/settings.json
-# .alfred/ specs and knowledge are git-tracked
-# Only state files are excluded
+# .alfred/ specs and knowledge are git-tracked (root only)
+# State files and non-root .alfred/ are excluded
 .alfred/.state/
 .alfred/.pending-compact.json
+web/.alfred/
 
 # Test
 coverage/
