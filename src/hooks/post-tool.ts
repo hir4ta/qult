@@ -46,6 +46,9 @@ export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<v
 	const toolInput = (ev.tool_input ?? {}) as Record<string, unknown>;
 	const toolResponse = (ev.tool_response ?? {}) as Record<string, unknown>;
 
+	// Long-task detection (research #7: task time 2x = failure rate 4x)
+	checkLongTask(ev.cwd, items);
+
 	if (ev.tool_name === "Edit" || ev.tool_name === "Write") {
 		await handleEditWrite(ev.cwd, toolInput, items, signal);
 	} else if (ev.tool_name === "Bash") {
@@ -104,8 +107,12 @@ async function handleEditWrite(
 			message: `Fix the following lint/type errors in the file you just edited before continuing:\n${summary}`,
 			spiritVsLetter: true,
 		});
+
+		// Lint repeat detection (design: same error 3x → suggest fix pattern)
+		checkLintRepeat(cwd, filePath, summary, items);
 	} else {
 		clearPendingFixes(cwd);
+		clearLintRepeatCount(cwd);
 	}
 
 	// Test adjacency check
@@ -259,6 +266,65 @@ function handlePotentialResolution(cwd: string, successCommand: string, _stdout:
 	});
 
 	clearLastError(cwd);
+}
+
+// ── Long-task detection (research #7) ────────────────────────────────
+
+const SESSION_START_FILE = "session-start-time.json";
+
+function checkLongTask(cwd: string, items: DirectiveItem[]): void {
+	const data = readStateJSON<{ startedAt: number }>(cwd, SESSION_START_FILE, { startedAt: 0 });
+	if (!data.startedAt) {
+		// First call — record session start
+		writeStateJSON(cwd, SESSION_START_FILE, { startedAt: Date.now() });
+		return;
+	}
+	const mins = (Date.now() - data.startedAt) / 60000;
+	if (mins >= 35) {
+		items.push({
+			level: "WARNING",
+			message: `Session has been running for ${Math.round(mins)} minutes. Task time 2x = failure rate 4x. Consider splitting into smaller tasks.`,
+		});
+		// Reset so we don't warn every call
+		writeStateJSON(cwd, SESSION_START_FILE, { startedAt: Date.now() });
+	}
+}
+
+// ── Lint repeat detection ────────────────────────────────────────────
+
+const LINT_REPEAT_FILE = "lint-repeat.json";
+
+interface LintRepeatState {
+	file: string;
+	signature: string;
+	count: number;
+}
+
+function checkLintRepeat(cwd: string, filePath: string, errorSummary: string, items: DirectiveItem[]): void {
+	const sig = errorSummary.slice(0, 200);
+	const state = readStateJSON<LintRepeatState>(cwd, LINT_REPEAT_FILE, { file: "", signature: "", count: 0 });
+
+	if (state.file === filePath && state.signature === sig) {
+		state.count++;
+	} else {
+		state.file = filePath;
+		state.signature = sig;
+		state.count = 1;
+	}
+
+	writeStateJSON(cwd, LINT_REPEAT_FILE, state);
+
+	if (state.count >= 3) {
+		items.push({
+			level: "DIRECTIVE",
+			message: `Same lint/type error has occurred ${state.count} times on ${filePath}. Stop and try a fundamentally different approach. Research the error in official docs if needed.`,
+			spiritVsLetter: true,
+		});
+	}
+}
+
+function clearLintRepeatCount(cwd: string): void {
+	writeStateJSON(cwd, LINT_REPEAT_FILE, { file: "", signature: "", count: 0 });
 }
 
 // ── Voyage error_resolution search ──────────────────────────────────

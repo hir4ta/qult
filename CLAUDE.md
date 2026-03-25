@@ -103,27 +103,14 @@ task clean       # Clean build artifacts
 - gate_write 30% + gate_commit 20% + error_resolution_hit 15% + convention 10% + base 25%
 - トレンド: 直近5セッション平均との差分 (improving/stable/declining)
 
-### DB
-- Schema V1: projects, knowledge_index, embeddings, quality_events
-- Path: `~/.alfred/alfred.db`
-- Voyage vector search only (FTS5 なし)
-
-### TUI (`task tui`)
-- Quality Score + 前セッション比較
-- Gates (on_write/on_commit/test pass/fail/rate)
-- Knowledge (error_resolution hits, exemplar injections, convention adherence + DB totals)
-- Recent Events (2sポーリング)
-- Session Info (Last activity, Today events, Files, Commits, Pending, Directives)
-- ヘルプ: `?` キーで EN/JA切替フローティングウィンドウ
-
 ## Troubleshooting
 
 - 修正→実行が3回連続失敗した場合、同じアプローチを繰り返さない。公式ドキュメント・事例を徹底リサーチしてからアプローチを再検討すること
 
-## Quality Gates
+## Milestone Checklist
 
-- At each meaningful implementation milestone, perform **thorough self-review**
-- After self-review, update README.md / CLAUDE.md to reflect changes
+- マイルストーン完了時に `task scan` を実行し、エラー0件を確認する
+- 変更内容に応じて README.md / CLAUDE.md を更新する
 
 ## Design Docs
 

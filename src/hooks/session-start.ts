@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DirectiveItem } from "./directives.js";
 import { emitDirectives } from "./directives.js";
@@ -6,6 +6,10 @@ import type { HookEvent } from "./dispatcher.js";
 import { readStateJSON, writeStateJSON } from "./state.js";
 import { detectProjectProfile, type ProjectProfile } from "../profile/detect.js";
 import { detectGates } from "../gates/index.js";
+import { openDefaultCached } from "../store/index.js";
+import { resolveOrRegisterProject } from "../store/project.js";
+import { insertQualityEvent } from "../store/quality-events.js";
+import { upsertKnowledge } from "../store/knowledge.js";
 
 /**
  * SessionStart handler: initial context injection.
@@ -41,17 +45,21 @@ export async function sessionStart(ev: HookEvent, signal: AbortSignal): Promise<
 		});
 	}
 
-	// 3. Conventions injection
+	// 3. Conventions injection + event tracking
 	const conventions = readConventions(ev.cwd);
 	if (conventions.length > 0) {
 		items.push({
 			level: "CONTEXT",
 			message: `Conventions: ${conventions.join(" | ")}`,
 		});
+		recordConventionEvent(ev.cwd, "convention_pass", conventions.length);
 	}
 
 	// 4. Auto-generate gates.json if missing
 	ensureGates(ev.cwd);
+
+	// 5. Knowledge sync (.alfred/knowledge/ → DB)
+	syncKnowledgeFiles(ev.cwd);
 
 	emitDirectives("SessionStart", items);
 }
@@ -178,4 +186,62 @@ function ensureGates(cwd: string): void {
 	} catch {
 		/* best effort */
 	}
+}
+
+// ── Convention event tracking ───────────────────────────────────────
+
+function recordConventionEvent(cwd: string, type: "convention_pass" | "convention_warn", count: number): void {
+	try {
+		const store = openDefaultCached();
+		const project = resolveOrRegisterProject(store, cwd);
+		const sessionId = findLatestSessionId(store) ?? `session-${Date.now()}`;
+		insertQualityEvent(store, project.id, sessionId, type, { count });
+	} catch { /* fail-open */ }
+}
+
+function findLatestSessionId(store: import("../store/index.js").Store): string | null {
+	try {
+		const row = store.db
+			.prepare("SELECT DISTINCT session_id FROM quality_events ORDER BY created_at DESC LIMIT 1")
+			.get() as { session_id: string } | undefined;
+		return row?.session_id ?? null;
+	} catch {
+		return null;
+	}
+}
+
+// ── Knowledge sync (.alfred/knowledge/ → DB) ────────────────────────
+
+function syncKnowledgeFiles(cwd: string): void {
+	try {
+		const knowledgeDir = join(cwd, ".alfred", "knowledge");
+		if (!existsSync(knowledgeDir)) return;
+
+		const store = openDefaultCached();
+		const project = resolveOrRegisterProject(store, cwd);
+
+		for (const typeDir of ["error_resolutions", "exemplars", "conventions"]) {
+			const dir = join(knowledgeDir, typeDir);
+			if (!existsSync(dir)) continue;
+
+			const type = typeDir === "error_resolutions" ? "error_resolution"
+				: typeDir === "exemplars" ? "exemplar" : "convention";
+
+			for (const file of readdirSync(dir).filter((f) => f.endsWith(".json"))) {
+				try {
+					const data = JSON.parse(readFileSync(join(dir, file), "utf-8"));
+					if (data.title && data.content) {
+						upsertKnowledge(store, {
+							projectId: project.id,
+							type: type as "error_resolution" | "exemplar" | "convention",
+							title: data.title,
+							content: typeof data.content === "string" ? data.content : JSON.stringify(data.content),
+							tags: data.tags ?? "",
+							author: data.author ?? "",
+						});
+					}
+				} catch { /* skip invalid files */ }
+			}
+		}
+	} catch { /* fail-open */ }
 }
