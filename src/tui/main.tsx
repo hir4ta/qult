@@ -130,7 +130,7 @@ function HelpOverlay({ lang, onClose, onToggleLang }: {
 			padding: 1,
 			backgroundColor: "#1d2021",
 		}} title={title}>
-			<scrollbox style={{ contentOptions: { flexDirection: "column" } }}>
+			<scrollbox focused style={{ contentOptions: { flexDirection: "column" } }}>
 				{lines.map((line, i) => (
 					<text key={String(i)} fg={line.startsWith("  ") ? C.dim : C.fg}>{line || " "}</text>
 				))}
