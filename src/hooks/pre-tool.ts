@@ -1,30 +1,61 @@
+import { existsSync } from "node:fs";
+import type { DirectiveItem } from "./directives.js";
+import { emitDirectives } from "./directives.js";
 import type { HookEvent } from "./dispatcher.js";
-import { emitAdditionalContext } from "./dispatcher.js";
+import {
+	formatPendingFixes,
+	hasPendingFixes,
+	readPendingFixes,
+} from "./pending-fixes.js";
+import { isSourceFile, guessTestFile } from "./detect.js";
 
 const BLOCKABLE_TOOLS = new Set(["Edit", "Write"]);
 
 /**
- * PreToolUse handler (v2): quality gate.
+ * PreToolUse handler: quality gate.
  * Can DENY Edit/Write if pending-fixes exist.
  *
  * Flow:
  * 1. Check pending-fixes.json → DENY if unresolved errors
- * 2. Convention check → CONTEXT injection
- * 3. Test adjacency check → WARNING if no test file
+ * 2. Test adjacency check → WARNING if no test file
  */
 export async function preToolUse(ev: HookEvent): Promise<void> {
 	const toolName = ev.tool_name ?? "";
 
 	// Only gate Edit/Write. Everything else passes through.
 	if (!BLOCKABLE_TOOLS.has(toolName)) return;
+	if (!ev.cwd) return;
 
-	// TODO (Phase 2): Implement v2 PreToolUse logic
-	// 1. Read .alfred/.state/pending-fixes.json
-	//    → If unresolved lint/type errors: exit 2 + stderr (DENY)
-	// 2. Convention check for target file's directory
-	//    → Inject convention as CONTEXT
-	// 3. Test adjacency check
-	//    → WARNING if no corresponding test file
+	const toolInput = (ev.tool_input ?? {}) as Record<string, unknown>;
+	const filePath = (toolInput.file_path as string) ?? "";
 
-	// For now: allow all Edit/Write (no v1 gates)
+	// 1. Check pending-fixes → DENY if unresolved errors exist
+	if (hasPendingFixes(ev.cwd)) {
+		const fixes = readPendingFixes(ev.cwd);
+		const formatted = formatPendingFixes(fixes);
+
+		// Exit code 2 = DENY
+		process.stderr.write(
+			`Fix lint/type errors before editing more files:\n${formatted}\n`,
+		);
+		process.exit(2);
+	}
+
+	// 2. Context injection (non-blocking)
+	const items: DirectiveItem[] = [];
+
+	// Test adjacency check for source files
+	if (filePath && isSourceFile(filePath)) {
+		const testFile = guessTestFile(filePath);
+		if (testFile && !existsSync(testFile)) {
+			items.push({
+				level: "WARNING",
+				message: `No test file found for ${filePath}. Consider creating ${testFile}.`,
+			});
+		}
+	}
+
+	if (items.length > 0) {
+		emitDirectives("PreToolUse", items);
+	}
 }

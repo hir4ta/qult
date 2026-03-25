@@ -1,23 +1,31 @@
-import type { HookEvent } from "./dispatcher.js";
 import type { DirectiveItem } from "./directives.js";
 import { emitDirectives } from "./directives.js";
+import type { HookEvent } from "./dispatcher.js";
+import { hasPendingFixes, readPendingFixes, formatPendingFixes } from "./pending-fixes.js";
 
 /**
- * Stop handler (v2): soft reminders (no hard blocking).
+ * Stop handler: soft reminders (no hard blocking).
  *
- * Flow:
- * 1. Check for untested changed files → CONTEXT
- * 2. Check pending-fixes → WARNING
- * 3. Save final quality summary
+ * Phase 2: pending-fixes warning.
+ * Phase 4: untested file check, final quality summary save.
  */
 export async function stop(ev: HookEvent): Promise<void> {
 	if (!ev.cwd) return;
 
 	const items: DirectiveItem[] = [];
 
-	// TODO (Phase 4): Implement v2 Stop logic
-	// 1. git diff --name-only → check for changed files without test updates → CONTEXT
-	// 2. pending-fixes.json → WARNING if unresolved
+	// 1. Check pending-fixes → WARNING if unresolved
+	if (hasPendingFixes(ev.cwd)) {
+		const fixes = readPendingFixes(ev.cwd);
+		const formatted = formatPendingFixes(fixes);
+		items.push({
+			level: "WARNING",
+			message: `Unresolved lint/type errors remain:\n${formatted}`,
+		});
+	}
+
+	// TODO (Phase 4):
+	// 2. git diff --name-only → changed files without test updates → CONTEXT
 	// 3. quality summary final save
 
 	emitDirectives("Stop", items);

@@ -1,0 +1,120 @@
+/**
+ * Detection helpers — pure functions, no DB dependency.
+ * Extracted so they can be tested under vitest (no bun:sqlite).
+ */
+
+/**
+ * Detect git commit from Bash stdout.
+ */
+export function isGitCommit(stdout: string): boolean {
+	if (!stdout) return false;
+	return (
+		/\[[\w./-]+ [0-9a-f]+\]/.test(stdout) ||
+		(stdout.includes("files changed") &&
+			(stdout.includes("insertion") || stdout.includes("deletion"))) ||
+		/Merge made by the/.test(stdout) ||
+		/Fast-forward/.test(stdout) ||
+		/Successfully rebased/.test(stdout) ||
+		/cherry-picked/i.test(stdout)
+	);
+}
+
+/**
+ * Detect test commands — comprehensive coverage of test runners and wrappers.
+ */
+export function isTestCommand(command: string): boolean {
+	if (!command) return false;
+
+	// Direct test runners
+	if (/\b(?:vitest|jest|mocha|ava|tap|nyc|c8|cypress\s+run|playwright\s+test|pytest|python\s+-m\s+(?:pytest|unittest)|go\s+test|cargo\s+test|dotnet\s+test|rspec|minitest|phpunit|mix\s+test|dart\s+test|flutter\s+test|swift\s+test|deno\s+test|bun\s+test)\b/.test(command)) {
+		return true;
+	}
+
+	// Package manager test commands
+	if (/\b(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?test(?:\s|$|:)/.test(command)) {
+		return true;
+	}
+
+	// Task runner test targets
+	if (/\b(?:task|make|rake|gradle|mvn|ant|bazel)\s+test(?:\s|$)/.test(command)) {
+		return true;
+	}
+
+	// Wrapper prefixes
+	if (/\b(?:npx|bunx|pnpx)\s+(?:vitest|jest|mocha|ava|tap|c8|nyc|playwright|cypress)\b/.test(command)) {
+		return true;
+	}
+
+	return false;
+}
+
+/**
+ * Check if a file path looks like source code (not config/lock/etc).
+ */
+export function isSourceFile(filePath: string): boolean {
+	const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
+	const SOURCE_EXTS = new Set(["ts", "tsx", "js", "jsx", "mts", "mjs", "py", "go", "rs"]);
+	if (!SOURCE_EXTS.has(ext)) return false;
+	if (/\.(test|spec)\.[^.]+$/.test(filePath)) return false;
+	if (/\b(config|\.config)\b/.test(filePath)) return false;
+	return true;
+}
+
+/**
+ * Guess the test file path for a source file.
+ */
+export function guessTestFile(filePath: string): string | null {
+	const match = filePath.match(/^(.+)\.(ts|tsx|js|jsx|mts|py|go|rs)$/);
+	if (!match) return null;
+	const [, base, ext] = match;
+	if (!base || !ext) return null;
+	if (/\.(test|spec)$/.test(base)) return null;
+	return `${base}.test.${ext}`;
+}
+
+/**
+ * Extract test failure summary from output.
+ */
+export function extractTestFailures(output: string): string {
+	const lines = output.split("\n");
+	const failures: string[] = [];
+
+	for (const line of lines) {
+		const trimmed = line.trim();
+		if (
+			/^\s*(FAIL|✗|×|✕)\s/.test(trimmed) ||
+			/AssertionError|Expected|Received|toBe|toEqual/.test(trimmed) ||
+			/Error:/.test(trimmed)
+		) {
+			failures.push(trimmed);
+		}
+	}
+
+	return failures.slice(0, 10).join("\n") || output.slice(0, 500);
+}
+
+/**
+ * Count assertions from test output.
+ * Returns null if can't determine.
+ */
+export function countAssertions(stdout: string): number | null {
+	const assertMatch = stdout.match(/(\d+)\s+assertion/i);
+	if (assertMatch) return Number.parseInt(assertMatch[1]!, 10);
+
+	const expectMatch = stdout.match(/(\d+)\s+expect/i);
+	if (expectMatch) return Number.parseInt(expectMatch[1]!, 10);
+
+	return null;
+}
+
+/**
+ * Extract base command name for matching error → resolution pairs.
+ */
+export function extractCommandBase(command: string): string {
+	const parts = command.trim().split(/\s+/);
+	for (const part of parts) {
+		if (part.includes("=") || part === "npx" || part === "bunx" || part === "env") continue;
+		return part;
+	}
+	return parts[0] ?? command;
+}

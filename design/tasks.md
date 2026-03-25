@@ -340,19 +340,31 @@ alfred CLI バイナリ (bun build --compile)
 | Phase | 状態 | タスク数 | 完了 |
 |---|---|---|---|
 | Phase 0: Gut | **完了** | 9 | 9/9 |
-| Phase 1: Foundation | **��了** | 7 | 7/7 |
-| Phase 2: Walls | 未着手 | 6 | 0/6 |
+| Phase 1: Foundation | **完了** | 7 | 7/7 |
+| Phase 2: Walls | **完了** | 6 | 6/6 |
 | Phase 3: Intelligence | 未着手 | 5 | 0/5 |
 | Phase 4: Polish | 未着手 | 7 | 0/7 |
-| **合計** | | **34** | **16/34** |
+| **合計** | | **34** | **22/34** |
 
 ---
 
 ## セッション引き継ぎノート
 
 ### 現在の状態 (2026-03-26)
-- **Phase 0 + Phase 1 完了** — tsc + build + vitest 全パス
+- **Phase 0 + Phase 1 + Phase 2 完了** — tsc + build + vitest 全パス (116テスト)
 - 設計ドキュメントは `design/` に全て格納
+
+### Phase 2 完了サマリー
+- P2-1: PostToolUse リライト (`src/hooks/post-tool.ts`) — Edit/Write→on_write ゲート実行→pending-fixes→DIRECTIVE、Bash→テスト検出+git commit検出+エラー検出、Self-reflection注入、quality_event記録
+- P2-2: PreToolUse リライト (`src/hooks/pre-tool.ts`) — pending-fixes チェック→DENY、テスト隣接チェック→WARNING
+- P2-3: UserPromptSubmit リライト (`src/hooks/user-prompt.ts`) — スコアリングベース意図分類（排除+実装スコア比較、位置重み、否定ハンドリング）、Plan mode→DIRECTIVE、大タスク→WARNING
+- P2-4: SessionStart リライト (`src/hooks/session-start.ts`) — プロファイル確認/生成、前セッション品質サマリー注入、conventions注入、gates自動生成
+- P2-5: pending-fixes管理 (`src/hooks/pending-fixes.ts`) — read/write/clear/has/format/parse
+- P2-6: error_resolution自動蓄積 — last-error.json ペアリング（PostToolUse内）
+- Stop/PreCompact も最低限実装（pending-fixes WARNING、品質サマリー保存）
+- 検出ヘルパー分離 (`src/hooks/detect.ts`) — isGitCommit, isTestCommand, isSourceFile, guessTestFile 等（vitest互換）
+- キーワード: EN+JP 95個のIMPLキーワード、70個の除外キーワード、35個の大タスクシグナル、包括的テストコマンド検出
+- テスト: 28→116（+88テスト）
 
 ### Phase 1 完了サマリー
 - P1-1: DB Schema V1 (projects, knowledge_index, embeddings, quality_events) — FTS5完全削除、v0互換型削除
@@ -362,13 +374,10 @@ alfred CLI バイナリ (bun build --compile)
 - P1-5: gates.json フレームワーク (`src/gates/index.ts`) — load/run/detect + 自動検出
 - P1-6: `alfred init` (`src/init/index.ts`) — MCP/hooks/rules/skills/agents/gates/profile/DB 一括セットアップ
 - P1-7: `alfred uninstall` (CLI) — クリーンアンインストール
-- DB パス: `~/.alfred/alfred.db`
-- テスト: 28/28 パス
-- 新規ファイル: src/store/search.ts, src/store/quality-events.ts, src/mcp/alfred-tool.ts, src/profile/detect.ts, src/gates/index.ts, src/init/index.ts
 
 ### 次のアクション
-- Phase 2 (Walls) から開始
-- P2-1 (PostToolUse リライト) から着手 — 最重要 Hook
+- Phase 3 (Intelligence) から開始
+- P3-1 (error_resolution ベクトル検索 + 自動注入) から着手
 
 ### 重要な設計判断（覚えておくべき）
 1. **Plugin 不要** — `alfred init` で ~/.claude/ に直接配置
@@ -379,3 +388,5 @@ alfred CLI バイナリ (bun build --compile)
 6. **Voyage AI 100% 前提** — FTS5 フォールバックなし
 7. **DB は ~/.alfred/alfred.db** — プロジェクト横断
 8. **リサーチ根拠 12 findings** — 全機能が research-ai-code-quality-2026.md に紐付く
+9. **意図分類はスコアリングベース** — 二値keyword matchではなく、位置重み+排除/実装スコア比較。外部NLPライブラリは不要（リサーチ済み: compromise/nlpjs/bayesはこのユースケースで keyword list より優位性なし）
+10. **検出ヘルパーは detect.ts に分離** — bun:sqlite非依存で vitest テスト可能
