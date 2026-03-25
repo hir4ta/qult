@@ -60,8 +60,8 @@ const HELP_EN = [
 	"  ✓ = pass/hit, ✗ = fail/miss, ● = warning",
 	"",
 	"Session",
-	"  Elapsed: time since TUI start (red at 35min — research:",
-	"    task time 2x = failure rate 4x)",
+	"  Last: time of most recent quality event (HH:MM)",
+	"  Today: total quality events recorded today",
 	"  Files: git diff changed file count",
 	"  Commits: commits today",
 	"  Pending: unresolved lint/type errors (blocks Edit/Write)",
@@ -94,8 +94,8 @@ const HELP_JA = [
 	"  ✓ = pass/hit, ✗ = fail/miss, ● = warning",
 	"",
 	"Session (セッション情報)",
-	"  経過時間: TUI起動からの時間 (35分超で赤 — リサーチ:",
-	"    タスク時間2倍 = 失敗率4倍)",
+	"  Last: 最後の品質イベントの時刻 (HH:MM)",
+	"  Today: 今日記録された品質イベントの総数",
 	"  Files: git diff の変更ファイル数",
 	"  Commits: 今日のコミット数",
 	"  Pending: 未修正の lint/型エラー数 (Edit/Writeをブロック)",
@@ -186,8 +186,6 @@ function App() {
 	const eT = k.errorHits + k.errorMisses;
 	const cvT = k.conventionPass + k.conventionWarn;
 
-	const mins = Math.floor((Date.now() - sess.startedAt) / 60000);
-	const minsColor = mins >= 35 ? C.red : mins >= 25 ? C.yellow : C.fg;
 
 	const evMax = Math.max(termH - 22, 2);
 
@@ -240,7 +238,8 @@ function App() {
 			{/* Session */}
 			<box style={{ height: 1, paddingX: 1 }}>
 				<text>
-					<span fg={C.dim}>Session: </span><span fg={minsColor}>{String(mins)}min</span>
+					<span fg={C.dim}>Last: </span><span fg={C.fg}>{sess.lastActivity || "-"}</span>
+					<span fg={C.dim}> │ Today: </span><span fg={C.fg}>{String(sess.eventsToday)}</span>
 					<span fg={C.dim}> │ Files: </span><span fg={C.fg}>{String(sess.changedFiles)}</span>
 					<span fg={C.dim}> │ Commits: </span><span fg={C.fg}>{String(sess.commits)}</span>
 					<span fg={C.dim}> │ Pending: </span><span fg={data.pendingFixesCount > 0 ? C.red : C.green}>{String(data.pendingFixesCount)}</span>

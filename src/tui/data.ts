@@ -51,7 +51,8 @@ export interface QualityDashboardData {
 
 	// Session info
 	session: {
-		startedAt: number; // epoch ms
+		lastActivity: string; // HH:MM or ""
+		eventsToday: number;
 		changedFiles: number;
 		commits: number;
 	};
@@ -66,7 +67,7 @@ export interface QualityDashboardData {
 	projectName: string;
 }
 
-const sessionStartTime = Date.now();
+// no session start time — not meaningful across day boundaries
 
 export function loadDashboardData(cwd: string): QualityDashboardData {
 	try {
@@ -88,6 +89,10 @@ export function loadDashboardData(cwd: string): QualityDashboardData {
 			exemplars: countKnowledgeByType(store, project.id, "exemplar"),
 			conventions: countKnowledgeByType(store, project.id, "convention"),
 		};
+
+		// Last activity + events today
+		const lastActivity = getLastActivityTime(store);
+		const eventsToday = getEventCountToday(store);
 
 		// Git stats
 		const gitStats = getGitStats(cwd);
@@ -128,7 +133,8 @@ export function loadDashboardData(cwd: string): QualityDashboardData {
 				};
 			}),
 			session: {
-				startedAt: sessionStartTime,
+				lastActivity,
+				eventsToday,
 				changedFiles: gitStats.changedFiles,
 				commits: gitStats.commits,
 			},
@@ -158,7 +164,7 @@ function emptyData(): QualityDashboardData {
 		knowledge: { errorHits: 0, errorMisses: 0, exemplarInjections: 0, assertionWarnings: 0, conventionPass: 0, conventionWarn: 0 },
 		knowledgeTotals: { errorResolutions: 0, exemplars: 0, conventions: 0 },
 		recentEvents: [],
-		session: { startedAt: Date.now(), changedFiles: 0, commits: 0 },
+		session: { lastActivity: "", eventsToday: 0, changedFiles: 0, commits: 0 },
 		pendingFixesCount: 0,
 		directiveCount: 0,
 		projectName: "unknown",
@@ -173,6 +179,29 @@ function findLatestSessionId(store: Store): string | null {
 		return row?.session_id ?? null;
 	} catch {
 		return null;
+	}
+}
+
+function getLastActivityTime(store: Store): string {
+	try {
+		const row = store.db
+			.prepare("SELECT created_at FROM quality_events ORDER BY created_at DESC LIMIT 1")
+			.get() as { created_at: string } | undefined;
+		return row?.created_at?.slice(11, 16) ?? "";
+	} catch {
+		return "";
+	}
+}
+
+function getEventCountToday(store: Store): number {
+	try {
+		const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+		const row = store.db
+			.prepare("SELECT COUNT(*) as cnt FROM quality_events WHERE created_at >= ?")
+			.get(today) as { cnt: number };
+		return row.cnt;
+	} catch {
+		return 0;
 	}
 }
 
