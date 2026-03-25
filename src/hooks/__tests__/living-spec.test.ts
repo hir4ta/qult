@@ -52,6 +52,22 @@ describe("matchComponent", () => {
 	it("returns null for unmatched directory", () => {
 		expect(matchComponent("src/hooks/new-hook.ts", componentMap)).toBeNull();
 	});
+
+	it("matches subdirectory (hierarchical)", () => {
+		expect(matchComponent("src/api/handlers/auth.ts", componentMap)).toBe("API Server");
+	});
+
+	it("matches deeply nested subdirectory", () => {
+		expect(matchComponent("src/store/migrations/v10.ts", componentMap)).toBe("Store");
+	});
+
+	it("prefers deepest match when multiple components overlap", () => {
+		const overlapping = new Map([
+			["API Root", ["src/api/server.ts"]],
+			["API Handlers", ["src/api/handlers/index.ts"]],
+		]);
+		expect(matchComponent("src/api/handlers/auth.ts", overlapping)).toBe("API Handlers");
+	});
 });
 
 describe("appendFileToComponent", () => {

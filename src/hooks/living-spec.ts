@@ -121,23 +121,36 @@ export function parseDesignFileRefs(content: string): Map<string, string[]> {
 
 /**
  * Match a file to a component by comparing directory paths.
- * Returns component name or null.
+ * Supports hierarchical matching: a file at `src/api/handlers/auth.ts`
+ * matches a component with `src/api/server.ts` (ancestor directory).
+ * Prefers the most specific (deepest) match when multiple components match.
  */
 export function matchComponent(
 	filePath: string,
 	componentMap: Map<string, string[]>,
 ): string | null {
 	const fileDir = dirname(filePath);
+	let bestMatch: string | null = null;
+	let bestDepth = -1;
 
 	for (const [component, files] of componentMap) {
 		for (const existing of files) {
-			if (dirname(existing) === fileDir) {
-				return component;
+			const existingDir = dirname(existing);
+			// Exact match or ancestor match (fileDir starts with existingDir)
+			if (
+				fileDir === existingDir ||
+				(fileDir.startsWith(existingDir + "/") && existingDir !== ".")
+			) {
+				const depth = existingDir.split("/").length;
+				if (depth > bestDepth) {
+					bestDepth = depth;
+					bestMatch = component;
+				}
 			}
 		}
 	}
 
-	return null;
+	return bestMatch;
 }
 
 /**

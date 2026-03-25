@@ -217,13 +217,18 @@ export function getKnowledgeStats(store: Store, projectId?: string): KnowledgeSt
 
 export function searchKnowledgeKeyword(store: Store, query: string, limit: number): KnowledgeRow[] {
 	const escaped = escapeLIKEContains(query);
+	// Use log-dampened hit_count blended with recency instead of raw hit_count.
+	// log(2 + hit_count) prevents unbounded growth; julianday decay favors recent entries.
 	const rows = store.db
 		.prepare(`
     SELECT id, project_id, file_path, content_hash, title, content, sub_type,
            branch, author, created_at, updated_at, hit_count, last_accessed, enabled
     FROM knowledge_index
     WHERE enabled = 1 AND (content LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\')
-    ORDER BY hit_count DESC LIMIT ?
+    ORDER BY (
+      ln(2 + hit_count) *
+      (1.0 / (1.0 + (julianday('now') - julianday(COALESCE(NULLIF(last_accessed, ''), updated_at))) / 90.0))
+    ) DESC LIMIT ?
   `)
 		.all(escaped, escaped, limit) as RawKnowledgeRow[];
 	return rows.map(mapRow);

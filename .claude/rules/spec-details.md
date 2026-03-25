@@ -27,6 +27,14 @@ paths:
 - Spec complete auto-extracts: design.md patterns → permanent knowledge (sub_type=pattern)
 - Wave: Closing required in all tasks.json: self-review, CLAUDE.md update, test verification, knowledge save
 
+## Task Dependencies
+- `SpecTask.depends?: string[]`: task IDs that must be checked before this task
+- `dossier check`: warns (not blocks) if depends are unchecked
+- `dossier status`: returns `ready_tasks` — unchecked tasks whose depends are all satisfied
+- `validate`: `cyclic_deps` check detects circular depends via Kahn's algorithm (fail if cycle)
+- `getReadyTasks()`: identifies parallelizable work within a wave
+- `detectCyclicDeps()`: returns task IDs in cycles, empty if acyclic
+
 ## Templates
 - Spec templates: `src/spec/templates.ts` — Markdown via .tmpl files, JSON via TypeScript generator functions
 - Markdown templates: requirements.md, design.md, research.md (EN/JA)

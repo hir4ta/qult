@@ -177,7 +177,7 @@ export function pairwiseSimilarity(
     SELECT e.source_id, e.vector, k.project_id FROM embeddings e
     JOIN knowledge_index k ON k.id = e.source_id
     WHERE e.source = 'knowledge' AND k.enabled = 1 ${subTypeFilter}
-    ORDER BY k.hit_count DESC
+    ORDER BY k.updated_at DESC
     LIMIT ?
   `)
 		.all(...params) as Array<{ source_id: number; vector: Buffer; project_id: string }>;

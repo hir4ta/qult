@@ -1,5 +1,6 @@
 import { SpecDir, allTasks as getAllTasks, closingWave, filesForSize, parseTasksFile } from "./types.js";
 import type { SpecFile, SpecSize, SpecType, TasksFile, TestSpecsFile } from "./types.js";
+import { detectCyclicDeps } from "../mcp/dossier/lifecycle.js";
 
 export interface ValidationCheck {
 	name: string;
@@ -191,6 +192,19 @@ export function validateSpec(
 				? { name: "closing_wave", status: "pass", message: "Closing wave found in tasks.json" }
 				: { name: "closing_wave", status: "fail", message: "No closing wave in tasks.json" },
 		);
+	}
+
+	// ---- 8b. cyclic_deps ----
+	if (expectedFiles.includes("tasks.json") && tasksData) {
+		const hasDeps = getAllTasks(tasksData).some((t) => t.depends && t.depends.length > 0);
+		if (hasDeps) {
+			const cyclic = detectCyclicDeps(tasksData);
+			checks.push(
+				cyclic.length === 0
+					? { name: "cyclic_deps", status: "pass", message: "No circular dependencies" }
+					: { name: "cyclic_deps", status: "fail", message: `Circular dependency: ${cyclic.join(", ")}` },
+			);
+		}
 	}
 
 	// ---- 9. gherkin_syntax ----

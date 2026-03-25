@@ -338,6 +338,21 @@ export function dossierCheck(projectPath: string, params: DossierParams) {
 		return errorResult(`task_id "${taskId}" not found in tasks.json`);
 	}
 
+	// Dependency check: warn if this task's depends are not all checked.
+	const depWarnings: string[] = [];
+	const checkedTask = findTaskById(tasksData, taskId);
+	if (checkedTask?.depends && checkedTask.depends.length > 0) {
+		const allTaskMap = new Map(
+			tasksData.waves.flatMap((w) => w.tasks).map((t) => [t.id.toLowerCase(), t]),
+		);
+		for (const depId of checkedTask.depends) {
+			const dep = allTaskMap.get(depId.toLowerCase());
+			if (dep && !dep.checked) {
+				depWarnings.push(`dependency ${dep.id} ("${dep.title}") is not yet checked`);
+			}
+		}
+	}
+
 	// Write back
 	sd.writeFile("tasks.json", JSON.stringify(tasksData, null, 2) + "\n");
 
@@ -357,6 +372,7 @@ export function dossierCheck(projectPath: string, params: DossierParams) {
 		task_id: taskId,
 		status: "checked",
 		task_slug: taskSlug,
+		...(depWarnings.length > 0 ? { dep_warnings: depWarnings } : {}),
 		...(waveMessages.length > 0 ? { wave_completion: waveMessages } : {}),
 	});
 }
@@ -414,4 +430,78 @@ export function dossierCancel(projectPath: string, params: DossierParams) {
 	}
 
 	return jsonResult({ task_slug: taskSlug, status: "cancelled", cancelled: true });
+}
+
+// --- Helpers ---
+
+import type { SpecTask, TasksFile as TF } from "../../spec/types.js";
+
+function findTaskById(tasksData: TF, taskId: string): SpecTask | undefined {
+	const lower = taskId.toLowerCase();
+	for (const wave of tasksData.waves) {
+		for (const task of wave.tasks) {
+			if (task.id.toLowerCase() === lower) return task;
+		}
+	}
+	return undefined;
+}
+
+/**
+ * Get tasks that are ready to work on: unchecked and all depends satisfied.
+ * Useful for identifying parallelizable work within a wave.
+ */
+export function getReadyTasks(tasksData: TF): SpecTask[] {
+	const checkedIds = new Set(
+		tasksData.waves
+			.flatMap((w) => w.tasks)
+			.filter((t) => t.checked)
+			.map((t) => t.id.toLowerCase()),
+	);
+
+	return tasksData.waves
+		.flatMap((w) => w.tasks)
+		.filter((t) => {
+			if (t.checked) return false;
+			if (!t.depends || t.depends.length === 0) return true;
+			return t.depends.every((d) => checkedIds.has(d.toLowerCase()));
+		});
+}
+
+/**
+ * Detect circular dependencies in tasks via topological sort.
+ * Returns array of task IDs involved in cycles, or empty if no cycles.
+ */
+export function detectCyclicDeps(tasksData: TF): string[] {
+	const allTasks = tasksData.waves.flatMap((w) => w.tasks);
+	const idSet = new Set(allTasks.map((t) => t.id.toLowerCase()));
+	const adj = new Map<string, string[]>();
+	for (const t of allTasks) {
+		const deps = (t.depends ?? []).filter((d) => idSet.has(d.toLowerCase()));
+		adj.set(t.id.toLowerCase(), deps.map((d) => d.toLowerCase()));
+	}
+
+	// Kahn's algorithm
+	const inDegree = new Map<string, number>();
+	for (const id of idSet) inDegree.set(id, 0);
+	for (const [, deps] of adj) {
+		for (const d of deps) {
+			inDegree.set(d, (inDegree.get(d) ?? 0) + 1);
+		}
+	}
+
+	const queue = [...idSet].filter((id) => inDegree.get(id) === 0);
+	const sorted: string[] = [];
+	while (queue.length > 0) {
+		const node = queue.shift()!;
+		sorted.push(node);
+		for (const dep of adj.get(node) ?? []) {
+			const newDeg = (inDegree.get(dep) ?? 1) - 1;
+			inDegree.set(dep, newDeg);
+			if (newDeg === 0) queue.push(dep);
+		}
+	}
+
+	// Nodes not in sorted = in cycles
+	const sortedSet = new Set(sorted);
+	return [...idSet].filter((id) => !sortedSet.has(id));
 }

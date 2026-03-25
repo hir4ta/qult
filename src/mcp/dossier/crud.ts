@@ -4,6 +4,7 @@ import { clearReviewGate, readReviewGate } from "../../hooks/review-gate.js";
 import { stripTemplate } from "../../spec/templates.js";
 import type { SpecFile, SpecSize, SpecType } from "../../spec/types.js";
 import {
+	parseTasksFile,
 	readActive,
 	readActiveState,
 	effectiveStatus,
@@ -14,6 +15,7 @@ import {
 import { validateSpec } from "../../spec/validate.js";
 import type { Store } from "../../store/index.js";
 import { type DossierParams, errorResult, jsonResult } from "./helpers.js";
+import { getReadyTasks } from "./lifecycle.js";
 
 export function dossierUpdate(projectPath: string, store: Store, params: DossierParams) {
 	if (!params.file) return errorResult("file is required for update");
@@ -114,6 +116,19 @@ export function dossierStatus(projectPath: string) {
 			const key = section.file.replace(".md", "");
 			result[key] = section.content;
 		}
+
+		// Show tasks ready to work on (all depends satisfied, not yet checked).
+		try {
+			const tasksData = parseTasksFile(sd.readFile("tasks.json"));
+			const ready = getReadyTasks(tasksData);
+			if (ready.length > 0) {
+				result.ready_tasks = ready.map((t) => ({
+					id: t.id,
+					title: t.title,
+					depends: t.depends ?? [],
+				}));
+			}
+		} catch { /* tasks.json may not exist */ }
 	}
 
 	return jsonResult(result);

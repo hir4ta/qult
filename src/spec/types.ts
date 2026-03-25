@@ -47,7 +47,6 @@ export interface SpecWave {
 export interface TasksFile {
 	slug: string;
 	waves: SpecWave[]; // includes closing wave (key === "closing")
-	dependency_graph?: Record<string, string[]>;
 }
 
 /**
@@ -70,7 +69,6 @@ export function parseTasksFile(raw: string): TasksFile {
 	return {
 		slug: data.slug ?? "",
 		waves,
-		dependency_graph: data.dependency_graph,
 	};
 }
 

@@ -16,11 +16,9 @@ paths:
 - Session continuity: writes .alfred/.pending-compact.json breadcrumb, SessionStart resolves → session_links table
 
 ## UserPromptSubmit
-- **Command hook only**: knowledge search + spec guard + LLM intent classification (Anthropic API direct call)
+- **Command hook only**: knowledge search + spec guard
 - Knowledge search: Voyage vector search → FTS5 fallback → keyword fallback
-- Intent classification: Haiku via Anthropic Messages API (ANTHROPIC_API_KEY required, fail-open without key). Runs in parallel with knowledge search
-- 7 intents (research/plan/implement/bugfix/review/tdd/save-knowledge) → skill suggestion via additionalContext
-- Spec creation is user-initiated (no auto-proposal). Removed: Stage 1 spec proposal DIRECTIVE
+- Spec creation is user-initiated (no auto-proposal)
 - Parallel dev guard (Stage 1.5): active spec exists + implementation keywords + slug NOT in worked-slugs → WARNING
 
 ## PostToolUse
@@ -30,7 +28,7 @@ paths:
 - FR-9: Agent レビューレスポンス検出時に review-gate.json の re_reviewed フラグをセット（fix_mode 中のみ）
 
 ## PostToolUse — Living Spec (src/hooks/living-spec.ts)
-- git commit → extractChangedFiles (git diff --name-only HEAD~1, 2s timeout) → shouldAutoAppend filter (multi-lang: JS/TS/Python/Go/Ruby/Rust/Java/C#/Swift/Kotlin, excludes test/gen/mock/vendor/dist/plugin/.alfred) → matchComponent (exact directory match against design.md component sections) → appendFileToComponent (design.md, `<!-- auto-added: ISO8601 -->` marker)
+- git commit → extractChangedFiles (git diff --name-only HEAD~1, 2s timeout) → shouldAutoAppend filter (multi-lang: JS/TS/Python/Go/Ruby/Rust/Java/C#/Swift/Kotlin, excludes test/gen/mock/vendor/dist/plugin/.alfred) → matchComponent (hierarchical directory match against design.md component sections, deepest match wins) → appendFileToComponent (design.md, `<!-- auto-added: ISO8601 -->` marker)
 - Language config: `src/hooks/lang-filter.ts` — per-language extension + exclusion patterns, shared DIR_EXCLUSIONS
 
 ## Dossier Hints
@@ -55,7 +53,6 @@ paths:
 ## Hook Output & Directives
 - Hook output: structured directive levels via `emitDirectives()` — [DIRECTIVE] (must comply), [WARNING] (should check), [CONTEXT] (reference). Max 3 DIRECTIVEs per invocation (NFR-5). Single `emitAdditionalContext()` call per hook (NFR-4)
 - Directive utility: `src/hooks/directives.ts` — `buildDirectiveOutput()`, `emitDirectives()`
-- Semantic intent classification: Voyage embedding similarity (threshold >= 0.5) with keyword fallback. Prompt embedding reused for knowledge search (DEC-2)
 - Hook state persistence: `src/hooks/state.ts` — readStateJSON/writeStateJSON. Stores session-local state in `.alfred/.state/` (gitignored). Path traversal guard on file names
 - Shared spec-guard utilities: `src/hooks/spec-guard.ts` — tryReadActiveSpec, isSpecFilePath, countUncheckedNextSteps, hasUncheckedSelfReview, allowTool, denyTool, blockStop
 - Validation engine: `src/spec/validate.ts` — 21-check validation for all spec sizes

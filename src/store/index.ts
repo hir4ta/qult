@@ -32,7 +32,31 @@ export class Store {
 			migrate(db);
 		}
 
-		return new Store(db, dbPath);
+		const store = new Store(db, dbPath);
+		store.initExpectedDims();
+		return store;
+	}
+
+	/**
+	 * Initialize expectedDims from existing embeddings.
+	 * If multiple dimensions exist (model migration), warn and use the most common.
+	 */
+	private initExpectedDims(): void {
+		try {
+			const rows = this.db
+				.prepare("SELECT dims, COUNT(*) as cnt FROM embeddings GROUP BY dims ORDER BY cnt DESC LIMIT 2")
+				.all() as Array<{ dims: number; cnt: number }>;
+			if (rows.length === 0) return;
+			this.expectedDims = rows[0]!.dims;
+			if (rows.length > 1) {
+				process.stderr.write(
+					`[alfred] WARNING: mixed embedding dimensions detected (${rows.map((r) => `${r.dims}d×${r.cnt}`).join(", ")}). ` +
+					`Using ${this.expectedDims}d. Consider re-embedding with a single model.\n`,
+				);
+			}
+		} catch {
+			/* fail-open: don't block startup */
+		}
 	}
 
 	static openDefault(): Store {
