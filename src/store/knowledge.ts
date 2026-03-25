@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { KnowledgeRow, KnowledgeStats } from "../types.js";
+import type { KnowledgeRowV1 as KnowledgeRow, KnowledgeStats } from "../types.js";
 import type { Store } from "./index.js";
 
 export function contentHash(content: string): string {

@@ -1,4 +1,4 @@
-import type { KnowledgeConflict, KnowledgeRow } from "../types.js";
+import type { KnowledgeConflict, KnowledgeRowV1 as KnowledgeRow } from "../types.js";
 import type { Store } from "./index.js";
 import type { RawKnowledgeRow } from "./knowledge.js";
 import { getKnowledgeByIDs, mapRow, searchKnowledgeKeyword } from "./knowledge.js";

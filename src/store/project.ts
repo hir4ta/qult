@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { basename, resolve } from "node:path";
 import type { ProjectInfo, ProjectRecord } from "../types.js";
+// Note: ProjectRecord v2 doesn't have 'branch' but store code still references it.
+// Will be cleaned up in Phase 1 store rewrite.
 import type { Store } from "./index.js";
 
 export function detectProject(dirPath: string): ProjectInfo {

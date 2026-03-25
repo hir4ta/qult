@@ -3,7 +3,7 @@ import { defineCommand, runMain } from "citty";
 const main = defineCommand({
 	meta: {
 		name: "alfred",
-		description: "Development butler for Claude Code",
+		description: "Quality butler for Claude Code",
 	},
 	subCommands: {
 		serve: defineCommand({
@@ -13,64 +13,10 @@ const main = defineCommand({
 				const { Embedder } = await import("./embedder/index.js");
 				const { serveMCP } = await import("./mcp/server.js");
 				const store = Store.openDefault();
-				let emb = null;
-				try {
-					emb = Embedder.create();
-				} catch {
-					/* no Voyage key */
-				}
-				if (emb) store.expectedDims = emb.dims;
+				const emb = Embedder.create(); // Voyage AI required in v2
+				store.expectedDims = emb.dims;
 				const version = await resolveVersion();
 				await serveMCP(store, emb, version);
-			},
-		}),
-		dashboard: defineCommand({
-			meta: { description: "Open browser dashboard (cross-project)" },
-			args: {
-				port: { type: "string", default: "7575", description: "Port number" },
-				"url-only": { type: "boolean", default: false, description: "Print URL only" },
-			},
-			async run({ args }) {
-				const { existsSync } = await import("node:fs");
-				const { join } = await import("node:path");
-				const { Store } = await import("./store/index.js");
-				const { Embedder } = await import("./embedder/index.js");
-				const { startDashboard } = await import("./api/server.js");
-				const { resolveOrRegisterProject, listActiveProjects } = await import("./store/project.js");
-				const { syncAllProjectSpecs } = await import("./store/spec-sync.js");
-				const { syncKnowledgeIndex } = await import("./hooks/session-start.js");
-
-				const cwd = process.cwd();
-				const store = Store.openDefault();
-				let emb = null;
-				try {
-					emb = Embedder.create();
-				} catch {
-					/* no Voyage key */
-				}
-				if (emb) store.expectedDims = emb.dims;
-
-				// Register cwd project if it has .alfred/
-				if (existsSync(join(cwd, ".alfred"))) {
-					resolveOrRegisterProject(store, cwd);
-				}
-
-				// Sync specs and knowledge from all registered projects
-				await syncAllProjectSpecs(store, emb);
-				for (const proj of listActiveProjects(store)) {
-					if (existsSync(join(proj.path, ".alfred", "knowledge"))) {
-						try {
-							syncKnowledgeIndex(store, proj.path);
-						} catch { /* fail-open */ }
-					}
-				}
-
-				const version = await resolveVersion();
-				await startDashboard(cwd, store, emb, {
-					port: parseInt(args.port, 10),
-					urlOnly: args["url-only"],
-					version,
-				});
 			},
 		}),
 		hook: defineCommand({
@@ -83,10 +29,28 @@ const main = defineCommand({
 				await runHook(args.event as string);
 			},
 		}),
+		tui: defineCommand({
+			meta: { description: "Show quality dashboard in terminal" },
+			async run() {
+				try {
+					// @ts-ignore — tui/main.tsx uses OpenTUI JSX (separate tsconfig)
+					const { runTui } = await import("./tui/main.js");
+					await runTui();
+				} catch (err: unknown) {
+					const msg = err instanceof Error ? err.message : String(err);
+					if (msg.includes("Cannot find module") || msg.includes("MODULE_NOT_FOUND")) {
+						process.stderr.write("Error: TUI requires @opentui packages.\n");
+						process.stderr.write("Install dependencies: cd claude-alfred && bun install\n");
+						process.exit(1);
+					}
+					throw err;
+				}
+			},
+		}),
 		doctor: defineCommand({
 			meta: { description: "Check installation health" },
 			async run() {
-				const { existsSync, readdirSync } = await import("node:fs");
+				const { existsSync } = await import("node:fs");
 				const { join } = await import("node:path");
 				const { homedir } = await import("node:os");
 				const home = homedir();
@@ -107,295 +71,77 @@ const main = defineCommand({
 				}
 
 				// DB
-				const dbPath = join(home, ".claude-alfred", "alfred.db");
-				check(
-					existsSync(dbPath),
-					`DB: ${dbPath}`,
-					"not found — run: alfred (any command) to create",
-				);
+				const dbPath = join(home, ".alfred", "alfred.db");
+				check(existsSync(dbPath), `DB: ${dbPath}`, "not found — run: alfred init");
 
-				// VOYAGE_API_KEY
+				// VOYAGE_API_KEY (required in v2)
 				const hasVoyage = !!process.env.VOYAGE_API_KEY;
-				check(
-					hasVoyage,
-					"VOYAGE_API_KEY set",
-					"not set — semantic search disabled, FTS5 fallback active",
-				);
+				check(hasVoyage, "VOYAGE_API_KEY set", "REQUIRED — alfred v2 requires Voyage AI");
 
-				// ALFRED_LANG
-				const lang = process.env.ALFRED_LANG;
-				check(true, `ALFRED_LANG: ${lang || "(not set, default: en)"}`);
-
-				// User rules — plugin distributes rules, so user copies are stale duplicates
-				const rulesDir = join(home, ".claude", "rules");
-				try {
-					const staleRules = readdirSync(rulesDir).filter((f) => f.startsWith("alfred"));
-					if (staleRules.length > 0) {
-						check(false, `Stale user rules: ${staleRules.join(", ")}`,
-							`remove from ${rulesDir} — plugin distributes these automatically`);
-					} else {
-						check(true, "No stale user rules (plugin distributes rules)");
+				// MCP registration
+				const mcpPath = join(home, ".claude", ".mcp.json");
+				if (existsSync(mcpPath)) {
+					try {
+						const { readFileSync } = await import("node:fs");
+						const mcp = JSON.parse(readFileSync(mcpPath, "utf-8"));
+						check(!!mcp.mcpServers?.alfred, "MCP: alfred registered", "run: alfred init");
+					} catch {
+						check(false, "MCP: .mcp.json parse error");
 					}
-				} catch {
-					check(true, "No stale user rules (plugin distributes rules)");
+				} else {
+					check(false, `MCP: ${mcpPath}`, "not found — run: alfred init");
 				}
 
-				// Project .alfred/
+				// Hooks
+				const settingsPath = join(home, ".claude", "settings.json");
+				if (existsSync(settingsPath)) {
+					try {
+						const { readFileSync } = await import("node:fs");
+						const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+						const hookCount = Object.keys(settings.hooks ?? {}).length;
+						check(hookCount >= 6, `Hooks: ${hookCount} events registered`, "run: alfred init");
+					} catch {
+						check(false, "Hooks: settings.json parse error");
+					}
+				} else {
+					check(false, `Hooks: ${settingsPath}`, "not found — run: alfred init");
+				}
+
+				// Rules
+				const rulesPath = join(home, ".claude", "rules", "alfred-quality.md");
+				check(existsSync(rulesPath), "Rules: alfred-quality.md", "not found — run: alfred init");
+
+				// Skills
+				const reviewSkill = join(home, ".claude", "skills", "alfred-review", "SKILL.md");
+				check(existsSync(reviewSkill), "Skill: alfred-review", "not found — run: alfred init");
+
+				// Agent
+				const reviewerAgent = join(home, ".claude", "agents", "alfred-reviewer.md");
+				check(existsSync(reviewerAgent), "Agent: alfred-reviewer", "not found — run: alfred init");
+
+				// Project
 				const cwd = process.cwd();
 				const hasAlfred = existsSync(join(cwd, ".alfred"));
-				check(
-					hasAlfred,
-					`Project: .alfred/ exists in ${cwd}`,
-					"not initialized — create a spec via /alfred:brief in Claude Code",
-				);
-			},
-		}),
-		update: defineCommand({
-			meta: { description: "Update alfred to the latest version" },
-			async run() {
-				const { writeFileSync, chmodSync, renameSync, unlinkSync } = await import("node:fs");
-				const { join } = await import("node:path");
-				const { homedir, platform, arch } = await import("node:os");
+				check(hasAlfred, `Project: .alfred/ exists`, "run: alfred init in your project");
 
-				const REPO = "hir4ta/claude-alfred";
-				const current = await resolveVersion();
-
-				// Detect platform
-				const os = platform() === "darwin" ? "darwin" : "linux";
-				const cpu = arch() === "arm64" ? "arm64" : "x64";
-				const platformStr = `${os}-${cpu}`;
-
-				// Fetch latest version
-				console.log("Checking for updates...");
-				let latest: string;
-				try {
-					const resp = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
-					if (!resp.ok) throw new Error(`GitHub API: ${resp.status}`);
-					const data = (await resp.json()) as { tag_name: string };
-					latest = data.tag_name.replace(/^v/, "");
-				} catch (err) {
-					console.error(`Failed to check for updates: ${err}`);
-					process.exit(1);
-				}
-
-				if (current === "dev") {
-					console.log("Running in dev mode — use `git pull` to update.");
-					return;
-				}
-
-				if (current === latest) {
-					console.log(`alfred ${current} is already up to date.`);
-					return;
-				}
-
-				console.log(`Updating alfred ${current} → ${latest}...`);
-
-				// Download new binary
-				const url = `https://github.com/${REPO}/releases/download/v${latest}/alfred-${platformStr}`;
-				const installDir = join(homedir(), ".local", "bin");
-				const alfredPath = join(installDir, "alfred");
-				const tmpPath = `${alfredPath}.tmp`;
-
-				try {
-					const resp = await fetch(url);
-					if (!resp.ok) throw new Error(`Download failed: ${resp.status}`);
-					const buf = await resp.arrayBuffer();
-					writeFileSync(tmpPath, Buffer.from(buf));
-					chmodSync(tmpPath, 0o755);
-					// Atomic replace
-					try { unlinkSync(`${alfredPath}.bak`); } catch {}
-					try { renameSync(alfredPath, `${alfredPath}.bak`); } catch {}
-					renameSync(tmpPath, alfredPath);
-					try { unlinkSync(`${alfredPath}.bak`); } catch {}
-				} catch (err) {
-					try { unlinkSync(tmpPath); } catch {}
-					console.error(`Update failed: ${err}`);
-					process.exit(1);
-				}
-
-				// Download and extract web assets for dashboard
-				const { mkdirSync } = await import("node:fs");
-				const webAssetsUrl = `https://github.com/${REPO}/releases/download/v${latest}/alfred-web-assets.tar.gz`;
-				const shareDir = join(homedir(), ".local", "share", "alfred", "web", "dist");
-				try {
-					const webResp = await fetch(webAssetsUrl);
-					if (webResp.ok) {
-						const tarBuf = Buffer.from(await webResp.arrayBuffer());
-						if (tarBuf.byteLength < 1000) throw new Error("Download too small");
-						mkdirSync(shareDir, { recursive: true });
-						const { spawnSync } = await import("node:child_process");
-						const tarTmp = join(homedir(), ".local", "share", "alfred", "web-assets.tar.gz");
-						writeFileSync(tarTmp, tarBuf);
-						const r = spawnSync("tar", ["-xzf", tarTmp, "-C", shareDir], { stdio: "pipe" });
-						try { unlinkSync(tarTmp); } catch {}
-						if (r.status !== 0) throw new Error(`tar failed: ${r.stderr?.toString()}`);
-						console.log("Dashboard assets updated.");
-					}
-				} catch {
-					console.log("Note: Dashboard assets download skipped (not critical).");
-				}
-
-				console.log(`alfred updated to ${latest}.`);
-			},
-		}),
-		uninstall: defineCommand({
-			meta: { description: "Remove alfred from this system" },
-			async run() {
-				const { existsSync, rmSync, unlinkSync } = await import("node:fs");
-				const { join } = await import("node:path");
-				const { homedir } = await import("node:os");
-				const readline = await import("node:readline");
-				const home = homedir();
-
-				// Confirm
-				const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-				const answer = await new Promise<string>((resolve) => {
-					rl.question("Remove alfred binary, database, and user rules? [y/N] ", resolve);
-				});
-				rl.close();
-				if (answer.toLowerCase() !== "y") {
-					console.log("Cancelled.");
-					return;
-				}
-
-				const removed: string[] = [];
-				const skip = (path: string) => console.log(`  skip: ${path} (not found)`);
-
-				// Binary
-				const binPath = join(home, ".local", "bin", "alfred");
-				if (existsSync(binPath)) {
-					unlinkSync(binPath);
-					removed.push(binPath);
-				} else skip(binPath);
-
-				// Database
-				const dbDir = join(home, ".claude-alfred");
-				if (existsSync(dbDir)) {
-					rmSync(dbDir, { recursive: true, force: true });
-					removed.push(dbDir);
-				} else skip(dbDir);
-
-				// Shared data (web assets)
-				const shareDir = join(home, ".local", "share", "alfred");
-				if (existsSync(shareDir)) {
-					rmSync(shareDir, { recursive: true, force: true });
-					removed.push(shareDir);
-				} else skip(shareDir);
-
-				// User rules
-				const rulesDir = join(home, ".claude", "rules");
-				for (const rule of ["alfred.md", "alfred-protocol.md"]) {
-					const p = join(rulesDir, rule);
-					if (existsSync(p)) {
-						unlinkSync(p);
-						removed.push(p);
-					}
-				}
-
-				// Plugin cache
-				const pluginCache = join(home, ".claude", "plugins", "cache", "claude-alfred");
-				if (existsSync(pluginCache)) {
-					rmSync(pluginCache, { recursive: true, force: true });
-					removed.push(pluginCache);
-				}
-
-				console.log("");
-				for (const p of removed) console.log(`  ✓ removed: ${p}`);
-				console.log("");
-				console.log("alfred uninstalled.");
-				console.log("Note: .alfred/ directories in your projects are preserved (specs + knowledge).");
-				console.log("To remove plugin from Claude Code: /plugin → select alfred → remove");
-			},
-		}),
-		specs: defineCommand({
-			meta: { description: "Show specs in TUI (--all to include completed)" },
-			args: { all: { type: "boolean", default: false, description: "Include completed/cancelled specs" } },
-			async run({ args }) {
-				try {
-					// @ts-ignore — tui/main.tsx uses OpenTUI JSX (separate tsconfig)
-					const { runTui } = await import("./tui/main.js");
-					await runTui({ showAll: args.all });
-				} catch (err: unknown) {
-					const msg = err instanceof Error ? err.message : String(err);
-					if (msg.includes("Cannot find module") || msg.includes("MODULE_NOT_FOUND")) {
-						process.stderr.write("Error: TUI requires @opentui packages (not bundled in binary).\n");
-						process.stderr.write("Install dependencies: cd claude-alfred && bun install\n");
-						process.stderr.write("Or use the web dashboard: alfred dashboard\n");
-						process.exit(1);
-					}
-					throw err;
-				}
+				// Gates
+				const gatesPath = join(cwd, ".alfred", "gates.json");
+				check(existsSync(gatesPath), "Gates: .alfred/gates.json", "run: alfred init");
 			},
 		}),
 		"hook-internal": defineCommand({
 			meta: { description: "[internal] Hook-internal commands for agent hooks" },
 			subCommands: {
 				"save-decision": defineCommand({
-					meta: { description: "Save a decision entry from PreCompact agent hook" },
+					meta: { description: "Save an error resolution from PreCompact agent hook" },
 					args: {
-						title: { type: "string", required: true, description: "Decision title (max 200 chars)" },
-						decision: { type: "string", required: true, description: "What was decided" },
-						reasoning: { type: "string", required: true, description: "Why this choice" },
-						alternatives: { type: "string", default: "", description: "Rejected alternatives (newline-separated)" },
+						title: { type: "string", required: true, description: "Title" },
+						error_signature: { type: "string", default: "", description: "Normalized error message" },
+						resolution: { type: "string", default: "", description: "How to resolve" },
 					},
 					async run({ args }) {
-						const { mkdirSync, writeFileSync } = await import("node:fs");
-						const { join } = await import("node:path");
-						const { Store } = await import("./store/index.js");
-						const { upsertKnowledge } = await import("./store/knowledge.js");
-						const { resolveOrRegisterProject } = await import("./store/project.js");
-						const { getGitUserName } = await import("./git/user.js");
-
-						const cwd = process.cwd();
-						const store = Store.openDefault();
-						const proj = resolveOrRegisterProject(store, cwd);
-						const author = await getGitUserName(cwd);
-
-						const title = args.title.slice(0, 200);
-						const decision = args.decision.slice(0, 1000);
-						const reasoning = args.reasoning.slice(0, 1000);
-						const alternatives = (args.alternatives ?? "").slice(0, 1000);
-
-						// Build DecisionEntry JSON
-						const id = `dec-compact-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-						const entry = {
-							id,
-							title,
-							context: "",
-							decision,
-							reasoning,
-							alternatives: alternatives ? alternatives.split("\n").filter(Boolean) : [],
-							tags: [],
-							createdAt: new Date().toISOString(),
-							status: "approved" as const,
-							lang: process.env.ALFRED_LANG || "en",
-						};
-
-						// Write to .alfred/knowledge/decisions/
-						const decisionsDir = join(cwd, ".alfred", "knowledge", "decisions");
-						mkdirSync(decisionsDir, { recursive: true });
-						const filePath = `decisions/${id}.json`;
-						writeFileSync(join(cwd, ".alfred", "knowledge", filePath), JSON.stringify(entry, null, 2) + "\n");
-
-						// Upsert to DB
-						upsertKnowledge(store, {
-							id: 0,
-							projectId: proj.id,
-							filePath,
-							contentHash: "",
-							title,
-							content: `${decision}\n\nReasoning: ${reasoning}${alternatives ? `\n\nAlternatives: ${alternatives}` : ""}`,
-							subType: "decision",
-							branch: proj.branch,
-							author,
-							createdAt: "",
-							updatedAt: "",
-							hitCount: 0,
-							lastAccessed: "",
-							enabled: true,
-						});
-
-						console.log(`Saved decision: ${title}`);
+						// TODO (Phase 1): Implement save via v2 knowledge system
+						console.log(`[alfred] save-decision: ${args.title}`);
 					},
 				}),
 			},
@@ -428,9 +174,7 @@ function check(ok: boolean, label: string, hint?: string): void {
 declare const __ALFRED_VERSION__: string | undefined;
 
 async function resolveVersion(): Promise<string> {
-	// Prefer build-time embedded version (works in any location)
 	if (typeof __ALFRED_VERSION__ !== "undefined") return __ALFRED_VERSION__;
-	// Fallback: resolve from package.json (dev mode)
 	try {
 		const { readFileSync } = await import("node:fs");
 		const { join } = await import("node:path");
@@ -442,9 +186,7 @@ async function resolveVersion(): Promise<string> {
 				if (pkg.version) return pkg.version;
 			} catch {}
 		}
-	} catch {
-		/* ignore */
-	}
+	} catch {}
 	return "dev";
 }
 

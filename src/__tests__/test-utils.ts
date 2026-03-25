@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DbDatabase } from "../store/db.js";
 import { Store } from "../store/index.js";
-import type { KnowledgeRow } from "../types.js";
+import type { KnowledgeRowV1 as KnowledgeRow } from "../types.js";
 
 export const TEST_PROJECT_ID = "test-project-id";
 

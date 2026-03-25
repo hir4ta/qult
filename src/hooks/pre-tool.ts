@@ -1,118 +1,30 @@
-import { resolve } from "node:path";
-import { effectiveStatus } from "../spec/types.js";
 import type { HookEvent } from "./dispatcher.js";
-import { isGateActive } from "./review-gate.js";
-import {
-	allowTool,
-	denyTool,
-	isActiveSpecMalformed,
-	isSpecFilePath,
-	tryReadActiveSpec,
-} from "./spec-guard.js";
+import { emitAdditionalContext } from "./dispatcher.js";
 
 const BLOCKABLE_TOOLS = new Set(["Edit", "Write"]);
 
 /**
- * Check if a file path is outside the project directory or in a known non-code
- * location. These files should never be blocked by review gates.
- * (#16: gate scope was too broad, blocking memory/docs/CLAUDE.md edits)
- */
-function isGateExemptPath(cwd: string | undefined, filePath: string): boolean {
-	if (!cwd || !filePath) return false;
-	const resolved = resolve(cwd, filePath);
-	const cwdPrefix = cwd.endsWith("/") ? cwd : `${cwd}/`;
-
-	// Files outside the project directory (e.g., ~/.claude/memory/)
-	if (!resolved.startsWith(cwdPrefix) && resolved !== cwd) return true;
-
-	// Relative path within project
-	const rel = resolved.slice(cwdPrefix.length);
-
-	// docs/ directory
-	if (rel.startsWith("docs/")) return true;
-
-	// Root-level markdown files (CLAUDE.md, README.md, etc.)
-	if (!rel.includes("/") && rel.endsWith(".md")) return true;
-
-	// .claude/ directory (rules, memory, settings — not .alfred/)
-	if (rel.startsWith(".claude/")) return true;
-
-	return false;
-}
-
-/**
- * PreToolUse handler: block Edit/Write on review-gate.
- * Enforcement order: .alfred/ exempt → malformed check → review-gate → allow.
- * Uses allowTool() for: .alfred/ files, deferred/cancelled specs, and active specs with cleared gates.
- * Only falls through to prompt hook (LLM judge) when NO active spec exists.
+ * PreToolUse handler (v2): quality gate.
+ * Can DENY Edit/Write if pending-fixes exist.
+ *
+ * Flow:
+ * 1. Check pending-fixes.json → DENY if unresolved errors
+ * 2. Convention check → CONTEXT injection
+ * 3. Test adjacency check → WARNING if no test file
  */
 export async function preToolUse(ev: HookEvent): Promise<void> {
 	const toolName = ev.tool_name ?? "";
 
-	// Only block Edit/Write. Everything else passes through.
+	// Only gate Edit/Write. Everything else passes through.
 	if (!BLOCKABLE_TOOLS.has(toolName)) return;
 
-	// .alfred/ edits are always allowed (spec creation/update).
-	const toolInput = (ev.tool_input ?? {}) as Record<string, unknown>;
-	const filePath = typeof toolInput.file_path === "string" ? toolInput.file_path : "";
-	if (filePath && isSpecFilePath(ev.cwd, filePath)) {
-		allowTool("Spec file edit");
-		return;
-	}
+	// TODO (Phase 2): Implement v2 PreToolUse logic
+	// 1. Read .alfred/.state/pending-fixes.json
+	//    → If unresolved lint/type errors: exit 2 + stderr (DENY)
+	// 2. Convention check for target file's directory
+	//    → Inject convention as CONTEXT
+	// 3. Test adjacency check
+	//    → WARNING if no corresponding test file
 
-	// Fail-closed: if _active.json exists but can't be parsed, deny rather than silently allowing.
-	if (isActiveSpecMalformed(ev.cwd)) {
-		denyTool(
-			"Failed to read spec state (_active.json exists but could not be parsed). Fix or delete .alfred/specs/_active.json before editing source files.",
-		);
-		return;
-	}
-
-	const spec = tryReadActiveSpec(ev.cwd);
-
-	// FR-20: Exempt deferred/cancelled tasks from all gates.
-	if (spec) {
-		const status = effectiveStatus(spec.status);
-		if (status === "deferred" || status === "cancelled") {
-			allowTool("Deferred/cancelled spec");
-			return;
-		}
-	}
-
-	// Gate-exempt paths: files outside project or in non-code locations (#16).
-	// These should never be blocked by review gates.
-	if (filePath && isGateExemptPath(ev.cwd, filePath)) {
-		allowTool("Gate-exempt path (non-code file)");
-		return;
-	}
-
-	// Review gate: blocks source edits until spec/wave review is completed.
-	const gate = isGateActive(ev.cwd);
-	if (gate) {
-		// fix_mode: allow Edit/Write for applying fixes, but gate stays active (#15/#20).
-		// Re-review is required before the gate can be fully cleared.
-		if (gate.fix_mode) {
-			allowTool(`Fix mode active for '${gate.slug}' — editing allowed, re-review required before clear`);
-			return;
-		}
-		const gateLabel =
-			gate.gate === "wave-review" ? `Wave ${gate.wave ?? "?"} review` : "Spec self-review";
-		const reason = [
-			`${gateLabel} required for spec '${gate.slug}'. Complete review, then run: dossier action=gate sub_action=clear reason="<review summary>"`,
-			`- Gate reason: ${gate.reason}`,
-			'- "I already reviewed mentally" → Run actual review (3-agent or /alfred:inspect), then clear the gate',
-			`- Need to apply fixes first? Run: dossier action=gate sub_action=fix reason="fixing Critical findings"`,
-		].join("\n");
-		denyTool(reason);
-		return;
-	}
-
-	// No active spec → allow silently. Spec creation is user-initiated.
-	if (!spec) {
-		allowTool("No active spec (user-initiated spec creation)");
-		return;
-	}
-
-	// Active spec + all gates passed → allow explicitly to skip prompt hook.
-	allowTool(`Active spec '${spec.slug}' (${spec.size}), gates clear`);
+	// For now: allow all Edit/Write (no v1 gates)
 }

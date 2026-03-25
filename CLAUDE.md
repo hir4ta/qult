@@ -1,161 +1,103 @@
 # claude-alfred
 
-Development butler for Claude Code — MCP server + Hook handler.
+Quality butler for Claude Code — Hooks + MCP server + TUI.
 
 ## Stack
 
-TypeScript (Bun 1.3+, ESM) / SQLite (bun:sqlite) / Voyage AI (embedding) / React SPA (Vite 8 + TanStack Router + shadcn/ui) / TUI (OpenTUI + @opentui/react)
+TypeScript (Bun 1.3+, ESM) / SQLite (bun:sqlite) / Voyage AI (voyage-4-large + rerank-2.5) / TUI (OpenTUI + @opentui/react)
 
-Build: bun build (bundle + compile) / vitest (test) / citty (CLI) / hono (HTTP, Bun.serve) / @modelcontextprotocol/sdk (MCP)
+Build: bun build (bundle + compile) / vitest (test) / citty (CLI) / @modelcontextprotocol/sdk (MCP)
+
+## Architecture
+
+alfred = Hook群 (品質の壁) + 知識DB (壁を賢くする) + MCP (Claude Codeのインターフェース) + TUI (品質可視化)
+
+```
+User → Claude Code → (alfred hooks: 監視 + コンテキスト注入 + ゲート)
+              ↓ 必要な時だけ
+           alfred MCP (知識DB)
+```
+
+| Weight | Component | Role |
+|---|---|---|
+| 70% | Hooks (6 events) | 監視、コンテキスト注入、品質ゲート |
+| 20% | DB + Voyage AI | 知識蓄積、ベクトル検索 |
+| 10% | MCP tool | Claude Code → 知識DBインターフェース |
 
 ## Structure
 
 | Package | Role |
 |---|---|
-| `src/mcp/` | MCP server (2 tools: dossier, ledger) — @modelcontextprotocol/sdk + Zod. dossier split into `src/mcp/dossier/{index,helpers,init,lifecycle,crud}.ts`. `quality-gate.ts` = ledger save 品質ゲート (重複検出, アクショナビリティ, 矛盾検出) |
-| `src/store/` | SQLite persistence (projects + knowledge_index + spec_index + embeddings + FTS5), project registry, spec sync |
-| `src/git/` | Git integration: user.name resolution |
+| `src/hooks/` | Hook handlers: SessionStart, PreCompact, UserPromptSubmit, PostToolUse, PreToolUse, Stop |
+| `src/mcp/` | MCP server (1 tool: `alfred` — search/save/profile/score) |
+| `src/store/` | SQLite persistence (projects, knowledge_index, embeddings, quality_events) |
 | `src/embedder/` | Voyage AI (voyage-4-large, vector search + rerank-2.5) |
-| `src/spec/` | Spec management: .alfred/specs/ (8 file types) + Size-based scaling + Validate + Templates |
-| `src/hooks/` | Hook handlers (SessionStart / PreCompact / UserPromptSubmit / PostToolUse / PreToolUse / Stop) |
-| `src/api/` | HTTP API server: Hono, REST handlers, SSE, SPA serving. `schemas.ts` = Zod schema (API型の single source of truth, frontend は `import type` で参照) |
-| `src/tui/` | OpenTUI terminal dashboard: real-time spec progress viewer (Bun-only, @opentui/react) |
+| `src/tui/` | OpenTUI terminal quality dashboard (Bun-only) |
+| `src/git/` | Git integration: user.name resolution |
 | `src/cli.ts` | CLI entry point (citty dispatch) |
-| `web/` | React SPA: Vite 8, TanStack Router/Query, shadcn/ui, Tailwind CSS v4, Biome |
-
-## Spec-Driven Development Flow (Invariant)
-
-### Concept Hierarchy
-
-**Spec > Wave > Task** — this hierarchy is immutable.
-
-- A **Spec** contains one or more **Waves**
-- A **Wave** contains one or more **Tasks**
-- Progress updates happen per Task completion
-- Knowledge accumulation and self-review happen per Wave completion
-
-### Development Flow
-
-1. **Spec Creation** (user-initiated) — User explicitly requests spec creation via `/alfred:brief` or `dossier action=init`. Implementation without spec is allowed
-2. **Self-Review** (all sizes including S)
-   - OK → Implementation phase
-   - NG → Fix → Self-review (loop until OK)
-3. **Implementation** (per Wave, Wave-centric enforcement)
-   - Each Wave ends with T-N.R Review: commit → self-review → knowledge save
-   - Task completion: explicit `dossier action=check task_id="T-X.Y"` (no heuristic auto-check)
-   - Wave completion: git commit detected → review gate set → Edit/Write blocked until reviewed
-   - Knowledge accumulation via `ledger save` (DIRECTIVE)
-4. **All Waves Complete** → Final self-review (Closing Wave)
-   - OK → `dossier action=complete` (summary creation)
-   - NG → Fix → Self-review (loop until OK)
-
-### Enforcement
-
-| Step | Mechanism | Level |
-|------|-----------|-------|
-| Spec creation | User-initiated (no auto-proposal) | Manual |
-| Wave self-review | review-gate.json via PreToolUse (fix_mode for review→fix→re-review loop) | DENY (fix_mode: ALLOW) |
-| Wave commit + knowledge | PostToolUse DIRECTIVE | DIRECTIVE |
-| Task progress update | Explicit `dossier action=check` | Manual |
-| Final self-review | Closing Wave checkbox + Stop hook | CONTEXT |
 
 ## Commands
 
-Taskfile (task runner) を使用。`task` コマンドで実行。
-
 ```bash
-task build                    # Build React SPA + CLI bundle (bun build)
-task dev                      # Start Vite dev server (use with ALFRED_DEV=1 bun dist/cli.mjs dashboard)
-bun src/tui/main.tsx          # TUI dashboard (real-time spec progress)
-task check                    # tsc --noEmit + Biome lint
-task fix                      # Biome auto-fix
-task test                     # vitest
-task clean                    # Clean build artifacts (dist/ + web/dist/)
-bun dist/cli.mjs dashboard   # Open browser dashboard (localhost:7575)
-bun dist/cli.mjs version     # Show version
+task build       # Build CLI bundle (bun build)
+task tui         # Quality dashboard in terminal
+task check       # tsc --noEmit + Biome lint
+task fix         # Biome auto-fix
+task test        # vitest
+task clean       # Clean build artifacts
 ```
 
-## Release
+## Design Principles
 
-`/release` — version auto-detected or specified.
+1. **壁 > 情報提示** — DIRECTIVE (100%強制) > CONTEXT (80%遵守)
+2. **機械的強制 > 言語的指示** — Hook ゲート > CLAUDE.md ルール
+3. **Claude Code 増幅 > 代替** — Plan mode 等のネイティブ機能をパワーアップ
+4. **リサーチ駆動** — 効果が実証された手法のみ実装 (see design/research-ai-code-quality-2026.md)
+5. **不可視** — ユーザーは alfred を意識しない
 
 ## Rules
 
-### Build & Distribution
+### Build
+- `bun build.ts` after src/ changes — output is `dist/cli.mjs`
+- `bun build.ts --compile` for single binary
+- **dependencies はゼロ** — bun:sqlite (built-in)、他は全て devDependencies + bun build バンドル
 
-- `bun build.ts` after src/ changes — output is `dist/cli.mjs`; `bun build.ts --compile` for single binary
-- `plugin/` is git-tracked for marketplace distribution (hooks, mcp config, skills, agents, rules)
-- MCP tools return structured JSON
-- MCP server version: dynamically set from resolvedVersion() (not hardcoded)
-- **dependencies はゼロ** — bun:sqlite (built-in) を使用、他のライブラリは全て devDependencies に書き bun build でバンドル
+### Configuration
+- VOYAGE_API_KEY **必須** — Voyage AI ベクトル検索 (フォールバックなし)
+- `alfred init` で ~/.claude/ に全設定配置 (MCP, hooks, rules, skills, agents)
+- Plugin 不要 — 直接ファイル配置
 
-### Configuration & API
+### Hook Design
+- Hook handler: short-lived CLI process. 6 hooks: SessionStart, PreCompact, UserPromptSubmit, PostToolUse, PreToolUse, Stop
+- PostToolUse (5s): 最重要 — ファイル編集後にlint/type実行、テスト結果解析、git commitゲート
+- PreToolUse (3s): Edit/Write ブロック可能 — pending-fixes未修正ならDENY
+- 二段構え: PostToolUse で検出+DIRECTIVE → PreToolUse でブロック
 
-- VOYAGE_API_KEY enables semantic search; without it, FTS5 full-text search is used as fallback
-- ALFRED_LANG sets output language for all generated content (default: en); template headings stay in English
+### Knowledge Types (3 types)
+- **error_resolution**: エラー→解決策キャッシュ (Bashエラー時に自動注入)
+- **exemplar**: before/after コード例 (Few-shot注入)
+- **convention**: プロジェクト規約 (PreToolUseで注入)
 
-### Hooks & Events
+### Quality Gates (.alfred/gates.json)
+- on_write: ファイル編集後に lint/type チェック
+- on_commit: git commit 後にテスト実行
+- 自動検出: package.json から tsc/biome/vitest 等を検出
 
-- Hook handler: short-lived process. 6 hooks registered in hooks.json: SessionStart, PreCompact, UserPromptSubmit, PostToolUse, PreToolUse, Stop
-- @.claude/rules/hook-behavior.md (event pipelines, directives, skill nudge, drift detection, enforcement)
-- @.claude/rules/hook-internals.md (hook timeouts)
-- @.claude/rules/implementation-discipline.md (spec-first rule, wave self-review, commit discipline)
+### DB Schema V1
+- projects, knowledge_index, embeddings, quality_events
+- Voyage vector search only (FTS5 なし)
+- rebuildFromScratch pattern
 
-### Database & Schema
-- @.claude/rules/store-internals.md (schema V10, vector search, SQL safety, knowledge architecture)
-- rebuildFromScratch migration pattern (V9→V10)
-
-### Spec Management
-- @.claude/rules/spec-details.md (sizes, types, templates, validation, confidence)
-
-### Web Dashboard
-
-- @.claude/rules/frontend.md (component patterns, i18n)
-- @.claude/rules/butler-design.md (Butler Design System: animated icons, grain texture, spring animation, empty states, organic radius, neo-brutalist accents, color storytelling)
-- `alfred dashboard`: HTTP server + browser open (localhost:7575)
-- React SPA: Vite 8 + TanStack Router (file-based) + TanStack Query + shadcn/ui + Tailwind CSS v4
-- Build: `task build` (bun run build:web → tsdown bundle)
-- Dev mode: `ALFRED_DEV=1 alfred dashboard` + `task dev` (Vite HMR proxy)
-- 3 tabs: Overview (+ プロジェクトリスト) / Tasks (/tasks) / Knowledge (/knowledge)
-- 全プロジェクト横断表示、リアルタイム進捗(SSE)
-- Markdown rendering: react-markdown + react-syntax-highlighter for rich spec display
-- Brand palette (DEC-15): session #40513b, decision #628141, pattern #2d8b7a, rule #e67e22, error #c0392b, purple #7b6b8d, dark #44403c
-- Knowledge lifecycle: verification badges (verified/overdue/pending), Knowledge Gaps collapsible section, `GET /api/knowledge/gaps`
-- Verification: knowledge_index に verification_due/last_verified/verification_count カラム. `ledger action=verify` で Leitner 方式検証. SessionStart で期限切れ通知
-- Wave enforcement: dossier complete は全 Wave のタスクチェックを検証。gate clear は reason 30文字以上必須。fix_mode は 60分タイムアウト
-
-### Knowledge & Search
-
-- @.claude/rules/knowledge-internals.md (persistence, search pipeline, governance, promotion)
-- Knowledge quality gate (`src/mcp/quality-gate.ts`): ledger save 時に自動実行。セマンティック重複 (>= 0.90 near_duplicate, >= 0.85 similar_existing)、アクショナビリティ (行動指示語チェック EN/JA)、矛盾検出 (classifyConflict + 高類似度)。WARNING のみ、BLOCK しない
-- Review calibration: extractReviewFindings が `review-finding` タグ + `enabled=0` で保存。`ledger verify outcome=confirmed` で enabled=1、`outcome=rejected` で status=rejected
-
-### Naming Convention (Butler Theme)
-
-- Skills: brief, attend, tdd, inspect, mend
-- MCP tools: dossier (spec management), ledger (knowledge)
-
-### Deliberation Style
-
-- **Spec review**: brief/attend focus agent review on requirements.md + design.md only (fix loop until 0 Critical/High). Other files get inline quick check
-- **Code review**: attend spawns `alfred:code-reviewer` agent per Wave boundary in foreground (3 parallel sub-reviewers: security, logic, design)
-- **Other skills**: inspect/mend use inline multi-perspective deliberation (no sub-agents)
-- tasks.json updated after each task completion (dashboard real-time progress)
-- attend/mend: MUST call `dossier action=complete` at end to close spec
-
-### Troubleshooting
+## Troubleshooting
 
 - 修正→実行が3回連続失敗した場合、同じアプローチを繰り返さない。公式ドキュメント・事例を徹底リサーチしてからアプローチを再検討すること
 
 ## Quality Gates
 
-- At each meaningful implementation milestone, perform **thorough self-review from multiple perspectives** (delegate to another agent if possible)
+- At each meaningful implementation milestone, perform **thorough self-review**
 - After self-review, update README.md / CLAUDE.md to reflect changes
-- Maintain test coverage at **50% or above** (`bun run test`; hook handlers may be excluded)
+- Maintain test coverage at **50% or above**
 
-## Compact Instructions
+## Design Docs
 
-- Preserve active spec task slug and current progress from tasks.json
-- Preserve Orchestrator State from `.alfred/.state/orchestrator-{slug}.json` (phase, iteration, counters)
-- Keep all CLAUDE.md rules intact (re-read from disk after compact)
-- Do NOT discard in-progress implementation context or recent decisions
+See `design/` for detailed architecture, hook design, MCP schema, and research references.

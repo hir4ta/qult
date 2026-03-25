@@ -1,8 +1,5 @@
 version: "3"
 
-vars:
-  WEB_DIR: web
-
 tasks:
   default:
     desc: Show available commands
@@ -10,43 +7,14 @@ tasks:
       - task --list
 
   build:
-    desc: Build React SPA and CLI bundle
-    deps: [web:build]
+    desc: Build CLI bundle (bun build)
     cmds:
       - bun build.ts
-      - task: install-web-assets
 
-  install-web-assets:
-    desc: Copy web assets to shared location for compiled binary
-    cmds:
-      - mkdir -p ~/.local/share/alfred/web/dist
-      - cp -R {{.WEB_DIR}}/dist/ ~/.local/share/alfred/web/dist/
-
-  dev:
-    desc: Start Vite dev server (use with ALFRED_DEV=1 alfred dashboard)
-    dir: "{{.WEB_DIR}}"
-    cmds:
-      - bun run dev
-
-  dashboard:
-    desc: Open web dashboard (localhost:7575)
-    cmds:
-      - bun dist/cli.mjs dashboard
-
-  active:
-    desc: Show active specs in TUI
+  tui:
+    desc: Show quality dashboard in terminal
     cmds:
       - bun src/tui/main.tsx
-
-  specs:
-    desc: Show all specs in TUI (including completed)
-    cmds:
-      - bun src/tui/main.tsx --all
-
-  opentui:
-    desc: OpenTUI component showcase (all 13 components)
-    cmds:
-      - bun src/tui/opentui-components.tsx
 
   check:
     desc: Run all checks (tsc + Biome lint)
@@ -59,11 +27,6 @@ tasks:
     cmds:
       - bun run lint:fix
 
-  fix:unsafe:
-    desc: Auto-fix all Biome issues including unsafe fixes
-    cmds:
-      - bunx biome check --write --unsafe src/ web/src/
-
   test:
     desc: Run vitest
     cmds:
@@ -72,20 +35,4 @@ tasks:
   clean:
     desc: Clean build artifacts
     cmds:
-      - rm -rf dist {{.WEB_DIR}}/dist
-      - rm -rf ~/.local/share/alfred/web/dist
-
-  # Internal tasks
-  web:build:
-    desc: Build React SPA
-    dir: "{{.WEB_DIR}}"
-    cmds:
-      - bun run build
-    sources:
-      - src/**/*
-      - index.html
-      - vite.config.ts
-      - tsconfig.json
-      - package.json
-    generates:
-      - dist/**/*
+      - rm -rf dist

@@ -1,23 +1,24 @@
 import type { HookEvent } from "./dispatcher.js";
-import { isGateActive } from "./review-gate.js";
-import { blockStop } from "./spec-guard.js";
+import type { DirectiveItem } from "./directives.js";
+import { emitDirectives } from "./directives.js";
 
 /**
- * Stop handler:
- * - review-gate active → BLOCK (hard enforcement)
- * - All soft reminders (unchecked tasks, self-review, completion) moved to rules.
- * DEC-4: stop_hook_active=true → always allow (infinite loop prevention).
+ * Stop handler (v2): soft reminders (no hard blocking).
+ *
+ * Flow:
+ * 1. Check for untested changed files → CONTEXT
+ * 2. Check pending-fixes → WARNING
+ * 3. Save final quality summary
  */
 export async function stop(ev: HookEvent): Promise<void> {
-	if (ev.stop_hook_active) return;
+	if (!ev.cwd) return;
 
-	// Review gate check — BLOCKS stop when spec/wave review is pending.
-	const gate = isGateActive(ev.cwd);
-	if (gate) {
-		const gateLabel =
-			gate.gate === "wave-review" ? `Wave ${gate.wave ?? "?"} review` : "Spec self-review";
-		blockStop(
-			`${gateLabel} not completed for spec '${gate.slug}'. Run review, then: dossier action=gate sub_action=clear reason="<review summary>"`,
-		);
-	}
+	const items: DirectiveItem[] = [];
+
+	// TODO (Phase 4): Implement v2 Stop logic
+	// 1. git diff --name-only → check for changed files without test updates → CONTEXT
+	// 2. pending-fixes.json → WARNING if unresolved
+	// 3. quality summary final save
+
+	emitDirectives("Stop", items);
 }

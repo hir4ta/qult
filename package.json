@@ -1,31 +1,24 @@
 {
   "name": "claude-alfred",
-  "version": "0.7.15",
+  "version": "1.0.0-alpha.0",
   "type": "module",
-  "workspaces": [
-    "web"
-  ],
   "bin": {
     "alfred": "dist/cli.mjs"
   },
   "files": [
-    "dist/",
-    "web/dist/",
-    "templates/"
+    "dist/"
   ],
   "engines": {
     "bun": ">=1.3"
   },
   "scripts": {
     "build": "bun build.ts",
-    "build:web": "cd web && bun run build",
     "dev": "bun --watch src/cli.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "biome check src/ web/src/",
-    "lint:fix": "biome check --write src/ web/src/",
+    "lint": "biome check src/",
+    "lint:fix": "biome check --write src/",
     "test": "bunx --bun vitest run",
-    "test:watch": "bunx --bun vitest",
-    "prepack": "bun run build:web && bun build.ts"
+    "test:watch": "bunx --bun vitest"
   },
   "dependencies": {},
   "devDependencies": {
@@ -36,12 +29,9 @@
     "@types/bun": "^1.3.11",
     "@vitest/coverage-v8": "^3.2.4",
     "citty": "^0.2",
-    "eta": "^4",
-    "hono": "^4",
     "react": "19.2.4",
     "typescript": "^5.8",
     "vitest": "^3",
-    "yaml": "^2",
     "zod": "^3"
   }
 }

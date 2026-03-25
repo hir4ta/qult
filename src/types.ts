@@ -1,4 +1,7 @@
-export interface KnowledgeRow {
+// ===== v1 Compatibility (removed in Phase 1 when store is rewritten) =====
+
+/** @deprecated v1 compat — will be removed in Phase 1 */
+export interface KnowledgeRowV1 {
 	id: number;
 	projectId: string;
 	filePath: string;
@@ -18,57 +21,23 @@ export interface KnowledgeRow {
 	verificationCount?: number;
 }
 
-export interface ProjectRecord {
-	id: string;
-	name: string;
-	remote: string;
-	path: string;
-	branch: string;
-	registeredAt: string;
-	lastSeenAt: string;
-	status: string;
-	metadata: string;
-}
-
-export interface SpecIndexRow {
-	id: number;
-	projectId: string;
-	slug: string;
-	fileName: string;
-	contentHash: string;
-	title: string;
-	content: string;
-	size: string;
-	specType: string;
-	status: string;
-	createdAt: string;
-	updatedAt: string;
-}
-
+/** @deprecated v1 compat */
 export interface KnowledgeStats {
 	total: number;
 	bySubType: Record<string, number>;
 	avgHitCount: number;
-	topAccessed: KnowledgeRow[];
+	topAccessed: KnowledgeRowV1[];
 }
 
-export interface LowVitalityRow extends KnowledgeRow {
-	vitality: number;
-}
-
-export interface VectorMatch {
-	sourceId: number;
-	score: number;
-	source?: "knowledge" | "spec";
-}
-
+/** @deprecated v1 compat */
 export interface KnowledgeConflict {
-	a: KnowledgeRow;
-	b: KnowledgeRow;
+	a: KnowledgeRowV1;
+	b: KnowledgeRowV1;
 	similarity: number;
 	type: "potential_duplicate" | "potential_contradiction";
 }
 
+/** @deprecated v1 compat */
 export interface ProjectInfo {
 	remote: string;
 	path: string;
@@ -76,82 +45,102 @@ export interface ProjectInfo {
 	branch: string;
 }
 
-export interface SessionLink {
-	claudeSessionId: string;
-	masterSessionId: string;
-	projectRemote: string;
-	projectPath: string;
-	taskSlug: string;
-	branch: string;
-	linkedAt: string;
-}
+// ===== v2 Knowledge Types =====
 
-export interface SessionContinuity {
-	masterSessionId: string;
-	linkedSessions: string[];
-	compactCount: number;
-}
+export type KnowledgeType = "error_resolution" | "exemplar" | "convention";
+export const KNOWLEDGE_TYPES: KnowledgeType[] = ["error_resolution", "exemplar", "convention"];
 
-export const SUB_TYPE_DECISION = "decision" as const;
-export const SUB_TYPE_PATTERN = "pattern" as const;
-export const SUB_TYPE_RULE = "rule" as const;
-export const SUB_TYPE_SNAPSHOT = "snapshot" as const; // internal: session snapshots, not searchable
-
-export type ValidSubType =
-	| typeof SUB_TYPE_DECISION
-	| typeof SUB_TYPE_PATTERN
-	| typeof SUB_TYPE_RULE;
-export const VALID_SUB_TYPES: ValidSubType[] = ["decision", "pattern", "rule"];
-
-// mneme-compatible knowledge schemas (stored as JSON in KnowledgeRow.content)
-
-export interface DecisionEntry {
-	id: string;
+export interface KnowledgeRow {
+	id: number;
+	projectId: string;
+	type: KnowledgeType;
 	title: string;
-	context: string;
-	decision: string;
-	reasoning: string;
-	alternatives: string[];
-	tags: string[];
+	content: string; // JSON (type-specific structure)
+	tags: string;
+	author: string;
+	hitCount: number;
+	lastAccessed: string;
+	enabled: boolean;
 	createdAt: string;
-	updatedAt?: string;
-	status: "draft" | "approved";
-	lang?: string;
-	author?: string;
-	updated_by?: string;
+	updatedAt: string;
 }
 
-export interface PatternEntry {
-	id: string;
-	type: "good" | "bad" | "error-solution";
-	title: string;
-	context: string;
+// Knowledge content JSON structures
+
+export interface ErrorResolutionContent {
+	error_signature: string;
+	resolution: string;
+	context?: string;
+}
+
+export interface ExemplarContent {
+	bad: string;
+	good: string;
+	explanation: string;
+}
+
+export interface ConventionContent {
 	pattern: string;
-	applicationConditions: string;
-	expectedOutcomes: string;
-	tags: string[];
-	createdAt: string;
-	updatedAt?: string;
-	status: "draft" | "approved";
-	lang?: string;
-	author?: string;
-	updated_by?: string;
+	category: string; // naming | imports | error-handling | testing | architecture | style
+	example_files?: string[];
 }
 
-export interface RuleEntry {
-	id: string;
-	title: string;
-	key: string;
-	text: string;
-	category: string;
-	priority: "p0" | "p1" | "p2";
-	rationale: string;
-	sourceRef?: { type: "decision" | "pattern"; id: string };
-	tags: string[];
+// ===== Quality Events =====
+
+export type QualityEventType =
+	| "gate_pass"
+	| "gate_fail"
+	| "error_hit"
+	| "error_miss"
+	| "test_pass"
+	| "test_fail"
+	| "assertion_warning"
+	| "convention_pass"
+	| "convention_warn";
+
+export interface QualityEvent {
+	id: number;
+	projectId: string;
+	sessionId: string;
+	eventType: QualityEventType;
+	data: string; // JSON
 	createdAt: string;
-	updatedAt?: string;
-	status: "draft" | "approved";
-	lang?: string;
-	author?: string;
-	updated_by?: string;
+}
+
+// ===== Project =====
+
+export interface ProjectRecord {
+	id: string;
+	name: string;
+	remote: string;
+	path: string;
+	/** @deprecated v1 compat — removed in Phase 1 */
+	branch: string;
+	registeredAt: string;
+	lastSeenAt: string;
+	status: string;
+	/** @deprecated v1 compat — removed in Phase 1 */
+	metadata: string;
+}
+
+// ===== Vector Search =====
+
+export interface VectorMatch {
+	sourceId: number;
+	score: number;
+	/** @deprecated v1 compat — removed in Phase 1 */
+	source?: "knowledge" | "spec";
+}
+
+// ===== Quality Score =====
+
+export interface QualityScore {
+	sessionScore: number; // 0-100
+	breakdown: {
+		gatePassRateWrite: { score: number; pass: number; total: number };
+		gatePassRateCommit: { score: number; pass: number; total: number };
+		errorResolutionHit: { score: number; hit: number; total: number };
+		conventionAdherence: { score: number; pass: number; total: number };
+	};
+	trend: "improving" | "stable" | "declining";
 }
