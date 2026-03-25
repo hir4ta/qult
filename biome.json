@@ -29,22 +29,7 @@
     "enabled": true
   },
   "files": {
-    "includes": ["src/**", "web/src/**"],
-    "experimentalScannerIgnores": ["dist/", "web/dist/", "web/src/routeTree.gen.ts", "web/src/styles/**"]
-  },
-  "overrides": [
-    {
-      "includes": ["web/src/**"],
-      "linter": {
-        "rules": {
-          "correctness": {
-            "useExhaustiveDependencies": "warn"
-          },
-          "suspicious": {
-            "noArrayIndexKey": "off"
-          }
-        }
-      }
-    }
-  ]
+    "includes": ["src/**"],
+    "experimentalScannerIgnores": ["dist/"]
+  }
 }

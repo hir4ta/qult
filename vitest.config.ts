@@ -16,7 +16,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      exclude: ['src/**/__tests__/**', 'src/spec/templates/**', 'src/api/**', 'src/embedder/**', 'src/cli.ts', 'src/postinstall.ts'],
+      exclude: ['src/**/__tests__/**', 'src/embedder/**', 'src/cli.ts', 'src/tui/**'],
     },
   },
 });
