@@ -61,7 +61,7 @@ describe("dossierCheck", () => {
 		};
 		setupSpec("check-test", tasks);
 
-		const result = parseResult(dossierCheck(tmpDir, { task_id: "T-1.1" }));
+		const result = parseResult(dossierCheck(tmpDir, { action: "check", task_id: "T-1.1" }));
 		expect(result.status).toBe("checked");
 
 		// Verify tasks.json was updated.
@@ -78,7 +78,7 @@ describe("dossierCheck", () => {
 		};
 		setupSpec("dup-check", tasks);
 
-		const result = parseResult(dossierCheck(tmpDir, { task_id: "T-1.1" }));
+		const result = parseResult(dossierCheck(tmpDir, { action: "check", task_id: "T-1.1" }));
 		expect(result.status).toBe("already_checked");
 	});
 
@@ -90,7 +90,7 @@ describe("dossierCheck", () => {
 		};
 		setupSpec("missing-task", tasks);
 
-		const result = parseResult(dossierCheck(tmpDir, { task_id: "T-99.1" }));
+		const result = parseResult(dossierCheck(tmpDir, { action: "check", task_id: "T-99.1" }));
 		expect(result.error).toContain("not found");
 	});
 
@@ -109,7 +109,7 @@ describe("dossierCheck", () => {
 
 		const io = suppressIO();
 		try {
-			const result = parseResult(dossierCheck(tmpDir, { task_id: "T-1.2" }));
+			const result = parseResult(dossierCheck(tmpDir, { action: "check", task_id: "T-1.2" }));
 			expect(result.gate_set).toBe(true);
 			expect(result.wave_completion).toBeDefined();
 			expect(result.wave_completion[0]).toContain("Wave 1 complete");
@@ -139,7 +139,7 @@ describe("dossierCheck", () => {
 
 		const io = suppressIO();
 		try {
-			const result = parseResult(dossierCheck(tmpDir, { task_id: "T-C.1" }));
+			const result = parseResult(dossierCheck(tmpDir, { action: "check", task_id: "T-C.1" }));
 			// Closing wave completes but no gate should be set.
 			expect(result.gate_set).toBeUndefined();
 		} finally { io.restore(); }
@@ -158,7 +158,7 @@ describe("dossierCheck", () => {
 		};
 		setupSpec("dep-warn", tasks);
 
-		const result = parseResult(dossierCheck(tmpDir, { task_id: "T-1.2" }));
+		const result = parseResult(dossierCheck(tmpDir, { action: "check", task_id: "T-1.2" }));
 		expect(result.dep_warnings).toBeDefined();
 		expect(result.dep_warnings[0]).toContain("T-1.1");
 	});
@@ -178,7 +178,7 @@ describe("dossierComplete", () => {
 		setupSpec("gate-block", tasks);
 		writeReviewGate(tmpDir, { gate: "wave-review", slug: "gate-block", wave: 1, reason: "review needed" });
 
-		const result = parseResult(await dossierComplete(tmpDir, store, {}));
+		const result = parseResult(await dossierComplete(tmpDir, store, { action: "complete" }));
 		expect(result.error).toContain("review gate active");
 	});
 
@@ -192,7 +192,7 @@ describe("dossierComplete", () => {
 		};
 		setupSpec("unchecked-block", tasks);
 
-		const result = parseResult(await dossierComplete(tmpDir, store, {}));
+		const result = parseResult(await dossierComplete(tmpDir, store, { action: "complete" }));
 		expect(result.error).toContain("unchecked task");
 	});
 
@@ -206,7 +206,7 @@ describe("dossierComplete", () => {
 		};
 		setupSpec("closing-block", tasks);
 
-		const result = parseResult(await dossierComplete(tmpDir, store, {}));
+		const result = parseResult(await dossierComplete(tmpDir, store, { action: "complete" }));
 		expect(result.error).toContain("Closing");
 	});
 });
