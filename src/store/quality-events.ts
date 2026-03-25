@@ -74,8 +74,64 @@ export function calculateQualityScore(
 			errorResolutionHit: { score: Math.round(errorHitRate * 100), hit: errorHit, total: errorTotal },
 			conventionAdherence: { score: Math.round(convRate * 100), pass: convPass, total: convTotal },
 		},
-		trend: "stable",
+		trend: computeTrend(store, score),
 	};
+}
+
+/**
+ * Compute trend by comparing current score to recent session averages.
+ */
+function computeTrend(store: Store, currentScore: number): "improving" | "stable" | "declining" {
+	try {
+		// Get distinct recent session IDs (excluding current-ish ones)
+		const rows = store.db
+			.prepare(`
+				SELECT DISTINCT session_id FROM quality_events
+				WHERE session_id NOT LIKE 'session-%'
+				ORDER BY created_at DESC LIMIT 5
+			`)
+			.all() as Array<{ session_id: string }>;
+
+		if (rows.length < 2) return "stable";
+
+		// Calculate average score of previous sessions
+		let totalScore = 0;
+		let count = 0;
+		for (const r of rows) {
+			const prev = calculateQualityScoreRaw(store, r.session_id);
+			if (prev > 0) {
+				totalScore += prev;
+				count++;
+			}
+		}
+		if (count === 0) return "stable";
+
+		const avg = totalScore / count;
+		const diff = currentScore - avg;
+		if (diff >= 5) return "improving";
+		if (diff <= -5) return "declining";
+		return "stable";
+	} catch {
+		return "stable";
+	}
+}
+
+/** Raw score calculation without trend (avoids recursion). */
+function calculateQualityScoreRaw(store: Store, sessionId: string): number {
+	const summary = getSessionSummary(store, sessionId);
+	const gp = summary.gate_pass ?? 0;
+	const gf = summary.gate_fail ?? 0;
+	const gt = gp + gf;
+	const gRate = gt > 0 ? gp / gt : 1;
+	const eh = summary.error_hit ?? 0;
+	const em = summary.error_miss ?? 0;
+	const et = eh + em;
+	const eRate = et > 0 ? eh / et : 0;
+	const cp = summary.convention_pass ?? 0;
+	const cw = summary.convention_warn ?? 0;
+	const ct = cp + cw;
+	const cRate = ct > 0 ? cp / ct : 1;
+	return Math.min(100, Math.max(0, Math.round(gRate * 30 + gRate * 20 + eRate * 15 + cRate * 10 + 25)));
 }
 
 export function getRecentEvents(

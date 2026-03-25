@@ -11,6 +11,7 @@ import { countKnowledge } from "../store/knowledge.js";
 import { readPendingFixes, hasPendingFixes, type PendingFixes } from "../hooks/pending-fixes.js";
 import { readStateJSON } from "../hooks/state.js";
 import type { QualityScore } from "../types.js";
+import { getExemplarInjectionCount } from "../hooks/user-prompt.js";
 
 export interface QualityDashboardData {
 	// Score
@@ -108,7 +109,7 @@ export function loadDashboardData(cwd: string): QualityDashboardData {
 			knowledge: {
 				errorHits: summary.error_hit ?? 0,
 				errorMisses: summary.error_miss ?? 0,
-				exemplarInjections: 0, // TODO: track exemplar injection events
+				exemplarInjections: getExemplarInjectionCount(cwd),
 				assertionWarnings: summary.assertion_warning ?? 0,
 				conventionPass: summary.convention_pass ?? 0,
 				conventionWarn: summary.convention_warn ?? 0,

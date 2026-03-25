@@ -2,6 +2,7 @@ import type { DirectiveItem } from "./directives.js";
 import { emitDirectives } from "./directives.js";
 import type { HookEvent } from "./dispatcher.js";
 import { searchKnowledgeSafe, formatSearchHits } from "./knowledge-search.js";
+import { readStateJSON, writeStateJSON } from "./state.js";
 
 /**
  * UserPromptSubmit handler: Plan mode power-up + knowledge injection.
@@ -38,7 +39,6 @@ export async function userPromptSubmit(ev: HookEvent, signal: AbortSignal): Prom
 	}
 
 	// Exemplar + error_resolution injection (research #8: few-shot > rule list)
-	// Inject 1-3 relevant examples for implementation prompts
 	if (intent === "implementation") {
 		const hits = await searchKnowledgeSafe(prompt, {
 			limit: 3,
@@ -50,6 +50,8 @@ export async function userPromptSubmit(ev: HookEvent, signal: AbortSignal): Prom
 				level: "CONTEXT",
 				message: `Relevant knowledge:\n${formatted}`,
 			});
+			// Record exemplar injection for TUI dashboard tracking
+			recordExemplarInjection(ev.cwd, hits.length);
 		}
 	}
 
@@ -254,4 +256,20 @@ function isLargeTask(prompt: string): boolean {
 		if (prompt.includes(signal)) return true;
 	}
 	return prompt.length > 800;
+}
+
+// ── Exemplar injection tracking ─────────────────────────────────────
+
+const EXEMPLAR_COUNT_FILE = "exemplar-injections.json";
+
+function recordExemplarInjection(cwd: string, count: number): void {
+	try {
+		const current = readStateJSON<{ count: number }>(cwd, EXEMPLAR_COUNT_FILE, { count: 0 });
+		writeStateJSON(cwd, EXEMPLAR_COUNT_FILE, { count: current.count + count });
+	} catch { /* fail-open */ }
+}
+
+/** Read total exemplar injection count for this session. */
+export function getExemplarInjectionCount(cwd: string): number {
+	return readStateJSON<{ count: number }>(cwd, EXEMPLAR_COUNT_FILE, { count: 0 }).count;
 }

@@ -17,6 +17,7 @@ const C = {
 	red: "#ea6962",
 	aqua: "#89b482",
 	border: "#5a524c",
+	hlBg: "#32302f",
 };
 
 function scoreColor(n: number) { return n >= 80 ? C.green : n >= 60 ? C.yellow : C.red; }
@@ -31,9 +32,127 @@ function pct(pass: number, total: number) {
 	return total === 0 ? " -" : `${Math.round((pass / total) * 100)}%`;
 }
 
+// ── Help content (EN / JA) ──────────────────────────────────────────
+
+const HELP_EN = [
+	"Quality Score (0-100)",
+	"  Weighted sum: gate_write 30% + gate_commit 20%",
+	"  + error_resolution_hit 15% + convention 10% + base 25%",
+	"  ▲/▼ = difference from previous session's score",
+	"  Trend: improving/stable/declining (multi-session)",
+	"",
+	"Gates",
+	"  on_write: lint/typecheck after each file edit",
+	"  on_commit: test/typecheck after git commit",
+	"  test: test runner pass/fail (vitest, jest, etc.)",
+	"  pass = gate cleared, fail = DIRECTIVE injected",
+	"",
+	"Knowledge",
+	"  error_resolution: past error→fix pairs (Voyage search)",
+	"    hits = resolution found & injected, total = DB entries",
+	"  exemplar: before/after code examples (few-shot)",
+	"    injected = exemplars sent to Claude this session",
+	"  convention: project coding patterns",
+	"    adherence = convention checks passed vs warned",
+	"",
+	"Recent Events",
+	"  Real-time stream of quality events (2s poll)",
+	"  ✓ = pass/hit, ✗ = fail/miss, ● = warning",
+	"",
+	"Session",
+	"  Elapsed: time since TUI start (red at 35min — research:",
+	"    task time 2x = failure rate 4x)",
+	"  Files: git diff changed file count",
+	"  Commits: commits today",
+	"  Pending: unresolved lint/type errors (blocks Edit/Write)",
+	"  Directives: DIRECTIVE injections this session",
+];
+
+const HELP_JA = [
+	"品質スコア (0-100)",
+	"  加重合計: gate_write 30% + gate_commit 20%",
+	"  + error_resolution_hit 15% + convention 10% + base 25%",
+	"  ▲/▼ = 前セッションスコアとの差分",
+	"  トレンド: improving/stable/declining (複数セッション比較)",
+	"",
+	"Gates (品質の壁)",
+	"  on_write: ファイル編集後に lint/型チェック実行",
+	"  on_commit: git commit 後にテスト/型チェック実行",
+	"  test: テストランナーの成功/失敗",
+	"  pass = 壁クリア, fail = DIRECTIVE(修正指示)注入",
+	"",
+	"Knowledge (知識DB)",
+	"  error_resolution: 過去のエラー→解決策ペア (Voyage検索)",
+	"    hits = 解決策発見&注入, total = DB蓄積数",
+	"  exemplar: before/afterコード例 (Few-shot注入)",
+	"    injected = このセッションでClaude に送った例の数",
+	"  convention: プロジェクトのコーディング規約",
+	"    adherence = convention チェック pass vs warn",
+	"",
+	"Recent Events (最近のイベント)",
+	"  品質イベントのリアルタイムストリーム (2秒ポーリング)",
+	"  ✓ = pass/hit, ✗ = fail/miss, ● = warning",
+	"",
+	"Session (セッション情報)",
+	"  経過時間: TUI起動からの時間 (35分超で赤 — リサーチ:",
+	"    タスク時間2倍 = 失敗率4倍)",
+	"  Files: git diff の変更ファイル数",
+	"  Commits: 今日のコミット数",
+	"  Pending: 未修正の lint/型エラー数 (Edit/Writeをブロック)",
+	"  Directives: このセッションの DIRECTIVE 注入回数",
+];
+
+// ── Help overlay component ──────────────────────────────────────────
+
+function HelpOverlay({ lang, onClose, onToggleLang }: {
+	lang: "en" | "ja";
+	onClose: () => void;
+	onToggleLang: () => void;
+}) {
+	const lines = lang === "en" ? HELP_EN : HELP_JA;
+	const title = lang === "en" ? "Help" : "ヘルプ";
+
+	useKeyboard((key) => {
+		if (key.name === "?" || key.name === "escape" || key.name === "q") onClose();
+		if (key.name === "tab") onToggleLang();
+	});
+
+	return (
+		<box style={{
+			position: "absolute",
+			top: 2,
+			left: 4,
+			right: 4,
+			bottom: 2,
+			borderStyle: "rounded",
+			borderColor: C.accent,
+			flexDirection: "column",
+			padding: 1,
+			backgroundColor: "#1d2021",
+		}} title={title}>
+			<scrollbox style={{ contentOptions: { flexDirection: "column" } }}>
+				{lines.map((line, i) => (
+					<text key={String(i)} fg={line.startsWith("  ") ? C.dim : C.fg}>{line || " "}</text>
+				))}
+			</scrollbox>
+			<box style={{ height: 1, marginTop: 1 }}>
+				<text>
+					<span fg={C.yellow}>[Tab]</span><span fg={C.dim}> {lang === "en" ? "日本語" : "English"}</span>
+					<span fg={C.dim}>  </span>
+					<span fg={C.yellow}>[?/Esc]</span><span fg={C.dim}> close</span>
+				</text>
+			</box>
+		</box>
+	);
+}
+
+// ── Main App ────────────────────────────────────────────────────────
+
 function App() {
 	const cwd = process.cwd();
 	const [data, setData] = useState<QualityDashboardData | null>(null);
+	const [showHelp, setShowHelp] = useState(false);
+	const [helpLang, setHelpLang] = useState<"en" | "ja">("en");
 	const renderer = useRenderer();
 	const { height: termH } = useTerminalDimensions();
 
@@ -44,8 +163,10 @@ function App() {
 	}, []);
 
 	useKeyboard((key) => {
+		if (showHelp) return; // HelpOverlay handles its own keys
 		if (key.name === "q" || key.name === "escape") renderer.destroy();
 		if (key.name === "r") setData(loadDashboardData(cwd));
+		if (key.name === "?") setShowHelp(true);
 	});
 
 	if (!data) return <text fg={C.dim}>Loading...</text>;
@@ -81,7 +202,7 @@ function App() {
 						<span fg={C.dim}> │ Score: </span>
 						<span fg={scoreColor(s.sessionScore)}>{String(s.sessionScore)}/100</span>
 						{delta != null && <span fg={delta >= 0 ? C.green : C.red}> {deltaStr}</span>}
-						<span fg={C.dim}> ({s.trend})</span>
+						{s.trend !== "stable" && <span fg={C.dim}> ({s.trend})</span>}
 					</text>
 				</box>
 			</box>
@@ -129,8 +250,17 @@ function App() {
 
 			{/* Footer */}
 			<box style={{ height: 1, paddingX: 1 }}>
-				<text fg={C.dim}>[q] quit  [r] refresh</text>
+				<text fg={C.dim}>[q] quit  [r] refresh  [?] help</text>
 			</box>
+
+			{/* Help overlay */}
+			{showHelp && (
+				<HelpOverlay
+					lang={helpLang}
+					onClose={() => setShowHelp(false)}
+					onToggleLang={() => setHelpLang((l) => l === "en" ? "ja" : "en")}
+				/>
+			)}
 		</box>
 	);
 }
