@@ -98,13 +98,24 @@ async function handleBashResult(
 
 /**
  * Detect git commit from Bash stdout.
+ * Handles: regular commit, merge, rebase, cherry-pick, amend.
  */
 export function isGitCommit(stdout: string): boolean {
 	if (!stdout) return false;
 	return (
+		// Regular commit: [branch hash] message
 		/\[[\w./-]+ [0-9a-f]+\]/.test(stdout) ||
+		// Diff stat (commit, merge, rebase all produce this)
 		(stdout.includes("files changed") &&
-			(stdout.includes("insertion") || stdout.includes("deletion")))
+			(stdout.includes("insertion") || stdout.includes("deletion"))) ||
+		// Merge commit
+		/Merge made by the/.test(stdout) ||
+		// Fast-forward merge
+		/Fast-forward/.test(stdout) ||
+		// Rebase
+		/Successfully rebased/.test(stdout) ||
+		// Cherry-pick (produces [branch hash] like regular commit, but also:)
+		/cherry-picked/i.test(stdout)
 	);
 }
 

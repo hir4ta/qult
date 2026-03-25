@@ -3,7 +3,6 @@ import type { Store } from "./index.js";
 
 const MIN_SIMILARITY = 0.6;
 const DEFAULT_MAX_VECTOR_CANDIDATES = 10_000;
-const EARLY_STOP_THRESHOLD = 0.7;
 
 function envIntOrDefault(key: string, fallback: number): number {
 	const v = process.env[key];
@@ -68,7 +67,6 @@ export function vectorSearch(
 		"ALFRED_MAX_VECTOR_CANDIDATES",
 		DEFAULT_MAX_VECTOR_CANDIDATES,
 	);
-	const earlyStopCount = Math.max(limit * 3, 50);
 
 	const allCandidates: VectorMatch[] = [];
 
@@ -87,7 +85,6 @@ export function vectorSearch(
     `)
 			.all(source, maxCandidates) as Array<{ source_id: number; source: string; vector: Buffer | Uint8Array }>;
 
-		let highQualityCount = 0;
 		for (const row of rows) {
 			const vec = deserializeFloat32(row.vector);
 			if (vec.length !== queryVec.length) continue;
@@ -96,10 +93,6 @@ export function vectorSearch(
 			if (sim < (minScore ?? MIN_SIMILARITY)) continue;
 
 			allCandidates.push({ sourceId: row.source_id, score: sim, source: row.source as VectorSource });
-			if (sim >= EARLY_STOP_THRESHOLD) {
-				highQualityCount++;
-				if (highQualityCount >= earlyStopCount) break;
-			}
 		}
 	}
 

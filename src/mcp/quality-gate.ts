@@ -54,8 +54,10 @@ const ACTIONABILITY_PATTERNS = {
 
 interface QualityGateParams {
 	title?: string;
+	decision?: string;
 	reasoning?: string;
 	pattern?: string;
+	context?: string;
 	text?: string;
 }
 
@@ -159,10 +161,10 @@ export function checkActionability(
 	let targets: string[];
 	switch (subType) {
 		case "decision":
-			targets = [params.title ?? "", params.reasoning ?? ""];
+			targets = [params.title ?? "", params.decision ?? "", params.reasoning ?? ""];
 			break;
 		case "pattern":
-			targets = [params.title ?? "", params.pattern ?? ""];
+			targets = [params.title ?? "", params.pattern ?? "", params.context ?? ""];
 			break;
 		case "rule":
 			targets = [params.title ?? "", params.text ?? ""];

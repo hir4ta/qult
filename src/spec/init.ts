@@ -39,6 +39,17 @@ export function initSpec(
 		throw new Error(`spec already exists for '${taskSlug}'; use dossier action=update to modify`);
 	}
 
+	// Check _active.json for ghost entries (slug exists in state but dir was deleted).
+	try {
+		const state = readActiveState(projectPath);
+		if (state.tasks.some((t) => t.slug === taskSlug)) {
+			throw new Error(`slug '${taskSlug}' already in _active.json; use dossier action=switch to resume`);
+		}
+	} catch (err) {
+		if (err instanceof Error && err.message.includes("already in _active.json")) throw err;
+		/* fail-open: state read errors don't block init */
+	}
+
 	mkdirSync(sd.dir(), { recursive: true });
 
 	const data: TemplateData = {

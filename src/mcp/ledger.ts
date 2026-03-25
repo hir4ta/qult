@@ -238,7 +238,7 @@ export function writeKnowledgeFile(
  * FR-1a: Compute verification_due date from a base date and half-life in days.
  */
 export function computeVerificationDue(baseDate: Date, halfLifeDays: number): string {
-	return new Date(baseDate.getTime() + (halfLifeDays / 2) * 86400000).toISOString();
+	return new Date(baseDate.getTime() + halfLifeDays * 86400000).toISOString();
 }
 
 const MAX_EMBEDDING_LENGTH = 1500;

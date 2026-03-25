@@ -32,6 +32,10 @@ describe("isGitCommit", () => {
 	it("detects diff stat pattern", () => expect(isGitCommit("3 files changed, 100 insertions(+), 20 deletions(-)")).toBe(true));
 	it("does not detect regular output", () => expect(isGitCommit("npm test completed successfully")).toBe(false));
 	it("returns false for empty string", () => expect(isGitCommit("")).toBe(false));
+	it("detects merge commit", () => expect(isGitCommit("Merge made by the 'ort' strategy.")).toBe(true));
+	it("detects fast-forward merge", () => expect(isGitCommit("Updating abc1234..def5678\nFast-forward")).toBe(true));
+	it("detects rebase", () => expect(isGitCommit("Successfully rebased and updated refs/heads/main.")).toBe(true));
+	it("detects cherry-pick", () => expect(isGitCommit("[main abc1234] cherry-picked from commit def5678")).toBe(true));
 });
 
 describe("detectWaveCompletion (JSON-based)", () => {
