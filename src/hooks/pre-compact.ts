@@ -8,6 +8,7 @@ import {
 	SpecDir,
 } from "../spec/types.js";
 import { openDefaultCached } from "../store/index.js";
+import { isGateActive } from "./review-gate.js";
 import { upsertKnowledge } from "../store/knowledge.js";
 import { resolveOrRegisterProject } from "../store/project.js";
 import type { KnowledgeRow } from "../types.js";
@@ -75,8 +76,17 @@ export async function preCompact(ev: HookEvent, _signal: AbortSignal): Promise<v
 	}
 
 	// Auto-complete task if tasks.json indicates all tasks checked.
+	// IMPORTANT: Do NOT auto-complete if a review gate is active — the spec
+	// must go through review before completion (SDD invariant).
 	try {
 		const taskSlug = readActive(projectPath);
+
+		const gate = isGateActive(projectPath);
+		if (gate && gate.slug === taskSlug) {
+			// Review gate active for this spec — skip auto-complete.
+			return;
+		}
+
 		const sd = new SpecDir(projectPath, taskSlug);
 		const tasksData = parseTasksFile(sd.readFile("tasks.json"));
 		const tasks = allTasks(tasksData);

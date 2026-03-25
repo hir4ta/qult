@@ -79,4 +79,54 @@ describe("preCompact (FR-6: extractDecisions removed)", () => {
 	it("returns early when cwd is empty", async () => {
 		await preCompact({ cwd: "" } as any, AbortSignal.timeout(5000));
 	});
+
+	it("does NOT auto-complete when review gate is active", async () => {
+		const tasksJson = {
+			slug: "gated",
+			waves: [
+				{ key: 1, title: "W1", tasks: [{ id: "T-1.1", title: "Task", checked: true }] },
+				{ key: "closing", title: "Closing", tasks: [{ id: "T-C.1", title: "Review", checked: true }] },
+			],
+		};
+		setupActiveSpec("gated", tasksJson);
+
+		// Set review gate.
+		const stateDir = join(tmpDir, ".alfred", ".state");
+		mkdirSync(stateDir, { recursive: true });
+		writeFileSync(join(stateDir, "review-gate.json"), JSON.stringify({
+			gate: "wave-review", slug: "gated", wave: 1, reason: "pending review",
+			set_at: new Date().toISOString(),
+		}));
+
+		const io = suppressIO();
+		try {
+			await preCompact({ cwd: tmpDir } as any, AbortSignal.timeout(5000));
+		} finally { io.restore(); }
+
+		// Task should still be active (not completed).
+		const active = JSON.parse(readFileSync(join(tmpDir, ".alfred", "specs", "_active.json"), "utf-8"));
+		expect(active.primary).toBe("gated");
+		expect(active.tasks.length).toBe(1);
+	});
+
+	it("auto-completes when all tasks checked and no gate", async () => {
+		const tasksJson = {
+			slug: "complete-me",
+			waves: [
+				{ key: 1, title: "W1", tasks: [{ id: "T-1.1", title: "Task", checked: true }] },
+				{ key: "closing", title: "Closing", tasks: [{ id: "T-C.1", title: "Review", checked: true }] },
+			],
+		};
+		setupActiveSpec("complete-me", tasksJson);
+
+		const io = suppressIO();
+		try {
+			await preCompact({ cwd: tmpDir } as any, AbortSignal.timeout(5000));
+		} finally { io.restore(); }
+
+		// Task should be completed.
+		const active = JSON.parse(readFileSync(join(tmpDir, ".alfred", "specs", "_active.json"), "utf-8"));
+		expect(active.primary).toBe("");
+		expect(active.tasks.length).toBe(0);
+	});
 });

@@ -27,12 +27,14 @@ After all spec documents are created:
 ## Step 3: Implementation (Per Wave)
 
 ### Per Task Completion
-- PostToolUse agent hook (Haiku) がタスク完了候補を additionalContext で提案 → Claude 本体が `dossier action=check` を呼ぶ
 - 明示的更新: `dossier action=check task_id="T-X.Y"`
+- Wave 内の全タスク checked → `dossier check` が自動で review-gate を設定 + status を "review" に遷移
+- PostToolUse も git commit 検出時に同じ wave completion 検出を行う（二重保護）
 
 ### Per Wave Completion
 1. **Commit** — Commit at Wave boundaries, include Wave number in message
 2. **Self-Review** — MUST run self-review before proceeding to next Wave
+   - Enforced: dossier check + PostToolUse の両方が review-gate を自動設定
    - Enforced: review-gate.json DENY blocks Edit/Write until cleared
    - If review finds Critical/High: enter fix_mode → fix → re-review → clear (loop until 0 findings)
    - FR-9: fix_mode 後の gate clear は `re_reviewed=true` が必須（PostToolUse が Agent レビューレスポンスを検出して自動セット）
@@ -49,4 +51,6 @@ After all spec documents are created:
 After all Waves (including Closing Wave) are done:
 1. Final self-review (Closing Wave checkbox)
 2. Call `dossier action=complete` to close the spec
+   - Blocked if: review-gate active, validation fails, or unchecked tasks remain
+   - PreCompact auto-complete also respects review-gate (skips if gate active)
 3. Stop hook will remind about unchecked items (CONTEXT, not DENY)

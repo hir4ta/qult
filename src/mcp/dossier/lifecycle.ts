@@ -62,6 +62,23 @@ export async function dossierComplete(projectPath: string, store: Store, params:
 	const state = readActiveState(projectPath);
 	const task = state.tasks.find((t) => t.slug === taskSlug);
 
+	// Review gate check: block completion if a review is pending.
+	try {
+		const gate = readReviewGate(projectPath);
+		if (gate && gate.slug === taskSlug) {
+			const isFixMode = gate.fix_mode && !gate.re_reviewed;
+			const gateLabel = gate.gate === "wave-review" ? `Wave ${gate.wave ?? "?"}` : "Spec";
+			if (isFixMode) {
+				return errorResult(
+					`${gateLabel} review gate active (fix_mode). Complete the re-review then clear the gate before completing the spec.`,
+				);
+			}
+			return errorResult(
+				`${gateLabel} review gate active. Run self-review, then: dossier action=gate sub_action=clear reason="<review summary>"`,
+			);
+		}
+	} catch { /* fail-open: don't block on gate read errors */ }
+
 	// Validation gate: all sizes must pass validation (no fail checks).
 	// Two failure modes: (1) validateSpec returns fails → block completion.
 	// (2) validateSpec throws → fail-open, allow completion (NFR-2).
@@ -356,22 +373,53 @@ export function dossierCheck(projectPath: string, params: DossierParams) {
 	// Write back
 	sd.writeFile("tasks.json", JSON.stringify(tasksData, null, 2) + "\n");
 
-	// Detect wave completion
+	// Detect wave completion: find the first unreviewed complete wave and set review gate.
 	const waveMessages: string[] = [];
+	let gateSet = false;
+
+	// Read existing wave progress to avoid re-gating already reviewed waves.
+	let prevProgress: { waves: Record<string, { reviewed: boolean }> } | null = null;
+	try {
+		prevProgress = readWaveProgress(projectPath);
+	} catch { /* no progress yet */ }
+
 	for (const wave of tasksData.waves) {
-		if (wave.tasks.every(t => t.checked) && wave.tasks.length > 0) {
-			const label = wave.key === "closing" ? "Closing" : `Wave ${wave.key}`;
-			const total = wave.tasks.length;
-			waveMessages.push(
-				`${label} complete (${total}/${total} tasks). You MUST now: 1) Commit your changes, 2) Run self-review (delegate to alfred:code-reviewer or /alfred:inspect), 3) Save any learnings via \`ledger save\`. Then clear the gate with \`dossier action=gate sub_action=clear reason="..."\`.`
-			);
+		if (wave.tasks.length === 0) continue;
+		if (!wave.tasks.every(t => t.checked)) continue;
+
+		const key = String(wave.key);
+		const prevReviewed = prevProgress?.waves[key]?.reviewed ?? false;
+		if (prevReviewed) continue;
+
+		const label = wave.key === "closing" ? "Closing" : `Wave ${wave.key}`;
+		const total = wave.tasks.length;
+		waveMessages.push(
+			`${label} complete (${total}/${total} tasks). You MUST now: 1) Commit your changes, 2) Run self-review (delegate to alfred:code-reviewer or /alfred:inspect), 3) Save any learnings via \`ledger save\`. Then clear the gate with \`dossier action=gate sub_action=clear reason="..."\`.`
+		);
+
+		// Set review gate for this wave (same logic as PostToolUse detectWaveCompletion).
+		if (!gateSet && wave.key !== "closing") {
+			try {
+				updateTaskStatus(projectPath, taskSlug, "review", "auto:wave-complete");
+			} catch { /* transition error — may already be in review */ }
+
+			writeReviewGate(projectPath, {
+				gate: "wave-review",
+				slug: taskSlug,
+				wave: typeof wave.key === "number" ? wave.key : 0,
+				reason: `Wave ${key} self-review required`,
+			});
+			gateSet = true;
 		}
+
+		break; // Process one unreviewed wave at a time.
 	}
 
 	return jsonResult({
 		task_id: taskId,
 		status: "checked",
 		task_slug: taskSlug,
+		...(gateSet ? { gate_set: true } : {}),
 		...(depWarnings.length > 0 ? { dep_warnings: depWarnings } : {}),
 		...(waveMessages.length > 0 ? { wave_completion: waveMessages } : {}),
 	});
