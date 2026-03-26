@@ -1,6 +1,6 @@
 # claude-alfred
 
-Claude Code の性能を倍増させる執事。13 Hooks + Skill + Agent。
+Claude Code の性能を倍増させる執事。14 Hooks + Skill + Agent。
 
 ## スタック
 
@@ -10,14 +10,14 @@ TypeScript (Bun 1.3+, ESM) / citty (CLI) / vitest (テスト) / Biome (lint)
 
 ```
 alfred CLI (init / hook / doctor)
-    ├── alfred init → ~/.claude/ に 13 hooks, skill, agent, rules を配置
+    ├── alfred init → ~/.claude/ に 14 hooks, skill, agent, rules を配置
     └── alfred hook <event> → stdin JSON → 処理 → stdout JSON or exit 2
 ```
 
 3つの柱 + 2つの防御層:
 1. **壁** — PostToolUse (gate) → PreToolUse (DENY)
 2. **Plan増幅** — UserPromptSubmit (template) + PermissionRequest (ExitPlanMode) + TaskCompleted (status同期)
-3. **実行ループ** — Stop (Plan未完了block + pending-fixes block) + PreCompact/SessionEnd (handoff)
+3. **実行ループ** — Stop (Plan未完了block + pending-fixes block) + PreCompact/PostCompact/SessionEnd (handoff)
 4. **サブエージェント制御** — SubagentStart (品質ルール注入) + SubagentStop
 5. **自己防御** — ConfigChange (hook削除防止) + PostToolUseFailure (失敗追跡)
 
@@ -26,10 +26,10 @@ alfred CLI (init / hook / doctor)
 ```
 src/
 ├── cli.ts                  # citty: init / hook / doctor
-├── init.ts                 # セットアップ (13 hooks + skill + agent + rules + gates)
+├── init.ts                 # セットアップ (14 hooks + skill + agent + rules + gates)
 ├── doctor.ts               # ヘルスチェック (8項目: bun, hooks, skill, agent, rules, gates, state, path)
 ├── hooks/
-│   ├── dispatcher.ts       # event → handler ルーティング (13 events)
+│   ├── dispatcher.ts       # event → handler ルーティング (14 events)
 │   ├── respond.ts          # 共通: respond / deny / block
 │   ├── post-tool.ts        # lint/type gate + pending-fixes + pace + 2回失敗
 │   ├── pre-tool.ts         # pending-fixes → DENY + pace red → DENY
@@ -39,6 +39,7 @@ src/
 │   ├── session-start.ts    # .alfred作成 + gates自動検出 + handoff復元
 │   ├── stop.ts             # pending-fixes block + Plan未完了block + pace警告
 │   ├── pre-compact.ts      # 構造化ハンドオフ保存
+│   ├── post-compact.ts     # コンパクション後ハンドオフ復元
 │   ├── session-end.ts      # 割り込み終了時 handoff 保存
 │   ├── subagent-start.ts   # サブエージェントに品質ルール注入
 │   ├── subagent-stop.ts    # サブエージェント出力検証 (reviewer findings + Plan 構造)

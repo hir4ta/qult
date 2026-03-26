@@ -50,60 +50,21 @@ v0.2 実装中に発見された問題:
 
 ---
 
-## v0.3.0 — Plan-Execution 整合性の強化
+## v0.3.0 — Plan-Execution 整合性の強化 (完了)
 
-v0.2 で dogfooding した結果を基に、設計↔実装の乖離を防ぐ仕組みを強化。
+v0.2 dogfooding を基に設計↔実装の乖離を防ぐ仕組みを強化。14 hooks 体制。
 
-### 3.1 PostToolUse: テスト検証の自動化
+### 3.1 テスト検証自動化 (完了)
+Plan Verify フィールドとテスト結果を自動照合。`parseVerifyFields()` + `checkVerifyFields()`。
 
-**問題:** Plan の Verify フィールド (`src/__tests__/foo.test.ts:barFunction`) が書かれているが、実際にそのテストが通ったかは検証されていない。
+### 3.2 HookEvent 公式スキーマ移行 (完了)
+`tool_output` → `tool_response` (公式)。実機デバッグで Bash の response 形式 `{ stdout, stderr }` を確認。共通フィールド (`hook_event_name`, `cwd`, `transcript_path`) も追加。
 
-**設計:**
-- PostToolUse で Bash (test コマンド) 完了後、Plan の Verify フィールドを読む
-- テスト出力に指定された関数名が含まれ、pass しているか確認
-- fail していれば additionalContext で「Plan の Task N の検証テストが失敗しています」
-- pass していれば Plan の該当タスクを自動的に [done] に更新 (TaskCompleted 経由ではなくテスト結果ベース)
+### 3.3 Plan 構造の詳細検証 (完了)
+ExitPlanMode 時に File/Verify/Review Gates を検証して DENY。`findLatestPlan()` を `getActivePlan()` に統一。
 
-**リサーチ根拠:** TDAD 論文「HOWではなくWHATを伝える。どのテストを確認すべきかを提供すると regression -70%」
-
-**影響ファイル:**
-- `src/hooks/post-tool.ts` — handleBash にテスト結果パーサー追加
-- `src/state/plan-status.ts` — `updateTaskByVerify()` 関数追加
-
-### 3.2 PostToolUse: Bash exit code の直接検出
-
-**問題:** 現在 Bash エラーは `tool_output` の文字列マッチで検出。不安定。
-
-**設計:**
-- Claude Code の PostToolUse 入力に `exit_code` フィールドがあるか調査 (v0.2 dogfooding で確認)
-- あれば直接使う。なければ `tool_output` から regex で抽出 (現行方式を維持)
-
-### 3.3 PermissionRequest: Plan 構造の詳細検証
-
-**問題:** 現在は「Review」という単語が含まれるかだけチェック。Plan の各 Task に必須フィールド (File, Change, Verify, Boundary, [status]) が揃っているかは未検証。
-
-**設計:**
-- ExitPlanMode 時に Plan ファイルを parsePlanTasks でパース
-- 各タスクに `File:`, `Verify:`, `[pending]` が含まれているか検証
-- 不足していれば DENY + 具体的な不足フィールドを指摘
-
-**影響ファイル:**
-- `src/hooks/permission-request.ts` — 構造検証追加
-- `src/state/plan-status.ts` — フィールド解析追加
-
-### 3.4 PostCompact hook
-
-**問題:** PreCompact でハンドオフを保存するが、PostCompact で復元コンテキストを注入する方がタイミングが正確。現在は SessionStart の compact matcher で代替しているが、PostCompact は「コンパクション直後」に発火するため、より適切。
-
-**設計:**
-- PostCompact hook handler を追加
-- handoff.json を読んで additionalContext で注入
-- SessionStart のハンドオフ復元と役割分担: PostCompact = コンパクション後の復元, SessionStart = セッション再開時の復元
-
-**影響ファイル:**
-- `src/hooks/post-compact.ts` — 新規
-- `src/hooks/dispatcher.ts` — 登録追加
-- `src/init.ts` — hook 登録追加
+### 3.4 PostCompact hook (完了)
+コンパクション直後のハンドオフ復元。`post-compact.ts` 新規 + dispatcher/init 登録。pre-compact.ts の Bun 依存も除去。
 
 ---
 
