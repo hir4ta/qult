@@ -575,3 +575,123 @@ describe("Scenario 15: Init creates complete setup", () => {
 		expect(loaded!.on_write?.lint).toBeDefined();
 	});
 });
+
+describe("Scenario 16: Plan status tracking — Stop blocks on incomplete plan", () => {
+	it("blocks when plan has pending tasks, allows when all done", async () => {
+		const stop = (await import("../hooks/stop.ts")).default;
+
+		// Create plan with incomplete tasks
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			[
+				"## Tasks",
+				"### Task 1: Add helper [done]",
+				"- File: src/helper.ts",
+				"",
+				"### Task 2: Add tests [pending]",
+				"- File: src/__tests__/helper.test.ts",
+				"",
+				"## Review Gates",
+				"- [x] Design Review",
+				"- [ ] Final Review",
+			].join("\n"),
+		);
+
+		// Stop should block — Task 2 and Final Review are incomplete
+		try {
+			await stop({ hook_type: "Stop" });
+		} catch {
+			// exit(2)
+		}
+
+		expect(exitCode).toBe(2);
+		const response = getResponse();
+		const reason = (response?.hookSpecificOutput as Record<string, string>)?.reason;
+		expect(reason).toContain("2 incomplete");
+		expect(reason).toContain("Add tests");
+		expect(reason).toContain("Final Review");
+
+		// Now mark all as done
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			[
+				"## Tasks",
+				"### Task 1: Add helper [done]",
+				"### Task 2: Add tests [done]",
+				"## Review Gates",
+				"- [x] Design Review",
+				"- [x] Final Review",
+			].join("\n"),
+		);
+
+		stdoutCapture = [];
+		exitCode = null;
+
+		await stop({ hook_type: "Stop" });
+		expect(exitCode).toBeNull(); // allowed
+	});
+});
+
+describe("Scenario 17: Full E2E — plan → implement → status update → stop", () => {
+	it("complete lifecycle with plan tracking", async () => {
+		setupPassingGates();
+		const userPrompt = (await import("../hooks/user-prompt.ts")).default;
+		const stop = (await import("../hooks/stop.ts")).default;
+
+		// Step 1: Plan mode → template injected with status instructions
+		await userPrompt({
+			hook_type: "UserPromptSubmit",
+			permission_mode: "plan",
+			prompt: "add logging",
+		});
+		const planResponse = getResponse();
+		const template = (planResponse?.hookSpecificOutput as Record<string, string>)
+			?.additionalContext;
+		expect(template).toContain("[pending]");
+		expect(template).toContain("Update each task's status");
+
+		// Step 2: Claude creates plan with pending tasks
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "logging-plan.md"),
+			[
+				"## Tasks",
+				"### Task 1: Add logger [pending]",
+				"### Task 2: Add tests [pending]",
+				"## Review Gates",
+				"- [ ] Final Review",
+			].join("\n"),
+		);
+
+		// Step 3: Stop should block (3 incomplete items)
+		stdoutCapture = [];
+		exitCode = null;
+		try {
+			await stop({ hook_type: "Stop" });
+		} catch {
+			// exit(2)
+		}
+		expect(exitCode).toBe(2);
+
+		// Step 4: Claude completes tasks and updates plan
+		writeFileSync(
+			join(planDir, "logging-plan.md"),
+			[
+				"## Tasks",
+				"### Task 1: Add logger [done]",
+				"### Task 2: Add tests [done]",
+				"## Review Gates",
+				"- [x] Final Review",
+			].join("\n"),
+		);
+
+		// Step 5: Stop should allow
+		stdoutCapture = [];
+		exitCode = null;
+		await stop({ hook_type: "Stop" });
+		expect(exitCode).toBeNull();
+	});
+});
