@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import type { GateDefinition } from "../types.ts";
 
 export interface GateResult {
@@ -11,9 +12,8 @@ export function runGate(name: string, gate: GateDefinition, file?: string): Gate
 	const command = file ? gate.command.replace("{file}", file) : gate.command;
 	const timeout = gate.timeout ?? 10_000;
 
-	let result: ReturnType<typeof Bun.spawnSync>;
 	try {
-		result = Bun.spawnSync(["sh", "-c", command], {
+		const stdout = execSync(command, {
 			cwd: process.cwd(),
 			timeout,
 			stdio: ["ignore", "pipe", "pipe"],
@@ -21,18 +21,19 @@ export function runGate(name: string, gate: GateDefinition, file?: string): Gate
 				...process.env,
 				PATH: `${process.cwd()}/node_modules/.bin:${process.env.PATH}`,
 			},
+			encoding: "utf-8",
 		});
-	} catch {
-		return { name, passed: false, output: `Gate "${name}" failed to execute` };
+		const output = (stdout ?? "").slice(0, 1000);
+		return { name, passed: true, output };
+	} catch (err: unknown) {
+		const e = err as { stdout?: string; stderr?: string; status?: number };
+		const stdout = typeof e.stdout === "string" ? e.stdout : "";
+		const stderr = typeof e.stderr === "string" ? e.stderr : "";
+		const output = (stdout + stderr).slice(0, 1000);
+		return {
+			name,
+			passed: false,
+			output: output || `Exit code ${e.status ?? 1}`,
+		};
 	}
-
-	const stdout = result.stdout?.toString() ?? "";
-	const stderr = result.stderr?.toString() ?? "";
-	const output = (stdout + stderr).slice(0, 1000);
-
-	return {
-		name,
-		passed: result.exitCode === 0,
-		output: output || (result.exitCode !== 0 ? `Exit code ${result.exitCode}` : ""),
-	};
 }

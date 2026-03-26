@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 export interface PlanTask {
@@ -50,7 +50,7 @@ export function getActivePlan(): { tasks: PlanTask[]; path: string } | null {
 			.filter((f) => f.endsWith(".md"))
 			.map((f) => ({
 				name: f,
-				mtime: Bun.file(join(planDir, f)).lastModified ?? 0,
+				mtime: statSync(join(planDir, f)).mtimeMs,
 			}))
 			.sort((a, b) => b.mtime - a.mtime);
 
