@@ -77,18 +77,19 @@ task clean       # ビルド成果物を削除
 
 ### Hook 設計
 - Hook ハンドラー: 短命CLIプロセス。6種: SessionStart, PreCompact, UserPromptSubmit, PostToolUse, PreToolUse, Stop
-- PostToolUse (5s): 最重要 — ファイル編集後にlint/type実行、テスト結果解析、git commitゲート、error_resolution Voyage検索注入
-- PreToolUse (3s): Edit/Write ブロック可能 — pending-fixes未修正ならDENY（修正対象ファイルへのEditは許可）
-- UserPromptSubmit (10s): 意図分類(排除→キーワード)→テスト先行DIRECTIVE、exemplar Voyage検索注入
+- PostToolUse (5s): 最重要 — lint/typeゲート、convention違反検出、fix_pattern自動蓄積、error_resolution Voyage検索注入、plan構造検証、decision自動蓄積
+- PreToolUse (3s): Edit/Write ブロック可能 — pending-fixes(lint/type/convention)未修正ならDENY（修正対象ファイルへのEditは許可）
+- UserPromptSubmit (10s): 意図分類→テスト先行DIRECTIVE、Plan Modeテンプレート注入、知識Voyage検索注入
 - SessionStart (5s): プロファイル注入、品質サマリー注入、conventions注入、zero-config(.alfred/自動作成)
 - Stop (3s): pending-fixes WARNING (stderr出力)、未テスト変更チェック、品質サマリー保存
 - PreCompact (10s): 品質サマリー保存、chapter memory保存
 - 二段構え: PostToolUse で検出+DIRECTIVE → PreToolUse でブロック
 
-### 知識タイプ (3種)
-- **error_resolution**: エラー→解決策キャッシュ (Bashエラー時にVoyage検索→自動注入)
-- **exemplar**: before/after コード例 (Few-shot注入, research #8)
-- **convention**: プロジェクト規約 (SessionStartで注入)
+### 知識タイプ (4種、全自動蓄積)
+- **error_resolution**: エラー→解決策キャッシュ (自動: Bashエラー→成功検出 / 注入: Bashエラー時にVoyage検索)
+- **fix_pattern**: lint/type修正パターン (自動: fail→passサイクルのbefore/after / 注入: 実装時にVoyage検索)
+- **convention**: プロジェクト規約 (自動: init時生成 / 注入: SessionStart + Edit後regex違反検出→DENY)
+- **decision**: 設計意思決定 (自動: plan Write + commitメッセージ / 注入: plan/design時にVoyage検索)
 
 ### Skills (2種)
 - **/alfred:review**: Judge フィルタリング付きマルチエージェントコードレビュー (HubSpot 3基準: Succinctness/Accuracy/Actionability)
