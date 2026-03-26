@@ -25,8 +25,9 @@ export interface SearchOptions {
 // Recency half-life in days per knowledge type
 const HALF_LIFE: Record<string, number> = {
 	error_resolution: 60,
-	exemplar: 120,
+	fix_pattern: 90,
 	convention: 180,
+	decision: 150,
 };
 
 /**

@@ -1,7 +1,12 @@
 // ===== Knowledge Types =====
 
-export type KnowledgeType = "error_resolution" | "exemplar" | "convention";
-export const KNOWLEDGE_TYPES: KnowledgeType[] = ["error_resolution", "exemplar", "convention"];
+export type KnowledgeType = "error_resolution" | "fix_pattern" | "convention" | "decision";
+export const KNOWLEDGE_TYPES: KnowledgeType[] = [
+	"error_resolution",
+	"fix_pattern",
+	"convention",
+	"decision",
+];
 
 export interface KnowledgeRow {
 	id: number;
@@ -26,10 +31,20 @@ export interface ErrorResolutionContent {
 	context?: string;
 }
 
-export interface ExemplarContent {
-	bad: string;
-	good: string;
-	explanation: string;
+export interface FixPatternContent {
+	file_path: string;
+	error_type: "lint" | "type";
+	error_signature: string;
+	before: string;
+	after: string;
+	rule?: string;
+}
+
+export interface DecisionContent {
+	context: string;
+	decision: string;
+	rationale: string;
+	source: "plan" | "commit" | "design_discussion";
 }
 
 export interface ConventionContent {
@@ -49,7 +64,9 @@ export type QualityEventType =
 	| "test_fail"
 	| "assertion_warning"
 	| "convention_pass"
-	| "convention_warn";
+	| "convention_warn"
+	| "plan_created"
+	| "knowledge_saved";
 
 export interface QualityEvent {
 	id: number;

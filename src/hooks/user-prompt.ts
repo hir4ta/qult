@@ -50,8 +50,8 @@ export async function userPromptSubmit(ev: HookEvent, signal: AbortSignal): Prom
 				level: "CONTEXT",
 				message: `Relevant knowledge:\n${formatted}`,
 			});
-			// Record exemplar injection for TUI dashboard tracking
-			recordExemplarInjection(ev.cwd, hits.length);
+			// Record knowledge injection for TUI dashboard tracking
+			recordKnowledgeInjection(ev.cwd, hits.length);
 		}
 	}
 
@@ -260,16 +260,16 @@ function isLargeTask(prompt: string): boolean {
 
 // ── Exemplar injection tracking ─────────────────────────────────────
 
-const EXEMPLAR_COUNT_FILE = "exemplar-injections.json";
+const KNOWLEDGE_INJECTION_FILE = "knowledge-injections.json";
 
-function recordExemplarInjection(cwd: string, count: number): void {
+function recordKnowledgeInjection(cwd: string, count: number): void {
 	try {
-		const current = readStateJSON<{ count: number }>(cwd, EXEMPLAR_COUNT_FILE, { count: 0 });
-		writeStateJSON(cwd, EXEMPLAR_COUNT_FILE, { count: current.count + count });
+		const current = readStateJSON<{ count: number }>(cwd, KNOWLEDGE_INJECTION_FILE, { count: 0 });
+		writeStateJSON(cwd, KNOWLEDGE_INJECTION_FILE, { count: current.count + count });
 	} catch { /* fail-open */ }
 }
 
-/** Read total exemplar injection count for this session. */
-export function getExemplarInjectionCount(cwd: string): number {
-	return readStateJSON<{ count: number }>(cwd, EXEMPLAR_COUNT_FILE, { count: 0 }).count;
+/** Read total knowledge injection count for this session. */
+export function getKnowledgeInjectionCount(cwd: string): number {
+	return readStateJSON<{ count: number }>(cwd, KNOWLEDGE_INJECTION_FILE, { count: 0 }).count;
 }

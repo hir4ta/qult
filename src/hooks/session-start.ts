@@ -160,7 +160,7 @@ function ensureAlfredDir(cwd: string): void {
 
 	try {
 		mkdirSync(join(alfredDir, ".state"), { recursive: true });
-		for (const dir of ["error_resolutions", "exemplars", "conventions"]) {
+		for (const dir of ["error_resolutions", "fix_patterns", "conventions"]) {
 			mkdirSync(join(alfredDir, "knowledge", dir), { recursive: true });
 		}
 		// Auto-detect and write gates.json
@@ -220,12 +220,12 @@ function syncKnowledgeFiles(cwd: string): void {
 		const store = openDefaultCached();
 		const project = resolveOrRegisterProject(store, cwd);
 
-		for (const typeDir of ["error_resolutions", "exemplars", "conventions"]) {
+		for (const typeDir of ["error_resolutions", "fix_patterns", "conventions"]) {
 			const dir = join(knowledgeDir, typeDir);
 			if (!existsSync(dir)) continue;
 
 			const type = typeDir === "error_resolutions" ? "error_resolution"
-				: typeDir === "exemplars" ? "exemplar" : "convention";
+				: typeDir === "fix_patterns" ? "fix_pattern" : "convention";
 
 			for (const file of readdirSync(dir).filter((f) => f.endsWith(".json"))) {
 				try {
@@ -233,7 +233,7 @@ function syncKnowledgeFiles(cwd: string): void {
 					if (data.title && data.content) {
 						upsertKnowledge(store, {
 							projectId: project.id,
-							type: type as "error_resolution" | "exemplar" | "convention",
+							type: type as "error_resolution" | "fix_pattern" | "convention",
 							title: data.title,
 							content: typeof data.content === "string" ? data.content : JSON.stringify(data.content),
 							tags: data.tags ?? "",

@@ -75,7 +75,7 @@ export function formatSearchHits(hits: SearchHit[]): string {
 				if (h.type === "error_resolution") {
 					return `Previously resolved: "${parsed.error_signature}" → ${parsed.resolution}`;
 				}
-				if (h.type === "exemplar") {
+				if (h.type === "fix_pattern") {
 					return `Example: ${parsed.explanation}\nBad: ${parsed.bad}\nGood: ${parsed.good}`;
 				}
 				if (h.type === "convention") {

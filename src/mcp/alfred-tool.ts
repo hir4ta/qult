@@ -100,11 +100,11 @@ async function alfredSearch(store: Store, emb: Embedder | null, params: AlfredPa
 // ===== save =====
 
 async function alfredSave(store: Store, emb: Embedder | null, params: AlfredParams) {
-	if (!params.type) return errorResult("type is required for save (error_resolution, exemplar, convention)");
+	if (!params.type) return errorResult("type is required for save (error_resolution, fix_pattern, convention, decision)");
 	if (!params.title) return errorResult("title is required for save");
 
 	const knowledgeType = params.type as KnowledgeType;
-	if (!["error_resolution", "exemplar", "convention"].includes(knowledgeType)) {
+	if (!["error_resolution", "fix_pattern", "convention", "decision"].includes(knowledgeType)) {
 		return errorResult(`Invalid type: ${params.type}. Must be error_resolution, exemplar, or convention`);
 	}
 
@@ -121,9 +121,9 @@ async function alfredSave(store: Store, emb: Embedder | null, params: AlfredPara
 			}
 			content = { error_signature: params.error_signature, resolution: params.resolution };
 			break;
-		case "exemplar":
+		case "fix_pattern":
 			if (!params.bad || !params.good || !params.explanation) {
-				return errorResult("bad, good, and explanation are required for exemplar");
+				return errorResult("bad, good, and explanation are required for fix_pattern");
 			}
 			content = { bad: params.bad, good: params.good, explanation: params.explanation };
 			break;

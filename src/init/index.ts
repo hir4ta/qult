@@ -282,7 +282,7 @@ async function initProject(cwd: string): Promise<void> {
 	}
 
 	// Knowledge directories
-	for (const dir of ["error_resolutions", "exemplars", "conventions"]) {
+	for (const dir of ["error_resolutions", "fix_patterns", "conventions"]) {
 		mkdirSync(join(alfredDir, "knowledge", dir), { recursive: true });
 	}
 	console.log("  ✓ Knowledge: .alfred/knowledge/ directories created");

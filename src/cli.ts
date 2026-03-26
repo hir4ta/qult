@@ -170,7 +170,7 @@ const main = defineCommand({
 					const knowledgeDir = join(cwd, ".alfred", "knowledge");
 					const hasKnowledge =
 						existsSync(join(knowledgeDir, "error_resolutions")) &&
-						existsSync(join(knowledgeDir, "exemplars")) &&
+						existsSync(join(knowledgeDir, "fix_patterns")) &&
 						existsSync(join(knowledgeDir, "conventions"));
 					check(hasKnowledge, "Knowledge: directories exist", "run: alfred init");
 				}

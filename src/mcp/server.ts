@@ -8,8 +8,8 @@ import { handleAlfred } from "./alfred-tool.js";
 const SERVER_INSTRUCTIONS = `alfred is your quality butler for Claude Code.
 
 When to use alfred:
-- Search past error resolutions, code exemplars, or conventions → action=search
-- Save a new error resolution, exemplar, or convention → action=save
+- Search past error resolutions, fix patterns, or conventions → action=search
+- Save a new error resolution, fix_pattern, or convention → action=save
 - Check project profile (language, test framework, linter) → action=profile
 - View quality score for current session → action=score
 `;
@@ -26,8 +26,8 @@ export function createMCPServer(store: Store, emb: Embedder | null, version: str
 		`Quality knowledge management — search, save, and track code quality across sessions.
 
 Actions:
-- search: Search error resolutions, exemplars, conventions via Voyage vector search
-- save: Save a new knowledge entry (error_resolution, exemplar, or convention)
+- search: Search error resolutions, fix patterns, conventions via Voyage vector search
+- save: Save a new knowledge entry (error_resolution, fix_pattern, or convention)
 - profile: Show/refresh project profile (language, test framework, linter, gates)
 - score: Show quality score for current or specified session`,
 		{
@@ -37,7 +37,7 @@ Actions:
 			// search params
 			query: z.string().optional().describe("Search query (for search)"),
 			type: z
-				.enum(["error_resolution", "exemplar", "convention", "all"])
+				.enum(["error_resolution", "fix_pattern", "convention", "decision", "all"])
 				.optional()
 				.describe("Knowledge type filter (for search, default: all)"),
 			scope: z
@@ -50,10 +50,10 @@ Actions:
 			// error_resolution fields
 			error_signature: z.string().optional().describe("Normalized error message (for error_resolution)"),
 			resolution: z.string().optional().describe("How to resolve the error (for error_resolution)"),
-			// exemplar fields
-			bad: z.string().optional().describe("Before code (for exemplar)"),
-			good: z.string().optional().describe("After code (for exemplar)"),
-			explanation: z.string().optional().describe("Why the good version is better (for exemplar)"),
+			// fix_pattern fields
+			bad: z.string().optional().describe("Before code (for fix_pattern)"),
+			good: z.string().optional().describe("After code (for fix_pattern)"),
+			explanation: z.string().optional().describe("Why the fix is better (for fix_pattern)"),
 			// convention fields
 			pattern: z.string().optional().describe("Convention description (for convention)"),
 			category: z.string().optional().describe("Convention category: naming|imports|error-handling|testing|architecture|style"),

@@ -11,7 +11,7 @@ import { countKnowledge } from "../store/knowledge.js";
 import { readPendingFixes, hasPendingFixes, type PendingFixes } from "../hooks/pending-fixes.js";
 import { readStateJSON } from "../hooks/state.js";
 import type { QualityScore } from "../types.js";
-import { getExemplarInjectionCount } from "../hooks/user-prompt.js";
+import { getKnowledgeInjectionCount } from "../hooks/user-prompt.js";
 
 export interface QualityDashboardData {
 	// Score
@@ -29,7 +29,7 @@ export interface QualityDashboardData {
 	knowledge: {
 		errorHits: number;
 		errorMisses: number;
-		exemplarInjections: number;
+		knowledgeInjections: number;
 		assertionWarnings: number;
 		conventionPass: number;
 		conventionWarn: number;
@@ -38,7 +38,7 @@ export interface QualityDashboardData {
 	// Knowledge DB totals
 	knowledgeTotals: {
 		errorResolutions: number;
-		exemplars: number;
+		fixPatterns: number;
 		conventions: number;
 	};
 
@@ -87,7 +87,7 @@ export function loadDashboardData(cwd: string): QualityDashboardData {
 		// Knowledge DB totals
 		const knowledgeTotals = {
 			errorResolutions: countKnowledgeByType(store, project.id, "error_resolution"),
-			exemplars: countKnowledgeByType(store, project.id, "exemplar"),
+			fixPatterns: countKnowledgeByType(store, project.id, "fix_pattern"),
 			conventions: countKnowledgeByType(store, project.id, "convention"),
 		};
 
@@ -115,7 +115,7 @@ export function loadDashboardData(cwd: string): QualityDashboardData {
 			knowledge: {
 				errorHits: summary.error_hit ?? 0,
 				errorMisses: summary.error_miss ?? 0,
-				exemplarInjections: getExemplarInjectionCount(cwd),
+				knowledgeInjections: getKnowledgeInjectionCount(cwd),
 				assertionWarnings: summary.assertion_warning ?? 0,
 				conventionPass: summary.convention_pass ?? 0,
 				conventionWarn: summary.convention_warn ?? 0,
@@ -162,8 +162,8 @@ function emptyData(): QualityDashboardData {
 		},
 		previousScore: null,
 		gates: { onWrite: { pass: 0, fail: 0 }, onCommit: { pass: 0, fail: 0 }, test: { pass: 0, fail: 0 } },
-		knowledge: { errorHits: 0, errorMisses: 0, exemplarInjections: 0, assertionWarnings: 0, conventionPass: 0, conventionWarn: 0 },
-		knowledgeTotals: { errorResolutions: 0, exemplars: 0, conventions: 0 },
+		knowledge: { errorHits: 0, errorMisses: 0, knowledgeInjections: 0, assertionWarnings: 0, conventionPass: 0, conventionWarn: 0 },
+		knowledgeTotals: { errorResolutions: 0, fixPatterns: 0, conventions: 0 },
 		recentEvents: [],
 		session: { lastActivity: "", eventsToday: 0, changedFiles: 0, commits: 0 },
 		pendingFixesCount: 0,

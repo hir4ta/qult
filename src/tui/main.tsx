@@ -50,8 +50,8 @@ const HELP_EN = [
 	"Knowledge",
 	"  error_resolution: past error→fix pairs (Voyage search)",
 	"    hits = resolution found & injected, total = DB entries",
-	"  exemplar: before/after code examples (few-shot)",
-	"    injected = exemplars sent to Claude this session",
+	"  fix_pattern: auto-detected lint/type fix patterns",
+	"    injected = knowledge entries sent to Claude this session",
 	"  convention: project coding patterns",
 	"    adherence = convention checks passed vs warned",
 	"",
@@ -84,7 +84,7 @@ const HELP_JA = [
 	"Knowledge (知識DB)",
 	"  error_resolution: 過去のエラー→解決策ペア (Voyage検索)",
 	"    hits = 解決策発見&注入, total = DB蓄積数",
-	"  exemplar: before/afterコード例 (Few-shot注入)",
+	"  fix_pattern: 自動検出されたlint/type修正パターン",
 	"    injected = このセッションでClaude に送った例の数",
 	"  convention: プロジェクトのコーディング規約",
 	"    adherence = convention チェック pass vs warn",
@@ -215,7 +215,7 @@ function App() {
 			{/* Knowledge */}
 			<box style={{ borderStyle: "rounded", borderColor: C.border, flexDirection: "column", paddingX: 1 }} title="Knowledge">
 				<text fg={C.fg}>{`error_resolution  hits: ${k.errorHits}/${eT} (${pct(k.errorHits, eT)})  total: ${kt.errorResolutions}`}</text>
-				<text fg={C.fg}>{`exemplar          injected: ${k.exemplarInjections}      total: ${kt.exemplars}`}</text>
+				<text fg={C.fg}>{`fix_pattern      injected: ${k.knowledgeInjections}      total: ${kt.fixPatterns}`}</text>
 				<text fg={C.fg}>{`convention        adherence: ${pct(k.conventionPass, cvT)}   total: ${kt.conventions}`}</text>
 			</box>
 
