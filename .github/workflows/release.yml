@@ -45,14 +45,6 @@ jobs:
       - name: Install dependencies (with target platform native packages)
         run: bun install --os ${{ matrix.install_os }} --cpu ${{ matrix.install_cpu }}
 
-      - name: Patch @opentui/core for static platform import
-        run: |
-          PLATFORM="${{ matrix.target }}"
-          PLATFORM="${PLATFORM#bun-}"
-          OS="${PLATFORM%-*}"
-          ARCH="${PLATFORM##*-}"
-          bash scripts/patch-opentui.sh "$OS" "$ARCH"
-
       - name: Compile binary
         run: |
           bun build.ts --compile \
