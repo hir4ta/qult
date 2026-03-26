@@ -104,11 +104,16 @@ task clean    # ビルド成果物削除
 - fail-count.json — 連続失敗カウント
 - gate-batch.json — run_once_per_batch 実行履歴 (session_id ベース)
 
-### シミュレーション必須
-- Hook や状態管理の変更後は `src/__tests__/simulation.test.ts` でE2Eシミュレーションを実行する
-- 新しい Hook を実装したら対応するシナリオをシミュレーションテストに追加する
+### Phase Gate (各 Phase 完了時に必ず実行)
+1. `bun vitest run` — 全テスト pass
+2. `bun vitest run src/__tests__/simulation.test.ts` — シミュレーション pass
+3. `bun tsc --noEmit && bun biome check src/` — 型 + lint clean
+4. セルフレビュー — ロジック・エッジケース・デザインを書き出す
+5. コミット — Phase Gate 通過後にのみコミット
+
+### シミュレーション
+- Hook や状態管理の変更後は simulation.test.ts にシナリオを追加する
 - シミュレーションは本番フロー (Edit→gate→pending-fixes→DENY) を再現する統合テスト
-- セルフレビューとシミュレーションは常にセットで行う
 
 ## 設計ドキュメント
 
