@@ -83,6 +83,11 @@ task clean    # ビルド成果物削除
 - handoff.json — 構造化ハンドオフ
 - project-profile.json — 言語/テストFW/リンター
 
+### シミュレーション必須
+- Hook や状態管理の変更後は `src/__tests__/simulation.test.ts` でE2Eシミュレーションを実行する
+- 新しいHookを実装したら対応するシナリオをシミュレーションテストに追加する
+- シミュレーションは本番フロー (Edit→gate→pending-fixes→DENY) を再現する統合テスト
+
 ## 設計ドキュメント
 
 - design-v0.1.md — v0.1.0 全体設計
