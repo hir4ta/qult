@@ -9,6 +9,11 @@ const EVENT_MAP: Record<string, () => Promise<{ default: (ev: HookEvent) => Prom
 	"pre-compact": () => import("./pre-compact.ts"),
 	"permission-request": () => import("./permission-request.ts"),
 	"task-completed": () => import("./task-completed.ts"),
+	"subagent-start": () => import("./subagent-start.ts"),
+	"subagent-stop": () => import("./subagent-stop.ts"),
+	"post-tool-failure": () => import("./post-tool-failure.ts"),
+	"session-end": () => import("./session-end.ts"),
+	"config-change": () => import("./config-change.ts"),
 };
 
 export async function dispatch(event: string): Promise<void> {

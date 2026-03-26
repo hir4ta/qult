@@ -86,6 +86,11 @@ const HOOK_EVENTS = {
 	PreCompact: { timeout: 10000 },
 	PermissionRequest: { timeout: 5000, matcher: "ExitPlanMode" },
 	TaskCompleted: { timeout: 5000 },
+	SubagentStart: { timeout: 3000 },
+	SubagentStop: { timeout: 5000 },
+	PostToolUseFailure: { timeout: 3000 },
+	SessionEnd: { timeout: 3000 },
+	ConfigChange: { timeout: 3000 },
 } as const;
 
 function writeHooks(settingsPath: string, force: boolean): void {
@@ -140,6 +145,11 @@ const EVENT_TO_ARG: Record<string, string> = {
 	PreCompact: "pre-compact",
 	PermissionRequest: "permission-request",
 	TaskCompleted: "task-completed",
+	SubagentStart: "subagent-start",
+	SubagentStop: "subagent-stop",
+	PostToolUseFailure: "post-tool-failure",
+	SessionEnd: "session-end",
+	ConfigChange: "config-change",
 };
 
 function eventToArg(event: string): string {

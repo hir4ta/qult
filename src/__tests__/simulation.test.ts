@@ -780,3 +780,79 @@ describe("Scenario 18: TaskCompleted auto-syncs plan status", () => {
 		expect(exitCode).toBeNull();
 	});
 });
+
+// ============================================================
+// Hook completeness scenarios
+// ============================================================
+
+describe("Scenario 19: SubagentStart injects quality context", () => {
+	it("subagents receive pending-fixes warning and quality rules", async () => {
+		const { writePendingFixes: wpf } = await import("../state/pending-fixes.ts");
+		wpf([{ file: "src/broken.ts", errors: ["type error"], gate: "typecheck" }]);
+
+		const subagentStart = (await import("../hooks/subagent-start.ts")).default;
+		await subagentStart({ hook_type: "SubagentStart" });
+
+		const response = getResponse();
+		const context = (response?.hookSpecificOutput as Record<string, string>)?.additionalContext;
+		expect(context).toBeDefined();
+		expect(context).toContain("15 lines");
+		expect(context).toContain("broken.ts");
+		expect(context).toContain("pending");
+	});
+});
+
+describe("Scenario 20: PostToolUseFailure tracks consecutive errors", () => {
+	it("suggests /clear after 2 consecutive tool failures", async () => {
+		const postToolFailure = (await import("../hooks/post-tool-failure.ts")).default;
+
+		await postToolFailure({
+			hook_type: "PostToolUseFailure",
+			tool_name: "Bash",
+			tool_output: "Error: ENOENT no such file",
+		});
+
+		stdoutCapture = [];
+		await postToolFailure({
+			hook_type: "PostToolUseFailure",
+			tool_name: "Bash",
+			tool_output: "Error: ENOENT no such file",
+		});
+
+		const response = getResponse();
+		const context = (response?.hookSpecificOutput as Record<string, string>)?.additionalContext;
+		expect(context).toContain("/clear");
+		expect(context).toContain("2 times");
+	});
+});
+
+describe("Scenario 21: ConfigChange blocks user_settings modification", () => {
+	it("prevents Claude from removing hooks", async () => {
+		const configChange = (await import("../hooks/config-change.ts")).default;
+		try {
+			await configChange({
+				hook_type: "ConfigChange",
+				tool_input: { source: "user_settings" },
+			});
+		} catch {
+			// exit(2)
+		}
+		expect(exitCode).toBe(2);
+	});
+});
+
+describe("Scenario 22: SessionEnd saves handoff on any exit", () => {
+	it("preserves state even on interrupt", async () => {
+		const { writePendingFixes: wpf } = await import("../state/pending-fixes.ts");
+		wpf([{ file: "src/wip.ts", errors: ["incomplete"], gate: "lint" }]);
+
+		const sessionEnd = (await import("../hooks/session-end.ts")).default;
+		await sessionEnd({ hook_type: "SessionEnd" });
+
+		const { readHandoff } = await import("../state/handoff.ts");
+		const handoff = readHandoff();
+		expect(handoff).not.toBeNull();
+		expect(handoff!.pending_fixes).toBe(true);
+		expect(handoff!.next_steps).toContain("wip.ts");
+	});
+});
