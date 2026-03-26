@@ -164,7 +164,7 @@ Hook スキーマバグ修正 + ドキュメント刷新。
 - **ROADMAP.md**: v0.5.1 評価 (72/100) + v0.6.0 ロードマップに全面書き換え
 - **README.md**: 「evaluator harness」コンセプトに刷新
 
-## v0.5.3 (進行中)
+## v0.5.3 (完了)
 
 公式ドキュメント準拠の hookSpecificOutput.additionalContext 対応表に基づく修正。
 
