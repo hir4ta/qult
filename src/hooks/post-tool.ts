@@ -67,7 +67,7 @@ async function handleEditWrite(
 	cwd: string,
 	toolInput: Record<string, unknown>,
 	items: DirectiveItem[],
-	signal: AbortSignal,
+	_signal: AbortSignal,
 ): Promise<void> {
 	const filePath = (toolInput.file_path as string) ?? "";
 	if (!filePath) return;
@@ -102,6 +102,9 @@ async function handleEditWrite(
 
 		writePendingFixes(cwd, fixes);
 
+		// Save fix context for fix_pattern extraction on next pass
+		saveFixContext(cwd, filePath, failures);
+
 		const formatted = formatPendingFixes(fixes);
 		const summary =
 			formatted || failures.map((f) => `${f.name}: ${f.output.slice(0, 200)}`).join("\n");
@@ -115,6 +118,8 @@ async function handleEditWrite(
 		// Lint repeat detection (design: same error 3x → suggest fix pattern)
 		checkLintRepeat(cwd, filePath, summary, items);
 	} else {
+		// Gate passed — check if this is a fix of a previous failure
+		extractFixPattern(cwd, filePath);
 		clearPendingFixes(cwd);
 		clearLintRepeatCount(cwd);
 	}
@@ -173,7 +178,7 @@ async function handleBash(
 async function handleGitCommit(
 	cwd: string,
 	items: DirectiveItem[],
-	signal: AbortSignal,
+	_signal: AbortSignal,
 ): Promise<void> {
 	const gates = loadGates(cwd);
 	if (!gates || Object.keys(gates.on_commit).length === 0) return;
@@ -321,6 +326,114 @@ async function saveErrorResolution(
 				/* embedding optional — knowledge saved for text match */
 			}
 		}
+	} catch {
+		/* fail-open */
+	}
+}
+
+// ── fix_pattern auto-accumulation ────────────────────────────────────
+
+const FIX_CONTEXT_FILE = "fix-context.json";
+
+interface FixContext {
+	filePath: string;
+	errorSignature: string;
+	errorType: string;
+	rule: string;
+	beforeSnapshot: string;
+	timestamp: string;
+}
+
+function saveFixContext(
+	cwd: string,
+	filePath: string,
+	failures: Array<{ name: string; output: string }>,
+): void {
+	try {
+		const { readFileSync } = require("node:fs") as typeof import("node:fs");
+		const content = readFileSync(filePath, "utf-8");
+		const errorSig = failures.map((f) => f.name).join("+");
+		const rule = failures[0]?.name ?? "unknown";
+		const errorType = rule.includes("lint") || rule === "lint" ? "lint" : "type";
+
+		writeStateJSON(cwd, FIX_CONTEXT_FILE, {
+			filePath,
+			errorSignature: errorSig,
+			errorType,
+			rule,
+			beforeSnapshot: content.slice(0, 500),
+			timestamp: new Date().toISOString(),
+		} satisfies FixContext);
+	} catch {
+		/* fail-open */
+	}
+}
+
+function extractFixPattern(cwd: string, filePath: string): void {
+	try {
+		const ctx = readStateJSON<FixContext | null>(cwd, FIX_CONTEXT_FILE, null);
+		if (!ctx) return;
+		if (ctx.filePath !== filePath) return;
+
+		const age = Date.now() - new Date(ctx.timestamp).getTime();
+		if (age > 10 * 60 * 1000) {
+			writeStateJSON(cwd, FIX_CONTEXT_FILE, null);
+			return;
+		}
+
+		const { readFileSync } = require("node:fs") as typeof import("node:fs");
+		const afterContent = readFileSync(filePath, "utf-8").slice(0, 500);
+
+		// Don't save if before/after are identical
+		if (ctx.beforeSnapshot === afterContent) {
+			writeStateJSON(cwd, FIX_CONTEXT_FILE, null);
+			return;
+		}
+
+		// Save fix_pattern to knowledge DB
+		saveFixPatternKnowledge(cwd, ctx, afterContent);
+		writeStateJSON(cwd, FIX_CONTEXT_FILE, null);
+	} catch {
+		/* fail-open */
+	}
+}
+
+async function saveFixPatternKnowledge(cwd: string, ctx: FixContext, after: string): Promise<void> {
+	try {
+		const { upsertKnowledge } = await import("../store/knowledge.js");
+		const { insertEmbedding } = await import("../store/vectors.js");
+		const store = openDefaultCached();
+		const project = resolveOrRegisterProject(store, cwd);
+
+		const title = `${ctx.errorType}/${ctx.rule}: ${ctx.errorSignature.slice(0, 60)}`;
+		const content = JSON.stringify({
+			file_path: ctx.filePath,
+			error_type: ctx.errorType,
+			error_signature: ctx.errorSignature,
+			before: ctx.beforeSnapshot,
+			after,
+			rule: ctx.rule,
+		});
+
+		const { id, changed } = upsertKnowledge(store, {
+			projectId: project.id,
+			type: "fix_pattern",
+			title,
+			content,
+		});
+
+		if (changed) {
+			try {
+				const { Embedder } = await import("../embedder/index.js");
+				const emb = Embedder.create();
+				const vector = await emb.embedForStorage(`${title}\n${content}`);
+				insertEmbedding(store, id, emb.model, vector);
+			} catch {
+				/* embedding optional */
+			}
+		}
+
+		recordQualityEventSafe(cwd, "knowledge_saved", { type: "fix_pattern", title });
 	} catch {
 		/* fail-open */
 	}
