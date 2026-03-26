@@ -112,7 +112,7 @@ async function alfredSave(store: Store, emb: Embedder | null, params: AlfredPara
 	const knowledgeType = params.type as KnowledgeType;
 	if (!["error_resolution", "fix_pattern", "convention", "decision"].includes(knowledgeType)) {
 		return errorResult(
-			`Invalid type: ${params.type}. Must be error_resolution, exemplar, or convention`,
+			`Invalid type: ${params.type}. Must be error_resolution, fix_pattern, convention, or decision`,
 		);
 	}
 

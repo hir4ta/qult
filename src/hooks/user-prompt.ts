@@ -22,7 +22,7 @@ export async function userPromptSubmit(ev: HookEvent, _signal: AbortSignal): Pro
 	const intent = classifyIntent(prompt);
 
 	// Plan mode detection: inject plan structure template
-	if (isPlanMode(ev) || wantsPlan(prompt)) {
+	if (isPlanMode(ev) || (wantsPlan(prompt) && !isExcluded(prompt))) {
 		items.push({
 			level: "DIRECTIVE",
 			message:

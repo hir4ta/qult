@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isPlanFile } from "../detect.js";
+import { isPlanFile, validatePlanStructure } from "../detect.js";
 
 describe("isPlanFile", () => {
 	it("detects .claude/plans/ files", () => {
@@ -20,17 +20,6 @@ describe("isPlanFile", () => {
 });
 
 describe("validatePlanStructure", () => {
-	function validatePlanStructure(content: string) {
-		const phases = (content.match(/^###?\s+Phase\s+\d/gim) || []).length;
-		const criteria = (content.match(/acceptance\s+criteria/gi) || []).length;
-		const testPlan = /test\s+plan/i.test(content);
-		return {
-			hasPhases: phases > 0,
-			phaseCount: phases,
-			phasesWithCriteria: Math.min(criteria, phases),
-			hasTestPlan: testPlan,
-		};
-	}
 
 	it("validates well-structured plan", () => {
 		const plan = `# Plan

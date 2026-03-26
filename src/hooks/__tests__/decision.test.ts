@@ -1,15 +1,7 @@
 import { describe, expect, it } from "vitest";
-
-// isPlanFile will be added to detect.ts
-// Import after implementation
-// import { isPlanFile, extractCommitMessage } from "../detect.js";
+import { extractCommitMessage, isPlanFile } from "../detect.js";
 
 describe("isPlanFile", () => {
-	// Inline the function for test-first
-	function isPlanFile(filePath: string): boolean {
-		return /\.claude\/plans\/.*\.md$/.test(filePath) || /\/plan[^/]*\.md$/i.test(filePath);
-	}
-
 	it("detects .claude/plans/ files", () => {
 		expect(isPlanFile("/Users/foo/.claude/plans/my-plan.md")).toBe(true);
 		expect(isPlanFile("/home/user/.claude/plans/lovely-stargazing-papert.md")).toBe(true);
@@ -29,12 +21,6 @@ describe("isPlanFile", () => {
 });
 
 describe("extractCommitMessage", () => {
-	function extractCommitMessage(stdout: string): string | null {
-		const match = stdout.match(/\[[\w./-]+ [0-9a-f]+\]\s+(.+)/);
-		if (match?.[1] && match[1].length > 50) return match[1];
-		return null;
-	}
-
 	it("extracts commit message from git output", () => {
 		const msg = extractCommitMessage("[main abc1234] feat: implement knowledge auto-accumulation engine for better quality");
 		expect(msg).toBe("feat: implement knowledge auto-accumulation engine for better quality");

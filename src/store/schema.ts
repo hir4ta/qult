@@ -214,6 +214,13 @@ function migrateV1toV2(db: DbDatabase): void {
 		CREATE INDEX IF NOT EXISTS idx_qe_session ON quality_events(session_id);
 		CREATE INDEX IF NOT EXISTS idx_qe_type ON quality_events(event_type);
 	`);
+
+	// Clean up orphaned embeddings (from deleted exemplar rows)
+	db.exec(`
+		DELETE FROM embeddings
+		WHERE source = 'knowledge'
+		AND source_id NOT IN (SELECT id FROM knowledge_index);
+	`);
 }
 
 export function migrate(db: DbDatabase): void {

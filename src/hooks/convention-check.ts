@@ -42,7 +42,7 @@ export function checkConventions(
 			if (!filePath.endsWith(ext)) continue;
 		}
 
-		const re = new RegExp(rule.check.match, "g");
+		const re = new RegExp(rule.check.match);
 		for (let i = 0; i < lines.length; i++) {
 			if (re.test(lines[i]!)) {
 				violations.push({
@@ -51,7 +51,6 @@ export function checkConventions(
 					line: i + 1,
 					detail: lines[i]!.trim().slice(0, 100),
 				});
-				re.lastIndex = 0;
 			}
 			if (violations.length >= 10) break;
 		}

@@ -62,7 +62,7 @@ export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<v
 		const filePath = (toolInput.file_path as string) ?? "";
 		if (ev.tool_name === "Write" && isPlanFile(filePath)) {
 			const planContent = (toolInput.content as string) ?? "";
-			savePlanDecision(ev.cwd, filePath, toolInput);
+			await savePlanDecision(ev.cwd, filePath, toolInput);
 			const validation = validatePlanStructure(planContent);
 			if (!validation.hasPhases) {
 				items.push({
@@ -233,7 +233,7 @@ async function handleBash(
 		await handleGitCommit(cwd, items, signal);
 		// Auto-save non-trivial commit messages as decision knowledge
 		const commitMsg = extractCommitMessage(stdout);
-		if (commitMsg) saveCommitDecision(cwd, commitMsg);
+		if (commitMsg) await saveCommitDecision(cwd, commitMsg);
 		return;
 	}
 
