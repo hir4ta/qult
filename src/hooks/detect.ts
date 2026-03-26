@@ -135,6 +135,25 @@ export function isPlanFile(filePath: string): boolean {
 /**
  * Extract commit message from git commit stdout (only if >50 chars).
  */
+export interface PlanValidation {
+	hasPhases: boolean;
+	phaseCount: number;
+	phasesWithCriteria: number;
+	hasTestPlan: boolean;
+}
+
+export function validatePlanStructure(content: string): PlanValidation {
+	const phases = (content.match(/^###?\s+Phase\s+\d/gim) || []).length;
+	const criteria = (content.match(/acceptance\s+criteria/gi) || []).length;
+	const testPlan = /test\s+plan/i.test(content);
+	return {
+		hasPhases: phases > 0,
+		phaseCount: phases,
+		phasesWithCriteria: Math.min(criteria, phases),
+		hasTestPlan: testPlan,
+	};
+}
+
 export function extractCommitMessage(stdout: string): string | null {
 	const match = stdout.match(/\[[\w./-]+ [0-9a-f]+\]\s+(.+)/);
 	if (match?.[1] && match[1].length > 50) return match[1];

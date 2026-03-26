@@ -13,6 +13,7 @@ import {
 	isPlanFile,
 	isSourceFile,
 	isTestCommand,
+	validatePlanStructure,
 } from "./detect.js";
 import type { DirectiveItem } from "./directives.js";
 import { emitDirectives } from "./directives.js";
@@ -56,10 +57,31 @@ export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<v
 
 	if (ev.tool_name === "Edit" || ev.tool_name === "Write") {
 		await handleEditWrite(ev.cwd, toolInput, items, signal);
-		// Auto-save plan files as decision knowledge
+		// Auto-save plan files as decision knowledge + validate structure
 		const filePath = (toolInput.file_path as string) ?? "";
 		if (ev.tool_name === "Write" && isPlanFile(filePath)) {
+			const planContent = (toolInput.content as string) ?? "";
 			savePlanDecision(ev.cwd, filePath, toolInput);
+			const validation = validatePlanStructure(planContent);
+			if (!validation.hasPhases) {
+				items.push({
+					level: "DIRECTIVE",
+					message:
+						"Plan must be structured in Phases with Acceptance Criteria for each. Rewrite with Phase structure.",
+					spiritVsLetter: true,
+				});
+			} else if (validation.phasesWithCriteria < validation.phaseCount) {
+				items.push({
+					level: "WARNING",
+					message: `${validation.phaseCount - validation.phasesWithCriteria} of ${validation.phaseCount} phases are missing Acceptance Criteria.`,
+				});
+			}
+			if (!validation.hasTestPlan) {
+				items.push({
+					level: "WARNING",
+					message: "Plan has no Test Plan section. Add verification steps for each phase.",
+				});
+			}
 		}
 	} else if (ev.tool_name === "Bash") {
 		await handleBash(ev.cwd, toolInput, toolResponse, items, signal);
