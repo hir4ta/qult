@@ -1,0 +1,119 @@
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+const TEST_HOME = join(import.meta.dirname, ".tmp-init-test-home");
+const TEST_PROJECT = join(import.meta.dirname, ".tmp-init-test-project");
+const originalCwd = process.cwd();
+const originalHome = process.env.HOME;
+
+beforeEach(() => {
+	mkdirSync(TEST_HOME, { recursive: true });
+	mkdirSync(TEST_PROJECT, { recursive: true });
+	process.env.HOME = TEST_HOME;
+	process.chdir(TEST_PROJECT);
+
+	// Create minimal project files for gate detection
+	writeFileSync(join(TEST_PROJECT, "biome.json"), "{}");
+	writeFileSync(join(TEST_PROJECT, "tsconfig.json"), "{}");
+	writeFileSync(
+		join(TEST_PROJECT, "package.json"),
+		JSON.stringify({ devDependencies: { vitest: "^3" } }),
+	);
+});
+
+afterEach(() => {
+	process.env.HOME = originalHome;
+	process.chdir(originalCwd);
+	rmSync(TEST_HOME, { recursive: true, force: true });
+	rmSync(TEST_PROJECT, { recursive: true, force: true });
+});
+
+describe("alfred init", () => {
+	it("writes hooks to ~/.claude/settings.json", async () => {
+		const { runInit } = await import("../init.ts");
+		await runInit(false);
+
+		const settingsPath = join(TEST_HOME, ".claude", "settings.json");
+		expect(existsSync(settingsPath)).toBe(true);
+
+		const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+		expect(settings.hooks.PostToolUse).toBeDefined();
+		expect(settings.hooks.PreToolUse).toBeDefined();
+		expect(settings.hooks.Stop).toBeDefined();
+		expect(settings.hooks.PermissionRequest).toBeDefined();
+
+		// Check PermissionRequest has matcher
+		const permHook = settings.hooks.PermissionRequest[0];
+		expect(permHook.matcher).toBe("ExitPlanMode");
+	});
+
+	it("creates .alfred/gates.json with detected gates", async () => {
+		const { runInit } = await import("../init.ts");
+		await runInit(false);
+
+		const gatesPath = join(TEST_PROJECT, ".alfred", "gates.json");
+		expect(existsSync(gatesPath)).toBe(true);
+
+		const gates = JSON.parse(readFileSync(gatesPath, "utf-8"));
+		expect(gates.on_write?.lint?.command).toContain("biome");
+		expect(gates.on_write?.typecheck?.command).toContain("tsc");
+	});
+
+	it("writes skill file for /alfred:review", async () => {
+		const { runInit } = await import("../init.ts");
+		await runInit(false);
+
+		const skillPath = join(TEST_HOME, ".claude", "skills", "alfred-review", "SKILL.md");
+		expect(existsSync(skillPath)).toBe(true);
+
+		const content = readFileSync(skillPath, "utf-8");
+		expect(content).toContain("review");
+		expect(content).toContain("correctness");
+		expect(content).toContain("security");
+		expect(content).toContain("Judge");
+	});
+
+	it("writes agent file for alfred-reviewer", async () => {
+		const { runInit } = await import("../init.ts");
+		await runInit(false);
+
+		const agentPath = join(TEST_HOME, ".claude", "agents", "alfred-reviewer.md");
+		expect(existsSync(agentPath)).toBe(true);
+
+		const content = readFileSync(agentPath, "utf-8");
+		expect(content).toContain("reviewer");
+	});
+
+	it("writes quality rules", async () => {
+		const { runInit } = await import("../init.ts");
+		await runInit(false);
+
+		const rulesPath = join(TEST_HOME, ".claude", "rules", "alfred-quality.md");
+		expect(existsSync(rulesPath)).toBe(true);
+
+		const content = readFileSync(rulesPath, "utf-8");
+		expect(content.split("\n").length).toBeLessThanOrEqual(30); // Keep rules concise
+	});
+
+	it("does not overwrite existing hooks without --force", async () => {
+		// Pre-create settings with existing hook
+		const claudeDir = join(TEST_HOME, ".claude");
+		mkdirSync(claudeDir, { recursive: true });
+		writeFileSync(
+			join(claudeDir, "settings.json"),
+			JSON.stringify({
+				hooks: {
+					PostToolUse: [{ type: "command", command: "alfred hook post-tool-use", timeout: 5000 }],
+				},
+			}),
+		);
+
+		const { runInit } = await import("../init.ts");
+		await runInit(false);
+
+		const settings = JSON.parse(readFileSync(join(claudeDir, "settings.json"), "utf-8"));
+		// Should have existing + not duplicate
+		expect(settings.hooks.PostToolUse).toHaveLength(1);
+	});
+});

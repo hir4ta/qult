@@ -541,3 +541,37 @@ describe("Scenario 14: Pace tracking updates on each edit", () => {
 		expect(pace!.tool_calls).toBe(0);
 	});
 });
+
+// ============================================================
+// Phase 4: Init + review skill integration scenarios
+// ============================================================
+
+describe("Scenario 15: Init creates complete setup", () => {
+	it("init creates gates, and hooks work with the created gates", async () => {
+		// Set up a project with biome + tsc
+		writeFileSync(join(TEST_DIR, "biome.json"), "{}");
+		writeFileSync(join(TEST_DIR, "tsconfig.json"), "{}");
+		writeFileSync(
+			join(TEST_DIR, "package.json"),
+			JSON.stringify({ devDependencies: { vitest: "^3" } }),
+		);
+
+		// Run gate detection (simulating what init does)
+		const { detectGates } = await import("../gates/detect.ts");
+		const gates = detectGates(TEST_DIR);
+
+		// Verify detected gates
+		expect(gates.on_write?.lint?.command).toContain("biome");
+		expect(gates.on_write?.typecheck?.command).toContain("tsc");
+		expect(gates.on_commit?.test?.command).toContain("vitest");
+
+		// Write gates.json manually (as init would)
+		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify(gates));
+
+		// Now PostToolUse should be able to load and run these gates
+		const { loadGates } = await import("../gates/load.ts");
+		const loaded = loadGates();
+		expect(loaded).not.toBeNull();
+		expect(loaded!.on_write?.lint).toBeDefined();
+	});
+});
