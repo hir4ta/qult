@@ -1,3 +1,4 @@
+import { resetBudget } from "../state/context-budget.ts";
 import type { HookEvent } from "../types.ts";
 
 const EVENT_MAP: Record<string, () => Promise<{ default: (ev: HookEvent) => Promise<void> }>> = {
@@ -37,6 +38,11 @@ export async function dispatch(event: string): Promise<void> {
 	} catch {
 		// fail-open: invalid JSON → do nothing
 		return;
+	}
+
+	// Initialize context budget for this session
+	if (ev.session_id) {
+		resetBudget(ev.session_id);
 	}
 
 	try {
