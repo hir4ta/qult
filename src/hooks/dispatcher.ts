@@ -18,15 +18,6 @@ const EVENT_MAP: Record<string, () => Promise<{ default: (ev: HookEvent) => Prom
 	"config-change": () => import("./config-change.ts"),
 };
 
-function readStdin(): Promise<string> {
-	return new Promise((resolve) => {
-		const chunks: Buffer[] = [];
-		process.stdin.on("data", (chunk) => chunks.push(chunk));
-		process.stdin.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-		process.stdin.on("error", () => resolve(""));
-	});
-}
-
 export async function dispatch(event: string): Promise<void> {
 	const loader = EVENT_MAP[event];
 	if (!loader) {
@@ -34,7 +25,13 @@ export async function dispatch(event: string): Promise<void> {
 		process.exit(1);
 	}
 
-	const input = await readStdin();
+	let input: string;
+	try {
+		const { readFileSync } = require("node:fs");
+		input = readFileSync("/dev/stdin", "utf-8");
+	} catch {
+		return; // fail-open: stdin read error
+	}
 	if (!input || input.length > 5_000_000) return; // fail-open
 
 	let ev: HookEvent;
