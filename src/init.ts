@@ -4,7 +4,6 @@ import { defineCommand } from "citty";
 import { detectGates } from "./gates/detect.ts";
 
 function loadTemplate(name: string): string {
-	// In dev: read from src/templates/. In built binary: read from same relative path.
 	const candidates = [
 		join(import.meta.dirname, "templates", name),
 		join(import.meta.dirname, "..", "src", "templates", name),
@@ -25,34 +24,131 @@ export const initCommand = defineCommand({
 	},
 });
 
+/** Alfred's hook definitions — the source of truth */
+const ALFRED_HOOKS: Record<
+	string,
+	Array<{ matcher: string; hooks: Array<Record<string, unknown>> }>
+> = {
+	PostToolUse: [
+		{ matcher: "", hooks: [{ type: "command", command: "alfred hook post-tool", timeout: 5000 }] },
+	],
+	PreToolUse: [
+		{ matcher: "", hooks: [{ type: "command", command: "alfred hook pre-tool", timeout: 3000 }] },
+	],
+	UserPromptSubmit: [
+		{
+			matcher: "",
+			hooks: [{ type: "command", command: "alfred hook user-prompt", timeout: 10000 }],
+		},
+	],
+	SessionStart: [
+		{
+			matcher: "",
+			hooks: [{ type: "command", command: "alfred hook session-start", timeout: 5000 }],
+		},
+	],
+	Stop: [{ matcher: "", hooks: [{ type: "command", command: "alfred hook stop", timeout: 5000 }] }],
+	PreCompact: [
+		{
+			matcher: "",
+			hooks: [{ type: "command", command: "alfred hook pre-compact", timeout: 10000 }],
+		},
+	],
+	PermissionRequest: [
+		{
+			matcher: "ExitPlanMode",
+			hooks: [{ type: "command", command: "alfred hook permission-request", timeout: 5000 }],
+		},
+	],
+	TaskCompleted: [
+		{
+			matcher: "",
+			hooks: [{ type: "command", command: "alfred hook task-completed", timeout: 5000 }],
+		},
+	],
+	SubagentStart: [
+		{
+			matcher: "",
+			hooks: [{ type: "command", command: "alfred hook subagent-start", timeout: 3000 }],
+		},
+	],
+	SubagentStop: [
+		{
+			matcher: "",
+			hooks: [{ type: "command", command: "alfred hook subagent-stop", timeout: 5000 }],
+		},
+	],
+	PostToolUseFailure: [
+		{
+			matcher: "",
+			hooks: [{ type: "command", command: "alfred hook post-tool-failure", timeout: 3000 }],
+		},
+	],
+	SessionEnd: [
+		{
+			matcher: "",
+			hooks: [{ type: "command", command: "alfred hook session-end", timeout: 3000 }],
+		},
+	],
+	ConfigChange: [
+		{
+			matcher: "",
+			hooks: [{ type: "command", command: "alfred hook config-change", timeout: 3000 }],
+		},
+	],
+};
+
 export async function runInit(force: boolean): Promise<void> {
 	const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
 	const claudeDir = join(home, ".claude");
-
-	// 1. Write hooks to settings.json
-	console.log("Writing hooks to settings.json...");
 	const settingsPath = join(claudeDir, "settings.json");
-	writeHooks(settingsPath, force);
 
-	// 2. Write skill
+	// 1. Merge hooks into settings.json
+	console.log("Writing hooks to settings.json...");
+	let settings: Record<string, unknown> = {};
+	if (existsSync(settingsPath)) {
+		try {
+			settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+		} catch {
+			console.error("  Warning: could not parse existing settings.json, starting fresh");
+		}
+	}
+
+	const existingHooks = (settings.hooks ?? {}) as Record<string, unknown[]>;
+
+	// Replace alfred hooks, preserve non-alfred hooks
+	for (const event of Object.keys(ALFRED_HOOKS)) {
+		const nonAlfred = (existingHooks[event] ?? []).filter((entry) => {
+			const json = JSON.stringify(entry);
+			return !json.includes("alfred hook");
+		});
+		existingHooks[event] = [...nonAlfred, ...ALFRED_HOOKS[event]!];
+		console.log(`  + ${event}`);
+	}
+
+	settings.hooks = existingHooks;
+	mkdirSync(claudeDir, { recursive: true });
+	writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+	// 2. Write skill, agent, rules
 	console.log("Writing skill: /alfred:review...");
-	const skillDir = join(claudeDir, "skills", "alfred-review");
-	writeTemplateFile(join(skillDir, "SKILL.md"), loadTemplate("skill-review.md"), force);
-
-	// 3. Write agent
+	writeFile(
+		join(claudeDir, "skills", "alfred-review", "SKILL.md"),
+		loadTemplate("skill-review.md"),
+		force,
+	);
 	console.log("Writing agent: alfred-reviewer...");
-	const agentDir = join(claudeDir, "agents");
-	writeTemplateFile(join(agentDir, "alfred-reviewer.md"), loadTemplate("agent-reviewer.md"), force);
-
-	// 4. Write rules
+	writeFile(
+		join(claudeDir, "agents", "alfred-reviewer.md"),
+		loadTemplate("agent-reviewer.md"),
+		force,
+	);
 	console.log("Writing rules: alfred-quality...");
-	const rulesDir = join(claudeDir, "rules");
-	writeTemplateFile(join(rulesDir, "alfred-quality.md"), loadTemplate("rules-quality.md"), force);
+	writeFile(join(claudeDir, "rules", "alfred-quality.md"), loadTemplate("rules-quality.md"), force);
 
-	// 5. Create .alfred/ and gates.json
+	// 3. Create .alfred/ and gates.json
 	const alfredDir = join(process.cwd(), ".alfred");
-	const stateDir = join(alfredDir, ".state");
-	mkdirSync(stateDir, { recursive: true });
+	mkdirSync(join(alfredDir, ".state"), { recursive: true });
 
 	const gatesPath = join(alfredDir, "gates.json");
 	if (!existsSync(gatesPath) || force) {
@@ -63,135 +159,14 @@ export async function runInit(force: boolean): Promise<void> {
 	}
 
 	console.log("\nalfred init complete.");
-	console.log("Run 'alfred doctor' to verify.");
 }
 
-function writeTemplateFile(path: string, content: string, force: boolean): void {
+function writeFile(path: string, content: string, force: boolean): void {
 	if (existsSync(path) && !force) {
-		console.log(`  = ${path} (already exists)`);
+		console.log(`  = ${path} (exists)`);
 		return;
 	}
-	const dir = join(path, "..");
-	mkdirSync(dir, { recursive: true });
+	mkdirSync(join(path, ".."), { recursive: true });
 	writeFileSync(path, content);
 	console.log(`  + ${path}`);
-}
-
-const HOOK_EVENTS = {
-	PostToolUse: { timeout: 5000 },
-	PreToolUse: { timeout: 3000 },
-	UserPromptSubmit: { timeout: 10000 },
-	SessionStart: { timeout: 5000 },
-	Stop: { timeout: 5000 },
-	PreCompact: { timeout: 10000 },
-	PermissionRequest: { timeout: 5000, matcher: "ExitPlanMode" },
-	TaskCompleted: { timeout: 5000 },
-	SubagentStart: { timeout: 3000 },
-	SubagentStop: { timeout: 5000 },
-	PostToolUseFailure: { timeout: 3000 },
-	SessionEnd: { timeout: 3000 },
-	ConfigChange: { timeout: 3000 },
-} as const;
-
-/**
- * Claude Code hook format (v2.1+):
- * {
- *   "hooks": {
- *     "PostToolUse": [
- *       { "matcher": "Edit|Write", "hooks": [{"type": "command", "command": "...", "timeout": 5000}] }
- *     ]
- *   }
- * }
- * Each event is an array of matcher groups. Each group has `matcher` (string) and `hooks` (array).
- */
-function writeHooks(settingsPath: string, force: boolean): void {
-	let settings: Record<string, unknown> = {};
-	if (existsSync(settingsPath)) {
-		try {
-			settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
-		} catch {
-			console.error("  Warning: could not parse existing settings.json, starting fresh");
-		}
-	}
-
-	const hooks = (settings.hooks ?? {}) as Record<string, MatcherGroup[]>;
-
-	for (const [event, config] of Object.entries(HOOK_EVENTS)) {
-		const existing = hooks[event] ?? [];
-		const hasAlfred = existing.some((entry) => {
-			// New nested format
-			if (entry.hooks) {
-				return entry.hooks.some((h) => h.command?.includes("alfred hook"));
-			}
-			// Old flat format
-			const cmd = (entry as Record<string, unknown>).command;
-			return typeof cmd === "string" && cmd.includes("alfred hook");
-		});
-
-		if (!hasAlfred || force) {
-			const hookDef: Record<string, unknown> = {
-				type: "command",
-				command: `alfred hook ${eventToArg(event)}`,
-				timeout: config.timeout,
-			};
-
-			const matcher = "matcher" in config ? (config.matcher as string) : "";
-
-			if (force) {
-				// Remove ALL alfred-related entries (both old flat format and new nested format)
-				hooks[event] = existing.filter((entry) => {
-					// Old flat format: { type, command, timeout } at top level
-					const isOldFlat =
-						"command" in entry && typeof (entry as Record<string, unknown>).command === "string";
-					if (isOldFlat) {
-						return !(entry as Record<string, unknown> & { command: string }).command.includes(
-							"alfred hook",
-						);
-					}
-					// New nested format: { matcher, hooks: [...] }
-					if (entry.hooks) {
-						entry.hooks = entry.hooks.filter((h) => !h.command?.includes("alfred hook"));
-						return entry.hooks.length > 0;
-					}
-					return true;
-				});
-			}
-
-			hooks[event] = [...(hooks[event] ?? []), { matcher, hooks: [hookDef] }];
-			console.log(`  + ${event} hook`);
-		} else {
-			console.log(`  = ${event} hook (already exists)`);
-		}
-	}
-
-	settings.hooks = hooks;
-
-	const dir = join(settingsPath, "..");
-	mkdirSync(dir, { recursive: true });
-	writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-}
-
-interface MatcherGroup {
-	matcher?: string;
-	hooks?: Array<{ type?: string; command?: string; timeout?: number }>;
-}
-
-const EVENT_TO_ARG: Record<string, string> = {
-	PostToolUse: "post-tool",
-	PreToolUse: "pre-tool",
-	UserPromptSubmit: "user-prompt",
-	SessionStart: "session-start",
-	Stop: "stop",
-	PreCompact: "pre-compact",
-	PermissionRequest: "permission-request",
-	TaskCompleted: "task-completed",
-	SubagentStart: "subagent-start",
-	SubagentStop: "subagent-stop",
-	PostToolUseFailure: "post-tool-failure",
-	SessionEnd: "session-end",
-	ConfigChange: "config-change",
-};
-
-function eventToArg(event: string): string {
-	return EVENT_TO_ARG[event] ?? event.toLowerCase();
 }
