@@ -969,3 +969,45 @@ describe("Scenario 24: run_once_per_batch skips typecheck on 2nd edit", () => {
 		expect(batch3!.typecheck).toBeUndefined();
 	});
 });
+
+// ============================================================
+// SubagentStop verification scenario
+// ============================================================
+
+describe("Scenario 25: SubagentStop blocks incomplete reviewer output", () => {
+	it("blocks reviewer without findings, allows with findings", async () => {
+		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+
+		// Incomplete reviewer output → block
+		try {
+			await subagentStop({
+				hook_type: "SubagentStop",
+				agent_type: "alfred-reviewer",
+				last_assistant_message: "The code looks good overall.",
+			});
+		} catch {
+			// exit(2)
+		}
+		expect(exitCode).toBe(2);
+
+		// Valid reviewer output → allow
+		stdoutCapture = [];
+		exitCode = null;
+		await subagentStop({
+			hook_type: "SubagentStop",
+			agent_type: "alfred-reviewer",
+			last_assistant_message: "- [medium] src/foo.ts:10 — unused variable\n  Fix: remove it",
+		});
+		expect(exitCode).toBeNull();
+
+		// Unknown agent → allow (fail-open)
+		stdoutCapture = [];
+		exitCode = null;
+		await subagentStop({
+			hook_type: "SubagentStop",
+			agent_type: "Explore",
+			last_assistant_message: "Found 3 files.",
+		});
+		expect(exitCode).toBeNull();
+	});
+});

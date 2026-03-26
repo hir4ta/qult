@@ -167,21 +167,13 @@ session_id ベースで `run_once_per_batch: true` のゲートを skip。
 `src/state/gate-batch.ts` + `src/hooks/post-tool.ts` に組み込み。
 6テスト + Scenario 24。git commit で batch リセット。
 
-### 3. SubagentStop 検証強化
+### 3. SubagentStop 検証強化 (実装済み)
 
-**問題:** 現在の `subagent-stop.ts` は pass-through。サブエージェントが不完全な出力をしても素通りする。
-
-**設計:**
-- `agent_transcript_path` フィールド (SubagentStop の入力) からサブエージェントの会話ログを読む
-- `last_assistant_message` フィールドでサブエージェントの最終出力を取得
-- Plan subagent の場合: 最終出力に Plan テンプレートの必須セクション (## Tasks, ## Review Gates) が含まれるか検証
-- Review subagent の場合: 最終出力に findings 形式 (`[severity] file:line`) が含まれるか検証
-- 不合格なら `decision: "block"` で差し戻し
-
-**注意:** `agent_type` フィールドで Plan/Review を区別する必要がある。matcher を使って特定の agent_type のみフックすることも可能。
-
-**影響ファイル:**
-- `src/hooks/subagent-stop.ts` — 検証ロジック追加
+`agent_type` + `last_assistant_message` でサブエージェント出力を検証。
+- `alfred-reviewer` → findings or "No issues found" 必須
+- `Plan` → `## Tasks` + Review Gates 必須
+- 不明 agent_type → allow (fail-open)
+9テスト + Scenario 25。
 
 ### 4. dogfooding で発見した問題の修正 (動的)
 

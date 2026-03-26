@@ -41,7 +41,7 @@ src/
 │   ├── pre-compact.ts      # 構造化ハンドオフ保存
 │   ├── session-end.ts      # 割り込み終了時 handoff 保存
 │   ├── subagent-start.ts   # サブエージェントに品質ルール注入
-│   ├── subagent-stop.ts    # サブエージェント完了検証
+│   ├── subagent-stop.ts    # サブエージェント出力検証 (reviewer findings + Plan 構造)
 │   ├── post-tool-failure.ts # ツール失敗追跡 + 2回連続→/clear
 │   └── config-change.ts    # user_settings 変更 DENY
 ├── gates/

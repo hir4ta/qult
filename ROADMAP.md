@@ -29,18 +29,13 @@ session_id ベースで `run_once_per_batch: true` のゲートを skip。
 `src/state/gate-batch.ts` + `src/hooks/post-tool.ts` に組み込み。
 6テスト + Scenario 24。git commit で batch リセット。
 
-### 2.3 SubagentStop 検証強化
+### 2.3 SubagentStop 検証強化 (完了)
 
-**問題:** サブエージェントの出力品質を検証していない。
-
-**設計:**
-- `last_assistant_message` から最終出力を取得
-- Plan subagent → `## Tasks` + `## Review Gates` 必須
-- Review subagent → `[severity] file:line` 形式の findings 必須
-- 不合格 → `decision: "block"` で差し戻し
-- `agent_type` フィールドで判定 (Plan / alfred-reviewer 等)
-
-**影響ファイル:** `src/hooks/subagent-stop.ts`
+`agent_type` + `last_assistant_message` でサブエージェント出力を検証。
+- `alfred-reviewer` → `[severity] file:line` or "No issues found" 必須
+- `Plan` → `## Tasks` + Review Gates 必須
+- 不合格 → block。不明 agent_type → allow (fail-open)
+9テスト + Scenario 25。
 
 ### 2.4 dogfooding 修正 (一部完了)
 
