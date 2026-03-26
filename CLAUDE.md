@@ -113,11 +113,11 @@ task clean    # ビルド成果物削除
 - last-test-pass.json — テスト pass 記録 (commit 前に必須)
 - last-review.json — レビュー完了記録 (Plan 時 Stop 前に必須)
 
-### Phase Gate (各 Phase 完了時に必ず実行)
+### Phase Gate (各コミット前に必ず実行)
 1. `bun vitest run` — 全テスト pass
 2. `bun vitest run src/__tests__/simulation.test.ts` — シミュレーション pass
 3. `bun tsc --noEmit && bun biome check src/` — 型 + lint clean
-4. セルフレビュー — ロジック・エッジケース・デザインを書き出す
+4. `/alfred:review` — 独立レビュー (自己評価は機能しない。必ずサブエージェントで実行)
 5. コミット — Phase Gate 通過後にのみコミット
 
 ### シミュレーション
