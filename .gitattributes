@@ -1,2 +1,3 @@
-# Override GitHub linguist detection
-*.tmpl linguist-language=Markdown
+# Linguist
+*.ts linguist-language=TypeScript
+*.md linguist-documentation=true

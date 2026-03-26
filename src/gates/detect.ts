@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { GatesConfig } from "../types.ts";
 
@@ -34,7 +34,7 @@ export function detectGates(projectRoot: string): GatesConfig {
 	const pkgPath = join(projectRoot, "package.json");
 	if (existsSync(pkgPath)) {
 		try {
-			const pkg = JSON.parse(Bun.file(pkgPath).toString());
+			const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
 			const deps = { ...pkg.dependencies, ...pkg.devDependencies };
 
 			if (deps.vitest) {

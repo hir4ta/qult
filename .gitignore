@@ -3,9 +3,6 @@ dist/
 node_modules/
 .task/
 
-# Database
-*.db
-
 # OS
 .DS_Store
 
@@ -13,9 +10,6 @@ node_modules/
 *.swp
 *.swo
 *~
-
-# Config (local)
-.claude/settings.json
 
 # alfred state (session-local, not tracked)
 .alfred/.state/
