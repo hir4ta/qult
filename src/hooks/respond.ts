@@ -19,6 +19,7 @@ export function deny(reason: string): never {
 		},
 	};
 	process.stdout.write(JSON.stringify(response));
+	process.stderr.write(reason);
 	process.exit(2);
 }
 
@@ -31,5 +32,6 @@ export function block(reason: string): never {
 		},
 	};
 	process.stdout.write(JSON.stringify(response));
+	process.stderr.write(reason);
 	process.exit(2);
 }

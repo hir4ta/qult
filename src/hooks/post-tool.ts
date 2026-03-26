@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { loadGates } from "../gates/load.ts";
 import { runGate } from "../gates/runner.ts";
+import { clearFailCount, recordFailure } from "../state/fail-count.ts";
 import { readPace, writePace } from "../state/pace.ts";
 import { readPendingFixes, writePendingFixes } from "../state/pending-fixes.ts";
 import type { HookEvent, PendingFix } from "../types.ts";
@@ -59,8 +60,10 @@ function handleBash(ev: HookEvent): void {
 	const command = typeof ev.tool_input?.command === "string" ? ev.tool_input.command : null;
 	if (!command) return;
 
+	// Detect git commit → reset pace + run on_commit gates
 	if (/\bgit\s+commit\b/.test(command)) {
 		writePace({ last_commit_at: new Date().toISOString(), changed_files: 0, tool_calls: 0 });
+		clearFailCount();
 
 		const gates = loadGates();
 		if (!gates?.on_commit) return;
@@ -80,6 +83,24 @@ function handleBash(ev: HookEvent): void {
 		if (messages.length > 0) {
 			respond(`Tests failed after commit:\n${messages.join("\n")}`);
 		}
+		return;
+	}
+
+	// Detect Bash failure → track consecutive failures
+	const output = typeof ev.tool_output === "string" ? ev.tool_output : "";
+	const exitCodeMatch = output.match(/exit code (\d+)/i) ?? output.match(/exited with (\d+)/i);
+	const isError = exitCodeMatch ? Number(exitCodeMatch[1]) !== 0 : false;
+
+	if (isError) {
+		const signature = output.slice(0, 200);
+		const count = recordFailure(signature);
+		if (count >= 2) {
+			respond(
+				"Same error 2 times in a row. Consider running /clear and trying a different approach.",
+			);
+		}
+	} else if (output.length > 0) {
+		clearFailCount();
 	}
 }
 

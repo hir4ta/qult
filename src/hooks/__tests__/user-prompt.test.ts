@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { HookEvent } from "../../types.ts";
 
 let stdoutCapture: string[] = [];
 

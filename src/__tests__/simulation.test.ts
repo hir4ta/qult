@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readPace, writePace } from "../state/pace.ts";
 import { readPendingFixes } from "../state/pending-fixes.ts";
-import type { GatesConfig, HookEvent } from "../types.ts";
+import type { GatesConfig } from "../types.ts";
 
 /**
  * End-to-end simulation of alfred hook flow.

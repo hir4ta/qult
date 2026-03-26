@@ -130,9 +130,16 @@ function writeHooks(settingsPath: string, force: boolean): void {
 	writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 }
 
+const EVENT_TO_ARG: Record<string, string> = {
+	PostToolUse: "post-tool",
+	PreToolUse: "pre-tool",
+	UserPromptSubmit: "user-prompt",
+	SessionStart: "session-start",
+	Stop: "stop",
+	PreCompact: "pre-compact",
+	PermissionRequest: "permission-request",
+};
+
 function eventToArg(event: string): string {
-	return event
-		.replace(/([A-Z])/g, "-$1")
-		.toLowerCase()
-		.replace(/^-/, "");
+	return EVENT_TO_ARG[event] ?? event.toLowerCase();
 }
