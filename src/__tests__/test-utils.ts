@@ -22,14 +22,16 @@ export function insertTestProject(
 }
 
 /** Build a knowledge upsert input with sensible defaults. */
-export function makeKnowledgeInput(overrides: {
-	projectId?: string;
-	type?: KnowledgeType;
-	title?: string;
-	content?: string;
-	tags?: string;
-	author?: string;
-} = {}) {
+export function makeKnowledgeInput(
+	overrides: {
+		projectId?: string;
+		type?: KnowledgeType;
+		title?: string;
+		content?: string;
+		tags?: string;
+		author?: string;
+	} = {},
+) {
 	return {
 		projectId: overrides.projectId ?? TEST_PROJECT_ID,
 		type: overrides.type ?? ("error_resolution" as KnowledgeType),

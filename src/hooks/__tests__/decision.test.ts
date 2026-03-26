@@ -22,7 +22,9 @@ describe("isPlanFile", () => {
 
 describe("extractCommitMessage", () => {
 	it("extracts commit message from git output", () => {
-		const msg = extractCommitMessage("[main abc1234] feat: implement knowledge auto-accumulation engine for better quality");
+		const msg = extractCommitMessage(
+			"[main abc1234] feat: implement knowledge auto-accumulation engine for better quality",
+		);
 		expect(msg).toBe("feat: implement knowledge auto-accumulation engine for better quality");
 	});
 

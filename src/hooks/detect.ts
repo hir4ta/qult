@@ -154,6 +154,59 @@ export function validatePlanStructure(content: string): PlanValidation {
 	};
 }
 
+// ===== Plan Criteria Extraction =====
+
+export interface PlanPhase {
+	name: string;
+	files: string[];
+	criteria: string[];
+}
+
+/**
+ * Extract structured plan criteria for drift detection.
+ * Parses phases, file lists, and acceptance criteria from plan markdown.
+ */
+export function extractPlanCriteria(content: string): PlanPhase[] {
+	const phases: PlanPhase[] = [];
+	const sections = content.split(/^###?\s+Phase\s+\d+\s*[:.]\s*/gim);
+
+	// First section is preamble, skip it
+	const phaseHeaders = content.match(/^###?\s+Phase\s+\d+\s*[:.]\s*(.*)/gim) || [];
+
+	for (let i = 0; i < phaseHeaders.length; i++) {
+		const header = phaseHeaders[i]!;
+		const name = header.replace(/^###?\s+/, "").trim();
+		const body = sections[i + 1] ?? "";
+
+		// Extract file paths (lines containing file-like patterns)
+		const files: string[] = [];
+		const fileMatches = body.match(/[`"]?([\w/.]+\.\w{1,5})[`"]?/g) || [];
+		for (const m of fileMatches) {
+			const clean = m.replace(/[`"]/g, "");
+			if (clean.includes("/") && clean.includes(".")) {
+				files.push(clean);
+			}
+		}
+
+		// Extract acceptance criteria (bulleted items after "Acceptance Criteria" heading)
+		// Handles both plain "Acceptance Criteria:" and bold "**Acceptance Criteria**:"
+		const criteria: string[] = [];
+		const criteriaMatch = body.match(
+			/\*?\*?acceptance\s+criteria\*?\*?\s*:?\s*\n((?:\s*[-*]\s+.+\n?)+)/i,
+		);
+		if (criteriaMatch) {
+			const items = criteriaMatch[1]!.match(/[-*]\s+(.+)/g) || [];
+			for (const item of items) {
+				criteria.push(item.replace(/^[-*]\s+/, "").trim());
+			}
+		}
+
+		phases.push({ name, files: [...new Set(files)], criteria });
+	}
+
+	return phases;
+}
+
 export function extractCommitMessage(stdout: string): string | null {
 	const match = stdout.match(/\[[\w./-]+ [0-9a-f]+\]\s+(.+)/);
 	if (match?.[1] && match[1].length > 50) return match[1];

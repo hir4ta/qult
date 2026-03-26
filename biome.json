@@ -22,6 +22,10 @@
       },
       "style": {
         "noNonNullAssertion": "off"
+      },
+      "security": {
+        "noDangerouslySetInnerHtml": "error",
+        "noGlobalEval": "error"
       }
     }
   },

@@ -85,7 +85,7 @@ export async function userPromptSubmit(ev: HookEvent, _signal: AbortSignal): Pro
 		});
 	}
 
-	emitDirectives("UserPromptSubmit", items);
+	emitDirectives("UserPromptSubmit", items, ev.cwd);
 }
 
 // ── Intent classification ───────────────────────────────────────────

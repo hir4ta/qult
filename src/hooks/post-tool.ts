@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { loadGates, runGateGroup } from "../gates/index.js";
+import { updatePace, resetPaceOnCommit, readPace } from "./pace.js";
 import { openDefaultCached } from "../store/index.js";
 import { resolveOrRegisterProject } from "../store/project.js";
 import { insertQualityEvent } from "../store/quality-events.js";
@@ -13,6 +14,7 @@ import {
 	isPlanFile,
 	isSourceFile,
 	isTestCommand,
+	extractPlanCriteria,
 	validatePlanStructure,
 } from "./detect.js";
 import type { DirectiveItem } from "./directives.js";
@@ -53,8 +55,9 @@ export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<v
 	const toolInput = (ev.tool_input ?? {}) as Record<string, unknown>;
 	const toolResponse = (ev.tool_response ?? {}) as Record<string, unknown>;
 
-	// Long-task detection (research #7: task time 2x = failure rate 4x)
-	checkLongTask(ev.cwd, items);
+	// Pace tracking + long-task detection (research #7: task time 2x = failure rate 4x)
+	updatePace(ev.cwd, ev.tool_name ?? "", toolInput);
+	checkPace(ev.cwd, items);
 
 	if (ev.tool_name === "Edit" || ev.tool_name === "Write") {
 		await handleEditWrite(ev.cwd, toolInput, items, signal);
@@ -63,6 +66,7 @@ export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<v
 		if (ev.tool_name === "Write" && isPlanFile(filePath)) {
 			const planContent = (toolInput.content as string) ?? "";
 			await savePlanDecision(ev.cwd, filePath, toolInput);
+			initPlanProgress(ev.cwd, filePath, planContent);
 			const validation = validatePlanStructure(planContent);
 			if (!validation.hasPhases) {
 				items.push({
@@ -88,7 +92,7 @@ export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<v
 		await handleBash(ev.cwd, toolInput, toolResponse, items, signal);
 	}
 
-	emitDirectives("PostToolUse", items);
+	emitDirectives("PostToolUse", items, ev.cwd);
 }
 
 // ── Edit/Write handler ──────────────────────────────────────────────
@@ -163,11 +167,32 @@ async function handleEditWrite(
 		});
 	}
 
+	// Read file content once for all checks (convention, security, layer)
+	let fileContent: string | null = null;
+	try {
+		const { readFileSync } = require("node:fs") as typeof import("node:fs");
+		fileContent = readFileSync(filePath, "utf-8");
+	} catch { /* fail-open */ }
+
 	// Convention check (regex-based rules only)
-	checkFileConventions(cwd, filePath, items);
+	checkFileConventions(cwd, filePath, items, fileContent);
+
+	// Security pattern check
+	checkFileSecurity(cwd, filePath, items, fileContent);
+
+	// Architecture layer check
+	checkLayerRules(cwd, filePath, items, fileContent);
+
+	// Plan drift check
+	checkPlanDrift(cwd, filePath, items);
+
+	// Duplicate code detection (Write only — new file creation)
+	if (toolInput.content) {
+		checkDuplicates(cwd, filePath, toolInput, items);
+	}
 }
 
-function checkFileConventions(cwd: string, filePath: string, items: DirectiveItem[]): void {
+function checkFileConventions(cwd: string, filePath: string, items: DirectiveItem[], preloadedContent?: string | null): void {
 	try {
 		const { readFileSync } = require("node:fs") as typeof import("node:fs");
 		const { join } = require("node:path") as typeof import("node:path");
@@ -180,11 +205,10 @@ function checkFileConventions(cwd: string, filePath: string, items: DirectiveIte
 		const rules = JSON.parse(readFileSync(convPath, "utf-8"));
 		if (!Array.isArray(rules)) return;
 
-		// Only check rules that have a `check` field
 		const checkableRules = rules.filter((r: { check?: unknown }) => r.check);
 		if (checkableRules.length === 0) return;
 
-		const content = readFileSync(filePath, "utf-8");
+		const content = preloadedContent ?? readFileSync(filePath, "utf-8");
 		const violations = checkConventions(filePath, content, checkableRules);
 
 		if (violations.length > 0) {
@@ -209,6 +233,181 @@ function checkFileConventions(cwd: string, filePath: string, items: DirectiveIte
 			recordQualityEventSafe(cwd, "convention_warn", { file: filePath, count: violations.length });
 		} else {
 			recordQualityEventSafe(cwd, "convention_pass", { file: filePath });
+		}
+	} catch {
+		/* fail-open */
+	}
+}
+
+function checkFileSecurity(cwd: string, filePath: string, items: DirectiveItem[], preloadedContent?: string | null): void {
+	try {
+		const { checkSecurity } =
+			require("./security-check.js") as typeof import("./security-check.js");
+
+		const content = preloadedContent ?? (() => {
+			const { readFileSync } = require("node:fs") as typeof import("node:fs");
+			return readFileSync(filePath, "utf-8");
+		})();
+		const violations = checkSecurity(filePath, content);
+
+		if (violations.length > 0) {
+			const fixes = readPendingFixes(cwd);
+			const fileEntry = fixes.files[filePath] ?? {};
+			fileEntry.security = violations.map((v) => ({
+				line: v.line,
+				rule: v.rule,
+				message: `[${v.severity}] ${v.detail}`,
+			}));
+			fixes.files[filePath] = fileEntry;
+			fixes.updated_at = new Date().toISOString();
+			writePendingFixes(cwd, fixes);
+
+			const summary = violations
+				.map((v) => `- Line ${v.line}: [${v.severity}] ${v.rule}: ${v.detail}`)
+				.join("\n");
+			items.push({
+				level: "DIRECTIVE",
+				message: `Security issues in ${filePath}:\n${summary}`,
+				spiritVsLetter: true,
+			});
+			recordQualityEventSafe(cwd, "security_warn", { file: filePath, count: violations.length });
+		} else {
+			recordQualityEventSafe(cwd, "security_pass", { file: filePath });
+		}
+	} catch {
+		/* fail-open */
+	}
+}
+
+function checkLayerRules(cwd: string, filePath: string, items: DirectiveItem[], preloadedContent?: string | null): void {
+	try {
+		const { loadLayersConfig, checkLayerViolations } =
+			require("./layer-check.js") as typeof import("./layer-check.js");
+
+		const config = loadLayersConfig(cwd);
+		if (!config) return;
+
+		const content = preloadedContent ?? (() => {
+			const { readFileSync } = require("node:fs") as typeof import("node:fs");
+			return readFileSync(filePath, "utf-8");
+		})();
+		const violations = checkLayerViolations(cwd, filePath, content, config);
+
+		if (violations.length > 0) {
+			const fixes = readPendingFixes(cwd);
+			const fileEntry = fixes.files[filePath] ?? {};
+			fileEntry.layer = violations.map((v) => ({
+				line: v.line,
+				rule: `${v.fromLayer} → ${v.toLayer}`,
+				message: v.message,
+			}));
+			fixes.files[filePath] = fileEntry;
+			fixes.updated_at = new Date().toISOString();
+			writePendingFixes(cwd, fixes);
+
+			const summary = violations
+				.map((v) => `- Line ${v.line}: ${v.fromLayer} → ${v.toLayer}`)
+				.join("\n");
+			items.push({
+				level: "DIRECTIVE",
+				message: `Architecture layer violations:\n${summary}`,
+				spiritVsLetter: true,
+			});
+			recordQualityEventSafe(cwd, "layer_warn", { file: filePath, count: violations.length });
+		} else {
+			recordQualityEventSafe(cwd, "layer_pass", { file: filePath });
+		}
+	} catch {
+		/* fail-open */
+	}
+}
+
+function checkDuplicates(
+	cwd: string,
+	filePath: string,
+	toolInput: Record<string, unknown>,
+	items: DirectiveItem[],
+): void {
+	try {
+		const { extractFunctionSignatures, buildSearchQuery } =
+			require("./duplicate-check.js") as typeof import("./duplicate-check.js");
+
+		const content = (toolInput.content as string) ?? "";
+		const sigs = extractFunctionSignatures(filePath, content);
+		if (sigs.length === 0) return;
+
+		const query = buildSearchQuery(sigs);
+		// Use sync-style search via knowledge-search (fail-open, returns [] on error)
+		searchKnowledgeSafe(query, { limit: 2, minScore: 0.8 }).then((hits) => {
+			if (hits.length > 0) {
+				// Can't inject into items (async), but can record for awareness
+				recordQualityEventSafe(cwd, "duplicate_warn", {
+					file: filePath,
+					signatures: sigs.map((s) => s.name),
+					similarTo: hits.map((h) => h.title),
+				});
+			}
+		}).catch(() => {/* fail-open */});
+	} catch {
+		/* fail-open */
+	}
+}
+
+function initPlanProgress(cwd: string, filePath: string, content: string): void {
+	try {
+		const { createHash } = require("node:crypto") as typeof import("node:crypto");
+		const phases = extractPlanCriteria(content);
+		if (phases.length === 0) return;
+
+		const hash = createHash("md5").update(content).digest("hex");
+		writeStateJSON(cwd, "plan-progress.json", {
+			plan_file: filePath,
+			plan_hash: hash,
+			phases: phases.map((p) => ({
+				name: p.name,
+				scope_files: p.files,
+				criteria: p.criteria,
+				verified: p.criteria.map(() => false),
+			})),
+			current_phase: 0,
+			drift_warnings: [],
+			amendments: [],
+		});
+	} catch {
+		/* fail-open */
+	}
+}
+
+function checkPlanDrift(cwd: string, filePath: string, items: DirectiveItem[]): void {
+	try {
+		const progress = readStateJSON<{
+			phases: Array<{ name: string; scope_files: string[] }>;
+			current_phase: number;
+			drift_warnings: Array<{ file: string; reason: string; timestamp: string }>;
+		} | null>(cwd, "plan-progress.json", null);
+		if (!progress?.phases?.length) return;
+
+		const currentPhase = progress.phases[progress.current_phase];
+		if (!currentPhase) return;
+
+		const inScope = currentPhase.scope_files.some(
+			(f) => filePath.endsWith(f) || filePath.includes(f),
+		);
+
+		if (!inScope && currentPhase.scope_files.length > 0) {
+			items.push({
+				level: "WARNING",
+				message:
+					`${filePath} is not in Phase ${progress.current_phase + 1} (${currentPhase.name}) scope. ` +
+					`If scope changed, update the plan file first.`,
+			});
+			progress.drift_warnings.push({
+				file: filePath,
+				reason: "out_of_phase_scope",
+				timestamp: new Date().toISOString(),
+			});
+			writeStateJSON(cwd, "plan-progress.json", progress);
+			recordQualityEventSafe(cwd, "plan_drift", { file: filePath, phase: progress.current_phase });
 		}
 	} catch {
 		/* fail-open */
@@ -249,6 +448,8 @@ async function handleBash(
 	}
 
 	if (exitCode !== 0 && (stderr || stdout)) {
+		// If we previously injected knowledge and error still occurs, mark as failure
+		updateInjectedKnowledgeUtility(cwd, false);
 		saveLastError(cwd, command, stderr || stdout);
 		// Search for previously resolved similar errors
 		await searchAndInjectErrorResolution(cwd, stderr || stdout, items);
@@ -264,6 +465,9 @@ async function handleGitCommit(
 	items: DirectiveItem[],
 	_signal: AbortSignal,
 ): Promise<void> {
+	// Reset pace counters on commit — reward commit behavior
+	resetPaceOnCommit(cwd);
+
 	const gates = loadGates(cwd);
 	if (!gates || Object.keys(gates.on_commit).length === 0) return;
 
@@ -280,15 +484,47 @@ async function handleGitCommit(
 		});
 	}
 
-	items.push({
-		level: "DIRECTIVE",
-		message:
-			"Before moving on, verify:\n" +
-			"1. Edge cases — List 3 edge cases. Are they handled or tested?\n" +
-			"2. Silent failure — Could this produce wrong output without crashing?\n" +
-			"3. Simplicity — Is there a simpler approach?\n" +
-			"4. Conventions — Does this match project patterns?",
-	});
+	// Self-reflection (research #5: HumanEval 80%→91%)
+	try {
+		const { classifyTaskType, determineDepth, buildReflectionDirective } =
+			require("./reflection.js") as typeof import("./reflection.js");
+		const pace = readStateJSON<{
+			files_changed_since_commit: string[];
+			lines_changed_since_commit: number;
+		}>(cwd, "session-pace.json", { files_changed_since_commit: [], lines_changed_since_commit: 0 });
+		const taskType = classifyTaskType(pace.files_changed_since_commit);
+		// Detect new files: files in pace that don't exist in git history
+		const hasNewFiles = pace.files_changed_since_commit.length > 0 &&
+			pace.files_changed_since_commit.some((f) => !existsSync(f.replace(/\.[^.]+$/, ".test$&")));
+		const depth = determineDepth(
+			pace.lines_changed_since_commit,
+			pace.files_changed_since_commit.length,
+			hasNewFiles,
+		);
+
+		// Knowledge hints: query past failures for modified files
+		const knowledgeHints: string[] = [];
+		try {
+			const fileNames = pace.files_changed_since_commit.slice(0, 3).map((f) => f.split("/").pop() ?? f);
+			const hits = await searchKnowledgeSafe(fileNames.join(" "), { limit: 2, minScore: 0.7 });
+			for (const hit of hits) {
+				knowledgeHints.push(hit.title ?? "");
+			}
+		} catch { /* fail-open */ }
+
+		items.push(buildReflectionDirective(taskType, depth, knowledgeHints));
+	} catch {
+		// Fallback to static checklist
+		items.push({
+			level: "DIRECTIVE",
+			message:
+				"Before moving on, verify:\n" +
+				"1. Edge cases — List 3 edge cases. Are they handled or tested?\n" +
+				"2. Silent failure — Could this produce wrong output without crashing?\n" +
+				"3. Simplicity — Is there a simpler approach?\n" +
+				"4. Conventions — Does this match project patterns?",
+		});
+	}
 }
 
 // ── Test result handlers ────────────────────────────────────────────
@@ -368,7 +604,28 @@ function handlePotentialResolution(cwd: string, successCommand: string, _stdout:
 	// Auto-save error_resolution to knowledge DB
 	saveErrorResolution(cwd, lastError, successCommand);
 
+	// Utility feedback: if we injected knowledge IDs, mark them as successful
+	updateInjectedKnowledgeUtility(cwd, true);
+
 	clearLastError(cwd);
+}
+
+function updateInjectedKnowledgeUtility(cwd: string, success: boolean): void {
+	try {
+		const data = readStateJSON<{ ids: number[] } | null>(cwd, "injected-knowledge-ids.json", null);
+		if (!data?.ids?.length) return;
+
+		const { updateUtility } = require("../store/gc.js") as typeof import("../store/gc.js");
+		const { openDefaultCached } = require("../store/index.js") as typeof import("../store/index.js");
+		const store = openDefaultCached();
+		for (const id of data.ids) {
+			updateUtility(store, id, success);
+		}
+		// Clear after processing
+		writeStateJSON(cwd, "injected-knowledge-ids.json", null);
+	} catch {
+		/* fail-open */
+	}
 }
 
 /** Save error→fix pattern to knowledge DB with vector embedding (fail-open). */
@@ -611,25 +868,32 @@ async function saveCommitDecision(cwd: string, commitMsg: string): Promise<void>
 	}
 }
 
-// ── Long-task detection (research #7) ────────────────────────────────
+// ── Task Pace Management (delegated to pace.ts) ──
 
-const SESSION_START_FILE = "session-start-time.json";
+function checkPace(cwd: string, items: DirectiveItem[]): void {
+	try {
+		const pace = readPace(cwd);
+		if (!pace?.started_at) return;
 
-function checkLongTask(cwd: string, items: DirectiveItem[]): void {
-	const data = readStateJSON<{ startedAt: number }>(cwd, SESSION_START_FILE, { startedAt: 0 });
-	if (!data.startedAt) {
-		// First call — record session start
-		writeStateJSON(cwd, SESSION_START_FILE, { startedAt: Date.now() });
-		return;
-	}
-	const mins = (Date.now() - data.startedAt) / 60000;
-	if (mins >= 35) {
-		items.push({
-			level: "WARNING",
-			message: `Session has been running for ${Math.round(mins)} minutes. Task time 2x = failure rate 4x. Consider splitting into smaller tasks.`,
-		});
-		// Reset so we don't warn every call
-		writeStateJSON(cwd, SESSION_START_FILE, { startedAt: Date.now() });
+		const ref = pace.last_commit_at || pace.started_at;
+		const mins = (Date.now() - new Date(ref).getTime()) / 60000;
+		const files = pace.files_changed_since_commit.length;
+		const lines = pace.lines_changed_since_commit;
+
+		const reasons: string[] = [];
+		if (mins >= 20) reasons.push(`${Math.round(mins)}min without commit`);
+		if (files >= 5) reasons.push(`${files} files changed`);
+		if (lines >= 200) reasons.push(`${lines} lines changed`);
+
+		if (reasons.length > 0) {
+			items.push({
+				level: "DIRECTIVE",
+				message: `Commit your progress: ${reasons.join(", ")}. Smaller commits = easier rollback.`,
+			});
+			recordQualityEventSafe(cwd, "pace_warn", { mins: Math.round(mins), files, lines });
+		}
+	} catch {
+		/* fail-open */
 	}
 }
 
@@ -702,6 +966,12 @@ async function searchAndInjectErrorResolution(
 			message: `Similar error resolved before:\n${formatted}`,
 		});
 		recordQualityEventSafe(cwd, "error_hit", { query: query.slice(0, 200), hits: hits.length });
+
+		// Track injected IDs for utility feedback on next success/failure
+		const injectedIds = hits.map((h) => h.id).filter((id): id is number => id != null);
+		if (injectedIds.length > 0) {
+			writeStateJSON(cwd, "injected-knowledge-ids.json", { ids: injectedIds, at: new Date().toISOString() });
+		}
 	} else {
 		recordQualityEventSafe(cwd, "error_miss", { query: query.slice(0, 200) });
 	}

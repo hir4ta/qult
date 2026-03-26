@@ -212,14 +212,7 @@ describe("classifyIntent", () => {
 	// ═══════════════════════════════════════════════════════════════
 
 	describe("neutral", () => {
-		it.each([
-			"hello",
-			"ok",
-			"thanks",
-			"yes",
-			"no",
-			"LGTM",
-		])("'%s' → neutral", (prompt) => {
+		it.each(["hello", "ok", "thanks", "yes", "no", "LGTM"])("'%s' → neutral", (prompt) => {
 			expect(classifyIntent(prompt)).toBe("neutral");
 		});
 	});

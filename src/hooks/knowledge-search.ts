@@ -5,6 +5,7 @@
 import type { KnowledgeType } from "../types.js";
 
 export interface SearchHit {
+	id?: number;
 	title: string;
 	content: string;
 	type: KnowledgeType;
@@ -35,6 +36,7 @@ export async function searchKnowledgeSafe(
 		});
 
 		return results.map((r) => ({
+			id: r.entry.id,
 			title: r.entry.title,
 			content: r.entry.content,
 			type: r.entry.type,

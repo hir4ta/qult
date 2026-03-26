@@ -1,6 +1,6 @@
 import type { DbDatabase } from "./db.js";
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -29,6 +29,11 @@ CREATE TABLE IF NOT EXISTS knowledge_index (
     hit_count       INTEGER DEFAULT 0,
     last_accessed   TEXT DEFAULT '',
     enabled         INTEGER DEFAULT 1,
+    success_count   INTEGER DEFAULT 0,
+    failure_count   INTEGER DEFAULT 0,
+    utility_score   REAL DEFAULT 0.5,
+    confidence      REAL DEFAULT 0.5,
+    source          TEXT DEFAULT '',
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
     UNIQUE(project_id, type, title)
@@ -57,7 +62,13 @@ CREATE TABLE IF NOT EXISTS quality_events (
         'test_pass','test_fail',
         'assertion_warning',
         'convention_pass','convention_warn',
-        'plan_created','knowledge_saved'
+        'plan_created','knowledge_saved',
+        'security_warn','security_pass',
+        'pace_warn','pace_deny',
+        'layer_warn','layer_pass',
+        'budget_trim','injection_tracked',
+        'plan_drift','reflection_depth',
+        'duplicate_warn'
     )),
     data        TEXT DEFAULT '{}',
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
@@ -223,6 +234,50 @@ function migrateV1toV2(db: DbDatabase): void {
 	`);
 }
 
+function migrateV2toV3(db: DbDatabase): void {
+	// Add utility tracking columns to knowledge_index
+	const kiCols = db.prepare("PRAGMA table_info(knowledge_index)").all() as Array<{ name: string }>;
+	const colNames = new Set(kiCols.map((c) => c.name));
+	if (!colNames.has("success_count")) {
+		db.exec("ALTER TABLE knowledge_index ADD COLUMN success_count INTEGER DEFAULT 0");
+		db.exec("ALTER TABLE knowledge_index ADD COLUMN failure_count INTEGER DEFAULT 0");
+		db.exec("ALTER TABLE knowledge_index ADD COLUMN utility_score REAL DEFAULT 0.5");
+		db.exec("ALTER TABLE knowledge_index ADD COLUMN confidence REAL DEFAULT 0.5");
+		db.exec("ALTER TABLE knowledge_index ADD COLUMN source TEXT DEFAULT ''");
+	}
+
+	// Rebuild quality_events with expanded CHECK constraint
+	db.exec(`
+		CREATE TABLE quality_events_v3 (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			session_id  TEXT DEFAULT '',
+			event_type  TEXT NOT NULL CHECK(event_type IN (
+				'gate_pass','gate_fail',
+				'error_hit','error_miss',
+				'test_pass','test_fail',
+				'assertion_warning',
+				'convention_pass','convention_warn',
+				'plan_created','knowledge_saved',
+				'security_warn','security_pass',
+				'pace_warn','pace_deny',
+				'layer_warn','layer_pass',
+				'budget_trim','injection_tracked',
+				'plan_drift','reflection_depth',
+				'duplicate_warn'
+			)),
+			data        TEXT DEFAULT '{}',
+			created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+		);
+		INSERT INTO quality_events_v3 SELECT * FROM quality_events;
+		DROP TABLE quality_events;
+		ALTER TABLE quality_events_v3 RENAME TO quality_events;
+		CREATE INDEX IF NOT EXISTS idx_qe_project ON quality_events(project_id);
+		CREATE INDEX IF NOT EXISTS idx_qe_session ON quality_events(session_id);
+		CREATE INDEX IF NOT EXISTS idx_qe_type ON quality_events(event_type);
+	`);
+}
+
 export function migrate(db: DbDatabase): void {
 	let current = 0;
 	try {
@@ -236,8 +291,11 @@ export function migrate(db: DbDatabase): void {
 	if (current === SCHEMA_VERSION) return;
 
 	const txn = db.transaction(() => {
-		if (current === 1) {
+		if (current === 2) {
+			migrateV2toV3(db);
+		} else if (current === 1) {
 			migrateV1toV2(db);
+			migrateV2toV3(db);
 		} else {
 			rebuildFromScratch(db);
 		}

@@ -3,7 +3,7 @@
  *
  * Installs: MCP server, hooks, rules, skills, agents, gates, DB
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { detectGates } from "../gates/index.js";
@@ -281,6 +281,18 @@ async function initProject(cwd: string): Promise<void> {
 		console.log("  ✓ Conventions: .alfred/conventions.json exists");
 	}
 
+	// Layers (architecture boundary enforcement)
+	const layersPath = join(alfredDir, "layers.json");
+	if (!existsSync(layersPath)) {
+		const skeleton = generateLayersSkeleton(cwd);
+		if (skeleton) {
+			writeFileSync(layersPath, `${JSON.stringify(skeleton, null, 2)}\n`);
+			console.log(`  ✓ Layers: ${skeleton.layers.length} layers → .alfred/layers.json`);
+		}
+	} else {
+		console.log("  ✓ Layers: .alfred/layers.json exists");
+	}
+
 	// Knowledge directories
 	for (const dir of ["error_resolutions", "fix_patterns", "conventions"]) {
 		mkdirSync(join(alfredDir, "knowledge", dir), { recursive: true });
@@ -536,3 +548,41 @@ For confirmed conventions:
 2. Generate \`.claude/rules/alfred-conventions.md\` with path-scoped rules
 3. Report: "Saved N conventions. Rules file generated."
 `;
+
+// ── Layers skeleton generation ──────────────────────────────────────
+
+interface LayersConfig {
+	layers: Array<{ name: string; pattern: string }>;
+	rules: Array<{ from: string; deny: string[] }>;
+}
+
+function generateLayersSkeleton(cwd: string): LayersConfig | null {
+	try {
+		const srcDir = join(cwd, "src");
+		if (!existsSync(srcDir)) return null;
+
+		const entries = readdirSync(srcDir, { withFileTypes: true });
+		const dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+		if (dirs.length < 2) return null;
+
+		const layers = dirs.map((d) => ({ name: d, pattern: `^src/${d}` }));
+
+		// Default rules: lower layers don't import higher layers
+		// Common pattern: types < store < embedder < gates/profile < hooks < mcp < tui < cli
+		const layerOrder = ["types", "store", "embedder", "gates", "profile", "hooks", "mcp", "init", "tui", "cli"];
+		const rules: Array<{ from: string; deny: string[] }> = [];
+
+		for (const layer of layers) {
+			const idx = layerOrder.indexOf(layer.name);
+			if (idx < 0) continue;
+			const higherLayers = layerOrder.slice(idx + 1).filter((l) => dirs.includes(l));
+			if (higherLayers.length > 0) {
+				rules.push({ from: layer.name, deny: higherLayers });
+			}
+		}
+
+		return rules.length > 0 ? { layers, rules } : null;
+	} catch {
+		return null;
+	}
+}

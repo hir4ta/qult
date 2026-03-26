@@ -20,7 +20,6 @@ describe("isPlanFile", () => {
 });
 
 describe("validatePlanStructure", () => {
-
 	it("validates well-structured plan", () => {
 		const plan = `# Plan
 ## Context

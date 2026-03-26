@@ -1,11 +1,11 @@
 import { execFileSync } from "node:child_process";
-import type { HookEvent } from "./dispatcher.js";
-import { writeStateJSON } from "./state.js";
 import type { Store } from "../store/index.js";
 import { openDefaultCached } from "../store/index.js";
 import { resolveOrRegisterProject } from "../store/project.js";
-import { getSessionSummary, calculateQualityScore } from "../store/quality-events.js";
+import { calculateQualityScore, getSessionSummary } from "../store/quality-events.js";
+import type { HookEvent } from "./dispatcher.js";
 import { hasPendingFixes } from "./pending-fixes.js";
+import { writeStateJSON } from "./state.js";
 
 function findLatestSessionId(store: Store): string | null {
 	try {

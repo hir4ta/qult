@@ -3,13 +3,13 @@
  */
 import { describe, expect, it } from "vitest";
 import {
-	isGitCommit,
-	isTestCommand,
-	isSourceFile,
-	guessTestFile,
-	extractTestFailures,
 	countAssertions,
 	extractCommandBase,
+	extractTestFailures,
+	guessTestFile,
+	isGitCommit,
+	isSourceFile,
+	isTestCommand,
 } from "../detect.js";
 
 describe("isGitCommit", () => {

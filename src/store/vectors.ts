@@ -26,13 +26,17 @@ export function insertEmbedding(
 	}
 	const blob = serializeFloat32(vector);
 	store.db
-		.prepare("INSERT OR REPLACE INTO embeddings (source, source_id, model, dims, vector) VALUES ('knowledge', ?, ?, ?, ?)")
+		.prepare(
+			"INSERT OR REPLACE INTO embeddings (source, source_id, model, dims, vector) VALUES ('knowledge', ?, ?, ?, ?)",
+		)
 		.run(sourceId, model, vector.length, blob);
 }
 
 export function cleanOrphanedEmbeddings(store: Store): number {
 	const result = store.db
-		.prepare("DELETE FROM embeddings WHERE source = 'knowledge' AND source_id NOT IN (SELECT id FROM knowledge_index)")
+		.prepare(
+			"DELETE FROM embeddings WHERE source = 'knowledge' AND source_id NOT IN (SELECT id FROM knowledge_index)",
+		)
 		.run();
 	return result.changes;
 }
@@ -46,7 +50,10 @@ export function vectorSearch(
 	if (!queryVec || queryVec.length === 0) return [];
 	if (limit <= 0) limit = 10;
 
-	const maxCandidates = envIntOrDefault("ALFRED_MAX_VECTOR_CANDIDATES", DEFAULT_MAX_VECTOR_CANDIDATES);
+	const maxCandidates = envIntOrDefault(
+		"ALFRED_MAX_VECTOR_CANDIDATES",
+		DEFAULT_MAX_VECTOR_CANDIDATES,
+	);
 
 	const rows = store.db
 		.prepare(`
@@ -74,7 +81,9 @@ export function vectorSearch(
 
 export function cosineSimilarity(a: number[], b: number[]): number {
 	if (a.length !== b.length || a.length === 0) return 0;
-	let dot = 0, normA = 0, normB = 0;
+	let dot = 0,
+		normA = 0,
+		normB = 0;
 	for (let i = 0; i < a.length; i++) {
 		dot += a[i]! * b[i]!;
 		normA += a[i]! * a[i]!;

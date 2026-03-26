@@ -4,14 +4,19 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { Store, openDefaultCached } from "../store/index.js";
-import { resolveOrRegisterProject } from "../store/project.js";
-import { getRecentEvents, getSessionSummary, calculateQualityScore, getGateBreakdown } from "../store/quality-events.js";
-import { countKnowledge } from "../store/knowledge.js";
-import { readPendingFixes, hasPendingFixes, type PendingFixes } from "../hooks/pending-fixes.js";
+import { hasPendingFixes, type PendingFixes, readPendingFixes } from "../hooks/pending-fixes.js";
 import { readStateJSON } from "../hooks/state.js";
-import type { QualityScore } from "../types.js";
 import { getKnowledgeInjectionCount } from "../hooks/user-prompt.js";
+import { openDefaultCached, type Store } from "../store/index.js";
+import { countKnowledge } from "../store/knowledge.js";
+import { resolveOrRegisterProject } from "../store/project.js";
+import {
+	calculateQualityScore,
+	getGateBreakdown,
+	getRecentEvents,
+	getSessionSummary,
+} from "../store/quality-events.js";
+import type { QualityScore } from "../types.js";
 
 export interface QualityDashboardData {
 	// Score
@@ -126,7 +131,9 @@ export function loadDashboardData(cwd: string): QualityDashboardData {
 				try {
 					const d = JSON.parse(e.data);
 					detail = d.gate ?? d.query?.slice(0, 60) ?? d.command?.slice(0, 60) ?? "";
-				} catch { /* ignore */ }
+				} catch {
+					/* ignore */
+				}
 				return {
 					timestamp: e.createdAt?.slice(11, 16) ?? "",
 					type: e.eventType,
@@ -161,8 +168,19 @@ function emptyData(): QualityDashboardData {
 			trend: "stable",
 		},
 		previousScore: null,
-		gates: { onWrite: { pass: 0, fail: 0 }, onCommit: { pass: 0, fail: 0 }, test: { pass: 0, fail: 0 } },
-		knowledge: { errorHits: 0, errorMisses: 0, knowledgeInjections: 0, assertionWarnings: 0, conventionPass: 0, conventionWarn: 0 },
+		gates: {
+			onWrite: { pass: 0, fail: 0 },
+			onCommit: { pass: 0, fail: 0 },
+			test: { pass: 0, fail: 0 },
+		},
+		knowledge: {
+			errorHits: 0,
+			errorMisses: 0,
+			knowledgeInjections: 0,
+			assertionWarnings: 0,
+			conventionPass: 0,
+			conventionWarn: 0,
+		},
 		knowledgeTotals: { errorResolutions: 0, fixPatterns: 0, conventions: 0 },
 		recentEvents: [],
 		session: { lastActivity: "", eventsToday: 0, changedFiles: 0, commits: 0 },
@@ -209,7 +227,9 @@ function getEventCountToday(store: Store): number {
 function countKnowledgeByType(store: Store, projectId: string, type: string): number {
 	try {
 		const row = store.db
-			.prepare("SELECT COUNT(*) as cnt FROM knowledge_index WHERE project_id = ? AND type = ? AND enabled = 1")
+			.prepare(
+				"SELECT COUNT(*) as cnt FROM knowledge_index WHERE project_id = ? AND type = ? AND enabled = 1",
+			)
 			.get(projectId, type) as { cnt: number };
 		return row.cnt;
 	} catch {
@@ -220,13 +240,19 @@ function countKnowledgeByType(store: Store, projectId: string, type: string): nu
 function getGitStats(cwd: string): { changedFiles: number; commits: number } {
 	try {
 		const diffOutput = execFileSync("git", ["diff", "--name-only"], {
-			cwd, timeout: 2000, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
+			cwd,
+			timeout: 2000,
+			encoding: "utf-8",
+			stdio: ["ignore", "pipe", "ignore"],
 		});
 		const changedFiles = diffOutput.trim().split("\n").filter(Boolean).length;
 
 		// Count commits today
 		const logOutput = execFileSync("git", ["log", "--oneline", "--since=midnight"], {
-			cwd, timeout: 2000, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
+			cwd,
+			timeout: 2000,
+			encoding: "utf-8",
+			stdio: ["ignore", "pipe", "ignore"],
 		});
 		const commits = logOutput.trim().split("\n").filter(Boolean).length;
 

@@ -42,5 +42,3 @@ export function writeStateJSON(cwd: string, name: string, data: unknown): void {
 		/* best effort */
 	}
 }
-
-

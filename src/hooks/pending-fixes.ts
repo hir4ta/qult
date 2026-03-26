@@ -15,7 +15,13 @@ export interface PendingFixEntry {
 export interface PendingFixes {
 	files: Record<
 		string,
-		{ lint?: PendingFixEntry[]; type?: PendingFixEntry[]; convention?: PendingFixEntry[] }
+		{
+			lint?: PendingFixEntry[];
+			type?: PendingFixEntry[];
+			convention?: PendingFixEntry[];
+			security?: PendingFixEntry[];
+			layer?: PendingFixEntry[];
+		}
 	>;
 	updated_at: string;
 }
@@ -58,6 +64,14 @@ export function formatPendingFixes(fixes: PendingFixes): string {
 		for (const entry of checks.convention ?? []) {
 			const loc = entry.line ? `:${entry.line}` : "";
 			lines.push(`- ${file}${loc} (convention): ${entry.message}`);
+		}
+		for (const entry of checks.security ?? []) {
+			const loc = entry.line ? `:${entry.line}` : "";
+			lines.push(`- ${file}${loc} (security): ${entry.message}`);
+		}
+		for (const entry of checks.layer ?? []) {
+			const loc = entry.line ? `:${entry.line}` : "";
+			lines.push(`- ${file}${loc} (layer): ${entry.message}`);
 		}
 	}
 	return lines.join("\n");

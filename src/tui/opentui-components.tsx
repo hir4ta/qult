@@ -6,7 +6,7 @@
  */
 import { createCliRenderer } from "@opentui/core";
 import { createRoot, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
-import { useState, createElement } from "react";
+import { createElement, useState } from "react";
 
 // --- Palette ---
 const C = {
@@ -76,24 +76,62 @@ function BoxDemo() {
 		<box style={{ flexDirection: "column", gap: 1, padding: 1 }}>
 			<text content="2. Box (borders, titles, layout)" fg={C.orange} />
 			<box style={{ flexDirection: "row", gap: 1 }}>
-				<box style={{ borderStyle: "single", borderColor: C.accent, width: 20, height: 5, padding: 1 }} title="single">
+				<box
+					style={{ borderStyle: "single", borderColor: C.accent, width: 20, height: 5, padding: 1 }}
+					title="single"
+				>
 					<text content="single border" fg={C.fg} />
 				</box>
-				<box style={{ borderStyle: "double", borderColor: C.green, width: 20, height: 5, padding: 1 }} title="double">
+				<box
+					style={{ borderStyle: "double", borderColor: C.green, width: 20, height: 5, padding: 1 }}
+					title="double"
+				>
 					<text content="double border" fg={C.fg} />
 				</box>
-				<box style={{ borderStyle: "rounded", borderColor: C.yellow, width: 20, height: 5, padding: 1 }} title="rounded">
+				<box
+					style={{
+						borderStyle: "rounded",
+						borderColor: C.yellow,
+						width: 20,
+						height: 5,
+						padding: 1,
+					}}
+					title="rounded"
+				>
 					<text content="rounded border" fg={C.fg} />
 				</box>
-				<box style={{ borderStyle: "heavy", borderColor: C.red, width: 20, height: 5, padding: 1 }} title="heavy">
+				<box
+					style={{ borderStyle: "heavy", borderColor: C.red, width: 20, height: 5, padding: 1 }}
+					title="heavy"
+				>
 					<text content="heavy border" fg={C.fg} />
 				</box>
 			</box>
 			<box style={{ flexDirection: "row", gap: 2 }}>
-				<box style={{ borderStyle: "rounded", borderColor: C.border, width: 30, height: 4, padding: 1, justifyContent: "center", alignItems: "center" }}>
+				<box
+					style={{
+						borderStyle: "rounded",
+						borderColor: C.border,
+						width: 30,
+						height: 4,
+						padding: 1,
+						justifyContent: "center",
+						alignItems: "center",
+					}}
+				>
 					<text content="centered content" fg={C.accent} />
 				</box>
-				<box style={{ borderStyle: "rounded", borderColor: C.border, width: 30, height: 4, flexDirection: "row", gap: 1, padding: 1 }}>
+				<box
+					style={{
+						borderStyle: "rounded",
+						borderColor: C.border,
+						width: 30,
+						height: 4,
+						flexDirection: "row",
+						gap: 1,
+						padding: 1,
+					}}
+				>
 					<text content="[A]" fg={C.green} />
 					<text content="[B]" fg={C.yellow} />
 					<text content="[C]" fg={C.red} />
@@ -105,11 +143,17 @@ function BoxDemo() {
 }
 
 function ScrollboxDemo() {
-	const lines = Array.from({ length: 30 }, (_, i) => `Line ${i + 1}: ${i % 3 === 0 ? "important" : "normal"} content`);
+	const lines = Array.from(
+		{ length: 30 },
+		(_, i) => `Line ${i + 1}: ${i % 3 === 0 ? "important" : "normal"} content`,
+	);
 	return (
 		<box style={{ flexDirection: "column", gap: 1, padding: 1 }}>
 			<text content="3. ScrollBox (scroll with arrows/j/k when focused)" fg={C.orange} />
-			<box style={{ borderStyle: "rounded", borderColor: C.border, width: 50, height: 10 }} title="scrollbox">
+			<box
+				style={{ borderStyle: "rounded", borderColor: C.border, width: 50, height: 10 }}
+				title="scrollbox"
+			>
 				<scrollbox style={{ contentOptions: { flexDirection: "column", padding: 1 } }}>
 					{lines.map((line, i) => (
 						<text key={i} content={line} fg={i % 3 === 0 ? C.accent : C.fg} />
@@ -127,10 +171,16 @@ function InputDemo() {
 			<text content="Props: width, value, placeholder, maxLength, backgroundColor," fg={C.dim} />
 			<text content="       focusedBackgroundColor, textColor, cursorColor" fg={C.dim} />
 			<text content="Events: INPUT (keystroke), CHANGE (blur/enter), ENTER" fg={C.dim} />
-			<box style={{ borderStyle: "rounded", borderColor: C.border, width: 40, height: 3, padding: 1 }} title="input preview">
+			<box
+				style={{ borderStyle: "rounded", borderColor: C.border, width: 40, height: 3, padding: 1 }}
+				title="input preview"
+			>
 				<text content="Name: [Type here...          ]" fg={C.fg} />
 			</box>
-			<text content="Usage: <input width={25} placeholder='...' textColor={C.fg} />" fg={C.accent} />
+			<text
+				content="Usage: <input width={25} placeholder='...' textColor={C.fg} />"
+				fg={C.accent}
+			/>
 		</box>
 	);
 }
@@ -142,7 +192,10 @@ function TextareaDemo() {
 			<text content="Props: width, height, initialValue, placeholder, wrapMode," fg={C.dim} />
 			<text content="       textColor, cursorColor, selectionBg, keyBindings" fg={C.dim} />
 			<text content="Events: onSubmit, onContentChange, onCursorChange" fg={C.dim} />
-			<box style={{ borderStyle: "rounded", borderColor: C.border, width: 50, height: 6, padding: 1 }} title="textarea preview">
+			<box
+				style={{ borderStyle: "rounded", borderColor: C.border, width: 50, height: 6, padding: 1 }}
+				title="textarea preview"
+			>
 				<text content="// Write code here" fg={C.green} />
 				<text content="function hello() {" fg={C.fg} />
 				<text content="  console.log('world');" fg={C.fg} />
@@ -159,7 +212,10 @@ function SelectDemo() {
 			<text content="Props: width, height, options[], selectedIndex, wrapSelection," fg={C.dim} />
 			<text content="       textColor, selectedBackgroundColor, showDescription" fg={C.dim} />
 			<text content="Events: ITEM_SELECTED, SELECTION_CHANGED" fg={C.dim} />
-			<box style={{ borderStyle: "rounded", borderColor: C.border, width: 45, height: 7, padding: 1 }} title="select preview">
+			<box
+				style={{ borderStyle: "rounded", borderColor: C.border, width: 45, height: 7, padding: 1 }}
+				title="select preview"
+			>
 				<text content="▸ brief       Planning & spec creation" fg={C.accent} bg={C.selectedBg} />
 				<text content="  attend      Full autopilot implementation" fg={C.fg} />
 				<text content="  mend        Bug fix workflow" fg={C.fg} />
@@ -235,7 +291,10 @@ export function main() {
 	return (
 		<box style={{ flexDirection: "column", gap: 1, padding: 1 }}>
 			<text content="10. Code (syntax highlighting)" fg={C.orange} />
-			<box style={{ borderStyle: "rounded", borderColor: C.border, width: 50, height: 10 }} title="code">
+			<box
+				style={{ borderStyle: "rounded", borderColor: C.border, width: 50, height: 10 }}
+				title="code"
+			>
 				<code content={code} filetype="typescript" fg={C.fg} bg={C.selectedBg} />
 			</box>
 		</box>
@@ -295,7 +354,9 @@ function FrameBufferDemo() {
 			<text content="  Low-level canvas for custom graphics." fg={C.dim} />
 			<text content="  Methods: setCell, drawText, fillRect, drawFrameBuffer" fg={C.dim} />
 			<text content="  Best used via Renderable API (not JSX)." fg={C.dim} />
-			<box style={{ borderStyle: "rounded", borderColor: C.border, width: 30, height: 5, padding: 1 }}>
+			<box
+				style={{ borderStyle: "rounded", borderColor: C.border, width: 30, height: 5, padding: 1 }}
+			>
 				<text content="████████████████████" fg={C.red} />
 				<text content="████████████████████" fg={C.orange} />
 				<text content="████████████████████" fg={C.yellow} />
@@ -308,17 +369,17 @@ function FrameBufferDemo() {
 
 const SECTION_COMPONENTS: Record<SectionKey, () => JSX.Element> = {
 	"text+span": TextDemo,
-	"box": BoxDemo,
-	"scrollbox": ScrollboxDemo,
-	"input": InputDemo,
-	"textarea": TextareaDemo,
-	"select": SelectDemo,
+	box: BoxDemo,
+	scrollbox: ScrollboxDemo,
+	input: InputDemo,
+	textarea: TextareaDemo,
+	select: SelectDemo,
 	"tab-select": TabSelectDemo,
-	"slider": SliderDemo,
+	slider: SliderDemo,
 	"ascii-font": AsciiFontDemo,
-	"code": CodeDemo,
-	"markdown": MarkdownDemo,
-	"diff": DiffDemo,
+	code: CodeDemo,
+	markdown: MarkdownDemo,
+	diff: DiffDemo,
 	"frame-buffer": FrameBufferDemo,
 };
 
@@ -359,7 +420,10 @@ function App() {
 			<box style={{ flexDirection: "row", paddingX: 1, height: 1 }}>
 				<text>
 					<span fg={C.accent}>OpenTUI Components</span>
-					<span fg={C.dim}> ({sectionIdx + 1}/{SECTIONS.length}) </span>
+					<span fg={C.dim}>
+						{" "}
+						({sectionIdx + 1}/{SECTIONS.length}){" "}
+					</span>
 					<span fg={C.yellow}>{currentSection}</span>
 					<span fg={C.dim}> | h/l or ←/→ navigate | 1-9 jump | q quit</span>
 				</text>

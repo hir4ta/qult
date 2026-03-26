@@ -40,7 +40,7 @@ export async function searchKnowledge(
 	opts: SearchOptions = {},
 ): Promise<ScoredResult[]> {
 	const limit = opts.limit ?? 5;
-	const minScore = opts.minScore ?? 0.70;
+	const minScore = opts.minScore ?? 0.7;
 	const trackHits = opts.trackHits ?? true;
 
 	// 1. Embed query
@@ -58,9 +58,7 @@ export async function searchKnowledge(
 
 	// Filter by type if specified
 	const typeFilter = opts.type && opts.type !== "all" ? opts.type : null;
-	const filtered = typeFilter
-		? entries.filter((e) => e.type === typeFilter)
-		: entries;
+	const filtered = typeFilter ? entries.filter((e) => e.type === typeFilter) : entries;
 	if (filtered.length === 0) return [];
 
 	// 4. Rerank
@@ -85,7 +83,10 @@ export async function searchKnowledge(
 
 	// 6. Track hit counts
 	if (trackHits && results.length > 0) {
-		incrementHitCount(store, results.map((r) => r.entry.id));
+		incrementHitCount(
+			store,
+			results.map((r) => r.entry.id),
+		);
 	}
 
 	return results;
@@ -102,7 +103,7 @@ function computeRecencyMultiplier(entry: KnowledgeRow): number {
 
 	const daysSince = (Date.now() - new Date(lastDate).getTime()) / (1000 * 60 * 60 * 24);
 	// Exponential decay: 1.0 at day 0, 0.5 at halfLife days
-	const decay = Math.pow(0.5, daysSince / halfLife);
+	const decay = 0.5 ** (daysSince / halfLife);
 	// Clamp between 0.3 and 1.2 (slight boost for very recent)
 	return Math.max(0.3, Math.min(1.2, 0.2 + decay));
 }

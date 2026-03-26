@@ -3,7 +3,7 @@
  */
 import { createCliRenderer } from "@opentui/core";
 import { createRoot, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
-import { useState, useEffect, createElement } from "react";
+import { createElement, useEffect, useState } from "react";
 import { loadDashboardData, type QualityDashboardData } from "./data.js";
 
 // Gruvbox Material Dark
@@ -20,7 +20,9 @@ const C = {
 	hlBg: "#32302f",
 };
 
-function scoreColor(n: number) { return n >= 80 ? C.green : n >= 60 ? C.yellow : C.red; }
+function scoreColor(n: number) {
+	return n >= 80 ? C.green : n >= 60 ? C.yellow : C.red;
+}
 
 function bar(pass: number, total: number, w = 10) {
 	if (total === 0) return "─".repeat(w);
@@ -104,7 +106,11 @@ const HELP_JA = [
 
 // ── Help overlay component ──────────────────────────────────────────
 
-function HelpOverlay({ lang, onClose, onToggleLang }: {
+function HelpOverlay({
+	lang,
+	onClose,
+	onToggleLang,
+}: {
 	lang: "en" | "ja";
 	onClose: () => void;
 	onToggleLang: () => void;
@@ -118,28 +124,35 @@ function HelpOverlay({ lang, onClose, onToggleLang }: {
 	});
 
 	return (
-		<box style={{
-			position: "absolute",
-			top: 2,
-			left: 4,
-			right: 4,
-			bottom: 2,
-			borderStyle: "rounded",
-			borderColor: C.accent,
-			flexDirection: "column",
-			padding: 1,
-			backgroundColor: "#1d2021",
-		}} title={title}>
+		<box
+			style={{
+				position: "absolute",
+				top: 2,
+				left: 4,
+				right: 4,
+				bottom: 2,
+				borderStyle: "rounded",
+				borderColor: C.accent,
+				flexDirection: "column",
+				padding: 1,
+				backgroundColor: "#1d2021",
+			}}
+			title={title}
+		>
 			<scrollbox focused style={{ contentOptions: { flexDirection: "column" } }}>
 				{lines.map((line, i) => (
-					<text key={String(i)} fg={line.startsWith("  ") ? C.dim : C.fg}>{line || " "}</text>
+					<text key={String(i)} fg={line.startsWith("  ") ? C.dim : C.fg}>
+						{line || " "}
+					</text>
 				))}
 			</scrollbox>
 			<box style={{ height: 1, marginTop: 1 }}>
 				<text>
-					<span fg={C.yellow}>[Tab]</span><span fg={C.dim}> {lang === "en" ? "日本語" : "English"}</span>
-					<span fg={C.dim}>  </span>
-					<span fg={C.yellow}>[?/Esc]</span><span fg={C.dim}> close</span>
+					<span fg={C.yellow}>[Tab]</span>
+					<span fg={C.dim}> {lang === "en" ? "日本語" : "English"}</span>
+					<span fg={C.dim}> </span>
+					<span fg={C.yellow}>[?/Esc]</span>
+					<span fg={C.dim}> close</span>
 				</text>
 			</box>
 		</box>
@@ -186,7 +199,6 @@ function App() {
 	const eT = k.errorHits + k.errorMisses;
 	const cvT = k.conventionPass + k.conventionWarn;
 
-
 	const evMax = Math.max(termH - 22, 2);
 
 	return (
@@ -206,21 +218,67 @@ function App() {
 			</box>
 
 			{/* Gates */}
-			<box style={{ borderStyle: "rounded", borderColor: C.border, flexDirection: "column", paddingX: 1, marginTop: 1 }} title="Gates">
-				<text fg={C.fg}>{`on_write   ${String(g.onWrite.pass).padStart(2)} pass  ${String(g.onWrite.fail).padStart(2)} fail  ${pct(g.onWrite.pass, wT).padStart(4)}  `}<span fg={wT > 0 && g.onWrite.pass === wT ? C.green : C.fg}>{bar(g.onWrite.pass, wT)}</span></text>
-				<text fg={C.fg}>{`on_commit  ${String(g.onCommit.pass).padStart(2)} pass  ${String(g.onCommit.fail).padStart(2)} fail  ${pct(g.onCommit.pass, cT).padStart(4)}  `}<span fg={cT > 0 && g.onCommit.pass === cT ? C.green : C.fg}>{bar(g.onCommit.pass, cT)}</span></text>
-				<text fg={C.fg}>{`test       ${String(g.test.pass).padStart(2)} pass  ${String(g.test.fail).padStart(2)} fail  ${pct(g.test.pass, tT).padStart(4)}  `}<span fg={tT > 0 && g.test.pass === tT ? C.green : C.fg}>{bar(g.test.pass, tT)}</span></text>
+			<box
+				style={{
+					borderStyle: "rounded",
+					borderColor: C.border,
+					flexDirection: "column",
+					paddingX: 1,
+					marginTop: 1,
+				}}
+				title="Gates"
+			>
+				<text fg={C.fg}>
+					{`on_write   ${String(g.onWrite.pass).padStart(2)} pass  ${String(g.onWrite.fail).padStart(2)} fail  ${pct(g.onWrite.pass, wT).padStart(4)}  `}
+					<span fg={wT > 0 && g.onWrite.pass === wT ? C.green : C.fg}>
+						{bar(g.onWrite.pass, wT)}
+					</span>
+				</text>
+				<text fg={C.fg}>
+					{`on_commit  ${String(g.onCommit.pass).padStart(2)} pass  ${String(g.onCommit.fail).padStart(2)} fail  ${pct(g.onCommit.pass, cT).padStart(4)}  `}
+					<span fg={cT > 0 && g.onCommit.pass === cT ? C.green : C.fg}>
+						{bar(g.onCommit.pass, cT)}
+					</span>
+				</text>
+				<text fg={C.fg}>
+					{`test       ${String(g.test.pass).padStart(2)} pass  ${String(g.test.fail).padStart(2)} fail  ${pct(g.test.pass, tT).padStart(4)}  `}
+					<span fg={tT > 0 && g.test.pass === tT ? C.green : C.fg}>{bar(g.test.pass, tT)}</span>
+				</text>
 			</box>
 
 			{/* Knowledge */}
-			<box style={{ borderStyle: "rounded", borderColor: C.border, flexDirection: "column", paddingX: 1 }} title="Knowledge">
-				<text fg={C.fg}>{`error_resolution  hits: ${k.errorHits}/${eT} (${pct(k.errorHits, eT)})  total: ${kt.errorResolutions}`}</text>
-				<text fg={C.fg}>{`fix_pattern      injected: ${k.knowledgeInjections}      total: ${kt.fixPatterns}`}</text>
-				<text fg={C.fg}>{`convention        adherence: ${pct(k.conventionPass, cvT)}   total: ${kt.conventions}`}</text>
+			<box
+				style={{
+					borderStyle: "rounded",
+					borderColor: C.border,
+					flexDirection: "column",
+					paddingX: 1,
+				}}
+				title="Knowledge"
+			>
+				<text
+					fg={C.fg}
+				>{`error_resolution  hits: ${k.errorHits}/${eT} (${pct(k.errorHits, eT)})  total: ${kt.errorResolutions}`}</text>
+				<text
+					fg={C.fg}
+				>{`fix_pattern      injected: ${k.knowledgeInjections}      total: ${kt.fixPatterns}`}</text>
+				<text
+					fg={C.fg}
+				>{`convention        adherence: ${pct(k.conventionPass, cvT)}   total: ${kt.conventions}`}</text>
 			</box>
 
 			{/* Recent Events */}
-			<box style={{ borderStyle: "rounded", borderColor: C.border, flexDirection: "column", paddingX: 1, flexGrow: 1, overflow: "hidden" }} title="Recent Events">
+			<box
+				style={{
+					borderStyle: "rounded",
+					borderColor: C.border,
+					flexDirection: "column",
+					paddingX: 1,
+					flexGrow: 1,
+					overflow: "hidden",
+				}}
+				title="Recent Events"
+			>
 				{data.recentEvents.length === 0 && <text fg={C.dim}>No events recorded yet</text>}
 				{data.recentEvents.slice(0, evMax).map((e, i) => {
 					const ok = e.type.includes("pass") || e.type === "error_hit";
@@ -229,7 +287,11 @@ function App() {
 					const ic = ok ? C.green : bad ? C.red : C.yellow;
 					return (
 						<text key={String(i)} fg={C.fg}>
-							<span fg={C.dim}>{e.timestamp}</span>{`  `}<span fg={ic}>{icon}</span>{` ${e.type.padEnd(18)}`}<span fg={C.dim}>{e.detail}</span>
+							<span fg={C.dim}>{e.timestamp}</span>
+							{`  `}
+							<span fg={ic}>{icon}</span>
+							{` ${e.type.padEnd(18)}`}
+							<span fg={C.dim}>{e.detail}</span>
 						</text>
 					);
 				})}
@@ -238,18 +300,26 @@ function App() {
 			{/* Session */}
 			<box style={{ height: 1, paddingX: 1 }}>
 				<text>
-					<span fg={C.dim}>Last: </span><span fg={C.fg}>{sess.lastActivity || "-"}</span>
-					<span fg={C.dim}> │ Today: </span><span fg={C.fg}>{String(sess.eventsToday)}</span>
-					<span fg={C.dim}> │ Files: </span><span fg={C.fg}>{String(sess.changedFiles)}</span>
-					<span fg={C.dim}> │ Commits: </span><span fg={C.fg}>{String(sess.commits)}</span>
-					<span fg={C.dim}> │ Pending: </span><span fg={data.pendingFixesCount > 0 ? C.red : C.green}>{String(data.pendingFixesCount)}</span>
-					<span fg={C.dim}> │ Directives: </span><span fg={C.fg}>{String(data.directiveCount)}</span>
+					<span fg={C.dim}>Last: </span>
+					<span fg={C.fg}>{sess.lastActivity || "-"}</span>
+					<span fg={C.dim}> │ Today: </span>
+					<span fg={C.fg}>{String(sess.eventsToday)}</span>
+					<span fg={C.dim}> │ Files: </span>
+					<span fg={C.fg}>{String(sess.changedFiles)}</span>
+					<span fg={C.dim}> │ Commits: </span>
+					<span fg={C.fg}>{String(sess.commits)}</span>
+					<span fg={C.dim}> │ Pending: </span>
+					<span fg={data.pendingFixesCount > 0 ? C.red : C.green}>
+						{String(data.pendingFixesCount)}
+					</span>
+					<span fg={C.dim}> │ Directives: </span>
+					<span fg={C.fg}>{String(data.directiveCount)}</span>
 				</text>
 			</box>
 
 			{/* Footer */}
 			<box style={{ height: 1, paddingX: 1 }}>
-				<text fg={C.dim}>[q] quit  [r] refresh  [?] help</text>
+				<text fg={C.dim}>[q] quit [r] refresh [?] help</text>
 			</box>
 
 			{/* Help overlay */}
@@ -257,7 +327,7 @@ function App() {
 				<HelpOverlay
 					lang={helpLang}
 					onClose={() => setShowHelp(false)}
-					onToggleLang={() => setHelpLang((l) => l === "en" ? "ja" : "en")}
+					onToggleLang={() => setHelpLang((l) => (l === "en" ? "ja" : "en"))}
 				/>
 			)}
 		</box>
@@ -272,19 +342,21 @@ export function runTui(): Promise<void> {
 				process.stdout.write("\x1b[?1000l\x1b[?1003l\x1b[?1006l");
 				resolve();
 			},
-		}).then((renderer) => {
-			process.once("uncaughtException", (err) => {
-				renderer.destroy();
-				console.error(err);
-				process.exit(1);
-			});
-			process.once("unhandledRejection", (err) => {
-				renderer.destroy();
-				console.error(err);
-				process.exit(1);
-			});
-			createRoot(renderer).render(<App />);
-		}).catch(reject);
+		})
+			.then((renderer) => {
+				process.once("uncaughtException", (err) => {
+					renderer.destroy();
+					console.error(err);
+					process.exit(1);
+				});
+				process.once("unhandledRejection", (err) => {
+					renderer.destroy();
+					console.error(err);
+					process.exit(1);
+				});
+				createRoot(renderer).render(<App />);
+			})
+			.catch(reject);
 	});
 }
 

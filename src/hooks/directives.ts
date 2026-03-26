@@ -82,9 +82,23 @@ export function buildDirectiveOutput(items: DirectiveItem[]): string {
 
 /**
  * Emit directives via single emitAdditionalContext call (NFR-4).
+ * When cwd is provided, applies budget management (fail-open).
  */
-export function emitDirectives(eventName: string, items: DirectiveItem[]): void {
-	const output = buildDirectiveOutput(items);
+export function emitDirectives(eventName: string, items: DirectiveItem[], cwd?: string): void {
+	let finalItems = items;
+	if (cwd) {
+		try {
+			const { trimToBudget, readBudgetLedger, recordInjection, writeBudgetLedger } =
+				require("./budget.js") as typeof import("./budget.js");
+			const ledger = readBudgetLedger(cwd);
+			finalItems = trimToBudget(eventName, items, ledger);
+			recordInjection(ledger, eventName, finalItems);
+			writeBudgetLedger(cwd, ledger);
+		} catch {
+			/* fail-open: use original items */
+		}
+	}
+	const output = buildDirectiveOutput(finalItems);
 	if (output) {
 		emitAdditionalContext(eventName, output);
 	}

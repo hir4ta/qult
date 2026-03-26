@@ -14,6 +14,11 @@ export interface RawKnowledgeRow {
 	hit_count: number;
 	last_accessed: string;
 	enabled: number;
+	success_count: number;
+	failure_count: number;
+	utility_score: number;
+	confidence: number;
+	source: string;
 	created_at: string;
 	updated_at: string;
 }
@@ -30,6 +35,11 @@ export function mapRow(r: RawKnowledgeRow): KnowledgeRow {
 		hitCount: r.hit_count,
 		lastAccessed: r.last_accessed,
 		enabled: r.enabled === 1,
+		successCount: r.success_count ?? 0,
+		failureCount: r.failure_count ?? 0,
+		utilityScore: r.utility_score ?? 0.5,
+		confidence: r.confidence ?? 0.5,
+		source: r.source ?? "",
 		createdAt: r.created_at,
 		updatedAt: r.updated_at,
 	};
@@ -42,18 +52,24 @@ interface UpsertResult {
 	changed: boolean;
 }
 
-export function upsertKnowledge(store: Store, row: {
-	projectId: string;
-	type: KnowledgeType;
-	title: string;
-	content: string;
-	tags?: string;
-	author?: string;
-}): UpsertResult {
+export function upsertKnowledge(
+	store: Store,
+	row: {
+		projectId: string;
+		type: KnowledgeType;
+		title: string;
+		content: string;
+		tags?: string;
+		author?: string;
+		source?: string;
+	},
+): UpsertResult {
 	const now = new Date().toISOString();
 
 	const existing = store.db
-		.prepare("SELECT id, content FROM knowledge_index WHERE project_id = ? AND type = ? AND title = ?")
+		.prepare(
+			"SELECT id, content FROM knowledge_index WHERE project_id = ? AND type = ? AND title = ?",
+		)
 		.get(row.projectId, row.type, row.title) as { id: number; content: string } | undefined;
 
 	if (existing && existing.content === row.content) {
@@ -62,11 +78,12 @@ export function upsertKnowledge(store: Store, row: {
 
 	const result = store.db
 		.prepare(`
-			INSERT INTO knowledge_index (project_id, type, title, content, tags, author, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO knowledge_index (project_id, type, title, content, tags, author, source, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(project_id, type, title) DO UPDATE SET
 				content = excluded.content,
 				tags = excluded.tags,
+				source = excluded.source,
 				updated_at = excluded.updated_at
 		`)
 		.run(
@@ -76,11 +93,22 @@ export function upsertKnowledge(store: Store, row: {
 			row.content,
 			row.tags ?? "",
 			row.author ?? "",
+			row.source ?? "auto",
 			now,
 			now,
 		);
 
 	const id = existing?.id ?? Number(result.lastInsertRowid);
+
+	// Supersession: content changed → reset utility counters
+	if (existing) {
+		store.db
+			.prepare(
+				"UPDATE knowledge_index SET success_count = 0, failure_count = 0, utility_score = 0.5 WHERE id = ?",
+			)
+			.run(id);
+	}
+
 	return { id, changed: true };
 }
 
@@ -88,7 +116,9 @@ export function getKnowledgeByID(store: Store, id: number): KnowledgeRow | undef
 	const row = store.db
 		.prepare(`
 			SELECT id, project_id, type, title, content, tags, author,
-			       hit_count, last_accessed, enabled, created_at, updated_at
+			       hit_count, last_accessed, enabled,
+			       success_count, failure_count, utility_score, confidence, source,
+			       created_at, updated_at
 			FROM knowledge_index WHERE id = ?
 		`)
 		.get(id) as RawKnowledgeRow | undefined;
@@ -101,7 +131,9 @@ export function getKnowledgeByIDs(store: Store, ids: number[]): KnowledgeRow[] {
 	const rows = store.db
 		.prepare(`
 			SELECT id, project_id, type, title, content, tags, author,
-			       hit_count, last_accessed, enabled, created_at, updated_at
+			       hit_count, last_accessed, enabled,
+			       success_count, failure_count, utility_score, confidence, source,
+			       created_at, updated_at
 			FROM knowledge_index WHERE id IN (${placeholders})
 		`)
 		.all(...ids) as RawKnowledgeRow[];
@@ -117,14 +149,22 @@ export function listKnowledge(
 	const params: unknown[] = [];
 
 	if (!opts?.includeDisabled) conditions.push("enabled = 1");
-	if (opts?.projectId) { conditions.push("project_id = ?"); params.push(opts.projectId); }
-	if (opts?.type) { conditions.push("type = ?"); params.push(opts.type); }
+	if (opts?.projectId) {
+		conditions.push("project_id = ?");
+		params.push(opts.projectId);
+	}
+	if (opts?.type) {
+		conditions.push("type = ?");
+		params.push(opts.type);
+	}
 	params.push(limit);
 
 	const rows = store.db
 		.prepare(`
 			SELECT id, project_id, type, title, content, tags, author,
-			       hit_count, last_accessed, enabled, created_at, updated_at
+			       hit_count, last_accessed, enabled,
+			       success_count, failure_count, utility_score, confidence, source,
+			       created_at, updated_at
 			FROM knowledge_index WHERE ${conditions.join(" AND ")}
 			ORDER BY updated_at DESC LIMIT ?
 		`)
@@ -145,7 +185,9 @@ export function incrementHitCount(store: Store, ids: number[]): void {
 	const now = new Date().toISOString();
 	const placeholders = ids.map(() => "?").join(",");
 	store.db
-		.prepare(`UPDATE knowledge_index SET hit_count = hit_count + 1, last_accessed = ? WHERE id IN (${placeholders})`)
+		.prepare(
+			`UPDATE knowledge_index SET hit_count = hit_count + 1, last_accessed = ? WHERE id IN (${placeholders})`,
+		)
 		.run(now, ...ids);
 }
 

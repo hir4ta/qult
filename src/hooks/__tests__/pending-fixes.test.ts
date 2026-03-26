@@ -1,14 +1,14 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+	clearPendingFixes,
+	formatPendingFixes,
+	hasPendingFixes,
+	parseGateOutput,
 	readPendingFixes,
 	writePendingFixes,
-	clearPendingFixes,
-	hasPendingFixes,
-	formatPendingFixes,
-	parseGateOutput,
 } from "../pending-fixes.js";
 
 describe("pending-fixes", () => {
@@ -99,7 +99,8 @@ describe("parseGateOutput", () => {
 	});
 
 	it("parses tsc output (file(line,col): error TS...)", () => {
-		const output = "src/foo.ts(22,5): error TS2322: Type 'string' is not assignable to type 'number'.";
+		const output =
+			"src/foo.ts(22,5): error TS2322: Type 'string' is not assignable to type 'number'.";
 		const entries = parseGateOutput(output, "typecheck");
 		expect(entries.length).toBe(1);
 		expect(entries[0]!.line).toBe(22);
@@ -111,9 +112,9 @@ describe("parseGateOutput", () => {
 	});
 
 	it("caps entries at 20", () => {
-		const lines = Array.from({ length: 30 }, (_, i) =>
-			`src/foo.ts:${i + 1}:1: Error ${i}`,
-		).join("\n");
+		const lines = Array.from({ length: 30 }, (_, i) => `src/foo.ts:${i + 1}:1: Error ${i}`).join(
+			"\n",
+		);
 		const entries = parseGateOutput(lines, "lint");
 		expect(entries.length).toBe(20);
 	});

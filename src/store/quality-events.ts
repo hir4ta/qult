@@ -1,7 +1,6 @@
 import type { QualityEvent, QualityEventType, QualityScore } from "../types.js";
 import type { Store } from "./index.js";
 
-
 export function insertQualityEvent(
 	store: Store,
 	projectId: string,
@@ -64,7 +63,9 @@ export function getGateBreakdown(store: Store, sessionId: string): GateBreakdown
 		try {
 			const parsed = JSON.parse(row.data);
 			if (parsed.group) group = parsed.group;
-		} catch { /* default to on_write */ }
+		} catch {
+			/* default to on_write */
+		}
 
 		const bucket = group === "on_commit" ? result.onCommit : result.onWrite;
 		if (row.event_type === "gate_pass") bucket.pass++;
@@ -74,15 +75,13 @@ export function getGateBreakdown(store: Store, sessionId: string): GateBreakdown
 	result.onWrite.total = result.onWrite.pass + result.onWrite.fail;
 	result.onWrite.rate = result.onWrite.total > 0 ? result.onWrite.pass / result.onWrite.total : 1;
 	result.onCommit.total = result.onCommit.pass + result.onCommit.fail;
-	result.onCommit.rate = result.onCommit.total > 0 ? result.onCommit.pass / result.onCommit.total : 1;
+	result.onCommit.rate =
+		result.onCommit.total > 0 ? result.onCommit.pass / result.onCommit.total : 1;
 
 	return result;
 }
 
-export function calculateQualityScore(
-	store: Store,
-	sessionId: string,
-): QualityScore {
+export function calculateQualityScore(store: Store, sessionId: string): QualityScore {
 	const summary = getSessionSummary(store, sessionId);
 	const gates = getGateBreakdown(store, sessionId);
 
@@ -98,19 +97,27 @@ export function calculateQualityScore(
 
 	// Weighted score: gate_write 30%, gate_commit 20%, error_resolution 15%, convention 10%, base 25%
 	const score = Math.round(
-		gates.onWrite.rate * 30 +
-		gates.onCommit.rate * 20 +
-		errorHitRate * 15 +
-		convRate * 10 +
-		25, // base score
+		gates.onWrite.rate * 30 + gates.onCommit.rate * 20 + errorHitRate * 15 + convRate * 10 + 25, // base score
 	);
 
 	return {
 		sessionScore: Math.min(100, Math.max(0, score)),
 		breakdown: {
-			gatePassRateWrite: { score: Math.round(gates.onWrite.rate * 100), pass: gates.onWrite.pass, total: gates.onWrite.total },
-			gatePassRateCommit: { score: Math.round(gates.onCommit.rate * 100), pass: gates.onCommit.pass, total: gates.onCommit.total },
-			errorResolutionHit: { score: Math.round(errorHitRate * 100), hit: errorHit, total: errorTotal },
+			gatePassRateWrite: {
+				score: Math.round(gates.onWrite.rate * 100),
+				pass: gates.onWrite.pass,
+				total: gates.onWrite.total,
+			},
+			gatePassRateCommit: {
+				score: Math.round(gates.onCommit.rate * 100),
+				pass: gates.onCommit.pass,
+				total: gates.onCommit.total,
+			},
+			errorResolutionHit: {
+				score: Math.round(errorHitRate * 100),
+				hit: errorHit,
+				total: errorTotal,
+			},
 			conventionAdherence: { score: Math.round(convRate * 100), pass: convPass, total: convTotal },
 		},
 		trend: computeTrend(store, score),
@@ -167,7 +174,13 @@ function calculateQualityScoreRaw(store: Store, sessionId: string): number {
 	const cw = summary.convention_warn ?? 0;
 	const ct = cp + cw;
 	const cRate = ct > 0 ? cp / ct : 1;
-	return Math.min(100, Math.max(0, Math.round(gates.onWrite.rate * 30 + gates.onCommit.rate * 20 + eRate * 15 + cRate * 10 + 25)));
+	return Math.min(
+		100,
+		Math.max(
+			0,
+			Math.round(gates.onWrite.rate * 30 + gates.onCommit.rate * 20 + eRate * 15 + cRate * 10 + 25),
+		),
+	);
 }
 
 export function getLatestSessionId(store: Store, projectId: string): string | null {
@@ -181,11 +194,7 @@ export function getLatestSessionId(store: Store, projectId: string): string | nu
 	return row?.session_id ?? null;
 }
 
-export function getRecentEvents(
-	store: Store,
-	sessionId: string,
-	limit = 10,
-): QualityEvent[] {
+export function getRecentEvents(store: Store, sessionId: string, limit = 10): QualityEvent[] {
 	const rows = store.db
 		.prepare(`
 			SELECT id, project_id, session_id, event_type, data, created_at

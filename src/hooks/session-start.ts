@@ -1,15 +1,15 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { detectGates } from "../gates/index.js";
+import { detectProjectProfile, type ProjectProfile } from "../profile/detect.js";
+import { openDefaultCached } from "../store/index.js";
+import { upsertKnowledge } from "../store/knowledge.js";
+import { resolveOrRegisterProject } from "../store/project.js";
+import { insertQualityEvent } from "../store/quality-events.js";
 import type { DirectiveItem } from "./directives.js";
 import { emitDirectives } from "./directives.js";
 import type { HookEvent } from "./dispatcher.js";
 import { readStateJSON, writeStateJSON } from "./state.js";
-import { detectProjectProfile, type ProjectProfile } from "../profile/detect.js";
-import { detectGates } from "../gates/index.js";
-import { openDefaultCached } from "../store/index.js";
-import { resolveOrRegisterProject } from "../store/project.js";
-import { insertQualityEvent } from "../store/quality-events.js";
-import { upsertKnowledge } from "../store/knowledge.js";
 
 /**
  * SessionStart handler: initial context injection.
@@ -61,7 +61,13 @@ export async function sessionStart(ev: HookEvent, signal: AbortSignal): Promise<
 	// 5. Knowledge sync (.alfred/knowledge/ → DB)
 	syncKnowledgeFiles(ev.cwd);
 
-	emitDirectives("SessionStart", items);
+	// 6. Knowledge garbage collection
+	runGarbageCollection(ev.cwd);
+
+	// 7. Proactive context: cache file risk scores + co-change graph
+	cacheProactiveData(ev.cwd);
+
+	emitDirectives("SessionStart", items, ev.cwd);
 }
 
 // ── Profile ─────────────────────────────────────────────────────────
@@ -144,9 +150,7 @@ function readConventions(cwd: string): string[] {
 	try {
 		const data = JSON.parse(readFileSync(conventionsPath, "utf-8")) as Convention[];
 		if (!Array.isArray(data)) return [];
-		return data
-			.slice(0, 5)
-			.map((c, i) => `(${i + 1}) ${c.pattern}`);
+		return data.slice(0, 5).map((c, i) => `(${i + 1}) ${c.pattern}`);
 	} catch {
 		return [];
 	}
@@ -190,13 +194,19 @@ function ensureGates(cwd: string): void {
 
 // ── Convention event tracking ───────────────────────────────────────
 
-function recordConventionEvent(cwd: string, type: "convention_pass" | "convention_warn", count: number): void {
+function recordConventionEvent(
+	cwd: string,
+	type: "convention_pass" | "convention_warn",
+	count: number,
+): void {
 	try {
 		const store = openDefaultCached();
 		const project = resolveOrRegisterProject(store, cwd);
 		const sessionId = findLatestSessionId(store) ?? `session-${Date.now()}`;
 		insertQualityEvent(store, project.id, sessionId, type, { count });
-	} catch { /* fail-open */ }
+	} catch {
+		/* fail-open */
+	}
 }
 
 function findLatestSessionId(store: import("../store/index.js").Store): string | null {
@@ -224,8 +234,12 @@ function syncKnowledgeFiles(cwd: string): void {
 			const dir = join(knowledgeDir, typeDir);
 			if (!existsSync(dir)) continue;
 
-			const type = typeDir === "error_resolutions" ? "error_resolution"
-				: typeDir === "fix_patterns" ? "fix_pattern" : "convention";
+			const type =
+				typeDir === "error_resolutions"
+					? "error_resolution"
+					: typeDir === "fix_patterns"
+						? "fix_pattern"
+						: "convention";
 
 			for (const file of readdirSync(dir).filter((f) => f.endsWith(".json"))) {
 				try {
@@ -235,13 +249,46 @@ function syncKnowledgeFiles(cwd: string): void {
 							projectId: project.id,
 							type: type as "error_resolution" | "fix_pattern" | "convention",
 							title: data.title,
-							content: typeof data.content === "string" ? data.content : JSON.stringify(data.content),
+							content:
+								typeof data.content === "string" ? data.content : JSON.stringify(data.content),
 							tags: data.tags ?? "",
 							author: data.author ?? "",
 						});
 					}
-				} catch { /* skip invalid files */ }
+				} catch {
+					/* skip invalid files */
+				}
 			}
 		}
-	} catch { /* fail-open */ }
+	} catch {
+		/* fail-open */
+	}
+}
+
+// ── Knowledge GC ────────────────────────────────────────────────────
+
+function runGarbageCollection(cwd: string): void {
+	try {
+		const { gc } = require("../store/gc.js") as typeof import("../store/gc.js");
+		const store = openDefaultCached();
+		const project = resolveOrRegisterProject(store, cwd);
+		gc(store, project.id);
+	} catch {
+		/* fail-open */
+	}
+}
+
+// ── Proactive context caching ───────────────────────────────────────
+
+function cacheProactiveData(cwd: string): void {
+	try {
+		const { analyzeFileRisks, analyzeCoChanges } =
+			require("./proactive.js") as typeof import("./proactive.js");
+		const risks = analyzeFileRisks(cwd);
+		writeStateJSON(cwd, "risk-scores.json", risks);
+		const coChanges = analyzeCoChanges(cwd);
+		writeStateJSON(cwd, "co-change-graph.json", coChanges);
+	} catch {
+		/* fail-open */
+	}
 }

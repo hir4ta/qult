@@ -19,6 +19,11 @@ export interface KnowledgeRow {
 	hitCount: number;
 	lastAccessed: string;
 	enabled: boolean;
+	successCount: number;
+	failureCount: number;
+	utilityScore: number;
+	confidence: number;
+	source: string;
 	createdAt: string;
 	updatedAt: string;
 }
@@ -66,7 +71,18 @@ export type QualityEventType =
 	| "convention_pass"
 	| "convention_warn"
 	| "plan_created"
-	| "knowledge_saved";
+	| "knowledge_saved"
+	| "security_warn"
+	| "security_pass"
+	| "pace_warn"
+	| "pace_deny"
+	| "layer_warn"
+	| "layer_pass"
+	| "budget_trim"
+	| "injection_tracked"
+	| "plan_drift"
+	| "reflection_depth"
+	| "duplicate_warn";
 
 export interface QualityEvent {
 	id: number;

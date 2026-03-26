@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { checkConventions, type ConventionRule, type ConventionViolation } from "../convention-check.js";
+import {
+	type ConventionRule,
+	type ConventionViolation,
+	checkConventions,
+} from "../convention-check.js";
 
 describe("checkConventions", () => {
 	const anyRule: ConventionRule = {
@@ -9,11 +13,9 @@ describe("checkConventions", () => {
 	};
 
 	it("detects any type violation", () => {
-		const violations = checkConventions(
-			"src/foo.ts",
-			'const x: any = 42;\nconst y = z as any;',
-			[anyRule],
-		);
+		const violations = checkConventions("src/foo.ts", "const x: any = 42;\nconst y = z as any;", [
+			anyRule,
+		]);
 		expect(violations).toHaveLength(2);
 		expect(violations[0]!.rule).toBe("Avoid any type");
 		expect(violations[0]!.line).toBe(1);
@@ -30,11 +32,7 @@ describe("checkConventions", () => {
 	});
 
 	it("respects filePattern", () => {
-		const violations = checkConventions(
-			"src/foo.py",
-			"x: any = 42",
-			[anyRule],
-		);
+		const violations = checkConventions("src/foo.py", "x: any = 42", [anyRule]);
 		expect(violations).toHaveLength(0);
 	});
 
@@ -59,11 +57,10 @@ describe("checkConventions", () => {
 			category: "style",
 			check: { type: "regex", match: "console\\.log\\(", filePattern: "*.ts" },
 		};
-		const violations = checkConventions(
-			"src/foo.ts",
-			'const x: any = 1;\nconsole.log(x);',
-			[anyRule, noConsoleRule],
-		);
+		const violations = checkConventions("src/foo.ts", "const x: any = 1;\nconsole.log(x);", [
+			anyRule,
+			noConsoleRule,
+		]);
 		expect(violations).toHaveLength(2);
 		expect(violations[0]!.rule).toBe("Avoid any type");
 		expect(violations[1]!.rule).toBe("No console.log in production code");

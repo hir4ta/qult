@@ -32,12 +32,14 @@ export function detectProjectProfile(cwd: string): ProjectProfile {
 	if (existsSync(pkgPath)) {
 		try {
 			pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-		} catch { /* invalid JSON */ }
+		} catch {
+			/* invalid JSON */
+		}
 	}
 
 	const allDeps = {
-		...(pkg.dependencies as Record<string, string> ?? {}),
-		...(pkg.devDependencies as Record<string, string> ?? {}),
+		...((pkg.dependencies as Record<string, string>) ?? {}),
+		...((pkg.devDependencies as Record<string, string>) ?? {}),
 	};
 
 	// Language detection
@@ -92,14 +94,20 @@ export function detectProjectProfile(cwd: string): ProjectProfile {
 	// Linter
 	if (existsSync(join(cwd, "biome.json")) || existsSync(join(cwd, "biome.jsonc"))) {
 		profile.linter = "biome";
-	} else if (allDeps.eslint || existsSync(join(cwd, ".eslintrc.json")) || existsSync(join(cwd, ".eslintrc.js"))) {
+	} else if (
+		allDeps.eslint ||
+		existsSync(join(cwd, ".eslintrc.json")) ||
+		existsSync(join(cwd, ".eslintrc.js"))
+	) {
 		profile.linter = "eslint";
 	} else if (existsSync(join(cwd, "pyproject.toml"))) {
 		// Check for ruff in pyproject.toml
 		try {
 			const pyproj = readFileSync(join(cwd, "pyproject.toml"), "utf-8");
 			if (pyproj.includes("[tool.ruff]")) profile.linter = "ruff";
-		} catch { /* ignore */ }
+		} catch {
+			/* ignore */
+		}
 	} else if (existsSync(join(cwd, "Cargo.toml"))) {
 		profile.linter = "clippy";
 	}

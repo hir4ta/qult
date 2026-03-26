@@ -31,24 +31,22 @@ Actions:
 - profile: Show/refresh project profile (language, test framework, linter, gates)
 - score: Show quality score for current or specified session`,
 		{
-			action: z
-				.enum(["search", "save", "profile", "score"])
-				.describe("Action to perform"),
+			action: z.enum(["search", "save", "profile", "score"]).describe("Action to perform"),
 			// search params
 			query: z.string().optional().describe("Search query (for search)"),
 			type: z
 				.enum(["error_resolution", "fix_pattern", "convention", "decision", "all"])
 				.optional()
 				.describe("Knowledge type filter (for search, default: all)"),
-			scope: z
-				.enum(["project", "global"])
-				.optional()
-				.describe("Search scope (default: project)"),
+			scope: z.enum(["project", "global"]).optional().describe("Search scope (default: project)"),
 			limit: z.number().optional().describe("Max results (for search, default: 5)"),
 			// save params
 			title: z.string().optional().describe("Title (REQUIRED for save)"),
 			// error_resolution fields
-			error_signature: z.string().optional().describe("Normalized error message (for error_resolution)"),
+			error_signature: z
+				.string()
+				.optional()
+				.describe("Normalized error message (for error_resolution)"),
 			resolution: z.string().optional().describe("How to resolve the error (for error_resolution)"),
 			// fix_pattern fields
 			bad: z.string().optional().describe("Before code (for fix_pattern)"),
@@ -56,8 +54,14 @@ Actions:
 			explanation: z.string().optional().describe("Why the fix is better (for fix_pattern)"),
 			// convention fields
 			pattern: z.string().optional().describe("Convention description (for convention)"),
-			category: z.string().optional().describe("Convention category: naming|imports|error-handling|testing|architecture|style"),
-			example_files: z.string().optional().describe("Comma-separated reference file paths (for convention)"),
+			category: z
+				.string()
+				.optional()
+				.describe("Convention category: naming|imports|error-handling|testing|architecture|style"),
+			example_files: z
+				.string()
+				.optional()
+				.describe("Comma-separated reference file paths (for convention)"),
 			// common
 			tags: z.string().optional().describe("Comma-separated tags"),
 			project_path: z.string().optional().describe("Project root path (defaults to cwd)"),
