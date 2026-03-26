@@ -4,6 +4,7 @@ import { detectGates } from "../gates/detect.ts";
 import { getTopErrors } from "../state/gate-history.ts";
 import { clearHandoff, readHandoff } from "../state/handoff.ts";
 import type { HookEvent } from "../types.ts";
+import { respond } from "./respond.ts";
 
 /** SessionStart: ensure .alfred/ exists, auto-detect gates, inject handoff context */
 export default async function sessionStart(_ev: HookEvent): Promise<void> {
@@ -53,9 +54,7 @@ export default async function sessionStart(_ev: HookEvent): Promise<void> {
 		);
 	}
 
-	// SessionStart does not support hookSpecificOutput.additionalContext,
-	// so we output context via stderr (advisory, non-blocking)
 	if (contextParts.length > 0) {
-		process.stderr.write(`[alfred] ${contextParts.join("\n\n")}\n`);
+		respond(contextParts.join("\n\n"));
 	}
 }

@@ -480,12 +480,14 @@ describe("Scenario 12: PreCompact → SessionStart handoff", () => {
 		expect(handoff!.pending_fixes).toBe(true);
 		expect(handoff!.next_steps).toContain("broken.ts");
 
-		// SessionStart restores handoff via stderr (SessionStart doesn't support hookSpecificOutput)
-		stderrCapture = [];
+		// SessionStart restores handoff
+		stdoutCapture = [];
 		await sessionStart({ hook_type: "SessionStart" });
-		const stderr = stderrCapture.join("");
-		expect(stderr).toContain("pending");
-		expect(stderr).toContain("Next steps");
+		const response = getResponse();
+		expect(response).not.toBeNull();
+		const context = (response?.hookSpecificOutput as Record<string, string>)?.additionalContext;
+		expect(context).toContain("pending");
+		expect(context).toContain("Next steps");
 
 		// Handoff should be consumed (cleared)
 		expect(readHandoff()).toBeNull();

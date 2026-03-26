@@ -1,6 +1,5 @@
 import { readHandoff } from "../state/handoff.ts";
 import type { HookEvent } from "../types.ts";
-import { respond } from "./respond.ts";
 
 /** PostCompact: restore handoff context after context compaction */
 export default async function postCompact(_ev: HookEvent): Promise<void> {
@@ -22,5 +21,6 @@ export default async function postCompact(_ev: HookEvent): Promise<void> {
 
 	lines.push(`Next steps: ${handoff.next_steps}`);
 
-	respond(lines.join("\n"));
+	// PostCompact does not support hookSpecificOutput.additionalContext
+	process.stderr.write(`[alfred] ${lines.join("\n")}\n`);
 }

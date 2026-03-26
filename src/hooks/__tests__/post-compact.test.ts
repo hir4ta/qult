@@ -4,15 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-post-compact-test");
 const STATE_DIR = join(TEST_DIR, ".alfred", ".state");
-let stdoutCapture: string[] = [];
+let stderrCapture: string[] = [];
 const originalCwd = process.cwd();
 
 beforeEach(() => {
 	mkdirSync(STATE_DIR, { recursive: true });
 	process.chdir(TEST_DIR);
-	stdoutCapture = [];
-	vi.spyOn(process.stdout, "write").mockImplementation((data) => {
-		stdoutCapture.push(typeof data === "string" ? data : data.toString());
+	stderrCapture = [];
+	vi.spyOn(process.stderr, "write").mockImplementation((data) => {
+		stderrCapture.push(typeof data === "string" ? data : data.toString());
 		return true;
 	});
 });
@@ -23,14 +23,8 @@ afterEach(() => {
 	rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
-function getResponse(): Record<string, unknown> | null {
-	const output = stdoutCapture.join("");
-	if (!output) return null;
-	return JSON.parse(output);
-}
-
 describe("postCompact", () => {
-	it("injects handoff as additionalContext when handoff exists", async () => {
+	it("injects handoff via stderr when handoff exists", async () => {
 		// Write a handoff file
 		writeFileSync(
 			join(STATE_DIR, "handoff.json"),
@@ -46,20 +40,18 @@ describe("postCompact", () => {
 		const handler = (await import("../post-compact.ts")).default;
 		await handler({ hook_type: "PostCompact" });
 
-		const response = getResponse();
-		expect(response).not.toBeNull();
-		const context = (response?.hookSpecificOutput as Record<string, string>)?.additionalContext;
-		expect(context).toContain("auth feature");
-		expect(context).toContain("auth.ts");
-		expect(context).toContain("Fix type errors");
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("auth feature");
+		expect(stderr).toContain("auth.ts");
+		expect(stderr).toContain("Fix type errors");
 	});
 
 	it("does nothing when no handoff exists", async () => {
 		const handler = (await import("../post-compact.ts")).default;
 		await handler({ hook_type: "PostCompact" });
 
-		const output = stdoutCapture.join("");
-		expect(output).toBe("");
+		const stderr = stderrCapture.join("");
+		expect(stderr).toBe("");
 	});
 
 	it("does not clear handoff (SessionStart responsibility)", async () => {

@@ -1,7 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { getActivePlan } from "../state/plan-status.ts";
 import type { HookEvent } from "../types.ts";
-import { respond } from "./respond.ts";
 
 // Match: ### Task N: <name> [status]
 const TASK_LINE_RE = /^(###\s+Task\s+\d+:\s*)(.+?)(\s*\[)(pending|in-progress|done)(\]\s*)$/;
@@ -17,7 +16,8 @@ export default async function taskCompleted(ev: HookEvent): Promise<void> {
 	// Find matching task in plan and update status to [done]
 	const updated = updatePlanTaskStatus(plan.path, subject);
 	if (updated) {
-		respond(`Plan updated: "${subject}" marked as [done]`);
+		// TaskCompleted does not support hookSpecificOutput.additionalContext
+		process.stderr.write(`[alfred] Plan updated: "${subject}" marked as [done]\n`);
 	}
 }
 

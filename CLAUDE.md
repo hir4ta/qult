@@ -101,6 +101,9 @@ task clean    # ビルド成果物削除
 - additionalContext = advisory (Claude は無視可能)
 - PostToolUse 検出 → PreToolUse ブロックの二段構え
 - SubagentStart でサブエージェントにも品質ルールを伝搬
+- **hookSpecificOutput.additionalContext 対応表** (公式ドキュメント準拠):
+  - respond() 使用可: SessionStart, UserPromptSubmit, PostToolUse, PostToolUseFailure, SubagentStart
+  - respond() 使用不可 (stderr で代替): Stop, PostCompact, TaskCompleted, PreCompact, SessionEnd, ConfigChange
 
 ### 状態ファイル (.alfred/.state/)
 - pending-fixes.json — 未修正 lint/type エラー

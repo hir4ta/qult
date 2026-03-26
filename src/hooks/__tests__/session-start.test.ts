@@ -5,16 +5,16 @@ import { writeHandoff } from "../../state/handoff.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-session-test");
 const STATE_DIR = join(TEST_DIR, ".alfred", ".state");
-let stderrCapture: string[] = [];
+let stdoutCapture: string[] = [];
 const originalCwd = process.cwd();
 
 beforeEach(() => {
 	mkdirSync(STATE_DIR, { recursive: true });
 	process.chdir(TEST_DIR);
-	stderrCapture = [];
+	stdoutCapture = [];
 
-	vi.spyOn(process.stderr, "write").mockImplementation((data) => {
-		stderrCapture.push(typeof data === "string" ? data : data.toString());
+	vi.spyOn(process.stdout, "write").mockImplementation((data) => {
+		stdoutCapture.push(typeof data === "string" ? data : data.toString());
 		return true;
 	});
 });
@@ -24,6 +24,12 @@ afterEach(() => {
 	process.chdir(originalCwd);
 	rmSync(TEST_DIR, { recursive: true, force: true });
 });
+
+function getResponse(): Record<string, unknown> | null {
+	const output = stdoutCapture.join("");
+	if (!output) return null;
+	return JSON.parse(output);
+}
 
 describe("sessionStart hook", () => {
 	it("injects handoff context when handoff exists", async () => {
@@ -38,9 +44,11 @@ describe("sessionStart hook", () => {
 		const handler = (await import("../session-start.ts")).default;
 		await handler({ hook_type: "SessionStart" });
 
-		const stderr = stderrCapture.join("");
-		expect(stderr).toContain("auth middleware");
-		expect(stderr).toContain("Add tests");
+		const response = getResponse();
+		expect(response).not.toBeNull();
+		const context = (response?.hookSpecificOutput as Record<string, string>)?.additionalContext;
+		expect(context).toContain("auth middleware");
+		expect(context).toContain("Add tests");
 	});
 
 	it("creates .alfred dir if missing", async () => {
