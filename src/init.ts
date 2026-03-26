@@ -158,6 +158,10 @@ export async function runInit(force: boolean): Promise<void> {
 		console.log(`  Created ${gatesPath}`);
 	}
 
+	// 4. Clear stale pending-fixes (fresh start)
+	const pendingPath = join(alfredDir, ".state", "pending-fixes.json");
+	writeFileSync(pendingPath, "[]");
+
 	console.log("\nalfred init complete.");
 }
 
