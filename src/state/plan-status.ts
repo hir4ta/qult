@@ -40,6 +40,42 @@ export function parsePlanTasks(content: string): PlanTask[] {
 	return tasks;
 }
 
+export interface VerifyField {
+	taskName: string;
+	testFile: string;
+	testFunction: string | null;
+}
+
+// - **Verify**: test-file:function or - **Verify**: test-file
+const VERIFY_RE = /^\s*-\s+\*{0,2}Verify\*{0,2}:\s*(\S+?)(?::(\S+))?\s*$/;
+
+/** Parse Verify fields from plan content, associating each with its task */
+export function parseVerifyFields(content: string): VerifyField[] {
+	const verifies: VerifyField[] = [];
+	let currentTask: string | null = null;
+
+	for (const line of content.split("\n")) {
+		const taskMatch = line.trim().match(TASK_RE);
+		if (taskMatch) {
+			currentTask = taskMatch[1]!.trim();
+			continue;
+		}
+
+		if (currentTask) {
+			const verifyMatch = line.match(VERIFY_RE);
+			if (verifyMatch) {
+				verifies.push({
+					taskName: currentTask,
+					testFile: verifyMatch[1]!,
+					testFunction: verifyMatch[2] ?? null,
+				});
+			}
+		}
+	}
+
+	return verifies;
+}
+
 /** Find and parse the latest plan file. Returns null if no plan found. */
 export function getActivePlan(): { tasks: PlanTask[]; path: string } | null {
 	try {

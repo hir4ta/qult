@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { loadGates } from "../gates/load.ts";
 import { runGate } from "../gates/runner.ts";
@@ -5,8 +6,11 @@ import { clearFailCount, recordFailure } from "../state/fail-count.ts";
 import { clearBatch, markRan, shouldSkip } from "../state/gate-batch.ts";
 import { readPace, writePace } from "../state/pace.ts";
 import { readPendingFixes, writePendingFixes } from "../state/pending-fixes.ts";
+import { getActivePlan, parseVerifyFields } from "../state/plan-status.ts";
 import type { HookEvent, PendingFix } from "../types.ts";
 import { respond } from "./respond.ts";
+
+const TEST_CMD_RE = /\b(vitest|jest|mocha|pytest|go\s+test|cargo\s+test)\b/;
 
 /** PostToolUse: lint/type gate after Edit/Write, test gate after git commit */
 export default async function postTool(ev: HookEvent): Promise<void> {
@@ -114,6 +118,38 @@ function handleBash(ev: HookEvent): void {
 		}
 	} else if (output.length > 0) {
 		clearFailCount();
+	}
+
+	// Detect test command → verify against Plan's Verify fields
+	if (TEST_CMD_RE.test(command)) {
+		checkVerifyFields(output);
+	}
+}
+
+function checkVerifyFields(output: string): void {
+	try {
+		const plan = getActivePlan();
+		if (!plan) return;
+
+		const content = readFileSync(plan.path, "utf-8");
+		const verifies = parseVerifyFields(content);
+		if (verifies.length === 0) return;
+
+		const messages: string[] = [];
+		for (const v of verifies) {
+			if (!v.testFunction) continue;
+			if (output.includes(v.testFunction)) {
+				messages.push(`[pass] Task "${v.taskName}" — ${v.testFunction} found in test output`);
+			} else {
+				messages.push(`[miss] Task "${v.taskName}" — ${v.testFunction} not found in test output`);
+			}
+		}
+
+		if (messages.length > 0) {
+			respond(`Plan verify check:\n${messages.join("\n")}`);
+		}
+	} catch {
+		// fail-open
 	}
 }
 

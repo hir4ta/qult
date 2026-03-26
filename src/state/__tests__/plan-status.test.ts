@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parsePlanTasks } from "../plan-status.ts";
+import { parsePlanTasks, parseVerifyFields } from "../plan-status.ts";
 
 describe("parsePlanTasks", () => {
 	it("parses tasks with status markers", () => {
@@ -84,5 +84,50 @@ Just a note`;
 		expect(pending).toHaveLength(2);
 		expect(pending.map((t) => t.name)).toContain("Write tests");
 		expect(pending.map((t) => t.name)).toContain("Final Review");
+	});
+});
+
+describe("parseVerifyFields", () => {
+	it("extracts Verify fields with task names", () => {
+		const plan = `## Tasks
+### Task 1: Add middleware [pending]
+- **File**: src/middleware.ts
+- **Verify**: src/__tests__/middleware.test.ts:authMiddleware
+
+### Task 2: Add routes [pending]
+- **File**: src/routes.ts
+- **Verify**: src/__tests__/routes.test.ts:handleLogin`;
+
+		const verifies = parseVerifyFields(plan);
+		expect(verifies).toHaveLength(2);
+		expect(verifies[0]).toEqual({
+			taskName: "Add middleware",
+			testFile: "src/__tests__/middleware.test.ts",
+			testFunction: "authMiddleware",
+		});
+		expect(verifies[1]).toEqual({
+			taskName: "Add routes",
+			testFile: "src/__tests__/routes.test.ts",
+			testFunction: "handleLogin",
+		});
+	});
+
+	it("handles Verify without function name", () => {
+		const plan = `## Tasks
+### Task 1: Add helper [pending]
+- **Verify**: src/__tests__/helper.test.ts`;
+
+		const verifies = parseVerifyFields(plan);
+		expect(verifies).toHaveLength(1);
+		expect(verifies[0]!.testFunction).toBeNull();
+	});
+
+	it("returns empty for plan without Verify fields", () => {
+		const plan = `## Tasks
+### Task 1: Add helper [pending]
+- **File**: src/helper.ts`;
+
+		const verifies = parseVerifyFields(plan);
+		expect(verifies).toHaveLength(0);
 	});
 });
