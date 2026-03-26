@@ -31,13 +31,13 @@ src/
 ├── hooks/
 │   ├── dispatcher.ts       # event → handler ルーティング (14 events)
 │   ├── respond.ts          # 共通: respond / deny / block
-│   ├── post-tool.ts        # lint/type gate + pending-fixes + pace + 2回失敗
-│   ├── pre-tool.ts         # pending-fixes → DENY + pace red → DENY
+│   ├── post-tool.ts        # lint/type gate + pending-fixes + pace + batch + test-pass + verify
+│   ├── pre-tool.ts         # pending-fixes → DENY + pace red → DENY + commit without test → DENY
 │   ├── user-prompt.ts      # Plan テンプレート注入 + 大タスク検出
 │   ├── permission-request.ts # ExitPlanMode: Review Gates 検証
 │   ├── task-completed.ts   # Plan task status 自動同期
 │   ├── session-start.ts    # .alfred作成 + gates自動検出 + handoff復元
-│   ├── stop.ts             # pending-fixes block + Plan未完了block + pace警告
+│   ├── stop.ts             # pending-fixes block + Plan未完了block + レビュー強制 + pace警告
 │   ├── pre-compact.ts      # 構造化ハンドオフ保存
 │   ├── post-compact.ts     # コンパクション後ハンドオフ復元
 │   ├── session-end.ts      # 割り込み終了時 handoff 保存

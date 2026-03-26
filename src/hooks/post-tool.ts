@@ -142,12 +142,11 @@ function checkVerifyFields(output: string): void {
 		const verifies = parseVerifyFields(content);
 		if (verifies.length === 0) return;
 
+		// Failures only surface — passing output is swallowed (research: output filtering)
 		const messages: string[] = [];
 		for (const v of verifies) {
 			if (!v.testFunction) continue;
-			if (output.includes(v.testFunction)) {
-				messages.push(`[pass] Task "${v.taskName}" — ${v.testFunction} found in test output`);
-			} else {
+			if (!output.includes(v.testFunction)) {
 				messages.push(`[miss] Task "${v.taskName}" — ${v.testFunction} not found in test output`);
 			}
 		}

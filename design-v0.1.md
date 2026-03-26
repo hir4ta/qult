@@ -45,17 +45,18 @@ alfred CLI (init / hook / doctor)
 
 | Hook | 強制レベル | 役割 |
 |---|---|---|
-| **Stop** | **block (exit 2)** | pending-fixes 残存 → block。Plan 未完了タスク → block。Pace 20分超 → 警告。stop_hook_active で無限ループ防止 |
-| **PreCompact** | state保存 | 構造化ハンドオフ保存 (summary, changed_files, pending_fixes, next_steps) |
-| **SessionStart** | additionalContext | .alfred 自動作成 + gates.json 自動検出 + ハンドオフ復元→消費 |
-| **SessionEnd** | state保存 | 割り込み終了含む全終了時にハンドオフ保存 (Stop の補完) |
+| **Stop** | **block (exit 2)** | pending-fixes → block。Plan 未完了 → block。レビュー未実行 → block。Pace 20分超 → 警告 |
+| **PreCompact** | state保存 | 構造化ハンドオフ保存 |
+| **PostCompact** | additionalContext | コンパクション後ハンドオフ復元 |
+| **SessionStart** | additionalContext | .alfred 自動作成 + gates 自動検出 + ハンドオフ復元→消費 |
+| **SessionEnd** | state保存 | 割り込み終了含む全終了時にハンドオフ保存 |
 
 ### サブエージェント制御 (品質ルール伝搬)
 
 | Hook | 強制レベル | 役割 |
 |---|---|---|
 | **SubagentStart** | additionalContext | 全サブエージェントに品質ルール + pending-fixes警告 + alfred-quality.md を注入 |
-| **SubagentStop** | (拡張ポイント) | サブエージェント完了時検証。現在は pass-through |
+| **SubagentStop** | **block (exit 2)** | サブエージェント出力検証 (reviewer findings + Plan 構造) + レビュー完了記録 |
 
 ### 自己防御
 
@@ -175,19 +176,14 @@ session_id ベースで `run_once_per_batch: true` のゲートを skip。
 - 不明 agent_type → allow (fail-open)
 9テスト + Scenario 25。
 
-### 4. dogfooding で発見した問題の修正 (動的)
+### 4. dogfooding で発見・修正した問題
 
-v0.2 の実装を alfred 自身のハーネスで行う (dogfooding)。その過程で発見された問題を修正する。
+- Bun グローバル依存 (`Bun.spawnSync`, `Bun.file`) → Node の `execSync`/`statSync` に置換
+- `alfred init` で hooks 未登録 → init 再実行で解消
+- 自己評価の限界 → 独立レビュー強制 (3.6) で対応
+- rules-quality.md が薄い → frontmatter + 構造化に改善
 
-予想される問題:
-- ConfigChange が過剰に DENY する (settings 以外の変更も巻き込む等)
-- PostToolUse の gate が遅すぎてタイムアウトする
-- Plan テンプレートが長すぎて Claude が省略する
-- pending-fixes のパスマッチングが本番環境で一致しない
-- SubagentStart の品質ルール注入が重すぎてサブエージェントが無視する
-
-### 5. テスト・シミュレーション方針
-
-- 各機能にユニットテスト + シミュレーションシナリオを追加
-- dogfooding 中に発見した問題は再現テストを先に書いてから修正
-- 全テスト通過後にコミット
+未観測 (遭遇時に対応):
+- ConfigChange の過剰 DENY
+- gate タイムアウト
+- pending-fixes パスマッチング
