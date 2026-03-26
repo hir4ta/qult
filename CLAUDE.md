@@ -27,7 +27,7 @@ alfred CLI (init / hook / doctor)
 src/
 ├── cli.ts                  # citty: init / hook / doctor
 ├── init.ts                 # セットアップ (13 hooks + skill + agent + rules + gates)
-├── doctor.ts               # ヘルスチェック (stub)
+├── doctor.ts               # ヘルスチェック (8項目: bun, hooks, skill, agent, rules, gates, state, path)
 ├── hooks/
 │   ├── dispatcher.ts       # event → handler ルーティング (13 events)
 │   ├── respond.ts          # 共通: respond / deny / block

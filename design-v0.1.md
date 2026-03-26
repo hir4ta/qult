@@ -165,33 +165,10 @@ The Stop hook will block if any tasks remain [pending] or [in-progress].
 
 ## v0.2 設計
 
-### 1. doctor コマンド
+### 1. doctor コマンド (実装済み)
 
-`alfred doctor` — セットアップの健全性チェック。
-
-**チェック項目:**
-1. Bun バージョン >= 1.3
-2. `~/.claude/settings.json` に 13 hooks 全てが登録されているか
-3. `~/.claude/skills/alfred-review/SKILL.md` が存在するか
-4. `~/.claude/agents/alfred-reviewer.md` が存在するか
-5. `~/.claude/rules/alfred-quality.md` が存在するか
-6. `.alfred/gates.json` が存在し、on_write に最低1つの gate があるか
-7. `.alfred/.state/` ディレクトリが存在するか
-8. `alfred` コマンドが PATH に存在するか
-
-**出力形式:**
-```
-[OK] Bun 1.3.11
-[OK] 13/13 hooks registered
-[OK] /alfred:review skill installed
-[OK] alfred-reviewer agent installed
-[OK] alfred-quality rules installed
-[OK] gates.json: 2 on_write, 1 on_commit
-[OK] .alfred/.state/ exists
-[WARN] run_once_per_batch not yet implemented
-```
-
-**実装箇所:** `src/doctor.ts` (現在 stub)
+`alfred doctor` — セットアップの健全性チェック。8項目を `runChecks()` で検証。
+`src/doctor.ts` に実装。17テスト + Scenario 23。
 
 ### 2. run_once_per_batch
 
