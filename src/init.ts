@@ -93,6 +93,17 @@ const HOOK_EVENTS = {
 	ConfigChange: { timeout: 3000 },
 } as const;
 
+/**
+ * Claude Code hook format (v2.1+):
+ * {
+ *   "hooks": {
+ *     "PostToolUse": [
+ *       { "matcher": "Edit|Write", "hooks": [{"type": "command", "command": "...", "timeout": 5000}] }
+ *     ]
+ *   }
+ * }
+ * Each event is an array of matcher groups. Each group has `matcher` (string) and `hooks` (array).
+ */
 function writeHooks(settingsPath: string, force: boolean): void {
 	let settings: Record<string, unknown> = {};
 	if (existsSync(settingsPath)) {
@@ -103,26 +114,50 @@ function writeHooks(settingsPath: string, force: boolean): void {
 		}
 	}
 
-	const hooks = (settings.hooks ?? {}) as Record<string, unknown[]>;
+	const hooks = (settings.hooks ?? {}) as Record<string, MatcherGroup[]>;
 
 	for (const [event, config] of Object.entries(HOOK_EVENTS)) {
-		const existing = hooks[event] as Array<{ command?: string }> | undefined;
-		const hasAlfred = existing?.some((h) => h.command?.includes("alfred hook"));
+		const existing = hooks[event] ?? [];
+		const hasAlfred = existing.some((entry) => {
+			// New nested format
+			if (entry.hooks) {
+				return entry.hooks.some((h) => h.command?.includes("alfred hook"));
+			}
+			// Old flat format
+			const cmd = (entry as Record<string, unknown>).command;
+			return typeof cmd === "string" && cmd.includes("alfred hook");
+		});
 
 		if (!hasAlfred || force) {
-			const hookEntry: Record<string, unknown> = {
+			const hookDef: Record<string, unknown> = {
 				type: "command",
 				command: `alfred hook ${eventToArg(event)}`,
 				timeout: config.timeout,
 			};
-			if ("matcher" in config) {
-				hookEntry.matcher = config.matcher;
+
+			const matcher = "matcher" in config ? (config.matcher as string) : "";
+
+			if (force) {
+				// Remove ALL alfred-related entries (both old flat format and new nested format)
+				hooks[event] = existing.filter((entry) => {
+					// Old flat format: { type, command, timeout } at top level
+					const isOldFlat =
+						"command" in entry && typeof (entry as Record<string, unknown>).command === "string";
+					if (isOldFlat) {
+						return !(entry as Record<string, unknown> & { command: string }).command.includes(
+							"alfred hook",
+						);
+					}
+					// New nested format: { matcher, hooks: [...] }
+					if (entry.hooks) {
+						entry.hooks = entry.hooks.filter((h) => !h.command?.includes("alfred hook"));
+						return entry.hooks.length > 0;
+					}
+					return true;
+				});
 			}
 
-			if (hasAlfred && force) {
-				hooks[event] = existing!.filter((h) => !h.command?.includes("alfred hook"));
-			}
-			hooks[event] = [...(hooks[event] ?? []), hookEntry];
+			hooks[event] = [...(hooks[event] ?? []), { matcher, hooks: [hookDef] }];
 			console.log(`  + ${event} hook`);
 		} else {
 			console.log(`  = ${event} hook (already exists)`);
@@ -134,6 +169,11 @@ function writeHooks(settingsPath: string, force: boolean): void {
 	const dir = join(settingsPath, "..");
 	mkdirSync(dir, { recursive: true });
 	writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+}
+
+interface MatcherGroup {
+	matcher?: string;
+	hooks?: Array<{ type?: string; command?: string; timeout?: number }>;
 }
 
 const EVENT_TO_ARG: Record<string, string> = {

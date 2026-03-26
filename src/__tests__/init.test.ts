@@ -13,7 +13,6 @@ beforeEach(() => {
 	process.env.HOME = TEST_HOME;
 	process.chdir(TEST_PROJECT);
 
-	// Create minimal project files for gate detection
 	writeFileSync(join(TEST_PROJECT, "biome.json"), "{}");
 	writeFileSync(join(TEST_PROJECT, "tsconfig.json"), "{}");
 	writeFileSync(
@@ -30,7 +29,7 @@ afterEach(() => {
 });
 
 describe("alfred init", () => {
-	it("writes hooks to ~/.claude/settings.json", async () => {
+	it("writes hooks in matcher+hooks format to settings.json", async () => {
 		const { runInit } = await import("../init.ts");
 		await runInit(false);
 
@@ -43,9 +42,16 @@ describe("alfred init", () => {
 		expect(settings.hooks.Stop).toBeDefined();
 		expect(settings.hooks.PermissionRequest).toBeDefined();
 
-		// Check PermissionRequest has matcher
+		// Verify new format: each entry has matcher + hooks array
+		const postTool = settings.hooks.PostToolUse[0];
+		expect(postTool.matcher).toBeDefined();
+		expect(Array.isArray(postTool.hooks)).toBe(true);
+		expect(postTool.hooks[0].command).toContain("alfred hook post-tool");
+
+		// PermissionRequest has ExitPlanMode matcher
 		const permHook = settings.hooks.PermissionRequest[0];
 		expect(permHook.matcher).toBe("ExitPlanMode");
+		expect(permHook.hooks[0].command).toContain("alfred hook permission-request");
 	});
 
 	it("creates .alfred/gates.json with detected gates", async () => {
@@ -93,18 +99,23 @@ describe("alfred init", () => {
 		expect(existsSync(rulesPath)).toBe(true);
 
 		const content = readFileSync(rulesPath, "utf-8");
-		expect(content.split("\n").length).toBeLessThanOrEqual(30); // Keep rules concise
+		expect(content.split("\n").length).toBeLessThanOrEqual(30);
 	});
 
 	it("does not overwrite existing hooks without --force", async () => {
-		// Pre-create settings with existing hook
 		const claudeDir = join(TEST_HOME, ".claude");
 		mkdirSync(claudeDir, { recursive: true });
+		// Pre-create settings in NEW format with existing alfred hook
 		writeFileSync(
 			join(claudeDir, "settings.json"),
 			JSON.stringify({
 				hooks: {
-					PostToolUse: [{ type: "command", command: "alfred hook post-tool-use", timeout: 5000 }],
+					PostToolUse: [
+						{
+							matcher: "",
+							hooks: [{ type: "command", command: "alfred hook post-tool", timeout: 5000 }],
+						},
+					],
 				},
 			}),
 		);
