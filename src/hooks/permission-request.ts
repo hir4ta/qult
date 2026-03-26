@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { HookEvent, HookResponse } from "../types.ts";
+import type { HookEvent } from "../types.ts";
+import { deny } from "./respond.ts";
 
 const REVIEW_GATE_PATTERN = /review/i;
 
@@ -9,7 +10,7 @@ export default async function permissionRequest(ev: HookEvent): Promise<void> {
 	if (ev.tool?.name !== "ExitPlanMode") return;
 
 	const planContent = findLatestPlan();
-	if (!planContent) return; // fail-open: no plan found → allow
+	if (!planContent) return; // fail-open
 
 	if (!REVIEW_GATE_PATTERN.test(planContent)) {
 		deny(
@@ -18,7 +19,6 @@ export default async function permissionRequest(ev: HookEvent): Promise<void> {
 	}
 }
 
-/** Find the most recently modified plan file */
 function findLatestPlan(): string | null {
 	try {
 		const planDir = join(process.cwd(), ".claude", "plans");
@@ -28,24 +28,13 @@ function findLatestPlan(): string | null {
 			.filter((f) => f.endsWith(".md"))
 			.map((f) => ({
 				name: f,
-				mtime: Bun.file(join(planDir, f)).lastModified,
+				mtime: Bun.file(join(planDir, f)).lastModified ?? 0,
 			}))
 			.sort((a, b) => b.mtime - a.mtime);
 
 		if (files.length === 0) return null;
 		return readFileSync(join(planDir, files[0]!.name), "utf-8");
 	} catch {
-		return null; // fail-open
+		return null;
 	}
-}
-
-function deny(reason: string): void {
-	const response: HookResponse = {
-		hookSpecificOutput: {
-			permissionDecision: "deny",
-			permissionDecisionReason: reason,
-		},
-	};
-	process.stdout.write(JSON.stringify(response));
-	process.exit(2);
 }

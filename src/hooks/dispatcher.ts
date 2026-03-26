@@ -17,9 +17,11 @@ export async function dispatch(event: string): Promise<void> {
 		process.exit(1);
 	}
 
+	const MAX_INPUT = 5_000_000; // 5MB
 	let input = "";
 	for await (const chunk of Bun.stdin.stream()) {
 		input += new TextDecoder().decode(chunk);
+		if (input.length > MAX_INPUT) return; // fail-open: input too large
 	}
 
 	let ev: HookEvent;

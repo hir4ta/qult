@@ -1,17 +1,16 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { clearHandoff, readHandoff } from "../state/handoff.ts";
-import type { HookEvent, HookResponse } from "../types.ts";
+import type { HookEvent } from "../types.ts";
+import { respond } from "./respond.ts";
 
 /** SessionStart: ensure .alfred/ exists, inject handoff context */
 export default async function sessionStart(_ev: HookEvent): Promise<void> {
-	// Ensure .alfred/.state/ exists (zero-config)
 	const stateDir = join(process.cwd(), ".alfred", ".state");
 	if (!existsSync(stateDir)) {
 		mkdirSync(stateDir, { recursive: true });
 	}
 
-	// Inject handoff from previous compaction
 	const handoff = readHandoff();
 	if (handoff) {
 		const lines = [
@@ -27,15 +26,6 @@ export default async function sessionStart(_ev: HookEvent): Promise<void> {
 		lines.push(`Next steps: ${handoff.next_steps}`);
 
 		respond(lines.join("\n"));
-		clearHandoff(); // consumed
+		clearHandoff();
 	}
-}
-
-function respond(context: string): void {
-	const response: HookResponse = {
-		hookSpecificOutput: {
-			additionalContext: context,
-		},
-	};
-	process.stdout.write(JSON.stringify(response));
 }

@@ -508,3 +508,36 @@ describe("Scenario 13: Stop infinite loop prevention", () => {
 		expect(exitCode).toBeNull();
 	});
 });
+
+describe("Scenario 14: Pace tracking updates on each edit", () => {
+	it("changed_files increments and resets on commit", async () => {
+		setupPassingGates();
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+
+		// 3 edits → pace should track
+		for (const file of ["a.ts", "b.ts", "c.ts"]) {
+			await postTool({
+				hook_type: "PostToolUse",
+				tool_name: "Edit",
+				tool_input: { file_path: join(TEST_DIR, `src/${file}`) },
+			});
+		}
+
+		let pace = readPace();
+		expect(pace).not.toBeNull();
+		expect(pace!.changed_files).toBe(3);
+		expect(pace!.tool_calls).toBe(3);
+
+		// git commit → resets
+		stdoutCapture = [];
+		await postTool({
+			hook_type: "PostToolUse",
+			tool_name: "Bash",
+			tool_input: { command: "git commit -m 'done'" },
+		});
+
+		pace = readPace();
+		expect(pace!.changed_files).toBe(0);
+		expect(pace!.tool_calls).toBe(0);
+	});
+});

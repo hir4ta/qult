@@ -1,6 +1,7 @@
-import type { HookEvent, HookResponse } from "../types.ts";
+import type { HookEvent } from "../types.ts";
+import { respond } from "./respond.ts";
 
-const LARGE_TASK_THRESHOLD = 200; // chars — prompt length heuristic
+const LARGE_TASK_THRESHOLD = 200;
 
 const PLAN_TEMPLATE = `Structure your plan as follows:
 
@@ -33,19 +34,9 @@ export default async function userPrompt(ev: HookEvent): Promise<void> {
 		return;
 	}
 
-	// Normal mode: suggest plan for large tasks
 	if (prompt.length > LARGE_TASK_THRESHOLD) {
 		respond(
 			"This looks like a large task. Consider using Plan mode (Shift+Tab twice) to break it into small, verified tasks before implementing.",
 		);
 	}
-}
-
-function respond(context: string): void {
-	const response: HookResponse = {
-		hookSpecificOutput: {
-			additionalContext: context,
-		},
-	};
-	process.stdout.write(JSON.stringify(response));
 }

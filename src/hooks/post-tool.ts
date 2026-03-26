@@ -1,9 +1,10 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { resolve } from "node:path";
+import { loadGates } from "../gates/load.ts";
 import { runGate } from "../gates/runner.ts";
-import { writePace } from "../state/pace.ts";
+import { readPace, writePace } from "../state/pace.ts";
 import { readPendingFixes, writePendingFixes } from "../state/pending-fixes.ts";
-import type { GatesConfig, HookEvent, HookResponse, PendingFix } from "../types.ts";
+import type { HookEvent, PendingFix } from "../types.ts";
+import { respond } from "./respond.ts";
 
 /** PostToolUse: lint/type gate after Edit/Write, test gate after git commit */
 export default async function postTool(ev: HookEvent): Promise<void> {
@@ -18,24 +19,29 @@ export default async function postTool(ev: HookEvent): Promise<void> {
 }
 
 function handleEditWrite(ev: HookEvent): void {
-	const file = typeof ev.tool_input?.file_path === "string" ? ev.tool_input.file_path : null;
-	if (!file) return;
+	const rawFile = typeof ev.tool_input?.file_path === "string" ? ev.tool_input.file_path : null;
+	if (!rawFile) return;
+	const file = resolve(rawFile);
 
 	const gates = loadGates();
 	if (!gates?.on_write) return;
 
-	// Read existing fixes for OTHER files, merge with new results for THIS file
+	// Read existing fixes for OTHER files
 	const existingFixes = readPendingFixes().filter((f) => f.file !== file);
 	const newFixes: PendingFix[] = [];
 	const messages: string[] = [];
 
 	for (const [name, gate] of Object.entries(gates.on_write)) {
-		const hasPlaceholder = gate.command.includes("{file}");
-		const result = runGate(name, gate, hasPlaceholder ? file : undefined);
+		try {
+			const hasPlaceholder = gate.command.includes("{file}");
+			const result = runGate(name, gate, hasPlaceholder ? file : undefined);
 
-		if (!result.passed) {
-			newFixes.push({ file, errors: [result.output], gate: name });
-			messages.push(`[${name}] ${result.output.slice(0, 200)}`);
+			if (!result.passed) {
+				newFixes.push({ file, errors: [result.output], gate: name });
+				messages.push(`[${name}] ${result.output.slice(0, 200)}`);
+			}
+		} catch {
+			// fail-open: gate execution error
 		}
 	}
 
@@ -44,13 +50,15 @@ function handleEditWrite(ev: HookEvent): void {
 	if (newFixes.length > 0) {
 		respond(`Fix these errors before continuing:\n${messages.join("\n")}`);
 	}
+
+	// Update pace tracking
+	updatePace();
 }
 
 function handleBash(ev: HookEvent): void {
 	const command = typeof ev.tool_input?.command === "string" ? ev.tool_input.command : null;
 	if (!command) return;
 
-	// Detect git commit → reset pace
 	if (/\bgit\s+commit\b/.test(command)) {
 		writePace({ last_commit_at: new Date().toISOString(), changed_files: 0, tool_calls: 0 });
 
@@ -59,9 +67,13 @@ function handleBash(ev: HookEvent): void {
 
 		const messages: string[] = [];
 		for (const [name, gate] of Object.entries(gates.on_commit)) {
-			const result = runGate(name, gate);
-			if (!result.passed) {
-				messages.push(`[${name}] ${result.output.slice(0, 200)}`);
+			try {
+				const result = runGate(name, gate);
+				if (!result.passed) {
+					messages.push(`[${name}] ${result.output.slice(0, 200)}`);
+				}
+			} catch {
+				// fail-open
 			}
 		}
 
@@ -71,21 +83,17 @@ function handleBash(ev: HookEvent): void {
 	}
 }
 
-function loadGates(): GatesConfig | null {
+function updatePace(): void {
 	try {
-		const path = join(process.cwd(), ".alfred", "gates.json");
-		if (!existsSync(path)) return null;
-		return JSON.parse(readFileSync(path, "utf-8"));
+		const pace = readPace() ?? {
+			last_commit_at: new Date().toISOString(),
+			changed_files: 0,
+			tool_calls: 0,
+		};
+		pace.changed_files++;
+		pace.tool_calls++;
+		writePace(pace);
 	} catch {
-		return null;
+		// fail-open
 	}
-}
-
-function respond(context: string): void {
-	const response: HookResponse = {
-		hookSpecificOutput: {
-			additionalContext: context,
-		},
-	};
-	process.stdout.write(JSON.stringify(response));
 }
