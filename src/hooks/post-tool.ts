@@ -4,6 +4,7 @@ import { loadGates } from "../gates/load.ts";
 import { runGate } from "../gates/runner.ts";
 import { clearFailCount, recordFailure } from "../state/fail-count.ts";
 import { clearBatch, markRan, shouldSkip } from "../state/gate-batch.ts";
+import { clearTestPass, recordTestPass } from "../state/last-test-pass.ts";
 import { readPace, writePace } from "../state/pace.ts";
 import { readPendingFixes, writePendingFixes } from "../state/pending-fixes.ts";
 import { getActivePlan, parseVerifyFields } from "../state/plan-status.ts";
@@ -81,6 +82,7 @@ function handleBash(ev: HookEvent): void {
 		writePace({ last_commit_at: new Date().toISOString(), changed_files: 0, tool_calls: 0 });
 		clearFailCount();
 		clearBatch();
+		clearTestPass();
 
 		const gates = loadGates();
 		if (!gates?.on_commit) return;
@@ -120,8 +122,11 @@ function handleBash(ev: HookEvent): void {
 		clearFailCount();
 	}
 
-	// Detect test command → verify against Plan's Verify fields
+	// Detect test command → record pass + verify against Plan's Verify fields
 	if (TEST_CMD_RE.test(command)) {
+		if (!isError) {
+			recordTestPass(command);
+		}
 		checkVerifyFields(output);
 	}
 }
