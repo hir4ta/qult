@@ -219,3 +219,195 @@ describe("Scenario 5: Pace red zone blocks edits", () => {
 		expect(response?.hookSpecificOutput).toHaveProperty("permissionDecision", "deny");
 	});
 });
+
+// ============================================================
+// Phase 2: Plan amplification scenarios
+// ============================================================
+
+describe("Scenario 6: Plan mode → template injected with review gates", () => {
+	it("full plan mode flow", async () => {
+		const userPrompt = (await import("../hooks/user-prompt.ts")).default;
+
+		await userPrompt({
+			hook_type: "UserPromptSubmit",
+			permission_mode: "plan",
+			prompt: "implement authentication",
+		});
+
+		const response = getResponse();
+		expect(response).not.toBeNull();
+
+		const context = (response?.hookSpecificOutput as Record<string, string>)?.additionalContext;
+		expect(context).toBeDefined();
+		// Must contain task structure guidance
+		expect(context).toContain("1 file");
+		expect(context).toContain("15 lines");
+		expect(context).toContain("Verify");
+		// Must contain review gates
+		expect(context).toContain("Design Review");
+		expect(context).toContain("Phase Review");
+		expect(context).toContain("Final Review");
+		expect(context).toContain("/alfred:review");
+	});
+});
+
+describe("Scenario 7: Normal mode large task → plan mode suggestion", () => {
+	it("long prompt triggers plan suggestion", async () => {
+		const userPrompt = (await import("../hooks/user-prompt.ts")).default;
+
+		const longPrompt =
+			"Implement a complete authentication system with JWT tokens, refresh tokens, " +
+			"login and signup endpoints, middleware for protected routes, password hashing with bcrypt, " +
+			"update the user model to include password fields, add rate limiting on auth endpoints, " +
+			"create integration tests for all auth flows, update the API documentation";
+
+		await userPrompt({
+			hook_type: "UserPromptSubmit",
+			prompt: longPrompt,
+		});
+
+		const response = getResponse();
+		expect(response).not.toBeNull();
+
+		const context = (response?.hookSpecificOutput as Record<string, string>)?.additionalContext;
+		expect(context).toBeDefined();
+		expect(context!.toLowerCase()).toContain("plan");
+	});
+
+	it("short prompt does NOT trigger plan suggestion", async () => {
+		const userPrompt = (await import("../hooks/user-prompt.ts")).default;
+
+		await userPrompt({
+			hook_type: "UserPromptSubmit",
+			prompt: "fix the typo in README",
+		});
+
+		// Should have no output
+		const output = stdoutCapture.join("");
+		expect(output).toBe("");
+	});
+});
+
+describe("Scenario 8: ExitPlanMode → plan without review gates is DENIED", () => {
+	it("plan with review gates passes, plan without is denied", async () => {
+		const permReq = (await import("../hooks/permission-request.ts")).default;
+
+		// Create plan directory with a plan that HAS review gates
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+
+		writeFileSync(
+			join(planDir, "good-plan.md"),
+			[
+				"## Context",
+				"Adding auth feature",
+				"",
+				"## Tasks",
+				"### Task 1: Add auth middleware",
+				"- File: src/middleware.ts",
+				"- Verify: src/__tests__/middleware.test.ts:authMiddleware",
+				"",
+				"## Review Gates",
+				"- [ ] Design Review: /alfred:review",
+				"- [ ] Final Review: /alfred:review",
+			].join("\n"),
+		);
+
+		// ExitPlanMode — should pass
+		await permReq({
+			hook_type: "PermissionRequest",
+			tool: { name: "ExitPlanMode" },
+		});
+		expect(exitCode).toBeNull();
+
+		// Now replace with a plan that has NO review gates
+		writeFileSync(
+			join(planDir, "good-plan.md"),
+			["## Context", "Quick fix", "", "## Tasks", "### Task 1: Fix bug"].join("\n"),
+		);
+
+		stdoutCapture = [];
+		exitCode = null;
+
+		try {
+			await permReq({
+				hook_type: "PermissionRequest",
+				tool: { name: "ExitPlanMode" },
+			});
+		} catch {
+			// process.exit(2)
+		}
+
+		expect(exitCode).toBe(2);
+		const response = getResponse();
+		const reason = (response?.hookSpecificOutput as Record<string, string>)
+			?.permissionDecisionReason;
+		expect(reason).toContain("Review");
+	});
+});
+
+describe("Scenario 9: Full flow — plan mode → implement → gate → deny → fix", () => {
+	it("end-to-end with plan and wall integration", async () => {
+		setupFailingLintGate();
+		const userPrompt = (await import("../hooks/user-prompt.ts")).default;
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+
+		// Step 1: User enters plan mode → template injected
+		await userPrompt({
+			hook_type: "UserPromptSubmit",
+			permission_mode: "plan",
+			prompt: "add helper function",
+		});
+		const planResponse = getResponse();
+		expect(planResponse).not.toBeNull();
+		expect(
+			(planResponse?.hookSpecificOutput as Record<string, string>)?.additionalContext,
+		).toContain("Review Gates");
+
+		// Step 2: Claude implements (edit) → lint fails → pending-fixes
+		stdoutCapture = [];
+		await postTool({
+			hook_type: "PostToolUse",
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/helper.ts") },
+		});
+		const fixes = readPendingFixes();
+		expect(fixes.length).toBeGreaterThan(0);
+
+		// Step 3: Claude tries to edit another file → DENIED
+		stdoutCapture = [];
+		exitCode = null;
+		try {
+			await preTool({
+				hook_type: "PreToolUse",
+				tool_name: "Edit",
+				tool_input: { file_path: join(TEST_DIR, "src/other.ts") },
+			});
+		} catch {
+			// process.exit(2)
+		}
+		expect(exitCode).toBe(2);
+
+		// Step 4: Claude fixes the original file → gate passes → unblocked
+		setupPassingGates();
+		stdoutCapture = [];
+		exitCode = null;
+		await postTool({
+			hook_type: "PostToolUse",
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/helper.ts") },
+		});
+		expect(readPendingFixes()).toHaveLength(0);
+
+		// Step 5: Now Claude can edit other files
+		stdoutCapture = [];
+		exitCode = null;
+		await preTool({
+			hook_type: "PreToolUse",
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/other.ts") },
+		});
+		expect(exitCode).toBeNull(); // allowed
+	});
+});
