@@ -85,50 +85,22 @@ ExitPlanMode 時に File/Verify/Review Gates を検証して DENY。`findLatestP
 
 ---
 
-## v0.4.0 — コンテキスト最適化
+## v0.4.0 — コンテキスト最適化 (完了)
 
 リサーチが示す「コンテキストの質」を最大化する。
 
-### 4.1 コンテキスト予算管理
+### 4.1 コンテキスト予算管理 (完了)
+respond() に 2000 token 予算チェック。超過時は注入スキップ (fail-open)。deny/block は予算外。
+`context-budget.ts` + dispatcher で session_id ベースリセット。
 
-**問題:** additionalContext を注入しすぎると逆効果 (Chroma Research: 集中300tokが113Kに圧勝)。現在は各hookが独立して注入しており、総量を管理していない。
+### 4.2 Plan テンプレート動的調整 (完了)
+プロンプト長に応じて 3段階:
+- Short (< 100): テンプレートなし
+- Medium (100-300): compact (Context + Tasks)
+- Large (300+): full (+ Review Gates)
 
-**設計:**
-- `.alfred/.state/context-budget.json`: `{ "session_id": "abc", "injected_tokens": 0, "budget": 2000 }`
-- 各hookの respond() 呼び出し前に予算チェック
-- 予算超過なら注入をスキップ (fail-open: 注入しないだけで動作は止めない)
-- 予算は session ごとにリセット
-- 優先度: DENY/block (常に発火) > 壁の additionalContext > Plan の additionalContext > サブエージェントの additionalContext
-
-**リサーチ根拠:**
-- Chroma: 集中プロンプト(300tok) が 113K tok に圧勝
-- TDAD: スキル定義 107行→20行で解決率4倍
-- HumanLayer: CLAUDE.md は 60行以下が最適
-
-**影響ファイル:**
-- `src/state/context-budget.ts` — 新規
-- `src/hooks/respond.ts` — respond() に予算チェック追加
-
-### 4.2 Plan テンプレートの動的調整
-
-**問題:** 全てのタスクに同じテンプレートを注入するのは非効率。小さなタスクにフルテンプレートは過剰。
-
-**設計:**
-- プロンプトの長さ/複雑さに応じてテンプレートのレベルを変える
-  - Short (< 100 chars): テンプレートなし
-  - Medium (100-300 chars): 簡易テンプレート (Context + Tasks のみ)
-  - Large (300+ chars): フルテンプレート (Review Gates 含む)
-
-### 4.3 additionalContext の位置最適化
-
-**問題:** Lost in the Middle (Liu et al.): 中間の情報は失われる。additionalContext がコンテキストのどこに挿入されるかは Claude Code の実装依存。
-
-**調査項目:**
-- additionalContext は system message の先頭/末尾のどちらに挿入されるか
-- 複数 hook の additionalContext はどの順序で並ぶか
-- 重要な情報を先頭に置く方法はあるか
-
-**この調査結果に基づいて注入戦略を最適化する。**
+### 4.3 additionalContext 位置最適化 (スキップ)
+公式ドキュメント確認: 位置制御する方法は存在しない。実装手段がないためスコープ外。
 
 ---
 

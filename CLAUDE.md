@@ -55,6 +55,7 @@ src/
 │   ├── handoff.ts          # 構造化ハンドオフ
 │   ├── plan-status.ts      # Plan task status 解析
 │   ├── fail-count.ts       # 連続失敗カウント
+│   ├── context-budget.ts   # コンテキスト注入予算管理
 │   ├── gate-batch.ts       # run_once_per_batch 実行履歴
 │   ├── last-test-pass.ts  # テスト pass 記録 (commit 前強制)
 │   └── last-review.ts    # レビュー完了記録 (Stop 時強制)
@@ -105,6 +106,7 @@ task clean    # ビルド成果物削除
 - session-pace.json — Pace 追跡 (最終コミット時刻, 変更ファイル数, ツール呼出数)
 - handoff.json — 構造化ハンドオフ (PreCompact/SessionEnd で保存)
 - fail-count.json — 連続失敗カウント
+- context-budget.json — コンテキスト注入予算 (session_id ベース, 2000 tok)
 - gate-batch.json — run_once_per_batch 実行履歴 (session_id ベース)
 - last-test-pass.json — テスト pass 記録 (commit 前に必須)
 - last-review.json — レビュー完了記録 (Plan 時 Stop 前に必須)
