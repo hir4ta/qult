@@ -1,0 +1,30 @@
+[
+  {
+    "pattern": "Prefer early return over deeply nested if/else",
+    "category": "style"
+  },
+  {
+    "pattern": "Remove unused imports — do not leave dead code",
+    "category": "imports"
+  },
+  {
+    "pattern": "Follow biome rules for formatting and lint — do not override or disable rules without justification",
+    "category": "style"
+  },
+  {
+    "pattern": "Test files use *.test.ts naming convention",
+    "category": "testing"
+  },
+  {
+    "pattern": "Each test must have at least 2 meaningful assertions",
+    "category": "testing"
+  },
+  {
+    "pattern": "Use strict TypeScript — avoid `any` type, prefer explicit types at module boundaries",
+    "category": "style"
+  },
+  {
+    "pattern": "Use `import type` for type-only imports",
+    "category": "imports"
+  }
+]

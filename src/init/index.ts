@@ -9,7 +9,6 @@ import { join } from "node:path";
 import { detectGates } from "../gates/index.js";
 import { detectProjectProfile } from "../profile/detect.js";
 import { Store } from "../store/index.js";
-import { resolveOrRegisterProject } from "../store/project.js";
 
 interface InitOptions {
 	scan?: boolean;
@@ -38,7 +37,7 @@ export async function alfredInit(cwd: string, opts: InitOptions = {}): Promise<v
 	installAgents(claudeDir);
 
 	// 6. Project setup
-	initProject(cwd);
+	await initProject(cwd);
 
 	// 7. DB
 	initDb();
@@ -51,7 +50,11 @@ function installMcp(claudeDir: string, force?: boolean): void {
 	let mcp: Record<string, unknown> = {};
 
 	if (existsSync(mcpPath)) {
-		try { mcp = JSON.parse(readFileSync(mcpPath, "utf-8")); } catch { /* new file */ }
+		try {
+			mcp = JSON.parse(readFileSync(mcpPath, "utf-8"));
+		} catch {
+			/* new file */
+		}
 	}
 
 	const servers = (mcp.mcpServers ?? {}) as Record<string, unknown>;
@@ -69,7 +72,7 @@ function installMcp(claudeDir: string, force?: boolean): void {
 	mcp.mcpServers = servers;
 
 	mkdirSync(claudeDir, { recursive: true });
-	writeFileSync(mcpPath, JSON.stringify(mcp, null, 2) + "\n");
+	writeFileSync(mcpPath, `${JSON.stringify(mcp, null, 2)}\n`);
 	console.log("  ✓ MCP: alfred registered → ~/.claude/.mcp.json");
 }
 
@@ -78,22 +81,47 @@ function installHooks(claudeDir: string, force?: boolean): void {
 	let settings: Record<string, unknown> = {};
 
 	if (existsSync(settingsPath)) {
-		try { settings = JSON.parse(readFileSync(settingsPath, "utf-8")); } catch { /* new file */ }
+		try {
+			settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+		} catch {
+			/* new file */
+		}
 	}
 
 	const hooks = (settings.hooks ?? {}) as Record<string, unknown>;
 
 	// Only install if not already present (or force)
 	const alfredHooks = {
-		PreToolUse: [{ matcher: "Edit|Write", hooks: [{ type: "command", command: "alfred hook pre-tool-use", timeout: 3 }] }],
-		PostToolUse: [{ matcher: "Bash|Edit|Write", hooks: [{ type: "command", command: "alfred hook post-tool-use", timeout: 5 }] }],
-		UserPromptSubmit: [{ hooks: [{ type: "command", command: "alfred hook user-prompt-submit", timeout: 10 }] }],
-		SessionStart: [{ hooks: [{ type: "command", command: "alfred hook session-start", timeout: 5 }] }],
+		PreToolUse: [
+			{
+				matcher: "Edit|Write",
+				hooks: [{ type: "command", command: "alfred hook pre-tool-use", timeout: 3 }],
+			},
+		],
+		PostToolUse: [
+			{
+				matcher: "Bash|Edit|Write",
+				hooks: [{ type: "command", command: "alfred hook post-tool-use", timeout: 5 }],
+			},
+		],
+		UserPromptSubmit: [
+			{ hooks: [{ type: "command", command: "alfred hook user-prompt-submit", timeout: 10 }] },
+		],
+		SessionStart: [
+			{ hooks: [{ type: "command", command: "alfred hook session-start", timeout: 5 }] },
+		],
 		PreCompact: [
-			{ hooks: [
-				{ type: "command", command: "alfred hook pre-compact", timeout: 10 },
-				{ type: "agent", prompt: "Read the transcript and extract error resolutions (error → fix patterns). For each, run: alfred hook-internal save-decision --title '...' --error_signature '...' --resolution '...'", timeout: 60 },
-			] },
+			{
+				hooks: [
+					{ type: "command", command: "alfred hook pre-compact", timeout: 10 },
+					{
+						type: "agent",
+						prompt:
+							"Read the transcript and extract error resolutions (error → fix patterns). For each, run: alfred hook-internal save-decision --title '...' --error_signature '...' --resolution '...'",
+						timeout: 60,
+					},
+				],
+			},
 		],
 		Stop: [{ hooks: [{ type: "command", command: "alfred hook stop", timeout: 3 }] }],
 	};
@@ -107,7 +135,7 @@ function installHooks(claudeDir: string, force?: boolean): void {
 	}
 
 	settings.hooks = hooks;
-	writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+	writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
 	console.log(`  ✓ Hooks: ${installed} events installed → ~/.claude/settings.json`);
 }
 
@@ -181,7 +209,9 @@ function installAgents(claudeDir: string): void {
 	const agentsDir = join(claudeDir, "agents");
 	mkdirSync(agentsDir, { recursive: true });
 
-	writeFileSync(join(agentsDir, "alfred-reviewer.md"), `---
+	writeFileSync(
+		join(agentsDir, "alfred-reviewer.md"),
+		`---
 name: alfred-reviewer
 description: >
   Single-perspective code reviewer. Used as a sub-agent by /alfred:review.
@@ -199,12 +229,13 @@ Output each finding with severity (critical/high/medium/low), file path, line nu
 issue description, and suggested fix.
 
 If no issues found, state: "No issues found in this review dimension."
-`);
+`,
+	);
 
 	console.log("  ✓ Agent: alfred-reviewer → ~/.claude/agents/");
 }
 
-function initProject(cwd: string): void {
+async function initProject(cwd: string): Promise<void> {
 	const alfredDir = join(cwd, ".alfred");
 	const stateDir = join(alfredDir, ".state");
 	mkdirSync(stateDir, { recursive: true });
@@ -213,7 +244,7 @@ function initProject(cwd: string): void {
 	const gatesPath = join(alfredDir, "gates.json");
 	if (!existsSync(gatesPath)) {
 		const gates = detectGates(cwd);
-		writeFileSync(gatesPath, JSON.stringify(gates, null, 2) + "\n");
+		writeFileSync(gatesPath, `${JSON.stringify(gates, null, 2)}\n`);
 		console.log("  ✓ Gates: auto-detected → .alfred/gates.json");
 	} else {
 		console.log("  ✓ Gates: .alfred/gates.json exists");
@@ -223,10 +254,31 @@ function initProject(cwd: string): void {
 	const profilePath = join(stateDir, "project-profile.json");
 	if (!existsSync(profilePath)) {
 		const profile = detectProjectProfile(cwd);
-		writeFileSync(profilePath, JSON.stringify(profile, null, 2) + "\n");
+		writeFileSync(profilePath, `${JSON.stringify(profile, null, 2)}\n`);
 		console.log("  ✓ Profile: auto-detected → .alfred/.state/project-profile.json");
 	} else {
 		console.log("  ✓ Profile: .alfred/.state/project-profile.json exists");
+	}
+
+	// Conventions (auto-generate from profile)
+	const convPath = join(alfredDir, "conventions.json");
+	if (!existsSync(convPath)) {
+		try {
+			const profile = existsSync(profilePath)
+				? JSON.parse(readFileSync(profilePath, "utf-8"))
+				: detectProjectProfile(cwd);
+			const { generateBaseConventions } = await import("../profile/conventions.js");
+			const conventions = generateBaseConventions(profile);
+			writeFileSync(convPath, `${JSON.stringify(conventions, null, 2)}\n`);
+			console.log(
+				`  ✓ Conventions: ${conventions.length} base conventions → .alfred/conventions.json`,
+			);
+		} catch {
+			writeFileSync(convPath, "[]\n");
+			console.log("  ✓ Conventions: empty .alfred/conventions.json (detection failed)");
+		}
+	} else {
+		console.log("  ✓ Conventions: .alfred/conventions.json exists");
 	}
 
 	// Knowledge directories
@@ -484,4 +536,3 @@ For confirmed conventions:
 2. Generate \`.claude/rules/alfred-conventions.md\` with path-scoped rules
 3. Report: "Saved N conventions. Rules file generated."
 `;
-

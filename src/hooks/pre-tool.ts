@@ -26,13 +26,18 @@ export async function preToolUse(ev: HookEvent): Promise<void> {
 	const filePath = (toolInput.file_path as string) ?? "";
 
 	// 1. Check pending-fixes → DENY if unresolved errors exist
+	//    Allow edits to files that already have pending fixes (so they can be fixed).
 	if (hasPendingFixes(ev.cwd)) {
 		const fixes = readPendingFixes(ev.cwd);
-		const formatted = formatPendingFixes(fixes);
+		const pendingFiles = Object.keys(fixes.files);
+		const isFixingPendingFile = filePath && pendingFiles.includes(filePath);
 
-		// Exit code 2 = DENY
-		process.stderr.write(`Fix lint/type errors before editing more files:\n${formatted}\n`);
-		process.exit(2);
+		if (!isFixingPendingFile) {
+			const formatted = formatPendingFixes(fixes);
+			// Exit code 2 = DENY
+			process.stderr.write(`Fix lint/type errors before editing more files:\n${formatted}\n`);
+			process.exit(2);
+		}
 	}
 
 	// 2. Context injection (non-blocking)
