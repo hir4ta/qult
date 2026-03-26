@@ -1011,3 +1011,59 @@ describe("Scenario 25: SubagentStop blocks incomplete reviewer output", () => {
 		expect(exitCode).toBeNull();
 	});
 });
+
+// ============================================================
+// Phase Gate: test pass required before commit
+// ============================================================
+
+describe("Scenario 26: git commit DENIED without test pass", () => {
+	it("blocks commit without test pass, allows after test pass", async () => {
+		// Need on_commit gate for test-before-commit enforcement
+		const gates: GatesConfig = {
+			on_write: { lint: { command: "echo 'OK' && exit 0", timeout: 3000 } },
+			on_commit: { test: { command: "echo 'OK' && exit 0", timeout: 3000 } },
+		};
+		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify(gates));
+		const { clearTestPass, recordTestPass } = await import("../state/last-test-pass.ts");
+		clearTestPass();
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+
+		// Commit without test pass → DENY
+		try {
+			await preTool({
+				hook_type: "PreToolUse",
+				tool_name: "Bash",
+				tool_input: { command: "git commit -m 'test'" },
+			});
+		} catch {
+			// exit(2)
+		}
+		expect(exitCode).toBe(2);
+
+		// Record test pass
+		recordTestPass("vitest run");
+
+		// Commit after test pass → allow
+		stdoutCapture = [];
+		exitCode = null;
+		await preTool({
+			hook_type: "PreToolUse",
+			tool_name: "Bash",
+			tool_input: { command: "git commit -m 'test'" },
+		});
+		expect(exitCode).toBeNull();
+
+		// PostToolUse git commit → clears test pass
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		stdoutCapture = [];
+		await postTool({
+			hook_type: "PostToolUse",
+			tool_name: "Bash",
+			tool_input: { command: "git commit -m 'done'" },
+		});
+
+		const { readLastTestPass } = await import("../state/last-test-pass.ts");
+		expect(readLastTestPass()).toBeNull();
+	});
+});
