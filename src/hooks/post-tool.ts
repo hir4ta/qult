@@ -28,6 +28,7 @@ import {
 	formatPendingFixes,
 	type PendingFixes,
 	parseGateOutput,
+	readPendingFixes,
 	writePendingFixes,
 } from "./pending-fixes.js";
 import { readStateJSON, writeStateJSON } from "./state.js";
@@ -160,6 +161,57 @@ async function handleEditWrite(
 			level: "WARNING",
 			message: `No test file found for ${filePath}. Consider creating ${testFile}.`,
 		});
+	}
+
+	// Convention check (regex-based rules only)
+	checkFileConventions(cwd, filePath, items);
+}
+
+function checkFileConventions(cwd: string, filePath: string, items: DirectiveItem[]): void {
+	try {
+		const { readFileSync } = require("node:fs") as typeof import("node:fs");
+		const { join } = require("node:path") as typeof import("node:path");
+		const { checkConventions } =
+			require("./convention-check.js") as typeof import("./convention-check.js");
+
+		const convPath = join(cwd, ".alfred", "conventions.json");
+		if (!existsSync(convPath)) return;
+
+		const rules = JSON.parse(readFileSync(convPath, "utf-8"));
+		if (!Array.isArray(rules)) return;
+
+		// Only check rules that have a `check` field
+		const checkableRules = rules.filter((r: { check?: unknown }) => r.check);
+		if (checkableRules.length === 0) return;
+
+		const content = readFileSync(filePath, "utf-8");
+		const violations = checkConventions(filePath, content, checkableRules);
+
+		if (violations.length > 0) {
+			// Add to pending-fixes
+			const fixes = readPendingFixes(cwd);
+			const fileEntry = fixes.files[filePath] ?? {};
+			fileEntry.convention = violations.map((v) => ({
+				line: v.line,
+				rule: v.category,
+				message: `${v.rule}: ${v.detail}`,
+			}));
+			fixes.files[filePath] = fileEntry;
+			fixes.updated_at = new Date().toISOString();
+			writePendingFixes(cwd, fixes);
+
+			const summary = violations.map((v) => `- Line ${v.line}: ${v.rule} (${v.detail})`).join("\n");
+			items.push({
+				level: "DIRECTIVE",
+				message: `Convention violations in ${filePath}:\n${summary}`,
+				spiritVsLetter: true,
+			});
+			recordQualityEventSafe(cwd, "convention_warn", { file: filePath, count: violations.length });
+		} else {
+			recordQualityEventSafe(cwd, "convention_pass", { file: filePath });
+		}
+	} catch {
+		/* fail-open */
 	}
 }
 

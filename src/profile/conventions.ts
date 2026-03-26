@@ -7,6 +7,11 @@ import type { ProjectProfile } from "./detect.js";
 export interface Convention {
 	pattern: string;
 	category: string;
+	check?: {
+		type: "regex";
+		match: string;
+		filePattern?: string;
+	};
 }
 
 export function generateBaseConventions(profile: ProjectProfile): Convention[] {
@@ -75,6 +80,7 @@ function getLanguageConventions(lang: string, _profile: ProjectProfile): Convent
 					pattern:
 						"Use strict TypeScript — avoid `any` type, prefer explicit types at module boundaries",
 					category: "style",
+					check: { type: "regex", match: ":\\s*any\\b|as\\s+any\\b", filePattern: "*.ts" },
 				},
 				{ pattern: "Use `import type` for type-only imports", category: "imports" },
 			];
