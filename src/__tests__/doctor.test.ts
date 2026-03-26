@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CheckResult } from "../doctor.ts";
@@ -89,10 +89,7 @@ describe("doctor: check 2 — hooks registered", () => {
 		setupValidEnv();
 		// Overwrite with partial hooks
 		const claudeDir = join(TEST_HOME, ".claude");
-		writeFileSync(
-			join(claudeDir, "settings.json"),
-			JSON.stringify({ hooks: { PostToolUse: [] } }),
-		);
+		writeFileSync(join(claudeDir, "settings.json"), JSON.stringify({ hooks: { PostToolUse: [] } }));
 
 		const { runChecks } = await import("../doctor.ts");
 		const results = runChecks();
@@ -191,10 +188,7 @@ describe("doctor: check 6 — gates.json", () => {
 
 	it("returns fail when gates.json has no on_write gates", async () => {
 		setupValidEnv();
-		writeFileSync(
-			join(TEST_PROJECT, ".alfred", "gates.json"),
-			JSON.stringify({ on_write: {} }),
-		);
+		writeFileSync(join(TEST_PROJECT, ".alfred", "gates.json"), JSON.stringify({ on_write: {} }));
 
 		const { runChecks } = await import("../doctor.ts");
 		const results = runChecks();
