@@ -4,6 +4,7 @@ import { loadGates } from "../gates/load.ts";
 import { runGate } from "../gates/runner.ts";
 import { clearFailCount, recordFailure } from "../state/fail-count.ts";
 import { clearBatch, markRan, shouldSkip } from "../state/gate-batch.ts";
+import { clearReview } from "../state/last-review.ts";
 import { clearTestPass, recordTestPass } from "../state/last-test-pass.ts";
 import { readPace, writePace } from "../state/pace.ts";
 import { readPendingFixes, writePendingFixes } from "../state/pending-fixes.ts";
@@ -83,6 +84,7 @@ function handleBash(ev: HookEvent): void {
 		clearFailCount();
 		clearBatch();
 		clearTestPass();
+		clearReview();
 
 		const gates = loadGates();
 		if (!gates?.on_commit) return;

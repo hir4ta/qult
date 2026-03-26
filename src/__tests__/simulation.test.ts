@@ -613,7 +613,7 @@ describe("Scenario 16: Plan status tracking — Stop blocks on incomplete plan",
 		expect(reason).toContain("Add tests");
 		expect(reason).toContain("Final Review");
 
-		// Now mark all as done
+		// Now mark all as done + record review
 		writeFileSync(
 			join(planDir, "test-plan.md"),
 			[
@@ -625,6 +625,8 @@ describe("Scenario 16: Plan status tracking — Stop blocks on incomplete plan",
 				"- [x] Final Review",
 			].join("\n"),
 		);
+		const { recordReview: rr16 } = await import("../state/last-review.ts");
+		rr16();
 
 		stdoutCapture = [];
 		exitCode = null;
@@ -688,7 +690,9 @@ describe("Scenario 17: Full E2E — plan → implement → status update → sto
 			].join("\n"),
 		);
 
-		// Step 5: Stop should allow
+		// Step 5: Record review + Stop should allow
+		const { recordReview: rr17 } = await import("../state/last-review.ts");
+		rr17();
 		stdoutCapture = [];
 		exitCode = null;
 		await stop({ hook_type: "Stop" });
@@ -773,7 +777,9 @@ describe("Scenario 18: TaskCompleted auto-syncs plan status", () => {
 			planContent.replace("- [ ] Final Review", "- [x] Final Review"),
 		);
 
-		// Now stop should allow
+		// Record review + Now stop should allow
+		const { recordReview: rr18 } = await import("../state/last-review.ts");
+		rr18();
 		stdoutCapture = [];
 		exitCode = null;
 		await stop({ hook_type: "Stop" });
@@ -1065,5 +1071,50 @@ describe("Scenario 26: git commit DENIED without test pass", () => {
 
 		const { readLastTestPass } = await import("../state/last-test-pass.ts");
 		expect(readLastTestPass()).toBeNull();
+	});
+});
+
+// ============================================================
+// Independent review required before stop (Plan active)
+// ============================================================
+
+describe("Scenario 27: Stop blocks without review when plan exists", () => {
+	it("blocks without review, allows after review", async () => {
+		// Create a plan with all tasks done + review gates checked
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "review-test.md"),
+			[
+				"## Tasks",
+				"### Task 1: Add feature [done]",
+				"- **File**: src/feature.ts",
+				"- **Verify**: src/__tests__/feature.test.ts:test",
+				"## Review Gates",
+				"- [x] Final Review",
+			].join("\n"),
+		);
+
+		const { clearReview, recordReview } = await import("../state/last-review.ts");
+		clearReview();
+
+		const stop = (await import("../hooks/stop.ts")).default;
+
+		// Stop should block — plan exists but no review
+		try {
+			await stop({ hook_type: "Stop" });
+		} catch {
+			// exit(2)
+		}
+		expect(exitCode).toBe(2);
+
+		// Record review (simulating alfred-reviewer completion)
+		recordReview();
+
+		// Stop should allow now
+		stdoutCapture = [];
+		exitCode = null;
+		await stop({ hook_type: "Stop" });
+		expect(exitCode).toBeNull();
 	});
 });

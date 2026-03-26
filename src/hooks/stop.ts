@@ -1,3 +1,4 @@
+import { readLastReview } from "../state/last-review.ts";
 import { readPace } from "../state/pace.ts";
 import { readPendingFixes } from "../state/pending-fixes.ts";
 import { getActivePlan } from "../state/plan-status.ts";
@@ -25,6 +26,13 @@ export default async function stop(ev: HookEvent): Promise<void> {
 			const taskList = incomplete.map((t) => `  [${t.status}] ${t.name}`).join("\n");
 			block(
 				`Plan has ${incomplete.length} incomplete item(s). Complete or update status before finishing:\n${taskList}\nPlan: ${plan.path}`,
+			);
+		}
+
+		// Block if plan exists but no review has been run
+		if (!readLastReview()) {
+			block(
+				"Run /alfred:review before finishing. Independent review is required when a plan is active.",
 			);
 		}
 	}
