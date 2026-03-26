@@ -51,7 +51,7 @@ describe("stop hook", () => {
 
 		expect(exitCode).toBe(2);
 		const response = getResponse();
-		expect((response?.hookSpecificOutput as Record<string, string>)?.reason).toContain("Fix");
+		expect((response as Record<string, string>)?.reason).toContain("Fix");
 	});
 
 	it("does not block when no pending-fixes", async () => {

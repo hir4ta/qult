@@ -25,12 +25,7 @@ export function deny(reason: string): never {
 
 /** Block Claude from stopping (exit 2) */
 export function block(reason: string): never {
-	const response: HookResponse = {
-		hookSpecificOutput: {
-			decision: "block",
-			reason,
-		},
-	};
+	const response = { decision: "block", reason };
 	process.stdout.write(JSON.stringify(response));
 	process.stderr.write(reason);
 	process.exit(2);

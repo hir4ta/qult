@@ -441,7 +441,7 @@ describe("Scenario 10: Stop hook blocks when pending fixes exist", () => {
 
 		expect(exitCode).toBe(2);
 		const response = getResponse();
-		expect((response?.hookSpecificOutput as Record<string, string>)?.decision).toBe("block");
+		expect((response as Record<string, string>)?.decision).toBe("block");
 	});
 });
 
@@ -608,7 +608,7 @@ describe("Scenario 16: Plan status tracking — Stop blocks on incomplete plan",
 
 		expect(exitCode).toBe(2);
 		const response = getResponse();
-		const reason = (response?.hookSpecificOutput as Record<string, string>)?.reason;
+		const reason = (response as Record<string, string>)?.reason;
 		expect(reason).toContain("2 incomplete");
 		expect(reason).toContain("Add tests");
 		expect(reason).toContain("Final Review");
