@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 
 export interface HookEvent {
 	cwd: string;
+	session_id?: string;
 	source?: string;
 	transcript_path?: string;
 	trigger?: string;

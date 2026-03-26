@@ -1,33 +1,33 @@
 import { existsSync } from "node:fs";
-import type { DirectiveItem } from "./directives.js";
-import { emitDirectives } from "./directives.js";
-import type { HookEvent } from "./dispatcher.js";
 import { loadGates, runGateGroup } from "../gates/index.js";
-import {
-	type PendingFixes,
-	clearPendingFixes,
-	formatPendingFixes,
-	parseGateOutput,
-	writePendingFixes,
-} from "./pending-fixes.js";
-import { readStateJSON, writeStateJSON } from "./state.js";
 import { openDefaultCached } from "../store/index.js";
 import { resolveOrRegisterProject } from "../store/project.js";
 import { insertQualityEvent } from "../store/quality-events.js";
 import {
-	isGitCommit,
-	isTestCommand,
-	isSourceFile,
-	guessTestFile,
-	extractTestFailures,
 	countAssertions,
 	extractCommandBase,
+	extractTestFailures,
+	guessTestFile,
+	isGitCommit,
+	isSourceFile,
+	isTestCommand,
 } from "./detect.js";
+import type { DirectiveItem } from "./directives.js";
+import { emitDirectives } from "./directives.js";
+import type { HookEvent } from "./dispatcher.js";
 import {
-	searchKnowledgeSafe,
-	normalizeErrorSignature,
 	formatSearchHits,
+	normalizeErrorSignature,
+	searchKnowledgeSafe,
 } from "./knowledge-search.js";
+import {
+	clearPendingFixes,
+	formatPendingFixes,
+	type PendingFixes,
+	parseGateOutput,
+	writePendingFixes,
+} from "./pending-fixes.js";
+import { readStateJSON, writeStateJSON } from "./state.js";
 
 // Re-export for backward compat (tests, etc.)
 export { isGitCommit, isTestCommand } from "./detect.js";
@@ -38,6 +38,9 @@ export { isGitCommit, isTestCommand } from "./detect.js";
  */
 export async function postToolUse(ev: HookEvent, signal: AbortSignal): Promise<void> {
 	if (!ev.cwd || !ev.tool_name) return;
+
+	// Use session_id from Claude Code stdin if available
+	if (ev.session_id) setSessionId(ev.session_id);
 
 	const SKIP = new Set(["Read", "Grep", "Glob", "Agent"]);
 	if (SKIP.has(ev.tool_name)) return;
@@ -100,7 +103,8 @@ async function handleEditWrite(
 		writePendingFixes(cwd, fixes);
 
 		const formatted = formatPendingFixes(fixes);
-		const summary = formatted || failures.map((f) => `${f.name}: ${f.output.slice(0, 200)}`).join("\n");
+		const summary =
+			formatted || failures.map((f) => `${f.name}: ${f.output.slice(0, 200)}`).join("\n");
 
 		items.push({
 			level: "DIRECTIVE",
@@ -200,9 +204,16 @@ async function handleGitCommit(
 
 // ── Test result handlers ────────────────────────────────────────────
 
-async function handleTestFailure(cwd: string, stdout: string, stderr: string, items: DirectiveItem[]): Promise<void> {
-	recordGateEvents(cwd, "test", [{ name: "test", passed: false, output: (stderr || stdout).slice(0, 500), duration: 0 }]);
-	const failSummary = extractTestFailures(stdout + "\n" + stderr);
+async function handleTestFailure(
+	cwd: string,
+	stdout: string,
+	stderr: string,
+	items: DirectiveItem[],
+): Promise<void> {
+	recordGateEvents(cwd, "test", [
+		{ name: "test", passed: false, output: (stderr || stdout).slice(0, 500), duration: 0 },
+	]);
+	const failSummary = extractTestFailures(`${stdout}\n${stderr}`);
 	items.push({
 		level: "DIRECTIVE",
 		message: `Test failed. Fix the failing tests before continuing:\n${failSummary}`,
@@ -300,9 +311,18 @@ interface LintRepeatState {
 	count: number;
 }
 
-function checkLintRepeat(cwd: string, filePath: string, errorSummary: string, items: DirectiveItem[]): void {
+function checkLintRepeat(
+	cwd: string,
+	filePath: string,
+	errorSummary: string,
+	items: DirectiveItem[],
+): void {
 	const sig = errorSummary.slice(0, 200);
-	const state = readStateJSON<LintRepeatState>(cwd, LINT_REPEAT_FILE, { file: "", signature: "", count: 0 });
+	const state = readStateJSON<LintRepeatState>(cwd, LINT_REPEAT_FILE, {
+		file: "",
+		signature: "",
+		count: 0,
+	});
 
 	if (state.file === filePath && state.signature === sig) {
 		state.count++;
@@ -372,7 +392,9 @@ function recordGateEvents(cwd: string, group: string, results: GateResult[]): vo
 				output: r.output.slice(0, 300),
 			});
 		}
-	} catch { /* fail-open */ }
+	} catch {
+		/* fail-open */
+	}
 }
 
 function recordQualityEventSafe(
@@ -384,7 +406,9 @@ function recordQualityEventSafe(
 		const store = openDefaultCached();
 		const project = resolveOrRegisterProject(store, cwd);
 		insertQualityEvent(store, project.id, getSessionId(), eventType, data);
-	} catch { /* fail-open */ }
+	} catch {
+		/* fail-open */
+	}
 }
 
 let _sessionId: string | undefined;
@@ -393,4 +417,8 @@ function getSessionId(): string {
 		_sessionId = `session-${Date.now()}`;
 	}
 	return _sessionId;
+}
+
+export function setSessionId(id: string): void {
+	if (id) _sessionId = id;
 }

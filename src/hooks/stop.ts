@@ -48,7 +48,7 @@ export async function stop(ev: HookEvent): Promise<void> {
 	}
 
 	// 3. Save final quality summary
-	saveFinalQualitySummary(ev.cwd);
+	saveFinalQualitySummary(ev.cwd, ev.session_id);
 
 	// Stop hook does not support hookSpecificOutput in the official schema.
 	// Output warnings to stderr instead.
@@ -87,11 +87,11 @@ function findUntestedChanges(cwd: string): string[] {
 	}
 }
 
-function saveFinalQualitySummary(cwd: string): void {
+function saveFinalQualitySummary(cwd: string, evSessionId?: string): void {
 	try {
 		const store = openDefaultCached();
 		resolveOrRegisterProject(store, cwd);
-		const sessionId = findLatestSessionId(store);
+		const sessionId = evSessionId ?? findLatestSessionId(store);
 		if (!sessionId) return;
 
 		const summary = getSessionSummary(store, sessionId);
