@@ -18,6 +18,15 @@ const EVENT_MAP: Record<string, () => Promise<{ default: (ev: HookEvent) => Prom
 	"config-change": () => import("./config-change.ts"),
 };
 
+function readStdin(): Promise<string> {
+	return new Promise((resolve) => {
+		const chunks: Buffer[] = [];
+		process.stdin.on("data", (chunk) => chunks.push(chunk));
+		process.stdin.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
+		process.stdin.on("error", () => resolve(""));
+	});
+}
+
 export async function dispatch(event: string): Promise<void> {
 	const loader = EVENT_MAP[event];
 	if (!loader) {
@@ -25,22 +34,16 @@ export async function dispatch(event: string): Promise<void> {
 		process.exit(1);
 	}
 
-	const MAX_INPUT = 5_000_000; // 5MB
-	let input = "";
-	for await (const chunk of Bun.stdin.stream()) {
-		input += new TextDecoder().decode(chunk);
-		if (input.length > MAX_INPUT) return; // fail-open: input too large
-	}
+	const input = await readStdin();
+	if (!input || input.length > 5_000_000) return; // fail-open
 
 	let ev: HookEvent;
 	try {
 		ev = JSON.parse(input);
 	} catch {
-		// fail-open: invalid JSON → do nothing
-		return;
+		return; // fail-open: invalid JSON
 	}
 
-	// Initialize context budget for this session
 	if (ev.session_id) {
 		resetBudget(ev.session_id);
 	}
@@ -49,7 +52,6 @@ export async function dispatch(event: string): Promise<void> {
 		const handler = await loader();
 		await handler.default(ev);
 	} catch (err) {
-		// fail-open: handler error → log to stderr for debugging
 		if (err instanceof Error && !err.message.startsWith("process.exit")) {
 			process.stderr.write(`[alfred] ${event}: ${err.message}\n`);
 		}
