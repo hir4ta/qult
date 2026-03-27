@@ -19,6 +19,7 @@ import {
 	markGateRan,
 	readLastReview,
 	readPace,
+	recordChangedFile,
 	recordFailure,
 	recordTestPass,
 	shouldSkipGate,
@@ -107,6 +108,13 @@ function handleEditWrite(ev: HookEvent): void {
 		} catch {
 			/* fail-open */
 		}
+	}
+
+	// Record changed file path for gated-file review threshold
+	try {
+		recordChangedFile(file);
+	} catch {
+		/* fail-open */
 	}
 
 	if (newFixes.length > 0) {

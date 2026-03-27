@@ -4,11 +4,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	checkBudget,
 	clearOnCommit,
+	countGatedFiles,
 	isPaceRed,
 	isReviewRequired,
 	markGateRan,
 	readPace,
 	readSessionState,
+	recordChangedFile,
 	recordFailure,
 	recordInjection,
 	recordReview,
@@ -192,28 +194,124 @@ describe("session-state: isReviewRequired", () => {
 		expect(isReviewRequired()).toBe(true);
 	});
 
-	it("required when changed_files >= 5", () => {
-		writePace({
-			last_commit_at: new Date().toISOString(),
-			changed_files: 5,
-			tool_calls: 10,
-		});
+	it("required when gated files >= 5", () => {
+		// Create gates.json with biome (covers .ts)
+		const { writeFileSync } = require("node:fs");
+		const alfredDir = join(TEST_DIR, ".alfred");
+		writeFileSync(
+			join(alfredDir, "gates.json"),
+			JSON.stringify({
+				on_write: { lint: { command: "biome check {file}", timeout: 3000 } },
+			}),
+		);
+
+		// Record 5 .ts files (gated)
+		for (let i = 0; i < 5; i++) {
+			recordChangedFile(`/project/src/file${i}.ts`);
+		}
 
 		expect(isReviewRequired()).toBe(true);
 	});
 
-	it("not required when changed_files < 5 and no plan", () => {
-		writePace({
-			last_commit_at: new Date().toISOString(),
-			changed_files: 2,
-			tool_calls: 5,
-		});
+	it("not required when only non-gated files changed", () => {
+		// Create gates.json with biome (covers .ts, not .md)
+		const { writeFileSync } = require("node:fs");
+		const alfredDir = join(TEST_DIR, ".alfred");
+		writeFileSync(
+			join(alfredDir, "gates.json"),
+			JSON.stringify({
+				on_write: { lint: { command: "biome check {file}", timeout: 3000 } },
+			}),
+		);
+
+		// Record 10 .md files (not gated)
+		for (let i = 0; i < 10; i++) {
+			recordChangedFile(`/project/docs/file${i}.md`);
+		}
+
+		expect(isReviewRequired()).toBe(false);
+	});
+
+	it("not required when gated files < 5 (even with many non-gated)", () => {
+		const { writeFileSync } = require("node:fs");
+		const alfredDir = join(TEST_DIR, ".alfred");
+		writeFileSync(
+			join(alfredDir, "gates.json"),
+			JSON.stringify({
+				on_write: { lint: { command: "biome check {file}", timeout: 3000 } },
+			}),
+		);
+
+		// 2 .ts (gated) + 10 .md (not gated)
+		recordChangedFile("/project/src/a.ts");
+		recordChangedFile("/project/src/b.ts");
+		for (let i = 0; i < 10; i++) {
+			recordChangedFile(`/project/docs/file${i}.md`);
+		}
 
 		expect(isReviewRequired()).toBe(false);
 	});
 
 	it("not required when no state (fresh session, no plan)", () => {
 		expect(isReviewRequired()).toBe(false);
+	});
+});
+
+describe("session-state: countGatedFiles", () => {
+	it("counts only files with gated extensions", () => {
+		const { writeFileSync } = require("node:fs");
+		const alfredDir = join(TEST_DIR, ".alfred");
+		writeFileSync(
+			join(alfredDir, "gates.json"),
+			JSON.stringify({
+				on_write: {
+					lint: { command: "biome check {file}", timeout: 3000 },
+					typecheck: { command: "tsc --noEmit", timeout: 10000 },
+				},
+			}),
+		);
+
+		recordChangedFile("/project/src/app.ts");
+		recordChangedFile("/project/src/utils.tsx");
+		recordChangedFile("/project/CLAUDE.md");
+		recordChangedFile("/project/README.md");
+		recordChangedFile("/project/config.json");
+
+		// .ts, .tsx, .json are gated by biome/tsc; .md is not
+		expect(countGatedFiles()).toBe(3);
+	});
+
+	it("returns 0 when no gates configured", () => {
+		recordChangedFile("/project/src/app.ts");
+		expect(countGatedFiles()).toBe(0);
+	});
+
+	it("deduplicates file paths", () => {
+		const { writeFileSync } = require("node:fs");
+		const alfredDir = join(TEST_DIR, ".alfred");
+		writeFileSync(
+			join(alfredDir, "gates.json"),
+			JSON.stringify({
+				on_write: { lint: { command: "biome check {file}", timeout: 3000 } },
+			}),
+		);
+
+		recordChangedFile("/project/src/app.ts");
+		recordChangedFile("/project/src/app.ts"); // duplicate
+		recordChangedFile("/project/src/app.ts"); // duplicate
+
+		expect(countGatedFiles()).toBe(1);
+	});
+});
+
+describe("session-state: clearOnCommit resets changed_file_paths", () => {
+	it("clears changed_file_paths on commit", () => {
+		recordChangedFile("/project/src/app.ts");
+		recordChangedFile("/project/src/utils.ts");
+		expect(readSessionState().changed_file_paths).toHaveLength(2);
+
+		clearOnCommit();
+		expect(readSessionState().changed_file_paths).toHaveLength(0);
 	});
 });
 

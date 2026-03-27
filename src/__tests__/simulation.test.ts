@@ -565,12 +565,20 @@ describe("Scenario 31: Small change skips review requirement", () => {
 		expect(stderr).toContain("review");
 	});
 
-	it("stop blocks finish without review for large changes (6+ files)", async () => {
-		writePace({
-			last_commit_at: new Date().toISOString(),
-			changed_files: 6,
-			tool_calls: 20,
-		});
+	it("stop blocks finish without review for large changes (6+ gated files)", async () => {
+		// Set up gates so gated extensions are known
+		writeFileSync(
+			join(ALFRED_DIR, "gates.json"),
+			JSON.stringify({
+				on_write: { lint: { command: "biome check {file}", timeout: 3000 } },
+			}),
+		);
+
+		// Record 6 gated files (.ts)
+		const { recordChangedFile } = await import("../state/session-state.ts");
+		for (let i = 0; i < 6; i++) {
+			recordChangedFile(`/project/src/file${i}.ts`);
+		}
 
 		const stop = (await import("../hooks/stop.ts")).default;
 		try {
@@ -582,6 +590,28 @@ describe("Scenario 31: Small change skips review requirement", () => {
 		expect(exitCode).toBe(2);
 		const response = getResponse();
 		expect((response as Record<string, string>)?.decision).toBe("block");
+	});
+
+	it("stop allows finish without review when only non-gated files changed", async () => {
+		// Set up gates (covers .ts, not .md)
+		writeFileSync(
+			join(ALFRED_DIR, "gates.json"),
+			JSON.stringify({
+				on_write: { lint: { command: "biome check {file}", timeout: 3000 } },
+			}),
+		);
+
+		// Record 10 .md files (not gated)
+		const { recordChangedFile } = await import("../state/session-state.ts");
+		for (let i = 0; i < 10; i++) {
+			recordChangedFile(`/project/docs/file${i}.md`);
+		}
+
+		const stop = (await import("../hooks/stop.ts")).default;
+		await stop({ hook_type: "Stop" });
+
+		// Should NOT block — only non-gated files changed
+		expect(exitCode).toBeNull();
 	});
 
 	it("stop blocks finish without review when plan is active", async () => {

@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { extname, join } from "node:path";
+import { loadGates } from "../gates/load.ts";
 import { atomicWriteJson } from "./atomic-write.ts";
 import { getCommitStats } from "./gate-history.ts";
 import { getActivePlan } from "./plan-status.ts";
@@ -33,6 +34,8 @@ export interface SessionState {
 	session_respond_count: number;
 	// First-pass tracking: files already counted (prevents re-counting on re-edit)
 	first_pass_recorded: string[];
+	// Changed file paths (for gated-file review threshold)
+	changed_file_paths: string[];
 }
 
 function filePath(): string {
@@ -56,6 +59,7 @@ function defaultState(): SessionState {
 		session_block_count: 0,
 		session_respond_count: 0,
 		first_pass_recorded: [],
+		changed_file_paths: [],
 	};
 }
 
@@ -135,16 +139,65 @@ export function isPaceRed(
 
 const REVIEW_FILE_THRESHOLD = 5;
 
+// Tool keyword → file extensions the tool meaningfully checks
+const TOOL_EXTS: [RegExp, string[]][] = [
+	[/\bbiome\b/, [".js", ".jsx", ".ts", ".tsx", ".json", ".jsonc", ".css", ".graphql"]],
+	[/\beslint\b/, [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".vue", ".svelte"]],
+	[/\btsc\b/, [".ts", ".tsx", ".mts", ".cts"]],
+	[/\bpyright\b/, [".py", ".pyi"]],
+	[/\bmypy\b/, [".py", ".pyi"]],
+	[/\bruff\b/, [".py", ".pyi"]],
+	[/\bgo\s+(vet|build)\b/, [".go"]],
+	[/\bcargo\s+(clippy|check)\b/, [".rs"]],
+];
+
+/** Get file extensions covered by on_write gates */
+export function getGatedExtensions(): Set<string> {
+	const gates = loadGates();
+	if (!gates?.on_write) return new Set();
+
+	const exts = new Set<string>();
+	for (const gate of Object.values(gates.on_write)) {
+		for (const [pattern, extensions] of TOOL_EXTS) {
+			if (pattern.test(gate.command)) {
+				for (const ext of extensions) exts.add(ext);
+			}
+		}
+	}
+	return exts;
+}
+
+/** Count changed files covered by on_write gates */
+export function countGatedFiles(): number {
+	const state = readSessionState();
+	const paths = state.changed_file_paths ?? [];
+	if (paths.length === 0) return 0;
+
+	const exts = getGatedExtensions();
+	if (exts.size === 0) return 0;
+
+	return paths.filter((p) => exts.has(extname(p).toLowerCase())).length;
+}
+
+/** Record a changed file path (deduplicated) */
+export function recordChangedFile(filePath: string): void {
+	const state = readSessionState();
+	if (!state.changed_file_paths) state.changed_file_paths = [];
+	if (!state.changed_file_paths.includes(filePath)) {
+		state.changed_file_paths.push(filePath);
+	}
+	writeState(state);
+}
+
 /** Determine if independent review is required for current session.
- *  Required when: plan is active OR changed_files >= threshold.
- *  Small changes (few files, no plan) can skip review. */
+ *  Required when: plan is active OR gated_files >= threshold.
+ *  Files outside gate coverage (e.g. .md) don't count toward threshold. */
 export function isReviewRequired(): boolean {
 	// Plan active → always require review
 	if (getActivePlan() !== null) return true;
 
-	// Large change → require review
-	const pace = readPace();
-	if (pace && pace.changed_files >= REVIEW_FILE_THRESHOLD) return true;
+	// Count only files covered by on_write gates
+	if (countGatedFiles() >= REVIEW_FILE_THRESHOLD) return true;
 
 	return false;
 }
@@ -276,6 +329,7 @@ export function clearOnCommit(paceReset?: {
 	state.test_command = null;
 	state.review_completed_at = null;
 	state.ran_gates = {};
+	state.changed_file_paths = [];
 	state.last_error_signature = "";
 	state.consecutive_error_count = 0;
 	if (paceReset) {

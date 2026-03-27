@@ -38,47 +38,6 @@ alfred CLI (init / hook / doctor)
 | PreCompact | advisory | stderr | pending-fixes reminder |
 | PostCompact | advisory | stderr | 構造化handoff (全クリティカル状態再注入) |
 
-## 構造
-
-```
-src/
-├── cli.ts                  # citty: init / hook / doctor / reset
-├── init.ts                 # セットアップ (12 hooks + skill + agent + rules + gates)
-├── doctor.ts               # ヘルスチェック (8項目 + --metrics) + state整合性検証
-├── reset.ts                # 状態リセット (--keep-history で履歴保持)
-├── hooks/
-│   ├── dispatcher.ts       # event → handler ルーティング (12 events) + HOOK_CLASS分類
-│   ├── respond.ts          # 共通: respond / deny / block + metrics記録
-│   ├── post-tool.ts        # lint/type gate + pending-fixes + pace + batch + test-pass + verify
-│   ├── pre-tool.ts         # pending-fixes → DENY + pace red → DENY + commit without test → DENY
-│   ├── user-prompt.ts      # Plan テンプレート注入 (Plan mode のみ)
-│   ├── permission-request.ts # ExitPlanMode: 適応型検証 (大Plan: 厳格, 小Plan: 軽量)
-│   ├── session-start.ts    # .alfred作成 + gates自動検出 + エラートレンド注入
-│   ├── stop.ts             # pending-fixes block + 大Plan未完了block + 小Plan warn + レビュー条件付き強制
-│   ├── pre-compact.ts      # pending-fixes reminder (stderr)
-│   ├── post-compact.ts     # 構造化handoff: 全クリティカル状態再注入 (stderr)
-│   ├── subagent-start.ts   # pending-fixes状態注入 (Opus 4.6はrules自動継承)
-│   ├── subagent-stop.ts    # reviewer PASS/FAIL + Score検証 + レビュー完了記録
-│   ├── post-tool-failure.ts # ツール失敗追跡 + 2回連続→/clear
-│   └── config-change.ts    # hook設定 変更 DENY (非hook設定は許可)
-├── gates/
-│   ├── runner.ts           # gate コマンド実行
-│   ├── load.ts             # gates.json 読み込み
-│   └── detect.ts           # プロジェクト設定 → gates.json 自動検出 (TS/Python/Go/Rust)
-├── state/
-│   ├── atomic-write.ts     # atomic JSON write (write-to-temp + rename)
-│   ├── pending-fixes.ts    # 未修正 lint/type エラー
-│   ├── session-state.ts    # 統合セッション状態 (pace, test, review, batch, fail, budget)
-│   ├── gate-history.ts     # gate 結果トレンド + コミット間隔統計
-│   ├── plan-status.ts      # Plan task status 解析
-│   └── metrics.ts          # DENY/block/respond/gate-outcome/first-pass/review-outcome/review-miss 記録 (50件 cap)
-├── templates/              # init が配置するファイル
-│   ├── skill-review.md     # /alfred:review skill
-│   ├── agent-reviewer.md   # reviewer agent (PASS/FAIL threshold)
-│   └── rules-quality.md    # 品質ルール (適応型タスクスコープ)
-└── types.ts
-```
-
 ## コマンド
 
 ```bash
@@ -95,7 +54,7 @@ task clean    # ビルド成果物削除
 
 1. **リサーチ駆動** — 効果が実証された手法のみ実装 (research-harness-engineering-2026.md)
 2. **壁 > 情報提示** — DENY (exit 2) > additionalContext
-3. **少ない方が強い** — コンテキスト注入は最小限。指示は20行以内
+3. **少ない方が強い** — コンテキスト注入は最小限。Hook注入は20行以内
 4. **タスクスコープ適応** — 計画なし: 1-2ファイル集中。計画あり: 計画の境界に従う
 5. **検証 > 指示** — 「何を検証すべきか」を伝える。HOW ではなく WHAT
 6. **fail-open** — 全 hook は try-catch で握りつぶす。alfred の障害で Claude を止めない
@@ -134,7 +93,7 @@ task clean    # ビルド成果物削除
 - metrics.json — DENY/block/respond 発火記録 (50件 cap, `doctor --metrics` で表示)
 
 ### Sprint Contract (適応型)
-- Anthropic記事 (2026-03-24) では Opus 4.6 で sprint construct を削除。alfredも適応:
+- Opus 4.6 で sprint construct を削除。alfredも適応:
   - **小Plan (≤3 tasks)**: 構造要件なし。Verify あれば具体的であること
   - **大Plan (4+ tasks)**: Success Criteria (具体的) + Verify フィールド (具体的) 必須
   - Review Gates: Plan構造では不要。review は stop.ts/pre-tool.ts で条件付き強制
@@ -146,9 +105,9 @@ task clean    # ビルド成果物削除
 - Verify フィールド検証: テスト名の出力一致 + テストファイル内のアサーション存在確認
 
 ### レビュー閾値 (適応型)
-- レビュー強制条件: Plan active **OR** changed_files >= 5
-- 小変更 (Plan なし + 5ファイル未満): レビュー任意 (stderr warn のみ)
-- 根拠: Anthropic記事 "the evaluator is not a fixed yes-or-no decision. It is worth the cost when the task sits beyond what the current model does reliably solo"
+- レビュー強制条件: Plan active **OR** gated_files >= 5
+- gated_files: on_write gate がカバーする拡張子のファイルのみカウント (.md等は除外)
+- 小変更 (Plan なし + gated 5ファイル未満): レビュー任意 (stderr warn のみ)
 - スキップ時は `review:skipped` を metrics.json に記録
 
 ### 効果測定
@@ -178,14 +137,7 @@ task clean    # ビルド成果物削除
 - Hook や状態管理の変更後は simulation.test.ts にシナリオを追加する
 - シミュレーションは本番フロー (Edit→gate→pending-fixes→DENY) を再現する統合テスト
 
-## 評価・分析の誠実性
-
-- 主張には裏付けの強さを明示: **事実** (一次ソース引用可能) / **推測** (根拠はあるが直接証拠なし) / **意見** (自分の解釈)
-- 一次ソースを確認せずに「記事によると」「研究では」と断言しない
-- 裏付けが取れていない主張を、取れているかのように提示しない。未検証なら「未検証」と明記
-- 自己検証を後回しにしない。主張する前にソースを確認する
-
 ## 設計ドキュメント
 
-- research-harness-engineering-2026.md — リサーチ結果
-- research-claude-code-plugins-2026.md — Plugin 調査結果
+@research-harness-engineering-2026.md
+@research-claude-code-plugins-2026.md

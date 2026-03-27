@@ -199,20 +199,21 @@ describe("preTool: Bash git commit checks", () => {
 		expect(output).toContain("review");
 	});
 
-	it("DENY commit without review when many files changed", async () => {
+	it("DENY commit without review when many gated files changed", async () => {
 		writeFileSync(
 			join(TEST_DIR, ".alfred", "gates.json"),
-			JSON.stringify({ on_commit: { test: { command: "vitest run", timeout: 30000 } } }),
+			JSON.stringify({
+				on_write: { lint: { command: "biome check {file}", timeout: 3000 } },
+				on_commit: { test: { command: "vitest run", timeout: 30000 } },
+			}),
 		);
 
-		// Record test pass + set pace to 6 changed files (above threshold)
-		const { recordTestPass, writePace } = await import("../state/session-state.ts");
+		// Record test pass + 6 gated files (above threshold)
+		const { recordChangedFile, recordTestPass } = await import("../state/session-state.ts");
 		recordTestPass("vitest run");
-		writePace({
-			last_commit_at: new Date().toISOString(),
-			changed_files: 6,
-			tool_calls: 20,
-		});
+		for (let i = 0; i < 6; i++) {
+			recordChangedFile(`/project/src/file${i}.ts`);
+		}
 
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
 		try {
