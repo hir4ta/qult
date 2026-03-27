@@ -21,7 +21,7 @@ description: alfred quality enforcement — fix errors first, small tasks, test-
 
 ## Before Commit
 - Run tests — commit is blocked until tests pass
-- Run /alfred:review — commit is blocked until independent review passes
+- Run /alfred:review — required when plan is active or 5+ files changed. Small changes can skip
 
 ## When Stuck
 - After 2 failed attempts, /clear and try a different approach

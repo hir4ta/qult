@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
+import { recordAction } from "../state/metrics.ts";
 import { readPendingFixes } from "../state/pending-fixes.ts";
 import { getActivePlan } from "../state/plan-status.ts";
-import { readLastReview, readPace } from "../state/session-state.ts";
+import { isReviewRequired, readLastReview, readPace } from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
 import { block } from "./respond.ts";
 
@@ -50,9 +51,20 @@ export default async function stop(ev: HookEvent): Promise<void> {
 		}
 	}
 
-	// Block if no review has been run (always required, with or without plan)
+	// Block if no review has been run (conditional on change size / plan)
 	if (!readLastReview()) {
-		block("Run /alfred:review before finishing. Independent review is required.");
+		if (isReviewRequired()) {
+			block("Run /alfred:review before finishing. Independent review is required.");
+		} else {
+			try {
+				recordAction("stop", "review-skipped", "Small change — review not required");
+			} catch {
+				/* fail-open */
+			}
+			process.stderr.write(
+				"[alfred] Review not required for this change size, but consider running /alfred:review for important changes.\n",
+			);
+		}
 	}
 
 	// Pace warning (soft) — Stop hook does not support additionalContext,

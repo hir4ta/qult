@@ -545,6 +545,65 @@ describe("Scenario 11: Stop hook allows when clean", () => {
 	});
 });
 
+describe("Scenario 31: Small change skips review requirement", () => {
+	it("stop allows finish without review for small changes (no plan, few files)", async () => {
+		// Small change: 2 files changed, no plan
+		writePace({
+			last_commit_at: new Date().toISOString(),
+			changed_files: 2,
+			tool_calls: 5,
+		});
+
+		const stop = (await import("../hooks/stop.ts")).default;
+		await stop({ hook_type: "Stop" });
+
+		// Should NOT block — small change, review optional
+		expect(exitCode).toBeNull();
+
+		// Should emit stderr advisory
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("review");
+	});
+
+	it("stop blocks finish without review for large changes (6+ files)", async () => {
+		writePace({
+			last_commit_at: new Date().toISOString(),
+			changed_files: 6,
+			tool_calls: 20,
+		});
+
+		const stop = (await import("../hooks/stop.ts")).default;
+		try {
+			await stop({ hook_type: "Stop" });
+		} catch {
+			/* exit(2) */
+		}
+
+		expect(exitCode).toBe(2);
+		const response = getResponse();
+		expect((response as Record<string, string>)?.decision).toBe("block");
+	});
+
+	it("stop blocks finish without review when plan is active", async () => {
+		// Create a plan
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			"## Tasks\n### Task 1: implement feature [pending]\n",
+		);
+
+		const stop = (await import("../hooks/stop.ts")).default;
+		try {
+			await stop({ hook_type: "Stop" });
+		} catch {
+			/* exit(2) */
+		}
+
+		expect(exitCode).toBe(2);
+	});
+});
+
 describe("Scenario 12: PreCompact → PostCompact pending-fixes reminder", () => {
 	it("pending fixes reminded across compaction", async () => {
 		const preCompact = (await import("../hooks/pre-compact.ts")).default;
@@ -1073,6 +1132,12 @@ describe("Scenario 26: git commit DENIED without test pass", () => {
 			on_commit: { test: { command: "echo 'OK' && exit 0", timeout: 3000 } },
 		};
 		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify(gates));
+
+		// Create a plan so that review is required
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(join(planDir, "test-plan.md"), "## Tasks\n### Task 1: implement [done]\n");
+
 		const { clearOnCommit, recordTestPass } = await import("../state/session-state.ts");
 		clearOnCommit();
 
@@ -1090,7 +1155,7 @@ describe("Scenario 26: git commit DENIED without test pass", () => {
 		}
 		expect(exitCode).toBe(2);
 
-		// Record test pass but no review → still DENY
+		// Record test pass but no review → still DENY (plan active = review required)
 		recordTestPass("vitest run");
 		stdoutCapture = [];
 		exitCode = null;

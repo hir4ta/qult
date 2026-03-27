@@ -170,8 +170,8 @@ stop.ts: finish → readLastReview() がnull → BLOCK
 
 ## 未対応の改善項目 (優先順)
 
-1. **Session state 越境問題の修正** — session-start.ts で pending-fixes クリア
-2. **レビュー閾値の導入** — 変更規模に応じたスキップ機構
+1. **Session state 越境問題の修正** — session-start.ts で pending-fixes クリア ✅ v0.9.3 で対応済み
+2. **レビュー閾値の導入** — 変更規模に応じたスキップ機構 ✅ v0.9.4 で対応 (Plan or 5+ファイル → 強制、それ以外 → 任意)
 3. **A/B テスト基盤** — alfred有無の比較データ取得
 4. **Sprint contract 完全削除テスト** — 大Plan要件を外して品質測定
 5. **Advisory hook 効果測定** — respond-skipped 率の実測

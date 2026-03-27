@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { writePendingFixes } from "../../state/pending-fixes.ts";
@@ -69,7 +69,15 @@ describe("stop hook", () => {
 		expect(exitCode).toBeNull();
 	});
 
-	it("blocks when no review has been run", async () => {
+	it("blocks when no review has been run and review is required (plan active)", async () => {
+		// Create a plan to make review required
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			"## Tasks\n### Task 1: implement feature [done]\n",
+		);
+
 		const handler = (await import("../stop.ts")).default;
 		try {
 			await handler({ hook_type: "Stop" });
@@ -80,6 +88,16 @@ describe("stop hook", () => {
 		expect(exitCode).toBe(2);
 		const response = getResponse();
 		expect((response as Record<string, string>)?.reason).toContain("review");
+	});
+
+	it("warns but does not block when no review and small change", async () => {
+		// No plan, no changed files → review not required
+		const handler = (await import("../stop.ts")).default;
+		await handler({ hook_type: "Stop" });
+
+		expect(exitCode).toBeNull();
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("review");
 	});
 
 	it("does not block when stop_hook_active is true (prevent infinite loop)", async () => {

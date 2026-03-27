@@ -121,13 +121,66 @@ describe("preTool: Bash git commit checks", () => {
 		expect(output).toContain("test");
 	});
 
-	it("DENY commit without review when on_commit gates exist", async () => {
+	it("allows commit without review for small change (test pass, no plan, few files)", async () => {
 		writeFileSync(
 			join(TEST_DIR, ".alfred", "gates.json"),
 			JSON.stringify({ on_commit: { test: { command: "vitest run", timeout: 30000 } } }),
 		);
 
-		// Record test pass but not review
+		// Record test pass but not review — small change (no plan, 0 changed files)
+		const { recordTestPass } = await import("../state/session-state.ts");
+		recordTestPass("vitest run");
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({
+			tool_name: "Bash",
+			tool_input: { command: 'git commit -m "test"' },
+		});
+
+		// Small change — review not required
+		expect(exitCode).toBeNull();
+	});
+
+	it("allows commit without review at boundary (4 files changed, no plan)", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".alfred", "gates.json"),
+			JSON.stringify({ on_commit: { test: { command: "vitest run", timeout: 30000 } } }),
+		);
+
+		// Record test pass + set pace to 4 files (just below threshold of 5)
+		const { recordTestPass, writePace } = await import("../state/session-state.ts");
+		recordTestPass("vitest run");
+		writePace({
+			last_commit_at: new Date().toISOString(),
+			changed_files: 4,
+			tool_calls: 10,
+		});
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({
+			tool_name: "Bash",
+			tool_input: { command: 'git commit -m "small fix"' },
+		});
+
+		// Should NOT be denied — small change doesn't require review
+		expect(exitCode).toBeNull();
+	});
+
+	it("DENY commit without review when plan is active", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".alfred", "gates.json"),
+			JSON.stringify({ on_commit: { test: { command: "vitest run", timeout: 30000 } } }),
+		);
+
+		// Create a plan file
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			"## Tasks\n### Task 1: test [pending]\n- **File**: foo.ts\n",
+		);
+
+		// Record test pass but not review — plan is active
 		const { recordTestPass } = await import("../state/session-state.ts");
 		recordTestPass("vitest run");
 
@@ -135,7 +188,37 @@ describe("preTool: Bash git commit checks", () => {
 		try {
 			await preTool({
 				tool_name: "Bash",
-				tool_input: { command: 'git commit -m "test"' },
+				tool_input: { command: 'git commit -m "planned change"' },
+			});
+		} catch {
+			/* exit(2) */
+		}
+
+		expect(exitCode).toBe(2);
+		const output = stdoutCapture.join("");
+		expect(output).toContain("review");
+	});
+
+	it("DENY commit without review when many files changed", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".alfred", "gates.json"),
+			JSON.stringify({ on_commit: { test: { command: "vitest run", timeout: 30000 } } }),
+		);
+
+		// Record test pass + set pace to 6 changed files (above threshold)
+		const { recordTestPass, writePace } = await import("../state/session-state.ts");
+		recordTestPass("vitest run");
+		writePace({
+			last_commit_at: new Date().toISOString(),
+			changed_files: 6,
+			tool_calls: 20,
+		});
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		try {
+			await preTool({
+				tool_name: "Bash",
+				tool_input: { command: 'git commit -m "large change"' },
 			});
 		} catch {
 			/* exit(2) */

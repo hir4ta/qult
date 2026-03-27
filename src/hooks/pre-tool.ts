@@ -1,8 +1,15 @@
 import { resolve } from "node:path";
 import { loadGates } from "../gates/load.ts";
+import { recordAction } from "../state/metrics.ts";
 import { readPendingFixes } from "../state/pending-fixes.ts";
 import { getActivePlan } from "../state/plan-status.ts";
-import { isPaceRed, readLastReview, readLastTestPass, readPace } from "../state/session-state.ts";
+import {
+	isPaceRed,
+	isReviewRequired,
+	readLastReview,
+	readLastTestPass,
+	readPace,
+} from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
 import { deny } from "./respond.ts";
 
@@ -50,16 +57,27 @@ function checkBash(ev: HookEvent): void {
 	if (!command) return;
 	if (!GIT_COMMIT_RE.test(command)) return;
 
-	// Require tests to pass before commit (only if project has test gates)
+	// Only enforce commit gates if project has gates configured
 	const gates = loadGates();
-	if (gates?.on_commit && Object.keys(gates.on_commit).length > 0) {
+	if (!gates) return;
+
+	// Require tests to pass before commit (only if project has test gates)
+	if (gates.on_commit && Object.keys(gates.on_commit).length > 0) {
 		if (!readLastTestPass()) {
 			deny("Run tests before committing. No test pass recorded since last commit.");
 		}
 	}
 
-	// Require independent review before commit (always)
+	// Require independent review before commit (conditional on change size / plan)
 	if (!readLastReview()) {
-		deny("Run /alfred:review before committing. Independent review is required.");
+		if (isReviewRequired()) {
+			deny("Run /alfred:review before committing. Independent review is required.");
+		} else {
+			try {
+				recordAction("pre-tool", "review-skipped", "Small change — review not required");
+			} catch {
+				/* fail-open */
+			}
+		}
 	}
 }

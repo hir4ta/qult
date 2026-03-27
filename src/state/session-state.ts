@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteJson } from "./atomic-write.ts";
 import { getCommitStats } from "./gate-history.ts";
+import { getActivePlan } from "./plan-status.ts";
 
 const STATE_DIR = ".alfred/.state";
 const FILE = "session-state.json";
@@ -128,6 +129,24 @@ export function isPaceRed(
 	const threshold = hasPlan ? getRedThreshold() * 1.5 : getRedThreshold();
 	const fileThreshold = hasPlan ? Math.ceil(DEFAULT_FILES * 1.5) : DEFAULT_FILES;
 	return minutes >= threshold && pace.changed_files >= fileThreshold;
+}
+
+// --- Review threshold ---
+
+const REVIEW_FILE_THRESHOLD = 5;
+
+/** Determine if independent review is required for current session.
+ *  Required when: plan is active OR changed_files >= threshold.
+ *  Small changes (few files, no plan) can skip review. */
+export function isReviewRequired(): boolean {
+	// Plan active → always require review
+	if (getActivePlan() !== null) return true;
+
+	// Large change → require review
+	const pace = readPace();
+	if (pace && pace.changed_files >= REVIEW_FILE_THRESHOLD) return true;
+
+	return false;
 }
 
 // --- Test pass ---

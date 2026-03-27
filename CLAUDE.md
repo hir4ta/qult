@@ -27,7 +27,7 @@ alfred CLI (init / hook / doctor)
 |------|------|------|------|
 | PreToolUse | enforcement | DENY | pending-fixes, pace red, commit gates |
 | PostToolUse | enforcement | respond | gate実行 → pending-fixes生成 |
-| Stop | enforcement | block | pending-fixes, incomplete plan, no review |
+| Stop | enforcement | block | pending-fixes, incomplete plan, no review (条件付き) |
 | PermissionRequest | enforcement | DENY | ExitPlanMode plan構造検証 |
 | ConfigChange | enforcement | DENY | hook削除防止 |
 | SubagentStop | enforcement | block | reviewer PASS→gate clear / FAIL→block (修正+再レビュー要求) |
@@ -54,7 +54,7 @@ src/
 │   ├── user-prompt.ts      # Plan テンプレート注入 (Plan mode のみ)
 │   ├── permission-request.ts # ExitPlanMode: 適応型検証 (大Plan: 厳格, 小Plan: 軽量)
 │   ├── session-start.ts    # .alfred作成 + gates自動検出 + エラートレンド注入
-│   ├── stop.ts             # pending-fixes block + 大Plan未完了block + 小Plan warn + レビュー強制
+│   ├── stop.ts             # pending-fixes block + 大Plan未完了block + 小Plan warn + レビュー条件付き強制
 │   ├── pre-compact.ts      # pending-fixes reminder (stderr)
 │   ├── post-compact.ts     # 構造化handoff: 全クリティカル状態再注入 (stderr)
 │   ├── subagent-start.ts   # pending-fixes状態注入 (Opus 4.6はrules自動継承)
@@ -137,7 +137,7 @@ task clean    # ビルド成果物削除
 - Anthropic記事 (2026-03-24) では Opus 4.6 で sprint construct を削除。alfredも適応:
   - **小Plan (≤3 tasks)**: 構造要件なし。Verify あれば具体的であること
   - **大Plan (4+ tasks)**: Success Criteria (具体的) + Verify フィールド (具体的) 必須
-  - Review Gates: Plan構造では不要。review は stop.ts/pre-tool.ts で機械的に強制
+  - Review Gates: Plan構造では不要。review は stop.ts/pre-tool.ts で条件付き強制
 - Success Criteria 質検証: 「tests pass」等の曖昧 criteria は DENY。行動レベルの具体的基準を要求
 - UserPromptSubmit: Plan mode のみテンプレート注入 (非Plan advisory は Opus 4.6 で不要のため削除)
 - Stop: 小Plan の未完了タスクは警告のみ (block ではない)
@@ -145,12 +145,18 @@ task clean    # ビルド成果物削除
 - reviewer に few-shot 例 3つ + anti-self-persuasion 指示を配置
 - Verify フィールド検証: テスト名の出力一致 + テストファイル内のアサーション存在確認
 
+### レビュー閾値 (適応型)
+- レビュー強制条件: Plan active **OR** changed_files >= 5
+- 小変更 (Plan なし + 5ファイル未満): レビュー任意 (stderr warn のみ)
+- 根拠: Anthropic記事 "the evaluator is not a fixed yes-or-no decision. It is worth the cost when the task sits beyond what the current model does reliably solo"
+- スキップ時は `review:skipped` を metrics.json に記録
+
 ### 効果測定
 - DENY 発火時に metrics.json へ記録。fix 後に resolution を記録
 - gate 実行結果 (pass/fail) を metrics.json へ記録
 - advisory skip (budget超過) を metrics.json へ記録
 - First-pass clean rate: ファイル編集時に全 gate を初回で通過した率 (品質の直接指標)
-- Review outcome: レビュー PASS/FAIL 率 + review:miss (PASS後のgate fail = evaluator見逃し)
+- Review outcome: レビュー PASS/FAIL 率 + review:miss (PASS後のgate fail = evaluator見逃し) + review:skipped (閾値以下でスキップ)
 - `doctor --metrics`: DENY resolution rate + gate pass rate + first-pass rate + review pass rate を表示
 - `doctor --fix`: 壊れた state ファイルをデフォルト値にリセット
 

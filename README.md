@@ -28,7 +28,7 @@ Edit → biome check 失敗 → pending-fixes 記録
 |---|---|
 | lint/type エラーを放置して別ファイルへ | **DENY** — 修正するまでブロック |
 | テスト未実行で git commit | **DENY** — テスト pass を要求 |
-| レビュー未実行で完了宣言 | **block** — /alfred:review を要求 |
+| レビュー未実行で完了宣言 (大変更) | **block** — /alfred:review を要求 (Plan active or 5+ファイル変更時。小変更は任意) |
 | レビュー FAIL で完了宣言 | **block** — 修正して再レビューを要求 |
 | Plan (4+ tasks) に曖昧な Success Criteria | **DENY** — 「tests pass」ではなく行動レベルの基準を要求 |
 | Plan (4+ tasks) に具体的な Verify がない | **DENY** — テスト名/コマンドを要求 |
@@ -39,14 +39,14 @@ Edit → biome check 失敗 → pending-fixes 記録
 
 **壁 (enforcement)** — 壊れたコードを通さない
 - **PostToolUse** `[Edit/Write/Bash]`: 編集後に gate 実行。失敗 → pending-fixes + first-pass/gate outcome 記録
-- **PreToolUse** `[Edit/Write/Bash]`: pending-fixes → DENY。Pace red → DENY。commit without test/review → DENY
+- **PreToolUse** `[Edit/Write/Bash]`: pending-fixes → DENY。Pace red → DENY。commit without test → DENY。review は条件付き (Plan or 5+ファイル)
 
 **Plan 増幅 (enforcement)** — 設計の質を底上げ
 - **UserPromptSubmit**: Plan mode 時のみテンプレート注入 (非Plan advisory は Opus 4.6 で不要のため削除)
 - **PermissionRequest** `[ExitPlanMode]`: Plan 構造検証 + Success Criteria 質検証 (曖昧 criteria DENY)
 
 **実行ループ (enforcement + advisory)** — 中途半端に終わらせない
-- **Stop**: 未修正エラー/大Plan未完了/レビュー未実行 → block
+- **Stop**: 未修正エラー/大Plan未完了 → block。レビュー未実行 → 条件付き block (Plan or 5+ファイル)
 - **PostCompact**: **構造化handoff** — 全クリティカル状態 (pending-fixes, Plan進捗, gate clearance, pace, error trends) を再注入
 - **PreCompact**: pending-fixes reminder (stderr)
 - **SessionStart**: 自動セットアップ + エラートレンド注入

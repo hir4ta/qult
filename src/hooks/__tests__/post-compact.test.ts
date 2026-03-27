@@ -44,7 +44,7 @@ describe("postCompact — structured handoff", () => {
 		const stderr = stderrCapture.join("");
 		expect(stderr).toContain("Commit gates");
 		expect(stderr).toContain("tests NOT passed");
-		expect(stderr).toContain("review NOT completed");
+		expect(stderr).toContain("review not completed");
 	});
 
 	it("injects plan progress after compaction", async () => {

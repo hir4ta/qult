@@ -5,6 +5,7 @@ import {
 	checkBudget,
 	clearOnCommit,
 	isPaceRed,
+	isReviewRequired,
 	markGateRan,
 	readPace,
 	readSessionState,
@@ -173,6 +174,46 @@ describe("session-state: context budget", () => {
 		recordInjection(1900);
 		resetBudget("session-2"); // new session — reset
 		expect(checkBudget(100)).toBe(true);
+	});
+});
+
+describe("session-state: isReviewRequired", () => {
+	it("required when plan is active", () => {
+		// Create a plan file to simulate active plan
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		const { mkdirSync, writeFileSync } = require("node:fs");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			"## Tasks\n### Task 1: test [pending]\n- **File**: foo.ts\n",
+		);
+
+		// Even with 0 changed files, plan makes review required
+		expect(isReviewRequired()).toBe(true);
+	});
+
+	it("required when changed_files >= 5", () => {
+		writePace({
+			last_commit_at: new Date().toISOString(),
+			changed_files: 5,
+			tool_calls: 10,
+		});
+
+		expect(isReviewRequired()).toBe(true);
+	});
+
+	it("not required when changed_files < 5 and no plan", () => {
+		writePace({
+			last_commit_at: new Date().toISOString(),
+			changed_files: 2,
+			tool_calls: 5,
+		});
+
+		expect(isReviewRequired()).toBe(false);
+	});
+
+	it("not required when no state (fresh session, no plan)", () => {
+		expect(isReviewRequired()).toBe(false);
 	});
 });
 

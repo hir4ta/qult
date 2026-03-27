@@ -1,7 +1,12 @@
 import { getTopErrors } from "../state/gate-history.ts";
 import { readPendingFixes } from "../state/pending-fixes.ts";
 import { getActivePlan } from "../state/plan-status.ts";
-import { readLastReview, readLastTestPass, readPace } from "../state/session-state.ts";
+import {
+	isReviewRequired,
+	readLastReview,
+	readLastTestPass,
+	readPace,
+} from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
 
 /**
@@ -51,7 +56,8 @@ export default async function postCompact(_ev: HookEvent): Promise<void> {
 	if (testPass) clearance.push(`tests passed (${testPass.command})`);
 	else clearance.push("tests NOT passed");
 	if (review) clearance.push("review completed");
-	else clearance.push("review NOT completed");
+	else if (isReviewRequired()) clearance.push("review NOT completed (REQUIRED)");
+	else clearance.push("review not completed (optional for this change size)");
 	sections.push(`Commit gates: ${clearance.join(", ")}`);
 
 	// 4. Pace status

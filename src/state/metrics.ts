@@ -37,7 +37,7 @@ function writeState(entries: MetricEntry[]): void {
 /** Record a DENY/block/respond/respond-skipped/miss action with event name and reason. */
 export function recordAction(
 	event: string,
-	type: "deny" | "block" | "respond" | "respond-skipped" | "miss",
+	type: "deny" | "block" | "respond" | "respond-skipped" | "miss" | "review-skipped",
 	reason: string,
 ): void {
 	const entries = readState();
