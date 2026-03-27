@@ -1735,3 +1735,36 @@ describe("Scenario 39: Small plan — contract checks warn only, never block", (
 		expect(stderr).toContain("Success Criteria");
 	});
 });
+
+describe("Scenario: Non-gated file extensions are skipped", () => {
+	it(".md file does not trigger biome gate or create pending-fixes", async () => {
+		// Gates with biome → only covers .js/.ts/.tsx etc, not .md
+		const gates: GatesConfig = {
+			on_write: {
+				lint: { command: "biome check {file} && exit 1", timeout: 3000 },
+			},
+		};
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+
+		// Step 1: Write a .md file — gate should be skipped entirely
+		await postTool({
+			tool_name: "Write",
+			tool_input: { file_path: join(TEST_DIR, "docs/concept.md") },
+		});
+
+		const fixes = readPendingFixes();
+		expect(fixes.length).toBe(0);
+
+		// Step 2: No DENY when editing another file (no pending-fixes from .md)
+		stdoutCapture = [];
+		exitCode = null;
+		await preTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/foo.ts") },
+		});
+		expect(exitCode).toBeNull();
+	});
+});

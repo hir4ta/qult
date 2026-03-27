@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { extname, resolve } from "node:path";
 import { loadGates } from "../gates/load.ts";
 import { runGate } from "../gates/runner.ts";
 import { recordCommit, recordGateResult } from "../state/gate-history.ts";
@@ -14,6 +14,7 @@ import { getActivePlan, parseCriteriaCommands, parseVerifyFields } from "../stat
 import {
 	clearFailCount,
 	clearOnCommit,
+	getGatedExtensions,
 	isFirstPassRecorded,
 	markFirstPassRecorded,
 	markGateRan,
@@ -56,6 +57,10 @@ function handleEditWrite(ev: HookEvent): void {
 	const gates = loadGates();
 	if (!gates?.on_write) return;
 
+	// File extension filter: skip per-file gates for extensions not covered by any gate tool
+	const fileExt = extname(file).toLowerCase();
+	const gatedExts = getGatedExtensions();
+
 	// Read existing fixes once — compute both "other files" and "had fixes for this file"
 	const before = readPendingFixes();
 	const hadFixesForFile = before.some((f) => f.file === file);
@@ -73,6 +78,12 @@ function handleEditWrite(ev: HookEvent): void {
 			}
 
 			const hasPlaceholder = gate.command.includes("{file}");
+
+			// Skip per-file gates for extensions not covered by any gate tool
+			// e.g. don't run `biome check` on .md files
+			if (hasPlaceholder && gatedExts.size > 0 && !gatedExts.has(fileExt)) {
+				continue;
+			}
 			const result = runGate(name, gate, hasPlaceholder ? file : undefined);
 
 			if (gate.run_once_per_batch && sessionId) {

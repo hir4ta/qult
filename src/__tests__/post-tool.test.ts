@@ -120,6 +120,76 @@ describe("postTool: .qult/ file skip", () => {
 	});
 });
 
+describe("postTool: non-gated extension skip", () => {
+	it("skips per-file gate for .md files when gate uses biome", async () => {
+		// Use "biome" in command so TOOL_EXTS recognizes it → .md is not in gated extensions
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({
+				on_write: {
+					lint: { command: "biome check {file} || exit 1", timeout: 3000 },
+				},
+			}),
+		);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Write",
+			tool_input: { file_path: join(TEST_DIR, "docs/README.md") },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		expect(readPendingFixes().length).toBe(0);
+		expect(stdoutCapture.join("")).toBe("");
+	});
+
+	it("still runs per-file gate for .ts files", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({
+				on_write: {
+					lint: { command: "echo 'lint error' && exit 1", timeout: 3000 },
+				},
+			}),
+		);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/foo.ts") },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		expect(readPendingFixes().length).toBe(1);
+	});
+
+	it("still runs run_once_per_batch gate (no {file}) for any file", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({
+				on_write: {
+					typecheck: {
+						command: "echo 'type error' && exit 1",
+						timeout: 3000,
+						run_once_per_batch: true,
+					},
+				},
+			}),
+		);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Write",
+			tool_input: { file_path: join(TEST_DIR, "docs/README.md") },
+		});
+
+		// run_once_per_batch gates without {file} should still run
+		// because they check the whole project, not a specific file
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		expect(readPendingFixes().length).toBe(1);
+	});
+});
+
 describe("postTool: Bash handling", () => {
 	it("resets pace on git commit", async () => {
 		writeFileSync(
