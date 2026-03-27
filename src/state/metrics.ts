@@ -13,16 +13,27 @@ let _dirty = false;
 // Module-scoped context: auto-injected into every metric entry
 let _sessionId: string | undefined;
 let _projectId: string | undefined;
+let _branch: string | undefined;
+let _user: string | undefined;
 
-/** Set session/project context for all subsequent metric entries. Called once per hook dispatch. */
-export function setMetricsContext(sessionId?: string, projectId?: string): void {
-	_sessionId = sessionId;
-	_projectId = projectId;
+/** Set session/project/branch/user context for all subsequent metric entries. Called once per hook dispatch. */
+export function setMetricsContext(ctx: {
+	sessionId?: string;
+	projectId?: string;
+	branch?: string;
+	user?: string;
+}): void {
+	_sessionId = ctx.sessionId;
+	_projectId = ctx.projectId;
+	_branch = ctx.branch;
+	_user = ctx.user;
 }
 
 function withContext(entry: MetricEntry): MetricEntry {
 	if (_sessionId) entry.session_id = _sessionId;
 	if (_projectId) entry.project_id = _projectId;
+	if (_branch) entry.branch = _branch;
+	if (_user) entry.user = _user;
 	return entry;
 }
 
@@ -31,8 +42,10 @@ export interface MetricEntry {
 	reason: string;
 	at: string;
 	detail?: Record<string, number>; // optional structured data (e.g. finding counts)
-	session_id?: string; // for per-session analysis and TUI
-	project_id?: string; // for multi-project TUI
+	session_id?: string; // Claude Code session identifier
+	project_id?: string; // project directory name
+	branch?: string; // git branch name
+	user?: string; // git user or $USER
 }
 
 function filePath(): string {

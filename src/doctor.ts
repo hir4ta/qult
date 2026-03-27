@@ -230,11 +230,15 @@ function showMetrics(): void {
 
 	const tracked = entries.filter((e) => e.session_id);
 	const sessionIds = new Set(tracked.map((e) => e.session_id));
-	const sessionInfo =
-		sessionIds.size > 0
-			? ` across ${sessionIds.size} session${sessionIds.size > 1 ? "s" : ""}`
-			: "";
-	console.log(`\n--- Metrics (${entries.length} actions${sessionInfo}) ---`);
+	const users = new Set(tracked.map((e) => e.user).filter(Boolean));
+	const branches = new Set(tracked.map((e) => e.branch).filter(Boolean));
+	const parts: string[] = [];
+	if (sessionIds.size > 0)
+		parts.push(`${sessionIds.size} session${sessionIds.size > 1 ? "s" : ""}`);
+	if (users.size > 0) parts.push(`${users.size} user${users.size > 1 ? "s" : ""}`);
+	if (branches.size > 0) parts.push(`${branches.size} branch${branches.size > 1 ? "es" : ""}`);
+	const context = parts.length > 0 ? ` across ${parts.join(", ")}` : "";
+	console.log(`\n--- Metrics (${entries.length} actions${context}) ---`);
 
 	// --- Actions ---
 	console.log("\n  Actions:");

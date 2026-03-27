@@ -1,9 +1,31 @@
+import { execSync } from "node:child_process";
 import { basename } from "node:path";
 import { flushAll } from "../state/flush.ts";
 import { setMetricsContext } from "../state/metrics.ts";
 import { resetBudget } from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
 import { setCurrentEvent } from "./respond.ts";
+
+/** Resolve git branch and user once per process (cached). */
+let _gitContext: { branch: string; user: string } | null = null;
+function getGitContext(cwd: string): { branch: string; user: string } {
+	if (_gitContext) return _gitContext;
+	try {
+		const branch = execSync("git branch --show-current", {
+			cwd,
+			encoding: "utf-8",
+			timeout: 2000,
+		}).trim();
+		const user =
+			execSync("git config user.name", { cwd, encoding: "utf-8", timeout: 2000 }).trim() ||
+			process.env.USER ||
+			"";
+		_gitContext = { branch, user };
+	} catch {
+		_gitContext = { branch: "", user: process.env.USER || "" };
+	}
+	return _gitContext;
+}
 
 /**
  * Hook classification: enforcement hooks use exit 2 (DENY/block),
@@ -71,7 +93,14 @@ export async function dispatch(event: string): Promise<void> {
 
 	const debug = !!process.env.QULT_DEBUG;
 	setCurrentEvent(event);
-	setMetricsContext(ev.session_id, basename(ev.cwd || process.cwd()));
+	const cwd = ev.cwd || process.cwd();
+	const git = getGitContext(cwd);
+	setMetricsContext({
+		sessionId: ev.session_id,
+		projectId: basename(cwd),
+		branch: git.branch,
+		user: git.user,
+	});
 	try {
 		if (debug) process.stderr.write(`[qult:debug] event=${event} input=${input.length}b\n`);
 		const start = Date.now();
