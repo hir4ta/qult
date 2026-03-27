@@ -1,4 +1,4 @@
-import { pathForToday, readAllDaysMerge, readDaily, today, writeDaily } from "./daily-file.ts";
+import { readAllDaysMerge, readDaily, today, writeDaily } from "./daily-file.ts";
 
 const BASE = "gate-history";
 
@@ -23,8 +23,6 @@ interface HistoryState {
 	gates: GateEntry[];
 	commits: CommitEntry[];
 }
-
-const EMPTY: HistoryState = { gates: [], commits: [] };
 
 /** Read today's history (process-scoped cache for writes). */
 function readHistory(): HistoryState {

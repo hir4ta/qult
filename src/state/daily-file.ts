@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteJson } from "./atomic-write.ts";
 
@@ -48,7 +48,7 @@ export function listDayFiles(base: string): string[] {
 	if (!existsSync(baseDir)) return [];
 	const files: string[] = [];
 	try {
-		for (const month of readdirSync(baseDir)) {
+		for (const month of readdirSync(baseDir).filter((d) => /^\d{4}-\d{2}$/.test(d))) {
 			const monthDir = join(baseDir, month);
 			try {
 				for (const file of readdirSync(monthDir)) {
