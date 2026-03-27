@@ -68,7 +68,7 @@ describe("qult init", () => {
 		expect(permHook.hooks[0].command).toContain("qult hook permission-request");
 	});
 
-	it("creates .qult/gates.json with detected gates", async () => {
+	it("creates .qult/gates.json as empty object (Skill fills it later)", async () => {
 		const { runInit } = await import("../init.ts");
 		await runInit(false);
 
@@ -76,8 +76,19 @@ describe("qult init", () => {
 		expect(existsSync(gatesPath)).toBe(true);
 
 		const gates = JSON.parse(readFileSync(gatesPath, "utf-8"));
-		expect(gates.on_write?.lint?.command).toContain("biome");
-		expect(gates.on_write?.typecheck?.command).toContain("tsc");
+		expect(gates).toEqual({});
+	});
+
+	it("writes skill file for /qult:detect-gates", async () => {
+		const { runInit } = await import("../init.ts");
+		await runInit(false);
+
+		const skillPath = join(TEST_HOME, ".claude", "skills", "qult-detect-gates", "SKILL.md");
+		expect(existsSync(skillPath)).toBe(true);
+
+		const content = readFileSync(skillPath, "utf-8");
+		expect(content).toContain("detect-gates");
+		expect(content).toContain("gates.json");
 	});
 
 	it("writes skill file for /qult:review", async () => {

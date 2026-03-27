@@ -718,33 +718,26 @@ describe("Scenario 14: Pace tracking updates on each edit", () => {
 // Phase 4: Init + review skill integration scenarios
 // ============================================================
 
-describe("Scenario 15: Init creates complete setup", () => {
-	it("init creates gates, and hooks work with the created gates", async () => {
-		// Set up a project with biome + tsc
-		writeFileSync(join(TEST_DIR, "biome.json"), "{}");
-		writeFileSync(join(TEST_DIR, "tsconfig.json"), "{}");
-		writeFileSync(
-			join(TEST_DIR, "package.json"),
-			JSON.stringify({ devDependencies: { vitest: "^3" } }),
-		);
+describe("Scenario 15: Init creates empty gates, session-start prompts detection", () => {
+	it("init writes empty gates.json, session-start prompts /qult:detect-gates", async () => {
+		// Init writes empty gates.json (Skill will fill it later)
+		writeFileSync(join(QULT_DIR, "gates.json"), "{}");
 
-		// Run gate detection (simulating what init does)
-		const { detectGates } = await import("../gates/detect.ts");
-		const gates = detectGates(TEST_DIR);
-
-		// Verify detected gates
-		expect(gates.on_write?.lint?.command).toContain("biome");
-		expect(gates.on_write?.typecheck?.command).toContain("tsc");
-		expect(gates.on_commit?.test?.command).toContain("vitest");
-
-		// Write gates.json manually (as init would)
-		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
-
-		// Now PostToolUse should be able to load and run these gates
 		const { loadGates } = await import("../gates/load.ts");
 		const loaded = loadGates();
 		expect(loaded).not.toBeNull();
-		expect(loaded!.on_write?.lint).toBeDefined();
+		expect(Object.keys(loaded!.on_write ?? {})).toHaveLength(0);
+		expect(Object.keys(loaded!.on_commit ?? {})).toHaveLength(0);
+	});
+
+	it("session-start responds with detect-gates prompt when gates are empty", async () => {
+		writeFileSync(join(QULT_DIR, "gates.json"), "{}");
+
+		const sessionStart = (await import("../hooks/session-start.ts")).default;
+		await sessionStart({ session_id: "test" });
+
+		const output = stdoutCapture.join("");
+		expect(output).toContain("qult:detect-gates");
 	});
 });
 

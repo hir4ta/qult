@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { defineCommand } from "citty";
-import { detectGates } from "./gates/detect.ts";
 
 function loadTemplate(name: string): string {
 	const candidates = [
@@ -159,6 +158,12 @@ export async function runInit(force: boolean): Promise<void> {
 		loadTemplate("agent-reviewer.md"),
 		force,
 	);
+	console.log("Writing skill: /qult:detect-gates...");
+	writeFile(
+		join(claudeDir, "skills", "qult-detect-gates", "SKILL.md"),
+		loadTemplate("skill-detect-gates.md"),
+		force,
+	);
 	console.log("Writing rules: qult-quality...");
 	writeFile(join(claudeDir, "rules", "qult-quality.md"), loadTemplate("rules-quality.md"), force);
 
@@ -168,10 +173,8 @@ export async function runInit(force: boolean): Promise<void> {
 
 	const gatesPath = join(qultDir, "gates.json");
 	if (!existsSync(gatesPath) || force) {
-		console.log("Detecting gates...");
-		const gates = detectGates(process.cwd());
-		writeFileSync(gatesPath, JSON.stringify(gates, null, 2));
-		console.log(`  Created ${gatesPath}`);
+		writeFileSync(gatesPath, "{}");
+		console.log(`  Created ${gatesPath} (run /qult:detect-gates to configure)`);
 	}
 
 	// 4. Clear stale pending-fixes (fresh start)

@@ -1,12 +1,12 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { detectGates } from "../gates/detect.ts";
+import { loadGates } from "../gates/load.ts";
 import { getTopErrors } from "../state/gate-history.ts";
 import { writePendingFixes } from "../state/pending-fixes.ts";
 import type { HookEvent } from "../types.ts";
 import { respond } from "./respond.ts";
 
-/** SessionStart: ensure .qult/ exists, auto-detect gates, inject error trends */
+/** SessionStart: ensure .qult/ exists, prompt gate detection if empty, inject error trends */
 export default async function sessionStart(_ev: HookEvent): Promise<void> {
 	const qultDir = join(process.cwd(), ".qult");
 	const stateDir = join(qultDir, ".state");
@@ -18,15 +18,18 @@ export default async function sessionStart(_ev: HookEvent): Promise<void> {
 	// Gates will re-detect issues when files are edited in this session.
 	writePendingFixes([]);
 
-	// Auto-detect gates if missing (zero-config)
-	const gatesPath = join(qultDir, "gates.json");
-	if (!existsSync(gatesPath)) {
-		try {
-			const gates = detectGates(process.cwd());
-			writeFileSync(gatesPath, JSON.stringify(gates, null, 2));
-		} catch {
-			// fail-open
-		}
+	// Prompt gate detection if gates are empty
+	const gates = loadGates();
+	const hasGates =
+		gates &&
+		(Object.keys(gates.on_write ?? {}).length > 0 ||
+			Object.keys(gates.on_commit ?? {}).length > 0 ||
+			Object.keys(gates.on_review ?? {}).length > 0);
+	if (!hasGates) {
+		respond(
+			"Gates are not configured. Run /qult:detect-gates to auto-detect your project's lint, typecheck, and test tools.",
+		);
+		return;
 	}
 
 	// Frequent error trends
