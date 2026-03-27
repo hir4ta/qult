@@ -7,7 +7,7 @@ Claude Code の暴走を止める執事。品質の下限を機械的に守る *
 
 ## なぜ evaluator harness か
 
-Anthropic の [Harness Design](https://www.anthropic.com/engineering/harness-design-long-running-apps) 記事が示した核心:
+Anthropic の [Harness Design](https://www.anthropic.com/engineering/harness-design-long-running-apps) 記事が示した核心
 
 - **自己評価は機能しない** — Claude は自分の仕事の問題を見つけても「大したことない」と自分を説得する
 - **独立 evaluator が必須** — generator と evaluator を分離することで品質が跳ねる
@@ -96,7 +96,7 @@ alfred doctor     # セットアップの健全性を確認
 
 ## Gate 自動検出
 
-`alfred init` がプロジェクトの設定ファイルから gate を自動検出:
+`alfred init` がプロジェクトの設定ファイルから gate を自動検出
 
 | 言語 | on_write (lint/type) | on_commit (test) | on_review (e2e) |
 |---|---|---|---|
