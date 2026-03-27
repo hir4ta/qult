@@ -1,10 +1,10 @@
 import type { HookEvent } from "../types.ts";
 import { respond } from "./respond.ts";
 
-const SHORT_THRESHOLD = 100;
-const LARGE_TASK_ADVISORY = 200;
-const FULL_TEMPLATE_THRESHOLD = 300;
-const LARGE_TASK_THRESHOLD = 500;
+const SHORT_THRESHOLD = 200;
+const LARGE_TASK_ADVISORY = 400;
+const FULL_TEMPLATE_THRESHOLD = 500;
+const LARGE_TASK_THRESHOLD = 800;
 
 const COMPACT_TEMPLATE = `Structure your plan:
 

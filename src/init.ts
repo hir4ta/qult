@@ -66,12 +66,6 @@ export const ALFRED_HOOKS: Record<
 			hooks: [{ type: "command", command: "alfred hook permission-request", timeout: 5000 }],
 		},
 	],
-	TaskCompleted: [
-		{
-			matcher: "",
-			hooks: [{ type: "command", command: "alfred hook task-completed", timeout: 5000 }],
-		},
-	],
 	SubagentStart: [
 		{
 			matcher: "",

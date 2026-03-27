@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { defineCommand } from "citty";
 import { ALFRED_HOOKS } from "./init.ts";
 import { getMetricsSummary, readMetrics } from "./state/metrics.ts";
-import { getOutcomeSummary } from "./state/session-outcomes.ts";
 import type { GatesConfig } from "./types.ts";
 
 export type CheckStatus = "ok" | "fail" | "warn";
@@ -101,9 +100,7 @@ const KNOWN_STATE_FILES = new Set([
 	"pending-fixes.json",
 	"session-state.json",
 	"gate-history.json",
-	"handoff.json",
 	"metrics.json",
-	"session-outcomes.json",
 ]);
 
 function checkStateDir(): CheckResult {
@@ -202,15 +199,6 @@ function showMetrics(): void {
 			`    DENY resolution: ${summary.resolution}/${summary.deny} (${summary.denyResolutionRate}%)`,
 		);
 	}
-
-	const outcomes = getOutcomeSummary();
-	if (outcomes) {
-		console.log(`\n--- Session Outcomes (last ${outcomes.total}) ---`);
-		console.log(`  Clean exits: ${outcomes.cleanRate}% (${outcomes.clean}/${outcomes.total})`);
-		console.log(
-			`  Avg pending: ${outcomes.avgStartingPending} at start → ${outcomes.avgEndingPending} at end`,
-		);
-	}
 }
 
 const STATE_DEFAULTS: Record<string, string> = {
@@ -218,7 +206,6 @@ const STATE_DEFAULTS: Record<string, string> = {
 	"session-state.json": "{}",
 	"gate-history.json": '{"gates":[],"commits":[]}',
 	"metrics.json": "[]",
-	"session-outcomes.json": "[]",
 };
 
 /** Scan .alfred/.state/ for corrupt JSON and replace with defaults. */

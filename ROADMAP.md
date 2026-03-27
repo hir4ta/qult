@@ -9,6 +9,34 @@
 | v0.3.0 | Plan-Execution 整合性 | テスト検証自動化, ExitPlanMode 詳細検証, Phase Gate, 独立レビュー強制 |
 | v0.4.0 | コンテキスト最適化 | 2000トークン予算, 動的 Plan テンプレート (Short/Medium/Large) |
 | v0.5.0 | 学習と適応 | gate トレンド分析, Pace 適応閾値, 頻出エラー注入 |
+| v0.8.0 | Simplification + Proof | 14→13 hooks, 7→4 state files, hook分類, reviewer PASS/FAIL, Plan閾値引上げ, 重要hook専用テスト |
+
+---
+
+## v0.8.0 — Simplification + Proof (2026-03-27)
+
+記事原則「simplest solution possible」「stress test assumptions」に従い、**足すのではなく引く**ことでスコアを上げた。
+
+### 削除・簡素化
+- **handoff.ts 削除** — advisory-only。記事「Opus 4.5+ compaction sufficient」。pending-fixes.json がディスク永続
+- **session-outcomes.ts 削除** — advisory-only。doctor以外どのhookも参照しない
+- **task-completed.ts 削除** — advisory-only (stderr)。fuzzy match 50%が fragile。記事「Opus 4.6 self-decomposes」
+- **pre-compact.ts 簡素化** — 54行→10行。pending-fixes reminder のみ
+- **post-compact.ts 簡素化** — 27行→10行。pending-fixes reminder のみ
+- **session-end.ts 簡素化** — 73行→12行。pending-fixes log のみ
+
+### 追加・強化
+- **HOOK_CLASS メタデータ** — dispatcher.ts に enforcement/advisory 分類を明示
+- **reviewer PASS/FAIL threshold** — 記事「hard pass/fail thresholds」。critical finding → Review: FAIL
+- **Plan テンプレート閾値引上げ** — SHORT: 100→200, FULL: 300→500, ADVISORY: 200→400, LARGE: 500→800
+- **pre-tool.test.ts** — 最重要 DENY hook の7テスト
+- **post-tool.test.ts** — 最複雑 hook の6テスト
+- **runner.test.ts** — gate 実行パスの6テスト
+
+### 結果
+- 14→13 hooks (TaskCompleted 削除)
+- 7→4 state files (handoff, session-outcomes, _session-start 削除)
+- 157→176 テスト (+19)
 
 ---
 

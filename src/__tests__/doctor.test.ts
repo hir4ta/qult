@@ -82,7 +82,7 @@ describe("doctor: check 2 — hooks registered", () => {
 		const check = findCheck(results, "hooks");
 		expect(check).toBeDefined();
 		expect(check!.status).toBe("ok");
-		expect(check!.message).toContain("14");
+		expect(check!.message).toContain("13/13");
 	});
 
 	it("returns fail when hooks are missing", async () => {

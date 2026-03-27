@@ -6,6 +6,8 @@ import { block } from "./respond.ts";
 // [severity] file:line pattern or "No issues found"
 const FINDING_RE = /\[(critical|high|medium|low)\]/i;
 const NO_ISSUES_RE = /no issues found/i;
+const REVIEW_PASS_RE = /^Review:\s*PASS/im;
+const REVIEW_FAIL_RE = /^Review:\s*FAIL/im;
 
 /** SubagentStop: verify subagent output quality */
 export default async function subagentStop(ev: HookEvent): Promise<void> {
@@ -28,9 +30,12 @@ export default async function subagentStop(ev: HookEvent): Promise<void> {
 }
 
 function validateReviewer(output: string): void {
-	if (FINDING_RE.test(output) || NO_ISSUES_RE.test(output)) return;
+	// Accept structured output: Review: PASS/FAIL, findings, or "No issues found"
+	const hasVerdict = REVIEW_PASS_RE.test(output) || REVIEW_FAIL_RE.test(output);
+	const hasFindings = FINDING_RE.test(output) || NO_ISSUES_RE.test(output);
+	if (hasVerdict || hasFindings) return;
 	block(
-		"Reviewer output must contain findings ([severity] file:line) or 'No issues found'. Rerun the review with structured output.",
+		"Reviewer output must start with 'Review: PASS' or 'Review: FAIL', contain findings ([severity] file:line), or 'No issues found'. Rerun the review with structured output.",
 	);
 }
 

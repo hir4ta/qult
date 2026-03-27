@@ -2,6 +2,30 @@ import { resetBudget } from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
 import { setCurrentEvent } from "./respond.ts";
 
+/**
+ * Hook classification: enforcement hooks use exit 2 (DENY/block),
+ * advisory hooks inject context or log to stderr (fail-open).
+ *
+ * "Every component in a harness encodes an assumption about what the model
+ * can't do on its own, and those assumptions are worth stress testing."
+ * — Anthropic, Harness Design for Long-Running Apps (2026-03-24)
+ */
+export const HOOK_CLASS: Record<string, "enforcement" | "advisory"> = {
+	"pre-tool": "enforcement", // DENY: pending-fixes, pace red, commit gates
+	"post-tool": "enforcement", // Indirect: populates pending-fixes → pre-tool DENY
+	stop: "enforcement", // block: pending-fixes, incomplete plan, no review
+	"permission-request": "enforcement", // DENY: malformed plan on ExitPlanMode
+	"config-change": "enforcement", // DENY: prevents hook deletion
+	"subagent-stop": "enforcement", // block: incomplete reviewer output
+	"session-start": "advisory", // respond: error trends
+	"user-prompt": "advisory", // respond: plan template
+	"subagent-start": "advisory", // respond: quality rules
+	"post-tool-failure": "advisory", // respond: /clear suggestion
+	"pre-compact": "advisory", // stderr: pending-fixes reminder
+	"post-compact": "advisory", // stderr: pending-fixes reminder
+	"session-end": "advisory", // stderr: pending-fixes log
+};
+
 const EVENT_MAP: Record<string, () => Promise<{ default: (ev: HookEvent) => Promise<void> }>> = {
 	"post-tool": () => import("./post-tool.ts"),
 	"pre-tool": () => import("./pre-tool.ts"),
@@ -11,7 +35,6 @@ const EVENT_MAP: Record<string, () => Promise<{ default: (ev: HookEvent) => Prom
 	"pre-compact": () => import("./pre-compact.ts"),
 	"post-compact": () => import("./post-compact.ts"),
 	"permission-request": () => import("./permission-request.ts"),
-	"task-completed": () => import("./task-completed.ts"),
 	"subagent-start": () => import("./subagent-start.ts"),
 	"subagent-stop": () => import("./subagent-stop.ts"),
 	"post-tool-failure": () => import("./post-tool-failure.ts"),

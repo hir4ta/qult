@@ -30,13 +30,16 @@ function getResponse(): Record<string, unknown> | null {
 }
 
 describe("userPrompt", () => {
-	it("injects full template for large plan prompt (300+ chars)", async () => {
+	it("injects full template for large plan prompt (500+ chars)", async () => {
 		const handler = (await import("../user-prompt.ts")).default;
 		const longPrompt =
 			"implement authentication with JWT tokens, add login endpoint, signup endpoint, " +
 			"middleware for protected routes, update user model, add password hashing, " +
 			"create refresh token logic, update the database schema, add tests for all endpoints, " +
-			"implement rate limiting, add CORS configuration, create API documentation";
+			"implement rate limiting, add CORS configuration, create API documentation, " +
+			"set up session management with Redis backend, add password complexity validation, " +
+			"implement account lockout after failed attempts, add OAuth2 provider support " +
+			"for Google and GitHub SSO with proper token exchange and user linking";
 
 		await handler({
 			hook_type: "UserPromptSubmit",
@@ -51,11 +54,13 @@ describe("userPrompt", () => {
 		expect(context).toContain("Review Gates");
 	});
 
-	it("injects compact template for medium plan prompt (100-300 chars)", async () => {
+	it("injects compact template for medium plan prompt (200-500 chars)", async () => {
 		const handler = (await import("../user-prompt.ts")).default;
-		// 100-300 chars
+		// 200-500 chars
 		const mediumPrompt =
-			"add a helper function to parse dates and validate format, with tests for edge cases including invalid inputs and timezone handling";
+			"add a helper function to parse dates and validate format, with tests for edge cases including " +
+			"invalid inputs and timezone handling, also add a utility for formatting relative timestamps " +
+			"like '2 hours ago' with proper pluralization and localization support for common languages";
 
 		await handler({
 			hook_type: "UserPromptSubmit",
@@ -70,7 +75,7 @@ describe("userPrompt", () => {
 		expect(context).not.toContain("Review Gates");
 	});
 
-	it("does not inject template for short plan prompt (< 100 chars)", async () => {
+	it("does not inject template for short plan prompt (< 200 chars)", async () => {
 		const handler = (await import("../user-prompt.ts")).default;
 
 		await handler({
@@ -102,7 +107,7 @@ describe("userPrompt", () => {
 	it("advises plan mode for large tasks in normal mode (no block)", async () => {
 		const handler = (await import("../user-prompt.ts")).default;
 
-		// Very long prompt (>500 chars) to trigger advisory
+		// Very long prompt (>800 chars) to trigger advisory
 		const longPrompt =
 			"implement authentication with JWT tokens, add login endpoint, signup endpoint, " +
 			"middleware for protected routes, update user model, add password hashing, " +
@@ -110,7 +115,10 @@ describe("userPrompt", () => {
 			"implement rate limiting on all auth endpoints with sliding window algorithm, " +
 			"add CORS configuration for frontend origin, create API documentation with OpenAPI spec, " +
 			"set up email verification flow with confirmation links, add two-factor authentication support, " +
-			"implement password reset with secure token generation and expiry";
+			"implement password reset with secure token generation and expiry, " +
+			"add OAuth2 provider support for Google and GitHub login, " +
+			"implement session management with Redis backend and sliding expiry windows, " +
+			"add account lockout after 5 failed attempts with progressive delays";
 
 		await handler({
 			hook_type: "UserPromptSubmit",

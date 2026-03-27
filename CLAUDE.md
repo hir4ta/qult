@@ -1,6 +1,6 @@
 # claude-alfred
 
-Claude Code の暴走を止める執事。14 Hooks + Skill + Agent で品質の下限を守る。
+Claude Code の暴走を止める執事。13 Hooks + Skill + Agent で品質の下限を守る。
 
 ## スタック
 
@@ -10,40 +10,57 @@ TypeScript (Bun 1.3+, ESM) / citty (CLI) / vitest (テスト) / Biome (lint)
 
 ```
 alfred CLI (init / hook / doctor)
-    ├── alfred init → ~/.claude/ に 14 hooks, skill, agent, rules を配置
+    ├── alfred init → ~/.claude/ に 13 hooks, skill, agent, rules を配置
     └── alfred hook <event> → stdin JSON → 処理 → stdout JSON or exit 2
 ```
 
 3つの柱 + 2つの防御層:
 1. **壁** — PostToolUse (gate) → PreToolUse (DENY)
-2. **Plan増幅** — UserPromptSubmit (template) + PermissionRequest (ExitPlanMode) + TaskCompleted (status同期)
-3. **実行ループ** — Stop (Plan未完了block + pending-fixes block) + PreCompact/PostCompact/SessionEnd (handoff)
-4. **サブエージェント制御** — SubagentStart (品質ルール注入) + SubagentStop
+2. **Plan増幅** — UserPromptSubmit (template) + PermissionRequest (ExitPlanMode)
+3. **実行ループ** — Stop (Plan未完了block + pending-fixes block) + PreCompact/PostCompact/SessionEnd (pending-fixes reminder)
+4. **サブエージェント制御** — SubagentStart (品質ルール注入) + SubagentStop (pass/fail threshold)
 5. **自己防御** — ConfigChange (hook削除防止) + PostToolUseFailure (失敗追跡)
+
+## Hook 分類
+
+| Hook | 分類 | 出力 | 説明 |
+|------|------|------|------|
+| PreToolUse | enforcement | DENY | pending-fixes, pace red, commit gates |
+| PostToolUse | enforcement | respond | gate実行 → pending-fixes生成 |
+| Stop | enforcement | block | pending-fixes, incomplete plan, no review |
+| PermissionRequest | enforcement | DENY | ExitPlanMode plan構造検証 |
+| ConfigChange | enforcement | DENY | hook削除防止 |
+| SubagentStop | enforcement | block | reviewer output検証 (PASS/FAIL) |
+| SessionStart | advisory | respond | エラートレンド注入 |
+| UserPromptSubmit | advisory | respond | Planテンプレート注入 |
+| SubagentStart | advisory | respond | 品質ルール注入 |
+| PostToolUseFailure | advisory | respond | /clear提案 |
+| PreCompact | advisory | stderr | pending-fixes reminder |
+| PostCompact | advisory | stderr | pending-fixes reminder |
+| SessionEnd | advisory | stderr | pending-fixes log |
 
 ## 構造
 
 ```
 src/
 ├── cli.ts                  # citty: init / hook / doctor / reset
-├── init.ts                 # セットアップ (14 hooks + skill + agent + rules + gates)
+├── init.ts                 # セットアップ (13 hooks + skill + agent + rules + gates)
 ├── doctor.ts               # ヘルスチェック (8項目 + --metrics) + state整合性検証
 ├── reset.ts                # 状態リセット (--keep-history で履歴保持)
 ├── hooks/
-│   ├── dispatcher.ts       # event → handler ルーティング (14 events)
+│   ├── dispatcher.ts       # event → handler ルーティング (13 events) + HOOK_CLASS分類
 │   ├── respond.ts          # 共通: respond / deny / block + metrics記録
 │   ├── post-tool.ts        # lint/type gate + pending-fixes + pace + batch + test-pass + verify
 │   ├── pre-tool.ts         # pending-fixes → DENY + pace red → DENY + commit without test → DENY
-│   ├── user-prompt.ts      # Plan テンプレート注入 + 大タスク advisory (500+ / 200+)
+│   ├── user-prompt.ts      # Plan テンプレート注入 + 大タスク advisory (800+ / 400+)
 │   ├── permission-request.ts # ExitPlanMode: 適応型検証 (大Plan: 厳格, 小Plan: 軽量)
-│   ├── task-completed.ts   # Plan task status 自動同期
-│   ├── session-start.ts    # .alfred作成 + gates自動検出 + handoff復元
+│   ├── session-start.ts    # .alfred作成 + gates自動検出 + エラートレンド注入
 │   ├── stop.ts             # pending-fixes block + 大Plan未完了block + 小Plan warn + レビュー強制
-│   ├── pre-compact.ts      # 構造化ハンドオフ保存
-│   ├── post-compact.ts     # コンパクション後ハンドオフ復元
-│   ├── session-end.ts      # handoff 保存 + セッション成果記録
+│   ├── pre-compact.ts      # pending-fixes reminder (stderr)
+│   ├── post-compact.ts     # pending-fixes reminder (stderr)
+│   ├── session-end.ts      # pending-fixes log (stderr)
 │   ├── subagent-start.ts   # サブエージェントに品質ルール注入
-│   ├── subagent-stop.ts    # サブエージェント出力検証 + レビュー完了記録
+│   ├── subagent-stop.ts    # reviewer PASS/FAIL検証 + レビュー完了記録
 │   ├── post-tool-failure.ts # ツール失敗追跡 + 2回連続→/clear
 │   └── config-change.ts    # user_settings 変更 DENY
 ├── gates/
@@ -54,13 +71,11 @@ src/
 │   ├── pending-fixes.ts    # 未修正 lint/type エラー
 │   ├── session-state.ts    # 統合セッション状態 (pace, test, review, batch, fail, budget)
 │   ├── gate-history.ts     # gate 結果トレンド + コミット間隔統計
-│   ├── handoff.ts          # 構造化ハンドオフ
 │   ├── plan-status.ts      # Plan task status 解析
-│   ├── metrics.ts          # DENY/block/respond 発火記録 (50件 cap)
-│   └── session-outcomes.ts # セッション成果追跡 (50件 cap)
+│   └── metrics.ts          # DENY/block/respond 発火記録 (50件 cap)
 ├── templates/              # init が配置するファイル
 │   ├── skill-review.md     # /alfred:review skill
-│   ├── agent-reviewer.md   # reviewer agent
+│   ├── agent-reviewer.md   # reviewer agent (PASS/FAIL threshold)
 │   └── rules-quality.md    # 品質ルール
 └── types.ts
 ```
@@ -85,6 +100,7 @@ task clean    # ビルド成果物削除
 4. **タスクサイズ制御** — 15 LOC以下・単一ファイル (SWE-bench: 80%+ 成功率)
 5. **検証 > 指示** — 「何を検証すべきか」を伝える。HOW ではなく WHAT
 6. **fail-open** — 全 hook は try-catch で握りつぶす。alfred の障害で Claude を止めない
+7. **simplest solution** — 全コンポーネントは load-bearing 仮定を持つ。仮定が崩れたら削除
 
 ## ルール
 
@@ -103,23 +119,21 @@ task clean    # ビルド成果物削除
   - respond() (hookSpecificOutput.additionalContext): SessionStart, PostToolUse, PostToolUseFailure, SubagentStart
   - deny() (hookSpecificOutput.permissionDecision): PreToolUse, PermissionRequest
   - block() (トップレベル decision/reason): Stop, UserPromptSubmit, SubagentStop
-  - 出力なし (stderr で advisory): PostCompact, TaskCompleted, PreCompact, SessionEnd, ConfigChange
+  - 出力なし (stderr で advisory): PostCompact, PreCompact, SessionEnd, ConfigChange
 
 ### 状態ファイル (.alfred/.state/)
 - pending-fixes.json — 未修正 lint/type エラー
 - session-state.json — 統合セッション状態 (pace, test pass, review, gate batch, fail count, budget, action counters)
 - gate-history.json — gate 結果トレンド + コミット間隔 (50件 cap)
-- handoff.json — 構造化ハンドオフ (Plan context + gate errors 含む)
 - metrics.json — DENY/block/respond 発火記録 (50件 cap, `doctor --metrics` で表示)
-- session-outcomes.json — セッション成果追跡 (clean exit率, pending推移, 50件 cap)
 
 ### Sprint Contract (適応型)
 - Anthropic記事 (2026-03-24) では Opus 4.6 で sprint construct を削除。alfredも適応:
   - **小Plan (≤3 tasks)**: File フィールドのみ必須。Success Criteria/Review Gates は任意
   - **大Plan (4+ tasks)**: Success Criteria + Review Gates + Verify フィールド必須
-- UserPromptSubmit: 大タスク (500+) は advisory (block ではない)
+- UserPromptSubmit: 大タスク (800+) は advisory (block ではない)
 - Stop: 小Plan の未完了タスクは警告のみ (block ではない)
-- reviewer は全 findings を報告。Judge (skill) のみが S/A/A フィルタを適用
+- reviewer は全 findings を報告 + Review: PASS/FAIL threshold。Judge (skill) のみが S/A/A フィルタを適用
 - reviewer に few-shot 例 + anti-self-persuasion 指示を配置
 
 ### 効果測定

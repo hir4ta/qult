@@ -77,15 +77,3 @@ export interface GateDefinition {
 	timeout?: number;
 	run_once_per_batch?: boolean;
 }
-
-/** Handoff state saved by PreCompact */
-export interface HandoffState {
-	summary: string;
-	changed_files: string[];
-	pending_fixes: boolean;
-	next_steps: string;
-	saved_at: string;
-	current_task?: string;
-	gate_errors?: string[];
-	plan_path?: string;
-}

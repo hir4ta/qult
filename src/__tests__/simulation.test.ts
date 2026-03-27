@@ -238,7 +238,12 @@ describe("Scenario 6: Plan mode → template injected with review gates", () => 
 			hook_type: "UserPromptSubmit",
 			permission_mode: "plan",
 			prompt:
-				"implement authentication with JWT tokens, add login and signup endpoints, middleware for protected routes, password hashing with bcrypt, update user model with password fields, add rate limiting on auth endpoints, create integration tests for all auth flows, update API documentation with auth examples, add refresh token rotation logic",
+				"implement authentication with JWT tokens, add login and signup endpoints, middleware for protected routes, " +
+				"password hashing with bcrypt, update user model with password fields, add rate limiting on auth endpoints, " +
+				"create integration tests for all auth flows, update API documentation with auth examples, " +
+				"add refresh token rotation logic, implement CORS configuration for frontend origin, " +
+				"set up email verification flow with confirmation links and expiry tokens, " +
+				"add two-factor authentication via TOTP with QR code generation",
 		});
 
 		const response = getResponse();
@@ -252,7 +257,7 @@ describe("Scenario 6: Plan mode → template injected with review gates", () => 
 		expect(context).toContain("Verify");
 		// Must contain success criteria
 		expect(context).toContain("Success Criteria");
-		// Must contain review gates (full template for 300+ chars)
+		// Must contain review gates (full template for 500+ chars)
 		expect(context).toContain("Design Review");
 		expect(context).toContain("Phase Review");
 		expect(context).toContain("Final Review");
@@ -264,7 +269,7 @@ describe("Scenario 7: Normal mode large task → advisory to use plan mode", () 
 	it("long prompt advises plan mode (no block)", async () => {
 		const userPrompt = (await import("../hooks/user-prompt.ts")).default;
 
-		// >500 chars to trigger advisory
+		// >800 chars to trigger advisory
 		const longPrompt =
 			"Implement a complete authentication system with JWT tokens, refresh tokens, " +
 			"login and signup endpoints, middleware for protected routes, password hashing with bcrypt, " +
@@ -272,7 +277,10 @@ describe("Scenario 7: Normal mode large task → advisory to use plan mode", () 
 			"create integration tests for all auth flows, update the API documentation, " +
 			"implement CORS configuration, add email verification with confirmation links, " +
 			"set up two-factor authentication support, add password reset with secure tokens, " +
-			"implement session management with Redis-backed token storage and sliding expiry";
+			"implement session management with Redis-backed token storage and sliding expiry, " +
+			"add OAuth2 provider integration for Google and GitHub SSO, implement account lockout " +
+			"after 5 failed attempts with progressive backoff delays, create admin dashboard " +
+			"for user management with role-based access control and audit logging";
 
 		await userPrompt({
 			hook_type: "UserPromptSubmit",
@@ -434,12 +442,16 @@ describe("Scenario 9: Full flow — plan mode → implement → gate → deny �
 		const postTool = (await import("../hooks/post-tool.ts")).default;
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
 
-		// Step 1: User enters plan mode → template injected
+		// Step 1: User enters plan mode → template injected (500+ chars for full template)
 		await userPrompt({
 			hook_type: "UserPromptSubmit",
 			permission_mode: "plan",
 			prompt:
-				"add helper function for parsing dates, validating format, handling timezones, converting between formats, with comprehensive tests for edge cases including invalid inputs, null values, boundary dates across multiple calendar systems, leap year handling, DST transitions, ISO 8601 compliance with offset parsing and duration calculation support",
+				"add helper function for parsing dates, validating format, handling timezones, converting between formats, " +
+				"with comprehensive tests for edge cases including invalid inputs, null values, boundary dates across " +
+				"multiple calendar systems, leap year handling, DST transitions, ISO 8601 compliance with offset parsing " +
+				"and duration calculation support, also add formatting utilities for relative timestamps and localized " +
+				"date output across common locales including Japanese era-based calendar formatting and Buddhist year systems",
 		});
 		const planResponse = getResponse();
 		expect(planResponse).not.toBeNull();
@@ -537,34 +549,25 @@ describe("Scenario 11: Stop hook allows when clean", () => {
 	});
 });
 
-describe("Scenario 12: PreCompact → SessionStart handoff", () => {
-	it("state preserved across compaction", async () => {
+describe("Scenario 12: PreCompact → PostCompact pending-fixes reminder", () => {
+	it("pending fixes reminded across compaction", async () => {
 		const preCompact = (await import("../hooks/pre-compact.ts")).default;
-		const sessionStart = (await import("../hooks/session-start.ts")).default;
-		const { readHandoff } = await import("../state/handoff.ts");
+		const postCompact = (await import("../hooks/post-compact.ts")).default;
 
-		// Create some pending fixes to capture in handoff
 		const { writePendingFixes: wpf } = await import("../state/pending-fixes.ts");
 		wpf([{ file: "src/broken.ts", errors: ["type error"], gate: "typecheck" }]);
 
-		// PreCompact saves handoff
+		// PreCompact writes reminder to stderr
 		await preCompact({ hook_type: "PreCompact" });
-		const handoff = readHandoff();
-		expect(handoff).not.toBeNull();
-		expect(handoff!.pending_fixes).toBe(true);
-		expect(handoff!.next_steps).toContain("broken.ts");
+		const preStderr = stderrCapture.join("");
+		expect(preStderr).toContain("pending fix");
+		expect(preStderr).toContain("src/broken.ts");
 
-		// SessionStart restores handoff
-		stdoutCapture = [];
-		await sessionStart({ hook_type: "SessionStart" });
-		const response = getResponse();
-		expect(response).not.toBeNull();
-		const context = (response?.hookSpecificOutput as Record<string, string>)?.additionalContext;
-		expect(context).toContain("pending");
-		expect(context).toContain("Next steps");
-
-		// Handoff should be consumed (cleared)
-		expect(readHandoff()).toBeNull();
+		// PostCompact also reminds via stderr
+		stderrCapture = [];
+		await postCompact({ hook_type: "PostCompact" });
+		const postStderr = stderrCapture.join("");
+		expect(postStderr).toContain("pending lint/type fix");
 	});
 });
 
@@ -732,8 +735,8 @@ describe("Scenario 17: Full E2E — plan → implement → status update → sto
 		const planResponse = getResponse();
 		const template = (planResponse?.hookSpecificOutput as Record<string, string>)
 			?.additionalContext;
-		expect(template).toContain("[pending]");
-		expect(template).toContain("Stop hook will block");
+		expect(template).toContain("## Tasks");
+		expect(template).toContain("Verify");
 
 		// Step 2: Claude creates plan with pending tasks
 		const planDir = join(TEST_DIR, ".claude", "plans");
@@ -785,9 +788,8 @@ describe("Scenario 17: Full E2E — plan → implement → status update → sto
 // TaskCompleted integration scenarios
 // ============================================================
 
-describe("Scenario 18: TaskCompleted auto-syncs plan status", () => {
-	it("completing a task updates plan and unblocks stop", async () => {
-		const taskCompleted = (await import("../hooks/task-completed.ts")).default;
+describe("Scenario 18: Plan completion unblocks stop", () => {
+	it("marking tasks done and review allows stop", async () => {
 		const stop = (await import("../hooks/stop.ts")).default;
 
 		// Create plan with 2 pending tasks
@@ -808,7 +810,7 @@ describe("Scenario 18: TaskCompleted auto-syncs plan status", () => {
 			].join("\n"),
 		);
 
-		// Stop should block (3 incomplete)
+		// Stop should block (incomplete tasks)
 		try {
 			await stop({ hook_type: "Stop" });
 		} catch {
@@ -816,46 +818,20 @@ describe("Scenario 18: TaskCompleted auto-syncs plan status", () => {
 		}
 		expect(exitCode).toBe(2);
 
-		// Claude completes Task 1 via TaskUpdate → TaskCompleted fires
-		stdoutCapture = [];
-		exitCode = null;
-		await taskCompleted({
-			hook_type: "TaskCompleted",
-			task_id: "1",
-			task_subject: "Add logger",
-		});
-		expect(exitCode).toBeNull();
-
-		// Verify plan was updated
-		const { readFileSync: rfs } = await import("node:fs");
-		const plan = rfs(join(planDir, "feature.md"), "utf-8");
-		expect(plan).toContain("Add logger [done]");
-		expect(plan).toContain("Add tests [pending]");
-
-		// Stop still blocks (Task 2 + Final Review pending)
-		stdoutCapture = [];
-		exitCode = null;
-		try {
-			await stop({ hook_type: "Stop" });
-		} catch {
-			// exit(2)
-		}
-		expect(exitCode).toBe(2);
-
-		// Claude completes Task 2
-		stdoutCapture = [];
-		exitCode = null;
-		await taskCompleted({
-			hook_type: "TaskCompleted",
-			task_id: "2",
-			task_subject: "Add tests",
-		});
-
-		// Manually check Final Review
-		const planContent = rfs(join(planDir, "feature.md"), "utf-8");
+		// Manually mark tasks as done + check review
 		writeFileSync(
 			join(planDir, "feature.md"),
-			planContent.replace("- [ ] Final Review", "- [x] Final Review"),
+			[
+				"## Tasks",
+				"### Task 1: Add logger [done]",
+				"- File: src/logger.ts",
+				"",
+				"### Task 2: Add tests [done]",
+				"- File: src/__tests__/logger.test.ts",
+				"",
+				"## Review Gates",
+				"- [x] Final Review",
+			].join("\n"),
 		);
 
 		// Record review + Now stop should allow
@@ -928,19 +904,18 @@ describe("Scenario 21: ConfigChange blocks user_settings modification", () => {
 	});
 });
 
-describe("Scenario 22: SessionEnd saves handoff on any exit", () => {
-	it("preserves state even on interrupt", async () => {
+describe("Scenario 22: SessionEnd logs pending fixes", () => {
+	it("logs pending fixes to stderr on exit", async () => {
 		const { writePendingFixes: wpf } = await import("../state/pending-fixes.ts");
 		wpf([{ file: "src/wip.ts", errors: ["incomplete"], gate: "lint" }]);
 
 		const sessionEnd = (await import("../hooks/session-end.ts")).default;
+		stderrCapture = [];
 		await sessionEnd({ hook_type: "SessionEnd" });
 
-		const { readHandoff } = await import("../state/handoff.ts");
-		const handoff = readHandoff();
-		expect(handoff).not.toBeNull();
-		expect(handoff!.pending_fixes).toBe(true);
-		expect(handoff!.next_steps).toContain("wip.ts");
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("1 pending fix");
+		expect(stderr).toContain("wip.ts");
 	});
 });
 
@@ -988,7 +963,7 @@ describe("Scenario 23: Init → Doctor reports all OK", () => {
 			// Verify key checks explicitly
 			const hooksCheck = results.find((r) => r.name === "hooks");
 			expect(hooksCheck!.status).toBe("ok");
-			expect(hooksCheck!.message).toContain("14");
+			expect(hooksCheck!.message).toContain("13/13");
 
 			const gatesCheck = results.find((r) => r.name === "gates");
 			expect(gatesCheck!.status).toBe("ok");

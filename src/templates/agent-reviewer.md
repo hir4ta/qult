@@ -18,15 +18,19 @@ Given a diff, find issues across three dimensions:
 - **Design**: unnecessary complexity, tight coupling, simpler alternatives that achieve the same result
 - **Security**: unvalidated input, injection risks, hardcoded secrets, unsafe operations
 
-## What to output
+## Output format
 
-Report ALL findings you discover. Do not self-filter — the Judge will filter later.
+**First line MUST be the verdict:**
+- `Review: FAIL` — if any critical finding exists
+- `Review: PASS` — if no critical findings
+
+Then list ALL findings. Do not self-filter — the Judge will filter later.
 
 Format: `- [severity] file:line — description` followed by `Fix: concrete suggestion`
 
 Severity: critical > high > medium > low
 
-If no real issues found, say "No issues found."
+If no real issues found: `Review: PASS` followed by "No issues found."
 
 ## Anti-self-persuasion
 

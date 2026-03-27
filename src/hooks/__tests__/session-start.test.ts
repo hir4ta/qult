@@ -1,7 +1,6 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { writeHandoff } from "../../state/handoff.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-session-test");
 const STATE_DIR = join(TEST_DIR, ".alfred", ".state");
@@ -32,25 +31,6 @@ function getResponse(): Record<string, unknown> | null {
 }
 
 describe("sessionStart hook", () => {
-	it("injects handoff context when handoff exists", async () => {
-		writeHandoff({
-			summary: "Implementing auth middleware",
-			changed_files: ["src/middleware.ts"],
-			pending_fixes: false,
-			next_steps: "Add tests for middleware",
-			saved_at: new Date().toISOString(),
-		});
-
-		const handler = (await import("../session-start.ts")).default;
-		await handler({ hook_type: "SessionStart" });
-
-		const response = getResponse();
-		expect(response).not.toBeNull();
-		const context = (response?.hookSpecificOutput as Record<string, string>)?.additionalContext;
-		expect(context).toContain("auth middleware");
-		expect(context).toContain("Add tests");
-	});
-
 	it("creates .alfred dir if missing", async () => {
 		rmSync(join(TEST_DIR, ".alfred"), { recursive: true, force: true });
 
@@ -59,5 +39,12 @@ describe("sessionStart hook", () => {
 
 		const { existsSync } = await import("node:fs");
 		expect(existsSync(join(TEST_DIR, ".alfred", ".state"))).toBe(true);
+	});
+
+	it("does not inject context when no errors", async () => {
+		const handler = (await import("../session-start.ts")).default;
+		await handler({ hook_type: "SessionStart" });
+
+		expect(getResponse()).toBeNull();
 	});
 });
