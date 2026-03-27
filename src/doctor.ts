@@ -254,6 +254,15 @@ function showMetrics(): void {
 		}
 		if (summary.reviewTotal > 0) {
 			console.log(`    Review pass rate: ${summary.reviewPassRate}%`);
+			console.log(
+				`    Review findings: ${summary.reviewFindingsTotal} total (avg ${summary.reviewAvgFindings}/review)`,
+			);
+			if (summary.reviewFindingsTotal > 0) {
+				const s = summary.reviewFindingsBySeverity;
+				console.log(
+					`    Severity: ${s.critical} critical, ${s.high} high, ${s.medium} medium, ${s.low} low`,
+				);
+			}
 		}
 		if (summary.reviewMiss > 0) {
 			console.log(`    Review misses: ${summary.reviewMiss} (gate failures after review PASS)`);

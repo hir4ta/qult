@@ -1381,3 +1381,188 @@ describe("Scenario 30: Small plan — Stop warns instead of blocking for incompl
 		expect(stderr).toContain("incomplete");
 	});
 });
+
+// ============================================================
+// Phase 5: Reviewer precision & Planner quality scenarios
+// ============================================================
+
+describe("Scenario 32: Reviewer findings recorded in metrics with severity breakdown", () => {
+	it("FAIL with mixed-severity findings stores detail in metrics", async () => {
+		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify({}));
+		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		const { readMetrics } = await import("../state/metrics.ts");
+
+		const reviewerOutput = [
+			"[critical] src/auth.ts:42 — SQL injection in login query",
+			"Fix: Use parameterized queries",
+			"",
+			"[high] src/api.ts:10 — Missing input validation",
+			"Fix: Add zod schema",
+			"",
+			"[low] src/utils.ts:5 — Unused import",
+			"Fix: Remove it",
+			"",
+			"Review: FAIL",
+			"Score: Correctness=2 Design=4 Security=2",
+		].join("\n");
+
+		try {
+			await subagentStop({
+				hook_type: "SubagentStop",
+				agent_type: "alfred-reviewer",
+				last_assistant_message: reviewerOutput,
+			});
+		} catch {
+			// exit(2) from block on FAIL
+		}
+
+		const metrics = readMetrics();
+		const reviewEntry = metrics.find((m) => m.action === "review:fail");
+		expect(reviewEntry).toBeDefined();
+		expect(reviewEntry!.detail).toBeDefined();
+		expect(reviewEntry!.detail!.total).toBe(3);
+		expect(reviewEntry!.detail!.critical).toBe(1);
+		expect(reviewEntry!.detail!.high).toBe(1);
+		expect(reviewEntry!.detail!.low).toBe(1);
+		expect(reviewEntry!.detail!.medium).toBe(0);
+	});
+
+	it("PASS with no findings stores zero total", async () => {
+		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify({}));
+		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		const { readMetrics } = await import("../state/metrics.ts");
+
+		const reviewerOutput = [
+			"No issues found.",
+			"",
+			"Review: PASS",
+			"Score: Correctness=5 Design=5 Security=5",
+		].join("\n");
+
+		await subagentStop({
+			hook_type: "SubagentStop",
+			agent_type: "alfred-reviewer",
+			last_assistant_message: reviewerOutput,
+		});
+
+		const metrics = readMetrics();
+		const reviewEntry = metrics.find((m) => m.action === "review:pass");
+		expect(reviewEntry).toBeDefined();
+		expect(reviewEntry!.detail).toBeDefined();
+		expect(reviewEntry!.detail!.total).toBe(0);
+	});
+});
+
+describe("Scenario 33: Plan template includes Boundary and SIZE guidance", () => {
+	it("plan mode full template contains Boundary field and LOC guidance", async () => {
+		const userPrompt = (await import("../hooks/user-prompt.ts")).default;
+
+		await userPrompt({
+			hook_type: "UserPromptSubmit",
+			permission_mode: "plan",
+			prompt:
+				"implement authentication with JWT tokens, add login and signup endpoints, middleware for protected routes, " +
+				"password hashing with bcrypt, update user model with password fields, add rate limiting on auth endpoints, " +
+				"create integration tests for all auth flows, update API documentation with auth examples, " +
+				"add refresh token rotation logic, implement CORS configuration for frontend origin, " +
+				"set up email verification flow with confirmation links and expiry tokens",
+		});
+
+		const response = getResponse();
+		expect(response).not.toBeNull();
+		const context = (response?.hookSpecificOutput as Record<string, string>)?.additionalContext;
+		expect(context).toContain("Boundary");
+		expect(context).toContain("15 LOC");
+	});
+});
+
+describe("Scenario 34: Large plan without File field is DENIED", () => {
+	it("4-task plan missing File field on a task → DENY", async () => {
+		const permReq = (await import("../hooks/permission-request.ts")).default;
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+
+		writeFileSync(
+			join(planDir, "no-file-field.md"),
+			[
+				"## Tasks",
+				"### Task 1: Add feature",
+				"- **File**: src/feature.ts",
+				"- **Verify**: src/__tests__/feature.test.ts:testFeature",
+				"### Task 2: Add model",
+				"- **Change**: update the model",
+				"- **Verify**: src/__tests__/model.test.ts:testModel",
+				"### Task 3: Add service",
+				"- **File**: src/service.ts",
+				"- **Verify**: src/__tests__/service.test.ts:testService",
+				"### Task 4: Add controller",
+				"- **File**: src/controller.ts",
+				"- **Verify**: src/__tests__/controller.test.ts:testController",
+				"",
+				"## Success Criteria",
+				"- [ ] `bun vitest run` — all scenarios pass",
+			].join("\n"),
+		);
+
+		try {
+			await permReq({ hook_type: "PermissionRequest", tool: { name: "ExitPlanMode" } });
+		} catch {
+			// exit(2)
+		}
+
+		expect(exitCode).toBe(2);
+		const response = getResponse();
+		const reason = (response?.hookSpecificOutput as Record<string, string>)
+			?.permissionDecisionReason;
+		expect(reason).toContain("File");
+		expect(reason).toContain("Add model");
+	});
+
+	it("small plan (≤3 tasks) passes without File field", async () => {
+		const permReq = (await import("../hooks/permission-request.ts")).default;
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+
+		writeFileSync(
+			join(planDir, "small-no-file.md"),
+			[
+				"## Tasks",
+				"### Task 1: Quick fix",
+				"- **Change**: fix the bug",
+				"### Task 2: Add test",
+				"- **Change**: add test case",
+			].join("\n"),
+		);
+
+		await permReq({ hook_type: "PermissionRequest", tool: { name: "ExitPlanMode" } });
+		expect(exitCode).toBeNull();
+	});
+});
+
+describe("Scenario 35: biome check --write clears stale pending-fixes", () => {
+	it("lint fix with --write triggers revalidation and clears pending-fixes", async () => {
+		setupFailingLintGate();
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+
+		// Step 1: Edit file → lint fails → pending-fixes created
+		await postTool({
+			hook_type: "PostToolUse",
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/foo.ts") },
+		});
+		expect(readPendingFixes().length).toBeGreaterThan(0);
+
+		// Step 2: Switch to passing gates (simulates the fix having been applied)
+		setupPassingGates();
+		stdoutCapture = [];
+
+		// Step 3: Run biome check --write → should revalidate and clear pending-fixes
+		await postTool({
+			hook_type: "PostToolUse",
+			tool_name: "Bash",
+			tool_input: { command: "biome check --write src/foo.ts" },
+		});
+
+		expect(readPendingFixes()).toHaveLength(0);
+	});
+});

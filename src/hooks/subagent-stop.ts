@@ -5,11 +5,32 @@ import type { HookEvent } from "../types.ts";
 import { block } from "./respond.ts";
 
 // [severity] file:line pattern or "No issues found"
-const FINDING_RE = /\[(critical|high|medium|low)\]/i;
+const SEVERITY_PATTERN = /\[(critical|high|medium|low)\]/;
+const FINDING_RE = new RegExp(SEVERITY_PATTERN.source, "i");
 const NO_ISSUES_RE = /no issues found/i;
 const REVIEW_PASS_RE = /^Review:\s*PASS/im;
 const REVIEW_FAIL_RE = /^Review:\s*FAIL/im;
 const SCORE_RE = /Score:\s*Correctness=\d\s+Design=\d\s+Security=\d/i;
+
+interface FindingSummary {
+	total: number;
+	critical: number;
+	high: number;
+	medium: number;
+	low: number;
+}
+
+/** Parse reviewer output for severity-tagged findings. */
+export function parseFindings(output: string): FindingSummary {
+	const summary: FindingSummary = { total: 0, critical: 0, high: 0, medium: 0, low: 0 };
+	const matches = output.matchAll(new RegExp(SEVERITY_PATTERN.source, "gi"));
+	for (const m of matches) {
+		const sev = m[1]!.toLowerCase() as keyof Omit<FindingSummary, "total">;
+		summary[sev]++;
+		summary.total++;
+	}
+	return summary;
+}
 
 /** SubagentStop: verify subagent output quality */
 export default async function subagentStop(ev: HookEvent): Promise<void> {
@@ -25,10 +46,11 @@ export default async function subagentStop(ev: HookEvent): Promise<void> {
 		const passed = REVIEW_PASS_RE.test(output);
 		const failed = REVIEW_FAIL_RE.test(output);
 		validateReviewer(output);
-		// Record outcome metric if verdict is present
+		// Record outcome metric with finding details if verdict is present
 		if (passed || failed) {
 			try {
-				recordReviewOutcome(passed);
+				const findings = parseFindings(output);
+				recordReviewOutcome(passed, { ...findings });
 			} catch {
 				/* fail-open */
 			}

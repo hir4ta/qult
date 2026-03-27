@@ -165,7 +165,7 @@ function handleBash(ev: HookEvent): void {
 
 	// Detect lint fix command → re-validate pending fixes
 	if (
-		/\b(biome\s+check.*--fix|biome\s+format|eslint.*--fix|prettier.*--write|ruff\s+check.*--fix|ruff\s+format|gofmt|go\s+fmt|cargo\s+fmt|autopep8|black)\b/.test(
+		/\b(biome\s+(check|lint).*--(fix|write)|biome\s+format|eslint.*--fix|prettier.*--write|ruff\s+check.*--fix|ruff\s+format|gofmt|go\s+fmt|cargo\s+fmt|autopep8|black)\b/.test(
 			command,
 		)
 	) {

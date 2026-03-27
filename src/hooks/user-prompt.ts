@@ -10,11 +10,12 @@ const COMPACT_TEMPLATE = `Structure your plan:
 Why this change is needed.
 
 ## Tasks
-Each task should be focused (1-2 files) with a Verify field.
+Each task: focused (1-2 files, ≤15 LOC change). Split larger work into more tasks.
 
 ### Task N: <name> [pending]
 - **File**: <path>
 - **Change**: <what to do>
+- **Boundary**: <what NOT to change>
 - **Verify**: <test file : test function>
 
 ## Success Criteria

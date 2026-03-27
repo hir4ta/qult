@@ -10,6 +10,7 @@ interface MetricEntry {
 	action: string; // "event:type" e.g. "pre-tool:deny"
 	reason: string;
 	at: string;
+	detail?: Record<string, number>; // optional structured data (e.g. finding counts)
 }
 
 function filePath(): string {
@@ -100,13 +101,14 @@ export function recordFirstPass(passed: boolean): void {
 }
 
 /** Record a review outcome (PASS or FAIL from alfred-reviewer). */
-export function recordReviewOutcome(passed: boolean): void {
+export function recordReviewOutcome(passed: boolean, detail?: Record<string, number>): void {
 	try {
 		const entries = readState();
 		entries.push({
 			action: `review:${passed ? "pass" : "fail"}`,
 			reason: "",
 			at: new Date().toISOString(),
+			detail,
 		});
 		if (entries.length > MAX_ENTRIES) {
 			entries.splice(0, entries.length - MAX_ENTRIES);
@@ -131,6 +133,9 @@ export function getMetricsSummary(): {
 	reviewPassRate: number;
 	reviewTotal: number;
 	reviewMiss: number;
+	reviewFindingsTotal: number;
+	reviewFindingsBySeverity: { critical: number; high: number; medium: number; low: number };
+	reviewAvgFindings: number;
 	topReasons: { reason: string; count: number }[];
 } {
 	const entries = readState();
@@ -146,6 +151,8 @@ export function getMetricsSummary(): {
 	let reviewPass = 0;
 	let reviewFail = 0;
 	let reviewMiss = 0;
+	let reviewFindingsTotal = 0;
+	const reviewFindingsBySeverity = { critical: 0, high: 0, medium: 0, low: 0 };
 	const reasonCounts = new Map<string, number>();
 
 	for (const e of entries) {
@@ -161,6 +168,15 @@ export function getMetricsSummary(): {
 		else if (e.action === "review:pass") reviewPass++;
 		else if (e.action === "review:fail") reviewFail++;
 		else if (e.action === "review:miss") reviewMiss++;
+
+		// Aggregate review finding details
+		if ((e.action === "review:pass" || e.action === "review:fail") && e.detail) {
+			reviewFindingsTotal += e.detail.total ?? 0;
+			reviewFindingsBySeverity.critical += e.detail.critical ?? 0;
+			reviewFindingsBySeverity.high += e.detail.high ?? 0;
+			reviewFindingsBySeverity.medium += e.detail.medium ?? 0;
+			reviewFindingsBySeverity.low += e.detail.low ?? 0;
+		}
 
 		if (e.reason) {
 			reasonCounts.set(e.reason, (reasonCounts.get(e.reason) ?? 0) + 1);
@@ -189,6 +205,10 @@ export function getMetricsSummary(): {
 		reviewPassRate: reviewTotal > 0 ? Math.round((reviewPass / reviewTotal) * 100) : 0,
 		reviewTotal,
 		reviewMiss,
+		reviewFindingsTotal,
+		reviewFindingsBySeverity,
+		reviewAvgFindings:
+			reviewTotal > 0 ? Math.round((reviewFindingsTotal / reviewTotal) * 10) / 10 : 0,
 		topReasons,
 	};
 }

@@ -4,7 +4,10 @@ import type { HookEvent } from "../types.ts";
 import { deny } from "./respond.ts";
 
 // Field patterns (with or without bold)
+const FILE_FIELD_RE = /^\s*-\s+\*{0,2}File\*{0,2}:/m;
 const VERIFY_FIELD_RE = /^\s*-\s+\*{0,2}Verify\*{0,2}:/m;
+// Detect file paths in Change field for granularity check (require path separator or src/)
+const FILE_PATH_RE = /(?:^|[\s/])[\w./-]+\.(ts|tsx|js|jsx|py|go|rs|rb|java)\b/g;
 // Verify field must contain a specific file path or command, not just generic text
 const VERIFY_SPECIFIC_RE =
 	/^\s*-\s+\*{0,2}Verify\*{0,2}:\s*\S+.*\.(ts|tsx|js|jsx|py|go|rs|rb|java|kt|swift|c|cpp|h|test|spec|json|toml|yaml|yml|sh)\b/m;
@@ -64,10 +67,32 @@ function validatePlanStructure(content: string): string[] {
 		// Review Gates: no longer required — review is enforced mechanically by stop.ts and pre-tool.ts
 	}
 
+	// Large plans: advisory warning for very large plans (not a hard block)
+	if (taskSections.length > 8) {
+		process.stderr.write(
+			"[alfred] Warning: Plan has 8+ tasks. Consider splitting into multiple sessions (1 feature per session).\n",
+		);
+	}
+
 	// Check each task has required fields
 	for (const section of taskSections) {
-		// File field: no longer required — models naturally include file paths
 		if (!isSmallPlan) {
+			// Large plans: require File field
+			if (!FILE_FIELD_RE.test(section.body)) {
+				problems.push(
+					`- Task "${section.name}": missing File field (specify which file to change)`,
+				);
+			}
+			// Large plans: check task granularity — warn if Change references 3+ distinct files
+			const changeMatch = section.body.match(/^\s*-\s+\*{0,2}Change\*{0,2}:\s*(.+)/m);
+			if (changeMatch) {
+				const files = changeMatch[1]!.match(FILE_PATH_RE);
+				if (files && new Set(files).size > 2) {
+					problems.push(
+						`- Task "${section.name}": touches ${new Set(files).size} files — split into smaller tasks (1-2 files each)`,
+					);
+				}
+			}
 			// Large plans: require Verify field with specificity
 			if (!VERIFY_FIELD_RE.test(section.body)) {
 				problems.push(`- Task "${section.name}": missing Verify field`);
