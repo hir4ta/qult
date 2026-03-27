@@ -113,4 +113,51 @@ describe("task-completed hook", () => {
 		const content = readFileSync(join(PLAN_DIR, "plan.md"), "utf-8");
 		expect(content).toContain("[done]");
 	});
+
+	it("rejects low-confidence fuzzy matches", async () => {
+		writeFileSync(
+			join(PLAN_DIR, "plan.md"),
+			[
+				"## Tasks",
+				"### Task 1: Add authentication middleware [pending]",
+				"- File: src/auth.ts",
+			].join("\n"),
+		);
+
+		const handler = (await import("../task-completed.ts")).default;
+		// "fix" is too short and unrelated — should NOT match
+		await handler({
+			hook_type: "TaskCompleted",
+			task_id: "1",
+			task_subject: "fix",
+		});
+
+		const content = readFileSync(join(PLAN_DIR, "plan.md"), "utf-8");
+		expect(content).toContain("[pending]"); // should NOT have been updated
+	});
+
+	it("skips already-done tasks", async () => {
+		writeFileSync(
+			join(PLAN_DIR, "plan.md"),
+			[
+				"## Tasks",
+				"### Task 1: Add helper [done]",
+				"- File: src/helper.ts",
+				"",
+				"### Task 2: Add tests [pending]",
+				"- File: src/__tests__/helper.test.ts",
+			].join("\n"),
+		);
+
+		const handler = (await import("../task-completed.ts")).default;
+		await handler({
+			hook_type: "TaskCompleted",
+			task_id: "2",
+			task_subject: "Add tests",
+		});
+
+		const content = readFileSync(join(PLAN_DIR, "plan.md"), "utf-8");
+		expect(content).toContain("Add helper [done]");
+		expect(content).toContain("Add tests [done]");
+	});
 });

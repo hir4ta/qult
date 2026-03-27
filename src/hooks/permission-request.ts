@@ -8,6 +8,9 @@ const TASK_HEADER_RE = /^###\s+Task\s+\d+:/m;
 // Field patterns (with or without bold)
 const FILE_FIELD_RE = /^\s*-\s+\*{0,2}File\*{0,2}:/m;
 const VERIFY_FIELD_RE = /^\s*-\s+\*{0,2}Verify\*{0,2}:/m;
+// Verify field must contain a specific file path or command, not just generic text
+const VERIFY_SPECIFIC_RE =
+	/^\s*-\s+\*{0,2}Verify\*{0,2}:\s*\S+.*\.(ts|js|py|go|rs|test|spec|json|toml|yaml|yml|sh)\b/m;
 const REVIEW_GATE_RE = /review.*gate/i;
 
 /** PermissionRequest: Validate plan structure on ExitPlanMode */
@@ -41,6 +44,10 @@ function validatePlanStructure(content: string): string[] {
 		}
 		if (!VERIFY_FIELD_RE.test(section.body)) {
 			problems.push(`- Task "${section.name}": missing Verify field`);
+		} else if (!VERIFY_SPECIFIC_RE.test(section.body)) {
+			problems.push(
+				`- Task "${section.name}": Verify field must reference a specific file or command (e.g., "Verify: bun vitest run src/__tests__/foo.test.ts")`,
+			);
 		}
 	}
 

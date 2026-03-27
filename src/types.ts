@@ -30,16 +30,34 @@ export interface HookEvent {
 	hook_type?: string;
 }
 
-/** Hook response written to stdout */
-export interface HookResponse {
-	hookSpecificOutput?: {
-		additionalContext?: string;
-		permissionDecision?: "allow" | "deny" | "ask";
-		permissionDecisionReason?: string;
-		decision?: "block";
-		reason?: string;
-	};
-}
+/** Hook response written to stdout.
+ *
+ * Schema varies by event:
+ * - PostToolUse / UserPromptSubmit / SessionStart / SubagentStart / PostToolUseFailure:
+ *     hookSpecificOutput.additionalContext
+ * - PreToolUse:
+ *     hookSpecificOutput.permissionDecision + permissionDecisionReason
+ * - Stop / UserPromptSubmit (block):
+ *     top-level decision + reason (NOT inside hookSpecificOutput)
+ *
+ * See: https://code.claude.com/docs/en/hooks
+ */
+export type HookResponse =
+	| {
+			hookSpecificOutput: {
+				additionalContext: string;
+			};
+	  }
+	| {
+			hookSpecificOutput: {
+				permissionDecision: "allow" | "deny" | "ask";
+				permissionDecisionReason?: string;
+			};
+	  }
+	| {
+			decision: "block";
+			reason: string;
+	  };
 
 /** Pending fix entry stored in .alfred/.state/pending-fixes.json */
 export interface PendingFix {

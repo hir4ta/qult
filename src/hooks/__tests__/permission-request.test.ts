@@ -166,6 +166,35 @@ describe("permissionRequest (ExitPlanMode)", () => {
 		expect(exitCode).toBeNull();
 	});
 
+	it("denies plan with generic Verify field (no specific file)", async () => {
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			[
+				"## Tasks",
+				"### Task 1: Add helper [pending]",
+				"- **File**: src/helper.ts",
+				"- **Verify**: テストが通ること",
+				"## Review Gates",
+				"- [ ] Final Review",
+			].join("\n"),
+		);
+
+		const handler = (await import("../permission-request.ts")).default;
+		try {
+			await handler({ hook_type: "PermissionRequest", tool: { name: "ExitPlanMode" } });
+		} catch {
+			// exit(2)
+		}
+
+		expect(exitCode).toBe(2);
+		const response = getResponse();
+		const reason = (response?.hookSpecificOutput as Record<string, string>)
+			?.permissionDecisionReason;
+		expect(reason).toContain("specific file or command");
+	});
+
 	it("ignores non-ExitPlanMode events", async () => {
 		const handler = (await import("../permission-request.ts")).default;
 		await handler({

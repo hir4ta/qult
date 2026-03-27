@@ -83,6 +83,15 @@ alfred hook <event>  # Hook イベント処理 (Claude Code が呼び出す)
 alfred doctor        # ヘルスチェック (bun, hooks, skill, agent, rules, gates, state, path)
 ```
 
+`alfred init` が配置するもの:
+- `~/.claude/settings.json` — 14 hooks を登録 (既存の hook は保持)
+- `~/.claude/skills/alfred-review/SKILL.md` — /alfred:review skill
+- `~/.claude/agents/alfred-reviewer.md` — 独立レビュー agent
+- `~/.claude/rules/alfred-quality.md` — 品質ルール
+- `.alfred/gates.json` — プロジェクトの lint/type/test gate を自動検出
+
+hooks は Claude Code が各イベントで自動呼び出し。手動操作は不要。
+
 ## Skills
 
 - `/alfred:review` — 独立コードレビュー。HubSpot 2-stage pattern: Reviewer (独立サブエージェント) が findings を出し、Judge がフィルタリング。自己評価は機能しないため、必ず別エージェントで実行する

@@ -8,8 +8,15 @@ export default async function preCompact(_ev: HookEvent): Promise<void> {
 	const fixes = readPendingFixes();
 	const changedFiles = getChangedFiles();
 
+	const summary =
+		fixes.length > 0
+			? `Session interrupted with ${fixes.length} pending fix(es) in: ${fixes.map((f) => f.file).join(", ")}`
+			: changedFiles.length > 0
+				? `Modified ${changedFiles.length} file(s): ${changedFiles.slice(0, 5).join(", ")}${changedFiles.length > 5 ? ` (+${changedFiles.length - 5} more)` : ""}`
+				: "Session started, no changes yet";
+
 	writeHandoff({
-		summary: "Session in progress",
+		summary,
 		changed_files: changedFiles,
 		pending_fixes: fixes.length > 0,
 		next_steps:

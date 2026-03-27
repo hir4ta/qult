@@ -175,6 +175,19 @@ Hook スキーマバグ修正 + ドキュメント刷新。
 - respond() 使用可: SessionStart, UserPromptSubmit, PostToolUse, PostToolUseFailure, SubagentStart
 - respond() 使用不可: Stop, PostCompact, TaskCompleted, PreCompact, SessionEnd, ConfigChange
 
+## v0.5.4 (完了)
+
+自己評価に基づく品質改善。型安全性・match精度・検証強度・handoff品質を向上。
+
+- **types.ts**: HookResponse を discriminated union に (additionalContext / permissionDecision / block の3パターン型分離)
+- **respond.ts**: respond/deny/block に使用可能な hook event を JSDoc 明記
+- **task-completed.ts**: fuzzy match を word overlap スコアリングに改善 (50%閾値 + best match + done skip)
+- **permission-request.ts**: Verify フィールドの具体性検証追加 (汎用文言 → DENY、ファイルパス/コマンド必須)
+- **pre-compact.ts**: handoff summary を動的生成 (pending fixes 数・変更ファイル名・状況文言)
+- **CLAUDE.md**: Hook 出力スキーマ対応表を全 hook 網羅 (respond/deny/block/出力なし の4カテゴリ)
+- **README.md**: post-init ガイダンス追加 (alfred init が何を配置するか)
+- 新テスト 3件: 低信頼度 match 拒否、done skip、Verify 汎用文言 DENY
+
 ---
 
 ## v0.6.0 — Evaluator 強化 + 効果測定
