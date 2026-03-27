@@ -533,7 +533,10 @@ describe("Scenario 10: Stop hook blocks when pending fixes exist", () => {
 });
 
 describe("Scenario 11: Stop hook allows when clean", () => {
-	it("Claude can stop normally when no pending fixes", async () => {
+	it("Claude can stop normally when no pending fixes and review completed", async () => {
+		const { recordReview } = await import("../state/session-state.ts");
+		recordReview();
+
 		const stop = (await import("../hooks/stop.ts")).default;
 
 		await stop({ hook_type: "Stop" });
@@ -560,7 +563,7 @@ describe("Scenario 12: PreCompact → PostCompact pending-fixes reminder", () =>
 		stderrCapture = [];
 		await postCompact({ hook_type: "PostCompact" });
 		const postStderr = stderrCapture.join("");
-		expect(postStderr).toContain("pending lint/type fix");
+		expect(postStderr).toContain("PENDING FIXES");
 	});
 });
 
@@ -841,8 +844,8 @@ describe("Scenario 18: Plan completion unblocks stop", () => {
 // Hook completeness scenarios
 // ============================================================
 
-describe("Scenario 19: SubagentStart injects quality context", () => {
-	it("subagents receive pending-fixes warning and quality rules", async () => {
+describe("Scenario 19: SubagentStart injects pending-fixes state", () => {
+	it("subagents receive pending-fixes warning", async () => {
 		const { writePendingFixes: wpf } = await import("../state/pending-fixes.ts");
 		wpf([{ file: "src/broken.ts", errors: ["type error"], gate: "typecheck" }]);
 
@@ -852,7 +855,6 @@ describe("Scenario 19: SubagentStart injects quality context", () => {
 		const response = getResponse();
 		const context = (response?.hookSpecificOutput as Record<string, string>)?.additionalContext;
 		expect(context).toBeDefined();
-		expect(context).toContain("focused");
 		expect(context).toContain("broken.ts");
 		expect(context).toContain("pending");
 	});
@@ -906,21 +908,6 @@ describe("Scenario 21: ConfigChange blocks hook modification", () => {
 	});
 });
 
-describe("Scenario 22: SessionEnd logs pending fixes", () => {
-	it("logs pending fixes to stderr on exit", async () => {
-		const { writePendingFixes: wpf } = await import("../state/pending-fixes.ts");
-		wpf([{ file: "src/wip.ts", errors: ["incomplete"], gate: "lint" }]);
-
-		const sessionEnd = (await import("../hooks/session-end.ts")).default;
-		stderrCapture = [];
-		await sessionEnd({ hook_type: "SessionEnd" });
-
-		const stderr = stderrCapture.join("");
-		expect(stderr).toContain("1 pending fix");
-		expect(stderr).toContain("wip.ts");
-	});
-});
-
 // ============================================================
 // Doctor integration scenario
 // ============================================================
@@ -944,7 +931,7 @@ describe("Scenario 23: Init → Doctor reports all OK", () => {
 			writeFileSync(join(claudeDir, "agents", "alfred-reviewer.md"), "# agent");
 			writeFileSync(join(claudeDir, "rules", "alfred-quality.md"), "# rules");
 
-			// Write settings.json with all 13 hooks
+			// Write settings.json with all 12 hooks
 			const { ALFRED_HOOKS } = await import("../init.ts");
 			const hooks: Record<string, unknown> = {};
 			for (const event of Object.keys(ALFRED_HOOKS)) {
@@ -965,7 +952,7 @@ describe("Scenario 23: Init → Doctor reports all OK", () => {
 			// Verify key checks explicitly
 			const hooksCheck = results.find((r) => r.name === "hooks");
 			expect(hooksCheck!.status).toBe("ok");
-			expect(hooksCheck!.message).toContain("13/13");
+			expect(hooksCheck!.message).toContain("12/12");
 
 			const gatesCheck = results.find((r) => r.name === "gates");
 			expect(gatesCheck!.status).toBe("ok");

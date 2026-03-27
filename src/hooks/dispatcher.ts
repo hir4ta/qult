@@ -22,8 +22,7 @@ export const HOOK_CLASS: Record<string, "enforcement" | "advisory"> = {
 	"subagent-start": "advisory", // respond: quality rules
 	"post-tool-failure": "advisory", // respond: /clear suggestion
 	"pre-compact": "advisory", // stderr: pending-fixes reminder
-	"post-compact": "advisory", // stderr: pending-fixes reminder
-	"session-end": "advisory", // stderr: pending-fixes log
+	"post-compact": "advisory", // stderr: structured handoff after compaction
 };
 
 const EVENT_MAP: Record<string, () => Promise<{ default: (ev: HookEvent) => Promise<void> }>> = {
@@ -38,7 +37,6 @@ const EVENT_MAP: Record<string, () => Promise<{ default: (ev: HookEvent) => Prom
 	"subagent-start": () => import("./subagent-start.ts"),
 	"subagent-stop": () => import("./subagent-stop.ts"),
 	"post-tool-failure": () => import("./post-tool-failure.ts"),
-	"session-end": () => import("./session-end.ts"),
 	"config-change": () => import("./config-change.ts"),
 };
 

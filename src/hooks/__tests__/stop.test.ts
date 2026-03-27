@@ -2,7 +2,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { writePendingFixes } from "../../state/pending-fixes.ts";
-import { writePace } from "../../state/session-state.ts";
+import { recordReview, writePace } from "../../state/session-state.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-stop-test");
 const STATE_DIR = join(TEST_DIR, ".alfred", ".state");
@@ -60,11 +60,26 @@ describe("stop hook", () => {
 		expect((response as Record<string, string>)?.reason).toContain("Fix");
 	});
 
-	it("does not block when no pending-fixes", async () => {
+	it("does not block when no pending-fixes and review completed", async () => {
+		recordReview();
+
 		const handler = (await import("../stop.ts")).default;
 		await handler({ hook_type: "Stop" });
 
 		expect(exitCode).toBeNull();
+	});
+
+	it("blocks when no review has been run", async () => {
+		const handler = (await import("../stop.ts")).default;
+		try {
+			await handler({ hook_type: "Stop" });
+		} catch {
+			// process.exit(2)
+		}
+
+		expect(exitCode).toBe(2);
+		const response = getResponse();
+		expect((response as Record<string, string>)?.reason).toContain("review");
 	});
 
 	it("does not block when stop_hook_active is true (prevent infinite loop)", async () => {
@@ -77,6 +92,7 @@ describe("stop hook", () => {
 	});
 
 	it("warns on pace yellow (20+ min) via stderr", async () => {
+		recordReview();
 		writePace({
 			last_commit_at: new Date(Date.now() - 25 * 60_000).toISOString(),
 			changed_files: 3,

@@ -1,6 +1,6 @@
 # claude-alfred
 
-Claude Code の暴走を止める執事。13 Hooks + Skill + Agent で品質の下限を守る。
+Claude Code の暴走を止める執事。12 Hooks + Skill + Agent で品質の下限を守る。
 
 ## スタック
 
@@ -10,15 +10,15 @@ TypeScript (Bun 1.3+, ESM) / citty (CLI) / vitest (テスト) / Biome (lint)
 
 ```
 alfred CLI (init / hook / doctor)
-    ├── alfred init → ~/.claude/ に 13 hooks, skill, agent, rules を配置
+    ├── alfred init → ~/.claude/ に 12 hooks, skill, agent, rules を配置
     └── alfred hook <event> → stdin JSON → 処理 → stdout JSON or exit 2
 ```
 
 3つの柱 + 2つの防御層:
 1. **壁** — PostToolUse (gate) → PreToolUse (DENY)
 2. **Plan増幅** — UserPromptSubmit (template) + PermissionRequest (ExitPlanMode)
-3. **実行ループ** — Stop (Plan未完了block + pending-fixes block) + PreCompact/PostCompact/SessionEnd (pending-fixes reminder)
-4. **サブエージェント制御** — SubagentStart (品質ルール注入) + SubagentStop (pass/fail threshold)
+3. **実行ループ** — Stop (Plan未完了block + pending-fixes block) + PreCompact (reminder) + PostCompact (構造化handoff)
+4. **サブエージェント制御** — SubagentStart (pending-fixes状態注入) + SubagentStop (pass/fail threshold)
 5. **自己防御** — ConfigChange (hook削除防止) + PostToolUseFailure (失敗追跡)
 
 ## Hook 分類
@@ -33,22 +33,21 @@ alfred CLI (init / hook / doctor)
 | SubagentStop | enforcement | block | reviewer PASS→gate clear / FAIL→block (修正+再レビュー要求) |
 | SessionStart | advisory | respond | エラートレンド注入 |
 | UserPromptSubmit | advisory | respond | Planテンプレート注入 (Plan mode のみ) |
-| SubagentStart | advisory | respond | 品質ルール注入 |
+| SubagentStart | advisory | respond | pending-fixes状態注入 |
 | PostToolUseFailure | advisory | respond | /clear提案 |
 | PreCompact | advisory | stderr | pending-fixes reminder |
-| PostCompact | advisory | stderr | pending-fixes + Plan進捗 reminder |
-| SessionEnd | advisory | stderr | pending-fixes log |
+| PostCompact | advisory | stderr | 構造化handoff (全クリティカル状態再注入) |
 
 ## 構造
 
 ```
 src/
 ├── cli.ts                  # citty: init / hook / doctor / reset
-├── init.ts                 # セットアップ (13 hooks + skill + agent + rules + gates)
+├── init.ts                 # セットアップ (12 hooks + skill + agent + rules + gates)
 ├── doctor.ts               # ヘルスチェック (8項目 + --metrics) + state整合性検証
 ├── reset.ts                # 状態リセット (--keep-history で履歴保持)
 ├── hooks/
-│   ├── dispatcher.ts       # event → handler ルーティング (13 events) + HOOK_CLASS分類
+│   ├── dispatcher.ts       # event → handler ルーティング (12 events) + HOOK_CLASS分類
 │   ├── respond.ts          # 共通: respond / deny / block + metrics記録
 │   ├── post-tool.ts        # lint/type gate + pending-fixes + pace + batch + test-pass + verify
 │   ├── pre-tool.ts         # pending-fixes → DENY + pace red → DENY + commit without test → DENY
@@ -57,9 +56,8 @@ src/
 │   ├── session-start.ts    # .alfred作成 + gates自動検出 + エラートレンド注入
 │   ├── stop.ts             # pending-fixes block + 大Plan未完了block + 小Plan warn + レビュー強制
 │   ├── pre-compact.ts      # pending-fixes reminder (stderr)
-│   ├── post-compact.ts     # pending-fixes + Plan進捗 reminder (stderr)
-│   ├── session-end.ts      # pending-fixes log (stderr)
-│   ├── subagent-start.ts   # サブエージェントに品質ルール注入
+│   ├── post-compact.ts     # 構造化handoff: 全クリティカル状態再注入 (stderr)
+│   ├── subagent-start.ts   # pending-fixes状態注入 (Opus 4.6はrules自動継承)
 │   ├── subagent-stop.ts    # reviewer PASS/FAIL + Score検証 + レビュー完了記録
 │   ├── post-tool-failure.ts # ツール失敗追跡 + 2回連続→/clear
 │   └── config-change.ts    # hook設定 変更 DENY (非hook設定は許可)
@@ -68,6 +66,7 @@ src/
 │   ├── load.ts             # gates.json 読み込み
 │   └── detect.ts           # プロジェクト設定 → gates.json 自動検出 (TS/Python/Go/Rust)
 ├── state/
+│   ├── atomic-write.ts     # atomic JSON write (write-to-temp + rename)
 │   ├── pending-fixes.ts    # 未修正 lint/type エラー
 │   ├── session-state.ts    # 統合セッション状態 (pace, test, review, batch, fail, budget)
 │   ├── gate-history.ts     # gate 結果トレンド + コミット間隔統計
@@ -114,12 +113,14 @@ task clean    # ビルド成果物削除
 - exit 2 = DENY/block (唯一の強制手段)。stderr にも理由を出力
 - additionalContext = advisory (Claude は無視可能)
 - PostToolUse 検出 → PreToolUse ブロックの二段構え
-- SubagentStart でサブエージェントにも品質ルールを伝搬
+- SubagentStart でpending-fixes状態をサブエージェントに伝搬 (品質ルールはOpus 4.6が自動継承)
+- PostCompact で構造化handoff: compaction後に全クリティカル状態を再注入
+- 全state file書き込みは atomic write (write-to-temp + rename) で race condition を防止
 - **Hook 出力スキーマ対応表** (https://code.claude.com/docs/en/hooks 準拠):
   - respond() (hookSpecificOutput.additionalContext): SessionStart, PostToolUse, PostToolUseFailure, SubagentStart
   - deny() (hookSpecificOutput.permissionDecision): PreToolUse, PermissionRequest
   - block() (トップレベル decision/reason): Stop, UserPromptSubmit, SubagentStop
-  - 出力なし (stderr で advisory): PostCompact, PreCompact, SessionEnd, ConfigChange
+  - 出力なし (stderr で advisory): PostCompact, PreCompact, ConfigChange
 
 ### Gates
 - on_write: 編集時に実行 (lint, typecheck)

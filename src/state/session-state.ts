@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { atomicWriteJson } from "./atomic-write.ts";
 import { getCommitStats } from "./gate-history.ts";
 
 const STATE_DIR = ".alfred/.state";
@@ -71,9 +72,7 @@ export function readSessionState(): SessionState {
 
 function writeState(state: SessionState): void {
 	try {
-		const dir = join(process.cwd(), STATE_DIR);
-		if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-		writeFileSync(filePath(), JSON.stringify(state, null, 2));
+		atomicWriteJson(filePath(), state);
 	} catch {
 		// fail-open
 	}

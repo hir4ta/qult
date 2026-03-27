@@ -10,7 +10,7 @@ const originalHome = process.env.HOME;
 
 /** Set up a fully valid alfred environment (init-equivalent) */
 function setupValidEnv(): void {
-	// ~/.claude/settings.json with 13 hooks
+	// ~/.claude/settings.json with 12 hooks
 	const claudeDir = join(TEST_HOME, ".claude");
 	mkdirSync(claudeDir, { recursive: true });
 
@@ -75,14 +75,14 @@ describe("doctor: check 1 — Bun version", () => {
 });
 
 describe("doctor: check 2 — hooks registered", () => {
-	it("returns ok when all 13 hooks are registered", async () => {
+	it("returns ok when all 12 hooks are registered", async () => {
 		setupValidEnv();
 		const { runChecks } = await import("../doctor.ts");
 		const results = runChecks();
 		const check = findCheck(results, "hooks");
 		expect(check).toBeDefined();
 		expect(check!.status).toBe("ok");
-		expect(check!.message).toContain("13/13");
+		expect(check!.message).toContain("12/12");
 	});
 
 	it("returns fail when hooks are missing", async () => {

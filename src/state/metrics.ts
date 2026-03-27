@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { atomicWriteJson } from "./atomic-write.ts";
 
 const STATE_DIR = ".alfred/.state";
 const FILE = "metrics.json";
@@ -27,9 +28,7 @@ function readState(): MetricEntry[] {
 
 function writeState(entries: MetricEntry[]): void {
 	try {
-		const dir = join(process.cwd(), STATE_DIR);
-		if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-		writeFileSync(filePath(), JSON.stringify(entries, null, 2));
+		atomicWriteJson(filePath(), entries);
 	} catch {
 		// fail-open
 	}

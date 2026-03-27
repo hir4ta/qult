@@ -106,12 +106,6 @@ export const ALFRED_HOOKS: Record<
 			hooks: [{ type: "command", command: "alfred hook post-tool-failure", timeout: 3000 }],
 		},
 	],
-	SessionEnd: [
-		{
-			matcher: "",
-			hooks: [{ type: "command", command: "alfred hook session-end", timeout: 3000 }],
-		},
-	],
 	ConfigChange: [
 		{
 			matcher: "",

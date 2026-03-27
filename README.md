@@ -14,7 +14,7 @@ Anthropic の [Harness Design](https://www.anthropic.com/engineering/harness-des
 - **全コンポーネントは仮定** — 「モデルが単独でできないこと」を encode し、陳腐化したら捨てる
 - **simplest solution possible** — 必要な時だけ複雑性を追加。不要なものは削除
 
-alfred は Claude Code の 13 hooks として動作し、**Opus evaluator で**、Claude の行動を機械的にゲートする。TypeScript, Python, Go, Rust を自動検出。世の SDD ツールの大半は「お願い」。alfred は「壁」。
+alfred は Claude Code の 12 hooks として動作し、**Opus evaluator で**、Claude の行動を機械的にゲートする。TypeScript, Python, Go, Rust を自動検出。世の SDD ツールの大半は「お願い」。alfred は「壁」。
 
 ## 何を防ぐか
 
@@ -35,7 +35,7 @@ Edit → biome check 失敗 → pending-fixes 記録
 | 120分以上コミットなし + 15ファイル変更 | **DENY** — スコープ肥大を阻止 (Plan ありは 180分/23ファイルまで猶予) |
 | hook 設定を変更しようとする | **DENY** — 自己防衛 (非 hook 設定は許可) |
 
-## 13 Hooks (6 enforcement + 7 advisory)
+## 12 Hooks (6 enforcement + 6 advisory)
 
 **壁 (enforcement)** — 壊れたコードを通さない
 - **PostToolUse** `[Edit/Write/Bash]`: 編集後に gate 実行。失敗 → pending-fixes + first-pass/gate outcome 記録
@@ -47,12 +47,12 @@ Edit → biome check 失敗 → pending-fixes 記録
 
 **実行ループ (enforcement + advisory)** — 中途半端に終わらせない
 - **Stop**: 未修正エラー/大Plan未完了/レビュー未実行 → block
-- **PostCompact**: pending-fixes + **Plan 進捗** reminder (compaction 後の再開支援)
-- **PreCompact / SessionEnd**: pending-fixes reminder (stderr)
+- **PostCompact**: **構造化handoff** — 全クリティカル状態 (pending-fixes, Plan進捗, gate clearance, pace, error trends) を再注入
+- **PreCompact**: pending-fixes reminder (stderr)
 - **SessionStart**: 自動セットアップ + エラートレンド注入
 
 **サブエージェント制御 (enforcement + advisory)** — 品質ルールを伝搬
-- **SubagentStart**: サブエージェントに品質ルール注入
+- **SubagentStart**: pending-fixes 状態注入 (品質ルールは Opus 4.6 が CLAUDE.md/rules から自動継承)
 - **SubagentStop**: reviewer PASS → review gate クリア / FAIL → block (修正+再レビュー要求)
 
 **自己防衛 (enforcement + advisory)** — harness 自体を守る
@@ -90,7 +90,7 @@ bun install
 bun build.ts
 bun link
 
-alfred init       # ~/.claude/ に 13 hooks + skill + agent + rules を配置
+alfred init       # ~/.claude/ に 12 hooks + skill + agent + rules を配置
 alfred doctor     # セットアップの健全性を確認
 ```
 

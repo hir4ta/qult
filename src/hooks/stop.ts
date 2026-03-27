@@ -48,13 +48,11 @@ export default async function stop(ev: HookEvent): Promise<void> {
 				);
 			}
 		}
+	}
 
-		// Block if plan exists but no review has been run
-		if (!readLastReview()) {
-			block(
-				"Run /alfred:review before finishing. Independent review is required when a plan is active.",
-			);
-		}
+	// Block if no review has been run (always required, with or without plan)
+	if (!readLastReview()) {
+		block("Run /alfred:review before finishing. Independent review is required.");
 	}
 
 	// Pace warning (soft) — Stop hook does not support additionalContext,
