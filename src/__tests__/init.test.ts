@@ -150,6 +150,23 @@ describe("qult init", () => {
 		expect(entries).toHaveLength(1);
 	});
 
+	it("preserves existing gates.json even with --force", async () => {
+		const { runInit } = await import("../init.ts");
+		await runInit(false);
+
+		// Write configured gates
+		const gatesPath = join(TEST_PROJECT, ".qult", "gates.json");
+		const gates = { on_write: { lint: { command: "biome check {file}", timeout: 3000 } } };
+		writeFileSync(gatesPath, JSON.stringify(gates));
+
+		// Re-init with --force
+		await runInit(true);
+
+		const result = JSON.parse(readFileSync(gatesPath, "utf-8"));
+		expect(result.on_write).toBeDefined();
+		expect(result.on_write.lint.command).toBe("biome check {file}");
+	});
+
 	it("does not overwrite existing hooks without --force", async () => {
 		const claudeDir = join(TEST_HOME, ".claude");
 		mkdirSync(claudeDir, { recursive: true });

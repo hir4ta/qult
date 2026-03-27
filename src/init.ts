@@ -172,7 +172,7 @@ export async function runInit(force: boolean): Promise<void> {
 	mkdirSync(join(qultDir, ".state"), { recursive: true });
 
 	const gatesPath = join(qultDir, "gates.json");
-	if (!existsSync(gatesPath) || force) {
+	if (!existsSync(gatesPath)) {
 		writeFileSync(gatesPath, "{}");
 		console.log(`  Created ${gatesPath} (run /qult:detect-gates to configure)`);
 	}

@@ -73,7 +73,7 @@ After CI succeeds, rebuild and install locally:
 
 ```
 bun build.ts
-qult init --force
+qult init
 bun link
 qult doctor
 ```
