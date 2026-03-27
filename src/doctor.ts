@@ -228,7 +228,10 @@ function showMetrics(): void {
 	);
 	const entries = readMetrics();
 
-	console.log(`\n--- Metrics (last ${entries.length} events) ---`);
+	const sessionIds = new Set(entries.map((e) => e.session_id).filter(Boolean));
+	const sessionInfo =
+		sessionIds.size > 0 ? `, ${sessionIds.size} session${sessionIds.size > 1 ? "s" : ""}` : "";
+	console.log(`\n--- Metrics (${entries.length} actions${sessionInfo}) ---`);
 
 	// --- Actions ---
 	console.log("\n  Actions:");
