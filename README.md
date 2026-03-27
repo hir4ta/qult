@@ -79,14 +79,126 @@ Edit → biome check 失敗 → pending-fixes 記録
 qult doctor --metrics
 ```
 
+実行すると以下のようなレポートが表示される:
+
+```
+--- Metrics (293 actions across 5 sessions) ---
+
+  Actions:
+    DENY:            105  (43 actionable, 62 defensive)
+    block:           5
+    respond:         32
+    respond-skipped: 2  (budget exceeded)
+    review:miss:     1
+
+  Top DENY reasons (actionable):    ...
+  Top block reasons:                ...
+  Top gate failures:                ...
+
+  Effectiveness:
+    DENY resolution (actionable): 16/43 (37%)
+    Avg fix effort: 2.3 edits/resolution
+    Gate pass rate: 67%
+    First-pass clean: 80% (recent: 75%)
+    DENYs per commit: 4.3
+    Peak consecutive errors: 3
+
+  Gates:
+    lint         pass 63%, avg 74ms
+    typecheck    pass 100%, avg 626ms
+
+  First-pass by gate:
+    lint         72% (8 failures)
+
+  Review:
+    Pass rate: 100% (3 reviews)
+    Findings: 9 total (avg 3/review)
+    Severity: 0 crit, 0 high, 4 med, 5 low
+    Misses: 1
+
+  Commits:
+    10 commits, avg 22m, med 6m, range 0-127m
+
+  Plans:
+    Approved: 4, Rejected: 1 (80% pass)
+```
+
+### ヘッダー
+
+| 項目 | 意味 |
+|------|------|
+| **actions** | hook が発火して記録された個々のアクション数 (1回のファイル編集で lint + typecheck = 2 actions) |
+| **sessions** | `session_id` が記録された Claude Code セッションの数。セッション追跡は v0.11 以降のデータのみ |
+
+### Actions セクション
+
+| 項目 | 意味 |
+|------|------|
+| **DENY** | Claude の操作を強制ブロックした回数。**actionable** = lint/typecheck 失敗等の修正すべきブロック。**defensive** = hook 設定保護 (正常動作) |
+| **block** | Claude が「完了」しようとした時に止めた回数 (未修正エラー、レビュー未実行等) |
+| **respond** | Claude のコンテキストに情報を注入した回数 (Plan テンプレート、エラートレンド等) |
+| **respond-skipped** | コンテキストバジェット (2000 token) 超過でスキップされた注入回数。多い場合はバジェット調整を検討 |
+| **review:miss** | レビュー PASS 後に gate が失敗した回数。evaluator が問題を見逃したことを示す (calibration 指標) |
+
+### Top reasons セクション
+
+種別ごとに最頻出の理由を表示:
+
+| セクション | 何が見える |
+|------|------|
+| **Top DENY reasons (actionable)** | 最も頻繁にブロックされた理由。`pending-fixes` が多ければ lint 品質、`pace red` が多ければスコープ管理に課題 |
+| **Top block reasons** | 完了ブロックの理由。`Pending lint/type errors` が多ければ修正せずに完了しようとしている |
+| **Top gate failures** | lint rule / TypeScript error コード別の失敗パターン。例: `lint/correctness/noUnusedImports` が頻出なら import 管理に課題 |
+
+### Effectiveness セクション
+
+qult の効果を測る中核指標:
+
+| 指標 | 意味 | 目安 |
+|------|------|------|
+| **DENY resolution (actionable)** | DENY 後に Claude が修正に成功した率。0% なら resolution 追跡が未機能の可能性 | 高いほど良い |
+| **Avg fix effort** | 1つの DENY を解消するのに要した編集回数 | 低いほど良い (1-2 が理想) |
+| **Gate pass rate** | 全 gate 実行のうち通過した割合 | 70%+ が目安 |
+| **First-pass clean** | ファイル初回編集時に全 gate を通過した率。**(recent: N%)** は直近20件の推移 | 高いほど品質が高い |
+| **DENYs per commit** | 1コミットに辿り着くまでの actionable DENY 回数。ハーネスの「摩擦コスト」 | 低いほどスムーズ |
+| **Peak consecutive errors** | セッション中の最大連続エラー数。Claude がスタックした度合い | 3+ なら /clear を検討 |
+
+### Gates セクション
+
+gate 名ごとの通過率と平均実行時間:
+
+| 項目 | 意味 |
+|------|------|
+| **pass N%** | その gate の通過率 |
+| **avg Nms** | 平均実行時間。遅い gate は timeout 調整の参考に |
+
+### First-pass by gate セクション
+
+gate 別の「初回編集で失敗した率」。全体の first-pass rate が低い時、どの gate が原因かを特定できる。
+
+### Review セクション
+
 | 指標 | 意味 |
 |------|------|
-| First-pass clean rate | ファイル編集時に全 gate を初回で通過した率 (品質の直接指標) |
-| Review pass rate | Opus evaluator のレビュー PASS 率 |
-| Review findings | 総件数, 平均/レビュー, severity 内訳 (critical/high/medium/low) |
-| Review misses | レビュー PASS 後にゲート失敗が発生した回数 (evaluator calibration 指標) |
-| DENY resolution rate | DENY 発火後に修正された率 |
-| Gate pass rate | gate 実行の通過率 |
+| **Pass rate** | Opus evaluator のレビュー PASS 率 |
+| **Findings** | レビュー指摘の総件数と平均 |
+| **Severity** | critical / high / medium / low の内訳 |
+| **Misses** | レビュー PASS 後に gate 失敗が発生した回数 (evaluator の見逃し) |
+
+### Commits セクション
+
+| 項目 | 意味 |
+|------|------|
+| **N commits** | 記録されたコミット数 |
+| **avg / med / range** | コミット間隔の平均・中央値・最小-最大 (分)。pace 閾値の妥当性確認に使う |
+
+### Plans セクション
+
+| 項目 | 意味 |
+|------|------|
+| **Approved** | ExitPlanMode で Plan 構造検証を通過した回数 |
+| **Rejected** | Plan 構造不備で差し戻された回数 |
+| **N% pass** | Plan の承認率。低い場合は Plan テンプレートの改善を検討 |
 
 ## インストール
 
