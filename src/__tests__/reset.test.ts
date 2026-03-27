@@ -5,7 +5,7 @@ import { runReset } from "../reset.ts";
 import { resetAllCaches } from "../state/flush.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-reset-test");
-const STATE_DIR = join(TEST_DIR, ".alfred", ".state");
+const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 const originalCwd = process.cwd();
 
 beforeEach(() => {
@@ -23,7 +23,7 @@ afterEach(() => {
 	rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
-describe("alfred reset", () => {
+describe("qult reset", () => {
 	it("deletes all state files and returns file names", () => {
 		const result = runReset(false);
 		expect(result.deleted).toHaveLength(4);
@@ -42,7 +42,7 @@ describe("alfred reset", () => {
 		expect(remaining).not.toContain("pending-fixes.json");
 	});
 
-	it("handles missing .alfred/.state gracefully", () => {
+	it("handles missing .qult/.state gracefully", () => {
 		rmSync(STATE_DIR, { recursive: true, force: true });
 		const result = runReset(false);
 		expect(result.deleted).toHaveLength(0);

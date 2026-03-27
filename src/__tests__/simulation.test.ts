@@ -7,13 +7,13 @@ import { readPace, writePace } from "../state/session-state.ts";
 import type { GatesConfig } from "../types.ts";
 
 /**
- * End-to-end simulation of alfred hook flow.
+ * End-to-end simulation of qult hook flow.
  * Imports handlers directly and captures stdout/exit behavior.
  */
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-simulation");
-const ALFRED_DIR = join(TEST_DIR, ".alfred");
-const STATE_DIR = join(ALFRED_DIR, ".state");
+const QULT_DIR = join(TEST_DIR, ".qult");
+const STATE_DIR = join(QULT_DIR, ".state");
 
 let stdoutCapture: string[] = [];
 let stderrCapture: string[] = [];
@@ -26,7 +26,7 @@ function setupFailingLintGate(): void {
 			lint: { command: "echo 'Error: unused import' && exit 1", timeout: 3000 },
 		},
 	};
-	writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify(gates));
+	writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
 }
 
 function setupPassingGates(): void {
@@ -35,7 +35,7 @@ function setupPassingGates(): void {
 			lint: { command: "echo 'OK' && exit 0", timeout: 3000 },
 		},
 	};
-	writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify(gates));
+	writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
 }
 
 beforeEach(() => {
@@ -185,7 +185,7 @@ describe("Scenario 4: Git commit resets pace", () => {
 			changed_files: 10,
 			tool_calls: 100,
 		});
-		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify({}));
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify({}));
 
 		const postTool = (await import("../hooks/post-tool.ts")).default;
 		await postTool({
@@ -260,7 +260,7 @@ describe("Scenario 6: Plan mode → template injected with review gates", () => 
 		expect(context).toContain("Success Criteria");
 		// Full template: automatic review enforcement note
 		expect(context).toContain("enforced by the harness");
-		expect(context).toContain("/alfred:review");
+		expect(context).toContain("/qult:review");
 	});
 });
 
@@ -570,7 +570,7 @@ describe("Scenario 31: Small change skips review requirement", () => {
 	it("stop blocks finish without review for large changes (6+ gated files)", async () => {
 		// Set up gates so gated extensions are known
 		writeFileSync(
-			join(ALFRED_DIR, "gates.json"),
+			join(QULT_DIR, "gates.json"),
 			JSON.stringify({
 				on_write: { lint: { command: "biome check {file}", timeout: 3000 } },
 			}),
@@ -597,7 +597,7 @@ describe("Scenario 31: Small change skips review requirement", () => {
 	it("stop allows finish without review when only non-gated files changed", async () => {
 		// Set up gates (covers .ts, not .md)
 		writeFileSync(
-			join(ALFRED_DIR, "gates.json"),
+			join(QULT_DIR, "gates.json"),
 			JSON.stringify({
 				on_write: { lint: { command: "biome check {file}", timeout: 3000 } },
 			}),
@@ -738,7 +738,7 @@ describe("Scenario 15: Init creates complete setup", () => {
 		expect(gates.on_commit?.test?.command).toContain("vitest");
 
 		// Write gates.json manually (as init would)
-		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify(gates));
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
 
 		// Now PostToolUse should be able to load and run these gates
 		const { loadGates } = await import("../gates/load.ts");
@@ -1007,7 +1007,7 @@ describe("Scenario 23: Init → Doctor reports all OK", () => {
 	it("doctor passes after valid init-like setup", async () => {
 		// Simulate what init does: create gates.json + .state
 		const gates = { on_write: { lint: { command: "echo ok", timeout: 3000 } } };
-		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify(gates));
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
 
 		// Point HOME to test dir for doctor to find settings
 		const originalHome = process.env.HOME;
@@ -1015,18 +1015,18 @@ describe("Scenario 23: Init → Doctor reports all OK", () => {
 
 		try {
 			const claudeDir = join(TEST_DIR, ".claude");
-			mkdirSync(join(claudeDir, "skills", "alfred-review"), { recursive: true });
+			mkdirSync(join(claudeDir, "skills", "qult-review"), { recursive: true });
 			mkdirSync(join(claudeDir, "agents"), { recursive: true });
 			mkdirSync(join(claudeDir, "rules"), { recursive: true });
-			writeFileSync(join(claudeDir, "skills", "alfred-review", "SKILL.md"), "# skill");
-			writeFileSync(join(claudeDir, "agents", "alfred-reviewer.md"), "# agent");
-			writeFileSync(join(claudeDir, "rules", "alfred-quality.md"), "# rules");
+			writeFileSync(join(claudeDir, "skills", "qult-review", "SKILL.md"), "# skill");
+			writeFileSync(join(claudeDir, "agents", "qult-reviewer.md"), "# agent");
+			writeFileSync(join(claudeDir, "rules", "qult-quality.md"), "# rules");
 
 			// Write settings.json with all 12 hooks
-			const { ALFRED_HOOKS } = await import("../init.ts");
+			const { QULT_HOOKS } = await import("../init.ts");
 			const hooks: Record<string, unknown> = {};
-			for (const event of Object.keys(ALFRED_HOOKS)) {
-				hooks[event] = ALFRED_HOOKS[event];
+			for (const event of Object.keys(QULT_HOOKS)) {
+				hooks[event] = QULT_HOOKS[event];
 			}
 			writeFileSync(join(claudeDir, "settings.json"), JSON.stringify({ hooks }));
 
@@ -1065,7 +1065,7 @@ describe("Scenario 24: run_once_per_batch skips typecheck on 2nd edit", () => {
 				typecheck: { command: "echo typecheck-ok", timeout: 3000, run_once_per_batch: true },
 			},
 		};
-		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify(gates));
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
 
 		const { clearOnCommit, readSessionState } = await import("../state/session-state.ts");
 		clearOnCommit();
@@ -1122,7 +1122,7 @@ describe("Scenario 25: SubagentStop blocks incomplete reviewer output", () => {
 		try {
 			await subagentStop({
 				hook_type: "SubagentStop",
-				agent_type: "alfred-reviewer",
+				agent_type: "qult-reviewer",
 				last_assistant_message: "The code looks good overall.",
 			});
 		} catch {
@@ -1135,7 +1135,7 @@ describe("Scenario 25: SubagentStop blocks incomplete reviewer output", () => {
 		exitCode = null;
 		await subagentStop({
 			hook_type: "SubagentStop",
-			agent_type: "alfred-reviewer",
+			agent_type: "qult-reviewer",
 			last_assistant_message: "- [medium] src/foo.ts:10 — unused variable\n  Fix: remove it",
 		});
 		expect(exitCode).toBeNull();
@@ -1163,7 +1163,7 @@ describe("Scenario 26: git commit DENIED without test pass", () => {
 			on_write: { lint: { command: "echo 'OK' && exit 0", timeout: 3000 } },
 			on_commit: { test: { command: "echo 'OK' && exit 0", timeout: 3000 } },
 		};
-		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify(gates));
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
 
 		// Create a plan so that review is required
 		const planDir = join(TEST_DIR, ".claude", "plans");
@@ -1263,7 +1263,7 @@ describe("Scenario 27: Stop blocks without review when plan exists", () => {
 		}
 		expect(exitCode).toBe(2);
 
-		// Record review (simulating alfred-reviewer completion)
+		// Record review (simulating qult-reviewer completion)
 		recordReview();
 
 		// Stop should allow now
@@ -1347,7 +1347,7 @@ describe("Scenario 29: Small plan (≤3 tasks) — ExitPlanMode allows without S
 				"- **Change**: Fix import",
 				"",
 				"## Review Gates",
-				"- [ ] Final Review: run /alfred:review",
+				"- [ ] Final Review: run /qult:review",
 			].join("\n"),
 		);
 
@@ -1390,7 +1390,7 @@ describe("Scenario 30: Small plan — Stop warns instead of blocking for incompl
 
 describe("Scenario 32: Reviewer findings recorded in metrics with severity breakdown", () => {
 	it("FAIL with mixed-severity findings stores detail in metrics", async () => {
-		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify({}));
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify({}));
 		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
 		const { readMetrics } = await import("../state/metrics.ts");
 
@@ -1411,7 +1411,7 @@ describe("Scenario 32: Reviewer findings recorded in metrics with severity break
 		try {
 			await subagentStop({
 				hook_type: "SubagentStop",
-				agent_type: "alfred-reviewer",
+				agent_type: "qult-reviewer",
 				last_assistant_message: reviewerOutput,
 			});
 		} catch {
@@ -1430,7 +1430,7 @@ describe("Scenario 32: Reviewer findings recorded in metrics with severity break
 	});
 
 	it("PASS with no findings stores zero total", async () => {
-		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify({}));
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify({}));
 		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
 		const { readMetrics } = await import("../state/metrics.ts");
 
@@ -1443,7 +1443,7 @@ describe("Scenario 32: Reviewer findings recorded in metrics with severity break
 
 		await subagentStop({
 			hook_type: "SubagentStop",
-			agent_type: "alfred-reviewer",
+			agent_type: "qult-reviewer",
 			last_assistant_message: reviewerOutput,
 		});
 
@@ -1602,7 +1602,7 @@ describe("Scenario 36: Stop blocks on unverified fields (large plan)", () => {
 	it("blocks when verify fields not executed", async () => {
 		const planDir = join(TEST_DIR, ".claude", "plans");
 		setupLargePlan(planDir, LARGE_PLAN_4TASKS);
-		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify({}));
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify({}));
 
 		const { recordReview, recordCriteriaCommand } = await import("../state/session-state.ts");
 		recordReview();
@@ -1625,7 +1625,7 @@ describe("Scenario 36: Stop blocks on unverified fields (large plan)", () => {
 	it("allows when all verify fields have been recorded", async () => {
 		const planDir = join(TEST_DIR, ".claude", "plans");
 		setupLargePlan(planDir, LARGE_PLAN_4TASKS);
-		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify({}));
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify({}));
 
 		const { recordVerifiedField, recordReview, recordCriteriaCommand } = await import(
 			"../state/session-state.ts"
@@ -1653,7 +1653,7 @@ describe("Scenario 37: File divergence warning", () => {
 			"- **File**: src/feature.ts",
 		].join("\n");
 		setupLargePlan(planDir, smallPlan);
-		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify({}));
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify({}));
 
 		const { recordChangedFile, recordReview } = await import("../state/session-state.ts");
 		recordChangedFile("/project/src/feature.ts");
@@ -1676,7 +1676,7 @@ describe("Scenario 38: Stop blocks on unexecuted criteria commands (large plan)"
 	it("blocks when criteria commands not executed", async () => {
 		const planDir = join(TEST_DIR, ".claude", "plans");
 		setupLargePlan(planDir, LARGE_PLAN_4TASKS);
-		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify({}));
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify({}));
 
 		const { recordVerifiedField, recordReview } = await import("../state/session-state.ts");
 		recordVerifiedField("Add auth:testLogin");
@@ -1712,7 +1712,7 @@ describe("Scenario 39: Small plan — contract checks warn only, never block", (
 			"- [ ] `bun vitest run` — tests pass",
 		].join("\n");
 		setupLargePlan(planDir, smallPlan);
-		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify({}));
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify({}));
 
 		const { recordReview } = await import("../state/session-state.ts");
 		recordReview();

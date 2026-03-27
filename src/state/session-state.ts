@@ -5,7 +5,7 @@ import { atomicWriteJson } from "./atomic-write.ts";
 import { getCommitStats } from "./gate-history.ts";
 import { getActivePlan } from "./plan-status.ts";
 
-const STATE_DIR = ".alfred/.state";
+const STATE_DIR = ".qult/.state";
 const FILE = "session-state.json";
 const BUDGET = 2000;
 const DEFAULT_RED_MINUTES = 120;
@@ -102,7 +102,7 @@ export function flush(): void {
 	try {
 		atomicWriteJson(filePath(), _cache);
 	} catch (e) {
-		if (e instanceof Error) process.stderr.write(`[alfred] state write error: ${e.message}\n`);
+		if (e instanceof Error) process.stderr.write(`[qult] state write error: ${e.message}\n`);
 	}
 	_dirty = false;
 }

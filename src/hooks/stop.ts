@@ -52,7 +52,7 @@ export default async function stop(ev: HookEvent): Promise<void> {
 				);
 			} else {
 				process.stderr.write(
-					`[alfred] Plan has ${incomplete.length} incomplete item(s). Consider updating before finishing.\n`,
+					`[qult] Plan has ${incomplete.length} incomplete item(s). Consider updating before finishing.\n`,
 				);
 			}
 		}
@@ -75,7 +75,7 @@ export default async function stop(ev: HookEvent): Promise<void> {
 					);
 				} else {
 					process.stderr.write(
-						`[alfred] ${unverified.length} verify field(s) not yet executed:\n${list}\n`,
+						`[qult] ${unverified.length} verify field(s) not yet executed:\n${list}\n`,
 					);
 				}
 			}
@@ -101,7 +101,7 @@ export default async function stop(ev: HookEvent): Promise<void> {
 						.map((f) => `  ${f}`)
 						.join("\n");
 					process.stderr.write(
-						`[alfred] ${unplannedFiles.length} file(s) changed outside the plan (possible scope creep):\n${list}\n`,
+						`[qult] ${unplannedFiles.length} file(s) changed outside the plan (possible scope creep):\n${list}\n`,
 					);
 				}
 			}
@@ -125,7 +125,7 @@ export default async function stop(ev: HookEvent): Promise<void> {
 					);
 				} else {
 					process.stderr.write(
-						`[alfred] ${unexecuted.length} Success Criteria command(s) not yet executed:\n${list}\n`,
+						`[qult] ${unexecuted.length} Success Criteria command(s) not yet executed:\n${list}\n`,
 					);
 				}
 			}
@@ -137,7 +137,7 @@ export default async function stop(ev: HookEvent): Promise<void> {
 	// Block if no review has been run (conditional on change size / plan)
 	if (!readLastReview()) {
 		if (isReviewRequired()) {
-			block("Run /alfred:review before finishing. Independent review is required.");
+			block("Run /qult:review before finishing. Independent review is required.");
 		} else {
 			try {
 				recordAction("stop", "review-skipped", "Small change — review not required");
@@ -145,7 +145,7 @@ export default async function stop(ev: HookEvent): Promise<void> {
 				/* fail-open */
 			}
 			process.stderr.write(
-				"[alfred] Review not required for this change size, but consider running /alfred:review for important changes.\n",
+				"[qult] Review not required for this change size, but consider running /qult:review for important changes.\n",
 			);
 		}
 	}
@@ -159,7 +159,7 @@ export default async function stop(ev: HookEvent): Promise<void> {
 		const elapsed = (Date.now() - commitTime) / 60_000;
 		if (elapsed >= PACE_YELLOW_MINUTES) {
 			process.stderr.write(
-				`[alfred] ${Math.round(elapsed)} minutes since last commit. Consider committing your current progress.\n`,
+				`[qult] ${Math.round(elapsed)} minutes since last commit. Consider committing your current progress.\n`,
 			);
 		}
 	}

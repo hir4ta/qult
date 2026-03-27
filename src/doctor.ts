@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { defineCommand } from "citty";
-import { ALFRED_HOOKS } from "./init.ts";
+import { QULT_HOOKS } from "./init.ts";
 import { getMetricsSummary, readMetrics } from "./state/metrics.ts";
 import type { GatesConfig } from "./types.ts";
 
@@ -41,13 +41,11 @@ function checkHooks(): CheckResult {
 	try {
 		const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
 		const hooks = settings.hooks ?? {};
-		const expected = Object.keys(ALFRED_HOOKS);
+		const expected = Object.keys(QULT_HOOKS);
 		const registered = expected.filter((event) => {
 			const entries = hooks[event];
 			if (!Array.isArray(entries)) return false;
-			return entries.some((e: Record<string, unknown>) =>
-				JSON.stringify(e).includes("alfred hook"),
-			);
+			return entries.some((e: Record<string, unknown>) => JSON.stringify(e).includes("qult hook"));
 		});
 		if (registered.length === expected.length) {
 			return {
@@ -96,7 +94,7 @@ function isExecutableReachable(exe: string): boolean {
 }
 
 function checkGates(): CheckResult {
-	const gatesPath = join(process.cwd(), ".alfred", "gates.json");
+	const gatesPath = join(process.cwd(), ".qult", "gates.json");
 	if (!existsSync(gatesPath)) {
 		return { name: "gates", status: "fail", message: "gates.json not found" };
 	}
@@ -145,12 +143,12 @@ const KNOWN_STATE_FILES = new Set([
 ]);
 
 function checkStateDir(): CheckResult {
-	const stateDir = join(process.cwd(), ".alfred", ".state");
+	const stateDir = join(process.cwd(), ".qult", ".state");
 	if (!existsSync(stateDir)) {
 		return {
 			name: "state",
 			status: "fail",
-			message: ".alfred/.state/ not found (run alfred init)",
+			message: ".qult/.state/ not found (run qult init)",
 		};
 	}
 
@@ -178,19 +176,19 @@ function checkStateDir(): CheckResult {
 		return {
 			name: "state",
 			status: "warn",
-			message: `.alfred/.state/ issues: ${warnings.join(", ")}`,
+			message: `.qult/.state/ issues: ${warnings.join(", ")}`,
 		};
 	}
-	return { name: "state", status: "ok", message: ".alfred/.state/ exists" };
+	return { name: "state", status: "ok", message: ".qult/.state/ exists" };
 }
 
 function checkPath(): CheckResult {
 	try {
 		const { execSync } = require("node:child_process");
-		const path = execSync("which alfred", { encoding: "utf-8" }).trim();
-		return { name: "path", status: "ok", message: `alfred in PATH (${path})` };
+		const path = execSync("which qult", { encoding: "utf-8" }).trim();
+		return { name: "path", status: "ok", message: `qult in PATH (${path})` };
 	} catch {
-		return { name: "path", status: "warn", message: "alfred not in PATH" };
+		return { name: "path", status: "warn", message: "qult not in PATH" };
 	}
 }
 
@@ -203,15 +201,11 @@ export function runChecks(): CheckResult[] {
 		checkHooks(),
 		checkFileExists(
 			"skill",
-			join(claudeDir, "skills", "alfred-review", "SKILL.md"),
-			"/alfred:review skill",
+			join(claudeDir, "skills", "qult-review", "SKILL.md"),
+			"/qult:review skill",
 		),
-		checkFileExists(
-			"agent",
-			join(claudeDir, "agents", "alfred-reviewer.md"),
-			"alfred-reviewer agent",
-		),
-		checkFileExists("rules", join(claudeDir, "rules", "alfred-quality.md"), "alfred-quality rules"),
+		checkFileExists("agent", join(claudeDir, "agents", "qult-reviewer.md"), "qult-reviewer agent"),
+		checkFileExists("rules", join(claudeDir, "rules", "qult-quality.md"), "qult-quality rules"),
 		checkGates(),
 		checkStateDir(),
 		checkPath(),
@@ -280,9 +274,9 @@ const STATE_DEFAULTS: Record<string, string> = {
 	"metrics.json": "[]",
 };
 
-/** Scan .alfred/.state/ for corrupt JSON and replace with defaults. */
+/** Scan .qult/.state/ for corrupt JSON and replace with defaults. */
 export function repairState(): string[] {
-	const stateDir = join(process.cwd(), ".alfred", ".state");
+	const stateDir = join(process.cwd(), ".qult", ".state");
 	if (!existsSync(stateDir)) return [];
 
 	const repaired: string[] = [];
@@ -306,7 +300,7 @@ export function repairState(): string[] {
 }
 
 export const doctorCommand = defineCommand({
-	meta: { description: "Check alfred health" },
+	meta: { description: "Check qult health" },
 	args: {
 		metrics: { type: "boolean", description: "Show action metrics", default: false },
 		fix: { type: "boolean", description: "Repair corrupted state files", default: false },

@@ -11,10 +11,10 @@ node_modules/
 *.swo
 *~
 
-# alfred state and generated files (not tracked)
-.alfred/.state/
-.alfred/conventions.json
-.alfred/layers.json
+# qult state and generated files (not tracked)
+.qult/.state/
+.qult/conventions.json
+.qult/layers.json
 
 # claude project settings (per-user)
 .claude/

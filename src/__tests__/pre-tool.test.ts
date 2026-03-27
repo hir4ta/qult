@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetAllCaches } from "../state/flush.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-pretool-test");
-const STATE_DIR = join(TEST_DIR, ".alfred", ".state");
+const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 let stdoutCapture: string[] = [];
 let exitCode: number | null = null;
 const originalCwd = process.cwd();
@@ -104,7 +104,7 @@ describe("preTool: Edit/Write checks", () => {
 describe("preTool: Bash git commit checks", () => {
 	it("DENY commit without test pass when on_commit gates exist", async () => {
 		writeFileSync(
-			join(TEST_DIR, ".alfred", "gates.json"),
+			join(TEST_DIR, ".qult", "gates.json"),
 			JSON.stringify({ on_commit: { test: { command: "vitest run", timeout: 30000 } } }),
 		);
 
@@ -125,7 +125,7 @@ describe("preTool: Bash git commit checks", () => {
 
 	it("allows commit without review for small change (test pass, no plan, few files)", async () => {
 		writeFileSync(
-			join(TEST_DIR, ".alfred", "gates.json"),
+			join(TEST_DIR, ".qult", "gates.json"),
 			JSON.stringify({ on_commit: { test: { command: "vitest run", timeout: 30000 } } }),
 		);
 
@@ -145,7 +145,7 @@ describe("preTool: Bash git commit checks", () => {
 
 	it("allows commit without review at boundary (4 files changed, no plan)", async () => {
 		writeFileSync(
-			join(TEST_DIR, ".alfred", "gates.json"),
+			join(TEST_DIR, ".qult", "gates.json"),
 			JSON.stringify({ on_commit: { test: { command: "vitest run", timeout: 30000 } } }),
 		);
 
@@ -170,7 +170,7 @@ describe("preTool: Bash git commit checks", () => {
 
 	it("DENY commit without review when plan is active", async () => {
 		writeFileSync(
-			join(TEST_DIR, ".alfred", "gates.json"),
+			join(TEST_DIR, ".qult", "gates.json"),
 			JSON.stringify({ on_commit: { test: { command: "vitest run", timeout: 30000 } } }),
 		);
 
@@ -203,7 +203,7 @@ describe("preTool: Bash git commit checks", () => {
 
 	it("DENY commit without review when many gated files changed", async () => {
 		writeFileSync(
-			join(TEST_DIR, ".alfred", "gates.json"),
+			join(TEST_DIR, ".qult", "gates.json"),
 			JSON.stringify({
 				on_write: { lint: { command: "biome check {file}", timeout: 3000 } },
 				on_commit: { test: { command: "vitest run", timeout: 30000 } },

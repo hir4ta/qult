@@ -79,7 +79,7 @@ export default async function postCompact(_ev: HookEvent): Promise<void> {
 
 	if (sections.length > 0) {
 		process.stderr.write(
-			`[alfred] Post-compaction state:\n${sections.map((s) => `  ${s}`).join("\n")}\n`,
+			`[qult] Post-compaction state:\n${sections.map((s) => `  ${s}`).join("\n")}\n`,
 		);
 	}
 }

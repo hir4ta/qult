@@ -26,7 +26,7 @@ Update status to [done] as you complete each task.`;
 
 const FULL_TEMPLATE = `${COMPACT_TEMPLATE}
 
-Note: Independent review (/alfred:review) is automatically required before each commit. You don't need to plan for it — it's enforced by the harness.`;
+Note: Independent review (/qult:review) is automatically required before each commit. You don't need to plan for it — it's enforced by the harness.`;
 
 /** UserPromptSubmit: Plan template injection (plan mode only).
  * Non-plan advisory removed — Opus 4.6 handles task scoping autonomously. */

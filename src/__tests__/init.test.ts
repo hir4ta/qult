@@ -28,7 +28,7 @@ afterEach(() => {
 	rmSync(TEST_PROJECT, { recursive: true, force: true });
 });
 
-describe("alfred init", () => {
+describe("qult init", () => {
 	it("writes hooks in matcher+hooks format to settings.json", async () => {
 		const { runInit } = await import("../init.ts");
 		await runInit(false);
@@ -60,19 +60,19 @@ describe("alfred init", () => {
 		// Each entry has matcher + hooks array
 		const postTool = settings.hooks.PostToolUse[0];
 		expect(Array.isArray(postTool.hooks)).toBe(true);
-		expect(postTool.hooks[0].command).toContain("alfred hook post-tool");
+		expect(postTool.hooks[0].command).toContain("qult hook post-tool");
 
 		// PermissionRequest has ExitPlanMode matcher
 		const permHook = settings.hooks.PermissionRequest[0];
 		expect(permHook.matcher).toBe("ExitPlanMode");
-		expect(permHook.hooks[0].command).toContain("alfred hook permission-request");
+		expect(permHook.hooks[0].command).toContain("qult hook permission-request");
 	});
 
-	it("creates .alfred/gates.json with detected gates", async () => {
+	it("creates .qult/gates.json with detected gates", async () => {
 		const { runInit } = await import("../init.ts");
 		await runInit(false);
 
-		const gatesPath = join(TEST_PROJECT, ".alfred", "gates.json");
+		const gatesPath = join(TEST_PROJECT, ".qult", "gates.json");
 		expect(existsSync(gatesPath)).toBe(true);
 
 		const gates = JSON.parse(readFileSync(gatesPath, "utf-8"));
@@ -80,11 +80,11 @@ describe("alfred init", () => {
 		expect(gates.on_write?.typecheck?.command).toContain("tsc");
 	});
 
-	it("writes skill file for /alfred:review", async () => {
+	it("writes skill file for /qult:review", async () => {
 		const { runInit } = await import("../init.ts");
 		await runInit(false);
 
-		const skillPath = join(TEST_HOME, ".claude", "skills", "alfred-review", "SKILL.md");
+		const skillPath = join(TEST_HOME, ".claude", "skills", "qult-review", "SKILL.md");
 		expect(existsSync(skillPath)).toBe(true);
 
 		const content = readFileSync(skillPath, "utf-8");
@@ -94,11 +94,11 @@ describe("alfred init", () => {
 		expect(content).toContain("Judge");
 	});
 
-	it("writes agent file for alfred-reviewer", async () => {
+	it("writes agent file for qult-reviewer", async () => {
 		const { runInit } = await import("../init.ts");
 		await runInit(false);
 
-		const agentPath = join(TEST_HOME, ".claude", "agents", "alfred-reviewer.md");
+		const agentPath = join(TEST_HOME, ".claude", "agents", "qult-reviewer.md");
 		expect(existsSync(agentPath)).toBe(true);
 
 		const content = readFileSync(agentPath, "utf-8");
@@ -109,18 +109,18 @@ describe("alfred init", () => {
 		const { runInit } = await import("../init.ts");
 		await runInit(false);
 
-		const rulesPath = join(TEST_HOME, ".claude", "rules", "alfred-quality.md");
+		const rulesPath = join(TEST_HOME, ".claude", "rules", "qult-quality.md");
 		expect(existsSync(rulesPath)).toBe(true);
 
 		const content = readFileSync(rulesPath, "utf-8");
 		expect(content.split("\n").length).toBeLessThanOrEqual(30);
 	});
 
-	it("registers project in ~/.alfred/registry.json", async () => {
+	it("registers project in ~/.qult/registry.json", async () => {
 		const { runInit } = await import("../init.ts");
 		await runInit(false);
 
-		const registryPath = join(TEST_HOME, ".alfred", "registry.json");
+		const registryPath = join(TEST_HOME, ".qult", "registry.json");
 		expect(existsSync(registryPath)).toBe(true);
 
 		const entries = JSON.parse(readFileSync(registryPath, "utf-8"));
@@ -134,7 +134,7 @@ describe("alfred init", () => {
 		await runInit(false);
 		await runInit(true);
 
-		const registryPath = join(TEST_HOME, ".alfred", "registry.json");
+		const registryPath = join(TEST_HOME, ".qult", "registry.json");
 		const entries = JSON.parse(readFileSync(registryPath, "utf-8"));
 		expect(entries).toHaveLength(1);
 	});
@@ -142,7 +142,7 @@ describe("alfred init", () => {
 	it("does not overwrite existing hooks without --force", async () => {
 		const claudeDir = join(TEST_HOME, ".claude");
 		mkdirSync(claudeDir, { recursive: true });
-		// Pre-create settings in NEW format with existing alfred hook
+		// Pre-create settings in NEW format with existing qult hook
 		writeFileSync(
 			join(claudeDir, "settings.json"),
 			JSON.stringify({
@@ -150,7 +150,7 @@ describe("alfred init", () => {
 					PostToolUse: [
 						{
 							matcher: "Edit",
-							hooks: [{ type: "command", command: "alfred hook post-tool", timeout: 5000 }],
+							hooks: [{ type: "command", command: "qult hook post-tool", timeout: 5000 }],
 						},
 					],
 				},
@@ -161,10 +161,10 @@ describe("alfred init", () => {
 		await runInit(false);
 
 		const settings = JSON.parse(readFileSync(join(claudeDir, "settings.json"), "utf-8"));
-		// Should replace old alfred entries with new ones (Edit, Write, Bash matchers)
-		const alfredEntries = settings.hooks.PostToolUse.filter((e: Record<string, unknown>) =>
-			JSON.stringify(e).includes("alfred hook"),
+		// Should replace old qult entries with new ones (Edit, Write, Bash matchers)
+		const qultEntries = settings.hooks.PostToolUse.filter((e: Record<string, unknown>) =>
+			JSON.stringify(e).includes("qult hook"),
 		);
-		expect(alfredEntries).toHaveLength(3);
+		expect(qultEntries).toHaveLength(3);
 	});
 });

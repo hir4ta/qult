@@ -15,7 +15,7 @@ function loadTemplate(name: string): string {
 }
 
 export const initCommand = defineCommand({
-	meta: { description: "Set up alfred hooks, skills, agents, and rules in ~/.claude/" },
+	meta: { description: "Set up qult hooks, skills, agents, and rules in ~/.claude/" },
 	args: {
 		force: { type: "boolean", description: "Overwrite existing configuration", default: false },
 	},
@@ -24,92 +24,92 @@ export const initCommand = defineCommand({
 	},
 });
 
-/** Alfred's hook definitions — the source of truth */
-export const ALFRED_HOOKS: Record<
+/** Qult's hook definitions — the source of truth */
+export const QULT_HOOKS: Record<
 	string,
 	Array<{ matcher: string; hooks: Array<Record<string, unknown>> }>
 > = {
 	PostToolUse: [
 		{
 			matcher: "Edit",
-			hooks: [{ type: "command", command: "alfred hook post-tool", timeout: 5000 }],
+			hooks: [{ type: "command", command: "qult hook post-tool", timeout: 5000 }],
 		},
 		{
 			matcher: "Write",
-			hooks: [{ type: "command", command: "alfred hook post-tool", timeout: 5000 }],
+			hooks: [{ type: "command", command: "qult hook post-tool", timeout: 5000 }],
 		},
 		{
 			matcher: "Bash",
-			hooks: [{ type: "command", command: "alfred hook post-tool", timeout: 5000 }],
+			hooks: [{ type: "command", command: "qult hook post-tool", timeout: 5000 }],
 		},
 	],
 	PreToolUse: [
 		{
 			matcher: "Edit",
-			hooks: [{ type: "command", command: "alfred hook pre-tool", timeout: 3000 }],
+			hooks: [{ type: "command", command: "qult hook pre-tool", timeout: 3000 }],
 		},
 		{
 			matcher: "Write",
-			hooks: [{ type: "command", command: "alfred hook pre-tool", timeout: 3000 }],
+			hooks: [{ type: "command", command: "qult hook pre-tool", timeout: 3000 }],
 		},
 		{
 			matcher: "Bash",
-			hooks: [{ type: "command", command: "alfred hook pre-tool", timeout: 3000 }],
+			hooks: [{ type: "command", command: "qult hook pre-tool", timeout: 3000 }],
 		},
 	],
 	UserPromptSubmit: [
 		{
 			matcher: "",
-			hooks: [{ type: "command", command: "alfred hook user-prompt", timeout: 10000 }],
+			hooks: [{ type: "command", command: "qult hook user-prompt", timeout: 10000 }],
 		},
 	],
 	SessionStart: [
 		{
 			matcher: "",
-			hooks: [{ type: "command", command: "alfred hook session-start", timeout: 5000 }],
+			hooks: [{ type: "command", command: "qult hook session-start", timeout: 5000 }],
 		},
 	],
-	Stop: [{ matcher: "", hooks: [{ type: "command", command: "alfred hook stop", timeout: 5000 }] }],
+	Stop: [{ matcher: "", hooks: [{ type: "command", command: "qult hook stop", timeout: 5000 }] }],
 	PreCompact: [
 		{
 			matcher: "",
-			hooks: [{ type: "command", command: "alfred hook pre-compact", timeout: 10000 }],
+			hooks: [{ type: "command", command: "qult hook pre-compact", timeout: 10000 }],
 		},
 	],
 	PostCompact: [
 		{
 			matcher: "",
-			hooks: [{ type: "command", command: "alfred hook post-compact", timeout: 5000 }],
+			hooks: [{ type: "command", command: "qult hook post-compact", timeout: 5000 }],
 		},
 	],
 	PermissionRequest: [
 		{
 			matcher: "ExitPlanMode",
-			hooks: [{ type: "command", command: "alfred hook permission-request", timeout: 5000 }],
+			hooks: [{ type: "command", command: "qult hook permission-request", timeout: 5000 }],
 		},
 	],
 	SubagentStart: [
 		{
 			matcher: "",
-			hooks: [{ type: "command", command: "alfred hook subagent-start", timeout: 3000 }],
+			hooks: [{ type: "command", command: "qult hook subagent-start", timeout: 3000 }],
 		},
 	],
 	SubagentStop: [
 		{
 			matcher: "",
-			hooks: [{ type: "command", command: "alfred hook subagent-stop", timeout: 5000 }],
+			hooks: [{ type: "command", command: "qult hook subagent-stop", timeout: 5000 }],
 		},
 	],
 	PostToolUseFailure: [
 		{
 			matcher: "Bash",
-			hooks: [{ type: "command", command: "alfred hook post-tool-failure", timeout: 3000 }],
+			hooks: [{ type: "command", command: "qult hook post-tool-failure", timeout: 3000 }],
 		},
 	],
 	ConfigChange: [
 		{
 			matcher: "",
-			hooks: [{ type: "command", command: "alfred hook config-change", timeout: 3000 }],
+			hooks: [{ type: "command", command: "qult hook config-change", timeout: 3000 }],
 		},
 	],
 };
@@ -132,13 +132,13 @@ export async function runInit(force: boolean): Promise<void> {
 
 	const existingHooks = (settings.hooks ?? {}) as Record<string, unknown[]>;
 
-	// Replace alfred hooks, preserve non-alfred hooks
-	for (const event of Object.keys(ALFRED_HOOKS)) {
-		const nonAlfred = (existingHooks[event] ?? []).filter((entry) => {
+	// Replace qult hooks, preserve non-qult hooks
+	for (const event of Object.keys(QULT_HOOKS)) {
+		const nonQult = (existingHooks[event] ?? []).filter((entry) => {
 			const json = JSON.stringify(entry);
-			return !json.includes("alfred hook");
+			return !json.includes("qult hook");
 		});
-		existingHooks[event] = [...nonAlfred, ...ALFRED_HOOKS[event]!];
+		existingHooks[event] = [...nonQult, ...QULT_HOOKS[event]!];
 		console.log(`  + ${event}`);
 	}
 
@@ -147,26 +147,26 @@ export async function runInit(force: boolean): Promise<void> {
 	writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 
 	// 2. Write skill, agent, rules
-	console.log("Writing skill: /alfred:review...");
+	console.log("Writing skill: /qult:review...");
 	writeFile(
-		join(claudeDir, "skills", "alfred-review", "SKILL.md"),
+		join(claudeDir, "skills", "qult-review", "SKILL.md"),
 		loadTemplate("skill-review.md"),
 		force,
 	);
-	console.log("Writing agent: alfred-reviewer...");
+	console.log("Writing agent: qult-reviewer...");
 	writeFile(
-		join(claudeDir, "agents", "alfred-reviewer.md"),
+		join(claudeDir, "agents", "qult-reviewer.md"),
 		loadTemplate("agent-reviewer.md"),
 		force,
 	);
-	console.log("Writing rules: alfred-quality...");
-	writeFile(join(claudeDir, "rules", "alfred-quality.md"), loadTemplate("rules-quality.md"), force);
+	console.log("Writing rules: qult-quality...");
+	writeFile(join(claudeDir, "rules", "qult-quality.md"), loadTemplate("rules-quality.md"), force);
 
-	// 3. Create .alfred/ and gates.json
-	const alfredDir = join(process.cwd(), ".alfred");
-	mkdirSync(join(alfredDir, ".state"), { recursive: true });
+	// 3. Create .qult/ and gates.json
+	const qultDir = join(process.cwd(), ".qult");
+	mkdirSync(join(qultDir, ".state"), { recursive: true });
 
-	const gatesPath = join(alfredDir, "gates.json");
+	const gatesPath = join(qultDir, "gates.json");
 	if (!existsSync(gatesPath) || force) {
 		console.log("Detecting gates...");
 		const gates = detectGates(process.cwd());
@@ -175,26 +175,26 @@ export async function runInit(force: boolean): Promise<void> {
 	}
 
 	// 4. Clear stale pending-fixes (fresh start)
-	const pendingPath = join(alfredDir, ".state", "pending-fixes.json");
+	const pendingPath = join(qultDir, ".state", "pending-fixes.json");
 	writeFileSync(pendingPath, "[]");
 
-	// 5. Register project in central registry (~/.alfred/registry.json)
+	// 5. Register project in central registry (~/.qult/registry.json)
 	registerProject(home, process.cwd());
 
-	// 6. Add .alfred/ to .gitignore if not already present
+	// 6. Add .qult/ to .gitignore if not already present
 	const gitignorePath = join(process.cwd(), ".gitignore");
 	try {
 		const gitignore = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf-8") : "";
-		if (!gitignore.includes(".alfred/") && !gitignore.includes(".alfred\n")) {
+		if (!gitignore.includes(".qult/") && !gitignore.includes(".qult\n")) {
 			const newline = gitignore.length > 0 && !gitignore.endsWith("\n") ? "\n" : "";
-			writeFileSync(gitignorePath, `${gitignore}${newline}.alfred/\n`);
-			console.log("  + .alfred/ added to .gitignore");
+			writeFileSync(gitignorePath, `${gitignore}${newline}.qult/\n`);
+			console.log("  + .qult/ added to .gitignore");
 		}
 	} catch {
 		// fail-open
 	}
 
-	console.log("\nalfred init complete.");
+	console.log("\nqult init complete.");
 }
 
 interface RegistryEntry {
@@ -204,7 +204,7 @@ interface RegistryEntry {
 
 function registerProject(home: string, projectPath: string): void {
 	try {
-		const registryDir = join(home, ".alfred");
+		const registryDir = join(home, ".qult");
 		mkdirSync(registryDir, { recursive: true });
 		const registryPath = join(registryDir, "registry.json");
 
@@ -223,7 +223,7 @@ function registerProject(home: string, projectPath: string): void {
 		}
 
 		writeFileSync(registryPath, JSON.stringify(entries, null, 2));
-		console.log(`  + registered in ~/.alfred/registry.json`);
+		console.log(`  + registered in ~/.qult/registry.json`);
 	} catch {
 		// fail-open
 	}

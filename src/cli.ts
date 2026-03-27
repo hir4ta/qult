@@ -1,12 +1,12 @@
-declare const __ALFRED_VERSION__: string;
+declare const __QULT_VERSION__: string;
 
 import { defineCommand, runMain } from "citty";
 import { dispatch } from "./hooks/dispatcher.ts";
 
 const main = defineCommand({
 	meta: {
-		name: "alfred",
-		version: typeof __ALFRED_VERSION__ !== "undefined" ? __ALFRED_VERSION__ : "dev",
+		name: "qult",
+		version: typeof __QULT_VERSION__ !== "undefined" ? __QULT_VERSION__ : "dev",
 		description: "Claude Code quality butler",
 	},
 	subCommands: {

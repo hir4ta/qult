@@ -6,10 +6,10 @@ import { writePendingFixes } from "../state/pending-fixes.ts";
 import type { HookEvent } from "../types.ts";
 import { respond } from "./respond.ts";
 
-/** SessionStart: ensure .alfred/ exists, auto-detect gates, inject error trends */
+/** SessionStart: ensure .qult/ exists, auto-detect gates, inject error trends */
 export default async function sessionStart(_ev: HookEvent): Promise<void> {
-	const alfredDir = join(process.cwd(), ".alfred");
-	const stateDir = join(alfredDir, ".state");
+	const qultDir = join(process.cwd(), ".qult");
+	const stateDir = join(qultDir, ".state");
 	if (!existsSync(stateDir)) {
 		mkdirSync(stateDir, { recursive: true });
 	}
@@ -19,7 +19,7 @@ export default async function sessionStart(_ev: HookEvent): Promise<void> {
 	writePendingFixes([]);
 
 	// Auto-detect gates if missing (zero-config)
-	const gatesPath = join(alfredDir, "gates.json");
+	const gatesPath = join(qultDir, "gates.json");
 	if (!existsSync(gatesPath)) {
 		try {
 			const gates = detectGates(process.cwd());

@@ -8,36 +8,36 @@ const TEST_PROJECT = join(import.meta.dirname, ".tmp-doctor-test-project");
 const originalCwd = process.cwd();
 const originalHome = process.env.HOME;
 
-/** Set up a fully valid alfred environment (init-equivalent) */
+/** Set up a fully valid qult environment (init-equivalent) */
 function setupValidEnv(): void {
 	// ~/.claude/settings.json with 12 hooks
 	const claudeDir = join(TEST_HOME, ".claude");
 	mkdirSync(claudeDir, { recursive: true });
 
-	const { ALFRED_HOOKS } = require("../../src/init.ts");
+	const { QULT_HOOKS } = require("../../src/init.ts");
 	const hooks: Record<string, unknown> = {};
-	for (const event of Object.keys(ALFRED_HOOKS)) {
-		hooks[event] = ALFRED_HOOKS[event];
+	for (const event of Object.keys(QULT_HOOKS)) {
+		hooks[event] = QULT_HOOKS[event];
 	}
 	writeFileSync(join(claudeDir, "settings.json"), JSON.stringify({ hooks }));
 
 	// skill
-	mkdirSync(join(claudeDir, "skills", "alfred-review"), { recursive: true });
-	writeFileSync(join(claudeDir, "skills", "alfred-review", "SKILL.md"), "# review skill");
+	mkdirSync(join(claudeDir, "skills", "qult-review"), { recursive: true });
+	writeFileSync(join(claudeDir, "skills", "qult-review", "SKILL.md"), "# review skill");
 
 	// agent
 	mkdirSync(join(claudeDir, "agents"), { recursive: true });
-	writeFileSync(join(claudeDir, "agents", "alfred-reviewer.md"), "# reviewer agent");
+	writeFileSync(join(claudeDir, "agents", "qult-reviewer.md"), "# reviewer agent");
 
 	// rules
 	mkdirSync(join(claudeDir, "rules"), { recursive: true });
-	writeFileSync(join(claudeDir, "rules", "alfred-quality.md"), "# quality rules");
+	writeFileSync(join(claudeDir, "rules", "qult-quality.md"), "# quality rules");
 
-	// .alfred/gates.json with on_write
-	const alfredDir = join(TEST_PROJECT, ".alfred");
-	mkdirSync(join(alfredDir, ".state"), { recursive: true });
+	// .qult/gates.json with on_write
+	const qultDir = join(TEST_PROJECT, ".qult");
+	mkdirSync(join(qultDir, ".state"), { recursive: true });
 	writeFileSync(
-		join(alfredDir, "gates.json"),
+		join(qultDir, "gates.json"),
 		JSON.stringify({
 			on_write: { lint: { command: "biome check {file}", timeout: 3000 } },
 		}),
@@ -177,7 +177,7 @@ describe("doctor: check 6 — gates.json", () => {
 
 	it("returns fail when gates.json is missing", async () => {
 		setupValidEnv();
-		rmSync(join(TEST_PROJECT, ".alfred", "gates.json"));
+		rmSync(join(TEST_PROJECT, ".qult", "gates.json"));
 
 		const { runChecks } = await import("../doctor.ts");
 		const results = runChecks();
@@ -188,7 +188,7 @@ describe("doctor: check 6 — gates.json", () => {
 
 	it("returns fail when gates.json has no on_write gates", async () => {
 		setupValidEnv();
-		writeFileSync(join(TEST_PROJECT, ".alfred", "gates.json"), JSON.stringify({ on_write: {} }));
+		writeFileSync(join(TEST_PROJECT, ".qult", "gates.json"), JSON.stringify({ on_write: {} }));
 
 		const { runChecks } = await import("../doctor.ts");
 		const results = runChecks();
@@ -198,7 +198,7 @@ describe("doctor: check 6 — gates.json", () => {
 	});
 });
 
-describe("doctor: check 7 — .alfred/.state/ exists", () => {
+describe("doctor: check 7 — .qult/.state/ exists", () => {
 	it("returns ok when state directory exists", async () => {
 		setupValidEnv();
 		const { runChecks } = await import("../doctor.ts");
@@ -210,7 +210,7 @@ describe("doctor: check 7 — .alfred/.state/ exists", () => {
 
 	it("returns fail when state directory is missing", async () => {
 		setupValidEnv();
-		rmSync(join(TEST_PROJECT, ".alfred", ".state"), { recursive: true, force: true });
+		rmSync(join(TEST_PROJECT, ".qult", ".state"), { recursive: true, force: true });
 
 		const { runChecks } = await import("../doctor.ts");
 		const results = runChecks();
@@ -220,8 +220,8 @@ describe("doctor: check 7 — .alfred/.state/ exists", () => {
 	});
 });
 
-describe("doctor: check 8 — alfred in PATH", () => {
-	it("returns ok or warn for alfred PATH check", async () => {
+describe("doctor: check 8 — qult in PATH", () => {
+	it("returns ok or warn for qult PATH check", async () => {
 		setupValidEnv();
 		const { runChecks } = await import("../doctor.ts");
 		const results = runChecks();
@@ -256,7 +256,7 @@ describe("doctor --fix repairs corrupted state", () => {
 		setupValidEnv();
 
 		// Write corrupt JSON to state files
-		const stateDir = join(TEST_PROJECT, ".alfred", ".state");
+		const stateDir = join(TEST_PROJECT, ".qult", ".state");
 		writeFileSync(join(stateDir, "pending-fixes.json"), "{broken json");
 		writeFileSync(join(stateDir, "session-state.json"), "not json at all");
 		writeFileSync(join(stateDir, "metrics.json"), "{{{{");
@@ -278,7 +278,7 @@ describe("doctor --fix repairs corrupted state", () => {
 		setupValidEnv();
 
 		// Write valid state
-		const stateDir = join(TEST_PROJECT, ".alfred", ".state");
+		const stateDir = join(TEST_PROJECT, ".qult", ".state");
 		writeFileSync(join(stateDir, "pending-fixes.json"), "[]");
 		writeFileSync(join(stateDir, "metrics.json"), "[]");
 

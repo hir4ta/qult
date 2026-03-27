@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetAllCaches } from "../flush.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-gate-history-test");
-const STATE_DIR = join(TEST_DIR, ".alfred", ".state");
+const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 const originalCwd = process.cwd();
 
 beforeEach(() => {

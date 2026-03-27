@@ -1,10 +1,10 @@
 ---
 name: release
-description: Release claude-alfred. Version can be specified or auto-detected
+description: Release qult. Version can be specified or auto-detected
 allowed-tools: Bash(bun *, git *, gh *), Read, Edit, Glob, Grep
 ---
 
-Release claude-alfred.
+Release qult.
 
 ## Version Detection
 
@@ -73,12 +73,12 @@ After CI succeeds, rebuild and install locally:
 
 ```
 bun build.ts
-alfred init --force
+qult init --force
 bun link
-alfred doctor
+qult doctor
 ```
 
-All 4 commands must succeed. `alfred doctor` must show all `[OK]`.
+All 4 commands must succeed. `qult doctor` must show all `[OK]`.
 
 ## Verify Release
 
@@ -94,4 +94,4 @@ gh release view v<VERSION>
 | Version | v<VERSION> |
 | Commit | <hash> |
 | CI | success/failure (duration) |
-| Release URL | https://github.com/hir4ta/claude-alfred/releases/tag/v<VERSION> |
+| Release URL | https://github.com/hir4ta/qult/releases/tag/v<VERSION> |

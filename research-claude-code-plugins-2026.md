@@ -167,10 +167,10 @@ claude --plugin-dir ./my-plugin
 - 「Phase 間」のフック地点は存在しない
 - Phase は Claude の出力概念であり、Hook lifecycle の概念ではない
 
-## 8. alfred にとっての影響
+## 8. qult にとっての影響
 
 ### Plugin として実装すべきもの
-- Skills (/alfred:review 等)
+- Skills (/qult:review 等)
 - Agents (reviewer)
 - Hooks (PostToolUse, PreToolUse, UserPromptSubmit, PreCompact)
 - MCP サーバー（将来的に必要になった場合）
@@ -180,10 +180,10 @@ claude --plugin-dir ./my-plugin
 - Stop hook (#10412)
 
 ### ハイブリッドアプローチ
-`alfred init` コマンドで:
+`qult init` コマンドで:
 1. Plugin をインストール (skills, agents, PostToolUse/PreToolUse/UserPromptSubmit hooks)
 2. settings.json に SessionStart / Stop hooks を書き込み
-3. プロジェクトローカル設定 (.alfred/) を作成
+3. プロジェクトローカル設定 (.qult/) を作成
 
 ## Sources
 

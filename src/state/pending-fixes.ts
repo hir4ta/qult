@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { PendingFix } from "../types.ts";
 import { atomicWriteJson } from "./atomic-write.ts";
 
-const STATE_DIR = ".alfred/.state";
+const STATE_DIR = ".qult/.state";
 const FIXES_FILE = "pending-fixes.json";
 
 // Process-scoped cache
@@ -44,7 +44,7 @@ export function flush(): void {
 	try {
 		atomicWriteJson(fixesPath(), _cache);
 	} catch (e) {
-		if (e instanceof Error) process.stderr.write(`[alfred] write error: ${e.message}\n`);
+		if (e instanceof Error) process.stderr.write(`[qult] write error: ${e.message}\n`);
 	}
 	_dirty = false;
 }

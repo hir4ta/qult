@@ -8,7 +8,7 @@ export function runReset(
 	keepHistory: boolean,
 	dryRun = false,
 ): { deleted: string[]; kept: string[] } {
-	const stateDir = join(process.cwd(), ".alfred", ".state");
+	const stateDir = join(process.cwd(), ".qult", ".state");
 	if (!existsSync(stateDir)) return { deleted: [], kept: [] };
 
 	const files = readdirSync(stateDir).filter((f) => f.endsWith(".json"));
@@ -30,7 +30,7 @@ export function runReset(
 }
 
 export const resetCommand = defineCommand({
-	meta: { description: "Reset alfred state" },
+	meta: { description: "Reset qult state" },
 	args: {
 		keepHistory: {
 			type: "boolean",

@@ -71,7 +71,7 @@ function checkBash(ev: HookEvent): void {
 	// Require independent review before commit (conditional on change size / plan)
 	if (!readLastReview()) {
 		if (isReviewRequired()) {
-			deny("Run /alfred:review before committing. Independent review is required.");
+			deny("Run /qult:review before committing. Independent review is required.");
 		} else {
 			try {
 				recordAction("pre-tool", "review-skipped", "Small change — review not required");

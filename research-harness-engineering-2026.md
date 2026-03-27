@@ -135,10 +135,10 @@ additionalContextは一律advisory。唯一の強制はexit 2とpermissionDecisi
 - Sprint contract は Opus 4.6 で削除 (モデル進化で不要に)
 - "Every component encodes an assumption about what the model can't do...worth stress testing"
 
-**alfredへの適用**:
+**qultへの適用**:
 - Context reset はClaude Code hook APIでは不可能 (agent handoff を制御する手段なし)
 - 代替: PostCompact で構造化handoff (全クリティカル状態の再注入) を実装
-- 独立evaluator: alfred-reviewer (Opus) + Judge filter (S/A/A)
+- 独立evaluator: qult-reviewer (Opus) + Judge filter (S/A/A)
 - Sprint contract: 小Plan緩和 + 大Plan構造要求 (Opus 4.6適応)
 
 ## 9. CLAUDE.md 最適化

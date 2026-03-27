@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetAllCaches } from "../../state/flush.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-session-test");
-const STATE_DIR = join(TEST_DIR, ".alfred", ".state");
+const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 let stdoutCapture: string[] = [];
 const originalCwd = process.cwd();
 
@@ -33,14 +33,14 @@ function getResponse(): Record<string, unknown> | null {
 }
 
 describe("sessionStart hook", () => {
-	it("creates .alfred dir if missing", async () => {
-		rmSync(join(TEST_DIR, ".alfred"), { recursive: true, force: true });
+	it("creates .qult dir if missing", async () => {
+		rmSync(join(TEST_DIR, ".qult"), { recursive: true, force: true });
 
 		const handler = (await import("../session-start.ts")).default;
 		await handler({ hook_type: "SessionStart" });
 
 		const { existsSync } = await import("node:fs");
-		expect(existsSync(join(TEST_DIR, ".alfred", ".state"))).toBe(true);
+		expect(existsSync(join(TEST_DIR, ".qult", ".state"))).toBe(true);
 	});
 
 	it("does not inject context when no errors", async () => {
@@ -52,7 +52,7 @@ describe("sessionStart hook", () => {
 
 	it("clears stale pending-fixes from previous session", async () => {
 		const { writeFileSync } = await import("node:fs");
-		const fixesPath = join(TEST_DIR, ".alfred", ".state", "pending-fixes.json");
+		const fixesPath = join(TEST_DIR, ".qult", ".state", "pending-fixes.json");
 		writeFileSync(
 			fixesPath,
 			JSON.stringify([{ file: "old.ts", errors: ["stale error"], gate: "lint" }]),

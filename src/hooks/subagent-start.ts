@@ -5,7 +5,7 @@ import { respond } from "./respond.ts";
 /**
  * SubagentStart: inject pending-fixes state into subagent context.
  *
- * Subagents don't read .alfred/.state/ — they need explicit notification
+ * Subagents don't read .qult/.state/ — they need explicit notification
  * about pending fixes to avoid editing blocked files.
  *
  * Quality rules injection was removed: Opus 4.6 subagents inherit project

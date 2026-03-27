@@ -1,9 +1,9 @@
 {
-  "name": "claude-alfred",
+  "name": "qult",
   "version": "0.9.9",
   "type": "module",
   "bin": {
-    "alfred": "dist/cli.mjs"
+    "qult": "dist/cli.mjs"
   },
   "files": [
     "dist/"

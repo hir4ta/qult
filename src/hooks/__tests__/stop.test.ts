@@ -6,7 +6,7 @@ import { writePendingFixes } from "../../state/pending-fixes.ts";
 import { recordReview, writePace } from "../../state/session-state.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-stop-test");
-const STATE_DIR = join(TEST_DIR, ".alfred", ".state");
+const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 let stdoutCapture: string[] = [];
 let stderrCapture: string[] = [];
 let exitCode: number | null = null;

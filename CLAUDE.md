@@ -1,4 +1,4 @@
-# claude-alfred
+# qult
 
 Claude Code の暴走を止める執事。12 Hooks + Skill + Agent で品質の下限を守る。
 
@@ -9,9 +9,9 @@ TypeScript (Bun 1.3+, ESM) / citty (CLI) / vitest (テスト) / Biome (lint)
 ## アーキテクチャ
 
 ```
-alfred CLI (init / hook / doctor)
-    ├── alfred init → ~/.claude/ に 12 hooks, skill, agent, rules を配置
-    └── alfred hook <event> → stdin JSON → 処理 → stdout JSON or exit 2
+qult CLI (init / hook / doctor)
+    ├── qult init → ~/.claude/ に 12 hooks, skill, agent, rules を配置
+    └── qult hook <event> → stdin JSON → 処理 → stdout JSON or exit 2
 ```
 
 3つの柱 + 2つの防御層:
@@ -57,7 +57,7 @@ task clean    # ビルド成果物削除
 3. **少ない方が強い** — コンテキスト注入は最小限。Hook注入は20行以内
 4. **タスクスコープ適応** — 計画なし: 1-2ファイル集中。計画あり: 計画の境界に従う
 5. **検証 > 指示** — 「何を検証すべきか」を伝える。HOW ではなく WHAT
-6. **fail-open** — 全 hook は try-catch で握りつぶす。alfred の障害で Claude を止めない
+6. **fail-open** — 全 hook は try-catch で握りつぶす。qult の障害で Claude を止めない
 7. **simplest solution** — 全コンポーネントは load-bearing 仮定を持つ。仮定が崩れたら削除
 
 ## ルール
@@ -86,14 +86,14 @@ task clean    # ビルド成果物削除
 - on_commit: コミット時に実行 (test)
 - on_review: レビュー時に reviewer が実行 (e2e — playwright/cypress 自動検出)
 
-### 状態ファイル (.alfred/.state/)
+### 状態ファイル (.qult/.state/)
 - pending-fixes.json — 未修正 lint/type エラー
 - session-state.json — 統合セッション状態 (pace, test pass, review, gate batch, fail count, budget, action counters, verified_fields, criteria_commands_run)
 - gate-history.json — gate 結果トレンド + コミット間隔 (50件 cap)
 - metrics.json — DENY/block/respond 発火記録 (50件 cap, `doctor --metrics` で表示)
 
 ### Sprint Contract (適応型)
-- Opus 4.6 で sprint construct を削除。alfredも適応:
+- Opus 4.6 で sprint construct を削除。qultも適応:
   - **小Plan (≤3 tasks)**: 構造要件なし。Verify あれば具体的であること
   - **大Plan (4+ tasks)**: Success Criteria (具体的) + Verify フィールド (具体的) 必須
   - Review Gates: Plan構造では不要。review は stop.ts/pre-tool.ts で条件付き強制
@@ -135,7 +135,7 @@ task clean    # ビルド成果物削除
 1. `bun vitest run` — 全テスト pass
 2. `bun vitest run src/__tests__/simulation.test.ts` — シミュレーション pass
 3. `bun tsc --noEmit && bun biome check src/` — 型 + lint clean
-4. `/alfred:review` — 独立レビュー (自己評価は機能しない。必ずサブエージェントで実行)
+4. `/qult:review` — 独立レビュー (自己評価は機能しない。必ずサブエージェントで実行)
 5. コミット — Phase Gate 通過後にのみコミット
 
 ### シミュレーション

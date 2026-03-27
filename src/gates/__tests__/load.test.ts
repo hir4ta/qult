@@ -4,11 +4,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadGates } from "../load.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-load-test");
-const ALFRED_DIR = join(TEST_DIR, ".alfred");
+const QULT_DIR = join(TEST_DIR, ".qult");
 const originalCwd = process.cwd();
 
 beforeEach(() => {
-	mkdirSync(ALFRED_DIR, { recursive: true });
+	mkdirSync(QULT_DIR, { recursive: true });
 	process.chdir(TEST_DIR);
 });
 
@@ -25,7 +25,7 @@ describe("loadGates", () => {
 
 	it("returns parsed config from valid gates.json", () => {
 		const gates = { on_write: { lint: { command: "biome check {file}", timeout: 3000 } } };
-		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify(gates));
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
 
 		const result = loadGates();
 		expect(result).not.toBeNull();
@@ -33,7 +33,7 @@ describe("loadGates", () => {
 	});
 
 	it("returns null on corrupted JSON (fail-open)", () => {
-		writeFileSync(join(ALFRED_DIR, "gates.json"), "not valid json{{{");
+		writeFileSync(join(QULT_DIR, "gates.json"), "not valid json{{{");
 
 		const result = loadGates();
 		expect(result).toBeNull();

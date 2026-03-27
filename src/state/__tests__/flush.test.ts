@@ -6,7 +6,7 @@ import { readPendingFixes, writePendingFixes } from "../pending-fixes.ts";
 import { readSessionState } from "../session-state.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-flush-test");
-const STATE_DIR = join(TEST_DIR, ".alfred", ".state");
+const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 const originalCwd = process.cwd();
 
 beforeEach(() => {

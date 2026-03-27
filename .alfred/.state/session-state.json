@@ -1,0 +1,20 @@
+{
+  "last_commit_at": "2026-03-27T14:37:41.408Z",
+  "changed_files": 0,
+  "tool_calls": 0,
+  "test_passed_at": null,
+  "test_command": null,
+  "review_completed_at": null,
+  "ran_gates": {},
+  "last_error_signature": "",
+  "consecutive_error_count": 0,
+  "context_session_id": "80ff005b-cc9c-4d8e-bcd6-0bd57c3b8ae6",
+  "context_used": 0,
+  "session_deny_count": 0,
+  "session_block_count": 0,
+  "session_respond_count": 0,
+  "first_pass_recorded": [],
+  "changed_file_paths": [],
+  "verified_fields": [],
+  "criteria_commands_run": []
+}

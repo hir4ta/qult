@@ -22,7 +22,7 @@ import {
 } from "../state/session-state.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-session-state");
-const STATE_DIR = join(TEST_DIR, ".alfred", ".state");
+const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 const originalCwd = process.cwd();
 
 beforeEach(() => {
@@ -199,9 +199,9 @@ describe("session-state: isReviewRequired", () => {
 	it("required when gated files >= 5", () => {
 		// Create gates.json with biome (covers .ts)
 		const { writeFileSync } = require("node:fs");
-		const alfredDir = join(TEST_DIR, ".alfred");
+		const qultDir = join(TEST_DIR, ".qult");
 		writeFileSync(
-			join(alfredDir, "gates.json"),
+			join(qultDir, "gates.json"),
 			JSON.stringify({
 				on_write: { lint: { command: "biome check {file}", timeout: 3000 } },
 			}),
@@ -218,9 +218,9 @@ describe("session-state: isReviewRequired", () => {
 	it("not required when only non-gated files changed", () => {
 		// Create gates.json with biome (covers .ts, not .md)
 		const { writeFileSync } = require("node:fs");
-		const alfredDir = join(TEST_DIR, ".alfred");
+		const qultDir = join(TEST_DIR, ".qult");
 		writeFileSync(
-			join(alfredDir, "gates.json"),
+			join(qultDir, "gates.json"),
 			JSON.stringify({
 				on_write: { lint: { command: "biome check {file}", timeout: 3000 } },
 			}),
@@ -236,9 +236,9 @@ describe("session-state: isReviewRequired", () => {
 
 	it("not required when gated files < 5 (even with many non-gated)", () => {
 		const { writeFileSync } = require("node:fs");
-		const alfredDir = join(TEST_DIR, ".alfred");
+		const qultDir = join(TEST_DIR, ".qult");
 		writeFileSync(
-			join(alfredDir, "gates.json"),
+			join(qultDir, "gates.json"),
 			JSON.stringify({
 				on_write: { lint: { command: "biome check {file}", timeout: 3000 } },
 			}),
@@ -262,9 +262,9 @@ describe("session-state: isReviewRequired", () => {
 describe("session-state: countGatedFiles", () => {
 	it("counts only files with gated extensions", () => {
 		const { writeFileSync } = require("node:fs");
-		const alfredDir = join(TEST_DIR, ".alfred");
+		const qultDir = join(TEST_DIR, ".qult");
 		writeFileSync(
-			join(alfredDir, "gates.json"),
+			join(qultDir, "gates.json"),
 			JSON.stringify({
 				on_write: {
 					lint: { command: "biome check {file}", timeout: 3000 },
@@ -290,9 +290,9 @@ describe("session-state: countGatedFiles", () => {
 
 	it("deduplicates file paths", () => {
 		const { writeFileSync } = require("node:fs");
-		const alfredDir = join(TEST_DIR, ".alfred");
+		const qultDir = join(TEST_DIR, ".qult");
 		writeFileSync(
-			join(alfredDir, "gates.json"),
+			join(qultDir, "gates.json"),
 			JSON.stringify({
 				on_write: { lint: { command: "biome check {file}", timeout: 3000 } },
 			}),

@@ -10,7 +10,7 @@ const originalCwd = process.cwd();
 
 beforeEach(() => {
 	resetAllCaches();
-	mkdirSync(join(TEST_DIR, ".alfred", ".state"), { recursive: true });
+	mkdirSync(join(TEST_DIR, ".qult", ".state"), { recursive: true });
 	process.chdir(TEST_DIR);
 	stdoutCapture = [];
 	exitCode = null;
@@ -64,17 +64,17 @@ describe("subagentStop", () => {
 		const handler = (await import("../subagent-stop.ts")).default;
 		await handler({
 			hook_type: "SubagentStop",
-			agent_type: "alfred-reviewer",
+			agent_type: "qult-reviewer",
 		});
 		expect(exitCode).toBeNull();
 	});
 
-	it("blocks alfred-reviewer without findings", async () => {
+	it("blocks qult-reviewer without findings", async () => {
 		const handler = (await import("../subagent-stop.ts")).default;
 		try {
 			await handler({
 				hook_type: "SubagentStop",
-				agent_type: "alfred-reviewer",
+				agent_type: "qult-reviewer",
 				last_assistant_message: "I looked at the code and it seems fine.",
 			});
 		} catch {
@@ -83,44 +83,44 @@ describe("subagentStop", () => {
 		expect(exitCode).toBe(2);
 	});
 
-	it("allows alfred-reviewer with severity findings", async () => {
+	it("allows qult-reviewer with severity findings", async () => {
 		const handler = (await import("../subagent-stop.ts")).default;
 		await handler({
 			hook_type: "SubagentStop",
-			agent_type: "alfred-reviewer",
+			agent_type: "qult-reviewer",
 			last_assistant_message:
 				"- [high] src/foo.ts:42 — missing null check\n  Fix: add if (!x) return;",
 		});
 		expect(exitCode).toBeNull();
 	});
 
-	it("allows alfred-reviewer with 'No issues found'", async () => {
+	it("allows qult-reviewer with 'No issues found'", async () => {
 		const handler = (await import("../subagent-stop.ts")).default;
 		await handler({
 			hook_type: "SubagentStop",
-			agent_type: "alfred-reviewer",
+			agent_type: "qult-reviewer",
 			last_assistant_message: "No issues found from correctness perspective.",
 		});
 		expect(exitCode).toBeNull();
 	});
 
-	it("allows alfred-reviewer with PASS verdict + Score line", async () => {
+	it("allows qult-reviewer with PASS verdict + Score line", async () => {
 		const handler = (await import("../subagent-stop.ts")).default;
 		await handler({
 			hook_type: "SubagentStop",
-			agent_type: "alfred-reviewer",
+			agent_type: "qult-reviewer",
 			last_assistant_message:
 				"Review: PASS\nScore: Correctness=5 Design=4 Security=5\n\nNo major issues.",
 		});
 		expect(exitCode).toBeNull();
 	});
 
-	it("blocks alfred-reviewer with FAIL verdict (requires fix + re-review)", async () => {
+	it("blocks qult-reviewer with FAIL verdict (requires fix + re-review)", async () => {
 		const handler = (await import("../subagent-stop.ts")).default;
 		try {
 			await handler({
 				hook_type: "SubagentStop",
-				agent_type: "alfred-reviewer",
+				agent_type: "qult-reviewer",
 				last_assistant_message:
 					"Review: FAIL\nScore: Correctness=2 Design=3 Security=4\n\n- [critical] src/foo.ts:10 — SQL injection\n  Fix: use parameterized query",
 			});
@@ -132,12 +132,12 @@ describe("subagentStop", () => {
 		expect(output).toContain("FAIL");
 	});
 
-	it("blocks alfred-reviewer with PASS verdict but no Score or findings", async () => {
+	it("blocks qult-reviewer with PASS verdict but no Score or findings", async () => {
 		const handler = (await import("../subagent-stop.ts")).default;
 		try {
 			await handler({
 				hook_type: "SubagentStop",
-				agent_type: "alfred-reviewer",
+				agent_type: "qult-reviewer",
 				last_assistant_message: "Review: PASS\n\nThe code looks good overall.",
 			});
 		} catch {

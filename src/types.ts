@@ -59,14 +59,14 @@ export type HookResponse =
 			reason: string;
 	  };
 
-/** Pending fix entry stored in .alfred/.state/pending-fixes.json */
+/** Pending fix entry stored in .qult/.state/pending-fixes.json */
 export interface PendingFix {
 	file: string;
 	errors: string[];
 	gate: string;
 }
 
-/** Gate configuration in .alfred/gates.json */
+/** Gate configuration in .qult/gates.json */
 export interface GatesConfig {
 	on_write?: Record<string, GateDefinition>;
 	on_commit?: Record<string, GateDefinition>;

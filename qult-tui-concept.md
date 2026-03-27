@@ -1,27 +1,27 @@
-# alfred-tui: TUI Dashboard Concept
+# qult-tui: TUI Dashboard Concept
 
-alfred の state データをリアルタイムで可視化する別パッケージ。
+qult の state データをリアルタイムで可視化する別パッケージ。
 
 ## モチベーション
 
-- alfred の「効果の実証」が現状の最大の弱点 (評価 3/5)
+- qult の「効果の実証」が現状の最大の弱点 (評価 3/5)
 - `doctor --metrics` は数値の羅列。トレンドやパターンが見えない
-- リッチな可視化で alfred の価値を目に見える形にする
+- リッチな可視化で qult の価値を目に見える形にする
 
 ## 技術スタック
 
 - OpenTUI (@opentui/core) — Zig ネイティブコアの TUI ライブラリ
 - Bun — ランタイム
-- 別パッケージ (alfred 本体の zero-dependency を維持)
+- 別パッケージ (qult 本体の zero-dependency を維持)
 
 ## プロジェクト横断ダッシュボード
 
-`alfred init` 実行時に `~/.alfred/registry.json` へプロジェクトパスを自動登録（v0.9.8+ で実装済み）。
+`qult init` 実行時に `~/.qult/registry.json` へプロジェクトパスを自動登録（v0.9.8+ で実装済み）。
 
 ```json
-// ~/.alfred/registry.json
+// ~/.qult/registry.json
 [
-  { "path": "/Users/user/Projects/claude-alfred", "registered_at": "2026-03-27T..." },
+  { "path": "/Users/user/Projects/qult", "registered_at": "2026-03-27T..." },
   { "path": "/Users/user/Projects/webapp", "registered_at": "2026-03-27T..." }
 ]
 ```
@@ -30,18 +30,18 @@ alfred の state データをリアルタイムで可視化する別パッケー
 
 ```bash
 # どのパスからでも実行可能
-alfred-dash
+qult-dash
 
 # デフォルト: 全プロジェクトの集約ビュー
 # Tab: プロジェクト単位で切り替え
-# 各プロジェクトの .alfred/.state/ を読み取り
+# 各プロジェクトの .qult/.state/ を読み取り
 ```
 
 ### 画面構成
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ [All] [claude-alfred] [webapp] [api-server]    Tab  │
+│ [All] [qult] [webapp] [api-server]    Tab  │
 ├─────────────────┬───────────────────────────────────┤
 │ Session Status  │ DENY/Block Activity               │
 │  pace: 12min    │  ██████░░ resolution: 75%         │
@@ -77,27 +77,27 @@ alfred-dash
 ## アーキテクチャ
 
 ```
-alfred-dash (別リポ)
-├── ~/.alfred/registry.json からプロジェクト一覧を取得
-├── 各プロジェクトの .alfred/.state/ を polling (1s) で読み取り
+qult-dash (別リポ)
+├── ~/.qult/registry.json からプロジェクト一覧を取得
+├── 各プロジェクトの .qult/.state/ を polling (1s) で読み取り
 ├── read-only — state ファイルへの書き込みは一切しない
-├── alfred 本体がなくても起動可能 (state ファイルがあれば動く)
-└── bun install -g && alfred-dash で起動
+├── qult 本体がなくても起動可能 (state ファイルがあれば動く)
+└── bun install -g && qult-dash で起動
 ```
 
 ## インストール
 
 ```bash
-# alfred 本体とは別にインストール
-bun install -g alfred-dash
+# qult 本体とは別にインストール
+bun install -g qult-dash
 # どのディレクトリからでも起動
-alfred-dash
+qult-dash
 ```
 
 ## 未決事項
 
 - ~~プロジェクト横断ダッシュボードの是非~~ → registry.json で解決済み
-- 別リポ vs claude-alfred monorepo 化
+- 別リポ vs qult monorepo 化
 - OpenTUI の Bun バンドル互換性の検証
 - リアルタイム polling vs ファイル監視 (fs.watch)
 - 集約ビューの集計ロジック（プロジェクト間の metrics をどうマージするか）

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetAllCaches } from "../../state/flush.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-user-prompt-test");
-const STATE_DIR = join(TEST_DIR, ".alfred", ".state");
+const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 let stdoutCapture: string[] = [];
 const originalCwd = process.cwd();
 

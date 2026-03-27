@@ -19,7 +19,7 @@ function findArg(flag: string): string | undefined {
 
 if (isCompile) {
 	const target = findArg("--target");
-	const outfile = findArg("--outfile") ?? "dist/alfred";
+	const outfile = findArg("--outfile") ?? "dist/qult";
 
 	const args = [
 		"bun",
@@ -28,7 +28,7 @@ if (isCompile) {
 		"--compile",
 		"--minify",
 		"--define",
-		`__ALFRED_VERSION__="${version}"`,
+		`__QULT_VERSION__="${version}"`,
 		"--outfile",
 		outfile,
 	];
@@ -45,7 +45,7 @@ if (isCompile) {
 		banner: "#!/usr/bin/env bun",
 		naming: "[name].mjs",
 		define: {
-			__ALFRED_VERSION__: JSON.stringify(version),
+			__QULT_VERSION__: JSON.stringify(version),
 		},
 	});
 

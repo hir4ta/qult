@@ -1,9 +1,9 @@
-# alfred
+# qult
 
 Claude Code の暴走を止める執事。品質の下限を機械的に守る **evaluator harness**。
 
 > Claude は優秀だが、lint エラーを放置して次のファイルに行く。テストなしでコミットする。自分のコードを褒めてレビューを終える。
-> alfred はそれを **物理的に止める**。お願い (advisory) ではなく、exit 2 (DENY) で。
+> qult はそれを **物理的に止める**。お願い (advisory) ではなく、exit 2 (DENY) で。
 
 ## なぜ evaluator harness か
 
@@ -14,7 +14,7 @@ Anthropic の [Harness Design](https://www.anthropic.com/engineering/harness-des
 - **全コンポーネントは仮定** — 「モデルが単独でできないこと」を encode し、陳腐化したら捨てる
 - **simplest solution possible** — 必要な時だけ複雑性を追加。不要なものは削除
 
-alfred は Claude Code の 12 hooks として動作し、**Opus evaluator で**、Claude の行動を機械的にゲートする。TypeScript, Python, Go, Rust を自動検出。世の SDD ツールの大半は「お願い」。alfred は「壁」。
+qult は Claude Code の 12 hooks として動作し、**Opus evaluator で**、Claude の行動を機械的にゲートする。TypeScript, Python, Go, Rust を自動検出。世の SDD ツールの大半は「お願い」。qult は「壁」。
 
 ## 何を防ぐか
 
@@ -24,11 +24,11 @@ Edit → biome check 失敗 → pending-fixes 記録
   → 同じファイルを修正 → biome check 通過 → 解除
 ```
 
-| 状況 | alfred の行動 |
+| 状況 | qult の行動 |
 |---|---|
 | lint/type エラーを放置して別ファイルへ | **DENY** — 修正するまでブロック |
 | テスト未実行で git commit | **DENY** — テスト pass を要求 |
-| レビュー未実行で完了宣言 (大変更) | **block** — /alfred:review を要求 (Plan active or 5+ファイル変更時。小変更は任意) |
+| レビュー未実行で完了宣言 (大変更) | **block** — /qult:review を要求 (Plan active or 5+ファイル変更時。小変更は任意) |
 | レビュー FAIL で完了宣言 | **block** — 修正して再レビューを要求 |
 | Plan (4+ tasks) に曖昧な Success Criteria | **DENY** — 「tests pass」ではなく行動レベルの基準を要求 |
 | Plan (4+ tasks) に具体的な Verify がない | **DENY** — テスト名/コマンドを要求 |
@@ -67,7 +67,7 @@ Edit → biome check 失敗 → pending-fixes 記録
 
 1. **壁 > 情報提示** — DENY (exit 2) で止める。additionalContext は無視される前提
 2. **リサーチ駆動** — 全設計判断に SWE-bench / Anthropic 記事 / Self-Refine 論文の裏付け
-3. **fail-open** — 全 hook は try-catch。alfred の障害で Claude を止めない
+3. **fail-open** — 全 hook は try-catch。qult の障害で Claude を止めない
 4. **Opus 4.6 適応** — Pace 120分、非Plan advisory 削除、sprint 構造緩和
 5. **simplest solution** — 全コンポーネントは load-bearing 仮定を持つ。仮定が崩れたら捨てる
 6. **効果測定** — first-pass clean rate + review pass/miss rate + gate pass rate で品質を計測
@@ -76,7 +76,7 @@ Edit → biome check 失敗 → pending-fixes 記録
 ## 効果測定
 
 ```bash
-alfred doctor --metrics
+qult doctor --metrics
 ```
 
 | 指標 | 意味 |
@@ -95,13 +95,13 @@ bun install
 bun build.ts
 bun link
 
-alfred init       # ~/.claude/ に 12 hooks + skill + agent + rules を配置
-alfred doctor     # セットアップの健全性を確認
+qult init       # ~/.claude/ に 12 hooks + skill + agent + rules を配置
+qult doctor     # セットアップの健全性を確認
 ```
 
 ## Gate 自動検出
 
-`alfred init` がプロジェクトの設定ファイルから gate を自動検出
+`qult init` がプロジェクトの設定ファイルから gate を自動検出
 
 | 言語 | on_write (lint/type) | on_commit (test) | on_review (e2e) |
 |---|---|---|---|

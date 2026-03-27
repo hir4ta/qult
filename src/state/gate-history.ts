@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteJson } from "./atomic-write.ts";
 
-const STATE_DIR = ".alfred/.state";
+const STATE_DIR = ".qult/.state";
 const FILE = "gate-history.json";
 const MAX_ENTRIES = 200;
 

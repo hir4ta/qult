@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteJson } from "./atomic-write.ts";
 
-const STATE_DIR = ".alfred/.state";
+const STATE_DIR = ".qult/.state";
 const FILE = "metrics.json";
 const MAX_ENTRIES = 500;
 
@@ -124,7 +124,7 @@ export function recordFirstPass(passed: boolean): void {
 	}
 }
 
-/** Record a review outcome (PASS or FAIL from alfred-reviewer). */
+/** Record a review outcome (PASS or FAIL from qult-reviewer). */
 export function recordReviewOutcome(passed: boolean, detail?: Record<string, number>): void {
 	try {
 		const entries = readState();

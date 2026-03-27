@@ -10,9 +10,9 @@ import {
 	readPace,
 } from "./state/session-state.ts";
 
-/** Display current alfred state and blockers */
+/** Display current qult state and blockers */
 export function runStatus(): void {
-	const lines: string[] = ["[alfred status]"];
+	const lines: string[] = ["[qult status]"];
 
 	// Pending fixes
 	const fixes = readPendingFixes();
@@ -77,7 +77,7 @@ export function runStatus(): void {
 }
 
 export const statusCommand = defineCommand({
-	meta: { description: "Show current alfred state and blockers" },
+	meta: { description: "Show current qult state and blockers" },
 	async run() {
 		runStatus();
 	},

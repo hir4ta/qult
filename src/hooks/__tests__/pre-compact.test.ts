@@ -5,7 +5,7 @@ import { resetAllCaches } from "../../state/flush.ts";
 import { writePendingFixes } from "../../state/pending-fixes.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-precompact-test");
-const STATE_DIR = join(TEST_DIR, ".alfred", ".state");
+const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 let stderrCapture: string[] = [];
 const originalCwd = process.cwd();
 

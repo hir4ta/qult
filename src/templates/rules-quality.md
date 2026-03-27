@@ -1,8 +1,8 @@
 ---
-description: alfred quality enforcement — fix errors first, small tasks, test-driven
+description: qult quality enforcement — fix errors first, small tasks, test-driven
 ---
 
-# Quality Rules (alfred)
+# Quality Rules (qult)
 
 ## Fix First
 - Fix lint/type errors before editing other files
@@ -21,7 +21,7 @@ description: alfred quality enforcement — fix errors first, small tasks, test-
 
 ## Before Commit
 - Run tests — commit is blocked until tests pass
-- Run /alfred:review — required when plan is active or 5+ files changed. Small changes can skip
+- Run /qult:review — required when plan is active or 5+ files changed. Small changes can skip
 
 ## When Stuck
 - After 2 failed attempts, /clear and try a different approach

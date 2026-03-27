@@ -42,7 +42,7 @@ export default async function subagentStop(ev: HookEvent): Promise<void> {
 	// fail-open: no agent_type or no output → allow
 	if (!agentType || !output) return;
 
-	if (agentType === "alfred-reviewer") {
+	if (agentType === "qult-reviewer") {
 		const passed = REVIEW_PASS_RE.test(output);
 		const failed = REVIEW_FAIL_RE.test(output);
 		validateReviewer(output);
@@ -57,7 +57,7 @@ export default async function subagentStop(ev: HookEvent): Promise<void> {
 		}
 		// Only clear the review gate on PASS. FAIL requires fixes + re-review.
 		if (failed) {
-			block("Review: FAIL. Fix the issues found by the reviewer and run /alfred:review again.");
+			block("Review: FAIL. Fix the issues found by the reviewer and run /qult:review again.");
 		}
 		recordReview();
 	} else if (agentType === "Plan") {

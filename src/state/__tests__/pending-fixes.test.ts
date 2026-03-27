@@ -5,7 +5,7 @@ import { resetAllCaches } from "../flush.ts";
 import { readPendingFixes, writePendingFixes } from "../pending-fixes.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-pf-test");
-const STATE_DIR = join(TEST_DIR, ".alfred", ".state");
+const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 
 beforeEach(() => {
 	resetAllCaches();

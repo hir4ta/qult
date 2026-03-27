@@ -70,7 +70,7 @@ function validatePlanStructure(content: string): string[] {
 	// Large plans: advisory warning for very large plans (not a hard block)
 	if (taskSections.length > 8) {
 		process.stderr.write(
-			"[alfred] Warning: Plan has 8+ tasks. Consider splitting into multiple sessions (1 feature per session).\n",
+			"[qult] Warning: Plan has 8+ tasks. Consider splitting into multiple sessions (1 feature per session).\n",
 		);
 	}
 

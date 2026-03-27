@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetAllCaches } from "../state/flush.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-integration-test");
-const STATE_DIR = join(TEST_DIR, ".alfred", ".state");
+const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 const originalCwd = process.cwd();
 let stdoutCapture: string[];
 let stderrCapture: string[];
@@ -15,7 +15,7 @@ beforeEach(() => {
 	mkdirSync(STATE_DIR, { recursive: true });
 	// Create a minimal gates.json with real biome
 	writeFileSync(
-		join(TEST_DIR, ".alfred", "gates.json"),
+		join(TEST_DIR, ".qult", "gates.json"),
 		JSON.stringify({
 			on_write: {
 				lint: { command: "biome check {file} --no-errors-on-unmatched", timeout: 5000 },

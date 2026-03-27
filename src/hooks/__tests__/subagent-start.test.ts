@@ -10,7 +10,7 @@ const originalCwd = process.cwd();
 
 beforeEach(() => {
 	resetAllCaches();
-	mkdirSync(join(TEST_DIR, ".alfred", ".state"), { recursive: true });
+	mkdirSync(join(TEST_DIR, ".qult", ".state"), { recursive: true });
 	process.chdir(TEST_DIR);
 	stdoutCapture = [];
 	vi.spyOn(process.stdout, "write").mockImplementation((data) => {

@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetAllCaches } from "../state/flush.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-status");
-const ALFRED_DIR = join(TEST_DIR, ".alfred");
-const STATE_DIR = join(ALFRED_DIR, ".state");
+const QULT_DIR = join(TEST_DIR, ".qult");
+const STATE_DIR = join(QULT_DIR, ".state");
 
 let stdoutCapture: string[] = [];
 const originalCwd = process.cwd();
@@ -32,10 +32,10 @@ function getOutput(): string {
 	return stdoutCapture.join("");
 }
 
-describe("alfred status", () => {
+describe("qult status", () => {
 	it("shows clean state when no blockers", async () => {
 		writeFileSync(
-			join(ALFRED_DIR, "gates.json"),
+			join(QULT_DIR, "gates.json"),
 			JSON.stringify({ on_write: { lint: { command: "biome check {file}", timeout: 3000 } } }),
 		);
 		const { runStatus } = await import("../status.ts");
@@ -46,7 +46,7 @@ describe("alfred status", () => {
 	});
 
 	it("shows pending fixes as blockers", async () => {
-		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify({}));
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify({}));
 		writeFileSync(
 			join(STATE_DIR, "pending-fixes.json"),
 			JSON.stringify([{ file: "src/foo.ts", errors: ["unused import"], gate: "lint" }]),
@@ -59,7 +59,7 @@ describe("alfred status", () => {
 	});
 
 	it("shows pace and review status", async () => {
-		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify({}));
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify({}));
 		writeFileSync(
 			join(STATE_DIR, "session-state.json"),
 			JSON.stringify({
@@ -78,7 +78,7 @@ describe("alfred status", () => {
 	});
 
 	it("shows plan progress when plan exists", async () => {
-		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify({}));
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify({}));
 		const planDir = join(TEST_DIR, ".claude", "plans");
 		mkdirSync(planDir, { recursive: true });
 		writeFileSync(

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetAllCaches } from "../state/flush.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-posttool-test");
-const STATE_DIR = join(TEST_DIR, ".alfred", ".state");
+const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 let stdoutCapture: string[] = [];
 const originalCwd = process.cwd();
 
@@ -30,7 +30,7 @@ afterEach(() => {
 describe("postTool: Edit/Write gate execution", () => {
 	it("adds pending-fixes when gate fails", async () => {
 		writeFileSync(
-			join(TEST_DIR, ".alfred", "gates.json"),
+			join(TEST_DIR, ".qult", "gates.json"),
 			JSON.stringify({
 				on_write: { lint: { command: "echo 'lint error' && exit 1", timeout: 3000 } },
 			}),
@@ -53,7 +53,7 @@ describe("postTool: Edit/Write gate execution", () => {
 
 	it("does not add pending-fixes when gate passes", async () => {
 		writeFileSync(
-			join(TEST_DIR, ".alfred", "gates.json"),
+			join(TEST_DIR, ".qult", "gates.json"),
 			JSON.stringify({
 				on_write: { lint: { command: "echo ok", timeout: 3000 } },
 			}),
@@ -84,7 +84,7 @@ describe("postTool: Edit/Write gate execution", () => {
 describe("postTool: Bash handling", () => {
 	it("resets pace on git commit", async () => {
 		writeFileSync(
-			join(TEST_DIR, ".alfred", "gates.json"),
+			join(TEST_DIR, ".qult", "gates.json"),
 			JSON.stringify({ on_write: { lint: { command: "echo ok" } } }),
 		);
 
