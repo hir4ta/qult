@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { atomicWriteJson } from "../atomic-write.ts";
 
-const TMP = join(process.cwd(), ".tmp-atomic-test");
+const TMP = join(import.meta.dirname, ".tmp-atomic-test");
 
 beforeEach(() => {
 	mkdirSync(join(TMP, "sub"), { recursive: true });

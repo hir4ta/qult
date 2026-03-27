@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 
 /**
  * Atomic JSON write: write to temp file, then rename.
@@ -7,9 +7,18 @@ import { join } from "node:path";
  * Prevents partial writes and read-during-write corruption.
  */
 export function atomicWriteJson(filePath: string, data: unknown): void {
-	const dir = join(filePath, "..");
+	const dir = dirname(filePath);
 	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 	const tmp = `${filePath}.${process.pid}.tmp`;
-	writeFileSync(tmp, JSON.stringify(data, null, 2));
-	renameSync(tmp, filePath);
+	try {
+		writeFileSync(tmp, JSON.stringify(data, null, 2));
+		renameSync(tmp, filePath);
+	} catch (err) {
+		try {
+			unlinkSync(tmp);
+		} catch {
+			// tmp may not exist if writeFileSync failed
+		}
+		throw err;
+	}
 }

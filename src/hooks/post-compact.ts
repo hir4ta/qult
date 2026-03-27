@@ -22,7 +22,9 @@ export default async function postCompact(_ev: HookEvent): Promise<void> {
 	// 1. Pending fixes (highest priority — blocks editing other files)
 	const fixes = readPendingFixes();
 	if (fixes.length > 0) {
-		const fileList = fixes.map((f) => `${f.file} (${f.gate}: ${f.errors[0]})`).join("; ");
+		const fileList = fixes
+			.map((f) => `${f.file} (${f.gate}: ${f.errors[0] ?? "error"})`)
+			.join("; ");
 		sections.push(
 			`PENDING FIXES (${fixes.length}): ${fileList}. Fix these before editing other files.`,
 		);
@@ -55,8 +57,11 @@ export default async function postCompact(_ev: HookEvent): Promise<void> {
 	// 4. Pace status
 	const pace = readPace();
 	if (pace) {
-		const elapsed = Math.round((Date.now() - new Date(pace.last_commit_at).getTime()) / 60_000);
-		sections.push(`Pace: ${elapsed}min since last commit, ${pace.changed_files} files changed`);
+		const commitTime = new Date(pace.last_commit_at).getTime();
+		if (!Number.isNaN(commitTime)) {
+			const elapsed = Math.round((Date.now() - commitTime) / 60_000);
+			sections.push(`Pace: ${elapsed}min since last commit, ${pace.changed_files} files changed`);
+		}
 	}
 
 	// 5. Recent error trends (top 3)
