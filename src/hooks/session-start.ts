@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { detectGates } from "../gates/detect.ts";
 import { getTopErrors } from "../state/gate-history.ts";
+import { writePendingFixes } from "../state/pending-fixes.ts";
 import type { HookEvent } from "../types.ts";
 import { respond } from "./respond.ts";
 
@@ -12,6 +13,10 @@ export default async function sessionStart(_ev: HookEvent): Promise<void> {
 	if (!existsSync(stateDir)) {
 		mkdirSync(stateDir, { recursive: true });
 	}
+
+	// Clear stale pending-fixes from previous session.
+	// Gates will re-detect issues when files are edited in this session.
+	writePendingFixes([]);
 
 	// Auto-detect gates if missing (zero-config)
 	const gatesPath = join(alfredDir, "gates.json");

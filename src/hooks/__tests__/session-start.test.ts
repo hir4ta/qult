@@ -47,4 +47,20 @@ describe("sessionStart hook", () => {
 
 		expect(getResponse()).toBeNull();
 	});
+
+	it("clears stale pending-fixes from previous session", async () => {
+		const { writeFileSync } = await import("node:fs");
+		const fixesPath = join(TEST_DIR, ".alfred", ".state", "pending-fixes.json");
+		writeFileSync(
+			fixesPath,
+			JSON.stringify([{ file: "old.ts", errors: ["stale error"], gate: "lint" }]),
+		);
+
+		const handler = (await import("../session-start.ts")).default;
+		await handler({ hook_type: "SessionStart" });
+
+		const { readFileSync } = await import("node:fs");
+		const fixes = JSON.parse(readFileSync(fixesPath, "utf-8"));
+		expect(fixes).toEqual([]);
+	});
 });
