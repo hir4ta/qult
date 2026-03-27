@@ -27,7 +27,7 @@ alfred CLI (init / hook / doctor)
 |------|------|------|------|
 | PreToolUse | enforcement | DENY | pending-fixes, pace red, commit gates |
 | PostToolUse | enforcement | respond | gate実行 → pending-fixes生成 |
-| Stop | enforcement | block | pending-fixes, incomplete plan, no review (条件付き) |
+| Stop | enforcement | block | pending-fixes, incomplete plan, no review, unverified fields, unexecuted criteria (条件付き) |
 | PermissionRequest | enforcement | DENY | ExitPlanMode plan構造検証 |
 | ConfigChange | enforcement | DENY | hook削除防止 |
 | SubagentStop | enforcement | block | reviewer PASS→gate clear / FAIL→block (修正+再レビュー要求) |
@@ -88,7 +88,7 @@ task clean    # ビルド成果物削除
 
 ### 状態ファイル (.alfred/.state/)
 - pending-fixes.json — 未修正 lint/type エラー
-- session-state.json — 統合セッション状態 (pace, test pass, review, gate batch, fail count, budget, action counters)
+- session-state.json — 統合セッション状態 (pace, test pass, review, gate batch, fail count, budget, action counters, verified_fields, criteria_commands_run)
 - gate-history.json — gate 結果トレンド + コミット間隔 (50件 cap)
 - metrics.json — DENY/block/respond 発火記録 (50件 cap, `doctor --metrics` で表示)
 
@@ -98,11 +98,16 @@ task clean    # ビルド成果物削除
   - **大Plan (4+ tasks)**: Success Criteria (具体的) + Verify フィールド (具体的) 必須
   - Review Gates: Plan構造では不要。review は stop.ts/pre-tool.ts で条件付き強制
 - Success Criteria 質検証: 「tests pass」等の曖昧 criteria は DENY。行動レベルの具体的基準を要求
-- UserPromptSubmit: Plan mode のみテンプレート注入 (非Plan advisory は Opus 4.6 で不要のため削除)
+- UserPromptSubmit: Plan mode のみテンプレート注入 (WHAT/WHERE/VERIFY/BOUNDARY/SIZE)
 - Stop: 小Plan の未完了タスクは警告のみ (block ではない)
 - reviewer は Opus モデルで実行 (Generator と同等能力での評価)。全 findings を報告 + Review: PASS/FAIL + Score (Correctness/Design/Security 1-5)。Judge (skill) のみが S/A/A フィルタを適用
 - reviewer に few-shot 例 3つ + anti-self-persuasion 指示を配置
-- Verify フィールド検証: テスト名の出力一致 + テストファイル内のアサーション存在確認
+- reviewer findings: severity 別カウント (critical/high/medium/low) を metrics に記録。`doctor --metrics` で precision 表示
+- **Plan Contract Enforcement** (大Plan block / 小Plan warn):
+  - Verify 実行完了: 全 Verify field のテスト関数が実行・pass したか stop 時に検証
+  - File field 必須 (大Plan): 各タスクに変更対象ファイルを明示
+  - Criteria 実行完了: Success Criteria の backtick コマンドが実際に実行されたか検証
+  - File divergence: Plan 外のファイル変更が Plan 内を超過したら scope creep 警告 (advisory)
 
 ### レビュー閾値 (適応型)
 - レビュー強制条件: Plan active **OR** gated_files >= 5
@@ -116,7 +121,7 @@ task clean    # ビルド成果物削除
 - advisory skip (budget超過) を metrics.json へ記録
 - First-pass clean rate: ファイル編集時に全 gate を初回で通過した率 (品質の直接指標)
 - Review outcome: レビュー PASS/FAIL 率 + review:miss (PASS後のgate fail = evaluator見逃し) + review:skipped (閾値以下でスキップ)
-- `doctor --metrics`: DENY resolution rate + gate pass rate + first-pass rate + review pass rate を表示
+- `doctor --metrics`: DENY resolution rate + gate pass rate + first-pass rate + review pass rate + review findings (total, avg, severity) を表示
 - `doctor --fix`: 壊れた state ファイルをデフォルト値にリセット
 
 ### Pace 制限 (適応型, Opus 4.6 対応)

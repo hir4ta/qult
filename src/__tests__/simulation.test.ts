@@ -1566,3 +1566,162 @@ describe("Scenario 35: biome check --write clears stale pending-fixes", () => {
 		expect(readPendingFixes()).toHaveLength(0);
 	});
 });
+
+// ============================================================
+// Phase 6: Plan contract enforcement scenarios
+// ============================================================
+
+function setupLargePlan(planDir: string, content: string): void {
+	mkdirSync(planDir, { recursive: true });
+	writeFileSync(join(planDir, "contract-plan.md"), content);
+}
+
+const LARGE_PLAN_4TASKS = [
+	"## Tasks",
+	"### Task 1: Add auth [done]",
+	"- **File**: src/auth.ts",
+	"- **Verify**: src/__tests__/auth.test.ts:testLogin",
+	"### Task 2: Add routes [done]",
+	"- **File**: src/routes.ts",
+	"- **Verify**: src/__tests__/routes.test.ts:testRoutes",
+	"### Task 3: Add middleware [done]",
+	"- **File**: src/middleware.ts",
+	"- **Verify**: src/__tests__/middleware.test.ts:testMiddleware",
+	"### Task 4: Add config [done]",
+	"- **File**: src/config.ts",
+	"- **Verify**: src/__tests__/config.test.ts:testConfig",
+	"",
+	"## Success Criteria",
+	"- [x] `bun vitest run` — all tests pass",
+	"- [x] `bun tsc --noEmit` — no type errors",
+].join("\n");
+
+describe("Scenario 36: Stop blocks on unverified fields (large plan)", () => {
+	it("blocks when verify fields not executed", async () => {
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		setupLargePlan(planDir, LARGE_PLAN_4TASKS);
+		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify({}));
+
+		const { recordReview, recordCriteriaCommand } = await import("../state/session-state.ts");
+		recordReview();
+		recordCriteriaCommand("bun vitest run");
+		recordCriteriaCommand("bun tsc --noEmit");
+
+		const stop = (await import("../hooks/stop.ts")).default;
+		try {
+			await stop({ hook_type: "Stop" });
+		} catch {
+			// exit(2)
+		}
+
+		expect(exitCode).toBe(2);
+		const response = getResponse();
+		const reason = (response as Record<string, string>)?.reason;
+		expect(reason).toContain("verify");
+	});
+
+	it("allows when all verify fields have been recorded", async () => {
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		setupLargePlan(planDir, LARGE_PLAN_4TASKS);
+		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify({}));
+
+		const { recordVerifiedField, recordReview, recordCriteriaCommand } = await import(
+			"../state/session-state.ts"
+		);
+		recordVerifiedField("Add auth:testLogin");
+		recordVerifiedField("Add routes:testRoutes");
+		recordVerifiedField("Add middleware:testMiddleware");
+		recordVerifiedField("Add config:testConfig");
+		recordCriteriaCommand("bun vitest run");
+		recordCriteriaCommand("bun tsc --noEmit");
+		recordReview();
+
+		const stop = (await import("../hooks/stop.ts")).default;
+		await stop({ hook_type: "Stop" });
+		expect(exitCode).toBeNull();
+	});
+});
+
+describe("Scenario 37: File divergence warning", () => {
+	it("warns when many unplanned files changed", async () => {
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		const smallPlan = [
+			"## Tasks",
+			"### Task 1: Add feature [done]",
+			"- **File**: src/feature.ts",
+		].join("\n");
+		setupLargePlan(planDir, smallPlan);
+		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify({}));
+
+		const { recordChangedFile, recordReview } = await import("../state/session-state.ts");
+		recordChangedFile("/project/src/feature.ts");
+		recordChangedFile("/project/src/unplanned1.ts");
+		recordChangedFile("/project/src/unplanned2.ts");
+		recordChangedFile("/project/src/unplanned3.ts");
+		recordReview();
+
+		const stop = (await import("../hooks/stop.ts")).default;
+		await stop({ hook_type: "Stop" });
+
+		// Advisory only — should NOT block
+		expect(exitCode).toBeNull();
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("scope creep");
+	});
+});
+
+describe("Scenario 38: Stop blocks on unexecuted criteria commands (large plan)", () => {
+	it("blocks when criteria commands not executed", async () => {
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		setupLargePlan(planDir, LARGE_PLAN_4TASKS);
+		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify({}));
+
+		const { recordVerifiedField, recordReview } = await import("../state/session-state.ts");
+		recordVerifiedField("Add auth:testLogin");
+		recordVerifiedField("Add routes:testRoutes");
+		recordVerifiedField("Add middleware:testMiddleware");
+		recordVerifiedField("Add config:testConfig");
+		recordReview();
+		// NOT recording criteria commands
+
+		const stop = (await import("../hooks/stop.ts")).default;
+		try {
+			await stop({ hook_type: "Stop" });
+		} catch {
+			// exit(2)
+		}
+
+		expect(exitCode).toBe(2);
+		const response = getResponse();
+		const reason = (response as Record<string, string>)?.reason;
+		expect(reason).toContain("Success Criteria");
+	});
+});
+
+describe("Scenario 39: Small plan — contract checks warn only, never block", () => {
+	it("small plan with unverified fields and unexecuted criteria only warns", async () => {
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		const smallPlan = [
+			"## Tasks",
+			"### Task 1: Fix bug [done]",
+			"- **File**: src/bug.ts",
+			"- **Verify**: src/__tests__/bug.test.ts:testBug",
+			"## Success Criteria",
+			"- [ ] `bun vitest run` — tests pass",
+		].join("\n");
+		setupLargePlan(planDir, smallPlan);
+		writeFileSync(join(ALFRED_DIR, "gates.json"), JSON.stringify({}));
+
+		const { recordReview } = await import("../state/session-state.ts");
+		recordReview();
+
+		const stop = (await import("../hooks/stop.ts")).default;
+		await stop({ hook_type: "Stop" });
+
+		// Small plan: warn only, no block
+		expect(exitCode).toBeNull();
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("verify");
+		expect(stderr).toContain("Success Criteria");
+	});
+});

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { parsePlanTasks, parseVerifyFields } from "../plan-status.ts";
+import {
+	parseCriteriaCommands,
+	parseFileFields,
+	parsePlanTasks,
+	parseVerifyFields,
+} from "../plan-status.ts";
 
 describe("parsePlanTasks", () => {
 	it("parses tasks with status markers", () => {
@@ -129,5 +134,54 @@ describe("parseVerifyFields", () => {
 
 		const verifies = parseVerifyFields(plan);
 		expect(verifies).toHaveLength(0);
+	});
+});
+
+describe("parseFileFields", () => {
+	it("extracts File fields with task names", () => {
+		const plan = `## Tasks
+### Task 1: Add auth [pending]
+- **File**: src/auth.ts
+- **Verify**: src/__tests__/auth.test.ts:testLogin
+
+### Task 2: Add routes [pending]
+- **File**: src/routes.ts`;
+
+		const files = parseFileFields(plan);
+		expect(files).toHaveLength(2);
+		expect(files[0]).toEqual({ taskName: "Add auth", filePath: "src/auth.ts" });
+		expect(files[1]).toEqual({ taskName: "Add routes", filePath: "src/routes.ts" });
+	});
+
+	it("returns empty for plan without File fields", () => {
+		expect(parseFileFields("## Tasks\n### Task 1: Fix\n")).toHaveLength(0);
+	});
+});
+
+describe("parseCriteriaCommands", () => {
+	it("extracts backtick commands from Success Criteria", () => {
+		const plan = `## Tasks
+### Task 1: Feature [done]
+## Success Criteria
+- [ ] \`bun vitest run\` — all tests pass
+- [ ] \`bun tsc --noEmit\` — no type errors
+- [ ] Manual review complete`;
+
+		const commands = parseCriteriaCommands(plan);
+		expect(commands).toEqual(["bun vitest run", "bun tsc --noEmit"]);
+	});
+
+	it("returns empty when no Success Criteria section", () => {
+		expect(parseCriteriaCommands("## Tasks\n### Task 1: Fix\n")).toHaveLength(0);
+	});
+
+	it("stops at next ## heading", () => {
+		const plan = `## Success Criteria
+- [ ] \`bun test\` passes
+## Notes
+Some \`code here\` that should not be parsed`;
+
+		const commands = parseCriteriaCommands(plan);
+		expect(commands).toEqual(["bun test"]);
 	});
 });

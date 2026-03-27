@@ -76,6 +76,57 @@ export function parseVerifyFields(content: string): VerifyField[] {
 	return verifies;
 }
 
+export interface FileField {
+	taskName: string;
+	filePath: string;
+}
+
+// - **File**: path/to/file.ts  or  - File: path/to/file.ts
+const FILE_RE = /^\s*-\s+\*{0,2}File\*{0,2}:\s*(\S+)\s*$/;
+
+/** Parse File fields from plan content, associating each with its task */
+export function parseFileFields(content: string): FileField[] {
+	const files: FileField[] = [];
+	let currentTask: string | null = null;
+
+	for (const line of content.split("\n")) {
+		const taskMatch = line.trim().match(TASK_RE);
+		if (taskMatch) {
+			currentTask = taskMatch[1]!.trim();
+			continue;
+		}
+
+		if (currentTask) {
+			const fileMatch = line.match(FILE_RE);
+			if (fileMatch) {
+				files.push({ taskName: currentTask, filePath: fileMatch[1]! });
+			}
+		}
+	}
+
+	return files;
+}
+
+/** Extract backtick-quoted commands from Success Criteria section */
+export function parseCriteriaCommands(content: string): string[] {
+	const commands: string[] = [];
+	const criteriaMatch = /^##\s+success\s*criteria/im.exec(content);
+	if (!criteriaMatch) return commands;
+
+	const section = content.slice(criteriaMatch.index);
+	const sectionEnd = section.search(/\n##\s/);
+	const criteriaBlock = sectionEnd >= 0 ? section.slice(0, sectionEnd) : section;
+
+	for (const line of criteriaBlock.split("\n")) {
+		if (!/^\s*-\s+\[/.test(line)) continue;
+		for (const m of line.matchAll(/`([^`]+)`/g)) {
+			commands.push(m[1]!);
+		}
+	}
+
+	return commands;
+}
+
 /** Get the path of the latest plan file (by mtime). Returns null if none found. */
 function getLatestPlanPath(): string | null {
 	try {

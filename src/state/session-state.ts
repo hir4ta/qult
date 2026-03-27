@@ -36,6 +36,9 @@ export interface SessionState {
 	first_pass_recorded: string[];
 	// Changed file paths (for gated-file review threshold)
 	changed_file_paths: string[];
+	// Plan contract tracking (cumulative across session, not reset on commit)
+	verified_fields: string[];
+	criteria_commands_run: string[];
 }
 
 function filePath(): string {
@@ -60,6 +63,8 @@ function defaultState(): SessionState {
 		session_respond_count: 0,
 		first_pass_recorded: [],
 		changed_file_paths: [],
+		verified_fields: [],
+		criteria_commands_run: [],
 	};
 }
 
@@ -185,6 +190,26 @@ export function recordChangedFile(filePath: string): void {
 	if (!state.changed_file_paths) state.changed_file_paths = [];
 	if (!state.changed_file_paths.includes(filePath)) {
 		state.changed_file_paths.push(filePath);
+	}
+	writeState(state);
+}
+
+/** Record a verified plan field (taskName:testFunction) — deduplicated */
+export function recordVerifiedField(key: string): void {
+	const state = readSessionState();
+	if (!state.verified_fields) state.verified_fields = [];
+	if (!state.verified_fields.includes(key)) {
+		state.verified_fields.push(key);
+	}
+	writeState(state);
+}
+
+/** Record a criteria command as executed — deduplicated */
+export function recordCriteriaCommand(command: string): void {
+	const state = readSessionState();
+	if (!state.criteria_commands_run) state.criteria_commands_run = [];
+	if (!state.criteria_commands_run.includes(command)) {
+		state.criteria_commands_run.push(command);
 	}
 	writeState(state);
 }

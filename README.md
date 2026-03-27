@@ -32,6 +32,10 @@ Edit → biome check 失敗 → pending-fixes 記録
 | レビュー FAIL で完了宣言 | **block** — 修正して再レビューを要求 |
 | Plan (4+ tasks) に曖昧な Success Criteria | **DENY** — 「tests pass」ではなく行動レベルの基準を要求 |
 | Plan (4+ tasks) に具体的な Verify がない | **DENY** — テスト名/コマンドを要求 |
+| Plan (4+ tasks) に File field がない | **DENY** — 変更対象ファイルの明示を要求 |
+| Plan の Verify field テストが未実行 | **block** — テスト実行を要求 (大Plan block / 小Plan warn) |
+| Plan の Success Criteria コマンドが未実行 | **block** — コマンド実行を要求 (大Plan block / 小Plan warn) |
+| Plan 外のファイルを大量に変更 | **warn** — scope creep 警告 (advisory) |
 | 120分以上コミットなし + 15ファイル変更 | **DENY** — スコープ肥大を阻止 (Plan ありは 180分/23ファイルまで猶予) |
 | hook 設定を変更しようとする | **DENY** — 自己防衛 (非 hook 設定は許可) |
 
@@ -42,11 +46,11 @@ Edit → biome check 失敗 → pending-fixes 記録
 - **PreToolUse** `[Edit/Write/Bash]`: pending-fixes → DENY。Pace red → DENY。commit without test → DENY。review は条件付き (Plan or 5+ファイル)
 
 **Plan 増幅 (enforcement)** — 設計の質を底上げ
-- **UserPromptSubmit**: Plan mode 時のみテンプレート注入 (非Plan advisory は Opus 4.6 で不要のため削除)
-- **PermissionRequest** `[ExitPlanMode]`: Plan 構造検証 + Success Criteria 質検証 (曖昧 criteria DENY)
+- **UserPromptSubmit**: Plan mode 時のみテンプレート注入 (WHAT/WHERE/VERIFY/BOUNDARY/SIZE)
+- **PermissionRequest** `[ExitPlanMode]`: Plan 構造検証 (File field, Verify, Success Criteria 質, タスク粒度)
 
 **実行ループ (enforcement + advisory)** — 中途半端に終わらせない
-- **Stop**: 未修正エラー/大Plan未完了 → block。レビュー未実行 → 条件付き block (Plan or 5+ファイル)
+- **Stop**: 未修正エラー/大Plan未完了/verify未実行/criteria未実行 → block。file divergence → warn。レビュー未実行 → 条件付き block
 - **PostCompact**: **構造化handoff** — 全クリティカル状態 (pending-fixes, Plan進捗, gate clearance, pace, error trends) を再注入
 - **PreCompact**: pending-fixes reminder (stderr)
 - **SessionStart**: 自動セットアップ + エラートレンド注入
@@ -79,6 +83,7 @@ alfred doctor --metrics
 |------|------|
 | First-pass clean rate | ファイル編集時に全 gate を初回で通過した率 (品質の直接指標) |
 | Review pass rate | Opus evaluator のレビュー PASS 率 |
+| Review findings | 総件数, 平均/レビュー, severity 内訳 (critical/high/medium/low) |
 | Review misses | レビュー PASS 後にゲート失敗が発生した回数 (evaluator calibration 指標) |
 | DENY resolution rate | DENY 発火後に修正された率 |
 | Gate pass rate | gate 実行の通過率 |

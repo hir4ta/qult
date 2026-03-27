@@ -10,7 +10,7 @@ import {
 	recordResolution,
 } from "../state/metrics.ts";
 import { readPendingFixes, writePendingFixes } from "../state/pending-fixes.ts";
-import { getActivePlan, parseVerifyFields } from "../state/plan-status.ts";
+import { getActivePlan, parseCriteriaCommands, parseVerifyFields } from "../state/plan-status.ts";
 import {
 	clearFailCount,
 	clearOnCommit,
@@ -20,8 +20,10 @@ import {
 	readLastReview,
 	readPace,
 	recordChangedFile,
+	recordCriteriaCommand,
 	recordFailure,
 	recordTestPass,
+	recordVerifiedField,
 	shouldSkipGate,
 	writePace,
 } from "../state/session-state.ts";
@@ -196,6 +198,13 @@ function handleBash(ev: HookEvent): void {
 		}
 		checkVerifyFields(output);
 	}
+
+	// Track criteria command execution
+	try {
+		checkCriteriaCommand(command);
+	} catch {
+		// fail-open
+	}
 }
 
 const ASSERT_RE = /\b(expect|assert|should|toBe|toEqual|toContain|toThrow|toHaveLength)\b/;
@@ -220,25 +229,34 @@ function checkVerifyFields(output: string): void {
 			}
 
 			// Check 2: test file has real assertions (not empty test)
+			let isWeak = false;
 			if (v.testFile) {
 				try {
 					const testPath = resolve(v.testFile);
 					if (existsSync(testPath)) {
 						const testContent = readFileSync(testPath, "utf-8");
-						// Find the test function block and check for assertions
 						const fnIndex = testContent.indexOf(v.testFunction);
 						if (fnIndex >= 0) {
-							// Check ~50 lines after the function name for assertions
 							const block = testContent.slice(fnIndex, fnIndex + 2000);
 							if (!ASSERT_RE.test(block)) {
 								messages.push(
 									`[weak] Task "${v.taskName}" — ${v.testFunction} has no assertions (expect/assert)`,
 								);
+								isWeak = true;
 							}
 						}
 					}
 				} catch {
 					// fail-open: can't read test file
+				}
+			}
+
+			// Record verified field if it passed both checks
+			if (!isWeak) {
+				try {
+					recordVerifiedField(`${v.taskName}:${v.testFunction}`);
+				} catch {
+					/* fail-open */
 				}
 			}
 		}
@@ -248,6 +266,21 @@ function checkVerifyFields(output: string): void {
 		}
 	} catch {
 		// fail-open
+	}
+}
+
+function checkCriteriaCommand(command: string): void {
+	const plan = getActivePlan();
+	if (!plan) return;
+
+	const content = readFileSync(plan.path, "utf-8");
+	const criteriaCommands = parseCriteriaCommands(content);
+	if (criteriaCommands.length === 0) return;
+
+	for (const criteria of criteriaCommands) {
+		if (command.includes(criteria)) {
+			recordCriteriaCommand(criteria);
+		}
 	}
 }
 
