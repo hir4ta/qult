@@ -1026,10 +1026,13 @@ describe("Scenario 23: Init → Doctor reports all OK", () => {
 		try {
 			const claudeDir = join(TEST_DIR, ".claude");
 			mkdirSync(join(claudeDir, "skills", "qult-review"), { recursive: true });
+			mkdirSync(join(claudeDir, "skills", "qult-plan-review"), { recursive: true });
 			mkdirSync(join(claudeDir, "agents"), { recursive: true });
 			mkdirSync(join(claudeDir, "rules"), { recursive: true });
 			writeFileSync(join(claudeDir, "skills", "qult-review", "SKILL.md"), "# skill");
+			writeFileSync(join(claudeDir, "skills", "qult-plan-review", "SKILL.md"), "# skill");
 			writeFileSync(join(claudeDir, "agents", "qult-reviewer.md"), "# agent");
+			writeFileSync(join(claudeDir, "agents", "qult-plan-evaluator.md"), "# agent");
 			writeFileSync(join(claudeDir, "rules", "qult-quality.md"), "# rules");
 
 			// Write settings.json with all 12 hooks
@@ -1044,7 +1047,7 @@ describe("Scenario 23: Init → Doctor reports all OK", () => {
 			const { runChecks } = await import("../doctor.ts");
 			const results = runChecks();
 
-			expect(results).toHaveLength(8);
+			expect(results).toHaveLength(10);
 
 			// All checks should be ok (except path which may be warn)
 			const failures = results.filter((r) => r.status === "fail");
@@ -1738,6 +1741,183 @@ describe("Scenario 39: Small plan — contract checks warn only, never block", (
 		const stderr = stderrCapture.join("");
 		expect(stderr).toContain("verify");
 		expect(stderr).toContain("Success Criteria");
+	});
+});
+
+describe("Scenario: Review score threshold — PASS with high scores clears gate", () => {
+	it("aggregate 14/15 proceeds past threshold", async () => {
+		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+
+		await subagentStop({
+			agent_type: "qult-reviewer",
+			last_assistant_message: [
+				"Review: PASS",
+				"Score: Correctness=5 Design=5 Security=4",
+				"No issues found.",
+			].join("\n"),
+		});
+
+		// Should not block — aggregate 14 >= threshold 12
+		expect(exitCode).toBeNull();
+	});
+});
+
+describe("Scenario: Review score threshold — PASS with low scores blocks", () => {
+	it("aggregate 9/15 blocks with below-threshold message", async () => {
+		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+
+		try {
+			await subagentStop({
+				agent_type: "qult-reviewer",
+				last_assistant_message: [
+					"Review: PASS",
+					"Score: Correctness=3 Design=3 Security=3",
+					"No issues found.",
+				].join("\n"),
+			});
+		} catch {
+			// exit(2)
+		}
+
+		expect(exitCode).toBe(2);
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("below threshold");
+		expect(stderr).toContain("9/15");
+	});
+});
+
+describe("Scenario: Review score threshold — max iterations reached proceeds", () => {
+	it("aggregate 9/15 after max iterations falls through (fail-open ceiling)", async () => {
+		// Simulate 2 prior iterations (iteration count = 2 after these).
+		// subagentStop will increment to 3 = maxIter, so iterCount < maxIter is false → fall through.
+		const { recordReviewIteration } = await import("../state/session-state.ts");
+		recordReviewIteration(9);
+		recordReviewIteration(10);
+		flushAll();
+		resetAllCaches();
+
+		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+
+		await subagentStop({
+			agent_type: "qult-reviewer",
+			last_assistant_message: [
+				"Review: PASS",
+				"Score: Correctness=3 Design=3 Security=3",
+				"No issues found.",
+			].join("\n"),
+		});
+
+		// Should NOT block — max iterations (3) reached
+		expect(exitCode).toBeNull();
+	});
+});
+
+describe("Scenario: Review PASS without scores — fail-open", () => {
+	it("PASS without parseable scores falls through to recordReview", async () => {
+		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+
+		await subagentStop({
+			agent_type: "qult-reviewer",
+			last_assistant_message: "Review: PASS\nNo issues found.",
+		});
+
+		// Should not block — no scores = fail-open
+		expect(exitCode).toBeNull();
+	});
+});
+
+describe("Scenario: Large plan without plan evaluation is DENIED on ExitPlanMode", () => {
+	it("DENY when plan_evaluated_at is null", async () => {
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			[
+				"## Context",
+				"Adding auth system",
+				"## Tasks",
+				"### Task 1: Add login [pending]",
+				"- **File**: src/login.ts",
+				"- **Verify**: src/__tests__/login.test.ts:testLogin",
+				"### Task 2: Add signup [pending]",
+				"- **File**: src/signup.ts",
+				"- **Verify**: src/__tests__/signup.test.ts:testSignup",
+				"### Task 3: Add middleware [pending]",
+				"- **File**: src/middleware.ts",
+				"- **Verify**: src/__tests__/middleware.test.ts:testAuth",
+				"### Task 4: Add rate limiting [pending]",
+				"- **File**: src/rate.ts",
+				"- **Verify**: src/__tests__/rate.test.ts:testLimit",
+				"## Success Criteria",
+				"- [ ] `bun vitest run` — all tests pass",
+			].join("\n"),
+		);
+
+		const handler = (await import("../hooks/permission-request.ts")).default;
+		try {
+			await handler({ tool: { name: "ExitPlanMode" } });
+		} catch {
+			// exit(2)
+		}
+
+		expect(exitCode).toBe(2);
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("plan-review");
+	});
+});
+
+describe("Scenario: Plan evaluator PASS clears gate → ExitPlanMode allowed", () => {
+	it("full flow: plan-evaluator PASS → ExitPlanMode allowed", async () => {
+		// Step 1: Plan evaluator PASS → records plan_evaluated_at
+		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+
+		await subagentStop({
+			agent_type: "qult-plan-evaluator",
+			last_assistant_message: [
+				"Plan: PASS",
+				"PlanScore: Scope=4 Coherence=5 Verifiability=4",
+				"No issues found.",
+			].join("\n"),
+		});
+
+		expect(exitCode).toBeNull();
+		flushAll();
+		resetAllCaches();
+
+		// Step 2: ExitPlanMode should now be allowed for a large plan
+		stdoutCapture = [];
+		stderrCapture = [];
+		exitCode = null;
+
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			[
+				"## Context",
+				"Adding auth system",
+				"## Tasks",
+				"### Task 1: Add login [pending]",
+				"- **File**: src/login.ts",
+				"- **Verify**: src/__tests__/login.test.ts:testLogin",
+				"### Task 2: Add signup [pending]",
+				"- **File**: src/signup.ts",
+				"- **Verify**: src/__tests__/signup.test.ts:testSignup",
+				"### Task 3: Add middleware [pending]",
+				"- **File**: src/middleware.ts",
+				"- **Verify**: src/__tests__/middleware.test.ts:testAuth",
+				"### Task 4: Add rate limiting [pending]",
+				"- **File**: src/rate.ts",
+				"- **Verify**: src/__tests__/rate.test.ts:testLimit",
+				"## Success Criteria",
+				"- [ ] `bun vitest run` — all tests pass",
+			].join("\n"),
+		);
+
+		const handler = (await import("../hooks/permission-request.ts")).default;
+		await handler({ tool: { name: "ExitPlanMode" } });
+
+		expect(exitCode).toBeNull();
 	});
 });
 

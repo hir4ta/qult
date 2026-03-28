@@ -1,6 +1,17 @@
-import { recordReviewOutcome } from "../state/metrics.ts";
+import { getCalibrated } from "../state/calibration.ts";
+import {
+	recordPlanEvalOutcome,
+	recordReviewIterationMetric,
+	recordReviewOutcome,
+} from "../state/metrics.ts";
 import { getLatestPlanContent } from "../state/plan-status.ts";
-import { recordReview } from "../state/session-state.ts";
+import {
+	getReviewIteration,
+	recordPlanEvaluation,
+	recordReview,
+	recordReviewIteration,
+	resetReviewIteration,
+} from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
 import { block } from "./respond.ts";
 
@@ -56,6 +67,31 @@ export function parseFindings(output: string): FindingSummary {
 	return summary;
 }
 
+// Plan evaluator patterns
+const PLAN_PASS_RE = /^Plan:\s*PASS/im;
+const PLAN_FAIL_RE = /^Plan:\s*FAIL/im;
+const PLAN_SCORE_RE = /PlanScore:\s*Scope=(\d)\s+Coherence=(\d)\s+Verifiability=(\d)/i;
+
+export interface PlanEvalScores {
+	scope: number;
+	coherence: number;
+	verifiability: number;
+}
+
+/** Parse plan evaluator scores. */
+export function parsePlanScores(output: string): PlanEvalScores | null {
+	const m = PLAN_SCORE_RE.exec(output);
+	if (!m) return null;
+	return {
+		scope: Number.parseInt(m[1]!, 10),
+		coherence: Number.parseInt(m[2]!, 10),
+		verifiability: Number.parseInt(m[3]!, 10),
+	};
+}
+
+const DEFAULT_REVIEW_SCORE_THRESHOLD = 12;
+const DEFAULT_MAX_REVIEW_ITERATIONS = 3;
+
 /** SubagentStop: verify subagent output quality */
 export default async function subagentStop(ev: HookEvent): Promise<void> {
 	if (ev.stop_hook_active) return;
@@ -71,10 +107,10 @@ export default async function subagentStop(ev: HookEvent): Promise<void> {
 		const failed = REVIEW_FAIL_RE.test(output);
 		validateReviewer(output);
 		// Record outcome metric with finding details + scores if verdict is present
+		const scores = parseScores(output);
 		if (passed || failed) {
 			try {
 				const findings = parseFindings(output);
-				const scores = parseScores(output);
 				const detail: Record<string, number> = { ...findings };
 				if (scores) {
 					detail.correctness = scores.correctness;
@@ -90,7 +126,69 @@ export default async function subagentStop(ev: HookEvent): Promise<void> {
 		if (failed) {
 			block("Review: FAIL. Fix the issues found by the reviewer and run /qult:review again.");
 		}
+		// Score threshold enforcement: PASS with low aggregate → block for iteration
+		if (passed && scores) {
+			const aggregate = scores.correctness + scores.design + scores.security;
+			const threshold = getCalibrated("review_score_threshold", DEFAULT_REVIEW_SCORE_THRESHOLD);
+			const maxIter = DEFAULT_MAX_REVIEW_ITERATIONS;
+
+			// Record this iteration (increments counter)
+			try {
+				recordReviewIteration(aggregate);
+			} catch {
+				/* fail-open */
+			}
+
+			// Read iteration count AFTER increment for correct comparison
+			const iterCount = getReviewIteration();
+
+			try {
+				recordReviewIterationMetric(
+					iterCount,
+					scores,
+					aggregate,
+					threshold,
+					aggregate >= threshold,
+				);
+			} catch {
+				/* fail-open */
+			}
+
+			if (aggregate < threshold && iterCount < maxIter) {
+				block(
+					`Review: PASS but aggregate score ${aggregate}/15 is below threshold ${threshold}/15. ` +
+						`Iteration ${iterCount}/${maxIter}. Fix weak areas and run /qult:review again.`,
+				);
+			}
+			// aggregate >= threshold OR maxIter reached → fall through to recordReview()
+		}
+		resetReviewIteration();
 		recordReview();
+	} else if (agentType === "qult-plan-evaluator") {
+		const planPassed = PLAN_PASS_RE.test(output);
+		const planFailed = PLAN_FAIL_RE.test(output);
+		validatePlanEvaluator(output);
+		// Record outcome metric
+		if (planPassed || planFailed) {
+			try {
+				const planScores = parsePlanScores(output);
+				const detail: Record<string, number> = {};
+				if (planScores) {
+					detail.scope = planScores.scope;
+					detail.coherence = planScores.coherence;
+					detail.verifiability = planScores.verifiability;
+				}
+				recordPlanEvalOutcome(planPassed, detail);
+			} catch {
+				/* fail-open */
+			}
+		}
+		if (planFailed) {
+			block(
+				"Plan: FAIL. Fix the plan issues identified by the evaluator and run /qult:plan-review again.",
+			);
+		}
+		recordPlanEvaluation();
 	} else if (agentType === "Plan") {
 		validatePlan();
 	}
@@ -108,6 +206,17 @@ function validateReviewer(output: string): void {
 
 	block(
 		"Reviewer output must include: (1) 'Review: PASS' or 'Review: FAIL', (2) 'Score: Correctness=N Design=N Security=N', and (3) findings ([severity] file:line) or 'No issues found'. Rerun the review.",
+	);
+}
+
+function validatePlanEvaluator(output: string): void {
+	const hasVerdict = PLAN_PASS_RE.test(output) || PLAN_FAIL_RE.test(output);
+	const hasScore = parsePlanScores(output) !== null;
+
+	if (hasVerdict && hasScore) return;
+
+	block(
+		"Plan evaluator output must include: (1) 'Plan: PASS' or 'Plan: FAIL', (2) 'PlanScore: Scope=N Coherence=N Verifiability=N'. Rerun /qult:plan-review.",
 	);
 }
 

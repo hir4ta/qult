@@ -212,7 +212,17 @@ export function runChecks(): CheckResult[] {
 			join(claudeDir, "skills", "qult-review", "SKILL.md"),
 			"/qult:review skill",
 		),
+		checkFileExists(
+			"skill",
+			join(claudeDir, "skills", "qult-plan-review", "SKILL.md"),
+			"/qult:plan-review skill",
+		),
 		checkFileExists("agent", join(claudeDir, "agents", "qult-reviewer.md"), "qult-reviewer agent"),
+		checkFileExists(
+			"agent",
+			join(claudeDir, "agents", "qult-plan-evaluator.md"),
+			"qult-plan-evaluator agent",
+		),
 		checkFileExists("rules", join(claudeDir, "rules", "qult-quality.md"), "qult-quality rules"),
 		checkGates(),
 		checkStateDir(),
@@ -434,6 +444,7 @@ function showMetrics(): void {
 				context_budget: 2000,
 				loc_limit: 200,
 				plan_task_threshold: 3,
+				review_score_threshold: 12,
 			};
 			const changes: string[] = [];
 			for (const [key, defVal] of Object.entries(defaults)) {

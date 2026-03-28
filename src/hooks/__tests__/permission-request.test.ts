@@ -72,6 +72,13 @@ describe("permissionRequest (ExitPlanMode)", () => {
 	it("allows large plan without review gates (review is enforced mechanically)", async () => {
 		const planDir = join(TEST_DIR, ".claude", "plans");
 		mkdirSync(planDir, { recursive: true });
+		// Large plan requires plan evaluation — set plan_evaluated_at
+		const stateDir = join(TEST_DIR, ".qult", ".state");
+		mkdirSync(stateDir, { recursive: true });
+		writeFileSync(
+			join(stateDir, "session-state.json"),
+			JSON.stringify({ plan_evaluated_at: new Date().toISOString() }),
+		);
 		writeFileSync(
 			join(planDir, "test-plan.md"),
 			[

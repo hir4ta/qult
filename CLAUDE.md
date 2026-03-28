@@ -28,9 +28,9 @@ qult CLI (init / hook / doctor)
 | PreToolUse | enforcement | DENY | pending-fixes, pace red, LOC limit, commit gates |
 | PostToolUse | enforcement | respond | gate実行 → pending-fixes生成 |
 | Stop | enforcement | block | pending-fixes, incomplete plan, no review, unverified fields, unexecuted criteria (条件付き) |
-| PermissionRequest | enforcement | DENY | ExitPlanMode plan構造検証 |
+| PermissionRequest | enforcement | DENY | ExitPlanMode plan構造検証 + plan evaluation gate |
 | ConfigChange | enforcement | DENY | hook削除防止 |
-| SubagentStop | enforcement | block | reviewer PASS→gate clear / FAIL→block (修正+再レビュー要求) |
+| SubagentStop | enforcement | block | reviewer スコア閾値強制 + plan-evaluator 検証 |
 | SessionStart | advisory | respond | エラートレンド注入 + 自動キャリブレーション + 外部コンテキスト |
 | UserPromptSubmit | advisory | respond | Planテンプレート注入 (Plan mode のみ) |
 | SubagentStart | advisory | respond | pending-fixes状態注入 |
@@ -88,8 +88,8 @@ task clean    # ビルド成果物削除
 
 ### 状態ファイル
 - `.qult/.state/pending-fixes.json` — 未修正 lint/type エラー
-- `.qult/.state/session-state.json` — 統合セッション状態 (pace, test pass, review, gate batch, fail count, budget, action counters, verified_fields, criteria_commands_run, changed_lines)
-- `.qult/.state/calibration.json` — 自動キャリブレーション結果 (pace_files, review_file_threshold, context_budget, loc_limit)
+- `.qult/.state/session-state.json` — 統合セッション状態 (pace, test pass, review, gate batch, fail count, budget, action counters, verified_fields, criteria_commands_run, changed_lines, review_iteration, plan_evaluated_at)
+- `.qult/.state/calibration.json` — 自動キャリブレーション結果 (pace_files, review_file_threshold, context_budget, loc_limit, review_score_threshold)
 - `.qult/metrics/YYYY-MM/YYYY-MM-DD.json` — DENY/block/respond 発火記録 (日次ローテーション, 上限なし)
 - `.qult/gate-history/YYYY-MM/YYYY-MM-DD.json` — gate 結果 + コミット履歴 (日次ローテーション, 上限なし)
 - `.qult/context-providers.json` — 外部コンテキストプロバイダー設定 (CI/CD状態等)
@@ -106,11 +106,23 @@ task clean    # ビルド成果物削除
 - reviewer は Opus モデルで実行 (Generator と同等能力での評価)。全 findings を報告 + Review: PASS/FAIL + Score (Correctness/Design/Security 1-5)。Judge (skill) のみが S/A/A フィルタを適用
 - reviewer に few-shot 例 3つ + anti-self-persuasion 指示を配置
 - reviewer findings: severity 別カウント (critical/high/medium/low) を metrics に記録。`doctor --metrics` で precision 表示
+- **反復 Evaluator ループ** (GAN 的アーキテクチャ):
+  - PASS でも aggregate score (C+D+S) < threshold (default 12/15) なら block → 修正 → 再review
+  - 最大 3 回反復。maxIter 到達後は fail-open で通過
+  - review_score_threshold は review:miss 率に基づき 12-14 で自動キャリブレーション
+  - 反復メトリクス: round 番号 + per-round scores を記録
+- **独立 Plan Evaluator**:
+  - qult-plan-evaluator エージェント (Opus): Scope/Coherence/Verifiability の 3次元独立評価
+  - /qult:plan-review スキル: Evaluator → Judge filter の 2-stage パターン
+  - 大Plan (4+ tasks): ExitPlanMode 時に plan evaluation 未実施なら DENY
+  - 小Plan: advisory のみ (stderr tip)
+  - Plan: PASS/FAIL + PlanScore: Scope=N Coherence=N Verifiability=N
 - **Plan Contract Enforcement** (大Plan block / 小Plan warn):
   - Verify 実行完了: 全 Verify field のテスト関数が実行・pass したか stop 時に検証
-  - File field 必須 (大Plan): 各タスクに変更対象ファイルを明示
+  - File field 必須 (大Plan): 各タスクに変更対象ファイルを明示。**消費者ファイルも含める** (例: init.ts に agent 追加 → doctor.ts, post-compact.ts, テストも File field に列挙)
   - Criteria 実行完了: Success Criteria の backtick コマンドが実際に実行されたか検証
   - File divergence: Plan 外のファイル変更が Plan 内を超過したら scope creep 警告 (advisory)
+  - **消費者チェック**: レジストリ変更 (init.ts, types.ts, session-state.ts) は必ず消費者への波及を確認。未更新の消費者は漏れの最大原因
 
 ### レビュー閾値 (適応型)
 - レビュー強制条件: Plan active **OR** gated_files >= 5
@@ -139,8 +151,8 @@ task clean    # ビルド成果物削除
 
 ### 自動キャリブレーション
 - SessionStart で24時間ごとに metrics から閾値を自動調整
-- 調整対象: pace_files, review_file_threshold, context_budget, loc_limit
-- ルール: first-pass rate → pace_files, review:miss → review threshold, respond-skipped率 → budget, fix effort → loc_limit
+- 調整対象: pace_files, review_file_threshold, context_budget, loc_limit, review_score_threshold
+- ルール: first-pass rate → pace_files, review:miss → review threshold + review score threshold, respond-skipped率 → budget, fix effort → loc_limit
 - `.qult/.state/calibration.json` に保存。`doctor --metrics` で確認可能
 
 ### 外部コンテキストプロバイダー

@@ -124,7 +124,7 @@ describe("qult init", () => {
 		expect(existsSync(rulesPath)).toBe(true);
 
 		const content = readFileSync(rulesPath, "utf-8");
-		expect(content.split("\n").length).toBeLessThanOrEqual(30);
+		expect(content.split("\n").length).toBeLessThanOrEqual(35);
 	});
 
 	it("registers project in ~/.qult/registry.json", async () => {

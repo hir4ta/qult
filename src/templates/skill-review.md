@@ -21,14 +21,21 @@ For each finding returned by the reviewer, verify:
 
 Discard findings that fail any criterion. Report only what passes all three.
 
-## Stage 3: Fix cycle (if critical/high findings)
+## Stage 3: Iterative improvement (score-driven)
 
-If Stage 2 outputs any critical or high findings:
-1. Fix all critical and high issues immediately
+After Stage 2, the SubagentStop hook enforces an aggregate score threshold mechanically.
+When the reviewer's aggregate score (Correctness + Design + Security) is below the threshold,
+SubagentStop blocks with the current score and iteration count.
+
+When blocked:
+1. Fix the weakest dimension(s) identified by findings
 2. Re-spawn `qult-reviewer` on the updated diff
 3. Re-apply Judge filter on new findings
 
-Maximum 2 fix cycles. After 2 cycles, report any remaining findings without further iteration.
+Maximum 3 iterations (calibration-controlled). After max iterations, the review proceeds regardless.
+
+If no scores are present in reviewer output (legacy format), fall back to severity-based
+iteration: fix critical/high findings and re-review, max 2 cycles.
 
 ## Output
 

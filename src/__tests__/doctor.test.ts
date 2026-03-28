@@ -21,13 +21,16 @@ function setupValidEnv(): void {
 	}
 	writeFileSync(join(claudeDir, "settings.json"), JSON.stringify({ hooks }));
 
-	// skill
+	// skills
 	mkdirSync(join(claudeDir, "skills", "qult-review"), { recursive: true });
 	writeFileSync(join(claudeDir, "skills", "qult-review", "SKILL.md"), "# review skill");
+	mkdirSync(join(claudeDir, "skills", "qult-plan-review"), { recursive: true });
+	writeFileSync(join(claudeDir, "skills", "qult-plan-review", "SKILL.md"), "# plan-review skill");
 
-	// agent
+	// agents
 	mkdirSync(join(claudeDir, "agents"), { recursive: true });
 	writeFileSync(join(claudeDir, "agents", "qult-reviewer.md"), "# reviewer agent");
+	writeFileSync(join(claudeDir, "agents", "qult-plan-evaluator.md"), "# plan-evaluator agent");
 
 	// rules
 	mkdirSync(join(claudeDir, "rules"), { recursive: true });
@@ -237,7 +240,7 @@ describe("doctor: overall", () => {
 		setupValidEnv();
 		const { runChecks } = await import("../doctor.ts");
 		const results = runChecks();
-		expect(results).toHaveLength(8);
+		expect(results).toHaveLength(10);
 	});
 
 	it("all checks pass with valid setup", async () => {

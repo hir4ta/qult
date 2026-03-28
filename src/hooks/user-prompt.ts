@@ -13,7 +13,7 @@ Why this change is needed.
 Each task: focused (1-2 files, ≤15 LOC change). Split larger work into more tasks.
 
 ### Task N: <name> [pending]
-- **File**: <path>
+- **File**: <path> (include consumer files: tests, docs, registries that reference this)
 - **Change**: <what to do>
 - **Boundary**: <what NOT to change>
 - **Verify**: <test file : test function>

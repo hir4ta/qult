@@ -233,6 +233,55 @@ export function recordReviewOutcome(passed: boolean, detail?: Record<string, num
 	}
 }
 
+/** Record a review iteration outcome with per-round scores. */
+export function recordReviewIterationMetric(
+	round: number,
+	scores: { correctness: number; design: number; security: number },
+	aggregate: number,
+	threshold: number,
+	passed: boolean,
+): void {
+	try {
+		const entries = readState();
+		entries.push(
+			withContext({
+				action: `review-iteration:${passed ? "pass" : "below-threshold"}`,
+				reason: `round ${round} aggregate ${aggregate}/${threshold}`,
+				at: new Date().toISOString(),
+				detail: {
+					round,
+					correctness: scores.correctness,
+					design: scores.design,
+					security: scores.security,
+					aggregate,
+					threshold,
+				},
+			}),
+		);
+		writeState(entries);
+	} catch {
+		/* fail-open */
+	}
+}
+
+/** Record a plan evaluation outcome (PASS or FAIL from qult-plan-evaluator). */
+export function recordPlanEvalOutcome(passed: boolean, detail?: Record<string, number>): void {
+	try {
+		const entries = readState();
+		entries.push(
+			withContext({
+				action: `plan-eval:${passed ? "pass" : "fail"}`,
+				reason: "",
+				at: new Date().toISOString(),
+				detail,
+			}),
+		);
+		writeState(entries);
+	} catch {
+		/* fail-open */
+	}
+}
+
 /** Classify DENY as defensive (config-change hook protection) vs actionable (lint/typecheck/etc). */
 const DEFENSIVE_DENY_RE = /hook|settings/i;
 

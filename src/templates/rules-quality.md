@@ -23,5 +23,9 @@ description: qult quality enforcement — fix errors first, small tasks, test-dr
 - Run tests — commit is blocked until tests pass
 - Run /qult:review — required when plan is active or 5+ files changed. Small changes can skip
 
+## Plans
+- Large plans (4+ tasks): run /qult:plan-review before exiting plan mode — enforced by the harness
+- Review scores must meet aggregate threshold (default 12/15) — the harness iterates until met
+
 ## When Stuck
 - After 2 failed attempts, /clear and try a different approach

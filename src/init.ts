@@ -158,6 +158,18 @@ export async function runInit(force: boolean): Promise<void> {
 		loadTemplate("agent-reviewer.md"),
 		force,
 	);
+	console.log("Writing agent: qult-plan-evaluator...");
+	writeFile(
+		join(claudeDir, "agents", "qult-plan-evaluator.md"),
+		loadTemplate("agent-plan-evaluator.md"),
+		force,
+	);
+	console.log("Writing skill: /qult:plan-review...");
+	writeFile(
+		join(claudeDir, "skills", "qult-plan-review", "SKILL.md"),
+		loadTemplate("skill-plan-review.md"),
+		force,
+	);
 	console.log("Writing skill: /qult:detect-gates...");
 	writeFile(
 		join(claudeDir, "skills", "qult-detect-gates", "SKILL.md"),

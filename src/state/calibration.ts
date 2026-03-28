@@ -12,6 +12,7 @@ const DEFAULT_REVIEW_THRESHOLD = 5;
 const DEFAULT_CONTEXT_BUDGET = 2000;
 const DEFAULT_LOC_LIMIT = 200;
 const DEFAULT_PLAN_TASK_THRESHOLD = 3;
+const DEFAULT_REVIEW_SCORE_THRESHOLD = 12;
 
 export interface Calibration {
 	pace_files: number;
@@ -19,6 +20,7 @@ export interface Calibration {
 	context_budget: number;
 	loc_limit: number;
 	plan_task_threshold: number;
+	review_score_threshold: number;
 	calibrated_at: string;
 }
 
@@ -159,12 +161,23 @@ export function calibrate(input: CalibrationInput): Calibration {
 		planTaskThreshold = lerp(input.planAvgCompliance, 50, 90, 2, 5);
 	}
 
+	// Rule 6: review_score_threshold — graduated on review-miss rate (0-15% → 12-14)
+	// 0% miss = keep default, high miss rate = raise threshold (reviews too lenient)
+	let reviewScoreThreshold: number;
+	if (input.reviewTotal < 5) {
+		reviewScoreThreshold = DEFAULT_REVIEW_SCORE_THRESHOLD;
+	} else {
+		const missRate = (input.reviewMiss / input.reviewTotal) * 100;
+		reviewScoreThreshold = lerp(missRate, 0, 15, DEFAULT_REVIEW_SCORE_THRESHOLD, 14);
+	}
+
 	return {
 		pace_files: paceFiles,
 		review_file_threshold: reviewThreshold,
 		context_budget: contextBudget,
 		loc_limit: locLimit,
 		plan_task_threshold: planTaskThreshold,
+		review_score_threshold: reviewScoreThreshold,
 		calibrated_at: new Date().toISOString(),
 	};
 }

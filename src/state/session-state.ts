@@ -59,6 +59,11 @@ export interface SessionState {
 	changed_lines: number;
 	// Advisory compliance tracking
 	pending_advisory: PendingAdvisory | null;
+	// Review iteration tracking (score-driven loop)
+	review_iteration: number;
+	review_last_aggregate: number;
+	// Plan evaluation tracking
+	plan_evaluated_at: string | null;
 }
 
 export interface PendingAdvisory {
@@ -96,6 +101,9 @@ function defaultState(): SessionState {
 		deny_edits_before_resolution: 0,
 		changed_lines: 0,
 		pending_advisory: null,
+		review_iteration: 0,
+		review_last_aggregate: 0,
+		plan_evaluated_at: null,
 	};
 }
 
@@ -459,6 +467,9 @@ export function clearOnCommit(paceReset?: {
 	state.changed_lines = 0;
 	state.session_deny_count = 0;
 	state.pending_advisory = null;
+	state.review_iteration = 0;
+	state.review_last_aggregate = 0;
+	state.plan_evaluated_at = null;
 	state.last_error_signature = "";
 	state.consecutive_error_count = 0;
 	if (paceReset) {
@@ -484,5 +495,42 @@ export function getPendingAdvisory(): PendingAdvisory | null {
 export function clearPendingAdvisory(): void {
 	const state = readSessionState();
 	state.pending_advisory = null;
+	writeState(state);
+}
+
+// --- Review iteration tracking ---
+
+/** Get current review iteration count (0 = not started). */
+export function getReviewIteration(): number {
+	return readSessionState().review_iteration ?? 0;
+}
+
+/** Record a review iteration with aggregate score. Increments iteration counter. */
+export function recordReviewIteration(aggregate: number): void {
+	const state = readSessionState();
+	state.review_iteration = (state.review_iteration ?? 0) + 1;
+	state.review_last_aggregate = aggregate;
+	writeState(state);
+}
+
+/** Reset review iteration state (called on review gate clear). */
+export function resetReviewIteration(): void {
+	const state = readSessionState();
+	state.review_iteration = 0;
+	state.review_last_aggregate = 0;
+	writeState(state);
+}
+
+// --- Plan evaluation tracking ---
+
+export function readLastPlanEvaluation(): { evaluated_at: string } | null {
+	const state = readSessionState();
+	if (!state.plan_evaluated_at) return null;
+	return { evaluated_at: state.plan_evaluated_at };
+}
+
+export function recordPlanEvaluation(): void {
+	const state = readSessionState();
+	state.plan_evaluated_at = new Date().toISOString();
 	writeState(state);
 }

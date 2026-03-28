@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { getCalibrated } from "../state/calibration.ts";
 import { recordAction, recordPlanCompliance } from "../state/metrics.ts";
 import { getActivePlan, TASK_RE } from "../state/plan-status.ts";
+import { readLastPlanEvaluation } from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
 import { deny } from "./respond.ts";
 
@@ -110,6 +111,13 @@ export function isConcreteCriterion(line: string): boolean {
 	return false;
 }
 
+/** Check if plan is small (≤ calibrated task threshold). */
+function isSmallPlan(content: string): boolean {
+	const taskSections = splitTaskSections(content);
+	const planTaskThreshold = getCalibrated("plan_task_threshold", 3);
+	return taskSections.length <= planTaskThreshold;
+}
+
 /** PermissionRequest: Validate plan structure on ExitPlanMode */
 export default async function permissionRequest(ev: HookEvent): Promise<void> {
 	if (ev.tool?.name !== "ExitPlanMode") return;
@@ -142,6 +150,19 @@ export default async function permissionRequest(ev: HookEvent): Promise<void> {
 		deny(`Plan structure issues:\n${problems.join("\n")}`);
 	}
 
+	// Large plans: require independent plan evaluation
+	if (!isSmallPlan(content)) {
+		if (!readLastPlanEvaluation()) {
+			deny(
+				"Large plan requires content evaluation. Run /qult:plan-review before exiting plan mode.",
+			);
+		}
+	} else {
+		process.stderr.write(
+			"[qult] Tip: Run /qult:plan-review for an independent plan quality check.\n",
+		);
+	}
+
 	// Plan validation passed — record success (deny case is recorded by respond.ts)
 	try {
 		recordAction("permission-request", "respond", "plan approved");
@@ -153,11 +174,10 @@ export default async function permissionRequest(ev: HookEvent): Promise<void> {
 function validatePlanStructure(content: string): string[] {
 	const problems: string[] = [];
 	const taskSections = splitTaskSections(content);
-	const planTaskThreshold = getCalibrated("plan_task_threshold", 3);
-	const isSmallPlan = taskSections.length <= planTaskThreshold;
+	const small = isSmallPlan(content);
 
 	// Large plans: check Success Criteria
-	if (!isSmallPlan) {
+	if (!small) {
 		if (!SUCCESS_CRITERIA_RE.test(content)) {
 			problems.push("- Missing Success Criteria section");
 		} else {
@@ -201,7 +221,7 @@ function validatePlanStructure(content: string): string[] {
 
 	// Check each task has required fields
 	for (const section of taskSections) {
-		if (!isSmallPlan) {
+		if (!small) {
 			// Large plans: require File field
 			if (!FILE_FIELD_RE.test(section.body)) {
 				problems.push(

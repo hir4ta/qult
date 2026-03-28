@@ -177,6 +177,7 @@ describe("readCalibration and writeCalibration", () => {
 			context_budget: 2500,
 			loc_limit: 150,
 			plan_task_threshold: 4,
+			review_score_threshold: 12,
 			calibrated_at: "2026-03-28T00:00:00Z",
 		};
 		writeCalibration(cal);
@@ -202,6 +203,7 @@ describe("shouldRecalibrate", () => {
 			context_budget: 2000,
 			loc_limit: 200,
 			plan_task_threshold: 3,
+			review_score_threshold: 12,
 			calibrated_at: new Date().toISOString(),
 		});
 		expect(shouldRecalibrate()).toBe(false);
@@ -215,6 +217,7 @@ describe("shouldRecalibrate", () => {
 			context_budget: 2000,
 			loc_limit: 200,
 			plan_task_threshold: 3,
+			review_score_threshold: 12,
 			calibrated_at: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
 		});
 		expect(shouldRecalibrate()).toBe(true);
@@ -230,6 +233,7 @@ describe("getCalibrated", () => {
 			context_budget: 2500,
 			loc_limit: 150,
 			plan_task_threshold: 4,
+			review_score_threshold: 13,
 			calibrated_at: new Date().toISOString(),
 		});
 		expect(getCalibrated("pace_files", 15)).toBe(20);

@@ -2,10 +2,13 @@ import { getTopErrors } from "../state/gate-history.ts";
 import { readPendingFixes } from "../state/pending-fixes.ts";
 import { getActivePlan } from "../state/plan-status.ts";
 import {
+	getReviewIteration,
 	isReviewRequired,
+	readLastPlanEvaluation,
 	readLastReview,
 	readLastTestPass,
 	readPace,
+	readSessionState,
 } from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
 
@@ -70,7 +73,23 @@ export default async function postCompact(_ev: HookEvent): Promise<void> {
 		}
 	}
 
-	// 5. Recent error trends (top 3)
+	// 5. Review iteration state
+	const reviewIter = getReviewIteration();
+	if (reviewIter > 0) {
+		const state = readSessionState();
+		sections.push(
+			`Review iteration: round ${reviewIter}, last aggregate ${state.review_last_aggregate}/15. Score threshold must be met before review clears.`,
+		);
+	}
+
+	// 6. Plan evaluation state
+	if (plan && !readLastPlanEvaluation()) {
+		sections.push(
+			"Plan evaluation: NOT completed. Run /qult:plan-review before exiting plan mode (required for large plans).",
+		);
+	}
+
+	// 7. Recent error trends (top 3)
 	const errors = getTopErrors(3);
 	if (errors.length > 0) {
 		const trends = errors.map((e) => `${e.gate}: ${e.error} (×${e.count})`).join("; ");
