@@ -10,7 +10,9 @@ let stdoutCapture: string[] = [];
 const originalCwd = process.cwd();
 
 /** Minimal gates config for tests that need gates present */
-const SAMPLE_GATES = JSON.stringify({ on_write: { lint: { command: "echo ok", timeout: 3000 } } });
+const SAMPLE_GATES = JSON.stringify({
+	on_write: { lint: { command: "echo ok", timeout: 3000 } },
+});
 
 beforeEach(() => {
 	resetAllCaches();

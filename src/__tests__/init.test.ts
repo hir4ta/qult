@@ -151,7 +151,9 @@ describe("qult init", () => {
 
 		// Write configured gates
 		const gatesPath = join(TEST_PROJECT, ".qult", "gates.json");
-		const gates = { on_write: { lint: { command: "biome check {file}", timeout: 3000 } } };
+		const gates = {
+			on_write: { lint: { command: "biome check {file}", timeout: 3000 } },
+		};
 		writeFileSync(gatesPath, JSON.stringify(gates));
 
 		// Re-init with --force
@@ -173,7 +175,13 @@ describe("qult init", () => {
 					PostToolUse: [
 						{
 							matcher: "Edit",
-							hooks: [{ type: "command", command: "qult hook post-tool", timeout: 5000 }],
+							hooks: [
+								{
+									type: "command",
+									command: "qult hook post-tool",
+									timeout: 5000,
+								},
+							],
 						},
 					],
 				},

@@ -14,9 +14,15 @@ function loadTemplate(name: string): string {
 }
 
 export const initCommand = defineCommand({
-	meta: { description: "Set up qult hooks, skills, agents, and rules in ~/.claude/" },
+	meta: {
+		description: "Set up qult hooks, skills, agents, and rules in ~/.claude/",
+	},
 	args: {
-		force: { type: "boolean", description: "Overwrite existing configuration", default: false },
+		force: {
+			type: "boolean",
+			description: "Overwrite existing configuration",
+			default: false,
+		},
 	},
 	async run({ args }) {
 		await runInit(args.force);
@@ -62,7 +68,12 @@ export const QULT_HOOKS: Record<
 			hooks: [{ type: "command", command: "qult hook session-start", timeout: 5000 }],
 		},
 	],
-	Stop: [{ matcher: "", hooks: [{ type: "command", command: "qult hook stop", timeout: 5000 }] }],
+	Stop: [
+		{
+			matcher: "",
+			hooks: [{ type: "command", command: "qult hook stop", timeout: 5000 }],
+		},
+	],
 	SubagentStop: [
 		{
 			matcher: "",
@@ -187,7 +198,10 @@ function registerProject(home: string, projectPath: string): void {
 		}
 
 		const existing = entries.findIndex((e) => e.path === projectPath);
-		const entry: RegistryEntry = { path: projectPath, registered_at: new Date().toISOString() };
+		const entry: RegistryEntry = {
+			path: projectPath,
+			registered_at: new Date().toISOString(),
+		};
 		if (existing >= 0) {
 			entries[existing] = entry;
 		} else {

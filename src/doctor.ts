@@ -28,14 +28,22 @@ function checkBun(): CheckResult {
 	if (major! > 1 || (major === 1 && minor! >= 3)) {
 		return { name: "bun", status: "ok", message: `Bun ${version}` };
 	}
-	return { name: "bun", status: "fail", message: `Bun ${version} (requires >= 1.3)` };
+	return {
+		name: "bun",
+		status: "fail",
+		message: `Bun ${version} (requires >= 1.3)`,
+	};
 }
 
 function checkHooks(): CheckResult {
 	const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
 	const settingsPath = join(home, ".claude", "settings.json");
 	if (!existsSync(settingsPath)) {
-		return { name: "hooks", status: "fail", message: "settings.json not found" };
+		return {
+			name: "hooks",
+			status: "fail",
+			message: "settings.json not found",
+		};
 	}
 	try {
 		const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
@@ -60,7 +68,11 @@ function checkHooks(): CheckResult {
 			message: `${registered.length}/${expected.length} hooks registered (missing: ${missing.join(", ")})`,
 		};
 	} catch {
-		return { name: "hooks", status: "fail", message: "Failed to parse settings.json" };
+		return {
+			name: "hooks",
+			status: "fail",
+			message: "Failed to parse settings.json",
+		};
 	}
 }
 
@@ -101,7 +113,11 @@ function checkGates(): CheckResult {
 		const onWriteCount = Object.keys(gates.on_write ?? {}).length;
 		const onCommitCount = Object.keys(gates.on_commit ?? {}).length;
 		if (onWriteCount === 0) {
-			return { name: "gates", status: "fail", message: "gates.json has no on_write gates" };
+			return {
+				name: "gates",
+				status: "fail",
+				message: "gates.json has no on_write gates",
+			};
 		}
 
 		const missing: string[] = [];
@@ -128,7 +144,11 @@ function checkGates(): CheckResult {
 			message: `gates.json: ${onWriteCount} on_write, ${onCommitCount} on_commit`,
 		};
 	} catch {
-		return { name: "gates", status: "fail", message: "Failed to parse gates.json" };
+		return {
+			name: "gates",
+			status: "fail",
+			message: "Failed to parse gates.json",
+		};
 	}
 }
 
@@ -245,7 +265,11 @@ export function repairState(): string[] {
 export const doctorCommand = defineCommand({
 	meta: { description: "Check qult health" },
 	args: {
-		fix: { type: "boolean", description: "Repair corrupted state files", default: false },
+		fix: {
+			type: "boolean",
+			description: "Repair corrupted state files",
+			default: false,
+		},
 	},
 	async run({ args }) {
 		const results = runChecks();

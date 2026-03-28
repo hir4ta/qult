@@ -24,7 +24,9 @@ describe("loadGates", () => {
 	});
 
 	it("returns parsed config from valid gates.json", () => {
-		const gates = { on_write: { lint: { command: "biome check {file}", timeout: 3000 } } };
+		const gates = {
+			on_write: { lint: { command: "biome check {file}", timeout: 3000 } },
+		};
 		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
 
 		const result = loadGates();

@@ -32,7 +32,9 @@ describe("postTool: Edit/Write gate execution", () => {
 		writeFileSync(
 			join(TEST_DIR, ".qult", "gates.json"),
 			JSON.stringify({
-				on_write: { lint: { command: "echo 'lint error' && exit 1", timeout: 3000 } },
+				on_write: {
+					lint: { command: "echo 'lint error' && exit 1", timeout: 3000 },
+				},
 			}),
 		);
 
@@ -86,7 +88,9 @@ describe("postTool: .qult/ file skip", () => {
 		writeFileSync(
 			join(TEST_DIR, ".qult", "gates.json"),
 			JSON.stringify({
-				on_write: { lint: { command: "echo 'lint error' && exit 1", timeout: 3000 } },
+				on_write: {
+					lint: { command: "echo 'lint error' && exit 1", timeout: 3000 },
+				},
 			}),
 		);
 

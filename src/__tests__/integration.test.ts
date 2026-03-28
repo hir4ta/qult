@@ -18,7 +18,10 @@ beforeEach(() => {
 		join(TEST_DIR, ".qult", "gates.json"),
 		JSON.stringify({
 			on_write: {
-				lint: { command: "biome check {file} --no-errors-on-unmatched", timeout: 5000 },
+				lint: {
+					command: "biome check {file} --no-errors-on-unmatched",
+					timeout: 5000,
+				},
 			},
 		}),
 	);

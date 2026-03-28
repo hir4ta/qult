@@ -36,7 +36,9 @@ describe("qult status", () => {
 	it("shows clean state when no blockers", async () => {
 		writeFileSync(
 			join(QULT_DIR, "gates.json"),
-			JSON.stringify({ on_write: { lint: { command: "biome check {file}", timeout: 3000 } } }),
+			JSON.stringify({
+				on_write: { lint: { command: "biome check {file}", timeout: 3000 } },
+			}),
 		);
 		const { runStatus } = await import("../status.ts");
 		runStatus();

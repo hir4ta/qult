@@ -17,7 +17,11 @@ const main = defineCommand({
 		hook: defineCommand({
 			meta: { description: "Run a hook handler" },
 			args: {
-				event: { type: "positional", description: "Hook event name", required: true },
+				event: {
+					type: "positional",
+					description: "Hook event name",
+					required: true,
+				},
 			},
 			async run({ args }) {
 				await dispatch(args.event);

@@ -407,7 +407,11 @@ describe("Scenario 24: run_once_per_batch skips typecheck on 2nd edit", () => {
 		const gates = {
 			on_write: {
 				lint: { command: "echo lint-ok", timeout: 3000 },
-				typecheck: { command: "echo typecheck-ok", timeout: 3000, run_once_per_batch: true },
+				typecheck: {
+					command: "echo typecheck-ok",
+					timeout: 3000,
+					run_once_per_batch: true,
+				},
 			},
 		};
 		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
@@ -723,7 +727,9 @@ describe("Scenario 23: Init → Doctor reports all OK", () => {
 		try {
 			const claudeDir = join(TEST_DIR, ".claude");
 			mkdirSync(join(claudeDir, "skills", "qult-review"), { recursive: true });
-			mkdirSync(join(claudeDir, "skills", "qult-plan-generator"), { recursive: true });
+			mkdirSync(join(claudeDir, "skills", "qult-plan-generator"), {
+				recursive: true,
+			});
 			mkdirSync(join(claudeDir, "agents"), { recursive: true });
 			mkdirSync(join(claudeDir, "rules"), { recursive: true });
 			writeFileSync(join(claudeDir, "skills", "qult-review", "SKILL.md"), "# skill");

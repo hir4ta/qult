@@ -101,7 +101,10 @@ function validatePlan(): void {
 
 		const files = (readdirSync(planDir) as string[])
 			.filter((f: string) => f.endsWith(".md"))
-			.map((f: string) => ({ name: f, mtime: statSync(join(planDir, f)).mtimeMs }))
+			.map((f: string) => ({
+				name: f,
+				mtime: statSync(join(planDir, f)).mtimeMs,
+			}))
 			.sort((a: { mtime: number }, b: { mtime: number }) => b.mtime - a.mtime);
 
 		if (files.length === 0) return;

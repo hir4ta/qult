@@ -154,7 +154,10 @@ export function isReviewRequired(): boolean {
 
 // --- Test pass ---
 
-export function readLastTestPass(): { passed_at: string; command: string } | null {
+export function readLastTestPass(): {
+	passed_at: string;
+	command: string;
+} | null {
 	const state = readSessionState();
 	if (!state.test_passed_at) return null;
 	return { passed_at: state.test_passed_at, command: state.test_command ?? "" };
@@ -192,7 +195,10 @@ export function shouldSkipGate(gateName: string, sessionId: string): boolean {
 
 export function markGateRan(gateName: string, sessionId: string): void {
 	const state = readSessionState();
-	state.ran_gates[gateName] = { session_id: sessionId, ran_at: new Date().toISOString() };
+	state.ran_gates[gateName] = {
+		session_id: sessionId,
+		ran_at: new Date().toISOString(),
+	};
 	writeState(state);
 }
 

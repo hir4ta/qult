@@ -24,7 +24,9 @@ function setupValidEnv(): void {
 	// skills
 	mkdirSync(join(claudeDir, "skills", "qult-review"), { recursive: true });
 	writeFileSync(join(claudeDir, "skills", "qult-review", "SKILL.md"), "# review skill");
-	mkdirSync(join(claudeDir, "skills", "qult-plan-generator"), { recursive: true });
+	mkdirSync(join(claudeDir, "skills", "qult-plan-generator"), {
+		recursive: true,
+	});
 	writeFileSync(
 		join(claudeDir, "skills", "qult-plan-generator", "SKILL.md"),
 		"# plan-generator skill",
@@ -117,7 +119,10 @@ describe("doctor: check 3 — skill exists", () => {
 
 	it("returns fail when skill file is missing", async () => {
 		setupValidEnv();
-		rmSync(join(TEST_HOME, ".claude", "skills"), { recursive: true, force: true });
+		rmSync(join(TEST_HOME, ".claude", "skills"), {
+			recursive: true,
+			force: true,
+		});
 
 		const { runChecks } = await import("../doctor.ts");
 		const results = runChecks();
@@ -139,7 +144,10 @@ describe("doctor: check 4 — agent exists", () => {
 
 	it("returns fail when agent file is missing", async () => {
 		setupValidEnv();
-		rmSync(join(TEST_HOME, ".claude", "agents"), { recursive: true, force: true });
+		rmSync(join(TEST_HOME, ".claude", "agents"), {
+			recursive: true,
+			force: true,
+		});
 
 		const { runChecks } = await import("../doctor.ts");
 		const results = runChecks();
@@ -161,7 +169,10 @@ describe("doctor: check 5 — rules exists", () => {
 
 	it("returns fail when rules file is missing", async () => {
 		setupValidEnv();
-		rmSync(join(TEST_HOME, ".claude", "rules"), { recursive: true, force: true });
+		rmSync(join(TEST_HOME, ".claude", "rules"), {
+			recursive: true,
+			force: true,
+		});
 
 		const { runChecks } = await import("../doctor.ts");
 		const results = runChecks();
@@ -216,7 +227,10 @@ describe("doctor: check 7 — .qult/.state/ exists", () => {
 
 	it("returns fail when state directory is missing", async () => {
 		setupValidEnv();
-		rmSync(join(TEST_PROJECT, ".qult", ".state"), { recursive: true, force: true });
+		rmSync(join(TEST_PROJECT, ".qult", ".state"), {
+			recursive: true,
+			force: true,
+		});
 
 		const { runChecks } = await import("../doctor.ts");
 		const results = runChecks();

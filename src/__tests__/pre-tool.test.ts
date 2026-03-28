@@ -37,7 +37,11 @@ describe("preTool: Edit/Write checks", () => {
 	it("DENY editing other files when pending-fixes exist", async () => {
 		const { writePendingFixes } = await import("../state/pending-fixes.ts");
 		writePendingFixes([
-			{ file: join(TEST_DIR, "src/broken.ts"), errors: ["type error"], gate: "typecheck" },
+			{
+				file: join(TEST_DIR, "src/broken.ts"),
+				errors: ["type error"],
+				gate: "typecheck",
+			},
 		]);
 
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
@@ -84,7 +88,9 @@ describe("preTool: Bash git commit checks", () => {
 	it("DENY commit without test pass when on_commit gates exist", async () => {
 		writeFileSync(
 			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({ on_commit: { test: { command: "vitest run", timeout: 30000 } } }),
+			JSON.stringify({
+				on_commit: { test: { command: "vitest run", timeout: 30000 } },
+			}),
 		);
 
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
@@ -105,7 +111,9 @@ describe("preTool: Bash git commit checks", () => {
 	it("allows commit without review for small change", async () => {
 		writeFileSync(
 			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({ on_commit: { test: { command: "vitest run", timeout: 30000 } } }),
+			JSON.stringify({
+				on_commit: { test: { command: "vitest run", timeout: 30000 } },
+			}),
 		);
 
 		const { recordTestPass } = await import("../state/session-state.ts");
@@ -123,7 +131,9 @@ describe("preTool: Bash git commit checks", () => {
 	it("DENY commit without review when plan is active", async () => {
 		writeFileSync(
 			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({ on_commit: { test: { command: "vitest run", timeout: 30000 } } }),
+			JSON.stringify({
+				on_commit: { test: { command: "vitest run", timeout: 30000 } },
+			}),
 		);
 
 		const planDir = join(TEST_DIR, ".claude", "plans");
