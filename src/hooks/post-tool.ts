@@ -22,6 +22,7 @@ import {
 	readLastReview,
 	readPace,
 	recordChangedFile,
+	recordChangedLines,
 	recordCriteriaCommand,
 	recordEditTowardsFix,
 	recordFailure,
@@ -56,6 +57,14 @@ function handleEditWrite(ev: HookEvent): void {
 	// Skip qult's own state/config files
 	const qultDir = resolve(process.cwd(), ".qult");
 	if (file.startsWith(`${qultDir}/`) || file === qultDir) return;
+
+	// Track LOC changes from tool_input
+	try {
+		const lines = computeChangedLines(ev);
+		if (lines > 0) recordChangedLines(lines);
+	} catch {
+		/* fail-open */
+	}
 
 	const gates = loadGates();
 	if (!gates?.on_write) return;
@@ -375,4 +384,30 @@ function revalidatePendingFixes(): void {
 	} catch {
 		// fail-open
 	}
+}
+
+/** Count lines in a string, handling empty string correctly ("".split → [""] = 1, but should be 0). */
+function countLines(s: string): number {
+	if (s === "") return 0;
+	return s.replace(/\n$/, "").split("\n").length;
+}
+
+/** Compute lines changed from Edit (max of old/new to capture replacements) or Write (line count). */
+function computeChangedLines(ev: HookEvent): number {
+	const input = ev.tool_input;
+	if (!input) return 0;
+
+	if (ev.tool_name === "Edit") {
+		const oldStr = typeof input.old_string === "string" ? input.old_string : "";
+		const newStr = typeof input.new_string === "string" ? input.new_string : "";
+		// Use max to capture replacement edits (10 lines → 10 different lines = 10 changed)
+		return Math.max(countLines(oldStr), countLines(newStr));
+	}
+
+	if (ev.tool_name === "Write") {
+		const content = typeof input.content === "string" ? input.content : "";
+		return countLines(content);
+	}
+
+	return 0;
 }

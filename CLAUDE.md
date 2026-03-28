@@ -25,13 +25,13 @@ qult CLI (init / hook / doctor)
 
 | Hook | 分類 | 出力 | 説明 |
 |------|------|------|------|
-| PreToolUse | enforcement | DENY | pending-fixes, pace red, commit gates |
+| PreToolUse | enforcement | DENY | pending-fixes, pace red, LOC limit, commit gates |
 | PostToolUse | enforcement | respond | gate実行 → pending-fixes生成 |
 | Stop | enforcement | block | pending-fixes, incomplete plan, no review, unverified fields, unexecuted criteria (条件付き) |
 | PermissionRequest | enforcement | DENY | ExitPlanMode plan構造検証 |
 | ConfigChange | enforcement | DENY | hook削除防止 |
 | SubagentStop | enforcement | block | reviewer PASS→gate clear / FAIL→block (修正+再レビュー要求) |
-| SessionStart | advisory | respond | エラートレンド注入 |
+| SessionStart | advisory | respond | エラートレンド注入 + 自動キャリブレーション + 外部コンテキスト |
 | UserPromptSubmit | advisory | respond | Planテンプレート注入 (Plan mode のみ) |
 | SubagentStart | advisory | respond | pending-fixes状態注入 |
 | PostToolUseFailure | advisory | respond | /clear提案 |
@@ -88,9 +88,11 @@ task clean    # ビルド成果物削除
 
 ### 状態ファイル
 - `.qult/.state/pending-fixes.json` — 未修正 lint/type エラー
-- `.qult/.state/session-state.json` — 統合セッション状態 (pace, test pass, review, gate batch, fail count, budget, action counters, verified_fields, criteria_commands_run)
+- `.qult/.state/session-state.json` — 統合セッション状態 (pace, test pass, review, gate batch, fail count, budget, action counters, verified_fields, criteria_commands_run, changed_lines)
+- `.qult/.state/calibration.json` — 自動キャリブレーション結果 (pace_files, review_file_threshold, context_budget, loc_limit)
 - `.qult/metrics/YYYY-MM/YYYY-MM-DD.json` — DENY/block/respond 発火記録 (日次ローテーション, 上限なし)
 - `.qult/gate-history/YYYY-MM/YYYY-MM-DD.json` — gate 結果 + コミット履歴 (日次ローテーション, 上限なし)
+- `.qult/context-providers.json` — 外部コンテキストプロバイダー設定 (CI/CD状態等)
 - 各エントリに session_id, project_id, branch, user を記録 (チーム開発 + TUI 対応)
 
 ### Sprint Contract (適応型)
@@ -126,11 +128,30 @@ task clean    # ビルド成果物削除
 - Review: PASS/FAIL 率 + findings (severity別) + review:miss (PASS後のgate fail)
 - Plans: permission-request の approve/deny 率
 - Commits: 間隔統計 (avg/median/min/max) + DENYs per commit
-- `doctor --metrics`: Actions / Top reasons (種別別) / Effectiveness / Gates / Review / Commits / Plans セクション表示
+- `doctor --metrics`: Actions / Top reasons (種別別) / Effectiveness / Gates / Review / Commits / Plans / Calibration セクション表示
 - `doctor --fix`: 壊れた state ファイルをデフォルト値にリセット
+
+### LOC 制限
+- PostToolUse で Edit/Write の変更行数を計測 (old_string/new_string の行数差分)
+- session-state.changed_lines に累積記録。コミット時にリセット
+- PreToolUse で LOC 制限チェック: デフォルト 200行 (Plan あり 300行)
+- キャリブレーション値があればそちらを使用
+
+### 自動キャリブレーション
+- SessionStart で24時間ごとに metrics から閾値を自動調整
+- 調整対象: pace_files, review_file_threshold, context_budget, loc_limit
+- ルール: first-pass rate → pace_files, review:miss → review threshold, respond-skipped率 → budget, fix effort → loc_limit
+- `.qult/.state/calibration.json` に保存。`doctor --metrics` で確認可能
+
+### 外部コンテキストプロバイダー
+- `.qult/context-providers.json` でコマンドベースの外部コンテキスト取得を宣言
+- SessionStart で inject_on: "session_start" のプロバイダーを実行し結果を注入
+- fail-open: 個々のプロバイダー失敗は無視
+- `/qult:detect-gates` で `gh` CLI 存在時に ci_status プロバイダーを自動生成
 
 ### Pace 制限 (適応型, Opus 4.6 対応)
 - デフォルト: 120分 + 15ファイル = RED → DENY (Opus 4.6 の長時間coherent作業に対応)
+- LOC 制限: 200行 (Plan あり 300行) → DENY。キャリブレーションで自動調整
 - コミット3回以上: 平均間隔 × 2 (10-120分の範囲)
 - Plan あり: threshold × 1.5 (180分 / 23ファイルまで許容)
 - ConfigChange: hook設定のみ DENY。その他の user_settings 変更は許可

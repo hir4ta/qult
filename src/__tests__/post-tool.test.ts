@@ -246,3 +246,95 @@ describe("postTool: Bash handling", () => {
 		expect(output).toContain("/clear");
 	});
 });
+
+describe("postTool: LOC tracking", () => {
+	it("tracks changed lines from Edit tool_input", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({ on_write: { lint: { command: "echo ok", timeout: 3000 } } }),
+		);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: {
+				file_path: join(TEST_DIR, "src/foo.ts"),
+				old_string: "line1\nline2\n",
+				new_string: "line1\nline2\nline3\nline4\nline5\n",
+			},
+		});
+
+		const { readChangedLines } = await import("../state/session-state.ts");
+		// max(2, 5) = 5 (uses max of old/new to capture replacement edits)
+		expect(readChangedLines()).toBe(5);
+	});
+
+	it("counts replacement edits correctly (same line count)", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({ on_write: { lint: { command: "echo ok", timeout: 3000 } } }),
+		);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: {
+				file_path: join(TEST_DIR, "src/foo.ts"),
+				old_string: "const a = 1;\nconst b = 2;\n",
+				new_string: "const x = 99;\nconst y = 100;\n",
+			},
+		});
+
+		const { readChangedLines } = await import("../state/session-state.ts");
+		// Replacing 2 lines with 2 different lines = 2 (not 0)
+		expect(readChangedLines()).toBe(2);
+	});
+
+	it("tracks lines from Write tool_input", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({ on_write: { lint: { command: "echo ok", timeout: 3000 } } }),
+		);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Write",
+			tool_input: {
+				file_path: join(TEST_DIR, "src/bar.ts"),
+				content: "const a = 1;\nconst b = 2;\nconst c = 3;\n",
+			},
+		});
+
+		const { readChangedLines } = await import("../state/session-state.ts");
+		expect(readChangedLines()).toBe(3);
+	});
+
+	it("accumulates lines across multiple edits", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({ on_write: { lint: { command: "echo ok", timeout: 3000 } } }),
+		);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: {
+				file_path: join(TEST_DIR, "src/foo.ts"),
+				old_string: "a\n",
+				new_string: "a\nb\nc\n",
+			},
+		});
+		await postTool({
+			tool_name: "Edit",
+			tool_input: {
+				file_path: join(TEST_DIR, "src/foo.ts"),
+				old_string: "x\n",
+				new_string: "x\ny\n",
+			},
+		});
+
+		const { readChangedLines } = await import("../state/session-state.ts");
+		// max(1,3) + max(1,2) = 3 + 2 = 5
+		expect(readChangedLines()).toBe(5);
+	});
+});

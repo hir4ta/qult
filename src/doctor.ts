@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { defineCommand } from "citty";
 import { QULT_HOOKS } from "./init.ts";
+import { readCalibration } from "./state/calibration.ts";
 import {
 	getAvgGateDuration,
 	getCommitStats,
@@ -366,6 +367,35 @@ function showMetrics(): void {
 		console.log(
 			`    Approved: ${summary.permissionAllow}, Rejected: ${summary.permissionDeny} (${summary.planSuccessRate}% pass)`,
 		);
+	}
+
+	// --- Calibration ---
+	try {
+		const cal = readCalibration();
+		if (cal) {
+			const defaults = {
+				pace_files: 15,
+				review_file_threshold: 5,
+				context_budget: 2000,
+				loc_limit: 200,
+			};
+			const changes: string[] = [];
+			for (const [key, defVal] of Object.entries(defaults)) {
+				const curVal = cal[key as keyof typeof defaults];
+				if (curVal !== defVal) {
+					changes.push(`    ${key}: ${defVal} -> ${curVal}`);
+				}
+			}
+			console.log("\n  Calibration:");
+			if (changes.length > 0) {
+				console.log(`    Calibrated at: ${cal.calibrated_at}`);
+				for (const c of changes) console.log(c);
+			} else {
+				console.log("    All thresholds at default values.");
+			}
+		}
+	} catch {
+		/* fail-open */
 	}
 }
 

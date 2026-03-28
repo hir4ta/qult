@@ -9,9 +9,11 @@ import {
 	isPaceRed,
 	isReviewRequired,
 	markGateRan,
+	readChangedLines,
 	readPace,
 	readSessionState,
 	recordChangedFile,
+	recordChangedLines,
 	recordFailure,
 	recordInjection,
 	recordReview,
@@ -279,8 +281,8 @@ describe("session-state: countGatedFiles", () => {
 		recordChangedFile("/project/README.md");
 		recordChangedFile("/project/config.json");
 
-		// .ts, .tsx, .json are gated by biome/tsc; .md is not
-		expect(countGatedFiles()).toBe(3);
+		// .ts, .tsx are gated by biome/tsc; .md and .json are not
+		expect(countGatedFiles()).toBe(2);
 	});
 
 	it("returns 0 when no gates configured", () => {
@@ -314,6 +316,30 @@ describe("session-state: clearOnCommit resets changed_file_paths", () => {
 
 		clearOnCommit();
 		expect(readSessionState().changed_file_paths).toHaveLength(0);
+	});
+});
+
+describe("session-state: LOC tracking", () => {
+	it("recordChangedLines tracks cumulative LOC", () => {
+		expect(readChangedLines()).toBe(0);
+		recordChangedLines(15);
+		expect(readChangedLines()).toBe(15);
+		recordChangedLines(10);
+		expect(readChangedLines()).toBe(25);
+	});
+
+	it("ignores zero or negative lines", () => {
+		recordChangedLines(10);
+		recordChangedLines(0);
+		recordChangedLines(-5);
+		expect(readChangedLines()).toBe(10);
+	});
+
+	it("clearOnCommit resets changed_lines", () => {
+		recordChangedLines(50);
+		expect(readChangedLines()).toBe(50);
+		clearOnCommit();
+		expect(readChangedLines()).toBe(0);
 	});
 });
 

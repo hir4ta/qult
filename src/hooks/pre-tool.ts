@@ -1,11 +1,13 @@
 import { resolve } from "node:path";
 import { loadGates } from "../gates/load.ts";
+import { getCalibrated } from "../state/calibration.ts";
 import { recordAction } from "../state/metrics.ts";
 import { readPendingFixes } from "../state/pending-fixes.ts";
 import { getActivePlan } from "../state/plan-status.ts";
 import {
 	isPaceRed,
 	isReviewRequired,
+	readChangedLines,
 	readLastReview,
 	readLastTestPass,
 	readPace,
@@ -50,6 +52,19 @@ function checkEditWrite(ev: HookEvent): void {
 			"Long time without commit on many changed files. Commit your current changes before continuing.",
 		);
 	}
+
+	// LOC limit: DENY when cumulative changed lines exceed threshold
+	try {
+		const locLimit = getLocLimit(hasPlan);
+		const currentLines = readChangedLines();
+		if (currentLines >= locLimit) {
+			deny(
+				`Too many lines changed (${currentLines}/${locLimit}) since last commit. Commit current changes first.`,
+			);
+		}
+	} catch {
+		/* fail-open */
+	}
 }
 
 function checkBash(ev: HookEvent): void {
@@ -80,4 +95,12 @@ function checkBash(ev: HookEvent): void {
 			}
 		}
 	}
+}
+
+const DEFAULT_LOC_LIMIT = 200;
+const PLAN_LOC_MULTIPLIER = 1.5;
+
+function getLocLimit(hasPlan: boolean): number {
+	const limit = getCalibrated("loc_limit", DEFAULT_LOC_LIMIT);
+	return hasPlan ? Math.ceil(limit * PLAN_LOC_MULTIPLIER) : limit;
 }

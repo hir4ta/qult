@@ -1,4 +1,4 @@
-import { pathForToday, readAllDaysArray, readDaily, today, writeDaily } from "./daily-file.ts";
+import { readAllDaysArray, readDaily, today, writeDaily } from "./daily-file.ts";
 
 const BASE = "metrics";
 

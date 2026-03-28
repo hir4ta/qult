@@ -90,6 +90,38 @@ describe("preTool: Edit/Write checks", () => {
 		expect(exitCode).toBe(2);
 	});
 
+	it("DENY edit when LOC limit exceeded", async () => {
+		const { recordChangedLines } = await import("../state/session-state.ts");
+		recordChangedLines(210);
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		try {
+			await preTool({
+				tool_name: "Edit",
+				tool_input: { file_path: join(TEST_DIR, "src/foo.ts") },
+			});
+		} catch {
+			/* exit(2) */
+		}
+
+		expect(exitCode).toBe(2);
+		const output = stdoutCapture.join("");
+		expect(output).toContain("lines changed");
+	});
+
+	it("allows edit when LOC under limit", async () => {
+		const { recordChangedLines } = await import("../state/session-state.ts");
+		recordChangedLines(100);
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/foo.ts") },
+		});
+
+		expect(exitCode).toBeNull();
+	});
+
 	it("allows Edit when no pending fixes and pace ok", async () => {
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
 		await preTool({

@@ -2,12 +2,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { extname, join } from "node:path";
 import { loadGates } from "../gates/load.ts";
 import { atomicWriteJson } from "./atomic-write.ts";
+import { getCalibrated } from "./calibration.ts";
 import { getCommitStats } from "./gate-history.ts";
 import { getActivePlan } from "./plan-status.ts";
 
 const STATE_DIR = ".qult/.state";
 const FILE = "session-state.json";
-const BUDGET = 2000;
 const DEFAULT_RED_MINUTES = 120;
 const DEFAULT_FILES = 15;
 
@@ -47,6 +47,8 @@ export interface SessionState {
 	peak_consecutive_error_count: number;
 	// Fix effort: edits between DENY and resolution
 	deny_edits_before_resolution: number;
+	// LOC tracking: cumulative lines changed since last commit
+	changed_lines: number;
 }
 
 function filePath(): string {
@@ -75,6 +77,7 @@ function defaultState(): SessionState {
 		criteria_commands_run: [],
 		peak_consecutive_error_count: 0,
 		deny_edits_before_resolution: 0,
+		changed_lines: 0,
 	};
 }
 
@@ -168,17 +171,18 @@ export function isPaceRed(
 	const elapsed = Date.now() - new Date(pace.last_commit_at).getTime();
 	const minutes = elapsed / 60_000;
 	const threshold = hasPlan ? getRedThreshold() * 1.5 : getRedThreshold();
-	const fileThreshold = hasPlan ? Math.ceil(DEFAULT_FILES * 1.5) : DEFAULT_FILES;
+	const calibratedFiles = getCalibrated("pace_files", DEFAULT_FILES);
+	const fileThreshold = hasPlan ? Math.ceil(calibratedFiles * 1.5) : calibratedFiles;
 	return minutes >= threshold && pace.changed_files >= fileThreshold;
 }
 
 // --- Review threshold ---
 
-const REVIEW_FILE_THRESHOLD = 5;
+const DEFAULT_REVIEW_FILE_THRESHOLD = 5;
 
 // Tool keyword → file extensions the tool meaningfully checks
 const TOOL_EXTS: [RegExp, string[]][] = [
-	[/\bbiome\b/, [".js", ".jsx", ".ts", ".tsx", ".json", ".jsonc", ".css", ".graphql"]],
+	[/\bbiome\b/, [".js", ".jsx", ".ts", ".tsx", ".css", ".graphql"]],
 	[/\beslint\b/, [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".vue", ".svelte"]],
 	[/\btsc\b/, [".ts", ".tsx", ".mts", ".cts"]],
 	[/\bpyright\b/, [".py", ".pyi"]],
@@ -254,7 +258,8 @@ export function isReviewRequired(): boolean {
 	if (getActivePlan() !== null) return true;
 
 	// Count only files covered by on_write gates
-	if (countGatedFiles() >= REVIEW_FILE_THRESHOLD) return true;
+	const reviewThreshold = getCalibrated("review_file_threshold", DEFAULT_REVIEW_FILE_THRESHOLD);
+	if (countGatedFiles() >= reviewThreshold) return true;
 
 	return false;
 }
@@ -354,6 +359,21 @@ export function resetFixEffort(): number {
 	}
 }
 
+// --- LOC tracking ---
+
+/** Read cumulative changed lines since last commit. */
+export function readChangedLines(): number {
+	return readSessionState().changed_lines ?? 0;
+}
+
+/** Record additional changed lines (added to cumulative total). */
+export function recordChangedLines(lines: number): void {
+	if (lines <= 0) return;
+	const state = readSessionState();
+	state.changed_lines = (state.changed_lines ?? 0) + lines;
+	writeState(state);
+}
+
 // --- Action counters ---
 
 export function incrementActionCount(type: "deny" | "block" | "respond"): void {
@@ -393,7 +413,8 @@ export function resetBudget(sessionId: string): void {
 export function checkBudget(tokens: number): boolean {
 	const state = readSessionState();
 	if (!state.context_session_id) return true; // fail-open
-	return state.context_used + tokens <= BUDGET;
+	const budget = getCalibrated("context_budget", 2000);
+	return state.context_used + tokens <= budget;
 }
 
 export function recordInjection(tokens: number): void {
@@ -416,6 +437,7 @@ export function clearOnCommit(paceReset?: {
 	state.review_completed_at = null;
 	state.ran_gates = {};
 	state.changed_file_paths = [];
+	state.changed_lines = 0;
 	state.last_error_signature = "";
 	state.consecutive_error_count = 0;
 	if (paceReset) {

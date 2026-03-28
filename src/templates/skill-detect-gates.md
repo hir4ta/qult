@@ -62,6 +62,23 @@ Rules:
 
 For each gate command, confirm the tool is available (e.g. `which biome`, `cargo --version`). Do NOT run full test suites or commands that modify state. If a tool is not installed, remove that gate.
 
+## Step 4: Context providers (optional)
+
+Check if `gh` CLI is available (`which gh`). If it is, create `.qult/context-providers.json` with a default CI status provider:
+
+```json
+{
+  "ci_status": {
+    "command": "gh run list --limit 3 --json status,conclusion,name --jq '.[] | \"\\(.name): \\(.conclusion // .status)\"'",
+    "timeout": 5000,
+    "inject_on": "session_start"
+  }
+}
+```
+
+If `gh` is not available, skip this step. If `.qult/context-providers.json` already exists, do not overwrite it.
+
 ## Output
 
 Print the final gates.json content and confirm: `Gates configured: N on_write, N on_commit, N on_review`
+If context providers were created, also confirm: `Context providers configured: N provider(s)`
