@@ -713,6 +713,46 @@ describe("Scenario: Review PASS without scores — fail-open", () => {
 });
 
 // ============================================================
+// Plan criteria in reviewer output
+// ============================================================
+
+describe("Scenario: Reviewer output with plan criteria findings passes SubagentStop", () => {
+	it("plan criteria finding is treated as normal finding — PASS with high score clears", async () => {
+		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		await subagentStop({
+			agent_type: "qult-reviewer",
+			last_assistant_message: [
+				"Review: PASS",
+				"Score: Correctness=4 Design=5 Security=5",
+				'- [high] plan — Task 2 "Add tests" not verified: auth.test.ts:testLogin',
+				"Fix: Add the missing test case",
+			].join("\n"),
+		});
+		expect(exitCode).toBeNull();
+		expect(stderrCapture.join("")).not.toContain("Reviewer output must include");
+	});
+
+	it("plan criteria finding with low correctness triggers FAIL verdict", async () => {
+		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		try {
+			await subagentStop({
+				agent_type: "qult-reviewer",
+				last_assistant_message: [
+					"Review: FAIL",
+					"Score: Correctness=2 Design=4 Security=4",
+					'- [high] plan — Task 1 "Add auth" not verified: auth.test.ts:testLogin',
+					"- [critical] src/auth.ts:15 — password stored in plaintext",
+					"Fix: Use bcrypt hashing",
+				].join("\n"),
+			});
+		} catch {
+			// exit(2)
+		}
+		expect(exitCode).toBe(2);
+	});
+});
+
+// ============================================================
 // Doctor
 // ============================================================
 

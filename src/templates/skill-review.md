@@ -23,10 +23,26 @@ Before spawning the reviewer, run any `on_review` gates defined in `.qult/gates.
 
 If a gate times out or crashes, record it as `ERROR` and continue. Do not block the review.
 
+## Stage 0.5: Extract plan acceptance criteria
+
+If an active plan exists in `.claude/plans/`, extract acceptance criteria to pass to the reviewer:
+
+1. Read the most recently modified `.md` file in `.claude/plans/`
+2. For each `### Task N:` block, extract the **Verify** line
+3. Build a compact criteria block:
+   ```
+   ## Plan acceptance criteria
+   - Task 1: <name> — Verify: <test file>:<test function>
+   - Task 3: <name> — Verify: <test file>:<test function>
+   ```
+4. Only include tasks with a non-empty Verify field
+5. If no plan file exists or no Verify fields are found, skip this stage entirely (no criteria block)
+
 ## Stage 1: Reviewer (independent evaluator)
 
 Spawn one `qult-reviewer` agent with the diff to review.
 Include the on_review gate results (from Stage 0) in the agent prompt so the reviewer can factor runtime failures into its Correctness score.
+If plan acceptance criteria were extracted (Stage 0.5), include them in the agent prompt as a separate section after the gate results.
 The reviewer evaluates correctness, design, and security in an independent context.
 
 ## Stage 2: Judge filter
