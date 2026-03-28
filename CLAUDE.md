@@ -170,5 +170,5 @@ task clean    # ビルド成果物削除
 
 ## 設計ドキュメント
 
-@research-harness-engineering-2026.md
-@research-claude-code-plugins-2026.md
+@docs/research-harness-engineering-2026.md
+@docs/research-claude-code-plugins-2026.md
