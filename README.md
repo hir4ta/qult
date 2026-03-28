@@ -15,6 +15,12 @@
 > Claude Code の UI が hook の成功/失敗を正しく判別できない既知のバグです ([#12671](https://github.com/anthropics/claude-code/issues/12671), [#21643](https://github.com/anthropics/claude-code/issues/21643), [#10463](https://github.com/anthropics/claude-code/issues/10463))。
 > hook 自体は正常に動作しています。
 
+> [!WARNING]
+> **PreToolUse hook の DENY が無視される場合があります。** qult は正しく `exit 2` + `permissionDecision: "deny"` を返しますが、
+> Claude Code がブロックせずにツールを実行してしまうケースが報告されています
+> ([#21988](https://github.com/anthropics/claude-code/issues/21988), [#4669](https://github.com/anthropics/claude-code/issues/4669), [#24327](https://github.com/anthropics/claude-code/issues/24327))。
+> 特に LOC 制限の DENY が連続で無視され、変更量が膨らむ現象が確認されています。Claude Code 側の修正待ちです。
+
 ---
 
 ## How it works
