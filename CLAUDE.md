@@ -9,11 +9,10 @@ TypeScript (Bun 1.3+, ESM) / citty (CLI) / vitest (テスト) / Biome (lint)
 ## コマンド
 
 ```bash
-task build    # bun build (バンドル)
-task check    # tsc --noEmit + Biome lint
-task fix      # Biome 自動修正
-task test     # vitest run
-task clean    # ビルド成果物削除
+bun run build    # bun build (バンドル)
+bun run typecheck && bun run lint  # tsc --noEmit + Biome lint
+bun run lint:fix # Biome 自動修正
+bun run test     # vitest run
 ```
 
 `bun tsc` / `bun vitest` を使う（`npx` 不要）
