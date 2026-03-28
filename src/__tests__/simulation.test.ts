@@ -1963,6 +1963,80 @@ describe("Scenario: Non-gated file extensions are skipped", () => {
 // False Positive Detection
 // ============================================================
 
+// ============================================================
+// on_review gate integration
+// ============================================================
+
+describe("Scenario: Review skill template includes on_review gate execution step", () => {
+	it("skill-review.md contains Stage 0 for on_review gates", async () => {
+		const { readFileSync } = await import("node:fs");
+		const { join } = await import("node:path");
+		const templatePath = join(import.meta.dirname, "..", "templates", "skill-review.md");
+		const content = readFileSync(templatePath, "utf-8");
+
+		// Stage 0 exists and mentions on_review
+		expect(content).toContain("Stage 0");
+		expect(content).toContain("on_review");
+		expect(content).toContain("gates.json");
+		// Gate results are passed to reviewer
+		expect(content).toContain("gate results");
+		// Timeout enforcement is specified
+		expect(content).toContain("timeout");
+		// Stage 0 appears before Stage 1 (structural order)
+		expect(content.indexOf("Stage 0")).toBeLessThan(content.indexOf("Stage 1"));
+	});
+
+	it("agent-reviewer.md references pre-provided gate results with fallback", async () => {
+		const { readFileSync } = await import("node:fs");
+		const { join } = await import("node:path");
+		const templatePath = join(import.meta.dirname, "..", "templates", "agent-reviewer.md");
+		const content = readFileSync(templatePath, "utf-8");
+
+		// Reviewer knows about pre-provided gate results
+		expect(content).toContain("gate results");
+		expect(content).toContain("fallback");
+		// Reviewer allowed-tools includes e2e patterns for fallback execution
+		expect(content).toContain("npx playwright *");
+		expect(content).toContain("npx cypress *");
+	});
+});
+
+describe("Scenario: gates.json with on_review section loads correctly", () => {
+	it("loadGates returns on_review gates", async () => {
+		const gates: GatesConfig = {
+			on_write: {
+				lint: { command: "echo ok", timeout: 3000 },
+			},
+			on_review: {
+				e2e: { command: "npx playwright test", timeout: 60000 },
+			},
+		};
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
+
+		const { loadGates } = await import("../gates/load.ts");
+		const loaded = loadGates();
+		expect(loaded).not.toBeNull();
+		expect(loaded!.on_review).toBeDefined();
+		expect(loaded!.on_review!.e2e).toBeDefined();
+		expect(loaded!.on_review!.e2e!.command).toBe("npx playwright test");
+		expect(loaded!.on_review!.e2e!.timeout).toBe(60000);
+	});
+
+	it("on_review is undefined when not configured in gates.json", async () => {
+		const gates: GatesConfig = {
+			on_write: {
+				lint: { command: "echo ok", timeout: 3000 },
+			},
+		};
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
+
+		const { loadGates } = await import("../gates/load.ts");
+		const loaded = loadGates();
+		expect(loaded).not.toBeNull();
+		expect(loaded!.on_review).toBeUndefined();
+	});
+});
+
 describe("Scenario: Pace-red DENY followed by clean commit records false positive", () => {
 	it("detects false positive when pace-red DENY is followed by clean commit", async () => {
 		// Set up passing on_commit gates

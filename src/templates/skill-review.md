@@ -7,9 +7,26 @@ description: "Independent code review using a separate evaluator agent (HubSpot 
 
 Two-stage code review: independent Reviewer → Judge filter.
 
+## Stage 0: Run on_review gates (runtime verification)
+
+Before spawning the reviewer, run any `on_review` gates defined in `.qult/gates.json`:
+
+1. Read `.qult/gates.json` — if no `on_review` section, skip to Stage 1
+2. For each gate in `on_review`, run the command via Bash with the gate's `timeout` value (in ms) as the Bash tool timeout. If no timeout is specified, default to 60000ms.
+3. Collect results as a summary block:
+   ```
+   ## on_review gate results
+   - e2e: PASS (12.3s)
+   - e2e: FAIL (8.1s) — [first 500 chars of stderr]
+   ```
+4. Pass this block as context when spawning the reviewer in Stage 1
+
+If a gate times out or crashes, record it as `ERROR` and continue. Do not block the review.
+
 ## Stage 1: Reviewer (independent evaluator)
 
 Spawn one `qult-reviewer` agent with the diff to review.
+Include the on_review gate results (from Stage 0) in the agent prompt so the reviewer can factor runtime failures into its Correctness score.
 The reviewer evaluates correctness, design, and security in an independent context.
 
 ## Stage 2: Judge filter
