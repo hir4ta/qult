@@ -15,6 +15,14 @@ const DEFAULT_FILES = 15;
 let _cache: SessionState | null = null;
 let _dirty = false;
 
+// Session-scoped file path: session-state-{sessionId}.json
+let _sessionScope: string | null = null;
+
+/** Set session scope for state file isolation. */
+export function setStateSessionScope(sessionId: string): void {
+	_sessionScope = sessionId;
+}
+
 export interface SessionState {
 	// Pace tracking
 	last_commit_at: string;
@@ -60,7 +68,8 @@ export interface PendingAdvisory {
 }
 
 function filePath(): string {
-	return join(process.cwd(), STATE_DIR, FILE);
+	const file = _sessionScope ? `session-state-${_sessionScope}.json` : FILE;
+	return join(process.cwd(), STATE_DIR, file);
 }
 
 function defaultState(): SessionState {
@@ -129,6 +138,7 @@ export function flush(): void {
 export function resetCache(): void {
 	_cache = null;
 	_dirty = false;
+	_sessionScope = null;
 }
 
 // --- Pace ---

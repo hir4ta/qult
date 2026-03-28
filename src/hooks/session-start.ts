@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { loadGates } from "../gates/load.ts";
 import {
@@ -36,8 +36,10 @@ export default async function sessionStart(_ev: HookEvent): Promise<void> {
 		/* fail-open */
 	}
 
-	// Clear stale pending-fixes from previous session.
-	// Gates will re-detect issues when files are edited in this session.
+	// Clean up stale session-scoped state files (>24h old)
+	cleanupStaleScopedFiles(stateDir);
+
+	// Clear this session's pending-fixes. Gates will re-detect on edit.
 	writePendingFixes([]);
 
 	// Prompt gate detection if gates are empty
@@ -112,6 +114,26 @@ const CAL_KEYS: (keyof Omit<Calibration, "calibrated_at">)[] = [
 	"loc_limit",
 	"plan_task_threshold",
 ];
+
+const STALE_MS = 24 * 60 * 60 * 1000; // 24 hours
+const SCOPED_FILE_RE = /^(session-state|pending-fixes)-.+\.json$/;
+
+/** Remove session-scoped state files older than 24h. */
+function cleanupStaleScopedFiles(stateDir: string): void {
+	try {
+		const now = Date.now();
+		for (const file of readdirSync(stateDir)) {
+			if (!SCOPED_FILE_RE.test(file)) continue;
+			const filePath = join(stateDir, file);
+			const age = now - statSync(filePath).mtimeMs;
+			if (age > STALE_MS) {
+				unlinkSync(filePath);
+			}
+		}
+	} catch {
+		/* fail-open */
+	}
+}
 
 function logCalibrationChanges(prev: Calibration | null, next: Calibration): void {
 	const changes: string[] = [];

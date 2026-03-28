@@ -2,7 +2,8 @@ import { execSync } from "node:child_process";
 import { basename } from "node:path";
 import { flushAll } from "../state/flush.ts";
 import { setMetricsContext } from "../state/metrics.ts";
-import { resetBudget } from "../state/session-state.ts";
+import { setFixesSessionScope } from "../state/pending-fixes.ts";
+import { resetBudget, setStateSessionScope } from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
 import { setCurrentEvent } from "./respond.ts";
 
@@ -88,6 +89,8 @@ export async function dispatch(event: string): Promise<void> {
 	}
 
 	if (ev.session_id) {
+		setStateSessionScope(ev.session_id);
+		setFixesSessionScope(ev.session_id);
 		resetBudget(ev.session_id);
 	}
 

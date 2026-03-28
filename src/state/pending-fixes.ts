@@ -10,8 +10,17 @@ const FIXES_FILE = "pending-fixes.json";
 let _cache: PendingFix[] | null = null;
 let _dirty = false;
 
+// Session-scoped file path: pending-fixes-{sessionId}.json
+let _sessionScope: string | null = null;
+
+/** Set session scope for pending-fixes file isolation. */
+export function setFixesSessionScope(sessionId: string): void {
+	_sessionScope = sessionId;
+}
+
 function fixesPath(): string {
-	return join(process.cwd(), STATE_DIR, FIXES_FILE);
+	const file = _sessionScope ? `pending-fixes-${_sessionScope}.json` : FIXES_FILE;
+	return join(process.cwd(), STATE_DIR, file);
 }
 
 /** Read current pending fixes. Returns empty array on any error (fail-open). */
@@ -53,4 +62,5 @@ export function flush(): void {
 export function resetCache(): void {
 	_cache = null;
 	_dirty = false;
+	_sessionScope = null;
 }
