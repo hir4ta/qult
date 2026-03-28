@@ -2,31 +2,23 @@ import { describe, expect, it, vi } from "vitest";
 import { HOOK_CLASS } from "../dispatcher.ts";
 
 describe("HOOK_CLASS", () => {
-	it("has entries for all 12 hook events", () => {
+	it("has entries for all 7 hook events", () => {
 		const events = Object.keys(HOOK_CLASS);
-		expect(events).toHaveLength(12);
+		expect(events).toHaveLength(7);
 		expect(events).toContain("pre-tool");
 		expect(events).toContain("post-tool");
 		expect(events).toContain("stop");
 		expect(events).toContain("session-start");
-		expect(events).toContain("user-prompt");
 		expect(events).toContain("permission-request");
-		expect(events).toContain("config-change");
 		expect(events).toContain("subagent-stop");
-		expect(events).toContain("subagent-start");
 		expect(events).toContain("post-compact");
-		expect(events).toContain("pre-compact");
-		expect(events).toContain("post-tool-failure");
 	});
 
 	it("classifies enforcement vs advisory correctly", () => {
 		expect(HOOK_CLASS["pre-tool"]).toBe("enforcement");
 		expect(HOOK_CLASS["post-tool"]).toBe("enforcement");
 		expect(HOOK_CLASS.stop).toBe("enforcement");
-		expect(HOOK_CLASS["config-change"]).toBe("enforcement");
 		expect(HOOK_CLASS["session-start"]).toBe("advisory");
-		expect(HOOK_CLASS["user-prompt"]).toBe("advisory");
-		expect(HOOK_CLASS["pre-compact"]).toBe("advisory");
 		expect(HOOK_CLASS["post-compact"]).toBe("advisory");
 	});
 });

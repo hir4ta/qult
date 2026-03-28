@@ -317,7 +317,7 @@ export function recordPlanEvalOutcome(passed: boolean, detail?: Record<string, n
 	}
 }
 
-/** Classify DENY as defensive (config-change hook protection) vs actionable (lint/typecheck/etc). */
+/** Classify DENY as defensive (e.g. hook protection) vs actionable (lint/typecheck/etc). */
 const DEFENSIVE_DENY_RE = /hook|settings/i;
 
 export interface MetricsSummary {

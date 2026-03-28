@@ -1,6 +1,6 @@
 {
   "name": "qult",
-  "version": "0.12.2",
+  "version": "0.13.0",
   "type": "module",
   "bin": {
     "qult": "dist/cli.mjs"

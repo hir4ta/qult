@@ -1,14 +1,14 @@
 # qult
 
-![Version](https://img.shields.io/badge/version-0.12.2-7fbbb3?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.13.0-7fbbb3?style=flat-square)
 ![TypeScript](https://img.shields.io/badge/TypeScript-Bun_1.3+-a7c080?style=flat-square&logo=typescript&logoColor=d3c6aa)
-![Hooks](https://img.shields.io/badge/hooks-12-dbbc7f?style=flat-square)
+![Hooks](https://img.shields.io/badge/hooks-7-dbbc7f?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-83c092?style=flat-square)
 
 **Claude の悪い癖を物理的に止める。** コードの品質を構造で守る evaluator harness。
 
 > Claude は優秀だが、lint エラーを放置して次のファイルに行く。テストなしでコミットする。自分のコードを褒めてレビューを終える。
-> qult は 12 hooks + 独立 Opus evaluator で、それを **お願い (advisory) ではなく exit 2 (DENY) で止める**。
+> qult は 7 hooks + 独立 Opus evaluator で、それを **お願い (advisory) ではなく exit 2 (DENY) で止める**。
 
 > [!NOTE]
 > セッション開始時に `SessionStart:startup hook error` や `Stop hook error` と表示されることがありますが、**これは qult のバグではありません**。
@@ -78,34 +78,33 @@ flowchart TB
 | Plan に曖昧な Criteria / Verify なし | **DENY** — 具体的な基準を要求 |
 | 200行超の変更 (コミット間) | **DENY** — コミットを要求 |
 | 120分超 + 15ファイル変更 | **DENY** — スコープ肥大を阻止 |
-| hook 設定を変更しようとする | **DENY** — 自己防衛 |
 
 ---
 
-## 12 Hooks
+## 7 Hooks
 
 ```mermaid
 block-beta
-    columns 3
+    columns 2
 
-    block:wall:3
-        columns 3
-        A["PostToolUse\n(gate実行)"] B["PreToolUse\n(DENY判定)"] C["ConfigChange\n(自己防衛)"]
+    block:wall:2
+        columns 2
+        A["PostToolUse\n(gate実行)"] B["PreToolUse\n(DENY判定)"]
     end
 
-    block:plan:3
-        columns 3
-        D["UserPromptSubmit\n(テンプレート注入)"] E["PermissionRequest\n(Plan構造検証)"] F["Stop\n(完了チェック)"]
+    block:plan:2
+        columns 2
+        E["PermissionRequest\n(Plan構造検証)"] F["Stop\n(完了チェック)"]
     end
 
-    block:support:3
-        columns 3
-        G["SessionStart\n(セットアップ)"] H["PostCompact\n(状態handoff)"] I["PreCompact\n(reminder)"]
+    block:support:2
+        columns 2
+        G["SessionStart\n(セットアップ)"] H["PostCompact\n(状態handoff)"]
     end
 
-    block:sub:3
-        columns 3
-        J["SubagentStart\n(状態注入)"] K["SubagentStop\n(スコア強制)"] L["PostToolUseFailure\n(/clear提案)"]
+    block:sub:2
+        columns 1
+        K["SubagentStop\n(スコア強制)"]
     end
 
     style wall fill:#e67e80,color:#2d353b
@@ -116,10 +115,10 @@ block-beta
 
 | 分類 | Hooks | 役割 |
 |------|-------|------|
-| **壁** (enforcement) | PostToolUse, PreToolUse, ConfigChange | 壊れたコードを通さない |
-| **Plan増幅** (enforcement) | UserPromptSubmit, PermissionRequest, Stop | 設計の質を底上げ、中途半端に終わらせない |
-| **実行支援** (advisory) | SessionStart, PostCompact, PreCompact | セットアップ、状態保持、リマインダー |
-| **サブエージェント** (mixed) | SubagentStart, SubagentStop, PostToolUseFailure | 品質ルール伝搬、スコア閾値強制 |
+| **壁** (enforcement) | PostToolUse, PreToolUse | 壊れたコードを通さない |
+| **Plan増幅** (enforcement) | PermissionRequest, Stop | 設計の質を底上げ、中途半端に終わらせない |
+| **実行支援** (advisory) | SessionStart, PostCompact | セットアップ、状態ハンドオフ |
+| **サブエージェント** (enforcement) | SubagentStop | レビュースコア閾値強制 |
 
 ---
 
@@ -128,7 +127,7 @@ block-beta
 ```bash
 bun install && bun build.ts && bun link
 
-qult init       # ~/.claude/ に 12 hooks + skill + agent + rules を配置
+qult init       # ~/.claude/ に 7 hooks + skill + agent + rules を配置
 qult doctor     # セットアップの健全性を確認
 ```
 

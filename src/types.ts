@@ -33,11 +33,11 @@ export interface HookEvent {
 /** Hook response written to stdout.
  *
  * Schema varies by event:
- * - PostToolUse / UserPromptSubmit / SessionStart / SubagentStart / PostToolUseFailure:
+ * - PostToolUse / SessionStart:
  *     hookSpecificOutput.additionalContext
  * - PreToolUse:
  *     hookSpecificOutput.permissionDecision + permissionDecisionReason
- * - Stop / UserPromptSubmit (block):
+ * - Stop (block):
  *     top-level decision + reason (NOT inside hookSpecificOutput)
  *
  * See: https://code.claude.com/docs/en/hooks

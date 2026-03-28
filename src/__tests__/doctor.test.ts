@@ -10,7 +10,7 @@ const originalHome = process.env.HOME;
 
 /** Set up a fully valid qult environment (init-equivalent) */
 function setupValidEnv(): void {
-	// ~/.claude/settings.json with 12 hooks
+	// ~/.claude/settings.json with 7 hooks
 	const claudeDir = join(TEST_HOME, ".claude");
 	mkdirSync(claudeDir, { recursive: true });
 
@@ -86,14 +86,14 @@ describe("doctor: check 1 — Bun version", () => {
 });
 
 describe("doctor: check 2 — hooks registered", () => {
-	it("returns ok when all 12 hooks are registered", async () => {
+	it("returns ok when all 7 hooks are registered", async () => {
 		setupValidEnv();
 		const { runChecks } = await import("../doctor.ts");
 		const results = runChecks();
 		const check = findCheck(results, "hooks");
 		expect(check).toBeDefined();
 		expect(check!.status).toBe("ok");
-		expect(check!.message).toContain("12/12");
+		expect(check!.message).toContain("7/7");
 	});
 
 	it("returns fail when hooks are missing", async () => {
@@ -244,7 +244,7 @@ describe("doctor: check 8 — qult in PATH", () => {
 });
 
 describe("doctor: overall", () => {
-	it("returns 12 check results", async () => {
+	it("returns 10 check results", async () => {
 		setupValidEnv();
 		const { runChecks } = await import("../doctor.ts");
 		const results = runChecks();

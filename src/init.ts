@@ -56,12 +56,6 @@ export const QULT_HOOKS: Record<
 			hooks: [{ type: "command", command: "qult hook pre-tool", timeout: 3000 }],
 		},
 	],
-	UserPromptSubmit: [
-		{
-			matcher: "",
-			hooks: [{ type: "command", command: "qult hook user-prompt", timeout: 10000 }],
-		},
-	],
 	SessionStart: [
 		{
 			matcher: "",
@@ -69,12 +63,6 @@ export const QULT_HOOKS: Record<
 		},
 	],
 	Stop: [{ matcher: "", hooks: [{ type: "command", command: "qult hook stop", timeout: 5000 }] }],
-	PreCompact: [
-		{
-			matcher: "",
-			hooks: [{ type: "command", command: "qult hook pre-compact", timeout: 10000 }],
-		},
-	],
 	PostCompact: [
 		{
 			matcher: "",
@@ -87,28 +75,10 @@ export const QULT_HOOKS: Record<
 			hooks: [{ type: "command", command: "qult hook permission-request", timeout: 5000 }],
 		},
 	],
-	SubagentStart: [
-		{
-			matcher: "",
-			hooks: [{ type: "command", command: "qult hook subagent-start", timeout: 3000 }],
-		},
-	],
 	SubagentStop: [
 		{
 			matcher: "",
 			hooks: [{ type: "command", command: "qult hook subagent-stop", timeout: 5000 }],
-		},
-	],
-	PostToolUseFailure: [
-		{
-			matcher: "Bash",
-			hooks: [{ type: "command", command: "qult hook post-tool-failure", timeout: 3000 }],
-		},
-	],
-	ConfigChange: [
-		{
-			matcher: "",
-			hooks: [{ type: "command", command: "qult hook config-change", timeout: 3000 }],
 		},
 	],
 };

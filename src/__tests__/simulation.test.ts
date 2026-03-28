@@ -234,78 +234,6 @@ describe("Scenario 5: Pace red zone blocks edits", () => {
 // Phase 2: Plan amplification scenarios
 // ============================================================
 
-describe("Scenario 6: Plan mode → template injected with review gates", () => {
-	it("full plan mode flow", async () => {
-		const userPrompt = (await import("../hooks/user-prompt.ts")).default;
-
-		await userPrompt({
-			hook_type: "UserPromptSubmit",
-			permission_mode: "plan",
-			prompt:
-				"implement authentication with JWT tokens, add login and signup endpoints, middleware for protected routes, " +
-				"password hashing with bcrypt, update user model with password fields, add rate limiting on auth endpoints, " +
-				"create integration tests for all auth flows, update API documentation with auth examples, " +
-				"add refresh token rotation logic, implement CORS configuration for frontend origin, " +
-				"set up email verification flow with confirmation links and expiry tokens, " +
-				"add two-factor authentication via TOTP with QR code generation",
-		});
-
-		const response = getResponse();
-		expect(response).not.toBeNull();
-
-		const context = (response?.hookSpecificOutput as Record<string, string>)?.additionalContext;
-		expect(context).toBeDefined();
-		// Must contain task structure guidance
-		expect(context).toContain("focused");
-		expect(context).toContain("Verify");
-		// Must contain success criteria
-		expect(context).toContain("Success Criteria");
-		// Full template: automatic review enforcement note
-		expect(context).toContain("enforced by the harness");
-		expect(context).toContain("/qult:review");
-	});
-});
-
-describe("Scenario 7: Normal mode large task → no advisory (Opus 4.6)", () => {
-	it("long prompt in normal mode produces no output", async () => {
-		const userPrompt = (await import("../hooks/user-prompt.ts")).default;
-
-		const longPrompt =
-			"Implement a complete authentication system with JWT tokens, refresh tokens, " +
-			"login and signup endpoints, middleware for protected routes, password hashing with bcrypt, " +
-			"update the user model to include password fields, add rate limiting on auth endpoints, " +
-			"create integration tests for all auth flows, update the API documentation, " +
-			"implement CORS configuration, add email verification with confirmation links, " +
-			"set up two-factor authentication support, add password reset with secure tokens, " +
-			"implement session management with Redis-backed token storage and sliding expiry, " +
-			"add OAuth2 provider integration for Google and GitHub SSO, implement account lockout " +
-			"after 5 failed attempts with progressive backoff delays, create admin dashboard " +
-			"for user management with role-based access control and audit logging";
-
-		await userPrompt({
-			hook_type: "UserPromptSubmit",
-			prompt: longPrompt,
-		});
-
-		expect(exitCode).toBeNull();
-		const output = stdoutCapture.join("");
-		expect(output).toBe("");
-	});
-
-	it("short prompt does NOT trigger plan suggestion", async () => {
-		const userPrompt = (await import("../hooks/user-prompt.ts")).default;
-
-		await userPrompt({
-			hook_type: "UserPromptSubmit",
-			prompt: "fix the typo in README",
-		});
-
-		// Should have no output
-		const output = stdoutCapture.join("");
-		expect(output).toBe("");
-	});
-});
-
 describe("Scenario 8: ExitPlanMode → small plan passes, vague Verify in large plan is DENIED", () => {
 	it("small plan passes without File field; large plan with vague Verify is denied", async () => {
 		const permReq = (await import("../hooks/permission-request.ts")).default;
@@ -432,32 +360,13 @@ describe("Scenario 10: ExitPlanMode → concrete Success Criteria passes", () =>
 	});
 });
 
-describe("Scenario 9: Full flow — plan mode → implement → gate → deny → fix", () => {
-	it("end-to-end with plan and wall integration", async () => {
+describe("Scenario 9: Full flow — implement → gate → deny → fix", () => {
+	it("end-to-end with wall integration", async () => {
 		setupFailingLintGate();
-		const userPrompt = (await import("../hooks/user-prompt.ts")).default;
 		const postTool = (await import("../hooks/post-tool.ts")).default;
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
 
-		// Step 1: User enters plan mode → template injected (500+ chars for full template)
-		await userPrompt({
-			hook_type: "UserPromptSubmit",
-			permission_mode: "plan",
-			prompt:
-				"add helper function for parsing dates, validating format, handling timezones, converting between formats, " +
-				"with comprehensive tests for edge cases including invalid inputs, null values, boundary dates across " +
-				"multiple calendar systems, leap year handling, DST transitions, ISO 8601 compliance with offset parsing " +
-				"and duration calculation support, also add formatting utilities for relative timestamps and localized " +
-				"date output across common locales including Japanese era-based calendar formatting and Buddhist year systems",
-		});
-		const planResponse = getResponse();
-		expect(planResponse).not.toBeNull();
-		expect(
-			(planResponse?.hookSpecificOutput as Record<string, string>)?.additionalContext,
-		).toContain("enforced by the harness");
-
-		// Step 2: Claude implements (edit) → lint fails → pending-fixes
-		stdoutCapture = [];
+		// Step 1: Claude implements (edit) → lint fails → pending-fixes
 		await postTool({
 			hook_type: "PostToolUse",
 			tool_name: "Edit",
@@ -638,25 +547,17 @@ describe("Scenario 31: Small change skips review requirement", () => {
 	});
 });
 
-describe("Scenario 12: PreCompact → PostCompact pending-fixes reminder", () => {
-	it("pending fixes reminded across compaction", async () => {
-		const preCompact = (await import("../hooks/pre-compact.ts")).default;
+describe("Scenario 12: PostCompact pending-fixes handoff", () => {
+	it("pending fixes handed off after compaction", async () => {
 		const postCompact = (await import("../hooks/post-compact.ts")).default;
 
 		const { writePendingFixes: wpf } = await import("../state/pending-fixes.ts");
 		wpf([{ file: "src/broken.ts", errors: ["type error"], gate: "typecheck" }]);
 
-		// PreCompact writes reminder to stderr
-		await preCompact({ hook_type: "PreCompact" });
-		const preStderr = stderrCapture.join("");
-		expect(preStderr).toContain("pending fix");
-		expect(preStderr).toContain("src/broken.ts");
-
-		// PostCompact also reminds via stderr
-		stderrCapture = [];
 		await postCompact({ hook_type: "PostCompact" });
 		const postStderr = stderrCapture.join("");
 		expect(postStderr).toContain("PENDING FIXES");
+		expect(postStderr).toContain("src/broken.ts");
 	});
 });
 
@@ -819,23 +720,9 @@ describe("Scenario 16: Plan status tracking — Stop blocks on incomplete plan",
 describe("Scenario 17: Full E2E — plan → implement → status update → stop", () => {
 	it("complete lifecycle with plan tracking", async () => {
 		setupPassingGates();
-		const userPrompt = (await import("../hooks/user-prompt.ts")).default;
 		const stop = (await import("../hooks/stop.ts")).default;
 
-		// Step 1: Plan mode → template injected with status instructions
-		await userPrompt({
-			hook_type: "UserPromptSubmit",
-			permission_mode: "plan",
-			prompt:
-				"add comprehensive logging with structured output, log levels, file rotation, request tracing, correlation IDs, error context capture, performance timing, integration with monitoring dashboard including alerts, custom metrics, distributed tracing spans, log aggregation pipeline, and retention policy configuration",
-		});
-		const planResponse = getResponse();
-		const template = (planResponse?.hookSpecificOutput as Record<string, string>)
-			?.additionalContext;
-		expect(template).toContain("## Tasks");
-		expect(template).toContain("Verify");
-
-		// Step 2: Claude creates plan with pending tasks
+		// Step 1: Claude creates plan with pending tasks
 		const planDir = join(TEST_DIR, ".claude", "plans");
 		mkdirSync(planDir, { recursive: true });
 		writeFileSync(
@@ -945,70 +832,6 @@ describe("Scenario 18: Plan completion unblocks stop", () => {
 // Hook completeness scenarios
 // ============================================================
 
-describe("Scenario 19: SubagentStart injects pending-fixes state", () => {
-	it("subagents receive pending-fixes warning", async () => {
-		const { writePendingFixes: wpf } = await import("../state/pending-fixes.ts");
-		wpf([{ file: "src/broken.ts", errors: ["type error"], gate: "typecheck" }]);
-
-		const subagentStart = (await import("../hooks/subagent-start.ts")).default;
-		await subagentStart({ hook_type: "SubagentStart" });
-
-		const response = getResponse();
-		const context = (response?.hookSpecificOutput as Record<string, string>)?.additionalContext;
-		expect(context).toBeDefined();
-		expect(context).toContain("broken.ts");
-		expect(context).toContain("pending");
-	});
-});
-
-describe("Scenario 20: PostToolUseFailure tracks consecutive errors", () => {
-	it("suggests /clear after 2 consecutive tool failures", async () => {
-		const postToolFailure = (await import("../hooks/post-tool-failure.ts")).default;
-
-		await postToolFailure({
-			hook_type: "PostToolUseFailure",
-			tool_name: "Bash",
-			tool_output: "Error: ENOENT no such file",
-		});
-
-		stdoutCapture = [];
-		await postToolFailure({
-			hook_type: "PostToolUseFailure",
-			tool_name: "Bash",
-			tool_output: "Error: ENOENT no such file",
-		});
-
-		const response = getResponse();
-		const context = (response?.hookSpecificOutput as Record<string, string>)?.additionalContext;
-		expect(context).toContain("/clear");
-		expect(context).toContain("2 times");
-	});
-});
-
-describe("Scenario 21: ConfigChange blocks hook modification", () => {
-	it("prevents Claude from removing hooks", async () => {
-		const configChange = (await import("../hooks/config-change.ts")).default;
-		try {
-			await configChange({
-				hook_type: "ConfigChange",
-				tool_input: { source: "user_settings", key: "hooks" },
-			});
-		} catch {
-			// exit(2)
-		}
-		expect(exitCode).toBe(2);
-	});
-
-	it("allows non-hook user_settings changes", async () => {
-		const configChange = (await import("../hooks/config-change.ts")).default;
-		await configChange({
-			hook_type: "ConfigChange",
-			tool_input: { source: "user_settings", key: "model" },
-		});
-		expect(exitCode).toBeNull();
-	});
-});
-
 // ============================================================
 // Doctor integration scenario
 // ============================================================
@@ -1061,7 +884,7 @@ describe("Scenario 23: Init → Doctor reports all OK", () => {
 			// Verify key checks explicitly
 			const hooksCheck = results.find((r) => r.name === "hooks");
 			expect(hooksCheck!.status).toBe("ok");
-			expect(hooksCheck!.message).toContain("12/12");
+			expect(hooksCheck!.message).toContain("7/7");
 
 			const gatesCheck = results.find((r) => r.name === "gates");
 			expect(gatesCheck!.status).toBe("ok");
@@ -1473,29 +1296,6 @@ describe("Scenario 32: Reviewer findings recorded in metrics with severity break
 		expect(reviewEntry).toBeDefined();
 		expect(reviewEntry!.detail).toBeDefined();
 		expect(reviewEntry!.detail!.total).toBe(0);
-	});
-});
-
-describe("Scenario 33: Plan template includes Boundary and SIZE guidance", () => {
-	it("plan mode full template contains Boundary field and LOC guidance", async () => {
-		const userPrompt = (await import("../hooks/user-prompt.ts")).default;
-
-		await userPrompt({
-			hook_type: "UserPromptSubmit",
-			permission_mode: "plan",
-			prompt:
-				"implement authentication with JWT tokens, add login and signup endpoints, middleware for protected routes, " +
-				"password hashing with bcrypt, update user model with password fields, add rate limiting on auth endpoints, " +
-				"create integration tests for all auth flows, update API documentation with auth examples, " +
-				"add refresh token rotation logic, implement CORS configuration for frontend origin, " +
-				"set up email verification flow with confirmation links and expiry tokens",
-		});
-
-		const response = getResponse();
-		expect(response).not.toBeNull();
-		const context = (response?.hookSpecificOutput as Record<string, string>)?.additionalContext;
-		expect(context).toContain("Boundary");
-		expect(context).toContain("15 LOC");
 	});
 });
 

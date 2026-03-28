@@ -37,10 +37,10 @@ bun run test     # vitest run
 - PostToolUse 検出 → PreToolUse ブロックの二段構え
 - 全 state file 書き込みは atomic write (write-to-temp + rename)
 - **出力スキーマ対応表** (hooks docs 準拠):
-  - respond(): SessionStart, PostToolUse, PostToolUseFailure, SubagentStart
+  - respond(): SessionStart, PostToolUse
   - deny(): PreToolUse, PermissionRequest
-  - block(): Stop, UserPromptSubmit, SubagentStop
-  - 出力なし (stderr): PostCompact, PreCompact, ConfigChange
+  - block(): Stop, SubagentStop
+  - 出力なし (stderr): PostCompact
 
 ### Gates
 - on_write: 編集時 (lint, typecheck) / on_commit: コミット時 (test) / on_review: レビュー時 (e2e)

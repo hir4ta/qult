@@ -21,7 +21,7 @@ function estimateTokens(text: string): number {
 }
 
 /** Send additionalContext to Claude (advisory, non-blocking). Skipped if budget exceeded.
- * Only valid for: PostToolUse, UserPromptSubmit, SessionStart, SubagentStart, PostToolUseFailure
+ * Only valid for: PostToolUse, SessionStart
  * @param advisory — optional advisory type for compliance tracking */
 export function respond(context: string, advisory?: Omit<PendingAdvisory, "injected_at">): void {
 	const tokens = estimateTokens(context);
@@ -83,7 +83,7 @@ export function deny(reason: string): never {
 
 /** Block Claude from stopping (exit 2). Always fires regardless of budget.
  * Uses top-level decision/reason per official schema.
- * Valid for: Stop, UserPromptSubmit */
+ * Valid for: Stop */
 export function block(reason: string): never {
 	try {
 		recordAction(_currentEvent, "block", reason.slice(0, 100));

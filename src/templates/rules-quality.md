@@ -1,31 +1,34 @@
----
-description: qult quality enforcement — fix errors first, small tasks, test-driven
----
-
 # Quality Rules (qult)
-
-## Fix First
-- Fix lint/type errors before editing other files
-- Prefer early return over deeply nested if/else
-
-## Task Scope
-- Quick fix (no plan): keep changes focused — 1-2 files per logical change
-- Planned work: follow the plan's task boundaries — scope is set by the plan
-- Keep each logical change under 200 lines of diff — split if larger
-- Commit after each working increment, not in large batches
 
 ## Test-Driven
 - Write the test file FIRST, then implement
 - At least 2 meaningful assertions per test case
 - Do not mark implementation as complete until tests pass
 
-## Before Commit
-- Run tests — commit is blocked until tests pass
-- Run /qult:review — required when plan is active or 5+ files changed. Small changes can skip
-
-## Plans
-- Large plans (4+ tasks): run /qult:plan-review before exiting plan mode — enforced by the harness
-- Review scores must meet aggregate threshold (default 12/15) — the harness iterates until met
+## Task Scope
+- Quick fix (no plan): keep changes focused — 1-2 files per logical change
+- Planned work: follow the plan's task boundaries — scope is set by the plan
 
 ## When Stuck
 - After 2 failed attempts, /clear and try a different approach
+
+## Plan Structure
+
+When writing a plan, use this structure:
+
+```
+## Context
+Why this change is needed.
+
+## Tasks
+### Task N: <name> [pending]
+- **File**: <path> (include consumer files: tests, docs, registries)
+- **Change**: <what to do>
+- **Boundary**: <what NOT to change>
+- **Verify**: <test file : test function>
+
+## Success Criteria
+- [ ] `<specific command>` — expected outcome
+```
+
+Update task status to [done] as you complete each task.

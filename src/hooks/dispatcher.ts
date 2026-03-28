@@ -41,29 +41,19 @@ export const HOOK_CLASS: Record<string, "enforcement" | "advisory"> = {
 	"post-tool": "enforcement", // Indirect: populates pending-fixes → pre-tool DENY
 	stop: "enforcement", // block: pending-fixes, incomplete plan, no review
 	"permission-request": "enforcement", // DENY: malformed plan on ExitPlanMode
-	"config-change": "enforcement", // DENY: prevents hook deletion
 	"subagent-stop": "enforcement", // block: incomplete reviewer output
 	"session-start": "advisory", // respond: error trends
-	"user-prompt": "advisory", // respond: plan template
-	"subagent-start": "advisory", // respond: quality rules
-	"post-tool-failure": "advisory", // respond: /clear suggestion
-	"pre-compact": "advisory", // stderr: pending-fixes reminder
 	"post-compact": "advisory", // stderr: structured handoff after compaction
 };
 
 const EVENT_MAP: Record<string, () => Promise<{ default: (ev: HookEvent) => Promise<void> }>> = {
 	"post-tool": () => import("./post-tool.ts"),
 	"pre-tool": () => import("./pre-tool.ts"),
-	"user-prompt": () => import("./user-prompt.ts"),
 	"session-start": () => import("./session-start.ts"),
 	stop: () => import("./stop.ts"),
-	"pre-compact": () => import("./pre-compact.ts"),
 	"post-compact": () => import("./post-compact.ts"),
 	"permission-request": () => import("./permission-request.ts"),
-	"subagent-start": () => import("./subagent-start.ts"),
 	"subagent-stop": () => import("./subagent-stop.ts"),
-	"post-tool-failure": () => import("./post-tool-failure.ts"),
-	"config-change": () => import("./config-change.ts"),
 };
 
 export async function dispatch(event: string): Promise<void> {
