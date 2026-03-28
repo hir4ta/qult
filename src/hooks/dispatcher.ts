@@ -1,49 +1,19 @@
-import { execSync } from "node:child_process";
-import { basename } from "node:path";
 import { flushAll } from "../state/flush.ts";
-import { setMetricsContext } from "../state/metrics.ts";
 import { setFixesSessionScope } from "../state/pending-fixes.ts";
-import { resetBudget, setStateSessionScope } from "../state/session-state.ts";
+import { setStateSessionScope } from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
 import { setCurrentEvent } from "./respond.ts";
-
-/** Resolve git branch and user once per process (cached). */
-let _gitContext: { branch: string; user: string } | null = null;
-function getGitContext(cwd: string): { branch: string; user: string } {
-	if (_gitContext) return _gitContext;
-	try {
-		const branch = execSync("git branch --show-current", {
-			cwd,
-			encoding: "utf-8",
-			timeout: 2000,
-		}).trim();
-		const user =
-			execSync("git config user.name", { cwd, encoding: "utf-8", timeout: 2000 }).trim() ||
-			process.env.USER ||
-			"";
-		_gitContext = { branch, user };
-	} catch {
-		_gitContext = { branch: "", user: process.env.USER || "" };
-	}
-	return _gitContext;
-}
 
 /**
  * Hook classification: enforcement hooks use exit 2 (DENY/block),
  * advisory hooks inject context or log to stderr (fail-open).
- *
- * "Every component in a harness encodes an assumption about what the model
- * can't do on its own, and those assumptions are worth stress testing."
- * — Anthropic, Harness Design for Long-Running Apps (2026-03-24)
  */
 export const HOOK_CLASS: Record<string, "enforcement" | "advisory"> = {
-	"pre-tool": "enforcement", // DENY: pending-fixes, pace red, commit gates
+	"pre-tool": "enforcement", // DENY: pending-fixes, commit gates
 	"post-tool": "enforcement", // Indirect: populates pending-fixes → pre-tool DENY
 	stop: "enforcement", // block: pending-fixes, incomplete plan, no review
-	"permission-request": "enforcement", // DENY: malformed plan on ExitPlanMode
 	"subagent-stop": "enforcement", // block: incomplete reviewer output
-	"session-start": "advisory", // respond: error trends
-	"post-compact": "advisory", // stderr: structured handoff after compaction
+	"session-start": "advisory", // respond: gate detection prompt
 };
 
 const EVENT_MAP: Record<string, () => Promise<{ default: (ev: HookEvent) => Promise<void> }>> = {
@@ -51,8 +21,6 @@ const EVENT_MAP: Record<string, () => Promise<{ default: (ev: HookEvent) => Prom
 	"pre-tool": () => import("./pre-tool.ts"),
 	"session-start": () => import("./session-start.ts"),
 	stop: () => import("./stop.ts"),
-	"post-compact": () => import("./post-compact.ts"),
-	"permission-request": () => import("./permission-request.ts"),
 	"subagent-stop": () => import("./subagent-stop.ts"),
 };
 
@@ -81,19 +49,10 @@ export async function dispatch(event: string): Promise<void> {
 	if (ev.session_id) {
 		setStateSessionScope(ev.session_id);
 		setFixesSessionScope(ev.session_id);
-		resetBudget(ev.session_id);
 	}
 
 	const debug = !!process.env.QULT_DEBUG;
 	setCurrentEvent(event);
-	const cwd = ev.cwd || process.cwd();
-	const git = getGitContext(cwd);
-	setMetricsContext({
-		sessionId: ev.session_id,
-		projectId: basename(cwd),
-		branch: git.branch,
-		user: git.user,
-	});
 	try {
 		if (debug) process.stderr.write(`[qult:debug] event=${event} input=${input.length}b\n`);
 		const start = Date.now();

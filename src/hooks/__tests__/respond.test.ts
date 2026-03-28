@@ -55,22 +55,6 @@ describe("respond()", () => {
 			"Fix this error",
 		);
 	});
-
-	it("skips when budget exceeded", async () => {
-		const { resetBudget, recordInjection } = await import("../../state/session-state.ts");
-		resetBudget("test-session");
-		// Fill budget (2000 tokens ≈ 8000 chars)
-		recordInjection(1990);
-
-		const { respond } = await import("../respond.ts");
-		const { setCurrentEvent } = await import("../respond.ts");
-		setCurrentEvent("post-tool");
-		respond("This should be skipped because budget is exhausted");
-
-		const output = stdoutCapture.join("");
-		expect(output).toBe("");
-		expect(exitCode).toBeNull();
-	});
 });
 
 describe("deny()", () => {

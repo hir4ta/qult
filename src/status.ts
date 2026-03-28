@@ -2,13 +2,7 @@ import { defineCommand } from "citty";
 import { loadGates } from "./gates/load.ts";
 import { readPendingFixes } from "./state/pending-fixes.ts";
 import { getActivePlan } from "./state/plan-status.ts";
-import {
-	isPaceRed,
-	isReviewRequired,
-	readLastReview,
-	readLastTestPass,
-	readPace,
-} from "./state/session-state.ts";
+import { isReviewRequired, readLastReview, readLastTestPass } from "./state/session-state.ts";
 
 /** Display current qult state and blockers */
 export function runStatus(): void {
@@ -23,18 +17,6 @@ export function runStatus(): void {
 		}
 	} else {
 		lines.push("  Pending fixes: 0");
-	}
-
-	// Pace
-	const pace = readPace();
-	const hasPlan = getActivePlan() !== null;
-	if (pace) {
-		const commitTime = new Date(pace.last_commit_at).getTime();
-		const elapsed = Number.isNaN(commitTime) ? 0 : Math.round((Date.now() - commitTime) / 60_000);
-		const red = isPaceRed(pace, hasPlan);
-		lines.push(`  Pace: ${elapsed}min / ${pace.changed_files} files${red ? " [RED]" : ""}`);
-	} else {
-		lines.push("  Pace: no data");
 	}
 
 	// Test gate

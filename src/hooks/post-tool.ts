@@ -1,44 +1,14 @@
-import { existsSync, readFileSync } from "node:fs";
 import { extname, resolve } from "node:path";
 import { loadGates } from "../gates/load.ts";
 import { runGate } from "../gates/runner.ts";
-import { recordCommit, recordGateResult } from "../state/gate-history.ts";
-import {
-	recordAction,
-	recordAdvisoryOutcome,
-	recordCleanCommit,
-	recordDenyResolutionTime,
-	recordFalsePositive,
-	recordFirstPass,
-	recordFixEffort,
-	recordGateOutcome,
-	recordResolution,
-} from "../state/metrics.ts";
 import { readPendingFixes, writePendingFixes } from "../state/pending-fixes.ts";
-import { getActivePlan, parseCriteriaCommands, parseVerifyFields } from "../state/plan-status.ts";
 import {
-	clearFailCount,
 	clearOnCommit,
-	clearPendingAdvisory,
 	getGatedExtensions,
-	getPendingAdvisory,
-	isFirstPassRecorded,
-	markFirstPassRecorded,
 	markGateRan,
-	readLastDeny,
-	readLastReview,
-	readPace,
-	readSessionState,
 	recordChangedFile,
-	recordChangedLines,
-	recordCriteriaCommand,
-	recordEditTowardsFix,
-	recordFailure,
 	recordTestPass,
-	recordVerifiedField,
-	resetFixEffort,
 	shouldSkipGate,
-	writePace,
 } from "../state/session-state.ts";
 import type { HookEvent, PendingFix } from "../types.ts";
 import { respond } from "./respond.ts";
@@ -66,17 +36,6 @@ function handleEditWrite(ev: HookEvent): void {
 	const qultDir = resolve(process.cwd(), ".qult");
 	if (file.startsWith(`${qultDir}/`) || file === qultDir) return;
 
-	// Check advisory compliance: did Claude edit the expected file?
-	checkAdvisoryCompliance("edit", file);
-
-	// Track LOC changes from tool_input
-	try {
-		const lines = computeChangedLines(ev);
-		if (lines > 0) recordChangedLines(lines);
-	} catch {
-		/* fail-open */
-	}
-
 	const gates = loadGates();
 	if (!gates?.on_write) return;
 
@@ -86,7 +45,6 @@ function handleEditWrite(ev: HookEvent): void {
 
 	// Read existing fixes once — compute both "other files" and "had fixes for this file"
 	const before = readPendingFixes();
-	const hadFixesForFile = before.some((f) => f.file === file);
 	const existingFixes = before.filter((f) => f.file !== file);
 	const newFixes: PendingFix[] = [];
 	const messages: string[] = [];
@@ -103,7 +61,6 @@ function handleEditWrite(ev: HookEvent): void {
 			const hasPlaceholder = gate.command.includes("{file}");
 
 			// Skip per-file gates for extensions not covered by any gate tool
-			// e.g. don't run `biome check` on .md files
 			if (hasPlaceholder && gatedExts.size > 0 && !gatedExts.has(fileExt)) {
 				continue;
 			}
@@ -111,19 +68,6 @@ function handleEditWrite(ev: HookEvent): void {
 
 			if (gate.run_once_per_batch && sessionId) {
 				markGateRan(name, sessionId);
-			}
-
-			recordGateResult(
-				name,
-				result.passed,
-				result.passed ? undefined : result.output,
-				result.duration_ms,
-				file,
-			);
-			try {
-				recordGateOutcome(name, result.passed);
-			} catch {
-				/* fail-open */
 			}
 
 			if (!result.passed) {
@@ -137,37 +81,6 @@ function handleEditWrite(ev: HookEvent): void {
 
 	writePendingFixes([...existingFixes, ...newFixes]);
 
-	// Record first-pass quality: did this file pass all gates on first write?
-	// Only count once per file per session to avoid inflating metrics on re-edits.
-	if (!hadFixesForFile && !isFirstPassRecorded(file)) {
-		try {
-			const firstFailGate = newFixes.length > 0 ? newFixes[0]!.gate : undefined;
-			recordFirstPass(newFixes.length === 0, firstFailGate);
-			markFirstPassRecorded(file);
-		} catch {
-			/* fail-open */
-		}
-	}
-
-	// Track fix effort: editing a file that has pending fixes counts as an edit toward fix
-	if (hadFixesForFile) {
-		try {
-			recordEditTowardsFix();
-		} catch {
-			/* fail-open */
-		}
-	}
-
-	if (hadFixesForFile && newFixes.length === 0) {
-		try {
-			const edits = resetFixEffort();
-			recordResolution("post-tool", `Fixed: ${file.split("/").pop()}`);
-			if (edits > 0) recordFixEffort(edits);
-		} catch {
-			/* fail-open */
-		}
-	}
-
 	// Record changed file path for gated-file review threshold
 	try {
 		recordChangedFile(file);
@@ -176,58 +89,20 @@ function handleEditWrite(ev: HookEvent): void {
 	}
 
 	if (newFixes.length > 0) {
-		// Calibration: if review already passed but new errors appear, reviewer missed them
-		if (readLastReview()) {
-			try {
-				recordAction("review", "miss", `Post-review gate fail: ${file.split("/").pop()}`);
-			} catch {
-				/* fail-open */
-			}
-		}
-		respond(`Fix these errors before continuing:\n${messages.join("\n")}`, {
-			type: "fix",
-			expected_files: newFixes.map((f) => f.file),
-		});
+		respond(`Fix these errors before continuing:\n${messages.join("\n")}`);
 	}
-
-	// Update pace tracking
-	updatePace();
 }
 
 function handleBash(ev: HookEvent): void {
 	const command = typeof ev.tool_input?.command === "string" ? ev.tool_input.command : null;
 	if (!command) return;
 
-	// Check advisory compliance for Bash (e.g., error-loop → expects /clear)
-	checkAdvisoryCompliance("bash");
-
-	// Detect git commit → reset pace + run on_commit gates
+	// Detect git commit → reset state + run on_commit gates
 	if (/\bgit\s+commit\b/.test(command)) {
-		// Capture last deny info BEFORE clearOnCommit resets it
-		let lastDeny: { at: string; reason: string } | null = null;
-		try {
-			lastDeny = readLastDeny();
-			recordCleanCommit(readSessionState().session_deny_count === 0);
-		} catch {
-			/* fail-open */
-		}
-		clearOnCommit({ last_commit_at: new Date().toISOString(), changed_files: 0, tool_calls: 0 });
-		recordCommit();
+		clearOnCommit();
 
 		const gates = loadGates();
-		if (!gates?.on_commit) {
-			// No gates → clean commit after DENY = false positive
-			try {
-				if (lastDeny && (lastDeny.reason === "pace-red" || lastDeny.reason === "loc-limit")) {
-					recordFalsePositive(lastDeny.reason);
-					const elapsed = (Date.now() - new Date(lastDeny.at).getTime()) / 1000;
-					if (elapsed > 0 && elapsed < 86400) recordDenyResolutionTime(lastDeny.reason, elapsed);
-				}
-			} catch {
-				/* fail-open */
-			}
-			return;
-		}
+		if (!gates?.on_commit) return;
 
 		const messages: string[] = [];
 		for (const [name, gate] of Object.entries(gates.on_commit)) {
@@ -238,20 +113,6 @@ function handleBash(ev: HookEvent): void {
 				}
 			} catch {
 				// fail-open
-			}
-		}
-
-		// False positive: pace-red/loc-limit DENY followed by clean commit (all gates pass)
-		// A clean commit after pace-red/loc-limit means the threshold was too strict for this session
-		if (messages.length === 0) {
-			try {
-				if (lastDeny && (lastDeny.reason === "pace-red" || lastDeny.reason === "loc-limit")) {
-					recordFalsePositive(lastDeny.reason);
-					const elapsed = (Date.now() - new Date(lastDeny.at).getTime()) / 1000;
-					if (elapsed > 0 && elapsed < 86400) recordDenyResolutionTime(lastDeny.reason, elapsed);
-				}
-			} catch {
-				/* fail-open */
 			}
 		}
 
@@ -270,144 +131,28 @@ function handleBash(ev: HookEvent): void {
 		revalidatePendingFixes();
 	}
 
-	// Detect Bash failure → track consecutive failures
-	const output = getToolOutput(ev);
-	const exitCodeMatch = output.match(/exit code (\d+)/i) ?? output.match(/exited with (\d+)/i);
-	const isError = exitCodeMatch ? Number(exitCodeMatch[1]) !== 0 : false;
-
-	if (isError) {
-		const signature = output.slice(0, 200);
-		const count = recordFailure(signature);
-		if (count >= 2) {
-			respond(
-				"Same error 2 times in a row. Consider running /clear and trying a different approach.",
-				{ type: "error-loop" },
-			);
-		}
-	} else if (output.length > 0) {
-		clearFailCount();
-	}
-
-	// Detect test command → record pass + verify against Plan's Verify fields
+	// Detect test command → record pass
 	if (TEST_CMD_RE.test(command)) {
+		const output = getToolOutput(ev);
+		const exitCodeMatch = output.match(/exit code (\d+)/i) ?? output.match(/exited with (\d+)/i);
+		const isError = exitCodeMatch ? Number(exitCodeMatch[1]) !== 0 : false;
+
 		if (!isError) {
 			recordTestPass(command);
-		}
-		checkVerifyFields(output);
-	}
-
-	// Track criteria command execution
-	try {
-		checkCriteriaCommand(command);
-	} catch {
-		// fail-open
-	}
-}
-
-const ASSERT_RE = /\b(expect|assert|should|toBe|toEqual|toContain|toThrow|toHaveLength)\b/;
-
-function checkVerifyFields(output: string): void {
-	try {
-		const plan = getActivePlan();
-		if (!plan) return;
-
-		const content = readFileSync(plan.path, "utf-8");
-		const verifies = parseVerifyFields(content);
-		if (verifies.length === 0) return;
-
-		const messages: string[] = [];
-		for (const v of verifies) {
-			if (!v.testFunction) continue;
-
-			// Check 1: test function appears in output
-			if (!output.includes(v.testFunction)) {
-				messages.push(`[miss] Task "${v.taskName}" — ${v.testFunction} not found in test output`);
-				continue;
-			}
-
-			// Check 2: test file has real assertions (not empty test)
-			let isWeak = false;
-			if (v.testFile) {
-				try {
-					const testPath = resolve(v.testFile);
-					if (existsSync(testPath)) {
-						const testContent = readFileSync(testPath, "utf-8");
-						const fnIndex = testContent.indexOf(v.testFunction);
-						if (fnIndex >= 0) {
-							const block = testContent.slice(fnIndex, fnIndex + 2000);
-							if (!ASSERT_RE.test(block)) {
-								messages.push(
-									`[weak] Task "${v.taskName}" — ${v.testFunction} has no assertions (expect/assert)`,
-								);
-								isWeak = true;
-							}
-						}
-					}
-				} catch {
-					// fail-open: can't read test file
-				}
-			}
-
-			// Record verified field if it passed both checks
-			if (!isWeak) {
-				try {
-					recordVerifiedField(`${v.taskName}:${v.testFunction}`);
-				} catch {
-					/* fail-open */
-				}
-			}
-		}
-
-		if (messages.length > 0) {
-			respond(`Plan verify check:\n${messages.join("\n")}`, { type: "verify-check" });
-		}
-	} catch {
-		// fail-open
-	}
-}
-
-function checkCriteriaCommand(command: string): void {
-	const plan = getActivePlan();
-	if (!plan) return;
-
-	const content = readFileSync(plan.path, "utf-8");
-	const criteriaCommands = parseCriteriaCommands(content);
-	if (criteriaCommands.length === 0) return;
-
-	for (const criteria of criteriaCommands) {
-		if (command.includes(criteria)) {
-			recordCriteriaCommand(criteria);
 		}
 	}
 }
 
 /** Extract tool output as string from tool_response (official) or tool_output (legacy) */
 function getToolOutput(ev: HookEvent): string {
-	// Official schema: tool_response is { stdout, stderr, ... } for Bash
 	if (ev.tool_response != null && typeof ev.tool_response === "object") {
 		const resp = ev.tool_response as Record<string, unknown>;
 		const stdout = typeof resp.stdout === "string" ? resp.stdout : "";
 		const stderr = typeof resp.stderr === "string" ? resp.stderr : "";
 		return (stdout + stderr).trim();
 	}
-	// Legacy fallback
 	if (typeof ev.tool_output === "string") return ev.tool_output;
 	return "";
-}
-
-function updatePace(): void {
-	try {
-		const pace = readPace() ?? {
-			last_commit_at: new Date().toISOString(),
-			changed_files: 0,
-			tool_calls: 0,
-		};
-		pace.changed_files++;
-		pace.tool_calls++;
-		writePace(pace);
-	} catch {
-		// fail-open
-	}
 }
 
 /** Re-run on_write gates on files with pending fixes. Clear fixes for files that now pass. */
@@ -436,59 +181,5 @@ function revalidatePendingFixes(): void {
 		writePendingFixes(remaining);
 	} catch {
 		// fail-open
-	}
-}
-
-/** Count lines in a string, handling empty string correctly ("".split → [""] = 1, but should be 0). */
-function countLines(s: string): number {
-	if (s === "") return 0;
-	return s.replace(/\n$/, "").split("\n").length;
-}
-
-/** Compute lines changed from Edit (max of old/new to capture replacements) or Write (line count). */
-function computeChangedLines(ev: HookEvent): number {
-	const input = ev.tool_input;
-	if (!input) return 0;
-
-	if (ev.tool_name === "Edit") {
-		const oldStr = typeof input.old_string === "string" ? input.old_string : "";
-		const newStr = typeof input.new_string === "string" ? input.new_string : "";
-		// Use max to capture replacement edits (10 lines → 10 different lines = 10 changed)
-		return Math.max(countLines(oldStr), countLines(newStr));
-	}
-
-	if (ev.tool_name === "Write") {
-		const content = typeof input.content === "string" ? input.content : "";
-		return countLines(content);
-	}
-
-	return 0;
-}
-
-/** Check if the current action complies with a pending advisory. */
-function checkAdvisoryCompliance(tool: "edit" | "bash", file?: string): void {
-	try {
-		const advisory = getPendingAdvisory();
-		if (!advisory) return;
-
-		let complied = false;
-		if (advisory.type === "fix" && tool === "edit") {
-			// Fix advisory: editing any of the expected files = complied
-			complied = advisory.expected_files?.includes(file!) ?? false;
-		} else if (advisory.type === "error-loop" && tool === "bash") {
-			// Error-loop advisory: running /clear or a distinctly different command = complied
-			// We can't detect /clear from PostToolUse, so any Bash after error-loop = compliance attempt
-			complied = true;
-		} else if (advisory.type === "verify-check" && tool === "edit") {
-			// Verify-check advisory: any edit = attempt to fix
-			complied = true;
-		} else {
-			return; // Different tool type than expected — don't judge yet
-		}
-
-		recordAdvisoryOutcome(advisory.type, complied);
-		clearPendingAdvisory();
-	} catch {
-		/* fail-open */
 	}
 }

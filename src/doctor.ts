@@ -2,16 +2,6 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { defineCommand } from "citty";
 import { QULT_HOOKS } from "./init.ts";
-import { readCalibration } from "./state/calibration.ts";
-import {
-	getAvgGateDuration,
-	getCommitStats,
-	getFileFailRates,
-	getGatePassRates,
-	getTopErrorPatterns,
-} from "./state/gate-history.ts";
-import { getMetricsSummary, readMetrics } from "./state/metrics.ts";
-import { readSessionState } from "./state/session-state.ts";
 import type { GatesConfig } from "./types.ts";
 
 export type CheckStatus = "ok" | "fail" | "warn";
@@ -83,7 +73,6 @@ function checkFileExists(name: string, path: string, label: string): CheckResult
 
 /** Extract the executable name from a gate command string */
 function extractExecutable(command: string): string | null {
-	// Strip env vars (any case) and leading whitespace, get first word
 	const match = command.replace(/^[A-Za-z_][A-Za-z0-9_]*=\S+\s+/g, "").match(/^(\S+)/);
 	return match?.[1] ?? null;
 }
@@ -115,7 +104,6 @@ function checkGates(): CheckResult {
 			return { name: "gates", status: "fail", message: "gates.json has no on_write gates" };
 		}
 
-		// Validate gate executables are reachable
 		const missing: string[] = [];
 		for (const [, gateMap] of Object.entries(gates)) {
 			if (!gateMap || typeof gateMap !== "object") continue;
@@ -144,11 +132,7 @@ function checkGates(): CheckResult {
 	}
 }
 
-const KNOWN_STATE_FILES = new Set([
-	"pending-fixes.json",
-	"session-state.json",
-	// metrics.json and gate-history.json migrated to daily rotation (.qult/metrics/, .qult/gate-history/)
-]);
+const KNOWN_STATE_FILES = new Set(["pending-fixes.json", "session-state.json"]);
 
 function checkStateDir(): CheckResult {
 	const stateDir = join(process.cwd(), ".qult", ".state");
@@ -165,11 +149,9 @@ function checkStateDir(): CheckResult {
 		const files = readdirSync(stateDir);
 		for (const file of files) {
 			if (!file.endsWith(".json")) continue;
-			// Check for unknown files
 			if (!KNOWN_STATE_FILES.has(file)) {
 				warnings.push(`unknown: ${file}`);
 			}
-			// Check JSON parsability
 			try {
 				JSON.parse(readFileSync(join(stateDir, file), "utf-8"));
 			} catch {
@@ -212,17 +194,7 @@ export function runChecks(): CheckResult[] {
 			join(claudeDir, "skills", "qult-review", "SKILL.md"),
 			"/qult:review skill",
 		),
-		checkFileExists(
-			"skill",
-			join(claudeDir, "skills", "qult-plan-review", "SKILL.md"),
-			"/qult:plan-review skill",
-		),
 		checkFileExists("agent", join(claudeDir, "agents", "qult-reviewer.md"), "qult-reviewer agent"),
-		checkFileExists(
-			"agent",
-			join(claudeDir, "agents", "qult-plan-evaluator.md"),
-			"qult-plan-evaluator agent",
-		),
 		checkFileExists(
 			"agent",
 			join(claudeDir, "agents", "qult-plan-generator.md"),
@@ -240,264 +212,9 @@ export function runChecks(): CheckResult[] {
 	];
 }
 
-function showMetrics(): void {
-	const sessionState = readSessionState();
-	const commitStats = getCommitStats();
-	const summary = getMetricsSummary(
-		sessionState.peak_consecutive_error_count ?? 0,
-		commitStats?.count ?? 0,
-	);
-	const entries = readMetrics();
-
-	const tracked = entries.filter((e) => e.session_id);
-	const sessionIds = new Set(tracked.map((e) => e.session_id));
-	const users = new Set(tracked.map((e) => e.user).filter(Boolean));
-	const branches = new Set(tracked.map((e) => e.branch).filter(Boolean));
-	const parts: string[] = [];
-	if (sessionIds.size > 0)
-		parts.push(`${sessionIds.size} session${sessionIds.size > 1 ? "s" : ""}`);
-	if (users.size > 0) parts.push(`${users.size} user${users.size > 1 ? "s" : ""}`);
-	if (branches.size > 0) parts.push(`${branches.size} branch${branches.size > 1 ? "es" : ""}`);
-	const context = parts.length > 0 ? ` across ${parts.join(", ")}` : "";
-	console.log(`\n--- Metrics (${entries.length} actions${context}) ---`);
-
-	// --- Actions ---
-	console.log("\n  Actions:");
-	const denyDetail =
-		summary.deny > 0
-			? `  (${summary.denyActionable} actionable, ${summary.denyDefensive} defensive)`
-			: "";
-	console.log(`    DENY:            ${summary.deny}${denyDetail}`);
-	console.log(`    block:           ${summary.block}`);
-	console.log(`    respond:         ${summary.respond}`);
-	if (summary.respondSkipped > 0) {
-		console.log(`    respond-skipped: ${summary.respondSkipped}  (budget exceeded)`);
-	}
-	if (summary.reviewMiss > 0) {
-		console.log(`    review:miss:     ${summary.reviewMiss}`);
-	}
-
-	// --- Top reasons by type ---
-	const showReasons = (label: string, reasons: { reason: string; count: number }[]) => {
-		if (reasons.length === 0) return;
-		console.log(`\n  ${label}:`);
-		for (const r of reasons) {
-			console.log(`    ${r.count}x  ${r.reason}`);
-		}
-	};
-	showReasons("Top DENY reasons (actionable)", summary.topDenyReasons);
-	showReasons("Top block reasons", summary.topBlockReasons);
-
-	// --- Gate error patterns ---
-	try {
-		const patterns = getTopErrorPatterns(5);
-		if (patterns.length > 0) {
-			console.log("\n  Top gate failures:");
-			for (const p of patterns) {
-				console.log(`    ${p.count}x  ${p.gate}: ${p.pattern}`);
-			}
-		}
-	} catch {
-		/* fail-open */
-	}
-
-	// --- Effectiveness ---
-	const hasEffectiveness =
-		summary.denyActionable > 0 || summary.gatePassRate > 0 || summary.firstPassTotal > 0;
-	if (hasEffectiveness) {
-		console.log("\n  Effectiveness:");
-		if (summary.denyActionable > 0) {
-			console.log(
-				`    DENY resolution (actionable): ${summary.resolution}/${summary.denyActionable} (${summary.actionableDenyResolutionRate}%)`,
-			);
-		}
-		if (summary.fixEffortTotal > 0) {
-			console.log(`    Avg fix effort: ${summary.avgFixEffort} edits/resolution`);
-		}
-		if (summary.gatePassRate > 0) {
-			console.log(`    Gate pass rate: ${summary.gatePassRate}%`);
-		}
-		if (summary.firstPassTotal > 0) {
-			const recent =
-				summary.firstPassRateRecent > 0 ? ` (recent: ${summary.firstPassRateRecent}%)` : "";
-			console.log(`    First-pass clean: ${summary.firstPassRate}%${recent}`);
-		}
-		if (summary.denysPerCommit > 0) {
-			console.log(`    DENYs per commit: ${summary.denysPerCommit}`);
-		}
-		if (summary.peakConsecutiveErrors > 0) {
-			console.log(`    Peak consecutive errors: ${summary.peakConsecutiveErrors}`);
-		}
-	}
-
-	// --- False Positives ---
-	if (
-		summary.avgDenyResolutionTimeSec > 0 ||
-		summary.paceRedFalsePositiveRate > 0 ||
-		summary.locLimitFalsePositiveRate > 0
-	) {
-		console.log("\n  False Positives:");
-		if (summary.avgDenyResolutionTimeSec > 0) {
-			console.log(`    Avg DENY resolution time: ${summary.avgDenyResolutionTimeSec}s`);
-		}
-		if (summary.paceRedFalsePositiveRate > 0) {
-			console.log(`    Pace-red FP rate: ${summary.paceRedFalsePositiveRate}%`);
-		}
-		if (summary.locLimitFalsePositiveRate > 0) {
-			console.log(`    LOC-limit FP rate: ${summary.locLimitFalsePositiveRate}%`);
-		}
-	}
-
-	// --- Gates ---
-	try {
-		const gateRates = getGatePassRates();
-		const gateDurations = getAvgGateDuration();
-		if (gateRates.length > 0) {
-			console.log("\n  Gates:");
-			const durationMap = new Map(gateDurations.map((d) => [d.gate, d.avgMs]));
-			for (const g of gateRates) {
-				const dur = durationMap.get(g.gate);
-				const durStr = dur !== undefined ? `, avg ${dur}ms` : "";
-				console.log(`    ${g.gate.padEnd(12)} pass ${g.passRate}%${durStr}`);
-			}
-		}
-	} catch {
-		/* fail-open */
-	}
-
-	// --- Gate-specific first-pass ---
-	if (summary.gateFirstPassRates.length > 0) {
-		console.log("\n  First-pass by gate:");
-		for (const g of summary.gateFirstPassRates) {
-			console.log(`    ${g.gate.padEnd(12)} ${g.rate}% (${g.total} failures)`);
-		}
-	}
-
-	// --- Review ---
-	if (summary.reviewTotal > 0) {
-		console.log("\n  Review:");
-		console.log(`    Pass rate: ${summary.reviewPassRate}% (${summary.reviewTotal} reviews)`);
-		console.log(
-			`    Findings: ${summary.reviewFindingsTotal} total (avg ${summary.reviewAvgFindings}/review)`,
-		);
-		if (summary.reviewFindingsTotal > 0) {
-			const s = summary.reviewFindingsBySeverity;
-			console.log(
-				`    Severity: ${s.critical} crit, ${s.high} high, ${s.medium} med, ${s.low} low`,
-			);
-		}
-		if (summary.reviewMiss > 0) {
-			console.log(`    Misses: ${summary.reviewMiss}`);
-		}
-	}
-
-	// --- Commits ---
-	if (commitStats) {
-		console.log("\n  Commits:");
-		console.log(
-			`    ${commitStats.count} commits, avg ${commitStats.avgMinutes}m, med ${commitStats.medianMinutes}m, range ${commitStats.minMinutes}-${commitStats.maxMinutes}m`,
-		);
-	}
-
-	// --- Plans ---
-	const permTotal = summary.permissionAllow + summary.permissionDeny;
-	if (permTotal > 0) {
-		console.log("\n  Plans:");
-		console.log(
-			`    Approved: ${summary.permissionAllow}, Rejected: ${summary.permissionDeny} (${summary.planSuccessRate}% pass)`,
-		);
-	}
-
-	// --- Plan Compliance ---
-	if (summary.planComplianceTotal > 0) {
-		console.log("\n  Plan compliance:");
-		console.log(
-			`    Avg score: ${summary.planAvgCompliance}/100 (${summary.planComplianceTotal} plans)`,
-		);
-		if (summary.planComplianceWeakest.length > 0) {
-			const weakest = summary.planComplianceWeakest
-				.map((w) => `${w.field}=${w.avgRate}`)
-				.join(", ");
-			console.log(`    Weakest: ${weakest}`);
-		}
-	}
-
-	// --- Advisory Compliance ---
-	if (summary.advisoryComplianceTotal > 0) {
-		console.log("\n  Advisory compliance:");
-		console.log(
-			`    Overall: ${summary.advisoryComplianceRate}% (${summary.advisoryComplianceTotal} tracked)`,
-		);
-		for (const t of summary.advisoryComplianceByType) {
-			console.log(`    ${t.type.padEnd(14)} ${t.rate}% (${t.total})`);
-		}
-	}
-
-	// --- Artifact Quality ---
-	const hasArtifactData = summary.cleanCommitTotal > 0 || summary.reviewAvgScores !== null;
-	if (hasArtifactData) {
-		console.log("\n  Artifact quality:");
-		if (summary.cleanCommitTotal > 0) {
-			console.log(
-				`    Clean commit rate: ${summary.cleanCommitRate}% (${summary.cleanCommitTotal} commits)`,
-			);
-		}
-		if (summary.reviewAvgScores) {
-			const s = summary.reviewAvgScores;
-			console.log(
-				`    Avg review scores: Correctness=${s.correctness} Design=${s.design} Security=${s.security}`,
-			);
-		}
-		try {
-			const hotspots = getFileFailRates(5);
-			if (hotspots.length > 0) {
-				console.log("    Hotspot files (high fail rate):");
-				for (const h of hotspots) {
-					const shortPath = h.file.replace(process.cwd(), "").replace(/^\//, "");
-					console.log(`      ${shortPath.padEnd(40)} fail ${h.failRate}% (${h.total} runs)`);
-				}
-			}
-		} catch {
-			/* fail-open */
-		}
-	}
-
-	// --- Calibration ---
-	try {
-		const cal = readCalibration();
-		if (cal) {
-			const defaults = {
-				pace_files: 15,
-				review_file_threshold: 5,
-				context_budget: 2000,
-				loc_limit: 200,
-				plan_task_threshold: 3,
-				review_score_threshold: 12,
-			};
-			const changes: string[] = [];
-			for (const [key, defVal] of Object.entries(defaults)) {
-				const curVal = cal[key as keyof typeof defaults];
-				if (curVal !== defVal) {
-					changes.push(`    ${key}: ${defVal} -> ${curVal}`);
-				}
-			}
-			console.log("\n  Calibration:");
-			if (changes.length > 0) {
-				console.log(`    Calibrated at: ${cal.calibrated_at}`);
-				for (const c of changes) console.log(c);
-			} else {
-				console.log("    All thresholds at default values.");
-			}
-		}
-	} catch {
-		/* fail-open */
-	}
-}
-
 const STATE_DEFAULTS: Record<string, string> = {
 	"pending-fixes.json": "[]",
 	"session-state.json": "{}",
-	// metrics.json and gate-history.json are now daily-rotated files under .qult/metrics/ and .qult/gate-history/
 };
 
 /** Scan .qult/.state/ for corrupt JSON and replace with defaults. */
@@ -514,7 +231,7 @@ export function repairState(): string[] {
 			try {
 				JSON.parse(readFileSync(filePath, "utf-8"));
 			} catch {
-				if (!(file in STATE_DEFAULTS)) continue; // skip unknown files
+				if (!(file in STATE_DEFAULTS)) continue;
 				writeFileSync(filePath, STATE_DEFAULTS[file]!);
 				repaired.push(file);
 			}
@@ -528,7 +245,6 @@ export function repairState(): string[] {
 export const doctorCommand = defineCommand({
 	meta: { description: "Check qult health" },
 	args: {
-		metrics: { type: "boolean", description: "Show action metrics", default: false },
 		fix: { type: "boolean", description: "Repair corrupted state files", default: false },
 	},
 	async run({ args }) {
@@ -536,10 +252,6 @@ export const doctorCommand = defineCommand({
 		for (const r of results) {
 			const tag = r.status === "ok" ? "[OK]" : r.status === "fail" ? "[FAIL]" : "[WARN]";
 			console.log(`${tag} ${r.message}`);
-		}
-
-		if (args.metrics) {
-			showMetrics();
 		}
 
 		if (args.fix) {

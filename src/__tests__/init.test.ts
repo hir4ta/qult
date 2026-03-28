@@ -40,9 +40,9 @@ describe("qult init", () => {
 		expect(settings.hooks.PostToolUse).toBeDefined();
 		expect(settings.hooks.PreToolUse).toBeDefined();
 		expect(settings.hooks.Stop).toBeDefined();
-		expect(settings.hooks.PermissionRequest).toBeDefined();
+		expect(settings.hooks.SubagentStop).toBeDefined();
 
-		// PostToolUse/PreToolUse have per-tool matchers (Edit, Write, Bash) to avoid unnecessary process spawns
+		// PostToolUse/PreToolUse have per-tool matchers (Edit, Write, Bash)
 		const postToolMatchers = settings.hooks.PostToolUse.map(
 			(e: Record<string, unknown>) => e.matcher,
 		);
@@ -61,11 +61,6 @@ describe("qult init", () => {
 		const postTool = settings.hooks.PostToolUse[0];
 		expect(Array.isArray(postTool.hooks)).toBe(true);
 		expect(postTool.hooks[0].command).toContain("qult hook post-tool");
-
-		// PermissionRequest has ExitPlanMode matcher
-		const permHook = settings.hooks.PermissionRequest[0];
-		expect(permHook.matcher).toBe("ExitPlanMode");
-		expect(permHook.hooks[0].command).toContain("qult hook permission-request");
 	});
 
 	it("creates .qult/gates.json as empty object (Skill fills it later)", async () => {

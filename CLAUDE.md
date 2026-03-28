@@ -20,10 +20,8 @@ bun run test     # vitest run
 ## 設計原則
 
 1. **壁 > 情報提示** — DENY (exit 2) > additionalContext
-2. **少ない方が強い** — コンテキスト注入は最小限。Hook注入は20行以内
-3. **検証 > 指示** — HOW ではなく WHAT を伝える
-4. **fail-open** — 全 hook は try-catch で握りつぶす。qult の障害で Claude を止めない
-5. **simplest solution** — 全コンポーネントは load-bearing 仮定を持つ。仮定が崩れたら削除
+2. **fail-open** — 全 hook は try-catch で握りつぶす。qult の障害で Claude を止めない
+3. **simplest solution** — 全コンポーネントは load-bearing 仮定を持つ。仮定が崩れたら削除
 
 ## ルール
 
@@ -31,23 +29,22 @@ bun run test     # vitest run
 - `bun build.ts` → `dist/cli.mjs`、`bun build.ts --compile` → シングルバイナリ
 - **dependencies ゼロ** — 全て devDependencies + bun build バンドル
 
-### Hook 設計
+### Hook 設計 (5 hooks)
 - 全 hook は fail-open (try-catch で握りつぶす)
 - exit 2 = DENY/block (唯一の強制手段)。stderr にも理由を出力
 - PostToolUse 検出 → PreToolUse ブロックの二段構え
 - 全 state file 書き込みは atomic write (write-to-temp + rename)
 - **出力スキーマ対応表** (hooks docs 準拠):
   - respond(): SessionStart, PostToolUse
-  - deny(): PreToolUse, PermissionRequest
+  - deny(): PreToolUse
   - block(): Stop, SubagentStop
-  - 出力なし (stderr): PostCompact
 
 ### Gates
 - on_write: 編集時 (lint, typecheck) / on_commit: コミット時 (test) / on_review: レビュー時 (e2e)
 
 ### 消費者チェック
 - レジストリ変更 (init.ts, types.ts, session-state.ts) は必ず消費者への波及を確認
-- 例: init.ts に agent 追加 → doctor.ts, post-compact.ts, テストも更新が必要
+- 例: init.ts に agent 追加 → doctor.ts, テストも更新が必要
 
 ### Phase Gate (各コミット前に必ず実行)
 1. `bun vitest run` — 全テスト pass

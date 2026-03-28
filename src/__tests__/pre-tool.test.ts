@@ -69,60 +69,7 @@ describe("preTool: Edit/Write checks", () => {
 		expect(exitCode).toBeNull();
 	});
 
-	it("DENY when pace is red (>120 min, 15+ files)", async () => {
-		const { writePace } = await import("../state/session-state.ts");
-		writePace({
-			last_commit_at: new Date(Date.now() - 125 * 60 * 1000).toISOString(),
-			changed_files: 16,
-			tool_calls: 80,
-		});
-
-		const preTool = (await import("../hooks/pre-tool.ts")).default;
-		try {
-			await preTool({
-				tool_name: "Edit",
-				tool_input: { file_path: join(TEST_DIR, "src/foo.ts") },
-			});
-		} catch {
-			/* exit(2) */
-		}
-
-		expect(exitCode).toBe(2);
-	});
-
-	it("DENY edit when LOC limit exceeded", async () => {
-		const { recordChangedLines } = await import("../state/session-state.ts");
-		recordChangedLines(210);
-
-		const preTool = (await import("../hooks/pre-tool.ts")).default;
-		try {
-			await preTool({
-				tool_name: "Edit",
-				tool_input: { file_path: join(TEST_DIR, "src/foo.ts") },
-			});
-		} catch {
-			/* exit(2) */
-		}
-
-		expect(exitCode).toBe(2);
-		const output = stdoutCapture.join("");
-		expect(output).toContain("lines changed");
-	});
-
-	it("allows edit when LOC under limit", async () => {
-		const { recordChangedLines } = await import("../state/session-state.ts");
-		recordChangedLines(100);
-
-		const preTool = (await import("../hooks/pre-tool.ts")).default;
-		await preTool({
-			tool_name: "Edit",
-			tool_input: { file_path: join(TEST_DIR, "src/foo.ts") },
-		});
-
-		expect(exitCode).toBeNull();
-	});
-
-	it("allows Edit when no pending fixes and pace ok", async () => {
+	it("allows Edit when no pending fixes", async () => {
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
 		await preTool({
 			tool_name: "Edit",
@@ -155,13 +102,12 @@ describe("preTool: Bash git commit checks", () => {
 		expect(output).toContain("test");
 	});
 
-	it("allows commit without review for small change (test pass, no plan, few files)", async () => {
+	it("allows commit without review for small change", async () => {
 		writeFileSync(
 			join(TEST_DIR, ".qult", "gates.json"),
 			JSON.stringify({ on_commit: { test: { command: "vitest run", timeout: 30000 } } }),
 		);
 
-		// Record test pass but not review — small change (no plan, 0 changed files)
 		const { recordTestPass } = await import("../state/session-state.ts");
 		recordTestPass("vitest run");
 
@@ -171,32 +117,6 @@ describe("preTool: Bash git commit checks", () => {
 			tool_input: { command: 'git commit -m "test"' },
 		});
 
-		// Small change — review not required
-		expect(exitCode).toBeNull();
-	});
-
-	it("allows commit without review at boundary (4 files changed, no plan)", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({ on_commit: { test: { command: "vitest run", timeout: 30000 } } }),
-		);
-
-		// Record test pass + set pace to 4 files (just below threshold of 5)
-		const { recordTestPass, writePace } = await import("../state/session-state.ts");
-		recordTestPass("vitest run");
-		writePace({
-			last_commit_at: new Date().toISOString(),
-			changed_files: 4,
-			tool_calls: 10,
-		});
-
-		const preTool = (await import("../hooks/pre-tool.ts")).default;
-		await preTool({
-			tool_name: "Bash",
-			tool_input: { command: 'git commit -m "small fix"' },
-		});
-
-		// Should NOT be denied — small change doesn't require review
 		expect(exitCode).toBeNull();
 	});
 
@@ -206,7 +126,6 @@ describe("preTool: Bash git commit checks", () => {
 			JSON.stringify({ on_commit: { test: { command: "vitest run", timeout: 30000 } } }),
 		);
 
-		// Create a plan file
 		const planDir = join(TEST_DIR, ".claude", "plans");
 		mkdirSync(planDir, { recursive: true });
 		writeFileSync(
@@ -214,7 +133,6 @@ describe("preTool: Bash git commit checks", () => {
 			"## Tasks\n### Task 1: test [pending]\n- **File**: foo.ts\n",
 		);
 
-		// Record test pass but not review — plan is active
 		const { recordTestPass } = await import("../state/session-state.ts");
 		recordTestPass("vitest run");
 
@@ -242,7 +160,6 @@ describe("preTool: Bash git commit checks", () => {
 			}),
 		);
 
-		// Record test pass + 6 gated files (above threshold)
 		const { recordChangedFile, recordTestPass } = await import("../state/session-state.ts");
 		recordTestPass("vitest run");
 		for (let i = 0; i < 6; i++) {

@@ -63,18 +63,6 @@ export const QULT_HOOKS: Record<
 		},
 	],
 	Stop: [{ matcher: "", hooks: [{ type: "command", command: "qult hook stop", timeout: 5000 }] }],
-	PostCompact: [
-		{
-			matcher: "",
-			hooks: [{ type: "command", command: "qult hook post-compact", timeout: 5000 }],
-		},
-	],
-	PermissionRequest: [
-		{
-			matcher: "ExitPlanMode",
-			hooks: [{ type: "command", command: "qult hook permission-request", timeout: 5000 }],
-		},
-	],
 	SubagentStop: [
 		{
 			matcher: "",
@@ -128,18 +116,6 @@ export async function runInit(force: boolean): Promise<void> {
 		loadTemplate("agent-reviewer.md"),
 		force,
 	);
-	console.log("Writing agent: qult-plan-evaluator...");
-	writeFile(
-		join(claudeDir, "agents", "qult-plan-evaluator.md"),
-		loadTemplate("agent-plan-evaluator.md"),
-		force,
-	);
-	console.log("Writing skill: /qult:plan-review...");
-	writeFile(
-		join(claudeDir, "skills", "qult-plan-review", "SKILL.md"),
-		loadTemplate("skill-plan-review.md"),
-		force,
-	);
 	console.log("Writing skill: /qult:detect-gates...");
 	writeFile(
 		join(claudeDir, "skills", "qult-detect-gates", "SKILL.md"),
@@ -164,8 +140,6 @@ export async function runInit(force: boolean): Promise<void> {
 	// 3. Create .qult/ directories and gates.json
 	const qultDir = join(process.cwd(), ".qult");
 	mkdirSync(join(qultDir, ".state"), { recursive: true });
-	mkdirSync(join(qultDir, "metrics"), { recursive: true });
-	mkdirSync(join(qultDir, "gate-history"), { recursive: true });
 
 	const gatesPath = join(qultDir, "gates.json");
 	if (!existsSync(gatesPath)) {
@@ -173,25 +147,14 @@ export async function runInit(force: boolean): Promise<void> {
 		console.log(`  Created ${gatesPath} (run /qult:detect-gates to configure)`);
 	}
 
-	// 4. Migrate old single-file state to daily rotation
-	const { migrateIfNeeded } = await import("./state/daily-file.ts");
-	const oldMetrics = join(qultDir, ".state", "metrics.json");
-	if (migrateIfNeeded(oldMetrics, "metrics")) {
-		console.log("  Migrated .state/metrics.json → metrics/ (daily rotation)");
-	}
-	const oldGateHistory = join(qultDir, ".state", "gate-history.json");
-	if (migrateIfNeeded(oldGateHistory, "gate-history")) {
-		console.log("  Migrated .state/gate-history.json → gate-history/ (daily rotation)");
-	}
-
-	// 5. Clear stale pending-fixes (fresh start)
+	// 4. Clear stale pending-fixes (fresh start)
 	const pendingPath = join(qultDir, ".state", "pending-fixes.json");
 	writeFileSync(pendingPath, "[]");
 
-	// 6. Register project in central registry (~/.qult/registry.json)
+	// 5. Register project in central registry (~/.qult/registry.json)
 	registerProject(home, process.cwd());
 
-	// 7. Add .qult/ to .gitignore if not already present
+	// 6. Add .qult/ to .gitignore if not already present
 	const gitignorePath = join(process.cwd(), ".gitignore");
 	try {
 		const gitignore = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf-8") : "";
@@ -223,7 +186,6 @@ function registerProject(home: string, projectPath: string): void {
 			entries = JSON.parse(readFileSync(registryPath, "utf-8"));
 		}
 
-		// Update existing or add new entry
 		const existing = entries.findIndex((e) => e.path === projectPath);
 		const entry: RegistryEntry = { path: projectPath, registered_at: new Date().toISOString() };
 		if (existing >= 0) {

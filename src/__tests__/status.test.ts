@@ -58,23 +58,13 @@ describe("qult status", () => {
 		expect(output).toContain("lint");
 	});
 
-	it("shows pace and review status", async () => {
+	it("shows review status", async () => {
 		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify({}));
-		writeFileSync(
-			join(STATE_DIR, "session-state.json"),
-			JSON.stringify({
-				last_commit_at: new Date(Date.now() - 30 * 60_000).toISOString(),
-				changed_files: 7,
-				tool_calls: 20,
-				review_completed_at: null,
-				test_passed_at: null,
-			}),
-		);
 		const { runStatus } = await import("../status.ts");
 		runStatus();
 		const output = getOutput();
-		expect(output).toContain("7");
 		expect(output).toContain("Review");
+		expect(output).toContain("Test gate");
 	});
 
 	it("shows plan progress when plan exists", async () => {

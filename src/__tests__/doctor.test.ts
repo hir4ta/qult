@@ -24,10 +24,6 @@ function setupValidEnv(): void {
 	// skills
 	mkdirSync(join(claudeDir, "skills", "qult-review"), { recursive: true });
 	writeFileSync(join(claudeDir, "skills", "qult-review", "SKILL.md"), "# review skill");
-	mkdirSync(join(claudeDir, "skills", "qult-plan-review"), { recursive: true });
-	writeFileSync(join(claudeDir, "skills", "qult-plan-review", "SKILL.md"), "# plan-review skill");
-	mkdirSync(join(claudeDir, "skills", "qult-detect-gates"), { recursive: true });
-	writeFileSync(join(claudeDir, "skills", "qult-detect-gates", "SKILL.md"), "# detect-gates skill");
 	mkdirSync(join(claudeDir, "skills", "qult-plan-generator"), { recursive: true });
 	writeFileSync(
 		join(claudeDir, "skills", "qult-plan-generator", "SKILL.md"),
@@ -37,7 +33,6 @@ function setupValidEnv(): void {
 	// agents
 	mkdirSync(join(claudeDir, "agents"), { recursive: true });
 	writeFileSync(join(claudeDir, "agents", "qult-reviewer.md"), "# reviewer agent");
-	writeFileSync(join(claudeDir, "agents", "qult-plan-evaluator.md"), "# plan-evaluator agent");
 	writeFileSync(join(claudeDir, "agents", "qult-plan-generator.md"), "# plan-generator agent");
 
 	// rules
@@ -86,14 +81,14 @@ describe("doctor: check 1 — Bun version", () => {
 });
 
 describe("doctor: check 2 — hooks registered", () => {
-	it("returns ok when all 7 hooks are registered", async () => {
+	it("returns ok when all 5 hooks are registered", async () => {
 		setupValidEnv();
 		const { runChecks } = await import("../doctor.ts");
 		const results = runChecks();
 		const check = findCheck(results, "hooks");
 		expect(check).toBeDefined();
 		expect(check!.status).toBe("ok");
-		expect(check!.message).toContain("7/7");
+		expect(check!.message).toContain("5/5");
 	});
 
 	it("returns fail when hooks are missing", async () => {
@@ -248,7 +243,7 @@ describe("doctor: overall", () => {
 		setupValidEnv();
 		const { runChecks } = await import("../doctor.ts");
 		const results = runChecks();
-		expect(results).toHaveLength(12);
+		expect(results).toHaveLength(10);
 	});
 
 	it("all checks pass with valid setup", async () => {
@@ -266,7 +261,7 @@ describe("doctor --fix repairs corrupted state", () => {
 	it("resets corrupt JSON files to valid defaults", async () => {
 		setupValidEnv();
 
-		// Write corrupt JSON to state files (metrics.json and gate-history.json are now daily-rotated)
+		// Write corrupt JSON to state files
 		const stateDir = join(TEST_PROJECT, ".qult", ".state");
 		writeFileSync(join(stateDir, "pending-fixes.json"), "{broken json");
 		writeFileSync(join(stateDir, "session-state.json"), "not json at all");
@@ -287,10 +282,9 @@ describe("doctor --fix repairs corrupted state", () => {
 	it("does nothing when state is healthy", async () => {
 		setupValidEnv();
 
-		// Write valid state
 		const stateDir = join(TEST_PROJECT, ".qult", ".state");
 		writeFileSync(join(stateDir, "pending-fixes.json"), "[]");
-		writeFileSync(join(stateDir, "metrics.json"), "[]");
+		writeFileSync(join(stateDir, "session-state.json"), "{}");
 
 		const { repairState } = await import("../doctor.ts");
 		const repaired = repairState();

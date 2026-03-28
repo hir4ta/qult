@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetAllCaches } from "../../state/flush.ts";
 import { writePendingFixes } from "../../state/pending-fixes.ts";
-import { recordReview, writePace } from "../../state/session-state.ts";
+import { recordReview } from "../../state/session-state.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-stop-test");
 const STATE_DIR = join(TEST_DIR, ".qult", ".state");
@@ -72,7 +72,6 @@ describe("stop hook", () => {
 	});
 
 	it("blocks when no review has been run and review is required (plan active)", async () => {
-		// Create a plan to make review required
 		const planDir = join(TEST_DIR, ".claude", "plans");
 		mkdirSync(planDir, { recursive: true });
 		writeFileSync(
@@ -92,16 +91,6 @@ describe("stop hook", () => {
 		expect((response as Record<string, string>)?.reason).toContain("review");
 	});
 
-	it("warns but does not block when no review and small change", async () => {
-		// No plan, no changed files → review not required
-		const handler = (await import("../stop.ts")).default;
-		await handler({ hook_type: "Stop" });
-
-		expect(exitCode).toBeNull();
-		const stderr = stderrCapture.join("");
-		expect(stderr).toContain("review");
-	});
-
 	it("does not block when stop_hook_active is true (prevent infinite loop)", async () => {
 		writePendingFixes([{ file: "src/foo.ts", errors: ["lint error"], gate: "lint" }]);
 
@@ -109,21 +98,5 @@ describe("stop hook", () => {
 		await handler({ hook_type: "Stop", stop_hook_active: true });
 
 		expect(exitCode).toBeNull();
-	});
-
-	it("warns on pace yellow (20+ min) via stderr", async () => {
-		recordReview();
-		writePace({
-			last_commit_at: new Date(Date.now() - 25 * 60_000).toISOString(),
-			changed_files: 3,
-			tool_calls: 20,
-		});
-
-		const handler = (await import("../stop.ts")).default;
-		await handler({ hook_type: "Stop" });
-
-		expect(exitCode).toBeNull();
-		const stderr = stderrCapture.join("");
-		expect(stderr).toContain("minutes since last commit");
 	});
 });

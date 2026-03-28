@@ -1,14 +1,14 @@
 # qult
 
-![Version](https://img.shields.io/badge/version-0.13.0-7fbbb3?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.14.0-7fbbb3?style=flat-square)
 ![TypeScript](https://img.shields.io/badge/TypeScript-Bun_1.3+-a7c080?style=flat-square&logo=typescript&logoColor=d3c6aa)
-![Hooks](https://img.shields.io/badge/hooks-7-dbbc7f?style=flat-square)
+![Hooks](https://img.shields.io/badge/hooks-5-dbbc7f?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-83c092?style=flat-square)
 
 **Claude の悪い癖を物理的に止める。** コードの品質を構造で守る evaluator harness。
 
 > Claude は優秀だが、lint エラーを放置して次のファイルに行く。テストなしでコミットする。自分のコードを褒めてレビューを終える。
-> qult は 7 hooks + 独立 Opus evaluator で、それを **お願い (advisory) ではなく exit 2 (DENY) で止める**。
+> qult は 5 hooks + 独立 Opus evaluator で、それを **お願い (advisory) ではなく exit 2 (DENY) で止める**。
 
 > [!NOTE]
 > セッション開始時に `SessionStart:startup hook error` や `Stop hook error` と表示されることがありますが、**これは qult のバグではありません**。
@@ -19,7 +19,7 @@
 > **PreToolUse hook の DENY が無視される場合があります。** qult は正しく `exit 2` + `permissionDecision: "deny"` を返しますが、
 > Claude Code がブロックせずにツールを実行してしまうケースが報告されています
 > ([#21988](https://github.com/anthropics/claude-code/issues/21988), [#4669](https://github.com/anthropics/claude-code/issues/4669), [#24327](https://github.com/anthropics/claude-code/issues/24327))。
-> 特に LOC 制限の DENY が連続で無視され、変更量が膨らむ現象が確認されています。Claude Code 側の修正待ちです。
+> Claude Code 側の修正待ちです。
 
 ---
 
@@ -40,26 +40,21 @@ flowchart LR
     style PF fill:#dbbc7f,color:#2d353b,stroke:#dbbc7f
 ```
 
-Anthropic の [Harness Design](https://www.anthropic.com/engineering/harness-design-long-running-apps) 記事が示した 3-agent パターンで動作:
+Anthropic の [Harness Design](https://www.anthropic.com/engineering/harness-design-long-running-apps) 記事が示した Generator-Evaluator パターンで動作:
 
 ```mermaid
 flowchart TB
-    subgraph Planner["Planner"]
-        PG["/qult:plan-generator\n(Opus)"]
-    end
     subgraph Generator["Generator"]
-        Claude["Claude 本体\n+ 12 hooks で品質ゲート"]
+        Claude["Claude 本体\n+ 5 hooks で品質ゲート"]
     end
     subgraph Evaluator["Evaluator"]
         Rev["/qult:review\n(Opus)"]
     end
 
-    PG -- "Plan" --> Claude
     Claude -- "コード" --> Rev
     Rev -- "FAIL → 修正" --> Claude
     Rev -- "PASS + score ≥ 12/15" --> Done["Commit"]
 
-    style Planner fill:#d699b6,color:#2d353b,stroke:#d699b6
     style Generator fill:#7fbbb3,color:#2d353b,stroke:#7fbbb3
     style Evaluator fill:#e69875,color:#2d353b,stroke:#e69875
     style Done fill:#a7c080,color:#2d353b,stroke:#a7c080
@@ -75,50 +70,19 @@ flowchart TB
 | テスト未実行で git commit | **DENY** — テスト pass を要求 |
 | レビュー未実行/FAIL で完了宣言 | **block** — /qult:review を要求 |
 | レビュー PASS だがスコア低い | **block** — 再レビュー (最大3回反復) |
-| Plan に曖昧な Criteria / Verify なし | **DENY** — 具体的な基準を要求 |
-| 200行超の変更 (コミット間) | **DENY** — コミットを要求 |
-| 120分超 + 15ファイル変更 | **DENY** — スコープ肥大を阻止 |
+| Plan の途中で完了宣言 | **block** — 全タスク完了を要求 |
 
 ---
 
-## 7 Hooks
+## 5 Hooks
 
-```mermaid
-block-beta
-    columns 2
-
-    block:wall:2
-        columns 2
-        A["PostToolUse\n(gate実行)"] B["PreToolUse\n(DENY判定)"]
-    end
-
-    block:plan:2
-        columns 2
-        E["PermissionRequest\n(Plan構造検証)"] F["Stop\n(完了チェック)"]
-    end
-
-    block:support:2
-        columns 2
-        G["SessionStart\n(セットアップ)"] H["PostCompact\n(状態handoff)"]
-    end
-
-    block:sub:2
-        columns 1
-        K["SubagentStop\n(スコア強制)"]
-    end
-
-    style wall fill:#e67e80,color:#2d353b
-    style plan fill:#d699b6,color:#2d353b
-    style support fill:#7fbbb3,color:#2d353b
-    style sub fill:#859289,color:#2d353b
-```
-
-| 分類 | Hooks | 役割 |
-|------|-------|------|
-| **壁** (enforcement) | PostToolUse, PreToolUse | 壊れたコードを通さない |
-| **Plan増幅** (enforcement) | PermissionRequest, Stop | 設計の質を底上げ、中途半端に終わらせない |
-| **実行支援** (advisory) | SessionStart, PostCompact | セットアップ、状態ハンドオフ |
-| **サブエージェント** (enforcement) | SubagentStop | レビュースコア閾値強制 |
+| 分類 | Hook | 役割 |
+|------|------|------|
+| **壁** (enforcement) | PostToolUse | Edit/Write 後に lint/type gate 実行、pending-fixes 作成 |
+| **壁** (enforcement) | PreToolUse | pending-fixes 未修正なら DENY、commit 前にテスト/レビュー要求 |
+| **完了ゲート** (enforcement) | Stop | 未修正エラー・未完了タスク・レビュー未実施なら block |
+| **サブエージェント** (enforcement) | SubagentStop | レビュー出力検証 + スコア閾値強制 (12/15) |
+| **セットアップ** (advisory) | SessionStart | `.qult/` 初期化、gate 未設定なら検出を促す |
 
 ---
 
@@ -127,7 +91,7 @@ block-beta
 ```bash
 bun install && bun build.ts && bun link
 
-qult init       # ~/.claude/ に 7 hooks + skill + agent + rules を配置
+qult init       # ~/.claude/ に 5 hooks + skill + agent + rules を配置
 qult doctor     # セットアップの健全性を確認
 ```
 
@@ -161,96 +125,9 @@ Gate は自動検出:
 | 原則 | 意味 |
 |------|------|
 | **壁 > 情報提示** | DENY (exit 2) で止める。advisory は無視される前提 |
-| **リサーチ駆動** | SWE-bench / Anthropic 記事 / Self-Refine 論文の裏付け |
 | **fail-open** | 全 hook は try-catch。qult の障害で Claude を止めない |
 | **simplest solution** | 全コンポーネントは仮定を持つ。崩れたら捨てる |
 | **dependencies ゼロ** | 全て devDependencies + bun build バンドル |
-
----
-
-## 効果測定
-
-```bash
-qult doctor --metrics
-```
-
-```
---- Metrics (293 actions across 5 sessions) ---
-
-  Actions:       DENY 105 (43 actionable) | block 5 | respond 32
-  Effectiveness: First-pass 80% | Gate pass 67% | DENYs/commit 4.3
-  Review:        Pass 100% (3 reviews) | Findings avg 3 | Misses 1
-  Commits:       10 commits, avg 22m | Clean commit rate 70%
-  Plans:         Approved 4, Rejected 1 (80% pass)
-```
-
-<details>
-<summary><strong>メトリクス詳細</strong></summary>
-
-### Actions
-
-| 項目 | 意味 |
-|------|------|
-| **DENY** (actionable) | lint/typecheck 失敗等の修正すべきブロック |
-| **DENY** (defensive) | hook 設定保護 (正常動作) |
-| **block** | 「完了」を止めた回数 (未修正エラー、レビュー未実行等) |
-| **respond** | コンテキストに情報を注入した回数 |
-| **review:miss** | レビュー PASS 後に gate 失敗 (evaluator の見逃し) |
-
-### Effectiveness
-
-| 指標 | 目安 |
-|------|------|
-| **First-pass clean** | ファイル初回編集時に全 gate 通過した率。高いほど良い |
-| **Gate pass rate** | 全 gate 実行の通過率。70%+ が目安 |
-| **DENYs per commit** | 1コミットまでの DENY 回数。低いほどスムーズ |
-| **DENY resolution** | DENY 後に修正成功した率 |
-| **Avg fix effort** | DENY 解消に要した編集回数。1-2 が理想 |
-
-### Review
-
-| 指標 | 意味 |
-|------|------|
-| **Pass rate** | Opus evaluator のレビュー PASS 率 |
-| **Findings** | severity 別 (critical/high/medium/low) の指摘件数 |
-| **Misses** | PASS 後に gate 失敗した回数 |
-
-### Artifact quality
-
-| 指標 | 意味 |
-|------|------|
-| **Clean commit rate** | DENY ゼロでコミットできた割合 |
-| **Avg review scores** | Correctness/Design/Security (1-5) |
-| **Hotspot files** | gate 失敗率の高いファイル |
-
-### False Positives
-
-| 指標 | 意味 |
-|------|------|
-| **Pace-red FP rate** | pace-red DENY 後に clean commit できた割合 |
-| **LOC-limit FP rate** | loc-limit DENY 後に clean commit できた割合 |
-
-FP 率 >20% で自動キャリブレーションが閾値を緩和。
-
-</details>
-
-<details>
-<summary><strong>自動キャリブレーション</strong></summary>
-
-24時間ごとに metrics から閾値を自動調整 (線形補間):
-
-| 閾値 | デフォルト | 範囲 | 調整基準 |
-|------|-----------|------|----------|
-| **pace_files** | 15 | 10-30 | first-pass rate + FP rate |
-| **loc_limit** | 200 | 150-400 | fix effort + FP rate |
-| **review_file_threshold** | 5 | 3-7 | review-miss rate |
-| **review_score_threshold** | 12 | 12-14 | review-miss rate |
-| **context_budget** | 2000 | 1500-2500 | respond-skipped rate |
-| **plan_task_threshold** | 3 | 2-5 | plan compliance score |
-
-**コールドスタート**: メトリクス不足時は `gates.json` の gate 数からヒューリスティック初期値を設定。
-
-</details>
 
 ---
 
@@ -260,7 +137,6 @@ FP 率 >20% で自動キャリブレーションが閾値を緩和。
 /qult:plan-generator "JWT認証をAPIに追加"
   → Opus が codebase を分析
   → WHAT/WHERE/VERIFY/BOUNDARY/SIZE 形式の Plan を生成
-  → 4+ tasks なら自動で plan-review
   → .claude/plans/ に書き出し
 ```
 
@@ -270,18 +146,13 @@ FP 率 >20% で自動キャリブレーションが閾値を緩和。
 
 ```
 .qult/
-├── metrics/            # hook アクション (日次ローテーション)
-├── gate-history/       # gate 結果 + コミット履歴 (日次)
-├── context-providers.json
 └── .state/
     ├── session-state-{id}.json
-    ├── pending-fixes-{id}.json
-    └── calibration.json
+    └── pending-fixes-{id}.json
 ```
 
 - セッション ID でスコープ (並行セッション安全)
 - 24h 経過した古いファイルは自動クリーンアップ
-- `qult doctor --metrics` で全日分を集計表示
 
 ---
 

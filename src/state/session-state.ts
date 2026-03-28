@@ -2,14 +2,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { extname, join } from "node:path";
 import { loadGates } from "../gates/load.ts";
 import { atomicWriteJson } from "./atomic-write.ts";
-import { getCalibrated } from "./calibration.ts";
-import { getCommitStats } from "./gate-history.ts";
 import { getActivePlan } from "./plan-status.ts";
 
 const STATE_DIR = ".qult/.state";
 const FILE = "session-state.json";
-const DEFAULT_RED_MINUTES = 120;
-const DEFAULT_FILES = 15;
+const DEFAULT_REVIEW_FILE_THRESHOLD = 5;
 
 // Process-scoped cache: read once from disk, flush once at end
 let _cache: SessionState | null = null;
@@ -24,55 +21,14 @@ export function setStateSessionScope(sessionId: string): void {
 }
 
 export interface SessionState {
-	// Pace tracking
 	last_commit_at: string;
-	changed_files: number;
-	tool_calls: number;
-	// Gate clearance
 	test_passed_at: string | null;
 	test_command: string | null;
 	review_completed_at: string | null;
-	// Gate batch (run_once_per_batch)
 	ran_gates: Record<string, { session_id: string; ran_at: string }>;
-	// Failure tracking
-	last_error_signature: string;
-	consecutive_error_count: number;
-	// Context budget
-	context_session_id: string;
-	context_used: number;
-	// Per-session action counters (for outcome tracking)
-	session_deny_count: number;
-	session_block_count: number;
-	session_respond_count: number;
-	// First-pass tracking: files already counted (prevents re-counting on re-edit)
-	first_pass_recorded: string[];
-	// Changed file paths (for gated-file review threshold)
 	changed_file_paths: string[];
-	// Plan contract tracking (cumulative across session, not reset on commit)
-	verified_fields: string[];
-	criteria_commands_run: string[];
-	// Peak consecutive error tracking
-	peak_consecutive_error_count: number;
-	// Fix effort: edits between DENY and resolution
-	deny_edits_before_resolution: number;
-	// LOC tracking: cumulative lines changed since last commit
-	changed_lines: number;
-	// Advisory compliance tracking
-	pending_advisory: PendingAdvisory | null;
-	// Review iteration tracking (score-driven loop)
 	review_iteration: number;
 	review_last_aggregate: number;
-	// Plan evaluation tracking
-	plan_evaluated_at: string | null;
-	// False positive tracking: last DENY timestamp and reason
-	last_deny_at: string | null;
-	last_deny_reason: string | null;
-}
-
-export interface PendingAdvisory {
-	type: "fix" | "error-loop" | "verify-check";
-	expected_files?: string[];
-	injected_at: string;
 }
 
 function filePath(): string {
@@ -83,32 +39,13 @@ function filePath(): string {
 function defaultState(): SessionState {
 	return {
 		last_commit_at: new Date().toISOString(),
-		changed_files: 0,
-		tool_calls: 0,
 		test_passed_at: null,
 		test_command: null,
 		review_completed_at: null,
 		ran_gates: {},
-		last_error_signature: "",
-		consecutive_error_count: 0,
-		context_session_id: "",
-		context_used: 0,
-		session_deny_count: 0,
-		session_block_count: 0,
-		session_respond_count: 0,
-		first_pass_recorded: [],
 		changed_file_paths: [],
-		verified_fields: [],
-		criteria_commands_run: [],
-		peak_consecutive_error_count: 0,
-		deny_edits_before_resolution: 0,
-		changed_lines: 0,
-		pending_advisory: null,
 		review_iteration: 0,
 		review_last_aggregate: 0,
-		plan_evaluated_at: null,
-		last_deny_at: null,
-		last_deny_reason: null,
 	};
 }
 
@@ -154,63 +91,7 @@ export function resetCache(): void {
 	_sessionScope = null;
 }
 
-// --- Pace ---
-
-export function readPace(): {
-	last_commit_at: string;
-	changed_files: number;
-	tool_calls: number;
-} | null {
-	// Return null only when both cache and disk are empty (no tracking data yet)
-	if (!_cache && !existsSync(filePath())) return null;
-	const state = readSessionState();
-	return {
-		last_commit_at: state.last_commit_at,
-		changed_files: state.changed_files,
-		tool_calls: state.tool_calls,
-	};
-}
-
-export function writePace(pace: {
-	last_commit_at: string;
-	changed_files: number;
-	tool_calls: number;
-}): void {
-	const state = readSessionState();
-	state.last_commit_at = pace.last_commit_at;
-	state.changed_files = pace.changed_files;
-	state.tool_calls = pace.tool_calls;
-	writeState(state);
-}
-
-export function getRedThreshold(): number {
-	try {
-		const stats = getCommitStats();
-		if (stats && stats.count >= 3) {
-			return Math.max(10, Math.min(DEFAULT_RED_MINUTES, stats.avgMinutes * 2));
-		}
-	} catch {
-		// fail-open
-	}
-	return DEFAULT_RED_MINUTES;
-}
-
-export function isPaceRed(
-	pace: { last_commit_at: string; changed_files: number } | null,
-	hasPlan = false,
-): boolean {
-	if (!pace) return false;
-	const elapsed = Date.now() - new Date(pace.last_commit_at).getTime();
-	const minutes = elapsed / 60_000;
-	const threshold = hasPlan ? getRedThreshold() * 1.5 : getRedThreshold();
-	const calibratedFiles = getCalibrated("pace_files", DEFAULT_FILES);
-	const fileThreshold = hasPlan ? Math.ceil(calibratedFiles * 1.5) : calibratedFiles;
-	return minutes >= threshold && pace.changed_files >= fileThreshold;
-}
-
 // --- Review threshold ---
-
-const DEFAULT_REVIEW_FILE_THRESHOLD = 5;
 
 // Tool keyword → file extensions the tool meaningfully checks
 const TOOL_EXTS: [RegExp, string[]][] = [
@@ -262,37 +143,12 @@ export function recordChangedFile(filePath: string): void {
 	writeState(state);
 }
 
-/** Record a verified plan field (taskName:testFunction) — deduplicated */
-export function recordVerifiedField(key: string): void {
-	const state = readSessionState();
-	if (!state.verified_fields) state.verified_fields = [];
-	if (!state.verified_fields.includes(key)) {
-		state.verified_fields.push(key);
-	}
-	writeState(state);
-}
-
-/** Record a criteria command as executed — deduplicated */
-export function recordCriteriaCommand(command: string): void {
-	const state = readSessionState();
-	if (!state.criteria_commands_run) state.criteria_commands_run = [];
-	if (!state.criteria_commands_run.includes(command)) {
-		state.criteria_commands_run.push(command);
-	}
-	writeState(state);
-}
-
 /** Determine if independent review is required for current session.
  *  Required when: plan is active OR gated_files >= threshold.
  *  Files outside gate coverage (e.g. .md) don't count toward threshold. */
 export function isReviewRequired(): boolean {
-	// Plan active → always require review
 	if (getActivePlan() !== null) return true;
-
-	// Count only files covered by on_write gates
-	const reviewThreshold = getCalibrated("review_file_threshold", DEFAULT_REVIEW_FILE_THRESHOLD);
-	if (countGatedFiles() >= reviewThreshold) return true;
-
+	if (countGatedFiles() >= DEFAULT_REVIEW_FILE_THRESHOLD) return true;
 	return false;
 }
 
@@ -340,168 +196,19 @@ export function markGateRan(gateName: string, sessionId: string): void {
 	writeState(state);
 }
 
-// --- Fail count ---
-
-export function recordFailure(signature: string): number {
-	try {
-		const state = readSessionState();
-		const count = state.last_error_signature === signature ? state.consecutive_error_count + 1 : 1;
-		state.last_error_signature = signature;
-		state.consecutive_error_count = count;
-		if (count > (state.peak_consecutive_error_count ?? 0)) {
-			state.peak_consecutive_error_count = count;
-		}
-		writeState(state);
-		return count;
-	} catch {
-		return 1;
-	}
-}
-
-export function clearFailCount(): void {
-	const state = readSessionState();
-	state.last_error_signature = "";
-	state.consecutive_error_count = 0;
-	writeState(state);
-}
-
-// --- Fix effort tracking ---
-
-/** Increment edit counter for fix effort (editing a file that has pending fixes). */
-export function recordEditTowardsFix(): void {
-	try {
-		const state = readSessionState();
-		state.deny_edits_before_resolution = (state.deny_edits_before_resolution ?? 0) + 1;
-		writeState(state);
-	} catch {
-		/* fail-open */
-	}
-}
-
-/** Reset fix effort counter and return the count (called on resolution). */
-export function resetFixEffort(): number {
-	try {
-		const state = readSessionState();
-		const count = state.deny_edits_before_resolution ?? 0;
-		state.deny_edits_before_resolution = 0;
-		writeState(state);
-		return count;
-	} catch {
-		return 0;
-	}
-}
-
-// --- LOC tracking ---
-
-/** Read cumulative changed lines since last commit. */
-export function readChangedLines(): number {
-	return readSessionState().changed_lines ?? 0;
-}
-
-/** Record additional changed lines (added to cumulative total). */
-export function recordChangedLines(lines: number): void {
-	if (lines <= 0) return;
-	const state = readSessionState();
-	state.changed_lines = (state.changed_lines ?? 0) + lines;
-	writeState(state);
-}
-
-// --- Action counters ---
-
-export function incrementActionCount(type: "deny" | "block" | "respond"): void {
-	const state = readSessionState();
-	if (type === "deny") state.session_deny_count++;
-	else if (type === "block") state.session_block_count++;
-	else state.session_respond_count++;
-	writeState(state);
-}
-
-// --- First-pass tracking ---
-
-/** Check if this file's first-pass has already been recorded. */
-export function isFirstPassRecorded(file: string): boolean {
-	const state = readSessionState();
-	return (state.first_pass_recorded ?? []).includes(file);
-}
-
-/** Mark a file's first-pass as recorded. */
-export function markFirstPassRecorded(file: string): void {
-	const state = readSessionState();
-	if (!state.first_pass_recorded) state.first_pass_recorded = [];
-	state.first_pass_recorded.push(file);
-	writeState(state);
-}
-
-// --- Context budget ---
-
-export function resetBudget(sessionId: string): void {
-	const state = readSessionState();
-	if (state.context_session_id === sessionId) return;
-	state.context_session_id = sessionId;
-	state.context_used = 0;
-	writeState(state);
-}
-
-export function checkBudget(tokens: number): boolean {
-	const state = readSessionState();
-	if (!state.context_session_id) return true; // fail-open
-	const budget = getCalibrated("context_budget", 2000);
-	return state.context_used + tokens <= budget;
-}
-
-export function recordInjection(tokens: number): void {
-	const state = readSessionState();
-	state.context_used += tokens;
-	writeState(state);
-}
-
 // --- Commit reset ---
 
-/** Clear per-commit fields. Preserves budget. Optionally resets pace atomically. */
-export function clearOnCommit(paceReset?: {
-	last_commit_at: string;
-	changed_files: number;
-	tool_calls: number;
-}): void {
+/** Clear per-commit fields. */
+export function clearOnCommit(): void {
 	const state = readSessionState();
+	state.last_commit_at = new Date().toISOString();
 	state.test_passed_at = null;
 	state.test_command = null;
 	state.review_completed_at = null;
 	state.ran_gates = {};
 	state.changed_file_paths = [];
-	state.changed_lines = 0;
-	state.session_deny_count = 0;
-	state.pending_advisory = null;
 	state.review_iteration = 0;
 	state.review_last_aggregate = 0;
-	state.plan_evaluated_at = null;
-	state.last_deny_at = null;
-	state.last_deny_reason = null;
-	state.last_error_signature = "";
-	state.consecutive_error_count = 0;
-	if (paceReset) {
-		state.last_commit_at = paceReset.last_commit_at;
-		state.changed_files = paceReset.changed_files;
-		state.tool_calls = paceReset.tool_calls;
-	}
-	writeState(state);
-}
-
-// --- Advisory compliance tracking ---
-
-export function setPendingAdvisory(advisory: PendingAdvisory): void {
-	const state = readSessionState();
-	state.pending_advisory = advisory;
-	writeState(state);
-}
-
-export function getPendingAdvisory(): PendingAdvisory | null {
-	return readSessionState().pending_advisory ?? null;
-}
-
-export function clearPendingAdvisory(): void {
-	const state = readSessionState();
-	state.pending_advisory = null;
 	writeState(state);
 }
 
@@ -526,39 +233,4 @@ export function resetReviewIteration(): void {
 	state.review_iteration = 0;
 	state.review_last_aggregate = 0;
 	writeState(state);
-}
-
-// --- Plan evaluation tracking ---
-
-export function readLastPlanEvaluation(): { evaluated_at: string } | null {
-	const state = readSessionState();
-	if (!state.plan_evaluated_at) return null;
-	return { evaluated_at: state.plan_evaluated_at };
-}
-
-export function recordPlanEvaluation(): void {
-	const state = readSessionState();
-	state.plan_evaluated_at = new Date().toISOString();
-	writeState(state);
-}
-
-// --- False positive tracking ---
-
-/** Record DENY timestamp and reason for false positive detection. */
-export function recordDenyTimestamp(reason: string): void {
-	try {
-		const state = readSessionState();
-		state.last_deny_at = new Date().toISOString();
-		state.last_deny_reason = reason;
-		writeState(state);
-	} catch {
-		/* fail-open */
-	}
-}
-
-/** Read last DENY info for resolution time / FP computation. */
-export function readLastDeny(): { at: string; reason: string } | null {
-	const state = readSessionState();
-	if (!state.last_deny_at || !state.last_deny_reason) return null;
-	return { at: state.last_deny_at, reason: state.last_deny_reason };
 }
