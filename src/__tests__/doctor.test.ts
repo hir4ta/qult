@@ -72,19 +72,7 @@ function findCheck(results: CheckResult[], name: string): CheckResult | undefine
 	return results.find((r) => r.name === name);
 }
 
-describe("doctor: check 1 — Bun version", () => {
-	it("returns ok when Bun >= 1.3", async () => {
-		setupValidEnv();
-		const { runChecks } = await import("../doctor.ts");
-		const results = runChecks();
-		const check = findCheck(results, "bun");
-		expect(check).toBeDefined();
-		// We're running in Bun, so this should pass
-		expect(check!.status).toBe("ok");
-	});
-});
-
-describe("doctor: check 2 — hooks registered", () => {
+describe("doctor: check 1 — hooks registered", () => {
 	it("returns ok when all 6 hooks are registered", async () => {
 		setupValidEnv();
 		const { runChecks } = await import("../doctor.ts");
@@ -255,11 +243,11 @@ describe("doctor: check 8 — qult in PATH", () => {
 });
 
 describe("doctor: overall", () => {
-	it("returns 10 check results", async () => {
+	it("returns 11 check results", async () => {
 		setupValidEnv();
 		const { runChecks } = await import("../doctor.ts");
 		const results = runChecks();
-		expect(results).toHaveLength(12);
+		expect(results).toHaveLength(11);
 	});
 
 	it("all checks pass with valid setup", async () => {

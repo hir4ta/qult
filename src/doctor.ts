@@ -11,30 +11,6 @@ export interface CheckResult {
 	message: string;
 }
 
-function getBunVersion(): string | null {
-	if (process.versions.bun) return process.versions.bun;
-	try {
-		const { execSync } = require("node:child_process");
-		return execSync("bun --version", { encoding: "utf-8" }).trim();
-	} catch {
-		return null;
-	}
-}
-
-function checkBun(): CheckResult {
-	const version = getBunVersion();
-	if (!version) return { name: "bun", status: "fail", message: "Bun not detected" };
-	const [major, minor] = version.split(".").map(Number);
-	if (major! > 1 || (major === 1 && minor! >= 3)) {
-		return { name: "bun", status: "ok", message: `Bun ${version}` };
-	}
-	return {
-		name: "bun",
-		status: "fail",
-		message: `Bun ${version} (requires >= 1.3)`,
-	};
-}
-
 function checkHooks(): CheckResult {
 	const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
 	const settingsPath = join(home, ".claude", "settings.json");
@@ -207,7 +183,6 @@ export function runChecks(): CheckResult[] {
 	const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
 	const claudeDir = join(home, ".claude");
 	return [
-		checkBun(),
 		checkHooks(),
 		checkFileExists(
 			"skill",

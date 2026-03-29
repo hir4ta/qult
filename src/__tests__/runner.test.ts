@@ -1,12 +1,14 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runGate } from "../gates/runner.ts";
+import { resetConfigCache } from "../config.ts";
+import { runGate, smartTruncate } from "../gates/runner.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-runner-test");
 const originalCwd = process.cwd();
 
 beforeEach(() => {
+	resetConfigCache();
 	mkdirSync(TEST_DIR, { recursive: true });
 	process.chdir(TEST_DIR);
 });
@@ -53,13 +55,44 @@ describe("runGate", () => {
 		expect(result.name).toBe("slow-gate");
 	});
 
-	it("truncates output to 1000 chars", () => {
-		// Generate long output
+	it("truncates long output using smart head+tail", () => {
+		// Generate output longer than default max (2000 chars)
 		const result = runGate("long-gate", {
-			command: `printf '%0.s-' {1..2000}`,
+			command: `printf '%0.s-' {1..5000}`,
 			timeout: 3000,
 		});
 		expect(result.passed).toBe(true);
-		expect(result.output.length).toBeLessThanOrEqual(1000);
+		// Smart truncation: output should be capped + contain truncation marker
+		expect(result.output.length).toBeLessThanOrEqual(2100); // 2000 + marker overhead
+		expect(result.output).toContain("chars truncated");
+	});
+});
+
+describe("smartTruncate", () => {
+	it("returns text unchanged if under limit", () => {
+		expect(smartTruncate("short text", 100)).toBe("short text");
+	});
+
+	it("truncates with head+tail and marker", () => {
+		const input = "A".repeat(100);
+		const result = smartTruncate(input, 50);
+		expect(result).toContain("chars truncated");
+		// Head should be ~75% of limit
+		expect(result.startsWith("A".repeat(37))).toBe(true);
+		// Tail should end with A's
+		expect(result.endsWith("A".repeat(13))).toBe(true);
+	});
+
+	it("preserves head + tail content", () => {
+		const head = "ERROR: first line\n";
+		const middle = "x".repeat(3000);
+		const tail = "\nSummary: 5 errors found";
+		const input = head + middle + tail;
+		const result = smartTruncate(input, 200);
+		// Head should contain the error
+		expect(result).toContain("ERROR: first line");
+		// Tail should contain the summary
+		expect(result).toContain("errors found");
+		expect(result).toContain("chars truncated");
 	});
 });

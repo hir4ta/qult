@@ -1,6 +1,6 @@
 # qult
 
-![Version](https://img.shields.io/badge/version-0.15.1-7fbbb3?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.15.2-7fbbb3?style=flat-square)
 ![TypeScript](https://img.shields.io/badge/TypeScript-Bun_1.3+-a7c080?style=flat-square&logo=typescript&logoColor=d3c6aa)
 ![Hooks](https://img.shields.io/badge/hooks-6-dbbc7f?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-83c092?style=flat-square)

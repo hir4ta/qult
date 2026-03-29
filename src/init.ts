@@ -167,9 +167,19 @@ export async function runInit(force: boolean): Promise<void> {
 	mkdirSync(join(qultDir, ".state"), { recursive: true });
 
 	const gatesPath = join(qultDir, "gates.json");
-	if (!existsSync(gatesPath)) {
-		writeFileSync(gatesPath, "{}");
-		console.log(`  Created ${gatesPath} (run /qult:detect-gates to configure)`);
+	if (!existsSync(gatesPath) || force) {
+		// Auto-detect gates from project toolchain
+		const { detectGates, hasAnyGates, formatDetectionSummary } = await import("./gates/detect.ts");
+		const detected = detectGates(process.cwd());
+		if (hasAnyGates(detected)) {
+			writeFileSync(gatesPath, JSON.stringify(detected, null, 2));
+			console.log(`  ${formatDetectionSummary(detected)}`);
+		} else {
+			writeFileSync(gatesPath, "{}");
+			console.log("  No gates detected (run /qult:detect-gates to configure manually)");
+		}
+	} else {
+		console.log(`  = ${gatesPath} (exists)`);
 	}
 
 	// 4. Clear stale pending-fixes (fresh start)

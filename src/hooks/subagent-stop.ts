@@ -1,3 +1,4 @@
+import { loadConfig } from "../config.ts";
 import {
 	getPlanEvalIteration,
 	getPlanEvalScoreHistory,
@@ -43,9 +44,6 @@ export function parseScores(output: string): ReviewScores | null {
 	}
 	return null;
 }
-
-const DEFAULT_REVIEW_SCORE_THRESHOLD = 12;
-const DEFAULT_MAX_REVIEW_ITERATIONS = 3;
 
 const DEFAULT_PLAN_EVAL_SCORE_THRESHOLD = 10;
 const DEFAULT_MAX_PLAN_EVAL_ITERATIONS = 2;
@@ -362,8 +360,9 @@ export default async function subagentStop(ev: HookEvent): Promise<void> {
 		const scores = parseScores(output);
 		if (passed && scores) {
 			const aggregate = scores.correctness + scores.design + scores.security;
-			const threshold = DEFAULT_REVIEW_SCORE_THRESHOLD;
-			const maxIter = DEFAULT_MAX_REVIEW_ITERATIONS;
+			const config = loadConfig();
+			const threshold = config.review.score_threshold;
+			const maxIter = config.review.max_iterations;
 
 			try {
 				recordReviewIteration(aggregate);

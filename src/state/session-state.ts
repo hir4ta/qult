@@ -1,12 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { extname, join } from "node:path";
+import { loadConfig } from "../config.ts";
 import { loadGates } from "../gates/load.ts";
 import { atomicWriteJson } from "./atomic-write.ts";
 import { getActivePlan } from "./plan-status.ts";
 
 const STATE_DIR = ".qult/.state";
 const FILE = "session-state.json";
-const DEFAULT_REVIEW_FILE_THRESHOLD = 5;
 
 // Process-scoped cache: read once from disk, flush once at end
 let _cache: SessionState | null = null;
@@ -173,7 +173,7 @@ export function recordChangedFile(filePath: string): void {
  *  Files outside gate coverage (e.g. .md) don't count toward threshold. */
 export function isReviewRequired(): boolean {
 	if (getActivePlan() !== null) return true;
-	if (countGatedFiles() >= DEFAULT_REVIEW_FILE_THRESHOLD) return true;
+	if (countGatedFiles() >= loadConfig().review.required_changed_files) return true;
 	return false;
 }
 

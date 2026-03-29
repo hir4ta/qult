@@ -14,6 +14,8 @@ const main = defineCommand({
 		doctor: () => import("./doctor.ts").then((m) => m.doctorCommand),
 		reset: () => import("./reset.ts").then((m) => m.resetCommand),
 		status: () => import("./status.ts").then((m) => m.statusCommand),
+		uninstall: () => import("./uninstall.ts").then((m) => m.uninstallCommand),
+		"self-update": () => import("./self-update.ts").then((m) => m.selfUpdateCommand),
 		hook: defineCommand({
 			meta: { description: "Run a hook handler" },
 			args: {
