@@ -21,13 +21,15 @@ bun run test     # vitest run
 
 ```
 qult/
-├── .claude-plugin/plugin.json   # マニフェスト
-├── hooks/hooks.json             # 5 hooks (PostToolUse, PreToolUse, Stop, SubagentStop, TaskCompleted)
-├── .mcp.json                    # MCP server (get_pending_fixes, get_session_status, get_gate_config)
-├── skills/                      # 6 skills (init, review, detect-gates, plan-generator, doctor, status)
-├── agents/                      # 3 agents (reviewer, plan-generator, plan-evaluator)
-├── dist/hook.mjs                # hook dispatcher バンドル
-└── dist/mcp-server.mjs          # MCP server バンドル
+├── .claude-plugin/marketplace.json  # マーケットプレイス定義
+├── plugin/                          # プラグイン本体
+│   ├── .claude-plugin/plugin.json
+│   ├── hooks/hooks.json             # 5 hooks
+│   ├── .mcp.json                    # MCP server
+│   ├── skills/                      # 6 skills
+│   ├── agents/                      # 3 agents
+│   └── dist/                        # バンドル (hook.mjs, mcp-server.mjs)
+└── src/                             # ソースコード (開発用)
 ```
 
 ## 設計原則
@@ -40,7 +42,7 @@ qult/
 ## ルール
 
 ### ビルド
-- `bun build.ts` → `dist/hook.mjs` + `dist/mcp-server.mjs`
+- `bun build.ts` → `plugin/dist/hook.mjs` + `plugin/dist/mcp-server.mjs`
 - **dependencies ゼロ** — 全て devDependencies + bun build バンドル
 
 ### Hook 設計 (5 hooks)
