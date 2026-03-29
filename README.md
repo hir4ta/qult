@@ -101,10 +101,12 @@ flowchart TB
 
 ## インストール
 
-Claude Code Plugin として導入:
-
 ```
-/plugin install qult
+# 1. マーケットプレイスを追加
+/plugin marketplace add hir4ta/qult
+
+# 2. プラグインをインストール
+/plugin install qult@hir4ta-qult
 ```
 
 プロジェクトごとに初期セットアップ:
@@ -118,19 +120,11 @@ Claude Code Plugin として導入:
 
 ## 更新
 
-```
-/plugin
-```
-
-Plugin 詳細画面から更新。
+`/plugin` > qult 詳細 > 更新。
 
 ## アンインストール
 
-```
-/plugin
-```
-
-Plugin 一覧から qult を削除。プロジェクトの `.qult/` と `.claude/rules/qult*.md` は手動で削除。
+`/plugin` > qult を削除。プロジェクトの `.qult/` と `.claude/rules/qult*.md` は手動で削除。
 
 ## 設定
 
