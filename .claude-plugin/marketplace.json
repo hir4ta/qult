@@ -1,18 +1,17 @@
 {
+	"$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
 	"name": "qult",
+	"description": "Quality evaluator harness for Claude Code",
 	"owner": {
 		"name": "hir4ta"
-	},
-	"metadata": {
-		"description": "Quality evaluator harness for Claude Code",
-		"version": "0.16.0"
 	},
 	"plugins": [
 		{
 			"name": "qult",
 			"source": "./",
 			"description": "Enforces lint, typecheck, test, and review gates via hooks + MCP",
-			"version": "0.16.0"
+			"version": "0.16.0",
+			"category": "development"
 		}
 	]
 }
