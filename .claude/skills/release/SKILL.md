@@ -38,8 +38,8 @@ bun build.ts
 ## Version Update
 
 1. Edit `version` in `package.json`
-2. Edit `version` in `.claude-plugin/plugin.json`
-3. Edit `version` in `.claude-plugin/marketplace.json` (both `metadata.version` and `plugins[0].version`)
+2. Edit `version` in `plugin/.claude-plugin/plugin.json`
+3. Edit `version` in `.claude-plugin/marketplace.json` (`plugins[0].version`)
 4. Update the version badge in `README.md`:
    - Find: `![Version](https://img.shields.io/badge/version-<OLD_VERSION>-7fbbb3?style=flat-square)`
    - Replace with: `![Version](https://img.shields.io/badge/version-<NEW_VERSION>-7fbbb3?style=flat-square)`
@@ -50,11 +50,11 @@ bun build.ts
 bun build.ts
 ```
 
-Verify `dist/hook.mjs` and `dist/mcp-server.mjs` exist.
+Verify `plugin/dist/hook.mjs` and `plugin/dist/mcp-server.mjs` exist.
 
 ## Commit & Tag
 
-1. Stage: `git add package.json .claude-plugin/ README.md dist/` (+ other files if agreed with user)
+1. Stage: `git add package.json plugin/.claude-plugin/ .claude-plugin/ README.md plugin/dist/` (+ other files if agreed with user)
 2. Commit message: `v<VERSION>: <one-line summary of commits>` (in English)
    - Generate summary from `git log <prev-tag>..HEAD --oneline`
    - **NEVER add Co-Authored-By** (public repository)
