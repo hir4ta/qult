@@ -38,19 +38,29 @@ bun build.ts
 ## Version Update
 
 1. Edit `version` in `package.json`
-2. Update the version badge in `README.md`:
+2. Edit `version` in `.claude-plugin/plugin.json`
+3. Edit `version` in `.claude-plugin/marketplace.json` (both `metadata.version` and `plugins[0].version`)
+4. Update the version badge in `README.md`:
    - Find: `![Version](https://img.shields.io/badge/version-<OLD_VERSION>-7fbbb3?style=flat-square)`
    - Replace with: `![Version](https://img.shields.io/badge/version-<NEW_VERSION>-7fbbb3?style=flat-square)`
 
+## Build
+
+```
+bun build.ts
+```
+
+Verify `dist/hook.mjs` and `dist/mcp-server.mjs` exist.
+
 ## Commit & Tag
 
-1. Stage: `git add package.json README.md` (+ other files if agreed with user)
+1. Stage: `git add package.json .claude-plugin/ README.md dist/` (+ other files if agreed with user)
 2. Commit message: `v<VERSION>: <one-line summary of commits>` (in English)
    - Generate summary from `git log <prev-tag>..HEAD --oneline`
    - **NEVER add Co-Authored-By** (public repository)
 3. `git tag v<VERSION>`
 
-## Push & CI
+## Push
 
 **NEVER use `--tags`** (pushes all local tags)
 
@@ -59,25 +69,10 @@ git push origin main
 git push origin v<VERSION>
 ```
 
-### CI Monitoring
-
-Tag push triggers `.github/workflows/release.yml` which:
-- Builds 4 platform binaries (darwin-arm64, darwin-x64, linux-x64, linux-arm64)
-- Creates GitHub Release with auto-generated release notes + all artifacts
-
-Monitor:
-1. `gh run list --limit 1` — check Release workflow started
-2. `gh run watch <run-id>` — watch until completion
-3. If CI fails → fix the issue, delete the tag (`git tag -d v<VERSION> && git push origin :refs/tags/v<VERSION>`), and re-release
-
-## Post-Release
-
-No local steps needed. Users update via `qult self-update` (which runs `init --force` automatically).
-
 ## Verify Release
 
-After post-release install:
 ```
+gh release create v<VERSION> --generate-notes
 gh release view v<VERSION>
 ```
 
@@ -87,5 +82,4 @@ gh release view v<VERSION>
 |------|-------|
 | Version | v<VERSION> |
 | Commit | <hash> |
-| CI | success/failure (duration) |
 | Release URL | https://github.com/hir4ta/qult/releases/tag/v<VERSION> |
