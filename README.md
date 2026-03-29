@@ -101,22 +101,44 @@ flowchart TB
 
 ## インストール
 
-```
-# 1. マーケットプレイスを追加
-/plugin marketplace add hir4ta/qult
+### 1. プラグインの導入 (1回だけ)
 
-# 2. プラグインをインストール
+```
+/plugin marketplace add hir4ta/qult
 /plugin install qult@hir4ta-qult
 ```
 
-プロジェクトごとに初期セットアップ:
+### 2. プロジェクトのセットアップ (プロジェクトごとに1回)
 
 ```
 /qult:init
 ```
 
-`.qult/gates.json` (ゲート設定) + `.claude/rules/qult*.md` (ルール) が生成される。
-手動で再検出する場合は `/qult:detect-gates` を実行。
+init が行うこと:
+- `.qult/` ディレクトリ作成
+- `.qult/gates.json` 生成 — プロジェクトの lint/typecheck/test ツールを自動検出
+- `.claude/rules/qult.md` 配置 — MCP tool の呼び出しルール (DENY 時に `get_pending_fixes` を呼ぶ等)
+- `.claude/rules/qult-quality.md` 配置 — テスト駆動、スコープ管理ルール
+- `.claude/rules/qult-plan.md` 配置 — Plan 構造ルール
+- `.gitignore` に `.qult/` 追加
+
+### 3. 動作確認
+
+```
+/qult:doctor
+```
+
+### init 後に使えるコマンド
+
+| コマンド | 説明 |
+|---------|------|
+| `/qult:status` | 現在の品質ゲート状態を表示 |
+| `/qult:review` | 独立コードレビュー (Opus evaluator) |
+| `/qult:detect-gates` | ゲート設定を再検出 |
+| `/qult:plan-generator` | 機能説明から構造化 Plan を生成 |
+| `/qult:doctor` | セットアップの健全性チェック |
+
+hooks (PostToolUse, PreToolUse, Stop, SubagentStop, TaskCompleted) と MCP server は自動で動作する。
 
 ## 更新
 
