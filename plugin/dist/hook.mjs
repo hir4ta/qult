@@ -1292,7 +1292,15 @@ async function dispatch(event) {
   }
   let input;
   try {
-    input = await Bun.stdin.text();
+    input = await new Promise((resolve3, reject) => {
+      let data = "";
+      process.stdin.setEncoding("utf-8");
+      process.stdin.on("data", (chunk) => {
+        data += chunk;
+      });
+      process.stdin.on("end", () => resolve3(data));
+      process.stdin.on("error", reject);
+    });
   } catch {
     return;
   }

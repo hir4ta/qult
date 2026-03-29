@@ -34,7 +34,15 @@ export async function dispatch(event: string): Promise<void> {
 
 	let input: string;
 	try {
-		input = await Bun.stdin.text();
+		input = await new Promise<string>((resolve, reject) => {
+			let data = "";
+			process.stdin.setEncoding("utf-8");
+			process.stdin.on("data", (chunk) => {
+				data += chunk;
+			});
+			process.stdin.on("end", () => resolve(data));
+			process.stdin.on("error", reject);
+		});
 	} catch {
 		return; // fail-open: stdin read error
 	}
