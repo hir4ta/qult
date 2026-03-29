@@ -96,4 +96,30 @@ describe("smartTruncate", () => {
 		expect(result).toContain("errors found");
 		expect(result).toContain("chars truncated");
 	});
+
+	it("handles 100KB+ input without exceeding maxChars", () => {
+		const size = 100_000;
+		const maxChars = 2000;
+		// Realistic: line-based output with unique markers at head and tail
+		const headLine = "src/app.ts(1,1): error TS2322: Type mismatch\n";
+		const tailLine = "\nFound 347 errors in 42 files.\n";
+		const filler = "x".repeat(size - headLine.length - tailLine.length);
+		const input = headLine + filler + tailLine;
+
+		const result = smartTruncate(input, maxChars);
+
+		// Must not exceed limit (plus marker overhead)
+		expect(result.length).toBeLessThanOrEqual(maxChars + 50);
+		// Head (75%) preserved
+		expect(result).toContain("error TS2322");
+		// Tail (25%) preserved
+		expect(result).toContain("347 errors");
+		// Marker present
+		expect(result).toContain("chars truncated");
+		// Truncated count is reasonable (close to input size minus maxChars)
+		const match = result.match(/\((\d+) chars truncated\)/);
+		expect(match).not.toBeNull();
+		const truncatedChars = Number(match![1]);
+		expect(truncatedChars).toBeGreaterThan(size - maxChars - 100);
+	});
 });

@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { atomicWriteJson } from "../atomic-write.ts";
@@ -43,5 +43,47 @@ describe("atomicWriteJson", () => {
 		atomicWriteJson(path, { v: 1 });
 		atomicWriteJson(path, { v: 2 });
 		expect(JSON.parse(readFileSync(path, "utf-8"))).toEqual({ v: 2 });
+	});
+
+	it("concurrent writes produce valid JSON with no leftover temp files", async () => {
+		const target = join(TMP, "concurrent.json");
+		const N = 10;
+
+		// Write a runner script that imports and calls atomicWriteJson
+		const scriptPath = join(TMP, "writer.ts");
+		const modulePath = join(import.meta.dirname, "..", "atomic-write.ts");
+		writeFileSync(
+			scriptPath,
+			`import { atomicWriteJson } from "${modulePath}";\n` +
+				`atomicWriteJson("${target}", { pid: process.pid, i: +process.argv[2] });\n`,
+		);
+
+		// Spawn N processes in parallel
+		const { spawn } = require("node:child_process");
+		const exits = await Promise.all(
+			Array.from(
+				{ length: N },
+				(_, i) =>
+					new Promise<number>((resolve) => {
+						const child = spawn("bun", ["run", scriptPath, String(i)], {
+							stdio: "ignore",
+						});
+						child.on("close", (code: number) => resolve(code ?? 1));
+					}),
+			),
+		);
+
+		// All processes should succeed
+		expect(exits.every((c) => c === 0)).toBe(true);
+
+		// File must be valid JSON (no corruption from partial writes)
+		const content = readFileSync(target, "utf-8");
+		const parsed = JSON.parse(content);
+		expect(parsed).toHaveProperty("pid");
+		expect(parsed).toHaveProperty("i");
+
+		// No leftover .tmp files
+		const files = readdirSync(TMP);
+		expect(files.filter((f) => f.endsWith(".tmp"))).toHaveLength(0);
 	});
 });

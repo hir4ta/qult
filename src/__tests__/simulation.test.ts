@@ -203,7 +203,7 @@ describe("Scenario 4: Git commit resets state", () => {
 // Full flow: implement → gate → deny → fix
 // ============================================================
 
-describe("Scenario 9: Full flow — implement → gate → deny → fix", () => {
+describe("Scenario 5: Full flow — implement → gate → deny → fix", () => {
 	it("end-to-end with wall integration", async () => {
 		setupFailingLintGate();
 		const postTool = (await import("../hooks/post-tool.ts")).default;
@@ -255,7 +255,7 @@ describe("Scenario 9: Full flow — implement → gate → deny → fix", () => 
 // Stop hook
 // ============================================================
 
-describe("Scenario 10: Stop hook blocks when pending fixes exist", () => {
+describe("Scenario 6: Stop hook blocks when pending fixes exist", () => {
 	it("prevents Claude from stopping with unfixed errors", async () => {
 		setupFailingLintGate();
 		const postTool = (await import("../hooks/post-tool.ts")).default;
@@ -282,7 +282,7 @@ describe("Scenario 10: Stop hook blocks when pending fixes exist", () => {
 	});
 });
 
-describe("Scenario 11: Stop hook allows when clean", () => {
+describe("Scenario 7: Stop hook allows when clean", () => {
 	it("Claude can stop normally when no pending fixes and review completed", async () => {
 		const { recordReview } = await import("../state/session-state.ts");
 		recordReview();
@@ -293,7 +293,7 @@ describe("Scenario 11: Stop hook allows when clean", () => {
 	});
 });
 
-describe("Scenario 13: Stop infinite loop prevention", () => {
+describe("Scenario 8: Stop infinite loop prevention", () => {
 	it("stop_hook_active prevents re-blocking", async () => {
 		const { writePendingFixes: wpf } = await import("../state/pending-fixes.ts");
 		wpf([{ file: "src/foo.ts", errors: ["err"], gate: "lint" }]);
@@ -318,7 +318,7 @@ describe("Scenario 13: Stop infinite loop prevention", () => {
 // Session start + init
 // ============================================================
 
-describe("Scenario 15: lazyInit creates state dir and clears pending-fixes", () => {
+describe("Scenario 9: lazyInit creates state dir and clears pending-fixes", () => {
 	it("lazyInit initializes .qult/.state/ and produces no stdout", async () => {
 		writeFileSync(join(QULT_DIR, "gates.json"), "{}");
 
@@ -332,7 +332,7 @@ describe("Scenario 15: lazyInit creates state dir and clears pending-fixes", () 
 	});
 });
 
-describe("Scenario 15b: Edit .qult/ files does not trigger gates", () => {
+describe("Scenario 10: Edit .qult/ files does not trigger gates", () => {
 	it("skips gate execution when editing .qult/gates.json", async () => {
 		setupFailingLintGate();
 
@@ -351,7 +351,7 @@ describe("Scenario 15b: Edit .qult/ files does not trigger gates", () => {
 // Plan tracking
 // ============================================================
 
-describe("Scenario 16: Plan status tracking — Stop blocks on incomplete plan", () => {
+describe("Scenario 11: Plan status tracking — Stop blocks on incomplete plan", () => {
 	it("blocks when plan has pending tasks, allows when all done", async () => {
 		const stop = (await import("../hooks/stop.ts")).default;
 
@@ -403,7 +403,7 @@ describe("Scenario 16: Plan status tracking — Stop blocks on incomplete plan",
 // run_once_per_batch
 // ============================================================
 
-describe("Scenario 24: run_once_per_batch skips typecheck on 2nd edit", () => {
+describe("Scenario 12: run_once_per_batch skips typecheck on 2nd edit", () => {
 	it("typecheck runs once, clears on commit", async () => {
 		const gates = {
 			on_write: {
@@ -457,7 +457,7 @@ describe("Scenario 24: run_once_per_batch skips typecheck on 2nd edit", () => {
 // SubagentStop
 // ============================================================
 
-describe("Scenario 25: SubagentStop blocks incomplete reviewer output", () => {
+describe("Scenario 13: SubagentStop blocks incomplete reviewer output", () => {
 	it("blocks reviewer without findings, allows with findings", async () => {
 		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
 
@@ -496,7 +496,7 @@ describe("Scenario 25: SubagentStop blocks incomplete reviewer output", () => {
 // Commit gate: test + review required
 // ============================================================
 
-describe("Scenario 26: git commit DENIED without test pass", () => {
+describe("Scenario 14: git commit DENIED without test pass", () => {
 	it("blocks commit without test pass, allows after test + review", async () => {
 		const gates: GatesConfig = {
 			on_write: { lint: { command: "echo 'OK' && exit 0", timeout: 3000 } },
@@ -555,7 +555,7 @@ describe("Scenario 26: git commit DENIED without test pass", () => {
 	});
 });
 
-describe("Scenario 27: Stop blocks without review when plan exists", () => {
+describe("Scenario 15: Stop blocks without review when plan exists", () => {
 	it("review required when plan is active", async () => {
 		const planDir = join(TEST_DIR, ".claude", "plans");
 		mkdirSync(planDir, { recursive: true });
@@ -581,7 +581,7 @@ describe("Scenario 27: Stop blocks without review when plan exists", () => {
 // Review small change skip
 // ============================================================
 
-describe("Scenario 31: Small change skips review requirement", () => {
+describe("Scenario 16: Small change skips review requirement", () => {
 	it("stop allows finish without review for small changes", async () => {
 		const stop = (await import("../hooks/stop.ts")).default;
 		await stop({ hook_type: "Stop" });
@@ -618,7 +618,7 @@ describe("Scenario 31: Small change skips review requirement", () => {
 // biome fix clears pending-fixes
 // ============================================================
 
-describe("Scenario 35: biome check --write clears stale pending-fixes", () => {
+describe("Scenario 17: biome check --write clears stale pending-fixes", () => {
 	it("revalidation clears fixes when gate now passes", async () => {
 		// First: create pending fixes with a failing gate
 		setupFailingLintGate();
@@ -757,7 +757,7 @@ describe("Scenario: Reviewer output with plan criteria findings passes SubagentS
 // Doctor
 // ============================================================
 
-// Scenario 23 removed: init/doctor are now skills, not CLI commands
+// init/doctor are now skills, not CLI commands — no simulation scenario needed
 
 // ============================================================
 // on_review gate in gates.json
