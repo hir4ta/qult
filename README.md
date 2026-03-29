@@ -75,6 +75,7 @@ flowchart TB
 | テスト未実行で git commit | **DENY** — テスト pass を要求 |
 | レビュー未実行/FAIL で完了宣言 | **block** — /qult:review を要求 |
 | レビュー PASS だがスコア低い | **block** — 傾向分析付きで再レビュー (最大3回) |
+| Plan 確定時に漏れがある | **DENY** — セッション全体の漏れチェックを強制 (1回) |
 | Plan の途中で完了宣言 | **block** — 全タスク完了を要求 |
 | Plan タスク完了時 | **verify** — Verify フィールドのテストを即時実行 |
 
@@ -85,7 +86,7 @@ flowchart TB
 | 分類 | Hook | 役割 |
 |------|------|------|
 | **壁** (enforcement) | PostToolUse | Edit/Write 後に lint/type gate 実行、state に書き込み |
-| **壁** (enforcement) | PreToolUse | pending-fixes 未修正なら DENY、commit 前にテスト/レビュー要求 |
+| **壁** (enforcement) | PreToolUse | pending-fixes 未修正なら DENY、commit 前にテスト/レビュー要求、ExitPlanMode 時に漏れチェック強制 |
 | **完了ゲート** (enforcement) | Stop | 未修正エラー・未完了タスク・レビュー未実施なら block |
 | **サブエージェント** (enforcement) | SubagentStop | レビュー出力検証 + 傾向分析付きスコア閾値強制 (12/15) |
 | **タスク検証** (advisory) | TaskCompleted | Plan タスク完了時に Verify テストを即時実行 |
