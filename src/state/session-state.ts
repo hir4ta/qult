@@ -31,6 +31,7 @@ export interface SessionState {
 	review_score_history: number[];
 	plan_eval_iteration: number;
 	plan_eval_score_history: number[];
+	plan_selfcheck_blocked_at: string | null;
 }
 
 function filePath(): string {
@@ -50,6 +51,7 @@ function defaultState(): SessionState {
 		review_score_history: [],
 		plan_eval_iteration: 0,
 		plan_eval_score_history: [],
+		plan_selfcheck_blocked_at: null,
 	};
 }
 
@@ -242,6 +244,7 @@ export function clearOnCommit(): void {
 	state.review_score_history = [];
 	state.plan_eval_iteration = 0;
 	state.plan_eval_score_history = [];
+	state.plan_selfcheck_blocked_at = null;
 	writeState(state);
 }
 
@@ -298,5 +301,19 @@ export function resetPlanEvalIteration(): void {
 	const state = readSessionState();
 	state.plan_eval_iteration = 0;
 	state.plan_eval_score_history = [];
+	writeState(state);
+}
+
+// --- Plan selfcheck gate ---
+
+/** Check if plan selfcheck has already been blocked (1-time gate). */
+export function wasPlanSelfcheckBlocked(): boolean {
+	return readSessionState().plan_selfcheck_blocked_at != null;
+}
+
+/** Record that plan selfcheck deny was issued. Next ExitPlanMode will pass. */
+export function recordPlanSelfcheckBlocked(): void {
+	const state = readSessionState();
+	state.plan_selfcheck_blocked_at = new Date().toISOString();
 	writeState(state);
 }

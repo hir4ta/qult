@@ -51,6 +51,7 @@ qult/
 - PreToolUse: pending-fixes チェック → exit 2 (DENY)
 - Stop/SubagentStop: 完了条件チェック → exit 2 (block)
 - TaskCompleted: Verify テスト実行 → state 書き込み
+- PreToolUse (ExitPlanMode): 1回目を DENY してセッション全体の漏れチェックを強制
 - 全 state file 書き込みは atomic write (write-to-temp + rename)
 - lazyInit: dispatcher 冒頭で .qult/.state/ 初期化 (SessionStart hook の代替)
 

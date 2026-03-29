@@ -201,3 +201,29 @@ describe("preTool: Bash git commit checks", () => {
 		expect(exitCode).toBeNull();
 	});
 });
+
+describe("preTool: ExitPlanMode selfcheck gate", () => {
+	it("DENY first ExitPlanMode to force selfcheck", async () => {
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		try {
+			await preTool({ tool_name: "ExitPlanMode" });
+		} catch {
+			/* exit(2) */
+		}
+
+		expect(exitCode).toBe(2);
+		const errOutput = stderrCapture.join("");
+		expect(errOutput).toContain("omissions");
+		expect(errOutput).toContain("ExitPlanMode again");
+	});
+
+	it("allows second ExitPlanMode after selfcheck blocked", async () => {
+		const { recordPlanSelfcheckBlocked } = await import("../state/session-state.ts");
+		recordPlanSelfcheckBlocked();
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({ tool_name: "ExitPlanMode" });
+
+		expect(exitCode).toBeNull();
+	});
+});

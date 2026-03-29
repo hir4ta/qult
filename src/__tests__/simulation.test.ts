@@ -1011,3 +1011,30 @@ describe("Scenario: TaskCompleted verifies plan task", () => {
 		expect(stdoutCapture.join("")).toBe("");
 	});
 });
+
+// ============================================================
+// ExitPlanMode selfcheck gate
+// ============================================================
+
+describe("Scenario: ExitPlanMode selfcheck — blocks once, passes on retry", () => {
+	it("first ExitPlanMode is denied, second passes", async () => {
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+
+		// 1st attempt: denied
+		try {
+			await preTool({ tool_name: "ExitPlanMode" });
+		} catch {
+			/* exit(2) */
+		}
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("omissions");
+
+		// Reset exit tracking
+		exitCode = null;
+		stderrCapture = [];
+
+		// 2nd attempt: passes (selfcheck already blocked)
+		await preTool({ tool_name: "ExitPlanMode" });
+		expect(exitCode).toBeNull();
+	});
+});

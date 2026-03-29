@@ -1,21 +1,42 @@
 import { resolve } from "node:path";
 import { loadGates } from "../gates/load.ts";
 import { readPendingFixes } from "../state/pending-fixes.ts";
-import { isReviewRequired, readLastReview, readLastTestPass } from "../state/session-state.ts";
+import {
+	isReviewRequired,
+	readLastReview,
+	readLastTestPass,
+	recordPlanSelfcheckBlocked,
+	wasPlanSelfcheckBlocked,
+} from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
 import { deny } from "./respond.ts";
 
 const GIT_COMMIT_RE = /\bgit\s+commit\b/;
 
-/** PreToolUse: DENY pending-fixes edits, commit without tests/review */
+/** PreToolUse: DENY pending-fixes edits, commit without tests/review, plan selfcheck */
 export default async function preTool(ev: HookEvent): Promise<void> {
 	const tool = ev.tool_name;
 
-	if (tool === "Edit" || tool === "Write") {
+	if (tool === "ExitPlanMode") {
+		checkExitPlanMode();
+	} else if (tool === "Edit" || tool === "Write") {
 		checkEditWrite(ev);
 	} else if (tool === "Bash") {
 		checkBash(ev);
 	}
+}
+
+/** 1-time gate: block ExitPlanMode once to force a selfcheck.
+ *  Claude reviews the session for omissions, then calls ExitPlanMode again. */
+function checkExitPlanMode(): void {
+	if (wasPlanSelfcheckBlocked()) return; // already blocked once — pass through
+	recordPlanSelfcheckBlocked();
+	deny(
+		"Before finalizing the plan, review the entire session from start to now for omissions. " +
+			"Check: missing files, untested edge cases, migration concerns, documentation gaps, " +
+			"dependency changes, and anything discussed but not included in the plan. " +
+			"After your review, call ExitPlanMode again.",
+	);
 }
 
 function checkEditWrite(ev: HookEvent): void {
