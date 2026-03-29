@@ -57,8 +57,9 @@ describe("runGate", () => {
 
 	it("truncates long output using smart head+tail", () => {
 		// Generate output longer than default max (2000 chars)
+		// Use python for portability (brace expansion is bash-only, CI uses sh)
 		const result = runGate("long-gate", {
-			command: `printf '%0.s-' {1..5000}`,
+			command: `python3 -c "print('-' * 5000)"`,
 			timeout: 3000,
 		});
 		expect(result.passed).toBe(true);
