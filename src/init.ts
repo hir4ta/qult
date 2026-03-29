@@ -1,17 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { defineCommand } from "citty";
-
-function loadTemplate(name: string): string {
-	const candidates = [
-		join(import.meta.dirname, "templates", name),
-		join(import.meta.dirname, "..", "src", "templates", name),
-	];
-	for (const path of candidates) {
-		if (existsSync(path)) return readFileSync(path, "utf-8");
-	}
-	throw new Error(`Template not found: ${name}`);
-}
+import { getTemplate } from "./templates/index.ts";
 
 export const initCommand = defineCommand({
 	meta: {
@@ -124,43 +114,39 @@ export async function runInit(force: boolean): Promise<void> {
 	console.log("Writing skill: /qult:review...");
 	writeFile(
 		join(claudeDir, "skills", "qult-review", "SKILL.md"),
-		loadTemplate("skill-review.md"),
+		getTemplate("skill-review.md"),
 		force,
 	);
 	console.log("Writing agent: qult-reviewer...");
-	writeFile(
-		join(claudeDir, "agents", "qult-reviewer.md"),
-		loadTemplate("agent-reviewer.md"),
-		force,
-	);
+	writeFile(join(claudeDir, "agents", "qult-reviewer.md"), getTemplate("agent-reviewer.md"), force);
 	console.log("Writing skill: /qult:detect-gates...");
 	writeFile(
 		join(claudeDir, "skills", "qult-detect-gates", "SKILL.md"),
-		loadTemplate("skill-detect-gates.md"),
+		getTemplate("skill-detect-gates.md"),
 		force,
 	);
 	console.log("Writing agent: qult-plan-generator...");
 	writeFile(
 		join(claudeDir, "agents", "qult-plan-generator.md"),
-		loadTemplate("agent-plan-generator.md"),
+		getTemplate("agent-plan-generator.md"),
 		force,
 	);
 	console.log("Writing skill: /qult:plan-generator...");
 	writeFile(
 		join(claudeDir, "skills", "qult-plan-generator", "SKILL.md"),
-		loadTemplate("skill-plan-generator.md"),
+		getTemplate("skill-plan-generator.md"),
 		force,
 	);
 	console.log("Writing agent: qult-plan-evaluator...");
 	writeFile(
 		join(claudeDir, "agents", "qult-plan-evaluator.md"),
-		loadTemplate("agent-plan-evaluator.md"),
+		getTemplate("agent-plan-evaluator.md"),
 		force,
 	);
 	console.log("Writing rules: qult-quality...");
-	writeFile(join(claudeDir, "rules", "qult-quality.md"), loadTemplate("rules-quality.md"), force);
+	writeFile(join(claudeDir, "rules", "qult-quality.md"), getTemplate("rules-quality.md"), force);
 	console.log("Writing rules: qult-plan...");
-	writeFile(join(claudeDir, "rules", "qult-plan.md"), loadTemplate("rules-plan.md"), force);
+	writeFile(join(claudeDir, "rules", "qult-plan.md"), getTemplate("rules-plan.md"), force);
 
 	// 3. Create .qult/ directories and gates.json
 	const qultDir = join(process.cwd(), ".qult");
