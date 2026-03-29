@@ -346,7 +346,10 @@ export default async function subagentStop(ev: HookEvent): Promise<void> {
 	// fail-open: no agent_type or no output → allow
 	if (!agentType || !output) return;
 
-	if (agentType === "qult-reviewer") {
+	// Normalize: plugin agents use "qult:reviewer", standalone use "qult-reviewer"
+	const normalized = agentType.replace(/:/g, "-");
+
+	if (normalized === "qult-reviewer") {
 		validateReviewer(output);
 
 		const passed = REVIEW_PASS_RE.test(output);
@@ -379,9 +382,9 @@ export default async function subagentStop(ev: HookEvent): Promise<void> {
 		}
 		resetReviewIteration();
 		recordReview();
-	} else if (agentType === "qult-plan-evaluator") {
+	} else if (normalized === "qult-plan-evaluator") {
 		validatePlanEvaluator(output);
-	} else if (agentType === "Plan") {
+	} else if (normalized === "Plan") {
 		validatePlan();
 	}
 	// Unknown agent_type → allow (fail-open)

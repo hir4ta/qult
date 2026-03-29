@@ -358,6 +358,20 @@ describe("subagentStop: integration", () => {
 		expect(state.review_completed_at).toBeTruthy();
 	});
 
+	it("qult:reviewer (colon format from plugin) works identically", async () => {
+		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		await subagentStop({
+			agent_type: "qult:reviewer",
+			last_assistant_message:
+				"Review: PASS\nNo issues found\nScore: Correctness=5 Design=4 Security=4",
+		});
+		expect(exitCode).toBeNull();
+
+		const { readSessionState } = await import("../state/session-state.ts");
+		const state = readSessionState();
+		expect(state.review_completed_at).toBeTruthy();
+	});
+
 	it("qult-reviewer with PASS + low score (<12): blocks for iteration", async () => {
 		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
 		await expect(

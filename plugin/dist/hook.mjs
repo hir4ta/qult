@@ -1033,7 +1033,8 @@ async function subagentStop(ev) {
   const output = ev.last_assistant_message;
   if (!agentType || !output)
     return;
-  if (agentType === "qult-reviewer") {
+  const normalized = agentType.replace(/:/g, "-");
+  if (normalized === "qult-reviewer") {
     validateReviewer(output);
     const passed = REVIEW_PASS_RE.test(output);
     const failed = REVIEW_FAIL_RE.test(output);
@@ -1057,9 +1058,9 @@ async function subagentStop(ev) {
     }
     resetReviewIteration();
     recordReview();
-  } else if (agentType === "qult-plan-evaluator") {
+  } else if (normalized === "qult-plan-evaluator") {
     validatePlanEvaluator(output);
-  } else if (agentType === "Plan") {
+  } else if (normalized === "Plan") {
     validatePlan();
   }
 }
