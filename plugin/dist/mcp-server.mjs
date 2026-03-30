@@ -19912,6 +19912,17 @@ function findLatestStateFile(cwd, prefix) {
   try {
     if (!existsSync(dir))
       return nonScoped;
+    try {
+      const markerPath = join(dir, "latest-session.json");
+      if (existsSync(markerPath)) {
+        const marker = JSON.parse(readFileSync(markerPath, "utf-8"));
+        if (marker?.session_id) {
+          const scoped = join(dir, `${prefix}-${marker.session_id}.json`);
+          if (existsSync(scoped))
+            return scoped;
+        }
+      }
+    } catch {}
     const files = readdirSync(dir).filter((f) => f.startsWith(prefix) && f.endsWith(".json")).map((f) => ({ name: f, mtime: statSync(join(dir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
     if (files.length === 0)
       return nonScoped;

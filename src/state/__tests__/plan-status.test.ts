@@ -52,6 +52,41 @@ Adding auth feature
 		expect(tasks[0]).toEqual({ name: "Add helper", status: "pending", taskNumber: 1 });
 	});
 
+	it("parses task with dash separator", () => {
+		const plan = `## Tasks
+### Task 1 - Add feature [pending]
+- **File**: src/feature.ts`;
+
+		const tasks = parsePlanTasks(plan);
+		expect(tasks).toHaveLength(1);
+		expect(tasks[0]).toEqual({ name: "Add feature", status: "pending", taskNumber: 1 });
+	});
+
+	it("parses task name containing brackets", () => {
+		const plan = `## Tasks
+### Task 1: Add [optional] caching [done]
+- **File**: src/cache.ts`;
+
+		const tasks = parsePlanTasks(plan);
+		expect(tasks).toHaveLength(1);
+		expect(tasks[0]!.name).toBe("Add [optional] caching");
+		expect(tasks[0]!.status).toBe("done");
+	});
+
+	it("parses uppercase status markers", () => {
+		const plan = `## Tasks
+### Task 1: Build widget [DONE]
+- **File**: src/widget.ts
+
+### Task 2: Test widget [PENDING]
+- **File**: src/widget.test.ts`;
+
+		const tasks = parsePlanTasks(plan);
+		expect(tasks).toHaveLength(2);
+		expect(tasks[0]!.status).toBe("done");
+		expect(tasks[1]!.status).toBe("pending");
+	});
+
 	it("returns empty for plan without tasks", () => {
 		const plan = `## Context
 Just a note`;

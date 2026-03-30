@@ -3,7 +3,7 @@ import {
 	buildPlanEvalBlockMessage,
 	buildReviewBlockMessage,
 	type ReviewScores,
-} from "../subagent-stop.ts";
+} from "../subagent-stop/index.ts";
 
 describe("buildReviewBlockMessage", () => {
 	const base: ReviewScores = { correctness: 3, design: 2, security: 4 };

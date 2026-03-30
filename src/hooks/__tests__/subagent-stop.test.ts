@@ -33,7 +33,7 @@ afterEach(() => {
 
 describe("subagentStop", () => {
 	it("allows normal subagent completion", async () => {
-		const handler = (await import("../subagent-stop.ts")).default;
+		const handler = (await import("../subagent-stop/index.ts")).default;
 		await handler({
 			hook_type: "SubagentStop",
 			stop_hook_active: false,
@@ -42,7 +42,7 @@ describe("subagentStop", () => {
 	});
 
 	it("does not block when stop_hook_active is true", async () => {
-		const handler = (await import("../subagent-stop.ts")).default;
+		const handler = (await import("../subagent-stop/index.ts")).default;
 		await handler({
 			hook_type: "SubagentStop",
 			stop_hook_active: true,
@@ -51,7 +51,7 @@ describe("subagentStop", () => {
 	});
 
 	it("allows unknown agent_type (fail-open)", async () => {
-		const handler = (await import("../subagent-stop.ts")).default;
+		const handler = (await import("../subagent-stop/index.ts")).default;
 		await handler({
 			hook_type: "SubagentStop",
 			agent_type: "Explore",
@@ -61,7 +61,7 @@ describe("subagentStop", () => {
 	});
 
 	it("allows when last_assistant_message is missing (fail-open)", async () => {
-		const handler = (await import("../subagent-stop.ts")).default;
+		const handler = (await import("../subagent-stop/index.ts")).default;
 		await handler({
 			hook_type: "SubagentStop",
 			agent_type: "qult-reviewer",
@@ -70,7 +70,7 @@ describe("subagentStop", () => {
 	});
 
 	it("blocks qult-reviewer without findings", async () => {
-		const handler = (await import("../subagent-stop.ts")).default;
+		const handler = (await import("../subagent-stop/index.ts")).default;
 		try {
 			await handler({
 				hook_type: "SubagentStop",
@@ -84,7 +84,7 @@ describe("subagentStop", () => {
 	});
 
 	it("allows qult-reviewer with severity findings", async () => {
-		const handler = (await import("../subagent-stop.ts")).default;
+		const handler = (await import("../subagent-stop/index.ts")).default;
 		await handler({
 			hook_type: "SubagentStop",
 			agent_type: "qult-reviewer",
@@ -95,7 +95,7 @@ describe("subagentStop", () => {
 	});
 
 	it("allows qult-reviewer with 'No issues found'", async () => {
-		const handler = (await import("../subagent-stop.ts")).default;
+		const handler = (await import("../subagent-stop/index.ts")).default;
 		await handler({
 			hook_type: "SubagentStop",
 			agent_type: "qult-reviewer",
@@ -105,7 +105,7 @@ describe("subagentStop", () => {
 	});
 
 	it("allows qult-reviewer with PASS verdict + Score line", async () => {
-		const handler = (await import("../subagent-stop.ts")).default;
+		const handler = (await import("../subagent-stop/index.ts")).default;
 		await handler({
 			hook_type: "SubagentStop",
 			agent_type: "qult-reviewer",
@@ -116,7 +116,7 @@ describe("subagentStop", () => {
 	});
 
 	it("blocks qult-reviewer with FAIL verdict (requires fix + re-review)", async () => {
-		const handler = (await import("../subagent-stop.ts")).default;
+		const handler = (await import("../subagent-stop/index.ts")).default;
 		try {
 			await handler({
 				hook_type: "SubagentStop",
@@ -133,7 +133,7 @@ describe("subagentStop", () => {
 	});
 
 	it("blocks qult-reviewer with PASS verdict but no Score or findings", async () => {
-		const handler = (await import("../subagent-stop.ts")).default;
+		const handler = (await import("../subagent-stop/index.ts")).default;
 		try {
 			await handler({
 				hook_type: "SubagentStop",
@@ -151,7 +151,7 @@ describe("subagentStop", () => {
 		mkdirSync(planDir, { recursive: true });
 		writeFileSync(join(planDir, "bad-plan.md"), "## Context\n- Do stuff\n- Do more stuff");
 
-		const handler = (await import("../subagent-stop.ts")).default;
+		const handler = (await import("../subagent-stop/index.ts")).default;
 		try {
 			await handler({
 				hook_type: "SubagentStop",
@@ -185,7 +185,7 @@ describe("subagentStop", () => {
 			].join("\n"),
 		);
 
-		const handler = (await import("../subagent-stop.ts")).default;
+		const handler = (await import("../subagent-stop/index.ts")).default;
 		await handler({
 			hook_type: "SubagentStop",
 			agent_type: "Plan",
@@ -195,7 +195,7 @@ describe("subagentStop", () => {
 	});
 
 	it("allows Plan agent when no plan file exists (fail-open)", async () => {
-		const handler = (await import("../subagent-stop.ts")).default;
+		const handler = (await import("../subagent-stop/index.ts")).default;
 		await handler({
 			hook_type: "SubagentStop",
 			agent_type: "Plan",
@@ -209,7 +209,7 @@ describe("subagentStop", () => {
 
 describe("validatePlanStructure", () => {
 	it("returns no errors for a valid plan", async () => {
-		const { validatePlanStructure } = await import("../subagent-stop.ts");
+		const { validatePlanStructure } = await import("../subagent-stop/index.ts");
 		const plan = [
 			"## Context",
 			"Adding auth middleware.",
@@ -228,7 +228,7 @@ describe("validatePlanStructure", () => {
 	});
 
 	it("reports missing ## Context", async () => {
-		const { validatePlanStructure } = await import("../subagent-stop.ts");
+		const { validatePlanStructure } = await import("../subagent-stop/index.ts");
 		const plan = [
 			"## Tasks",
 			"### Task 1: Add middleware [pending]",
@@ -246,21 +246,21 @@ describe("validatePlanStructure", () => {
 	});
 
 	it("reports missing ## Tasks", async () => {
-		const { validatePlanStructure } = await import("../subagent-stop.ts");
+		const { validatePlanStructure } = await import("../subagent-stop/index.ts");
 		const plan = "## Context\nDoing stuff\n\n## Success Criteria\n- [ ] `test` -- pass";
 		const errors = validatePlanStructure(plan);
 		expect(errors.some((e) => e.includes("Tasks"))).toBe(true);
 	});
 
 	it("reports zero task entries", async () => {
-		const { validatePlanStructure } = await import("../subagent-stop.ts");
+		const { validatePlanStructure } = await import("../subagent-stop/index.ts");
 		const plan = "## Context\nDoing stuff\n\n## Tasks\n\n## Success Criteria\n- [ ] `test` -- pass";
 		const errors = validatePlanStructure(plan);
 		expect(errors.some((e) => /task/i.test(e))).toBe(true);
 	});
 
 	it("reports more than 15 tasks", async () => {
-		const { validatePlanStructure } = await import("../subagent-stop.ts");
+		const { validatePlanStructure } = await import("../subagent-stop/index.ts");
 		const tasks = Array.from(
 			{ length: 16 },
 			(_, i) =>
@@ -272,7 +272,7 @@ describe("validatePlanStructure", () => {
 	});
 
 	it("reports missing task fields", async () => {
-		const { validatePlanStructure } = await import("../subagent-stop.ts");
+		const { validatePlanStructure } = await import("../subagent-stop/index.ts");
 		const plan = [
 			"## Context",
 			"Adding auth.",
@@ -292,7 +292,7 @@ describe("validatePlanStructure", () => {
 	});
 
 	it("reports missing ## Success Criteria", async () => {
-		const { validatePlanStructure } = await import("../subagent-stop.ts");
+		const { validatePlanStructure } = await import("../subagent-stop/index.ts");
 		const plan = [
 			"## Context",
 			"Adding auth.",
@@ -309,7 +309,7 @@ describe("validatePlanStructure", () => {
 	});
 
 	it("reports Success Criteria without backtick command", async () => {
-		const { validatePlanStructure } = await import("../subagent-stop.ts");
+		const { validatePlanStructure } = await import("../subagent-stop/index.ts");
 		const plan = [
 			"## Context",
 			"Adding auth.",
@@ -327,13 +327,40 @@ describe("validatePlanStructure", () => {
 		const errors = validatePlanStructure(plan);
 		expect(errors.some((e) => /command|backtick/i.test(e))).toBe(true);
 	});
+	it("handles Tasks as last section (no ## after it)", async () => {
+		const { validatePlanStructure } = await import("../subagent-stop/index.ts");
+		const plan = [
+			"## Context",
+			"Adding feature.",
+			"",
+			"## Tasks",
+			"### Task 1: Add widget [pending]",
+			"- **File**: src/widget.ts",
+			"- **Change**: Create widget component",
+			"- **Boundary**: Do not touch existing components",
+			"- **Verify**: src/__tests__/widget.test.ts:testWidget",
+		].join("\n");
+		const errors = validatePlanStructure(plan);
+		// Should report missing Success Criteria, but NOT crash on missing next section
+		expect(errors.some((e) => /Success Criteria/i.test(e))).toBe(true);
+		// Should still parse the task fields correctly (no missing field errors)
+		expect(errors.some((e) => /missing required field/i.test(e))).toBe(false);
+	});
+
+	it("handles Tasks section header with no trailing newline", async () => {
+		const { validatePlanStructure } = await import("../subagent-stop/index.ts");
+		const plan =
+			"## Context\nWhy.\n\n## Tasks\n### Task 1: Do thing [pending]\n- **File**: a.ts\n- **Change**: something\n- **Boundary**: nothing\n- **Verify**: a.test.ts:test1\n\n## Success Criteria\n- [ ] `bun test` passes";
+		const errors = validatePlanStructure(plan);
+		expect(errors).toHaveLength(0);
+	});
 });
 
 // --- Level 2: validatePlanHeuristics ---
 
 describe("validatePlanHeuristics", () => {
 	it("returns no warnings for a well-formed plan", async () => {
-		const { validatePlanHeuristics } = await import("../subagent-stop.ts");
+		const { validatePlanHeuristics } = await import("../subagent-stop/index.ts");
 		const plan = [
 			"## Context",
 			"Adding auth.",
@@ -352,7 +379,7 @@ describe("validatePlanHeuristics", () => {
 	});
 
 	it("flags vague Change field (single verb + short object)", async () => {
-		const { validatePlanHeuristics } = await import("../subagent-stop.ts");
+		const { validatePlanHeuristics } = await import("../subagent-stop/index.ts");
 		const plan = [
 			"## Context",
 			"Fixing auth.",
@@ -372,7 +399,7 @@ describe("validatePlanHeuristics", () => {
 	});
 
 	it("allows specific Change field starting with vague verb", async () => {
-		const { validatePlanHeuristics } = await import("../subagent-stop.ts");
+		const { validatePlanHeuristics } = await import("../subagent-stop/index.ts");
 		const plan = [
 			"## Context",
 			"Improving auth.",
@@ -392,7 +419,7 @@ describe("validatePlanHeuristics", () => {
 	});
 
 	it("flags invalid Verify format (no colon separator)", async () => {
-		const { validatePlanHeuristics } = await import("../subagent-stop.ts");
+		const { validatePlanHeuristics } = await import("../subagent-stop/index.ts");
 		const plan = [
 			"## Context",
 			"Adding auth.",
@@ -419,7 +446,7 @@ describe("validatePlanHeuristics", () => {
 		);
 		resetAllCaches();
 
-		const { validatePlanHeuristics } = await import("../subagent-stop.ts");
+		const { validatePlanHeuristics } = await import("../subagent-stop/index.ts");
 		const plan = [
 			"## Context",
 			"Adding new state field.",
@@ -439,7 +466,7 @@ describe("validatePlanHeuristics", () => {
 	});
 
 	it("allows specific Change with many words even starting with vague verb", async () => {
-		const { validatePlanHeuristics } = await import("../subagent-stop.ts");
+		const { validatePlanHeuristics } = await import("../subagent-stop/index.ts");
 		const plan = [
 			"## Context",
 			"Refactoring.",
@@ -459,7 +486,7 @@ describe("validatePlanHeuristics", () => {
 	});
 
 	it("passes when registry file has consumer file in another task", async () => {
-		const { validatePlanHeuristics } = await import("../subagent-stop.ts");
+		const { validatePlanHeuristics } = await import("../subagent-stop/index.ts");
 		const plan = [
 			"## Context",
 			"Adding new state field.",
@@ -489,7 +516,7 @@ describe("validatePlanHeuristics", () => {
 
 describe("plan-evaluator SubagentStop", () => {
 	it("allows qult-plan-evaluator with PASS and high scores", async () => {
-		const handler = (await import("../subagent-stop.ts")).default;
+		const handler = (await import("../subagent-stop/index.ts")).default;
 		await handler({
 			hook_type: "SubagentStop",
 			agent_type: "qult-plan-evaluator",
@@ -500,7 +527,7 @@ describe("plan-evaluator SubagentStop", () => {
 	});
 
 	it("blocks qult-plan-evaluator with REVISE verdict", async () => {
-		const handler = (await import("../subagent-stop.ts")).default;
+		const handler = (await import("../subagent-stop/index.ts")).default;
 		try {
 			await handler({
 				hook_type: "SubagentStop",
@@ -516,7 +543,7 @@ describe("plan-evaluator SubagentStop", () => {
 	});
 
 	it("blocks qult-plan-evaluator with PASS but low aggregate score", async () => {
-		const handler = (await import("../subagent-stop.ts")).default;
+		const handler = (await import("../subagent-stop/index.ts")).default;
 		try {
 			await handler({
 				hook_type: "SubagentStop",
@@ -532,7 +559,7 @@ describe("plan-evaluator SubagentStop", () => {
 	});
 
 	it("blocks qult-plan-evaluator with malformed output", async () => {
-		const handler = (await import("../subagent-stop.ts")).default;
+		const handler = (await import("../subagent-stop/index.ts")).default;
 		try {
 			await handler({
 				hook_type: "SubagentStop",
@@ -546,7 +573,7 @@ describe("plan-evaluator SubagentStop", () => {
 	});
 
 	it("allows qult-plan-evaluator with borderline score (exactly at threshold)", async () => {
-		const handler = (await import("../subagent-stop.ts")).default;
+		const handler = (await import("../subagent-stop/index.ts")).default;
 		await handler({
 			hook_type: "SubagentStop",
 			agent_type: "qult-plan-evaluator",
@@ -557,7 +584,7 @@ describe("plan-evaluator SubagentStop", () => {
 	});
 
 	it("parses plan-evaluator scores with colon format", async () => {
-		const { parseDimensionScores } = await import("../subagent-stop.ts");
+		const { parseDimensionScores } = await import("../subagent-stop/index.ts");
 		const output = "Score: Feasibility: 4, Completeness: 3, Clarity: 5";
 		const scores = parseDimensionScores(output, ["Feasibility", "Completeness", "Clarity"]);
 		expect(scores).toEqual({ Feasibility: 4, Completeness: 3, Clarity: 5 });

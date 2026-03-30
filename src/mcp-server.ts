@@ -43,15 +43,29 @@ function readJson<T>(path: string, fallback: T): T {
 }
 
 /**
- * Find the most recently modified file matching a prefix in the state dir.
- * Hooks write session-scoped files (e.g. pending-fixes-{sessionId}.json).
- * MCP server picks the latest one since it doesn't know the session ID.
+ * Find the state file matching a prefix, preferring the session from latest-session.json.
+ * Falls back to mtime-based selection if latest-session.json is missing or stale.
  */
 function findLatestStateFile(cwd: string, prefix: string): string {
 	const dir = join(cwd, STATE_DIR);
 	const nonScoped = join(dir, `${prefix}.json`);
 	try {
 		if (!existsSync(dir)) return nonScoped;
+
+		// Prefer session from latest-session.json (written by hooks)
+		try {
+			const markerPath = join(dir, "latest-session.json");
+			if (existsSync(markerPath)) {
+				const marker = JSON.parse(readFileSync(markerPath, "utf-8"));
+				if (marker?.session_id) {
+					const scoped = join(dir, `${prefix}-${marker.session_id}.json`);
+					if (existsSync(scoped)) return scoped;
+				}
+			}
+		} catch {
+			// fall through to mtime-based selection
+		}
+
 		const files = readdirSync(dir)
 			.filter((f) => f.startsWith(prefix) && f.endsWith(".json"))
 			.map((f) => ({ name: f, mtime: statSync(join(dir, f)).mtimeMs }))

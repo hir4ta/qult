@@ -14,8 +14,28 @@ var __export = (target, all) => {
 };
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 
+// src/state/atomic-write.ts
+import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+function atomicWriteJson(filePath, data) {
+  const dir = dirname(filePath);
+  if (!existsSync(dir))
+    mkdirSync(dir, { recursive: true });
+  const tmp = `${filePath}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmp, JSON.stringify(data, null, 2));
+    renameSync(tmp, filePath);
+  } catch (err) {
+    try {
+      unlinkSync(tmp);
+    } catch {}
+    throw err;
+  }
+}
+var init_atomic_write = () => {};
+
 // src/config.ts
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync as existsSync2, readFileSync } from "node:fs";
 import { join } from "node:path";
 function loadConfig() {
   if (_cache)
@@ -23,7 +43,7 @@ function loadConfig() {
   const config = structuredClone(DEFAULTS);
   try {
     const configPath = join(process.cwd(), ".qult", "config.json");
-    if (existsSync(configPath)) {
+    if (existsSync2(configPath)) {
       const raw = JSON.parse(readFileSync(configPath, "utf-8"));
       if (raw.review) {
         if (typeof raw.review.score_threshold === "number")
@@ -87,14 +107,14 @@ var init_config = __esm(() => {
 });
 
 // src/gates/load.ts
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "node:fs";
+import { existsSync as existsSync3, readFileSync as readFileSync2 } from "node:fs";
 import { join as join2 } from "node:path";
 function loadGates() {
   if (_cache2 !== undefined)
     return _cache2;
   try {
     const path = join2(process.cwd(), ".qult", "gates.json");
-    if (!existsSync2(path)) {
+    if (!existsSync3(path)) {
       _cache2 = null;
       return null;
     }
@@ -108,26 +128,6 @@ function loadGates() {
 }
 var _cache2;
 var init_load = () => {};
-
-// src/state/atomic-write.ts
-import { existsSync as existsSync3, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
-function atomicWriteJson(filePath, data) {
-  const dir = dirname(filePath);
-  if (!existsSync3(dir))
-    mkdirSync(dir, { recursive: true });
-  const tmp = `${filePath}.${process.pid}.tmp`;
-  try {
-    writeFileSync(tmp, JSON.stringify(data, null, 2));
-    renameSync(tmp, filePath);
-  } catch (err) {
-    try {
-      unlinkSync(tmp);
-    } catch {}
-    throw err;
-  }
-}
-var init_atomic_write = () => {};
 
 // src/state/pending-fixes.ts
 import { existsSync as existsSync4, readFileSync as readFileSync3 } from "node:fs";
@@ -201,7 +201,7 @@ function parsePlanTasks(content) {
     if (taskMatch) {
       const taskNumber = Number(taskMatch[1]);
       const name = taskMatch[2].trim();
-      const status = taskMatch[3] ?? "pending";
+      const status = taskMatch[3]?.toLowerCase() ?? "pending";
       let verify;
       for (let j = i + 1;j < lines.length; j++) {
         const nextTrimmed = lines[j].trim();
@@ -276,7 +276,7 @@ function getActivePlan() {
 }
 var TASK_RE, CHECKBOX_RE, VERIFY_LINE_RE, _planCache = null, _planCachePath = null, _planCacheMtime = null;
 var init_plan_status = __esm(() => {
-  TASK_RE = /^###\s+Task\s+(\d+):\s*(.+?)(?:\s*\[(done|pending|in-progress)\])?\s*$/;
+  TASK_RE = /^###\s+Task\s+(\d+)[\s:-]+(.+?)(?:\s*\[(done|pending|in-progress)\])?\s*$/i;
   CHECKBOX_RE = /^-\s+\[([ xX])\]\s*(.+)$/;
   VERIFY_LINE_RE = /^\s*-\s*\*\*Verify\*\*:\s*(.+)$/;
 });
@@ -855,37 +855,7 @@ var init_stop = __esm(() => {
   init_respond();
 });
 
-// src/hooks/subagent-stop.ts
-var exports_subagent_stop = {};
-__export(exports_subagent_stop, {
-  validatePlanStructure: () => validatePlanStructure,
-  validatePlanHeuristics: () => validatePlanHeuristics,
-  parseScores: () => parseScores,
-  parseDimensionScores: () => parseDimensionScores,
-  default: () => subagentStop,
-  buildReviewBlockMessage: () => buildReviewBlockMessage,
-  buildPlanEvalBlockMessage: () => buildPlanEvalBlockMessage
-});
-import { existsSync as existsSync8, readdirSync as readdirSync3, readFileSync as readFileSync6, statSync as statSync3 } from "node:fs";
-import { join as join7 } from "node:path";
-function parseScores(output) {
-  for (const re of [SCORE_STRICT_RE, SCORE_COLON_RE, SCORE_LOOSE_RE]) {
-    const m = re.exec(output);
-    if (m) {
-      const correctness = Number.parseInt(m[1], 10);
-      const design = Number.parseInt(m[2], 10);
-      const security = Number.parseInt(m[3], 10);
-      if (correctness < 1 || correctness > 5)
-        return null;
-      if (design < 1 || design > 5)
-        return null;
-      if (security < 1 || security > 5)
-        return null;
-      return { correctness, design, security };
-    }
-  }
-  return null;
-}
+// src/hooks/subagent-stop/trend-analysis.ts
 function detectTrend(history) {
   if (history.length < 2)
     return "stagnant";
@@ -906,6 +876,8 @@ function findWeakestDimension(dimensions) {
   }
   return weakest;
 }
+
+// src/hooks/subagent-stop/message-builders.ts
 function buildReviewBlockMessage(scores, history, aggregate, threshold, iterCount, maxIter) {
   const trend = detectTrend(history);
   const weakest = findWeakestDimension({
@@ -950,25 +922,23 @@ function buildPlanEvalBlockMessage(dimensions, history, aggregate, threshold, it
   }
   return `${header} Weakest dimension: ${weakest.name} (${weakest.score}/5). Fix this area first.`;
 }
-function parseDimensionScores(output, dimensions) {
-  const strictPattern = dimensions.map((d) => `${d}=(\\d+)`).join("\\s+");
-  const strictRe = new RegExp(`Score:\\s*${strictPattern}`, "i");
-  const colonParts = dimensions.map((d) => `${d}[=:]\\s*(\\d+)`).join(".*?");
-  const colonRe = new RegExp(colonParts, "i");
-  for (const re of [strictRe, colonRe]) {
-    const m = re.exec(output);
-    if (m) {
-      const result = {};
-      for (let i = 0;i < dimensions.length; i++) {
-        const val = Number.parseInt(m[i + 1], 10);
-        if (val < 1 || val > 5)
-          return null;
-        result[dimensions[i]] = val;
-      }
-      return result;
-    }
-  }
-  return null;
+var init_message_builders = () => {};
+
+// src/hooks/subagent-stop/plan-validators.ts
+function extractTasksContent(content) {
+  const tasksIdx = content.search(/^## Tasks/m);
+  if (tasksIdx < 0)
+    return null;
+  const tasksSection = content.slice(tasksIdx);
+  const firstNewline = tasksSection.indexOf(`
+`);
+  if (firstNewline < 0)
+    return tasksSection;
+  const afterHeader = tasksSection.slice(firstNewline);
+  const nextSectionIdx = afterHeader.search(/^## /m);
+  if (nextSectionIdx < 0)
+    return tasksSection;
+  return tasksSection.slice(0, firstNewline + nextSectionIdx);
 }
 function validatePlanStructure(content) {
   const errors = [];
@@ -985,12 +955,10 @@ function validatePlanStructure(content) {
   } else if (taskCount > 15) {
     errors.push(`Too many tasks (${taskCount}). Maximum is 15. Split into smaller plans.`);
   }
-  const tasksSection = content.slice(content.search(/^## Tasks/m));
-  const firstNewline = tasksSection.indexOf(`
-`);
-  const nextSection = firstNewline >= 0 ? tasksSection.slice(firstNewline).search(/^## /m) : -1;
-  const tasksContent = nextSection >= 0 ? tasksSection.slice(0, firstNewline + nextSection) : tasksSection;
-  const taskHeaders = [...tasksContent.matchAll(/^### Task (\d+):.*$/gm)];
+  const tasksContent = extractTasksContent(content);
+  if (!tasksContent)
+    return errors;
+  const taskHeaders = [...tasksContent.matchAll(TASK_BLOCK_RE)];
   for (let i = 0;i < taskHeaders.length; i++) {
     const start = taskHeaders[i].index;
     const end = i + 1 < taskHeaders.length ? taskHeaders[i + 1].index : tasksContent.length;
@@ -1015,14 +983,10 @@ function validatePlanStructure(content) {
 }
 function validatePlanHeuristics(content) {
   const warnings = [];
-  if (!/^## Tasks/m.test(content))
+  const tasksContent = extractTasksContent(content);
+  if (!tasksContent)
     return warnings;
-  const tasksSection = content.slice(content.search(/^## Tasks/m));
-  const firstNewline = tasksSection.indexOf(`
-`);
-  const nextSection = firstNewline >= 0 ? tasksSection.slice(firstNewline).search(/^## /m) : -1;
-  const tasksContent = nextSection >= 0 ? tasksSection.slice(0, firstNewline + nextSection) : tasksSection;
-  const taskHeaders = [...tasksContent.matchAll(/^### Task (\d+):.*$/gm)];
+  const taskHeaders = [...tasksContent.matchAll(TASK_BLOCK_RE)];
   const taskBlocks = [];
   for (let i = 0;i < taskHeaders.length; i++) {
     const start = taskHeaders[i].index;
@@ -1070,6 +1034,71 @@ function validatePlanHeuristics(content) {
   }
   return warnings;
 }
+var TASK_HEADER_G, TASK_BLOCK_RE, FIELD_RES, VAGUE_VERBS_RE, VERIFY_FORMAT_RE, PLAN_EVAL_DIMENSIONS;
+var init_plan_validators = __esm(() => {
+  init_config();
+  TASK_HEADER_G = /^### Task \d+[\s:-]/gim;
+  TASK_BLOCK_RE = /^### Task (\d+)[\s:-]+.*$/gim;
+  FIELD_RES = {
+    File: /^\s*-\s*\*\*File\*\*/m,
+    Change: /^\s*-\s*\*\*Change\*\*/m,
+    Boundary: /^\s*-\s*\*\*Boundary\*\*/m,
+    Verify: /^\s*-\s*\*\*Verify\*\*/m
+  };
+  VAGUE_VERBS_RE = /^(improve|update|fix|refactor|clean\s*up|enhance|optimize|modify|adjust|change)\b/i;
+  VERIFY_FORMAT_RE = /\S+\.\w+:\S+/;
+  PLAN_EVAL_DIMENSIONS = ["Feasibility", "Completeness", "Clarity"];
+});
+
+// src/hooks/subagent-stop/score-parsers.ts
+function parseScores(output) {
+  for (const re of [SCORE_STRICT_RE, SCORE_COLON_RE, SCORE_LOOSE_RE]) {
+    const m = re.exec(output);
+    if (m) {
+      const correctness = Number.parseInt(m[1], 10);
+      const design = Number.parseInt(m[2], 10);
+      const security = Number.parseInt(m[3], 10);
+      if (correctness < 1 || correctness > 5)
+        return null;
+      if (design < 1 || design > 5)
+        return null;
+      if (security < 1 || security > 5)
+        return null;
+      return { correctness, design, security };
+    }
+  }
+  return null;
+}
+function parseDimensionScores(output, dimensions) {
+  const strictPattern = dimensions.map((d) => `${d}=(\\d+)`).join("\\s+");
+  const strictRe = new RegExp(`Score:\\s*${strictPattern}`, "i");
+  const colonParts = dimensions.map((d) => `${d}[=:]\\s*(\\d+)`).join(".*?");
+  const colonRe = new RegExp(colonParts, "i");
+  for (const re of [strictRe, colonRe]) {
+    const m = re.exec(output);
+    if (m) {
+      const result = {};
+      for (let i = 0;i < dimensions.length; i++) {
+        const val = Number.parseInt(m[i + 1], 10);
+        if (val < 1 || val > 5)
+          return null;
+        result[dimensions[i]] = val;
+      }
+      return result;
+    }
+  }
+  return null;
+}
+var SCORE_STRICT_RE, SCORE_COLON_RE, SCORE_LOOSE_RE;
+var init_score_parsers = __esm(() => {
+  SCORE_STRICT_RE = /Score:\s*Correctness=(\d+)\s+Design=(\d+)\s+Security=(\d+)/i;
+  SCORE_COLON_RE = /Correctness[=:]\s*(\d+).*?Design[=:]\s*(\d+).*?Security[=:]\s*(\d+)/i;
+  SCORE_LOOSE_RE = /Score:.*?[=:]\s*(\d+).*?[=:]\s*(\d+).*?[=:]\s*(\d+)/i;
+});
+
+// src/hooks/subagent-stop/agent-validators.ts
+import { existsSync as existsSync8, readdirSync as readdirSync3, readFileSync as readFileSync6, statSync as statSync3 } from "node:fs";
+import { join as join7 } from "node:path";
 async function subagentStop(ev) {
   if (ev.stop_hook_active)
     return;
@@ -1173,31 +1202,40 @@ function validateReviewer(output) {
     return;
   block("Reviewer output must include: (1) 'Review: PASS' or 'Review: FAIL', (2) 'Score: Correctness=N Design=N Security=N', and (3) findings ([severity] file:line) or 'No issues found'. Rerun the review.");
 }
-var SEVERITY_PATTERN, FINDING_RE, NO_ISSUES_RE, REVIEW_PASS_RE, REVIEW_FAIL_RE, SCORE_STRICT_RE, SCORE_COLON_RE, SCORE_LOOSE_RE, PLAN_PASS_RE, PLAN_REVISE_RE, TASK_HEADER_G, FIELD_RES, VAGUE_VERBS_RE, VERIFY_FORMAT_RE, PLAN_EVAL_DIMENSIONS;
-var init_subagent_stop = __esm(() => {
+var SEVERITY_PATTERN, FINDING_RE, NO_ISSUES_RE, REVIEW_PASS_RE, REVIEW_FAIL_RE, PLAN_PASS_RE, PLAN_REVISE_RE;
+var init_agent_validators = __esm(() => {
   init_config();
   init_session_state();
   init_respond();
+  init_message_builders();
+  init_plan_validators();
+  init_score_parsers();
   SEVERITY_PATTERN = /\[(critical|high|medium|low)\]/;
   FINDING_RE = new RegExp(SEVERITY_PATTERN.source, "i");
   NO_ISSUES_RE = /no issues found/i;
   REVIEW_PASS_RE = /^Review:\s*PASS/im;
   REVIEW_FAIL_RE = /^Review:\s*FAIL/im;
-  SCORE_STRICT_RE = /Score:\s*Correctness=(\d+)\s+Design=(\d+)\s+Security=(\d+)/i;
-  SCORE_COLON_RE = /Correctness[=:]\s*(\d+).*?Design[=:]\s*(\d+).*?Security[=:]\s*(\d+)/i;
-  SCORE_LOOSE_RE = /Score:.*?[=:]\s*(\d+).*?[=:]\s*(\d+).*?[=:]\s*(\d+)/i;
   PLAN_PASS_RE = /^Plan:\s*PASS/im;
   PLAN_REVISE_RE = /^Plan:\s*REVISE/im;
-  TASK_HEADER_G = /^### Task \d+:/gm;
-  FIELD_RES = {
-    File: /^\s*-\s*\*\*File\*\*/m,
-    Change: /^\s*-\s*\*\*Change\*\*/m,
-    Boundary: /^\s*-\s*\*\*Boundary\*\*/m,
-    Verify: /^\s*-\s*\*\*Verify\*\*/m
-  };
-  VAGUE_VERBS_RE = /^(improve|update|fix|refactor|clean\s*up|enhance|optimize|modify|adjust|change)\b/i;
-  VERIFY_FORMAT_RE = /\S+\.\w+:\S+/;
-  PLAN_EVAL_DIMENSIONS = ["Feasibility", "Completeness", "Clarity"];
+});
+
+// src/hooks/subagent-stop/index.ts
+var exports_subagent_stop = {};
+__export(exports_subagent_stop, {
+  validatePlanStructure: () => validatePlanStructure,
+  validatePlanHeuristics: () => validatePlanHeuristics,
+  parseScores: () => parseScores,
+  parseDimensionScores: () => parseDimensionScores,
+  default: () => subagentStop,
+  buildReviewBlockMessage: () => buildReviewBlockMessage,
+  buildPlanEvalBlockMessage: () => buildPlanEvalBlockMessage,
+  PLAN_EVAL_DIMENSIONS: () => PLAN_EVAL_DIMENSIONS
+});
+var init_subagent_stop = __esm(() => {
+  init_agent_validators();
+  init_message_builders();
+  init_plan_validators();
+  init_score_parsers();
 });
 
 // src/hooks/task-completed.ts
@@ -1269,9 +1307,11 @@ var init_task_completed = __esm(() => {
 });
 
 // src/hooks/dispatcher.ts
+init_atomic_write();
 init_flush();
 init_pending_fixes();
 init_session_state();
+import { join as join8 } from "node:path";
 
 // src/hooks/lazy-init.ts
 init_pending_fixes();
@@ -1317,6 +1357,7 @@ var EVENT_MAP = {
   "subagent-stop": () => Promise.resolve().then(() => (init_subagent_stop(), exports_subagent_stop)),
   "task-completed": () => Promise.resolve().then(() => (init_task_completed(), exports_task_completed))
 };
+var _lastWrittenSessionId;
 async function dispatch(event) {
   const loader = EVENT_MAP[event];
   if (!loader) {
@@ -1349,6 +1390,15 @@ async function dispatch(event) {
   if (ev.session_id) {
     setStateSessionScope(ev.session_id);
     setFixesSessionScope(ev.session_id);
+    if (ev.session_id !== _lastWrittenSessionId) {
+      try {
+        atomicWriteJson(join8(process.cwd(), ".qult", ".state", "latest-session.json"), {
+          session_id: ev.session_id,
+          updated_at: new Date().toISOString()
+        });
+        _lastWrittenSessionId = ev.session_id;
+      } catch {}
+    }
   }
   lazyInit();
   const debug = !!process.env.QULT_DEBUG;

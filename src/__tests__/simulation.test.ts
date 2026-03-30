@@ -459,7 +459,7 @@ describe("Scenario 12: run_once_per_batch skips typecheck on 2nd edit", () => {
 
 describe("Scenario 13: SubagentStop blocks incomplete reviewer output", () => {
 	it("blocks reviewer without findings, allows with findings", async () => {
-		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 
 		try {
 			await subagentStop({
@@ -667,7 +667,7 @@ describe("Scenario: Non-gated file extensions are skipped", () => {
 
 describe("Scenario: Review score threshold — PASS with high scores clears gate", () => {
 	it("aggregate >= 12 allows", async () => {
-		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await subagentStop({
 			agent_type: "qult-reviewer",
 			last_assistant_message:
@@ -679,7 +679,7 @@ describe("Scenario: Review score threshold — PASS with high scores clears gate
 
 describe("Scenario: Review score threshold — PASS with low scores blocks", () => {
 	it("aggregate < 12 blocks for iteration", async () => {
-		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		try {
 			await subagentStop({
 				agent_type: "qult-reviewer",
@@ -697,7 +697,7 @@ describe("Scenario: Review score threshold — PASS with low scores blocks", () 
 
 describe("Scenario: Review PASS without scores — fail-open", () => {
 	it("PASS without score lines still clears gate (findings present)", async () => {
-		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await subagentStop({
 			agent_type: "qult-reviewer",
 			last_assistant_message: "Review: PASS\n- [low] minor style issue\nNo issues found",
@@ -712,7 +712,7 @@ describe("Scenario: Review PASS without scores — fail-open", () => {
 
 describe("Scenario: Reviewer output with plan criteria findings passes SubagentStop", () => {
 	it("plan criteria finding is treated as normal finding — PASS with high score clears", async () => {
-		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await subagentStop({
 			agent_type: "qult-reviewer",
 			last_assistant_message: [
@@ -727,7 +727,7 @@ describe("Scenario: Reviewer output with plan criteria findings passes SubagentS
 	});
 
 	it("plan criteria finding with low correctness triggers FAIL verdict", async () => {
-		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		try {
 			await subagentStop({
 				agent_type: "qult-reviewer",
@@ -796,7 +796,7 @@ describe("Scenario: Plan validation full flow", () => {
 			].join("\n"),
 		);
 
-		const handler = (await import("../hooks/subagent-stop.ts")).default;
+		const handler = (await import("../hooks/subagent-stop/index.ts")).default;
 		try {
 			await handler({
 				hook_type: "SubagentStop",
@@ -831,7 +831,7 @@ describe("Scenario: Plan validation full flow", () => {
 			].join("\n"),
 		);
 
-		const handler = (await import("../hooks/subagent-stop.ts")).default;
+		const handler = (await import("../hooks/subagent-stop/index.ts")).default;
 		try {
 			await handler({
 				hook_type: "SubagentStop",
@@ -866,7 +866,7 @@ describe("Scenario: Plan validation full flow", () => {
 			].join("\n"),
 		);
 
-		const handler = (await import("../hooks/subagent-stop.ts")).default;
+		const handler = (await import("../hooks/subagent-stop/index.ts")).default;
 		await handler({
 			hook_type: "SubagentStop",
 			agent_type: "Plan",
@@ -876,7 +876,7 @@ describe("Scenario: Plan validation full flow", () => {
 	});
 
 	it("plan-evaluator PASS with high score allows completion", async () => {
-		const handler = (await import("../hooks/subagent-stop.ts")).default;
+		const handler = (await import("../hooks/subagent-stop/index.ts")).default;
 		await handler({
 			hook_type: "SubagentStop",
 			agent_type: "qult-plan-evaluator",
@@ -887,7 +887,7 @@ describe("Scenario: Plan validation full flow", () => {
 	});
 
 	it("plan-evaluator REVISE blocks completion", async () => {
-		const handler = (await import("../hooks/subagent-stop.ts")).default;
+		const handler = (await import("../hooks/subagent-stop/index.ts")).default;
 		try {
 			await handler({
 				hook_type: "SubagentStop",
@@ -908,7 +908,7 @@ describe("Scenario: Plan validation full flow", () => {
 
 describe("Scenario: Adaptive review block message shows trend", () => {
 	it("first iteration block mentions weakest dimension", async () => {
-		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		try {
 			await subagentStop({
 				agent_type: "qult-reviewer",

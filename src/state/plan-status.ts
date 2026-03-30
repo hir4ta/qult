@@ -8,8 +8,8 @@ export interface PlanTask {
 	verify?: string;
 }
 
-// ### Task N: <name> [status]
-export const TASK_RE = /^###\s+Task\s+(\d+):\s*(.+?)(?:\s*\[(done|pending|in-progress)\])?\s*$/;
+// ### Task N: <name> [status]  or  ### Task N - <name> [status]
+export const TASK_RE = /^###\s+Task\s+(\d+)[\s:-]+(.+?)(?:\s*\[(done|pending|in-progress)\])?\s*$/i;
 
 // - [x] or - [ ] checkbox (Review Gates)
 const CHECKBOX_RE = /^-\s+\[([ xX])\]\s*(.+)$/;
@@ -28,7 +28,7 @@ export function parsePlanTasks(content: string): PlanTask[] {
 		if (taskMatch) {
 			const taskNumber = Number(taskMatch[1]);
 			const name = taskMatch[2]!.trim();
-			const status = (taskMatch[3] as PlanTask["status"]) ?? "pending";
+			const status = (taskMatch[3]?.toLowerCase() as PlanTask["status"]) ?? "pending";
 			// Look ahead for **Verify** field in the task block
 			let verify: string | undefined;
 			for (let j = i + 1; j < lines.length; j++) {

@@ -57,6 +57,55 @@ describe("findLatestStateFile", () => {
 		expect(result).toBe(newer);
 	});
 
+	it("prefers session from latest-session.json over mtime", () => {
+		const target = join(STATE_DIR, "pending-fixes-abc.json");
+		const newer = join(STATE_DIR, "pending-fixes-xyz.json");
+		writeFileSync(target, '[{"file":"abc"}]');
+
+		// Make xyz newer by mtime
+		const pastTime = Date.now() - 10000;
+		const { utimesSync } = require("node:fs");
+		utimesSync(target, pastTime / 1000, pastTime / 1000);
+		writeFileSync(newer, '[{"file":"xyz"}]');
+
+		// Write latest-session.json pointing to abc
+		writeFileSync(
+			join(STATE_DIR, "latest-session.json"),
+			JSON.stringify({ session_id: "abc", updated_at: new Date().toISOString() }),
+		);
+
+		const result = findLatestStateFile(TEST_DIR, "pending-fixes");
+		expect(result).toBe(target);
+	});
+
+	it("falls back to mtime when latest-session.json is corrupt", () => {
+		const older = join(STATE_DIR, "pending-fixes-old.json");
+		const newer = join(STATE_DIR, "pending-fixes-new.json");
+		writeFileSync(older, "[]");
+
+		const pastTime = Date.now() - 10000;
+		const { utimesSync } = require("node:fs");
+		utimesSync(older, pastTime / 1000, pastTime / 1000);
+		writeFileSync(newer, "[]");
+
+		writeFileSync(join(STATE_DIR, "latest-session.json"), "not valid json{{{");
+
+		const result = findLatestStateFile(TEST_DIR, "pending-fixes");
+		expect(result).toBe(newer);
+	});
+
+	it("falls back to mtime when latest-session.json points to nonexistent session", () => {
+		const existing = join(STATE_DIR, "pending-fixes-real.json");
+		writeFileSync(existing, "[]");
+		writeFileSync(
+			join(STATE_DIR, "latest-session.json"),
+			JSON.stringify({ session_id: "ghost", updated_at: new Date().toISOString() }),
+		);
+
+		const result = findLatestStateFile(TEST_DIR, "pending-fixes");
+		expect(result).toBe(existing);
+	});
+
 	it("returns non-scoped path when state dir does not exist", () => {
 		rmSync(join(TEST_DIR, ".qult"), { recursive: true, force: true });
 		const result = findLatestStateFile(TEST_DIR, "pending-fixes");

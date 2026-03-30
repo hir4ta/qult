@@ -78,3 +78,7 @@ qult/
 ### シミュレーション
 - Hook や状態管理の変更後は simulation.test.ts にシナリオを追加する
 - シミュレーションは本番フロー (Edit→gate→pending-fixes→DENY) を再現する統合テスト
+
+### Claude Code 公式仕様の調査
+- Claude Code の hooks、plugins、skills、agents、MCP 等の公式仕様を調べるときは `claude-code-guide` エージェントを必ず使う
+- WebSearch や WebFetch で独自にリサーチしに行かないこと

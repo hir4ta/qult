@@ -42,7 +42,7 @@ import {
 	parseScores,
 	validatePlanHeuristics,
 	validatePlanStructure,
-} from "../hooks/subagent-stop.ts";
+} from "../hooks/subagent-stop/index.ts";
 
 describe("parseScores", () => {
 	it("parses strict format", () => {
@@ -307,7 +307,7 @@ Why this change is needed.
 
 describe("subagentStop: integration", () => {
 	it("unknown agent_type: no exit (fail-open)", async () => {
-		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await subagentStop({
 			agent_type: "unknown-agent",
 			last_assistant_message: "Some output",
@@ -317,7 +317,7 @@ describe("subagentStop: integration", () => {
 	});
 
 	it("no output: no exit (fail-open)", async () => {
-		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await subagentStop({
 			agent_type: "qult-reviewer",
 			last_assistant_message: "",
@@ -327,7 +327,7 @@ describe("subagentStop: integration", () => {
 	});
 
 	it("stop_hook_active: no exit (short-circuit)", async () => {
-		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await expect(
 			subagentStop({
 				agent_type: "qult-reviewer",
@@ -339,7 +339,7 @@ describe("subagentStop: integration", () => {
 	});
 
 	it("qult-reviewer with FAIL verdict: blocks with exit 2", async () => {
-		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await expect(
 			subagentStop({
 				agent_type: "qult-reviewer",
@@ -352,7 +352,7 @@ describe("subagentStop: integration", () => {
 	});
 
 	it("qult-reviewer with PASS + high score (>=12): allows", async () => {
-		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await subagentStop({
 			agent_type: "qult-reviewer",
 			last_assistant_message:
@@ -366,7 +366,7 @@ describe("subagentStop: integration", () => {
 	});
 
 	it("qult:reviewer (colon format from plugin) works identically", async () => {
-		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await subagentStop({
 			agent_type: "qult:reviewer",
 			last_assistant_message:
@@ -380,7 +380,7 @@ describe("subagentStop: integration", () => {
 	});
 
 	it("qult-reviewer with PASS + low score (<12): blocks for iteration", async () => {
-		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await expect(
 			subagentStop({
 				agent_type: "qult-reviewer",
@@ -393,7 +393,7 @@ describe("subagentStop: integration", () => {
 	});
 
 	it("qult-reviewer with invalid output (no verdict/score/findings): blocks", async () => {
-		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await expect(
 			subagentStop({
 				agent_type: "qult-reviewer",
@@ -405,7 +405,7 @@ describe("subagentStop: integration", () => {
 	});
 
 	it("qult-plan-evaluator with REVISE: blocks", async () => {
-		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await expect(
 			subagentStop({
 				agent_type: "qult-plan-evaluator",
@@ -418,7 +418,7 @@ describe("subagentStop: integration", () => {
 	});
 
 	it("qult-plan-evaluator with PASS + high score: allows", async () => {
-		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await subagentStop({
 			agent_type: "qult-plan-evaluator",
 			last_assistant_message:
@@ -429,7 +429,7 @@ describe("subagentStop: integration", () => {
 	});
 
 	it("qult-plan-evaluator with invalid output: blocks", async () => {
-		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await expect(
 			subagentStop({
 				agent_type: "qult-plan-evaluator",
@@ -460,7 +460,7 @@ Why this change is needed.
 `,
 		);
 
-		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await subagentStop({
 			agent_type: "Plan",
 			last_assistant_message: "Plan created successfully.",
@@ -484,7 +484,7 @@ Why this change is needed.
 `,
 		);
 
-		const subagentStop = (await import("../hooks/subagent-stop.ts")).default;
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await expect(
 			subagentStop({
 				agent_type: "Plan",

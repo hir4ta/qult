@@ -1,3 +1,5 @@
+import { join } from "node:path";
+import { atomicWriteJson } from "../state/atomic-write.ts";
 import { flushAll } from "../state/flush.ts";
 import { setFixesSessionScope } from "../state/pending-fixes.ts";
 import { setStateSessionScope } from "../state/session-state.ts";
@@ -21,9 +23,11 @@ const EVENT_MAP: Record<string, () => Promise<{ default: (ev: HookEvent) => Prom
 	"post-tool": () => import("./post-tool.ts"),
 	"pre-tool": () => import("./pre-tool.ts"),
 	stop: () => import("./stop.ts"),
-	"subagent-stop": () => import("./subagent-stop.ts"),
+	"subagent-stop": () => import("./subagent-stop/index.ts"),
 	"task-completed": () => import("./task-completed.ts"),
 };
+
+let _lastWrittenSessionId: string | undefined;
 
 export async function dispatch(event: string): Promise<void> {
 	const loader = EVENT_MAP[event];
@@ -58,6 +62,17 @@ export async function dispatch(event: string): Promise<void> {
 	if (ev.session_id) {
 		setStateSessionScope(ev.session_id);
 		setFixesSessionScope(ev.session_id);
+		if (ev.session_id !== _lastWrittenSessionId) {
+			try {
+				atomicWriteJson(join(process.cwd(), ".qult", ".state", "latest-session.json"), {
+					session_id: ev.session_id,
+					updated_at: new Date().toISOString(),
+				});
+				_lastWrittenSessionId = ev.session_id;
+			} catch {
+				/* fail-open */
+			}
+		}
 	}
 
 	lazyInit();
