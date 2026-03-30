@@ -15,26 +15,9 @@ import {
 	recordTestPass,
 	shouldSkipGate,
 } from "../state/session-state.ts";
-import type { GatesConfig, HookEvent, PendingFix } from "../types.ts";
+import type { HookEvent, PendingFix } from "../types.ts";
 
-/** Fallback regex for test command detection when no on_commit gates configured */
-const TEST_CMD_RE = /\b(vitest|jest|mocha|pytest|go\s+test|cargo\s+test)\b/;
-
-/** Check if a bash command matches an on_commit gate command.
- *  Falls back to TEST_CMD_RE only when no on_commit gates are configured. */
-function isTestCommand(command: string, gates: GatesConfig | null): boolean {
-	if (gates?.on_commit) {
-		for (const gate of Object.values(gates.on_commit)) {
-			if (command.includes(gate.command)) {
-				return true;
-			}
-		}
-		return false;
-	}
-	return TEST_CMD_RE.test(command);
-}
-
-/** PostToolUse: lint/type gate after Edit/Write, test gate after git commit */
+/** PostToolUse: lint/type gate after Edit/Write, commit/test/lint-fix detection after Bash */
 export default async function postTool(ev: HookEvent): Promise<void> {
 	const tool = ev.tool_name;
 	if (!tool) return;
@@ -45,6 +28,8 @@ export default async function postTool(ev: HookEvent): Promise<void> {
 		handleBash(ev);
 	}
 }
+
+// ── Edit/Write: run on_write gates ──────────────────────────
 
 function handleEditWrite(ev: HookEvent): void {
 	const rawFile = typeof ev.tool_input?.file_path === "string" ? ev.tool_input.file_path : null;
@@ -63,20 +48,15 @@ function handleEditWrite(ev: HookEvent): void {
 	const gatedExts = getGatedExtensions();
 
 	const newFixes: PendingFix[] = [];
-	const messages: string[] = [];
-
 	const sessionId = ev.session_id;
 
 	for (const [name, gate] of Object.entries(gates.on_write)) {
 		try {
-			// Skip run_once_per_batch gates if already ran in this session
 			if (gate.run_once_per_batch && sessionId && shouldSkipGate(name, sessionId)) {
 				continue;
 			}
 
 			const hasPlaceholder = gate.command.includes("{file}");
-
-			// Skip per-file gates for extensions not covered by any gate tool
 			if (hasPlaceholder && gatedExts.size > 0 && !gatedExts.has(fileExt)) {
 				continue;
 			}
@@ -88,7 +68,6 @@ function handleEditWrite(ev: HookEvent): void {
 
 			if (!result.passed) {
 				newFixes.push({ file, errors: [result.output], gate: name });
-				messages.push(`[${name}] ${result.output.slice(0, 200)}`);
 			}
 		} catch {
 			// fail-open: gate execution error
@@ -101,79 +80,59 @@ function handleEditWrite(ev: HookEvent): void {
 		clearPendingFixesForFile(file);
 	}
 
-	// Record changed file path for gated-file review threshold
 	try {
 		recordChangedFile(file);
 	} catch {
 		/* fail-open */
 	}
-
-	// State written via addPendingFixes above; Claude reads via MCP get_pending_fixes
 }
+
+// ── Bash: three independent detectors ───────────────────────
+
+const GIT_COMMIT_RE = /\bgit\s+commit\b/;
+
+const LINT_FIX_RE =
+	/\b(biome\s+(check|lint).*--(fix|write)|biome\s+format|eslint.*--fix|prettier.*--write|ruff\s+check.*--fix|ruff\s+format|gofmt|go\s+fmt|cargo\s+fmt|autopep8|black)\b/;
+
+/** Fallback regex for test command detection when no on_commit gates configured */
+const TEST_CMD_RE = /\b(vitest|jest|mocha|pytest|go\s+test|cargo\s+test)\b/;
 
 function handleBash(ev: HookEvent): void {
 	const command = typeof ev.tool_input?.command === "string" ? ev.tool_input.command : null;
 	if (!command) return;
 
-	// Detect git commit → reset state + run on_commit gates
-	if (/\bgit\s+commit\b/.test(command)) {
-		clearOnCommit();
-
-		const gates = loadGates();
-		if (!gates?.on_commit) return;
-
-		const messages: string[] = [];
-		for (const [name, gate] of Object.entries(gates.on_commit)) {
-			try {
-				const result = runGate(name, gate);
-				if (!result.passed) {
-					messages.push(`[${name}] ${result.output.slice(0, 200)}`);
-				}
-			} catch {
-				// fail-open
-			}
-		}
-
-		// Test failures recorded; Claude reads via MCP get_session_status
+	if (GIT_COMMIT_RE.test(command)) {
+		onGitCommit();
 		return;
 	}
 
-	// Detect lint fix command → re-validate pending fixes
-	if (
-		/\b(biome\s+(check|lint).*--(fix|write)|biome\s+format|eslint.*--fix|prettier.*--write|ruff\s+check.*--fix|ruff\s+format|gofmt|go\s+fmt|cargo\s+fmt|autopep8|black)\b/.test(
-			command,
-		)
-	) {
-		revalidatePendingFixes();
+	if (LINT_FIX_RE.test(command)) {
+		onLintFix();
 	}
 
-	// Detect test command → record pass (gates-aware, falls back to regex)
-	const gates = loadGates();
-	if (isTestCommand(command, gates)) {
-		const output = getToolOutput(ev);
-		const exitCodeMatch = output.match(/exit code (\d+)/i) ?? output.match(/exited with (\d+)/i);
-		const isError = exitCodeMatch ? Number(exitCodeMatch[1]) !== 0 : false;
+	if (isTestCommand(command)) {
+		onTestCommand(ev, command);
+	}
+}
 
-		if (!isError) {
-			recordTestPass(command);
+/** git commit detected: reset per-commit state, run on_commit gates */
+function onGitCommit(): void {
+	clearOnCommit();
+
+	const gates = loadGates();
+	if (!gates?.on_commit) return;
+
+	for (const [name, gate] of Object.entries(gates.on_commit)) {
+		try {
+			runGate(name, gate);
+		} catch {
+			// fail-open
 		}
 	}
 }
 
-/** Extract tool output as string from tool_response (official) or tool_output (legacy) */
-function getToolOutput(ev: HookEvent): string {
-	if (ev.tool_response != null && typeof ev.tool_response === "object") {
-		const resp = ev.tool_response as Record<string, unknown>;
-		const stdout = typeof resp.stdout === "string" ? resp.stdout : "";
-		const stderr = typeof resp.stderr === "string" ? resp.stderr : "";
-		return (stdout + stderr).trim();
-	}
-	if (typeof ev.tool_output === "string") return ev.tool_output;
-	return "";
-}
-
-/** Re-run on_write gates on files with pending fixes. Clear fixes for files that now pass. */
-function revalidatePendingFixes(): void {
+/** Lint-fix command detected: re-validate files with pending fixes */
+function onLintFix(): void {
 	try {
 		const fixes = readPendingFixes();
 		if (fixes.length === 0) return;
@@ -187,16 +146,51 @@ function revalidatePendingFixes(): void {
 				if (!hasPlaceholder) continue;
 				try {
 					const result = runGate(name, gate, fix.file);
-					if (!result.passed) return true; // still failing
+					if (!result.passed) return true;
 				} catch {
 					return true; // fail-open: keep the fix
 				}
 			}
-			return false; // all gates passed
+			return false;
 		});
 
 		writePendingFixes(remaining);
 	} catch {
 		// fail-open
 	}
+}
+
+/** Check if a bash command matches an on_commit gate command or test regex fallback */
+function isTestCommand(command: string): boolean {
+	const gates = loadGates();
+	if (gates?.on_commit) {
+		for (const gate of Object.values(gates.on_commit)) {
+			if (command.includes(gate.command)) return true;
+		}
+		return false;
+	}
+	return TEST_CMD_RE.test(command);
+}
+
+/** Test command detected: record pass if exit code 0 */
+function onTestCommand(ev: HookEvent, command: string): void {
+	const output = getToolOutput(ev);
+	const exitCodeMatch = output.match(/exit code (\d+)/i) ?? output.match(/exited with (\d+)/i);
+	const isError = exitCodeMatch ? Number(exitCodeMatch[1]) !== 0 : false;
+
+	if (!isError) {
+		recordTestPass(command);
+	}
+}
+
+/** Extract tool output as string from tool_response (official) or tool_output (legacy) */
+function getToolOutput(ev: HookEvent): string {
+	if (ev.tool_response != null && typeof ev.tool_response === "object") {
+		const resp = ev.tool_response as Record<string, unknown>;
+		const stdout = typeof resp.stdout === "string" ? resp.stdout : "";
+		const stderr = typeof resp.stderr === "string" ? resp.stderr : "";
+		return (stdout + stderr).trim();
+	}
+	if (typeof ev.tool_output === "string") return ev.tool_output;
+	return "";
 }

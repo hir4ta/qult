@@ -20,18 +20,46 @@ export function setStateSessionScope(sessionId: string): void {
 	_sessionScope = sessionId;
 }
 
+/**
+ * Per-session quality state.
+ *
+ * Fields are grouped by domain. Each group is managed by dedicated
+ * helper functions below — avoid mutating fields directly.
+ */
 export interface SessionState {
+	// ── Commit lifecycle ─────────────────────────────────────
+	/** When the last commit gate reset occurred (ISO timestamp) */
 	last_commit_at: string;
+
+	// ── Test gate ────────────────────────────────────────────
+	/** When tests last passed (ISO timestamp, null = not passed since last commit) */
 	test_passed_at: string | null;
+	/** The test command that was detected as passing */
 	test_command: string | null;
+
+	// ── Review gate ──────────────────────────────────────────
+	/** When independent review last completed (ISO timestamp) */
 	review_completed_at: string | null;
-	ran_gates: Record<string, { session_id: string; ran_at: string }>;
-	changed_file_paths: string[];
+	/** Number of review iterations in current cycle (0 = not started) */
 	review_iteration: number;
+	/** Aggregate scores per iteration for trend detection */
 	review_score_history: number[];
+
+	// ── Plan evaluation ──────────────────────────────────────
+	/** Number of plan evaluation iterations (0 = not started) */
 	plan_eval_iteration: number;
+	/** Aggregate scores per iteration for trend detection */
 	plan_eval_score_history: number[];
+	/** When ExitPlanMode was first denied for selfcheck (null = not yet) */
 	plan_selfcheck_blocked_at: string | null;
+
+	// ── Gate batch tracking ──────────────────────────────────
+	/** Per-gate run tracking for run_once_per_batch dedup */
+	ran_gates: Record<string, { session_id: string; ran_at: string }>;
+
+	// ── File tracking ────────────────────────────────────────
+	/** Files edited this session (for review threshold) */
+	changed_file_paths: string[];
 }
 
 function filePath(): string {
@@ -112,7 +140,7 @@ export function resetCache(): void {
 	_sessionScope = null;
 }
 
-// --- Review threshold ---
+// ── File extension heuristic (for gated-file filtering) ─────
 
 // Tool keyword → file extensions the tool meaningfully checks
 const TOOL_EXTS: [RegExp, string[]][] = [
@@ -148,6 +176,8 @@ export function getGatedExtensions(): Set<string> {
 	return exts;
 }
 
+// ── File tracking ───────────────────────────────────────────
+
 /** Record a changed file path (deduplicated) */
 export function recordChangedFile(filePath: string): void {
 	const state = readSessionState();
@@ -168,7 +198,7 @@ export function isReviewRequired(): boolean {
 	return false;
 }
 
-// --- Test pass ---
+// ── Test gate ───────────────────────────────────────────────
 
 export function readLastTestPass(): {
 	passed_at: string;
@@ -186,7 +216,7 @@ export function recordTestPass(command: string): void {
 	writeState(state);
 }
 
-// --- Review ---
+// ── Review gate ─────────────────────────────────────────────
 
 export function readLastReview(): { reviewed_at: string } | null {
 	const state = readSessionState();
@@ -200,7 +230,7 @@ export function recordReview(): void {
 	writeState(state);
 }
 
-// --- Gate batch ---
+// ── Gate batch dedup ────────────────────────────────────────
 
 export function shouldSkipGate(gateName: string, sessionId: string): boolean {
 	const state = readSessionState();
@@ -218,9 +248,9 @@ export function markGateRan(gateName: string, sessionId: string): void {
 	writeState(state);
 }
 
-// --- Commit reset ---
+// ── Commit lifecycle reset ──────────────────────────────────
 
-/** Clear per-commit fields. */
+/** Clear all per-commit fields. Called when git commit is detected. */
 export function clearOnCommit(): void {
 	const state = readSessionState();
 	state.last_commit_at = new Date().toISOString();
@@ -237,7 +267,7 @@ export function clearOnCommit(): void {
 	writeState(state);
 }
 
-// --- Review iteration tracking ---
+// ── Review iteration tracking ───────────────────────────────
 
 /** Get current review iteration count (0 = not started). */
 export function getReviewIteration(): number {
@@ -265,7 +295,7 @@ export function resetReviewIteration(): void {
 	writeState(state);
 }
 
-// --- Plan evaluation iteration tracking ---
+// ── Plan evaluation iteration tracking ──────────────────────
 
 /** Get current plan evaluation iteration count (0 = not started). */
 export function getPlanEvalIteration(): number {
@@ -293,7 +323,7 @@ export function resetPlanEvalIteration(): void {
 	writeState(state);
 }
 
-// --- Plan selfcheck gate ---
+// ── Plan selfcheck gate ─────────────────────────────────────
 
 /** Check if plan selfcheck has already been blocked (1-time gate). */
 export function wasPlanSelfcheckBlocked(): boolean {

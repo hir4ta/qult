@@ -1,6 +1,6 @@
 # qult
 
-![Version](https://img.shields.io/badge/version-0.16.8-7fbbb3?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.16.9-7fbbb3?style=flat-square)
 ![TypeScript](https://img.shields.io/badge/TypeScript-standalone_binary-a7c080?style=flat-square&logo=typescript&logoColor=d3c6aa)
 ![Hooks](https://img.shields.io/badge/hooks-5-dbbc7f?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-83c092?style=flat-square)
@@ -180,6 +180,21 @@ hooks (PostToolUse, PreToolUse, Stop, SubagentStop, TaskCompleted) と MCP serve
 環境変数: `QULT_REVIEW_SCORE_THRESHOLD`, `QULT_REVIEW_MAX_ITERATIONS`, `QULT_REVIEW_REQUIRED_FILES`, `QULT_GATE_OUTPUT_MAX`, `QULT_GATE_DEFAULT_TIMEOUT`
 
 <details>
+<summary><strong>レビュースコア閾値の根拠</strong></summary>
+
+reviewer エージェントは3つの観点 (Correctness, Design, Security) を 1-5 で採点する。デフォルト閾値 12/15 の意味:
+
+- 5+5+2 = 12: セキュリティが弱い変更でも通る (内部ツール向け)
+- 4+4+4 = 12: 全観点で「十分」なバランス
+- 3+3+3 = 9: 不合格。全体的な品質不足は検出される
+
+閾値はプロジェクトに合わせて変更可能。プロトタイプなら下げる (`"score_threshold": 9`)、本番APIなら上げる (`"score_threshold": 14`)。
+
+スコアはLLM生成のため完全な再現性はない。トレンド検知付きイテレーション (`max_iterations` 回まで再試行) で補正: スコアが改善傾向ならフィードバックが機能している証拠。停滞なら別のアプローチを提案する。
+
+</details>
+
+<details>
 <summary><strong>対応言語・ツール</strong></summary>
 
 | 言語 | on_write (lint/type) | on_commit (test) | on_review (e2e) |
@@ -195,6 +210,85 @@ hooks (PostToolUse, PreToolUse, Stop, SubagentStop, TaskCompleted) と MCP serve
 | **Frontend** | stylelint | — | playwright / cypress / wdio |
 
 </details>
+
+### カスタムゲート
+
+`.qult/gates.json` を直接編集してゲートの追加・変更・削除ができる:
+
+```json
+{
+  "on_write": {
+    "lint": { "command": "biome check {file}", "timeout": 3000 },
+    "typecheck": { "command": "bun tsc --noEmit", "timeout": 10000, "run_once_per_batch": true },
+    "custom-check": { "command": "my-tool check {file}", "timeout": 5000 }
+  },
+  "on_commit": {
+    "test": { "command": "bun vitest run", "timeout": 30000 }
+  },
+  "on_review": {
+    "e2e": { "command": "playwright test", "timeout": 120000 }
+  }
+}
+```
+
+**ゲートフィールド:**
+
+| フィールド | 必須 | 説明 |
+|-----------|------|------|
+| `command` | Yes | シェルコマンド。`{file}` は編集されたファイルパスに置換される |
+| `timeout` | No | タイムアウト (ms)。省略時は `gates.default_timeout` |
+| `run_once_per_batch` | No | true の場合、同一セッション内での再実行をスキップ (`tsc --noEmit` のようなプロジェクト全体チェック向け) |
+| `extensions` | No | チェック対象の拡張子配列 (例: `[".ts", ".tsx"]`)。省略時はコマンドから推定 |
+
+**ゲートカテゴリ:**
+
+| カテゴリ | 実行タイミング | 典型的なゲート |
+|---------|---------------|---------------|
+| `on_write` | Edit/Write の度に実行 | lint, typecheck |
+| `on_commit` | `git commit` 検出時 | test |
+| `on_review` | `/qult:review` 実行時 | e2e |
+
+### ゲートの無効化
+
+`.qult/gates.json` からゲートのエントリを削除するか、カテゴリごと削除する:
+
+```json
+{
+  "on_write": {
+    "lint": { "command": "biome check {file}", "timeout": 3000 }
+  }
+}
+```
+
+一時的に全ゲートを無効化するには `.qult/gates.json` をリネームまたは削除する。qult は fail-open 設計のため、ゲートなし = 制約なし。`/qult:detect-gates` で再生成可能。
+
+### モノレポ・ワークスペース
+
+qult はプロジェクトルートからゲートを検出する。ワークスペースごとに異なるツールを使う場合は `.qult/gates.json` を手動編集:
+
+```json
+{
+  "on_write": {
+    "lint-frontend": {
+      "command": "cd packages/frontend && eslint {file}",
+      "timeout": 5000,
+      "extensions": [".tsx", ".jsx"]
+    },
+    "lint-backend": {
+      "command": "cd packages/backend && biome check {file}",
+      "timeout": 3000,
+      "extensions": [".ts"]
+    },
+    "typecheck": {
+      "command": "tsc --noEmit",
+      "timeout": 15000,
+      "run_once_per_batch": true
+    }
+  }
+}
+```
+
+`extensions` でファイルを適切なリンターにルーティングする。`{file}` プレースホルダには編集されたファイルの絶対パスが入る。
 
 
 ## 設計原則
@@ -263,7 +357,7 @@ Claude Code 側の既知バグ ([#21988](https://github.com/anthropics/claude-co
 <details>
 <summary><strong>特定のファイルでゲートをスキップしたい</strong></summary>
 
-`.qult/gates.json` の各ゲートに `extensions` フィールドを手動で追加して、対象拡張子を制限できる:
+`.qult/gates.json` の各ゲートに `extensions` フィールドを追加して、対象拡張子を制限できる:
 
 ```json
 {
@@ -272,6 +366,42 @@ Claude Code 側の既知バグ ([#21988](https://github.com/anthropics/claude-co
   }
 }
 ```
+
+</details>
+
+<details>
+<summary><strong>ゲートが誤検出する (実際にはエラーでないのにブロックされる)</strong></summary>
+
+1. ゲートコマンドをターミナルで手動実行して結果を確認
+2. ツール設定の問題なら `.eslintrc.json` や `biome.json` 等を修正
+3. qult が間違ったツールを実行しているなら `.qult/gates.json` のコマンドを修正
+4. 最終手段として `.qult/gates.json` からゲートを削除
+
+qult は `gates.json` のコマンドをそのまま実行する。誤検出はツール設定の問題であり、qult 側の修正は不要。
+
+</details>
+
+<details>
+<summary><strong>レビューが低スコアで繰り返しブロックされる</strong></summary>
+
+レビューイテレーション上限はデフォルト3回。3回目以降は通過する。スコアイテレーションをスキップしたい場合:
+
+- `.qult/config.json` の `review.score_threshold` を下げる
+- または環境変数 `QULT_REVIEW_SCORE_THRESHOLD=9` を設定
+
+スコアが停滞する場合 (同じスコアが繰り返される)、SubagentStop hook が根本的に異なるアプローチを提案する。これは設計通り: 同じ修正戦略を繰り返してもスコアは改善しない。
+
+</details>
+
+<details>
+<summary><strong>qult がコミットをブロックするが今すぐコミットしたい</strong></summary>
+
+qult は PreToolUse hook でゲートを強制する。緊急時の回避方法:
+
+1. ターミナルで直接コミット (Claude Code の外): `git commit -m "emergency fix"`
+2. または一時的に qult を無効化: `/plugin` > qult を無効化 > コミット > 再有効化
+
+`.qult/.state/` を削除してバイパスしないこと。セッション追跡がすべてクリアされ、予期しない動作の原因になる。
 
 </details>
 

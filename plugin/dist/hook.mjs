@@ -597,17 +597,6 @@ __export(exports_post_tool, {
   default: () => postTool
 });
 import { extname, resolve } from "node:path";
-function isTestCommand(command, gates) {
-  if (gates?.on_commit) {
-    for (const gate of Object.values(gates.on_commit)) {
-      if (command.includes(gate.command)) {
-        return true;
-      }
-    }
-    return false;
-  }
-  return TEST_CMD_RE.test(command);
-}
 async function postTool(ev) {
   const tool = ev.tool_name;
   if (!tool)
@@ -632,7 +621,6 @@ function handleEditWrite(ev) {
   const fileExt = extname(file).toLowerCase();
   const gatedExts = getGatedExtensions();
   const newFixes = [];
-  const messages = [];
   const sessionId = ev.session_id;
   for (const [name, gate] of Object.entries(gates.on_write)) {
     try {
@@ -649,7 +637,6 @@ function handleEditWrite(ev) {
       }
       if (!result.passed) {
         newFixes.push({ file, errors: [result.output], gate: name });
-        messages.push(`[${name}] ${result.output.slice(0, 200)}`);
       }
     } catch {}
   }
@@ -666,47 +653,29 @@ function handleBash(ev) {
   const command = typeof ev.tool_input?.command === "string" ? ev.tool_input.command : null;
   if (!command)
     return;
-  if (/\bgit\s+commit\b/.test(command)) {
-    clearOnCommit();
-    const gates2 = loadGates();
-    if (!gates2?.on_commit)
-      return;
-    const messages = [];
-    for (const [name, gate] of Object.entries(gates2.on_commit)) {
-      try {
-        const result = runGate(name, gate);
-        if (!result.passed) {
-          messages.push(`[${name}] ${result.output.slice(0, 200)}`);
-        }
-      } catch {}
-    }
+  if (GIT_COMMIT_RE.test(command)) {
+    onGitCommit();
     return;
   }
-  if (/\b(biome\s+(check|lint).*--(fix|write)|biome\s+format|eslint.*--fix|prettier.*--write|ruff\s+check.*--fix|ruff\s+format|gofmt|go\s+fmt|cargo\s+fmt|autopep8|black)\b/.test(command)) {
-    revalidatePendingFixes();
+  if (LINT_FIX_RE.test(command)) {
+    onLintFix();
   }
+  if (isTestCommand(command)) {
+    onTestCommand(ev, command);
+  }
+}
+function onGitCommit() {
+  clearOnCommit();
   const gates = loadGates();
-  if (isTestCommand(command, gates)) {
-    const output = getToolOutput(ev);
-    const exitCodeMatch = output.match(/exit code (\d+)/i) ?? output.match(/exited with (\d+)/i);
-    const isError = exitCodeMatch ? Number(exitCodeMatch[1]) !== 0 : false;
-    if (!isError) {
-      recordTestPass(command);
-    }
+  if (!gates?.on_commit)
+    return;
+  for (const [name, gate] of Object.entries(gates.on_commit)) {
+    try {
+      runGate(name, gate);
+    } catch {}
   }
 }
-function getToolOutput(ev) {
-  if (ev.tool_response != null && typeof ev.tool_response === "object") {
-    const resp = ev.tool_response;
-    const stdout = typeof resp.stdout === "string" ? resp.stdout : "";
-    const stderr = typeof resp.stderr === "string" ? resp.stderr : "";
-    return (stdout + stderr).trim();
-  }
-  if (typeof ev.tool_output === "string")
-    return ev.tool_output;
-  return "";
-}
-function revalidatePendingFixes() {
+function onLintFix() {
   try {
     const fixes = readPendingFixes();
     if (fixes.length === 0)
@@ -732,12 +701,44 @@ function revalidatePendingFixes() {
     writePendingFixes(remaining);
   } catch {}
 }
-var TEST_CMD_RE;
+function isTestCommand(command) {
+  const gates = loadGates();
+  if (gates?.on_commit) {
+    for (const gate of Object.values(gates.on_commit)) {
+      if (command.includes(gate.command))
+        return true;
+    }
+    return false;
+  }
+  return TEST_CMD_RE.test(command);
+}
+function onTestCommand(ev, command) {
+  const output = getToolOutput(ev);
+  const exitCodeMatch = output.match(/exit code (\d+)/i) ?? output.match(/exited with (\d+)/i);
+  const isError = exitCodeMatch ? Number(exitCodeMatch[1]) !== 0 : false;
+  if (!isError) {
+    recordTestPass(command);
+  }
+}
+function getToolOutput(ev) {
+  if (ev.tool_response != null && typeof ev.tool_response === "object") {
+    const resp = ev.tool_response;
+    const stdout = typeof resp.stdout === "string" ? resp.stdout : "";
+    const stderr = typeof resp.stderr === "string" ? resp.stderr : "";
+    return (stdout + stderr).trim();
+  }
+  if (typeof ev.tool_output === "string")
+    return ev.tool_output;
+  return "";
+}
+var GIT_COMMIT_RE, LINT_FIX_RE, TEST_CMD_RE;
 var init_post_tool = __esm(() => {
   init_load();
   init_runner();
   init_pending_fixes();
   init_session_state();
+  GIT_COMMIT_RE = /\bgit\s+commit\b/;
+  LINT_FIX_RE = /\b(biome\s+(check|lint).*--(fix|write)|biome\s+format|eslint.*--fix|prettier.*--write|ruff\s+check.*--fix|ruff\s+format|gofmt|go\s+fmt|cargo\s+fmt|autopep8|black)\b/;
   TEST_CMD_RE = /\b(vitest|jest|mocha|pytest|go\s+test|cargo\s+test)\b/;
 });
 
@@ -791,7 +792,7 @@ function checkBash(ev) {
   const command = typeof ev.tool_input?.command === "string" ? ev.tool_input.command : null;
   if (!command)
     return;
-  if (!GIT_COMMIT_RE.test(command))
+  if (!GIT_COMMIT_RE2.test(command))
     return;
   const gates = loadGates();
   if (!gates)
@@ -807,13 +808,13 @@ function checkBash(ev) {
     }
   }
 }
-var GIT_COMMIT_RE;
+var GIT_COMMIT_RE2;
 var init_pre_tool = __esm(() => {
   init_load();
   init_pending_fixes();
   init_session_state();
   init_respond();
-  GIT_COMMIT_RE = /\bgit\s+commit\b/;
+  GIT_COMMIT_RE2 = /\bgit\s+commit\b/;
 });
 
 // src/hooks/stop.ts

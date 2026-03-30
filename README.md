@@ -1,6 +1,6 @@
 # qult
 
-![Version](https://img.shields.io/badge/version-0.16.8-7fbbb3?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.16.9-7fbbb3?style=flat-square)
 ![TypeScript](https://img.shields.io/badge/TypeScript-standalone_binary-a7c080?style=flat-square&logo=typescript&logoColor=d3c6aa)
 ![Hooks](https://img.shields.io/badge/hooks-5-dbbc7f?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-83c092?style=flat-square)
@@ -175,6 +175,21 @@ Customize thresholds in `.qult/config.json` (all optional):
 Environment variable overrides: `QULT_REVIEW_SCORE_THRESHOLD`, `QULT_REVIEW_MAX_ITERATIONS`, `QULT_REVIEW_REQUIRED_FILES`, `QULT_GATE_OUTPUT_MAX`, `QULT_GATE_DEFAULT_TIMEOUT`
 
 <details>
+<summary><strong>Review score threshold rationale</strong></summary>
+
+The reviewer agent scores three dimensions (Correctness, Design, Security) on a 1-5 scale. The default threshold of 12/15 means:
+
+- 5+5+2 = 12: A security-weak change still passes (acceptable for internal tools)
+- 4+4+4 = 12: Balanced "good enough" across all dimensions
+- 3+3+3 = 9: Fails. Consistent mediocrity is caught
+
+The threshold is configurable because acceptable quality varies by project. Lower it for prototypes (`"score_threshold": 9`), raise it for production APIs (`"score_threshold": 14`).
+
+Scores are LLM-generated and not perfectly reproducible. The trend-aware iteration system (up to `max_iterations` retries) compensates: if the score improves across iterations, the feedback is working. If it stagnates, the system advises a different approach.
+
+</details>
+
+<details>
 <summary><strong>Supported languages and tools</strong></summary>
 
 | Language | on_write (lint/type) | on_commit (test) | on_review (e2e) |
@@ -190,6 +205,85 @@ Environment variable overrides: `QULT_REVIEW_SCORE_THRESHOLD`, `QULT_REVIEW_MAX_
 | **Frontend** | stylelint | -- | playwright / cypress / wdio |
 
 </details>
+
+### Custom gates
+
+Edit `.qult/gates.json` directly to add, modify, or remove gates:
+
+```json
+{
+  "on_write": {
+    "lint": { "command": "biome check {file}", "timeout": 3000 },
+    "typecheck": { "command": "bun tsc --noEmit", "timeout": 10000, "run_once_per_batch": true },
+    "custom-check": { "command": "my-tool check {file}", "timeout": 5000 }
+  },
+  "on_commit": {
+    "test": { "command": "bun vitest run", "timeout": 30000 }
+  },
+  "on_review": {
+    "e2e": { "command": "playwright test", "timeout": 120000 }
+  }
+}
+```
+
+**Gate fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `command` | Yes | Shell command. `{file}` is replaced with the edited file path |
+| `timeout` | No | Timeout in ms (default: `gates.default_timeout`) |
+| `run_once_per_batch` | No | If true, skip re-running within the same session (useful for whole-project checks like `tsc --noEmit`) |
+| `extensions` | No | Array of file extensions to check (e.g. `[".ts", ".tsx"]`). If omitted, qult infers from the command |
+
+**Gate categories:**
+
+| Category | When it runs | Typical gates |
+|----------|-------------|---------------|
+| `on_write` | After every Edit/Write | lint, typecheck |
+| `on_commit` | When `git commit` is detected | test |
+| `on_review` | During `/qult:review` | e2e |
+
+### Disabling a gate
+
+Remove the gate entry from `.qult/gates.json`, or remove the entire category:
+
+```json
+{
+  "on_write": {
+    "lint": { "command": "biome check {file}", "timeout": 3000 }
+  }
+}
+```
+
+To temporarily disable all gates, rename or delete `.qult/gates.json`. qult is fail-open: missing gates means no enforcement. Run `/qult:detect-gates` to regenerate.
+
+### Monorepo and workspace projects
+
+qult detects gates from the project root. For monorepos with different tools per workspace, edit `.qult/gates.json` manually:
+
+```json
+{
+  "on_write": {
+    "lint-frontend": {
+      "command": "cd packages/frontend && eslint {file}",
+      "timeout": 5000,
+      "extensions": [".tsx", ".jsx"]
+    },
+    "lint-backend": {
+      "command": "cd packages/backend && biome check {file}",
+      "timeout": 3000,
+      "extensions": [".ts"]
+    },
+    "typecheck": {
+      "command": "tsc --noEmit",
+      "timeout": 15000,
+      "run_once_per_batch": true
+    }
+  }
+}
+```
+
+Use `extensions` to route files to the correct linter. The `{file}` placeholder receives the absolute path of the edited file.
 
 ## Design principles
 
@@ -254,7 +348,7 @@ Delete files in `.qult/.state/` and start a new session. qult is fail-open by de
 <details>
 <summary><strong>Skip gates for specific files</strong></summary>
 
-Manually add an `extensions` field to gates in `.qult/gates.json` to restrict which file types are checked:
+Add an `extensions` field to gates in `.qult/gates.json` to restrict which file types are checked:
 
 ```json
 {
@@ -263,6 +357,42 @@ Manually add an `extensions` field to gates in `.qult/gates.json` to restrict wh
   }
 }
 ```
+
+</details>
+
+<details>
+<summary><strong>Gate false positive (lint reports error that is not real)</strong></summary>
+
+1. Check if the gate command itself is correct: run it manually in terminal
+2. If the tool config is wrong, fix the tool config (e.g. `.eslintrc.json`, `biome.json`)
+3. If qult is running the wrong tool, edit `.qult/gates.json` to use the correct command
+4. As a last resort, remove the gate from `.qult/gates.json`
+
+qult runs the exact command in `gates.json`. If the command produces false positives, the fix is in the tool config, not in qult.
+
+</details>
+
+<details>
+<summary><strong>Review blocks repeatedly with low score</strong></summary>
+
+The review iteration limit defaults to 3. After 3 attempts, the review proceeds regardless. If you want to skip review iteration:
+
+- Lower `review.score_threshold` in `.qult/config.json`
+- Or set `QULT_REVIEW_SCORE_THRESHOLD=9` as an environment variable
+
+If scores stagnate (same score across iterations), the SubagentStop hook suggests trying a fundamentally different approach. This is by design: the same fix strategy applied repeatedly will not improve the score.
+
+</details>
+
+<details>
+<summary><strong>qult blocks commit but I need to commit now</strong></summary>
+
+qult enforces gates via PreToolUse hooks. To bypass in an emergency:
+
+1. Commit directly in terminal (outside Claude Code): `git commit -m "emergency fix"`
+2. Or temporarily disable qult: `/plugin` > disable qult, commit, re-enable
+
+Do not delete `.qult/.state/` to bypass. This clears all session tracking and may cause unexpected behavior.
 
 </details>
 
