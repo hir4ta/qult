@@ -1,6 +1,6 @@
 ---
 name: status
-description: Show current qult session status including pending fixes, test/review gates, and changed files.
+description: Show current qult session status including pending fixes, test/review gates, and changed files. Use to check commit readiness, see what gates are blocking, or confirm all gates are clear before committing. NOT for diagnosing setup issues (use /qult:doctor instead).
 user_invocable: true
 ---
 

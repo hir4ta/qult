@@ -1,6 +1,6 @@
 ---
 name: update
-description: Update qult rules files in the current project after a plugin update. Overwrites existing rules with the latest version.
+description: Update qult rules files in the current project after a plugin update. Overwrites existing rules with the latest version. Use after running /plugin update to sync project-level rules with the latest qult version. NOT for initial setup (use /qult:init instead).
 user_invocable: true
 ---
 

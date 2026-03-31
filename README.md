@@ -1,14 +1,14 @@
 # qult
 
-![Version](https://img.shields.io/badge/version-0.17.0-7fbbb3?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.17.1-7fbbb3?style=flat-square)
 ![TypeScript](https://img.shields.io/badge/TypeScript-standalone_binary-a7c080?style=flat-square&logo=typescript&logoColor=d3c6aa)
-![Hooks](https://img.shields.io/badge/hooks-5-dbbc7f?style=flat-square)
+![Hooks](https://img.shields.io/badge/hooks-7-dbbc7f?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-83c092?style=flat-square)
 
 **Physically stop Claude's bad habits.** An evaluator harness that enforces code quality through structure.
 
 > Claude is capable, but it leaves lint errors behind and moves to the next file. It commits without tests. It praises its own code and calls the review done.
-> qult uses 5 hooks + MCP server + independent Opus evaluator to stop that with **exit 2 (DENY), not advisory messages**.
+> qult uses 7 hooks + MCP server + independent Opus evaluator to stop that with **exit 2 (DENY), not advisory messages**.
 > Distributed as a Claude Code Plugin. Install with `/plugin install`.
 
 > [!NOTE]
@@ -46,7 +46,7 @@ Operates on the Generator-Evaluator pattern from Anthropic's [Harness Design](ht
 ```mermaid
 flowchart TB
     subgraph Generator["Generator"]
-        Claude["Claude\n+ 5 hooks for quality gates"]
+        Claude["Claude\n+ 7 hooks for quality gates"]
     end
     subgraph Evaluator["Evaluator"]
         Rev["/qult:review\n(Opus)"]

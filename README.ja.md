@@ -1,14 +1,14 @@
 # qult
 
-![Version](https://img.shields.io/badge/version-0.17.0-7fbbb3?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.17.1-7fbbb3?style=flat-square)
 ![TypeScript](https://img.shields.io/badge/TypeScript-standalone_binary-a7c080?style=flat-square&logo=typescript&logoColor=d3c6aa)
-![Hooks](https://img.shields.io/badge/hooks-5-dbbc7f?style=flat-square)
+![Hooks](https://img.shields.io/badge/hooks-7-dbbc7f?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-83c092?style=flat-square)
 
 **Claude の悪い癖を物理的に止める。** コードの品質を構造で守る evaluator harness。
 
 > Claude は優秀だが、lint エラーを放置して次のファイルに行く。テストなしでコミットする。自分のコードを褒めてレビューを終える。
-> qult は 5 hooks + MCP server + 独立 Opus evaluator で、それを **お願い (advisory) ではなく exit 2 (DENY) で止める**。
+> qult は 7 hooks + MCP server + 独立 Opus evaluator で、それを **お願い (advisory) ではなく exit 2 (DENY) で止める**。
 > Claude Code Plugin として配布。`/plugin install` で導入完了。
 
 > [!NOTE]
@@ -46,7 +46,7 @@ Anthropic の [Harness Design](https://www.anthropic.com/engineering/harness-des
 ```mermaid
 flowchart TB
     subgraph Generator["Generator"]
-        Claude["Claude 本体\n+ 5 hooks で品質ゲート"]
+        Claude["Claude 本体\n+ 7 hooks で品質ゲート"]
     end
     subgraph Evaluator["Evaluator"]
         Rev["/qult:review\n(Opus)"]

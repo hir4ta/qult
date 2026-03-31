@@ -1,6 +1,6 @@
 ---
 name: doctor
-description: Check qult health for the current project. Verifies state files, gates, rules, and MCP server connectivity.
+description: Check qult health for the current project. Verifies state files, gates, rules, and MCP server connectivity. Use when hooks don't fire, gates seem broken, or after initial setup to confirm everything works. NOT for checking session progress (use /qult:status instead).
 user_invocable: true
 ---
 
