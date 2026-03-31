@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { atomicWriteJson } from "../atomic-write.ts";
@@ -11,7 +11,6 @@ beforeEach(() => {
 
 afterEach(() => {
 	try {
-		const { rmSync } = require("node:fs");
 		rmSync(TMP, { recursive: true, force: true });
 	} catch {
 		// ignore
@@ -45,6 +44,24 @@ describe("atomicWriteJson", () => {
 		expect(JSON.parse(readFileSync(path, "utf-8"))).toEqual({ v: 2 });
 	});
 
+	it("cleans up temp file and rethrows when writeFileSync fails", () => {
+		mkdirSync(join(TMP, "readonly"), { recursive: true });
+		const roPath = join(TMP, "readonly", "fail.json");
+
+		chmodSync(join(TMP, "readonly"), 0o444);
+
+		try {
+			expect(() => atomicWriteJson(roPath, { x: 1 })).toThrow();
+		} finally {
+			chmodSync(join(TMP, "readonly"), 0o755);
+		}
+	});
+
+	it("throws when target path is impossible", () => {
+		const target = join("/dev/null", "impossible.json");
+		expect(() => atomicWriteJson(target, { z: 1 })).toThrow();
+	});
+
 	it("concurrent writes produce valid JSON with no leftover temp files", async () => {
 		const target = join(TMP, "concurrent.json");
 		const N = 10;
@@ -59,7 +76,7 @@ describe("atomicWriteJson", () => {
 		);
 
 		// Spawn N processes in parallel
-		const { spawn } = require("node:child_process");
+		const { spawn } = await import("node:child_process");
 		const exits = await Promise.all(
 			Array.from(
 				{ length: N },
