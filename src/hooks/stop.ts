@@ -1,6 +1,6 @@
 import { readPendingFixes } from "../state/pending-fixes.ts";
 import { getActivePlan } from "../state/plan-status.ts";
-import { isReviewRequired, readLastReview } from "../state/session-state.ts";
+import { isGateDisabled, isReviewRequired, readLastReview } from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
 import { block } from "./respond.ts";
 
@@ -29,7 +29,7 @@ export default async function stop(ev: HookEvent): Promise<void> {
 
 	// Block if no review has been run (conditional on change size / plan)
 	if (!readLastReview()) {
-		if (isReviewRequired()) {
+		if (isReviewRequired() && !isGateDisabled("review")) {
 			block("Run /qult:review before finishing. Independent review is required.");
 		}
 	}

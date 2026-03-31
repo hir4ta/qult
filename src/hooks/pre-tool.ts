@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { loadGates } from "../gates/load.ts";
 import { readPendingFixes } from "../state/pending-fixes.ts";
 import {
+	isGateDisabled,
 	isReviewRequired,
 	readLastReview,
 	readLastTestPass,
@@ -11,7 +12,7 @@ import {
 import type { HookEvent } from "../types.ts";
 import { deny } from "./respond.ts";
 
-const GIT_COMMIT_RE = /\bgit\s+commit\b/;
+const GIT_COMMIT_RE = /\bgit\s+(?:-\S+(?:\s+\S+)?\s+)*commit\b/i;
 
 /** PreToolUse: DENY pending-fixes edits, commit without tests/review, plan selfcheck */
 export default async function preTool(ev: HookEvent): Promise<void> {
@@ -73,14 +74,15 @@ function checkBash(ev: HookEvent): void {
 
 	// Require tests to pass before commit (only if project has test gates)
 	if (gates.on_commit && Object.keys(gates.on_commit).length > 0) {
-		if (!readLastTestPass()) {
+		const allCommitGatesDisabled = Object.keys(gates.on_commit).every((g) => isGateDisabled(g));
+		if (!allCommitGatesDisabled && !readLastTestPass()) {
 			deny("Run tests before committing. No test pass recorded since last commit.");
 		}
 	}
 
 	// Require independent review before commit (conditional on change size / plan)
 	if (!readLastReview()) {
-		if (isReviewRequired()) {
+		if (isReviewRequired() && !isGateDisabled("review")) {
 			deny("Run /qult:review before committing. Independent review is required.");
 		}
 	}

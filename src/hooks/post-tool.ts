@@ -1,6 +1,6 @@
 import { extname, resolve } from "node:path";
 import { loadGates } from "../gates/load.ts";
-import { runGate } from "../gates/runner.ts";
+import { runGate, runGateAsync } from "../gates/runner.ts";
 import {
 	addPendingFixes,
 	clearPendingFixesForFile,
@@ -10,6 +10,7 @@ import {
 import {
 	clearOnCommit,
 	getGatedExtensions,
+	isGateDisabled,
 	markGateRan,
 	recordChangedFile,
 	recordTestPass,
@@ -23,7 +24,7 @@ export default async function postTool(ev: HookEvent): Promise<void> {
 	if (!tool) return;
 
 	if (tool === "Edit" || tool === "Write") {
-		handleEditWrite(ev);
+		await handleEditWrite(ev);
 	} else if (tool === "Bash") {
 		handleBash(ev);
 	}
@@ -31,7 +32,7 @@ export default async function postTool(ev: HookEvent): Promise<void> {
 
 // ── Edit/Write: run on_write gates ──────────────────────────
 
-function handleEditWrite(ev: HookEvent): void {
+async function handleEditWrite(ev: HookEvent): Promise<void> {
 	const rawFile = typeof ev.tool_input?.file_path === "string" ? ev.tool_input.file_path : null;
 	if (!rawFile) return;
 	const file = resolve(rawFile);
@@ -46,31 +47,41 @@ function handleEditWrite(ev: HookEvent): void {
 	// File extension filter: skip per-file gates for extensions not covered by any gate tool
 	const fileExt = extname(file).toLowerCase();
 	const gatedExts = getGatedExtensions();
-
-	const newFixes: PendingFix[] = [];
 	const sessionId = ev.session_id;
 
+	// Filter gates, then run in parallel
+	const gateEntries: {
+		name: string;
+		gate: (typeof gates.on_write)[string];
+		fileArg: string | undefined;
+	}[] = [];
 	for (const [name, gate] of Object.entries(gates.on_write)) {
+		if (isGateDisabled(name)) continue;
+		if (gate.run_once_per_batch && sessionId && shouldSkipGate(name, sessionId)) continue;
+		const hasPlaceholder = gate.command.includes("{file}");
+		if (hasPlaceholder && gatedExts.size > 0 && !gatedExts.has(fileExt)) continue;
+		gateEntries.push({ name, gate, fileArg: hasPlaceholder ? file : undefined });
+	}
+
+	const results = await Promise.allSettled(
+		gateEntries.map((entry) => runGateAsync(entry.name, entry.gate, entry.fileArg)),
+	);
+
+	const newFixes: PendingFix[] = [];
+	for (let i = 0; i < results.length; i++) {
+		const settled = results[i]!;
+		const entry = gateEntries[i]!;
 		try {
-			if (gate.run_once_per_batch && sessionId && shouldSkipGate(name, sessionId)) {
-				continue;
-			}
-
-			const hasPlaceholder = gate.command.includes("{file}");
-			if (hasPlaceholder && gatedExts.size > 0 && !gatedExts.has(fileExt)) {
-				continue;
-			}
-			const result = runGate(name, gate, hasPlaceholder ? file : undefined);
-
-			if (gate.run_once_per_batch && sessionId) {
-				markGateRan(name, sessionId);
-			}
-
-			if (!result.passed) {
-				newFixes.push({ file, errors: [result.output], gate: name });
+			if (settled.status === "fulfilled") {
+				if (entry.gate.run_once_per_batch && sessionId) {
+					markGateRan(entry.name, sessionId);
+				}
+				if (!settled.value.passed) {
+					newFixes.push({ file, errors: [settled.value.output], gate: entry.name });
+				}
 			}
 		} catch {
-			// fail-open: gate execution error
+			// fail-open
 		}
 	}
 
@@ -89,7 +100,7 @@ function handleEditWrite(ev: HookEvent): void {
 
 // ── Bash: three independent detectors ───────────────────────
 
-const GIT_COMMIT_RE = /\bgit\s+commit\b/;
+const GIT_COMMIT_RE = /\bgit\s+(?:-\S+(?:\s+\S+)?\s+)*commit\b/i;
 
 const LINT_FIX_RE =
 	/\b(biome\s+(check|lint).*--(fix|write)|biome\s+format|eslint.*--fix|prettier.*--write|ruff\s+check.*--fix|ruff\s+format|gofmt|go\s+fmt|cargo\s+fmt|autopep8|black)\b/;
@@ -124,6 +135,7 @@ function onGitCommit(): void {
 
 	for (const [name, gate] of Object.entries(gates.on_commit)) {
 		try {
+			if (isGateDisabled(name)) continue;
 			runGate(name, gate);
 		} catch {
 			// fail-open
@@ -142,6 +154,7 @@ function onLintFix(): void {
 
 		const remaining = fixes.filter((fix) => {
 			for (const [name, gate] of Object.entries(gates.on_write!)) {
+				if (isGateDisabled(name)) continue;
 				const hasPlaceholder = gate.command.includes("{file}");
 				if (!hasPlaceholder) continue;
 				try {

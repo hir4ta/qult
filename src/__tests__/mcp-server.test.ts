@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -204,14 +204,18 @@ describe("handleRequest (JSON-RPC)", () => {
 		expect(serverInfo.name).toBe("qult");
 	});
 
-	it("tools/list returns 3 tool definitions", () => {
+	it("tools/list returns 7 tool definitions", () => {
 		const response = handleRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" }, TEST_DIR);
 		const result = response!.result as { tools: { name: string }[] };
-		expect(result.tools).toHaveLength(3);
+		expect(result.tools).toHaveLength(7);
 		expect(result.tools.map((t) => t.name)).toEqual([
 			"get_pending_fixes",
 			"get_session_status",
 			"get_gate_config",
+			"disable_gate",
+			"enable_gate",
+			"set_config",
+			"clear_pending_fixes",
 		]);
 	});
 
@@ -255,8 +259,8 @@ describe("handleRequest (JSON-RPC)", () => {
 });
 
 describe("TOOL_DEFS", () => {
-	it("has 3 tool definitions", () => {
-		expect(TOOL_DEFS).toHaveLength(3);
+	it("has 7 tool definitions", () => {
+		expect(TOOL_DEFS).toHaveLength(7);
 	});
 
 	it("each tool has name, description, and inputSchema", () => {
@@ -265,5 +269,128 @@ describe("TOOL_DEFS", () => {
 			expect(typeof tool.description).toBe("string");
 			expect(tool.inputSchema.type).toBe("object");
 		}
+	});
+});
+
+describe("handleTool: disable_gate / enable_gate", () => {
+	it("disable_gate adds gate to disabled_gates in state file", () => {
+		// Write gates.json and initial session state
+		const qultDir = join(TEST_DIR, ".qult");
+		writeFileSync(
+			join(qultDir, "gates.json"),
+			JSON.stringify({ on_write: { lint: { command: "echo ok" } } }),
+		);
+		const statePath = join(STATE_DIR, "session-state.json");
+		writeFileSync(statePath, JSON.stringify({ disabled_gates: [] }));
+		resetMcpCache();
+
+		const result = handleTool("disable_gate", TEST_DIR, { gate_name: "lint" });
+		expect(result.content[0]!.text).toContain("disabled");
+
+		const state = JSON.parse(readFileSync(statePath, "utf-8"));
+		expect(state.disabled_gates).toContain("lint");
+	});
+
+	it("disable_gate rejects unknown gate name", () => {
+		const qultDir = join(TEST_DIR, ".qult");
+		writeFileSync(
+			join(qultDir, "gates.json"),
+			JSON.stringify({ on_write: { lint: { command: "echo ok" } } }),
+		);
+		resetMcpCache();
+
+		const result = handleTool("disable_gate", TEST_DIR, { gate_name: "typo" });
+		expect(result.isError).toBe(true);
+		expect(result.content[0]!.text).toContain("Unknown gate");
+	});
+
+	it("disable_gate accepts 'review' as valid gate name", () => {
+		const statePath = join(STATE_DIR, "session-state.json");
+		writeFileSync(statePath, JSON.stringify({ disabled_gates: [] }));
+		resetMcpCache();
+
+		const result = handleTool("disable_gate", TEST_DIR, { gate_name: "review" });
+		expect(result.content[0]!.text).toContain("disabled");
+	});
+
+	it("enable_gate removes gate from disabled_gates", () => {
+		const qultDir = join(TEST_DIR, ".qult");
+		writeFileSync(
+			join(qultDir, "gates.json"),
+			JSON.stringify({
+				on_write: { lint: { command: "echo ok" }, typecheck: { command: "echo ok" } },
+			}),
+		);
+		const statePath = join(STATE_DIR, "session-state.json");
+		writeFileSync(statePath, JSON.stringify({ disabled_gates: ["lint", "typecheck"] }));
+		resetMcpCache();
+
+		const result = handleTool("enable_gate", TEST_DIR, { gate_name: "lint" });
+		expect(result.content[0]!.text).toContain("re-enabled");
+
+		const state = JSON.parse(readFileSync(statePath, "utf-8"));
+		expect(state.disabled_gates).toEqual(["typecheck"]);
+	});
+
+	it("disable_gate returns error without gate_name", () => {
+		const result = handleTool("disable_gate", TEST_DIR, {});
+		expect(result.isError).toBe(true);
+	});
+});
+
+describe("handleTool: clear_pending_fixes", () => {
+	it("clears all pending fixes", () => {
+		const fixesPath = join(STATE_DIR, "pending-fixes.json");
+		writeFileSync(fixesPath, JSON.stringify([{ file: "a.ts", errors: ["err"], gate: "lint" }]));
+		resetMcpCache();
+
+		const result = handleTool("clear_pending_fixes", TEST_DIR);
+		expect(result.content[0]!.text).toContain("cleared");
+
+		const fixes = JSON.parse(readFileSync(fixesPath, "utf-8"));
+		expect(fixes).toEqual([]);
+	});
+});
+
+describe("handleTool: set_config", () => {
+	it("sets a valid config key", () => {
+		const qultDir = join(TEST_DIR, ".qult");
+		mkdirSync(qultDir, { recursive: true });
+		resetMcpCache();
+
+		const result = handleTool("set_config", TEST_DIR, {
+			key: "review.score_threshold",
+			value: 10,
+		});
+		expect(result.content[0]!.text).toContain("Config set");
+		expect(result.content[0]!.text).toContain("10");
+
+		const config = JSON.parse(readFileSync(join(qultDir, "config.json"), "utf-8"));
+		expect(config.review.score_threshold).toBe(10);
+	});
+
+	it("rejects invalid config key", () => {
+		const result = handleTool("set_config", TEST_DIR, {
+			key: "invalid.key",
+			value: 5,
+		});
+		expect(result.isError).toBe(true);
+		expect(result.content[0]!.text).toContain("Invalid key");
+	});
+
+	it("merges with existing config", () => {
+		const qultDir = join(TEST_DIR, ".qult");
+		mkdirSync(qultDir, { recursive: true });
+		writeFileSync(
+			join(qultDir, "config.json"),
+			JSON.stringify({ review: { score_threshold: 12, max_iterations: 3 } }),
+		);
+		resetMcpCache();
+
+		handleTool("set_config", TEST_DIR, { key: "review.score_threshold", value: 10 });
+
+		const config = JSON.parse(readFileSync(join(qultDir, "config.json"), "utf-8"));
+		expect(config.review.score_threshold).toBe(10);
+		expect(config.review.max_iterations).toBe(3);
 	});
 });

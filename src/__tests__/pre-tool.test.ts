@@ -190,6 +190,32 @@ describe("preTool: Bash git commit checks", () => {
 		expect(errOutput).toContain("review");
 	});
 
+	it("allows commit when review is disabled via disable_gate", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({
+				on_commit: { test: { command: "vitest run", timeout: 30000 } },
+			}),
+		);
+
+		const { disableGate, recordChangedFile, recordTestPass } = await import(
+			"../state/session-state.ts"
+		);
+		recordTestPass("vitest run");
+		for (let i = 0; i < 6; i++) {
+			recordChangedFile(`/project/src/file${i}.ts`);
+		}
+		disableGate("review");
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({
+			tool_name: "Bash",
+			tool_input: { command: 'git commit -m "large change"' },
+		});
+
+		expect(exitCode).toBeNull();
+	});
+
 	it("allows non-commit Bash commands", async () => {
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
 		await preTool({
@@ -198,6 +224,48 @@ describe("preTool: Bash git commit checks", () => {
 		});
 
 		expect(exitCode).toBeNull();
+	});
+
+	it("DENY git -c key=value commit (config args before commit)", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({
+				on_commit: { test: { command: "vitest run", timeout: 30000 } },
+			}),
+		);
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		try {
+			await preTool({
+				tool_name: "Bash",
+				tool_input: { command: 'git -c user.name="Foo" commit -m "msg"' },
+			});
+		} catch {
+			/* exit(2) */
+		}
+
+		expect(exitCode).toBe(2);
+	});
+
+	it("DENY case-insensitive GIT COMMIT", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({
+				on_commit: { test: { command: "vitest run", timeout: 30000 } },
+			}),
+		);
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		try {
+			await preTool({
+				tool_name: "Bash",
+				tool_input: { command: 'GIT COMMIT -m "msg"' },
+			});
+		} catch {
+			/* exit(2) */
+		}
+
+		expect(exitCode).toBe(2);
 	});
 });
 

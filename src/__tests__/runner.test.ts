@@ -2,7 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetConfigCache } from "../config.ts";
-import { runGate, smartTruncate } from "../gates/runner.ts";
+import { runGate, runGateAsync, smartTruncate } from "../gates/runner.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-runner-test");
 const originalCwd = process.cwd();
@@ -66,6 +66,23 @@ describe("runGate", () => {
 		// Smart truncation: output should be capped + contain truncation marker
 		expect(result.output.length).toBeLessThanOrEqual(2100); // 2000 + marker overhead
 		expect(result.output).toContain("chars truncated");
+	});
+});
+
+describe("runGateAsync", () => {
+	it("returns passed: false for failing command", async () => {
+		const result = await runGateAsync("fail-gate", {
+			command: "echo 'lint error' && exit 1",
+			timeout: 3000,
+		});
+		expect(result.passed).toBe(false);
+		expect(result.output).toContain("lint error");
+	});
+
+	it("returns passed: true for successful command", async () => {
+		const result = await runGateAsync("ok-gate", { command: "echo ok", timeout: 3000 });
+		expect(result.passed).toBe(true);
+		expect(result.output).toContain("ok");
 	});
 });
 

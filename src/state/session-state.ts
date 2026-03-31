@@ -60,6 +60,10 @@ export interface SessionState {
 	// ── File tracking ────────────────────────────────────────
 	/** Files edited this session (for review threshold) */
 	changed_file_paths: string[];
+
+	// ── Gate override ────────────────────────────────────────
+	/** Gates temporarily disabled for this session */
+	disabled_gates: string[];
 }
 
 function filePath(): string {
@@ -80,6 +84,7 @@ function defaultState(): SessionState {
 		plan_eval_iteration: 0,
 		plan_eval_score_history: [],
 		plan_selfcheck_blocked_at: null,
+		disabled_gates: [],
 	};
 }
 
@@ -320,6 +325,31 @@ export function resetPlanEvalIteration(): void {
 	const state = readSessionState();
 	state.plan_eval_iteration = 0;
 	state.plan_eval_score_history = [];
+	writeState(state);
+}
+
+// ── Gate override ───────────────────────────────────────
+
+/** Check if a gate is currently disabled. */
+export function isGateDisabled(gateName: string): boolean {
+	const state = readSessionState();
+	return (state.disabled_gates ?? []).includes(gateName);
+}
+
+/** Disable a gate for the current session. */
+export function disableGate(gateName: string): void {
+	const state = readSessionState();
+	if (!state.disabled_gates) state.disabled_gates = [];
+	if (!state.disabled_gates.includes(gateName)) {
+		state.disabled_gates.push(gateName);
+	}
+	writeState(state);
+}
+
+/** Re-enable a previously disabled gate. */
+export function enableGate(gateName: string): void {
+	const state = readSessionState();
+	state.disabled_gates = (state.disabled_gates ?? []).filter((g) => g !== gateName);
 	writeState(state);
 }
 

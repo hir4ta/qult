@@ -57,10 +57,14 @@ describe("parseScores", () => {
 		expect(result).toEqual({ correctness: 4, design: 5, security: 3 });
 	});
 
-	it("parses loose format (Score: with 3 digits)", () => {
-		const result = parseScores("Score: =4 =5 =3");
+	it("parses dimensions in any order", () => {
+		const result = parseScores("Design=5 Security=3 Correctness=4");
 		expect(result).not.toBeNull();
 		expect(result).toEqual({ correctness: 4, design: 5, security: 3 });
+	});
+
+	it("rejects nameless scores (no dimension names)", () => {
+		expect(parseScores("Score: =4 =5 =3")).toBeNull();
 	});
 
 	it("returns null on invalid input (no scores)", () => {
@@ -73,6 +77,21 @@ describe("parseScores", () => {
 		const result = parseScores("");
 		expect(result).toBeNull();
 		expect(parseScores("   ")).toBeNull();
+	});
+
+	it("returns null if any dimension out of range", () => {
+		expect(parseScores("Correctness=6 Design=5 Security=3")).toBeNull();
+		expect(parseScores("Correctness=0 Design=5 Security=3")).toBeNull();
+	});
+
+	it("parses mixed = and : separators", () => {
+		const result = parseScores("Correctness: 4, Design=5, Security: 3");
+		expect(result).not.toBeNull();
+		expect(result).toEqual({ correctness: 4, design: 5, security: 3 });
+	});
+
+	it("rejects partial dimensions", () => {
+		expect(parseScores("Correctness=4 Design=5")).toBeNull();
 	});
 });
 
@@ -95,6 +114,16 @@ describe("parseDimensionScores", () => {
 		const result = parseDimensionScores("No dimension scores here", dims);
 		expect(result).toBeNull();
 		expect(parseDimensionScores("", dims)).toBeNull();
+	});
+
+	it("parses dimensions in any order", () => {
+		const result = parseDimensionScores("Clarity=3 Feasibility: 4, Completeness=5", dims);
+		expect(result).not.toBeNull();
+		expect(result).toEqual({ Feasibility: 4, Completeness: 5, Clarity: 3 });
+	});
+
+	it("rejects partial dimensions", () => {
+		expect(parseDimensionScores("Feasibility=4 Completeness=5", dims)).toBeNull();
 	});
 });
 
@@ -275,6 +304,27 @@ Why this change is needed.
 		const warnings = validatePlanHeuristics(plan);
 		expect(warnings.length).toBeGreaterThan(0);
 		expect(warnings.some((w) => w.includes("Verify"))).toBe(true);
+	});
+
+	it("Go-style TestXxx verify format does not trigger warning", () => {
+		const plan = validPlan.replace("foo.test.ts:testTimeout", "TestHandleTimeout");
+		const warnings = validatePlanHeuristics(plan);
+		expect(warnings.filter((w) => w.includes("Verify"))).toHaveLength(0);
+	});
+
+	it("Python-style test_xxx verify format does not trigger warning", () => {
+		const plan = validPlan.replace("foo.test.ts:testTimeout", "test_handle_timeout");
+		const warnings = validatePlanHeuristics(plan);
+		expect(warnings.filter((w) => w.includes("Verify"))).toHaveLength(0);
+	});
+
+	it("vague change with 7 words still triggers warning (threshold is 8)", () => {
+		const plan = validPlan.replace(
+			"Add a timeout parameter to the execute function with default 5000ms",
+			"Fix the bug in session state",
+		);
+		const warnings = validatePlanHeuristics(plan);
+		expect(warnings.some((w) => w.includes("vague"))).toBe(true);
 	});
 
 	it("registry file without consumer triggers warning", () => {

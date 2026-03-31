@@ -12,6 +12,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { atomicWriteJson } from "./state/atomic-write.ts";
 import type { GatesConfig, PendingFix } from "./types.ts";
 
 const STATE_DIR = ".qult/.state";
@@ -92,12 +93,37 @@ function formatPendingFixes(fixes: PendingFix[]): string {
 	return lines.join("\n");
 }
 
+// ── Gate name validation ────────────────────────────────────
+
+/** Get all valid gate names from gates.json + "review" (session policy). */
+function getValidGateNames(cwd: string): string[] {
+	const gatesPath = join(cwd, GATES_PATH);
+	const gates = readJson<GatesConfig | null>(gatesPath, null);
+	const names = new Set<string>(["review"]);
+	if (gates) {
+		for (const category of [gates.on_write, gates.on_commit, gates.on_review]) {
+			if (category) {
+				for (const name of Object.keys(category)) names.add(name);
+			}
+		}
+	}
+	return [...names];
+}
+
+function isValidGateName(name: string, cwd: string): boolean {
+	return getValidGateNames(cwd).includes(name);
+}
+
 // ── Tool definitions ────────────────────────────────────────
 
 interface ToolDef {
 	name: string;
 	description: string;
-	inputSchema: { type: "object"; properties: Record<string, never> };
+	inputSchema: {
+		type: "object";
+		properties: Record<string, unknown>;
+		required?: string[];
+	};
 }
 
 interface ToolResult {
@@ -124,9 +150,58 @@ const TOOL_DEFS: ToolDef[] = [
 			"Returns gate definitions as JSON: on_write (lint/typecheck per file), on_commit (test), on_review (e2e). Each gate has command, timeout, optional run_once_per_batch.",
 		inputSchema: { type: "object", properties: {} },
 	},
+	{
+		name: "disable_gate",
+		description:
+			"Temporarily disable a gate for this session. The gate will not run on file edits or block commits. Use when a gate is broken or irrelevant for current work. Re-enable with enable_gate.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				gate_name: {
+					type: "string",
+					description: "Gate name to disable (e.g. 'lint', 'typecheck', 'test')",
+				},
+			},
+			required: ["gate_name"],
+		},
+	},
+	{
+		name: "enable_gate",
+		description: "Re-enable a previously disabled gate.",
+		inputSchema: {
+			type: "object",
+			properties: { gate_name: { type: "string", description: "Gate name to re-enable" } },
+			required: ["gate_name"],
+		},
+	},
+	{
+		name: "set_config",
+		description:
+			"Set a qult config value in .qult/config.json. Allowed keys: review.score_threshold, review.max_iterations, review.required_changed_files, plan_eval.score_threshold, plan_eval.max_iterations.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				key: {
+					type: "string",
+					description: "Config key (e.g. 'review.score_threshold')",
+				},
+				value: {
+					type: "number",
+					description: "Numeric value to set",
+				},
+			},
+			required: ["key", "value"],
+		},
+	},
+	{
+		name: "clear_pending_fixes",
+		description:
+			"Clear all pending lint/typecheck fixes. Use when fixes are false positives or already resolved outside qult.",
+		inputSchema: { type: "object", properties: {} },
+	},
 ];
 
-function handleTool(name: string, cwd: string): ToolResult {
+function handleTool(name: string, cwd: string, args?: Record<string, unknown>): ToolResult {
 	switch (name) {
 		case "get_pending_fixes": {
 			const path = findLatestStateFile(cwd, "pending-fixes");
@@ -157,6 +232,106 @@ function handleTool(name: string, cwd: string): ToolResult {
 				};
 			}
 			return { content: [{ type: "text", text: JSON.stringify(gates, null, 2) }] };
+		}
+		case "disable_gate": {
+			const gateName = typeof args?.gate_name === "string" ? args.gate_name : null;
+			if (!gateName) {
+				return { isError: true, content: [{ type: "text", text: "Missing gate_name parameter." }] };
+			}
+			if (!isValidGateName(gateName, cwd)) {
+				return {
+					isError: true,
+					content: [
+						{
+							type: "text",
+							text: `Unknown gate '${gateName}'. Valid gates: ${getValidGateNames(cwd).join(", ")}`,
+						},
+					],
+				};
+			}
+			const statePath = findLatestStateFile(cwd, "session-state");
+			const state = readJson<Record<string, unknown>>(statePath, {});
+			const disabled = Array.isArray(state.disabled_gates) ? state.disabled_gates : [];
+			if (!disabled.includes(gateName)) {
+				disabled.push(gateName);
+			}
+			state.disabled_gates = disabled;
+			try {
+				atomicWriteJson(statePath, state);
+				_jsonCache.delete(statePath);
+			} catch {
+				return { isError: true, content: [{ type: "text", text: "Failed to write state." }] };
+			}
+			return { content: [{ type: "text", text: `Gate '${gateName}' disabled for this session.` }] };
+		}
+		case "enable_gate": {
+			const gateName = typeof args?.gate_name === "string" ? args.gate_name : null;
+			if (!gateName) {
+				return { isError: true, content: [{ type: "text", text: "Missing gate_name parameter." }] };
+			}
+			const statePath = findLatestStateFile(cwd, "session-state");
+			const state = readJson<Record<string, unknown>>(statePath, {});
+			const disabled = Array.isArray(state.disabled_gates) ? state.disabled_gates : [];
+			state.disabled_gates = disabled.filter((g: unknown) => g !== gateName);
+			try {
+				atomicWriteJson(statePath, state);
+				_jsonCache.delete(statePath);
+			} catch {
+				return { isError: true, content: [{ type: "text", text: "Failed to write state." }] };
+			}
+			return { content: [{ type: "text", text: `Gate '${gateName}' re-enabled.` }] };
+		}
+		case "set_config": {
+			const key = typeof args?.key === "string" ? args.key : null;
+			const value = typeof args?.value === "number" ? args.value : null;
+			if (!key || value === null) {
+				return {
+					isError: true,
+					content: [{ type: "text", text: "Missing key or value parameter." }],
+				};
+			}
+			const ALLOWED_KEYS = [
+				"review.score_threshold",
+				"review.max_iterations",
+				"review.required_changed_files",
+				"plan_eval.score_threshold",
+				"plan_eval.max_iterations",
+			];
+			if (!ALLOWED_KEYS.includes(key)) {
+				return {
+					isError: true,
+					content: [
+						{ type: "text", text: `Invalid key '${key}'. Allowed: ${ALLOWED_KEYS.join(", ")}` },
+					],
+				};
+			}
+			const configPath = join(cwd, ".qult", "config.json");
+			const config = readJson<Record<string, unknown>>(configPath, {});
+			const [section, field] = key.split(".");
+			if (!section || !field) {
+				return { isError: true, content: [{ type: "text", text: "Invalid key format." }] };
+			}
+			if (!config[section] || typeof config[section] !== "object") {
+				config[section] = {};
+			}
+			(config[section] as Record<string, unknown>)[field] = value;
+			try {
+				atomicWriteJson(configPath, config);
+				_jsonCache.delete(configPath);
+			} catch {
+				return { isError: true, content: [{ type: "text", text: "Failed to write config." }] };
+			}
+			return { content: [{ type: "text", text: `Config set: ${key} = ${value}` }] };
+		}
+		case "clear_pending_fixes": {
+			const fixesPath = findLatestStateFile(cwd, "pending-fixes");
+			try {
+				atomicWriteJson(fixesPath, []);
+				_jsonCache.delete(fixesPath);
+			} catch {
+				return { isError: true, content: [{ type: "text", text: "Failed to clear fixes." }] };
+			}
+			return { content: [{ type: "text", text: "All pending fixes cleared." }] };
 		}
 		default:
 			return { isError: true, content: [{ type: "text", text: `Unknown tool: ${name}` }] };
@@ -213,7 +388,8 @@ function handleRequest(parsed: JsonRpcRequest, cwd: string): JsonRpcResponse | n
 			return { jsonrpc: "2.0", id, result: { tools: TOOL_DEFS } };
 
 		case "tools/call": {
-			const toolName = (parsed.params as Record<string, unknown>)?.name;
+			const params = parsed.params as Record<string, unknown>;
+			const toolName = params?.name;
 			if (typeof toolName !== "string") {
 				return {
 					jsonrpc: "2.0",
@@ -221,7 +397,11 @@ function handleRequest(parsed: JsonRpcRequest, cwd: string): JsonRpcResponse | n
 					error: { code: -32602, message: "Missing tool name" },
 				};
 			}
-			return { jsonrpc: "2.0", id, result: handleTool(toolName, cwd) };
+			const toolArgs =
+				typeof params?.arguments === "object"
+					? (params.arguments as Record<string, unknown>)
+					: undefined;
+			return { jsonrpc: "2.0", id, result: handleTool(toolName, cwd, toolArgs) };
 		}
 
 		case "ping":
@@ -249,16 +429,16 @@ async function main(): Promise<void> {
 			const parsed = JSON.parse(line) as JsonRpcRequest;
 			const response = handleRequest(parsed, cwd);
 			if (response) {
-				process.stdout.write(JSON.stringify(response) + "\n");
+				process.stdout.write(`${JSON.stringify(response)}\n`);
 			}
 		} catch {
 			// Malformed JSON → send parse error if we can guess an id
 			process.stdout.write(
-				JSON.stringify({
+				`${JSON.stringify({
 					jsonrpc: "2.0",
 					id: null,
 					error: { code: -32700, message: "Parse error" },
-				}) + "\n",
+				})}\n`,
 			);
 		}
 	}

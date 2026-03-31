@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { exec, execSync } from "node:child_process";
 import { loadConfig } from "../config.ts";
 import type { GateDefinition } from "../types.ts";
 
@@ -20,7 +20,47 @@ export function smartTruncate(text: string, maxChars: number): string {
 	return `${head}\n... (${truncated} chars truncated) ...\n${tail}`;
 }
 
-/** Run a single gate command. Returns pass/fail + output + duration. */
+/** Run a single gate command asynchronously. Returns pass/fail + output + duration. */
+export function runGateAsync(
+	name: string,
+	gate: GateDefinition,
+	file?: string,
+): Promise<GateResult> {
+	const config = loadConfig();
+	const command = file ? gate.command.replace("{file}", file) : gate.command;
+	const timeout = gate.timeout ?? config.gates.default_timeout;
+	const maxChars = config.gates.output_max_chars;
+	const start = Date.now();
+
+	return new Promise((resolve) => {
+		exec(
+			command,
+			{
+				cwd: process.cwd(),
+				timeout,
+				env: {
+					...process.env,
+					PATH: `${process.cwd()}/node_modules/.bin:${process.env.PATH}`,
+				},
+				encoding: "utf-8",
+			},
+			(err, stdout, stderr) => {
+				const duration_ms = Date.now() - start;
+				if (err) {
+					const output =
+						smartTruncate((stdout ?? "") + (stderr ?? ""), maxChars) ||
+						`Exit code ${err.code ?? 1}`;
+					resolve({ name, passed: false, output, duration_ms });
+				} else {
+					const output = smartTruncate(stdout ?? "", maxChars);
+					resolve({ name, passed: true, output, duration_ms });
+				}
+			},
+		);
+	});
+}
+
+/** Run a single gate command (sync). Returns pass/fail + output + duration. */
 export function runGate(name: string, gate: GateDefinition, file?: string): GateResult {
 	const config = loadConfig();
 	const command = file ? gate.command.replace("{file}", file) : gate.command;

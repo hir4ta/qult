@@ -319,7 +319,8 @@ function defaultState() {
     review_score_history: [],
     plan_eval_iteration: 0,
     plan_eval_score_history: [],
-    plan_selfcheck_blocked_at: null
+    plan_selfcheck_blocked_at: null,
+    disabled_gates: []
   };
 }
 function readSessionState() {
@@ -489,6 +490,10 @@ function resetPlanEvalIteration() {
   state.plan_eval_score_history = [];
   writeState(state);
 }
+function isGateDisabled(gateName) {
+  const state = readSessionState();
+  return (state.disabled_gates ?? []).includes(gateName);
+}
 function wasPlanSelfcheckBlocked() {
   return readSessionState().plan_selfcheck_blocked_at != null;
 }
@@ -598,7 +603,7 @@ var init_respond = __esm(() => {
 });
 
 // src/gates/runner.ts
-import { execSync } from "node:child_process";
+import { exec, execSync } from "node:child_process";
 function smartTruncate(text, maxChars) {
   if (text.length <= maxChars)
     return text;
@@ -610,6 +615,33 @@ function smartTruncate(text, maxChars) {
   return `${head}
 ... (${truncated} chars truncated) ...
 ${tail}`;
+}
+function runGateAsync(name, gate, file) {
+  const config = loadConfig();
+  const command = file ? gate.command.replace("{file}", file) : gate.command;
+  const timeout = gate.timeout ?? config.gates.default_timeout;
+  const maxChars = config.gates.output_max_chars;
+  const start = Date.now();
+  return new Promise((resolve) => {
+    exec(command, {
+      cwd: process.cwd(),
+      timeout,
+      env: {
+        ...process.env,
+        PATH: `${process.cwd()}/node_modules/.bin:${process.env.PATH}`
+      },
+      encoding: "utf-8"
+    }, (err, stdout, stderr) => {
+      const duration_ms = Date.now() - start;
+      if (err) {
+        const output = smartTruncate((stdout ?? "") + (stderr ?? ""), maxChars) || `Exit code ${err.code ?? 1}`;
+        resolve({ name, passed: false, output, duration_ms });
+      } else {
+        const output = smartTruncate(stdout ?? "", maxChars);
+        resolve({ name, passed: true, output, duration_ms });
+      }
+    });
+  });
 }
 function runGate(name, gate, file) {
   const config = loadConfig();
@@ -660,12 +692,12 @@ async function postTool(ev) {
   if (!tool)
     return;
   if (tool === "Edit" || tool === "Write") {
-    handleEditWrite(ev);
+    await handleEditWrite(ev);
   } else if (tool === "Bash") {
     handleBash(ev);
   }
 }
-function handleEditWrite(ev) {
+async function handleEditWrite(ev) {
   const rawFile = typeof ev.tool_input?.file_path === "string" ? ev.tool_input.file_path : null;
   if (!rawFile)
     return;
@@ -678,23 +710,31 @@ function handleEditWrite(ev) {
     return;
   const fileExt = extname(file).toLowerCase();
   const gatedExts = getGatedExtensions();
-  const newFixes = [];
   const sessionId = ev.session_id;
+  const gateEntries = [];
   for (const [name, gate] of Object.entries(gates.on_write)) {
+    if (isGateDisabled(name))
+      continue;
+    if (gate.run_once_per_batch && sessionId && shouldSkipGate(name, sessionId))
+      continue;
+    const hasPlaceholder = gate.command.includes("{file}");
+    if (hasPlaceholder && gatedExts.size > 0 && !gatedExts.has(fileExt))
+      continue;
+    gateEntries.push({ name, gate, fileArg: hasPlaceholder ? file : undefined });
+  }
+  const results = await Promise.allSettled(gateEntries.map((entry) => runGateAsync(entry.name, entry.gate, entry.fileArg)));
+  const newFixes = [];
+  for (let i = 0;i < results.length; i++) {
+    const settled = results[i];
+    const entry = gateEntries[i];
     try {
-      if (gate.run_once_per_batch && sessionId && shouldSkipGate(name, sessionId)) {
-        continue;
-      }
-      const hasPlaceholder = gate.command.includes("{file}");
-      if (hasPlaceholder && gatedExts.size > 0 && !gatedExts.has(fileExt)) {
-        continue;
-      }
-      const result = runGate(name, gate, hasPlaceholder ? file : undefined);
-      if (gate.run_once_per_batch && sessionId) {
-        markGateRan(name, sessionId);
-      }
-      if (!result.passed) {
-        newFixes.push({ file, errors: [result.output], gate: name });
+      if (settled.status === "fulfilled") {
+        if (entry.gate.run_once_per_batch && sessionId) {
+          markGateRan(entry.name, sessionId);
+        }
+        if (!settled.value.passed) {
+          newFixes.push({ file, errors: [settled.value.output], gate: entry.name });
+        }
       }
     } catch {}
   }
@@ -729,6 +769,8 @@ function onGitCommit() {
     return;
   for (const [name, gate] of Object.entries(gates.on_commit)) {
     try {
+      if (isGateDisabled(name))
+        continue;
       runGate(name, gate);
     } catch {}
   }
@@ -743,6 +785,8 @@ function onLintFix() {
       return;
     const remaining = fixes.filter((fix) => {
       for (const [name, gate] of Object.entries(gates.on_write)) {
+        if (isGateDisabled(name))
+          continue;
         const hasPlaceholder = gate.command.includes("{file}");
         if (!hasPlaceholder)
           continue;
@@ -795,7 +839,7 @@ var init_post_tool = __esm(() => {
   init_runner();
   init_pending_fixes();
   init_session_state();
-  GIT_COMMIT_RE = /\bgit\s+commit\b/;
+  GIT_COMMIT_RE = /\bgit\s+(?:-\S+(?:\s+\S+)?\s+)*commit\b/i;
   LINT_FIX_RE = /\b(biome\s+(check|lint).*--(fix|write)|biome\s+format|eslint.*--fix|prettier.*--write|ruff\s+check.*--fix|ruff\s+format|gofmt|go\s+fmt|cargo\s+fmt|autopep8|black)\b/;
   TEST_CMD_RE = /\b(vitest|jest|mocha|pytest|go\s+test|cargo\s+test)\b/;
 });
@@ -856,12 +900,13 @@ function checkBash(ev) {
   if (!gates)
     return;
   if (gates.on_commit && Object.keys(gates.on_commit).length > 0) {
-    if (!readLastTestPass()) {
+    const allCommitGatesDisabled = Object.keys(gates.on_commit).every((g) => isGateDisabled(g));
+    if (!allCommitGatesDisabled && !readLastTestPass()) {
       deny("Run tests before committing. No test pass recorded since last commit.");
     }
   }
   if (!readLastReview()) {
-    if (isReviewRequired()) {
+    if (isReviewRequired() && !isGateDisabled("review")) {
       deny("Run /qult:review before committing. Independent review is required.");
     }
   }
@@ -872,7 +917,7 @@ var init_pre_tool = __esm(() => {
   init_pending_fixes();
   init_session_state();
   init_respond();
-  GIT_COMMIT_RE2 = /\bgit\s+commit\b/;
+  GIT_COMMIT_RE2 = /\bgit\s+(?:-\S+(?:\s+\S+)?\s+)*commit\b/i;
 });
 
 // src/hooks/stop.ts
@@ -902,7 +947,7 @@ Plan: ${plan.path}`);
     }
   }
   if (!readLastReview()) {
-    if (isReviewRequired()) {
+    if (isReviewRequired() && !isGateDisabled("review")) {
       block("Run /qult:review before finishing. Independent review is required.");
     }
   }
@@ -1066,7 +1111,7 @@ function validatePlanHeuristics(content) {
       const changeValue = changeMatch[1].trim();
       if (VAGUE_VERBS_RE.test(changeValue)) {
         const words = changeValue.split(/\s+/);
-        if (words.length < 6) {
+        if (words.length < 8) {
           warnings.push(`Task ${num}: Change field is too vague ("${changeValue}"). Be specific about what to do.`);
         }
       }
@@ -1105,54 +1150,43 @@ var init_plan_validators = __esm(() => {
     Verify: /^\s*-\s*\*\*Verify\*\*/m
   };
   VAGUE_VERBS_RE = /^(improve|update|fix|refactor|clean\s*up|enhance|optimize|modify|adjust|change)\b/i;
-  VERIFY_FORMAT_RE = /\S+\.\w+:\S+/;
+  VERIFY_FORMAT_RE = /\S+\.\w+\s*:\s*\S+|\bTest[A-Z]\w+\b|\btest_\w+\b|[\w/]+\.\w+/;
   PLAN_EVAL_DIMENSIONS = ["Feasibility", "Completeness", "Clarity"];
 });
 
 // src/hooks/subagent-stop/score-parsers.ts
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function parseDimensionScore(output, name) {
+  const re = new RegExp(`${escapeRegex(name)}[=:]\\s*(\\d+)`, "i");
+  const m = re.exec(output);
+  if (!m)
+    return null;
+  const val = Number.parseInt(m[1], 10);
+  return val >= 1 && val <= 5 ? val : null;
+}
 function parseScores(output) {
-  for (const re of [SCORE_STRICT_RE, SCORE_COLON_RE, SCORE_LOOSE_RE]) {
-    const m = re.exec(output);
-    if (m) {
-      const correctness = Number.parseInt(m[1], 10);
-      const design = Number.parseInt(m[2], 10);
-      const security = Number.parseInt(m[3], 10);
-      if (correctness < 1 || correctness > 5)
-        return null;
-      if (design < 1 || design > 5)
-        return null;
-      if (security < 1 || security > 5)
-        return null;
-      return { correctness, design, security };
-    }
-  }
-  return null;
+  const correctness = parseDimensionScore(output, REVIEW_DIMENSIONS[0]);
+  const design = parseDimensionScore(output, REVIEW_DIMENSIONS[1]);
+  const security = parseDimensionScore(output, REVIEW_DIMENSIONS[2]);
+  if (correctness === null || design === null || security === null)
+    return null;
+  return { correctness, design, security };
 }
 function parseDimensionScores(output, dimensions) {
-  const strictPattern = dimensions.map((d) => `${d}=(\\d+)`).join("\\s+");
-  const strictRe = new RegExp(`Score:\\s*${strictPattern}`, "i");
-  const colonParts = dimensions.map((d) => `${d}[=:]\\s*(\\d+)`).join(".*?");
-  const colonRe = new RegExp(colonParts, "i");
-  for (const re of [strictRe, colonRe]) {
-    const m = re.exec(output);
-    if (m) {
-      const result = {};
-      for (let i = 0;i < dimensions.length; i++) {
-        const val = Number.parseInt(m[i + 1], 10);
-        if (val < 1 || val > 5)
-          return null;
-        result[dimensions[i]] = val;
-      }
-      return result;
-    }
+  const result = {};
+  for (const dim of dimensions) {
+    const val = parseDimensionScore(output, dim);
+    if (val === null)
+      return null;
+    result[dim] = val;
   }
-  return null;
+  return result;
 }
-var SCORE_STRICT_RE, SCORE_COLON_RE, SCORE_LOOSE_RE;
+var REVIEW_DIMENSIONS;
 var init_score_parsers = __esm(() => {
-  SCORE_STRICT_RE = /Score:\s*Correctness=(\d+)\s+Design=(\d+)\s+Security=(\d+)/i;
-  SCORE_COLON_RE = /Correctness[=:]\s*(\d+).*?Design[=:]\s*(\d+).*?Security[=:]\s*(\d+)/i;
-  SCORE_LOOSE_RE = /Score:.*?[=:]\s*(\d+).*?[=:]\s*(\d+).*?[=:]\s*(\d+)/i;
+  REVIEW_DIMENSIONS = ["Correctness", "Design", "Security"];
 });
 
 // src/hooks/subagent-stop/agent-validators.ts
@@ -1255,11 +1289,9 @@ function validateReviewer(output) {
   const hasVerdict = REVIEW_PASS_RE.test(output) || REVIEW_FAIL_RE.test(output);
   const hasFindings = FINDING_RE.test(output) || NO_ISSUES_RE.test(output);
   const hasScore = parseScores(output) !== null;
-  if (hasFindings)
+  if (hasVerdict || hasFindings || hasScore)
     return;
-  if (hasVerdict && hasScore)
-    return;
-  block("Reviewer output must include: (1) 'Review: PASS' or 'Review: FAIL', (2) 'Score: Correctness=N Design=N Security=N', and (3) findings ([severity] file:line) or 'No issues found'. Rerun the review.");
+  block("Reviewer output must include at least one of: (1) 'Review: PASS' or 'Review: FAIL', (2) 'Score: Correctness=N Design=N Security=N', or (3) findings ([severity] file:line). Rerun the review.");
 }
 var SEVERITY_PATTERN, FINDING_RE, NO_ISSUES_RE, REVIEW_PASS_RE, REVIEW_FAIL_RE, PLAN_PASS_RE, PLAN_REVISE_RE;
 var init_agent_validators = __esm(() => {

@@ -234,3 +234,28 @@ describe("postTool: Bash handling", () => {
 		expect(readLastTestPass()).toBeTruthy();
 	});
 });
+
+describe("postTool: disabled gate skip", () => {
+	it("skips disabled gate — no pending-fixes created", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({
+				on_write: {
+					lint: { command: "echo 'lint error' && exit 1", timeout: 3000 },
+				},
+			}),
+		);
+
+		const { disableGate } = await import("../state/session-state.ts");
+		disableGate("lint");
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/foo.ts") },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		expect(readPendingFixes().length).toBe(0);
+	});
+});

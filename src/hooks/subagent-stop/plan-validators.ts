@@ -82,7 +82,8 @@ export function validatePlanStructure(content: string): string[] {
 
 const VAGUE_VERBS_RE =
 	/^(improve|update|fix|refactor|clean\s*up|enhance|optimize|modify|adjust|change)\b/i;
-const VERIFY_FORMAT_RE = /\S+\.\w+:\S+/;
+/** Accept: file.ext:function, TestXxx (Go), test_xxx (Python), or path-like strings */
+const VERIFY_FORMAT_RE = /\S+\.\w+\s*:\s*\S+|\bTest[A-Z]\w+\b|\btest_\w+\b|[\w/]+\.\w+/;
 
 export const PLAN_EVAL_DIMENSIONS = ["Feasibility", "Completeness", "Clarity"];
 
@@ -119,7 +120,7 @@ export function validatePlanHeuristics(content: string): string[] {
 			if (VAGUE_VERBS_RE.test(changeValue)) {
 				// Count words after the vague verb
 				const words = changeValue.split(/\s+/);
-				if (words.length < 6) {
+				if (words.length < 8) {
 					warnings.push(
 						`Task ${num}: Change field is too vague ("${changeValue}"). Be specific about what to do.`,
 					);

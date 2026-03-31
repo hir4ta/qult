@@ -164,3 +164,33 @@ qult の各コンポーネントが依存する仮定と、仮定が崩れた場
 **崩れたら**: 実運用でレビューが価値を生む変更サイズの分布を計測。閾値を調整。
 
 **注意**: この閾値は最も仮定が弱い。運用データ収集を優先すべき。
+
+## Calibration Rationale
+
+各閾値の設計根拠を集約する。キャリブレーションデータの蓄積に伴い更新すること。
+
+### review.score_threshold: 12/15
+
+- 3 次元 (Correctness, Design, Security) x 5 段階
+- 12 = 全次元平均 4.0/5 = 各次元で「minor issues のみ」のライン
+- anchor 基準: 4/5 は「realistic inputs で correct / clear separation / defense-in-depth gap のみ」
+- 11 以下は少なくとも 1 次元が 3/5 以下（＝ reachable な問題あり）なので再修正の価値がある
+
+### plan_eval.score_threshold: 10/15
+
+- 3 次元 (Feasibility, Completeness, Clarity) x 5 段階
+- 10 = 全次元平均 3.33/5
+- review より低い理由: 計画は実装中に修正可能。コードの品質バグは後発見が高コストだが、計画の不完全さは実装で自然に補完される
+- 10 未満は少なくとも 1 次元が 2/5 以下（＝ unexecutable/missing coverage/ambiguous）
+
+### review.required_changed_files: 5
+
+- ゲート対象ファイル 5 以上でレビュー必須
+- 根拠: 5 ファイル以上の変更ではファイル間相互作用の見落としが増加する経験則
+- 厳密なデータなし — 最も仮定が弱い閾値。運用データで要調整
+
+### review.max_iterations: 3 / plan_eval.max_iterations: 2
+
+- Self-Refine (Madaan et al., 2023) の知見: 3 回以上の反復は収穫逓減
+- review は 3 回（コードの修正は多段階）、plan_eval は 2 回（計画の修正は比較的単純）
+- 実運用で 3 回目の改善幅が 0-1 点なら 2 回に削減を検討

@@ -1095,3 +1095,89 @@ describe("Scenario: ExitPlanMode selfcheck — blocks once, passes on retry", ()
 		expect(exitCode).toBeNull();
 	});
 });
+
+// ============================================================
+// Disabled gate scenarios
+// ============================================================
+
+describe("Scenario 8: Disabled gate skips execution — no pending-fixes created", () => {
+	it("full flow", async () => {
+		setupFailingLintGate();
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		const { disableGate } = await import("../state/session-state.ts");
+
+		// Disable lint gate
+		disableGate("lint");
+
+		// Edit a file — lint gate should NOT run
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/foo.ts") },
+		});
+
+		// No pending fixes should exist
+		const fixes = readPendingFixes();
+		expect(fixes.length).toBe(0);
+
+		// Editing another file should work (no DENY)
+		await preTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/bar.ts") },
+		});
+		expect(exitCode).toBeNull();
+	});
+});
+
+describe("Scenario 9: Parallel gate execution collects results correctly", () => {
+	it("full flow", async () => {
+		// Setup 2 gates: one passes, one fails
+		const gates: GatesConfig = {
+			on_write: {
+				lint: { command: "echo 'OK' && exit 0", timeout: 3000 },
+				typecheck: { command: "echo 'Type error in foo.ts' && exit 1", timeout: 3000 },
+			},
+		};
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
+		resetGatesCache();
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/foo.ts") },
+		});
+
+		// Should have pending fixes from typecheck (not lint)
+		const fixes = readPendingFixes();
+		expect(fixes.length).toBe(1);
+		expect(fixes[0]!.gate).toBe("typecheck");
+		expect(fixes[0]!.errors[0]).toContain("Type error");
+	});
+});
+
+describe("Scenario 10: Parallel gate with timeout — timeout gate fails, other succeeds", () => {
+	it("full flow", async () => {
+		// Setup 2 gates: one times out, one passes
+		const gates: GatesConfig = {
+			on_write: {
+				lint: { command: "echo 'OK' && exit 0", timeout: 3000 },
+				slow: { command: "sleep 10", timeout: 200 },
+			},
+		};
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
+		resetGatesCache();
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/foo.ts") },
+		});
+
+		// Timed-out gate should create pending fix; lint should pass
+		const fixes = readPendingFixes();
+		expect(fixes.length).toBe(1);
+		expect(fixes[0]!.gate).toBe("slow");
+	});
+});

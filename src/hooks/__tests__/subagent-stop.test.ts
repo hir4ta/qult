@@ -132,13 +132,24 @@ describe("subagentStop", () => {
 		expect(errOutput).toContain("FAIL");
 	});
 
-	it("blocks qult-reviewer with PASS verdict but no Score or findings", async () => {
+	it("allows qult-reviewer with PASS verdict but no Score or findings (soft validation)", async () => {
+		const handler = (await import("../subagent-stop/index.ts")).default;
+		await handler({
+			hook_type: "SubagentStop",
+			agent_type: "qult-reviewer",
+			last_assistant_message: "Review: PASS\n\nThe code looks good overall.",
+		});
+		// Verdict alone is sufficient — no BLOCK
+		expect(exitCode).toBeNull();
+	});
+
+	it("blocks qult-reviewer with no verdict, no score, no findings", async () => {
 		const handler = (await import("../subagent-stop/index.ts")).default;
 		try {
 			await handler({
 				hook_type: "SubagentStop",
 				agent_type: "qult-reviewer",
-				last_assistant_message: "Review: PASS\n\nThe code looks good overall.",
+				last_assistant_message: "I looked at the code and it seems fine to me.",
 			});
 		} catch {
 			// process.exit(2)

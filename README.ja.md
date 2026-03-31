@@ -1,6 +1,6 @@
 # qult
 
-![Version](https://img.shields.io/badge/version-0.17.1-7fbbb3?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.18.0-7fbbb3?style=flat-square)
 ![TypeScript](https://img.shields.io/badge/TypeScript-standalone_binary-a7c080?style=flat-square&logo=typescript&logoColor=d3c6aa)
 ![Hooks](https://img.shields.io/badge/hooks-7-dbbc7f?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-83c092?style=flat-square)
@@ -96,6 +96,10 @@ flowchart TB
 | get_pending_fixes | lint/typecheck エラーの詳細を返す |
 | get_session_status | テスト/レビュー状態を返す |
 | get_gate_config | ゲート設定を返す |
+| disable_gate | ゲートを一時的に無効化 |
+| enable_gate | 無効化したゲートを再有効化 |
+| set_config | .qult/config.json の設定値を変更 |
+| clear_pending_fixes | pending-fixes を全クリア |
 
 
 ## インストール
@@ -135,6 +139,8 @@ init が行うこと:
 |---------|------|
 | `/qult:status` | 現在の品質ゲート状態を表示 |
 | `/qult:review` | 独立コードレビュー (Opus evaluator) |
+| `/qult:skip` | ゲートの一時無効化/有効化、pending-fixes クリア |
+| `/qult:config` | 設定値の確認・変更（閾値、イテレーション上限等） |
 | `/qult:detect-gates` | ゲート設定を再検出 |
 | `/qult:plan-generator` | 機能説明から構造化 Plan を生成 |
 | `/qult:doctor` | セットアップの健全性チェック |

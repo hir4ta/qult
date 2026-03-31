@@ -26,7 +26,7 @@ qult/
 │   ├── .claude-plugin/plugin.json
 │   ├── hooks/hooks.json             # 7 hooks
 │   ├── .mcp.json                    # MCP server
-│   ├── skills/                      # 8 skills
+│   ├── skills/                      # 10 skills
 │   ├── agents/                      # 3 agents
 │   └── dist/                        # バンドル (hook.mjs, mcp-server.mjs)
 └── src/                             # ソースコード (開発用)
@@ -50,7 +50,7 @@ qult/
 - exit 2 = DENY/block (唯一の強制手段)。stderr に理由を出力
 - **enforcement hooks は stdout 不使用** — plugin hook output bug (#16538) を回避
 - SessionStart: .qult/.state/ 初期化、stale ファイル掃除、startup/clear 時のみ pending-fixes クリア
-- PostToolUse: gate 実行 → state 書き込み (pending-fixes)
+- PostToolUse: gate 並列実行 (Promise.allSettled) → state 書き込み (pending-fixes)
 - PreToolUse: pending-fixes チェック → exit 2 (DENY)。Bash は `if: "Bash(git commit*)"` で絞り込み
 - Stop/SubagentStop: 完了条件チェック → exit 2 (block)
 - TaskCompleted: Verify テスト実行 → state 書き込み
@@ -60,9 +60,11 @@ qult/
 - lazyInit: SessionStart が発火しない環境向けの fallback
 
 ### MCP Server
-- Claude が状態を取得する唯一の経路
+- Claude が状態を取得・操作する経路
 - raw stdio JSON-RPC 実装 (SDK 依存なし)
-- tools: get_pending_fixes, get_session_status, get_gate_config
+- 読み取り: get_pending_fixes, get_session_status, get_gate_config
+- 操作: disable_gate, enable_gate, clear_pending_fixes, set_config
+- disable_gate は gate 名をバリデーション（gates.json のキー + "review"）
 - MCP tool の呼び出しルールは `.claude/rules/qult-gates.md` に定義
 
 ### Config 優先順位

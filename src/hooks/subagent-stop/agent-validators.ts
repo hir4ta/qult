@@ -165,11 +165,12 @@ function validateReviewer(output: string): void {
 	const hasFindings = FINDING_RE.test(output) || NO_ISSUES_RE.test(output);
 	const hasScore = parseScores(output) !== null;
 
-	// Accept if: findings present (backward compat) OR verdict + score
-	if (hasFindings) return;
-	if (hasVerdict && hasScore) return;
+	// Soft validation: accept if any review signal is present.
+	// Only block when output contains no verdict, no findings, AND no scores
+	// (i.e., completely unrelated output from the reviewer agent).
+	if (hasVerdict || hasFindings || hasScore) return;
 
 	block(
-		"Reviewer output must include: (1) 'Review: PASS' or 'Review: FAIL', (2) 'Score: Correctness=N Design=N Security=N', and (3) findings ([severity] file:line) or 'No issues found'. Rerun the review.",
+		"Reviewer output must include at least one of: (1) 'Review: PASS' or 'Review: FAIL', (2) 'Score: Correctness=N Design=N Security=N', or (3) findings ([severity] file:line). Rerun the review.",
 	);
 }

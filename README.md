@@ -1,6 +1,6 @@
 # qult
 
-![Version](https://img.shields.io/badge/version-0.17.1-7fbbb3?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.18.0-7fbbb3?style=flat-square)
 ![TypeScript](https://img.shields.io/badge/TypeScript-standalone_binary-a7c080?style=flat-square&logo=typescript&logoColor=d3c6aa)
 ![Hooks](https://img.shields.io/badge/hooks-7-dbbc7f?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-83c092?style=flat-square)
@@ -94,6 +94,10 @@ flowchart TB
 | get_pending_fixes | Returns lint/typecheck error details |
 | get_session_status | Returns test/review state |
 | get_gate_config | Returns gate configuration |
+| disable_gate | Temporarily disable a gate for this session |
+| enable_gate | Re-enable a previously disabled gate |
+| set_config | Change a config value in .qult/config.json |
+| clear_pending_fixes | Clear all pending lint/typecheck fixes |
 
 ## Installation
 
@@ -132,6 +136,8 @@ What init does:
 |---------|-------------|
 | `/qult:status` | Show current quality gate status |
 | `/qult:review` | Independent code review (Opus evaluator) |
+| `/qult:skip` | Temporarily disable/enable gates or clear pending fixes |
+| `/qult:config` | View or change config values (thresholds, iterations) |
 | `/qult:detect-gates` | Re-detect gate configuration |
 | `/qult:plan-generator` | Generate structured plan from feature description |
 | `/qult:doctor` | Health check for setup |
