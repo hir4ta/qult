@@ -15,7 +15,18 @@
 		],
 		"PreToolUse": [
 			{
-				"matcher": "Edit|Write|Bash|ExitPlanMode",
+				"matcher": "Edit|Write|ExitPlanMode",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs pre-tool",
+						"timeout": 5
+					}
+				]
+			},
+			{
+				"matcher": "Bash",
+				"if": "Bash(git commit*)",
 				"hooks": [
 					{
 						"type": "command",
@@ -54,6 +65,28 @@
 						"type": "command",
 						"command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs task-completed",
 						"timeout": 15
+					}
+				]
+			}
+		],
+		"SessionStart": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs session-start",
+						"timeout": 5
+					}
+				]
+			}
+		],
+		"PostCompact": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs post-compact",
+						"timeout": 5
 					}
 				]
 			}

@@ -17,6 +17,8 @@ export const HOOK_CLASS: Record<string, "enforcement" | "advisory"> = {
 	stop: "enforcement", // block: pending-fixes, incomplete plan, no review
 	"subagent-stop": "enforcement", // block: incomplete reviewer output
 	"task-completed": "advisory", // plan task Verify execution
+	"session-start": "advisory", // initialize state directory
+	"post-compact": "advisory", // re-inject state summary after compaction
 };
 
 const EVENT_MAP: Record<string, () => Promise<{ default: (ev: HookEvent) => Promise<void> }>> = {
@@ -25,6 +27,8 @@ const EVENT_MAP: Record<string, () => Promise<{ default: (ev: HookEvent) => Prom
 	stop: () => import("./stop.ts"),
 	"subagent-stop": () => import("./subagent-stop/index.ts"),
 	"task-completed": () => import("./task-completed.ts"),
+	"session-start": () => import("./session-start.ts"),
+	"post-compact": () => import("./post-compact.ts"),
 };
 
 let _lastWrittenSessionId: string | undefined;

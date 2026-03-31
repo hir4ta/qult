@@ -37,36 +37,52 @@ var init_atomic_write = () => {};
 // src/config.ts
 import { existsSync as existsSync2, readFileSync } from "node:fs";
 import { join } from "node:path";
+function applyConfigLayer(config, raw) {
+  if (raw.review && typeof raw.review === "object") {
+    const r = raw.review;
+    if (typeof r.score_threshold === "number")
+      config.review.score_threshold = r.score_threshold;
+    if (typeof r.max_iterations === "number")
+      config.review.max_iterations = r.max_iterations;
+    if (typeof r.required_changed_files === "number")
+      config.review.required_changed_files = r.required_changed_files;
+  }
+  if (raw.plan_eval && typeof raw.plan_eval === "object") {
+    const p = raw.plan_eval;
+    if (typeof p.score_threshold === "number")
+      config.plan_eval.score_threshold = p.score_threshold;
+    if (typeof p.max_iterations === "number")
+      config.plan_eval.max_iterations = p.max_iterations;
+    if (Array.isArray(p.registry_files))
+      config.plan_eval.registry_files = p.registry_files.filter((f) => typeof f === "string");
+  }
+  if (raw.gates && typeof raw.gates === "object") {
+    const g = raw.gates;
+    if (typeof g.output_max_chars === "number")
+      config.gates.output_max_chars = g.output_max_chars;
+    if (typeof g.default_timeout === "number")
+      config.gates.default_timeout = g.default_timeout;
+  }
+}
 function loadConfig() {
   if (_cache)
     return _cache;
   const config = structuredClone(DEFAULTS);
   try {
+    const pluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
+    if (pluginDataDir) {
+      const prefsPath = join(pluginDataDir, "preferences.json");
+      if (existsSync2(prefsPath)) {
+        const raw = JSON.parse(readFileSync(prefsPath, "utf-8"));
+        applyConfigLayer(config, raw);
+      }
+    }
+  } catch {}
+  try {
     const configPath = join(process.cwd(), ".qult", "config.json");
     if (existsSync2(configPath)) {
       const raw = JSON.parse(readFileSync(configPath, "utf-8"));
-      if (raw.review) {
-        if (typeof raw.review.score_threshold === "number")
-          config.review.score_threshold = raw.review.score_threshold;
-        if (typeof raw.review.max_iterations === "number")
-          config.review.max_iterations = raw.review.max_iterations;
-        if (typeof raw.review.required_changed_files === "number")
-          config.review.required_changed_files = raw.review.required_changed_files;
-      }
-      if (raw.plan_eval) {
-        if (typeof raw.plan_eval.score_threshold === "number")
-          config.plan_eval.score_threshold = raw.plan_eval.score_threshold;
-        if (typeof raw.plan_eval.max_iterations === "number")
-          config.plan_eval.max_iterations = raw.plan_eval.max_iterations;
-        if (Array.isArray(raw.plan_eval.registry_files))
-          config.plan_eval.registry_files = raw.plan_eval.registry_files.filter((f) => typeof f === "string");
-      }
-      if (raw.gates) {
-        if (typeof raw.gates.output_max_chars === "number")
-          config.gates.output_max_chars = raw.gates.output_max_chars;
-        if (typeof raw.gates.default_timeout === "number")
-          config.gates.default_timeout = raw.gates.default_timeout;
-      }
+      applyConfigLayer(config, raw);
     }
   } catch {}
   const envInt = (key) => {
@@ -514,6 +530,48 @@ var init_flush = __esm(() => {
   init_pending_fixes();
   init_plan_status();
   init_session_state();
+});
+
+// src/hooks/lazy-init.ts
+import { existsSync as existsSync7, mkdirSync as mkdirSync2, readdirSync as readdirSync2, statSync as statSync2, unlinkSync as unlinkSync2 } from "node:fs";
+import { join as join6 } from "node:path";
+function markSessionStartCompleted() {
+  _sessionStartCompleted = true;
+}
+function lazyInit() {
+  if (_sessionStartCompleted)
+    return;
+  if (_initialized)
+    return;
+  _initialized = true;
+  try {
+    const stateDir = join6(process.cwd(), ".qult", ".state");
+    if (!existsSync7(stateDir)) {
+      mkdirSync2(stateDir, { recursive: true });
+    }
+    cleanupStaleScopedFiles(stateDir);
+    writePendingFixes([]);
+  } catch {}
+}
+function cleanupStaleScopedFiles(stateDir) {
+  try {
+    const now = Date.now();
+    for (const file of readdirSync2(stateDir)) {
+      if (!SCOPED_FILE_RE.test(file))
+        continue;
+      const filePath2 = join6(stateDir, file);
+      const age = now - statSync2(filePath2).mtimeMs;
+      if (age > STALE_MS) {
+        unlinkSync2(filePath2);
+      }
+    }
+  } catch {}
+}
+var STALE_MS, SCOPED_FILE_RE, _initialized = false, _sessionStartCompleted = false;
+var init_lazy_init = __esm(() => {
+  init_pending_fixes();
+  STALE_MS = 24 * 60 * 60 * 1000;
+  SCOPED_FILE_RE = /^(session-state|pending-fixes)-.+\.json$/;
 });
 
 // src/hooks/respond.ts
@@ -1307,56 +1365,135 @@ var init_task_completed = __esm(() => {
   SAFE_SHELL_ARG_RE = /^[a-zA-Z0-9_/.@-]+$/;
 });
 
+// src/hooks/session-start.ts
+var exports_session_start = {};
+__export(exports_session_start, {
+  default: () => sessionStart
+});
+import { existsSync as existsSync9, mkdirSync as mkdirSync3, readdirSync as readdirSync4, statSync as statSync4, unlinkSync as unlinkSync3 } from "node:fs";
+import { join as join8 } from "node:path";
+async function sessionStart(ev) {
+  try {
+    const stateDir = join8(process.cwd(), ".qult", ".state");
+    if (!existsSync9(stateDir)) {
+      mkdirSync3(stateDir, { recursive: true });
+    }
+    cleanupStaleScopedFiles2(stateDir);
+    if (ev.source === "startup" || ev.source === "clear") {
+      writePendingFixes([]);
+      try {
+        flush();
+      } catch {}
+    }
+    markSessionStartCompleted();
+  } catch {}
+}
+function cleanupStaleScopedFiles2(stateDir) {
+  try {
+    const now = Date.now();
+    for (const file of readdirSync4(stateDir)) {
+      if (!SCOPED_FILE_RE2.test(file))
+        continue;
+      const filePath2 = join8(stateDir, file);
+      const age = now - statSync4(filePath2).mtimeMs;
+      if (age > STALE_MS2) {
+        unlinkSync3(filePath2);
+      }
+    }
+  } catch {}
+}
+var STALE_MS2, SCOPED_FILE_RE2;
+var init_session_start = __esm(() => {
+  init_pending_fixes();
+  init_lazy_init();
+  STALE_MS2 = 24 * 60 * 60 * 1000;
+  SCOPED_FILE_RE2 = /^(session-state|pending-fixes)-.+\.json$/;
+});
+
+// src/hooks/post-compact.ts
+var exports_post_compact = {};
+__export(exports_post_compact, {
+  default: () => postCompact
+});
+import { existsSync as existsSync10, readdirSync as readdirSync5, readFileSync as readFileSync7, statSync as statSync5 } from "node:fs";
+import { join as join9 } from "node:path";
+async function postCompact(_ev) {
+  try {
+    const stateDir = join9(process.cwd(), ".qult", ".state");
+    if (!existsSync10(stateDir))
+      return;
+    const parts = [];
+    const fixesPath2 = findLatestFile(stateDir, "pending-fixes");
+    if (fixesPath2) {
+      const fixes = safeReadJson(fixesPath2, []);
+      if (fixes.length > 0) {
+        parts.push(`[qult] ${fixes.length} pending fix(es):`);
+        for (const fix of fixes) {
+          parts.push(`  [${fix.gate}] ${fix.file}`);
+        }
+      }
+    }
+    const statePath = findLatestFile(stateDir, "session-state");
+    if (statePath) {
+      const state = safeReadJson(statePath, {});
+      if (Object.keys(state).length > 0) {
+        const summary = [];
+        if (state.test_passed_at)
+          summary.push(`test_passed_at: ${state.test_passed_at}`);
+        if (state.review_completed_at)
+          summary.push(`review_completed_at: ${state.review_completed_at}`);
+        const files = state.changed_file_paths;
+        if (Array.isArray(files) && files.length > 0)
+          summary.push(`${files.length} file(s) changed`);
+        if (summary.length > 0) {
+          parts.push(`[qult] Session: ${summary.join(", ")}`);
+        }
+      }
+    }
+    if (parts.length > 0) {
+      process.stdout.write(parts.join(`
+`));
+    }
+  } catch {}
+}
+function findLatestFile(stateDir, prefix) {
+  try {
+    const files = readdirSync5(stateDir).filter((f) => f.startsWith(prefix) && f.endsWith(".json")).map((f) => ({
+      path: join9(stateDir, f),
+      mtime: statSync5(join9(stateDir, f)).mtimeMs
+    })).sort((a, b) => b.mtime - a.mtime);
+    return files.length > 0 ? files[0].path : null;
+  } catch {
+    return null;
+  }
+}
+function safeReadJson(path, fallback) {
+  try {
+    if (!existsSync10(path))
+      return fallback;
+    return JSON.parse(readFileSync7(path, "utf-8"));
+  } catch {
+    return fallback;
+  }
+}
+var init_post_compact = () => {};
+
 // src/hooks/dispatcher.ts
 init_atomic_write();
 init_flush();
 init_pending_fixes();
 init_session_state();
-import { join as join8 } from "node:path";
-
-// src/hooks/lazy-init.ts
-init_pending_fixes();
-import { existsSync as existsSync7, mkdirSync as mkdirSync2, readdirSync as readdirSync2, statSync as statSync2, unlinkSync as unlinkSync2 } from "node:fs";
-import { join as join6 } from "node:path";
-var STALE_MS = 24 * 60 * 60 * 1000;
-var SCOPED_FILE_RE = /^(session-state|pending-fixes)-.+\.json$/;
-var _initialized = false;
-function lazyInit() {
-  if (_initialized)
-    return;
-  _initialized = true;
-  try {
-    const stateDir = join6(process.cwd(), ".qult", ".state");
-    if (!existsSync7(stateDir)) {
-      mkdirSync2(stateDir, { recursive: true });
-    }
-    cleanupStaleScopedFiles(stateDir);
-    writePendingFixes([]);
-  } catch {}
-}
-function cleanupStaleScopedFiles(stateDir) {
-  try {
-    const now = Date.now();
-    for (const file of readdirSync2(stateDir)) {
-      if (!SCOPED_FILE_RE.test(file))
-        continue;
-      const filePath2 = join6(stateDir, file);
-      const age = now - statSync2(filePath2).mtimeMs;
-      if (age > STALE_MS) {
-        unlinkSync2(filePath2);
-      }
-    }
-  } catch {}
-}
-
-// src/hooks/dispatcher.ts
+init_lazy_init();
 init_respond();
+import { join as join10 } from "node:path";
 var EVENT_MAP = {
   "post-tool": () => Promise.resolve().then(() => (init_post_tool(), exports_post_tool)),
   "pre-tool": () => Promise.resolve().then(() => (init_pre_tool(), exports_pre_tool)),
   stop: () => Promise.resolve().then(() => (init_stop(), exports_stop)),
   "subagent-stop": () => Promise.resolve().then(() => (init_subagent_stop(), exports_subagent_stop)),
-  "task-completed": () => Promise.resolve().then(() => (init_task_completed(), exports_task_completed))
+  "task-completed": () => Promise.resolve().then(() => (init_task_completed(), exports_task_completed)),
+  "session-start": () => Promise.resolve().then(() => (init_session_start(), exports_session_start)),
+  "post-compact": () => Promise.resolve().then(() => (init_post_compact(), exports_post_compact))
 };
 var _lastWrittenSessionId;
 async function dispatch(event) {
@@ -1393,7 +1530,7 @@ async function dispatch(event) {
     setFixesSessionScope(ev.session_id);
     if (ev.session_id !== _lastWrittenSessionId) {
       try {
-        atomicWriteJson(join8(process.cwd(), ".qult", ".state", "latest-session.json"), {
+        atomicWriteJson(join10(process.cwd(), ".qult", ".state", "latest-session.json"), {
           session_id: ev.session_id,
           updated_at: new Date().toISOString()
         });

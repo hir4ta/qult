@@ -1,6 +1,6 @@
 # qult
 
-![Version](https://img.shields.io/badge/version-0.16.10-7fbbb3?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.17.0-7fbbb3?style=flat-square)
 ![TypeScript](https://img.shields.io/badge/TypeScript-standalone_binary-a7c080?style=flat-square&logo=typescript&logoColor=d3c6aa)
 ![Hooks](https://img.shields.io/badge/hooks-5-dbbc7f?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-83c092?style=flat-square)
@@ -77,15 +77,17 @@ flowchart TB
 | Declares done mid-plan | **block** -- requires all tasks completed |
 | Plan task completed | **verify** -- runs Verify test immediately |
 
-## 5 Hooks + MCP Server
+## 7 Hooks + MCP Server
 
 | Type | Hook | Role |
 |------|------|------|
+| **Init** (advisory) | SessionStart | Initialize state directory, clean stale files, clear pending-fixes on startup |
 | **Wall** (enforcement) | PostToolUse | Runs lint/type gates after Edit/Write, writes state |
 | **Wall** (enforcement) | PreToolUse | DENY if pending fixes, require test/review before commit, force selfcheck on ExitPlanMode |
 | **Completion gate** (enforcement) | Stop | Block if unresolved errors, incomplete tasks, or missing review |
 | **Subagent** (enforcement) | SubagentStop | Validates review output + enforces trend-aware score threshold (12/15) |
 | **Task verify** (advisory) | TaskCompleted | Runs Verify test immediately when plan task completes |
+| **Context** (advisory) | PostCompact | Re-injects pending fixes and session state after context compaction |
 
 | MCP Tool | Role |
 |----------|------|
@@ -136,7 +138,7 @@ What init does:
 | `/qult:update` | Update rules files after plugin update |
 | `/qult:register-hooks` | Register hooks in settings.local.json (fallback) |
 
-Hooks (PostToolUse, PreToolUse, Stop, SubagentStop, TaskCompleted) and MCP server run automatically.
+Hooks (SessionStart, PostToolUse, PreToolUse, Stop, SubagentStop, TaskCompleted, PostCompact) and MCP server run automatically.
 
 ### If hooks don't fire
 

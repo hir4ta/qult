@@ -1,6 +1,6 @@
 # qult
 
-![Version](https://img.shields.io/badge/version-0.16.10-7fbbb3?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.17.0-7fbbb3?style=flat-square)
 ![TypeScript](https://img.shields.io/badge/TypeScript-standalone_binary-a7c080?style=flat-square&logo=typescript&logoColor=d3c6aa)
 ![Hooks](https://img.shields.io/badge/hooks-5-dbbc7f?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-83c092?style=flat-square)
@@ -79,15 +79,17 @@ flowchart TB
 | Plan タスク完了時 | **verify** — Verify フィールドのテストを即時実行 |
 
 
-## 5 Hooks + MCP Server
+## 7 Hooks + MCP Server
 
 | 分類 | Hook | 役割 |
 |------|------|------|
+| **初期化** (advisory) | SessionStart | state ディレクトリ初期化、stale ファイル掃除、startup 時に pending-fixes クリア |
 | **壁** (enforcement) | PostToolUse | Edit/Write 後に lint/type gate 実行、state に書き込み |
 | **壁** (enforcement) | PreToolUse | pending-fixes 未修正なら DENY、commit 前にテスト/レビュー要求、ExitPlanMode 時に漏れチェック強制 |
 | **完了ゲート** (enforcement) | Stop | 未修正エラー・未完了タスク・レビュー未実施なら block |
 | **サブエージェント** (enforcement) | SubagentStop | レビュー出力検証 + 傾向分析付きスコア閾値強制 (12/15) |
 | **タスク検証** (advisory) | TaskCompleted | Plan タスク完了時に Verify テストを即時実行 |
+| **コンテキスト** (advisory) | PostCompact | compaction 後に pending-fixes と session 状態を再注入 |
 
 | MCP Tool | 役割 |
 |----------|------|
@@ -139,7 +141,7 @@ init が行うこと:
 | `/qult:update` | プラグイン更新後に rules ファイルを最新化 |
 | `/qult:register-hooks` | hooks を settings.local.json に登録 (フォールバック) |
 
-hooks (PostToolUse, PreToolUse, Stop, SubagentStop, TaskCompleted) と MCP server は自動で動作する。
+hooks (SessionStart, PostToolUse, PreToolUse, Stop, SubagentStop, TaskCompleted, PostCompact) と MCP server は自動で動作する。
 
 ### hooks が発火しない場合
 

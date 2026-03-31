@@ -1,7 +1,14 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createServer, findLatestStateFile, readJson, resetMcpCache } from "../mcp-server.ts";
+import {
+	findLatestStateFile,
+	handleRequest,
+	handleTool,
+	readJson,
+	resetMcpCache,
+	TOOL_DEFS,
+} from "../mcp-server.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-mcp-test");
 const STATE_DIR = join(TEST_DIR, ".qult", ".state");
@@ -47,7 +54,6 @@ describe("findLatestStateFile", () => {
 		const newer = join(STATE_DIR, "pending-fixes-session-new.json");
 		writeFileSync(older, "[]");
 
-		// Ensure different mtime
 		const pastTime = Date.now() - 10000;
 		const { utimesSync } = require("node:fs");
 		utimesSync(older, pastTime / 1000, pastTime / 1000);
@@ -62,13 +68,11 @@ describe("findLatestStateFile", () => {
 		const newer = join(STATE_DIR, "pending-fixes-xyz.json");
 		writeFileSync(target, '[{"file":"abc"}]');
 
-		// Make xyz newer by mtime
 		const pastTime = Date.now() - 10000;
 		const { utimesSync } = require("node:fs");
 		utimesSync(target, pastTime / 1000, pastTime / 1000);
 		writeFileSync(newer, '[{"file":"xyz"}]');
 
-		// Write latest-session.json pointing to abc
 		writeFileSync(
 			join(STATE_DIR, "latest-session.json"),
 			JSON.stringify({ session_id: "abc", updated_at: new Date().toISOString() }),
@@ -113,29 +117,24 @@ describe("findLatestStateFile", () => {
 	});
 });
 
-describe("MCP server tools", () => {
-	it("get_pending_fixes returns empty message when no fixes", async () => {
-		const server = createServer(TEST_DIR);
-		const tools = await listTools(server);
-		expect(tools.some((t) => t.name === "get_pending_fixes")).toBe(true);
-
-		const result = await callTool(server, "get_pending_fixes", {});
+describe("handleTool", () => {
+	it("get_pending_fixes returns empty message when no fixes", () => {
+		const result = handleTool("get_pending_fixes", TEST_DIR);
 		expect(result.content[0]!.text).toBe("No pending fixes.");
 	});
 
-	it("get_pending_fixes returns formatted fixes from state file", async () => {
+	it("get_pending_fixes returns formatted fixes from state file", () => {
 		const fixes = [{ file: "/src/foo.ts", errors: ["error: unused var"], gate: "lint" }];
 		writeFileSync(join(STATE_DIR, "pending-fixes.json"), JSON.stringify(fixes));
 
-		const server = createServer(TEST_DIR);
-		const result = await callTool(server, "get_pending_fixes", {});
+		const result = handleTool("get_pending_fixes", TEST_DIR);
 		const text = result.content[0]!.text;
 		expect(text).toContain("1 pending fix(es)");
 		expect(text).toContain("[lint] /src/foo.ts");
 		expect(text).toContain("error: unused var");
 	});
 
-	it("get_session_status returns state from file", async () => {
+	it("get_session_status returns state from file", () => {
 		const state = {
 			last_commit_at: "2026-01-01T00:00:00Z",
 			test_passed_at: null,
@@ -143,83 +142,128 @@ describe("MCP server tools", () => {
 		};
 		writeFileSync(join(STATE_DIR, "session-state.json"), JSON.stringify(state));
 
-		const server = createServer(TEST_DIR);
-		const result = await callTool(server, "get_session_status", {});
+		const result = handleTool("get_session_status", TEST_DIR);
 		const parsed = JSON.parse(result.content[0]!.text);
 		expect(parsed.last_commit_at).toBe("2026-01-01T00:00:00Z");
 		expect(parsed.test_passed_at).toBeNull();
 	});
 
-	it("get_session_status returns isError when no state", async () => {
-		const server = createServer(TEST_DIR);
-		const result = await callTool(server, "get_session_status", {});
+	it("get_session_status returns isError when no state", () => {
+		const result = handleTool("get_session_status", TEST_DIR);
 		expect(result.content[0]!.text).toContain("No session state");
 		expect(result.isError).toBe(true);
 	});
 
-	it("get_gate_config returns gates from file", async () => {
+	it("get_gate_config returns gates from file", () => {
 		const gates = {
 			on_write: { lint: { command: "bun biome check {file}" } },
 			on_commit: { test: { command: "bun vitest run" } },
 		};
 		writeFileSync(join(TEST_DIR, ".qult", "gates.json"), JSON.stringify(gates));
 
-		const server = createServer(TEST_DIR);
-		const result = await callTool(server, "get_gate_config", {});
+		const result = handleTool("get_gate_config", TEST_DIR);
 		const parsed = JSON.parse(result.content[0]!.text);
 		expect(parsed.on_write.lint.command).toBe("bun biome check {file}");
 		expect(parsed.on_commit.test.command).toBe("bun vitest run");
 	});
 
-	it("get_gate_config returns isError when no gates", async () => {
-		const server = createServer(TEST_DIR);
-		const result = await callTool(server, "get_gate_config", {});
+	it("get_gate_config returns isError when no gates", () => {
+		const result = handleTool("get_gate_config", TEST_DIR);
 		expect(result.content[0]!.text).toContain("No gates configured");
 		expect(result.isError).toBe(true);
 	});
 
-	it("get_pending_fixes reads session-scoped file", async () => {
+	it("get_pending_fixes reads session-scoped file", () => {
 		const fixes = [{ file: "/src/bar.ts", errors: ["type error"], gate: "typecheck" }];
 		writeFileSync(join(STATE_DIR, "pending-fixes-abc123.json"), JSON.stringify(fixes));
 
-		const server = createServer(TEST_DIR);
-		const result = await callTool(server, "get_pending_fixes", {});
+		const result = handleTool("get_pending_fixes", TEST_DIR);
 		const text = result.content[0]!.text;
 		expect(text).toContain("[typecheck] /src/bar.ts");
 	});
+
+	it("returns error for unknown tool", () => {
+		const result = handleTool("nonexistent_tool", TEST_DIR);
+		expect(result.isError).toBe(true);
+		expect(result.content[0]!.text).toContain("Unknown tool");
+	});
 });
 
-// --- Test helpers: call MCP tools without transport ---
+describe("handleRequest (JSON-RPC)", () => {
+	it("initialize returns server info and capabilities", () => {
+		const response = handleRequest(
+			{ jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
+			TEST_DIR,
+		);
+		expect(response).not.toBeNull();
+		expect(response!.id).toBe(1);
+		const result = response!.result as Record<string, unknown>;
+		expect(result.protocolVersion).toBe("2024-11-05");
+		expect(result.capabilities).toEqual({ tools: {} });
+		const serverInfo = result.serverInfo as Record<string, string>;
+		expect(serverInfo.name).toBe("qult");
+	});
 
-interface ToolDef {
-	name: string;
-}
+	it("tools/list returns 3 tool definitions", () => {
+		const response = handleRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" }, TEST_DIR);
+		const result = response!.result as { tools: { name: string }[] };
+		expect(result.tools).toHaveLength(3);
+		expect(result.tools.map((t) => t.name)).toEqual([
+			"get_pending_fixes",
+			"get_session_status",
+			"get_gate_config",
+		]);
+	});
 
-interface ToolResult {
-	content: { type: string; text: string }[];
-	isError?: boolean;
-}
+	it("tools/call dispatches to correct handler", () => {
+		const response = handleRequest(
+			{ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "get_pending_fixes" } },
+			TEST_DIR,
+		);
+		const result = response!.result as { content: { text: string }[] };
+		expect(result.content[0]!.text).toBe("No pending fixes.");
+	});
 
-interface RegisteredTool {
-	handler: (args: Record<string, unknown>) => Promise<ToolResult>;
-}
+	it("tools/call returns error for missing tool name", () => {
+		const response = handleRequest(
+			{ jsonrpc: "2.0", id: 4, method: "tools/call", params: {} },
+			TEST_DIR,
+		);
+		expect(response!.error).toBeDefined();
+		expect(response!.error!.code).toBe(-32602);
+	});
 
-function listTools(server: ReturnType<typeof createServer>): ToolDef[] {
-	// biome-ignore lint/suspicious/noExplicitAny: accessing SDK internals for test
-	const internal = server as any;
-	const tools = internal._registeredTools as Record<string, RegisteredTool>;
-	return Object.keys(tools).map((name) => ({ name }));
-}
+	it("notifications (no id) return null", () => {
+		const response = handleRequest(
+			{ jsonrpc: "2.0", method: "notifications/initialized" } as never,
+			TEST_DIR,
+		);
+		expect(response).toBeNull();
+	});
 
-async function callTool(
-	server: ReturnType<typeof createServer>,
-	name: string,
-	args: Record<string, unknown>,
-): Promise<ToolResult> {
-	// biome-ignore lint/suspicious/noExplicitAny: accessing SDK internals for test
-	const internal = server as any;
-	const tools = internal._registeredTools as Record<string, RegisteredTool>;
-	const tool = tools[name];
-	if (!tool) throw new Error(`Tool ${name} not found`);
-	return tool.handler(args);
-}
+	it("ping returns empty result", () => {
+		const response = handleRequest({ jsonrpc: "2.0", id: 5, method: "ping" }, TEST_DIR);
+		expect(response!.result).toEqual({});
+	});
+
+	it("unknown method returns -32601 error", () => {
+		const response = handleRequest({ jsonrpc: "2.0", id: 6, method: "unknown/method" }, TEST_DIR);
+		expect(response!.error).toBeDefined();
+		expect(response!.error!.code).toBe(-32601);
+		expect(response!.error!.message).toContain("Method not found");
+	});
+});
+
+describe("TOOL_DEFS", () => {
+	it("has 3 tool definitions", () => {
+		expect(TOOL_DEFS).toHaveLength(3);
+	});
+
+	it("each tool has name, description, and inputSchema", () => {
+		for (const tool of TOOL_DEFS) {
+			expect(typeof tool.name).toBe("string");
+			expect(typeof tool.description).toBe("string");
+			expect(tool.inputSchema.type).toBe("object");
+		}
+	});
+});

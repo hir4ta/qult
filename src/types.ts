@@ -26,6 +26,8 @@ export interface HookEvent {
 	agent_type?: string;
 	agent_transcript_path?: string;
 	last_assistant_message?: string;
+	// SessionStart
+	source?: string;
 	// Legacy compat
 	hook_type?: string;
 }

@@ -21,6 +21,7 @@ afterEach(() => {
 	delete process.env.QULT_REVIEW_REQUIRED_FILES;
 	delete process.env.QULT_GATE_OUTPUT_MAX;
 	delete process.env.QULT_GATE_DEFAULT_TIMEOUT;
+	delete process.env.CLAUDE_PLUGIN_DATA;
 });
 
 describe("loadConfig", () => {
@@ -92,5 +93,72 @@ describe("loadConfig", () => {
 		expect(config.review.required_changed_files).toBe(3);
 		expect(config.gates.output_max_chars).toBe(1500);
 		expect(config.gates.default_timeout).toBe(5000);
+	});
+});
+
+describe("CLAUDE_PLUGIN_DATA layer", () => {
+	it("reads preferences.json from CLAUDE_PLUGIN_DATA", () => {
+		const pluginDataDir = join(TEST_DIR, "plugin-data");
+		mkdirSync(pluginDataDir, { recursive: true });
+		writeFileSync(
+			join(pluginDataDir, "preferences.json"),
+			JSON.stringify({ review: { score_threshold: 10 } }),
+		);
+		process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+		const config = loadConfig();
+		expect(config.review.score_threshold).toBe(10);
+	});
+
+	it("project config overrides CLAUDE_PLUGIN_DATA", () => {
+		const pluginDataDir = join(TEST_DIR, "plugin-data");
+		mkdirSync(pluginDataDir, { recursive: true });
+		writeFileSync(
+			join(pluginDataDir, "preferences.json"),
+			JSON.stringify({ review: { score_threshold: 10 } }),
+		);
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ review: { score_threshold: 14 } }),
+		);
+		process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+		const config = loadConfig();
+		expect(config.review.score_threshold).toBe(14);
+	});
+
+	it("env vars override CLAUDE_PLUGIN_DATA", () => {
+		const pluginDataDir = join(TEST_DIR, "plugin-data");
+		mkdirSync(pluginDataDir, { recursive: true });
+		writeFileSync(
+			join(pluginDataDir, "preferences.json"),
+			JSON.stringify({ review: { score_threshold: 10 } }),
+		);
+		process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+		process.env.QULT_REVIEW_SCORE_THRESHOLD = "15";
+		const config = loadConfig();
+		expect(config.review.score_threshold).toBe(15);
+	});
+
+	it("skips when CLAUDE_PLUGIN_DATA is not set", () => {
+		delete process.env.CLAUDE_PLUGIN_DATA;
+		const config = loadConfig();
+		expect(config.review.score_threshold).toBe(12); // default
+	});
+
+	it("skips when preferences.json is missing", () => {
+		const pluginDataDir = join(TEST_DIR, "plugin-data");
+		mkdirSync(pluginDataDir, { recursive: true });
+		// no preferences.json
+		process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+		const config = loadConfig();
+		expect(config.review.score_threshold).toBe(12); // default
+	});
+
+	it("skips when preferences.json is corrupt", () => {
+		const pluginDataDir = join(TEST_DIR, "plugin-data");
+		mkdirSync(pluginDataDir, { recursive: true });
+		writeFileSync(join(pluginDataDir, "preferences.json"), "not json");
+		process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+		const config = loadConfig();
+		expect(config.review.score_threshold).toBe(12); // default
 	});
 });

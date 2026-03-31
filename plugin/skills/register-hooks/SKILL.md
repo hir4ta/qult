@@ -25,11 +25,22 @@ Register qult hooks in `.claude/settings.local.json` as a fallback for environme
 2. **Merge** qult hook entries into the existing `hooks` object. Preserve any non-qult hooks and other keys already in the file.
 3. **Write** the updated file back
 
-The hooks to register:
+The hooks to register (must match `plugin/hooks/hooks.json`):
 
 ```json
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs session-start",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Edit|Write|Bash",
@@ -44,7 +55,18 @@ The hooks to register:
     ],
     "PreToolUse": [
       {
-        "matcher": "Edit|Write|Bash|ExitPlanMode",
+        "matcher": "Edit|Write|ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs pre-tool",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "if": "Bash(git commit*)",
         "hooks": [
           {
             "type": "command",
@@ -86,6 +108,17 @@ The hooks to register:
           }
         ]
       }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs post-compact",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }
@@ -95,7 +128,7 @@ Note: These use `${CLAUDE_PLUGIN_ROOT}` so the binary stays in the plugin cache 
 
 ## Output
 
-Confirm: `qult hooks registered in .claude/settings.local.json (5 events). Restart Claude Code for hooks to take effect.`
+Confirm: `qult hooks registered in .claude/settings.local.json (7 events). Restart Claude Code for hooks to take effect.`
 
 ## Unregister
 

@@ -36,6 +36,31 @@ const DEFAULTS: QultConfig = {
 	},
 };
 
+/** Apply a raw config object on top of an existing QultConfig (field-by-field type-safe merge). */
+function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): void {
+	if (raw.review && typeof raw.review === "object") {
+		const r = raw.review as Record<string, unknown>;
+		if (typeof r.score_threshold === "number") config.review.score_threshold = r.score_threshold;
+		if (typeof r.max_iterations === "number") config.review.max_iterations = r.max_iterations;
+		if (typeof r.required_changed_files === "number")
+			config.review.required_changed_files = r.required_changed_files;
+	}
+	if (raw.plan_eval && typeof raw.plan_eval === "object") {
+		const p = raw.plan_eval as Record<string, unknown>;
+		if (typeof p.score_threshold === "number") config.plan_eval.score_threshold = p.score_threshold;
+		if (typeof p.max_iterations === "number") config.plan_eval.max_iterations = p.max_iterations;
+		if (Array.isArray(p.registry_files))
+			config.plan_eval.registry_files = p.registry_files.filter(
+				(f: unknown) => typeof f === "string",
+			);
+	}
+	if (raw.gates && typeof raw.gates === "object") {
+		const g = raw.gates as Record<string, unknown>;
+		if (typeof g.output_max_chars === "number") config.gates.output_max_chars = g.output_max_chars;
+		if (typeof g.default_timeout === "number") config.gates.default_timeout = g.default_timeout;
+	}
+}
+
 // Process-scoped cache
 let _cache: QultConfig | null = null;
 
@@ -45,35 +70,26 @@ export function loadConfig(): QultConfig {
 
 	const config = structuredClone(DEFAULTS);
 
-	// Layer 1: .qult/config.json
+	// Layer 0.5: ${CLAUDE_PLUGIN_DATA}/preferences.json (user-level cross-project)
+	try {
+		const pluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
+		if (pluginDataDir) {
+			const prefsPath = join(pluginDataDir, "preferences.json");
+			if (existsSync(prefsPath)) {
+				const raw = JSON.parse(readFileSync(prefsPath, "utf-8"));
+				applyConfigLayer(config, raw);
+			}
+		}
+	} catch {
+		// fail-open: use defaults
+	}
+
+	// Layer 1: .qult/config.json (project-level)
 	try {
 		const configPath = join(process.cwd(), ".qult", "config.json");
 		if (existsSync(configPath)) {
 			const raw = JSON.parse(readFileSync(configPath, "utf-8"));
-			if (raw.review) {
-				if (typeof raw.review.score_threshold === "number")
-					config.review.score_threshold = raw.review.score_threshold;
-				if (typeof raw.review.max_iterations === "number")
-					config.review.max_iterations = raw.review.max_iterations;
-				if (typeof raw.review.required_changed_files === "number")
-					config.review.required_changed_files = raw.review.required_changed_files;
-			}
-			if (raw.plan_eval) {
-				if (typeof raw.plan_eval.score_threshold === "number")
-					config.plan_eval.score_threshold = raw.plan_eval.score_threshold;
-				if (typeof raw.plan_eval.max_iterations === "number")
-					config.plan_eval.max_iterations = raw.plan_eval.max_iterations;
-				if (Array.isArray(raw.plan_eval.registry_files))
-					config.plan_eval.registry_files = raw.plan_eval.registry_files.filter(
-						(f: unknown) => typeof f === "string",
-					);
-			}
-			if (raw.gates) {
-				if (typeof raw.gates.output_max_chars === "number")
-					config.gates.output_max_chars = raw.gates.output_max_chars;
-				if (typeof raw.gates.default_timeout === "number")
-					config.gates.default_timeout = raw.gates.default_timeout;
-			}
+			applyConfigLayer(config, raw);
 		}
 	} catch {
 		// fail-open: use defaults

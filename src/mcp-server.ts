@@ -5,16 +5,20 @@
  * This read-only server lets Claude query that state via MCP tools.
  * Runs as stdio transport, spawned by Claude Code plugin system.
  *
- * @see https://modelcontextprotocol.io/docs/concepts/servers
+ * Uses raw JSON-RPC over stdio (newline-delimited) instead of the MCP SDK
+ * to eliminate the 660KB SDK dependency and reduce coupling to SDK releases.
  */
+
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { createInterface } from "node:readline";
 import type { GatesConfig, PendingFix } from "./types.ts";
 
 const STATE_DIR = ".qult/.state";
 const GATES_PATH = ".qult/gates.json";
+const PROTOCOL_VERSION = "2024-11-05";
+const SERVER_NAME = "qult";
+const SERVER_VERSION = "1.0.0";
 
 /** Cache TTL in ms — MCP tools are called infrequently, 2s prevents redundant reads. */
 const CACHE_TTL_MS = 2000;
@@ -52,7 +56,6 @@ function findLatestStateFile(cwd: string, prefix: string): string {
 	try {
 		if (!existsSync(dir)) return nonScoped;
 
-		// Prefer session from latest-session.json (written by hooks)
 		try {
 			const markerPath = join(dir, "latest-session.json");
 			if (existsSync(markerPath)) {
@@ -89,85 +92,176 @@ function formatPendingFixes(fixes: PendingFix[]): string {
 	return lines.join("\n");
 }
 
-function createServer(cwd: string): McpServer {
-	const server = new McpServer(
-		{ name: "qult", version: "1.0.0" },
-		{
-			instructions: [
-				"qult enforces quality gates (lint, typecheck, test, review) via hooks.",
-				"Hooks block tool use with exit 2 when violations exist.",
-				"",
-				"IMPORTANT: When a tool is DENIED by qult, call get_pending_fixes immediately.",
-				"Before committing, call get_session_status to verify test/review gates.",
-				"If gates are not configured, run /qult:detect-gates.",
-			].join("\n"),
-		},
-	);
+// ── Tool definitions ────────────────────────────────────────
 
-	server.tool(
-		"get_pending_fixes",
-		"Returns lint/typecheck errors that must be fixed. Call when DENIED by qult. Response: '[gate] file\\n  error details' per fix, or 'No pending fixes.'",
-		{},
-		() => {
+interface ToolDef {
+	name: string;
+	description: string;
+	inputSchema: { type: "object"; properties: Record<string, never> };
+}
+
+interface ToolResult {
+	content: { type: "text"; text: string }[];
+	isError?: boolean;
+}
+
+const TOOL_DEFS: ToolDef[] = [
+	{
+		name: "get_pending_fixes",
+		description:
+			"Returns lint/typecheck errors that must be fixed. Call when DENIED by qult. Response: '[gate] file\\n  error details' per fix, or 'No pending fixes.'",
+		inputSchema: { type: "object", properties: {} },
+	},
+	{
+		name: "get_session_status",
+		description:
+			"Returns session state as JSON: test_passed_at, review_completed_at, changed_file_paths, review_iteration. Call before committing to verify gates.",
+		inputSchema: { type: "object", properties: {} },
+	},
+	{
+		name: "get_gate_config",
+		description:
+			"Returns gate definitions as JSON: on_write (lint/typecheck per file), on_commit (test), on_review (e2e). Each gate has command, timeout, optional run_once_per_batch.",
+		inputSchema: { type: "object", properties: {} },
+	},
+];
+
+function handleTool(name: string, cwd: string): ToolResult {
+	switch (name) {
+		case "get_pending_fixes": {
 			const path = findLatestStateFile(cwd, "pending-fixes");
 			const fixes = readJson<PendingFix[]>(path, []);
 			if (!Array.isArray(fixes) || fixes.length === 0) {
-				return { content: [{ type: "text" as const, text: "No pending fixes." }] };
+				return { content: [{ type: "text", text: "No pending fixes." }] };
 			}
-			return {
-				content: [{ type: "text" as const, text: formatPendingFixes(fixes) }],
-			};
-		},
-	);
-
-	server.tool(
-		"get_session_status",
-		"Returns session state as JSON: test_passed_at, review_completed_at, changed_file_paths, review_iteration. Call before committing to verify gates.",
-		{},
-		() => {
+			return { content: [{ type: "text", text: formatPendingFixes(fixes) }] };
+		}
+		case "get_session_status": {
 			const path = findLatestStateFile(cwd, "session-state");
 			const state = readJson<Record<string, unknown> | null>(path, null);
 			if (!state) {
 				return {
 					isError: true,
-					content: [{ type: "text" as const, text: "No session state. Run /qult:init to set up." }],
+					content: [{ type: "text", text: "No session state. Run /qult:init to set up." }],
 				};
 			}
-			return {
-				content: [{ type: "text" as const, text: JSON.stringify(state, null, 2) }],
-			};
-		},
-	);
-
-	server.tool(
-		"get_gate_config",
-		"Returns gate definitions as JSON: on_write (lint/typecheck per file), on_commit (test), on_review (e2e). Each gate has command, timeout, optional run_once_per_batch.",
-		{},
-		() => {
+			return { content: [{ type: "text", text: JSON.stringify(state, null, 2) }] };
+		}
+		case "get_gate_config": {
 			const gatesPath = join(cwd, GATES_PATH);
 			const gates = readJson<GatesConfig | null>(gatesPath, null);
 			if (!gates) {
 				return {
 					isError: true,
-					content: [
-						{ type: "text" as const, text: "No gates configured. Run /qult:detect-gates." },
-					],
+					content: [{ type: "text", text: "No gates configured. Run /qult:detect-gates." }],
 				};
 			}
-			return {
-				content: [{ type: "text" as const, text: JSON.stringify(gates, null, 2) }],
-			};
-		},
-	);
-
-	return server;
+			return { content: [{ type: "text", text: JSON.stringify(gates, null, 2) }] };
+		}
+		default:
+			return { isError: true, content: [{ type: "text", text: `Unknown tool: ${name}` }] };
+	}
 }
+
+// ── JSON-RPC dispatch ───────────────────────────────────────
+
+interface JsonRpcRequest {
+	jsonrpc: "2.0";
+	id?: string | number;
+	method: string;
+	params?: Record<string, unknown>;
+}
+
+interface JsonRpcResponse {
+	jsonrpc: "2.0";
+	id: string | number;
+	result?: unknown;
+	error?: { code: number; message: string };
+}
+
+/**
+ * Handle a single JSON-RPC request. Pure function for testability.
+ * Returns null for notifications (no id → no response).
+ */
+function handleRequest(parsed: JsonRpcRequest, cwd: string): JsonRpcResponse | null {
+	const id = parsed.id;
+
+	// Notifications (no id) → no response
+	if (id === undefined || id === null) return null;
+
+	switch (parsed.method) {
+		case "initialize":
+			return {
+				jsonrpc: "2.0",
+				id,
+				result: {
+					protocolVersion: PROTOCOL_VERSION,
+					capabilities: { tools: {} },
+					serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
+					instructions: [
+						"qult enforces quality gates (lint, typecheck, test, review) via hooks.",
+						"Hooks block tool use with exit 2 when violations exist.",
+						"",
+						"IMPORTANT: When a tool is DENIED by qult, call get_pending_fixes immediately.",
+						"Before committing, call get_session_status to verify test/review gates.",
+						"If gates are not configured, run /qult:detect-gates.",
+					].join("\n"),
+				},
+			};
+
+		case "tools/list":
+			return { jsonrpc: "2.0", id, result: { tools: TOOL_DEFS } };
+
+		case "tools/call": {
+			const toolName = (parsed.params as Record<string, unknown>)?.name;
+			if (typeof toolName !== "string") {
+				return {
+					jsonrpc: "2.0",
+					id,
+					error: { code: -32602, message: "Missing tool name" },
+				};
+			}
+			return { jsonrpc: "2.0", id, result: handleTool(toolName, cwd) };
+		}
+
+		case "ping":
+			return { jsonrpc: "2.0", id, result: {} };
+
+		default:
+			return {
+				jsonrpc: "2.0",
+				id,
+				error: { code: -32601, message: `Method not found: ${parsed.method}` },
+			};
+	}
+}
+
+// ── stdio transport ─────────────────────────────────────────
 
 async function main(): Promise<void> {
 	const cwd = process.env.QULT_CWD ?? process.cwd();
-	const server = createServer(cwd);
-	const transport = new StdioServerTransport();
-	await server.connect(transport);
+
+	const rl = createInterface({ input: process.stdin });
+
+	for await (const line of rl) {
+		if (!line.trim()) continue;
+		try {
+			const parsed = JSON.parse(line) as JsonRpcRequest;
+			const response = handleRequest(parsed, cwd);
+			if (response) {
+				process.stdout.write(JSON.stringify(response) + "\n");
+			}
+		} catch {
+			// Malformed JSON → send parse error if we can guess an id
+			process.stdout.write(
+				JSON.stringify({
+					jsonrpc: "2.0",
+					id: null,
+					error: { code: -32700, message: "Parse error" },
+				}) + "\n",
+			);
+		}
+	}
 }
 
 main().catch((err) => {
@@ -180,4 +274,4 @@ function resetMcpCache(): void {
 	_jsonCache.clear();
 }
 
-export { createServer, findLatestStateFile, readJson, resetMcpCache };
+export { findLatestStateFile, handleRequest, handleTool, readJson, resetMcpCache, TOOL_DEFS };
