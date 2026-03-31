@@ -1,6 +1,6 @@
 # qult
 
-![Version](https://img.shields.io/badge/version-0.16.9-7fbbb3?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.16.10-7fbbb3?style=flat-square)
 ![TypeScript](https://img.shields.io/badge/TypeScript-standalone_binary-a7c080?style=flat-square&logo=typescript&logoColor=d3c6aa)
 ![Hooks](https://img.shields.io/badge/hooks-5-dbbc7f?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-83c092?style=flat-square)
@@ -134,8 +134,19 @@ What init does:
 | `/qult:plan-generator` | Generate structured plan from feature description |
 | `/qult:doctor` | Health check for setup |
 | `/qult:update` | Update rules files after plugin update |
+| `/qult:register-hooks` | Register hooks in settings.local.json (fallback) |
 
 Hooks (PostToolUse, PreToolUse, Stop, SubagentStop, TaskCompleted) and MCP server run automatically.
+
+### If hooks don't fire
+
+Plugin hooks have known reliability issues in some environments ([#18547](https://github.com/anthropics/claude-code/issues/18547), [#10225](https://github.com/anthropics/claude-code/issues/10225)). If hooks don't trigger after install:
+
+```
+/qult:register-hooks
+```
+
+This registers the same hooks in `.claude/settings.local.json` as a fallback. When both plugin hooks and settings hooks are present, Claude Code deduplicates them (same command runs once). The `.claude/settings.local.json` file is gitignored, so it does not affect other team members.
 
 ## Updating
 

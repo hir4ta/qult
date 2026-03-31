@@ -1,6 +1,6 @@
 # qult
 
-![Version](https://img.shields.io/badge/version-0.16.9-7fbbb3?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.16.10-7fbbb3?style=flat-square)
 ![TypeScript](https://img.shields.io/badge/TypeScript-standalone_binary-a7c080?style=flat-square&logo=typescript&logoColor=d3c6aa)
 ![Hooks](https://img.shields.io/badge/hooks-5-dbbc7f?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-83c092?style=flat-square)
@@ -137,8 +137,19 @@ init が行うこと:
 | `/qult:plan-generator` | 機能説明から構造化 Plan を生成 |
 | `/qult:doctor` | セットアップの健全性チェック |
 | `/qult:update` | プラグイン更新後に rules ファイルを最新化 |
+| `/qult:register-hooks` | hooks を settings.local.json に登録 (フォールバック) |
 
 hooks (PostToolUse, PreToolUse, Stop, SubagentStop, TaskCompleted) と MCP server は自動で動作する。
+
+### hooks が発火しない場合
+
+plugin hooks は一部の環境で正常に発火しない既知の問題がある ([#18547](https://github.com/anthropics/claude-code/issues/18547), [#10225](https://github.com/anthropics/claude-code/issues/10225))。インストール後に hooks が動かない場合:
+
+```
+/qult:register-hooks
+```
+
+同じ hooks を `.claude/settings.local.json` にフォールバックとして登録する。plugin hooks と settings hooks の両方が存在する場合、Claude Code が重複排除する (同一コマンドは1回だけ実行)。`.claude/settings.local.json` は gitignore されるため、チームメンバーに影響しない。
 
 ## 更新
 

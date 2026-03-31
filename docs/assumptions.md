@@ -17,6 +17,18 @@ qult の各コンポーネントが依存する仮定と、仮定が崩れた場
 
 ## Hook レイヤー
 
+### Plugin hooks の信頼性
+
+**仮定**: plugin/hooks/hooks.json だけでは hooks が発火しない環境がある。
+
+**根拠**: VS Code 拡張で plugin hooks が発火しない (#18547)、plugin hooks がマッチするが実行されない (#10225)。2026-03 時点で未解決。
+
+**対策**: `/qult:register-hooks` で `.claude/settings.local.json` にフォールバック登録できるようにした。plugin hooks と settings hooks が両方存在する場合、同一コマンドは重複排除される。
+
+**崩れたら**: Claude Code 側で plugin hooks の信頼性が修正されれば、register-hooks スキルは不要になる。ただし害はないので残しても良い。
+
+**検証方法**: #18547, #10225 の issue ステータスを定期的に確認。resolved になったら、plugin hooks のみで 5 セッション実行し、全 hooks が発火することを確認。
+
 ### PostToolUse: Edit/Write 後の lint/typecheck 実行
 
 **仮定**: Claude は Edit 後に自発的に lint/typecheck を実行しない。実行しても結果を見て修正するとは限らない。
