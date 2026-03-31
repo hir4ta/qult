@@ -1012,6 +1012,67 @@ describe("Scenario: TaskCompleted verifies plan task", () => {
 // ExitPlanMode selfcheck gate
 // ============================================================
 
+// ============================================================
+// Test pass → commit allowed (full lifecycle)
+// ============================================================
+
+describe("Scenario 18: test pass recorded → commit allowed", () => {
+	function setupGatesWithTest(): void {
+		const gates: GatesConfig = {
+			on_write: {
+				lint: { command: "echo 'OK' && exit 0", timeout: 3000 },
+			},
+			on_commit: {
+				test: { command: "vitest run", timeout: 30000 },
+			},
+		};
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
+		resetGatesCache();
+	}
+
+	it("commit denied without test pass, allowed after test pass", async () => {
+		setupGatesWithTest();
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+
+		// Step 1: git commit without test → DENIED
+		try {
+			await preTool({
+				tool_name: "Bash",
+				tool_input: { command: "git commit -m 'no tests'" },
+			});
+		} catch {
+			/* exit(2) */
+		}
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("test");
+
+		// Reset tracking
+		exitCode = null;
+		stderrCapture = [];
+
+		// Step 2: run test command (detected by postTool)
+		await postTool({
+			tool_name: "Bash",
+			tool_input: { command: "bun vitest run" },
+			tool_response: { stdout: "Tests passed\nexit code 0" },
+		});
+
+		// Verify test pass was recorded
+		const { readLastTestPass } = await import("../state/session-state.ts");
+		const testPass = readLastTestPass();
+		expect(testPass).not.toBeNull();
+		expect(testPass!.command).toContain("vitest");
+
+		// Step 3: git commit after test pass → allowed
+		await preTool({
+			tool_name: "Bash",
+			tool_input: { command: "git commit -m 'tested'" },
+		});
+		expect(exitCode).toBeNull();
+	});
+});
+
 describe("Scenario: ExitPlanMode selfcheck — blocks once, passes on retry", () => {
 	it("first ExitPlanMode is denied, second passes", async () => {
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
