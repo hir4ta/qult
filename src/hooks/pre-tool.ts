@@ -108,19 +108,16 @@ function checkBash(ev: HookEvent): void {
 	if (!command) return;
 	if (!GIT_COMMIT_RE.test(command)) return;
 
-	// Only enforce commit gates if project has gates configured
-	const gates = loadGates();
-	if (!gates) return;
-
 	// Require tests to pass before commit (only if project has test gates)
-	if (gates.on_commit && Object.keys(gates.on_commit).length > 0) {
+	const gates = loadGates();
+	if (gates?.on_commit && Object.keys(gates.on_commit).length > 0) {
 		const allCommitGatesDisabled = Object.keys(gates.on_commit).every((g) => isGateDisabled(g));
 		if (!allCommitGatesDisabled && !readLastTestPass()) {
 			deny("Run tests before committing. No test pass recorded since last commit.");
 		}
 	}
 
-	// Require independent review before commit (conditional on change size / plan)
+	// Require independent review before commit (independent of gates config)
 	if (!readLastReview()) {
 		if (isReviewRequired() && !isGateDisabled("review")) {
 			deny("Run /qult:review before committing. Independent review is required.");

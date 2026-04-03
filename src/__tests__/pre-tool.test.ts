@@ -128,6 +128,30 @@ describe("preTool: Bash git commit checks", () => {
 		expect(exitCode).toBeNull();
 	});
 
+	it("DENY commit without review when plan is active and no gates.json", async () => {
+		// No gates.json — review enforcement should still work
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			"## Tasks\n### Task 1: test [pending]\n- **File**: foo.ts\n",
+		);
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		try {
+			await preTool({
+				tool_name: "Bash",
+				tool_input: { command: 'git commit -m "no gates"' },
+			});
+		} catch {
+			/* exit(2) */
+		}
+
+		expect(exitCode).toBe(2);
+		const errOutput = stderrCapture.join("");
+		expect(errOutput).toContain("review");
+	});
+
 	it("DENY commit without review when plan is active", async () => {
 		writeFileSync(
 			join(TEST_DIR, ".qult", "gates.json"),
