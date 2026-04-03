@@ -42,10 +42,12 @@ qult/
 ## ルール
 
 ### ビルド
+
 - `bun build.ts` → `plugin/dist/hook.mjs` + `plugin/dist/mcp-server.mjs`
 - **dependencies ゼロ** — 全て devDependencies + bun build バンドル
 
 ### Hook 設計 (7 hooks)
+
 - 全 hook は fail-open (try-catch で握りつぶす)
 - exit 2 = DENY/block (唯一の強制手段)。stderr に理由を出力
 - **enforcement hooks は stdout 不使用** — plugin hook output bug (#16538) を回避
@@ -60,6 +62,7 @@ qult/
 - lazyInit: SessionStart が発火しない環境向けの fallback
 
 ### MCP Server
+
 - Claude が状態を取得・操作する経路
 - raw stdio JSON-RPC 実装 (SDK 依存なし)
 - 読み取り: get_pending_fixes, get_session_status, get_gate_config
@@ -68,15 +71,19 @@ qult/
 - MCP tool の呼び出しルールは `.claude/rules/qult-gates.md` に定義
 
 ### Config 優先順位
+
 - DEFAULTS < `${CLAUDE_PLUGIN_DATA}/preferences.json` < `.qult/config.json` < `QULT_*` env
 
 ### Gates
+
 - on_write: 編集時 (lint, typecheck) / on_commit: コミット時 (test) / on_review: レビュー時 (e2e)
 
 ### 消費者チェック
+
 - 型変更 (types.ts, session-state.ts) は必ず消費者への波及を確認
 
 ### Phase Gate (各コミット前に必ず実行)
+
 1. `bun vitest run` — 全テスト pass
 2. `bun vitest run src/__tests__/simulation.test.ts` — シミュレーション pass
 3. `bun tsc --noEmit && bun biome check src/` — 型 + lint clean
@@ -84,9 +91,11 @@ qult/
 5. コミット — Phase Gate 通過後にのみコミット
 
 ### シミュレーション
+
 - Hook や状態管理の変更後は simulation.test.ts にシナリオを追加する
 - シミュレーションは本番フロー (Edit→gate→pending-fixes→DENY) を再現する統合テスト
 
 ### Claude Code 公式仕様の調査
+
 - Claude Code の hooks、plugins、skills、agents、MCP 等の公式仕様を調べるときは `claude-code-guide` エージェントを必ず使う
 - WebSearch や WebFetch で独自にリサーチしに行かないこと
