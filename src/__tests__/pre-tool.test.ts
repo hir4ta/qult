@@ -269,6 +269,95 @@ describe("preTool: Bash git commit checks", () => {
 	});
 });
 
+describe("preTool: TDD enforcement", () => {
+	function setupPlanWithVerify(): void {
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			[
+				"## Tasks",
+				"### Task 1: Add helper [pending]",
+				"- **File**: src/helper.ts",
+				"- **Verify**: src/__tests__/helper.test.ts:testHelper",
+			].join("\n"),
+		);
+	}
+
+	it("DENY impl edit when test not yet edited", async () => {
+		setupPlanWithVerify();
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		try {
+			await preTool({
+				tool_name: "Edit",
+				tool_input: { file_path: join(TEST_DIR, "src/helper.ts") },
+			});
+		} catch {
+			/* exit(2) */
+		}
+
+		expect(exitCode).toBe(2);
+		const errOutput = stderrCapture.join("");
+		expect(errOutput).toContain("TDD");
+		expect(errOutput).toContain("src/__tests__/helper.test.ts");
+	});
+
+	it("allows impl edit after test file edited", async () => {
+		setupPlanWithVerify();
+
+		const { recordChangedFile } = await import("../state/session-state.ts");
+		recordChangedFile(join(TEST_DIR, "src/__tests__/helper.test.ts"));
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/helper.ts") },
+		});
+
+		expect(exitCode).toBeNull();
+	});
+
+	it("allows editing test file itself", async () => {
+		setupPlanWithVerify();
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/__tests__/helper.test.ts") },
+		});
+
+		expect(exitCode).toBeNull();
+	});
+
+	it("no plan — no TDD enforcement", async () => {
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/helper.ts") },
+		});
+
+		expect(exitCode).toBeNull();
+	});
+
+	it("task without Verify — no TDD enforcement", async () => {
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			["## Tasks", "### Task 1: Add helper [pending]", "- **File**: src/helper.ts"].join("\n"),
+		);
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/helper.ts") },
+		});
+
+		expect(exitCode).toBeNull();
+	});
+});
+
 describe("preTool: ExitPlanMode selfcheck gate", () => {
 	it("DENY first ExitPlanMode to force selfcheck", async () => {
 		const preTool = (await import("../hooks/pre-tool.ts")).default;

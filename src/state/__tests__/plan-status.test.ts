@@ -39,7 +39,9 @@ Adding auth feature
 		const tasks = parsePlanTasks(plan);
 		expect(tasks).toHaveLength(2);
 		expect(tasks[0]!.taskNumber).toBe(5);
+		expect(tasks[0]!.file).toBe("src/fix.ts");
 		expect(tasks[1]!.taskNumber).toBe(12);
+		expect(tasks[1]!.file).toBe("src/feature.ts");
 	});
 
 	it("defaults to pending when no status marker", () => {
@@ -59,7 +61,12 @@ Adding auth feature
 
 		const tasks = parsePlanTasks(plan);
 		expect(tasks).toHaveLength(1);
-		expect(tasks[0]).toEqual({ name: "Add feature", status: "pending", taskNumber: 1 });
+		expect(tasks[0]).toEqual({
+			name: "Add feature",
+			status: "pending",
+			taskNumber: 1,
+			file: "src/feature.ts",
+		});
 	});
 
 	it("parses task name containing brackets", () => {
@@ -85,6 +92,30 @@ Adding auth feature
 		expect(tasks).toHaveLength(2);
 		expect(tasks[0]!.status).toBe("done");
 		expect(tasks[1]!.status).toBe("pending");
+	});
+
+	it("parses File and Verify fields", () => {
+		const plan = `## Tasks
+### Task 1: Add helper [pending]
+- **File**: src/helper.ts
+- **Change**: Add utility function
+- **Boundary**: Don't modify existing code
+- **Verify**: src/__tests__/helper.test.ts:testHelper`;
+
+		const tasks = parsePlanTasks(plan);
+		expect(tasks).toHaveLength(1);
+		expect(tasks[0]!.file).toBe("src/helper.ts");
+		expect(tasks[0]!.verify).toBe("src/__tests__/helper.test.ts:testHelper");
+	});
+
+	it("returns undefined file for non-bold File line", () => {
+		const plan = `## Tasks
+### Task 1: Add helper [pending]
+- File: src/helper.ts`;
+
+		const tasks = parsePlanTasks(plan);
+		expect(tasks).toHaveLength(1);
+		expect(tasks[0]!.file).toBeUndefined();
 	});
 
 	it("returns empty for plan without tasks", () => {

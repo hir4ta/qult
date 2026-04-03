@@ -1181,3 +1181,66 @@ describe("Scenario 10: Parallel gate with timeout — timeout gate fails, other 
 		expect(fixes[0]!.gate).toBe("slow");
 	});
 });
+
+// ============================================================
+// TDD enforcement
+// ============================================================
+
+describe("Scenario: TDD enforcement — test file must be edited before impl file", () => {
+	it("full flow: DENY impl → edit test → allow impl", async () => {
+		setupPassingGates();
+
+		// Set up plan with File + Verify
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "tdd-plan.md"),
+			[
+				"## Tasks",
+				"### Task 1: Add utility [pending]",
+				"- **File**: src/util.ts",
+				"- **Change**: Add helper function",
+				"- **Boundary**: Don't modify existing code",
+				"- **Verify**: src/__tests__/util.test.ts:testUtil",
+			].join("\n"),
+		);
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+
+		// Step 1: Try to edit impl file — DENIED (test not written yet)
+		try {
+			await preTool({
+				tool_name: "Edit",
+				tool_input: { file_path: join(TEST_DIR, "src/util.ts") },
+			});
+		} catch {
+			/* exit(2) */
+		}
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("TDD");
+
+		// Reset captures
+		exitCode = null;
+		stderrCapture = [];
+
+		// Step 2: Edit test file — allowed, recorded via PostToolUse
+		await preTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/__tests__/util.test.ts") },
+		});
+		expect(exitCode).toBeNull();
+
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/__tests__/util.test.ts") },
+		});
+
+		// Step 3: Now edit impl file — allowed (test file already edited)
+		await preTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/util.ts") },
+		});
+		expect(exitCode).toBeNull();
+	});
+});

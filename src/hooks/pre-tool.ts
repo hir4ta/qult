@@ -1,11 +1,13 @@
 import { resolve } from "node:path";
 import { loadGates } from "../gates/load.ts";
 import { readPendingFixes } from "../state/pending-fixes.ts";
+import { getActivePlan, parseVerifyField } from "../state/plan-status.ts";
 import {
 	isGateDisabled,
 	isReviewRequired,
 	readLastReview,
 	readLastTestPass,
+	readSessionState,
 	recordPlanSelfcheckBlocked,
 	wasPlanSelfcheckBlocked,
 } from "../state/session-state.ts";
@@ -43,10 +45,10 @@ function checkExitPlanMode(): void {
 function checkEditWrite(ev: HookEvent): void {
 	const targetFile = typeof ev.tool_input?.file_path === "string" ? ev.tool_input.file_path : null;
 	if (!targetFile) return;
+	const resolvedTarget = resolve(targetFile);
 
 	const fixes = readPendingFixes();
 	if (fixes.length > 0) {
-		const resolvedTarget = resolve(targetFile);
 		const isFixingPendingFile = fixes.some((f) => resolve(f.file) === resolvedTarget);
 
 		if (!isFixingPendingFile) {
@@ -60,6 +62,44 @@ function checkEditWrite(ev: HookEvent): void {
 				.join("\n");
 			deny(`Fix existing errors before editing other files:\n${fileList}`);
 		}
+	}
+
+	// TDD enforcement: test file must be edited before implementation file
+	try {
+		checkTddOrder(resolvedTarget);
+	} catch (e) {
+		if (e instanceof Error && e.message.startsWith("process.exit")) throw e;
+		// fail-open
+	}
+}
+
+/** TDD: deny editing an implementation file if its corresponding test file hasn't been edited yet. */
+function checkTddOrder(resolvedTarget: string): void {
+	const plan = getActivePlan();
+	if (!plan) return;
+
+	const cwd = process.cwd();
+	const changed = readSessionState().changed_file_paths ?? [];
+
+	for (const task of plan.tasks) {
+		if (!task.file || !task.verify) continue;
+
+		const parsed = parseVerifyField(task.verify);
+		if (!parsed) continue;
+
+		const implFile = resolve(cwd, task.file);
+		if (resolvedTarget !== implFile) continue;
+
+		const testFile = resolve(cwd, parsed.file);
+
+		// Editing the test file itself is always allowed
+		if (resolvedTarget === testFile) return;
+
+		if (!changed.includes(testFile)) {
+			deny(`TDD: write the test first. Edit ${parsed.file} before ${task.file}.`);
+		}
+
+		return;
 	}
 }
 
