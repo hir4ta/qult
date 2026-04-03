@@ -218,18 +218,23 @@ function parsePlanTasks(content) {
       const taskNumber = Number(taskMatch[1]);
       const name = taskMatch[2].trim();
       const status = taskMatch[3]?.toLowerCase() ?? "pending";
+      let file;
       let verify;
       for (let j = i + 1;j < lines.length; j++) {
         const nextTrimmed = lines[j].trim();
         if (/^###?\s/.test(nextTrimmed))
           break;
+        const fileMatch = nextTrimmed.match(FILE_LINE_RE);
+        if (fileMatch) {
+          file = fileMatch[1].trim();
+          continue;
+        }
         const verifyMatch = nextTrimmed.match(VERIFY_LINE_RE);
         if (verifyMatch) {
           verify = verifyMatch[1].trim();
-          break;
         }
       }
-      tasks.push({ name, status, taskNumber, verify });
+      tasks.push({ name, status, taskNumber, file, verify });
       continue;
     }
     const checkMatch = trimmed.match(CHECKBOX_RE);
@@ -290,10 +295,11 @@ function getActivePlan() {
     return null;
   }
 }
-var TASK_RE, CHECKBOX_RE, VERIFY_LINE_RE, _planCache = null, _planCachePath = null, _planCacheMtime = null;
+var TASK_RE, CHECKBOX_RE, FILE_LINE_RE, VERIFY_LINE_RE, _planCache = null, _planCachePath = null, _planCacheMtime = null;
 var init_plan_status = __esm(() => {
   TASK_RE = /^###\s+Task\s+(\d+)[\s:-]+(.+?)(?:\s*\[(done|pending|in-progress)\])?\s*$/i;
   CHECKBOX_RE = /^-\s+\[([ xX])\]\s*(.+)$/;
+  FILE_LINE_RE = /^\s*-\s*\*\*File\*\*:\s*(.+)$/;
   VERIFY_LINE_RE = /^\s*-\s*\*\*Verify\*\*:\s*(.+)$/;
 });
 
@@ -870,9 +876,9 @@ function checkEditWrite(ev) {
   const targetFile = typeof ev.tool_input?.file_path === "string" ? ev.tool_input.file_path : null;
   if (!targetFile)
     return;
+  const resolvedTarget = resolve2(targetFile);
   const fixes = readPendingFixes();
   if (fixes.length > 0) {
-    const resolvedTarget = resolve2(targetFile);
     const isFixingPendingFile = fixes.some((f) => resolve2(f.file) === resolvedTarget);
     if (!isFixingPendingFile) {
       const fileList = fixes.map((f) => {
@@ -889,6 +895,36 @@ ${shown.join(`
 ${fileList}`);
     }
   }
+  try {
+    checkTddOrder(resolvedTarget);
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith("process.exit"))
+      throw e;
+  }
+}
+function checkTddOrder(resolvedTarget) {
+  const plan = getActivePlan();
+  if (!plan)
+    return;
+  const cwd = process.cwd();
+  const changed = readSessionState().changed_file_paths ?? [];
+  for (const task of plan.tasks) {
+    if (!task.file || !task.verify)
+      continue;
+    const parsed = parseVerifyField(task.verify);
+    if (!parsed)
+      continue;
+    const implFile = resolve2(cwd, task.file);
+    if (resolvedTarget !== implFile)
+      continue;
+    const testFile = resolve2(cwd, parsed.file);
+    if (resolvedTarget === testFile)
+      return;
+    if (!changed.includes(testFile)) {
+      deny(`TDD: write the test first. Edit ${parsed.file} before ${task.file}.`);
+    }
+    return;
+  }
 }
 function checkBash(ev) {
   const command = typeof ev.tool_input?.command === "string" ? ev.tool_input.command : null;
@@ -897,9 +933,7 @@ function checkBash(ev) {
   if (!GIT_COMMIT_RE2.test(command))
     return;
   const gates = loadGates();
-  if (!gates)
-    return;
-  if (gates.on_commit && Object.keys(gates.on_commit).length > 0) {
+  if (gates?.on_commit && Object.keys(gates.on_commit).length > 0) {
     const allCommitGatesDisabled = Object.keys(gates.on_commit).every((g) => isGateDisabled(g));
     if (!allCommitGatesDisabled && !readLastTestPass()) {
       deny("Run tests before committing. No test pass recorded since last commit.");
@@ -915,6 +949,7 @@ var GIT_COMMIT_RE2;
 var init_pre_tool = __esm(() => {
   init_load();
   init_pending_fixes();
+  init_plan_status();
   init_session_state();
   init_respond();
   GIT_COMMIT_RE2 = /\bgit\s+(?:-\S+(?:\s+\S+)?\s+)*commit\b/i;
