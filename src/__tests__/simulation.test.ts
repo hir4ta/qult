@@ -1746,3 +1746,54 @@ describe("Scenario: Parallel on_write gates (1 fail, 2 pass)", () => {
 		expect(fixes[0]!.errors[0]).toContain("lint error");
 	});
 });
+
+// ============================================================
+// 3-Strike escalation: gate fails 3 times on same file
+// ============================================================
+
+describe("Scenario: 3-Strike gate failure escalation", () => {
+	it("warns to stderr after 3 consecutive gate failures on same file", async () => {
+		setupFailingLintGate();
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		const { resetGatesCache } = await import("../gates/load.ts");
+		const filePath = join(TEST_DIR, "src/strike.ts");
+
+		for (let i = 0; i < 3; i++) {
+			resetGatesCache();
+			await postTool({
+				tool_name: "Edit",
+				tool_input: { file_path: filePath },
+			});
+		}
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("3-Strike");
+		expect(stderr).toContain("lint");
+	});
+});
+
+// ============================================================
+// TaskCreate promotion: warn on first edit of plan task file
+// ============================================================
+
+describe("Scenario: TaskCreate promotion on plan task file", () => {
+	it("suggests TaskCreate when editing a plan task file for the first time", async () => {
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			["## Tasks", "### Task 1: Add feature [pending]", "- **File**: src/feature.ts"].join("\n"),
+		);
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/feature.ts") },
+		});
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("Plan task detected");
+		expect(stderr).toContain("TaskCreate");
+	});
+});

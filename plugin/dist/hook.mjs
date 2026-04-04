@@ -568,7 +568,7 @@ function resetGateFailure(file, gateName) {
   if (!state.gate_failure_counts)
     return;
   const key = `${file}:${gateName}`;
-  if (state.gate_failure_counts[key]) {
+  if (key in state.gate_failure_counts) {
     delete state.gate_failure_counts[key];
     writeState(state);
   }

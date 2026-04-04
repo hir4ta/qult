@@ -322,7 +322,7 @@ describe("postTool: gate execution summary to stderr", () => {
 });
 
 describe("postTool: 3-Strike gate failure escalation", () => {
-	it("warns after 3 consecutive failures on same file+gate", async () => {
+	it("does not warn before 3 failures, warns on 3rd failure", async () => {
 		writeFileSync(
 			join(TEST_DIR, ".qult", "gates.json"),
 			JSON.stringify({
@@ -336,19 +336,26 @@ describe("postTool: 3-Strike gate failure escalation", () => {
 		const { resetGatesCache } = await import("../gates/load.ts");
 		const filePath = join(TEST_DIR, "src/broken.ts");
 
-		// Fail 3 times (reset gates cache between calls to re-read gates, but keep session state)
-		for (let i = 0; i < 3; i++) {
+		// Fail twice — no 3-Strike warning yet
+		for (let i = 0; i < 2; i++) {
 			resetGatesCache();
 			await postTool({
 				tool_name: "Edit",
 				tool_input: { file_path: filePath },
 			});
 		}
+		const stderrAfter2 = stderrCapture.join("");
+		expect(stderrAfter2).not.toContain("3-Strike");
 
-		const stderr = stderrCapture.join("");
-		expect(stderr).toContain("3-Strike");
-		expect(stderr).toContain("broken.ts");
-		expect(stderr).toContain("lint");
+		// 3rd failure — 3-Strike warning
+		resetGatesCache();
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: filePath },
+		});
+		const stderrAfter3 = stderrCapture.join("");
+		expect(stderrAfter3).toContain("3-Strike");
+		expect(stderrAfter3).toContain("lint");
 	});
 });
 

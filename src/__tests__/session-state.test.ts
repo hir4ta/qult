@@ -5,6 +5,7 @@ import { resetAllCaches } from "../state/flush.ts";
 import {
 	clearOnCommit,
 	getGatedExtensions,
+	incrementGateFailure,
 	isReviewRequired,
 	markGateRan,
 	readSessionState,
@@ -13,6 +14,7 @@ import {
 	recordReview,
 	recordTaskVerifyResult,
 	recordTestPass,
+	resetGateFailure,
 	shouldSkipGate,
 } from "../state/session-state.ts";
 
@@ -212,5 +214,41 @@ describe("session-state: taskVerifyResults", () => {
 		clearOnCommit();
 		expect(readTaskVerifyResult("Task 1")).toBeNull();
 		expect(readTaskVerifyResult("Task 2")).toBeNull();
+	});
+});
+
+describe("session-state: gate failure escalation", () => {
+	it("incrementGateFailure returns incrementing counts", () => {
+		expect(incrementGateFailure("/src/a.ts", "lint")).toBe(1);
+		expect(incrementGateFailure("/src/a.ts", "lint")).toBe(2);
+		expect(incrementGateFailure("/src/a.ts", "lint")).toBe(3);
+	});
+
+	it("incrementGateFailure tracks different file:gate combinations independently", () => {
+		expect(incrementGateFailure("/src/a.ts", "lint")).toBe(1);
+		expect(incrementGateFailure("/src/a.ts", "typecheck")).toBe(1);
+		expect(incrementGateFailure("/src/b.ts", "lint")).toBe(1);
+		expect(incrementGateFailure("/src/a.ts", "lint")).toBe(2);
+	});
+
+	it("resetGateFailure clears count for specific file:gate", () => {
+		incrementGateFailure("/src/a.ts", "lint");
+		incrementGateFailure("/src/a.ts", "lint");
+		resetGateFailure("/src/a.ts", "lint");
+		// After reset, next increment starts from 1
+		expect(incrementGateFailure("/src/a.ts", "lint")).toBe(1);
+	});
+
+	it("resetGateFailure is no-op for non-existent key", () => {
+		// Should not throw
+		resetGateFailure("/src/nonexistent.ts", "lint");
+		expect(readSessionState().gate_failure_counts).toEqual({});
+	});
+
+	it("clearOnCommit resets gate_failure_counts", () => {
+		incrementGateFailure("/src/a.ts", "lint");
+		incrementGateFailure("/src/b.ts", "typecheck");
+		clearOnCommit();
+		expect(readSessionState().gate_failure_counts).toEqual({});
 	});
 });
