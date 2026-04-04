@@ -1831,10 +1831,13 @@ describe("Scenario: Export breaking change detection", () => {
 			"export function hello() {}\nexport function goodbye() {}\n",
 		);
 		setupPassingGates();
-		execSync("git init && git add -A && git commit -m init", {
-			cwd: TEST_DIR,
-			stdio: "ignore",
-		});
+		execSync(
+			"git init && git config user.email test@test && git config user.name test && git add -A && git commit -m init",
+			{
+				cwd: TEST_DIR,
+				stdio: "ignore",
+			},
+		);
 
 		// Remove an export
 		writeFileSync(join(TEST_DIR, "src/api.ts"), "export function hello() {}\n");

@@ -642,10 +642,13 @@ describe("postTool: export breaking change detection", () => {
 			join(TEST_DIR, "src/api.ts"),
 			"export function hello() {}\nexport function goodbye() {}\n",
 		);
-		execSync("git init && git add -A && git commit -m init", {
-			cwd: TEST_DIR,
-			stdio: "ignore",
-		});
+		execSync(
+			"git init && git config user.email test@test && git config user.name test && git add -A && git commit -m init",
+			{
+				cwd: TEST_DIR,
+				stdio: "ignore",
+			},
+		);
 
 		// Now remove an export
 		writeFileSync(join(TEST_DIR, "src/api.ts"), "export function hello() {}\n");
@@ -666,10 +669,13 @@ describe("postTool: export breaking change detection", () => {
 		const { execSync } = await import("node:child_process");
 		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
 		writeFileSync(join(TEST_DIR, "src/api.ts"), "export function hello() {}\n");
-		execSync("git init && git add -A && git commit -m init", {
-			cwd: TEST_DIR,
-			stdio: "ignore",
-		});
+		execSync(
+			"git init && git config user.email test@test && git config user.name test && git add -A && git commit -m init",
+			{
+				cwd: TEST_DIR,
+				stdio: "ignore",
+			},
+		);
 
 		// Add a new export (no removal)
 		writeFileSync(
