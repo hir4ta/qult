@@ -735,6 +735,72 @@ Why this change is needed.
 		expect(state.review_stage_scores).toEqual({});
 	});
 
+	// --- Score-findings consistency tests ---
+
+	describe("scoresFindingsConsistency", () => {
+		it("all 5/5 with no findings: warns to stderr but allows", async () => {
+			const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+			await subagentStop({
+				agent_type: "qult-spec-reviewer",
+				last_assistant_message: "Spec: PASS\nScore: Completeness=5 Accuracy=5\nNo issues found.",
+			});
+			expect(exitCode).toBeNull();
+			expect(stderrCapture.join("")).toContain("verify review thoroughness");
+		});
+
+		it("critical finding with high scores: blocks", async () => {
+			const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+			await expect(
+				subagentStop({
+					agent_type: "qult-quality-reviewer",
+					last_assistant_message:
+						"Quality: PASS\nScore: Design=5 Maintainability=5\n[critical] src/foo.ts:10 — duplicated logic across modules",
+				}),
+			).rejects.toThrow("process.exit");
+			expect(exitCode).toBe(2);
+			expect(stderrCapture.join("")).toContain("Reconcile findings with scores");
+		});
+
+		it("high finding with high scores: blocks", async () => {
+			const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+			await expect(
+				subagentStop({
+					agent_type: "qult-security-reviewer",
+					last_assistant_message:
+						"Security: PASS\nScore: Vulnerability=4 Hardening=5\n[high] src/api.ts:20 — missing input validation",
+				}),
+			).rejects.toThrow("process.exit");
+			expect(exitCode).toBe(2);
+			expect(stderrCapture.join("")).toContain("Reconcile findings with scores");
+		});
+
+		it("medium finding with high scores: allows", async () => {
+			const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+			await subagentStop({
+				agent_type: "qult-spec-reviewer",
+				last_assistant_message:
+					"Spec: PASS\nScore: Completeness=5 Accuracy=5\n[medium] docs could be improved",
+			});
+			expect(exitCode).toBeNull();
+		});
+
+		it("critical finding with low scores: allows (consistent)", async () => {
+			writeFileSync(
+				join(TEST_DIR, ".qult", "config.json"),
+				JSON.stringify({ review: { dimension_floor: 1 } }),
+			);
+			resetAllCaches();
+
+			const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+			await subagentStop({
+				agent_type: "qult-spec-reviewer",
+				last_assistant_message:
+					"Spec: PASS\nScore: Completeness=2 Accuracy=2\n[critical] major gap in implementation",
+			});
+			expect(exitCode).toBeNull();
+		});
+	});
+
 	it("Plan agent with invalid plan (missing sections): blocks", async () => {
 		const planDir = join(TEST_DIR, ".claude", "plans");
 		mkdirSync(planDir, { recursive: true });

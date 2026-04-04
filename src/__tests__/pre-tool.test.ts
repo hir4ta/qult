@@ -382,6 +382,81 @@ describe("preTool: TDD enforcement", () => {
 	});
 });
 
+describe("preTool: tddRedVerification", () => {
+	function setupPlanWithVerify(): void {
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			[
+				"## Tasks",
+				"### Task 1: Add feature [pending]",
+				"- **File**: src/feature.ts",
+				"- **Verify**: src/__tests__/feature.test.ts:testFeature",
+			].join("\n"),
+		);
+	}
+
+	it("denies impl edit when verify test already passes (RED violation)", async () => {
+		setupPlanWithVerify();
+
+		const { recordChangedFile, recordTaskVerifyResult } = await import("../state/session-state.ts");
+		// Test file was edited
+		recordChangedFile(join(TEST_DIR, "src/__tests__/feature.test.ts"));
+		// But verify test passed (no RED state)
+		recordTaskVerifyResult("Task 1", true);
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		try {
+			await preTool({
+				tool_name: "Edit",
+				tool_input: { file_path: join(TEST_DIR, "src/feature.ts") },
+			});
+		} catch {
+			/* exit(2) */
+		}
+
+		expect(exitCode).toBe(2);
+		const errOutput = stderrCapture.join("");
+		expect(errOutput).toContain("TDD");
+		expect(errOutput).toContain("already passes");
+		expect(errOutput).toContain("RED");
+	});
+
+	it("allows impl edit when verify test fails (RED confirmed)", async () => {
+		setupPlanWithVerify();
+
+		const { recordChangedFile, recordTaskVerifyResult } = await import("../state/session-state.ts");
+		recordChangedFile(join(TEST_DIR, "src/__tests__/feature.test.ts"));
+		// Verify test failed (RED state confirmed)
+		recordTaskVerifyResult("Task 1", false);
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/feature.ts") },
+		});
+
+		expect(exitCode).toBeNull();
+	});
+
+	it("allows impl edit when no verify result yet (fail-open)", async () => {
+		setupPlanWithVerify();
+
+		const { recordChangedFile } = await import("../state/session-state.ts");
+		recordChangedFile(join(TEST_DIR, "src/__tests__/feature.test.ts"));
+		// No recordTaskVerifyResult call — result not yet available
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/feature.ts") },
+		});
+
+		expect(exitCode).toBeNull();
+	});
+});
+
 describe("preTool: ExitPlanMode selfcheck gate", () => {
 	it("DENY first ExitPlanMode to force selfcheck", async () => {
 		const preTool = (await import("../hooks/pre-tool.ts")).default;

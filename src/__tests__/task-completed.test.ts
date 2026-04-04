@@ -304,3 +304,48 @@ describe("taskCompleted: execution (fail-open)", () => {
 		expect(spawnSync).toHaveBeenCalledOnce();
 	});
 });
+
+describe("taskCompleted: recordsVerifyResult", () => {
+	it("records verify test pass result in session state", async () => {
+		writePlan(makePlanContent({ verify: "src/__tests__/foo.test.ts:testFoo" }));
+		writeGates({ on_commit: { test: { command: "vitest run", timeout: 5000 } } });
+		vi.mocked(spawnSync).mockReturnValue({
+			status: 0,
+			stdout: "",
+			stderr: "",
+			pid: 0,
+			output: [],
+			signal: null,
+		});
+
+		const taskCompleted = await loadTaskCompleted();
+		await taskCompleted({ task_subject: "Task 1: Add feature" });
+
+		const { readTaskVerifyResult } = await import("../state/session-state.ts");
+		const result = readTaskVerifyResult("Task 1");
+		expect(result).not.toBeNull();
+		expect(result!.passed).toBe(true);
+		expect(result!.ran_at).toBeTruthy();
+	});
+
+	it("records verify test fail result in session state", async () => {
+		writePlan(makePlanContent({ verify: "src/__tests__/foo.test.ts:testFoo" }));
+		writeGates({ on_commit: { test: { command: "vitest run", timeout: 5000 } } });
+		vi.mocked(spawnSync).mockReturnValue({
+			status: 1,
+			stdout: "",
+			stderr: "Test failed",
+			pid: 0,
+			output: [],
+			signal: null,
+		});
+
+		const taskCompleted = await loadTaskCompleted();
+		await taskCompleted({ task_subject: "Task 1: Add feature" });
+
+		const { readTaskVerifyResult } = await import("../state/session-state.ts");
+		const result = readTaskVerifyResult("Task 1");
+		expect(result).not.toBeNull();
+		expect(result!.passed).toBe(false);
+	});
+});

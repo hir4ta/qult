@@ -1497,3 +1497,88 @@ describe("Scenario: Stage PASS without parseable scores blocks", () => {
 		expect(stderrCapture.join("")).toContain("no parseable scores");
 	});
 });
+
+// ============================================================
+// TDD RED verification (full lifecycle)
+// ============================================================
+
+describe("Scenario: tddRedSimulation", () => {
+	it("blocks impl edit when verify test passes, allows when it fails", async () => {
+		// Set up plan with verify field
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			[
+				"## Context",
+				"Test RED verification.",
+				"",
+				"## Tasks",
+				"### Task 1: Add feature [pending]",
+				"- **File**: src/feature.ts",
+				"- **Change**: Add new feature",
+				"- **Boundary**: None",
+				"- **Verify**: src/__tests__/feature.test.ts:testFeature",
+				"",
+				"## Success Criteria",
+				"- [ ] `echo ok` -- pass",
+			].join("\n"),
+		);
+
+		writeFileSync(
+			join(QULT_DIR, "gates.json"),
+			JSON.stringify({
+				on_write: { lint: { command: "echo ok", timeout: 3000 } },
+				on_commit: { test: { command: "vitest run", timeout: 30000 } },
+			}),
+		);
+
+		const { recordChangedFile, recordTaskVerifyResult } = await import("../state/session-state.ts");
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+
+		// Step 1: Test file edited
+		recordChangedFile(join(TEST_DIR, "src/__tests__/feature.test.ts"));
+
+		// Step 2: Verify test passed (RED violation) → DENY impl edit
+		recordTaskVerifyResult("Task 1", true);
+		try {
+			await preTool({
+				tool_name: "Edit",
+				tool_input: { file_path: join(TEST_DIR, "src/feature.ts") },
+			});
+		} catch {
+			/* exit(2) */
+		}
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("already passes");
+
+		// Step 3: Fix test to fail (RED confirmed) → allow impl edit
+		recordTaskVerifyResult("Task 1", false);
+		stderrCapture = [];
+		exitCode = null;
+		await preTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/feature.ts") },
+		});
+		expect(exitCode).toBeNull();
+	});
+});
+
+// ============================================================
+// Evaluator score-findings consistency
+// ============================================================
+
+describe("Scenario: Evaluator blocks on critical findings with high scores", () => {
+	it("blocks when critical finding contradicts 5/5 scores", async () => {
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		await expect(
+			subagentStop({
+				agent_type: "qult-quality-reviewer",
+				last_assistant_message:
+					"Quality: PASS\nScore: Design=5 Maintainability=5\n[critical] src/handler.ts:42 — god object with 15 responsibilities",
+			}),
+		).rejects.toThrow("process.exit");
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("Reconcile findings with scores");
+	});
+});

@@ -8,8 +8,10 @@ import {
 	isReviewRequired,
 	markGateRan,
 	readSessionState,
+	readTaskVerifyResult,
 	recordChangedFile,
 	recordReview,
+	recordTaskVerifyResult,
 	recordTestPass,
 	shouldSkipGate,
 } from "../state/session-state.ts";
@@ -181,5 +183,34 @@ describe("session-state: clearOnCommit resets changed_file_paths", () => {
 		expect(readSessionState().changed_file_paths).toHaveLength(2);
 		clearOnCommit();
 		expect(readSessionState().changed_file_paths).toHaveLength(0);
+	});
+});
+
+describe("session-state: taskVerifyResults", () => {
+	it("recordTaskVerifyResult and readTaskVerifyResult round-trip", () => {
+		recordTaskVerifyResult("Task 1", true);
+		const result = readTaskVerifyResult("Task 1");
+		expect(result).not.toBeNull();
+		expect(result!.passed).toBe(true);
+		expect(result!.ran_at).toBeTruthy();
+	});
+
+	it("readTaskVerifyResult returns null for unrecorded task", () => {
+		expect(readTaskVerifyResult("Task 99")).toBeNull();
+	});
+
+	it("recordTaskVerifyResult overwrites previous result", () => {
+		recordTaskVerifyResult("Task 1", true);
+		recordTaskVerifyResult("Task 1", false);
+		const result = readTaskVerifyResult("Task 1");
+		expect(result!.passed).toBe(false);
+	});
+
+	it("clearOnCommit resets task_verify_results", () => {
+		recordTaskVerifyResult("Task 1", true);
+		recordTaskVerifyResult("Task 2", false);
+		clearOnCommit();
+		expect(readTaskVerifyResult("Task 1")).toBeNull();
+		expect(readTaskVerifyResult("Task 2")).toBeNull();
 	});
 });

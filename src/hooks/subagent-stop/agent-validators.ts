@@ -215,6 +215,35 @@ function validateStageReviewer(
 				`${stageName}: PASS but ${dims} below minimum ${floor}/5. Fix these dimensions and re-run /qult:review.`,
 			);
 		}
+
+		// Score-findings consistency check
+		checkScoreFindingsConsistency(output, scoreEntries, stageName);
+	}
+}
+
+/** Check consistency between findings severity and scores.
+ *  - Critical/high findings + all scores 4+ → block (contradiction)
+ *  - All 5/5 + no findings → warn to stderr (suspicious but not blocked) */
+function checkScoreFindingsConsistency(
+	output: string,
+	scores: Record<string, number>,
+	stageName: string,
+): void {
+	const criticalHighCount = (output.match(/\[(critical|high)\]/gi) ?? []).length;
+	const allScoresHigh = Object.values(scores).every((v) => v >= 4);
+	const allPerfect = Object.values(scores).every((v) => v === 5);
+	const noFindings = !FINDING_RE.test(output);
+
+	if (criticalHighCount > 0 && allScoresHigh) {
+		block(
+			`${stageName}: PASS but ${criticalHighCount} critical/high finding(s) with all scores 4+/5. Reconcile findings with scores and rerun the review.`,
+		);
+	}
+
+	if (allPerfect && noFindings) {
+		process.stderr.write(
+			`[qult] ${stageName}: all dimensions 5/5 with no findings — verify review thoroughness.\n`,
+		);
 	}
 }
 

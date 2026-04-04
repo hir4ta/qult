@@ -8,6 +8,7 @@ import {
 	readLastReview,
 	readLastTestPass,
 	readSessionState,
+	readTaskVerifyResult,
 	recordPlanSelfcheckBlocked,
 	wasPlanSelfcheckBlocked,
 } from "../state/session-state.ts";
@@ -97,6 +98,15 @@ function checkTddOrder(resolvedTarget: string): void {
 
 		if (!changed.includes(testFile)) {
 			deny(`TDD: write the test first. Edit ${parsed.file} before ${task.file}.`);
+		}
+
+		// RED verification: if Verify test was run and passed BEFORE implementation, it's a no-op test
+		const taskKey = task.taskNumber != null ? `Task ${task.taskNumber}` : task.name;
+		const verifyResult = readTaskVerifyResult(taskKey);
+		if (verifyResult?.passed === true) {
+			deny(
+				`TDD: test for ${taskKey} already passes before implementation. Write a failing test first (RED), then implement (GREEN).`,
+			);
 		}
 
 		return;

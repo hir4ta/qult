@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { loadGates } from "../gates/load.ts";
 import { getActivePlan, parseVerifyField } from "../state/plan-status.ts";
+import { recordTaskVerifyResult } from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
 
 const TEST_RUNNER_RE: [RegExp, (file: string, testName: string) => string[]][] = [
@@ -44,8 +45,10 @@ export default async function taskCompleted(ev: HookEvent): Promise<void> {
 
 	const args = argsBuilder(parsed.file, parsed.testName);
 
+	const taskKey = task.taskNumber != null ? `Task ${task.taskNumber}` : task.name;
+
 	try {
-		spawnSync(args[0]!, args.slice(1), {
+		const result = spawnSync(args[0]!, args.slice(1), {
 			cwd: process.cwd(),
 			timeout: VERIFY_TIMEOUT,
 			stdio: ["ignore", "pipe", "pipe"],
@@ -54,7 +57,12 @@ export default async function taskCompleted(ev: HookEvent): Promise<void> {
 				PATH: `${process.cwd()}/node_modules/.bin:${process.env.PATH}`,
 			},
 		});
-		// Result (pass or fail) is intentionally ignored — Claude reads via MCP get_session_status
+		const passed = result.status === 0;
+		try {
+			recordTaskVerifyResult(taskKey, passed);
+		} catch {
+			/* fail-open */
+		}
 	} catch {
 		// spawnSync itself threw (e.g. command not found) — fail-open
 	}

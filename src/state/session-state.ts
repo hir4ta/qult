@@ -66,6 +66,10 @@ export interface SessionState {
 	// ── Gate override ────────────────────────────────────────
 	/** Gates temporarily disabled for this session */
 	disabled_gates: string[];
+
+	// ── TDD RED verification ─────────────────────────────────
+	/** Per-task Verify test results for RED-GREEN enforcement (key = "Task N") */
+	task_verify_results: Record<string, { passed: boolean; ran_at: string }>;
 }
 
 function filePath(): string {
@@ -88,6 +92,7 @@ function defaultState(): SessionState {
 		plan_eval_score_history: [],
 		plan_selfcheck_blocked_at: null,
 		disabled_gates: [],
+		task_verify_results: {},
 	};
 }
 
@@ -280,6 +285,7 @@ export function clearOnCommit(): void {
 	state.plan_eval_iteration = 0;
 	state.plan_eval_score_history = [];
 	state.plan_selfcheck_blocked_at = null;
+	state.task_verify_results = {};
 	writeState(state);
 }
 
@@ -359,6 +365,22 @@ export function resetPlanEvalIteration(): void {
 	state.plan_eval_iteration = 0;
 	state.plan_eval_score_history = [];
 	writeState(state);
+}
+
+// ── TDD RED verification ────────────────────────────────
+
+/** Record a task's Verify test result (pass/fail). Key is "Task N". */
+export function recordTaskVerifyResult(taskKey: string, passed: boolean): void {
+	const state = readSessionState();
+	if (!state.task_verify_results) state.task_verify_results = {};
+	state.task_verify_results[taskKey] = { passed, ran_at: new Date().toISOString() };
+	writeState(state);
+}
+
+/** Read a task's Verify test result. Returns null if not yet recorded. */
+export function readTaskVerifyResult(taskKey: string): { passed: boolean; ran_at: string } | null {
+	const state = readSessionState();
+	return state.task_verify_results?.[taskKey] ?? null;
 }
 
 // ── Gate override ───────────────────────────────────────
