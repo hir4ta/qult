@@ -105,8 +105,8 @@ flowchart TB
     Claude -- "All tasks done" --> Spec
     Spec --> Quality
     Quality --> Security
-    Security -- "Any FAIL / aggregate < 24 / dimension < 3" --> Claude
-    Security -- "All PASS + aggregate >= 24/30 + all dims >= 3" --> Done["Commit"]
+    Security -- "Any FAIL / aggregate < 26 / dimension < 4" --> Claude
+    Security -- "All PASS + aggregate >= 26/30 + all dims >= 4" --> Done["Commit"]
 
     style Generator fill:#7fbbb3,color:#2d353b,stroke:#7fbbb3
     style Evaluator fill:#e69875,color:#2d353b,stroke:#e69875
@@ -120,12 +120,17 @@ flowchart TB
 |---|---|
 | Lint/type errors left behind, moves to another file | **The Wall** — DENY until fixed |
 | `git commit` without running tests | **The Wall** — requires test pass |
+| Import of non-existent package (hallucinated import) | **The Wall** — pending-fix until corrected |
+| `git commit` without exit code 0 confirmation | **The Wall** — requires positive evidence of test pass |
 | Declares done without review or after FAIL | **block** — requires /qult:review |
 | Review PASS but low aggregate score | **block** — trend-aware re-review (up to 3x) |
-| Review PASS but any single dimension below floor | **block** — e.g., Security=2 blocks even if aggregate is high |
+| Review PASS but any single dimension below floor | **block** — e.g., Security=3 blocks even if aggregate is high (floor=4) |
+| Review scores suspiciously uniform | **warn** — score bias detection (identical/low-variance) |
 | Plan finalized with omissions | **The Wall** — forces session-wide check (once) |
 | Declares done mid-plan | **block** — requires all tasks completed |
 | Plan task completed | **verify** — runs Verify test immediately |
+| Verify test has too few assertions | **warn** — shallow test quality warning |
+| Same file gets review findings repeatedly | **warn** — Agentic Flywheel suggests .claude/rules/ entry |
 
 ## Complete Workflow
 
@@ -145,12 +150,12 @@ qult provides a full development workflow through 12 skills and 6 agents:
 | Type | Hook | Role |
 |------|------|------|
 | **Init** (advisory) | SessionStart | Initialize state directory, clean stale files, clear pending-fixes on startup |
-| **The Wall** (enforcement) | PostToolUse | Runs lint/type gates after Edit/Write, writes state |
+| **The Wall** (enforcement) | PostToolUse | Runs lint/type gates + hallucinated import check after Edit/Write, outputs gate summary to stderr |
 | **The Wall** (enforcement) | PreToolUse | DENY if pending fixes, require test/review before commit, force selfcheck on ExitPlanMode |
 | **Completion gate** (enforcement) | Stop | Block if unresolved errors, incomplete tasks, or missing review |
-| **Subagent** (enforcement) | SubagentStop | Validates review output, enforces dimension floor + aggregate threshold (24/30) |
-| **Task verify** (advisory) | TaskCompleted | Runs Verify test immediately when plan task completes |
-| **Context** (advisory) | PostCompact | Re-injects pending fixes and session state after context compaction |
+| **Subagent** (enforcement) | SubagentStop | Validates review output, enforces dimension floor + aggregate threshold (26/30), score bias detection, Agentic Flywheel |
+| **Task verify** (advisory) | TaskCompleted | Runs Verify test immediately, checks test quality (assertion count) |
+| **Context** (advisory) | PostCompact | Re-injects pending fixes, session state, disabled gates, review iteration, plan progress |
 
 | MCP Tool | Role |
 |----------|------|
@@ -257,10 +262,10 @@ Customize thresholds in `.qult/config.json` (all optional):
 ```json
 {
   "review": {
-    "score_threshold": 24,
+    "score_threshold": 26,
     "max_iterations": 3,
     "required_changed_files": 5,
-    "dimension_floor": 3
+    "dimension_floor": 4
   },
   "gates": {
     "output_max_chars": 2000,
@@ -271,10 +276,10 @@ Customize thresholds in `.qult/config.json` (all optional):
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `review.score_threshold` | number | 24 | Aggregate score required to pass 3-stage review (max 30) |
+| `review.score_threshold` | number | 26 | Aggregate score required to pass 3-stage review (max 30) |
 | `review.max_iterations` | number | 3 | Maximum review retry iterations |
 | `review.required_changed_files` | number | 5 | Number of changed files that triggers mandatory review |
-| `review.dimension_floor` | number | 3 | Minimum score per dimension (1-5). Any dimension below this blocks regardless of aggregate |
+| `review.dimension_floor` | number | 4 | Minimum score per dimension (1-5). Any dimension below this blocks regardless of aggregate |
 | `gates.output_max_chars` | number | 2000 | Max gate output chars (excess is truncated) |
 | `gates.default_timeout` | number | 10000 | Gate command timeout (ms) |
 
@@ -285,16 +290,19 @@ Environment variable overrides: `QULT_REVIEW_SCORE_THRESHOLD`, `QULT_REVIEW_MAX_
 
 The 3-stage reviewer scores six dimensions (Completeness, Accuracy, Design, Maintainability, Vulnerability, Hardening) on a 1-5 scale.
 
-**Aggregate threshold** (default 24/30):
-- 4+4+4+4+4+4 = 24: Consistent "good" across all dimensions
-- 3+3+3+3+3+3 = 18: Fails. Consistent mediocrity is caught
-- 5+5+4+4+4+4 = 26: Strong code passes comfortably
+**Aggregate threshold** (default 26/30):
+- 5+4+5+4+4+4 = 26: Solid code passes at the threshold
+- 4+4+4+4+4+4 = 24: Fails. Consistent "good" is no longer enough — AI reviewers tend toward leniency
+- 3+3+3+3+3+3 = 18: Fails significantly. Consistent mediocrity is caught
+- 5+5+4+4+5+5 = 28: Strong code passes comfortably
 
-**Dimension floor** (default 3/5):
-- 5+5+5+5+2+2 = 24: Aggregate passes, but **blocked** — Vulnerability=2 or Hardening=2 is below floor
-- 3+3+4+4+5+5 = 24: Passes — no dimension below floor
+**Dimension floor** (default 4/5):
+- 5+5+5+5+3+3 = 26: Aggregate passes, but **blocked** — Vulnerability=3 is below floor (3/5 means "reachable wrong output" per quality-reviewer rubric)
+- 4+4+4+4+5+5 = 26: Passes — all dimensions at or above floor
 
-The dimension floor prevents a dangerous pattern where excellent scores in some areas mask critical weakness in others (especially security). Configurable: lower it for prototypes (`"dimension_floor": 2`), raise it for production APIs (`"dimension_floor": 4`).
+The dimension floor prevents a dangerous pattern where excellent scores in some areas mask critical weakness in others (especially security). The default of 4 was chosen because 3/5 in the quality-reviewer rubric means "a reachable code path produces wrong output" — not acceptable for production code. Configurable: lower it for prototypes (`"dimension_floor": 3`), raise it for safety-critical systems (`"dimension_floor": 5`).
+
+**Score bias detection**: qult warns when all 6 dimensions have identical scores or when score variance is low (range < 2). This helps detect template-like AI reviewer responses that lack genuine differentiation.
 
 Scores are LLM-generated and not perfectly reproducible. The trend-aware iteration system (up to `max_iterations` retries) compensates: if the score improves across iterations, the feedback is working. If it stagnates, the system advises a different approach.
 
@@ -446,6 +454,20 @@ qult provides LSP server configurations for TypeScript, Python, Go, and Rust. LS
 
 > LSP servers must be installed separately (`npm i -g typescript-language-server`, `pip install pyright`, `gopls`, `rust-analyzer`).
 
+## AI-Specific Quality Features
+
+Beyond traditional linting and testing, qult addresses failure modes specific to AI coding agents:
+
+| Feature | LLM Failure Mode | How qult addresses it |
+|---------|------------------|----------------------|
+| **Hallucinated import detection** | AI invents non-existent packages (~20% of AI package recommendations don't exist) | PostToolUse checks every `import` against `node_modules`. Missing packages become pending-fixes |
+| **Test false positive prevention** | AI records test pass without verifying exit code | Requires explicit `exit code 0` in output — absence of failure is not evidence of success |
+| **Verify test quality check** | AI writes shallow tests (single assertion, no edge cases) | TaskCompleted warns when average assertions/test < 2 |
+| **Score bias detection** | AI reviewers give identical or near-identical scores (template responses) | Warns on uniform scores (all same) or low variance (range < 2) |
+| **Instruction drift defense** | AI forgets constraints mid-session (context rot at ~60% utilization) | State summary in every deny/block message + gate summary on every edit + full re-injection on compaction |
+| **Agentic Flywheel** | Same mistakes repeated across sessions | Review findings persisted + repeated patterns detected + .claude/rules/ suggestions |
+| **Codebase-aware explore** | AI asks generic questions instead of project-specific ones | Phase 0 scans codebase for relevant types/patterns and generates context questions |
+
 ## Design principles
 
 | Principle | Fowler's category | Meaning |
@@ -473,12 +495,15 @@ qult provides LSP server configurations for TypeScript, Python, Go, and Rust. LS
 ```
 .qult/
 └── .state/
-    ├── session-state-{id}.json
-    └── pending-fixes-{id}.json
+    ├── session-state-{id}.json       Per-session quality state
+    ├── pending-fixes-{id}.json       Per-session lint/type errors
+    ├── latest-session.json           Session marker for MCP
+    └── review-findings-history.json  Agentic Flywheel (cross-session)
 ```
 
-- Scoped by session ID (concurrent session safe)
-- Stale files auto-cleaned after 24h
+- Session-scoped by ID (concurrent session safe, session_id validated against path traversal)
+- Stale session files auto-cleaned after 24h
+- Findings history persists across sessions (max 100 entries, used for pattern detection)
 
 ## Troubleshooting
 
@@ -571,6 +596,10 @@ Academic papers and industry sources that validate qult's design:
 - [The Specification as Quality Gate](https://arxiv.org/abs/2603.25773) — Deterministic verification first, AI review for residual only
 - [VibeGuard](https://arxiv.org/abs/2604.01052) — Security gate framework for AI-generated code
 - [Anthropic: Harness Design](https://www.anthropic.com/engineering/harness-design-long-running-apps) — Generator-Evaluator pattern
+- [IEEE Spectrum: AI Coding Degrades](https://spectrum.ieee.org/ai-coding-degrades) — Silent failures in AI-generated code
+- [arXiv: AI-Specific Code Smells](https://arxiv.org/abs/2509.20491) — SpecDetect4AI: 22 AI-specific code smells, 88.66% precision
+- [Martin Fowler: Humans and Agents](https://martinfowler.com/articles/exploring-gen-ai/humans-and-agents.html) — "On the Loop" model, Agentic Flywheel
+- [PGS: Property-Generated Solver](https://ai-scholar.tech/en/articles/llm-paper/property-generated-solver) — +37.3% correctness via property-based testing
 
 ## Stack
 
