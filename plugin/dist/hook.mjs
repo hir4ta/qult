@@ -333,7 +333,8 @@ function defaultState() {
     plan_eval_iteration: 0,
     plan_eval_score_history: [],
     plan_selfcheck_blocked_at: null,
-    disabled_gates: []
+    disabled_gates: [],
+    task_verify_results: {}
   };
 }
 function readSessionState() {
@@ -469,6 +470,7 @@ function clearOnCommit() {
   state.plan_eval_iteration = 0;
   state.plan_eval_score_history = [];
   state.plan_selfcheck_blocked_at = null;
+  state.task_verify_results = {};
   writeState(state);
 }
 function getReviewIteration() {
@@ -521,6 +523,17 @@ function resetPlanEvalIteration() {
   state.plan_eval_iteration = 0;
   state.plan_eval_score_history = [];
   writeState(state);
+}
+function recordTaskVerifyResult(taskKey, passed) {
+  const state = readSessionState();
+  if (!state.task_verify_results)
+    state.task_verify_results = {};
+  state.task_verify_results[taskKey] = { passed, ran_at: new Date().toISOString() };
+  writeState(state);
+}
+function readTaskVerifyResult(taskKey) {
+  const state = readSessionState();
+  return state.task_verify_results?.[taskKey] ?? null;
 }
 function isGateDisabled(gateName) {
   const state = readSessionState();
@@ -957,6 +970,11 @@ function checkTddOrder(resolvedTarget) {
     if (!changed.includes(testFile)) {
       deny(`TDD: write the test first. Edit ${parsed.file} before ${task.file}.`);
     }
+    const taskKey = task.taskNumber != null ? `Task ${task.taskNumber}` : task.name;
+    const verifyResult = readTaskVerifyResult(taskKey);
+    if (verifyResult?.passed === true) {
+      deny(`TDD: test for ${taskKey} already passes before implementation. Write a failing test first (RED), then implement (GREEN).`);
+    }
     return;
   }
 }
@@ -1013,6 +1031,18 @@ ${fileList}`);
       block(`Plan has ${incomplete.length} incomplete item(s). Complete or update status before finishing:
 ${taskList}
 Plan: ${plan.path}`);
+    }
+    const doneTasks = plan.tasks.filter((t) => t.status === "done" && t.verify?.includes(":"));
+    const unverified = doneTasks.filter((t) => {
+      const key = t.taskNumber != null ? `Task ${t.taskNumber}` : t.name;
+      return readTaskVerifyResult(key) === null;
+    });
+    if (unverified.length > 0) {
+      const list = unverified.map((t) => `  Task ${t.taskNumber ?? "?"}: ${t.name}`).join(`
+`);
+      block(`${unverified.length} plan task(s) have Verify fields but no test result recorded:
+${list}
+Use TaskCreate to track tasks so TaskCompleted triggers Verify test execution.`);
     }
   }
   if (!readLastReview()) {
@@ -1327,6 +1357,9 @@ ${structErrors.map((e) => `  - ${e}`).join(`
 ${heuristicWarnings.map((w) => `  - ${w}`).join(`
 `)}`);
     }
+    if (getPlanEvalIteration() === 0) {
+      block("Plan has not been evaluated. Run /qult:plan-generator with plan-evaluator, or run the plan-evaluator manually before proceeding.");
+    }
   } catch (err) {
     if (err instanceof Error && err.message.startsWith("process.exit"))
       throw err;
@@ -1384,6 +1417,20 @@ function validateStageReviewer(output, passRe, failRe, scoreParser, stageName) {
       const dims = belowFloor.map(([name, score]) => `${capitalize(name)} (${score}/5)`).join(", ");
       block(`${stageName}: PASS but ${dims} below minimum ${floor}/5. Fix these dimensions and re-run /qult:review.`);
     }
+    checkScoreFindingsConsistency(output, scoreEntries, stageName);
+  }
+}
+function checkScoreFindingsConsistency(output, scores, stageName) {
+  const criticalHighCount = (output.match(/\[(critical|high)\]/gi) ?? []).length;
+  const allScoresHigh = Object.values(scores).every((v) => v >= 4);
+  const allPerfect = Object.values(scores).every((v) => v === 5);
+  const noFindings = !FINDING_RE.test(output);
+  if (criticalHighCount > 0 && allScoresHigh) {
+    block(`${stageName}: PASS but ${criticalHighCount} critical/high finding(s) with all scores 4+/5. Reconcile findings with scores and rerun the review.`);
+  }
+  if (allPerfect && noFindings) {
+    process.stderr.write(`[qult] ${stageName}: all dimensions 5/5 with no findings — verify review thoroughness.
+`);
   }
 }
 function checkAggregateScore() {
@@ -1513,8 +1560,9 @@ async function taskCompleted(ev) {
   if (!argsBuilder)
     return;
   const args = argsBuilder(parsed.file, parsed.testName);
+  const taskKey = task.taskNumber != null ? `Task ${task.taskNumber}` : task.name;
   try {
-    spawnSync(args[0], args.slice(1), {
+    const result = spawnSync(args[0], args.slice(1), {
       cwd: process.cwd(),
       timeout: VERIFY_TIMEOUT,
       stdio: ["ignore", "pipe", "pipe"],
@@ -1523,6 +1571,10 @@ async function taskCompleted(ev) {
         PATH: `${process.cwd()}/node_modules/.bin:${process.env.PATH}`
       }
     });
+    const passed = result.status === 0;
+    try {
+      recordTaskVerifyResult(taskKey, passed);
+    } catch {}
   } catch {}
 }
 function detectTestRunner() {
@@ -1544,6 +1596,7 @@ var TEST_RUNNER_RE, VERIFY_TIMEOUT = 15000, SAFE_SHELL_ARG_RE;
 var init_task_completed = __esm(() => {
   init_load();
   init_plan_status();
+  init_session_state();
   TEST_RUNNER_RE = [
     [/\bvitest\b/, (f, t) => ["vitest", "run", f, "-t", t]],
     [/\bjest\b/, (f, t) => ["jest", f, "-t", t]],

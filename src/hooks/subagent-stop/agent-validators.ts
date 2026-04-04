@@ -109,6 +109,13 @@ function validatePlan(): void {
 		if (heuristicWarnings.length > 0) {
 			block(`Plan quality issues:\n${heuristicWarnings.map((w) => `  - ${w}`).join("\n")}`);
 		}
+
+		// Level 3: Require plan-evaluator to have run at least once
+		if (getPlanEvalIteration() === 0) {
+			block(
+				"Plan has not been evaluated. Run /qult:plan-generator with plan-evaluator, or run the plan-evaluator manually before proceeding.",
+			);
+		}
 	} catch (err) {
 		// fail-open — but re-throw block() exits
 		if (err instanceof Error && err.message.startsWith("process.exit")) throw err;

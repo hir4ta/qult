@@ -464,7 +464,7 @@ describe("subagentStop: integration", () => {
 		expect(stderrCapture.join("")).toContain("Plan evaluator output must include");
 	});
 
-	it("Plan agent with valid plan structure: allows", async () => {
+	it("Plan agent with valid plan structure and evaluator done: allows", async () => {
 		const planDir = join(TEST_DIR, ".claude", "plans");
 		mkdirSync(planDir, { recursive: true });
 		writeFileSync(
@@ -484,6 +484,10 @@ Why this change is needed.
 `,
 		);
 
+		// Mark plan-evaluator as having run
+		const { recordPlanEvalIteration } = await import("../state/session-state.ts");
+		recordPlanEvalIteration(12);
+
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await subagentStop({
 			agent_type: "Plan",
@@ -491,6 +495,39 @@ Why this change is needed.
 		});
 		expect(exitCode).toBeNull();
 		expect(stderrCapture.join("")).toBe("");
+	});
+
+	it("Plan agent without plan-evaluator: blocks", async () => {
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "plan-001.md"),
+			`## Context
+Why this change is needed.
+
+## Tasks
+### Task 1: Add feature [pending]
+- **File**: src/foo.ts
+- **Change**: Add the new feature with proper error handling
+- **Boundary**: Don't touch bar.ts
+- **Verify**: foo.test.ts:testFeature
+
+## Success Criteria
+- [ ] \`bun vitest run\` -- all tests pass
+`,
+		);
+
+		// No recordPlanEvalIteration call — evaluator never ran
+
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		await expect(
+			subagentStop({
+				agent_type: "Plan",
+				last_assistant_message: "Plan created successfully.",
+			}),
+		).rejects.toThrow("process.exit");
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("not been evaluated");
 	});
 
 	// --- 3-stage review agents ---

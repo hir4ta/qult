@@ -843,7 +843,7 @@ describe("Scenario: Plan validation full flow", () => {
 		expect(stderrCapture.join("")).toContain("vague");
 	});
 
-	it("L1+L2 pass for well-formed plan", async () => {
+	it("L1+L2 pass for well-formed plan with evaluator done", async () => {
 		const planDir = join(TEST_DIR, ".claude", "plans");
 		mkdirSync(planDir, { recursive: true });
 		writeFileSync(
@@ -863,6 +863,9 @@ describe("Scenario: Plan validation full flow", () => {
 				"- [ ] `bun vitest run` -- all tests pass",
 			].join("\n"),
 		);
+
+		const { recordPlanEvalIteration } = await import("../state/session-state.ts");
+		recordPlanEvalIteration(12);
 
 		const handler = (await import("../hooks/subagent-stop/index.ts")).default;
 		await handler({
@@ -1580,5 +1583,79 @@ describe("Scenario: Evaluator blocks on critical findings with high scores", () 
 		).rejects.toThrow("process.exit");
 		expect(exitCode).toBe(2);
 		expect(stderrCapture.join("")).toContain("Reconcile findings with scores");
+	});
+});
+
+// ============================================================
+// Workflow enforcement: Stop blocks on missing Verify results
+// ============================================================
+
+describe("Scenario: Stop blocks when Verify results not recorded", () => {
+	it("blocks when plan tasks done but Verify results missing", async () => {
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			[
+				"## Tasks",
+				"### Task 1: Add feature [done]",
+				"- **File**: src/feature.ts",
+				"- **Verify**: src/__tests__/feature.test.ts:testFeature",
+				"### Task 2: Add helper [done]",
+				"- **File**: src/helper.ts",
+				"- **Verify**: src/__tests__/helper.test.ts:testHelper",
+			].join("\n"),
+		);
+
+		const { recordReview } = await import("../state/session-state.ts");
+		recordReview();
+
+		const stop = (await import("../hooks/stop.ts")).default;
+		try {
+			await stop({ hook_type: "Stop" });
+		} catch {
+			/* exit(2) */
+		}
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("Verify");
+		expect(stderrCapture.join("")).toContain("TaskCreate");
+	});
+});
+
+// ============================================================
+// Workflow enforcement: Plan without evaluator blocks
+// ============================================================
+
+describe("Scenario: Plan without evaluator blocks", () => {
+	it("blocks Plan agent when plan-evaluator never ran", async () => {
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			[
+				"## Context",
+				"Adding feature.",
+				"",
+				"## Tasks",
+				"### Task 1: Add feature [pending]",
+				"- **File**: src/feature.ts",
+				"- **Change**: Add new feature with proper error handling",
+				"- **Boundary**: None",
+				"- **Verify**: src/__tests__/feature.test.ts:testFeature",
+				"",
+				"## Success Criteria",
+				"- [ ] `bun vitest run` -- all tests pass",
+			].join("\n"),
+		);
+
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		await expect(
+			subagentStop({
+				agent_type: "Plan",
+				last_assistant_message: "Plan created.",
+			}),
+		).rejects.toThrow("process.exit");
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("not been evaluated");
 	});
 });

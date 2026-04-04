@@ -127,7 +127,7 @@ describe("subagentStop", () => {
 		expect(exitCode).toBe(2);
 	});
 
-	it("allows Plan agent when plan file has Tasks section", async () => {
+	it("allows Plan agent when plan file has Tasks section and evaluator done", async () => {
 		const planDir = join(TEST_DIR, ".claude", "plans");
 		mkdirSync(planDir, { recursive: true });
 		writeFileSync(
@@ -147,6 +147,9 @@ describe("subagentStop", () => {
 				"- [ ] `bun vitest run` -- all tests pass",
 			].join("\n"),
 		);
+
+		const { recordPlanEvalIteration } = await import("../../state/session-state.ts");
+		recordPlanEvalIteration(12);
 
 		const handler = (await import("../subagent-stop/index.ts")).default;
 		await handler({

@@ -18,14 +18,20 @@ You are working in a qult-enabled project. Quality by Structure, Not by Promise.
 ### When starting new work
 - If the task is non-trivial, suggest `/qult:explore` to interview the architect
 - If a plan exists in `.claude/plans/`, read it first
+- Use `/qult:plan-generator` to create plans — do NOT write plans directly. Plans require plan-evaluator validation; SubagentStop blocks unevaluated plans
+
+### When implementing a plan
+- Create tasks with TaskCreate for EACH plan task. TaskCompleted hook auto-runs Verify tests — without TaskCreate, Stop hook blocks on missing Verify results
+- Follow TDD: write test → TaskCompleted records RED → implement → TaskCompleted records GREEN
 
 ### When DENIED by a hook
 - Immediately call `mcp__plugin_qult_qult__get_pending_fixes()` to understand what's wrong
 - Fix the issue in the same file before moving on
 
 ### Before committing
-- Call `mcp__plugin_qult_qult__get_session_status()` to check gate status
-- Ensure tests have passed and review is complete (if required)
+- MUST call `mcp__plugin_qult_qult__get_session_status()` to check gate status
+- MUST ensure tests have passed and review is complete (if required)
+- MUST verify all plan tasks have Verify results recorded (Stop hook enforces this)
 
 ### When debugging
 - Investigate root cause first — never guess-fix

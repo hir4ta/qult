@@ -1,6 +1,11 @@
 import { readPendingFixes } from "../state/pending-fixes.ts";
 import { getActivePlan } from "../state/plan-status.ts";
-import { isGateDisabled, isReviewRequired, readLastReview } from "../state/session-state.ts";
+import {
+	isGateDisabled,
+	isReviewRequired,
+	readLastReview,
+	readTaskVerifyResult,
+} from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
 import { block } from "./respond.ts";
 
@@ -15,7 +20,7 @@ export default async function stop(ev: HookEvent): Promise<void> {
 		block(`Pending lint/type errors remain. Fix these before completing:\n${fileList}`);
 	}
 
-	// Block if plan has incomplete tasks
+	// Plan checks: incomplete tasks, then Verify results (block() throws, so sequential)
 	const plan = getActivePlan();
 	if (plan) {
 		const incomplete = plan.tasks.filter((t) => t.status !== "done");
@@ -23,6 +28,20 @@ export default async function stop(ev: HookEvent): Promise<void> {
 			const taskList = incomplete.map((t) => `  [${t.status}] ${t.name}`).join("\n");
 			block(
 				`Plan has ${incomplete.length} incomplete item(s). Complete or update status before finishing:\n${taskList}\nPlan: ${plan.path}`,
+			);
+		}
+
+		// Block if plan tasks with Verify field have no recorded test result
+		// (indirect enforcement: TaskCreate → TaskCompleted → Verify execution → result recorded)
+		const doneTasks = plan.tasks.filter((t) => t.status === "done" && t.verify?.includes(":"));
+		const unverified = doneTasks.filter((t) => {
+			const key = t.taskNumber != null ? `Task ${t.taskNumber}` : t.name;
+			return readTaskVerifyResult(key) === null;
+		});
+		if (unverified.length > 0) {
+			const list = unverified.map((t) => `  Task ${t.taskNumber ?? "?"}: ${t.name}`).join("\n");
+			block(
+				`${unverified.length} plan task(s) have Verify fields but no test result recorded:\n${list}\nUse TaskCreate to track tasks so TaskCompleted triggers Verify test execution.`,
 			);
 		}
 	}
