@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "../../config.ts";
+import { atomicWriteJson } from "../../state/atomic-write.ts";
 import {
 	clearStageScores,
 	getPlanEvalIteration,
@@ -225,6 +226,13 @@ function validateStageReviewer(
 
 		// Score-findings consistency check
 		checkScoreFindingsConsistency(output, scoreEntries, stageName);
+
+		// L5: Extract findings for Flywheel persistence
+		try {
+			extractFindings(output, stageName);
+		} catch {
+			/* fail-open */
+		}
 	}
 }
 
@@ -307,12 +315,20 @@ function checkAggregateScore(): void {
 			// Aggregate passes — clear stage scores and record review
 			clearStageScores();
 			resetReviewIteration();
+			// L5: Agentic Flywheel — persist findings for pattern detection
+			try {
+				const mergedHistory = persistReviewFindings();
+				if (mergedHistory) detectRepeatedPatterns(mergedHistory);
+			} catch {
+				/* fail-open */
+			}
 			recordReview();
 			return;
 		}
 
-		// Clear stage scores for next iteration
+		// Clear stage scores and findings for next iteration
 		clearStageScores();
+		_currentFindings = [];
 
 		if (iterCount < maxIter) {
 			// Find weakest dimension across all stages
@@ -351,4 +367,93 @@ function checkAggregateScore(): void {
 		// fail-open — but re-throw block() exits
 		if (err instanceof Error && err.message.startsWith("process.exit")) throw err;
 	}
+}
+
+// ── L5: Agentic Flywheel — findings persistence & pattern detection ──
+
+interface FindingRecord {
+	file: string;
+	severity: string;
+	description: string;
+	stage: string;
+	timestamp: string;
+}
+
+const FINDINGS_HISTORY_FILE = "review-findings-history.json";
+const MAX_FINDINGS = 100;
+
+let _currentFindings: FindingRecord[] = [];
+
+/** Extract findings from reviewer output and cache for persistence.
+ *  Separator: em-dash (—) or en-dash (–) only. Plain hyphen excluded to avoid misparsing hyphenated filenames. */
+export function extractFindings(output: string, stageName: string): void {
+	const findingRe = /\[(critical|high|medium|low)\]\s*(\S+?)(?::\d+)?\s+[—–]\s+(.+?)(?:\n|$)/gi;
+	for (const match of output.matchAll(findingRe)) {
+		_currentFindings.push({
+			file: match[2]!,
+			severity: match[1]!.toLowerCase(),
+			description: match[3]!.trim().slice(0, 200),
+			stage: stageName,
+			timestamp: new Date().toISOString(),
+		});
+	}
+}
+
+/** Persist accumulated findings to history file. Returns merged history for detectRepeatedPatterns. */
+function persistReviewFindings(): FindingRecord[] | null {
+	if (_currentFindings.length === 0) return null;
+	const historyPath = join(process.cwd(), ".qult", ".state", FINDINGS_HISTORY_FILE);
+	let history: FindingRecord[] = [];
+	try {
+		if (existsSync(historyPath)) {
+			history = JSON.parse(readFileSync(historyPath, "utf-8"));
+		}
+	} catch {
+		history = [];
+	}
+	history.push(..._currentFindings);
+	if (history.length > MAX_FINDINGS) {
+		history = history.slice(-MAX_FINDINGS);
+	}
+	atomicWriteJson(historyPath, history);
+	_currentFindings = [];
+	return history;
+}
+
+/** Detect repeated findings and suggest rules. Takes merged history to avoid redundant I/O. */
+function detectRepeatedPatterns(history: FindingRecord[]): void {
+	// Count findings per file (medium+ only, threshold 3+ to avoid single-session noise)
+	const fileCounts: Record<string, number> = {};
+	for (const f of history) {
+		if (f.severity === "low") continue;
+		fileCounts[f.file] = (fileCounts[f.file] ?? 0) + 1;
+	}
+	for (const [file, count] of Object.entries(fileCounts)) {
+		if (count >= 3) {
+			process.stderr.write(
+				`[qult] Flywheel: ${file} has ${count} review findings. Consider adding a .claude/rules/ entry.\n`,
+			);
+		}
+	}
+	// Count similar descriptions (3+ occurrences)
+	const descCounts: Record<string, number> = {};
+	for (const f of history) {
+		const key = f.description
+			.toLowerCase()
+			.replace(/\S+\.\w{1,4}\b/g, "FILE")
+			.slice(0, 80);
+		descCounts[key] = (descCounts[key] ?? 0) + 1;
+	}
+	for (const [desc, count] of Object.entries(descCounts)) {
+		if (count >= 3) {
+			process.stderr.write(
+				`[qult] Flywheel: recurring pattern (${count}x): "${desc}". Consider encoding as a .claude/rules/ rule.\n`,
+			);
+		}
+	}
+}
+
+/** Reset current findings cache (for tests). */
+export function resetFindingsCache(): void {
+	_currentFindings = [];
 }

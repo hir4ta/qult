@@ -23,9 +23,28 @@ If you think "this is too simple for a design" — that is exactly when hidden r
 
 ## Process
 
+### Phase 0: Codebase Context Injection
+
+**Before asking any questions**, silently analyze the project to generate context-aware questions:
+
+1. **Scan codebase structure**: Use Glob to identify key directories, entry points, and module boundaries
+2. **Identify relevant types**: Search for `export interface`, `export type`, `export class` in files likely related to the architect's feature description
+3. **Find existing patterns**: Look for similar features or modules that already exist — naming conventions, file organization, test patterns
+4. **Check dependencies**: Scan package.json / go.mod / Cargo.toml for relevant dependencies
+
+**Generate context questions from findings:**
+- If the project has an auth middleware → "Does this feature require authentication?"
+- If there's a state management module → "Does this feature need new state tracked in [existing state file]?"
+- If there are existing test patterns → "Should tests follow the [pattern name] pattern used in [file]?"
+- If there are registry files (types.ts, index.ts exports) → "Will this feature add new exports to [registry file]?"
+
+Include these context questions alongside the standard interview questions in Phase 1. Label them as `[from codebase]` so the architect knows they're data-driven.
+
 ### Phase 1: Intent Discovery
 
 Interview the architect to understand the full picture. Use AskUserQuestion for EVERY question — never assume answers.
+
+Include context questions from Phase 0 alongside the mandatory categories.
 
 **Mandatory question categories** (minimum 2-3 questions per category):
 

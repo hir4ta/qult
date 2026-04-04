@@ -1,4 +1,4 @@
-export { default } from "./agent-validators.ts";
+export { default, extractFindings, resetFindingsCache } from "./agent-validators.ts";
 export { buildPlanEvalBlockMessage, buildReviewBlockMessage } from "./message-builders.ts";
 export {
 	PLAN_EVAL_DIMENSIONS,

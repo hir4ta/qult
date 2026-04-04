@@ -13,6 +13,7 @@ const mockedSpawnSync = vi.mocked(spawnSync);
 const TEST_DIR = join(import.meta.dirname, ".tmp-task-completed-test");
 const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 let stdoutCapture: string[] = [];
+let stderrCapture: string[] = [];
 const originalCwd = process.cwd();
 
 beforeEach(() => {
@@ -34,7 +35,11 @@ beforeEach(() => {
 		stdoutCapture.push(typeof data === "string" ? data : data.toString());
 		return true;
 	});
-	vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+	stderrCapture = [];
+	vi.spyOn(process.stderr, "write").mockImplementation((data) => {
+		stderrCapture.push(typeof data === "string" ? data : data.toString());
+		return true;
+	});
 });
 
 afterEach(() => {
@@ -206,5 +211,55 @@ describe("taskCompleted: shell safety", () => {
 
 		expect(stdoutCapture.join("")).toBe("");
 		expect(mockedSpawnSync).not.toHaveBeenCalled();
+	});
+});
+
+describe("taskCompleted: verify test quality check", () => {
+	it("warns on shallow test file with too few assertions", async () => {
+		writePlan(PLAN_WITH_VERIFY);
+		writeGates({ on_commit: { test: { command: "vitest run" } } });
+
+		// Create test file with only 1 assertion
+		mkdirSync(join(TEST_DIR, "src", "__tests__"), { recursive: true });
+		writeFileSync(
+			join(TEST_DIR, "src/__tests__/handler.test.ts"),
+			`import { describe, it, expect } from "vitest";
+describe("handler", () => {
+  it("works", () => {
+    expect(true).toBe(true);
+  });
+});`,
+		);
+
+		const taskCompleted = (await import("../task-completed.ts")).default;
+		await taskCompleted({ task_subject: "Task 1: Add handler" });
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("Test quality warning");
+		expect(stderr).toContain("shallow tests");
+	});
+
+	it("does not warn on test file with sufficient assertions", async () => {
+		writePlan(PLAN_WITH_VERIFY);
+		writeGates({ on_commit: { test: { command: "vitest run" } } });
+
+		mkdirSync(join(TEST_DIR, "src", "__tests__"), { recursive: true });
+		writeFileSync(
+			join(TEST_DIR, "src/__tests__/handler.test.ts"),
+			`import { describe, it, expect } from "vitest";
+describe("handler", () => {
+  it("handles request", () => {
+    expect(result.status).toBe(200);
+    expect(result.body).toContain("ok");
+    expect(result.headers).toHaveProperty("content-type");
+  });
+});`,
+		);
+
+		const taskCompleted = (await import("../task-completed.ts")).default;
+		await taskCompleted({ task_subject: "Task 1: Add handler" });
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).not.toContain("Test quality warning");
 	});
 });

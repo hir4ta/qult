@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { loadGates } from "../gates/load.ts";
 import { getActivePlan, parseVerifyField } from "../state/plan-status.ts";
 import { recordTaskVerifyResult } from "../state/session-state.ts";
@@ -65,6 +67,37 @@ export default async function taskCompleted(ev: HookEvent): Promise<void> {
 		}
 	} catch {
 		// spawnSync itself threw (e.g. command not found) — fail-open
+	}
+
+	// L3: Verify test quality check — warn on shallow tests (fail-open, non-blocking)
+	try {
+		checkVerifyTestQuality(parsed.file, parsed.testName, taskKey);
+	} catch {
+		/* fail-open */
+	}
+}
+
+const ASSERTION_RE = /\b(expect|assert|should)\s*[.(]/g;
+const MIN_ASSERTIONS = 2;
+
+/** Check that the Verify test file contains meaningful assertions. Warns to stderr if shallow. */
+export function checkVerifyTestQuality(testFile: string, _testName: string, taskKey: string): void {
+	const absPath = resolve(process.cwd(), testFile);
+	if (!existsSync(absPath)) return;
+
+	const content = readFileSync(absPath, "utf-8");
+
+	// Find the test block by name and count assertions within it
+	// Simple heuristic: count assertions in the entire file as a proxy
+	// (extracting individual test blocks requires AST parsing which is out of scope)
+	const assertionCount = (content.match(ASSERTION_RE) ?? []).length;
+	const testCount = (content.match(/\b(it|test)\s*\(/g) ?? []).length || 1;
+	const avgAssertions = assertionCount / testCount;
+
+	if (avgAssertions < MIN_ASSERTIONS) {
+		process.stderr.write(
+			`[qult] Test quality warning: ${testFile} has ~${avgAssertions.toFixed(1)} assertions/test (minimum ${MIN_ASSERTIONS}). ${taskKey} may have shallow tests.\n`,
+		);
 	}
 }
 
