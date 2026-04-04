@@ -146,7 +146,7 @@ describe("postTool: test command detection from gates", () => {
 		await postTool({
 			tool_name: "Bash",
 			tool_input: { command: "npm run test:integration" },
-			tool_response: { stdout: "All tests passed", stderr: "" },
+			tool_response: { stdout: "All tests passed\nexit code 0", stderr: "" },
 		});
 
 		const { readLastTestPass } = await import("../state/session-state.ts");
@@ -165,7 +165,7 @@ describe("postTool: test command detection from gates", () => {
 		await postTool({
 			tool_name: "Bash",
 			tool_input: { command: "bun vitest run --reporter=verbose" },
-			tool_response: { stdout: "Tests passed", stderr: "" },
+			tool_response: { stdout: "Tests passed\nexit code 0", stderr: "" },
 		});
 
 		const { readLastTestPass } = await import("../state/session-state.ts");
@@ -178,7 +178,7 @@ describe("postTool: test command detection from gates", () => {
 		await postTool({
 			tool_name: "Bash",
 			tool_input: { command: "bun vitest run" },
-			tool_response: { stdout: "Tests passed", stderr: "" },
+			tool_response: { stdout: "Tests passed\nexit code 0", stderr: "" },
 		});
 
 		const { readLastTestPass } = await import("../state/session-state.ts");
@@ -227,7 +227,19 @@ describe("postTool: Bash handling", () => {
 		expect(state.changed_file_paths).toHaveLength(0);
 	});
 
-	it("records test pass for vitest command", async () => {
+	it("records test pass for vitest command with exit code 0", async () => {
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Bash",
+			tool_input: { command: "bun vitest run" },
+			tool_response: { stdout: "Tests passed\n5 tests\nexit code 0", stderr: "" },
+		});
+
+		const { readLastTestPass } = await import("../state/session-state.ts");
+		expect(readLastTestPass()).toBeTruthy();
+	});
+
+	it("does not record test pass without explicit exit code (false positive prevention)", async () => {
 		const postTool = (await import("../hooks/post-tool.ts")).default;
 		await postTool({
 			tool_name: "Bash",
@@ -236,7 +248,7 @@ describe("postTool: Bash handling", () => {
 		});
 
 		const { readLastTestPass } = await import("../state/session-state.ts");
-		expect(readLastTestPass()).toBeTruthy();
+		expect(readLastTestPass()).toBeNull();
 	});
 });
 
@@ -306,5 +318,93 @@ describe("postTool: gate execution summary to stderr", () => {
 		const stderr = stderrCapture.join("");
 		expect(stderr).toContain("lint FAIL");
 		expect(stderr).toContain("pending fix(es)");
+	});
+});
+
+describe("postTool: hallucinated import detection", () => {
+	beforeEach(() => {
+		// Setup passing gates so gate execution doesn't interfere
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({
+				on_write: {
+					lint: { command: "echo 'OK' && exit 0", timeout: 3000 },
+				},
+			}),
+		);
+	});
+
+	it("creates pending-fix for nonexistent package import", async () => {
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(
+			join(TEST_DIR, "src/test.ts"),
+			'import { something } from "nonexistent-package-xyz";\nexport const x = 1;\n',
+		);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/test.ts") },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const fixes = readPendingFixes();
+		const importFix = fixes.find((f) => f.gate === "import-check");
+		expect(importFix).toBeDefined();
+		expect(importFix!.errors[0]).toContain("nonexistent-package-xyz");
+	});
+
+	it("does not flag relative imports", async () => {
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(
+			join(TEST_DIR, "src/test.ts"),
+			'import { foo } from "./foo.ts";\nimport { bar } from "../bar.ts";\nexport const x = 1;\n',
+		);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/test.ts") },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const importFixes = readPendingFixes().filter((f) => f.gate === "import-check");
+		expect(importFixes).toHaveLength(0);
+	});
+
+	it("does not flag node: built-in imports", async () => {
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(
+			join(TEST_DIR, "src/test.ts"),
+			'import { readFileSync } from "node:fs";\nimport { join } from "path";\nexport const x = 1;\n',
+		);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/test.ts") },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const importFixes = readPendingFixes().filter((f) => f.gate === "import-check");
+		expect(importFixes).toHaveLength(0);
+	});
+
+	it("skips non-TypeScript files", async () => {
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(
+			join(TEST_DIR, "src/test.md"),
+			'import { something } from "nonexistent-package";\n',
+		);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/test.md") },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const importFixes = readPendingFixes().filter((f) => f.gate === "import-check");
+		expect(importFixes).toHaveLength(0);
 	});
 });

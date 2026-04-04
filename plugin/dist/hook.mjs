@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 var __defProp = Object.defineProperty;
 var __returnValue = (v) => v;
 function __exportSetter(name, newValue) {
@@ -13,6 +14,7 @@ var __export = (target, all) => {
     });
 };
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
+var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
 // src/state/atomic-write.ts
 import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
@@ -776,7 +778,8 @@ var exports_post_tool = {};
 __export(exports_post_tool, {
   default: () => postTool
 });
-import { extname, resolve } from "node:path";
+import { existsSync as existsSync8, readFileSync as readFileSync6 } from "node:fs";
+import { extname, join as join8, resolve } from "node:path";
 async function postTool(ev) {
   const tool = ev.tool_name;
   if (!tool)
@@ -828,29 +831,83 @@ async function handleEditWrite(ev) {
       }
     } catch {}
   }
+  try {
+    const importFixes = detectHallucinatedImports(file);
+    newFixes.push(...importFixes);
+  } catch {}
   if (newFixes.length > 0) {
     addPendingFixes(file, newFixes);
   } else {
     clearPendingFixesForFile(file);
   }
   try {
-    if (gateEntries.length > 0) {
-      const parts = gateEntries.map((entry, i) => {
+    if (gateEntries.length > 0 || newFixes.some((f) => f.gate === "import-check")) {
+      const gateParts = gateEntries.map((entry, i) => {
         const settled = results[i];
         if (settled.status === "fulfilled") {
           return `${entry.name} ${settled.value.passed ? "PASS" : "FAIL"}`;
         }
         return `${entry.name} ERROR`;
       });
+      const importFixCount = newFixes.filter((f) => f.gate === "import-check").length;
+      if (importFixCount > 0)
+        gateParts.push(`import-check FAIL`);
       const totalFixes = readPendingFixes().length;
       const fixSuffix = totalFixes > 0 ? ` | ${totalFixes} pending fix(es)` : "";
-      process.stderr.write(`[qult] gates: ${parts.join(", ")}${fixSuffix}
+      process.stderr.write(`[qult] gates: ${gateParts.join(", ")}${fixSuffix}
 `);
     }
   } catch {}
   try {
     recordChangedFile(file);
   } catch {}
+}
+function detectHallucinatedImports(file) {
+  if (isGateDisabled("import-check"))
+    return [];
+  const ext = extname(file).toLowerCase();
+  if (!TS_JS_EXTS.has(ext))
+    return [];
+  if (!existsSync8(file))
+    return [];
+  const content = readFileSync6(file, "utf-8");
+  if (content.length > MAX_IMPORT_CHECK_SIZE)
+    return [];
+  const cwd = process.cwd();
+  const missingPkgs = [];
+  let builtins;
+  try {
+    builtins = new Set(__require("node:module").builtinModules);
+  } catch {
+    builtins = FALLBACK_BUILTINS;
+  }
+  for (const line of content.split(`
+`)) {
+    if (line.trimStart().startsWith("//"))
+      continue;
+    const match = line.match(IMPORT_LINE_RE);
+    if (!match)
+      continue;
+    const specifier = match[1];
+    const pkgName = specifier.startsWith("@") ? specifier.split("/").slice(0, 2).join("/") : specifier.split("/")[0];
+    if (pkgName.startsWith("node:") || builtins.has(pkgName))
+      continue;
+    if (pkgName.includes(".."))
+      continue;
+    if (!existsSync8(join8(cwd, "node_modules", pkgName))) {
+      missingPkgs.push(pkgName);
+    }
+  }
+  if (missingPkgs.length === 0)
+    return [];
+  const unique = [...new Set(missingPkgs)];
+  return [
+    {
+      file,
+      errors: unique.map((pkg) => `Hallucinated import: package "${pkg.slice(0, 128)}" not found in node_modules`),
+      gate: "import-check"
+    }
+  ];
 }
 function handleBash(ev) {
   const command = typeof ev.tool_input?.command === "string" ? ev.tool_input.command : null;
@@ -922,8 +979,8 @@ function isTestCommand(command) {
 function onTestCommand(ev, command) {
   const output = getToolOutput(ev);
   const exitCodeMatch = output.match(/exit code (\d+)/i) ?? output.match(/exited with (\d+)/i);
-  const isError = exitCodeMatch ? Number(exitCodeMatch[1]) !== 0 : false;
-  if (!isError) {
+  const isPass = exitCodeMatch ? Number(exitCodeMatch[1]) === 0 : false;
+  if (isPass) {
     recordTestPass(command);
   }
 }
@@ -938,12 +995,59 @@ function getToolOutput(ev) {
     return ev.tool_output;
   return "";
 }
-var GIT_COMMIT_RE, LINT_FIX_RE, TEST_CMD_RE;
+var TS_JS_EXTS, IMPORT_LINE_RE, MAX_IMPORT_CHECK_SIZE = 500000, FALLBACK_BUILTINS, GIT_COMMIT_RE, LINT_FIX_RE, TEST_CMD_RE;
 var init_post_tool = __esm(() => {
   init_load();
   init_runner();
   init_pending_fixes();
   init_session_state();
+  TS_JS_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
+  IMPORT_LINE_RE = /^\s*import\s+(?:[^"']*\s+from\s+)?["']([^"'./][^"']*)["']/;
+  FALLBACK_BUILTINS = new Set([
+    "assert",
+    "async_hooks",
+    "buffer",
+    "child_process",
+    "cluster",
+    "console",
+    "constants",
+    "crypto",
+    "dgram",
+    "diagnostics_channel",
+    "dns",
+    "domain",
+    "events",
+    "fs",
+    "http",
+    "http2",
+    "https",
+    "inspector",
+    "module",
+    "net",
+    "os",
+    "path",
+    "perf_hooks",
+    "process",
+    "punycode",
+    "querystring",
+    "readline",
+    "repl",
+    "stream",
+    "string_decoder",
+    "sys",
+    "test",
+    "timers",
+    "tls",
+    "trace_events",
+    "tty",
+    "url",
+    "util",
+    "v8",
+    "vm",
+    "wasi",
+    "worker_threads",
+    "zlib"
+  ]);
   GIT_COMMIT_RE = /\bgit\s+(?:-\S+(?:\s+\S+)?\s+)*commit\b/i;
   LINT_FIX_RE = /\b(biome\s+(check|lint).*--(fix|write)|biome\s+format|eslint.*--fix|prettier.*--write|ruff\s+check.*--fix|ruff\s+format|gofmt|go\s+fmt|cargo\s+fmt|autopep8|black)\b/;
   TEST_CMD_RE = /\b(vitest|jest|mocha|pytest|go\s+test|cargo\s+test)\b/;
@@ -1362,8 +1466,8 @@ var init_score_parsers = __esm(() => {
 });
 
 // src/hooks/subagent-stop/agent-validators.ts
-import { existsSync as existsSync8, readdirSync as readdirSync3, readFileSync as readFileSync6, statSync as statSync3 } from "node:fs";
-import { join as join8 } from "node:path";
+import { existsSync as existsSync9, readdirSync as readdirSync3, readFileSync as readFileSync7, statSync as statSync3 } from "node:fs";
+import { join as join9 } from "node:path";
 async function subagentStop(ev) {
   if (ev.stop_hook_active)
     return;
@@ -1387,16 +1491,16 @@ async function subagentStop(ev) {
 }
 function validatePlan() {
   try {
-    const planDir = join8(process.cwd(), ".claude", "plans");
-    if (!existsSync8(planDir))
+    const planDir = join9(process.cwd(), ".claude", "plans");
+    if (!existsSync9(planDir))
       return;
     const files = readdirSync3(planDir).filter((f) => f.endsWith(".md")).map((f) => ({
       name: f,
-      mtime: statSync3(join8(planDir, f)).mtimeMs
+      mtime: statSync3(join9(planDir, f)).mtimeMs
     })).sort((a, b) => b.mtime - a.mtime);
     if (files.length === 0)
       return;
-    const content = readFileSync6(join8(planDir, files[0].name), "utf-8");
+    const content = readFileSync7(join9(planDir, files[0].name), "utf-8");
     const structErrors = validatePlanStructure(content);
     if (structErrors.length > 0) {
       block(`Plan structural issues:
@@ -1675,12 +1779,12 @@ var exports_session_start = {};
 __export(exports_session_start, {
   default: () => sessionStart
 });
-import { existsSync as existsSync9, mkdirSync as mkdirSync3 } from "node:fs";
-import { join as join9 } from "node:path";
+import { existsSync as existsSync10, mkdirSync as mkdirSync3 } from "node:fs";
+import { join as join10 } from "node:path";
 async function sessionStart(ev) {
   try {
-    const stateDir = join9(process.cwd(), ".qult", ".state");
-    if (!existsSync9(stateDir)) {
+    const stateDir = join10(process.cwd(), ".qult", ".state");
+    if (!existsSync10(stateDir)) {
       mkdirSync3(stateDir, { recursive: true });
     }
     cleanupStaleScopedFiles(stateDir);
@@ -1704,12 +1808,12 @@ var exports_post_compact = {};
 __export(exports_post_compact, {
   default: () => postCompact
 });
-import { existsSync as existsSync10, readdirSync as readdirSync4, readFileSync as readFileSync7, statSync as statSync4 } from "node:fs";
-import { join as join10 } from "node:path";
+import { existsSync as existsSync11, readdirSync as readdirSync4, readFileSync as readFileSync8, statSync as statSync4 } from "node:fs";
+import { join as join11 } from "node:path";
 async function postCompact(_ev) {
   try {
-    const stateDir = join10(process.cwd(), ".qult", ".state");
-    if (!existsSync10(stateDir))
+    const stateDir = join11(process.cwd(), ".qult", ".state");
+    if (!existsSync11(stateDir))
       return;
     const parts = [];
     const fixesPath2 = findLatestFile(stateDir, "pending-fixes");
@@ -1729,16 +1833,40 @@ async function postCompact(_ev) {
         const summary = [];
         if (state.test_passed_at)
           summary.push(`test_passed_at: ${state.test_passed_at}`);
+        else
+          summary.push("tests: NOT PASSED");
         if (state.review_completed_at)
           summary.push(`review_completed_at: ${state.review_completed_at}`);
+        else
+          summary.push("review: NOT DONE");
         const files = state.changed_file_paths;
         if (Array.isArray(files) && files.length > 0)
           summary.push(`${files.length} file(s) changed`);
+        const disabled = state.disabled_gates;
+        if (Array.isArray(disabled) && disabled.length > 0)
+          summary.push(`disabled gates: ${disabled.join(", ")}`);
+        const reviewIter = state.review_iteration;
+        if (typeof reviewIter === "number" && reviewIter > 0)
+          summary.push(`review iteration: ${reviewIter}`);
         if (summary.length > 0) {
           parts.push(`[qult] Session: ${summary.join(", ")}`);
         }
       }
     }
+    try {
+      const planDir = join11(process.cwd(), ".claude", "plans");
+      if (existsSync11(planDir)) {
+        const planFiles = readdirSync4(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync4(join11(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
+        if (planFiles.length > 0) {
+          const content = readFileSync8(join11(planDir, planFiles[0].name), "utf-8");
+          const taskCount = (content.match(/^###\s+Task\s+\d+/gim) ?? []).length;
+          const doneCount = (content.match(/^###\s+Task\s+\d+.*\[done\]/gim) ?? []).length;
+          if (taskCount > 0) {
+            parts.push(`[qult] Plan: ${doneCount}/${taskCount} tasks done`);
+          }
+        }
+      }
+    } catch {}
     if (parts.length > 0) {
       process.stdout.write(parts.join(`
 `));
@@ -1748,8 +1876,8 @@ async function postCompact(_ev) {
 function findLatestFile(stateDir, prefix) {
   try {
     const files = readdirSync4(stateDir).filter((f) => f.startsWith(prefix) && f.endsWith(".json")).map((f) => ({
-      path: join10(stateDir, f),
-      mtime: statSync4(join10(stateDir, f)).mtimeMs
+      path: join11(stateDir, f),
+      mtime: statSync4(join11(stateDir, f)).mtimeMs
     })).sort((a, b) => b.mtime - a.mtime);
     return files.length > 0 ? files[0].path : null;
   } catch {
@@ -1758,9 +1886,9 @@ function findLatestFile(stateDir, prefix) {
 }
 function safeReadJson(path, fallback) {
   try {
-    if (!existsSync10(path))
+    if (!existsSync11(path))
       return fallback;
-    return JSON.parse(readFileSync7(path, "utf-8"));
+    return JSON.parse(readFileSync8(path, "utf-8"));
   } catch {
     return fallback;
   }
@@ -1774,7 +1902,7 @@ init_pending_fixes();
 init_session_state();
 init_lazy_init();
 init_respond();
-import { join as join11 } from "node:path";
+import { join as join12 } from "node:path";
 var EVENT_MAP = {
   "post-tool": () => Promise.resolve().then(() => (init_post_tool(), exports_post_tool)),
   "pre-tool": () => Promise.resolve().then(() => (init_pre_tool(), exports_pre_tool)),
@@ -1819,7 +1947,7 @@ async function dispatch(event) {
     setFixesSessionScope(ev.session_id);
     if (ev.session_id !== _lastWrittenSessionId) {
       try {
-        atomicWriteJson(join11(process.cwd(), ".qult", ".state", "latest-session.json"), {
+        atomicWriteJson(join12(process.cwd(), ".qult", ".state", "latest-session.json"), {
           session_id: ev.session_id,
           updated_at: new Date().toISOString()
         });

@@ -5,6 +5,7 @@ import type { HookEvent, PendingFix } from "../types.ts";
 /**
  * PostCompact: re-inject qult state summary into Claude's context after compaction.
  * Outputs to stdout (PostCompact stdout goes to Claude's context).
+ * This is the primary instruction drift defense after context compression.
  */
 export default async function postCompact(_ev: HookEvent): Promise<void> {
 	try {
@@ -32,15 +33,46 @@ export default async function postCompact(_ev: HookEvent): Promise<void> {
 			if (Object.keys(state).length > 0) {
 				const summary: string[] = [];
 				if (state.test_passed_at) summary.push(`test_passed_at: ${state.test_passed_at}`);
+				else summary.push("tests: NOT PASSED");
 				if (state.review_completed_at)
 					summary.push(`review_completed_at: ${state.review_completed_at}`);
+				else summary.push("review: NOT DONE");
 				const files = state.changed_file_paths;
 				if (Array.isArray(files) && files.length > 0)
 					summary.push(`${files.length} file(s) changed`);
+				// Disabled gates
+				const disabled = state.disabled_gates;
+				if (Array.isArray(disabled) && disabled.length > 0)
+					summary.push(`disabled gates: ${disabled.join(", ")}`);
+				// Review iteration
+				const reviewIter = state.review_iteration;
+				if (typeof reviewIter === "number" && reviewIter > 0)
+					summary.push(`review iteration: ${reviewIter}`);
 				if (summary.length > 0) {
 					parts.push(`[qult] Session: ${summary.join(", ")}`);
 				}
 			}
+		}
+
+		// Plan task status
+		try {
+			const planDir = join(process.cwd(), ".claude", "plans");
+			if (existsSync(planDir)) {
+				const planFiles = readdirSync(planDir)
+					.filter((f) => f.endsWith(".md"))
+					.map((f) => ({ name: f, mtime: statSync(join(planDir, f)).mtimeMs }))
+					.sort((a, b) => b.mtime - a.mtime);
+				if (planFiles.length > 0) {
+					const content = readFileSync(join(planDir, planFiles[0]!.name), "utf-8");
+					const taskCount = (content.match(/^###\s+Task\s+\d+/gim) ?? []).length;
+					const doneCount = (content.match(/^###\s+Task\s+\d+.*\[done\]/gim) ?? []).length;
+					if (taskCount > 0) {
+						parts.push(`[qult] Plan: ${doneCount}/${taskCount} tasks done`);
+					}
+				}
+			}
+		} catch {
+			/* fail-open */
 		}
 
 		if (parts.length > 0) {

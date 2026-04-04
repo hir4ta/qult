@@ -1,4 +1,5 @@
-import { extname, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { extname, join, resolve } from "node:path";
 import { loadGates } from "../gates/load.ts";
 import { runGate, runGateAsync } from "../gates/runner.ts";
 import {
@@ -85,6 +86,14 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 		}
 	}
 
+	// Hallucinated import detection — accumulate into same newFixes array to avoid per-file replacement conflict
+	try {
+		const importFixes = detectHallucinatedImports(file);
+		newFixes.push(...importFixes);
+	} catch {
+		/* fail-open */
+	}
+
 	if (newFixes.length > 0) {
 		addPendingFixes(file, newFixes);
 	} else {
@@ -93,17 +102,19 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 
 	// Gate execution summary to stderr (instruction drift defense)
 	try {
-		if (gateEntries.length > 0) {
-			const parts = gateEntries.map((entry, i) => {
+		if (gateEntries.length > 0 || newFixes.some((f) => f.gate === "import-check")) {
+			const gateParts = gateEntries.map((entry, i) => {
 				const settled = results[i]!;
 				if (settled.status === "fulfilled") {
 					return `${entry.name} ${settled.value.passed ? "PASS" : "FAIL"}`;
 				}
 				return `${entry.name} ERROR`;
 			});
+			const importFixCount = newFixes.filter((f) => f.gate === "import-check").length;
+			if (importFixCount > 0) gateParts.push(`import-check FAIL`);
 			const totalFixes = readPendingFixes().length;
 			const fixSuffix = totalFixes > 0 ? ` | ${totalFixes} pending fix(es)` : "";
-			process.stderr.write(`[qult] gates: ${parts.join(", ")}${fixSuffix}\n`);
+			process.stderr.write(`[qult] gates: ${gateParts.join(", ")}${fixSuffix}\n`);
 		}
 	} catch {
 		/* fail-open */
@@ -115,6 +126,111 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 		/* fail-open */
 	}
 }
+
+const TS_JS_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
+// Per-line import matching: no cross-line backtracking (ReDoS safe)
+const IMPORT_LINE_RE = /^\s*import\s+(?:[^"']*\s+from\s+)?["']([^"'./][^"']*)["']/;
+const MAX_IMPORT_CHECK_SIZE = 500_000; // Skip files > 500KB
+
+/** Detect imports of non-existent packages. Returns PendingFix[] to accumulate. */
+function detectHallucinatedImports(file: string): PendingFix[] {
+	if (isGateDisabled("import-check")) return [];
+	const ext = extname(file).toLowerCase();
+	if (!TS_JS_EXTS.has(ext)) return [];
+	if (!existsSync(file)) return [];
+
+	const content = readFileSync(file, "utf-8");
+	if (content.length > MAX_IMPORT_CHECK_SIZE) return [];
+
+	const cwd = process.cwd();
+	const missingPkgs: string[] = [];
+	// Use Node.js built-in module list at runtime (complete & future-proof)
+	let builtins: Set<string>;
+	try {
+		builtins = new Set(require("node:module").builtinModules as string[]);
+	} catch {
+		builtins = FALLBACK_BUILTINS;
+	}
+
+	for (const line of content.split("\n")) {
+		// Skip commented lines
+		if (line.trimStart().startsWith("//")) continue;
+		const match = line.match(IMPORT_LINE_RE);
+		if (!match) continue;
+		const specifier = match[1]!;
+		// Extract package name (handle scoped: @scope/pkg)
+		const pkgName = specifier.startsWith("@")
+			? specifier.split("/").slice(0, 2).join("/")
+			: specifier.split("/")[0]!;
+		// Skip node: prefix and built-ins (including subpaths like fs/promises)
+		if (pkgName.startsWith("node:") || builtins.has(pkgName)) continue;
+		// Path traversal guard
+		if (pkgName.includes("..")) continue;
+		// Check node_modules
+		if (!existsSync(join(cwd, "node_modules", pkgName))) {
+			missingPkgs.push(pkgName);
+		}
+	}
+
+	if (missingPkgs.length === 0) return [];
+	const unique = [...new Set(missingPkgs)];
+	return [
+		{
+			file,
+			errors: unique.map(
+				(pkg) => `Hallucinated import: package "${pkg.slice(0, 128)}" not found in node_modules`,
+			),
+			gate: "import-check",
+		},
+	];
+}
+
+// Fallback if require("node:module") is unavailable
+const FALLBACK_BUILTINS = new Set([
+	"assert",
+	"async_hooks",
+	"buffer",
+	"child_process",
+	"cluster",
+	"console",
+	"constants",
+	"crypto",
+	"dgram",
+	"diagnostics_channel",
+	"dns",
+	"domain",
+	"events",
+	"fs",
+	"http",
+	"http2",
+	"https",
+	"inspector",
+	"module",
+	"net",
+	"os",
+	"path",
+	"perf_hooks",
+	"process",
+	"punycode",
+	"querystring",
+	"readline",
+	"repl",
+	"stream",
+	"string_decoder",
+	"sys",
+	"test",
+	"timers",
+	"tls",
+	"trace_events",
+	"tty",
+	"url",
+	"util",
+	"v8",
+	"vm",
+	"wasi",
+	"worker_threads",
+	"zlib",
+]);
 
 // ── Bash: three independent detectors ───────────────────────
 
@@ -203,13 +319,14 @@ function isTestCommand(command: string): boolean {
 	return TEST_CMD_RE.test(command);
 }
 
-/** Test command detected: record pass if exit code 0 */
+/** Test command detected: record pass only if exit code 0 is explicitly present.
+ *  Requires positive evidence of success — absence of exit code does NOT count as pass. */
 function onTestCommand(ev: HookEvent, command: string): void {
 	const output = getToolOutput(ev);
 	const exitCodeMatch = output.match(/exit code (\d+)/i) ?? output.match(/exited with (\d+)/i);
-	const isError = exitCodeMatch ? Number(exitCodeMatch[1]) !== 0 : false;
+	const isPass = exitCodeMatch ? Number(exitCodeMatch[1]) === 0 : false;
 
-	if (!isError) {
+	if (isPass) {
 		recordTestPass(command);
 	}
 }
