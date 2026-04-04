@@ -106,7 +106,7 @@ var DEFAULTS, _cache = null;
 var init_config = __esm(() => {
   DEFAULTS = {
     review: {
-      score_threshold: 12,
+      score_threshold: 24,
       max_iterations: 3,
       required_changed_files: 5
     },
@@ -1219,9 +1219,30 @@ function parseDimensionScores(output, dimensions) {
   }
   return result;
 }
-var REVIEW_DIMENSIONS;
+function parseSpecScores(output) {
+  const scores = parseDimensionScores(output, SPEC_DIMENSIONS);
+  if (!scores)
+    return null;
+  return { completeness: scores.Completeness, accuracy: scores.Accuracy };
+}
+function parseQualityScores(output) {
+  const scores = parseDimensionScores(output, QUALITY_DIMENSIONS);
+  if (!scores)
+    return null;
+  return { design: scores.Design, maintainability: scores.Maintainability };
+}
+function parseSecurityScores(output) {
+  const scores = parseDimensionScores(output, SECURITY_DIMENSIONS);
+  if (!scores)
+    return null;
+  return { vulnerability: scores.Vulnerability, hardening: scores.Hardening };
+}
+var REVIEW_DIMENSIONS, SPEC_DIMENSIONS, QUALITY_DIMENSIONS, SECURITY_DIMENSIONS;
 var init_score_parsers = __esm(() => {
   REVIEW_DIMENSIONS = ["Correctness", "Design", "Security"];
+  SPEC_DIMENSIONS = ["Completeness", "Accuracy"];
+  QUALITY_DIMENSIONS = ["Design", "Maintainability"];
+  SECURITY_DIMENSIONS = ["Vulnerability", "Hardening"];
 });
 
 // src/hooks/subagent-stop/agent-validators.ts
@@ -1259,6 +1280,12 @@ async function subagentStop(ev) {
     }
     resetReviewIteration();
     recordReview();
+  } else if (normalized === "qult-spec-reviewer") {
+    validateStageReviewer(output, SPEC_PASS_RE, SPEC_FAIL_RE, parseSpecScores, "Spec");
+  } else if (normalized === "qult-quality-reviewer") {
+    validateStageReviewer(output, QUALITY_PASS_RE, QUALITY_FAIL_RE, parseQualityScores, "Quality");
+  } else if (normalized === "qult-security-reviewer") {
+    validateStageReviewer(output, SECURITY_PASS_RE, SECURITY_FAIL_RE, parseSecurityScores, "Security");
   } else if (normalized === "qult-plan-evaluator") {
     validatePlanEvaluator(output);
   } else if (normalized === "Plan") {
@@ -1328,7 +1355,18 @@ function validateReviewer(output) {
     return;
   block("Reviewer output must include at least one of: (1) 'Review: PASS' or 'Review: FAIL', (2) 'Score: Correctness=N Design=N Security=N', or (3) findings ([severity] file:line). Rerun the review.");
 }
-var SEVERITY_PATTERN, FINDING_RE, NO_ISSUES_RE, REVIEW_PASS_RE, REVIEW_FAIL_RE, PLAN_PASS_RE, PLAN_REVISE_RE;
+function validateStageReviewer(output, passRe, failRe, scoreParser, stageName) {
+  const hasVerdict = passRe.test(output) || failRe.test(output);
+  const hasFindings = FINDING_RE.test(output) || NO_ISSUES_RE.test(output);
+  const hasScore = scoreParser(output) !== null;
+  if (!hasVerdict && !hasFindings && !hasScore) {
+    block(`${stageName} reviewer output must include: (1) '${stageName}: PASS' or '${stageName}: FAIL', (2) Score line, or (3) findings. Rerun the review.`);
+  }
+  if (failRe.test(output)) {
+    block(`${stageName}: FAIL. Fix the issues found by the ${stageName.toLowerCase()} reviewer and re-run /qult:review.`);
+  }
+}
+var SEVERITY_PATTERN, FINDING_RE, NO_ISSUES_RE, REVIEW_PASS_RE, REVIEW_FAIL_RE, SPEC_PASS_RE, SPEC_FAIL_RE, QUALITY_PASS_RE, QUALITY_FAIL_RE, SECURITY_PASS_RE, SECURITY_FAIL_RE, PLAN_PASS_RE, PLAN_REVISE_RE;
 var init_agent_validators = __esm(() => {
   init_config();
   init_session_state();
@@ -1341,6 +1379,12 @@ var init_agent_validators = __esm(() => {
   NO_ISSUES_RE = /no issues found/i;
   REVIEW_PASS_RE = /^Review:\s*PASS/im;
   REVIEW_FAIL_RE = /^Review:\s*FAIL/im;
+  SPEC_PASS_RE = /^Spec:\s*PASS/im;
+  SPEC_FAIL_RE = /^Spec:\s*FAIL/im;
+  QUALITY_PASS_RE = /^Quality:\s*PASS/im;
+  QUALITY_FAIL_RE = /^Quality:\s*FAIL/im;
+  SECURITY_PASS_RE = /^Security:\s*PASS/im;
+  SECURITY_FAIL_RE = /^Security:\s*FAIL/im;
   PLAN_PASS_RE = /^Plan:\s*PASS/im;
   PLAN_REVISE_RE = /^Plan:\s*REVISE/im;
 });
@@ -1350,7 +1394,10 @@ var exports_subagent_stop = {};
 __export(exports_subagent_stop, {
   validatePlanStructure: () => validatePlanStructure,
   validatePlanHeuristics: () => validatePlanHeuristics,
+  parseSpecScores: () => parseSpecScores,
+  parseSecurityScores: () => parseSecurityScores,
   parseScores: () => parseScores,
+  parseQualityScores: () => parseQualityScores,
   parseDimensionScores: () => parseDimensionScores,
   default: () => subagentStop,
   buildReviewBlockMessage: () => buildReviewBlockMessage,
