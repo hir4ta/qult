@@ -1,15 +1,39 @@
 # qult
 
-![Version](https://img.shields.io/badge/version-0.20.0-7fbbb3?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.20.1-7fbbb3?style=flat-square)
 ![TypeScript](https://img.shields.io/badge/TypeScript-standalone_binary-a7c080?style=flat-square&logo=typescript&logoColor=d3c6aa)
 ![Hooks](https://img.shields.io/badge/hooks-7-dbbc7f?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-83c092?style=flat-square)
 
-**Quality by Structure, Not by Promise.** An evaluator harness that enforces code quality through walls, not words.
+**Quality by Structure, Not by Promise.** A harness engineering tool that enforces code quality through walls, not words.
 
-> Claude is capable, but it leaves lint errors behind and moves to the next file. It commits without tests. It praises its own code and calls the review done.
-> qult uses 7 hooks + MCP server + 3-stage independent review to stop that with **exit 2 (DENY), not advisory messages**.
+> Prompts are suggestions. Hooks are enforcement.
+> qult uses 7 hooks + MCP server + 3-stage independent review to block quality regressions with **exit 2 (DENY), not advisory messages**.
 > Distributed as a Claude Code Plugin. Install with `/plugin install`.
+
+## Why harness engineering?
+
+AI coding agents are powerful but unreliable at self-regulation. They leave lint errors behind and move to the next file. They commit without running tests. They praise their own code and call the review done.
+
+The emerging discipline of **harness engineering** — first named by [OpenAI](https://openai.com/index/harness-engineering/) and formalized by [Martin Fowler](https://martinfowler.com/articles/exploring-gen-ai/harness-engineering.html) — addresses this:
+
+> **Agent = Model + Harness.** Enforce invariants, don't micromanage implementations.
+
+Research validates this approach:
+
+- **TDAD** ([arXiv:2603.17973](https://arxiv.org/abs/2603.17973)): Adding TDD instructions via prompts alone **increased regressions** from 6% to 10% — worse than no intervention. Structural enforcement reduced them to 1.8%.
+- **Specification as Quality Gate** ([arXiv:2603.25773](https://arxiv.org/abs/2603.25773)): AI reviewing AI is structurally circular — correlated errors echo rather than cancel. Deterministic gates must come first, AI review only for the residual.
+
+qult implements this architecture: **deterministic gates (lint, typecheck) → executable specifications (test) → AI review (residual only)**.
+
+### Trust structure, not models
+
+| Approach | Mechanism | Guarantee |
+|----------|-----------|-----------|
+| **Prompt-based** (superpowers, etc.) | Persuasive skill prose | None — model may skip steps |
+| **Structure-based** (qult) | Hook exit 2 (DENY) | Structural — cannot be bypassed by the model |
+
+In Fowler's taxonomy: qult's hooks are **sensors** (feedback controls that observe and correct), while skills and CLAUDE.md are **guides** (feedforward controls that steer before action). Both are necessary; qult provides both.
 
 ## Philosophy
 
@@ -66,8 +90,8 @@ Operates on the Generator-Evaluator pattern from Anthropic's [Harness Design](ht
 
 ```mermaid
 flowchart TB
-    subgraph Generator["Generator"]
-        Claude["Claude\n+ 7 hooks for quality gates"]
+    subgraph Generator["Generator (7 hooks)"]
+        Claude["Claude\n+ deterministic gates"]
     end
     subgraph Evaluator["3-Stage Evaluator"]
         Spec["Stage 1: Spec Reviewer\n(Completeness + Accuracy)"]
@@ -81,8 +105,8 @@ flowchart TB
     Claude -- "All tasks done" --> Spec
     Spec --> Quality
     Quality --> Security
-    Security -- "Any FAIL / score < 24" --> Claude
-    Security -- "All PASS + score >= 24/30" --> Done["Commit"]
+    Security -- "Any FAIL / aggregate < 24 / dimension < 3" --> Claude
+    Security -- "All PASS + aggregate >= 24/30 + all dims >= 3" --> Done["Commit"]
 
     style Generator fill:#7fbbb3,color:#2d353b,stroke:#7fbbb3
     style Evaluator fill:#e69875,color:#2d353b,stroke:#e69875
@@ -94,13 +118,14 @@ flowchart TB
 
 | Situation | Action |
 |---|---|
-| Lint/type errors left behind, moves to another file | **The Wall** -- DENY until fixed |
-| `git commit` without running tests | **The Wall** -- requires test pass |
-| Declares done without review or after FAIL | **block** -- requires /qult:review |
-| Review PASS but low score | **block** -- trend-aware re-review (up to 3x) |
-| Plan finalized with omissions | **The Wall** -- forces session-wide check (once) |
-| Declares done mid-plan | **block** -- requires all tasks completed |
-| Plan task completed | **verify** -- runs Verify test immediately |
+| Lint/type errors left behind, moves to another file | **The Wall** — DENY until fixed |
+| `git commit` without running tests | **The Wall** — requires test pass |
+| Declares done without review or after FAIL | **block** — requires /qult:review |
+| Review PASS but low aggregate score | **block** — trend-aware re-review (up to 3x) |
+| Review PASS but any single dimension below floor | **block** — e.g., Security=2 blocks even if aggregate is high |
+| Plan finalized with omissions | **The Wall** — forces session-wide check (once) |
+| Declares done mid-plan | **block** — requires all tasks completed |
+| Plan task completed | **verify** — runs Verify test immediately |
 
 ## Complete Workflow
 
@@ -123,7 +148,7 @@ qult provides a full development workflow through 12 skills and 6 agents:
 | **The Wall** (enforcement) | PostToolUse | Runs lint/type gates after Edit/Write, writes state |
 | **The Wall** (enforcement) | PreToolUse | DENY if pending fixes, require test/review before commit, force selfcheck on ExitPlanMode |
 | **Completion gate** (enforcement) | Stop | Block if unresolved errors, incomplete tasks, or missing review |
-| **Subagent** (enforcement) | SubagentStop | Validates review output + enforces trend-aware score threshold (24/30) |
+| **Subagent** (enforcement) | SubagentStop | Validates review output, enforces dimension floor + aggregate threshold (24/30) |
 | **Task verify** (advisory) | TaskCompleted | Runs Verify test immediately when plan task completes |
 | **Context** (advisory) | PostCompact | Re-injects pending fixes and session state after context compaction |
 
@@ -156,11 +181,11 @@ Restart Claude Code after installation (end the session and start a new one).
 
 What init does:
 - Creates `.qult/` directory
-- Generates `.qult/gates.json` -- auto-detects project lint/typecheck/test tools
+- Generates `.qult/gates.json` — auto-detects project lint/typecheck/test tools
 - Adds `.qult/` to `.gitignore`
 - Cleans up legacy files (old rules, hooks)
 
-All quality rules are delivered via MCP server instructions -- no files are placed in your project except `.qult/`.
+All quality rules are delivered via MCP server instructions — no files are placed in your project except `.qult/`.
 
 ### 3. Verify setup
 
@@ -207,13 +232,19 @@ qult's review (`/qult:review`) spawns three specialized Opus reviewers in sequen
 | 3 | **Security Reviewer** | Vulnerability + Hardening | Are there injection risks? Is defense-in-depth applied? |
 
 Each agent scores 2 dimensions (1-5 each). Total: **6 dimensions / 30 points**.
-Default threshold: **24/30** (configurable). Maximum 3 iterations.
+
+### Dual threshold enforcement
+
+qult enforces quality at two levels:
+
+1. **Dimension floor** (default: 3/5) — Any single dimension below the floor blocks immediately, regardless of aggregate score. This prevents "excellent code with terrible security" from passing.
+2. **Aggregate threshold** (default: 24/30) — After all 3 stages complete, the combined score across all 6 dimensions must meet the threshold. Maximum 3 iterations.
 
 After all reviewers complete, a Judge filter validates each finding for Succinctness, Accuracy, and Actionability.
 
 ## Updating
 
-`/plugin` > qult details > update. All hooks, skills, agents, and MCP server are updated automatically. No additional commands needed -- quality rules are delivered via MCP instructions, not project files.
+`/plugin` > qult details > update. All hooks, skills, agents, and MCP server are updated automatically. No additional commands needed — quality rules are delivered via MCP instructions, not project files.
 
 ## Uninstalling
 
@@ -228,7 +259,8 @@ Customize thresholds in `.qult/config.json` (all optional):
   "review": {
     "score_threshold": 24,
     "max_iterations": 3,
-    "required_changed_files": 5
+    "required_changed_files": 5,
+    "dimension_floor": 3
   },
   "gates": {
     "output_max_chars": 2000,
@@ -242,22 +274,27 @@ Customize thresholds in `.qult/config.json` (all optional):
 | `review.score_threshold` | number | 24 | Aggregate score required to pass 3-stage review (max 30) |
 | `review.max_iterations` | number | 3 | Maximum review retry iterations |
 | `review.required_changed_files` | number | 5 | Number of changed files that triggers mandatory review |
+| `review.dimension_floor` | number | 3 | Minimum score per dimension (1-5). Any dimension below this blocks regardless of aggregate |
 | `gates.output_max_chars` | number | 2000 | Max gate output chars (excess is truncated) |
 | `gates.default_timeout` | number | 10000 | Gate command timeout (ms) |
 
-Environment variable overrides: `QULT_REVIEW_SCORE_THRESHOLD`, `QULT_REVIEW_MAX_ITERATIONS`, `QULT_REVIEW_REQUIRED_FILES`, `QULT_GATE_OUTPUT_MAX`, `QULT_GATE_DEFAULT_TIMEOUT`
+Environment variable overrides: `QULT_REVIEW_SCORE_THRESHOLD`, `QULT_REVIEW_MAX_ITERATIONS`, `QULT_REVIEW_REQUIRED_FILES`, `QULT_REVIEW_DIMENSION_FLOOR`, `QULT_GATE_OUTPUT_MAX`, `QULT_GATE_DEFAULT_TIMEOUT`
 
 <details>
 <summary><strong>Review score threshold rationale</strong></summary>
 
-The 3-stage reviewer scores six dimensions (Completeness, Accuracy, Design, Maintainability, Vulnerability, Hardening) on a 1-5 scale. The default threshold of 24/30 means:
+The 3-stage reviewer scores six dimensions (Completeness, Accuracy, Design, Maintainability, Vulnerability, Hardening) on a 1-5 scale.
 
+**Aggregate threshold** (default 24/30):
 - 4+4+4+4+4+4 = 24: Consistent "good" across all dimensions
-- 5+5+5+5+2+2 = 24: Excellent code but weak security still passes (marginal)
 - 3+3+3+3+3+3 = 18: Fails. Consistent mediocrity is caught
 - 5+5+4+4+4+4 = 26: Strong code passes comfortably
 
-The threshold is configurable because acceptable quality varies by project. Lower it for prototypes (`"score_threshold": 18`), raise it for production APIs (`"score_threshold": 27`).
+**Dimension floor** (default 3/5):
+- 5+5+5+5+2+2 = 24: Aggregate passes, but **blocked** — Vulnerability=2 or Hardening=2 is below floor
+- 3+3+4+4+5+5 = 24: Passes — no dimension below floor
+
+The dimension floor prevents a dangerous pattern where excellent scores in some areas mask critical weakness in others (especially security). Configurable: lower it for prototypes (`"dimension_floor": 2`), raise it for production APIs (`"dimension_floor": 4`).
 
 Scores are LLM-generated and not perfectly reproducible. The trend-aware iteration system (up to `max_iterations` retries) compensates: if the score improves across iterations, the feedback is working. If it stagnates, the system advises a different approach.
 
@@ -377,16 +414,16 @@ plugin/
 └── dist/                         Bundled hook + MCP server
 ```
 
-| Component | Role |
-|-----------|------|
-| **hooks** | Enforcement — DENY (exit 2) on quality violations |
-| **MCP server** | State management + quality rule injection via instructions |
-| **skills** | Interactive workflows (explore, review, debug, finish) |
-| **agents** | Independent evaluators (plan, spec, quality, security) |
-| **settings.json** | Sets quality-guardian as default session agent |
-| **.lsp.json** | Provides real-time diagnostics (TypeScript, Python, Go, Rust) |
-| **bin/** | `qult-gate` CLI for manual gate operations |
-| **output-styles/** | "Quality First" output style — concise, evidence-based, gate-aware |
+| Component | Fowler's taxonomy | Role |
+|-----------|-------------------|------|
+| **hooks** | Sensor (feedback) | Enforcement — DENY (exit 2) on quality violations |
+| **MCP server** | Sensor (observability) | State management + quality rule injection via instructions |
+| **skills** | Guide (feedforward) | Interactive workflows (explore, review, debug, finish) |
+| **agents** | Guide + Sensor | Independent evaluators (plan, spec, quality, security) |
+| **settings.json** | Guide | Sets quality-guardian as default session agent |
+| **.lsp.json** | Sensor (real-time) | Provides real-time diagnostics (TypeScript, Python, Go, Rust) |
+| **bin/** | Sensor (manual) | `qult-gate` CLI for manual gate operations |
+| **output-styles/** | Guide | "Quality First" output style — concise, evidence-based, gate-aware |
 
 ### Output style
 
@@ -411,13 +448,14 @@ qult provides LSP server configurations for TypeScript, Python, Go, and Rust. LS
 
 ## Design principles
 
-| Principle | Meaning |
-|-----------|---------|
-| **The Wall > advisory** | Stop with DENY (exit 2). Advisories are assumed to be ignored |
-| **fail-open** | All hooks use try-catch. qult failures never block Claude |
-| **Proof or Block** | No completion claims without verification evidence |
-| **structural guarantee** | Quality enforced by structure. Stress-test assumptions, remove if broken |
-| **zero dependencies** | All devDependencies + bun build bundle |
+| Principle | Fowler's category | Meaning |
+|-----------|-------------------|---------|
+| **The Wall > advisory** | Sensor > Guide | Stop with DENY (exit 2). Advisories are assumed to be ignored |
+| **fail-open** | Sensor safety | All hooks use try-catch. qult failures never block Claude |
+| **Proof or Block** | Sensor enforcement | No completion claims without verification evidence |
+| **deterministic first** | Gate ordering | lint/typecheck → test → AI review. Matches academic recommendation |
+| **dimension floor** | Sensor threshold | Any single dimension below floor blocks. No weak spots hidden by averages |
+| **zero dependencies** | Supply chain | All devDependencies + bun build bundle |
 
 ## Agents
 
@@ -468,7 +506,7 @@ Run `/qult:init`. Ensure tool binaries are on PATH (`which biome`, `which tsc`, 
 <details>
 <summary><strong>Corrupt state files</strong></summary>
 
-Delete files in `.qult/.state/` and start a new session. qult is fail-open by design -- corrupt state files will not block Claude.
+Delete files in `.qult/.state/` and start a new session. qult is fail-open by design — corrupt state files will not block Claude.
 
 </details>
 
@@ -523,8 +561,19 @@ Do not delete `.qult/.state/` to bypass. This clears all session tracking and ma
 
 </details>
 
+## References
+
+Academic papers and industry sources that validate qult's design:
+
+- [OpenAI: Harness Engineering](https://openai.com/index/harness-engineering/) — "Agent = Model + Harness. Enforce invariants, not micromanage implementations."
+- [Martin Fowler: Harness Engineering](https://martinfowler.com/articles/exploring-gen-ai/harness-engineering.html) — Guides (feedforward) + Sensors (feedback) taxonomy
+- [TDAD: Test-Driven Agentic Development](https://arxiv.org/abs/2603.17973) — Prompt-only TDD increases regressions; structural enforcement reduces them
+- [The Specification as Quality Gate](https://arxiv.org/abs/2603.25773) — Deterministic verification first, AI review for residual only
+- [VibeGuard](https://arxiv.org/abs/2604.01052) — Security gate framework for AI-generated code
+- [Anthropic: Harness Design](https://www.anthropic.com/engineering/harness-design-long-running-apps) — Generator-Evaluator pattern
+
 ## Stack
 
-TypeScript / MCP SDK / vitest (tests) / Biome (lint)
+TypeScript / Bun 1.3+ / vitest (tests) / Biome (lint) / zero dependencies
 
 Distributed as a Claude Code Plugin. Development requires Bun 1.3+.

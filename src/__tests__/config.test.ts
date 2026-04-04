@@ -21,6 +21,7 @@ afterEach(() => {
 	delete process.env.QULT_REVIEW_REQUIRED_FILES;
 	delete process.env.QULT_GATE_OUTPUT_MAX;
 	delete process.env.QULT_GATE_DEFAULT_TIMEOUT;
+	delete process.env.QULT_REVIEW_DIMENSION_FLOOR;
 	delete process.env.CLAUDE_PLUGIN_DATA;
 });
 
@@ -30,6 +31,7 @@ describe("loadConfig", () => {
 		expect(config.review.score_threshold).toBe(24);
 		expect(config.review.max_iterations).toBe(3);
 		expect(config.review.required_changed_files).toBe(5);
+		expect(config.review.dimension_floor).toBe(3);
 		expect(config.gates.output_max_chars).toBe(2000);
 		expect(config.gates.default_timeout).toBe(10000);
 	});
@@ -85,14 +87,27 @@ describe("loadConfig", () => {
 		process.env.QULT_REVIEW_SCORE_THRESHOLD = "9";
 		process.env.QULT_REVIEW_MAX_ITERATIONS = "2";
 		process.env.QULT_REVIEW_REQUIRED_FILES = "3";
+		process.env.QULT_REVIEW_DIMENSION_FLOOR = "4";
 		process.env.QULT_GATE_OUTPUT_MAX = "1500";
 		process.env.QULT_GATE_DEFAULT_TIMEOUT = "5000";
 		const config = loadConfig();
 		expect(config.review.score_threshold).toBe(9);
 		expect(config.review.max_iterations).toBe(2);
 		expect(config.review.required_changed_files).toBe(3);
+		expect(config.review.dimension_floor).toBe(4);
 		expect(config.gates.output_max_chars).toBe(1500);
 		expect(config.gates.default_timeout).toBe(5000);
+	});
+
+	it("reads dimension_floor from config file", () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ review: { dimension_floor: 2 } }),
+		);
+		const config = loadConfig();
+		expect(config.review.dimension_floor).toBe(2);
+		// Other defaults preserved
+		expect(config.review.score_threshold).toBe(24);
 	});
 });
 

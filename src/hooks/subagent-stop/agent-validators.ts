@@ -2,13 +2,16 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "../../config.ts";
 import {
+	clearStageScores,
 	getPlanEvalIteration,
 	getPlanEvalScoreHistory,
 	getReviewIteration,
 	getReviewScoreHistory,
+	getStageScores,
 	recordPlanEvalIteration,
 	recordReview,
 	recordReviewIteration,
+	recordStageScores,
 	resetPlanEvalIteration,
 	resetReviewIteration,
 } from "../../state/session-state.ts";
@@ -27,6 +30,7 @@ import {
 	parseSecurityScores,
 	parseSpecScores,
 } from "./score-parsers.ts";
+import { detectTrend, findWeakestDimension } from "./trend-analysis.ts";
 
 // [severity] file:line pattern or "No issues found"
 const SEVERITY_PATTERN = /\[(critical|high|medium|low)\]/;
@@ -106,7 +110,8 @@ export default async function subagentStop(ev: HookEvent): Promise<void> {
 			parseSecurityScores,
 			"Security",
 		);
-		// After all 3 stages complete, recordReview is called by the review skill
+		// After final stage, check aggregate across all 3 stages
+		checkAggregateScore();
 	} else if (normalized === "qult-plan-evaluator") {
 		validatePlanEvaluator(output);
 	} else if (normalized === "Plan") {
@@ -204,7 +209,8 @@ function validateReviewer(output: string): void {
 }
 
 /** Generic validation for 3-stage review agents (spec, quality, security).
- *  Validates output format: verdict + scores + findings. Blocks on FAIL verdict. */
+ *  Validates output format: verdict + scores + findings. Blocks on FAIL verdict.
+ *  Enforces dimension floor: any single dimension below floor → block. */
 function validateStageReviewer(
 	output: string,
 	passRe: RegExp,
@@ -214,7 +220,8 @@ function validateStageReviewer(
 ): void {
 	const hasVerdict = passRe.test(output) || failRe.test(output);
 	const hasFindings = FINDING_RE.test(output) || NO_ISSUES_RE.test(output);
-	const hasScore = scoreParser(output) !== null;
+	const scores = scoreParser(output);
+	const hasScore = scores !== null;
 
 	// Soft validation: accept if any signal is present
 	if (!hasVerdict && !hasFindings && !hasScore) {
@@ -227,5 +234,116 @@ function validateStageReviewer(
 		block(
 			`${stageName}: FAIL. Fix the issues found by the ${stageName.toLowerCase()} reviewer and re-run /qult:review.`,
 		);
+	}
+
+	// PASS verdict but no parseable scores — block to require structured output
+	if (passRe.test(output) && !scores) {
+		block(
+			`${stageName}: PASS but no parseable scores found. Output must include 'Score: Dim1=N Dim2=N'. Rerun the review.`,
+		);
+	}
+
+	// Dimension floor enforcement: block if any dimension is below the floor
+	if (passRe.test(output) && scores) {
+		const scoreEntries = scores as Record<string, number>;
+
+		// Record stage scores BEFORE floor check.
+		// block() throws, so recordStageScores must come first to persist scores.
+		// This is intentional: /qult:review always reruns all 3 stages per cycle,
+		// so partial stage scores are cleared at next aggregate check.
+		try {
+			recordStageScores(stageName, scoreEntries);
+		} catch {
+			/* fail-open */
+		}
+
+		const floor = loadConfig().review.dimension_floor;
+		const belowFloor = Object.entries(scoreEntries).filter(
+			([, v]) => typeof v === "number" && v < floor,
+		);
+		if (belowFloor.length > 0) {
+			const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+			const dims = belowFloor.map(([name, score]) => `${capitalize(name)} (${score}/5)`).join(", ");
+			block(
+				`${stageName}: PASS but ${dims} below minimum ${floor}/5. Fix these dimensions and re-run /qult:review.`,
+			);
+		}
+	}
+}
+
+/** Check aggregate score across all 3 stages. Blocks if below threshold. */
+function checkAggregateScore(): void {
+	try {
+		const stageScores = getStageScores();
+		const stages = ["Spec", "Quality", "Security"];
+		// Only check if all 3 stages have scores
+		if (!stages.every((s) => stageScores[s])) return;
+
+		const allScores = stages.flatMap((s) =>
+			Object.values(stageScores[s]!).filter((v) => typeof v === "number" && v >= 1 && v <= 5),
+		);
+		// If any stage has no valid scores, skip aggregate (fail-open)
+		if (allScores.length !== 6) return;
+		const aggregate = allScores.reduce((sum, v) => sum + v, 0);
+		const config = loadConfig();
+		const threshold = config.review.score_threshold;
+		const maxIter = config.review.max_iterations;
+
+		try {
+			recordReviewIteration(aggregate);
+		} catch {
+			/* fail-open */
+		}
+
+		const iterCount = getReviewIteration();
+		const history = getReviewScoreHistory();
+
+		if (aggregate >= threshold) {
+			// Aggregate passes — clear stage scores and record review
+			clearStageScores();
+			resetReviewIteration();
+			recordReview();
+			return;
+		}
+
+		// Clear stage scores for next iteration
+		clearStageScores();
+
+		if (iterCount < maxIter) {
+			// Find weakest dimension across all stages
+			const allDims: Record<string, number> = {};
+			for (const stage of stages) {
+				for (const [dim, score] of Object.entries(stageScores[stage]!)) {
+					const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+					allDims[capitalize(dim)] = score;
+				}
+			}
+			const weakest = findWeakestDimension(allDims);
+			const trend = detectTrend(history);
+
+			let msg = `Review aggregate ${aggregate}/30 below threshold ${threshold}/30. Iteration ${iterCount}/${maxIter}.`;
+			if (weakest) {
+				if (trend === "improving" && history.length >= 2) {
+					const prev = history[history.length - 2]!;
+					msg += ` Score improved ${prev}→${aggregate}. Focus on: ${weakest.name} (${weakest.score}/5).`;
+				} else if (trend === "regressing" && history.length >= 2) {
+					const prev = history[history.length - 2]!;
+					msg += ` Score regressed ${prev}→${aggregate}. Revert recent ${weakest.name.toLowerCase()}-related changes.`;
+				} else {
+					msg += ` Weakest: ${weakest.name} (${weakest.score}/5). Fix and re-run /qult:review.`;
+				}
+			}
+			block(msg);
+		}
+
+		// Max iterations reached — allow with warning to stderr
+		process.stderr.write(
+			`[qult] Max review iterations (${maxIter}) reached. Aggregate ${aggregate}/30 below threshold ${threshold}/30. Proceeding anyway.\n`,
+		);
+		resetReviewIteration();
+		recordReview();
+	} catch (err) {
+		// fail-open — but re-throw block() exits
+		if (err instanceof Error && err.message.startsWith("process.exit")) throw err;
 	}
 }

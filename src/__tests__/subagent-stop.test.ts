@@ -650,6 +650,60 @@ Why this change is needed.
 		expect(stderrCapture.join("")).toContain("Security: FAIL");
 	});
 
+	it("qult-spec-reviewer with PASS but dimension below floor: blocks", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ review: { dimension_floor: 3 } }),
+		);
+		resetAllCaches();
+
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		await expect(
+			subagentStop({
+				agent_type: "qult-spec-reviewer",
+				last_assistant_message: "Spec: PASS\nScore: Completeness=2 Accuracy=5\nNo issues found.",
+			}),
+		).rejects.toThrow("process.exit");
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("below minimum");
+		expect(stderrCapture.join("")).toContain("Completeness");
+	});
+
+	it("qult-security-reviewer with PASS but dimension below floor: blocks", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ review: { dimension_floor: 3 } }),
+		);
+		resetAllCaches();
+
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		await expect(
+			subagentStop({
+				agent_type: "qult-security-reviewer",
+				last_assistant_message:
+					"Security: PASS\nScore: Vulnerability=2 Hardening=4\nNo issues found.",
+			}),
+		).rejects.toThrow("process.exit");
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("below minimum");
+		expect(stderrCapture.join("")).toContain("Vulnerability");
+	});
+
+	it("qult-quality-reviewer with PASS and all dimensions at floor: allows", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ review: { dimension_floor: 3 } }),
+		);
+		resetAllCaches();
+
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		await subagentStop({
+			agent_type: "qult-quality-reviewer",
+			last_assistant_message: "Quality: PASS\nScore: Design=3 Maintainability=4\nNo issues found.",
+		});
+		expect(exitCode).toBeNull();
+	});
+
 	it("qult-spec-reviewer with invalid output: blocks", async () => {
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await expect(
@@ -669,6 +723,104 @@ Why this change is needed.
 			last_assistant_message: "Spec: PASS\nScore: Completeness=5 Accuracy=5\nNo issues found.",
 		});
 		expect(exitCode).toBeNull();
+	});
+
+	// --- 3-stage aggregate score tests ---
+
+	it("3-stage review: aggregate below threshold after security-reviewer blocks", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ review: { score_threshold: 24 } }),
+		);
+		resetAllCaches();
+
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+
+		// Stage 1: Spec PASS with low scores
+		await subagentStop({
+			agent_type: "qult-spec-reviewer",
+			last_assistant_message: "Spec: PASS\nScore: Completeness=3 Accuracy=3\nNo issues found.",
+		});
+		expect(exitCode).toBeNull();
+
+		// Stage 2: Quality PASS with low scores
+		await subagentStop({
+			agent_type: "qult-quality-reviewer",
+			last_assistant_message: "Quality: PASS\nScore: Design=3 Maintainability=3\nNo issues found.",
+		});
+		expect(exitCode).toBeNull();
+
+		// Stage 3: Security PASS — aggregate = 3+3+3+3+3+3 = 18 < 24
+		await expect(
+			subagentStop({
+				agent_type: "qult-security-reviewer",
+				last_assistant_message:
+					"Security: PASS\nScore: Vulnerability=3 Hardening=3\nNo issues found.",
+			}),
+		).rejects.toThrow("process.exit");
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("18/30");
+		expect(stderrCapture.join("")).toContain("below threshold");
+	});
+
+	it("3-stage review: aggregate at threshold after security-reviewer allows", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ review: { score_threshold: 24 } }),
+		);
+		resetAllCaches();
+
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+
+		// Stage 1: Spec PASS
+		await subagentStop({
+			agent_type: "qult-spec-reviewer",
+			last_assistant_message: "Spec: PASS\nScore: Completeness=4 Accuracy=4\nNo issues found.",
+		});
+
+		// Stage 2: Quality PASS
+		await subagentStop({
+			agent_type: "qult-quality-reviewer",
+			last_assistant_message: "Quality: PASS\nScore: Design=4 Maintainability=4\nNo issues found.",
+		});
+
+		// Stage 3: Security PASS — aggregate = 4+4+4+4+4+4 = 24 >= 24
+		await subagentStop({
+			agent_type: "qult-security-reviewer",
+			last_assistant_message:
+				"Security: PASS\nScore: Vulnerability=4 Hardening=4\nNo issues found.",
+		});
+		expect(exitCode).toBeNull();
+	});
+
+	it("3-stage review: stage scores are cleared after successful aggregate", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ review: { score_threshold: 24 } }),
+		);
+		resetAllCaches();
+
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+
+		// Complete all 3 stages with passing scores
+		await subagentStop({
+			agent_type: "qult-spec-reviewer",
+			last_assistant_message: "Spec: PASS\nScore: Completeness=5 Accuracy=5\nNo issues found.",
+		});
+		await subagentStop({
+			agent_type: "qult-quality-reviewer",
+			last_assistant_message: "Quality: PASS\nScore: Design=4 Maintainability=4\nNo issues found.",
+		});
+		await subagentStop({
+			agent_type: "qult-security-reviewer",
+			last_assistant_message:
+				"Security: PASS\nScore: Vulnerability=5 Hardening=4\nNo issues found.",
+		});
+
+		// Verify stage scores are cleared (next review starts fresh)
+		const { readSessionState } = await import("../state/session-state.ts");
+		const state = readSessionState();
+		expect(state.review_stage_scores).toEqual({});
 	});
 
 	it("Plan agent with invalid plan (missing sections): blocks", async () => {

@@ -7,6 +7,7 @@ export interface QultConfig {
 		score_threshold: number;
 		max_iterations: number;
 		required_changed_files: number;
+		dimension_floor: number;
 	};
 	plan_eval: {
 		score_threshold: number;
@@ -24,6 +25,7 @@ const DEFAULTS: QultConfig = {
 		score_threshold: 24,
 		max_iterations: 3,
 		required_changed_files: 5,
+		dimension_floor: 3,
 	},
 	plan_eval: {
 		score_threshold: 10,
@@ -44,6 +46,8 @@ function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): voi
 		if (typeof r.max_iterations === "number") config.review.max_iterations = r.max_iterations;
 		if (typeof r.required_changed_files === "number")
 			config.review.required_changed_files = r.required_changed_files;
+		if (typeof r.dimension_floor === "number")
+			config.review.dimension_floor = Math.max(1, Math.min(5, r.dimension_floor));
 	}
 	if (raw.plan_eval && typeof raw.plan_eval === "object") {
 		const p = raw.plan_eval as Record<string, unknown>;
@@ -109,6 +113,8 @@ export function loadConfig(): QultConfig {
 		envInt("QULT_REVIEW_MAX_ITERATIONS") ?? config.review.max_iterations;
 	config.review.required_changed_files =
 		envInt("QULT_REVIEW_REQUIRED_FILES") ?? config.review.required_changed_files;
+	const rawFloor = envInt("QULT_REVIEW_DIMENSION_FLOOR");
+	if (rawFloor !== undefined) config.review.dimension_floor = Math.max(1, Math.min(5, rawFloor));
 	config.plan_eval.score_threshold =
 		envInt("QULT_PLAN_EVAL_SCORE_THRESHOLD") ?? config.plan_eval.score_threshold;
 	config.plan_eval.max_iterations =

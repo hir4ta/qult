@@ -46,6 +46,8 @@ function applyConfigLayer(config, raw) {
       config.review.max_iterations = r.max_iterations;
     if (typeof r.required_changed_files === "number")
       config.review.required_changed_files = r.required_changed_files;
+    if (typeof r.dimension_floor === "number")
+      config.review.dimension_floor = Math.max(1, Math.min(5, r.dimension_floor));
   }
   if (raw.plan_eval && typeof raw.plan_eval === "object") {
     const p = raw.plan_eval;
@@ -95,6 +97,9 @@ function loadConfig() {
   config.review.score_threshold = envInt("QULT_REVIEW_SCORE_THRESHOLD") ?? config.review.score_threshold;
   config.review.max_iterations = envInt("QULT_REVIEW_MAX_ITERATIONS") ?? config.review.max_iterations;
   config.review.required_changed_files = envInt("QULT_REVIEW_REQUIRED_FILES") ?? config.review.required_changed_files;
+  const rawFloor = envInt("QULT_REVIEW_DIMENSION_FLOOR");
+  if (rawFloor !== undefined)
+    config.review.dimension_floor = Math.max(1, Math.min(5, rawFloor));
   config.plan_eval.score_threshold = envInt("QULT_PLAN_EVAL_SCORE_THRESHOLD") ?? config.plan_eval.score_threshold;
   config.plan_eval.max_iterations = envInt("QULT_PLAN_EVAL_MAX_ITERATIONS") ?? config.plan_eval.max_iterations;
   config.gates.output_max_chars = envInt("QULT_GATE_OUTPUT_MAX") ?? config.gates.output_max_chars;
@@ -108,7 +113,8 @@ var init_config = __esm(() => {
     review: {
       score_threshold: 24,
       max_iterations: 3,
-      required_changed_files: 5
+      required_changed_files: 5,
+      dimension_floor: 3
     },
     plan_eval: {
       score_threshold: 10,
@@ -323,6 +329,7 @@ function defaultState() {
     changed_file_paths: [],
     review_iteration: 0,
     review_score_history: [],
+    review_stage_scores: {},
     plan_eval_iteration: 0,
     plan_eval_score_history: [],
     plan_selfcheck_blocked_at: null,
@@ -346,6 +353,9 @@ function readSessionState() {
       raw.plan_eval_score_history = [raw.plan_eval_last_aggregate];
     }
     const state = { ...defaultState(), ...raw };
+    if (state.review_stage_scores && (typeof state.review_stage_scores !== "object" || Array.isArray(state.review_stage_scores))) {
+      state.review_stage_scores = {};
+    }
     _cache4 = state;
     return state;
   } catch {
@@ -455,6 +465,7 @@ function clearOnCommit() {
   state.changed_file_paths = [];
   state.review_iteration = 0;
   state.review_score_history = [];
+  state.review_stage_scores = {};
   state.plan_eval_iteration = 0;
   state.plan_eval_score_history = [];
   state.plan_selfcheck_blocked_at = null;
@@ -476,6 +487,21 @@ function resetReviewIteration() {
   const state = readSessionState();
   state.review_iteration = 0;
   state.review_score_history = [];
+  writeState(state);
+}
+function recordStageScores(stageName, scores) {
+  const state = readSessionState();
+  if (!state.review_stage_scores)
+    state.review_stage_scores = {};
+  state.review_stage_scores[stageName] = scores;
+  writeState(state);
+}
+function getStageScores() {
+  return readSessionState().review_stage_scores ?? {};
+}
+function clearStageScores() {
+  const state = readSessionState();
+  state.review_stage_scores = {};
   writeState(state);
 }
 function getPlanEvalIteration() {
@@ -1286,6 +1312,7 @@ async function subagentStop(ev) {
     validateStageReviewer(output, QUALITY_PASS_RE, QUALITY_FAIL_RE, parseQualityScores, "Quality");
   } else if (normalized === "qult-security-reviewer") {
     validateStageReviewer(output, SECURITY_PASS_RE, SECURITY_FAIL_RE, parseSecurityScores, "Security");
+    checkAggregateScore();
   } else if (normalized === "qult-plan-evaluator") {
     validatePlanEvaluator(output);
   } else if (normalized === "Plan") {
@@ -1358,12 +1385,87 @@ function validateReviewer(output) {
 function validateStageReviewer(output, passRe, failRe, scoreParser, stageName) {
   const hasVerdict = passRe.test(output) || failRe.test(output);
   const hasFindings = FINDING_RE.test(output) || NO_ISSUES_RE.test(output);
-  const hasScore = scoreParser(output) !== null;
+  const scores = scoreParser(output);
+  const hasScore = scores !== null;
   if (!hasVerdict && !hasFindings && !hasScore) {
     block(`${stageName} reviewer output must include: (1) '${stageName}: PASS' or '${stageName}: FAIL', (2) Score line, or (3) findings. Rerun the review.`);
   }
   if (failRe.test(output)) {
     block(`${stageName}: FAIL. Fix the issues found by the ${stageName.toLowerCase()} reviewer and re-run /qult:review.`);
+  }
+  if (passRe.test(output) && !scores) {
+    block(`${stageName}: PASS but no parseable scores found. Output must include 'Score: Dim1=N Dim2=N'. Rerun the review.`);
+  }
+  if (passRe.test(output) && scores) {
+    const scoreEntries = scores;
+    try {
+      recordStageScores(stageName, scoreEntries);
+    } catch {}
+    const floor = loadConfig().review.dimension_floor;
+    const belowFloor = Object.entries(scoreEntries).filter(([, v]) => typeof v === "number" && v < floor);
+    if (belowFloor.length > 0) {
+      const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+      const dims = belowFloor.map(([name, score]) => `${capitalize(name)} (${score}/5)`).join(", ");
+      block(`${stageName}: PASS but ${dims} below minimum ${floor}/5. Fix these dimensions and re-run /qult:review.`);
+    }
+  }
+}
+function checkAggregateScore() {
+  try {
+    const stageScores = getStageScores();
+    const stages = ["Spec", "Quality", "Security"];
+    if (!stages.every((s) => stageScores[s]))
+      return;
+    const allScores = stages.flatMap((s) => Object.values(stageScores[s]).filter((v) => typeof v === "number" && v >= 1 && v <= 5));
+    if (allScores.length !== 6)
+      return;
+    const aggregate = allScores.reduce((sum, v) => sum + v, 0);
+    const config = loadConfig();
+    const threshold = config.review.score_threshold;
+    const maxIter = config.review.max_iterations;
+    try {
+      recordReviewIteration(aggregate);
+    } catch {}
+    const iterCount = getReviewIteration();
+    const history = getReviewScoreHistory();
+    if (aggregate >= threshold) {
+      clearStageScores();
+      resetReviewIteration();
+      recordReview();
+      return;
+    }
+    clearStageScores();
+    if (iterCount < maxIter) {
+      const allDims = {};
+      for (const stage of stages) {
+        for (const [dim, score] of Object.entries(stageScores[stage])) {
+          const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+          allDims[capitalize(dim)] = score;
+        }
+      }
+      const weakest = findWeakestDimension(allDims);
+      const trend = detectTrend(history);
+      let msg = `Review aggregate ${aggregate}/30 below threshold ${threshold}/30. Iteration ${iterCount}/${maxIter}.`;
+      if (weakest) {
+        if (trend === "improving" && history.length >= 2) {
+          const prev = history[history.length - 2];
+          msg += ` Score improved ${prev}→${aggregate}. Focus on: ${weakest.name} (${weakest.score}/5).`;
+        } else if (trend === "regressing" && history.length >= 2) {
+          const prev = history[history.length - 2];
+          msg += ` Score regressed ${prev}→${aggregate}. Revert recent ${weakest.name.toLowerCase()}-related changes.`;
+        } else {
+          msg += ` Weakest: ${weakest.name} (${weakest.score}/5). Fix and re-run /qult:review.`;
+        }
+      }
+      block(msg);
+    }
+    process.stderr.write(`[qult] Max review iterations (${maxIter}) reached. Aggregate ${aggregate}/30 below threshold ${threshold}/30. Proceeding anyway.
+`);
+    resetReviewIteration();
+    recordReview();
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("process.exit"))
+      throw err;
   }
 }
 var SEVERITY_PATTERN, FINDING_RE, NO_ISSUES_RE, REVIEW_PASS_RE, REVIEW_FAIL_RE, SPEC_PASS_RE, SPEC_FAIL_RE, QUALITY_PASS_RE, QUALITY_FAIL_RE, SECURITY_PASS_RE, SECURITY_FAIL_RE, PLAN_PASS_RE, PLAN_REVISE_RE;

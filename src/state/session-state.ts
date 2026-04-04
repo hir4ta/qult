@@ -44,6 +44,8 @@ export interface SessionState {
 	review_iteration: number;
 	/** Aggregate scores per iteration for trend detection */
 	review_score_history: number[];
+	/** Per-stage scores for 3-stage aggregate (e.g. {"Spec": {"completeness": 5, "accuracy": 4}}) */
+	review_stage_scores: Record<string, Record<string, number>>;
 
 	// ── Plan evaluation ──────────────────────────────────────
 	/** Number of plan evaluation iterations (0 = not started) */
@@ -81,6 +83,7 @@ function defaultState(): SessionState {
 		changed_file_paths: [],
 		review_iteration: 0,
 		review_score_history: [],
+		review_stage_scores: {},
 		plan_eval_iteration: 0,
 		plan_eval_score_history: [],
 		plan_selfcheck_blocked_at: null,
@@ -114,6 +117,13 @@ export function readSessionState(): SessionState {
 			raw.plan_eval_score_history = [raw.plan_eval_last_aggregate];
 		}
 		const state = { ...defaultState(), ...raw };
+		// Validate review_stage_scores shape (must be Record<string, Record<string, number>>)
+		if (
+			state.review_stage_scores &&
+			(typeof state.review_stage_scores !== "object" || Array.isArray(state.review_stage_scores))
+		) {
+			state.review_stage_scores = {};
+		}
 		_cache = state;
 		return state;
 	} catch {
@@ -266,6 +276,7 @@ export function clearOnCommit(): void {
 	state.changed_file_paths = [];
 	state.review_iteration = 0;
 	state.review_score_history = [];
+	state.review_stage_scores = {};
 	state.plan_eval_iteration = 0;
 	state.plan_eval_score_history = [];
 	state.plan_selfcheck_blocked_at = null;
@@ -297,6 +308,28 @@ export function resetReviewIteration(): void {
 	const state = readSessionState();
 	state.review_iteration = 0;
 	state.review_score_history = [];
+	writeState(state);
+}
+
+// ── Review stage scores (3-stage aggregate) ───────────────────
+
+/** Record scores for a review stage (e.g., "Spec", "Quality", "Security"). */
+export function recordStageScores(stageName: string, scores: Record<string, number>): void {
+	const state = readSessionState();
+	if (!state.review_stage_scores) state.review_stage_scores = {};
+	state.review_stage_scores[stageName] = scores;
+	writeState(state);
+}
+
+/** Get all recorded stage scores. Returns empty object if none. */
+export function getStageScores(): Record<string, Record<string, number>> {
+	return readSessionState().review_stage_scores ?? {};
+}
+
+/** Clear all stage scores (after aggregate check or on commit reset). */
+export function clearStageScores(): void {
+	const state = readSessionState();
+	state.review_stage_scores = {};
 	writeState(state);
 }
 

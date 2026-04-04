@@ -140,7 +140,7 @@ var TOOL_DEFS = [
   },
   {
     name: "set_config",
-    description: "Set a qult config value in .qult/config.json. Allowed keys: review.score_threshold, review.max_iterations, review.required_changed_files, plan_eval.score_threshold, plan_eval.max_iterations.",
+    description: "Set a qult config value in .qult/config.json. Allowed keys: review.score_threshold, review.max_iterations, review.required_changed_files, review.dimension_floor, plan_eval.score_threshold, plan_eval.max_iterations.",
     inputSchema: {
       type: "object",
       properties: {
@@ -255,6 +255,7 @@ function handleTool(name, cwd, args) {
         "review.score_threshold",
         "review.max_iterations",
         "review.required_changed_files",
+        "review.dimension_floor",
         "plan_eval.score_threshold",
         "plan_eval.max_iterations"
       ];
@@ -264,6 +265,12 @@ function handleTool(name, cwd, args) {
           content: [
             { type: "text", text: `Invalid key '${key}'. Allowed: ${ALLOWED_KEYS.join(", ")}` }
           ]
+        };
+      }
+      if (key === "review.dimension_floor" && (value < 1 || value > 5)) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "dimension_floor must be between 1 and 5." }]
         };
       }
       const configPath = join(cwd, ".qult", "config.json");
