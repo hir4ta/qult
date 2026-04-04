@@ -160,6 +160,19 @@ var TOOL_DEFS = [
     name: "clear_pending_fixes",
     description: "Clear all pending lint/typecheck fixes. Use when fixes are false positives or already resolved outside qult.",
     inputSchema: { type: "object", properties: {} }
+  },
+  {
+    name: "record_review",
+    description: "Record that an independent review has been completed. Call this at the end of /qult:review after all stages pass. Required for the commit gate to allow commits.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        aggregate_score: {
+          type: "number",
+          description: "Aggregate review score (e.g. 26 out of 30)"
+        }
+      }
+    }
   }
 ];
 function handleTool(name, cwd, args) {
@@ -300,6 +313,20 @@ function handleTool(name, cwd, args) {
         return { isError: true, content: [{ type: "text", text: "Failed to clear fixes." }] };
       }
       return { content: [{ type: "text", text: "All pending fixes cleared." }] };
+    }
+    case "record_review": {
+      const statePath = findLatestStateFile(cwd, "session-state");
+      try {
+        const state = readJson(statePath, {});
+        state.review_completed_at = new Date().toISOString();
+        atomicWriteJson(statePath, state);
+        _jsonCache.delete(statePath);
+      } catch {
+        return { isError: true, content: [{ type: "text", text: "Failed to record review." }] };
+      }
+      const score = typeof args?.aggregate_score === "number" ? args.aggregate_score : null;
+      const msg = score !== null ? `Review recorded (aggregate: ${score}/30).` : "Review recorded.";
+      return { content: [{ type: "text", text: msg }] };
     }
     default:
       return { isError: true, content: [{ type: "text", text: `Unknown tool: ${name}` }] };

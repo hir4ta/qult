@@ -207,7 +207,7 @@ describe("handleRequest (JSON-RPC)", () => {
 	it("tools/list returns 7 tool definitions", () => {
 		const response = handleRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" }, TEST_DIR);
 		const result = response!.result as { tools: { name: string }[] };
-		expect(result.tools).toHaveLength(7);
+		expect(result.tools).toHaveLength(8);
 		expect(result.tools.map((t) => t.name)).toEqual([
 			"get_pending_fixes",
 			"get_session_status",
@@ -216,6 +216,7 @@ describe("handleRequest (JSON-RPC)", () => {
 			"enable_gate",
 			"set_config",
 			"clear_pending_fixes",
+			"record_review",
 		]);
 	});
 
@@ -259,8 +260,8 @@ describe("handleRequest (JSON-RPC)", () => {
 });
 
 describe("TOOL_DEFS", () => {
-	it("has 7 tool definitions", () => {
-		expect(TOOL_DEFS).toHaveLength(7);
+	it("has 8 tool definitions", () => {
+		expect(TOOL_DEFS).toHaveLength(8);
 	});
 
 	it("each tool has name, description, and inputSchema", () => {
@@ -392,5 +393,27 @@ describe("handleTool: set_config", () => {
 		const config = JSON.parse(readFileSync(join(qultDir, "config.json"), "utf-8"));
 		expect(config.review.score_threshold).toBe(10);
 		expect(config.review.max_iterations).toBe(3);
+	});
+});
+
+describe("handleTool: record_review", () => {
+	it("sets review_completed_at in session state", () => {
+		resetMcpCache();
+
+		const result = handleTool("record_review", TEST_DIR);
+		expect(result.content[0]!.text).toContain("recorded");
+
+		const stateFile = findLatestStateFile(TEST_DIR, "session-state");
+		const state = JSON.parse(readFileSync(stateFile, "utf-8"));
+		expect(state.review_completed_at).toBeTruthy();
+		expect(typeof state.review_completed_at).toBe("string");
+	});
+
+	it("includes aggregate score in response", () => {
+		resetMcpCache();
+
+		const result = handleTool("record_review", TEST_DIR, { aggregate_score: 26 });
+		expect(result.content[0]!.text).toContain("recorded");
+		expect(result.content[0]!.text).toContain("26");
 	});
 });

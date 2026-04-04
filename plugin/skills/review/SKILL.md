@@ -131,3 +131,12 @@ Fix: concrete suggestion
 ```
 
 If all three stages pass with no findings: "Review complete. All clear."
+
+## Stage 6: Record review completion
+
+**This step is mandatory.** After all stages pass and the summary is output:
+
+1. Call `mcp__plugin_qult_qult__record_review({ aggregate_score: <total> })` to record the review completion in session state
+2. This enables the commit gate to allow commits. Without this call, the commit gate will block.
+
+This is the authoritative signal that review is complete. SubagentStop hooks provide additional enforcement but are not the primary mechanism.
