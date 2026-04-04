@@ -679,7 +679,7 @@ Why this change is needed.
 	it("3-stage review: aggregate below threshold after security-reviewer blocks", async () => {
 		writeFileSync(
 			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 24 } }),
+			JSON.stringify({ review: { score_threshold: 24, dimension_floor: 1 } }),
 		);
 		resetAllCaches();
 

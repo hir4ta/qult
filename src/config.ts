@@ -23,10 +23,10 @@ export interface QultConfig {
 
 const DEFAULTS: QultConfig = {
 	review: {
-		score_threshold: 24,
+		score_threshold: 26,
 		max_iterations: 3,
 		required_changed_files: 5,
-		dimension_floor: 3,
+		dimension_floor: 4,
 	},
 	plan_eval: {
 		score_threshold: 10,

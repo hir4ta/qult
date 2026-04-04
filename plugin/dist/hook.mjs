@@ -111,10 +111,10 @@ var DEFAULTS, _cache = null;
 var init_config = __esm(() => {
   DEFAULTS = {
     review: {
-      score_threshold: 24,
+      score_threshold: 26,
       max_iterations: 3,
       required_changed_files: 5,
-      dimension_floor: 3
+      dimension_floor: 4
     },
     plan_eval: {
       score_threshold: 10,
@@ -155,6 +155,8 @@ var init_load = () => {};
 import { existsSync as existsSync4, readFileSync as readFileSync3 } from "node:fs";
 import { join as join3 } from "node:path";
 function setFixesSessionScope(sessionId) {
+  if (!/^[\w-]+$/.test(sessionId))
+    return;
   _sessionScope = sessionId;
 }
 function fixesPath() {
@@ -213,6 +215,16 @@ var init_pending_fixes = __esm(() => {
 // src/state/plan-status.ts
 import { existsSync as existsSync5, readdirSync, readFileSync as readFileSync4, statSync } from "node:fs";
 import { join as join4 } from "node:path";
+function normalizeStatus(raw) {
+  if (!raw)
+    return "pending";
+  const s = raw.toLowerCase().trim();
+  if (s === "done" || s === "complete" || s === "completed" || s === "finished")
+    return "done";
+  if (s === "in-progress" || s === "wip" || s === "started" || s === "working")
+    return "in-progress";
+  return "pending";
+}
 function parsePlanTasks(content) {
   const tasks = [];
   const lines = content.split(`
@@ -223,7 +235,7 @@ function parsePlanTasks(content) {
     if (taskMatch) {
       const taskNumber = Number(taskMatch[1]);
       const name = taskMatch[2].trim();
-      const status = taskMatch[3]?.toLowerCase() ?? "pending";
+      const status = normalizeStatus(taskMatch[3]);
       let file;
       let verify;
       for (let j = i + 1;j < lines.length; j++) {
@@ -303,7 +315,7 @@ function getActivePlan() {
 }
 var TASK_RE, CHECKBOX_RE, FILE_LINE_RE, VERIFY_LINE_RE, _planCache = null, _planCachePath = null, _planCacheMtime = null;
 var init_plan_status = __esm(() => {
-  TASK_RE = /^###\s+Task\s+(\d+)[\s:-]+(.+?)(?:\s*\[(done|pending|in-progress)\])?\s*$/i;
+  TASK_RE = /^###\s+Task\s+(\d+)[\s:\-\u2013\u2014]+(.+?)(?:\s*\[([^\]]+)\])?\s*$/i;
   CHECKBOX_RE = /^-\s+\[([ xX])\]\s*(.+)$/;
   FILE_LINE_RE = /^\s*-\s*\*\*File\*\*:\s*(.+)$/;
   VERIFY_LINE_RE = /^\s*-\s*\*\*Verify\*\*:\s*(.+)$/;
@@ -313,6 +325,8 @@ var init_plan_status = __esm(() => {
 import { existsSync as existsSync6, readFileSync as readFileSync5 } from "node:fs";
 import { join as join5 } from "node:path";
 function setStateSessionScope(sessionId) {
+  if (!/^[\w-]+$/.test(sessionId))
+    return;
   _sessionScope2 = sessionId;
 }
 function filePath() {
@@ -636,23 +650,46 @@ var init_lazy_init = __esm(() => {
 function setCurrentEvent(event) {
   _currentEvent = event;
 }
+function compactStateSummary() {
+  try {
+    const state = readSessionState();
+    const fixes = readPendingFixes();
+    const parts = [];
+    if (fixes.length > 0)
+      parts.push(`${fixes.length} pending fix(es)`);
+    parts.push(state.test_passed_at ? "tests: PASS" : "tests: NOT PASSED");
+    parts.push(state.review_completed_at ? "review: DONE" : "review: NOT DONE");
+    const changed = state.changed_file_paths?.length ?? 0;
+    if (changed > 0)
+      parts.push(`${changed} file(s) changed`);
+    const disabled = state.disabled_gates ?? [];
+    if (disabled.length > 0)
+      parts.push(`disabled: ${disabled.join(",")}`);
+    return `
+[qult state] ${parts.join(" | ")}`;
+  } catch {
+    return "";
+  }
+}
 function deny(reason) {
   try {
     flushAll();
   } catch {}
-  process.stderr.write(reason);
+  process.stderr.write(reason + compactStateSummary());
   process.exit(2);
 }
 function block(reason) {
   try {
     flushAll();
   } catch {}
-  process.stderr.write(reason);
+  process.stderr.write(reason + compactStateSummary());
   process.exit(2);
 }
 var _currentEvent = "unknown";
 var init_respond = __esm(() => {
   init_flush();
+  init_pending_fixes();
+  init_session_state();
 });
 
 // src/gates/runner.ts
@@ -796,6 +833,21 @@ async function handleEditWrite(ev) {
   } else {
     clearPendingFixesForFile(file);
   }
+  try {
+    if (gateEntries.length > 0) {
+      const parts = gateEntries.map((entry, i) => {
+        const settled = results[i];
+        if (settled.status === "fulfilled") {
+          return `${entry.name} ${settled.value.passed ? "PASS" : "FAIL"}`;
+        }
+        return `${entry.name} ERROR`;
+      });
+      const totalFixes = readPendingFixes().length;
+      const fixSuffix = totalFixes > 0 ? ` | ${totalFixes} pending fix(es)` : "";
+      process.stderr.write(`[qult] gates: ${parts.join(", ")}${fixSuffix}
+`);
+    }
+  } catch {}
   try {
     recordChangedFile(file);
   } catch {}
@@ -1446,6 +1498,16 @@ function checkAggregateScore() {
     const config = loadConfig();
     const threshold = config.review.score_threshold;
     const maxIter = config.review.max_iterations;
+    try {
+      const uniqueScores = new Set(allScores);
+      if (uniqueScores.size === 1) {
+        process.stderr.write(`[qult] Review bias warning: all 6 dimensions scored identically (${allScores[0]}/5). This may indicate template answers.
+`);
+      } else if (Math.max(...allScores) - Math.min(...allScores) < 2) {
+        process.stderr.write(`[qult] Review bias warning: score range is ${Math.min(...allScores)}-${Math.max(...allScores)}/5 (low variance). Consider if reviewers differentiated sufficiently.
+`);
+      }
+    } catch {}
     try {
       recordReviewIteration(aggregate);
     } catch {}

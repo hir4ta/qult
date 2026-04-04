@@ -91,6 +91,24 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 		clearPendingFixesForFile(file);
 	}
 
+	// Gate execution summary to stderr (instruction drift defense)
+	try {
+		if (gateEntries.length > 0) {
+			const parts = gateEntries.map((entry, i) => {
+				const settled = results[i]!;
+				if (settled.status === "fulfilled") {
+					return `${entry.name} ${settled.value.passed ? "PASS" : "FAIL"}`;
+				}
+				return `${entry.name} ERROR`;
+			});
+			const totalFixes = readPendingFixes().length;
+			const fixSuffix = totalFixes > 0 ? ` | ${totalFixes} pending fix(es)` : "";
+			process.stderr.write(`[qult] gates: ${parts.join(", ")}${fixSuffix}\n`);
+		}
+	} catch {
+		/* fail-open */
+	}
+
 	try {
 		recordChangedFile(file);
 	} catch {

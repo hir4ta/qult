@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parsePlanTasks } from "../plan-status.ts";
+import { normalizeStatus, parsePlanTasks } from "../plan-status.ts";
 
 describe("parsePlanTasks", () => {
 	it("parses tasks with status markers and taskNumber", () => {
@@ -137,5 +137,76 @@ Just a note`;
 		expect(tasks[0]).toEqual({ name: "Design Review", status: "done" });
 		expect(tasks[1]).toEqual({ name: "Phase Review", status: "pending" });
 		expect(tasks[2]).toEqual({ name: "Final Review", status: "done" });
+	});
+
+	it("parses em-dash separator without bleeding into name", () => {
+		const plan = `## Tasks
+### Task 1 — Add feature [done]
+- **File**: src/feature.ts`;
+
+		const tasks = parsePlanTasks(plan);
+		expect(tasks).toHaveLength(1);
+		expect(tasks[0]!.name).toBe("Add feature");
+		expect(tasks[0]!.status).toBe("done");
+		expect(tasks[0]!.taskNumber).toBe(1);
+	});
+
+	it("parses en-dash separator", () => {
+		const plan = `## Tasks
+### Task 2 – Update config [pending]`;
+
+		const tasks = parsePlanTasks(plan);
+		expect(tasks).toHaveLength(1);
+		expect(tasks[0]!.name).toBe("Update config");
+		expect(tasks[0]!.status).toBe("pending");
+	});
+
+	it("normalizes fuzzy status values", () => {
+		const plan = `## Tasks
+### Task 1: Build widget [complete]
+### Task 2: Test widget [wip]
+### Task 3: Deploy widget [finished]
+### Task 4: Document widget [todo]`;
+
+		const tasks = parsePlanTasks(plan);
+		expect(tasks).toHaveLength(4);
+		expect(tasks[0]!.status).toBe("done");
+		expect(tasks[1]!.status).toBe("in-progress");
+		expect(tasks[2]!.status).toBe("done");
+		expect(tasks[3]!.status).toBe("pending");
+	});
+
+	it("treats unknown status as pending (fail-open)", () => {
+		const plan = `## Tasks
+### Task 1: Something [unknown-value]`;
+
+		const tasks = parsePlanTasks(plan);
+		expect(tasks).toHaveLength(1);
+		expect(tasks[0]!.status).toBe("pending");
+	});
+});
+
+describe("normalizeStatus", () => {
+	it("maps done variants to done", () => {
+		expect(normalizeStatus("done")).toBe("done");
+		expect(normalizeStatus("complete")).toBe("done");
+		expect(normalizeStatus("completed")).toBe("done");
+		expect(normalizeStatus("finished")).toBe("done");
+		expect(normalizeStatus("DONE")).toBe("done");
+	});
+
+	it("maps in-progress variants to in-progress", () => {
+		expect(normalizeStatus("in-progress")).toBe("in-progress");
+		expect(normalizeStatus("wip")).toBe("in-progress");
+		expect(normalizeStatus("started")).toBe("in-progress");
+		expect(normalizeStatus("working")).toBe("in-progress");
+	});
+
+	it("maps everything else to pending", () => {
+		expect(normalizeStatus("pending")).toBe("pending");
+		expect(normalizeStatus("todo")).toBe("pending");
+		expect(normalizeStatus("unknown")).toBe("pending");
+		expect(normalizeStatus(undefined)).toBe("pending");
+		expect(normalizeStatus("")).toBe("pending");
 	});
 });

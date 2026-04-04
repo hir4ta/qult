@@ -9,8 +9,18 @@ export interface PlanTask {
 	verify?: string;
 }
 
-// ### Task N: <name> [status]  or  ### Task N - <name> [status]
-export const TASK_RE = /^###\s+Task\s+(\d+)[\s:-]+(.+?)(?:\s*\[(done|pending|in-progress)\])?\s*$/i;
+// ### Task N: <name> [status]  or  ### Task N - <name> [status]  or  ### Task N — <name> [status]
+export const TASK_RE = /^###\s+Task\s+(\d+)[\s:\-\u2013\u2014]+(.+?)(?:\s*\[([^\]]+)\])?\s*$/i;
+
+/** Normalize free-form status strings to PlanTask status values (fail-open: unknown → "pending"). */
+export function normalizeStatus(raw: string | undefined): PlanTask["status"] {
+	if (!raw) return "pending";
+	const s = raw.toLowerCase().trim();
+	if (s === "done" || s === "complete" || s === "completed" || s === "finished") return "done";
+	if (s === "in-progress" || s === "wip" || s === "started" || s === "working")
+		return "in-progress";
+	return "pending";
+}
 
 // - [x] or - [ ] checkbox (Review Gates)
 const CHECKBOX_RE = /^-\s+\[([ xX])\]\s*(.+)$/;
@@ -30,7 +40,7 @@ export function parsePlanTasks(content: string): PlanTask[] {
 		if (taskMatch) {
 			const taskNumber = Number(taskMatch[1]);
 			const name = taskMatch[2]!.trim();
-			const status = (taskMatch[3]?.toLowerCase() as PlanTask["status"]) ?? "pending";
+			const status = normalizeStatus(taskMatch[3]);
 			// Look ahead for **File** and **Verify** fields in the task block
 			let file: string | undefined;
 			let verify: string | undefined;

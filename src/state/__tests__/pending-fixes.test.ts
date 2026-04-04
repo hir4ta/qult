@@ -1,11 +1,13 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetAllCaches } from "../flush.ts";
 import {
 	addPendingFixes,
 	clearPendingFixesForFile,
+	flush as flushFixes,
 	readPendingFixes,
+	setFixesSessionScope,
 	writePendingFixes,
 } from "../pending-fixes.ts";
 
@@ -125,5 +127,62 @@ describe("clearPendingFixesForFile", () => {
 
 		const result = readPendingFixes();
 		expect(result).toHaveLength(1);
+	});
+});
+
+describe("session scope isolation", () => {
+	it("writes and reads fixes independently per session scope", () => {
+		// Session A: write fixes
+		setFixesSessionScope("session-A");
+		writePendingFixes([{ file: "a.ts", errors: ["err-A"], gate: "lint" }]);
+		flushFixes();
+
+		// Verify session A file exists
+		const pathA = join(STATE_DIR, "pending-fixes-session-A.json");
+		expect(existsSync(pathA)).toBe(true);
+		const fixesA = JSON.parse(readFileSync(pathA, "utf-8"));
+		expect(fixesA).toHaveLength(1);
+		expect(fixesA[0].errors[0]).toBe("err-A");
+
+		// Reset cache, switch to session B
+		resetAllCaches();
+		setFixesSessionScope("session-B");
+		writePendingFixes([{ file: "b.ts", errors: ["err-B"], gate: "typecheck" }]);
+		flushFixes();
+
+		// Verify session B file exists and is independent
+		const pathB = join(STATE_DIR, "pending-fixes-session-B.json");
+		expect(existsSync(pathB)).toBe(true);
+		const fixesB = JSON.parse(readFileSync(pathB, "utf-8"));
+		expect(fixesB).toHaveLength(1);
+		expect(fixesB[0].errors[0]).toBe("err-B");
+
+		// Verify session A file is unchanged
+		const fixesAAfter = JSON.parse(readFileSync(pathA, "utf-8"));
+		expect(fixesAAfter).toHaveLength(1);
+		expect(fixesAAfter[0].errors[0]).toBe("err-A");
+	});
+
+	it("reads correct session-scoped file after scope switch", () => {
+		// Write to session A
+		setFixesSessionScope("scope-1");
+		writePendingFixes([{ file: "x.ts", errors: ["err-1"], gate: "lint" }]);
+		flushFixes();
+
+		// Switch to session B, write different data
+		resetAllCaches();
+		setFixesSessionScope("scope-2");
+		writePendingFixes([
+			{ file: "y.ts", errors: ["err-2a"], gate: "lint" },
+			{ file: "z.ts", errors: ["err-2b"], gate: "typecheck" },
+		]);
+		flushFixes();
+
+		// Switch back to session A, read
+		resetAllCaches();
+		setFixesSessionScope("scope-1");
+		const result = readPendingFixes();
+		expect(result).toHaveLength(1);
+		expect(result[0]!.file).toBe("x.ts");
 	});
 });

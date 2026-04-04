@@ -556,3 +556,85 @@ describe("plan-evaluator SubagentStop", () => {
 		expect(scores).toEqual({ Feasibility: 4, Completeness: 3, Clarity: 5 });
 	});
 });
+
+describe("score distribution bias detection", () => {
+	it("warns on identical scores across all 6 dimensions", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ review: { score_threshold: 24, dimension_floor: 1 } }),
+		);
+		resetAllCaches();
+
+		const handler = (await import("../subagent-stop/index.ts")).default;
+		await handler({
+			agent_type: "qult-spec-reviewer",
+			last_assistant_message: "Spec: PASS\nScore: Completeness=4 Accuracy=4\nNo issues found.",
+		});
+		await handler({
+			agent_type: "qult-quality-reviewer",
+			last_assistant_message: "Quality: PASS\nScore: Design=4 Maintainability=4\nNo issues found.",
+		});
+		await handler({
+			agent_type: "qult-security-reviewer",
+			last_assistant_message:
+				"Security: PASS\nScore: Vulnerability=4 Hardening=4\nNo issues found.",
+		});
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("scored identically");
+		expect(stderr).toContain("template answers");
+	});
+
+	it("warns on low variance scores (max-min < 2)", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ review: { score_threshold: 24, dimension_floor: 1 } }),
+		);
+		resetAllCaches();
+
+		const handler = (await import("../subagent-stop/index.ts")).default;
+		await handler({
+			agent_type: "qult-spec-reviewer",
+			last_assistant_message: "Spec: PASS\nScore: Completeness=4 Accuracy=5\nNo issues found.",
+		});
+		await handler({
+			agent_type: "qult-quality-reviewer",
+			last_assistant_message: "Quality: PASS\nScore: Design=4 Maintainability=4\nNo issues found.",
+		});
+		await handler({
+			agent_type: "qult-security-reviewer",
+			last_assistant_message:
+				"Security: PASS\nScore: Vulnerability=4 Hardening=5\nNo issues found.",
+		});
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("low variance");
+	});
+
+	it("does not warn on well-distributed scores", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ review: { score_threshold: 24, dimension_floor: 1 } }),
+		);
+		resetAllCaches();
+
+		const handler = (await import("../subagent-stop/index.ts")).default;
+		await handler({
+			agent_type: "qult-spec-reviewer",
+			last_assistant_message: "Spec: PASS\nScore: Completeness=5 Accuracy=3\nNo issues found.",
+		});
+		await handler({
+			agent_type: "qult-quality-reviewer",
+			last_assistant_message: "Quality: PASS\nScore: Design=4 Maintainability=5\nNo issues found.",
+		});
+		await handler({
+			agent_type: "qult-security-reviewer",
+			last_assistant_message:
+				"Security: PASS\nScore: Vulnerability=3 Hardening=4\nNo issues found.",
+		});
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).not.toContain("identically");
+		expect(stderr).not.toContain("low variance");
+	});
+});

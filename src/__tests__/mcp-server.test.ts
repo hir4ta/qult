@@ -353,6 +353,15 @@ describe("handleTool: clear_pending_fixes", () => {
 		const fixes = JSON.parse(readFileSync(fixesPath, "utf-8"));
 		expect(fixes).toEqual([]);
 	});
+
+	it("handles missing state dir gracefully", () => {
+		rmSync(STATE_DIR, { recursive: true, force: true });
+		resetMcpCache();
+
+		// Should not throw (fail-open)
+		const result = handleTool("clear_pending_fixes", TEST_DIR);
+		expect(result.content[0]!.text).toContain("cleared");
+	});
 });
 
 describe("handleTool: set_config", () => {
@@ -379,6 +388,13 @@ describe("handleTool: set_config", () => {
 		});
 		expect(result.isError).toBe(true);
 		expect(result.content[0]!.text).toContain("Invalid key");
+	});
+
+	it("returns error without key or value", () => {
+		const noKey = handleTool("set_config", TEST_DIR, { value: 5 });
+		expect(noKey.isError).toBe(true);
+		const noValue = handleTool("set_config", TEST_DIR, { key: "review.score_threshold" });
+		expect(noValue.isError).toBe(true);
 	});
 
 	it("merges with existing config", () => {

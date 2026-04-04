@@ -1,6 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetGatesCache } from "../gates/load.ts";
 import { resetAllCaches } from "../state/flush.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-integration-test");
@@ -111,5 +112,118 @@ describe("Integration: real biome gate", () => {
 		}
 
 		expect(exitCode).toBe(2);
+	});
+});
+
+describe("Integration: real tsc gate", { timeout: 15000 }, () => {
+	beforeEach(() => {
+		// Configure tsc as typecheck gate
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({
+				on_write: {
+					typecheck: {
+						command: `bun tsc --noEmit --project ${join(TEST_DIR, "tsconfig.json")}`,
+						timeout: 10000,
+					},
+				},
+			}),
+		);
+		resetGatesCache();
+		// Minimal tsconfig.json
+		writeFileSync(
+			join(TEST_DIR, "tsconfig.json"),
+			JSON.stringify({
+				compilerOptions: {
+					strict: true,
+					noEmit: true,
+					target: "ES2022",
+					module: "ESNext",
+					moduleResolution: "bundler",
+				},
+				include: ["*.ts"],
+			}),
+		);
+	});
+
+	it("passes clean TypeScript file", async () => {
+		writeFileSync(join(TEST_DIR, "clean.ts"), "export const x: number = 1;\n");
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "clean.ts") },
+			session_id: "integration-tsc",
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		expect(readPendingFixes()).toHaveLength(0);
+	});
+
+	it("detects type error and creates pending fix", async () => {
+		writeFileSync(join(TEST_DIR, "broken.ts"), 'export const x: number = "not a number";\n');
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "broken.ts") },
+			session_id: "integration-tsc",
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const fixes = readPendingFixes();
+		expect(fixes.length).toBeGreaterThan(0);
+		expect(fixes[0]!.gate).toBe("typecheck");
+	});
+});
+
+describe("Integration: test command detection", () => {
+	it("records test pass when vitest command succeeds", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({
+				on_commit: {
+					test: { command: "bun vitest run", timeout: 10000 },
+				},
+			}),
+		);
+		resetGatesCache();
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Bash",
+			tool_input: { command: "bun vitest run" },
+			tool_response: { stdout: "Tests passed\nexit code 0", stderr: "" },
+			session_id: "integration-test-detect",
+		});
+
+		const { readSessionState } = await import("../state/session-state.ts");
+		const state = readSessionState();
+		expect(state.test_passed_at).not.toBeNull();
+		expect(state.test_command).toBe("bun vitest run");
+	});
+
+	it("does not record test pass when exit code is non-zero", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({
+				on_commit: {
+					test: { command: "bun vitest run", timeout: 10000 },
+				},
+			}),
+		);
+		resetGatesCache();
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Bash",
+			tool_input: { command: "bun vitest run" },
+			tool_response: { stdout: "FAIL\nexit code 1", stderr: "" },
+			session_id: "integration-test-detect",
+		});
+
+		const { readSessionState } = await import("../state/session-state.ts");
+		const state = readSessionState();
+		expect(state.test_passed_at).toBeNull();
 	});
 });

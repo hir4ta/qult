@@ -1,9 +1,17 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetGatesCache } from "../gates/load.ts";
 import { resetAllCaches } from "../state/flush.ts";
-import { readPendingFixes } from "../state/pending-fixes.ts";
+import { readPendingFixes, setFixesSessionScope } from "../state/pending-fixes.ts";
+import {
+	flush as flushSessionState,
+	readSessionState,
+	recordReview,
+	recordTestPass,
+	resetCache as resetSessionCache,
+	setStateSessionScope,
+} from "../state/session-state.ts";
 import type { GatesConfig } from "../types.ts";
 
 /**
@@ -696,7 +704,7 @@ describe("Scenario: 3-stage review score threshold — low scores blocks", () =>
 	it("aggregate < threshold blocks after security stage", async () => {
 		writeFileSync(
 			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 24 } }),
+			JSON.stringify({ review: { score_threshold: 24, dimension_floor: 1 } }),
 		);
 		resetAllCaches();
 
@@ -1657,5 +1665,84 @@ describe("Scenario: Plan without evaluator blocks", () => {
 		).rejects.toThrow("process.exit");
 		expect(exitCode).toBe(2);
 		expect(stderrCapture.join("")).toContain("not been evaluated");
+	});
+});
+
+// ============================================================
+// Concurrent sessions: state isolation
+// ============================================================
+
+describe("Scenario: Concurrent session state isolation", () => {
+	it("session A and session B write independently", () => {
+		// Session A: record test pass
+		setStateSessionScope("session-A");
+		setFixesSessionScope("session-A");
+		recordTestPass("vitest run");
+		flushSessionState();
+
+		// Session B: record review (separate scope)
+		resetSessionCache();
+		setStateSessionScope("session-B");
+		setFixesSessionScope("session-B");
+		recordReview();
+		flushSessionState();
+
+		// Verify session A: test passed, no review
+		resetSessionCache();
+		setStateSessionScope("session-A");
+		const stateA = readSessionState();
+		expect(stateA.test_passed_at).not.toBeNull();
+		expect(stateA.review_completed_at).toBeNull();
+
+		// Verify session B: no test, review done
+		resetSessionCache();
+		setStateSessionScope("session-B");
+		const stateB = readSessionState();
+		expect(stateB.test_passed_at).toBeNull();
+		expect(stateB.review_completed_at).not.toBeNull();
+	});
+
+	it("latest-session.json reflects last writer", async () => {
+		const { atomicWriteJson } = await import("../state/atomic-write.ts");
+		const markerPath = join(STATE_DIR, "latest-session.json");
+
+		// Session A writes marker
+		atomicWriteJson(markerPath, { session_id: "session-A", updated_at: new Date().toISOString() });
+		let marker = JSON.parse(readFileSync(markerPath, "utf-8"));
+		expect(marker.session_id).toBe("session-A");
+
+		// Session B overwrites marker
+		atomicWriteJson(markerPath, { session_id: "session-B", updated_at: new Date().toISOString() });
+		marker = JSON.parse(readFileSync(markerPath, "utf-8"));
+		expect(marker.session_id).toBe("session-B");
+	});
+});
+
+// ============================================================
+// Parallel gate execution: multiple gates don't corrupt state
+// ============================================================
+
+describe("Scenario: Parallel on_write gates (1 fail, 2 pass)", () => {
+	it("produces exactly 1 pending fix from the failing gate", async () => {
+		const gates: GatesConfig = {
+			on_write: {
+				lint: { command: "echo 'lint error' && exit 1", timeout: 3000 },
+				typecheck: { command: "echo 'OK' && exit 0", timeout: 3000 },
+				format: { command: "echo 'formatted' && exit 0", timeout: 3000 },
+			},
+		};
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
+		resetGatesCache();
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/a.ts") },
+		});
+
+		const fixes = readPendingFixes();
+		expect(fixes).toHaveLength(1);
+		expect(fixes[0]!.gate).toBe("lint");
+		expect(fixes[0]!.errors[0]).toContain("lint error");
 	});
 });

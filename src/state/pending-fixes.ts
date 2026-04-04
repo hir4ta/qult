@@ -13,8 +13,9 @@ let _dirty = false;
 // Session-scoped file path: pending-fixes-{sessionId}.json
 let _sessionScope: string | null = null;
 
-/** Set session scope for pending-fixes file isolation. */
+/** Set session scope for pending-fixes file isolation. Rejects path-traversal characters. */
 export function setFixesSessionScope(sessionId: string): void {
+	if (!/^[\w-]+$/.test(sessionId)) return;
 	_sessionScope = sessionId;
 }
 

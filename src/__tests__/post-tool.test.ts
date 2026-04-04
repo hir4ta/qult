@@ -6,6 +6,7 @@ import { resetAllCaches } from "../state/flush.ts";
 const TEST_DIR = join(import.meta.dirname, ".tmp-posttool-test");
 const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 let stdoutCapture: string[] = [];
+let stderrCapture: string[] = [];
 const originalCwd = process.cwd();
 
 beforeEach(() => {
@@ -13,12 +14,16 @@ beforeEach(() => {
 	mkdirSync(STATE_DIR, { recursive: true });
 	process.chdir(TEST_DIR);
 	stdoutCapture = [];
+	stderrCapture = [];
 
 	vi.spyOn(process.stdout, "write").mockImplementation((data) => {
 		stdoutCapture.push(typeof data === "string" ? data : data.toString());
 		return true;
 	});
-	vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+	vi.spyOn(process.stderr, "write").mockImplementation((data) => {
+		stderrCapture.push(typeof data === "string" ? data : data.toString());
+		return true;
+	});
 });
 
 afterEach(() => {
@@ -257,5 +262,49 @@ describe("postTool: disabled gate skip", () => {
 
 		const { readPendingFixes } = await import("../state/pending-fixes.ts");
 		expect(readPendingFixes().length).toBe(0);
+	});
+});
+
+describe("postTool: gate execution summary to stderr", () => {
+	it("outputs gate results after Edit", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({
+				on_write: {
+					lint: { command: "echo 'OK' && exit 0", timeout: 3000 },
+				},
+			}),
+		);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/foo.ts") },
+		});
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("[qult] gates:");
+		expect(stderr).toContain("lint PASS");
+	});
+
+	it("shows FAIL and pending fix count on gate failure", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({
+				on_write: {
+					lint: { command: "echo 'error' && exit 1", timeout: 3000 },
+				},
+			}),
+		);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/foo.ts") },
+		});
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("lint FAIL");
+		expect(stderr).toContain("pending fix(es)");
 	});
 });

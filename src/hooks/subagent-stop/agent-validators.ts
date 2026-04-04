@@ -278,6 +278,22 @@ function checkAggregateScore(): void {
 		const threshold = config.review.score_threshold;
 		const maxIter = config.review.max_iterations;
 
+		// Score distribution bias detection (stderr warnings, non-blocking)
+		try {
+			const uniqueScores = new Set(allScores);
+			if (uniqueScores.size === 1) {
+				process.stderr.write(
+					`[qult] Review bias warning: all 6 dimensions scored identically (${allScores[0]}/5). This may indicate template answers.\n`,
+				);
+			} else if (Math.max(...allScores) - Math.min(...allScores) < 2) {
+				process.stderr.write(
+					`[qult] Review bias warning: score range is ${Math.min(...allScores)}-${Math.max(...allScores)}/5 (low variance). Consider if reviewers differentiated sufficiently.\n`,
+				);
+			}
+		} catch {
+			/* fail-open */
+		}
+
 		try {
 			recordReviewIteration(aggregate);
 		} catch {
