@@ -1414,7 +1414,7 @@ function checkAggregateScore() {
   try {
     const stageScores = getStageScores();
     const stages = ["Spec", "Quality", "Security"];
-    if (!stages.every((s) => stageScores[s]))
+    if (!stages.every((s) => stageScores[s] && typeof stageScores[s] === "object" && !Array.isArray(stageScores[s])))
       return;
     const allScores = stages.flatMap((s) => Object.values(stageScores[s]).filter((v) => typeof v === "number" && v >= 1 && v <= 5));
     if (allScores.length !== 6)

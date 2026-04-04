@@ -1349,3 +1349,158 @@ describe("Scenario: 3-stage aggregate score enforcement", () => {
 		expect(exitCode).toBeNull();
 	});
 });
+
+// ============================================================
+// MCP record_review → commit gate
+// ============================================================
+
+describe("Scenario: MCP record_review allows commit", () => {
+	it("commit passes after record_review sets review_completed_at", async () => {
+		const gates: GatesConfig = {
+			on_commit: { test: { command: "echo ok", timeout: 3000 } },
+		};
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
+		resetGatesCache();
+
+		const { handleTool } = await import("../mcp-server.ts");
+		const { recordChangedFile, recordTestPass } = await import("../state/session-state.ts");
+
+		// Simulate enough changed files to trigger review requirement
+		for (let i = 0; i < 6; i++) recordChangedFile(`src/file${i}.ts`);
+		recordTestPass("bun vitest run");
+
+		// Without record_review → commit blocked
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await expect(
+			preTool({ tool_name: "Bash", tool_input: { command: "git commit -m test" } }),
+		).rejects.toThrow("process.exit");
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("review");
+
+		// Reset exit state
+		exitCode = null;
+		stderrCapture = [];
+
+		// Record review via MCP
+		handleTool("record_review", TEST_DIR, { aggregate_score: 26 });
+
+		// Now commit should pass
+		resetAllCaches();
+		await preTool({ tool_name: "Bash", tool_input: { command: "git commit -m test" } });
+		expect(exitCode).toBeNull();
+	});
+});
+
+// ============================================================
+// MCP record_test_pass → commit gate
+// ============================================================
+
+describe("Scenario: MCP record_test_pass allows commit", () => {
+	it("commit passes after record_test_pass sets test_passed_at", async () => {
+		const gates: GatesConfig = {
+			on_commit: { test: { command: "echo ok", timeout: 3000 } },
+		};
+		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
+		resetGatesCache();
+
+		const { handleTool } = await import("../mcp-server.ts");
+
+		// Without test pass → commit blocked
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await expect(
+			preTool({ tool_name: "Bash", tool_input: { command: "git commit -m test" } }),
+		).rejects.toThrow("process.exit");
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("test");
+
+		// Reset
+		exitCode = null;
+		stderrCapture = [];
+
+		// Record test pass via MCP
+		handleTool("record_test_pass", TEST_DIR, { command: "bun vitest run" });
+
+		// Now commit should pass (review not required: < 5 files)
+		resetAllCaches();
+		await preTool({ tool_name: "Bash", tool_input: { command: "git commit -m test" } });
+		expect(exitCode).toBeNull();
+	});
+});
+
+// ============================================================
+// 3-stage aggregate: max iterations → allow with warning
+// ============================================================
+
+describe("Scenario: 3-stage aggregate max iterations allows with warning", () => {
+	it("allows review after max iterations despite low aggregate", async () => {
+		writeFileSync(
+			join(QULT_DIR, "config.json"),
+			JSON.stringify({ review: { score_threshold: 28, max_iterations: 2, dimension_floor: 1 } }),
+		);
+		resetAllCaches();
+
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+
+		// Iteration 1: aggregate 18/30 < 28 → blocks (iterCount=1 < maxIter=2)
+		await subagentStop({
+			agent_type: "qult-spec-reviewer",
+			last_assistant_message: "Spec: PASS\nScore: Completeness=3 Accuracy=3\nNo issues found.",
+		});
+		await subagentStop({
+			agent_type: "qult-quality-reviewer",
+			last_assistant_message: "Quality: PASS\nScore: Design=3 Maintainability=3\nNo issues found.",
+		});
+		await expect(
+			subagentStop({
+				agent_type: "qult-security-reviewer",
+				last_assistant_message:
+					"Security: PASS\nScore: Vulnerability=3 Hardening=3\nNo issues found.",
+			}),
+		).rejects.toThrow("process.exit");
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("18/30");
+
+		// Reset for iteration 2
+		exitCode = null;
+		stderrCapture = [];
+
+		// Iteration 2: same score → iterCount=2 >= maxIter=2 → allows with warning
+		await subagentStop({
+			agent_type: "qult-spec-reviewer",
+			last_assistant_message: "Spec: PASS\nScore: Completeness=3 Accuracy=3\nNo issues found.",
+		});
+		await subagentStop({
+			agent_type: "qult-quality-reviewer",
+			last_assistant_message: "Quality: PASS\nScore: Design=3 Maintainability=3\nNo issues found.",
+		});
+		await subagentStop({
+			agent_type: "qult-security-reviewer",
+			last_assistant_message:
+				"Security: PASS\nScore: Vulnerability=3 Hardening=3\nNo issues found.",
+		});
+		expect(exitCode).toBeNull();
+		expect(stderrCapture.join("")).toContain("Max review iterations");
+
+		// review_completed_at should be set
+		const { readSessionState } = await import("../state/session-state.ts");
+		expect(readSessionState().review_completed_at).toBeTruthy();
+	});
+});
+
+// ============================================================
+// Stage PASS with no parseable scores → blocks
+// ============================================================
+
+describe("Scenario: Stage PASS without parseable scores blocks", () => {
+	it("spec PASS without score line blocks for revalidation", async () => {
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		await expect(
+			subagentStop({
+				agent_type: "qult-spec-reviewer",
+				last_assistant_message: "Spec: PASS\nAll looks good, no issues found.",
+			}),
+		).rejects.toThrow("process.exit");
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("no parseable scores");
+	});
+});

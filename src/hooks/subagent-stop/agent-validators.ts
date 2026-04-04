@@ -276,8 +276,14 @@ function checkAggregateScore(): void {
 	try {
 		const stageScores = getStageScores();
 		const stages = ["Spec", "Quality", "Security"];
-		// Only check if all 3 stages have scores
-		if (!stages.every((s) => stageScores[s])) return;
+		// Only check if all 3 stages have valid score objects
+		if (
+			!stages.every(
+				(s) =>
+					stageScores[s] && typeof stageScores[s] === "object" && !Array.isArray(stageScores[s]),
+			)
+		)
+			return;
 
 		const allScores = stages.flatMap((s) =>
 			Object.values(stageScores[s]!).filter((v) => typeof v === "number" && v >= 1 && v <= 5),

@@ -62,11 +62,6 @@ export function clearPendingFixesForFile(file: string): void {
 	}
 }
 
-/** Clear all pending fixes. */
-export function clearAllPendingFixes(): void {
-	writePendingFixes([]);
-}
-
 /** Flush cached fixes to disk if dirty. */
 export function flush(): void {
 	if (!_dirty || !_cache) return;
