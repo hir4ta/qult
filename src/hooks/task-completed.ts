@@ -82,16 +82,22 @@ const MIN_ASSERTIONS = 2;
 
 /** Check that the Verify test file contains meaningful assertions. Warns to stderr if shallow. */
 export function checkVerifyTestQuality(testFile: string, _testName: string, taskKey: string): void {
-	const absPath = resolve(process.cwd(), testFile);
+	const cwd = resolve(process.cwd());
+	const absPath = resolve(cwd, testFile);
+	// Path traversal guard
+	if (!absPath.startsWith(cwd)) return;
 	if (!existsSync(absPath)) return;
 
 	const content = readFileSync(absPath, "utf-8");
 
-	// Find the test block by name and count assertions within it
-	// Simple heuristic: count assertions in the entire file as a proxy
-	// (extracting individual test blocks requires AST parsing which is out of scope)
-	const assertionCount = (content.match(ASSERTION_RE) ?? []).length;
-	const testCount = (content.match(/\b(it|test)\s*\(/g) ?? []).length || 1;
+	// Strip single-line comments to avoid counting assertions in commented code
+	const codeOnly = content
+		.split("\n")
+		.filter((line) => !line.trimStart().startsWith("//"))
+		.join("\n");
+
+	const assertionCount = (codeOnly.match(ASSERTION_RE) ?? []).length;
+	const testCount = (codeOnly.match(/\b(it|test)\s*\(/g) ?? []).length || 1;
 	const avgAssertions = assertionCount / testCount;
 
 	if (avgAssertions < MIN_ASSERTIONS) {

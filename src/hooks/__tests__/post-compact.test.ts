@@ -120,6 +120,11 @@ describe("post-compact handler", () => {
 	});
 
 	it("includes NOT PASSED / NOT DONE when tests and review are incomplete", async () => {
+		// Requires gates.json to exist for NOT PASSED/NOT DONE to show
+		writeFileSync(
+			join(QULT_DIR, "gates.json"),
+			JSON.stringify({ on_commit: { test: { command: "vitest run" } } }),
+		);
 		const state = {
 			test_passed_at: null,
 			review_completed_at: null,

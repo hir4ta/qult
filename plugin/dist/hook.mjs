@@ -1823,12 +1823,18 @@ async function taskCompleted(ev) {
   } catch {}
 }
 function checkVerifyTestQuality(testFile, _testName, taskKey) {
-  const absPath = resolve3(process.cwd(), testFile);
+  const cwd = resolve3(process.cwd());
+  const absPath = resolve3(cwd, testFile);
+  if (!absPath.startsWith(cwd))
+    return;
   if (!existsSync10(absPath))
     return;
   const content = readFileSync8(absPath, "utf-8");
-  const assertionCount = (content.match(ASSERTION_RE) ?? []).length;
-  const testCount = (content.match(/\b(it|test)\s*\(/g) ?? []).length || 1;
+  const codeOnly = content.split(`
+`).filter((line) => !line.trimStart().startsWith("//")).join(`
+`);
+  const assertionCount = (codeOnly.match(ASSERTION_RE) ?? []).length;
+  const testCount = (codeOnly.match(/\b(it|test)\s*\(/g) ?? []).length || 1;
   const avgAssertions = assertionCount / testCount;
   if (avgAssertions < MIN_ASSERTIONS) {
     process.stderr.write(`[qult] Test quality warning: ${testFile} has ~${avgAssertions.toFixed(1)} assertions/test (minimum ${MIN_ASSERTIONS}). ${taskKey} may have shallow tests.
@@ -1924,13 +1930,15 @@ async function postCompact(_ev) {
       const state = safeReadJson(statePath, {});
       if (Object.keys(state).length > 0) {
         const summary = [];
+        const gatesPath = join11(process.cwd(), ".qult", "gates.json");
+        const hasGates = existsSync12(gatesPath);
         if (state.test_passed_at)
           summary.push(`test_passed_at: ${state.test_passed_at}`);
-        else
+        else if (hasGates)
           summary.push("tests: NOT PASSED");
         if (state.review_completed_at)
           summary.push(`review_completed_at: ${state.review_completed_at}`);
-        else
+        else if (hasGates)
           summary.push("review: NOT DONE");
         const files = state.changed_file_paths;
         if (Array.isArray(files) && files.length > 0)

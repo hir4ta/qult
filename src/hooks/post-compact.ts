@@ -32,11 +32,14 @@ export default async function postCompact(_ev: HookEvent): Promise<void> {
 			const state = safeReadJson<Record<string, unknown>>(statePath, {});
 			if (Object.keys(state).length > 0) {
 				const summary: string[] = [];
+				// Only show NOT PASSED / NOT DONE when gates exist (avoid misleading for doc-only projects)
+				const gatesPath = join(process.cwd(), ".qult", "gates.json");
+				const hasGates = existsSync(gatesPath);
 				if (state.test_passed_at) summary.push(`test_passed_at: ${state.test_passed_at}`);
-				else summary.push("tests: NOT PASSED");
+				else if (hasGates) summary.push("tests: NOT PASSED");
 				if (state.review_completed_at)
 					summary.push(`review_completed_at: ${state.review_completed_at}`);
-				else summary.push("review: NOT DONE");
+				else if (hasGates) summary.push("review: NOT DONE");
 				const files = state.changed_file_paths;
 				if (Array.isArray(files) && files.length > 0)
 					summary.push(`${files.length} file(s) changed`);
