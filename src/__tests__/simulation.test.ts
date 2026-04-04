@@ -1795,5 +1795,23 @@ describe("Scenario: TaskCreate promotion on plan task file", () => {
 		const stderr = stderrCapture.join("");
 		expect(stderr).toContain("Plan task detected");
 		expect(stderr).toContain("TaskCreate");
+
+		// Second edit of same file: simulate postTool to record changed_file_paths
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		setupPassingGates();
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/feature.ts") },
+		});
+
+		// Clear stderr and edit again — no warning on second edit
+		stderrCapture = [];
+		await preTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/feature.ts") },
+		});
+
+		const stderr2 = stderrCapture.join("");
+		expect(stderr2).not.toContain("Plan task detected");
 	});
 });

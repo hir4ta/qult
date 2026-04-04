@@ -392,12 +392,14 @@ export function readTaskVerifyResult(taskKey: string): { passed: boolean; ran_at
 
 // ── Gate failure escalation ─────────────────────────────
 
-/** Increment gate failure count for a file:gate combination. Returns the new count. */
+const MAX_GATE_FAILURE_COUNT = 100;
+
+/** Increment gate failure count for a file:gate combination. Returns the new count (capped at 100). */
 export function incrementGateFailure(file: string, gateName: string): number {
 	const state = readSessionState();
 	if (!state.gate_failure_counts) state.gate_failure_counts = {};
 	const key = `${file}:${gateName}`;
-	const count = (state.gate_failure_counts[key] ?? 0) + 1;
+	const count = Math.min((state.gate_failure_counts[key] ?? 0) + 1, MAX_GATE_FAILURE_COUNT);
 	state.gate_failure_counts[key] = count;
 	writeState(state);
 	return count;

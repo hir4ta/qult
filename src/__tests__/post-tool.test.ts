@@ -347,15 +347,17 @@ describe("postTool: 3-Strike gate failure escalation", () => {
 		const stderrAfter2 = stderrCapture.join("");
 		expect(stderrAfter2).not.toContain("3-Strike");
 
-		// 3rd failure — 3-Strike warning
+		// Clear stderr before 3rd iteration for precise assertion
+		stderrCapture = [];
 		resetGatesCache();
 		await postTool({
 			tool_name: "Edit",
 			tool_input: { file_path: filePath },
 		});
-		const stderrAfter3 = stderrCapture.join("");
-		expect(stderrAfter3).toContain("3-Strike");
-		expect(stderrAfter3).toContain("lint");
+		const stderrOn3rd = stderrCapture.join("");
+		expect(stderrOn3rd).toContain("3-Strike");
+		expect(stderrOn3rd).toContain("lint");
+		expect(stderrOn3rd).toContain("3 times");
 	});
 });
 

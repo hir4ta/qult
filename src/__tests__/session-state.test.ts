@@ -251,4 +251,29 @@ describe("session-state: gate failure escalation", () => {
 		clearOnCommit();
 		expect(readSessionState().gate_failure_counts).toEqual({});
 	});
+
+	it("resetGateFailure deletes key even if count were 0 (truthiness fix)", () => {
+		// Directly write a 0 value to simulate edge case
+		const state = readSessionState();
+		state.gate_failure_counts = { "/src/edge.ts:lint": 0 };
+		// Use writeState indirectly by writing via incrementGateFailure then overwriting
+		incrementGateFailure("/src/edge.ts", "lint");
+		// Now manually set to 0 to test the truthiness fix
+		const s2 = readSessionState();
+		s2.gate_failure_counts["/src/edge.ts:lint"] = 0;
+		// resetGateFailure should still delete the key (using `key in` not truthiness)
+		resetGateFailure("/src/edge.ts", "lint");
+		expect("/src/edge.ts:lint" in readSessionState().gate_failure_counts).toBe(false);
+	});
+
+	it("incrementGateFailure is capped at 100", () => {
+		const state = readSessionState();
+		state.gate_failure_counts = { "/src/loop.ts:lint": 99 };
+		// Writing state directly to simulate 99 failures
+		const count = incrementGateFailure("/src/loop.ts", "lint");
+		expect(count).toBe(100);
+		// One more should still be 100
+		const count2 = incrementGateFailure("/src/loop.ts", "lint");
+		expect(count2).toBe(100);
+	});
 });

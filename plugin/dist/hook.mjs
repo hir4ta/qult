@@ -558,7 +558,7 @@ function incrementGateFailure(file, gateName) {
   if (!state.gate_failure_counts)
     state.gate_failure_counts = {};
   const key = `${file}:${gateName}`;
-  const count = (state.gate_failure_counts[key] ?? 0) + 1;
+  const count = Math.min((state.gate_failure_counts[key] ?? 0) + 1, MAX_GATE_FAILURE_COUNT);
   state.gate_failure_counts[key] = count;
   writeState(state);
   return count;
@@ -585,7 +585,7 @@ function recordPlanSelfcheckBlocked() {
   state.plan_selfcheck_blocked_at = new Date().toISOString();
   writeState(state);
 }
-var STATE_DIR2 = ".qult/.state", FILE = "session-state.json", _cache4 = null, _dirty2 = false, _sessionScope2 = null, TOOL_EXTS;
+var STATE_DIR2 = ".qult/.state", FILE = "session-state.json", _cache4 = null, _dirty2 = false, _sessionScope2 = null, TOOL_EXTS, MAX_GATE_FAILURE_COUNT = 100;
 var init_session_state = __esm(() => {
   init_config();
   init_load();
