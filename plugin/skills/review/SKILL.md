@@ -55,6 +55,8 @@ The spec-reviewer evaluates **Completeness** and **Accuracy** in an independent 
 
 Collect output: `Spec: PASS/FAIL`, `Score: Completeness=N Accuracy=N`, findings.
 
+**Post-validation**: Verify the agent output contains `Spec: PASS` or `Spec: FAIL` and `Score: Completeness=N Accuracy=N`. If the output does not contain a verdict line, the agent malfunctioned — re-spawn it with a clearer prompt. Do NOT fabricate scores.
+
 If Spec: PASS, record the scores:
 ```
 mcp__plugin_qult_qult__record_stage_scores({ stage: "Spec", scores: { completeness: N, accuracy: N } })
@@ -72,6 +74,8 @@ The quality-reviewer evaluates **Design** and **Maintainability** in an independ
 
 Collect output: `Quality: PASS/FAIL`, `Score: Design=N Maintainability=N`, findings.
 
+**Post-validation**: Verify the agent output contains `Quality: PASS` or `Quality: FAIL` and `Score: Design=N Maintainability=N`. If the output does not contain a verdict line, the agent malfunctioned — re-spawn it with a clearer prompt. Do NOT fabricate scores.
+
 If Quality: PASS, record the scores:
 ```
 mcp__plugin_qult_qult__record_stage_scores({ stage: "Quality", scores: { design: N, maintainability: N } })
@@ -87,6 +91,8 @@ In the agent prompt, include:
 The security-reviewer evaluates **Vulnerability** and **Hardening** in an independent context.
 
 Collect output: `Security: PASS/FAIL`, `Score: Vulnerability=N Hardening=N`, findings.
+
+**Post-validation**: Verify the agent output contains `Security: PASS` or `Security: FAIL` and `Score: Vulnerability=N Hardening=N`. If the output does not contain a verdict line, the agent malfunctioned — re-spawn it with a clearer prompt. Do NOT fabricate scores. Also verify the agent did not modify any files (check `git status` for unexpected changes) — security reviewer is read-only.
 
 If Security: PASS, record the scores:
 ```

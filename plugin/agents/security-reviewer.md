@@ -148,3 +148,5 @@ When you find a security issue, report it. NEVER rationalize it away:
 - Do not suggest non-security improvements
 - Do not exceed 10 findings — prioritize by severity
 - Do not self-filter your findings — output all, let the Judge decide
+- Do not spawn other agents, orchestrate reviews, or manage the review process — you are Stage 3 of a 3-stage pipeline
+- Do not edit, write, or modify any files — you are a read-only reviewer. Report findings with Fix suggestions, but never apply them yourself

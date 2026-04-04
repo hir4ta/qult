@@ -2064,9 +2064,20 @@ async function subagentStop(ev) {
     return;
   const agentType = ev.agent_type;
   const output = ev.last_assistant_message;
-  if (!agentType || !output)
+  if (!agentType)
     return;
   const normalized = agentType.replace(/:/g, "-");
+  const KNOWN_REVIEWERS = new Set([
+    "qult-spec-reviewer",
+    "qult-quality-reviewer",
+    "qult-security-reviewer",
+    "qult-plan-evaluator"
+  ]);
+  if (!output && KNOWN_REVIEWERS.has(normalized)) {
+    block(`${normalized} returned empty output. The reviewer must produce a verdict, scores, and findings. Rerun the review.`);
+  }
+  if (!output)
+    return;
   if (normalized === "qult-spec-reviewer") {
     validateStageReviewer(output, SPEC_PASS_RE, SPEC_FAIL_RE, parseSpecScores, "Spec");
   } else if (normalized === "qult-quality-reviewer") {

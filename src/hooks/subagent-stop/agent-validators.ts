@@ -55,11 +55,25 @@ export default async function subagentStop(ev: HookEvent): Promise<void> {
 	const agentType = ev.agent_type;
 	const output = ev.last_assistant_message;
 
-	// fail-open: no agent_type or no output → allow
-	if (!agentType || !output) return;
+	// fail-open: no agent_type → allow (not a qult agent)
+	if (!agentType) return;
 
 	// Normalize: plugin agents use "qult:spec-reviewer", standalone use "qult-spec-reviewer"
 	const normalized = agentType.replace(/:/g, "-");
+
+	// Known reviewer with empty output → block (empty review is not a valid review)
+	const KNOWN_REVIEWERS = new Set([
+		"qult-spec-reviewer",
+		"qult-quality-reviewer",
+		"qult-security-reviewer",
+		"qult-plan-evaluator",
+	]);
+	if (!output && KNOWN_REVIEWERS.has(normalized)) {
+		block(
+			`${normalized} returned empty output. The reviewer must produce a verdict, scores, and findings. Rerun the review.`,
+		);
+	}
+	if (!output) return;
 
 	if (normalized === "qult-spec-reviewer") {
 		validateStageReviewer(output, SPEC_PASS_RE, SPEC_FAIL_RE, parseSpecScores, "Spec");

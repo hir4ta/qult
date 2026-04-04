@@ -60,11 +60,25 @@ describe("subagentStop", () => {
 		expect(exitCode).toBeNull();
 	});
 
-	it("allows when last_assistant_message is missing (fail-open)", async () => {
+	it("blocks known reviewer when last_assistant_message is missing", async () => {
+		const handler = (await import("../subagent-stop/index.ts")).default;
+		try {
+			await handler({
+				hook_type: "SubagentStop",
+				agent_type: "qult-spec-reviewer",
+			});
+		} catch {
+			/* exit(2) */
+		}
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("empty output");
+	});
+
+	it("allows unknown agent when last_assistant_message is missing (fail-open)", async () => {
 		const handler = (await import("../subagent-stop/index.ts")).default;
 		await handler({
 			hook_type: "SubagentStop",
-			agent_type: "qult-spec-reviewer",
+			agent_type: "Explore",
 		});
 		expect(exitCode).toBeNull();
 	});

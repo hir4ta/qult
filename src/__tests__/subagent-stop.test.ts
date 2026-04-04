@@ -406,14 +406,27 @@ describe("subagentStop: integration", () => {
 		expect(stderrCapture.join("")).toBe("");
 	});
 
-	it("no output: no exit (fail-open)", async () => {
+	it("no output from known reviewer: blocks (not fail-open)", async () => {
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		try {
+			await subagentStop({
+				agent_type: "qult-spec-reviewer",
+				last_assistant_message: "",
+			});
+		} catch {
+			/* exit(2) */
+		}
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("empty output");
+	});
+
+	it("no output from unknown agent: no exit (fail-open)", async () => {
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await subagentStop({
-			agent_type: "qult-spec-reviewer",
+			agent_type: "unknown-agent",
 			last_assistant_message: "",
 		});
 		expect(exitCode).toBeNull();
-		expect(stderrCapture.join("")).toBe("");
 	});
 
 	it("stop_hook_active: no exit (short-circuit)", async () => {
