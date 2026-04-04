@@ -55,6 +55,11 @@ The spec-reviewer evaluates **Completeness** and **Accuracy** in an independent 
 
 Collect output: `Spec: PASS/FAIL`, `Score: Completeness=N Accuracy=N`, findings.
 
+If Spec: PASS, record the scores:
+```
+mcp__plugin_qult_qult__record_stage_scores({ stage: "Spec", scores: { completeness: N, accuracy: N } })
+```
+
 ## Stage 2: Quality Reviewer (design & maintainability)
 
 Spawn one `quality-reviewer` agent.
@@ -67,6 +72,11 @@ The quality-reviewer evaluates **Design** and **Maintainability** in an independ
 
 Collect output: `Quality: PASS/FAIL`, `Score: Design=N Maintainability=N`, findings.
 
+If Quality: PASS, record the scores:
+```
+mcp__plugin_qult_qult__record_stage_scores({ stage: "Quality", scores: { design: N, maintainability: N } })
+```
+
 ## Stage 3: Security Reviewer (vulnerability & hardening)
 
 Spawn one `security-reviewer` agent.
@@ -77,6 +87,11 @@ In the agent prompt, include:
 The security-reviewer evaluates **Vulnerability** and **Hardening** in an independent context.
 
 Collect output: `Security: PASS/FAIL`, `Score: Vulnerability=N Hardening=N`, findings.
+
+If Security: PASS, record the scores:
+```
+mcp__plugin_qult_qult__record_stage_scores({ stage: "Security", scores: { vulnerability: N, hardening: N } })
+```
 
 ## Stage 4: Judge filter
 

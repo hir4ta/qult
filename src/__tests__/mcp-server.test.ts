@@ -207,7 +207,7 @@ describe("handleRequest (JSON-RPC)", () => {
 	it("tools/list returns 7 tool definitions", () => {
 		const response = handleRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" }, TEST_DIR);
 		const result = response!.result as { tools: { name: string }[] };
-		expect(result.tools).toHaveLength(8);
+		expect(result.tools).toHaveLength(10);
 		expect(result.tools.map((t) => t.name)).toEqual([
 			"get_pending_fixes",
 			"get_session_status",
@@ -217,6 +217,8 @@ describe("handleRequest (JSON-RPC)", () => {
 			"set_config",
 			"clear_pending_fixes",
 			"record_review",
+			"record_test_pass",
+			"record_stage_scores",
 		]);
 	});
 
@@ -260,8 +262,8 @@ describe("handleRequest (JSON-RPC)", () => {
 });
 
 describe("TOOL_DEFS", () => {
-	it("has 8 tool definitions", () => {
-		expect(TOOL_DEFS).toHaveLength(8);
+	it("has 10 tool definitions", () => {
+		expect(TOOL_DEFS).toHaveLength(10);
 	});
 
 	it("each tool has name, description, and inputSchema", () => {
@@ -415,5 +417,54 @@ describe("handleTool: record_review", () => {
 		const result = handleTool("record_review", TEST_DIR, { aggregate_score: 26 });
 		expect(result.content[0]!.text).toContain("recorded");
 		expect(result.content[0]!.text).toContain("26");
+	});
+});
+
+describe("handleTool: record_test_pass", () => {
+	it("sets test_passed_at and test_command in session state", () => {
+		resetMcpCache();
+
+		const result = handleTool("record_test_pass", TEST_DIR, { command: "bun vitest run" });
+		expect(result.content[0]!.text).toContain("Test pass recorded");
+
+		const stateFile = findLatestStateFile(TEST_DIR, "session-state");
+		const state = JSON.parse(readFileSync(stateFile, "utf-8"));
+		expect(state.test_passed_at).toBeTruthy();
+		expect(state.test_command).toBe("bun vitest run");
+	});
+
+	it("returns error without command", () => {
+		const result = handleTool("record_test_pass", TEST_DIR, {});
+		expect(result.isError).toBe(true);
+	});
+});
+
+describe("handleTool: record_stage_scores", () => {
+	it("records scores for a valid stage", () => {
+		resetMcpCache();
+
+		const result = handleTool("record_stage_scores", TEST_DIR, {
+			stage: "Spec",
+			scores: { completeness: 5, accuracy: 4 },
+		});
+		expect(result.content[0]!.text).toContain("Spec");
+
+		const stateFile = findLatestStateFile(TEST_DIR, "session-state");
+		const state = JSON.parse(readFileSync(stateFile, "utf-8"));
+		expect(state.review_stage_scores.Spec).toEqual({ completeness: 5, accuracy: 4 });
+	});
+
+	it("rejects invalid stage name", () => {
+		const result = handleTool("record_stage_scores", TEST_DIR, {
+			stage: "Invalid",
+			scores: { foo: 3 },
+		});
+		expect(result.isError).toBe(true);
+		expect(result.content[0]!.text).toContain("Invalid stage");
+	});
+
+	it("returns error without required params", () => {
+		expect(handleTool("record_stage_scores", TEST_DIR, {}).isError).toBe(true);
+		expect(handleTool("record_stage_scores", TEST_DIR, { stage: "Spec" }).isError).toBe(true);
 	});
 });

@@ -213,6 +213,40 @@ const TOOL_DEFS: ToolDef[] = [
 			},
 		},
 	},
+	{
+		name: "record_test_pass",
+		description:
+			"Record that tests have passed. Call after running tests successfully. Required for the commit gate to allow commits when on_commit gates are configured.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				command: {
+					type: "string",
+					description: "The test command that was run (e.g. 'bun vitest run')",
+				},
+			},
+			required: ["command"],
+		},
+	},
+	{
+		name: "record_stage_scores",
+		description:
+			"Record review scores for a specific stage (Spec, Quality, or Security). Call after each review stage passes with scores. Used for 3-stage aggregate score tracking.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				stage: {
+					type: "string",
+					description: "Stage name: 'Spec', 'Quality', or 'Security'",
+				},
+				scores: {
+					type: "object",
+					description: "Dimension scores (e.g. {completeness: 5, accuracy: 4} for Spec stage)",
+				},
+			},
+			required: ["stage", "scores"],
+		},
+	},
 ];
 
 function handleTool(name: string, cwd: string, args?: Record<string, unknown>): ToolResult {
@@ -368,6 +402,72 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			const score = typeof args?.aggregate_score === "number" ? args.aggregate_score : null;
 			const msg = score !== null ? `Review recorded (aggregate: ${score}/30).` : "Review recorded.";
 			return { content: [{ type: "text", text: msg }] };
+		}
+		case "record_test_pass": {
+			const cmd = typeof args?.command === "string" ? args.command : null;
+			if (!cmd) {
+				return { isError: true, content: [{ type: "text", text: "Missing command parameter." }] };
+			}
+			const statePath = findLatestStateFile(cwd, "session-state");
+			try {
+				const state = readJson<Record<string, unknown>>(statePath, {});
+				state.test_passed_at = new Date().toISOString();
+				state.test_command = cmd;
+				atomicWriteJson(statePath, state);
+				_jsonCache.delete(statePath);
+			} catch {
+				return {
+					isError: true,
+					content: [{ type: "text", text: "Failed to record test pass." }],
+				};
+			}
+			return { content: [{ type: "text", text: `Test pass recorded: ${cmd}` }] };
+		}
+		case "record_stage_scores": {
+			const stage = typeof args?.stage === "string" ? args.stage : null;
+			const scores = args?.scores;
+			if (!stage || !scores || typeof scores !== "object") {
+				return {
+					isError: true,
+					content: [{ type: "text", text: "Missing stage or scores parameter." }],
+				};
+			}
+			const validStages = ["Spec", "Quality", "Security"];
+			if (!validStages.includes(stage)) {
+				return {
+					isError: true,
+					content: [
+						{
+							type: "text",
+							text: `Invalid stage '${stage}'. Must be: ${validStages.join(", ")}`,
+						},
+					],
+				};
+			}
+			const statePath = findLatestStateFile(cwd, "session-state");
+			try {
+				const state = readJson<Record<string, unknown>>(statePath, {});
+				if (
+					!state.review_stage_scores ||
+					typeof state.review_stage_scores !== "object" ||
+					Array.isArray(state.review_stage_scores)
+				) {
+					state.review_stage_scores = {};
+				}
+				(state.review_stage_scores as Record<string, unknown>)[stage] = scores;
+				atomicWriteJson(statePath, state);
+				_jsonCache.delete(statePath);
+			} catch {
+				return {
+					isError: true,
+					content: [{ type: "text", text: "Failed to record stage scores." }],
+				};
+			}
+			return {
+				content: [
+					{ type: "text", text: `Stage scores recorded: ${stage} = ${JSON.stringify(scores)}` },
+				],
+			};
 		}
 		default:
 			return { isError: true, content: [{ type: "text", text: `Unknown tool: ${name}` }] };
