@@ -33,8 +33,12 @@ qult/
 │   ├── .claude-plugin/plugin.json
 │   ├── hooks/hooks.json             # 7 hooks
 │   ├── .mcp.json                    # MCP server
-│   ├── skills/                      # 14 skills
-│   ├── agents/                      # 5 agents
+│   ├── skills/                      # 12 skills
+│   ├── agents/                      # 6 agents
+│   ├── bin/qult-gate                # CLI ツール
+│   ├── output-styles/               # 出力スタイル
+│   ├── .lsp.json                    # LSP server 設定
+│   ├── settings.json                # デフォルトエージェント設定
 │   └── dist/                        # バンドル (hook.mjs, mcp-server.mjs)
 └── src/                             # ソースコード (開発用)
 ```
@@ -75,7 +79,7 @@ qult/
 - 読み取り: get_pending_fixes, get_session_status, get_gate_config
 - 操作: disable_gate, enable_gate, clear_pending_fixes, set_config
 - disable_gate は gate 名をバリデーション（gates.json のキー + "review"）
-- MCP tool の呼び出しルールは `.claude/rules/qult-gates.md` に定義
+- MCP tool の呼び出しルールは MCP server instructions で注入（プロジェクトにファイル配置しない）
 
 ### Config 優先順位
 

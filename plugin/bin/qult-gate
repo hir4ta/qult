@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# qult-gate — Run quality gates from the command line.
+#
+# Usage:
+#   qult-gate status       Show pending fixes and session state
+#   qult-gate run-lint     Run on_write gates on a file
+#   qult-gate run-test     Run on_commit gates
+#   qult-gate version      Show qult version
+#
+# This script is added to PATH by the qult plugin.
+# It reads .qult/gates.json and executes gate commands directly.
+
+set -euo pipefail
+
+QULT_DIR=".qult"
+GATES_FILE="${QULT_DIR}/gates.json"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+cmd="${1:-help}"
+
+case "$cmd" in
+  status)
+    echo -e "${CYAN}qult gate status${NC}"
+    if [ ! -f "$GATES_FILE" ]; then
+      echo -e "${YELLOW}No gates configured.${NC} Run /qult:init"
+      exit 0
+    fi
+
+    # Show gates
+    echo -e "\n${CYAN}Gates:${NC}"
+    if command -v node >/dev/null 2>&1; then
+      node -e "
+        const g = JSON.parse(require('fs').readFileSync('$GATES_FILE','utf8'));
+        for (const [cat, gates] of Object.entries(g)) {
+          for (const [name, def] of Object.entries(gates)) {
+            console.log('  ' + cat + '/' + name + ': ' + def.command);
+          }
+        }
+      "
+    else
+      cat "$GATES_FILE"
+    fi
+
+    # Show pending fixes
+    echo -e "\n${CYAN}State:${NC}"
+    state_dir="${QULT_DIR}/.state"
+    if [ -d "$state_dir" ]; then
+      pf=$(find "$state_dir" -name 'pending-fixes*.json' -newer "$state_dir" 2>/dev/null | head -1)
+      if [ -n "$pf" ] && [ -f "$pf" ]; then
+        fixes=$(node -e "const f=JSON.parse(require('fs').readFileSync('$pf','utf8')); console.log(f.length || 0)" 2>/dev/null || echo "?")
+        if [ "$fixes" = "0" ]; then
+          echo -e "  Pending fixes: ${GREEN}none${NC}"
+        else
+          echo -e "  Pending fixes: ${RED}${fixes}${NC}"
+        fi
+      else
+        echo -e "  Pending fixes: ${GREEN}none${NC}"
+      fi
+    else
+      echo -e "  State dir: ${YELLOW}not found${NC}"
+    fi
+    ;;
+
+  run-lint)
+    file="${2:-}"
+    if [ -z "$file" ]; then
+      echo "Usage: qult-gate run-lint <file>"
+      exit 1
+    fi
+    if [ ! -f "$GATES_FILE" ]; then
+      echo "No gates configured."
+      exit 0
+    fi
+    echo -e "${CYAN}Running on_write gates on ${file}${NC}"
+    node -e "
+      const g = JSON.parse(require('fs').readFileSync('$GATES_FILE','utf8'));
+      const gates = g.on_write || {};
+      const { execSync } = require('child_process');
+      let ok = true;
+      for (const [name, def] of Object.entries(gates)) {
+        const cmd = def.command.replace('{file}', '$file');
+        process.stdout.write('  ' + name + ': ');
+        try {
+          execSync(cmd, { stdio: 'pipe', timeout: def.timeout || 10000 });
+          console.log('\x1b[32mPASS\x1b[0m');
+        } catch (e) {
+          console.log('\x1b[31mFAIL\x1b[0m');
+          if (e.stderr) process.stderr.write(e.stderr.toString().slice(0, 500));
+          ok = false;
+        }
+      }
+      process.exit(ok ? 0 : 1);
+    "
+    ;;
+
+  run-test)
+    if [ ! -f "$GATES_FILE" ]; then
+      echo "No gates configured."
+      exit 0
+    fi
+    echo -e "${CYAN}Running on_commit gates${NC}"
+    node -e "
+      const g = JSON.parse(require('fs').readFileSync('$GATES_FILE','utf8'));
+      const gates = g.on_commit || {};
+      const { execSync } = require('child_process');
+      let ok = true;
+      for (const [name, def] of Object.entries(gates)) {
+        process.stdout.write('  ' + name + ': ');
+        try {
+          execSync(def.command, { stdio: 'pipe', timeout: def.timeout || 30000 });
+          console.log('\x1b[32mPASS\x1b[0m');
+        } catch (e) {
+          console.log('\x1b[31mFAIL\x1b[0m');
+          if (e.stderr) process.stderr.write(e.stderr.toString().slice(0, 500));
+          ok = false;
+        }
+      }
+      process.exit(ok ? 0 : 1);
+    "
+    ;;
+
+  version)
+    if [ -f "${CLAUDE_PLUGIN_ROOT:-}/dist/hook.mjs" ]; then
+      node -e "
+        const src = require('fs').readFileSync('${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs','utf8');
+        const m = src.match(/__QULT_VERSION__.*?\"([^\"]+)\"/);
+        console.log('qult ' + (m ? m[1] : 'unknown'));
+      " 2>/dev/null || echo "qult (version unknown)"
+    else
+      echo "qult (plugin root not found)"
+    fi
+    ;;
+
+  help|*)
+    echo "qult-gate — Quality gate CLI"
+    echo ""
+    echo "Commands:"
+    echo "  status       Show gate config and pending fixes"
+    echo "  run-lint <f> Run on_write gates on a file"
+    echo "  run-test     Run on_commit gates"
+    echo "  version      Show qult version"
+    ;;
+esac

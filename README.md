@@ -1,6 +1,6 @@
 # qult
 
-![Version](https://img.shields.io/badge/version-0.19.0-7fbbb3?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.20.0-7fbbb3?style=flat-square)
 ![TypeScript](https://img.shields.io/badge/TypeScript-standalone_binary-a7c080?style=flat-square&logo=typescript&logoColor=d3c6aa)
 ![Hooks](https://img.shields.io/badge/hooks-7-dbbc7f?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-83c092?style=flat-square)
@@ -104,7 +104,7 @@ flowchart TB
 
 ## Complete Workflow
 
-qult provides a full development workflow through 14 skills and 5 agents:
+qult provides a full development workflow through 12 skills and 6 agents:
 
 ```
 /qult:explore    → Interview the architect, explore design
@@ -157,10 +157,10 @@ Restart Claude Code after installation (end the session and start a new one).
 What init does:
 - Creates `.qult/` directory
 - Generates `.qult/gates.json` -- auto-detects project lint/typecheck/test tools
-- Places `.claude/rules/qult-gates.md` -- MCP tool invocation rules
-- Places `.claude/rules/qult-quality.md` -- test-driven, scope management rules
-- Places `.claude/rules/qult-plan.md` -- plan structure rules
 - Adds `.qult/` to `.gitignore`
+- Cleans up legacy files (old rules, hooks)
+
+All quality rules are delivered via MCP server instructions -- no files are placed in your project except `.qult/`.
 
 ### 3. Verify setup
 
@@ -180,9 +180,7 @@ What init does:
 | `/qult:status` | Show current quality gate status |
 | `/qult:skip` | Temporarily disable/enable gates or clear pending fixes |
 | `/qult:config` | View or change config values (thresholds, iterations) |
-| `/qult:detect-gates` | Re-detect gate configuration |
 | `/qult:doctor` | Health check for setup |
-| `/qult:update` | Update rules files after plugin update |
 | `/qult:register-hooks` | Register hooks in settings.local.json (fallback) |
 | `/qult:writing-skills` | TDD methodology for creating new skills |
 
@@ -215,12 +213,11 @@ After all reviewers complete, a Judge filter validates each finding for Succinct
 
 ## Updating
 
-1. `/plugin` > qult details > update (hooks, skills, agents, MCP server are updated)
-2. `/qult:update` (updates project rules files to latest)
+`/plugin` > qult details > update. All hooks, skills, agents, and MCP server are updated automatically. No additional commands needed -- quality rules are delivered via MCP instructions, not project files.
 
 ## Uninstalling
 
-`/plugin` > delete qult. Manually remove `.qult/` and `.claude/rules/qult*.md` from the project.
+`/plugin` > delete qult. Manually remove `.qult/` from the project.
 
 ## Configuration
 
@@ -332,7 +329,7 @@ Remove the gate entry from `.qult/gates.json`, or remove the entire category:
 }
 ```
 
-To temporarily disable all gates, rename or delete `.qult/gates.json`. qult is fail-open: missing gates means no enforcement. Run `/qult:detect-gates` to regenerate.
+To temporarily disable all gates, rename or delete `.qult/gates.json`. qult is fail-open: missing gates means no enforcement. Run `/qult:init` to regenerate.
 
 ### Monorepo and workspace projects
 
@@ -362,6 +359,56 @@ qult detects gates from the project root. For monorepos with different tools per
 
 Use `extensions` to route files to the correct linter. The `{file}` placeholder receives the absolute path of the edited file.
 
+## Plugin Architecture
+
+qult uses every component available in the Claude Code Plugin system:
+
+```
+plugin/
+├── .claude-plugin/plugin.json    Manifest
+├── .mcp.json                     MCP server (state + quality rules)
+├── .lsp.json                     LSP servers (TS/Python/Go/Rust)
+├── settings.json                 Default agent (quality-guardian)
+├── hooks/hooks.json              7 enforcement hooks
+├── agents/                       6 agents
+├── skills/                       12 skills
+├── bin/qult-gate                 CLI tool (status, run-lint, run-test)
+├── output-styles/quality-first.md  Output style
+└── dist/                         Bundled hook + MCP server
+```
+
+| Component | Role |
+|-----------|------|
+| **hooks** | Enforcement — DENY (exit 2) on quality violations |
+| **MCP server** | State management + quality rule injection via instructions |
+| **skills** | Interactive workflows (explore, review, debug, finish) |
+| **agents** | Independent evaluators (plan, spec, quality, security) |
+| **settings.json** | Sets quality-guardian as default session agent |
+| **.lsp.json** | Provides real-time diagnostics (TypeScript, Python, Go, Rust) |
+| **bin/** | `qult-gate` CLI for manual gate operations |
+| **output-styles/** | "Quality First" output style — concise, evidence-based, gate-aware |
+
+### Output style
+
+Select the "Quality First" output style via `/config` > Output style. It uses qult terminology and includes gate status in every response.
+
+### CLI tool
+
+`qult-gate` is added to PATH when the plugin is active:
+
+```bash
+qult-gate status       # Show gate config and pending fixes
+qult-gate run-lint <f> # Run on_write gates on a file
+qult-gate run-test     # Run on_commit gates
+qult-gate version      # Show qult version
+```
+
+### LSP integration
+
+qult provides LSP server configurations for TypeScript, Python, Go, and Rust. LSP gives Claude real-time diagnostics — errors are caught before gates run, not after.
+
+> LSP servers must be installed separately (`npm i -g typescript-language-server`, `pip install pyright`, `gopls`, `rust-analyzer`).
+
 ## Design principles
 
 | Principle | Meaning |
@@ -374,13 +421,14 @@ Use `extensions` to route files to the correct linter. The `{file}` placeholder 
 
 ## Agents
 
-| Agent | Model | Dimensions | Purpose |
-|-------|-------|-----------|---------|
-| **plan-generator** | Opus | — | Analyzes codebase, generates structured implementation plans |
-| **plan-evaluator** | Opus | Feasibility, Completeness, Clarity | Evaluates plan quality before implementation |
-| **spec-reviewer** | Opus | Completeness, Accuracy | Verifies implementation matches the plan |
-| **quality-reviewer** | Opus | Design, Maintainability | Evaluates code quality and edge cases |
-| **security-reviewer** | Opus | Vulnerability, Hardening | OWASP Top 10 security review |
+| Agent | Model | Purpose |
+|-------|-------|---------|
+| **quality-guardian** | inherit | Default session agent. Embeds qult philosophy into every interaction |
+| **plan-generator** | Opus | Analyzes codebase, generates structured implementation plans |
+| **plan-evaluator** | Opus | Evaluates plan quality (Feasibility, Completeness, Clarity) |
+| **spec-reviewer** | Opus | Verifies implementation matches the plan (Completeness, Accuracy) |
+| **quality-reviewer** | Opus | Evaluates code quality (Design, Maintainability) |
+| **security-reviewer** | Opus | OWASP Top 10 security review (Vulnerability, Hardening) |
 
 ## Data storage
 
@@ -413,7 +461,7 @@ Known Claude Code bug ([#21988](https://github.com/anthropics/claude-code/issues
 <details>
 <summary><strong>Gates not detected</strong></summary>
 
-Run `/qult:detect-gates`. Ensure tool binaries are on PATH (`which biome`, `which tsc`, etc.). `node_modules/.bin` is searched automatically.
+Run `/qult:init`. Ensure tool binaries are on PATH (`which biome`, `which tsc`, etc.). `node_modules/.bin` is searched automatically.
 
 </details>
 

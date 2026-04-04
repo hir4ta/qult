@@ -228,7 +228,7 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			if (!gates) {
 				return {
 					isError: true,
-					content: [{ type: "text", text: "No gates configured. Run /qult:detect-gates." }],
+					content: [{ type: "text", text: "No gates configured. Run /qult:init." }],
 				};
 			}
 			return { content: [{ type: "text", text: JSON.stringify(gates, null, 2) }] };
@@ -379,7 +379,24 @@ function handleRequest(parsed: JsonRpcRequest, cwd: string): JsonRpcResponse | n
 						"",
 						"IMPORTANT: When a tool is DENIED by qult, call get_pending_fixes immediately.",
 						"Before committing, call get_session_status to verify test/review gates.",
-						"If gates are not configured, run /qult:detect-gates.",
+						"If gates are not configured, run /qult:init.",
+						"",
+						"## Quality Rules",
+						"- ALWAYS write the test file FIRST, then implement.",
+						"- At least 2 meaningful assertions per test case.",
+						"- NEVER mark implementation as complete until tests pass.",
+						"- Quick fix (no plan): keep changes focused, 1-2 files per logical change.",
+						"- Planned work: follow the plan's task boundaries.",
+						"",
+						"## Plan Structure",
+						"When writing a plan, use: ## Context, ## Tasks (### Task N with File/Change/Boundary/Verify), ## Success Criteria.",
+						"Update task status to [done] as you complete each task.",
+						"",
+						"## Workflow",
+						"- When requirements are unclear, use /qult:explore to interview the architect.",
+						"- When debugging, use /qult:debug for structured root-cause analysis.",
+						"- When finishing a branch, use /qult:finish for structured completion.",
+						"- Independent 3-stage review (/qult:review) is required for large changes or when a plan is active.",
 					].join("\n"),
 				},
 			};
