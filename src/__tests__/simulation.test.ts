@@ -1854,3 +1854,64 @@ describe("Scenario: Export breaking change detection", () => {
 		expect(stderr).toContain("export-check FAIL");
 	});
 });
+
+describe("Scenario: Multi-language hallucinated import detection", () => {
+	it("Python import creates pending-fix and blocks other files", async () => {
+		setupPassingGates();
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "src/app.py"), "import nonexistent_module\nx = 1\n");
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/app.py") },
+		});
+
+		const fixes = readPendingFixes();
+		const importFixes = fixes.filter((f) => f.gate === "import-check");
+		expect(importFixes).toHaveLength(1);
+		expect(importFixes[0]!.errors[0]).toContain("nonexistent_module");
+
+		// Now try editing a different file — should DENY
+		exitCode = null;
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		try {
+			await preTool({
+				tool_name: "Edit",
+				tool_input: { file_path: join(TEST_DIR, "src/other.ts") },
+			});
+		} catch {
+			/* exit(2) */
+		}
+		expect(exitCode).toBe(2);
+	});
+});
+
+describe("Scenario: Task drift detection warns on out-of-scope edits", () => {
+	it("warns but does not DENY", async () => {
+		setupPassingGates();
+		// Create plan with specific task files
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			[
+				"## Tasks",
+				"### Task 1: A [pending]",
+				"- **File**: src/a.ts",
+				"### Task 2: B [pending]",
+				"- **File**: src/b.ts",
+			].join("\n"),
+		);
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/unrelated.ts") },
+		});
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("Task drift");
+		expect(exitCode).toBeNull(); // Advisory only — no DENY
+	});
+});

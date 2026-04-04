@@ -724,6 +724,52 @@ var init_respond = __esm(() => {
 
 // src/gates/runner.ts
 import { exec, execSync } from "node:child_process";
+function shellEscape(s) {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+function deduplicateErrors(text) {
+  const lines = text.split(`
+`);
+  const codeGroups = new Map;
+  const lineCodes = [];
+  for (let i = 0;i < lines.length; i++) {
+    const match = lines[i].match(ERROR_CODE_RE);
+    const code = match ? match[1] : null;
+    lineCodes.push(code);
+    if (code) {
+      const existing = codeGroups.get(code);
+      if (existing) {
+        existing.count++;
+      } else {
+        codeGroups.set(code, { first: i, count: 1 });
+      }
+    }
+  }
+  const hasRepeats = [...codeGroups.values()].some((g) => g.count > 1);
+  if (!hasRepeats)
+    return text;
+  const result = [];
+  const emittedSummary = new Set;
+  for (let i = 0;i < lines.length; i++) {
+    const code = lineCodes[i];
+    if (!code) {
+      result.push(lines[i]);
+      continue;
+    }
+    const group = codeGroups.get(code);
+    if (group.count === 1) {
+      result.push(lines[i]);
+    } else if (i === group.first) {
+      result.push(lines[i]);
+      if (!emittedSummary.has(code)) {
+        result.push(`... and ${group.count - 1} more ${code} errors`);
+        emittedSummary.add(code);
+      }
+    }
+  }
+  return result.join(`
+`);
+}
 function smartTruncate(text, maxChars) {
   if (text.length <= maxChars)
     return text;
@@ -738,7 +784,7 @@ ${tail}`;
 }
 function runGateAsync(name, gate, file) {
   const config = loadConfig();
-  const command = file ? gate.command.replace("{file}", file) : gate.command;
+  const command = file ? gate.command.replace("{file}", shellEscape(file)) : gate.command;
   const timeout = gate.timeout ?? config.gates.default_timeout;
   const maxChars = config.gates.output_max_chars;
   const start = Date.now();
@@ -754,7 +800,8 @@ function runGateAsync(name, gate, file) {
     }, (err, stdout, stderr) => {
       const duration_ms = Date.now() - start;
       if (err) {
-        const output = smartTruncate((stdout ?? "") + (stderr ?? ""), maxChars) || `Exit code ${err.code ?? 1}`;
+        const raw = (stdout ?? "") + (stderr ?? "");
+        const output = smartTruncate(deduplicateErrors(raw), maxChars) || `Exit code ${err.code ?? 1}`;
         resolve({ name, passed: false, output, duration_ms });
       } else {
         const output = smartTruncate(stdout ?? "", maxChars);
@@ -765,7 +812,7 @@ function runGateAsync(name, gate, file) {
 }
 function runGate(name, gate, file) {
   const config = loadConfig();
-  const command = file ? gate.command.replace("{file}", file) : gate.command;
+  const command = file ? gate.command.replace("{file}", shellEscape(file)) : gate.command;
   const timeout = gate.timeout ?? config.gates.default_timeout;
   const maxChars = config.gates.output_max_chars;
   const start = Date.now();
@@ -788,7 +835,7 @@ function runGate(name, gate, file) {
     const stdout = "stdout" in e && typeof e.stdout === "string" ? e.stdout : "";
     const stderr = "stderr" in e && typeof e.stderr === "string" ? e.stderr : "";
     const status = "status" in e && typeof e.status === "number" ? e.status : 1;
-    const output = smartTruncate(stdout + stderr, maxChars) || `Exit code ${status}`;
+    const output = smartTruncate(deduplicateErrors(stdout + stderr), maxChars) || `Exit code ${status}`;
     return {
       name,
       passed: false,
@@ -797,18 +844,84 @@ function runGate(name, gate, file) {
     };
   }
 }
+var ERROR_CODE_RE;
 var init_runner = __esm(() => {
   init_config();
+  ERROR_CODE_RE = /\b([A-Z]{1,4}\d{4,5})\b/;
+});
+
+// src/hooks/detectors/convention-check.ts
+import { readdirSync as readdirSync3, statSync as statSync3 } from "node:fs";
+import { basename, dirname as dirname2, extname, join as join8 } from "node:path";
+function classify(name) {
+  if (KEBAB_RE.test(name))
+    return "kebab-case";
+  if (SNAKE_RE.test(name))
+    return "snake_case";
+  if (PASCAL_RE.test(name))
+    return "PascalCase";
+  if (CAMEL_RE.test(name))
+    return "camelCase";
+  return "other";
+}
+function detectConventionDrift(file) {
+  const dir = dirname2(file);
+  const fileName = basename(file);
+  const stem = basename(fileName, extname(fileName));
+  let siblings;
+  try {
+    siblings = readdirSync3(dir).filter((f) => {
+      try {
+        return f !== fileName && statSync3(join8(dir, f)).isFile();
+      } catch {
+        return false;
+      }
+    }).map((f) => basename(f, extname(f)));
+  } catch {
+    return [];
+  }
+  if (siblings.length < 3)
+    return [];
+  const counts = new Map;
+  for (const s of siblings) {
+    const c = classify(s);
+    if (c !== "other")
+      counts.set(c, (counts.get(c) ?? 0) + 1);
+  }
+  let dominant = null;
+  let dominantCount = 0;
+  for (const [conv, count] of counts) {
+    if (count > dominantCount) {
+      dominant = conv;
+      dominantCount = count;
+    }
+  }
+  const classifiableCount = [...counts.values()].reduce((a, b) => a + b, 0);
+  if (!dominant || classifiableCount === 0 || dominantCount <= classifiableCount * 0.5)
+    return [];
+  const fileConvention = classify(stem);
+  if (fileConvention === dominant || fileConvention === "other")
+    return [];
+  return [
+    sanitizeForStderr(`${fileName} uses ${fileConvention} but siblings use ${dominant} (${dominantCount}/${classifiableCount})`)
+  ];
+}
+var KEBAB_RE, CAMEL_RE, SNAKE_RE, PASCAL_RE;
+var init_convention_check = __esm(() => {
+  KEBAB_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)+$/;
+  CAMEL_RE = /^[a-z][a-z0-9]*[A-Z][a-zA-Z0-9]*$/;
+  SNAKE_RE = /^[a-z][a-z0-9]*(_[a-z0-9]+)+$/;
+  PASCAL_RE = /^[A-Z][a-zA-Z0-9]*$/;
 });
 
 // src/hooks/detectors/export-check.ts
 import { execSync as execSync2 } from "node:child_process";
 import { existsSync as existsSync8, readFileSync as readFileSync6 } from "node:fs";
-import { extname } from "node:path";
+import { extname as extname2 } from "node:path";
 function detectExportBreakingChanges(file) {
   if (isGateDisabled("export-check"))
     return [];
-  const ext = extname(file).toLowerCase();
+  const ext = extname2(file).toLowerCase();
   if (!TS_JS_EXTS.has(ext))
     return [];
   if (!existsSync8(file))
@@ -855,18 +968,25 @@ var init_export_check = __esm(() => {
 
 // src/hooks/detectors/import-check.ts
 import { existsSync as existsSync9, readFileSync as readFileSync7 } from "node:fs";
-import { extname as extname2, join as join8 } from "node:path";
+import { extname as extname3, join as join9, resolve } from "node:path";
 function detectHallucinatedImports(file) {
   if (isGateDisabled("import-check"))
     return [];
-  const ext = extname2(file).toLowerCase();
-  if (!TS_JS_EXTS2.has(ext))
+  const ext = extname3(file).toLowerCase();
+  if (!TS_JS_EXTS2.has(ext) && !PY_EXTS.has(ext) && !GO_EXTS.has(ext))
     return [];
   if (!existsSync9(file))
     return [];
   const content = readFileSync7(file, "utf-8");
   if (content.length > MAX_IMPORT_CHECK_SIZE)
     return [];
+  if (PY_EXTS.has(ext))
+    return detectPythonImports(file, content);
+  if (GO_EXTS.has(ext))
+    return detectGoImports(file, content);
+  return detectTsJsImports(file, content);
+}
+function detectTsJsImports(file, content) {
   const cwd = process.cwd();
   const missingPkgs = [];
   let builtins;
@@ -888,7 +1008,7 @@ function detectHallucinatedImports(file) {
       continue;
     if (pkgName.includes(".."))
       continue;
-    if (!existsSync9(join8(cwd, "node_modules", pkgName))) {
+    if (!existsSync9(join9(cwd, "node_modules", pkgName))) {
       missingPkgs.push(pkgName);
     }
   }
@@ -903,11 +1023,149 @@ function detectHallucinatedImports(file) {
     }
   ];
 }
-var TS_JS_EXTS2, IMPORT_LINE_RE, MAX_IMPORT_CHECK_SIZE = 500000, FALLBACK_BUILTINS;
+function detectPythonImports(file, content) {
+  const cwd = process.cwd();
+  const missingModules = [];
+  for (const line of content.split(`
+`)) {
+    if (line.trimStart().startsWith("#"))
+      continue;
+    const match = line.match(PY_IMPORT_RE);
+    if (!match)
+      continue;
+    const moduleName = match[1] ?? match[2];
+    if (PY_STDLIB.has(moduleName))
+      continue;
+    if (existsSync9(join9(cwd, `${moduleName}.py`)) || existsSync9(join9(cwd, moduleName)))
+      continue;
+    missingModules.push(moduleName);
+  }
+  if (missingModules.length === 0)
+    return [];
+  const unique = [...new Set(missingModules)];
+  return [
+    {
+      file,
+      errors: unique.map((mod) => {
+        const safe = sanitizeForStderr(mod.slice(0, 128));
+        return `Hallucinated import: Python module "${safe}" not found (not stdlib, no ${safe}.py or ${safe}/ in project)`;
+      }),
+      gate: "import-check"
+    }
+  ];
+}
+function detectGoImports(file, content) {
+  const cwd = process.cwd();
+  const missingPkgs = [];
+  let goSum = null;
+  try {
+    goSum = readFileSync7(join9(cwd, "go.sum"), "utf-8");
+  } catch {}
+  const lines = content.split(`
+`);
+  let inBlock = false;
+  for (const line of lines) {
+    if (line.trimStart().startsWith("//"))
+      continue;
+    if (/^\s*import\s*\(/.test(line)) {
+      inBlock = true;
+      continue;
+    }
+    if (inBlock && line.trim() === ")") {
+      inBlock = false;
+      continue;
+    }
+    let importPath;
+    if (inBlock) {
+      const m = line.match(GO_IMPORT_RE);
+      if (m)
+        importPath = m[1];
+    } else {
+      const m = line.match(/^\s*import\s+"([^"]+)"/);
+      if (m)
+        importPath = m[1];
+    }
+    if (!importPath)
+      continue;
+    const topPkg = importPath.split("/")[0];
+    if (GO_STDLIB_PREFIXES.has(topPkg))
+      continue;
+    const vendorDir = resolve(cwd, "vendor");
+    const vendorPath = resolve(vendorDir, importPath);
+    if (vendorPath.startsWith(`${vendorDir}/`) && existsSync9(vendorPath))
+      continue;
+    if (goSum?.includes(`${importPath} `))
+      continue;
+    missingPkgs.push(importPath);
+  }
+  if (missingPkgs.length === 0)
+    return [];
+  const unique = [...new Set(missingPkgs)];
+  return [
+    {
+      file,
+      errors: unique.map((pkg) => `Hallucinated import: Go package "${sanitizeForStderr(pkg.slice(0, 128))}" not found (not stdlib, not in vendor/ or go.sum)`),
+      gate: "import-check"
+    }
+  ];
+}
+var TS_JS_EXTS2, PY_EXTS, GO_EXTS, IMPORT_LINE_RE, PY_IMPORT_RE, MAX_IMPORT_CHECK_SIZE = 500000, GO_IMPORT_RE, GO_STDLIB_PREFIXES, FALLBACK_BUILTINS, PY_STDLIB;
 var init_import_check = __esm(() => {
   init_session_state();
   TS_JS_EXTS2 = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
+  PY_EXTS = new Set([".py", ".pyi"]);
+  GO_EXTS = new Set([".go"]);
   IMPORT_LINE_RE = /^\s*import\s+(?:[^"']*\s+from\s+)?["']([^"'./][^"']*)["']/;
+  PY_IMPORT_RE = /^\s*(?:import\s+(\w+)|from\s+(\w+)\s+import)\b/;
+  GO_IMPORT_RE = /^\s*"([^"]+)"/;
+  GO_STDLIB_PREFIXES = new Set([
+    "archive",
+    "bufio",
+    "bytes",
+    "cmp",
+    "compress",
+    "context",
+    "crypto",
+    "database",
+    "debug",
+    "embed",
+    "encoding",
+    "errors",
+    "flag",
+    "fmt",
+    "go",
+    "hash",
+    "html",
+    "image",
+    "internal",
+    "io",
+    "iter",
+    "log",
+    "maps",
+    "math",
+    "mime",
+    "net",
+    "os",
+    "path",
+    "plugin",
+    "reflect",
+    "regexp",
+    "runtime",
+    "slices",
+    "sort",
+    "strconv",
+    "strings",
+    "structs",
+    "sync",
+    "syscall",
+    "testing",
+    "text",
+    "time",
+    "unicode",
+    "unique",
+    "unsafe",
+    "vendor"
+  ]);
   FALLBACK_BUILTINS = new Set([
     "assert",
     "async_hooks",
@@ -953,6 +1211,157 @@ var init_import_check = __esm(() => {
     "worker_threads",
     "zlib"
   ]);
+  PY_STDLIB = new Set([
+    "abc",
+    "aifc",
+    "argparse",
+    "array",
+    "ast",
+    "asyncio",
+    "atexit",
+    "base64",
+    "binascii",
+    "bisect",
+    "builtins",
+    "bz2",
+    "calendar",
+    "cgi",
+    "cmd",
+    "code",
+    "codecs",
+    "collections",
+    "colorsys",
+    "compileall",
+    "concurrent",
+    "configparser",
+    "contextlib",
+    "copy",
+    "copyreg",
+    "csv",
+    "ctypes",
+    "curses",
+    "dataclasses",
+    "datetime",
+    "dbm",
+    "decimal",
+    "difflib",
+    "dis",
+    "email",
+    "enum",
+    "errno",
+    "faulthandler",
+    "fileinput",
+    "fnmatch",
+    "fractions",
+    "ftplib",
+    "functools",
+    "gc",
+    "getopt",
+    "getpass",
+    "gettext",
+    "glob",
+    "grp",
+    "gzip",
+    "hashlib",
+    "heapq",
+    "hmac",
+    "html",
+    "http",
+    "imaplib",
+    "importlib",
+    "inspect",
+    "io",
+    "ipaddress",
+    "itertools",
+    "json",
+    "keyword",
+    "linecache",
+    "locale",
+    "logging",
+    "lzma",
+    "mailbox",
+    "math",
+    "mimetypes",
+    "mmap",
+    "multiprocessing",
+    "netrc",
+    "numbers",
+    "operator",
+    "optparse",
+    "os",
+    "pathlib",
+    "pdb",
+    "pickle",
+    "pickletools",
+    "pkgutil",
+    "platform",
+    "plistlib",
+    "poplib",
+    "posixpath",
+    "pprint",
+    "queue",
+    "random",
+    "re",
+    "readline",
+    "reprlib",
+    "resource",
+    "rlcompleter",
+    "sched",
+    "secrets",
+    "select",
+    "selectors",
+    "shelve",
+    "shlex",
+    "shutil",
+    "signal",
+    "site",
+    "smtplib",
+    "socket",
+    "socketserver",
+    "sqlite3",
+    "ssl",
+    "stat",
+    "statistics",
+    "string",
+    "struct",
+    "subprocess",
+    "sunau",
+    "symtable",
+    "sys",
+    "sysconfig",
+    "syslog",
+    "tarfile",
+    "tempfile",
+    "termios",
+    "textwrap",
+    "threading",
+    "time",
+    "timeit",
+    "tkinter",
+    "token",
+    "tokenize",
+    "tomllib",
+    "trace",
+    "traceback",
+    "tracemalloc",
+    "tty",
+    "turtle",
+    "types",
+    "typing",
+    "unicodedata",
+    "unittest",
+    "urllib",
+    "uuid",
+    "venv",
+    "warnings",
+    "wave",
+    "weakref",
+    "xml",
+    "xmlrpc",
+    "zipfile",
+    "zipimport",
+    "zlib"
+  ]);
 });
 
 // src/hooks/post-tool.ts
@@ -960,7 +1369,7 @@ var exports_post_tool = {};
 __export(exports_post_tool, {
   default: () => postTool
 });
-import { extname as extname3, resolve } from "node:path";
+import { extname as extname4, resolve as resolve2 } from "node:path";
 async function postTool(ev) {
   const tool = ev.tool_name;
   if (!tool)
@@ -975,14 +1384,14 @@ async function handleEditWrite(ev) {
   const rawFile = typeof ev.tool_input?.file_path === "string" ? ev.tool_input.file_path : null;
   if (!rawFile)
     return;
-  const file = resolve(rawFile);
-  const qultDir = resolve(process.cwd(), ".qult");
+  const file = resolve2(rawFile);
+  const qultDir = resolve2(process.cwd(), ".qult");
   if (file.startsWith(`${qultDir}/`) || file === qultDir)
     return;
   const gates = loadGates();
   if (!gates?.on_write)
     return;
-  const fileExt = extname3(file).toLowerCase();
+  const fileExt = extname4(file).toLowerCase();
   const gatedExts = getGatedExtensions();
   const sessionId = ev.session_id;
   const gateEntries = [];
@@ -1031,6 +1440,16 @@ async function handleEditWrite(ev) {
     const exportFixes = detectExportBreakingChanges(file);
     newFixes.push(...exportFixes);
   } catch {}
+  try {
+    const state = readSessionState();
+    if (!state.changed_file_paths.includes(file)) {
+      const warnings = detectConventionDrift(file);
+      for (const w of warnings) {
+        process.stderr.write(`[qult] Convention: ${w}
+`);
+      }
+    }
+  } catch {}
   if (newFixes.length > 0) {
     addPendingFixes(file, newFixes);
   } else {
@@ -1060,6 +1479,25 @@ async function handleEditWrite(ev) {
   try {
     recordChangedFile(file);
   } catch {}
+  try {
+    checkOverEngineering();
+  } catch {}
+}
+function checkOverEngineering() {
+  const plan = getActivePlan();
+  if (!plan)
+    return;
+  const state = readSessionState();
+  const changed = state.changed_file_paths ?? [];
+  const totalChanged = changed.length;
+  const cwd = process.cwd();
+  const planFiles = new Set(plan.tasks.filter((t) => t.file).map((t) => resolve2(cwd, t.file)));
+  const unplannedCount = changed.filter((f) => !planFiles.has(f)).length;
+  const planTaskCount = plan.tasks.filter((t) => t.file).length;
+  if (unplannedCount > 5 || totalChanged > planTaskCount * 2) {
+    process.stderr.write(`[qult] Over-engineering risk: ${unplannedCount} unplanned file(s) out of ${totalChanged} changed. Review scope.
+`);
+  }
 }
 function handleBash(ev) {
   const command = typeof ev.tool_input?.command === "string" ? ev.tool_input.command : null;
@@ -1152,7 +1590,9 @@ var init_post_tool = __esm(() => {
   init_load();
   init_runner();
   init_pending_fixes();
+  init_plan_status();
   init_session_state();
+  init_convention_check();
   init_export_check();
   init_import_check();
   GIT_COMMIT_RE = /\bgit\s+(?:-\S+(?:\s+\S+)?\s+)*commit\b/i;
@@ -1165,7 +1605,7 @@ var exports_pre_tool = {};
 __export(exports_pre_tool, {
   default: () => preTool
 });
-import { resolve as resolve2 } from "node:path";
+import { resolve as resolve3 } from "node:path";
 async function preTool(ev) {
   const tool = ev.tool_name;
   if (tool === "ExitPlanMode") {
@@ -1186,10 +1626,10 @@ function checkEditWrite(ev) {
   const targetFile = typeof ev.tool_input?.file_path === "string" ? ev.tool_input.file_path : null;
   if (!targetFile)
     return;
-  const resolvedTarget = resolve2(targetFile);
+  const resolvedTarget = resolve3(targetFile);
   const fixes = readPendingFixes();
   if (fixes.length > 0) {
-    const isFixingPendingFile = fixes.some((f) => resolve2(f.file) === resolvedTarget);
+    const isFixingPendingFile = fixes.some((f) => resolve3(f.file) === resolvedTarget);
     if (!isFixingPendingFile) {
       const fileList = fixes.map((f) => {
         const totalErrors = f.errors.length;
@@ -1214,6 +1654,12 @@ ${fileList}`);
   try {
     suggestTaskCreate(resolvedTarget);
   } catch {}
+  try {
+    checkTaskDrift(resolvedTarget);
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith("process.exit"))
+      throw e;
+  }
 }
 function suggestTaskCreate(resolvedTarget) {
   const plan = getActivePlan();
@@ -1226,13 +1672,28 @@ function suggestTaskCreate(resolvedTarget) {
   for (const task of plan.tasks) {
     if (!task.file)
       continue;
-    const taskFile = resolve2(cwd, task.file);
+    const taskFile = resolve3(cwd, task.file);
     if (resolvedTarget === taskFile) {
       process.stderr.write(`[qult] Plan task detected for ${task.file}. Use TaskCreate to track progress and enable Verify test execution.
 `);
       return;
     }
   }
+}
+function checkTaskDrift(resolvedTarget) {
+  const plan = getActivePlan();
+  if (!plan)
+    return;
+  if (driftWarnedFiles.has(resolvedTarget))
+    return;
+  const cwd = process.cwd();
+  const planFiles = new Set(plan.tasks.filter((t) => t.file).map((t) => resolve3(cwd, t.file)));
+  if (planFiles.has(resolvedTarget))
+    return;
+  const relative = resolvedTarget.startsWith(cwd) ? resolvedTarget.slice(cwd.length + 1) : resolvedTarget;
+  process.stderr.write(`[qult] Task drift: ${sanitizeForStderr(relative)} is not in the current plan scope.
+`);
+  driftWarnedFiles.add(resolvedTarget);
 }
 function checkTddOrder(resolvedTarget) {
   const plan = getActivePlan();
@@ -1246,10 +1707,10 @@ function checkTddOrder(resolvedTarget) {
     const parsed = parseVerifyField(task.verify);
     if (!parsed)
       continue;
-    const implFile = resolve2(cwd, task.file);
+    const implFile = resolve3(cwd, task.file);
     if (resolvedTarget !== implFile)
       continue;
-    const testFile = resolve2(cwd, parsed.file);
+    const testFile = resolve3(cwd, parsed.file);
     if (resolvedTarget === testFile)
       return;
     if (!changed.includes(testFile)) {
@@ -1282,7 +1743,7 @@ function checkBash(ev) {
     }
   }
 }
-var GIT_COMMIT_RE2;
+var GIT_COMMIT_RE2, driftWarnedFiles;
 var init_pre_tool = __esm(() => {
   init_load();
   init_pending_fixes();
@@ -1290,6 +1751,7 @@ var init_pre_tool = __esm(() => {
   init_session_state();
   init_respond();
   GIT_COMMIT_RE2 = /\bgit\s+(?:-\S+(?:\s+\S+)?\s+)*commit\b/i;
+  driftWarnedFiles = new Set;
 });
 
 // src/hooks/stop.ts
@@ -1595,8 +2057,8 @@ var init_score_parsers = __esm(() => {
 });
 
 // src/hooks/subagent-stop/agent-validators.ts
-import { existsSync as existsSync10, readdirSync as readdirSync3, readFileSync as readFileSync8, statSync as statSync3 } from "node:fs";
-import { join as join9 } from "node:path";
+import { existsSync as existsSync10, readdirSync as readdirSync4, readFileSync as readFileSync8, statSync as statSync4 } from "node:fs";
+import { join as join10 } from "node:path";
 async function subagentStop(ev) {
   if (ev.stop_hook_active)
     return;
@@ -1620,16 +2082,16 @@ async function subagentStop(ev) {
 }
 function validatePlan() {
   try {
-    const planDir = join9(process.cwd(), ".claude", "plans");
+    const planDir = join10(process.cwd(), ".claude", "plans");
     if (!existsSync10(planDir))
       return;
-    const files = readdirSync3(planDir).filter((f) => f.endsWith(".md")).map((f) => ({
+    const files = readdirSync4(planDir).filter((f) => f.endsWith(".md")).map((f) => ({
       name: f,
-      mtime: statSync3(join9(planDir, f)).mtimeMs
+      mtime: statSync4(join10(planDir, f)).mtimeMs
     })).sort((a, b) => b.mtime - a.mtime);
     if (files.length === 0)
       return;
-    const content = readFileSync8(join9(planDir, files[0].name), "utf-8");
+    const content = readFileSync8(join10(planDir, files[0].name), "utf-8");
     const structErrors = validatePlanStructure(content);
     if (structErrors.length > 0) {
       block(`Plan structural issues:
@@ -1810,7 +2272,7 @@ function extractFindings(output, stageName) {
 function persistReviewFindings() {
   if (_currentFindings.length === 0)
     return null;
-  const historyPath = join9(process.cwd(), ".qult", ".state", FINDINGS_HISTORY_FILE);
+  const historyPath = join10(process.cwd(), ".qult", ".state", FINDINGS_HISTORY_FILE);
   let history = [];
   try {
     if (existsSync10(historyPath)) {
@@ -1910,7 +2372,7 @@ __export(exports_task_completed, {
 });
 import { spawnSync } from "node:child_process";
 import { existsSync as existsSync11, readFileSync as readFileSync9 } from "node:fs";
-import { resolve as resolve3 } from "node:path";
+import { resolve as resolve4 } from "node:path";
 async function taskCompleted(ev) {
   const subject = ev.task_subject;
   if (!subject)
@@ -1952,8 +2414,8 @@ async function taskCompleted(ev) {
   } catch {}
 }
 function checkVerifyTestQuality(testFile, _testName, taskKey) {
-  const cwd = resolve3(process.cwd());
-  const absPath = resolve3(cwd, testFile);
+  const cwd = resolve4(process.cwd());
+  const absPath = resolve4(cwd, testFile);
   if (!absPath.startsWith(cwd))
     return;
   if (!existsSync11(absPath))
@@ -2008,10 +2470,10 @@ __export(exports_session_start, {
   default: () => sessionStart
 });
 import { existsSync as existsSync12, mkdirSync as mkdirSync3 } from "node:fs";
-import { join as join10 } from "node:path";
+import { join as join11 } from "node:path";
 async function sessionStart(ev) {
   try {
-    const stateDir = join10(process.cwd(), ".qult", ".state");
+    const stateDir = join11(process.cwd(), ".qult", ".state");
     if (!existsSync12(stateDir)) {
       mkdirSync3(stateDir, { recursive: true });
     }
@@ -2036,11 +2498,11 @@ var exports_post_compact = {};
 __export(exports_post_compact, {
   default: () => postCompact
 });
-import { existsSync as existsSync13, readdirSync as readdirSync4, readFileSync as readFileSync10, statSync as statSync4 } from "node:fs";
-import { join as join11 } from "node:path";
+import { existsSync as existsSync13, readdirSync as readdirSync5, readFileSync as readFileSync10, statSync as statSync5 } from "node:fs";
+import { join as join12 } from "node:path";
 async function postCompact(_ev) {
   try {
-    const stateDir = join11(process.cwd(), ".qult", ".state");
+    const stateDir = join12(process.cwd(), ".qult", ".state");
     if (!existsSync13(stateDir))
       return;
     const parts = [];
@@ -2059,7 +2521,7 @@ async function postCompact(_ev) {
       const state = safeReadJson(statePath, {});
       if (Object.keys(state).length > 0) {
         const summary = [];
-        const gatesPath = join11(process.cwd(), ".qult", "gates.json");
+        const gatesPath = join12(process.cwd(), ".qult", "gates.json");
         const hasGates = existsSync13(gatesPath);
         if (state.test_passed_at)
           summary.push(`test_passed_at: ${state.test_passed_at}`);
@@ -2084,11 +2546,11 @@ async function postCompact(_ev) {
       }
     }
     try {
-      const planDir = join11(process.cwd(), ".claude", "plans");
+      const planDir = join12(process.cwd(), ".claude", "plans");
       if (existsSync13(planDir)) {
-        const planFiles = readdirSync4(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync4(join11(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
+        const planFiles = readdirSync5(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync5(join12(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
         if (planFiles.length > 0) {
-          const content = readFileSync10(join11(planDir, planFiles[0].name), "utf-8");
+          const content = readFileSync10(join12(planDir, planFiles[0].name), "utf-8");
           const taskCount = (content.match(/^###\s+Task\s+\d+/gim) ?? []).length;
           const doneCount = (content.match(/^###\s+Task\s+\d+.*\[done\]/gim) ?? []).length;
           if (taskCount > 0) {
@@ -2105,9 +2567,9 @@ async function postCompact(_ev) {
 }
 function findLatestFile(stateDir, prefix) {
   try {
-    const files = readdirSync4(stateDir).filter((f) => f.startsWith(prefix) && f.endsWith(".json")).map((f) => ({
-      path: join11(stateDir, f),
-      mtime: statSync4(join11(stateDir, f)).mtimeMs
+    const files = readdirSync5(stateDir).filter((f) => f.startsWith(prefix) && f.endsWith(".json")).map((f) => ({
+      path: join12(stateDir, f),
+      mtime: statSync5(join12(stateDir, f)).mtimeMs
     })).sort((a, b) => b.mtime - a.mtime);
     return files.length > 0 ? files[0].path : null;
   } catch {
@@ -2132,7 +2594,7 @@ init_pending_fixes();
 init_session_state();
 init_lazy_init();
 init_respond();
-import { join as join12 } from "node:path";
+import { join as join13 } from "node:path";
 var EVENT_MAP = {
   "post-tool": () => Promise.resolve().then(() => (init_post_tool(), exports_post_tool)),
   "pre-tool": () => Promise.resolve().then(() => (init_pre_tool(), exports_pre_tool)),
@@ -2152,13 +2614,13 @@ async function dispatch(event) {
   }
   let input;
   try {
-    input = await new Promise((resolve4, reject) => {
+    input = await new Promise((resolve5, reject) => {
       let data = "";
       process.stdin.setEncoding("utf-8");
       process.stdin.on("data", (chunk) => {
         data += chunk;
       });
-      process.stdin.on("end", () => resolve4(data));
+      process.stdin.on("end", () => resolve5(data));
       process.stdin.on("error", reject);
     });
   } catch {
@@ -2177,7 +2639,7 @@ async function dispatch(event) {
     setFixesSessionScope(ev.session_id);
     if (ev.session_id !== _lastWrittenSessionId) {
       try {
-        atomicWriteJson(join12(process.cwd(), ".qult", ".state", "latest-session.json"), {
+        atomicWriteJson(join13(process.cwd(), ".qult", ".state", "latest-session.json"), {
           session_id: ev.session_id,
           updated_at: new Date().toISOString()
         });

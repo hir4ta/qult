@@ -2,7 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetConfigCache } from "../config.ts";
-import { runGate, runGateAsync, smartTruncate } from "../gates/runner.ts";
+import { deduplicateErrors, runGate, runGateAsync, smartTruncate } from "../gates/runner.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-runner-test");
 const originalCwd = process.cwd();
@@ -138,5 +138,53 @@ describe("smartTruncate", () => {
 		expect(match).not.toBeNull();
 		const truncatedChars = Number(match![1]);
 		expect(truncatedChars).toBeGreaterThan(size - maxChars - 100);
+	});
+});
+
+describe("deduplicateErrors", () => {
+	it("collapses repeated error codes into first + summary", () => {
+		const lines = Array.from(
+			{ length: 10 },
+			(_, i) => `src/foo.ts(${i + 1},1): error TS2322: Type mismatch`,
+		);
+		const result = deduplicateErrors(lines.join("\n"));
+		const outputLines = result.split("\n").filter((l) => l.trim());
+		expect(outputLines).toHaveLength(2);
+		expect(outputLines[0]).toContain("TS2322");
+		expect(outputLines[1]).toContain("9 more TS2322");
+	});
+
+	it("preserves lines with different error codes", () => {
+		const input = [
+			"src/a.ts(1,1): error TS2322: Type mismatch",
+			"src/b.ts(2,1): error TS2345: Argument not assignable",
+			"src/c.py:3: E0308: invalid type",
+		].join("\n");
+		const result = deduplicateErrors(input);
+		expect(result).toContain("TS2322");
+		expect(result).toContain("TS2345");
+		expect(result).toContain("E0308");
+		const outputLines = result.split("\n").filter((l) => l.trim());
+		expect(outputLines).toHaveLength(3);
+	});
+
+	it("passes through text with no error codes unchanged", () => {
+		const input = "some normal output\nwithout error codes\n";
+		expect(deduplicateErrors(input)).toBe(input);
+	});
+
+	it("handles mixed error codes correctly", () => {
+		const lines = [
+			...Array.from({ length: 5 }, (_, i) => `src/a.ts(${i},1): error TS2322: Type mismatch`),
+			"src/b.ts(1,1): error TS2345: Argument not assignable",
+			...Array.from({ length: 3 }, (_, i) => `src/c.ts(${i},1): error TS2322: Type mismatch`),
+		];
+		const result = deduplicateErrors(lines.join("\n"));
+		const outputLines = result.split("\n").filter((l) => l.trim());
+		// first TS2322 + summary, TS2345, = 3 lines
+		expect(outputLines).toHaveLength(3);
+		expect(outputLines[0]).toContain("TS2322");
+		expect(outputLines[1]).toContain("7 more TS2322");
+		expect(outputLines[2]).toContain("TS2345");
 	});
 });

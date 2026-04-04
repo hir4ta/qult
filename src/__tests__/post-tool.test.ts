@@ -449,6 +449,181 @@ describe("postTool: hallucinated import detection", () => {
 	});
 });
 
+describe("postTool: Python hallucinated import detection", () => {
+	beforeEach(() => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({
+				on_write: { lint: { command: "echo 'OK' && exit 0", timeout: 3000 } },
+			}),
+		);
+	});
+
+	it("flags import of nonexistent module", async () => {
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "src/app.py"), "import nonexistent_module\nx = 1\n");
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/app.py") },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const fixes = readPendingFixes().filter((f) => f.gate === "import-check");
+		expect(fixes).toHaveLength(1);
+		expect(fixes[0]!.errors[0]).toContain("nonexistent_module");
+	});
+
+	it("flags from X import Y for nonexistent module", async () => {
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "src/app.py"), "from nonexistent_module import foo\n");
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/app.py") },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const fixes = readPendingFixes().filter((f) => f.gate === "import-check");
+		expect(fixes).toHaveLength(1);
+		expect(fixes[0]!.errors[0]).toContain("nonexistent_module");
+	});
+
+	it("does not flag stdlib import os", async () => {
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "src/app.py"), "import os\nimport sys\n");
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/app.py") },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const fixes = readPendingFixes().filter((f) => f.gate === "import-check");
+		expect(fixes).toHaveLength(0);
+	});
+
+	it("does not flag from pathlib import Path (stdlib)", async () => {
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "src/app.py"), "from pathlib import Path\n");
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/app.py") },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const fixes = readPendingFixes().filter((f) => f.gate === "import-check");
+		expect(fixes).toHaveLength(0);
+	});
+
+	it("does not flag import when module file exists in project", async () => {
+		writeFileSync(join(TEST_DIR, "mymodule.py"), "# local module\n");
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "src/app.py"), "import mymodule\n");
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/app.py") },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const fixes = readPendingFixes().filter((f) => f.gate === "import-check");
+		expect(fixes).toHaveLength(0);
+	});
+});
+
+describe("postTool: Go hallucinated import detection", () => {
+	beforeEach(() => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({
+				on_write: { lint: { command: "echo 'OK' && exit 0", timeout: 3000 } },
+			}),
+		);
+	});
+
+	it("flags nonexistent third-party import", async () => {
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(
+			join(TEST_DIR, "src/main.go"),
+			'package main\n\nimport "github.com/nonexistent/pkg"\n',
+		);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/main.go") },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const fixes = readPendingFixes().filter((f) => f.gate === "import-check");
+		expect(fixes).toHaveLength(1);
+		expect(fixes[0]!.errors[0]).toContain("github.com/nonexistent/pkg");
+	});
+
+	it("does not flag stdlib import fmt", async () => {
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "src/main.go"), 'package main\n\nimport "fmt"\nimport "os"\n');
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/main.go") },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const fixes = readPendingFixes().filter((f) => f.gate === "import-check");
+		expect(fixes).toHaveLength(0);
+	});
+
+	it("handles multiline import block", async () => {
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(
+			join(TEST_DIR, "src/main.go"),
+			'package main\n\nimport (\n\t"fmt"\n\t"github.com/nonexistent/pkg"\n)\n',
+		);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/main.go") },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const fixes = readPendingFixes().filter((f) => f.gate === "import-check");
+		expect(fixes).toHaveLength(1);
+		expect(fixes[0]!.errors[0]).toContain("github.com/nonexistent/pkg");
+	});
+
+	it("does not flag when go.sum contains the module", async () => {
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(
+			join(TEST_DIR, "src/main.go"),
+			'package main\n\nimport "github.com/existing/pkg"\n',
+		);
+		writeFileSync(
+			join(TEST_DIR, "go.sum"),
+			"github.com/existing/pkg v1.0.0 h1:abc=\ngithub.com/existing/pkg v1.0.0/go.mod h1:def=\n",
+		);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/main.go") },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const fixes = readPendingFixes().filter((f) => f.gate === "import-check");
+		expect(fixes).toHaveLength(0);
+	});
+});
+
 describe("postTool: export breaking change detection", () => {
 	beforeEach(() => {
 		writeFileSync(
@@ -526,5 +701,154 @@ describe("postTool: export breaking change detection", () => {
 		const { readPendingFixes } = await import("../state/pending-fixes.ts");
 		const exportFixes = readPendingFixes().filter((f) => f.gate === "export-check");
 		expect(exportFixes).toHaveLength(0);
+	});
+});
+
+describe("postTool: convention drift detection", () => {
+	beforeEach(() => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({
+				on_write: { lint: { command: "echo ok && exit 0", timeout: 3000 } },
+			}),
+		);
+	});
+
+	it("warns when new file uses different naming convention than siblings", async () => {
+		const dir = join(TEST_DIR, "src");
+		mkdirSync(dir, { recursive: true });
+		// Create kebab-case siblings
+		writeFileSync(join(dir, "my-utils.ts"), "export const x = 1;\n");
+		writeFileSync(join(dir, "api-client.ts"), "export const x = 1;\n");
+		writeFileSync(join(dir, "data-store.ts"), "export const x = 1;\n");
+		writeFileSync(join(dir, "event-bus.ts"), "export const x = 1;\n");
+		// New file is camelCase — should warn
+		writeFileSync(join(dir, "myHelper.ts"), "export const x = 1;\n");
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(dir, "myHelper.ts") },
+		});
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("Convention");
+	});
+
+	it("does not warn when naming matches dominant convention", async () => {
+		const dir = join(TEST_DIR, "src");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "my-utils.ts"), "export const x = 1;\n");
+		writeFileSync(join(dir, "api-client.ts"), "export const x = 1;\n");
+		writeFileSync(join(dir, "data-store.ts"), "export const x = 1;\n");
+		// New file matches kebab-case
+		writeFileSync(join(dir, "new-thing.ts"), "export const x = 1;\n");
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(dir, "new-thing.ts") },
+		});
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).not.toContain("Convention");
+	});
+
+	it("does not warn for directories with fewer than 3 siblings", async () => {
+		const dir = join(TEST_DIR, "src");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "a.ts"), "export const x = 1;\n");
+		writeFileSync(join(dir, "myHelper.ts"), "export const x = 1;\n");
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(dir, "myHelper.ts") },
+		});
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).not.toContain("Convention");
+	});
+});
+
+describe("postTool: over-engineering detection", () => {
+	beforeEach(() => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({
+				on_write: { lint: { command: "echo ok && exit 0", timeout: 3000 } },
+			}),
+		);
+	});
+
+	it("warns when unplanned file count exceeds threshold", async () => {
+		// Setup plan with 2 task files
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			[
+				"## Tasks",
+				"### Task 1: A [pending]",
+				"- **File**: src/a.ts",
+				"### Task 2: B [pending]",
+				"- **File**: src/b.ts",
+			].join("\n"),
+		);
+
+		// Populate changed_file_paths with 2 planned + 6 unplanned files
+		const { recordChangedFile } = await import("../state/session-state.ts");
+		recordChangedFile(join(TEST_DIR, "src/a.ts"));
+		recordChangedFile(join(TEST_DIR, "src/b.ts"));
+		for (let i = 0; i < 6; i++) {
+			recordChangedFile(join(TEST_DIR, `src/extra${i}.ts`));
+		}
+
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "src/extra6.ts"), "export const x = 1;\n");
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/extra6.ts") },
+		});
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("Over-engineering");
+	});
+
+	it("does not warn when all changed files are in plan scope", async () => {
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			["## Tasks", "### Task 1: A [pending]", "- **File**: src/a.ts"].join("\n"),
+		);
+
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "src/a.ts"), "export const x = 1;\n");
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/a.ts") },
+		});
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).not.toContain("Over-engineering");
+	});
+
+	it("does not warn when no plan is active", async () => {
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "src/foo.ts"), "export const x = 1;\n");
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/foo.ts") },
+		});
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).not.toContain("Over-engineering");
 	});
 });

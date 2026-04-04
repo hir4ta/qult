@@ -7,18 +7,21 @@ import {
 	readPendingFixes,
 	writePendingFixes,
 } from "../state/pending-fixes.ts";
+import { getActivePlan } from "../state/plan-status.ts";
 import {
 	clearOnCommit,
 	getGatedExtensions,
 	incrementGateFailure,
 	isGateDisabled,
 	markGateRan,
+	readSessionState,
 	recordChangedFile,
 	recordTestPass,
 	resetGateFailure,
 	shouldSkipGate,
 } from "../state/session-state.ts";
 import type { HookEvent, PendingFix } from "../types.ts";
+import { detectConventionDrift } from "./detectors/convention-check.ts";
 import { detectExportBreakingChanges } from "./detectors/export-check.ts";
 import { detectHallucinatedImports } from "./detectors/import-check.ts";
 
@@ -122,6 +125,19 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 		/* fail-open */
 	}
 
+	// Convention drift detection (advisory): warn on naming mismatch for new files
+	try {
+		const state = readSessionState();
+		if (!state.changed_file_paths.includes(file)) {
+			const warnings = detectConventionDrift(file);
+			for (const w of warnings) {
+				process.stderr.write(`[qult] Convention: ${w}\n`);
+			}
+		}
+	} catch {
+		/* fail-open */
+	}
+
 	if (newFixes.length > 0) {
 		addPendingFixes(file, newFixes);
 	} else {
@@ -154,6 +170,34 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 		recordChangedFile(file);
 	} catch {
 		/* fail-open */
+	}
+
+	// Over-engineering detection: warn when too many unplanned files changed
+	try {
+		checkOverEngineering();
+	} catch {
+		/* fail-open */
+	}
+}
+
+/** Advisory: warn when too many files are changed outside the plan scope. */
+function checkOverEngineering(): void {
+	const plan = getActivePlan();
+	if (!plan) return;
+
+	const state = readSessionState();
+	const changed = state.changed_file_paths ?? [];
+	const totalChanged = changed.length;
+
+	const cwd = process.cwd();
+	const planFiles = new Set(plan.tasks.filter((t) => t.file).map((t) => resolve(cwd, t.file!)));
+	const unplannedCount = changed.filter((f) => !planFiles.has(f)).length;
+	const planTaskCount = plan.tasks.filter((t) => t.file).length;
+
+	if (unplannedCount > 5 || totalChanged > planTaskCount * 2) {
+		process.stderr.write(
+			`[qult] Over-engineering risk: ${unplannedCount} unplanned file(s) out of ${totalChanged} changed. Review scope.\n`,
+		);
 	}
 }
 

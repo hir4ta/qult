@@ -457,6 +457,73 @@ describe("preTool: tddRedVerification", () => {
 	});
 });
 
+describe("preTool: task drift detection", () => {
+	function setupPlanWithFiles(): void {
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			[
+				"## Tasks",
+				"### Task 1: Add feature [pending]",
+				"- **File**: src/feature.ts",
+				"### Task 2: Add helper [pending]",
+				"- **File**: src/helper.ts",
+			].join("\n"),
+		);
+	}
+
+	it("warns when editing a file not in plan scope", async () => {
+		setupPlanWithFiles();
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/unrelated.ts") },
+		});
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("Task drift");
+		expect(exitCode).toBeNull(); // No DENY
+	});
+
+	it("does not warn when editing a file in plan scope", async () => {
+		setupPlanWithFiles();
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/feature.ts") },
+		});
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).not.toContain("Task drift");
+	});
+
+	it("does not warn when no plan is active", async () => {
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/random.ts") },
+		});
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).not.toContain("Task drift");
+	});
+
+	it("does not call deny even when drift detected", async () => {
+		setupPlanWithFiles();
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/unrelated.ts") },
+		});
+
+		expect(exitCode).toBeNull();
+	});
+});
+
 describe("preTool: ExitPlanMode selfcheck gate", () => {
 	it("DENY first ExitPlanMode to force selfcheck", async () => {
 		const preTool = (await import("../hooks/pre-tool.ts")).default;

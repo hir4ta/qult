@@ -14,8 +14,10 @@ import {
 } from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
 import { deny } from "./respond.ts";
+import { sanitizeForStderr } from "./sanitize.ts";
 
 const GIT_COMMIT_RE = /\bgit\s+(?:-\S+(?:\s+\S+)?\s+)*commit\b/i;
+const driftWarnedFiles = new Set<string>();
 
 /** PreToolUse: DENY pending-fixes edits, commit without tests/review, plan selfcheck */
 export default async function preTool(ev: HookEvent): Promise<void> {
@@ -79,6 +81,14 @@ function checkEditWrite(ev: HookEvent): void {
 	} catch {
 		/* fail-open */
 	}
+
+	// Task drift detection: warn when editing files outside plan scope
+	try {
+		checkTaskDrift(resolvedTarget);
+	} catch (e) {
+		if (e instanceof Error && e.message.startsWith("process.exit")) throw e;
+		/* fail-open */
+	}
 }
 
 /** Suggest TaskCreate when editing a file that matches a plan task for the first time. */
@@ -102,6 +112,26 @@ function suggestTaskCreate(resolvedTarget: string): void {
 			return;
 		}
 	}
+}
+
+/** Task drift: warn (not deny) when editing files outside the plan scope. */
+function checkTaskDrift(resolvedTarget: string): void {
+	const plan = getActivePlan();
+	if (!plan) return;
+	if (driftWarnedFiles.has(resolvedTarget)) return;
+
+	const cwd = process.cwd();
+	const planFiles = new Set(plan.tasks.filter((t) => t.file).map((t) => resolve(cwd, t.file!)));
+
+	if (planFiles.has(resolvedTarget)) return;
+
+	const relative = resolvedTarget.startsWith(cwd)
+		? resolvedTarget.slice(cwd.length + 1)
+		: resolvedTarget;
+	process.stderr.write(
+		`[qult] Task drift: ${sanitizeForStderr(relative)} is not in the current plan scope.\n`,
+	);
+	driftWarnedFiles.add(resolvedTarget);
 }
 
 /** TDD: deny editing an implementation file if its corresponding test file hasn't been edited yet. */

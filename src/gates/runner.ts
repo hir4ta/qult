@@ -2,11 +2,67 @@ import { exec, execSync } from "node:child_process";
 import { loadConfig } from "../config.ts";
 import type { GateDefinition } from "../types.ts";
 
+/** Shell-escape a string for safe interpolation into a shell command. */
+function shellEscape(s: string): string {
+	return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
 export interface GateResult {
 	name: string;
 	passed: boolean;
 	output: string;
 	duration_ms: number;
+}
+
+const ERROR_CODE_RE = /\b([A-Z]{1,4}\d{4,5})\b/;
+
+/** Deduplicate lines sharing the same error code. Keeps first occurrence + summary. */
+export function deduplicateErrors(text: string): string {
+	const lines = text.split("\n");
+	const codeGroups = new Map<string, { first: number; count: number }>();
+	const lineCodes: (string | null)[] = [];
+
+	for (let i = 0; i < lines.length; i++) {
+		const match = lines[i]!.match(ERROR_CODE_RE);
+		const code = match ? match[1]! : null;
+		lineCodes.push(code);
+		if (code) {
+			const existing = codeGroups.get(code);
+			if (existing) {
+				existing.count++;
+			} else {
+				codeGroups.set(code, { first: i, count: 1 });
+			}
+		}
+	}
+
+	// If no deduplication possible, return as-is
+	const hasRepeats = [...codeGroups.values()].some((g) => g.count > 1);
+	if (!hasRepeats) return text;
+
+	const result: string[] = [];
+	const emittedSummary = new Set<string>();
+
+	for (let i = 0; i < lines.length; i++) {
+		const code = lineCodes[i];
+		if (!code) {
+			result.push(lines[i]!);
+			continue;
+		}
+		const group = codeGroups.get(code)!;
+		if (group.count === 1) {
+			result.push(lines[i]!);
+		} else if (i === group.first) {
+			result.push(lines[i]!);
+			if (!emittedSummary.has(code)) {
+				result.push(`... and ${group.count - 1} more ${code} errors`);
+				emittedSummary.add(code);
+			}
+		}
+		// skip duplicate lines
+	}
+
+	return result.join("\n");
 }
 
 /** Smart truncation: keep head + tail with truncation marker in between. */
@@ -27,7 +83,7 @@ export function runGateAsync(
 	file?: string,
 ): Promise<GateResult> {
 	const config = loadConfig();
-	const command = file ? gate.command.replace("{file}", file) : gate.command;
+	const command = file ? gate.command.replace("{file}", shellEscape(file)) : gate.command;
 	const timeout = gate.timeout ?? config.gates.default_timeout;
 	const maxChars = config.gates.output_max_chars;
 	const start = Date.now();
@@ -47,9 +103,9 @@ export function runGateAsync(
 			(err, stdout, stderr) => {
 				const duration_ms = Date.now() - start;
 				if (err) {
+					const raw = (stdout ?? "") + (stderr ?? "");
 					const output =
-						smartTruncate((stdout ?? "") + (stderr ?? ""), maxChars) ||
-						`Exit code ${err.code ?? 1}`;
+						smartTruncate(deduplicateErrors(raw), maxChars) || `Exit code ${err.code ?? 1}`;
 					resolve({ name, passed: false, output, duration_ms });
 				} else {
 					const output = smartTruncate(stdout ?? "", maxChars);
@@ -63,7 +119,7 @@ export function runGateAsync(
 /** Run a single gate command (sync). Returns pass/fail + output + duration. */
 export function runGate(name: string, gate: GateDefinition, file?: string): GateResult {
 	const config = loadConfig();
-	const command = file ? gate.command.replace("{file}", file) : gate.command;
+	const command = file ? gate.command.replace("{file}", shellEscape(file)) : gate.command;
 	const timeout = gate.timeout ?? config.gates.default_timeout;
 	const maxChars = config.gates.output_max_chars;
 	const start = Date.now();
@@ -87,7 +143,8 @@ export function runGate(name: string, gate: GateDefinition, file?: string): Gate
 		const stdout = "stdout" in e && typeof e.stdout === "string" ? e.stdout : "";
 		const stderr = "stderr" in e && typeof e.stderr === "string" ? e.stderr : "";
 		const status = "status" in e && typeof e.status === "number" ? e.status : 1;
-		const output = smartTruncate(stdout + stderr, maxChars) || `Exit code ${status}`;
+		const output =
+			smartTruncate(deduplicateErrors(stdout + stderr), maxChars) || `Exit code ${status}`;
 		return {
 			name,
 			passed: false,

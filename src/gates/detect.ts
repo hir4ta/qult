@@ -217,6 +217,44 @@ const PROBE_RULES: ProbeRule[] = [
 		executable: "deno",
 	},
 
+	// --- on_commit: security (priority order) ---
+	{
+		configs: [".semgrep.yml", ".semgrep/rules.yml"],
+		name: "security-semgrep",
+		category: "on_commit",
+		command: "semgrep scan --config auto --quiet",
+		timeout: 30000,
+		run_once_per_batch: true,
+		executable: "semgrep",
+	},
+	{
+		configs: ["bandit.yml", ".bandit"],
+		name: "security-bandit",
+		category: "on_commit",
+		command: "bandit -r . -q",
+		timeout: 30000,
+		run_once_per_batch: true,
+		executable: "bandit",
+	},
+	{
+		configs: ["go.mod"],
+		name: "security-gosec",
+		category: "on_commit",
+		command: "gosec -quiet ./...",
+		timeout: 30000,
+		run_once_per_batch: true,
+		executable: "gosec",
+	},
+	{
+		configs: [".gitleaks.toml"],
+		name: "security-gitleaks",
+		category: "on_commit",
+		command: "gitleaks detect --no-git --source . -q",
+		timeout: 30000,
+		run_once_per_batch: true,
+		executable: "gitleaks",
+	},
+
 	// --- on_review: e2e (priority order) ---
 	{
 		configs: [
@@ -251,11 +289,16 @@ const PROBE_RULES: ProbeRule[] = [
 
 /** Check if an executable is reachable via PATH or node_modules/.bin */
 function isReachable(exe: string, root: string): boolean {
+	// Validate exe to prevent command injection (only alphanumeric, dash, underscore)
+	if (!/^[a-zA-Z0-9_-]+$/.test(exe)) return false;
 	const nodeModulesBin = join(root, "node_modules", ".bin", exe);
 	if (existsSync(nodeModulesBin)) return true;
 	try {
-		const { execSync } = require("node:child_process");
-		execSync(`command -v ${exe}`, { encoding: "utf-8", stdio: "pipe" });
+		const { execFileSync } = require("node:child_process");
+		execFileSync("/bin/sh", ["-c", `command -v ${exe}`], {
+			encoding: "utf-8",
+			stdio: "pipe",
+		});
 		return true;
 	} catch {
 		return false;
@@ -323,6 +366,9 @@ export function detectGates(root: string): GatesConfig {
 		}
 		if (!configFound && rule.executable === "pytest") {
 			configFound = hasPyprojectSection(root, "pytest");
+		}
+		if (!configFound && rule.executable === "bandit") {
+			configFound = hasPyprojectSection(root, "bandit");
 		}
 
 		// Fallback: check package.json devDependencies for JS tools

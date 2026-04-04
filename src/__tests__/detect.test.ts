@@ -128,6 +128,34 @@ describe("detectGates", () => {
 	});
 });
 
+describe("security gate detection", () => {
+	it("detects security-semgrep when .semgrep.yml exists and semgrep reachable", () => {
+		writeFileSync(join(TEST_DIR, ".semgrep.yml"), "rules: []");
+		mkdirSync(join(TEST_DIR, "node_modules", ".bin"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "node_modules", ".bin", "semgrep"), "");
+		const gates = detectGates(TEST_DIR);
+		expect(gates.on_commit?.["security-semgrep"]).toBeDefined();
+		expect(gates.on_commit?.["security-semgrep"]?.command).toContain("semgrep");
+		expect(gates.on_commit?.["security-semgrep"]?.run_once_per_batch).toBe(true);
+	});
+
+	it("detects security-gitleaks when .gitleaks.toml exists", () => {
+		writeFileSync(join(TEST_DIR, ".gitleaks.toml"), "[allowlist]");
+		mkdirSync(join(TEST_DIR, "node_modules", ".bin"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "node_modules", ".bin", "gitleaks"), "");
+		const gates = detectGates(TEST_DIR);
+		expect(gates.on_commit?.["security-gitleaks"]).toBeDefined();
+		expect(gates.on_commit?.["security-gitleaks"]?.command).toContain("gitleaks");
+	});
+
+	it("does not detect security-gosec when gosec is not reachable", () => {
+		writeFileSync(join(TEST_DIR, "go.mod"), "module example.com/test");
+		// No gosec in PATH or node_modules
+		const gates = detectGates(TEST_DIR);
+		expect(gates.on_commit?.["security-gosec"]).toBeUndefined();
+	});
+});
+
 describe("formatDetectionSummary", () => {
 	it("formats counts correctly", () => {
 		const gates = {

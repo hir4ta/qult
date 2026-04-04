@@ -43,6 +43,7 @@ Why this change is needed — the problem and intended outcome.
 
 ## Rules
 
+- Write the plan in the same language the architect used in the feature description
 - Each task: 1-2 files, ≤15 LOC change. Split larger work into more tasks
 - Fewer tasks > more tasks. Only what's necessary
 - Every task MUST have File, Change, Boundary, and Verify fields
