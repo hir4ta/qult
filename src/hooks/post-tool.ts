@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { loadGates } from "../gates/load.ts";
@@ -113,6 +114,14 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 		/* fail-open */
 	}
 
+	// Export breaking change detection (L4)
+	try {
+		const exportFixes = detectExportBreakingChanges(file);
+		newFixes.push(...exportFixes);
+	} catch {
+		/* fail-open */
+	}
+
 	if (newFixes.length > 0) {
 		addPendingFixes(file, newFixes);
 	} else {
@@ -130,7 +139,9 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 				return `${entry.name} ERROR`;
 			});
 			const importFixCount = newFixes.filter((f) => f.gate === "import-check").length;
-			if (importFixCount > 0) gateParts.push(`import-check FAIL`);
+			if (importFixCount > 0) gateParts.push("import-check FAIL");
+			const exportFixCount = newFixes.filter((f) => f.gate === "export-check").length;
+			if (exportFixCount > 0) gateParts.push("export-check FAIL");
 			const totalFixes = readPendingFixes().length;
 			const fixSuffix = totalFixes > 0 ? ` | ${totalFixes} pending fix(es)` : "";
 			process.stderr.write(`[qult] gates: ${gateParts.join(", ")}${fixSuffix}\n`);
@@ -250,6 +261,57 @@ const FALLBACK_BUILTINS = new Set([
 	"worker_threads",
 	"zlib",
 ]);
+
+// ── Export breaking change detection (L4) ───────────────────
+
+const EXPORT_RE =
+	/\bexport\s+(?:default\s+)?(?:function|class|const|let|var|type|interface|enum)\s+(\w+)/g;
+
+/** Detect removed exports by comparing current file with git HEAD version.
+ *  Returns PendingFix[] for deleted exports. */
+function detectExportBreakingChanges(file: string): PendingFix[] {
+	if (isGateDisabled("export-check")) return [];
+	const ext = extname(file).toLowerCase();
+	if (!TS_JS_EXTS.has(ext)) return [];
+	if (!existsSync(file)) return [];
+
+	// Get previous version from git
+	let oldContent: string;
+	try {
+		const relPath = file.startsWith(process.cwd()) ? file.slice(process.cwd().length + 1) : file;
+		oldContent = execSync(`git show HEAD:${relPath}`, {
+			cwd: process.cwd(),
+			encoding: "utf-8",
+			timeout: 5000,
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+	} catch {
+		return []; // fail-open: file not in git, or git not available
+	}
+
+	const newContent = readFileSync(file, "utf-8");
+
+	const oldExports = new Set<string>();
+	for (const match of oldContent.matchAll(EXPORT_RE)) {
+		oldExports.add(match[1]!);
+	}
+
+	const newExports = new Set<string>();
+	for (const match of newContent.matchAll(EXPORT_RE)) {
+		newExports.add(match[1]!);
+	}
+
+	const removed = [...oldExports].filter((name) => !newExports.has(name));
+	if (removed.length === 0) return [];
+
+	return [
+		{
+			file,
+			errors: removed.map((name) => `Breaking change: export "${name}" was removed`),
+			gate: "export-check",
+		},
+	];
+}
 
 // ── Bash: three independent detectors ───────────────────────
 

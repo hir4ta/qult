@@ -461,6 +461,7 @@ Beyond traditional linting and testing, qult addresses failure modes specific to
 | Feature | LLM Failure Mode | How qult addresses it |
 |---------|------------------|----------------------|
 | **Hallucinated import detection** | AI invents non-existent packages (~20% of AI package recommendations don't exist) | PostToolUse checks every `import` against `node_modules`. Missing packages become pending-fixes |
+| **Export breaking change detection** | AI removes exports without checking consumers | PostToolUse compares with git HEAD, flags removed exports as pending-fixes |
 | **Test false positive prevention** | AI records test pass without verifying exit code | Requires explicit `exit code 0` in output — absence of failure is not evidence of success |
 | **Verify test quality check** | AI writes shallow tests (single assertion, no edge cases) | TaskCompleted warns when average assertions/test < 2 |
 | **Score bias detection** | AI reviewers give identical or near-identical scores (template responses) | Warns on uniform scores (all same) or low variance (range < 2) |

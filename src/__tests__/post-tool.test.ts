@@ -448,3 +448,83 @@ describe("postTool: hallucinated import detection", () => {
 		expect(importFixes).toHaveLength(0);
 	});
 });
+
+describe("postTool: export breaking change detection", () => {
+	beforeEach(() => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({
+				on_write: { lint: { command: "echo ok && exit 0", timeout: 3000 } },
+			}),
+		);
+	});
+
+	it("detects removed export and creates pending-fix", async () => {
+		// Setup: create a git repo with initial file
+		const { execSync } = await import("node:child_process");
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(
+			join(TEST_DIR, "src/api.ts"),
+			"export function hello() {}\nexport function goodbye() {}\n",
+		);
+		execSync("git init && git add -A && git commit -m init", {
+			cwd: TEST_DIR,
+			stdio: "ignore",
+		});
+
+		// Now remove an export
+		writeFileSync(join(TEST_DIR, "src/api.ts"), "export function hello() {}\n");
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/api.ts") },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const exportFixes = readPendingFixes().filter((f) => f.gate === "export-check");
+		expect(exportFixes).toHaveLength(1);
+		expect(exportFixes[0]!.errors[0]).toContain("goodbye");
+	});
+
+	it("does not flag when no exports are removed", async () => {
+		const { execSync } = await import("node:child_process");
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "src/api.ts"), "export function hello() {}\n");
+		execSync("git init && git add -A && git commit -m init", {
+			cwd: TEST_DIR,
+			stdio: "ignore",
+		});
+
+		// Add a new export (no removal)
+		writeFileSync(
+			join(TEST_DIR, "src/api.ts"),
+			"export function hello() {}\nexport function world() {}\n",
+		);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/api.ts") },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const exportFixes = readPendingFixes().filter((f) => f.gate === "export-check");
+		expect(exportFixes).toHaveLength(0);
+	});
+
+	it("fail-open when file not in git", async () => {
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "src/new.ts"), "export function fresh() {}\n");
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/new.ts") },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const exportFixes = readPendingFixes().filter((f) => f.gate === "export-check");
+		expect(exportFixes).toHaveLength(0);
+	});
+});

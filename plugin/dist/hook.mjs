@@ -800,6 +800,7 @@ var exports_post_tool = {};
 __export(exports_post_tool, {
   default: () => postTool
 });
+import { execSync as execSync2 } from "node:child_process";
 import { existsSync as existsSync8, readFileSync as readFileSync6 } from "node:fs";
 import { extname, join as join8, resolve } from "node:path";
 async function postTool(ev) {
@@ -868,6 +869,10 @@ async function handleEditWrite(ev) {
     const importFixes = detectHallucinatedImports(file);
     newFixes.push(...importFixes);
   } catch {}
+  try {
+    const exportFixes = detectExportBreakingChanges(file);
+    newFixes.push(...exportFixes);
+  } catch {}
   if (newFixes.length > 0) {
     addPendingFixes(file, newFixes);
   } else {
@@ -884,7 +889,10 @@ async function handleEditWrite(ev) {
       });
       const importFixCount = newFixes.filter((f) => f.gate === "import-check").length;
       if (importFixCount > 0)
-        gateParts.push(`import-check FAIL`);
+        gateParts.push("import-check FAIL");
+      const exportFixCount = newFixes.filter((f) => f.gate === "export-check").length;
+      if (exportFixCount > 0)
+        gateParts.push("export-check FAIL");
       const totalFixes = readPendingFixes().length;
       const fixSuffix = totalFixes > 0 ? ` | ${totalFixes} pending fix(es)` : "";
       process.stderr.write(`[qult] gates: ${gateParts.join(", ")}${fixSuffix}
@@ -939,6 +947,46 @@ function detectHallucinatedImports(file) {
       file,
       errors: unique.map((pkg) => `Hallucinated import: package "${pkg.slice(0, 128)}" not found in node_modules`),
       gate: "import-check"
+    }
+  ];
+}
+function detectExportBreakingChanges(file) {
+  if (isGateDisabled("export-check"))
+    return [];
+  const ext = extname(file).toLowerCase();
+  if (!TS_JS_EXTS.has(ext))
+    return [];
+  if (!existsSync8(file))
+    return [];
+  let oldContent;
+  try {
+    const relPath = file.startsWith(process.cwd()) ? file.slice(process.cwd().length + 1) : file;
+    oldContent = execSync2(`git show HEAD:${relPath}`, {
+      cwd: process.cwd(),
+      encoding: "utf-8",
+      timeout: 5000,
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+  } catch {
+    return [];
+  }
+  const newContent = readFileSync6(file, "utf-8");
+  const oldExports = new Set;
+  for (const match of oldContent.matchAll(EXPORT_RE)) {
+    oldExports.add(match[1]);
+  }
+  const newExports = new Set;
+  for (const match of newContent.matchAll(EXPORT_RE)) {
+    newExports.add(match[1]);
+  }
+  const removed = [...oldExports].filter((name) => !newExports.has(name));
+  if (removed.length === 0)
+    return [];
+  return [
+    {
+      file,
+      errors: removed.map((name) => `Breaking change: export "${name}" was removed`),
+      gate: "export-check"
     }
   ];
 }
@@ -1028,7 +1076,7 @@ function getToolOutput(ev) {
     return ev.tool_output;
   return "";
 }
-var TS_JS_EXTS, IMPORT_LINE_RE, MAX_IMPORT_CHECK_SIZE = 500000, FALLBACK_BUILTINS, GIT_COMMIT_RE, LINT_FIX_RE, TEST_CMD_RE;
+var TS_JS_EXTS, IMPORT_LINE_RE, MAX_IMPORT_CHECK_SIZE = 500000, FALLBACK_BUILTINS, EXPORT_RE, GIT_COMMIT_RE, LINT_FIX_RE, TEST_CMD_RE;
 var init_post_tool = __esm(() => {
   init_load();
   init_runner();
@@ -1081,6 +1129,7 @@ var init_post_tool = __esm(() => {
     "worker_threads",
     "zlib"
   ]);
+  EXPORT_RE = /\bexport\s+(?:default\s+)?(?:function|class|const|let|var|type|interface|enum)\s+(\w+)/g;
   GIT_COMMIT_RE = /\bgit\s+(?:-\S+(?:\s+\S+)?\s+)*commit\b/i;
   LINT_FIX_RE = /\b(biome\s+(check|lint).*--(fix|write)|biome\s+format|eslint.*--fix|prettier.*--write|ruff\s+check.*--fix|ruff\s+format|gofmt|go\s+fmt|cargo\s+fmt|autopep8|black)\b/;
   TEST_CMD_RE = /\b(vitest|jest|mocha|pytest|go\s+test|cargo\s+test)\b/;
