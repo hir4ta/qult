@@ -17,7 +17,7 @@ import {
 } from "../../state/session-state.ts";
 import type { HookEvent } from "../../types.ts";
 import { block } from "../respond.ts";
-import { buildPlanEvalBlockMessage, buildReviewBlockMessage } from "./message-builders.ts";
+import { buildPlanEvalBlockMessage } from "./message-builders.ts";
 import {
 	PLAN_EVAL_DIMENSIONS,
 	validatePlanHeuristics,
@@ -26,7 +26,6 @@ import {
 import {
 	parseDimensionScores,
 	parseQualityScores,
-	parseScores,
 	parseSecurityScores,
 	parseSpecScores,
 } from "./score-parsers.ts";
@@ -36,9 +35,6 @@ import { detectTrend, findWeakestDimension } from "./trend-analysis.ts";
 const SEVERITY_PATTERN = /\[(critical|high|medium|low)\]/;
 const FINDING_RE = new RegExp(SEVERITY_PATTERN.source, "i");
 const NO_ISSUES_RE = /no issues found/i;
-const REVIEW_PASS_RE = /^Review:\s*PASS/im;
-const REVIEW_FAIL_RE = /^Review:\s*FAIL/im;
-
 // 3-stage review verdicts
 const SPEC_PASS_RE = /^Spec:\s*PASS/im;
 const SPEC_FAIL_RE = /^Spec:\s*FAIL/im;
@@ -61,44 +57,10 @@ export default async function subagentStop(ev: HookEvent): Promise<void> {
 	// fail-open: no agent_type or no output → allow
 	if (!agentType || !output) return;
 
-	// Normalize: plugin agents use "qult:reviewer", standalone use "qult-reviewer"
+	// Normalize: plugin agents use "qult:spec-reviewer", standalone use "qult-spec-reviewer"
 	const normalized = agentType.replace(/:/g, "-");
 
-	if (normalized === "qult-reviewer") {
-		// Legacy single reviewer (backward compat)
-		validateReviewer(output);
-
-		const passed = REVIEW_PASS_RE.test(output);
-		const failed = REVIEW_FAIL_RE.test(output);
-
-		if (failed) {
-			block("Review: FAIL. Fix the issues found by the reviewer and run /qult:review again.");
-		}
-
-		// Score threshold enforcement: PASS with low aggregate → block for iteration
-		const scores = parseScores(output);
-		if (passed && scores) {
-			const aggregate = scores.correctness + scores.design + scores.security;
-			const config = loadConfig();
-			const threshold = config.review.score_threshold;
-			const maxIter = config.review.max_iterations;
-
-			try {
-				recordReviewIteration(aggregate);
-			} catch {
-				/* fail-open */
-			}
-
-			const iterCount = getReviewIteration();
-			const history = getReviewScoreHistory();
-
-			if (aggregate < threshold && iterCount < maxIter) {
-				block(buildReviewBlockMessage(scores, history, aggregate, threshold, iterCount, maxIter));
-			}
-		}
-		resetReviewIteration();
-		recordReview();
-	} else if (normalized === "qult-spec-reviewer") {
+	if (normalized === "qult-spec-reviewer") {
 		validateStageReviewer(output, SPEC_PASS_RE, SPEC_FAIL_RE, parseSpecScores, "Spec");
 	} else if (normalized === "qult-quality-reviewer") {
 		validateStageReviewer(output, QUALITY_PASS_RE, QUALITY_FAIL_RE, parseQualityScores, "Quality");
@@ -191,21 +153,6 @@ function validatePlanEvaluator(output: string): void {
 	}
 
 	resetPlanEvalIteration();
-}
-
-function validateReviewer(output: string): void {
-	const hasVerdict = REVIEW_PASS_RE.test(output) || REVIEW_FAIL_RE.test(output);
-	const hasFindings = FINDING_RE.test(output) || NO_ISSUES_RE.test(output);
-	const hasScore = parseScores(output) !== null;
-
-	// Soft validation: accept if any review signal is present.
-	// Only block when output contains no verdict, no findings, AND no scores
-	// (i.e., completely unrelated output from the reviewer agent).
-	if (hasVerdict || hasFindings || hasScore) return;
-
-	block(
-		"Reviewer output must include at least one of: (1) 'Review: PASS' or 'Review: FAIL', (2) 'Score: Correctness=N Design=N Security=N', or (3) findings ([severity] file:line). Rerun the review.",
-	);
 }
 
 /** Generic validation for 3-stage review agents (spec, quality, security).

@@ -458,13 +458,13 @@ describe("Scenario 12: run_once_per_batch skips typecheck on 2nd edit", () => {
 // ============================================================
 
 describe("Scenario 13: SubagentStop blocks incomplete reviewer output", () => {
-	it("blocks reviewer without findings, allows with findings", async () => {
+	it("blocks spec-reviewer without findings/verdict/score, allows with findings", async () => {
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 
 		try {
 			await subagentStop({
 				hook_type: "SubagentStop",
-				agent_type: "qult-reviewer",
+				agent_type: "qult-spec-reviewer",
 				last_assistant_message: "The code looks good overall.",
 			});
 		} catch {
@@ -472,16 +472,17 @@ describe("Scenario 13: SubagentStop blocks incomplete reviewer output", () => {
 		}
 		expect(exitCode).toBe(2);
 
-		stdoutCapture = [];
+		stderrCapture = [];
 		exitCode = null;
 		await subagentStop({
 			hook_type: "SubagentStop",
-			agent_type: "qult-reviewer",
-			last_assistant_message: "- [medium] src/foo.ts:10 — unused variable\n  Fix: remove it",
+			agent_type: "qult-spec-reviewer",
+			last_assistant_message:
+				"Spec: PASS\nScore: Completeness=4 Accuracy=4\n- [medium] minor — style\nFix: reformat",
 		});
 		expect(exitCode).toBeNull();
 
-		stdoutCapture = [];
+		stderrCapture = [];
 		exitCode = null;
 		await subagentStop({
 			hook_type: "SubagentStop",
@@ -665,103 +666,81 @@ describe("Scenario: Non-gated file extensions are skipped", () => {
 // Review score threshold
 // ============================================================
 
-describe("Scenario: Review score threshold — PASS with high scores clears gate", () => {
-	it("aggregate >= threshold allows (legacy reviewer with overridden threshold)", async () => {
-		// Legacy reviewer max score is 15. Override threshold to legacy value.
+describe("Scenario: 3-stage review score threshold — high scores clears gate", () => {
+	it("aggregate >= threshold allows after all 3 stages", async () => {
 		writeFileSync(
 			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 12 } }),
+			JSON.stringify({ review: { score_threshold: 24 } }),
 		);
 		resetAllCaches();
 
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await subagentStop({
-			agent_type: "qult-reviewer",
+			agent_type: "qult-spec-reviewer",
+			last_assistant_message: "Spec: PASS\nScore: Completeness=5 Accuracy=4\nNo issues found.",
+		});
+		await subagentStop({
+			agent_type: "qult-quality-reviewer",
+			last_assistant_message: "Quality: PASS\nScore: Design=4 Maintainability=4\nNo issues found.",
+		});
+		await subagentStop({
+			agent_type: "qult-security-reviewer",
 			last_assistant_message:
-				"Review: PASS\nScore: Correctness=5 Design=4 Security=4\nNo issues found",
+				"Security: PASS\nScore: Vulnerability=4 Hardening=4\nNo issues found.",
 		});
 		expect(exitCode).toBeNull();
 	});
 });
 
-describe("Scenario: Review score threshold — PASS with low scores blocks", () => {
-	it("aggregate < threshold blocks for iteration", async () => {
+describe("Scenario: 3-stage review score threshold — low scores blocks", () => {
+	it("aggregate < threshold blocks after security stage", async () => {
 		writeFileSync(
 			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 12 } }),
+			JSON.stringify({ review: { score_threshold: 24 } }),
 		);
 		resetAllCaches();
 
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		await subagentStop({
+			agent_type: "qult-spec-reviewer",
+			last_assistant_message: "Spec: PASS\nScore: Completeness=3 Accuracy=3\nNo issues found.",
+		});
+		await subagentStop({
+			agent_type: "qult-quality-reviewer",
+			last_assistant_message: "Quality: PASS\nScore: Design=3 Maintainability=3\nNo issues found.",
+		});
 		try {
 			await subagentStop({
-				agent_type: "qult-reviewer",
+				agent_type: "qult-security-reviewer",
 				last_assistant_message:
-					"Review: PASS\nScore: Correctness=3 Design=3 Security=3\nNo issues found",
+					"Security: PASS\nScore: Vulnerability=3 Hardening=3\nNo issues found.",
 			});
 		} catch {
 			// exit(2)
 		}
 		expect(exitCode).toBe(2);
-		const errOutput = stderrCapture.join("");
-		expect(errOutput).toContain("below threshold");
+		expect(stderrCapture.join("")).toContain("below threshold");
 	});
 });
 
-describe("Scenario: Review PASS without scores — fail-open", () => {
-	it("PASS without score lines still clears gate (findings present)", async () => {
-		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
-		await subagentStop({
-			agent_type: "qult-reviewer",
-			last_assistant_message: "Review: PASS\n- [low] minor style issue\nNo issues found",
-		});
-		expect(exitCode).toBeNull();
-	});
-});
-
-// ============================================================
-// Plan criteria in reviewer output
-// ============================================================
-
-describe("Scenario: Reviewer output with plan criteria findings passes SubagentStop", () => {
-	it("plan criteria finding is treated as normal finding — PASS with high score clears", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 12 } }),
-		);
-		resetAllCaches();
-
-		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
-		await subagentStop({
-			agent_type: "qult-reviewer",
-			last_assistant_message: [
-				"Review: PASS",
-				"Score: Correctness=4 Design=5 Security=5",
-				'- [high] plan — Task 2 "Add tests" not verified: auth.test.ts:testLogin',
-				"Fix: Add the missing test case",
-			].join("\n"),
-		});
-		expect(exitCode).toBeNull();
-		expect(stderrCapture.join("")).not.toContain("Reviewer output must include");
-	});
-
-	it("plan criteria finding with low correctness triggers FAIL verdict", async () => {
+describe("Scenario: Spec FAIL blocks", () => {
+	it("spec FAIL verdict blocks with FAIL message", async () => {
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		try {
 			await subagentStop({
-				agent_type: "qult-reviewer",
+				agent_type: "qult-spec-reviewer",
 				last_assistant_message: [
-					"Review: FAIL",
-					"Score: Correctness=2 Design=4 Security=4",
-					'- [high] plan — Task 1 "Add auth" not verified: auth.test.ts:testLogin',
-					"- [critical] src/auth.ts:15 — password stored in plaintext",
-					"Fix: Use bcrypt hashing",
+					"Spec: FAIL",
+					"Score: Completeness=2 Accuracy=4",
+					'- [critical] plan — Task 1 "Add auth" not implemented',
+					"Fix: implement the handler",
 				].join("\n"),
 			});
 		} catch {
 			// exit(2)
 		}
 		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("FAIL");
 	});
 });
 
@@ -925,14 +904,28 @@ describe("Scenario: Plan validation full flow", () => {
 // Adaptive block messages
 // ============================================================
 
-describe("Scenario: Adaptive review block message shows trend", () => {
-	it("first iteration block mentions weakest dimension", async () => {
+describe("Scenario: Adaptive 3-stage review block mentions weakest dimension", () => {
+	it("first iteration block mentions weakest dimension across all stages", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ review: { score_threshold: 24, dimension_floor: 1 } }),
+		);
+		resetAllCaches();
+
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		await subagentStop({
+			agent_type: "qult-spec-reviewer",
+			last_assistant_message: "Spec: PASS\nScore: Completeness=3 Accuracy=3\nNo issues found.",
+		});
+		await subagentStop({
+			agent_type: "qult-quality-reviewer",
+			last_assistant_message: "Quality: PASS\nScore: Design=2 Maintainability=3\nNo issues found.",
+		});
 		try {
 			await subagentStop({
-				agent_type: "qult-reviewer",
+				agent_type: "qult-security-reviewer",
 				last_assistant_message:
-					"Review: PASS\nScore: Correctness=3 Design=2 Security=3\nNo issues found",
+					"Security: PASS\nScore: Vulnerability=3 Hardening=3\nNo issues found.",
 			});
 		} catch {
 			// exit(2)

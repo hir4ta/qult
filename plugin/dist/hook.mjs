@@ -569,27 +569,9 @@ var init_flush = __esm(() => {
   init_session_state();
 });
 
-// src/hooks/lazy-init.ts
-import { existsSync as existsSync7, mkdirSync as mkdirSync2, readdirSync as readdirSync2, statSync as statSync2, unlinkSync as unlinkSync2 } from "node:fs";
+// src/state/cleanup.ts
+import { readdirSync as readdirSync2, statSync as statSync2, unlinkSync as unlinkSync2 } from "node:fs";
 import { join as join6 } from "node:path";
-function markSessionStartCompleted() {
-  _sessionStartCompleted = true;
-}
-function lazyInit() {
-  if (_sessionStartCompleted)
-    return;
-  if (_initialized)
-    return;
-  _initialized = true;
-  try {
-    const stateDir = join6(process.cwd(), ".qult", ".state");
-    if (!existsSync7(stateDir)) {
-      mkdirSync2(stateDir, { recursive: true });
-    }
-    cleanupStaleScopedFiles(stateDir);
-    writePendingFixes([]);
-  } catch {}
-}
 function cleanupStaleScopedFiles(stateDir) {
   try {
     const now = Date.now();
@@ -604,11 +586,37 @@ function cleanupStaleScopedFiles(stateDir) {
     }
   } catch {}
 }
-var STALE_MS, SCOPED_FILE_RE, _initialized = false, _sessionStartCompleted = false;
-var init_lazy_init = __esm(() => {
-  init_pending_fixes();
+var STALE_MS, SCOPED_FILE_RE;
+var init_cleanup = __esm(() => {
   STALE_MS = 24 * 60 * 60 * 1000;
   SCOPED_FILE_RE = /^(session-state|pending-fixes)-.+\.json$/;
+});
+
+// src/hooks/lazy-init.ts
+import { existsSync as existsSync7, mkdirSync as mkdirSync2 } from "node:fs";
+import { join as join7 } from "node:path";
+function markSessionStartCompleted() {
+  _sessionStartCompleted = true;
+}
+function lazyInit() {
+  if (_sessionStartCompleted)
+    return;
+  if (_initialized)
+    return;
+  _initialized = true;
+  try {
+    const stateDir = join7(process.cwd(), ".qult", ".state");
+    if (!existsSync7(stateDir)) {
+      mkdirSync2(stateDir, { recursive: true });
+    }
+    cleanupStaleScopedFiles(stateDir);
+    writePendingFixes([]);
+  } catch {}
+}
+var _initialized = false, _sessionStartCompleted = false;
+var init_lazy_init = __esm(() => {
+  init_cleanup();
+  init_pending_fixes();
 });
 
 // src/hooks/respond.ts
@@ -1273,7 +1281,7 @@ var init_score_parsers = __esm(() => {
 
 // src/hooks/subagent-stop/agent-validators.ts
 import { existsSync as existsSync8, readdirSync as readdirSync3, readFileSync as readFileSync6, statSync as statSync3 } from "node:fs";
-import { join as join7 } from "node:path";
+import { join as join8 } from "node:path";
 async function subagentStop(ev) {
   if (ev.stop_hook_active)
     return;
@@ -1282,31 +1290,7 @@ async function subagentStop(ev) {
   if (!agentType || !output)
     return;
   const normalized = agentType.replace(/:/g, "-");
-  if (normalized === "qult-reviewer") {
-    validateReviewer(output);
-    const passed = REVIEW_PASS_RE.test(output);
-    const failed = REVIEW_FAIL_RE.test(output);
-    if (failed) {
-      block("Review: FAIL. Fix the issues found by the reviewer and run /qult:review again.");
-    }
-    const scores = parseScores(output);
-    if (passed && scores) {
-      const aggregate = scores.correctness + scores.design + scores.security;
-      const config = loadConfig();
-      const threshold = config.review.score_threshold;
-      const maxIter = config.review.max_iterations;
-      try {
-        recordReviewIteration(aggregate);
-      } catch {}
-      const iterCount = getReviewIteration();
-      const history = getReviewScoreHistory();
-      if (aggregate < threshold && iterCount < maxIter) {
-        block(buildReviewBlockMessage(scores, history, aggregate, threshold, iterCount, maxIter));
-      }
-    }
-    resetReviewIteration();
-    recordReview();
-  } else if (normalized === "qult-spec-reviewer") {
+  if (normalized === "qult-spec-reviewer") {
     validateStageReviewer(output, SPEC_PASS_RE, SPEC_FAIL_RE, parseSpecScores, "Spec");
   } else if (normalized === "qult-quality-reviewer") {
     validateStageReviewer(output, QUALITY_PASS_RE, QUALITY_FAIL_RE, parseQualityScores, "Quality");
@@ -1321,16 +1305,16 @@ async function subagentStop(ev) {
 }
 function validatePlan() {
   try {
-    const planDir = join7(process.cwd(), ".claude", "plans");
+    const planDir = join8(process.cwd(), ".claude", "plans");
     if (!existsSync8(planDir))
       return;
     const files = readdirSync3(planDir).filter((f) => f.endsWith(".md")).map((f) => ({
       name: f,
-      mtime: statSync3(join7(planDir, f)).mtimeMs
+      mtime: statSync3(join8(planDir, f)).mtimeMs
     })).sort((a, b) => b.mtime - a.mtime);
     if (files.length === 0)
       return;
-    const content = readFileSync6(join7(planDir, files[0].name), "utf-8");
+    const content = readFileSync6(join8(planDir, files[0].name), "utf-8");
     const structErrors = validatePlanStructure(content);
     if (structErrors.length > 0) {
       block(`Plan structural issues:
@@ -1373,14 +1357,6 @@ function validatePlanEvaluator(output) {
     }
   }
   resetPlanEvalIteration();
-}
-function validateReviewer(output) {
-  const hasVerdict = REVIEW_PASS_RE.test(output) || REVIEW_FAIL_RE.test(output);
-  const hasFindings = FINDING_RE.test(output) || NO_ISSUES_RE.test(output);
-  const hasScore = parseScores(output) !== null;
-  if (hasVerdict || hasFindings || hasScore)
-    return;
-  block("Reviewer output must include at least one of: (1) 'Review: PASS' or 'Review: FAIL', (2) 'Score: Correctness=N Design=N Security=N', or (3) findings ([severity] file:line). Rerun the review.");
 }
 function validateStageReviewer(output, passRe, failRe, scoreParser, stageName) {
   const hasVerdict = passRe.test(output) || failRe.test(output);
@@ -1468,7 +1444,7 @@ function checkAggregateScore() {
       throw err;
   }
 }
-var SEVERITY_PATTERN, FINDING_RE, NO_ISSUES_RE, REVIEW_PASS_RE, REVIEW_FAIL_RE, SPEC_PASS_RE, SPEC_FAIL_RE, QUALITY_PASS_RE, QUALITY_FAIL_RE, SECURITY_PASS_RE, SECURITY_FAIL_RE, PLAN_PASS_RE, PLAN_REVISE_RE;
+var SEVERITY_PATTERN, FINDING_RE, NO_ISSUES_RE, SPEC_PASS_RE, SPEC_FAIL_RE, QUALITY_PASS_RE, QUALITY_FAIL_RE, SECURITY_PASS_RE, SECURITY_FAIL_RE, PLAN_PASS_RE, PLAN_REVISE_RE;
 var init_agent_validators = __esm(() => {
   init_config();
   init_session_state();
@@ -1479,8 +1455,6 @@ var init_agent_validators = __esm(() => {
   SEVERITY_PATTERN = /\[(critical|high|medium|low)\]/;
   FINDING_RE = new RegExp(SEVERITY_PATTERN.source, "i");
   NO_ISSUES_RE = /no issues found/i;
-  REVIEW_PASS_RE = /^Review:\s*PASS/im;
-  REVIEW_FAIL_RE = /^Review:\s*FAIL/im;
   SPEC_PASS_RE = /^Spec:\s*PASS/im;
   SPEC_FAIL_RE = /^Spec:\s*FAIL/im;
   QUALITY_PASS_RE = /^Quality:\s*PASS/im;
@@ -1586,15 +1560,15 @@ var exports_session_start = {};
 __export(exports_session_start, {
   default: () => sessionStart
 });
-import { existsSync as existsSync9, mkdirSync as mkdirSync3, readdirSync as readdirSync4, statSync as statSync4, unlinkSync as unlinkSync3 } from "node:fs";
-import { join as join8 } from "node:path";
+import { existsSync as existsSync9, mkdirSync as mkdirSync3 } from "node:fs";
+import { join as join9 } from "node:path";
 async function sessionStart(ev) {
   try {
-    const stateDir = join8(process.cwd(), ".qult", ".state");
+    const stateDir = join9(process.cwd(), ".qult", ".state");
     if (!existsSync9(stateDir)) {
       mkdirSync3(stateDir, { recursive: true });
     }
-    cleanupStaleScopedFiles2(stateDir);
+    cleanupStaleScopedFiles(stateDir);
     if (ev.source === "startup" || ev.source === "clear") {
       writePendingFixes([]);
       try {
@@ -1604,26 +1578,10 @@ async function sessionStart(ev) {
     markSessionStartCompleted();
   } catch {}
 }
-function cleanupStaleScopedFiles2(stateDir) {
-  try {
-    const now = Date.now();
-    for (const file of readdirSync4(stateDir)) {
-      if (!SCOPED_FILE_RE2.test(file))
-        continue;
-      const filePath2 = join8(stateDir, file);
-      const age = now - statSync4(filePath2).mtimeMs;
-      if (age > STALE_MS2) {
-        unlinkSync3(filePath2);
-      }
-    }
-  } catch {}
-}
-var STALE_MS2, SCOPED_FILE_RE2;
 var init_session_start = __esm(() => {
+  init_cleanup();
   init_pending_fixes();
   init_lazy_init();
-  STALE_MS2 = 24 * 60 * 60 * 1000;
-  SCOPED_FILE_RE2 = /^(session-state|pending-fixes)-.+\.json$/;
 });
 
 // src/hooks/post-compact.ts
@@ -1631,11 +1589,11 @@ var exports_post_compact = {};
 __export(exports_post_compact, {
   default: () => postCompact
 });
-import { existsSync as existsSync10, readdirSync as readdirSync5, readFileSync as readFileSync7, statSync as statSync5 } from "node:fs";
-import { join as join9 } from "node:path";
+import { existsSync as existsSync10, readdirSync as readdirSync4, readFileSync as readFileSync7, statSync as statSync4 } from "node:fs";
+import { join as join10 } from "node:path";
 async function postCompact(_ev) {
   try {
-    const stateDir = join9(process.cwd(), ".qult", ".state");
+    const stateDir = join10(process.cwd(), ".qult", ".state");
     if (!existsSync10(stateDir))
       return;
     const parts = [];
@@ -1674,9 +1632,9 @@ async function postCompact(_ev) {
 }
 function findLatestFile(stateDir, prefix) {
   try {
-    const files = readdirSync5(stateDir).filter((f) => f.startsWith(prefix) && f.endsWith(".json")).map((f) => ({
-      path: join9(stateDir, f),
-      mtime: statSync5(join9(stateDir, f)).mtimeMs
+    const files = readdirSync4(stateDir).filter((f) => f.startsWith(prefix) && f.endsWith(".json")).map((f) => ({
+      path: join10(stateDir, f),
+      mtime: statSync4(join10(stateDir, f)).mtimeMs
     })).sort((a, b) => b.mtime - a.mtime);
     return files.length > 0 ? files[0].path : null;
   } catch {
@@ -1701,7 +1659,7 @@ init_pending_fixes();
 init_session_state();
 init_lazy_init();
 init_respond();
-import { join as join10 } from "node:path";
+import { join as join11 } from "node:path";
 var EVENT_MAP = {
   "post-tool": () => Promise.resolve().then(() => (init_post_tool(), exports_post_tool)),
   "pre-tool": () => Promise.resolve().then(() => (init_pre_tool(), exports_pre_tool)),
@@ -1746,7 +1704,7 @@ async function dispatch(event) {
     setFixesSessionScope(ev.session_id);
     if (ev.session_id !== _lastWrittenSessionId) {
       try {
-        atomicWriteJson(join10(process.cwd(), ".qult", ".state", "latest-session.json"), {
+        atomicWriteJson(join11(process.cwd(), ".qult", ".state", "latest-session.json"), {
           session_id: ev.session_id,
           updated_at: new Date().toISOString()
         });

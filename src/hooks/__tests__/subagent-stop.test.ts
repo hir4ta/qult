@@ -64,98 +64,43 @@ describe("subagentStop", () => {
 		const handler = (await import("../subagent-stop/index.ts")).default;
 		await handler({
 			hook_type: "SubagentStop",
-			agent_type: "qult-reviewer",
+			agent_type: "qult-spec-reviewer",
 		});
 		expect(exitCode).toBeNull();
 	});
 
-	it("blocks qult-reviewer without findings", async () => {
+	it("blocks qult-spec-reviewer with FAIL verdict", async () => {
 		const handler = (await import("../subagent-stop/index.ts")).default;
 		try {
 			await handler({
 				hook_type: "SubagentStop",
-				agent_type: "qult-reviewer",
-				last_assistant_message: "I looked at the code and it seems fine.",
-			});
-		} catch {
-			// process.exit(2)
-		}
-		expect(exitCode).toBe(2);
-	});
-
-	it("allows qult-reviewer with severity findings", async () => {
-		const handler = (await import("../subagent-stop/index.ts")).default;
-		await handler({
-			hook_type: "SubagentStop",
-			agent_type: "qult-reviewer",
-			last_assistant_message:
-				"- [high] src/foo.ts:42 — missing null check\n  Fix: add if (!x) return;",
-		});
-		expect(exitCode).toBeNull();
-	});
-
-	it("allows qult-reviewer with 'No issues found'", async () => {
-		const handler = (await import("../subagent-stop/index.ts")).default;
-		await handler({
-			hook_type: "SubagentStop",
-			agent_type: "qult-reviewer",
-			last_assistant_message: "No issues found from correctness perspective.",
-		});
-		expect(exitCode).toBeNull();
-	});
-
-	it("allows qult-reviewer with PASS verdict + Score line", async () => {
-		// Legacy reviewer: override threshold to legacy value (max score 15)
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 12 } }),
-		);
-		resetAllCaches();
-
-		const handler = (await import("../subagent-stop/index.ts")).default;
-		await handler({
-			hook_type: "SubagentStop",
-			agent_type: "qult-reviewer",
-			last_assistant_message:
-				"Review: PASS\nScore: Correctness=5 Design=4 Security=5\n\nNo major issues.",
-		});
-		expect(exitCode).toBeNull();
-	});
-
-	it("blocks qult-reviewer with FAIL verdict (requires fix + re-review)", async () => {
-		const handler = (await import("../subagent-stop/index.ts")).default;
-		try {
-			await handler({
-				hook_type: "SubagentStop",
-				agent_type: "qult-reviewer",
+				agent_type: "qult-spec-reviewer",
 				last_assistant_message:
-					"Review: FAIL\nScore: Correctness=2 Design=3 Security=4\n\n- [critical] src/foo.ts:10 — SQL injection\n  Fix: use parameterized query",
+					"Spec: FAIL\nScore: Completeness=2 Accuracy=3\n- [critical] plan — Task 1 not implemented",
 			});
 		} catch {
 			// process.exit(2)
 		}
 		expect(exitCode).toBe(2);
-		const errOutput = stderrCapture.join("");
-		expect(errOutput).toContain("FAIL");
+		expect(stderrCapture.join("")).toContain("FAIL");
 	});
 
-	it("allows qult-reviewer with PASS verdict but no Score or findings (soft validation)", async () => {
+	it("allows qult-spec-reviewer with PASS + scores", async () => {
 		const handler = (await import("../subagent-stop/index.ts")).default;
 		await handler({
 			hook_type: "SubagentStop",
-			agent_type: "qult-reviewer",
-			last_assistant_message: "Review: PASS\n\nThe code looks good overall.",
+			agent_type: "qult-spec-reviewer",
+			last_assistant_message: "Spec: PASS\nScore: Completeness=5 Accuracy=4\nNo issues found.",
 		});
-		// Verdict alone is sufficient — no BLOCK
 		expect(exitCode).toBeNull();
 	});
 
-	it("blocks qult-reviewer with no verdict, no score, no findings", async () => {
+	it("blocks qult-spec-reviewer with no verdict, no score, no findings", async () => {
 		const handler = (await import("../subagent-stop/index.ts")).default;
 		try {
 			await handler({
 				hook_type: "SubagentStop",
-				agent_type: "qult-reviewer",
+				agent_type: "qult-spec-reviewer",
 				last_assistant_message: "I looked at the code and it seems fine to me.",
 			});
 		} catch {

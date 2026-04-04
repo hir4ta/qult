@@ -12,6 +12,7 @@ export interface QultConfig {
 	plan_eval: {
 		score_threshold: number;
 		max_iterations: number;
+		/** File paths that trigger consumer-coverage heuristic. Config file only (no env var). */
 		registry_files: string[];
 	};
 	gates: {

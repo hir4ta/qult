@@ -409,7 +409,7 @@ describe("subagentStop: integration", () => {
 	it("no output: no exit (fail-open)", async () => {
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await subagentStop({
-			agent_type: "qult-reviewer",
+			agent_type: "qult-spec-reviewer",
 			last_assistant_message: "",
 		});
 		expect(exitCode).toBeNull();
@@ -420,100 +420,12 @@ describe("subagentStop: integration", () => {
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await expect(
 			subagentStop({
-				agent_type: "qult-reviewer",
-				last_assistant_message: "Review: FAIL\n[critical] src/foo.ts:1 Bad code",
+				agent_type: "qult-spec-reviewer",
+				last_assistant_message: "Spec: FAIL\n[critical] plan — Task 1 not implemented",
 				stop_hook_active: true,
 			}),
 		).resolves.toBeUndefined();
 		expect(exitCode).toBeNull();
-	});
-
-	it("qult-reviewer with FAIL verdict: blocks with exit 2", async () => {
-		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
-		await expect(
-			subagentStop({
-				agent_type: "qult-reviewer",
-				last_assistant_message:
-					"Review: FAIL\n[critical] src/foo.ts:1 Bad code\nScore: Correctness=2 Design=2 Security=1",
-			}),
-		).rejects.toThrow("process.exit");
-		expect(exitCode).toBe(2);
-		expect(stderrCapture.join("")).toContain("FAIL");
-	});
-
-	it("qult-reviewer with PASS + high score (>=24): allows", async () => {
-		// Legacy reviewer threshold is now 24/15 max — scores 5+5+5=15 always pass since 15 < 24 triggers block.
-		// For legacy reviewer, any PASS + score is subject to threshold.
-		// With new default threshold of 24, legacy reviewer (max 15) will always be below threshold.
-		// Override config to test legacy path:
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 12 } }),
-		);
-		resetAllCaches();
-
-		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
-		await subagentStop({
-			agent_type: "qult-reviewer",
-			last_assistant_message:
-				"Review: PASS\nNo issues found\nScore: Correctness=5 Design=4 Security=4",
-		});
-		expect(exitCode).toBeNull();
-
-		const { readSessionState } = await import("../state/session-state.ts");
-		const state = readSessionState();
-		expect(state.review_completed_at).toBeTruthy();
-	});
-
-	it("qult:reviewer (colon format from plugin) works identically", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 12 } }),
-		);
-		resetAllCaches();
-
-		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
-		await subagentStop({
-			agent_type: "qult:reviewer",
-			last_assistant_message:
-				"Review: PASS\nNo issues found\nScore: Correctness=5 Design=4 Security=4",
-		});
-		expect(exitCode).toBeNull();
-
-		const { readSessionState } = await import("../state/session-state.ts");
-		const state = readSessionState();
-		expect(state.review_completed_at).toBeTruthy();
-	});
-
-	it("qult-reviewer with PASS + low score (<12): blocks for iteration", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 12 } }),
-		);
-		resetAllCaches();
-
-		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
-		await expect(
-			subagentStop({
-				agent_type: "qult-reviewer",
-				last_assistant_message:
-					"Review: PASS\nNo issues found\nScore: Correctness=3 Design=3 Security=3",
-			}),
-		).rejects.toThrow("process.exit");
-		expect(exitCode).toBe(2);
-		expect(stderrCapture.join("")).toContain("below threshold");
-	});
-
-	it("qult-reviewer with invalid output (no verdict/score/findings): blocks", async () => {
-		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
-		await expect(
-			subagentStop({
-				agent_type: "qult-reviewer",
-				last_assistant_message: "I looked at the code and it seems fine overall.",
-			}),
-		).rejects.toThrow("process.exit");
-		expect(exitCode).toBe(2);
-		expect(stderrCapture.join("")).toContain("Reviewer output must include");
 	});
 
 	it("qult-plan-evaluator with REVISE: blocks", async () => {

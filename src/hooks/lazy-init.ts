@@ -1,9 +1,7 @@
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { cleanupStaleScopedFiles } from "../state/cleanup.ts";
 import { writePendingFixes } from "../state/pending-fixes.ts";
-
-const STALE_MS = 24 * 60 * 60 * 1000; // 24 hours
-const SCOPED_FILE_RE = /^(session-state|pending-fixes)-.+\.json$/;
 
 let _initialized = false;
 let _sessionStartCompleted = false;
@@ -39,23 +37,6 @@ export function lazyInit(): void {
 		}
 		cleanupStaleScopedFiles(stateDir);
 		writePendingFixes([]);
-	} catch {
-		/* fail-open */
-	}
-}
-
-/** Remove session-scoped state files older than 24h. */
-function cleanupStaleScopedFiles(stateDir: string): void {
-	try {
-		const now = Date.now();
-		for (const file of readdirSync(stateDir)) {
-			if (!SCOPED_FILE_RE.test(file)) continue;
-			const filePath = join(stateDir, file);
-			const age = now - statSync(filePath).mtimeMs;
-			if (age > STALE_MS) {
-				unlinkSync(filePath);
-			}
-		}
 	} catch {
 		/* fail-open */
 	}
