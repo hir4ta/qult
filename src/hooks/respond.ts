@@ -1,6 +1,7 @@
 import { flushAll } from "../state/flush.ts";
 import { readPendingFixes } from "../state/pending-fixes.ts";
 import { readSessionState } from "../state/session-state.ts";
+import { sanitizeForStderr } from "./sanitize.ts";
 
 /** Current hook event name, set by dispatcher before calling handler */
 let _currentEvent = "unknown";
@@ -24,7 +25,8 @@ export function compactStateSummary(): string {
 		const changed = state.changed_file_paths?.length ?? 0;
 		if (changed > 0) parts.push(`${changed} file(s) changed`);
 		const disabled = state.disabled_gates ?? [];
-		if (disabled.length > 0) parts.push(`disabled: ${disabled.join(",")}`);
+		if (disabled.length > 0)
+			parts.push(`disabled: ${disabled.map((g) => sanitizeForStderr(g)).join(",")}`);
 		return `\n[qult state] ${parts.join(" | ")}`;
 	} catch {
 		return ""; // fail-open

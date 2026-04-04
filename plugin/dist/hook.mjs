@@ -670,6 +670,12 @@ var init_lazy_init = __esm(() => {
   init_pending_fixes();
 });
 
+// src/hooks/sanitize.ts
+function sanitizeForStderr(input) {
+  const noAnsi = input.replace(/\x1B\[[0-9;]*[A-Za-z]/g, "");
+  return noAnsi.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+}
+
 // src/hooks/respond.ts
 function setCurrentEvent(event) {
   _currentEvent = event;
@@ -688,7 +694,7 @@ function compactStateSummary() {
       parts.push(`${changed} file(s) changed`);
     const disabled = state.disabled_gates ?? [];
     if (disabled.length > 0)
-      parts.push(`disabled: ${disabled.join(",")}`);
+      parts.push(`disabled: ${disabled.map((g) => sanitizeForStderr(g)).join(",")}`);
     return `
 [qult state] ${parts.join(" | ")}`;
   } catch {
@@ -795,14 +801,166 @@ var init_runner = __esm(() => {
   init_config();
 });
 
+// src/hooks/detectors/export-check.ts
+import { execSync as execSync2 } from "node:child_process";
+import { existsSync as existsSync8, readFileSync as readFileSync6 } from "node:fs";
+import { extname } from "node:path";
+function detectExportBreakingChanges(file) {
+  if (isGateDisabled("export-check"))
+    return [];
+  const ext = extname(file).toLowerCase();
+  if (!TS_JS_EXTS.has(ext))
+    return [];
+  if (!existsSync8(file))
+    return [];
+  let oldContent;
+  try {
+    const cwd = process.cwd();
+    const relPath = file.startsWith(cwd) ? file.slice(cwd.length + 1) : file;
+    oldContent = execSync2(`git show HEAD:${relPath}`, {
+      cwd,
+      encoding: "utf-8",
+      timeout: 5000,
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+  } catch {
+    return [];
+  }
+  const newContent = readFileSync6(file, "utf-8");
+  const oldExports = new Set;
+  for (const match of oldContent.matchAll(EXPORT_RE)) {
+    oldExports.add(match[1]);
+  }
+  const newExports = new Set;
+  for (const match of newContent.matchAll(EXPORT_RE)) {
+    newExports.add(match[1]);
+  }
+  const removed = [...oldExports].filter((name) => !newExports.has(name));
+  if (removed.length === 0)
+    return [];
+  return [
+    {
+      file,
+      errors: removed.map((name) => `Breaking change: export "${sanitizeForStderr(name)}" was removed`),
+      gate: "export-check"
+    }
+  ];
+}
+var TS_JS_EXTS, EXPORT_RE;
+var init_export_check = __esm(() => {
+  init_session_state();
+  TS_JS_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
+  EXPORT_RE = /\bexport\s+(?:default\s+)?(?:function|class|const|let|var|type|interface|enum)\s+(\w+)/g;
+});
+
+// src/hooks/detectors/import-check.ts
+import { existsSync as existsSync9, readFileSync as readFileSync7 } from "node:fs";
+import { extname as extname2, join as join8 } from "node:path";
+function detectHallucinatedImports(file) {
+  if (isGateDisabled("import-check"))
+    return [];
+  const ext = extname2(file).toLowerCase();
+  if (!TS_JS_EXTS2.has(ext))
+    return [];
+  if (!existsSync9(file))
+    return [];
+  const content = readFileSync7(file, "utf-8");
+  if (content.length > MAX_IMPORT_CHECK_SIZE)
+    return [];
+  const cwd = process.cwd();
+  const missingPkgs = [];
+  let builtins;
+  try {
+    builtins = new Set(__require("node:module").builtinModules);
+  } catch {
+    builtins = FALLBACK_BUILTINS;
+  }
+  for (const line of content.split(`
+`)) {
+    if (line.trimStart().startsWith("//"))
+      continue;
+    const match = line.match(IMPORT_LINE_RE);
+    if (!match)
+      continue;
+    const specifier = match[1];
+    const pkgName = specifier.startsWith("@") ? specifier.split("/").slice(0, 2).join("/") : specifier.split("/")[0];
+    if (pkgName.startsWith("node:") || builtins.has(pkgName))
+      continue;
+    if (pkgName.includes(".."))
+      continue;
+    if (!existsSync9(join8(cwd, "node_modules", pkgName))) {
+      missingPkgs.push(pkgName);
+    }
+  }
+  if (missingPkgs.length === 0)
+    return [];
+  const unique = [...new Set(missingPkgs)];
+  return [
+    {
+      file,
+      errors: unique.map((pkg) => `Hallucinated import: package "${sanitizeForStderr(pkg.slice(0, 128))}" not found in node_modules`),
+      gate: "import-check"
+    }
+  ];
+}
+var TS_JS_EXTS2, IMPORT_LINE_RE, MAX_IMPORT_CHECK_SIZE = 500000, FALLBACK_BUILTINS;
+var init_import_check = __esm(() => {
+  init_session_state();
+  TS_JS_EXTS2 = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
+  IMPORT_LINE_RE = /^\s*import\s+(?:[^"']*\s+from\s+)?["']([^"'./][^"']*)["']/;
+  FALLBACK_BUILTINS = new Set([
+    "assert",
+    "async_hooks",
+    "buffer",
+    "child_process",
+    "cluster",
+    "console",
+    "constants",
+    "crypto",
+    "dgram",
+    "diagnostics_channel",
+    "dns",
+    "domain",
+    "events",
+    "fs",
+    "http",
+    "http2",
+    "https",
+    "inspector",
+    "module",
+    "net",
+    "os",
+    "path",
+    "perf_hooks",
+    "process",
+    "punycode",
+    "querystring",
+    "readline",
+    "repl",
+    "stream",
+    "string_decoder",
+    "sys",
+    "test",
+    "timers",
+    "tls",
+    "trace_events",
+    "tty",
+    "url",
+    "util",
+    "v8",
+    "vm",
+    "wasi",
+    "worker_threads",
+    "zlib"
+  ]);
+});
+
 // src/hooks/post-tool.ts
 var exports_post_tool = {};
 __export(exports_post_tool, {
   default: () => postTool
 });
-import { execSync as execSync2 } from "node:child_process";
-import { existsSync as existsSync8, readFileSync as readFileSync6 } from "node:fs";
-import { extname, join as join8, resolve } from "node:path";
+import { extname as extname3, resolve } from "node:path";
 async function postTool(ev) {
   const tool = ev.tool_name;
   if (!tool)
@@ -824,7 +982,7 @@ async function handleEditWrite(ev) {
   const gates = loadGates();
   if (!gates?.on_write)
     return;
-  const fileExt = extname(file).toLowerCase();
+  const fileExt = extname3(file).toLowerCase();
   const gatedExts = getGatedExtensions();
   const sessionId = ev.session_id;
   const gateEntries = [];
@@ -902,93 +1060,6 @@ async function handleEditWrite(ev) {
   try {
     recordChangedFile(file);
   } catch {}
-}
-function detectHallucinatedImports(file) {
-  if (isGateDisabled("import-check"))
-    return [];
-  const ext = extname(file).toLowerCase();
-  if (!TS_JS_EXTS.has(ext))
-    return [];
-  if (!existsSync8(file))
-    return [];
-  const content = readFileSync6(file, "utf-8");
-  if (content.length > MAX_IMPORT_CHECK_SIZE)
-    return [];
-  const cwd = process.cwd();
-  const missingPkgs = [];
-  let builtins;
-  try {
-    builtins = new Set(__require("node:module").builtinModules);
-  } catch {
-    builtins = FALLBACK_BUILTINS;
-  }
-  for (const line of content.split(`
-`)) {
-    if (line.trimStart().startsWith("//"))
-      continue;
-    const match = line.match(IMPORT_LINE_RE);
-    if (!match)
-      continue;
-    const specifier = match[1];
-    const pkgName = specifier.startsWith("@") ? specifier.split("/").slice(0, 2).join("/") : specifier.split("/")[0];
-    if (pkgName.startsWith("node:") || builtins.has(pkgName))
-      continue;
-    if (pkgName.includes(".."))
-      continue;
-    if (!existsSync8(join8(cwd, "node_modules", pkgName))) {
-      missingPkgs.push(pkgName);
-    }
-  }
-  if (missingPkgs.length === 0)
-    return [];
-  const unique = [...new Set(missingPkgs)];
-  return [
-    {
-      file,
-      errors: unique.map((pkg) => `Hallucinated import: package "${pkg.slice(0, 128)}" not found in node_modules`),
-      gate: "import-check"
-    }
-  ];
-}
-function detectExportBreakingChanges(file) {
-  if (isGateDisabled("export-check"))
-    return [];
-  const ext = extname(file).toLowerCase();
-  if (!TS_JS_EXTS.has(ext))
-    return [];
-  if (!existsSync8(file))
-    return [];
-  let oldContent;
-  try {
-    const relPath = file.startsWith(process.cwd()) ? file.slice(process.cwd().length + 1) : file;
-    oldContent = execSync2(`git show HEAD:${relPath}`, {
-      cwd: process.cwd(),
-      encoding: "utf-8",
-      timeout: 5000,
-      stdio: ["ignore", "pipe", "ignore"]
-    });
-  } catch {
-    return [];
-  }
-  const newContent = readFileSync6(file, "utf-8");
-  const oldExports = new Set;
-  for (const match of oldContent.matchAll(EXPORT_RE)) {
-    oldExports.add(match[1]);
-  }
-  const newExports = new Set;
-  for (const match of newContent.matchAll(EXPORT_RE)) {
-    newExports.add(match[1]);
-  }
-  const removed = [...oldExports].filter((name) => !newExports.has(name));
-  if (removed.length === 0)
-    return [];
-  return [
-    {
-      file,
-      errors: removed.map((name) => `Breaking change: export "${name}" was removed`),
-      gate: "export-check"
-    }
-  ];
 }
 function handleBash(ev) {
   const command = typeof ev.tool_input?.command === "string" ? ev.tool_input.command : null;
@@ -1076,60 +1147,14 @@ function getToolOutput(ev) {
     return ev.tool_output;
   return "";
 }
-var TS_JS_EXTS, IMPORT_LINE_RE, MAX_IMPORT_CHECK_SIZE = 500000, FALLBACK_BUILTINS, EXPORT_RE, GIT_COMMIT_RE, LINT_FIX_RE, TEST_CMD_RE;
+var GIT_COMMIT_RE, LINT_FIX_RE, TEST_CMD_RE;
 var init_post_tool = __esm(() => {
   init_load();
   init_runner();
   init_pending_fixes();
   init_session_state();
-  TS_JS_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
-  IMPORT_LINE_RE = /^\s*import\s+(?:[^"']*\s+from\s+)?["']([^"'./][^"']*)["']/;
-  FALLBACK_BUILTINS = new Set([
-    "assert",
-    "async_hooks",
-    "buffer",
-    "child_process",
-    "cluster",
-    "console",
-    "constants",
-    "crypto",
-    "dgram",
-    "diagnostics_channel",
-    "dns",
-    "domain",
-    "events",
-    "fs",
-    "http",
-    "http2",
-    "https",
-    "inspector",
-    "module",
-    "net",
-    "os",
-    "path",
-    "perf_hooks",
-    "process",
-    "punycode",
-    "querystring",
-    "readline",
-    "repl",
-    "stream",
-    "string_decoder",
-    "sys",
-    "test",
-    "timers",
-    "tls",
-    "trace_events",
-    "tty",
-    "url",
-    "util",
-    "v8",
-    "vm",
-    "wasi",
-    "worker_threads",
-    "zlib"
-  ]);
-  EXPORT_RE = /\bexport\s+(?:default\s+)?(?:function|class|const|let|var|type|interface|enum)\s+(\w+)/g;
+  init_export_check();
+  init_import_check();
   GIT_COMMIT_RE = /\bgit\s+(?:-\S+(?:\s+\S+)?\s+)*commit\b/i;
   LINT_FIX_RE = /\b(biome\s+(check|lint).*--(fix|write)|biome\s+format|eslint.*--fix|prettier.*--write|ruff\s+check.*--fix|ruff\s+format|gofmt|go\s+fmt|cargo\s+fmt|autopep8|black)\b/;
   TEST_CMD_RE = /\b(vitest|jest|mocha|pytest|go\s+test|cargo\s+test)\b/;
@@ -1570,7 +1595,7 @@ var init_score_parsers = __esm(() => {
 });
 
 // src/hooks/subagent-stop/agent-validators.ts
-import { existsSync as existsSync9, readdirSync as readdirSync3, readFileSync as readFileSync7, statSync as statSync3 } from "node:fs";
+import { existsSync as existsSync10, readdirSync as readdirSync3, readFileSync as readFileSync8, statSync as statSync3 } from "node:fs";
 import { join as join9 } from "node:path";
 async function subagentStop(ev) {
   if (ev.stop_hook_active)
@@ -1596,7 +1621,7 @@ async function subagentStop(ev) {
 function validatePlan() {
   try {
     const planDir = join9(process.cwd(), ".claude", "plans");
-    if (!existsSync9(planDir))
+    if (!existsSync10(planDir))
       return;
     const files = readdirSync3(planDir).filter((f) => f.endsWith(".md")).map((f) => ({
       name: f,
@@ -1604,7 +1629,7 @@ function validatePlan() {
     })).sort((a, b) => b.mtime - a.mtime);
     if (files.length === 0)
       return;
-    const content = readFileSync7(join9(planDir, files[0].name), "utf-8");
+    const content = readFileSync8(join9(planDir, files[0].name), "utf-8");
     const structErrors = validatePlanStructure(content);
     if (structErrors.length > 0) {
       block(`Plan structural issues:
@@ -1788,8 +1813,8 @@ function persistReviewFindings() {
   const historyPath = join9(process.cwd(), ".qult", ".state", FINDINGS_HISTORY_FILE);
   let history = [];
   try {
-    if (existsSync9(historyPath)) {
-      history = JSON.parse(readFileSync7(historyPath, "utf-8"));
+    if (existsSync10(historyPath)) {
+      history = JSON.parse(readFileSync8(historyPath, "utf-8"));
     }
   } catch {
     history = [];
@@ -1884,7 +1909,7 @@ __export(exports_task_completed, {
   checkVerifyTestQuality: () => checkVerifyTestQuality
 });
 import { spawnSync } from "node:child_process";
-import { existsSync as existsSync10, readFileSync as readFileSync8 } from "node:fs";
+import { existsSync as existsSync11, readFileSync as readFileSync9 } from "node:fs";
 import { resolve as resolve3 } from "node:path";
 async function taskCompleted(ev) {
   const subject = ev.task_subject;
@@ -1931,9 +1956,9 @@ function checkVerifyTestQuality(testFile, _testName, taskKey) {
   const absPath = resolve3(cwd, testFile);
   if (!absPath.startsWith(cwd))
     return;
-  if (!existsSync10(absPath))
+  if (!existsSync11(absPath))
     return;
-  const content = readFileSync8(absPath, "utf-8");
+  const content = readFileSync9(absPath, "utf-8");
   const codeOnly = content.split(`
 `).filter((line) => !line.trimStart().startsWith("//")).join(`
 `);
@@ -1982,12 +2007,12 @@ var exports_session_start = {};
 __export(exports_session_start, {
   default: () => sessionStart
 });
-import { existsSync as existsSync11, mkdirSync as mkdirSync3 } from "node:fs";
+import { existsSync as existsSync12, mkdirSync as mkdirSync3 } from "node:fs";
 import { join as join10 } from "node:path";
 async function sessionStart(ev) {
   try {
     const stateDir = join10(process.cwd(), ".qult", ".state");
-    if (!existsSync11(stateDir)) {
+    if (!existsSync12(stateDir)) {
       mkdirSync3(stateDir, { recursive: true });
     }
     cleanupStaleScopedFiles(stateDir);
@@ -2011,12 +2036,12 @@ var exports_post_compact = {};
 __export(exports_post_compact, {
   default: () => postCompact
 });
-import { existsSync as existsSync12, readdirSync as readdirSync4, readFileSync as readFileSync9, statSync as statSync4 } from "node:fs";
+import { existsSync as existsSync13, readdirSync as readdirSync4, readFileSync as readFileSync10, statSync as statSync4 } from "node:fs";
 import { join as join11 } from "node:path";
 async function postCompact(_ev) {
   try {
     const stateDir = join11(process.cwd(), ".qult", ".state");
-    if (!existsSync12(stateDir))
+    if (!existsSync13(stateDir))
       return;
     const parts = [];
     const fixesPath2 = findLatestFile(stateDir, "pending-fixes");
@@ -2035,7 +2060,7 @@ async function postCompact(_ev) {
       if (Object.keys(state).length > 0) {
         const summary = [];
         const gatesPath = join11(process.cwd(), ".qult", "gates.json");
-        const hasGates = existsSync12(gatesPath);
+        const hasGates = existsSync13(gatesPath);
         if (state.test_passed_at)
           summary.push(`test_passed_at: ${state.test_passed_at}`);
         else if (hasGates)
@@ -2060,10 +2085,10 @@ async function postCompact(_ev) {
     }
     try {
       const planDir = join11(process.cwd(), ".claude", "plans");
-      if (existsSync12(planDir)) {
+      if (existsSync13(planDir)) {
         const planFiles = readdirSync4(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync4(join11(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
         if (planFiles.length > 0) {
-          const content = readFileSync9(join11(planDir, planFiles[0].name), "utf-8");
+          const content = readFileSync10(join11(planDir, planFiles[0].name), "utf-8");
           const taskCount = (content.match(/^###\s+Task\s+\d+/gim) ?? []).length;
           const doneCount = (content.match(/^###\s+Task\s+\d+.*\[done\]/gim) ?? []).length;
           if (taskCount > 0) {
@@ -2091,9 +2116,9 @@ function findLatestFile(stateDir, prefix) {
 }
 function safeReadJson(path, fallback) {
   try {
-    if (!existsSync12(path))
+    if (!existsSync13(path))
       return fallback;
-    return JSON.parse(readFileSync9(path, "utf-8"));
+    return JSON.parse(readFileSync10(path, "utf-8"));
   } catch {
     return fallback;
   }

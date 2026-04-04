@@ -1815,3 +1815,42 @@ describe("Scenario: TaskCreate promotion on plan task file", () => {
 		expect(stderr2).not.toContain("Plan task detected");
 	});
 });
+
+// ============================================================
+// Export breaking change detection
+// ============================================================
+
+describe("Scenario: Export breaking change detection", () => {
+	it("detects removed export and includes in gate summary", async () => {
+		const { execSync } = await import("node:child_process");
+
+		// Setup git repo with initial file
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(
+			join(TEST_DIR, "src/api.ts"),
+			"export function hello() {}\nexport function goodbye() {}\n",
+		);
+		setupPassingGates();
+		execSync("git init && git add -A && git commit -m init", {
+			cwd: TEST_DIR,
+			stdio: "ignore",
+		});
+
+		// Remove an export
+		writeFileSync(join(TEST_DIR, "src/api.ts"), "export function hello() {}\n");
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/api.ts") },
+		});
+
+		const fixes = readPendingFixes();
+		const exportFixes = fixes.filter((f) => f.gate === "export-check");
+		expect(exportFixes).toHaveLength(1);
+		expect(exportFixes[0]!.errors[0]).toContain("goodbye");
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("export-check FAIL");
+	});
+});

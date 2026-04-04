@@ -150,7 +150,7 @@ qult provides a full development workflow through 12 skills and 6 agents:
 | Type | Hook | Role |
 |------|------|------|
 | **Init** (advisory) | SessionStart | Initialize state directory, clean stale files, clear pending-fixes on startup |
-| **The Wall** (enforcement) | PostToolUse | Runs lint/type gates + hallucinated import check after Edit/Write, outputs gate summary to stderr |
+| **The Wall** (enforcement) | PostToolUse | Runs lint/type gates + hallucinated import + export breaking change detection, outputs gate summary to stderr |
 | **The Wall** (enforcement) | PreToolUse | DENY if pending fixes, require test/review before commit, force selfcheck on ExitPlanMode |
 | **Completion gate** (enforcement) | Stop | Block if unresolved errors, incomplete tasks, or missing review |
 | **Subagent** (enforcement) | SubagentStop | Validates review output, enforces dimension floor + aggregate threshold (26/30), score bias detection, Agentic Flywheel |
