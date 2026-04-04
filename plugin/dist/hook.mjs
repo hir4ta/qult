@@ -350,7 +350,8 @@ function defaultState() {
     plan_eval_score_history: [],
     plan_selfcheck_blocked_at: null,
     disabled_gates: [],
-    task_verify_results: {}
+    task_verify_results: {},
+    gate_failure_counts: {}
   };
 }
 function readSessionState() {
@@ -487,6 +488,7 @@ function clearOnCommit() {
   state.plan_eval_score_history = [];
   state.plan_selfcheck_blocked_at = null;
   state.task_verify_results = {};
+  state.gate_failure_counts = {};
   writeState(state);
 }
 function getReviewIteration() {
@@ -550,6 +552,26 @@ function recordTaskVerifyResult(taskKey, passed) {
 function readTaskVerifyResult(taskKey) {
   const state = readSessionState();
   return state.task_verify_results?.[taskKey] ?? null;
+}
+function incrementGateFailure(file, gateName) {
+  const state = readSessionState();
+  if (!state.gate_failure_counts)
+    state.gate_failure_counts = {};
+  const key = `${file}:${gateName}`;
+  const count = (state.gate_failure_counts[key] ?? 0) + 1;
+  state.gate_failure_counts[key] = count;
+  writeState(state);
+  return count;
+}
+function resetGateFailure(file, gateName) {
+  const state = readSessionState();
+  if (!state.gate_failure_counts)
+    return;
+  const key = `${file}:${gateName}`;
+  if (state.gate_failure_counts[key]) {
+    delete state.gate_failure_counts[key];
+    writeState(state);
+  }
 }
 function isGateDisabled(gateName) {
   const state = readSessionState();
@@ -827,6 +849,17 @@ async function handleEditWrite(ev) {
         }
         if (!settled.value.passed) {
           newFixes.push({ file, errors: [settled.value.output], gate: entry.name });
+          try {
+            const count = incrementGateFailure(file, entry.name);
+            if (count >= 3) {
+              process.stderr.write(`[qult] 3-Strike: ${file} failed ${entry.name} ${count} times. Investigate root cause before continuing.
+`);
+            }
+          } catch {}
+        } else {
+          try {
+            resetGateFailure(file, entry.name);
+          } catch {}
         }
       }
     } catch {}
@@ -1103,6 +1136,28 @@ ${fileList}`);
   } catch (e) {
     if (e instanceof Error && e.message.startsWith("process.exit"))
       throw e;
+  }
+  try {
+    suggestTaskCreate(resolvedTarget);
+  } catch {}
+}
+function suggestTaskCreate(resolvedTarget) {
+  const plan = getActivePlan();
+  if (!plan)
+    return;
+  const cwd = process.cwd();
+  const changed = readSessionState().changed_file_paths ?? [];
+  if (changed.includes(resolvedTarget))
+    return;
+  for (const task of plan.tasks) {
+    if (!task.file)
+      continue;
+    const taskFile = resolve2(cwd, task.file);
+    if (resolvedTarget === taskFile) {
+      process.stderr.write(`[qult] Plan task detected for ${task.file}. Use TaskCreate to track progress and enable Verify test execution.
+`);
+      return;
+    }
   }
 }
 function checkTddOrder(resolvedTarget) {

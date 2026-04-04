@@ -71,6 +71,10 @@ export interface SessionState {
 	// ── TDD RED verification ─────────────────────────────────
 	/** Per-task Verify test results for RED-GREEN enforcement (key = "Task N") */
 	task_verify_results: Record<string, { passed: boolean; ran_at: string }>;
+
+	// ── Gate failure escalation ──────────────────────────────
+	/** Per-file:gate failure count for 3-Strike escalation (key = "file:gate") */
+	gate_failure_counts: Record<string, number>;
 }
 
 function filePath(): string {
@@ -94,6 +98,7 @@ function defaultState(): SessionState {
 		plan_selfcheck_blocked_at: null,
 		disabled_gates: [],
 		task_verify_results: {},
+		gate_failure_counts: {},
 	};
 }
 
@@ -287,6 +292,7 @@ export function clearOnCommit(): void {
 	state.plan_eval_score_history = [];
 	state.plan_selfcheck_blocked_at = null;
 	state.task_verify_results = {};
+	state.gate_failure_counts = {};
 	writeState(state);
 }
 
@@ -382,6 +388,30 @@ export function recordTaskVerifyResult(taskKey: string, passed: boolean): void {
 export function readTaskVerifyResult(taskKey: string): { passed: boolean; ran_at: string } | null {
 	const state = readSessionState();
 	return state.task_verify_results?.[taskKey] ?? null;
+}
+
+// ── Gate failure escalation ─────────────────────────────
+
+/** Increment gate failure count for a file:gate combination. Returns the new count. */
+export function incrementGateFailure(file: string, gateName: string): number {
+	const state = readSessionState();
+	if (!state.gate_failure_counts) state.gate_failure_counts = {};
+	const key = `${file}:${gateName}`;
+	const count = (state.gate_failure_counts[key] ?? 0) + 1;
+	state.gate_failure_counts[key] = count;
+	writeState(state);
+	return count;
+}
+
+/** Reset gate failure count for a file:gate (called when gate passes). */
+export function resetGateFailure(file: string, gateName: string): void {
+	const state = readSessionState();
+	if (!state.gate_failure_counts) return;
+	const key = `${file}:${gateName}`;
+	if (state.gate_failure_counts[key]) {
+		delete state.gate_failure_counts[key];
+		writeState(state);
+	}
 }
 
 // ── Gate override ───────────────────────────────────────

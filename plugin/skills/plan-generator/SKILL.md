@@ -7,9 +7,21 @@ description: "Generate a structured plan from a feature description. Spawns plan
 
 Generate a structured implementation plan from a brief feature description.
 
+## Stage 0: Spec document check
+
+Before generating a plan, check if a spec document exists:
+
+1. Search for `docs/spec-*.md` files using Glob
+2. If found: read the most recent spec and include it as context for the plan-generator agent
+3. If not found: continue without a spec, but note in the agent prompt that no spec was provided
+
+This ensures that design decisions from `/qult:explore` are carried into the plan.
+
 ## Stage 1: Plan generation (independent agent)
 
-Spawn one `plan-generator` agent with the user's feature description: `$ARGUMENTS`
+Spawn one `plan-generator` agent with:
+- The user's feature description: `$ARGUMENTS`
+- The spec document content (if found in Stage 0)
 
 The agent analyzes the codebase independently and outputs a complete plan in markdown format.
 

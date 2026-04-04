@@ -321,6 +321,37 @@ describe("postTool: gate execution summary to stderr", () => {
 	});
 });
 
+describe("postTool: 3-Strike gate failure escalation", () => {
+	it("warns after 3 consecutive failures on same file+gate", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({
+				on_write: {
+					lint: { command: "echo 'error' && exit 1", timeout: 3000 },
+				},
+			}),
+		);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		const { resetGatesCache } = await import("../gates/load.ts");
+		const filePath = join(TEST_DIR, "src/broken.ts");
+
+		// Fail 3 times (reset gates cache between calls to re-read gates, but keep session state)
+		for (let i = 0; i < 3; i++) {
+			resetGatesCache();
+			await postTool({
+				tool_name: "Edit",
+				tool_input: { file_path: filePath },
+			});
+		}
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("3-Strike");
+		expect(stderr).toContain("broken.ts");
+		expect(stderr).toContain("lint");
+	});
+});
+
 describe("postTool: hallucinated import detection", () => {
 	beforeEach(() => {
 		// Setup passing gates so gate execution doesn't interfere

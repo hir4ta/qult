@@ -482,3 +482,56 @@ describe("preTool: ExitPlanMode selfcheck gate", () => {
 		expect(exitCode).toBeNull();
 	});
 });
+
+describe("preTool: TaskCreate promotion", () => {
+	it("warns when editing a plan task file for the first time", async () => {
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			["## Tasks", "### Task 1: Add widget [pending]", "- **File**: src/widget.ts"].join("\n"),
+		);
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/widget.ts") },
+		});
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("Plan task detected");
+		expect(stderr).toContain("TaskCreate");
+	});
+
+	it("does not warn on second edit of same file", async () => {
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			["## Tasks", "### Task 1: Add widget [pending]", "- **File**: src/widget.ts"].join("\n"),
+		);
+
+		const { recordChangedFile } = await import("../state/session-state.ts");
+		recordChangedFile(join(TEST_DIR, "src/widget.ts"));
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/widget.ts") },
+		});
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).not.toContain("Plan task detected");
+	});
+
+	it("does not warn when no plan exists", async () => {
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/random.ts") },
+		});
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).not.toContain("Plan task detected");
+	});
+});

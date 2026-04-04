@@ -11,10 +11,12 @@ import {
 import {
 	clearOnCommit,
 	getGatedExtensions,
+	incrementGateFailure,
 	isGateDisabled,
 	markGateRan,
 	recordChangedFile,
 	recordTestPass,
+	resetGateFailure,
 	shouldSkipGate,
 } from "../state/session-state.ts";
 import type { HookEvent, PendingFix } from "../types.ts";
@@ -79,6 +81,23 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 				}
 				if (!settled.value.passed) {
 					newFixes.push({ file, errors: [settled.value.output], gate: entry.name });
+					// 3-Strike escalation: track repeated failures
+					try {
+						const count = incrementGateFailure(file, entry.name);
+						if (count >= 3) {
+							process.stderr.write(
+								`[qult] 3-Strike: ${file} failed ${entry.name} ${count} times. Investigate root cause before continuing.\n`,
+							);
+						}
+					} catch {
+						/* fail-open */
+					}
+				} else {
+					try {
+						resetGateFailure(file, entry.name);
+					} catch {
+						/* fail-open */
+					}
 				}
 			}
 		} catch {

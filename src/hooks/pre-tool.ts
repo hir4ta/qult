@@ -72,6 +72,36 @@ function checkEditWrite(ev: HookEvent): void {
 		if (e instanceof Error && e.message.startsWith("process.exit")) throw e;
 		// fail-open
 	}
+
+	// TaskCreate promotion: remind to use TaskCreate when editing plan task files
+	try {
+		suggestTaskCreate(resolvedTarget);
+	} catch {
+		/* fail-open */
+	}
+}
+
+/** Suggest TaskCreate when editing a file that matches a plan task for the first time. */
+function suggestTaskCreate(resolvedTarget: string): void {
+	const plan = getActivePlan();
+	if (!plan) return;
+
+	const cwd = process.cwd();
+	const changed = readSessionState().changed_file_paths ?? [];
+
+	// Only suggest on first edit of a file (not already in changed_file_paths)
+	if (changed.includes(resolvedTarget)) return;
+
+	for (const task of plan.tasks) {
+		if (!task.file) continue;
+		const taskFile = resolve(cwd, task.file);
+		if (resolvedTarget === taskFile) {
+			process.stderr.write(
+				`[qult] Plan task detected for ${task.file}. Use TaskCreate to track progress and enable Verify test execution.\n`,
+			);
+			return;
+		}
+	}
 }
 
 /** TDD: deny editing an implementation file if its corresponding test file hasn't been edited yet. */
