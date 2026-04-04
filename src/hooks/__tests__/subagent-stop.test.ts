@@ -105,6 +105,13 @@ describe("subagentStop", () => {
 	});
 
 	it("allows qult-reviewer with PASS verdict + Score line", async () => {
+		// Legacy reviewer: override threshold to legacy value (max score 15)
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ review: { score_threshold: 12 } }),
+		);
+		resetAllCaches();
+
 		const handler = (await import("../subagent-stop/index.ts")).default;
 		await handler({
 			hook_type: "SubagentStop",

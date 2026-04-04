@@ -5,4 +5,14 @@ export {
 	validatePlanHeuristics,
 	validatePlanStructure,
 } from "./plan-validators.ts";
-export { parseDimensionScores, parseScores, type ReviewScores } from "./score-parsers.ts";
+export {
+	parseDimensionScores,
+	parseQualityScores,
+	parseScores,
+	parseSecurityScores,
+	parseSpecScores,
+	type QualityReviewScores,
+	type ReviewScores,
+	type SecurityReviewScores,
+	type SpecReviewScores,
+} from "./score-parsers.ts";

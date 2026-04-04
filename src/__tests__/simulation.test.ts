@@ -666,7 +666,14 @@ describe("Scenario: Non-gated file extensions are skipped", () => {
 // ============================================================
 
 describe("Scenario: Review score threshold — PASS with high scores clears gate", () => {
-	it("aggregate >= 12 allows", async () => {
+	it("aggregate >= threshold allows (legacy reviewer with overridden threshold)", async () => {
+		// Legacy reviewer max score is 15. Override threshold to legacy value.
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ review: { score_threshold: 12 } }),
+		);
+		resetAllCaches();
+
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await subagentStop({
 			agent_type: "qult-reviewer",
@@ -678,7 +685,13 @@ describe("Scenario: Review score threshold — PASS with high scores clears gate
 });
 
 describe("Scenario: Review score threshold — PASS with low scores blocks", () => {
-	it("aggregate < 12 blocks for iteration", async () => {
+	it("aggregate < threshold blocks for iteration", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ review: { score_threshold: 12 } }),
+		);
+		resetAllCaches();
+
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		try {
 			await subagentStop({
@@ -712,6 +725,12 @@ describe("Scenario: Review PASS without scores — fail-open", () => {
 
 describe("Scenario: Reviewer output with plan criteria findings passes SubagentStop", () => {
 	it("plan criteria finding is treated as normal finding — PASS with high score clears", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ review: { score_threshold: 12 } }),
+		);
+		resetAllCaches();
+
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await subagentStop({
 			agent_type: "qult-reviewer",

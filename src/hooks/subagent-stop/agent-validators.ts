@@ -20,7 +20,13 @@ import {
 	validatePlanHeuristics,
 	validatePlanStructure,
 } from "./plan-validators.ts";
-import { parseDimensionScores, parseScores } from "./score-parsers.ts";
+import {
+	parseDimensionScores,
+	parseQualityScores,
+	parseScores,
+	parseSecurityScores,
+	parseSpecScores,
+} from "./score-parsers.ts";
 
 // [severity] file:line pattern or "No issues found"
 const SEVERITY_PATTERN = /\[(critical|high|medium|low)\]/;
@@ -28,6 +34,14 @@ const FINDING_RE = new RegExp(SEVERITY_PATTERN.source, "i");
 const NO_ISSUES_RE = /no issues found/i;
 const REVIEW_PASS_RE = /^Review:\s*PASS/im;
 const REVIEW_FAIL_RE = /^Review:\s*FAIL/im;
+
+// 3-stage review verdicts
+const SPEC_PASS_RE = /^Spec:\s*PASS/im;
+const SPEC_FAIL_RE = /^Spec:\s*FAIL/im;
+const QUALITY_PASS_RE = /^Quality:\s*PASS/im;
+const QUALITY_FAIL_RE = /^Quality:\s*FAIL/im;
+const SECURITY_PASS_RE = /^Security:\s*PASS/im;
+const SECURITY_FAIL_RE = /^Security:\s*FAIL/im;
 
 // Plan evaluator verdicts
 const PLAN_PASS_RE = /^Plan:\s*PASS/im;
@@ -47,6 +61,7 @@ export default async function subagentStop(ev: HookEvent): Promise<void> {
 	const normalized = agentType.replace(/:/g, "-");
 
 	if (normalized === "qult-reviewer") {
+		// Legacy single reviewer (backward compat)
 		validateReviewer(output);
 
 		const passed = REVIEW_PASS_RE.test(output);
@@ -79,6 +94,19 @@ export default async function subagentStop(ev: HookEvent): Promise<void> {
 		}
 		resetReviewIteration();
 		recordReview();
+	} else if (normalized === "qult-spec-reviewer") {
+		validateStageReviewer(output, SPEC_PASS_RE, SPEC_FAIL_RE, parseSpecScores, "Spec");
+	} else if (normalized === "qult-quality-reviewer") {
+		validateStageReviewer(output, QUALITY_PASS_RE, QUALITY_FAIL_RE, parseQualityScores, "Quality");
+	} else if (normalized === "qult-security-reviewer") {
+		validateStageReviewer(
+			output,
+			SECURITY_PASS_RE,
+			SECURITY_FAIL_RE,
+			parseSecurityScores,
+			"Security",
+		);
+		// After all 3 stages complete, recordReview is called by the review skill
 	} else if (normalized === "qult-plan-evaluator") {
 		validatePlanEvaluator(output);
 	} else if (normalized === "Plan") {
@@ -173,4 +201,31 @@ function validateReviewer(output: string): void {
 	block(
 		"Reviewer output must include at least one of: (1) 'Review: PASS' or 'Review: FAIL', (2) 'Score: Correctness=N Design=N Security=N', or (3) findings ([severity] file:line). Rerun the review.",
 	);
+}
+
+/** Generic validation for 3-stage review agents (spec, quality, security).
+ *  Validates output format: verdict + scores + findings. Blocks on FAIL verdict. */
+function validateStageReviewer(
+	output: string,
+	passRe: RegExp,
+	failRe: RegExp,
+	scoreParser: (output: string) => object | null,
+	stageName: string,
+): void {
+	const hasVerdict = passRe.test(output) || failRe.test(output);
+	const hasFindings = FINDING_RE.test(output) || NO_ISSUES_RE.test(output);
+	const hasScore = scoreParser(output) !== null;
+
+	// Soft validation: accept if any signal is present
+	if (!hasVerdict && !hasFindings && !hasScore) {
+		block(
+			`${stageName} reviewer output must include: (1) '${stageName}: PASS' or '${stageName}: FAIL', (2) Score line, or (3) findings. Rerun the review.`,
+		);
+	}
+
+	if (failRe.test(output)) {
+		block(
+			`${stageName}: FAIL. Fix the issues found by the ${stageName.toLowerCase()} reviewer and re-run /qult:review.`,
+		);
+	}
 }

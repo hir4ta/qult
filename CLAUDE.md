@@ -1,6 +1,13 @@
 # qult
 
-Claude Code の品質を構造で守る evaluator harness。Claude Code Plugin として配布。
+**Quality by Structure, Not by Promise.** Claude Code の品質を構造で守る evaluator harness。Claude Code Plugin として配布。
+
+## 哲学
+
+- **The Wall doesn't negotiate** — プロンプトは提案。hooks は強制。品質を約束に委ねない
+- **architect が設計し、agent が実装する** — 人間は何を作るかを決める。AIはどう作るかを実行する
+- **Proof or Block** — 証拠なき完了宣言は構造的にブロック
+- **fail-open** — qult の障害で開発を止めない。壊れたら道を開ける
 
 ## スタック
 
@@ -26,17 +33,17 @@ qult/
 │   ├── .claude-plugin/plugin.json
 │   ├── hooks/hooks.json             # 7 hooks
 │   ├── .mcp.json                    # MCP server
-│   ├── skills/                      # 10 skills
-│   ├── agents/                      # 3 agents
+│   ├── skills/                      # 14 skills
+│   ├── agents/                      # 5 agents
 │   └── dist/                        # バンドル (hook.mjs, mcp-server.mjs)
 └── src/                             # ソースコード (開発用)
 ```
 
 ## 設計原則
 
-1. **壁 > 情報提示** — DENY (exit 2) が唯一の強制手段
+1. **The Wall > 情報提示** — DENY (exit 2) が唯一の強制手段
 2. **fail-open** — 全 hook は try-catch で握りつぶす。qult の障害で Claude を止めない
-3. **structural guarantee** — 品質を構造で保証する。仮定を stress-test し、崩れたら削除
+3. **Proof or Block** — 品質を構造で保証する。仮定を stress-test し、崩れたら削除
 4. **hooks = 検出 + ブロック、MCP = 情報伝達** — stdout 不使用 (#16538 回避)
 
 ## ルール

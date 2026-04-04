@@ -27,7 +27,7 @@ afterEach(() => {
 describe("loadConfig", () => {
 	it("returns defaults when no config file exists", () => {
 		const config = loadConfig();
-		expect(config.review.score_threshold).toBe(12);
+		expect(config.review.score_threshold).toBe(24);
 		expect(config.review.max_iterations).toBe(3);
 		expect(config.review.required_changed_files).toBe(5);
 		expect(config.gates.output_max_chars).toBe(2000);
@@ -66,13 +66,13 @@ describe("loadConfig", () => {
 	it("ignores invalid env var values", () => {
 		process.env.QULT_REVIEW_SCORE_THRESHOLD = "not-a-number";
 		const config = loadConfig();
-		expect(config.review.score_threshold).toBe(12); // default
+		expect(config.review.score_threshold).toBe(24); // default
 	});
 
 	it("handles corrupt config file gracefully", () => {
 		writeFileSync(join(TEST_DIR, ".qult", "config.json"), "not json");
 		const config = loadConfig();
-		expect(config.review.score_threshold).toBe(12); // default
+		expect(config.review.score_threshold).toBe(24); // default
 	});
 
 	it("caches result across calls", () => {
@@ -141,7 +141,7 @@ describe("CLAUDE_PLUGIN_DATA layer", () => {
 	it("skips when CLAUDE_PLUGIN_DATA is not set", () => {
 		delete process.env.CLAUDE_PLUGIN_DATA;
 		const config = loadConfig();
-		expect(config.review.score_threshold).toBe(12); // default
+		expect(config.review.score_threshold).toBe(24); // default
 	});
 
 	it("skips when preferences.json is missing", () => {
@@ -150,7 +150,7 @@ describe("CLAUDE_PLUGIN_DATA layer", () => {
 		// no preferences.json
 		process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
 		const config = loadConfig();
-		expect(config.review.score_threshold).toBe(12); // default
+		expect(config.review.score_threshold).toBe(24); // default
 	});
 
 	it("skips when preferences.json is corrupt", () => {
@@ -159,6 +159,6 @@ describe("CLAUDE_PLUGIN_DATA layer", () => {
 		writeFileSync(join(pluginDataDir, "preferences.json"), "not json");
 		process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
 		const config = loadConfig();
-		expect(config.review.score_threshold).toBe(12); // default
+		expect(config.review.score_threshold).toBe(24); // default
 	});
 });

@@ -1,10 +1,32 @@
+/** Legacy reviewer scores (3 dimensions, /15 max) */
 export interface ReviewScores {
 	correctness: number;
 	design: number;
 	security: number;
 }
 
+/** Spec reviewer scores (2 dimensions, /10 max) */
+export interface SpecReviewScores {
+	completeness: number;
+	accuracy: number;
+}
+
+/** Quality reviewer scores (2 dimensions, /10 max) */
+export interface QualityReviewScores {
+	design: number;
+	maintainability: number;
+}
+
+/** Security reviewer scores (2 dimensions, /10 max) */
+export interface SecurityReviewScores {
+	vulnerability: number;
+	hardening: number;
+}
+
 const REVIEW_DIMENSIONS = ["Correctness", "Design", "Security"] as const;
+const SPEC_DIMENSIONS = ["Completeness", "Accuracy"] as const;
+const QUALITY_DIMENSIONS = ["Design", "Maintainability"] as const;
+const SECURITY_DIMENSIONS = ["Vulnerability", "Hardening"] as const;
 
 function escapeRegex(s: string): string {
 	return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -31,7 +53,7 @@ export function parseScores(output: string): ReviewScores | null {
 /** Generic dimension score parser. Extracts each dimension independently by name. */
 export function parseDimensionScores(
 	output: string,
-	dimensions: string[],
+	dimensions: string[] | readonly string[],
 ): Record<string, number> | null {
 	const result: Record<string, number> = {};
 	for (const dim of dimensions) {
@@ -40,4 +62,25 @@ export function parseDimensionScores(
 		result[dim] = val;
 	}
 	return result;
+}
+
+/** Parse spec reviewer scores. */
+export function parseSpecScores(output: string): SpecReviewScores | null {
+	const scores = parseDimensionScores(output, SPEC_DIMENSIONS);
+	if (!scores) return null;
+	return { completeness: scores.Completeness!, accuracy: scores.Accuracy! };
+}
+
+/** Parse quality reviewer scores. */
+export function parseQualityScores(output: string): QualityReviewScores | null {
+	const scores = parseDimensionScores(output, QUALITY_DIMENSIONS);
+	if (!scores) return null;
+	return { design: scores.Design!, maintainability: scores.Maintainability! };
+}
+
+/** Parse security reviewer scores. */
+export function parseSecurityScores(output: string): SecurityReviewScores | null {
+	const scores = parseDimensionScores(output, SECURITY_DIMENSIONS);
+	if (!scores) return null;
+	return { vulnerability: scores.Vulnerability!, hardening: scores.Hardening! };
 }

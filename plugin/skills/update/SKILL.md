@@ -19,6 +19,8 @@ This skill updates the **project-level rules files** that were copied during `/q
 ```markdown
 # qult Quality Gates
 
+> Quality by Structure, Not by Promise. The Wall doesn't negotiate.
+
 IMPORTANT: These rules are enforced by qult hooks. Follow them exactly.
 
 ## MCP Tool Usage
@@ -28,16 +30,28 @@ IMPORTANT: These rules are enforced by qult hooks. Follow them exactly.
 - After a TaskCompleted hook runs, call `mcp__plugin_qult_qult__get_session_status()` to see verification results
 - If gates are not configured, run `/qult:detect-gates`
 
-## Commit Gates
+## Commit Gates — Proof or Block
 
 - NEVER commit with unresolved lint/typecheck errors
 - Tests MUST pass before committing (when on_commit gates are configured)
-- Independent review (`/qult:review`) is required for large changes or when a plan is active
+- Independent 3-stage review (`/qult:review`) is required for large changes or when a plan is active
+  - Stage 1: Spec compliance (Completeness + Accuracy)
+  - Stage 2: Code quality (Design + Maintainability)
+  - Stage 3: Security (Vulnerability + Hardening)
+
+## Workflow
+
+- The architect decides what to build. The agent decides how to build it.
+- When requirements are unclear, use `/qult:explore` to interview the architect.
+- When debugging, use `/qult:debug` for structured root-cause analysis.
+- When finishing a branch, use `/qult:finish` for structured completion.
 ```
 
 ### qult-quality.md
 ```markdown
 # Quality Rules (qult)
+
+> Proof or Block. No completion claims without fresh verification evidence.
 
 ## Test-Driven
 
@@ -49,11 +63,18 @@ IMPORTANT: These rules are enforced by qult hooks. Follow them exactly.
 
 - Quick fix (no plan): keep changes focused, 1-2 files per logical change
 - Planned work: follow the plan's task boundaries, scope is set by the plan
+
+## Ambiguity Resolution
+
+- When requirements are unclear, ask the architect — never guess
+- When debugging, investigate root cause first — never guess-fix
 ```
 
 ### qult-plan.md
 ```markdown
 # Plan Rules (qult)
+
+> The architect decides what to build. The plan describes how.
 
 ## Plan Structure
 

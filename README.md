@@ -5,11 +5,32 @@
 ![Hooks](https://img.shields.io/badge/hooks-7-dbbc7f?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-83c092?style=flat-square)
 
-**Physically stop Claude's bad habits.** An evaluator harness that enforces code quality through structure.
+**Quality by Structure, Not by Promise.** An evaluator harness that enforces code quality through walls, not words.
 
 > Claude is capable, but it leaves lint errors behind and moves to the next file. It commits without tests. It praises its own code and calls the review done.
-> qult uses 7 hooks + MCP server + independent Opus evaluator to stop that with **exit 2 (DENY), not advisory messages**.
+> qult uses 7 hooks + MCP server + 3-stage independent review to stop that with **exit 2 (DENY), not advisory messages**.
 > Distributed as a Claude Code Plugin. Install with `/plugin install`.
+
+## Philosophy
+
+```
+Quality by Structure, Not by Promise.
+
+1. The Wall doesn't negotiate.
+   Prompts are suggestions. Hooks are enforcement. Quality is not left to promises.
+
+2. The architect designs, the agent implements.
+   Humans decide what to build. AI decides how to build it.
+   Ambiguity is resolved by asking, never by guessing.
+
+3. Proof or Block.
+   "Done" is not evidence. Tests pass, review passes — then it's done.
+   Claims without evidence are structurally blocked.
+
+4. fail-open — cult of quality, humble about ourselves.
+   qult's own failures never block Claude. Break? Open the gate.
+   Fanatical about quality. Humble about our tools.
+```
 
 > [!NOTE]
 > You may see `SessionStart:startup hook error` or `Stop hook error` at session start. **This is not a qult bug.**
@@ -32,7 +53,7 @@ flowchart LR
     Gate -- pass --> OK["Continue"]
     Gate -- fail --> PF["pending-fixes"]
     PF --> Next["Try to Edit\nanother file"]
-    Next --> DENY["DENY\n(exit 2)"]
+    Next --> DENY["The Wall\n(DENY exit 2)"]
     DENY --> Fix["Fix the\nsame file"]
     Fix --> Gate
 
@@ -48,16 +69,20 @@ flowchart TB
     subgraph Generator["Generator"]
         Claude["Claude\n+ 7 hooks for quality gates"]
     end
-    subgraph Evaluator["Evaluator"]
-        Rev["/qult:review\n(Opus)"]
+    subgraph Evaluator["3-Stage Evaluator"]
+        Spec["Stage 1: Spec Reviewer\n(Completeness + Accuracy)"]
+        Quality["Stage 2: Quality Reviewer\n(Design + Maintainability)"]
+        Security["Stage 3: Security Reviewer\n(Vulnerability + Hardening)"]
     end
 
     Claude -- "Task done" --> TV["TaskCompleted\nRun Verify immediately"]
     TV -- "FAIL" --> Claude
     TV -- "PASS" --> Claude
-    Claude -- "All tasks done" --> Rev
-    Rev -- "FAIL / score < 12\ntrend-aware block" --> Claude
-    Rev -- "PASS + score >= 12/15" --> Done["Commit"]
+    Claude -- "All tasks done" --> Spec
+    Spec --> Quality
+    Quality --> Security
+    Security -- "Any FAIL / score < 24" --> Claude
+    Security -- "All PASS + score >= 24/30" --> Done["Commit"]
 
     style Generator fill:#7fbbb3,color:#2d353b,stroke:#7fbbb3
     style Evaluator fill:#e69875,color:#2d353b,stroke:#e69875
@@ -69,23 +94,36 @@ flowchart TB
 
 | Situation | Action |
 |---|---|
-| Lint/type errors left behind, moves to another file | **DENY** -- blocked until fixed |
-| `git commit` without running tests | **DENY** -- requires test pass |
+| Lint/type errors left behind, moves to another file | **The Wall** -- DENY until fixed |
+| `git commit` without running tests | **The Wall** -- requires test pass |
 | Declares done without review or after FAIL | **block** -- requires /qult:review |
 | Review PASS but low score | **block** -- trend-aware re-review (up to 3x) |
-| Plan finalized with omissions | **DENY** -- forces session-wide check (once) |
+| Plan finalized with omissions | **The Wall** -- forces session-wide check (once) |
 | Declares done mid-plan | **block** -- requires all tasks completed |
 | Plan task completed | **verify** -- runs Verify test immediately |
+
+## Complete Workflow
+
+qult provides a full development workflow through 14 skills and 5 agents:
+
+```
+/qult:explore    → Interview the architect, explore design
+/qult:plan-generator → Generate structured implementation plan
+    [Plan mode]  → Architect reviews and approves
+/qult:review     → 3-stage independent review (Spec → Quality → Security)
+/qult:finish     → Structured branch completion (merge/PR/hold/discard)
+/qult:debug      → Structured root-cause debugging
+```
 
 ## 7 Hooks + MCP Server
 
 | Type | Hook | Role |
 |------|------|------|
 | **Init** (advisory) | SessionStart | Initialize state directory, clean stale files, clear pending-fixes on startup |
-| **Wall** (enforcement) | PostToolUse | Runs lint/type gates after Edit/Write, writes state |
-| **Wall** (enforcement) | PreToolUse | DENY if pending fixes, require test/review before commit, force selfcheck on ExitPlanMode |
+| **The Wall** (enforcement) | PostToolUse | Runs lint/type gates after Edit/Write, writes state |
+| **The Wall** (enforcement) | PreToolUse | DENY if pending fixes, require test/review before commit, force selfcheck on ExitPlanMode |
 | **Completion gate** (enforcement) | Stop | Block if unresolved errors, incomplete tasks, or missing review |
-| **Subagent** (enforcement) | SubagentStop | Validates review output + enforces trend-aware score threshold (12/15) |
+| **Subagent** (enforcement) | SubagentStop | Validates review output + enforces trend-aware score threshold (24/30) |
 | **Task verify** (advisory) | TaskCompleted | Runs Verify test immediately when plan task completes |
 | **Context** (advisory) | PostCompact | Re-injects pending fixes and session state after context compaction |
 
@@ -134,15 +172,19 @@ What init does:
 
 | Command | Description |
 |---------|-------------|
+| `/qult:explore` | Design exploration — interview the architect before coding |
+| `/qult:plan-generator` | Generate structured plan from feature description |
+| `/qult:review` | 3-stage independent code review (Spec + Quality + Security) |
+| `/qult:finish` | Structured branch completion (merge/PR/hold/discard) |
+| `/qult:debug` | Structured root-cause debugging |
 | `/qult:status` | Show current quality gate status |
-| `/qult:review` | Independent code review (Opus evaluator) |
 | `/qult:skip` | Temporarily disable/enable gates or clear pending fixes |
 | `/qult:config` | View or change config values (thresholds, iterations) |
 | `/qult:detect-gates` | Re-detect gate configuration |
-| `/qult:plan-generator` | Generate structured plan from feature description |
 | `/qult:doctor` | Health check for setup |
 | `/qult:update` | Update rules files after plugin update |
 | `/qult:register-hooks` | Register hooks in settings.local.json (fallback) |
+| `/qult:writing-skills` | TDD methodology for creating new skills |
 
 Hooks (SessionStart, PostToolUse, PreToolUse, Stop, SubagentStop, TaskCompleted, PostCompact) and MCP server run automatically.
 
@@ -155,6 +197,21 @@ Plugin hooks have known reliability issues in some environments ([#18547](https:
 ```
 
 This registers the same hooks in `.claude/settings.local.json` as a fallback. When both plugin hooks and settings hooks are present, Claude Code deduplicates them (same command runs once). The `.claude/settings.local.json` file is gitignored, so it does not affect other team members.
+
+## 3-Stage Review
+
+qult's review (`/qult:review`) spawns three specialized Opus reviewers in sequence:
+
+| Stage | Agent | Dimensions | Focus |
+|-------|-------|-----------|-------|
+| 1 | **Spec Reviewer** | Completeness + Accuracy | Does the implementation match the plan? Are consumers updated? |
+| 2 | **Quality Reviewer** | Design + Maintainability | Is the code well-designed? Are edge cases handled? |
+| 3 | **Security Reviewer** | Vulnerability + Hardening | Are there injection risks? Is defense-in-depth applied? |
+
+Each agent scores 2 dimensions (1-5 each). Total: **6 dimensions / 30 points**.
+Default threshold: **24/30** (configurable). Maximum 3 iterations.
+
+After all reviewers complete, a Judge filter validates each finding for Succinctness, Accuracy, and Actionability.
 
 ## Updating
 
@@ -172,7 +229,7 @@ Customize thresholds in `.qult/config.json` (all optional):
 ```json
 {
   "review": {
-    "score_threshold": 12,
+    "score_threshold": 24,
     "max_iterations": 3,
     "required_changed_files": 5
   },
@@ -185,7 +242,7 @@ Customize thresholds in `.qult/config.json` (all optional):
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `review.score_threshold` | number | 12 | Aggregate score required to pass review (max 15) |
+| `review.score_threshold` | number | 24 | Aggregate score required to pass 3-stage review (max 30) |
 | `review.max_iterations` | number | 3 | Maximum review retry iterations |
 | `review.required_changed_files` | number | 5 | Number of changed files that triggers mandatory review |
 | `gates.output_max_chars` | number | 2000 | Max gate output chars (excess is truncated) |
@@ -196,13 +253,14 @@ Environment variable overrides: `QULT_REVIEW_SCORE_THRESHOLD`, `QULT_REVIEW_MAX_
 <details>
 <summary><strong>Review score threshold rationale</strong></summary>
 
-The reviewer agent scores three dimensions (Correctness, Design, Security) on a 1-5 scale. The default threshold of 12/15 means:
+The 3-stage reviewer scores six dimensions (Completeness, Accuracy, Design, Maintainability, Vulnerability, Hardening) on a 1-5 scale. The default threshold of 24/30 means:
 
-- 5+5+2 = 12: A security-weak change still passes (acceptable for internal tools)
-- 4+4+4 = 12: Balanced "good enough" across all dimensions
-- 3+3+3 = 9: Fails. Consistent mediocrity is caught
+- 4+4+4+4+4+4 = 24: Consistent "good" across all dimensions
+- 5+5+5+5+2+2 = 24: Excellent code but weak security still passes (marginal)
+- 3+3+3+3+3+3 = 18: Fails. Consistent mediocrity is caught
+- 5+5+4+4+4+4 = 26: Strong code passes comfortably
 
-The threshold is configurable because acceptable quality varies by project. Lower it for prototypes (`"score_threshold": 9`), raise it for production APIs (`"score_threshold": 14`).
+The threshold is configurable because acceptable quality varies by project. Lower it for prototypes (`"score_threshold": 18`), raise it for production APIs (`"score_threshold": 27`).
 
 Scores are LLM-generated and not perfectly reproducible. The trend-aware iteration system (up to `max_iterations` retries) compensates: if the score improves across iterations, the feedback is working. If it stagnates, the system advises a different approach.
 
@@ -308,19 +366,21 @@ Use `extensions` to route files to the correct linter. The `{file}` placeholder 
 
 | Principle | Meaning |
 |-----------|---------|
-| **Wall > advisory** | Stop with DENY (exit 2). Advisories are assumed to be ignored |
+| **The Wall > advisory** | Stop with DENY (exit 2). Advisories are assumed to be ignored |
 | **fail-open** | All hooks use try-catch. qult failures never block Claude |
+| **Proof or Block** | No completion claims without verification evidence |
 | **structural guarantee** | Quality enforced by structure. Stress-test assumptions, remove if broken |
 | **zero dependencies** | All devDependencies + bun build bundle |
 
-## Plan generation
+## Agents
 
-```
-/qult:plan-generator "Add JWT auth to the API"
-  -> Opus analyzes the codebase
-  -> Generates plan in WHAT/WHERE/VERIFY/BOUNDARY/SIZE format
-  -> Writes to .claude/plans/
-```
+| Agent | Model | Dimensions | Purpose |
+|-------|-------|-----------|---------|
+| **plan-generator** | Opus | — | Analyzes codebase, generates structured implementation plans |
+| **plan-evaluator** | Opus | Feasibility, Completeness, Clarity | Evaluates plan quality before implementation |
+| **spec-reviewer** | Opus | Completeness, Accuracy | Verifies implementation matches the plan |
+| **quality-reviewer** | Opus | Design, Maintainability | Evaluates code quality and edge cases |
+| **security-reviewer** | Opus | Vulnerability, Hardening | OWASP Top 10 security review |
 
 ## Data storage
 
@@ -397,7 +457,7 @@ qult runs the exact command in `gates.json`. If the command produces false posit
 The review iteration limit defaults to 3. After 3 attempts, the review proceeds regardless. If you want to skip review iteration:
 
 - Lower `review.score_threshold` in `.qult/config.json`
-- Or set `QULT_REVIEW_SCORE_THRESHOLD=9` as an environment variable
+- Or set `QULT_REVIEW_SCORE_THRESHOLD=18` as an environment variable
 
 If scores stagnate (same score across iterations), the SubagentStop hook suggests trying a fundamentally different approach. This is by design: the same fix strategy applied repeatedly will not improve the score.
 

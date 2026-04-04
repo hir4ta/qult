@@ -21,7 +21,7 @@ export interface QultConfig {
 
 const DEFAULTS: QultConfig = {
 	review: {
-		score_threshold: 12,
+		score_threshold: 24,
 		max_iterations: 3,
 		required_changed_files: 5,
 	},

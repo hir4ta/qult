@@ -26,10 +26,10 @@ The user will specify what they want:
 ### Change a config value
 
 Allowed keys:
-- `review.score_threshold` (default: 12) — minimum aggregate review score (3-15)
+- `review.score_threshold` (default: 24) — minimum aggregate review score across 3 stages (6-30). 6 dimensions: Completeness, Accuracy, Design, Maintainability, Vulnerability, Hardening.
 - `review.max_iterations` (default: 3) — max review retry cycles
 - `review.required_changed_files` (default: 5) — file count triggering review requirement
-- `plan_eval.score_threshold` (default: 10) — minimum aggregate plan eval score
+- `plan_eval.score_threshold` (default: 10) — minimum aggregate plan eval score (3-15)
 - `plan_eval.max_iterations` (default: 2) — max plan eval retry cycles
 
 1. Call `mcp__plugin_qult_qult__set_config({ key: "<key>", value: <number> })`

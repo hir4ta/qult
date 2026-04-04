@@ -39,7 +39,10 @@ import {
 	buildPlanEvalBlockMessage,
 	buildReviewBlockMessage,
 	parseDimensionScores,
+	parseQualityScores,
 	parseScores,
+	parseSecurityScores,
+	parseSpecScores,
 	validatePlanHeuristics,
 	validatePlanStructure,
 } from "../hooks/subagent-stop/index.ts";
@@ -124,6 +127,43 @@ describe("parseDimensionScores", () => {
 
 	it("rejects partial dimensions", () => {
 		expect(parseDimensionScores("Feasibility=4 Completeness=5", dims)).toBeNull();
+	});
+});
+
+describe("parseSpecScores", () => {
+	it("parses spec reviewer format", () => {
+		const result = parseSpecScores("Score: Completeness=4 Accuracy=5");
+		expect(result).toEqual({ completeness: 4, accuracy: 5 });
+	});
+
+	it("returns null on missing dimension", () => {
+		expect(parseSpecScores("Score: Completeness=4")).toBeNull();
+	});
+
+	it("returns null on empty string", () => {
+		expect(parseSpecScores("")).toBeNull();
+	});
+});
+
+describe("parseQualityScores", () => {
+	it("parses quality reviewer format", () => {
+		const result = parseQualityScores("Score: Design=3 Maintainability=4");
+		expect(result).toEqual({ design: 3, maintainability: 4 });
+	});
+
+	it("returns null on missing dimension", () => {
+		expect(parseQualityScores("Score: Design=3")).toBeNull();
+	});
+});
+
+describe("parseSecurityScores", () => {
+	it("parses security reviewer format", () => {
+		const result = parseSecurityScores("Score: Vulnerability=5 Hardening=4");
+		expect(result).toEqual({ vulnerability: 5, hardening: 4 });
+	});
+
+	it("returns null on missing dimension", () => {
+		expect(parseSecurityScores("Score: Vulnerability=5")).toBeNull();
 	});
 });
 
@@ -401,7 +441,17 @@ describe("subagentStop: integration", () => {
 		expect(stderrCapture.join("")).toContain("FAIL");
 	});
 
-	it("qult-reviewer with PASS + high score (>=12): allows", async () => {
+	it("qult-reviewer with PASS + high score (>=24): allows", async () => {
+		// Legacy reviewer threshold is now 24/15 max — scores 5+5+5=15 always pass since 15 < 24 triggers block.
+		// For legacy reviewer, any PASS + score is subject to threshold.
+		// With new default threshold of 24, legacy reviewer (max 15) will always be below threshold.
+		// Override config to test legacy path:
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ review: { score_threshold: 12 } }),
+		);
+		resetAllCaches();
+
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await subagentStop({
 			agent_type: "qult-reviewer",
@@ -416,6 +466,12 @@ describe("subagentStop: integration", () => {
 	});
 
 	it("qult:reviewer (colon format from plugin) works identically", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ review: { score_threshold: 12 } }),
+		);
+		resetAllCaches();
+
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await subagentStop({
 			agent_type: "qult:reviewer",
@@ -430,6 +486,12 @@ describe("subagentStop: integration", () => {
 	});
 
 	it("qult-reviewer with PASS + low score (<12): blocks for iteration", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ review: { score_threshold: 12 } }),
+		);
+		resetAllCaches();
+
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await expect(
 			subagentStop({
@@ -517,6 +579,96 @@ Why this change is needed.
 		});
 		expect(exitCode).toBeNull();
 		expect(stderrCapture.join("")).toBe("");
+	});
+
+	// --- 3-stage review agents ---
+
+	it("qult-spec-reviewer with PASS: allows", async () => {
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		await subagentStop({
+			agent_type: "qult-spec-reviewer",
+			last_assistant_message: "Spec: PASS\nScore: Completeness=5 Accuracy=4\nNo issues found.",
+		});
+		expect(exitCode).toBeNull();
+	});
+
+	it("qult-spec-reviewer with FAIL: blocks", async () => {
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		await expect(
+			subagentStop({
+				agent_type: "qult-spec-reviewer",
+				last_assistant_message:
+					"Spec: FAIL\nScore: Completeness=2 Accuracy=3\n[critical] plan — Task 1 not implemented",
+			}),
+		).rejects.toThrow("process.exit");
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("Spec: FAIL");
+	});
+
+	it("qult-quality-reviewer with PASS: allows", async () => {
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		await subagentStop({
+			agent_type: "qult-quality-reviewer",
+			last_assistant_message: "Quality: PASS\nScore: Design=4 Maintainability=5\nNo issues found.",
+		});
+		expect(exitCode).toBeNull();
+	});
+
+	it("qult-quality-reviewer with FAIL: blocks", async () => {
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		await expect(
+			subagentStop({
+				agent_type: "qult-quality-reviewer",
+				last_assistant_message:
+					"Quality: FAIL\nScore: Design=2 Maintainability=3\n[critical] Mixed concerns in handler",
+			}),
+		).rejects.toThrow("process.exit");
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("Quality: FAIL");
+	});
+
+	it("qult-security-reviewer with PASS: allows", async () => {
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		await subagentStop({
+			agent_type: "qult-security-reviewer",
+			last_assistant_message:
+				"Security: PASS\nScore: Vulnerability=5 Hardening=4\nNo issues found.",
+		});
+		expect(exitCode).toBeNull();
+	});
+
+	it("qult-security-reviewer with FAIL: blocks", async () => {
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		await expect(
+			subagentStop({
+				agent_type: "qult-security-reviewer",
+				last_assistant_message:
+					"Security: FAIL\nScore: Vulnerability=1 Hardening=2\n[critical] SQL injection in user input handler",
+			}),
+		).rejects.toThrow("process.exit");
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("Security: FAIL");
+	});
+
+	it("qult-spec-reviewer with invalid output: blocks", async () => {
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		await expect(
+			subagentStop({
+				agent_type: "qult-spec-reviewer",
+				last_assistant_message: "The implementation looks correct to me.",
+			}),
+		).rejects.toThrow("process.exit");
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("Spec reviewer output must include");
+	});
+
+	it("qult:spec-reviewer (colon format) works identically", async () => {
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		await subagentStop({
+			agent_type: "qult:spec-reviewer",
+			last_assistant_message: "Spec: PASS\nScore: Completeness=5 Accuracy=5\nNo issues found.",
+		});
+		expect(exitCode).toBeNull();
 	});
 
 	it("Plan agent with invalid plan (missing sections): blocks", async () => {
