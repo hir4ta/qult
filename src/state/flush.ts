@@ -1,7 +1,7 @@
 import { resetConfigCache } from "../config.ts";
 import { resetGatesCache } from "../gates/load.ts";
 import { flush as flushPendingFixes, resetCache as resetPendingFixes } from "./pending-fixes.ts";
-import { resetPlanCache } from "./plan-status.ts";
+import { resetPlanCache, setDisableHomeFallback } from "./plan-status.ts";
 import { flush as flushSessionState, resetCache as resetSessionState } from "./session-state.ts";
 
 /** Flush all dirty state caches to disk. Called once at end of hook dispatch. */
@@ -25,4 +25,5 @@ export function resetAllCaches(): void {
 	resetGatesCache();
 	resetPlanCache();
 	resetConfigCache();
+	setDisableHomeFallback(true); // Tests should not access ~/.claude/plans/
 }

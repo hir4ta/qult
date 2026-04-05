@@ -137,6 +137,9 @@ describe("preTool: Bash git commit checks", () => {
 			"## Tasks\n### Task 1: test [pending]\n- **File**: foo.ts\n",
 		);
 
+		const { recordChangedFile } = await import("../state/session-state.ts");
+		recordChangedFile("/fake/changed-file.ts");
+
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
 		try {
 			await preTool({
@@ -167,7 +170,8 @@ describe("preTool: Bash git commit checks", () => {
 			"## Tasks\n### Task 1: test [pending]\n- **File**: foo.ts\n",
 		);
 
-		const { recordTestPass } = await import("../state/session-state.ts");
+		const { recordChangedFile, recordTestPass } = await import("../state/session-state.ts");
+		recordChangedFile("/fake/changed-file.ts");
 		recordTestPass("vitest run");
 
 		const preTool = (await import("../hooks/pre-tool.ts")).default;

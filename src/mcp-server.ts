@@ -559,6 +559,11 @@ function handleRequest(parsed: JsonRpcRequest, cwd: string): JsonRpcResponse | n
 						"- When debugging, use /qult:debug for structured root-cause analysis.",
 						"- When finishing a branch, use /qult:finish for structured completion.",
 						"- Independent 4-stage review (/qult:review) is required for large changes or when a plan is active.",
+						"",
+						"## Hook/MCP Roles",
+						"- Hooks detect test pass best-effort via output parsing. If tests passed but hook didn't detect it, call record_test_pass explicitly.",
+						"- After committing, session state resets (test/review cleared). This is expected — gates only apply to uncommitted changes.",
+						"- MCP tools (record_test_pass, record_review) are the authoritative state management mechanism.",
 					].join("\n"),
 				},
 			};

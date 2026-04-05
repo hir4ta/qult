@@ -203,7 +203,11 @@ describe("extra_path validation", () => {
 			}),
 		);
 		const config = loadConfig();
-		expect(config.gates.extra_path).toEqual([".venv/bin", "/usr/local/bin", "../node_modules/.bin"]);
+		expect(config.gates.extra_path).toEqual([
+			".venv/bin",
+			"/usr/local/bin",
+			"../node_modules/.bin",
+		]);
 	});
 
 	it("ignores non-string items in extra_path", () => {

@@ -362,6 +362,7 @@ describe("Scenario 10: Edit .qult/ files does not trigger gates", () => {
 describe("Scenario 11: Plan status tracking — Stop blocks on incomplete plan", () => {
 	it("blocks when plan has pending tasks, allows when all done", async () => {
 		const stop = (await import("../hooks/stop.ts")).default;
+		const { recordChangedFile } = await import("../state/session-state.ts");
 
 		const planDir = join(TEST_DIR, ".claude", "plans");
 		mkdirSync(planDir, { recursive: true });
@@ -376,6 +377,7 @@ describe("Scenario 11: Plan status tracking — Stop blocks on incomplete plan",
 				"- [ ] Final Review",
 			].join("\n"),
 		);
+		recordChangedFile("/fake/changed-file.ts");
 
 		// Stop should block — incomplete tasks + no review
 		try {
@@ -517,10 +519,11 @@ describe("Scenario 14: git commit DENIED without test pass", () => {
 		mkdirSync(planDir, { recursive: true });
 		writeFileSync(join(planDir, "test-plan.md"), "## Tasks\n### Task 1: implement [done]\n");
 
-		const { clearOnCommit, recordTestPass, recordReview } = await import(
+		const { clearOnCommit, recordChangedFile, recordTestPass, recordReview } = await import(
 			"../state/session-state.ts"
 		);
 		clearOnCommit();
+		recordChangedFile("/fake/changed-file.ts");
 
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
 
@@ -537,6 +540,7 @@ describe("Scenario 14: git commit DENIED without test pass", () => {
 		expect(exitCode).toBe(2);
 
 		// Test pass but no review → DENY (plan active)
+		recordChangedFile("/fake/changed-file.ts");
 		recordTestPass("vitest run");
 		stdoutCapture = [];
 		exitCode = null;
@@ -572,6 +576,9 @@ describe("Scenario 15: Stop blocks without review when plan exists", () => {
 			join(planDir, "test-plan.md"),
 			"## Tasks\n### Task 1: implement feature [done]\n",
 		);
+
+		const { recordChangedFile } = await import("../state/session-state.ts");
+		recordChangedFile("/fake/changed-file.ts");
 
 		const stop = (await import("../hooks/stop.ts")).default;
 		try {
@@ -1669,7 +1676,8 @@ describe("Scenario: Stop blocks when Verify results not recorded", () => {
 			].join("\n"),
 		);
 
-		const { recordReview } = await import("../state/session-state.ts");
+		const { recordChangedFile, recordReview } = await import("../state/session-state.ts");
+		recordChangedFile("/fake/changed-file.ts");
 		recordReview();
 
 		const stop = (await import("../hooks/stop.ts")).default;
@@ -2153,15 +2161,13 @@ describe("Scenario: Incomplete review (only 3 of 4 stages) blocks", () => {
 		// Run only 3 stages (no Adversarial)
 		await subagentStop({
 			agent_type: "qult-spec-reviewer",
-			last_assistant_message:
-				"Spec: PASS\nScore: Completeness=4 Accuracy=4\nNo issues found.",
+			last_assistant_message: "Spec: PASS\nScore: Completeness=4 Accuracy=4\nNo issues found.",
 		});
 		expect(exitCode).toBeNull();
 
 		await subagentStop({
 			agent_type: "qult-quality-reviewer",
-			last_assistant_message:
-				"Quality: PASS\nScore: Design=4 Maintainability=4\nNo issues found.",
+			last_assistant_message: "Quality: PASS\nScore: Design=4 Maintainability=4\nNo issues found.",
 		});
 		expect(exitCode).toBeNull();
 

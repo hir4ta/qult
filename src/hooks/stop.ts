@@ -13,7 +13,7 @@ import type { HookEvent } from "../types.ts";
 import { block } from "./respond.ts";
 
 // Escalation thresholds: advisory warnings become blocking after N occurrences
-const SECURITY_ESCALATION_THRESHOLD = 5;
+const SECURITY_ESCALATION_THRESHOLD = 10;
 const DRIFT_ESCALATION_THRESHOLD = 8;
 const TEST_QUALITY_ESCALATION_THRESHOLD = 8;
 
@@ -28,9 +28,12 @@ export default async function stop(ev: HookEvent): Promise<void> {
 		block(`Pending lint/type errors remain. Fix these before completing:\n${fileList}`);
 	}
 
+	const state = readSessionState();
+	const hasChanges = (state.changed_file_paths?.length ?? 0) > 0;
+
 	// Plan checks: incomplete tasks, then Verify results (block() throws, so sequential)
 	const plan = getActivePlan();
-	if (plan) {
+	if (plan && hasChanges) {
 		const incomplete = plan.tasks.filter((t) => t.status !== "done");
 		if (incomplete.length > 0) {
 			const taskList = incomplete.map((t) => `  [${t.status}] ${t.name}`).join("\n");
@@ -54,23 +57,25 @@ export default async function stop(ev: HookEvent): Promise<void> {
 		}
 	}
 
-	// Block if large change without a plan (enforces "architect designs, agent implements")
-	if (!plan) {
-		const state = readSessionState();
-		const changed = state.changed_file_paths?.length ?? 0;
-		const threshold = loadConfig().review.required_changed_files;
-		if (changed >= threshold) {
-			block(
-				`${changed} files changed without a plan. Run /qult:plan-generator before continuing.\n` +
-					"Large changes require a structured plan so TDD enforcement, task verification, and scope tracking can function.",
-			);
+	// Skip plan-required and review gates when no files changed (post-commit state)
+	if (hasChanges) {
+		// Block if large change without a plan (enforces "architect designs, agent implements")
+		if (!plan) {
+			const changed = state.changed_file_paths.length;
+			const threshold = loadConfig().review.required_changed_files;
+			if (changed >= threshold) {
+				block(
+					`${changed} files changed without a plan. Run /qult:plan-generator before continuing.\n` +
+						"Large changes require a structured plan so TDD enforcement, task verification, and scope tracking can function.",
+				);
+			}
 		}
-	}
 
-	// Block if no review has been run (conditional on change size / plan)
-	if (!readLastReview()) {
-		if (isReviewRequired() && !isGateDisabled("review")) {
-			block("Run /qult:review before finishing. Independent review is required.");
+		// Block if no review has been run (conditional on change size / plan)
+		if (!readLastReview()) {
+			if (isReviewRequired() && !isGateDisabled("review")) {
+				block("Run /qult:review before finishing. Independent review is required.");
+			}
 		}
 	}
 

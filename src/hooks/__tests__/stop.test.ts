@@ -76,6 +76,7 @@ describe("stop hook", () => {
 			join(planDir, "test-plan.md"),
 			"## Tasks\n### Task 1: implement feature [done]\n",
 		);
+		recordChangedFile("/fake/changed-file.ts");
 
 		const handler = (await import("../stop.ts")).default;
 		try {
@@ -101,6 +102,7 @@ describe("stop hook", () => {
 				"- **Verify**: src/__tests__/foo.test.ts:testFoo",
 			].join("\n"),
 		);
+		recordChangedFile("/fake/changed-file.ts");
 		recordReview();
 
 		const handler = (await import("../stop.ts")).default;

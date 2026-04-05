@@ -135,12 +135,17 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 		const securityFixes = detectSecurityPatterns(file);
 		if (securityFixes.length > 0) {
 			newFixes.push(...securityFixes);
-			const count = incrementEscalation("security_warning_count");
-			// Matches SECURITY_ESCALATION_THRESHOLD in stop.ts
-			if (count >= 5) {
-				process.stderr.write(
-					`[qult] Security escalation: ${count} security warnings this session. Review security posture.\n`,
-				);
+			// Don't count test file warnings toward escalation (false positive reduction)
+			const fileName = file.split("/").pop() ?? "";
+			const isTestFile =
+				fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_");
+			if (!isTestFile) {
+				const count = incrementEscalation("security_warning_count");
+				if (count >= 10) {
+					process.stderr.write(
+						`[qult] Security escalation: ${count} security warnings this session. Review security posture.\n`,
+					);
+				}
 			}
 		}
 	} catch {
@@ -332,8 +337,9 @@ const GIT_COMMIT_RE = /\bgit\s+(?:-\S+(?:\s+\S+)?\s+)*commit\b/i;
 const LINT_FIX_RE =
 	/\b(biome\s+(check|lint).*--(fix|write)|biome\s+format|eslint.*--fix|prettier.*--write|ruff\s+check.*--fix|ruff\s+format|gofmt|go\s+fmt|cargo\s+fmt|autopep8|black)\b/;
 
-/** Fallback regex for test command detection when no on_commit gates configured */
-const TEST_CMD_RE = /\b(vitest|jest|mocha|pytest|go\s+test|cargo\s+test)\b/;
+/** Fallback regex for test command detection when no on_commit gates configured.
+ *  Includes bun/npx/pnpm prefixed variants. */
+const TEST_CMD_RE = /\b(bun\s+)?(vitest|jest|mocha|pytest|go\s+test|cargo\s+test)\b/;
 
 function handleBash(ev: HookEvent): void {
 	const command = typeof ev.tool_input?.command === "string" ? ev.tool_input.command : null;
@@ -413,6 +419,7 @@ function isTestCommand(command: string): boolean {
 }
 
 /** Test command detected: record pass only if exit code 0 is explicitly present.
+ *  Best-effort detection — MCP `record_test_pass` is the authoritative mechanism.
  *  Requires positive evidence of success — absence of exit code does NOT count as pass. */
 function onTestCommand(ev: HookEvent, command: string): void {
 	// Prefer structured exitCode from tool_response (more reliable than regex)
@@ -422,9 +429,13 @@ function onTestCommand(ev: HookEvent, command: string): void {
 		return;
 	}
 
-	// Fallback: parse exit code from text output
+	// Fallback: parse exit code from text output (multiple patterns for robustness)
 	const output = getToolOutput(ev);
-	const exitCodeMatch = output.match(/exit code (\d+)/i) ?? output.match(/exited with (\d+)/i);
+	const exitCodeMatch =
+		output.match(/exit code (\d+)/i) ??
+		output.match(/exited with (\d+)/i) ??
+		output.match(/exited with code (\d+)/i) ??
+		output.match(/process exited with (\d+)/i);
 	const isPass = exitCodeMatch ? Number(exitCodeMatch[1]) === 0 : false;
 
 	if (isPass) {

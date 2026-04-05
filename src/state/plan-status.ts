@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 export interface PlanTask {
@@ -85,22 +86,53 @@ export function parseVerifyField(verify: string): { file: string; testName: stri
 	return { file, testName };
 }
 
-/** Get the path of the latest plan file (by mtime). Returns null if none found. */
-function getLatestPlanPath(): string | null {
+/** Scan a directory for .md plan files, return sorted by mtime (newest first). */
+function scanPlanDir(dir: string): { path: string; mtime: number }[] {
 	try {
-		const planDir = join(process.cwd(), ".claude", "plans");
-		if (!existsSync(planDir)) return null;
-
-		const files = readdirSync(planDir)
+		if (!existsSync(dir)) return [];
+		return readdirSync(dir)
 			.filter((f) => f.endsWith(".md"))
 			.map((f) => ({
-				name: f,
-				mtime: statSync(join(planDir, f)).mtimeMs,
+				path: join(dir, f),
+				mtime: statSync(join(dir, f)).mtimeMs,
 			}))
 			.sort((a, b) => b.mtime - a.mtime);
+	} catch {
+		return [];
+	}
+}
 
-		if (files.length === 0) return null;
-		return join(planDir, files[0]!.name);
+/** Get the path of the latest plan file (by mtime). Returns null if none found.
+ *  Search order: .claude/plans/ (project) → CLAUDE_PLANS_DIR env → ~/.claude/plans/ (user home) */
+function getLatestPlanPath(): string | null {
+	try {
+		// 1. Project-local plans (primary)
+		const projectDir = join(process.cwd(), ".claude", "plans");
+		const projectFiles = scanPlanDir(projectDir);
+		if (projectFiles.length > 0) return projectFiles[0]!.path;
+
+		// 2. CLAUDE_PLANS_DIR env var (explicit override)
+		const envDir = process.env.CLAUDE_PLANS_DIR;
+		if (envDir) {
+			const envFiles = scanPlanDir(envDir);
+			if (envFiles.length > 0) return envFiles[0]!.path;
+		}
+
+		// 3. User home ~/.claude/plans/ (Claude Code stores plans here in some modes)
+		// Only consider files modified within the last 24 hours to avoid stale cross-project plans
+		if (!_disableHomeFallback) {
+			try {
+				const homeDir = join(homedir(), ".claude", "plans");
+				const homeFiles = scanPlanDir(homeDir);
+				const recentCutoff = Date.now() - 24 * 60 * 60 * 1000;
+				const recentHome = homeFiles.filter((f) => f.mtime > recentCutoff);
+				if (recentHome.length > 0) return recentHome[0]!.path;
+			} catch {
+				/* fail-open: homedir() may fail in sandboxed environments */
+			}
+		}
+
+		return null;
 	} catch {
 		return null;
 	}
@@ -110,6 +142,12 @@ function getLatestPlanPath(): string | null {
 let _planCache: { tasks: PlanTask[]; path: string } | null = null;
 let _planCachePath: string | null = null;
 let _planCacheMtime: number | null = null;
+
+/** Disable home directory fallback (for tests). */
+let _disableHomeFallback = false;
+export function setDisableHomeFallback(disable: boolean): void {
+	_disableHomeFallback = disable;
+}
 
 /** Find and parse the latest plan file. Returns null if no plan found or no tasks. */
 export function getActivePlan(): { tasks: PlanTask[]; path: string } | null {
@@ -138,15 +176,16 @@ export function getActivePlan(): { tasks: PlanTask[]; path: string } | null {
 	}
 }
 
-/** Check whether a plan file exists in .claude/plans/ (any .md file counts).
- *  Unlike getActivePlan(), this does NOT require parseable tasks — file presence is sufficient. */
+/** Check whether a plan file exists in the project directory (any .md file counts).
+ *  Only checks project-local .claude/plans/ — NOT user home.
+ *  This is used for plan-required enforcement which should only apply to project-level plans. */
 export function hasPlanFile(): boolean {
 	try {
 		const planDir = join(process.cwd(), ".claude", "plans");
 		if (!existsSync(planDir)) return false;
 		return readdirSync(planDir).some((f) => f.endsWith(".md"));
 	} catch {
-		return false; // fail-open
+		return false;
 	}
 }
 

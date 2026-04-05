@@ -188,19 +188,22 @@ function checkBash(ev: HookEvent): void {
 		}
 	}
 
-	// Require plan when many files changed (structural enforcement — not bypassable)
+	// Skip plan-required and review gates when no files changed (post-commit state)
 	const state = readSessionState();
 	const changedCount = state.changed_file_paths?.length ?? 0;
-	if (changedCount >= loadConfig().review.required_changed_files && !hasPlanFile()) {
-		deny(
-			`${changedCount} files changed without a plan. Run /qult:plan-generator before committing.`,
-		);
-	}
+	if (changedCount > 0) {
+		// Require plan when many files changed (structural enforcement — not bypassable)
+		if (changedCount >= loadConfig().review.required_changed_files && !hasPlanFile()) {
+			deny(
+				`${changedCount} files changed without a plan. Run /qult:plan-generator before committing.`,
+			);
+		}
 
-	// Require independent review before commit (independent of gates config)
-	if (!readLastReview()) {
-		if (isReviewRequired() && !isGateDisabled("review")) {
-			deny("Run /qult:review before committing. Independent review is required.");
+		// Require independent review before commit (independent of gates config)
+		if (!readLastReview()) {
+			if (isReviewRequired() && !isGateDisabled("review")) {
+				deny("Run /qult:review before committing. Independent review is required.");
+			}
 		}
 	}
 }
