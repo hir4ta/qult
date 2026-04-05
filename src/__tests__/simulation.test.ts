@@ -1081,6 +1081,8 @@ describe("Scenario 18: test pass recorded → commit allowed", () => {
 
 	it("commit denied without test pass, allowed after test pass", async () => {
 		setupGatesWithTest();
+		const { recordChangedFile } = await import("../state/session-state.ts");
+		recordChangedFile("/fake/src/file.ts");
 		const postTool = (await import("../hooks/post-tool.ts")).default;
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
 
@@ -1452,6 +1454,9 @@ describe("Scenario: MCP record_test_pass allows commit", () => {
 		};
 		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
 		resetGatesCache();
+
+		const { recordChangedFile } = await import("../state/session-state.ts");
+		recordChangedFile("/fake/src/file.ts");
 
 		const { handleTool } = await import("../mcp-server.ts");
 

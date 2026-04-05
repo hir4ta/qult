@@ -93,6 +93,9 @@ describe("preTool: Bash git commit checks", () => {
 			}),
 		);
 
+		const { recordChangedFile } = await import("../state/session-state.ts");
+		recordChangedFile("/fake/src/file.ts");
+
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
 		try {
 			await preTool({
@@ -330,6 +333,9 @@ describe("preTool: Bash git commit checks", () => {
 			}),
 		);
 
+		const { recordChangedFile } = await import("../state/session-state.ts");
+		recordChangedFile("/fake/src/file.ts");
+
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
 		try {
 			await preTool({
@@ -350,6 +356,9 @@ describe("preTool: Bash git commit checks", () => {
 				on_commit: { test: { command: "vitest run", timeout: 30000 } },
 			}),
 		);
+
+		const { recordChangedFile } = await import("../state/session-state.ts");
+		recordChangedFile("/fake/src/file.ts");
 
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
 		try {

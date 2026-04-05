@@ -14,6 +14,29 @@ import { block } from "./respond.ts";
 
 // Escalation thresholds: advisory warnings become blocking after N occurrences
 const SECURITY_ESCALATION_THRESHOLD = 10;
+
+/** Source code extensions — non-source changes (version bumps, build artifacts) skip gates. */
+const SOURCE_EXTS = new Set([
+	".ts",
+	".tsx",
+	".js",
+	".jsx",
+	".mts",
+	".cts",
+	".mjs",
+	".cjs",
+	".py",
+	".pyi",
+	".go",
+	".rs",
+	".rb",
+	".java",
+	".kt",
+	".php",
+	".cs",
+	".vue",
+	".svelte",
+]);
 const DRIFT_ESCALATION_THRESHOLD = 8;
 const TEST_QUALITY_ESCALATION_THRESHOLD = 8;
 
@@ -29,11 +52,20 @@ export default async function stop(ev: HookEvent): Promise<void> {
 	}
 
 	const state = readSessionState();
-	const hasChanges = (state.changed_file_paths?.length ?? 0) > 0;
+	const changedPaths = state.changed_file_paths ?? [];
+	const hasChanges = changedPaths.length > 0;
+
+	// Skip plan/review gates when only non-source files changed (e.g. release: version bump + build artifacts)
+	const hasSourceChanges =
+		hasChanges &&
+		changedPaths.some((p) => {
+			const ext = p.slice(p.lastIndexOf("."));
+			return SOURCE_EXTS.has(ext);
+		});
 
 	// Plan checks: incomplete tasks, then Verify results (block() throws, so sequential)
 	const plan = getActivePlan();
-	if (plan && hasChanges) {
+	if (plan && hasSourceChanges) {
 		const incomplete = plan.tasks.filter((t) => t.status !== "done");
 		if (incomplete.length > 0) {
 			const taskList = incomplete.map((t) => `  [${t.status}] ${t.name}`).join("\n");
@@ -57,8 +89,8 @@ export default async function stop(ev: HookEvent): Promise<void> {
 		}
 	}
 
-	// Skip plan-required and review gates when no files changed (post-commit state)
-	if (hasChanges) {
+	// Skip plan-required and review gates when no source files changed (post-commit or release state)
+	if (hasSourceChanges) {
 		// Block if large change without a plan (enforces "architect designs, agent implements")
 		if (!plan) {
 			const changed = state.changed_file_paths.length;

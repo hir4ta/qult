@@ -174,10 +174,48 @@ function checkTddOrder(resolvedTarget: string): void {
 	}
 }
 
+/** File extensions considered "source code" for gate purposes.
+ *  Non-source changes (package.json, README, dist/) skip test/review gates. */
+const SOURCE_EXTS = new Set([
+	".ts",
+	".tsx",
+	".js",
+	".jsx",
+	".mts",
+	".cts",
+	".mjs",
+	".cjs",
+	".py",
+	".pyi",
+	".go",
+	".rs",
+	".rb",
+	".java",
+	".kt",
+	".php",
+	".cs",
+	".vue",
+	".svelte",
+]);
+
+function hasSourceChanges(paths: string[]): boolean {
+	return paths.some((p) => {
+		const ext = p.slice(p.lastIndexOf("."));
+		return SOURCE_EXTS.has(ext);
+	});
+}
+
 function checkBash(ev: HookEvent): void {
 	const command = typeof ev.tool_input?.command === "string" ? ev.tool_input.command : null;
 	if (!command) return;
 	if (!GIT_COMMIT_RE.test(command)) return;
+
+	const state = readSessionState();
+	const changedPaths = state.changed_file_paths ?? [];
+	const changedCount = changedPaths.length;
+
+	// Skip all commit gates when no source code changed (e.g. release commits: version bump + build artifacts)
+	if (!hasSourceChanges(changedPaths)) return;
 
 	// Require tests to pass before commit (only if project has test gates)
 	const gates = loadGates();
@@ -188,9 +226,6 @@ function checkBash(ev: HookEvent): void {
 		}
 	}
 
-	// Skip plan-required and review gates when no files changed (post-commit state)
-	const state = readSessionState();
-	const changedCount = state.changed_file_paths?.length ?? 0;
 	if (changedCount > 0) {
 		// Require plan when many files changed (structural enforcement — not bypassable)
 		if (changedCount >= loadConfig().review.required_changed_files && !hasPlanFile()) {
