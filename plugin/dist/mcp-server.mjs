@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 var DEFAULTS = {
   review: {
-    score_threshold: 26,
+    score_threshold: 34,
     max_iterations: 3,
     required_changed_files: 5,
     dimension_floor: 4
@@ -22,7 +22,8 @@ var DEFAULTS = {
     output_max_chars: 2000,
     default_timeout: 1e4,
     test_on_edit: false,
-    test_on_edit_timeout: 15000
+    test_on_edit_timeout: 15000,
+    extra_path: []
   }
 };
 function applyConfigLayer(config, raw) {
@@ -56,6 +57,8 @@ function applyConfigLayer(config, raw) {
       config.gates.test_on_edit = g.test_on_edit;
     if (typeof g.test_on_edit_timeout === "number")
       config.gates.test_on_edit_timeout = g.test_on_edit_timeout;
+    if (Array.isArray(g.extra_path))
+      config.gates.extra_path = g.extra_path.filter((p) => typeof p === "string" && p.trim().length > 0);
   }
 }
 var _cache = null;
@@ -287,7 +290,7 @@ var TOOL_DEFS = [
       properties: {
         aggregate_score: {
           type: "number",
-          description: "Aggregate review score (e.g. 26 out of 30)"
+          description: "Aggregate review score (e.g. 34 out of 40 for 4-stage review)"
         }
       }
     }
@@ -308,7 +311,7 @@ var TOOL_DEFS = [
   },
   {
     name: "record_stage_scores",
-    description: "Record review scores for a specific stage (Spec, Quality, or Security). Call after each review stage passes with scores. Used for 3-stage aggregate score tracking.",
+    description: "Record review scores for a specific stage (Spec, Quality, Security, or Adversarial). Call after each review stage passes with scores. Used for 4-stage aggregate score tracking (/40).",
     inputSchema: {
       type: "object",
       properties: {
@@ -466,8 +469,8 @@ function handleTool(name, cwd, args) {
     }
     case "record_review": {
       const statePath = findLatestStateFile(cwd, "session-state");
+      const state = readJson(statePath, {});
       try {
-        const state = readJson(statePath, {});
         const changedPaths = Array.isArray(state.changed_file_paths) ? state.changed_file_paths : [];
         const threshold = loadConfig().review.required_changed_files;
         if (changedPaths.length >= threshold && !hasPlanFile()) {
@@ -483,7 +486,6 @@ function handleTool(name, cwd, args) {
         }
       } catch {}
       try {
-        const state = readJson(statePath, {});
         state.review_completed_at = new Date().toISOString();
         atomicWriteJson(statePath, state);
         _jsonCache.delete(statePath);
@@ -491,7 +493,7 @@ function handleTool(name, cwd, args) {
         return { isError: true, content: [{ type: "text", text: "Failed to record review." }] };
       }
       const score = typeof args?.aggregate_score === "number" ? args.aggregate_score : null;
-      const msg = score !== null ? `Review recorded (aggregate: ${score}/30).` : "Review recorded.";
+      const msg = score !== null ? `Review recorded (aggregate: ${score}).` : "Review recorded.";
       return { content: [{ type: "text", text: msg }] };
     }
     case "record_test_pass": {
@@ -596,7 +598,12 @@ function handleRequest(parsed, cwd) {
             "- When requirements are unclear, use /qult:explore to interview the architect.",
             "- When debugging, use /qult:debug for structured root-cause analysis.",
             "- When finishing a branch, use /qult:finish for structured completion.",
-            "- Independent 3-stage review (/qult:review) is required for large changes or when a plan is active."
+            "- Independent 4-stage review (/qult:review) is required for large changes or when a plan is active.",
+            "",
+            "## Hook/MCP Roles",
+            "- Hooks detect test pass best-effort via output parsing. If tests passed but hook didn't detect it, call record_test_pass explicitly.",
+            "- After committing, session state resets (test/review cleared). This is expected — gates only apply to uncommitted changes.",
+            "- MCP tools (record_test_pass, record_review) are the authoritative state management mechanism."
           ].join(`
 `)
         }

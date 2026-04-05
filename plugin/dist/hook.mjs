@@ -70,6 +70,8 @@ function applyConfigLayer(config, raw) {
       config.gates.test_on_edit = g.test_on_edit;
     if (typeof g.test_on_edit_timeout === "number")
       config.gates.test_on_edit_timeout = g.test_on_edit_timeout;
+    if (Array.isArray(g.extra_path))
+      config.gates.extra_path = g.extra_path.filter((p) => typeof p === "string" && p.trim().length > 0);
   }
 }
 function loadConfig() {
@@ -123,7 +125,7 @@ var DEFAULTS, _cache = null;
 var init_config = __esm(() => {
   DEFAULTS = {
     review: {
-      score_threshold: 26,
+      score_threshold: 34,
       max_iterations: 3,
       required_changed_files: 5,
       dimension_floor: 4
@@ -137,7 +139,8 @@ var init_config = __esm(() => {
       output_max_chars: 2000,
       default_timeout: 1e4,
       test_on_edit: false,
-      test_on_edit_timeout: 15000
+      test_on_edit_timeout: 15000,
+      extra_path: []
     }
   };
 });
@@ -228,6 +231,7 @@ var init_pending_fixes = __esm(() => {
 
 // src/state/plan-status.ts
 import { existsSync as existsSync5, readdirSync, readFileSync as readFileSync4, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { join as join4 } from "node:path";
 function normalizeStatus(raw) {
   if (!raw)
@@ -288,18 +292,41 @@ function parseVerifyField(verify) {
     return null;
   return { file, testName };
 }
+function scanPlanDir(dir) {
+  try {
+    if (!existsSync5(dir))
+      return [];
+    return readdirSync(dir).filter((f) => f.endsWith(".md")).map((f) => ({
+      path: join4(dir, f),
+      mtime: statSync(join4(dir, f)).mtimeMs
+    })).sort((a, b) => b.mtime - a.mtime);
+  } catch {
+    return [];
+  }
+}
 function getLatestPlanPath() {
   try {
-    const planDir = join4(process.cwd(), ".claude", "plans");
-    if (!existsSync5(planDir))
-      return null;
-    const files = readdirSync(planDir).filter((f) => f.endsWith(".md")).map((f) => ({
-      name: f,
-      mtime: statSync(join4(planDir, f)).mtimeMs
-    })).sort((a, b) => b.mtime - a.mtime);
-    if (files.length === 0)
-      return null;
-    return join4(planDir, files[0].name);
+    const projectDir = join4(process.cwd(), ".claude", "plans");
+    const projectFiles = scanPlanDir(projectDir);
+    if (projectFiles.length > 0)
+      return projectFiles[0].path;
+    const envDir = process.env.CLAUDE_PLANS_DIR;
+    if (envDir) {
+      const envFiles = scanPlanDir(envDir);
+      if (envFiles.length > 0)
+        return envFiles[0].path;
+    }
+    if (!_disableHomeFallback) {
+      try {
+        const homeDir = join4(homedir(), ".claude", "plans");
+        const homeFiles = scanPlanDir(homeDir);
+        const recentCutoff = Date.now() - 24 * 60 * 60 * 1000;
+        const recentHome = homeFiles.filter((f) => f.mtime > recentCutoff);
+        if (recentHome.length > 0)
+          return recentHome[0].path;
+      } catch {}
+    }
+    return null;
   } catch {
     return null;
   }
@@ -337,7 +364,7 @@ function hasPlanFile() {
     return false;
   }
 }
-var TASK_RE, CHECKBOX_RE, FILE_LINE_RE, VERIFY_LINE_RE, _planCache = null, _planCachePath = null, _planCacheMtime = null;
+var TASK_RE, CHECKBOX_RE, FILE_LINE_RE, VERIFY_LINE_RE, _planCache = null, _planCachePath = null, _planCacheMtime = null, _disableHomeFallback = false;
 var init_plan_status = __esm(() => {
   TASK_RE = /^###\s+Task\s+(\d+)[\s:\-\u2013\u2014]+(.+?)(?:\s*\[([^\]]+)\])?\s*$/i;
   CHECKBOX_RE = /^-\s+\[([ xX])\]\s*(.+)$/;
@@ -590,6 +617,14 @@ function incrementGateFailure(file, gateName) {
   const key = `${file}:${gateName}`;
   const count = Math.min((state.gate_failure_counts[key] ?? 0) + 1, MAX_GATE_FAILURE_COUNT);
   state.gate_failure_counts[key] = count;
+  const keys = Object.keys(state.gate_failure_counts);
+  if (keys.length > MAX_GATE_FAILURE_KEYS) {
+    const sorted = [...keys].sort((a, b) => (state.gate_failure_counts[a] ?? 0) - (state.gate_failure_counts[b] ?? 0));
+    const toRemove = sorted.slice(0, keys.length - MAX_GATE_FAILURE_KEYS);
+    for (const k of toRemove) {
+      delete state.gate_failure_counts[k];
+    }
+  }
   writeState(state);
   return count;
 }
@@ -625,7 +660,7 @@ function incrementEscalation(counter) {
 function readEscalation(counter) {
   return readSessionState()[counter] ?? 0;
 }
-var STATE_DIR2 = ".qult/.state", FILE = "session-state.json", _cache4 = null, _dirty2 = false, _sessionScope2 = null, TOOL_EXTS, MAX_GATE_FAILURE_COUNT = 100;
+var STATE_DIR2 = ".qult/.state", FILE = "session-state.json", _cache4 = null, _dirty2 = false, _sessionScope2 = null, TOOL_EXTS, MAX_GATE_FAILURE_COUNT = 100, MAX_GATE_FAILURE_KEYS = 200;
 var init_session_state = __esm(() => {
   init_config();
   init_load();
@@ -822,6 +857,12 @@ function smartTruncate(text, maxChars) {
 ... (${truncated} chars truncated) ...
 ${tail}`;
 }
+function buildPath(extraPaths) {
+  const cwd = process.cwd();
+  const extra = extraPaths.filter((p) => !p.includes(":")).map((p) => p.startsWith("/") ? p : `${cwd}/${p}`).join(":");
+  const prefix = extra ? `${extra}:` : "";
+  return `${prefix}${cwd}/node_modules/.bin:${process.env.PATH}`;
+}
 function runGateAsync(name, gate, file) {
   const config = loadConfig();
   const command = file ? gate.command.replace("{file}", shellEscape(file)) : gate.command;
@@ -834,7 +875,7 @@ function runGateAsync(name, gate, file) {
       timeout,
       env: {
         ...process.env,
-        PATH: `${process.cwd()}/node_modules/.bin:${process.env.PATH}`
+        PATH: buildPath(config.gates.extra_path)
       },
       encoding: "utf-8"
     }, (err, stdout, stderr) => {
@@ -863,7 +904,7 @@ function runGate(name, gate, file) {
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
-        PATH: `${process.cwd()}/node_modules/.bin:${process.env.PATH}`
+        PATH: buildPath(config.gates.extra_path)
       },
       encoding: "utf-8"
     });
@@ -1109,7 +1150,9 @@ function detectExportBreakingChanges(file) {
   let oldContent;
   try {
     const cwd = process.cwd();
-    const relPath = file.startsWith(cwd) ? file.slice(cwd.length + 1) : file;
+    if (!file.startsWith(`${cwd}/`) && file !== cwd)
+      return [];
+    const relPath = file.slice(cwd.length + 1);
     oldContent = execSync2(`git show HEAD:${relPath}`, {
       cwd,
       encoding: "utf-8",
@@ -1147,7 +1190,7 @@ var init_export_check = __esm(() => {
 });
 
 // src/hooks/detectors/import-check.ts
-import { existsSync as existsSync10, readFileSync as readFileSync8 } from "node:fs";
+import { existsSync as existsSync10, readdirSync as readdirSync4, readFileSync as readFileSync8 } from "node:fs";
 import { extname as extname4, join as join9, resolve } from "node:path";
 function detectHallucinatedImports(file) {
   if (isGateDisabled("import-check"))
@@ -1206,6 +1249,7 @@ function detectTsJsImports(file, content) {
 function detectPythonImports(file, content) {
   const cwd = process.cwd();
   const missingModules = [];
+  const sitePackagesDirs = findPythonSitePackages(cwd);
   for (const line of content.split(`
 `)) {
     if (line.trimStart().startsWith("#"))
@@ -1216,7 +1260,11 @@ function detectPythonImports(file, content) {
     const moduleName = match[1] ?? match[2];
     if (PY_STDLIB.has(moduleName))
       continue;
+    if (moduleName.startsWith("_"))
+      continue;
     if (existsSync10(join9(cwd, `${moduleName}.py`)) || existsSync10(join9(cwd, moduleName)))
+      continue;
+    if (sitePackagesDirs.some((dir) => existsSync10(join9(dir, moduleName)) || existsSync10(join9(dir, `${moduleName}.py`))))
       continue;
     missingModules.push(moduleName);
   }
@@ -1288,6 +1336,26 @@ function detectGoImports(file, content) {
       gate: "import-check"
     }
   ];
+}
+function findPythonSitePackages(cwd) {
+  const dirs = [];
+  const venvRoots = [join9(cwd, ".venv"), join9(cwd, "venv")];
+  for (const root of venvRoots) {
+    try {
+      if (!existsSync10(root))
+        continue;
+      const libDir = join9(root, "lib");
+      if (!existsSync10(libDir))
+        continue;
+      const entries = readdirSync4(libDir).filter((e) => e.startsWith("python"));
+      for (const entry of entries) {
+        const sp = join9(libDir, entry, "site-packages");
+        if (existsSync10(sp))
+          dirs.push(sp);
+      }
+    } catch {}
+  }
+  return dirs;
 }
 var TS_JS_EXTS3, PY_EXTS2, GO_EXTS, IMPORT_LINE_RE, PY_IMPORT_RE2, MAX_IMPORT_CHECK_SIZE = 500000, GO_IMPORT_RE, GO_STDLIB_PREFIXES, FALLBACK_BUILTINS, PY_STDLIB;
 var init_import_check = __esm(() => {
@@ -1569,9 +1637,34 @@ function detectSecurityPatterns(file) {
   const fileName = file.split("/").pop() ?? "";
   const isTestFile = fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_") || fileName.includes("_test.");
   const starIsComment = JS_TS_EXTS.has(ext) || ext === ".java" || ext === ".kt" || ext === ".cs";
+  const hasBlockComments = JS_TS_EXTS.has(ext) || ext === ".java" || ext === ".kt" || ext === ".cs" || ext === ".go" || ext === ".rs";
+  let inBlockComment = false;
   for (let i = 0;i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trimStart();
+    if (hasBlockComments) {
+      if (inBlockComment) {
+        const endIdx = line.indexOf("*/");
+        if (endIdx >= 0) {
+          inBlockComment = false;
+          const afterComment = line.slice(endIdx + 2);
+          if (!afterComment.trim())
+            continue;
+        } else {
+          continue;
+        }
+      }
+      if (!inBlockComment && trimmed.startsWith("/*")) {
+        const endIdx = line.indexOf("*/", line.indexOf("/*") + 2);
+        if (endIdx < 0) {
+          inBlockComment = true;
+          continue;
+        }
+        const afterComment = line.slice(endIdx + 2);
+        if (!afterComment.trim())
+          continue;
+      }
+    }
     if (trimmed.startsWith("//") || trimmed.startsWith("#"))
       continue;
     if (starIsComment && trimmed.startsWith("*"))
@@ -1819,10 +1912,14 @@ async function handleEditWrite(ev) {
     const securityFixes = detectSecurityPatterns(file);
     if (securityFixes.length > 0) {
       newFixes.push(...securityFixes);
-      const count = incrementEscalation("security_warning_count");
-      if (count >= 5) {
-        process.stderr.write(`[qult] Security escalation: ${count} security warnings this session. Review security posture.
+      const fileName = file.split("/").pop() ?? "";
+      const isTestFile2 = fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_");
+      if (!isTestFile2) {
+        const count = incrementEscalation("security_warning_count");
+        if (count >= 10) {
+          process.stderr.write(`[qult] Security escalation: ${count} security warnings this session. Review security posture.
 `);
+        }
       }
     }
   } catch {}
@@ -2029,12 +2126,28 @@ function isTestCommand(command) {
   return TEST_CMD_RE.test(command);
 }
 function onTestCommand(ev, command) {
+  const structuredCode = getStructuredExitCode(ev);
+  if (structuredCode !== null) {
+    if (structuredCode === 0)
+      recordTestPass(command);
+    return;
+  }
   const output = getToolOutput(ev);
-  const exitCodeMatch = output.match(/exit code (\d+)/i) ?? output.match(/exited with (\d+)/i);
+  const exitCodeMatch = output.match(/exit code (\d+)/i) ?? output.match(/exited with (\d+)/i) ?? output.match(/exited with code (\d+)/i) ?? output.match(/process exited with (\d+)/i);
   const isPass = exitCodeMatch ? Number(exitCodeMatch[1]) === 0 : false;
   if (isPass) {
     recordTestPass(command);
   }
+}
+function getStructuredExitCode(ev) {
+  if (ev.tool_response != null && typeof ev.tool_response === "object") {
+    const resp = ev.tool_response;
+    if (typeof resp.exitCode === "number")
+      return resp.exitCode;
+    if (typeof resp.exit_code === "number")
+      return resp.exit_code;
+  }
+  return null;
 }
 function getToolOutput(ev) {
   if (ev.tool_response != null && typeof ev.tool_response === "object") {
@@ -2064,7 +2177,7 @@ var init_post_tool = __esm(() => {
   planWarnedAt = new Set;
   GIT_COMMIT_RE = /\bgit\s+(?:-\S+(?:\s+\S+)?\s+)*commit\b/i;
   LINT_FIX_RE = /\b(biome\s+(check|lint).*--(fix|write)|biome\s+format|eslint.*--fix|prettier.*--write|ruff\s+check.*--fix|ruff\s+format|gofmt|go\s+fmt|cargo\s+fmt|autopep8|black)\b/;
-  TEST_CMD_RE = /\b(vitest|jest|mocha|pytest|go\s+test|cargo\s+test)\b/;
+  TEST_CMD_RE = /\b(bun\s+)?(vitest|jest|mocha|pytest|go\s+test|cargo\s+test)\b/;
 });
 
 // src/hooks/pre-tool.ts
@@ -2206,12 +2319,14 @@ function checkBash(ev) {
   }
   const state = readSessionState();
   const changedCount = state.changed_file_paths?.length ?? 0;
-  if (changedCount >= loadConfig().review.required_changed_files && !hasPlanFile()) {
-    deny(`${changedCount} files changed without a plan. Run /qult:plan-generator before committing.`);
-  }
-  if (!readLastReview()) {
-    if (isReviewRequired() && !isGateDisabled("review")) {
-      deny("Run /qult:review before committing. Independent review is required.");
+  if (changedCount > 0) {
+    if (changedCount >= loadConfig().review.required_changed_files && !hasPlanFile()) {
+      deny(`${changedCount} files changed without a plan. Run /qult:plan-generator before committing.`);
+    }
+    if (!readLastReview()) {
+      if (isReviewRequired() && !isGateDisabled("review")) {
+        deny("Run /qult:review before committing. Independent review is required.");
+      }
     }
   }
 }
@@ -2242,8 +2357,10 @@ async function stop(ev) {
     block(`Pending lint/type errors remain. Fix these before completing:
 ${fileList}`);
   }
+  const state = readSessionState();
+  const hasChanges = (state.changed_file_paths?.length ?? 0) > 0;
   const plan = getActivePlan();
-  if (plan) {
+  if (plan && hasChanges) {
     const incomplete = plan.tasks.filter((t) => t.status !== "done");
     if (incomplete.length > 0) {
       const taskList = incomplete.map((t) => `  [${t.status}] ${t.name}`).join(`
@@ -2265,18 +2382,19 @@ ${list}
 Use TaskCreate to track tasks so TaskCompleted triggers Verify test execution.`);
     }
   }
-  if (!plan) {
-    const state = readSessionState();
-    const changed = state.changed_file_paths?.length ?? 0;
-    const threshold = loadConfig().review.required_changed_files;
-    if (changed >= threshold) {
-      block(`${changed} files changed without a plan. Run /qult:plan-generator before continuing.
+  if (hasChanges) {
+    if (!plan) {
+      const changed = state.changed_file_paths.length;
+      const threshold = loadConfig().review.required_changed_files;
+      if (changed >= threshold) {
+        block(`${changed} files changed without a plan. Run /qult:plan-generator before continuing.
 ` + "Large changes require a structured plan so TDD enforcement, task verification, and scope tracking can function.");
+      }
     }
-  }
-  if (!readLastReview()) {
-    if (isReviewRequired() && !isGateDisabled("review")) {
-      block("Run /qult:review before finishing. Independent review is required.");
+    if (!readLastReview()) {
+      if (isReviewRequired() && !isGateDisabled("review")) {
+        block("Run /qult:review before finishing. Independent review is required.");
+      }
     }
   }
   if (readLastReview()) {
@@ -2296,7 +2414,7 @@ Use TaskCreate to track tasks so TaskCompleted triggers Verify test execution.`)
     block(`${testQualityCount} test quality warnings emitted this session. Improve test assertions before finishing.`);
   }
 }
-var SECURITY_ESCALATION_THRESHOLD = 5, DRIFT_ESCALATION_THRESHOLD = 8, TEST_QUALITY_ESCALATION_THRESHOLD = 8;
+var SECURITY_ESCALATION_THRESHOLD = 10, DRIFT_ESCALATION_THRESHOLD = 8, TEST_QUALITY_ESCALATION_THRESHOLD = 8;
 var init_stop = __esm(() => {
   init_config();
   init_pending_fixes();
@@ -2306,6 +2424,7 @@ var init_stop = __esm(() => {
 });
 
 // src/state/calibration.ts
+import { createHash } from "node:crypto";
 import { existsSync as existsSync13, readFileSync as readFileSync10 } from "node:fs";
 import { join as join11 } from "node:path";
 function calibrationPath() {
@@ -2313,6 +2432,10 @@ function calibrationPath() {
   if (!pluginDataDir)
     return null;
   return join11(pluginDataDir, CALIBRATION_FILE);
+}
+function projectId() {
+  const cwd = process.cwd();
+  return createHash("sha256").update(cwd).digest("hex").slice(0, 12);
 }
 function readCalibration() {
   const path = calibrationPath();
@@ -2335,7 +2458,8 @@ function recordCalibration(aggregate, stageScores) {
   data.entries.push({
     date: new Date().toISOString(),
     aggregate,
-    stages: stageScores
+    stages: stageScores,
+    project: projectId()
   });
   if (data.entries.length > MAX_ENTRIES) {
     data.entries = data.entries.slice(-MAX_ENTRIES);
@@ -2345,7 +2469,10 @@ function recordCalibration(aggregate, stageScores) {
   const mean = scores.reduce((s, v) => s + v, 0) / count;
   const variance = scores.reduce((s, v) => s + (v - mean) ** 2, 0) / count;
   const stddev = Math.sqrt(variance);
-  const perfectCount = data.entries.filter((e) => e.aggregate === 30).length;
+  const perfectCount = data.entries.filter((e) => {
+    const dims = Object.values(e.stages).flatMap((s) => Object.values(s));
+    return dims.length > 0 && dims.every((v) => v === 5);
+  }).length;
   data.stats = {
     mean: Math.round(mean * 100) / 100,
     stddev: Math.round(stddev * 100) / 100,
@@ -2356,26 +2483,43 @@ function recordCalibration(aggregate, stageScores) {
 }
 function checkCalibration() {
   const data = readCalibration();
-  if (!data || data.stats.count < 5)
+  if (!data)
     return [];
+  const currentProject = projectId();
+  const projectEntries = data.entries.filter((e) => !e.project || e.project === currentProject);
+  if (projectEntries.length < 5)
+    return [];
+  const scores = projectEntries.map((e) => e.aggregate);
+  const count = scores.length;
+  const mean = scores.reduce((s, v) => s + v, 0) / count;
+  const variance = scores.reduce((s, v) => s + (v - mean) ** 2, 0) / count;
+  const stddev = Math.sqrt(variance);
   const warnings = [];
-  if (data.stats.mean > 28 && data.stats.stddev < 1.5) {
+  const maxObserved = Math.max(...scores, 1);
+  const highMeanThreshold = maxObserved * 0.93;
+  const roundedMean = Math.round(mean * 100) / 100;
+  const roundedStddev = Math.round(stddev * 100) / 100;
+  if (roundedMean > highMeanThreshold && roundedStddev < 1.5) {
     warnings.push({
       type: "high_mean",
-      message: `Cross-session calibration: mean ${data.stats.mean}/30 with σ=${data.stats.stddev} across ${data.stats.count} reviews. Scores may be systematically inflated.`
+      message: `Cross-session calibration: mean ${roundedMean} with σ=${roundedStddev} across ${count} reviews. Scores may be systematically inflated.`
     });
   }
-  if (data.stats.count >= 10 && data.stats.stddev < 0.8) {
+  if (count >= 10 && roundedStddev < 0.8) {
     warnings.push({
       type: "low_variance",
-      message: `Cross-session calibration: σ=${data.stats.stddev} across ${data.stats.count} reviews suggests reviewers are not differentiating between codebases.`
+      message: `Cross-session calibration: σ=${roundedStddev} across ${count} reviews suggests reviewers are not differentiating.`
     });
   }
-  const recentPerfect = data.entries.slice(-3).every((e) => e.aggregate === 30);
-  if (recentPerfect && data.stats.count >= 3) {
+  const recentEntries = projectEntries.slice(-3);
+  const maxPossible = recentEntries.every((e) => {
+    const dims = Object.values(e.stages).flatMap((s) => Object.values(s));
+    return dims.length > 0 && dims.every((v) => v === 5);
+  });
+  if (maxPossible && recentEntries.length >= 3) {
     warnings.push({
       type: "perfect_streak",
-      message: "Cross-session calibration: 3+ consecutive perfect scores (30/30). No code is perfect — reviewers may need recalibration."
+      message: "Cross-session calibration: 3+ consecutive perfect scores. No code is perfect — reviewers may need recalibration."
     });
   }
   return warnings;
@@ -2644,7 +2788,7 @@ var init_score_parsers = __esm(() => {
 });
 
 // src/hooks/subagent-stop/agent-validators.ts
-import { existsSync as existsSync14, readdirSync as readdirSync4, readFileSync as readFileSync11, statSync as statSync4 } from "node:fs";
+import { existsSync as existsSync14, readdirSync as readdirSync5, readFileSync as readFileSync11, statSync as statSync4 } from "node:fs";
 import { join as join12 } from "node:path";
 async function subagentStop(ev) {
   if (ev.stop_hook_active)
@@ -2672,7 +2816,6 @@ async function subagentStop(ev) {
     validateStageReviewer(output, QUALITY_PASS_RE, QUALITY_FAIL_RE, parseQualityScores, "Quality");
   } else if (normalized === "qult-security-reviewer") {
     validateStageReviewer(output, SECURITY_PASS_RE, SECURITY_FAIL_RE, parseSecurityScores, "Security");
-    checkAggregateScore();
   } else if (normalized === "qult-adversarial-reviewer") {
     validateStageReviewer(output, ADVERSARIAL_PASS_RE, ADVERSARIAL_FAIL_RE, parseAdversarialScores, "Adversarial");
   } else if (normalized === "qult-plan-evaluator") {
@@ -2686,7 +2829,7 @@ function validatePlan() {
     const planDir = join12(process.cwd(), ".claude", "plans");
     if (!existsSync14(planDir))
       return;
-    const files = readdirSync4(planDir).filter((f) => f.endsWith(".md")).map((f) => ({
+    const files = readdirSync5(planDir).filter((f) => f.endsWith(".md")).map((f) => ({
       name: f,
       mtime: statSync4(join12(planDir, f)).mtimeMs
     })).sort((a, b) => b.mtime - a.mtime);
@@ -2769,6 +2912,24 @@ function validateStageReviewer(output, passRe, failRe, scoreParser, stageName) {
     try {
       extractFindings(output, stageName);
     } catch {}
+    tryAggregateCheck();
+  }
+}
+function tryAggregateCheck() {
+  try {
+    const stageScores = getStageScores();
+    const completedStages = ALL_STAGES.filter((s) => stageScores[s] && typeof stageScores[s] === "object" && !Array.isArray(stageScores[s]));
+    const hasAllStages = completedStages.length === ALL_STAGES.length;
+    if (hasAllStages) {
+      checkAggregateScore(ALL_STAGES);
+    }
+    if (completedStages.length === 3 && completedStages.includes("Security") && !completedStages.includes("Adversarial")) {
+      process.stderr.write(`[qult] Review warning: only ${completedStages.length}/4 stages completed. Adversarial reviewer has not run yet. All 4 stages are required for a complete review. Waiting for Adversarial stage...
+`);
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("process.exit"))
+      throw err;
   }
 }
 function checkScoreFindingsConsistency(output, scores, stageName) {
@@ -2789,23 +2950,21 @@ function checkScoreFindingsConsistency(output, scores, stageName) {
     block(`${stageName}: all dimensions 5/5 with no findings and no explicit 'No issues found' declaration. Perfect scores require either findings or an explicit declaration. Rerun the review.`);
   }
 }
-function checkAggregateScore() {
+function checkAggregateScore(stages) {
   try {
     const stageScores = getStageScores();
-    const stages = ["Spec", "Quality", "Security"];
-    if (!stages.every((s) => stageScores[s] && typeof stageScores[s] === "object" && !Array.isArray(stageScores[s])))
-      return;
     const allScores = stages.flatMap((s) => Object.values(stageScores[s]).filter((v) => typeof v === "number" && v >= 1 && v <= 5));
-    if (allScores.length !== 6)
+    if (allScores.length !== stages.length * 2)
       return;
     const aggregate = allScores.reduce((sum, v) => sum + v, 0);
+    const maxScore = allScores.length * 5;
     const config = loadConfig();
     const threshold = config.review.score_threshold;
     const maxIter = config.review.max_iterations;
     try {
       const uniqueScores = new Set(allScores);
       if (uniqueScores.size === 1) {
-        process.stderr.write(`[qult] Review bias warning: all 6 dimensions scored identically (${allScores[0]}/5). This may indicate template answers.
+        process.stderr.write(`[qult] Review bias warning: all ${allScores.length} dimensions scored identically (${allScores[0]}/5). This may indicate template answers.
 `);
       } else if (Math.max(...allScores) - Math.min(...allScores) < 2) {
         process.stderr.write(`[qult] Review bias warning: score range is ${Math.min(...allScores)}-${Math.max(...allScores)}/5 (low variance). Consider if reviewers differentiated sufficiently.
@@ -2848,7 +3007,7 @@ function checkAggregateScore() {
       }
       const weakest = findWeakestDimension(allDims);
       const trend = detectTrend(history);
-      let msg = `Review aggregate ${aggregate}/30 below threshold ${threshold}/30. Iteration ${iterCount}/${maxIter}.`;
+      let msg = `Review aggregate ${aggregate}/${maxScore} below threshold ${threshold}/${maxScore}. Iteration ${iterCount}/${maxIter}.`;
       if (weakest) {
         if (trend === "improving" && history.length >= 2) {
           const prev = history[history.length - 2];
@@ -2862,7 +3021,7 @@ function checkAggregateScore() {
       }
       block(msg);
     }
-    process.stderr.write(`[qult] Max review iterations (${maxIter}) reached. Aggregate ${aggregate}/30 below threshold ${threshold}/30. Proceeding anyway.
+    process.stderr.write(`[qult] Max review iterations (${maxIter}) reached. Aggregate ${aggregate}/${maxScore} below threshold ${threshold}/${maxScore}. Proceeding anyway.
 `);
     resetReviewIteration();
     recordReview();
@@ -2931,7 +3090,7 @@ function detectRepeatedPatterns(history) {
 function resetFindingsCache() {
   _currentFindings = [];
 }
-var SEVERITY_PATTERN, FINDING_RE, NO_ISSUES_RE, SPEC_PASS_RE, SPEC_FAIL_RE, QUALITY_PASS_RE, QUALITY_FAIL_RE, SECURITY_PASS_RE, SECURITY_FAIL_RE, ADVERSARIAL_PASS_RE, ADVERSARIAL_FAIL_RE, PLAN_PASS_RE, PLAN_REVISE_RE, FINDINGS_HISTORY_FILE = "review-findings-history.json", MAX_FINDINGS = 100, _currentFindings;
+var SEVERITY_PATTERN, FINDING_RE, NO_ISSUES_RE, SPEC_PASS_RE, SPEC_FAIL_RE, QUALITY_PASS_RE, QUALITY_FAIL_RE, SECURITY_PASS_RE, SECURITY_FAIL_RE, ADVERSARIAL_PASS_RE, ADVERSARIAL_FAIL_RE, PLAN_PASS_RE, PLAN_REVISE_RE, ALL_STAGES, FINDINGS_HISTORY_FILE = "review-findings-history.json", MAX_FINDINGS = 100, _currentFindings;
 var init_agent_validators = __esm(() => {
   init_config();
   init_atomic_write();
@@ -2954,6 +3113,7 @@ var init_agent_validators = __esm(() => {
   ADVERSARIAL_FAIL_RE = /^Adversarial:\s*FAIL/im;
   PLAN_PASS_RE = /^Plan:\s*PASS/im;
   PLAN_REVISE_RE = /^Plan:\s*REVISE/im;
+  ALL_STAGES = ["Spec", "Quality", "Security", "Adversarial"];
   _currentFindings = [];
 });
 
@@ -2985,6 +3145,36 @@ var init_subagent_stop = __esm(() => {
 // src/hooks/detectors/test-quality-check.ts
 import { existsSync as existsSync15, readFileSync as readFileSync12 } from "node:fs";
 import { resolve as resolve4 } from "node:path";
+function countAssertionsOutsideSetup(code) {
+  const lines = code.split(`
+`);
+  let inSetupBlock = false;
+  let braceDepth = 0;
+  let setupStartDepth = 0;
+  let count = 0;
+  for (const line of lines) {
+    if (!inSetupBlock && SETUP_BLOCK_RE.test(line)) {
+      inSetupBlock = true;
+      setupStartDepth = braceDepth;
+    }
+    for (const ch of line) {
+      if (ch === "{")
+        braceDepth++;
+      else if (ch === "}") {
+        braceDepth--;
+        if (inSetupBlock && braceDepth <= setupStartDepth) {
+          inSetupBlock = false;
+        }
+      }
+    }
+    if (!inSetupBlock) {
+      const matches = line.match(ASSERTION_RE);
+      if (matches)
+        count += matches.length;
+    }
+  }
+  return count;
+}
 function analyzeTestQuality(file) {
   const cwd = resolve4(process.cwd());
   const absPath = resolve4(cwd, file);
@@ -3005,8 +3195,10 @@ function analyzeTestQuality(file) {
 `);
   const lines = content.split(`
 `);
-  const assertionCount = (codeOnly.match(ASSERTION_RE) ?? []).length;
-  const testCount = (codeOnly.match(TEST_CASE_RE) ?? []).length || 1;
+  const testCount = (codeOnly.match(TEST_CASE_RE) ?? []).length;
+  if (testCount === 0)
+    return null;
+  const assertionCount = countAssertionsOutsideSetup(codeOnly);
   const avgAssertions = assertionCount / testCount;
   const smells = [];
   for (let i = 0;i < lines.length; i++) {
@@ -3102,7 +3294,7 @@ function formatTestQualityWarnings(file, result, taskKey) {
   }
   return warnings;
 }
-var MAX_CHECK_SIZE3 = 500000, ASSERTION_RE, TEST_CASE_RE, WEAK_MATCHERS, TRIVIAL_ASSERTION_RE, EMPTY_TEST_RE, MOCK_RE, ALWAYS_TRUE_RE, CONSTANT_SELF_RE, SNAPSHOT_RE, IMPL_COUPLED_RE;
+var MAX_CHECK_SIZE3 = 500000, ASSERTION_RE, TEST_CASE_RE, WEAK_MATCHERS, TRIVIAL_ASSERTION_RE, EMPTY_TEST_RE, MOCK_RE, ALWAYS_TRUE_RE, CONSTANT_SELF_RE, SNAPSHOT_RE, IMPL_COUPLED_RE, SETUP_BLOCK_RE;
 var init_test_quality_check = __esm(() => {
   ASSERTION_RE = /\b(expect|assert|should)\s*[.(]/g;
   TEST_CASE_RE = /\b(it|test)\s*\(/g;
@@ -3121,6 +3313,7 @@ var init_test_quality_check = __esm(() => {
   CONSTANT_SELF_RE = /expect\s*\(\s*(["'`][^"'`]*["'`]|\d+)\s*\)\s*\.(?:toBe|toEqual)\s*\(\s*\1\s*\)/;
   SNAPSHOT_RE = /\.toMatchSnapshot\s*\(|\.toMatchInlineSnapshot\s*\(/g;
   IMPL_COUPLED_RE = /expect\s*\(\s*\w+\s*\)\s*\.(?:toHaveBeenCalled|toHaveBeenCalledWith|toHaveBeenCalledTimes)\s*\(/;
+  SETUP_BLOCK_RE = /\b(beforeEach|afterEach|beforeAll|afterAll)\s*\(/;
 });
 
 // src/hooks/task-completed.ts
@@ -3249,7 +3442,7 @@ var exports_post_compact = {};
 __export(exports_post_compact, {
   default: () => postCompact
 });
-import { existsSync as existsSync17, readdirSync as readdirSync5, readFileSync as readFileSync13, statSync as statSync5 } from "node:fs";
+import { existsSync as existsSync17, readdirSync as readdirSync6, readFileSync as readFileSync13, statSync as statSync5 } from "node:fs";
 import { join as join14 } from "node:path";
 async function postCompact(_ev) {
   try {
@@ -3264,6 +3457,9 @@ async function postCompact(_ev) {
         parts.push(`[qult] ${fixes.length} pending fix(es):`);
         for (const fix of fixes) {
           parts.push(`  [${fix.gate}] ${fix.file}`);
+          if (fix.errors?.length > 0) {
+            parts.push(`    ${sanitizeForStderr(fix.errors[0].slice(0, 200))}`);
+          }
         }
       }
     }
@@ -3311,13 +3507,26 @@ async function postCompact(_ev) {
     try {
       const planDir = join14(process.cwd(), ".claude", "plans");
       if (existsSync17(planDir)) {
-        const planFiles = readdirSync5(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync5(join14(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
+        const planFiles = readdirSync6(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync5(join14(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
         if (planFiles.length > 0) {
           const content = readFileSync13(join14(planDir, planFiles[0].name), "utf-8");
           const taskCount = (content.match(/^###\s+Task\s+\d+/gim) ?? []).length;
           const doneCount = (content.match(/^###\s+Task\s+\d+.*\[done\]/gim) ?? []).length;
           if (taskCount > 0) {
             parts.push(`[qult] Plan: ${doneCount}/${taskCount} tasks done`);
+          }
+        }
+      }
+    } catch {}
+    try {
+      const findingsPath = join14(stateDir, "review-findings-history.json");
+      if (existsSync17(findingsPath)) {
+        const findings = safeReadJson(findingsPath, []);
+        if (findings.length > 0) {
+          const recent = findings.slice(-5);
+          parts.push("[qult] Recent review findings:");
+          for (const f of recent) {
+            parts.push(`  [${sanitizeForStderr(f.severity)}] ${sanitizeForStderr(f.file)} — ${sanitizeForStderr(f.description.slice(0, 150))}`);
           }
         }
       }
@@ -3330,7 +3539,7 @@ async function postCompact(_ev) {
 }
 function findLatestFile(stateDir, prefix) {
   try {
-    const files = readdirSync5(stateDir).filter((f) => f.startsWith(prefix) && f.endsWith(".json")).map((f) => ({
+    const files = readdirSync6(stateDir).filter((f) => f.startsWith(prefix) && f.endsWith(".json")).map((f) => ({
       path: join14(stateDir, f),
       mtime: statSync5(join14(stateDir, f)).mtimeMs
     })).sort((a, b) => b.mtime - a.mtime);
