@@ -51,6 +51,19 @@ export default async function postCompact(_ev: HookEvent): Promise<void> {
 				const reviewIter = state.review_iteration;
 				if (typeof reviewIter === "number" && reviewIter > 0)
 					summary.push(`review iteration: ${reviewIter}`);
+				// Quality escalation counters
+				const secWarn = state.security_warning_count;
+				if (typeof secWarn === "number" && secWarn > 0)
+					summary.push(`security warnings: ${secWarn}`);
+				const testQWarn = state.test_quality_warning_count;
+				if (typeof testQWarn === "number" && testQWarn > 0)
+					summary.push(`test quality warnings: ${testQWarn}`);
+				const driftWarn = state.drift_warning_count;
+				if (typeof driftWarn === "number" && driftWarn > 0)
+					summary.push(`drift warnings: ${driftWarn}`);
+				const deadImpWarn = state.dead_import_warning_count;
+				if (typeof deadImpWarn === "number" && deadImpWarn > 0)
+					summary.push(`dead import warnings: ${deadImpWarn}`);
 				if (summary.length > 0) {
 					parts.push(`[qult] Session: ${summary.join(", ")}`);
 				}

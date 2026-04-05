@@ -41,10 +41,17 @@ Heuristic: "Could the same result be achieved with fewer abstractions?" If yes, 
    - What happens with empty input? Null? Undefined?
    - What happens if an external call fails?
    - Is the function doing one thing or multiple things?
-4. For test files:
+4. For test files (comprehensive test quality review):
    - Do assertions verify behavior, or just check that code runs?
    - Are edge cases covered?
    - Is the test isolated (no shared mutable state)?
+   - **Weak matchers**: Are there assertions like `.toBeTruthy()`, `.toBeDefined()`, `.toBe(true)` that accept too many inputs? Should they assert specific values?
+   - **Trivial assertions**: Does any test assert `expect(x).toBe(x)` (same variable)?
+   - **Empty tests**: Are there `it('...', () => {})` with no body?
+   - **Mock overuse**: Do mocks outnumber assertions? Are tests verifying mock calls instead of outputs?
+   - **Implementation coupling**: Do tests use `toHaveBeenCalledWith` without also checking the result? Tests should verify what the code DOES, not how it does it.
+   - **Assertion count**: Are there at least 2 meaningful assertions per test case?
+   - **No-op tests**: Does the test pass even if the implementation is empty or broken?
 
 ## Scoring (required in output)
 
@@ -53,7 +60,7 @@ List all issues FIRST, then assign scores. Do not score before you have enumerat
 Rate each dimension 1-5:
 
 - **Design**: 5=each unit has one responsibility, can be tested in isolation, no unnecessary abstractions or wrappers; 4=responsibilities are clear but one unit has a secondary concern or one unnecessary wrapper exists that could be inlined; 3=two or more concerns mixed in one unit OR an abstraction layer exists that adds no value (single-implementation interface, wrapper-only class, pass-through function chain); 2=changing one feature requires modifying unrelated code; 1=no separation of concerns
-- **Maintainability**: 5=all realistic edge cases handled, errors propagated clearly, tests verify behavior; 4=correct for all realistic inputs but an unlikely edge case is unhandled; 3=a reachable code path produces wrong output or silently drops data; 2=a common input triggers wrong behavior or an error is silently swallowed; 1=core functionality is broken or tests don't verify actual behavior
+- **Maintainability**: 5=all realistic edge cases handled, errors propagated clearly, tests verify behavior with specific assertions (no weak matchers or mock-only tests); 4=correct for all realistic inputs but an unlikely edge case is unhandled, tests are meaningful but may use 1-2 weak matchers; 3=a reachable code path produces wrong output or silently drops data, OR tests use primarily weak matchers/mock-only assertions; 2=a common input triggers wrong behavior or an error is silently swallowed, OR tests have empty bodies or trivial assertions; 1=core functionality is broken or tests don't verify actual behavior
 
 **Verdict rule**: FAIL if any dimension ≤ 2 or any critical finding exists. PASS otherwise.
 

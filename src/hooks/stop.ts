@@ -1,13 +1,21 @@
+import { loadConfig } from "../config.ts";
 import { readPendingFixes } from "../state/pending-fixes.ts";
 import { getActivePlan } from "../state/plan-status.ts";
 import {
 	isGateDisabled,
 	isReviewRequired,
+	readEscalation,
 	readLastReview,
+	readSessionState,
 	readTaskVerifyResult,
 } from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
 import { block } from "./respond.ts";
+
+// Escalation thresholds: advisory warnings become blocking after N occurrences
+const SECURITY_ESCALATION_THRESHOLD = 5;
+const DRIFT_ESCALATION_THRESHOLD = 8;
+const TEST_QUALITY_ESCALATION_THRESHOLD = 8;
 
 /** Stop: block if pending-fixes, incomplete plan, or no review */
 export default async function stop(ev: HookEvent): Promise<void> {
@@ -46,10 +54,52 @@ export default async function stop(ev: HookEvent): Promise<void> {
 		}
 	}
 
+	// Block if large change without a plan (enforces "architect designs, agent implements")
+	if (!plan) {
+		const state = readSessionState();
+		const changed = state.changed_file_paths?.length ?? 0;
+		const threshold = loadConfig().review.required_changed_files;
+		if (changed >= threshold) {
+			block(
+				`${changed} files changed without a plan. Run /qult:plan-generator before continuing.\n` +
+					"Large changes require a structured plan so TDD enforcement, task verification, and scope tracking can function.",
+			);
+		}
+	}
+
 	// Block if no review has been run (conditional on change size / plan)
 	if (!readLastReview()) {
 		if (isReviewRequired() && !isGateDisabled("review")) {
 			block("Run /qult:review before finishing. Independent review is required.");
 		}
+	}
+
+	// Guide: suggest /qult:finish when review is complete (advisory, not blocking)
+	if (readLastReview()) {
+		process.stderr.write(
+			"[qult] Review complete. Run /qult:finish for structured branch completion (merge/PR/hold/discard).\n",
+		);
+	}
+
+	// Escalation: block if excessive quality warnings accumulated (advisory → enforcement)
+	const securityCount = readEscalation("security_warning_count");
+	if (securityCount >= SECURITY_ESCALATION_THRESHOLD && !isGateDisabled("security-check")) {
+		block(
+			`${securityCount} security warnings emitted this session. Fix security issues before finishing.`,
+		);
+	}
+
+	const driftCount = readEscalation("drift_warning_count");
+	if (driftCount >= DRIFT_ESCALATION_THRESHOLD) {
+		block(
+			`${driftCount} drift warnings emitted this session. Review scope and address drift before finishing.`,
+		);
+	}
+
+	const testQualityCount = readEscalation("test_quality_warning_count");
+	if (testQualityCount >= TEST_QUALITY_ESCALATION_THRESHOLD) {
+		block(
+			`${testQualityCount} test quality warnings emitted this session. Improve test assertions before finishing.`,
+		);
 	}
 }

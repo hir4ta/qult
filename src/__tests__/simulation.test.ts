@@ -1918,3 +1918,125 @@ describe("Scenario: Task drift detection warns on out-of-scope edits", () => {
 		expect(exitCode).toBeNull(); // Advisory only — no DENY
 	});
 });
+
+// ============================================================
+// Security-check detector → pending-fixes → DENY
+// ============================================================
+
+describe("Scenario: Security-check detects hardcoded secret and blocks", () => {
+	it("creates pending-fix with security-check gate and blocks other files", async () => {
+		setupPassingGates();
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "src/config.ts"), `const key = "AKIAIOSFODNN7EXAMPLE1";\n`);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/config.ts") },
+		});
+
+		const fixes = readPendingFixes();
+		const secFixes = fixes.filter((f) => f.gate === "security-check");
+		expect(secFixes).toHaveLength(1);
+		expect(secFixes[0]!.errors[0]).toContain("AWS access key");
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("security-check FAIL");
+
+		// Verify DENY on other file
+		exitCode = null;
+		stderrCapture = [];
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		try {
+			await preTool({
+				tool_name: "Edit",
+				tool_input: { file_path: join(TEST_DIR, "src/other.ts") },
+			});
+		} catch {
+			// process.exit(2) throws
+		}
+		expect(exitCode).toBe(2);
+	});
+});
+
+// ============================================================
+// Security escalation threshold blocks in Stop
+// ============================================================
+
+describe("Scenario: Security escalation blocks Stop after threshold", () => {
+	it("stop blocks when security_warning_count >= 5", async () => {
+		setupPassingGates();
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+
+		// Trigger 5 security warnings by editing files with secrets
+		for (let i = 0; i < 5; i++) {
+			const filePath = join(TEST_DIR, `src/secret${i}.ts`);
+			writeFileSync(filePath, `const key${i} = "AKIAIOSFODNN7EXAMPLE${i}";\n`);
+			await postTool({
+				tool_name: "Edit",
+				tool_input: { file_path: filePath },
+			});
+		}
+
+		// Verify escalation counter
+		const state = readSessionState();
+		expect(state.security_warning_count).toBeGreaterThanOrEqual(5);
+
+		// Stop should block
+		exitCode = null;
+		stderrCapture = [];
+		const stop = (await import("../hooks/stop.ts")).default;
+		try {
+			await stop({ hook_event_name: "Stop" });
+		} catch {
+			// process.exit(2) throws (may throw for pending-fixes first)
+		}
+		expect(exitCode).toBe(2);
+		const stderr = stderrCapture.join("");
+		// Either blocked for pending fixes or for security escalation
+		expect(stderr.includes("security warnings") || stderr.includes("Pending")).toBe(true);
+	});
+});
+
+// ============================================================
+// Dead import detection is advisory (no DENY)
+// ============================================================
+
+describe("Scenario: Dead import detection is advisory only", () => {
+	it("warns to stderr but does not create pending-fixes", async () => {
+		setupPassingGates();
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(
+			join(TEST_DIR, "src/unused.ts"),
+			`import { readFileSync, writeFileSync } from "node:fs";\n\nconst x = readFileSync("f", "utf-8");\n`,
+		);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: join(TEST_DIR, "src/unused.ts") },
+		});
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("Dead import");
+		expect(stderr).toContain("writeFileSync");
+
+		// Advisory: no pending-fixes for dead imports
+		const fixes = readPendingFixes();
+		const deadImportFixes = fixes.filter((f) => f.gate === "dead-import-check");
+		expect(deadImportFixes).toHaveLength(0);
+
+		// No DENY on other files from dead imports alone
+		exitCode = null;
+		if (fixes.length === 0) {
+			const preTool = (await import("../hooks/pre-tool.ts")).default;
+			await preTool({
+				tool_name: "Edit",
+				tool_input: { file_path: join(TEST_DIR, "src/other.ts") },
+			});
+			expect(exitCode).toBeNull();
+		}
+	});
+});

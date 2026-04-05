@@ -85,7 +85,7 @@ function formatPendingFixes(fixes) {
 function getValidGateNames(cwd) {
   const gatesPath = join(cwd, GATES_PATH);
   const gates = readJson(gatesPath, null);
-  const names = new Set(["review"]);
+  const names = new Set(["review", "security-check", "dead-import-check"]);
   if (gates) {
     for (const category of [gates.on_write, gates.on_commit, gates.on_review]) {
       if (category) {

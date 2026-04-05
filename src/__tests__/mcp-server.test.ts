@@ -316,6 +316,18 @@ describe("handleTool: disable_gate / enable_gate", () => {
 		expect(result.content[0]!.text).toContain("disabled");
 	});
 
+	it("disable_gate accepts computational detector names (security-check, dead-import-check)", () => {
+		const statePath = join(STATE_DIR, "session-state.json");
+		writeFileSync(statePath, JSON.stringify({ disabled_gates: [] }));
+		resetMcpCache();
+
+		const secResult = handleTool("disable_gate", TEST_DIR, { gate_name: "security-check" });
+		expect(secResult.content[0]!.text).toContain("disabled");
+
+		const deadResult = handleTool("disable_gate", TEST_DIR, { gate_name: "dead-import-check" });
+		expect(deadResult.content[0]!.text).toContain("disabled");
+	});
+
 	it("enable_gate removes gate from disabled_gates", () => {
 		const qultDir = join(TEST_DIR, ".qult");
 		writeFileSync(

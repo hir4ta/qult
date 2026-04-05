@@ -95,11 +95,12 @@ function formatPendingFixes(fixes: PendingFix[]): string {
 
 // ── Gate name validation ────────────────────────────────────
 
-/** Get all valid gate names from gates.json + "review" (session policy). */
+/** Get all valid gate names from gates.json + session-policy + computational detectors. */
 function getValidGateNames(cwd: string): string[] {
 	const gatesPath = join(cwd, GATES_PATH);
 	const gates = readJson<GatesConfig | null>(gatesPath, null);
-	const names = new Set<string>(["review"]);
+	// "review" = session policy gate; others = computational detectors (no external command)
+	const names = new Set<string>(["review", "security-check", "dead-import-check"]);
 	if (gates) {
 		for (const category of [gates.on_write, gates.on_commit, gates.on_review]) {
 			if (category) {

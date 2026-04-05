@@ -255,6 +255,35 @@ const PROBE_RULES: ProbeRule[] = [
 		executable: "gitleaks",
 	},
 
+	// --- on_commit: dependency audit (priority order) ---
+	{
+		configs: ["package-lock.json", "package.json"],
+		name: "audit-npm",
+		category: "on_commit",
+		command: "npm audit --audit-level=high",
+		timeout: 30000,
+		run_once_per_batch: true,
+		executable: "npm",
+	},
+	{
+		configs: ["requirements.txt", "pyproject.toml"],
+		name: "audit-pip",
+		category: "on_commit",
+		command: "pip-audit",
+		timeout: 30000,
+		run_once_per_batch: true,
+		executable: "pip-audit",
+	},
+	{
+		configs: ["Cargo.toml"],
+		name: "audit-cargo",
+		category: "on_commit",
+		command: "cargo audit",
+		timeout: 30000,
+		run_once_per_batch: true,
+		executable: "cargo-audit",
+	},
+
 	// --- on_review: e2e (priority order) ---
 	{
 		configs: [

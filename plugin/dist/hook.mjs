@@ -351,7 +351,11 @@ function defaultState() {
     plan_selfcheck_blocked_at: null,
     disabled_gates: [],
     task_verify_results: {},
-    gate_failure_counts: {}
+    gate_failure_counts: {},
+    security_warning_count: 0,
+    test_quality_warning_count: 0,
+    drift_warning_count: 0,
+    dead_import_warning_count: 0
   };
 }
 function readSessionState() {
@@ -489,6 +493,10 @@ function clearOnCommit() {
   state.plan_selfcheck_blocked_at = null;
   state.task_verify_results = {};
   state.gate_failure_counts = {};
+  state.security_warning_count = 0;
+  state.test_quality_warning_count = 0;
+  state.drift_warning_count = 0;
+  state.dead_import_warning_count = 0;
   writeState(state);
 }
 function getReviewIteration() {
@@ -584,6 +592,16 @@ function recordPlanSelfcheckBlocked() {
   const state = readSessionState();
   state.plan_selfcheck_blocked_at = new Date().toISOString();
   writeState(state);
+}
+function incrementEscalation(counter) {
+  const state = readSessionState();
+  const count = (state[counter] ?? 0) + 1;
+  state[counter] = count;
+  writeState(state);
+  return count;
+}
+function readEscalation(counter) {
+  return readSessionState()[counter] ?? 0;
 }
 var STATE_DIR2 = ".qult/.state", FILE = "session-state.json", _cache4 = null, _dirty2 = false, _sessionScope2 = null, TOOL_EXTS, MAX_GATE_FAILURE_COUNT = 100;
 var init_session_state = __esm(() => {
@@ -914,17 +932,157 @@ var init_convention_check = __esm(() => {
   PASCAL_RE = /^[A-Z][a-zA-Z0-9]*$/;
 });
 
-// src/hooks/detectors/export-check.ts
-import { execSync as execSync2 } from "node:child_process";
+// src/hooks/detectors/dead-import-check.ts
 import { existsSync as existsSync8, readFileSync as readFileSync6 } from "node:fs";
 import { extname as extname2 } from "node:path";
+function detectDeadImports(file) {
+  if (isGateDisabled("dead-import-check"))
+    return [];
+  const ext = extname2(file).toLowerCase();
+  if (!TS_JS_EXTS.has(ext) && !PY_EXTS.has(ext))
+    return [];
+  if (!existsSync8(file))
+    return [];
+  let content;
+  try {
+    content = readFileSync6(file, "utf-8");
+  } catch {
+    return [];
+  }
+  if (content.length > MAX_CHECK_SIZE)
+    return [];
+  if (PY_EXTS.has(ext))
+    return detectDeadPythonImports(content);
+  return detectDeadTsJsImports(content);
+}
+function detectDeadTsJsImports(content) {
+  const lines = content.split(`
+`);
+  const imports = [];
+  for (let i = 0;i < lines.length; i++) {
+    const line = lines[i];
+    if (SIDE_EFFECT_RE.test(line) && !DEFAULT_IMPORT_RE.test(line) && !NAMED_IMPORT_RE.test(line) && !NAMESPACE_IMPORT_RE.test(line))
+      continue;
+    if (REEXPORT_RE.test(line))
+      continue;
+    const typeMatch = line.match(TYPE_IMPORT_RE);
+    if (typeMatch) {
+      for (const imp of parseNamedImports(typeMatch[1])) {
+        imports.push({ name: imp.alias, line: i + 1 });
+      }
+      continue;
+    }
+    const defaultMatch = line.match(DEFAULT_IMPORT_RE);
+    if (defaultMatch) {
+      imports.push({ name: defaultMatch[1], line: i + 1 });
+    }
+    const namedMatch = line.match(NAMED_IMPORT_RE);
+    if (namedMatch) {
+      for (const imp of parseNamedImports(namedMatch[1])) {
+        imports.push({ name: imp.alias, line: i + 1 });
+      }
+    }
+    const nsMatch = line.match(NAMESPACE_IMPORT_RE);
+    if (nsMatch) {
+      imports.push({ name: nsMatch[1], line: i + 1 });
+    }
+  }
+  const codeWithoutImports = lines.filter((line) => !line.trimStart().startsWith("import ")).join(`
+`);
+  const warnings = [];
+  for (const { name, line } of imports) {
+    const usageRe = new RegExp(`\\b${escapeRegex(name)}\\b`);
+    if (!usageRe.test(codeWithoutImports)) {
+      warnings.push(sanitizeForStderr(`L${line}: unused import "${name}" — consider removing`));
+    }
+  }
+  return warnings;
+}
+function detectDeadPythonImports(content) {
+  const lines = content.split(`
+`);
+  const imports = [];
+  for (let i = 0;i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trimStart().startsWith("#"))
+      continue;
+    const fromMatch = line.match(PY_FROM_IMPORT_RE);
+    if (fromMatch) {
+      const names = fromMatch[1].split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+      for (const n of names) {
+        const parts = n.split(/\s+as\s+/);
+        const alias = (parts.length > 1 ? parts[1] : parts[0]).trim();
+        if (alias === "*")
+          continue;
+        if (/^\w+$/.test(alias)) {
+          imports.push({ name: alias, line: i + 1 });
+        }
+      }
+      continue;
+    }
+    const importMatch = line.match(PY_IMPORT_RE);
+    if (importMatch) {
+      const names = importMatch[1].split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+      for (const n of names) {
+        const parts = n.split(/\s+as\s+/);
+        const alias = (parts.length > 1 ? parts[1] : parts[0]).trim();
+        const topName = alias.split(".")[0];
+        if (/^\w+$/.test(topName)) {
+          imports.push({ name: topName, line: i + 1 });
+        }
+      }
+    }
+  }
+  const codeWithoutImports = lines.filter((line) => !line.trimStart().startsWith("import ") && !line.trimStart().startsWith("from ")).join(`
+`);
+  const warnings = [];
+  for (const { name, line } of imports) {
+    const usageRe = new RegExp(`\\b${escapeRegex(name)}\\b`);
+    if (!usageRe.test(codeWithoutImports)) {
+      warnings.push(sanitizeForStderr(`L${line}: unused import "${name}" — consider removing`));
+    }
+  }
+  return warnings;
+}
+function parseNamedImports(raw) {
+  return raw.split(",").map((s) => s.trim()).filter((s) => s.length > 0).map((s) => {
+    const withoutType = s.replace(/^type\s+/, "");
+    const parts = withoutType.split(/\s+as\s+/);
+    return {
+      name: parts[0].trim(),
+      alias: (parts.length > 1 ? parts[1] : parts[0]).trim()
+    };
+  }).filter(({ alias }) => /^\w+$/.test(alias));
+}
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+var TS_JS_EXTS, PY_EXTS, MAX_CHECK_SIZE = 500000, DEFAULT_IMPORT_RE, NAMED_IMPORT_RE, NAMESPACE_IMPORT_RE, SIDE_EFFECT_RE, REEXPORT_RE, TYPE_IMPORT_RE, PY_FROM_IMPORT_RE, PY_IMPORT_RE;
+var init_dead_import_check = __esm(() => {
+  init_session_state();
+  TS_JS_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
+  PY_EXTS = new Set([".py", ".pyi"]);
+  DEFAULT_IMPORT_RE = /^\s*import\s+(\w+)\s+from\s+["']/;
+  NAMED_IMPORT_RE = /^\s*import\s*\{([^}]+)\}\s*from\s+["']/;
+  NAMESPACE_IMPORT_RE = /^\s*import\s+\*\s+as\s+(\w+)\s+from\s+["']/;
+  SIDE_EFFECT_RE = /^\s*import\s+["']/;
+  REEXPORT_RE = /^\s*export\s+\{[^}]*\}\s+from\s+["']/;
+  TYPE_IMPORT_RE = /^\s*import\s+type\s+\{([^}]+)\}\s*from\s+["']/;
+  PY_FROM_IMPORT_RE = /^\s*from\s+\S+\s+import\s+(.+)/;
+  PY_IMPORT_RE = /^\s*import\s+(.+)/;
+});
+
+// src/hooks/detectors/export-check.ts
+import { execSync as execSync2 } from "node:child_process";
+import { existsSync as existsSync9, readFileSync as readFileSync7 } from "node:fs";
+import { extname as extname3 } from "node:path";
 function detectExportBreakingChanges(file) {
   if (isGateDisabled("export-check"))
     return [];
-  const ext = extname2(file).toLowerCase();
-  if (!TS_JS_EXTS.has(ext))
+  const ext = extname3(file).toLowerCase();
+  if (!TS_JS_EXTS2.has(ext))
     return [];
-  if (!existsSync8(file))
+  if (!existsSync9(file))
     return [];
   let oldContent;
   try {
@@ -939,7 +1097,7 @@ function detectExportBreakingChanges(file) {
   } catch {
     return [];
   }
-  const newContent = readFileSync6(file, "utf-8");
+  const newContent = readFileSync7(file, "utf-8");
   const oldExports = new Set;
   for (const match of oldContent.matchAll(EXPORT_RE)) {
     oldExports.add(match[1]);
@@ -959,28 +1117,28 @@ function detectExportBreakingChanges(file) {
     }
   ];
 }
-var TS_JS_EXTS, EXPORT_RE;
+var TS_JS_EXTS2, EXPORT_RE;
 var init_export_check = __esm(() => {
   init_session_state();
-  TS_JS_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
+  TS_JS_EXTS2 = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
   EXPORT_RE = /\bexport\s+(?:default\s+)?(?:function|class|const|let|var|type|interface|enum)\s+(\w+)/g;
 });
 
 // src/hooks/detectors/import-check.ts
-import { existsSync as existsSync9, readFileSync as readFileSync7 } from "node:fs";
-import { extname as extname3, join as join9, resolve } from "node:path";
+import { existsSync as existsSync10, readFileSync as readFileSync8 } from "node:fs";
+import { extname as extname4, join as join9, resolve } from "node:path";
 function detectHallucinatedImports(file) {
   if (isGateDisabled("import-check"))
     return [];
-  const ext = extname3(file).toLowerCase();
-  if (!TS_JS_EXTS2.has(ext) && !PY_EXTS.has(ext) && !GO_EXTS.has(ext))
+  const ext = extname4(file).toLowerCase();
+  if (!TS_JS_EXTS3.has(ext) && !PY_EXTS2.has(ext) && !GO_EXTS.has(ext))
     return [];
-  if (!existsSync9(file))
+  if (!existsSync10(file))
     return [];
-  const content = readFileSync7(file, "utf-8");
+  const content = readFileSync8(file, "utf-8");
   if (content.length > MAX_IMPORT_CHECK_SIZE)
     return [];
-  if (PY_EXTS.has(ext))
+  if (PY_EXTS2.has(ext))
     return detectPythonImports(file, content);
   if (GO_EXTS.has(ext))
     return detectGoImports(file, content);
@@ -1008,7 +1166,7 @@ function detectTsJsImports(file, content) {
       continue;
     if (pkgName.includes(".."))
       continue;
-    if (!existsSync9(join9(cwd, "node_modules", pkgName))) {
+    if (!existsSync10(join9(cwd, "node_modules", pkgName))) {
       missingPkgs.push(pkgName);
     }
   }
@@ -1030,13 +1188,13 @@ function detectPythonImports(file, content) {
 `)) {
     if (line.trimStart().startsWith("#"))
       continue;
-    const match = line.match(PY_IMPORT_RE);
+    const match = line.match(PY_IMPORT_RE2);
     if (!match)
       continue;
     const moduleName = match[1] ?? match[2];
     if (PY_STDLIB.has(moduleName))
       continue;
-    if (existsSync9(join9(cwd, `${moduleName}.py`)) || existsSync9(join9(cwd, moduleName)))
+    if (existsSync10(join9(cwd, `${moduleName}.py`)) || existsSync10(join9(cwd, moduleName)))
       continue;
     missingModules.push(moduleName);
   }
@@ -1059,7 +1217,7 @@ function detectGoImports(file, content) {
   const missingPkgs = [];
   let goSum = null;
   try {
-    goSum = readFileSync7(join9(cwd, "go.sum"), "utf-8");
+    goSum = readFileSync8(join9(cwd, "go.sum"), "utf-8");
   } catch {}
   const lines = content.split(`
 `);
@@ -1092,7 +1250,7 @@ function detectGoImports(file, content) {
       continue;
     const vendorDir = resolve(cwd, "vendor");
     const vendorPath = resolve(vendorDir, importPath);
-    if (vendorPath.startsWith(`${vendorDir}/`) && existsSync9(vendorPath))
+    if (vendorPath.startsWith(`${vendorDir}/`) && existsSync10(vendorPath))
       continue;
     if (goSum?.includes(`${importPath} `))
       continue;
@@ -1109,14 +1267,14 @@ function detectGoImports(file, content) {
     }
   ];
 }
-var TS_JS_EXTS2, PY_EXTS, GO_EXTS, IMPORT_LINE_RE, PY_IMPORT_RE, MAX_IMPORT_CHECK_SIZE = 500000, GO_IMPORT_RE, GO_STDLIB_PREFIXES, FALLBACK_BUILTINS, PY_STDLIB;
+var TS_JS_EXTS3, PY_EXTS2, GO_EXTS, IMPORT_LINE_RE, PY_IMPORT_RE2, MAX_IMPORT_CHECK_SIZE = 500000, GO_IMPORT_RE, GO_STDLIB_PREFIXES, FALLBACK_BUILTINS, PY_STDLIB;
 var init_import_check = __esm(() => {
   init_session_state();
-  TS_JS_EXTS2 = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
-  PY_EXTS = new Set([".py", ".pyi"]);
+  TS_JS_EXTS3 = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
+  PY_EXTS2 = new Set([".py", ".pyi"]);
   GO_EXTS = new Set([".go"]);
   IMPORT_LINE_RE = /^\s*import\s+(?:[^"']*\s+from\s+)?["']([^"'./][^"']*)["']/;
-  PY_IMPORT_RE = /^\s*(?:import\s+(\w+)|from\s+(\w+)\s+import)\b/;
+  PY_IMPORT_RE2 = /^\s*(?:import\s+(\w+)|from\s+(\w+)\s+import)\b/;
   GO_IMPORT_RE = /^\s*"([^"]+)"/;
   GO_STDLIB_PREFIXES = new Set([
     "archive",
@@ -1364,12 +1522,171 @@ var init_import_check = __esm(() => {
   ]);
 });
 
+// src/hooks/detectors/security-check.ts
+import { existsSync as existsSync11, readFileSync as readFileSync9 } from "node:fs";
+import { extname as extname5 } from "node:path";
+function detectSecurityPatterns(file) {
+  if (isGateDisabled("security-check"))
+    return [];
+  const ext = extname5(file).toLowerCase();
+  if (!CHECKABLE_EXTS.has(ext))
+    return [];
+  if (!existsSync11(file))
+    return [];
+  let content;
+  try {
+    content = readFileSync9(file, "utf-8");
+  } catch {
+    return [];
+  }
+  if (content.length > MAX_CHECK_SIZE2)
+    return [];
+  const errors = [];
+  const lines = content.split(`
+`);
+  const fileName = file.split("/").pop() ?? "";
+  const isTestFile = fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_") || fileName.includes("_test.");
+  const starIsComment = JS_TS_EXTS.has(ext) || ext === ".java" || ext === ".kt" || ext === ".cs";
+  for (let i = 0;i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith("//") || trimmed.startsWith("#"))
+      continue;
+    if (starIsComment && trimmed.startsWith("*"))
+      continue;
+    if (!isTestFile) {
+      for (const { re, desc } of SECRET_PATTERNS) {
+        if (re.test(line)) {
+          if (/process\.env\b/.test(line))
+            continue;
+          if (/os\.environ/.test(line))
+            continue;
+          if (/\$\{?\w*ENV\w*\}?/.test(line))
+            continue;
+          errors.push(`L${i + 1}: ${desc}`);
+          break;
+        }
+      }
+    }
+    for (const { re, desc, exts } of DANGEROUS_PATTERNS) {
+      if (exts && !exts.has(ext))
+        continue;
+      if (re.test(line)) {
+        errors.push(`L${i + 1}: ${desc}`);
+        break;
+      }
+    }
+  }
+  if (errors.length === 0)
+    return [];
+  return [
+    {
+      file,
+      errors: errors.map((e) => sanitizeForStderr(e.slice(0, 300))),
+      gate: "security-check"
+    }
+  ];
+}
+var CHECKABLE_EXTS, MAX_CHECK_SIZE2 = 500000, SECRET_PATTERNS, JS_TS_EXTS, PY_EXTS3, DANGEROUS_PATTERNS;
+var init_security_check = __esm(() => {
+  init_session_state();
+  CHECKABLE_EXTS = new Set([
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mts",
+    ".cts",
+    ".mjs",
+    ".cjs",
+    ".py",
+    ".pyi",
+    ".go",
+    ".rs",
+    ".rb",
+    ".java",
+    ".kt",
+    ".php",
+    ".cs"
+  ]);
+  SECRET_PATTERNS = [
+    { re: /(?:AKIA|ASIA)[A-Z0-9]{16,}/, desc: "AWS access key" },
+    { re: /(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,}/, desc: "GitHub token" },
+    { re: /xox[bpas]-[A-Za-z0-9-]{10,}/, desc: "Slack token" },
+    { re: /(?:sk|pk)_(?:test|live)_[A-Za-z0-9]{20,}/, desc: "Stripe key" },
+    {
+      re: /["'`]Bearer\s+[A-Za-z0-9_\-/.+=]{20,}["'`]/,
+      desc: "Hardcoded Bearer token"
+    },
+    {
+      re: /(?:api[_-]?key|apikey|api[_-]?secret|api[_-]?token)\s*[:=]\s*["'`][A-Za-z0-9_\-/.]{20,}["'`]/i,
+      desc: "Hardcoded API key"
+    },
+    {
+      re: /(?:secret|password|passwd|pwd|token|auth[_-]?token|access[_-]?token|private[_-]?key)\s*[:=]\s*["'`][^\s"'`]{8,}["'`]/i,
+      desc: "Hardcoded secret/password"
+    },
+    { re: /-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----/, desc: "Private key" },
+    {
+      re: /(?:mongodb|postgres|postgresql|mysql|redis|amqp):\/\/[^:]+:[^@\s]{4,}@/i,
+      desc: "Connection string with embedded credentials"
+    }
+  ];
+  JS_TS_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
+  PY_EXTS3 = new Set([".py", ".pyi"]);
+  DANGEROUS_PATTERNS = [
+    {
+      re: /\beval\s*\(\s*(?!["'`])[a-zA-Z_$]/,
+      desc: "eval() with dynamic input — command injection risk",
+      exts: JS_TS_EXTS
+    },
+    {
+      re: /\.innerHTML\s*=\s*(?!["'`]|`\s*$)[a-zA-Z_$]/,
+      desc: "innerHTML assignment with dynamic value — XSS risk",
+      exts: JS_TS_EXTS
+    },
+    {
+      re: /document\.write\s*\(\s*(?!["'`])[a-zA-Z_$]/,
+      desc: "document.write() with dynamic input — XSS risk",
+      exts: JS_TS_EXTS
+    },
+    {
+      re: /\b(?:exec|execSync)\s*\(\s*(?:`[^`]*\$\{|[a-zA-Z_$](?!['"]))/,
+      desc: "exec/execSync with dynamic command — command injection risk",
+      exts: JS_TS_EXTS
+    },
+    {
+      re: /(?:SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER)\s+.*["'`]\s*\+\s*[a-zA-Z_$]/i,
+      desc: "SQL string concatenation — SQL injection risk"
+    },
+    {
+      re: /(?:SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER)\s+.*\$\{/i,
+      desc: "SQL template literal with interpolation — SQL injection risk"
+    },
+    {
+      re: /(?:os\.system|subprocess\.(?:call|run|Popen|check_output))\s*\(\s*f["']/,
+      desc: "Shell command with f-string — command injection risk",
+      exts: PY_EXTS3
+    },
+    {
+      re: /\b(?:eval|exec)\s*\(\s*(?!["'])[a-zA-Z_]/,
+      desc: "eval/exec with dynamic input — code injection risk",
+      exts: PY_EXTS3
+    },
+    {
+      re: /dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*(?!["'`])[a-zA-Z_$]/,
+      desc: "dangerouslySetInnerHTML with dynamic value — XSS risk",
+      exts: JS_TS_EXTS
+    }
+  ];
+});
+
 // src/hooks/post-tool.ts
 var exports_post_tool = {};
 __export(exports_post_tool, {
   default: () => postTool
 });
-import { extname as extname4, resolve as resolve2 } from "node:path";
+import { extname as extname6, resolve as resolve2 } from "node:path";
 async function postTool(ev) {
   const tool = ev.tool_name;
   if (!tool)
@@ -1391,7 +1708,7 @@ async function handleEditWrite(ev) {
   const gates = loadGates();
   if (!gates?.on_write)
     return;
-  const fileExt = extname4(file).toLowerCase();
+  const fileExt = extname6(file).toLowerCase();
   const gatedExts = getGatedExtensions();
   const sessionId = ev.session_id;
   const gateEntries = [];
@@ -1441,12 +1758,34 @@ async function handleEditWrite(ev) {
     newFixes.push(...exportFixes);
   } catch {}
   try {
+    const securityFixes = detectSecurityPatterns(file);
+    if (securityFixes.length > 0) {
+      newFixes.push(...securityFixes);
+      const count = incrementEscalation("security_warning_count");
+      if (count >= 5) {
+        process.stderr.write(`[qult] Security escalation: ${count} security warnings this session. Review security posture.
+`);
+      }
+    }
+  } catch {}
+  try {
+    const deadImportWarnings = detectDeadImports(file);
+    if (deadImportWarnings.length > 0) {
+      incrementEscalation("dead_import_warning_count");
+      for (const w of deadImportWarnings) {
+        process.stderr.write(`[qult] Dead import: ${w}
+`);
+      }
+    }
+  } catch {}
+  try {
     const state = readSessionState();
     if (!state.changed_file_paths.includes(file)) {
       const warnings = detectConventionDrift(file);
       for (const w of warnings) {
         process.stderr.write(`[qult] Convention: ${w}
 `);
+        incrementEscalation("drift_warning_count");
       }
     }
   } catch {}
@@ -1470,6 +1809,9 @@ async function handleEditWrite(ev) {
       const exportFixCount = newFixes.filter((f) => f.gate === "export-check").length;
       if (exportFixCount > 0)
         gateParts.push("export-check FAIL");
+      const securityFixCount = newFixes.filter((f) => f.gate === "security-check").length;
+      if (securityFixCount > 0)
+        gateParts.push("security-check FAIL");
       const totalFixes = readPendingFixes().length;
       const fixSuffix = totalFixes > 0 ? ` | ${totalFixes} pending fix(es)` : "";
       process.stderr.write(`[qult] gates: ${gateParts.join(", ")}${fixSuffix}
@@ -1481,6 +1823,9 @@ async function handleEditWrite(ev) {
   } catch {}
   try {
     checkOverEngineering();
+  } catch {}
+  try {
+    checkPlanRequired();
   } catch {}
 }
 function checkOverEngineering() {
@@ -1496,6 +1841,24 @@ function checkOverEngineering() {
   const planTaskCount = plan.tasks.filter((t) => t.file).length;
   if (unplannedCount > 5 || totalChanged > planTaskCount * 2) {
     process.stderr.write(`[qult] Over-engineering risk: ${unplannedCount} unplanned file(s) out of ${totalChanged} changed. Review scope.
+`);
+  }
+}
+function checkPlanRequired() {
+  const plan = getActivePlan();
+  if (plan)
+    return;
+  const state = readSessionState();
+  const changed = state.changed_file_paths?.length ?? 0;
+  const threshold = loadConfig().review.required_changed_files;
+  if (changed >= threshold && !planWarnedAt.has(threshold)) {
+    planWarnedAt.add(threshold);
+    process.stderr.write(`[qult] Plan required: ${changed} files changed without a plan. Run /qult:plan-generator to create a structured plan.
+`);
+  }
+  if (changed >= threshold * 2 && !planWarnedAt.has(threshold * 2)) {
+    planWarnedAt.add(threshold * 2);
+    process.stderr.write(`[qult] Plan strongly recommended: ${changed} files changed (${threshold * 2}+ threshold). Large unplanned changes risk scope creep and missed tests.
 `);
   }
 }
@@ -1585,16 +1948,20 @@ function getToolOutput(ev) {
     return ev.tool_output;
   return "";
 }
-var GIT_COMMIT_RE, LINT_FIX_RE, TEST_CMD_RE;
+var planWarnedAt, GIT_COMMIT_RE, LINT_FIX_RE, TEST_CMD_RE;
 var init_post_tool = __esm(() => {
+  init_config();
   init_load();
   init_runner();
   init_pending_fixes();
   init_plan_status();
   init_session_state();
   init_convention_check();
+  init_dead_import_check();
   init_export_check();
   init_import_check();
+  init_security_check();
+  planWarnedAt = new Set;
   GIT_COMMIT_RE = /\bgit\s+(?:-\S+(?:\s+\S+)?\s+)*commit\b/i;
   LINT_FIX_RE = /\b(biome\s+(check|lint).*--(fix|write)|biome\s+format|eslint.*--fix|prettier.*--write|ruff\s+check.*--fix|ruff\s+format|gofmt|go\s+fmt|cargo\s+fmt|autopep8|black)\b/;
   TEST_CMD_RE = /\b(vitest|jest|mocha|pytest|go\s+test|cargo\s+test)\b/;
@@ -1792,13 +2159,40 @@ ${list}
 Use TaskCreate to track tasks so TaskCompleted triggers Verify test execution.`);
     }
   }
+  if (!plan) {
+    const state = readSessionState();
+    const changed = state.changed_file_paths?.length ?? 0;
+    const threshold = loadConfig().review.required_changed_files;
+    if (changed >= threshold) {
+      block(`${changed} files changed without a plan. Run /qult:plan-generator before continuing.
+` + "Large changes require a structured plan so TDD enforcement, task verification, and scope tracking can function.");
+    }
+  }
   if (!readLastReview()) {
     if (isReviewRequired() && !isGateDisabled("review")) {
       block("Run /qult:review before finishing. Independent review is required.");
     }
   }
+  if (readLastReview()) {
+    process.stderr.write(`[qult] Review complete. Run /qult:finish for structured branch completion (merge/PR/hold/discard).
+`);
+  }
+  const securityCount = readEscalation("security_warning_count");
+  if (securityCount >= SECURITY_ESCALATION_THRESHOLD && !isGateDisabled("security-check")) {
+    block(`${securityCount} security warnings emitted this session. Fix security issues before finishing.`);
+  }
+  const driftCount = readEscalation("drift_warning_count");
+  if (driftCount >= DRIFT_ESCALATION_THRESHOLD) {
+    block(`${driftCount} drift warnings emitted this session. Review scope and address drift before finishing.`);
+  }
+  const testQualityCount = readEscalation("test_quality_warning_count");
+  if (testQualityCount >= TEST_QUALITY_ESCALATION_THRESHOLD) {
+    block(`${testQualityCount} test quality warnings emitted this session. Improve test assertions before finishing.`);
+  }
 }
+var SECURITY_ESCALATION_THRESHOLD = 5, DRIFT_ESCALATION_THRESHOLD = 8, TEST_QUALITY_ESCALATION_THRESHOLD = 8;
 var init_stop = __esm(() => {
+  init_config();
   init_pending_fixes();
   init_plan_status();
   init_session_state();
@@ -2001,11 +2395,11 @@ var init_plan_validators = __esm(() => {
 });
 
 // src/hooks/subagent-stop/score-parsers.ts
-function escapeRegex(s) {
+function escapeRegex2(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function parseDimensionScore(output, name) {
-  const re = new RegExp(`${escapeRegex(name)}[=:]\\s*(\\d+)`, "i");
+  const re = new RegExp(`${escapeRegex2(name)}[=:]\\s*(\\d+)`, "i");
   const m = re.exec(output);
   if (!m)
     return null;
@@ -2057,7 +2451,7 @@ var init_score_parsers = __esm(() => {
 });
 
 // src/hooks/subagent-stop/agent-validators.ts
-import { existsSync as existsSync10, readdirSync as readdirSync4, readFileSync as readFileSync8, statSync as statSync4 } from "node:fs";
+import { existsSync as existsSync12, readdirSync as readdirSync4, readFileSync as readFileSync10, statSync as statSync4 } from "node:fs";
 import { join as join10 } from "node:path";
 async function subagentStop(ev) {
   if (ev.stop_hook_active)
@@ -2094,7 +2488,7 @@ async function subagentStop(ev) {
 function validatePlan() {
   try {
     const planDir = join10(process.cwd(), ".claude", "plans");
-    if (!existsSync10(planDir))
+    if (!existsSync12(planDir))
       return;
     const files = readdirSync4(planDir).filter((f) => f.endsWith(".md")).map((f) => ({
       name: f,
@@ -2102,7 +2496,7 @@ function validatePlan() {
     })).sort((a, b) => b.mtime - a.mtime);
     if (files.length === 0)
       return;
-    const content = readFileSync8(join10(planDir, files[0].name), "utf-8");
+    const content = readFileSync10(join10(planDir, files[0].name), "utf-8");
     const structErrors = validatePlanStructure(content);
     if (structErrors.length > 0) {
       block(`Plan structural issues:
@@ -2286,8 +2680,8 @@ function persistReviewFindings() {
   const historyPath = join10(process.cwd(), ".qult", ".state", FINDINGS_HISTORY_FILE);
   let history = [];
   try {
-    if (existsSync10(historyPath)) {
-      history = JSON.parse(readFileSync8(historyPath, "utf-8"));
+    if (existsSync12(historyPath)) {
+      history = JSON.parse(readFileSync10(historyPath, "utf-8"));
     }
   } catch {
     history = [];
@@ -2375,6 +2769,121 @@ var init_subagent_stop = __esm(() => {
   init_score_parsers();
 });
 
+// src/hooks/detectors/test-quality-check.ts
+import { existsSync as existsSync13, readFileSync as readFileSync11 } from "node:fs";
+import { resolve as resolve4 } from "node:path";
+function analyzeTestQuality(file) {
+  const cwd = resolve4(process.cwd());
+  const absPath = resolve4(cwd, file);
+  if (!absPath.startsWith(cwd))
+    return null;
+  if (!existsSync13(absPath))
+    return null;
+  let content;
+  try {
+    content = readFileSync11(absPath, "utf-8");
+  } catch {
+    return null;
+  }
+  if (content.length > MAX_CHECK_SIZE3)
+    return null;
+  const codeOnly = content.split(`
+`).filter((line) => !line.trimStart().startsWith("//")).join(`
+`);
+  const lines = content.split(`
+`);
+  const assertionCount = (codeOnly.match(ASSERTION_RE) ?? []).length;
+  const testCount = (codeOnly.match(TEST_CASE_RE) ?? []).length || 1;
+  const avgAssertions = assertionCount / testCount;
+  const smells = [];
+  for (let i = 0;i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith("//"))
+      continue;
+    for (const { re, name } of WEAK_MATCHERS) {
+      if (re.test(line)) {
+        smells.push({
+          type: "weak-matcher",
+          line: i + 1,
+          message: `Weak matcher ${name} — consider asserting a specific value`
+        });
+        break;
+      }
+    }
+    if (TRIVIAL_ASSERTION_RE.test(line)) {
+      smells.push({
+        type: "trivial-assertion",
+        line: i + 1,
+        message: "Trivial assertion: comparing variable to itself"
+      });
+    }
+    if (EMPTY_TEST_RE.test(line)) {
+      smells.push({
+        type: "empty-test",
+        line: i + 1,
+        message: "Empty test body — no assertions"
+      });
+    }
+    if (IMPL_COUPLED_RE.test(line)) {
+      smells.push({
+        type: "impl-coupled",
+        line: i + 1,
+        message: "Tests mock calls instead of behavior — consider asserting outputs"
+      });
+    }
+  }
+  const mockCount = (codeOnly.match(MOCK_RE) ?? []).length;
+  if (mockCount > 0 && mockCount > assertionCount) {
+    smells.push({
+      type: "mock-overuse",
+      line: 0,
+      message: `Mock overuse: ${mockCount} mocks vs ${assertionCount} assertions — tests may verify mocks, not behavior`
+    });
+  }
+  return { testCount, assertionCount, avgAssertions, smells };
+}
+function formatTestQualityWarnings(file, result, taskKey) {
+  const warnings = [];
+  const prefix = taskKey ? `${taskKey}: ` : "";
+  if (result.avgAssertions < 2) {
+    warnings.push(`${prefix}${file} has ~${result.avgAssertions.toFixed(1)} assertions/test (minimum 2)`);
+  }
+  const smellsByType = new Map;
+  for (const smell of result.smells) {
+    const existing = smellsByType.get(smell.type) ?? [];
+    existing.push(smell);
+    smellsByType.set(smell.type, existing);
+  }
+  for (const [type, items] of smellsByType) {
+    if (items.length === 1) {
+      warnings.push(`${prefix}${file}:${items[0].line}: ${items[0].message}`);
+    } else {
+      const lineNums = items.slice(0, 5).map((s) => s.line).filter((l) => l > 0).join(",");
+      const suffix = items.length > 5 ? ` (+${items.length - 5} more)` : "";
+      warnings.push(`${prefix}${file}: ${items.length}x ${type} (L${lineNums}${suffix}) — ${items[0].message}`);
+    }
+  }
+  return warnings;
+}
+var MAX_CHECK_SIZE3 = 500000, ASSERTION_RE, TEST_CASE_RE, WEAK_MATCHERS, TRIVIAL_ASSERTION_RE, EMPTY_TEST_RE, MOCK_RE, IMPL_COUPLED_RE;
+var init_test_quality_check = __esm(() => {
+  ASSERTION_RE = /\b(expect|assert|should)\s*[.(]/g;
+  TEST_CASE_RE = /\b(it|test)\s*\(/g;
+  WEAK_MATCHERS = [
+    { re: /\.toBeTruthy\s*\(\s*\)/, name: "toBeTruthy()" },
+    { re: /\.toBeFalsy\s*\(\s*\)/, name: "toBeFalsy()" },
+    { re: /\.toBeDefined\s*\(\s*\)/, name: "toBeDefined()" },
+    { re: /\.toBeUndefined\s*\(\s*\)/, name: "toBeUndefined()" },
+    { re: /\.toBe\s*\(\s*true\s*\)/, name: "toBe(true)" },
+    { re: /\.toBe\s*\(\s*false\s*\)/, name: "toBe(false)" }
+  ];
+  TRIVIAL_ASSERTION_RE = /expect\s*\(\s*(\w+)\s*\)\s*\.(?:toBe|toEqual|toStrictEqual)\s*\(\s*\1\s*\)/;
+  EMPTY_TEST_RE = /\b(?:it|test)\s*\(\s*["'`][^"'`]*["'`]\s*,\s*(?:async\s+)?\(\s*\)\s*=>\s*\{\s*\}\s*\)/;
+  MOCK_RE = /\b(?:vi\.fn|jest\.fn|vi\.spyOn|jest\.spyOn|sinon\.stub|sinon\.spy|\.mockImplementation|\.mockReturnValue|\.mockResolvedValue|mock\()\s*\(/g;
+  IMPL_COUPLED_RE = /expect\s*\(\s*\w+\s*\)\s*\.(?:toHaveBeenCalled|toHaveBeenCalledWith|toHaveBeenCalledTimes)\s*\(/;
+});
+
 // src/hooks/task-completed.ts
 var exports_task_completed = {};
 __export(exports_task_completed, {
@@ -2382,8 +2891,6 @@ __export(exports_task_completed, {
   checkVerifyTestQuality: () => checkVerifyTestQuality
 });
 import { spawnSync } from "node:child_process";
-import { existsSync as existsSync11, readFileSync as readFileSync9 } from "node:fs";
-import { resolve as resolve4 } from "node:path";
 async function taskCompleted(ev) {
   const subject = ev.task_subject;
   if (!subject)
@@ -2425,22 +2932,16 @@ async function taskCompleted(ev) {
   } catch {}
 }
 function checkVerifyTestQuality(testFile, _testName, taskKey) {
-  const cwd = resolve4(process.cwd());
-  const absPath = resolve4(cwd, testFile);
-  if (!absPath.startsWith(cwd))
+  const result = analyzeTestQuality(testFile);
+  if (!result)
     return;
-  if (!existsSync11(absPath))
-    return;
-  const content = readFileSync9(absPath, "utf-8");
-  const codeOnly = content.split(`
-`).filter((line) => !line.trimStart().startsWith("//")).join(`
+  const warnings = formatTestQualityWarnings(testFile, result, taskKey);
+  if (warnings.length > 0) {
+    incrementEscalation("test_quality_warning_count");
+    for (const w of warnings) {
+      process.stderr.write(`[qult] Test quality: ${w}
 `);
-  const assertionCount = (codeOnly.match(ASSERTION_RE) ?? []).length;
-  const testCount = (codeOnly.match(/\b(it|test)\s*\(/g) ?? []).length || 1;
-  const avgAssertions = assertionCount / testCount;
-  if (avgAssertions < MIN_ASSERTIONS) {
-    process.stderr.write(`[qult] Test quality warning: ${testFile} has ~${avgAssertions.toFixed(1)} assertions/test (minimum ${MIN_ASSERTIONS}). ${taskKey} may have shallow tests.
-`);
+    }
   }
 }
 function detectTestRunner() {
@@ -2458,11 +2959,12 @@ function detectTestRunner() {
   } catch {}
   return null;
 }
-var TEST_RUNNER_RE, VERIFY_TIMEOUT = 15000, SAFE_SHELL_ARG_RE, ASSERTION_RE, MIN_ASSERTIONS = 2;
+var TEST_RUNNER_RE, VERIFY_TIMEOUT = 15000, SAFE_SHELL_ARG_RE;
 var init_task_completed = __esm(() => {
   init_load();
   init_plan_status();
   init_session_state();
+  init_test_quality_check();
   TEST_RUNNER_RE = [
     [/\bvitest\b/, (f, t) => ["vitest", "run", f, "-t", t]],
     [/\bjest\b/, (f, t) => ["jest", f, "-t", t]],
@@ -2472,7 +2974,6 @@ var init_task_completed = __esm(() => {
     [/\bmocha\b/, (f, t) => ["mocha", f, "--grep", t]]
   ];
   SAFE_SHELL_ARG_RE = /^[a-zA-Z0-9_/.@-]+$/;
-  ASSERTION_RE = /\b(expect|assert|should)\s*[.(]/g;
 });
 
 // src/hooks/session-start.ts
@@ -2480,12 +2981,12 @@ var exports_session_start = {};
 __export(exports_session_start, {
   default: () => sessionStart
 });
-import { existsSync as existsSync12, mkdirSync as mkdirSync3 } from "node:fs";
+import { existsSync as existsSync14, mkdirSync as mkdirSync3 } from "node:fs";
 import { join as join11 } from "node:path";
 async function sessionStart(ev) {
   try {
     const stateDir = join11(process.cwd(), ".qult", ".state");
-    if (!existsSync12(stateDir)) {
+    if (!existsSync14(stateDir)) {
       mkdirSync3(stateDir, { recursive: true });
     }
     cleanupStaleScopedFiles(stateDir);
@@ -2509,12 +3010,12 @@ var exports_post_compact = {};
 __export(exports_post_compact, {
   default: () => postCompact
 });
-import { existsSync as existsSync13, readdirSync as readdirSync5, readFileSync as readFileSync10, statSync as statSync5 } from "node:fs";
+import { existsSync as existsSync15, readdirSync as readdirSync5, readFileSync as readFileSync12, statSync as statSync5 } from "node:fs";
 import { join as join12 } from "node:path";
 async function postCompact(_ev) {
   try {
     const stateDir = join12(process.cwd(), ".qult", ".state");
-    if (!existsSync13(stateDir))
+    if (!existsSync15(stateDir))
       return;
     const parts = [];
     const fixesPath2 = findLatestFile(stateDir, "pending-fixes");
@@ -2533,7 +3034,7 @@ async function postCompact(_ev) {
       if (Object.keys(state).length > 0) {
         const summary = [];
         const gatesPath = join12(process.cwd(), ".qult", "gates.json");
-        const hasGates = existsSync13(gatesPath);
+        const hasGates = existsSync15(gatesPath);
         if (state.test_passed_at)
           summary.push(`test_passed_at: ${state.test_passed_at}`);
         else if (hasGates)
@@ -2551,6 +3052,18 @@ async function postCompact(_ev) {
         const reviewIter = state.review_iteration;
         if (typeof reviewIter === "number" && reviewIter > 0)
           summary.push(`review iteration: ${reviewIter}`);
+        const secWarn = state.security_warning_count;
+        if (typeof secWarn === "number" && secWarn > 0)
+          summary.push(`security warnings: ${secWarn}`);
+        const testQWarn = state.test_quality_warning_count;
+        if (typeof testQWarn === "number" && testQWarn > 0)
+          summary.push(`test quality warnings: ${testQWarn}`);
+        const driftWarn = state.drift_warning_count;
+        if (typeof driftWarn === "number" && driftWarn > 0)
+          summary.push(`drift warnings: ${driftWarn}`);
+        const deadImpWarn = state.dead_import_warning_count;
+        if (typeof deadImpWarn === "number" && deadImpWarn > 0)
+          summary.push(`dead import warnings: ${deadImpWarn}`);
         if (summary.length > 0) {
           parts.push(`[qult] Session: ${summary.join(", ")}`);
         }
@@ -2558,10 +3071,10 @@ async function postCompact(_ev) {
     }
     try {
       const planDir = join12(process.cwd(), ".claude", "plans");
-      if (existsSync13(planDir)) {
+      if (existsSync15(planDir)) {
         const planFiles = readdirSync5(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync5(join12(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
         if (planFiles.length > 0) {
-          const content = readFileSync10(join12(planDir, planFiles[0].name), "utf-8");
+          const content = readFileSync12(join12(planDir, planFiles[0].name), "utf-8");
           const taskCount = (content.match(/^###\s+Task\s+\d+/gim) ?? []).length;
           const doneCount = (content.match(/^###\s+Task\s+\d+.*\[done\]/gim) ?? []).length;
           if (taskCount > 0) {
@@ -2589,9 +3102,9 @@ function findLatestFile(stateDir, prefix) {
 }
 function safeReadJson(path, fallback) {
   try {
-    if (!existsSync13(path))
+    if (!existsSync15(path))
       return fallback;
-    return JSON.parse(readFileSync10(path, "utf-8"));
+    return JSON.parse(readFileSync12(path, "utf-8"));
   } catch {
     return fallback;
   }

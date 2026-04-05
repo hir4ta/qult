@@ -1,10 +1,9 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { loadGates } from "../gates/load.ts";
 import { getActivePlan, parseVerifyField } from "../state/plan-status.ts";
-import { recordTaskVerifyResult } from "../state/session-state.ts";
+import { incrementEscalation, recordTaskVerifyResult } from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
+import { analyzeTestQuality, formatTestQualityWarnings } from "./detectors/test-quality-check.ts";
 
 const TEST_RUNNER_RE: [RegExp, (file: string, testName: string) => string[]][] = [
 	[/\bvitest\b/, (f, t) => ["vitest", "run", f, "-t", t]],
@@ -77,33 +76,18 @@ export default async function taskCompleted(ev: HookEvent): Promise<void> {
 	}
 }
 
-const ASSERTION_RE = /\b(expect|assert|should)\s*[.(]/g;
-const MIN_ASSERTIONS = 2;
-
-/** Check that the Verify test file contains meaningful assertions. Warns to stderr if shallow. */
+/** Check that the Verify test file contains meaningful assertions and no test smells.
+ *  Uses the comprehensive test-quality-check detector. Warns to stderr if issues found. */
 export function checkVerifyTestQuality(testFile: string, _testName: string, taskKey: string): void {
-	const cwd = resolve(process.cwd());
-	const absPath = resolve(cwd, testFile);
-	// Path traversal guard
-	if (!absPath.startsWith(cwd)) return;
-	if (!existsSync(absPath)) return;
+	const result = analyzeTestQuality(testFile);
+	if (!result) return;
 
-	const content = readFileSync(absPath, "utf-8");
-
-	// Strip single-line comments to avoid counting assertions in commented code
-	const codeOnly = content
-		.split("\n")
-		.filter((line) => !line.trimStart().startsWith("//"))
-		.join("\n");
-
-	const assertionCount = (codeOnly.match(ASSERTION_RE) ?? []).length;
-	const testCount = (codeOnly.match(/\b(it|test)\s*\(/g) ?? []).length || 1;
-	const avgAssertions = assertionCount / testCount;
-
-	if (avgAssertions < MIN_ASSERTIONS) {
-		process.stderr.write(
-			`[qult] Test quality warning: ${testFile} has ~${avgAssertions.toFixed(1)} assertions/test (minimum ${MIN_ASSERTIONS}). ${taskKey} may have shallow tests.\n`,
-		);
+	const warnings = formatTestQualityWarnings(testFile, result, taskKey);
+	if (warnings.length > 0) {
+		incrementEscalation("test_quality_warning_count");
+		for (const w of warnings) {
+			process.stderr.write(`[qult] Test quality: ${w}\n`);
+		}
 	}
 }
 

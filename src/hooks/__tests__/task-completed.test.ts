@@ -235,8 +235,8 @@ describe("handler", () => {
 		await taskCompleted({ task_subject: "Task 1: Add handler" });
 
 		const stderr = stderrCapture.join("");
-		expect(stderr).toContain("Test quality warning");
-		expect(stderr).toContain("shallow tests");
+		expect(stderr).toContain("Test quality");
+		expect(stderr).toContain("assertions/test");
 	});
 
 	it("does not warn on test file with sufficient assertions", async () => {

@@ -3,7 +3,11 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetAllCaches } from "../../state/flush.ts";
 import { writePendingFixes } from "../../state/pending-fixes.ts";
-import { recordReview, recordTaskVerifyResult } from "../../state/session-state.ts";
+import {
+	recordChangedFile,
+	recordReview,
+	recordTaskVerifyResult,
+} from "../../state/session-state.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-stop-test");
 const STATE_DIR = join(TEST_DIR, ".qult", ".state");
@@ -145,6 +149,36 @@ describe("stop hook", () => {
 		await handler({ hook_type: "Stop" });
 
 		expect(exitCode).toBeNull();
+	});
+
+	it("blocks when many files changed without a plan", async () => {
+		// Simulate 6 changed files (threshold is 5)
+		for (let i = 0; i < 6; i++) {
+			recordChangedFile(`/project/src/file${i}.ts`);
+		}
+		recordReview(); // review done, but no plan
+
+		const handler = (await import("../stop.ts")).default;
+		try {
+			await handler({ hook_type: "Stop" });
+		} catch {
+			// process.exit(2)
+		}
+
+		expect(exitCode).toBe(2);
+		const errOutput = stderrCapture.join("");
+		expect(errOutput).toContain("plan");
+		expect(errOutput).toContain("/qult:plan-generator");
+	});
+
+	it("suggests /qult:finish when review is complete", async () => {
+		recordReview();
+
+		const handler = (await import("../stop.ts")).default;
+		await handler({ hook_type: "Stop" });
+
+		const errOutput = stderrCapture.join("");
+		expect(errOutput).toContain("/qult:finish");
 	});
 
 	it("does not block when stop_hook_active is true (prevent infinite loop)", async () => {

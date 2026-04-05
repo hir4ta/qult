@@ -75,6 +75,16 @@ export interface SessionState {
 	// ── Gate failure escalation ──────────────────────────────
 	/** Per-file:gate failure count for 3-Strike escalation (key = "file:gate") */
 	gate_failure_counts: Record<string, number>;
+
+	// ── Quality escalation counters ────��────────────────────
+	/** Security warnings emitted this session (for escalation) */
+	security_warning_count: number;
+	/** Test quality warnings emitted this session (for escalation) */
+	test_quality_warning_count: number;
+	/** Drift warnings emitted this session (for escalation) */
+	drift_warning_count: number;
+	/** Dead import warnings emitted this session (for escalation) */
+	dead_import_warning_count: number;
 }
 
 function filePath(): string {
@@ -99,6 +109,10 @@ function defaultState(): SessionState {
 		disabled_gates: [],
 		task_verify_results: {},
 		gate_failure_counts: {},
+		security_warning_count: 0,
+		test_quality_warning_count: 0,
+		drift_warning_count: 0,
+		dead_import_warning_count: 0,
 	};
 }
 
@@ -293,6 +307,10 @@ export function clearOnCommit(): void {
 	state.plan_selfcheck_blocked_at = null;
 	state.task_verify_results = {};
 	state.gate_failure_counts = {};
+	state.security_warning_count = 0;
+	state.test_quality_warning_count = 0;
+	state.drift_warning_count = 0;
+	state.dead_import_warning_count = 0;
 	writeState(state);
 }
 
@@ -453,4 +471,26 @@ export function recordPlanSelfcheckBlocked(): void {
 	const state = readSessionState();
 	state.plan_selfcheck_blocked_at = new Date().toISOString();
 	writeState(state);
+}
+
+// ── Quality escalation counters ────────────────────────────
+
+type EscalationCounter =
+	| "security_warning_count"
+	| "test_quality_warning_count"
+	| "drift_warning_count"
+	| "dead_import_warning_count";
+
+/** Increment an escalation counter. Returns the new count. */
+export function incrementEscalation(counter: EscalationCounter): number {
+	const state = readSessionState();
+	const count = (state[counter] ?? 0) + 1;
+	state[counter] = count;
+	writeState(state);
+	return count;
+}
+
+/** Read an escalation counter value. */
+export function readEscalation(counter: EscalationCounter): number {
+	return readSessionState()[counter] ?? 0;
 }

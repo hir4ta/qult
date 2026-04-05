@@ -1,4 +1,5 @@
 import { extname, resolve } from "node:path";
+import { loadConfig } from "../config.ts";
 import { loadGates } from "../gates/load.ts";
 import { runGate, runGateAsync } from "../gates/runner.ts";
 import {
@@ -11,6 +12,7 @@ import { getActivePlan } from "../state/plan-status.ts";
 import {
 	clearOnCommit,
 	getGatedExtensions,
+	incrementEscalation,
 	incrementGateFailure,
 	isGateDisabled,
 	markGateRan,
@@ -22,8 +24,10 @@ import {
 } from "../state/session-state.ts";
 import type { HookEvent, PendingFix } from "../types.ts";
 import { detectConventionDrift } from "./detectors/convention-check.ts";
+import { detectDeadImports } from "./detectors/dead-import-check.ts";
 import { detectExportBreakingChanges } from "./detectors/export-check.ts";
 import { detectHallucinatedImports } from "./detectors/import-check.ts";
+import { detectSecurityPatterns } from "./detectors/security-check.ts";
 
 /** PostToolUse: lint/type gate after Edit/Write, commit/test/lint-fix detection after Bash */
 export default async function postTool(ev: HookEvent): Promise<void> {
@@ -125,6 +129,36 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 		/* fail-open */
 	}
 
+	// Security pattern detection (computational on_write sensor — no external tools needed)
+	try {
+		const securityFixes = detectSecurityPatterns(file);
+		if (securityFixes.length > 0) {
+			newFixes.push(...securityFixes);
+			const count = incrementEscalation("security_warning_count");
+			// Matches SECURITY_ESCALATION_THRESHOLD in stop.ts
+			if (count >= 5) {
+				process.stderr.write(
+					`[qult] Security escalation: ${count} security warnings this session. Review security posture.\n`,
+				);
+			}
+		}
+	} catch {
+		/* fail-open */
+	}
+
+	// Dead import detection (advisory)
+	try {
+		const deadImportWarnings = detectDeadImports(file);
+		if (deadImportWarnings.length > 0) {
+			incrementEscalation("dead_import_warning_count");
+			for (const w of deadImportWarnings) {
+				process.stderr.write(`[qult] Dead import: ${w}\n`);
+			}
+		}
+	} catch {
+		/* fail-open */
+	}
+
 	// Convention drift detection (advisory): warn on naming mismatch for new files
 	try {
 		const state = readSessionState();
@@ -132,6 +166,7 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 			const warnings = detectConventionDrift(file);
 			for (const w of warnings) {
 				process.stderr.write(`[qult] Convention: ${w}\n`);
+				incrementEscalation("drift_warning_count");
 			}
 		}
 	} catch {
@@ -158,6 +193,8 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 			if (importFixCount > 0) gateParts.push("import-check FAIL");
 			const exportFixCount = newFixes.filter((f) => f.gate === "export-check").length;
 			if (exportFixCount > 0) gateParts.push("export-check FAIL");
+			const securityFixCount = newFixes.filter((f) => f.gate === "security-check").length;
+			if (securityFixCount > 0) gateParts.push("security-check FAIL");
 			const totalFixes = readPendingFixes().length;
 			const fixSuffix = totalFixes > 0 ? ` | ${totalFixes} pending fix(es)` : "";
 			process.stderr.write(`[qult] gates: ${gateParts.join(", ")}${fixSuffix}\n`);
@@ -175,6 +212,13 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 	// Over-engineering detection: warn when too many unplanned files changed
 	try {
 		checkOverEngineering();
+	} catch {
+		/* fail-open */
+	}
+
+	// Plan-required detection: warn when many files changed without a plan
+	try {
+		checkPlanRequired();
 	} catch {
 		/* fail-open */
 	}
@@ -197,6 +241,33 @@ function checkOverEngineering(): void {
 	if (unplannedCount > 5 || totalChanged > planTaskCount * 2) {
 		process.stderr.write(
 			`[qult] Over-engineering risk: ${unplannedCount} unplanned file(s) out of ${totalChanged} changed. Review scope.\n`,
+		);
+	}
+}
+
+/** Warn when many files changed without a plan. Escalates to block in Stop hook.
+ *  This enforces "architect designs, agent implements" — no large unplanned changes. */
+const planWarnedAt = new Set<number>(); // deduplicate warnings by file-count threshold
+
+function checkPlanRequired(): void {
+	const plan = getActivePlan();
+	if (plan) return; // plan exists — no warning needed
+
+	const state = readSessionState();
+	const changed = state.changed_file_paths?.length ?? 0;
+	const threshold = loadConfig().review.required_changed_files;
+
+	if (changed >= threshold && !planWarnedAt.has(threshold)) {
+		planWarnedAt.add(threshold);
+		process.stderr.write(
+			`[qult] Plan required: ${changed} files changed without a plan. Run /qult:plan-generator to create a structured plan.\n`,
+		);
+	}
+	// Escalate at 2x threshold
+	if (changed >= threshold * 2 && !planWarnedAt.has(threshold * 2)) {
+		planWarnedAt.add(threshold * 2);
+		process.stderr.write(
+			`[qult] Plan strongly recommended: ${changed} files changed (${threshold * 2}+ threshold). Large unplanned changes risk scope creep and missed tests.\n`,
 		);
 	}
 }

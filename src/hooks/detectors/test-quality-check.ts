@@ -1,0 +1,188 @@
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+const MAX_CHECK_SIZE = 500_000;
+
+/** Result of test quality analysis */
+export interface TestQualityResult {
+	/** Number of test cases found */
+	testCount: number;
+	/** Number of assertions found */
+	assertionCount: number;
+	/** Average assertions per test */
+	avgAssertions: number;
+	/** Detected test smells */
+	smells: TestSmell[];
+}
+
+export interface TestSmell {
+	type: string;
+	line: number;
+	message: string;
+}
+
+// ── Assertion patterns ───────────────────────────────────────
+
+const ASSERTION_RE = /\b(expect|assert|should)\s*[.(]/g;
+const TEST_CASE_RE = /\b(it|test)\s*\(/g;
+
+// ── Weak matcher patterns ────────────────────────────────────
+// These matchers accept anything truthy/defined — they don't verify specific values.
+
+const WEAK_MATCHERS: { re: RegExp; name: string }[] = [
+	{ re: /\.toBeTruthy\s*\(\s*\)/, name: "toBeTruthy()" },
+	{ re: /\.toBeFalsy\s*\(\s*\)/, name: "toBeFalsy()" },
+	{ re: /\.toBeDefined\s*\(\s*\)/, name: "toBeDefined()" },
+	{ re: /\.toBeUndefined\s*\(\s*\)/, name: "toBeUndefined()" },
+	{ re: /\.toBe\s*\(\s*true\s*\)/, name: "toBe(true)" },
+	{ re: /\.toBe\s*\(\s*false\s*\)/, name: "toBe(false)" },
+];
+
+// ── Trivial assertion pattern ────────────────────────────────
+// expect(x).toBe(x) or expect(x).toEqual(x) — same variable name
+const TRIVIAL_ASSERTION_RE =
+	/expect\s*\(\s*(\w+)\s*\)\s*\.(?:toBe|toEqual|toStrictEqual)\s*\(\s*\1\s*\)/;
+
+// ── Empty test pattern ───────────────────────────────────────
+// it('...', () => {}) or test('...', () => {})
+const EMPTY_TEST_RE =
+	/\b(?:it|test)\s*\(\s*["'`][^"'`]*["'`]\s*,\s*(?:async\s+)?\(\s*\)\s*=>\s*\{\s*\}\s*\)/;
+
+// ── Mock/spy patterns ────────────────────────────────────────
+const MOCK_RE =
+	/\b(?:vi\.fn|jest\.fn|vi\.spyOn|jest\.spyOn|sinon\.stub|sinon\.spy|\.mockImplementation|\.mockReturnValue|\.mockResolvedValue|mock\()\s*\(/g;
+
+// ── Implementation-coupled assertion ─────────────────────────
+// Assertions that test internal method calls rather than behavior
+const IMPL_COUPLED_RE =
+	/expect\s*\(\s*\w+\s*\)\s*\.(?:toHaveBeenCalled|toHaveBeenCalledWith|toHaveBeenCalledTimes)\s*\(/;
+
+/** Analyze test quality for a given test file. Pure function (no side effects).
+ *  Returns null if file cannot be analyzed. */
+export function analyzeTestQuality(file: string): TestQualityResult | null {
+	const cwd = resolve(process.cwd());
+	const absPath = resolve(cwd, file);
+	// Path traversal guard
+	if (!absPath.startsWith(cwd)) return null;
+	if (!existsSync(absPath)) return null;
+
+	let content: string;
+	try {
+		content = readFileSync(absPath, "utf-8");
+	} catch {
+		return null;
+	}
+	if (content.length > MAX_CHECK_SIZE) return null;
+
+	// Strip comments
+	const codeOnly = content
+		.split("\n")
+		.filter((line) => !line.trimStart().startsWith("//"))
+		.join("\n");
+
+	const lines = content.split("\n");
+	const assertionCount = (codeOnly.match(ASSERTION_RE) ?? []).length;
+	const testCount = (codeOnly.match(TEST_CASE_RE) ?? []).length || 1;
+	const avgAssertions = assertionCount / testCount;
+
+	const smells: TestSmell[] = [];
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i]!;
+		const trimmed = line.trimStart();
+		if (trimmed.startsWith("//")) continue;
+
+		// Weak matchers
+		for (const { re, name } of WEAK_MATCHERS) {
+			if (re.test(line)) {
+				smells.push({
+					type: "weak-matcher",
+					line: i + 1,
+					message: `Weak matcher ${name} — consider asserting a specific value`,
+				});
+				break;
+			}
+		}
+
+		// Trivial assertions (expect(x).toBe(x))
+		if (TRIVIAL_ASSERTION_RE.test(line)) {
+			smells.push({
+				type: "trivial-assertion",
+				line: i + 1,
+				message: "Trivial assertion: comparing variable to itself",
+			});
+		}
+
+		// Empty tests
+		if (EMPTY_TEST_RE.test(line)) {
+			smells.push({
+				type: "empty-test",
+				line: i + 1,
+				message: "Empty test body — no assertions",
+			});
+		}
+
+		// Implementation-coupled assertions
+		if (IMPL_COUPLED_RE.test(line)) {
+			smells.push({
+				type: "impl-coupled",
+				line: i + 1,
+				message: "Tests mock calls instead of behavior — consider asserting outputs",
+			});
+		}
+	}
+
+	// Mock overuse: more mocks than assertions
+	const mockCount = (codeOnly.match(MOCK_RE) ?? []).length;
+	if (mockCount > 0 && mockCount > assertionCount) {
+		smells.push({
+			type: "mock-overuse",
+			line: 0,
+			message: `Mock overuse: ${mockCount} mocks vs ${assertionCount} assertions — tests may verify mocks, not behavior`,
+		});
+	}
+
+	return { testCount, assertionCount, avgAssertions, smells };
+}
+
+/** Format test quality result as warning lines for stderr output. */
+export function formatTestQualityWarnings(
+	file: string,
+	result: TestQualityResult,
+	taskKey?: string,
+): string[] {
+	const warnings: string[] = [];
+	const prefix = taskKey ? `${taskKey}: ` : "";
+
+	if (result.avgAssertions < 2) {
+		warnings.push(
+			`${prefix}${file} has ~${result.avgAssertions.toFixed(1)} assertions/test (minimum 2)`,
+		);
+	}
+
+	// Group smells by type for concise output
+	const smellsByType = new Map<string, TestSmell[]>();
+	for (const smell of result.smells) {
+		const existing = smellsByType.get(smell.type) ?? [];
+		existing.push(smell);
+		smellsByType.set(smell.type, existing);
+	}
+
+	for (const [type, items] of smellsByType) {
+		if (items.length === 1) {
+			warnings.push(`${prefix}${file}:${items[0]!.line}: ${items[0]!.message}`);
+		} else {
+			const lineNums = items
+				.slice(0, 5)
+				.map((s) => s.line)
+				.filter((l) => l > 0)
+				.join(",");
+			const suffix = items.length > 5 ? ` (+${items.length - 5} more)` : "";
+			warnings.push(
+				`${prefix}${file}: ${items.length}x ${type} (L${lineNums}${suffix}) — ${items[0]!.message}`,
+			);
+		}
+	}
+
+	return warnings;
+}
