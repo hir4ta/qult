@@ -76,12 +76,15 @@ export function parsePlanTasks(content: string): PlanTask[] {
 }
 
 /** Parse a Verify field value into file and test name.
- *  Format: "src/__tests__/foo.test.ts:testFoo" → { file, testName } */
+ *  Format: "src/__tests__/foo.test.ts:testFoo" → { file, testName }
+ *  Strips backticks and quotes that markdown formatting may introduce. */
 export function parseVerifyField(verify: string): { file: string; testName: string } | null {
-	const colonIdx = verify.lastIndexOf(":");
+	// Strip backticks and quotes from markdown formatting
+	const cleaned = verify.replace(/[`"']/g, "");
+	const colonIdx = cleaned.lastIndexOf(":");
 	if (colonIdx <= 0) return null;
-	const file = verify.slice(0, colonIdx).trim();
-	const testName = verify.slice(colonIdx + 1).trim();
+	const file = cleaned.slice(0, colonIdx).trim();
+	const testName = cleaned.slice(colonIdx + 1).trim();
 	if (!file || !testName) return null;
 	return { file, testName };
 }

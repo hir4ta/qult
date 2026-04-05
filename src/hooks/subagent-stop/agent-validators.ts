@@ -203,14 +203,12 @@ function validateStageReviewer(
 	stageName: string,
 ): void {
 	const hasVerdict = passRe.test(output) || failRe.test(output);
-	const hasFindings = FINDING_RE.test(output) || NO_ISSUES_RE.test(output);
 	const scores = scoreParser(output);
-	const hasScore = scores !== null;
 
-	// Soft validation: accept if any signal is present
-	if (!hasVerdict && !hasFindings && !hasScore) {
+	// Strict validation: require verdict (PASS/FAIL is mandatory for structured review)
+	if (!hasVerdict) {
 		block(
-			`${stageName} reviewer output must include: (1) '${stageName}: PASS' or '${stageName}: FAIL', (2) Score line, or (3) findings. Rerun the review.`,
+			`${stageName} reviewer output must include '${stageName}: PASS' or '${stageName}: FAIL' as the first line. Rerun the review.`,
 		);
 	}
 

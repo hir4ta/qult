@@ -29,6 +29,7 @@ import { detectExportBreakingChanges } from "./detectors/export-check.ts";
 import { detectHallucinatedImports } from "./detectors/import-check.ts";
 import { detectSecurityPatterns } from "./detectors/security-check.ts";
 import { resolveTestFile } from "./detectors/test-file-resolver.ts";
+import { deny } from "./respond.ts";
 
 /** PostToolUse: lint/type gate after Edit/Write, commit/test/lint-fix detection after Bash */
 export default async function postTool(ev: HookEvent): Promise<void> {
@@ -48,6 +49,20 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 	const rawFile = typeof ev.tool_input?.file_path === "string" ? ev.tool_input.file_path : null;
 	if (!rawFile) return;
 	const file = resolve(rawFile);
+
+	// Defense-in-depth: if PreToolUse DENY was ignored (Claude Code #21988),
+	// re-check pending-fixes here and DENY again before running new gates.
+	try {
+		const existingFixes = readPendingFixes();
+		if (existingFixes.length > 0 && !existingFixes.some((f) => resolve(f.file) === file)) {
+			deny(
+				`Fix existing errors before editing other files (PostToolUse fallback):\n${existingFixes.map((f) => `  ${f.file}`).join("\n")}`,
+			);
+		}
+	} catch (err) {
+		if (err instanceof Error && err.message.startsWith("process.exit")) throw err;
+		/* fail-open */
+	}
 
 	// Skip qult's own state/config files
 	const qultDir = resolve(process.cwd(), ".qult");

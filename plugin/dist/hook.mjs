@@ -283,11 +283,12 @@ function parsePlanTasks(content) {
   return tasks;
 }
 function parseVerifyField(verify) {
-  const colonIdx = verify.lastIndexOf(":");
+  const cleaned = verify.replace(/[`"']/g, "");
+  const colonIdx = cleaned.lastIndexOf(":");
   if (colonIdx <= 0)
     return null;
-  const file = verify.slice(0, colonIdx).trim();
-  const testName = verify.slice(colonIdx + 1).trim();
+  const file = cleaned.slice(0, colonIdx).trim();
+  const testName = cleaned.slice(colonIdx + 1).trim();
   if (!file || !testName)
     return null;
   return { file, testName };
@@ -1884,6 +1885,17 @@ async function handleEditWrite(ev) {
   if (!rawFile)
     return;
   const file = resolve2(rawFile);
+  try {
+    const existingFixes = readPendingFixes();
+    if (existingFixes.length > 0 && !existingFixes.some((f) => resolve2(f.file) === file)) {
+      deny(`Fix existing errors before editing other files (PostToolUse fallback):
+${existingFixes.map((f) => `  ${f.file}`).join(`
+`)}`);
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("process.exit"))
+      throw err;
+  }
   const qultDir = resolve2(process.cwd(), ".qult");
   if (file.startsWith(`${qultDir}/`) || file === qultDir)
     return;
@@ -2205,6 +2217,7 @@ var init_post_tool = __esm(() => {
   init_import_check();
   init_security_check();
   init_test_file_resolver();
+  init_respond();
   planWarnedAt = new Set;
   GIT_COMMIT_RE = /\bgit\s+(?:-\S+(?:\s+\S+)?\s+)*commit\b/i;
   LINT_FIX_RE = /\b(biome\s+(check|lint).*--(fix|write)|biome\s+format|eslint.*--fix|prettier.*--write|ruff\s+check.*--fix|ruff\s+format|gofmt|go\s+fmt|cargo\s+fmt|autopep8|black)\b/;
@@ -3082,11 +3095,9 @@ function validatePlanEvaluator(output) {
 }
 function validateStageReviewer(output, passRe, failRe, scoreParser, stageName) {
   const hasVerdict = passRe.test(output) || failRe.test(output);
-  const hasFindings = FINDING_RE.test(output) || NO_ISSUES_RE2.test(output);
   const scores = scoreParser(output);
-  const hasScore = scores !== null;
-  if (!hasVerdict && !hasFindings && !hasScore) {
-    block(`${stageName} reviewer output must include: (1) '${stageName}: PASS' or '${stageName}: FAIL', (2) Score line, or (3) findings. Rerun the review.`);
+  if (!hasVerdict) {
+    block(`${stageName} reviewer output must include '${stageName}: PASS' or '${stageName}: FAIL' as the first line. Rerun the review.`);
   }
   if (failRe.test(output)) {
     block(`${stageName}: FAIL. Fix the issues found by the ${stageName.toLowerCase()} reviewer and re-run /qult:review.`);

@@ -161,7 +161,7 @@ describe("Scenario 1: Edit → lint fails → block other files → allow fix fi
 });
 
 describe("Scenario 2: Pending fixes preserved across files", () => {
-	it("editing file B keeps errors for file A", async () => {
+	it("editing file B is DENIED when file A has errors (defense-in-depth)", async () => {
 		setupFailingLintGate();
 		const postTool = (await import("../hooks/post-tool.ts")).default;
 
@@ -172,49 +172,45 @@ describe("Scenario 2: Pending fixes preserved across files", () => {
 		});
 		expect(readPendingFixes()).toHaveLength(1);
 
-		stdoutCapture = [];
-		await postTool({
-			hook_type: "PostToolUse",
-			tool_name: "Edit",
-			tool_input: { file_path: join(TEST_DIR, "src/b.ts") },
-		});
-
-		const fixes = readPendingFixes();
-		expect(fixes).toHaveLength(2);
-		expect(fixes.map((f) => f.file)).toContain(join(TEST_DIR, "src/a.ts"));
-		expect(fixes.map((f) => f.file)).toContain(join(TEST_DIR, "src/b.ts"));
+		// Defense-in-depth: PostToolUse DENIES editing different file when pending-fixes exist
+		stderrCapture = [];
+		await expect(
+			postTool({
+				hook_type: "PostToolUse",
+				tool_name: "Edit",
+				tool_input: { file_path: join(TEST_DIR, "src/b.ts") },
+			}),
+		).rejects.toThrow("process.exit");
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("Fix existing errors");
 	});
 });
 
 describe("Scenario 3: Fix clears only that file's errors", () => {
-	it("fixing A preserves B's errors", async () => {
+	it("fixing A clears A's error, editing same file allowed", async () => {
 		setupFailingLintGate();
 		const postTool = (await import("../hooks/post-tool.ts")).default;
 
+		// Create error for file A
 		await postTool({
 			hook_type: "PostToolUse",
 			tool_name: "Edit",
 			tool_input: { file_path: join(TEST_DIR, "src/a.ts") },
 		});
-		stdoutCapture = [];
-		await postTool({
-			hook_type: "PostToolUse",
-			tool_name: "Edit",
-			tool_input: { file_path: join(TEST_DIR, "src/b.ts") },
-		});
-		expect(readPendingFixes()).toHaveLength(2);
+		expect(readPendingFixes()).toHaveLength(1);
 
+		// Fix file A (editing the same file with pending-fixes is allowed)
 		setupPassingGates();
 		stdoutCapture = [];
+		exitCode = null;
 		await postTool({
 			hook_type: "PostToolUse",
 			tool_name: "Edit",
 			tool_input: { file_path: join(TEST_DIR, "src/a.ts") },
 		});
 
-		const fixes = readPendingFixes();
-		expect(fixes).toHaveLength(1);
-		expect(fixes[0]!.file).toContain("b.ts");
+		expect(exitCode).toBeNull();
+		expect(readPendingFixes()).toHaveLength(0);
 	});
 });
 
@@ -2068,9 +2064,10 @@ describe("Scenario: Security escalation blocks Stop after threshold", () => {
 
 		const postTool = (await import("../hooks/post-tool.ts")).default;
 
-		// Trigger 5 security warnings by editing files with secrets
+		// Trigger 5 security warnings by editing the SAME file with secrets
+		// (defense-in-depth allows re-editing a file with its own pending-fixes)
+		const filePath = join(TEST_DIR, "src/secret.ts");
 		for (let i = 0; i < 5; i++) {
-			const filePath = join(TEST_DIR, `src/secret${i}.ts`);
 			writeFileSync(filePath, `const key${i} = "AKIAIOSFODNN7EXAMPLE${i}";\n`);
 			await postTool({
 				tool_name: "Edit",
