@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "../../config.ts";
@@ -10,6 +11,7 @@ import {
 	getReviewIteration,
 	getReviewScoreHistory,
 	getStageScores,
+	readSessionState,
 	recordPlanEvalIteration,
 	recordReview,
 	recordReviewIteration,
@@ -35,6 +37,48 @@ import {
 	parseSpecScores,
 } from "./score-parsers.ts";
 import { detectTrend, findWeakestDimension } from "./trend-analysis.ts";
+
+/** Read-only enforcement: detect if a reviewer created unauthorized commits.
+ *  Known reviewers must be read-only — they may read files but must NOT write, edit, or commit.
+ *  We detect commits (not uncommitted changes, since the code under review IS uncommitted).
+ *  Compares HEAD commit timestamp against session's last_commit_at. */
+const READ_ONLY_REVIEWERS = new Set([
+	"qult-spec-reviewer",
+	"qult-quality-reviewer",
+	"qult-security-reviewer",
+	"qult-adversarial-reviewer",
+	"qult-plan-evaluator",
+]);
+
+function checkReadOnlyViolation(normalized: string): void {
+	if (!READ_ONLY_REVIEWERS.has(normalized)) return;
+
+	try {
+		const state = readSessionState();
+		if (!state.last_commit_at) return;
+
+		const headTime = execSync("git log -1 --format=%aI HEAD", {
+			timeout: 5000,
+			encoding: "utf-8",
+			stdio: ["pipe", "pipe", "pipe"],
+		}).trim();
+
+		if (headTime && new Date(headTime) > new Date(state.last_commit_at)) {
+			const commitMsg = execSync("git log -1 --format=%s HEAD", {
+				timeout: 5000,
+				encoding: "utf-8",
+				stdio: ["pipe", "pipe", "pipe"],
+			}).trim();
+			block(
+				`${normalized} violated read-only constraint: unauthorized commit detected ("${commitMsg.slice(0, 100)}"). ` +
+					"Reviewers must NOT commit. Revert with `git reset --soft HEAD~1` and rerun the review.",
+			);
+		}
+	} catch (err) {
+		if (err instanceof Error && err.message.startsWith("process.exit")) throw err;
+		/* fail-open: git not available or other error */
+	}
+}
 
 // [severity] file:line pattern or "No issues found"
 const SEVERITY_PATTERN = /\[(critical|high|medium|low)\]/;
@@ -68,6 +112,14 @@ export default async function subagentStop(ev: HookEvent): Promise<void> {
 
 	// Normalize: plugin agents use "qult:spec-reviewer", standalone use "qult-spec-reviewer"
 	const normalized = agentType.replace(/:/g, "-");
+
+	// Read-only enforcement: reviewers must not modify files or create commits
+	try {
+		checkReadOnlyViolation(normalized);
+	} catch (err) {
+		if (err instanceof Error && err.message.startsWith("process.exit")) throw err;
+		/* fail-open */
+	}
 
 	// Known reviewer with empty output → block (empty review is not a valid review)
 	const KNOWN_REVIEWERS = new Set([

@@ -3234,8 +3234,34 @@ var init_score_parsers = __esm(() => {
 });
 
 // src/hooks/subagent-stop/agent-validators.ts
+import { execSync as execSync3 } from "node:child_process";
 import { existsSync as existsSync16, readdirSync as readdirSync5, readFileSync as readFileSync13, statSync as statSync5 } from "node:fs";
 import { join as join13 } from "node:path";
+function checkReadOnlyViolation(normalized) {
+  if (!READ_ONLY_REVIEWERS.has(normalized))
+    return;
+  try {
+    const state = readSessionState();
+    if (!state.last_commit_at)
+      return;
+    const headTime = execSync3("git log -1 --format=%aI HEAD", {
+      timeout: 5000,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"]
+    }).trim();
+    if (headTime && new Date(headTime) > new Date(state.last_commit_at)) {
+      const commitMsg = execSync3("git log -1 --format=%s HEAD", {
+        timeout: 5000,
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"]
+      }).trim();
+      block(`${normalized} violated read-only constraint: unauthorized commit detected ("${commitMsg.slice(0, 100)}"). ` + "Reviewers must NOT commit. Revert with `git reset --soft HEAD~1` and rerun the review.");
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("process.exit"))
+      throw err;
+  }
+}
 async function subagentStop(ev) {
   if (ev.stop_hook_active)
     return;
@@ -3244,6 +3270,12 @@ async function subagentStop(ev) {
   if (!agentType)
     return;
   const normalized = agentType.replace(/:/g, "-");
+  try {
+    checkReadOnlyViolation(normalized);
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("process.exit"))
+      throw err;
+  }
   const KNOWN_REVIEWERS = new Set([
     "qult-spec-reviewer",
     "qult-quality-reviewer",
@@ -3558,7 +3590,7 @@ function detectRepeatedPatterns(history) {
 function resetFindingsCache() {
   _currentFindings = [];
 }
-var SEVERITY_PATTERN, FINDING_RE, NO_ISSUES_RE2, SPEC_PASS_RE, SPEC_FAIL_RE, QUALITY_PASS_RE, QUALITY_FAIL_RE, SECURITY_PASS_RE, SECURITY_FAIL_RE, ADVERSARIAL_PASS_RE, ADVERSARIAL_FAIL_RE, PLAN_PASS_RE, PLAN_REVISE_RE, ALL_STAGES, FINDINGS_HISTORY_FILE = "review-findings-history.json", MAX_FINDINGS = 100, _currentFindings;
+var READ_ONLY_REVIEWERS, SEVERITY_PATTERN, FINDING_RE, NO_ISSUES_RE2, SPEC_PASS_RE, SPEC_FAIL_RE, QUALITY_PASS_RE, QUALITY_FAIL_RE, SECURITY_PASS_RE, SECURITY_FAIL_RE, ADVERSARIAL_PASS_RE, ADVERSARIAL_FAIL_RE, PLAN_PASS_RE, PLAN_REVISE_RE, ALL_STAGES, FINDINGS_HISTORY_FILE = "review-findings-history.json", MAX_FINDINGS = 100, _currentFindings;
 var init_agent_validators = __esm(() => {
   init_config();
   init_atomic_write();
@@ -3570,6 +3602,13 @@ var init_agent_validators = __esm(() => {
   init_message_builders();
   init_plan_validators();
   init_score_parsers();
+  READ_ONLY_REVIEWERS = new Set([
+    "qult-spec-reviewer",
+    "qult-quality-reviewer",
+    "qult-security-reviewer",
+    "qult-adversarial-reviewer",
+    "qult-plan-evaluator"
+  ]);
   SEVERITY_PATTERN = /\[(critical|high|medium|low)\]/;
   FINDING_RE = new RegExp(SEVERITY_PATTERN.source, "i");
   NO_ISSUES_RE2 = /no issues found/i;

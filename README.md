@@ -7,7 +7,7 @@
 **Quality by Structure, Not by Promise.** A harness engineering tool that enforces code quality through walls, not words.
 
 > Prompts are suggestions. Hooks are enforcement.
-> qult uses 7 hooks + MCP server + 3-stage independent review to block quality regressions with **exit 2 (DENY), not advisory messages**.
+> qult uses 7 hooks + MCP server + 4-stage independent review to block quality regressions with **exit 2 (DENY), not advisory messages**.
 > Distributed as a Claude Code Plugin. Install with `/plugin install`.
 
 ## Why harness engineering?
@@ -98,10 +98,11 @@ flowchart TB
     subgraph Generator["Generator (7 hooks)"]
         Claude["Claude\n+ deterministic gates"]
     end
-    subgraph Evaluator["3-Stage Evaluator"]
+    subgraph Evaluator["4-Stage Evaluator"]
         Spec["Stage 1: Spec Reviewer\n(Completeness + Accuracy)"]
         Quality["Stage 2: Quality Reviewer\n(Design + Maintainability)"]
         Security["Stage 3: Security Reviewer\n(Vulnerability + Hardening)"]
+        Adversarial["Stage 4: Adversarial Reviewer\n(EdgeCases + LogicCorrectness)"]
     end
 
     Claude -- "Task done" --> TV["TaskCompleted\nRun Verify immediately"]
@@ -110,8 +111,9 @@ flowchart TB
     Claude -- "All tasks done" --> Spec
     Spec --> Quality
     Quality --> Security
-    Security -- "Any FAIL / aggregate < 26 / dimension < 4" --> Claude
-    Security -- "All PASS + aggregate >= 26/30 + all dims >= 4" --> Done["Commit"]
+    Security --> Adversarial
+    Adversarial -- "Any FAIL / aggregate < 34 / dimension < 4" --> Claude
+    Adversarial -- "All PASS + aggregate >= 34/40 + all dims >= 4" --> Done["Commit"]
 
     style Generator fill:#7fbbb3,color:#2d353b,stroke:#7fbbb3
     style Evaluator fill:#e69875,color:#2d353b,stroke:#e69875
@@ -136,16 +138,20 @@ flowchart TB
 | Plan task completed | **verify**: runs Verify test immediately |
 | Verify test has too few assertions | **warn**: shallow test quality warning |
 | Same file gets review findings repeatedly | **warn**: Agentic Flywheel suggests .claude/rules/ entry |
+| Duplicate code blocks within or across files | **warn/block**: duplication detection (intra-file blocking, cross-file advisory, escalation at 8) |
+| Reviewer says "no issues" but detectors found problems | **block**: cross-validation contradicts reviewer claims against ground truth |
+| Reviewer creates unauthorized commit | **block**: read-only enforcement detects unauthorized commits |
+| Human approval not recorded (when configured) | **block**: opt-in human review gate requires architect approval |
 
 ## Complete Workflow
 
-qult provides a full development workflow through 12 skills and 6 agents:
+qult provides a full development workflow through 12 skills and 7 agents:
 
 ```
 /qult:explore        → Interview the architect, explore design
 /qult:plan-generator → Generate structured implementation plan
     [Plan mode]      → Architect reviews and approves
-/qult:review         → 3-stage independent review (Spec → Quality → Security)
+/qult:review         → 4-stage independent review (Spec → Quality → Security → Adversarial)
 /qult:finish         → Structured branch completion (merge/PR/hold/discard)
 /qult:debug          → Structured root-cause debugging
 ```
@@ -158,7 +164,7 @@ qult provides a full development workflow through 12 skills and 6 agents:
 | **The Wall** (enforcement) | PostToolUse | Runs lint/type gates + hallucinated import detection + export breaking change detection. Outputs gate summary to stderr |
 | **The Wall** (enforcement) | PreToolUse | DENY if pending fixes, require test/review before commit, force selfcheck on ExitPlanMode |
 | **Completion gate** (enforcement) | Stop | Block if unresolved errors, incomplete tasks, or missing review |
-| **Subagent** (enforcement) | SubagentStop | Validates review output, enforces dimension floor + aggregate threshold (26/30), score bias detection, Agentic Flywheel |
+| **Subagent** (enforcement) | SubagentStop | Validates review output, enforces dimension floor + aggregate threshold (34/40), score bias detection, read-only enforcement, Agentic Flywheel |
 | **Task verify** (advisory) | TaskCompleted | Runs Verify test immediately, checks test quality (assertion count) |
 | **Context** (advisory) | PostCompact | Re-injects pending fixes, session state, disabled gates, review iteration, plan progress |
 
@@ -167,10 +173,15 @@ qult provides a full development workflow through 12 skills and 6 agents:
 | get_pending_fixes | Returns lint/typecheck error details |
 | get_session_status | Returns test/review state |
 | get_gate_config | Returns gate configuration |
+| get_detector_summary | Returns consolidated computational detector findings (ground truth for reviews) |
 | disable_gate | Temporarily disable a gate for this session |
 | enable_gate | Re-enable a previously disabled gate |
 | set_config | Change a config value in .qult/config.json |
 | clear_pending_fixes | Clear all pending lint/typecheck fixes |
+| record_review | Record review completion with aggregate score |
+| record_test_pass | Record that tests have passed |
+| record_stage_scores | Record per-stage review dimension scores |
+| record_human_approval | Record architect's human review approval (opt-in) |
 
 ## Installation
 
@@ -232,17 +243,20 @@ Plugin hooks have known reliability issues in some environments ([#18547](https:
 
 This registers the same hooks in `.claude/settings.local.json` as a fallback. When both plugin hooks and settings hooks are present, Claude Code deduplicates them (same command runs once). The `.claude/settings.local.json` file is gitignored, so it does not affect other team members.
 
-## 3-Stage Review
+## 4-Stage Review
 
-qult's review (`/qult:review`) spawns three specialized Opus reviewers in sequence:
+qult's review (`/qult:review`) spawns four specialized reviewers in sequence, with computational detector findings injected as ground truth:
 
-| Stage | Agent | Dimensions | Focus |
-|-------|-------|-----------|-------|
-| 1 | **Spec Reviewer** | Completeness + Accuracy | Does the implementation match the plan? Are consumers updated? |
-| 2 | **Quality Reviewer** | Design + Maintainability | Is the code well-designed? Are edge cases handled? |
-| 3 | **Security Reviewer** | Vulnerability + Hardening | Are there injection risks? Is defense-in-depth applied? |
+| Stage | Agent | Model | Dimensions | Focus |
+|-------|-------|-------|-----------|-------|
+| 1 | **Spec Reviewer** | Sonnet | Completeness + Accuracy | Does the implementation match the plan? Are consumers updated? |
+| 2 | **Quality Reviewer** | Opus | Design + Maintainability | Is the code well-designed? Are edge cases handled? |
+| 3 | **Security Reviewer** | Opus | Vulnerability + Hardening | Are there injection risks? Is defense-in-depth applied? |
+| 4 | **Adversarial Reviewer** | Haiku | EdgeCases + LogicCorrectness | Silent failures, off-by-one, type coercion, race conditions? |
 
-Each agent scores 2 dimensions (1-5 each). Total: **6 dimensions / 30 points**.
+Each agent scores 2 dimensions (1-5 each). Total: **8 dimensions / 40 points**.
+
+Before spawning reviewers, `get_detector_summary` collects deterministic detector findings (security patterns, dead imports, duplication, test quality). These serve as ground truth that reviewers must not contradict — cross-validation catches inconsistencies.
 
 ### Dual threshold enforcement
 
@@ -251,8 +265,8 @@ qult enforces quality at two levels:
 1. **Dimension floor** (default: 4/5)
    - Any single dimension below the floor blocks immediately, regardless of aggregate score
    - Prevents "excellent code with terrible security" from passing
-2. **Aggregate threshold** (default: 26/30)
-   - After all 3 stages complete, the combined score across all 6 dimensions must meet the threshold
+2. **Aggregate threshold** (default: 34/40)
+   - After all 4 stages complete, the combined score across all 8 dimensions must meet the threshold
    - Maximum 3 iterations
 
 After all reviewers complete, a Judge filter validates each finding for Succinctness, Accuracy, and Actionability.
@@ -272,10 +286,11 @@ Customize thresholds in `.qult/config.json` (all optional):
 ```json
 {
   "review": {
-    "score_threshold": 26,
+    "score_threshold": 34,
     "max_iterations": 3,
     "required_changed_files": 5,
-    "dimension_floor": 4
+    "dimension_floor": 4,
+    "require_human_approval": false
   },
   "gates": {
     "output_max_chars": 2000,
@@ -286,35 +301,36 @@ Customize thresholds in `.qult/config.json` (all optional):
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `review.score_threshold` | number | 26 | Aggregate score required to pass 3-stage review (max 30) |
+| `review.score_threshold` | number | 34 | Aggregate score required to pass 4-stage review (max 40) |
 | `review.max_iterations` | number | 3 | Maximum review retry iterations |
 | `review.required_changed_files` | number | 5 | Number of changed files that triggers mandatory review |
 | `review.dimension_floor` | number | 4 | Minimum score per dimension (1-5). Any dimension below this blocks regardless of aggregate |
+| `review.require_human_approval` | boolean | false | Require architect to call `record_human_approval` before commit (opt-in) |
 | `gates.output_max_chars` | number | 2000 | Max gate output chars (excess is truncated) |
 | `gates.default_timeout` | number | 10000 | Gate command timeout (ms) |
 
-Environment variable overrides: `QULT_REVIEW_SCORE_THRESHOLD`, `QULT_REVIEW_MAX_ITERATIONS`, `QULT_REVIEW_REQUIRED_FILES`, `QULT_REVIEW_DIMENSION_FLOOR`, `QULT_GATE_OUTPUT_MAX`, `QULT_GATE_DEFAULT_TIMEOUT`
+Environment variable overrides: `QULT_REVIEW_SCORE_THRESHOLD`, `QULT_REVIEW_MAX_ITERATIONS`, `QULT_REVIEW_REQUIRED_FILES`, `QULT_REVIEW_DIMENSION_FLOOR`, `QULT_REQUIRE_HUMAN_APPROVAL`, `QULT_GATE_OUTPUT_MAX`, `QULT_GATE_DEFAULT_TIMEOUT`
 
 <details>
 <summary><strong>Review score threshold rationale</strong></summary>
 
-The 3-stage reviewer scores six dimensions (Completeness, Accuracy, Design, Maintainability, Vulnerability, Hardening) on a 1-5 scale.
+The 4-stage reviewer scores eight dimensions (Completeness, Accuracy, Design, Maintainability, Vulnerability, Hardening, EdgeCases, LogicCorrectness) on a 1-5 scale.
 
-**Aggregate threshold** (default 26/30):
+**Aggregate threshold** (default 34/40):
 
 | Score example | Total | Result |
 | --- | --- | --- |
-| 5+4+5+4+4+4 | 26 | Pass. Solid code passes at the threshold |
-| 4+4+4+4+4+4 | 24 | Fail. Consistent "good" is no longer enough. AI reviewers tend toward leniency |
-| 3+3+3+3+3+3 | 18 | Fail significantly. Consistent mediocrity is caught |
-| 5+5+4+4+5+5 | 28 | Strong code passes comfortably |
+| 5+4+5+4+4+4+4+4 | 34 | Pass. Solid code passes at the threshold |
+| 4+4+4+4+4+4+4+4 | 32 | Fail. Consistent "good" is no longer enough. AI reviewers tend toward leniency |
+| 3+3+3+3+3+3+3+3 | 24 | Fail significantly. Consistent mediocrity is caught |
+| 5+5+4+4+5+5+4+5 | 37 | Strong code passes comfortably |
 
 **Dimension floor** (default 4/5):
 
 | Score example | Total | Result |
 | --- | --- | --- |
-| 5+5+5+5+3+3 | 26 | Aggregate passes, but **blocked**. Vulnerability=3 is below floor (3/5 means "reachable wrong output" per quality-reviewer rubric) |
-| 4+4+4+4+5+5 | 26 | Pass. All dimensions at or above floor |
+| 5+5+5+5+3+3+5+5 | 36 | Aggregate passes, but **blocked**. Vulnerability=3 is below floor (3/5 means "reachable wrong output" per quality-reviewer rubric) |
+| 4+4+4+4+5+5+4+4 | 34 | Pass. All dimensions at or above floor |
 
 The dimension floor prevents a dangerous pattern where excellent scores in some areas mask critical weakness in others (especially security). The default of 4 was chosen because 3/5 in the quality-reviewer rubric means "a reachable code path produces wrong output," which is not acceptable for production code.
 
@@ -322,7 +338,7 @@ Configurable:
 - Lower it for prototypes: `"dimension_floor": 3`
 - Raise it for safety-critical systems: `"dimension_floor": 5`
 
-**Score bias detection**: qult warns when all 6 dimensions have identical scores or when score variance is low (range < 2). This helps detect template-like AI reviewer responses that lack genuine differentiation.
+**Score bias detection**: qult warns when all 8 dimensions have identical scores or when score variance is low (range < 2). This helps detect template-like AI reviewer responses that lack genuine differentiation.
 
 Scores are LLM-generated and not perfectly reproducible. The trend-aware iteration system (up to `max_iterations` retries) compensates: if the score improves across iterations, the feedback is working. If it stagnates, the system advises a different approach.
 
@@ -435,7 +451,7 @@ plugin/
 ├── .lsp.json                     LSP servers (TS/Python/Go/Rust)
 ├── settings.json                 Default agent (quality-guardian)
 ├── hooks/hooks.json              7 enforcement hooks
-├── agents/                       6 agents
+├── agents/                       7 agents
 ├── skills/                       12 skills
 ├── bin/qult-gate                 CLI tool (status, run-lint, run-test)
 ├── output-styles/quality-first.md  Output style
@@ -487,6 +503,10 @@ Beyond traditional linting and testing, qult addresses failure modes specific to
 | **Score bias detection** | AI reviewers give identical or near-identical scores (template responses) | Warns on uniform scores (all same) or low variance (range < 2) |
 | **Instruction drift defense** | AI forgets constraints mid-session (context rot at ~60% utilization) | State summary in every deny/block message + gate summary on every edit + full re-injection on compaction |
 | **Agentic Flywheel** | Same mistakes repeated across sessions | Review findings persisted + repeated patterns detected + .claude/rules/ suggestions |
+| **Code duplication detection** | AI generates 8x more duplicated code (GitClear 2025) | PostToolUse detects intra-file duplicate blocks (4+ lines, blocking) and cross-file duplicates (advisory). Escalation at 8 warnings |
+| **Ground truth injection** | LLM reviewing LLM is circular — correlated errors echo | Computational detector findings injected into reviewer context as ground truth. Cross-validation blocks contradictions |
+| **Read-only reviewer enforcement** | Reviewers may modify files or commit despite read-only constraint | SubagentStop detects unauthorized commits by comparing HEAD against session state |
+| **Human review gate** | AI review alone is insufficient (research consensus) | Opt-in `require_human_approval` config. Blocks commit until architect calls `record_human_approval` |
 | **Codebase-aware explore** | AI asks generic questions instead of project-specific ones | Phase 0 scans codebase for relevant types/patterns and generates context questions |
 
 ## Design principles
@@ -507,9 +527,10 @@ Beyond traditional linting and testing, qult addresses failure modes specific to
 | **quality-guardian** | inherit | Default session agent. Embeds qult philosophy into every interaction |
 | **plan-generator** | Opus | Analyzes codebase, generates structured implementation plans |
 | **plan-evaluator** | Opus | Evaluates plan quality (Feasibility, Completeness, Clarity) |
-| **spec-reviewer** | Opus | Verifies implementation matches the plan (Completeness, Accuracy) |
+| **spec-reviewer** | Sonnet | Verifies implementation matches the plan (Completeness, Accuracy) |
 | **quality-reviewer** | Opus | Evaluates code quality (Design, Maintainability) |
 | **security-reviewer** | Opus | OWASP Top 10 security review (Vulnerability, Hardening) |
+| **adversarial-reviewer** | Haiku | Devil's advocate: edge cases, logic errors, silent failures (EdgeCases, LogicCorrectness) |
 
 ## Data storage
 
