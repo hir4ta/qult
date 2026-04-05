@@ -3,7 +3,7 @@ import { loadConfig } from "../config.ts";
 import type { GateDefinition } from "../types.ts";
 
 /** Shell-escape a string for safe interpolation into a shell command. */
-function shellEscape(s: string): string {
+export function shellEscape(s: string): string {
 	return `'${s.replace(/'/g, "'\\''")}'`;
 }
 

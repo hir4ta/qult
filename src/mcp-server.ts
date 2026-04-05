@@ -433,7 +433,7 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 					content: [{ type: "text", text: "Missing stage or scores parameter." }],
 				};
 			}
-			const validStages = ["Spec", "Quality", "Security"];
+			const validStages = ["Spec", "Quality", "Security", "Adversarial"];
 			if (!validStages.includes(stage)) {
 				return {
 					isError: true,

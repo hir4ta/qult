@@ -711,17 +711,19 @@ describe("Scenario: 3-stage review score threshold — low scores blocks", () =>
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await subagentStop({
 			agent_type: "qult-spec-reviewer",
-			last_assistant_message: "Spec: PASS\nScore: Completeness=3 Accuracy=3\nNo issues found.",
+			last_assistant_message:
+				"Spec: PASS\nScore: Completeness=3 Accuracy=3\n- [low] src/a.ts — gap\n- [low] src/b.ts — gap",
 		});
 		await subagentStop({
 			agent_type: "qult-quality-reviewer",
-			last_assistant_message: "Quality: PASS\nScore: Design=3 Maintainability=3\nNo issues found.",
+			last_assistant_message:
+				"Quality: PASS\nScore: Design=3 Maintainability=3\n- [low] src/c.ts — issue\n- [low] src/d.ts — issue",
 		});
 		try {
 			await subagentStop({
 				agent_type: "qult-security-reviewer",
 				last_assistant_message:
-					"Security: PASS\nScore: Vulnerability=3 Hardening=3\nNo issues found.",
+					"Security: PASS\nScore: Vulnerability=3 Hardening=3\n- [low] src/e.ts — weak\n- [low] src/f.ts — weak",
 			});
 		} catch {
 			// exit(2)
@@ -926,17 +928,19 @@ describe("Scenario: Adaptive 3-stage review block mentions weakest dimension", (
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await subagentStop({
 			agent_type: "qult-spec-reviewer",
-			last_assistant_message: "Spec: PASS\nScore: Completeness=3 Accuracy=3\nNo issues found.",
+			last_assistant_message:
+				"Spec: PASS\nScore: Completeness=3 Accuracy=3\n- [low] src/a.ts — gap\n- [low] src/b.ts — gap",
 		});
 		await subagentStop({
 			agent_type: "qult-quality-reviewer",
-			last_assistant_message: "Quality: PASS\nScore: Design=2 Maintainability=3\nNo issues found.",
+			last_assistant_message:
+				"Quality: PASS\nScore: Design=2 Maintainability=3\n- [high] src/c.ts — design flaw\n- [low] src/d.ts — complexity",
 		});
 		try {
 			await subagentStop({
 				agent_type: "qult-security-reviewer",
 				last_assistant_message:
-					"Security: PASS\nScore: Vulnerability=3 Hardening=3\nNo issues found.",
+					"Security: PASS\nScore: Vulnerability=3 Hardening=3\n- [low] src/e.ts — weak\n- [low] src/f.ts — weak",
 			});
 		} catch {
 			// exit(2)
@@ -1302,17 +1306,19 @@ describe("Scenario: 3-stage aggregate score enforcement", () => {
 
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 
-		// Stage 1: Spec PASS (low scores)
+		// Stage 1: Spec PASS (low scores, findings required for < 4)
 		await subagentStop({
 			agent_type: "qult-spec-reviewer",
-			last_assistant_message: "Spec: PASS\nScore: Completeness=3 Accuracy=3\nNo issues found.",
+			last_assistant_message:
+				"Spec: PASS\nScore: Completeness=3 Accuracy=3\n- [low] src/a.ts — gap\n- [low] src/b.ts — gap",
 		});
 		expect(exitCode).toBeNull();
 
 		// Stage 2: Quality PASS (low scores)
 		await subagentStop({
 			agent_type: "qult-quality-reviewer",
-			last_assistant_message: "Quality: PASS\nScore: Design=3 Maintainability=3\nNo issues found.",
+			last_assistant_message:
+				"Quality: PASS\nScore: Design=3 Maintainability=3\n- [low] src/c.ts — issue\n- [low] src/d.ts — issue",
 		});
 		expect(exitCode).toBeNull();
 
@@ -1321,7 +1327,7 @@ describe("Scenario: 3-stage aggregate score enforcement", () => {
 			subagentStop({
 				agent_type: "qult-security-reviewer",
 				last_assistant_message:
-					"Security: PASS\nScore: Vulnerability=3 Hardening=3\nNo issues found.",
+					"Security: PASS\nScore: Vulnerability=3 Hardening=3\n- [low] src/e.ts — weak\n- [low] src/f.ts — weak",
 			}),
 		).rejects.toThrow("process.exit");
 		expect(exitCode).toBe(2);
@@ -1445,20 +1451,26 @@ describe("Scenario: 3-stage aggregate max iterations allows with warning", () =>
 
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 
+		const lowSpec =
+			"Spec: PASS\nScore: Completeness=3 Accuracy=3\n- [low] src/a.ts — gap\n- [low] src/b.ts — gap";
+		const lowQuality =
+			"Quality: PASS\nScore: Design=3 Maintainability=3\n- [low] src/c.ts — issue\n- [low] src/d.ts — issue";
+		const lowSecurity =
+			"Security: PASS\nScore: Vulnerability=3 Hardening=3\n- [low] src/e.ts — weak\n- [low] src/f.ts — weak";
+
 		// Iteration 1: aggregate 18/30 < 28 → blocks (iterCount=1 < maxIter=2)
 		await subagentStop({
 			agent_type: "qult-spec-reviewer",
-			last_assistant_message: "Spec: PASS\nScore: Completeness=3 Accuracy=3\nNo issues found.",
+			last_assistant_message: lowSpec,
 		});
 		await subagentStop({
 			agent_type: "qult-quality-reviewer",
-			last_assistant_message: "Quality: PASS\nScore: Design=3 Maintainability=3\nNo issues found.",
+			last_assistant_message: lowQuality,
 		});
 		await expect(
 			subagentStop({
 				agent_type: "qult-security-reviewer",
-				last_assistant_message:
-					"Security: PASS\nScore: Vulnerability=3 Hardening=3\nNo issues found.",
+				last_assistant_message: lowSecurity,
 			}),
 		).rejects.toThrow("process.exit");
 		expect(exitCode).toBe(2);
@@ -1471,16 +1483,15 @@ describe("Scenario: 3-stage aggregate max iterations allows with warning", () =>
 		// Iteration 2: same score → iterCount=2 >= maxIter=2 → allows with warning
 		await subagentStop({
 			agent_type: "qult-spec-reviewer",
-			last_assistant_message: "Spec: PASS\nScore: Completeness=3 Accuracy=3\nNo issues found.",
+			last_assistant_message: lowSpec,
 		});
 		await subagentStop({
 			agent_type: "qult-quality-reviewer",
-			last_assistant_message: "Quality: PASS\nScore: Design=3 Maintainability=3\nNo issues found.",
+			last_assistant_message: lowQuality,
 		});
 		await subagentStop({
 			agent_type: "qult-security-reviewer",
-			last_assistant_message:
-				"Security: PASS\nScore: Vulnerability=3 Hardening=3\nNo issues found.",
+			last_assistant_message: lowSecurity,
 		});
 		expect(exitCode).toBeNull();
 		expect(stderrCapture.join("")).toContain("Max review iterations");

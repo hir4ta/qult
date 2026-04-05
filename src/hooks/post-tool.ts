@@ -1,7 +1,7 @@
-import { extname, resolve } from "node:path";
+import { dirname, extname, resolve } from "node:path";
 import { loadConfig } from "../config.ts";
 import { loadGates } from "../gates/load.ts";
-import { runGate, runGateAsync } from "../gates/runner.ts";
+import { runGate, runGateAsync, shellEscape } from "../gates/runner.ts";
 import {
 	addPendingFixes,
 	clearPendingFixesForFile,
@@ -28,6 +28,7 @@ import { detectDeadImports } from "./detectors/dead-import-check.ts";
 import { detectExportBreakingChanges } from "./detectors/export-check.ts";
 import { detectHallucinatedImports } from "./detectors/import-check.ts";
 import { detectSecurityPatterns } from "./detectors/security-check.ts";
+import { resolveTestFile } from "./detectors/test-file-resolver.ts";
 
 /** PostToolUse: lint/type gate after Edit/Write, commit/test/lint-fix detection after Bash */
 export default async function postTool(ev: HookEvent): Promise<void> {
@@ -173,6 +174,33 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 		/* fail-open */
 	}
 
+	// Test-on-edit: run related test file when enabled and no lint/type errors
+	try {
+		const config = loadConfig();
+		if (config.gates.test_on_edit && newFixes.length === 0) {
+			const testFile = resolveTestFile(file);
+			if (testFile && gates?.on_commit?.test) {
+				const testGate = gates.on_commit.test;
+				// Build per-file test command from the test runner
+				const testCommand = buildTestFileCommand(testGate.command, testFile);
+				if (testCommand) {
+					const testResult = await runGateAsync("test-on-edit", {
+						command: testCommand,
+						timeout: config.gates.test_on_edit_timeout,
+					});
+					if (!testResult.passed) {
+						newFixes.push({ file, errors: [testResult.output], gate: "test-on-edit" });
+						process.stderr.write(`[qult] test-on-edit: ${testFile} FAIL\n`);
+					} else {
+						process.stderr.write(`[qult] test-on-edit: ${testFile} PASS\n`);
+					}
+				}
+			}
+		}
+	} catch {
+		/* fail-open */
+	}
+
 	if (newFixes.length > 0) {
 		addPendingFixes(file, newFixes);
 	} else {
@@ -270,6 +298,31 @@ function checkPlanRequired(): void {
 			`[qult] Plan strongly recommended: ${changed} files changed (${threshold * 2}+ threshold). Large unplanned changes risk scope creep and missed tests.\n`,
 		);
 	}
+}
+
+// ── Test-on-edit command builder ─────────────────────────────
+
+/** Build a test command for a specific file based on the test runner in on_commit.test. */
+function buildTestFileCommand(testCommand: string, testFile: string): string | null {
+	const escaped = shellEscape(testFile);
+	// vitest / jest: append file path
+	if (/\b(vitest|jest)\b/.test(testCommand)) {
+		const base = testCommand.replace(/\s+run\b/, " run");
+		return `${base} ${escaped}`;
+	}
+	// pytest: append file path
+	if (/\bpytest\b/.test(testCommand)) {
+		return `${testCommand} ${escaped}`;
+	}
+	// go test: run on package directory (go test doesn't accept file paths)
+	if (/\bgo\s+test\b/.test(testCommand)) {
+		return `go test -v -run . ${shellEscape(dirname(testFile))}`;
+	}
+	// mocha: append file
+	if (/\bmocha\b/.test(testCommand)) {
+		return `${testCommand} ${escaped}`;
+	}
+	return null;
 }
 
 // ── Bash: three independent detectors ───────────────────────

@@ -6,6 +6,8 @@ export {
 	validatePlanStructure,
 } from "./plan-validators.ts";
 export {
+	type AdversarialReviewScores,
+	parseAdversarialScores,
 	parseDimensionScores,
 	parseQualityScores,
 	parseScores,

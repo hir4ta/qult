@@ -52,7 +52,20 @@ const EMPTY_TEST_RE =
 const MOCK_RE =
 	/\b(?:vi\.fn|jest\.fn|vi\.spyOn|jest\.spyOn|sinon\.stub|sinon\.spy|\.mockImplementation|\.mockReturnValue|\.mockResolvedValue|mock\()\s*\(/g;
 
-// ── Implementation-coupled assertion ─────────────────────────
+// ── Always-true assertion ────────────────────────────────────
+// expect(true).toBe(true), expect(1).toBeTruthy(), expect("str").toBeDefined()
+const ALWAYS_TRUE_RE =
+	/expect\s*\(\s*(?:true|1|"[^"]*"|'[^']*'|\d+)\s*\)\s*\.(?:toBe\s*\(\s*(?:true|1)\s*\)|toBeTruthy\s*\(\s*\)|toBeDefined\s*\(\s*\))/;
+
+// ── Constant-to-constant assertion ──────────────────────────
+// expect("hello").toBe("hello") or expect(42).toBe(42) — literal equals itself
+const CONSTANT_SELF_RE =
+	/expect\s*\(\s*(["'`][^"'`]*["'`]|\d+)\s*\)\s*\.(?:toBe|toEqual)\s*\(\s*\1\s*\)/;
+
+// ── Snapshot-only detection ─────────────────────────────────
+const SNAPSHOT_RE = /\.toMatchSnapshot\s*\(|\.toMatchInlineSnapshot\s*\(/g;
+
+// ── Implementation-coupled assertion ───��───────────────���─────
 // Assertions that test internal method calls rather than behavior
 const IMPL_COUPLED_RE =
 	/expect\s*\(\s*\w+\s*\)\s*\.(?:toHaveBeenCalled|toHaveBeenCalledWith|toHaveBeenCalledTimes)\s*\(/;
@@ -122,6 +135,24 @@ export function analyzeTestQuality(file: string): TestQualityResult | null {
 			});
 		}
 
+		// Always-true assertions
+		if (ALWAYS_TRUE_RE.test(line)) {
+			smells.push({
+				type: "always-true",
+				line: i + 1,
+				message: "Always-true assertion — tests a literal, not computed behavior",
+			});
+		}
+
+		// Constant-to-constant assertions (expect("x").toBe("x"))
+		if (CONSTANT_SELF_RE.test(line)) {
+			smells.push({
+				type: "constant-self",
+				line: i + 1,
+				message: "Constant-to-constant assertion: literal compared to itself",
+			});
+		}
+
 		// Implementation-coupled assertions
 		if (IMPL_COUPLED_RE.test(line)) {
 			smells.push({
@@ -130,6 +161,17 @@ export function analyzeTestQuality(file: string): TestQualityResult | null {
 				message: "Tests mock calls instead of behavior — consider asserting outputs",
 			});
 		}
+	}
+
+	// Snapshot-only test: all assertions are snapshot matchers, no value assertions
+	const snapshotCount = (codeOnly.match(SNAPSHOT_RE) ?? []).length;
+	const nonSnapshotAssertions = assertionCount - snapshotCount;
+	if (snapshotCount > 0 && nonSnapshotAssertions === 0) {
+		smells.push({
+			type: "snapshot-only",
+			line: 0,
+			message: `All ${snapshotCount} assertion(s) are snapshots — add value-based assertions to verify behavior`,
+		});
 	}
 
 	// Mock overuse: more mocks than assertions

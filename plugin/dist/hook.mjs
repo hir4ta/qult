@@ -66,6 +66,10 @@ function applyConfigLayer(config, raw) {
       config.gates.output_max_chars = g.output_max_chars;
     if (typeof g.default_timeout === "number")
       config.gates.default_timeout = g.default_timeout;
+    if (typeof g.test_on_edit === "boolean")
+      config.gates.test_on_edit = g.test_on_edit;
+    if (typeof g.test_on_edit_timeout === "number")
+      config.gates.test_on_edit_timeout = g.test_on_edit_timeout;
   }
 }
 function loadConfig() {
@@ -106,6 +110,12 @@ function loadConfig() {
   config.plan_eval.max_iterations = envInt("QULT_PLAN_EVAL_MAX_ITERATIONS") ?? config.plan_eval.max_iterations;
   config.gates.output_max_chars = envInt("QULT_GATE_OUTPUT_MAX") ?? config.gates.output_max_chars;
   config.gates.default_timeout = envInt("QULT_GATE_DEFAULT_TIMEOUT") ?? config.gates.default_timeout;
+  const testOnEditEnv = process.env.QULT_TEST_ON_EDIT;
+  if (testOnEditEnv === "1" || testOnEditEnv === "true")
+    config.gates.test_on_edit = true;
+  else if (testOnEditEnv === "0" || testOnEditEnv === "false")
+    config.gates.test_on_edit = false;
+  config.gates.test_on_edit_timeout = envInt("QULT_TEST_ON_EDIT_TIMEOUT") ?? config.gates.test_on_edit_timeout;
   _cache = config;
   return config;
 }
@@ -125,7 +135,9 @@ var init_config = __esm(() => {
     },
     gates: {
       output_max_chars: 2000,
-      default_timeout: 1e4
+      default_timeout: 1e4,
+      test_on_edit: false,
+      test_on_edit_timeout: 15000
     }
   };
 });
@@ -1681,12 +1693,48 @@ var init_security_check = __esm(() => {
   ];
 });
 
+// src/hooks/detectors/test-file-resolver.ts
+import { existsSync as existsSync12 } from "node:fs";
+import { basename as basename2, dirname as dirname3, extname as extname6, join as join10 } from "node:path";
+function resolveTestFile(sourceFile) {
+  const ext = extname6(sourceFile);
+  const base = basename2(sourceFile, ext);
+  const dir = dirname3(sourceFile);
+  if (isTestFile(sourceFile))
+    return null;
+  for (const pattern of TEST_PATTERNS) {
+    const candidate = pattern(dir, base, ext);
+    if (candidate && existsSync12(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+function isTestFile(file) {
+  const base = basename2(file);
+  return /\.(test|spec)\.\w+$/.test(base) || /^test_\w+\.py$/.test(base) || /_test\.go$/.test(base) || /\/(__tests__|tests)\//.test(file);
+}
+var TEST_PATTERNS;
+var init_test_file_resolver = __esm(() => {
+  TEST_PATTERNS = [
+    (dir, name, ext) => join10(dir, `${name}.test${ext}`),
+    (dir, name, ext) => join10(dir, `${name}.spec${ext}`),
+    (dir, name, ext) => join10(dir, "__tests__", `${name}.test${ext}`),
+    (dir, name, ext) => join10(dir, "__tests__", `${name}.spec${ext}`),
+    (dir, name, ext) => join10(dir, "tests", `${name}.test${ext}`),
+    (dir, name, ext) => ext === ".py" ? join10(dir, `test_${name}${ext}`) : null,
+    (dir, name, ext) => ext === ".py" ? join10(dir, "tests", `test_${name}${ext}`) : null,
+    (dir, name, ext) => ext === ".go" ? join10(dir, `${name}_test${ext}`) : null,
+    (dir, name, ext) => ext === ".rs" ? join10(dir, "tests", `${name}${ext}`) : null
+  ];
+});
+
 // src/hooks/post-tool.ts
 var exports_post_tool = {};
 __export(exports_post_tool, {
   default: () => postTool
 });
-import { extname as extname6, resolve as resolve2 } from "node:path";
+import { dirname as dirname4, extname as extname7, resolve as resolve2 } from "node:path";
 async function postTool(ev) {
   const tool = ev.tool_name;
   if (!tool)
@@ -1708,7 +1756,7 @@ async function handleEditWrite(ev) {
   const gates = loadGates();
   if (!gates?.on_write)
     return;
-  const fileExt = extname6(file).toLowerCase();
+  const fileExt = extname7(file).toLowerCase();
   const gatedExts = getGatedExtensions();
   const sessionId = ev.session_id;
   const gateEntries = [];
@@ -1789,6 +1837,30 @@ async function handleEditWrite(ev) {
       }
     }
   } catch {}
+  try {
+    const config = loadConfig();
+    if (config.gates.test_on_edit && newFixes.length === 0) {
+      const testFile = resolveTestFile(file);
+      if (testFile && gates?.on_commit?.test) {
+        const testGate = gates.on_commit.test;
+        const testCommand = buildTestFileCommand(testGate.command, testFile);
+        if (testCommand) {
+          const testResult = await runGateAsync("test-on-edit", {
+            command: testCommand,
+            timeout: config.gates.test_on_edit_timeout
+          });
+          if (!testResult.passed) {
+            newFixes.push({ file, errors: [testResult.output], gate: "test-on-edit" });
+            process.stderr.write(`[qult] test-on-edit: ${testFile} FAIL
+`);
+          } else {
+            process.stderr.write(`[qult] test-on-edit: ${testFile} PASS
+`);
+          }
+        }
+      }
+    }
+  } catch {}
   if (newFixes.length > 0) {
     addPendingFixes(file, newFixes);
   } else {
@@ -1861,6 +1933,23 @@ function checkPlanRequired() {
     process.stderr.write(`[qult] Plan strongly recommended: ${changed} files changed (${threshold * 2}+ threshold). Large unplanned changes risk scope creep and missed tests.
 `);
   }
+}
+function buildTestFileCommand(testCommand, testFile) {
+  const escaped = shellEscape(testFile);
+  if (/\b(vitest|jest)\b/.test(testCommand)) {
+    const base = testCommand.replace(/\s+run\b/, " run");
+    return `${base} ${escaped}`;
+  }
+  if (/\bpytest\b/.test(testCommand)) {
+    return `${testCommand} ${escaped}`;
+  }
+  if (/\bgo\s+test\b/.test(testCommand)) {
+    return `go test -v -run . ${shellEscape(dirname4(testFile))}`;
+  }
+  if (/\bmocha\b/.test(testCommand)) {
+    return `${testCommand} ${escaped}`;
+  }
+  return null;
 }
 function handleBash(ev) {
   const command = typeof ev.tool_input?.command === "string" ? ev.tool_input.command : null;
@@ -1961,6 +2050,7 @@ var init_post_tool = __esm(() => {
   init_export_check();
   init_import_check();
   init_security_check();
+  init_test_file_resolver();
   planWarnedAt = new Set;
   GIT_COMMIT_RE = /\bgit\s+(?:-\S+(?:\s+\S+)?\s+)*commit\b/i;
   LINT_FIX_RE = /\b(biome\s+(check|lint).*--(fix|write)|biome\s+format|eslint.*--fix|prettier.*--write|ruff\s+check.*--fix|ruff\s+format|gofmt|go\s+fmt|cargo\s+fmt|autopep8|black)\b/;
@@ -2197,6 +2287,86 @@ var init_stop = __esm(() => {
   init_plan_status();
   init_session_state();
   init_respond();
+});
+
+// src/state/calibration.ts
+import { existsSync as existsSync13, readFileSync as readFileSync10 } from "node:fs";
+import { join as join11 } from "node:path";
+function calibrationPath() {
+  const pluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
+  if (!pluginDataDir)
+    return null;
+  return join11(pluginDataDir, CALIBRATION_FILE);
+}
+function readCalibration() {
+  const path = calibrationPath();
+  if (!path || !existsSync13(path))
+    return null;
+  try {
+    return JSON.parse(readFileSync10(path, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+function recordCalibration(aggregate, stageScores) {
+  const path = calibrationPath();
+  if (!path)
+    return;
+  const data = readCalibration() ?? {
+    entries: [],
+    stats: { mean: 0, stddev: 0, count: 0, perfect_count: 0 }
+  };
+  data.entries.push({
+    date: new Date().toISOString(),
+    aggregate,
+    stages: stageScores
+  });
+  if (data.entries.length > MAX_ENTRIES) {
+    data.entries = data.entries.slice(-MAX_ENTRIES);
+  }
+  const scores = data.entries.map((e) => e.aggregate);
+  const count = scores.length;
+  const mean = scores.reduce((s, v) => s + v, 0) / count;
+  const variance = scores.reduce((s, v) => s + (v - mean) ** 2, 0) / count;
+  const stddev = Math.sqrt(variance);
+  const perfectCount = data.entries.filter((e) => e.aggregate === 30).length;
+  data.stats = {
+    mean: Math.round(mean * 100) / 100,
+    stddev: Math.round(stddev * 100) / 100,
+    count,
+    perfect_count: perfectCount
+  };
+  atomicWriteJson(path, data);
+}
+function checkCalibration() {
+  const data = readCalibration();
+  if (!data || data.stats.count < 5)
+    return [];
+  const warnings = [];
+  if (data.stats.mean > 28 && data.stats.stddev < 1.5) {
+    warnings.push({
+      type: "high_mean",
+      message: `Cross-session calibration: mean ${data.stats.mean}/30 with σ=${data.stats.stddev} across ${data.stats.count} reviews. Scores may be systematically inflated.`
+    });
+  }
+  if (data.stats.count >= 10 && data.stats.stddev < 0.8) {
+    warnings.push({
+      type: "low_variance",
+      message: `Cross-session calibration: σ=${data.stats.stddev} across ${data.stats.count} reviews suggests reviewers are not differentiating between codebases.`
+    });
+  }
+  const recentPerfect = data.entries.slice(-3).every((e) => e.aggregate === 30);
+  if (recentPerfect && data.stats.count >= 3) {
+    warnings.push({
+      type: "perfect_streak",
+      message: "Cross-session calibration: 3+ consecutive perfect scores (30/30). No code is perfect — reviewers may need recalibration."
+    });
+  }
+  return warnings;
+}
+var CALIBRATION_FILE = "review-calibration.json", MAX_ENTRIES = 50;
+var init_calibration = __esm(() => {
+  init_atomic_write();
 });
 
 // src/hooks/subagent-stop/trend-analysis.ts
@@ -2442,17 +2612,24 @@ function parseSecurityScores(output) {
     return null;
   return { vulnerability: scores.Vulnerability, hardening: scores.Hardening };
 }
-var REVIEW_DIMENSIONS, SPEC_DIMENSIONS, QUALITY_DIMENSIONS, SECURITY_DIMENSIONS;
+function parseAdversarialScores(output) {
+  const scores = parseDimensionScores(output, ADVERSARIAL_DIMENSIONS);
+  if (!scores)
+    return null;
+  return { edgeCases: scores.EdgeCases, logicCorrectness: scores.LogicCorrectness };
+}
+var REVIEW_DIMENSIONS, SPEC_DIMENSIONS, QUALITY_DIMENSIONS, SECURITY_DIMENSIONS, ADVERSARIAL_DIMENSIONS;
 var init_score_parsers = __esm(() => {
   REVIEW_DIMENSIONS = ["Correctness", "Design", "Security"];
   SPEC_DIMENSIONS = ["Completeness", "Accuracy"];
   QUALITY_DIMENSIONS = ["Design", "Maintainability"];
   SECURITY_DIMENSIONS = ["Vulnerability", "Hardening"];
+  ADVERSARIAL_DIMENSIONS = ["EdgeCases", "LogicCorrectness"];
 });
 
 // src/hooks/subagent-stop/agent-validators.ts
-import { existsSync as existsSync12, readdirSync as readdirSync4, readFileSync as readFileSync10, statSync as statSync4 } from "node:fs";
-import { join as join10 } from "node:path";
+import { existsSync as existsSync14, readdirSync as readdirSync4, readFileSync as readFileSync11, statSync as statSync4 } from "node:fs";
+import { join as join12 } from "node:path";
 async function subagentStop(ev) {
   if (ev.stop_hook_active)
     return;
@@ -2465,6 +2642,7 @@ async function subagentStop(ev) {
     "qult-spec-reviewer",
     "qult-quality-reviewer",
     "qult-security-reviewer",
+    "qult-adversarial-reviewer",
     "qult-plan-evaluator"
   ]);
   if (!output && KNOWN_REVIEWERS.has(normalized)) {
@@ -2479,6 +2657,8 @@ async function subagentStop(ev) {
   } else if (normalized === "qult-security-reviewer") {
     validateStageReviewer(output, SECURITY_PASS_RE, SECURITY_FAIL_RE, parseSecurityScores, "Security");
     checkAggregateScore();
+  } else if (normalized === "qult-adversarial-reviewer") {
+    validateStageReviewer(output, ADVERSARIAL_PASS_RE, ADVERSARIAL_FAIL_RE, parseAdversarialScores, "Adversarial");
   } else if (normalized === "qult-plan-evaluator") {
     validatePlanEvaluator(output);
   } else if (normalized === "Plan") {
@@ -2487,16 +2667,16 @@ async function subagentStop(ev) {
 }
 function validatePlan() {
   try {
-    const planDir = join10(process.cwd(), ".claude", "plans");
-    if (!existsSync12(planDir))
+    const planDir = join12(process.cwd(), ".claude", "plans");
+    if (!existsSync14(planDir))
       return;
     const files = readdirSync4(planDir).filter((f) => f.endsWith(".md")).map((f) => ({
       name: f,
-      mtime: statSync4(join10(planDir, f)).mtimeMs
+      mtime: statSync4(join12(planDir, f)).mtimeMs
     })).sort((a, b) => b.mtime - a.mtime);
     if (files.length === 0)
       return;
-    const content = readFileSync10(join10(planDir, files[0].name), "utf-8");
+    const content = readFileSync11(join12(planDir, files[0].name), "utf-8");
     const structErrors = validatePlanStructure(content);
     if (structErrors.length > 0) {
       block(`Plan structural issues:
@@ -2577,15 +2757,20 @@ function validateStageReviewer(output, passRe, failRe, scoreParser, stageName) {
 }
 function checkScoreFindingsConsistency(output, scores, stageName) {
   const criticalHighCount = (output.match(/\[(critical|high)\]/gi) ?? []).length;
+  const hasFindings = FINDING_RE.test(output);
   const allScoresHigh = Object.values(scores).every((v) => v >= 4);
   const allPerfect = Object.values(scores).every((v) => v === 5);
-  const noFindings = !FINDING_RE.test(output);
+  const hasNoIssuesDeclaration = NO_ISSUES_RE.test(output);
   if (criticalHighCount > 0 && allScoresHigh) {
     block(`${stageName}: PASS but ${criticalHighCount} critical/high finding(s) with all scores 4+/5. Reconcile findings with scores and rerun the review.`);
   }
-  if (allPerfect && noFindings) {
-    process.stderr.write(`[qult] ${stageName}: all dimensions 5/5 with no findings — verify review thoroughness.
-`);
+  const belowThreshold = Object.entries(scores).filter(([, v]) => v < 4);
+  if (belowThreshold.length > 0 && !hasFindings) {
+    const dims = belowThreshold.map(([name, score]) => `${name} (${score}/5)`).join(", ");
+    block(`${stageName}: ${dims} scored below 4/5 but no findings cited. Low scores must include at least one [severity] file — description finding as evidence. Rerun the review with concrete findings.`);
+  }
+  if (allPerfect && !hasFindings && !hasNoIssuesDeclaration) {
+    block(`${stageName}: all dimensions 5/5 with no findings and no explicit 'No issues found' declaration. Perfect scores require either findings or an explicit declaration. Rerun the review.`);
   }
 }
 function checkAggregateScore() {
@@ -2623,6 +2808,14 @@ function checkAggregateScore() {
         const mergedHistory = persistReviewFindings();
         if (mergedHistory)
           detectRepeatedPatterns(mergedHistory);
+      } catch {}
+      try {
+        recordCalibration(aggregate, stageScores);
+        const calibrationWarnings = checkCalibration();
+        for (const w of calibrationWarnings) {
+          process.stderr.write(`[qult] ${w.message}
+`);
+        }
       } catch {}
       recordReview();
       return;
@@ -2677,11 +2870,11 @@ function extractFindings(output, stageName) {
 function persistReviewFindings() {
   if (_currentFindings.length === 0)
     return null;
-  const historyPath = join10(process.cwd(), ".qult", ".state", FINDINGS_HISTORY_FILE);
+  const historyPath = join12(process.cwd(), ".qult", ".state", FINDINGS_HISTORY_FILE);
   let history = [];
   try {
-    if (existsSync12(historyPath)) {
-      history = JSON.parse(readFileSync10(historyPath, "utf-8"));
+    if (existsSync14(historyPath)) {
+      history = JSON.parse(readFileSync11(historyPath, "utf-8"));
     }
   } catch {
     history = [];
@@ -2722,10 +2915,11 @@ function detectRepeatedPatterns(history) {
 function resetFindingsCache() {
   _currentFindings = [];
 }
-var SEVERITY_PATTERN, FINDING_RE, NO_ISSUES_RE, SPEC_PASS_RE, SPEC_FAIL_RE, QUALITY_PASS_RE, QUALITY_FAIL_RE, SECURITY_PASS_RE, SECURITY_FAIL_RE, PLAN_PASS_RE, PLAN_REVISE_RE, FINDINGS_HISTORY_FILE = "review-findings-history.json", MAX_FINDINGS = 100, _currentFindings;
+var SEVERITY_PATTERN, FINDING_RE, NO_ISSUES_RE, SPEC_PASS_RE, SPEC_FAIL_RE, QUALITY_PASS_RE, QUALITY_FAIL_RE, SECURITY_PASS_RE, SECURITY_FAIL_RE, ADVERSARIAL_PASS_RE, ADVERSARIAL_FAIL_RE, PLAN_PASS_RE, PLAN_REVISE_RE, FINDINGS_HISTORY_FILE = "review-findings-history.json", MAX_FINDINGS = 100, _currentFindings;
 var init_agent_validators = __esm(() => {
   init_config();
   init_atomic_write();
+  init_calibration();
   init_session_state();
   init_respond();
   init_message_builders();
@@ -2740,6 +2934,8 @@ var init_agent_validators = __esm(() => {
   QUALITY_FAIL_RE = /^Quality:\s*FAIL/im;
   SECURITY_PASS_RE = /^Security:\s*PASS/im;
   SECURITY_FAIL_RE = /^Security:\s*FAIL/im;
+  ADVERSARIAL_PASS_RE = /^Adversarial:\s*PASS/im;
+  ADVERSARIAL_FAIL_RE = /^Adversarial:\s*FAIL/im;
   PLAN_PASS_RE = /^Plan:\s*PASS/im;
   PLAN_REVISE_RE = /^Plan:\s*REVISE/im;
   _currentFindings = [];
@@ -2756,6 +2952,7 @@ __export(exports_subagent_stop, {
   parseScores: () => parseScores,
   parseQualityScores: () => parseQualityScores,
   parseDimensionScores: () => parseDimensionScores,
+  parseAdversarialScores: () => parseAdversarialScores,
   extractFindings: () => extractFindings,
   default: () => subagentStop,
   buildReviewBlockMessage: () => buildReviewBlockMessage,
@@ -2770,18 +2967,18 @@ var init_subagent_stop = __esm(() => {
 });
 
 // src/hooks/detectors/test-quality-check.ts
-import { existsSync as existsSync13, readFileSync as readFileSync11 } from "node:fs";
+import { existsSync as existsSync15, readFileSync as readFileSync12 } from "node:fs";
 import { resolve as resolve4 } from "node:path";
 function analyzeTestQuality(file) {
   const cwd = resolve4(process.cwd());
   const absPath = resolve4(cwd, file);
   if (!absPath.startsWith(cwd))
     return null;
-  if (!existsSync13(absPath))
+  if (!existsSync15(absPath))
     return null;
   let content;
   try {
-    content = readFileSync11(absPath, "utf-8");
+    content = readFileSync12(absPath, "utf-8");
   } catch {
     return null;
   }
@@ -2825,6 +3022,20 @@ function analyzeTestQuality(file) {
         message: "Empty test body — no assertions"
       });
     }
+    if (ALWAYS_TRUE_RE.test(line)) {
+      smells.push({
+        type: "always-true",
+        line: i + 1,
+        message: "Always-true assertion — tests a literal, not computed behavior"
+      });
+    }
+    if (CONSTANT_SELF_RE.test(line)) {
+      smells.push({
+        type: "constant-self",
+        line: i + 1,
+        message: "Constant-to-constant assertion: literal compared to itself"
+      });
+    }
     if (IMPL_COUPLED_RE.test(line)) {
       smells.push({
         type: "impl-coupled",
@@ -2832,6 +3043,15 @@ function analyzeTestQuality(file) {
         message: "Tests mock calls instead of behavior — consider asserting outputs"
       });
     }
+  }
+  const snapshotCount = (codeOnly.match(SNAPSHOT_RE) ?? []).length;
+  const nonSnapshotAssertions = assertionCount - snapshotCount;
+  if (snapshotCount > 0 && nonSnapshotAssertions === 0) {
+    smells.push({
+      type: "snapshot-only",
+      line: 0,
+      message: `All ${snapshotCount} assertion(s) are snapshots — add value-based assertions to verify behavior`
+    });
   }
   const mockCount = (codeOnly.match(MOCK_RE) ?? []).length;
   if (mockCount > 0 && mockCount > assertionCount) {
@@ -2866,7 +3086,7 @@ function formatTestQualityWarnings(file, result, taskKey) {
   }
   return warnings;
 }
-var MAX_CHECK_SIZE3 = 500000, ASSERTION_RE, TEST_CASE_RE, WEAK_MATCHERS, TRIVIAL_ASSERTION_RE, EMPTY_TEST_RE, MOCK_RE, IMPL_COUPLED_RE;
+var MAX_CHECK_SIZE3 = 500000, ASSERTION_RE, TEST_CASE_RE, WEAK_MATCHERS, TRIVIAL_ASSERTION_RE, EMPTY_TEST_RE, MOCK_RE, ALWAYS_TRUE_RE, CONSTANT_SELF_RE, SNAPSHOT_RE, IMPL_COUPLED_RE;
 var init_test_quality_check = __esm(() => {
   ASSERTION_RE = /\b(expect|assert|should)\s*[.(]/g;
   TEST_CASE_RE = /\b(it|test)\s*\(/g;
@@ -2881,6 +3101,9 @@ var init_test_quality_check = __esm(() => {
   TRIVIAL_ASSERTION_RE = /expect\s*\(\s*(\w+)\s*\)\s*\.(?:toBe|toEqual|toStrictEqual)\s*\(\s*\1\s*\)/;
   EMPTY_TEST_RE = /\b(?:it|test)\s*\(\s*["'`][^"'`]*["'`]\s*,\s*(?:async\s+)?\(\s*\)\s*=>\s*\{\s*\}\s*\)/;
   MOCK_RE = /\b(?:vi\.fn|jest\.fn|vi\.spyOn|jest\.spyOn|sinon\.stub|sinon\.spy|\.mockImplementation|\.mockReturnValue|\.mockResolvedValue|mock\()\s*\(/g;
+  ALWAYS_TRUE_RE = /expect\s*\(\s*(?:true|1|"[^"]*"|'[^']*'|\d+)\s*\)\s*\.(?:toBe\s*\(\s*(?:true|1)\s*\)|toBeTruthy\s*\(\s*\)|toBeDefined\s*\(\s*\))/;
+  CONSTANT_SELF_RE = /expect\s*\(\s*(["'`][^"'`]*["'`]|\d+)\s*\)\s*\.(?:toBe|toEqual)\s*\(\s*\1\s*\)/;
+  SNAPSHOT_RE = /\.toMatchSnapshot\s*\(|\.toMatchInlineSnapshot\s*\(/g;
   IMPL_COUPLED_RE = /expect\s*\(\s*\w+\s*\)\s*\.(?:toHaveBeenCalled|toHaveBeenCalledWith|toHaveBeenCalledTimes)\s*\(/;
 });
 
@@ -2981,12 +3204,12 @@ var exports_session_start = {};
 __export(exports_session_start, {
   default: () => sessionStart
 });
-import { existsSync as existsSync14, mkdirSync as mkdirSync3 } from "node:fs";
-import { join as join11 } from "node:path";
+import { existsSync as existsSync16, mkdirSync as mkdirSync3 } from "node:fs";
+import { join as join13 } from "node:path";
 async function sessionStart(ev) {
   try {
-    const stateDir = join11(process.cwd(), ".qult", ".state");
-    if (!existsSync14(stateDir)) {
+    const stateDir = join13(process.cwd(), ".qult", ".state");
+    if (!existsSync16(stateDir)) {
       mkdirSync3(stateDir, { recursive: true });
     }
     cleanupStaleScopedFiles(stateDir);
@@ -3010,12 +3233,12 @@ var exports_post_compact = {};
 __export(exports_post_compact, {
   default: () => postCompact
 });
-import { existsSync as existsSync15, readdirSync as readdirSync5, readFileSync as readFileSync12, statSync as statSync5 } from "node:fs";
-import { join as join12 } from "node:path";
+import { existsSync as existsSync17, readdirSync as readdirSync5, readFileSync as readFileSync13, statSync as statSync5 } from "node:fs";
+import { join as join14 } from "node:path";
 async function postCompact(_ev) {
   try {
-    const stateDir = join12(process.cwd(), ".qult", ".state");
-    if (!existsSync15(stateDir))
+    const stateDir = join14(process.cwd(), ".qult", ".state");
+    if (!existsSync17(stateDir))
       return;
     const parts = [];
     const fixesPath2 = findLatestFile(stateDir, "pending-fixes");
@@ -3033,8 +3256,8 @@ async function postCompact(_ev) {
       const state = safeReadJson(statePath, {});
       if (Object.keys(state).length > 0) {
         const summary = [];
-        const gatesPath = join12(process.cwd(), ".qult", "gates.json");
-        const hasGates = existsSync15(gatesPath);
+        const gatesPath = join14(process.cwd(), ".qult", "gates.json");
+        const hasGates = existsSync17(gatesPath);
         if (state.test_passed_at)
           summary.push(`test_passed_at: ${state.test_passed_at}`);
         else if (hasGates)
@@ -3070,11 +3293,11 @@ async function postCompact(_ev) {
       }
     }
     try {
-      const planDir = join12(process.cwd(), ".claude", "plans");
-      if (existsSync15(planDir)) {
-        const planFiles = readdirSync5(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync5(join12(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
+      const planDir = join14(process.cwd(), ".claude", "plans");
+      if (existsSync17(planDir)) {
+        const planFiles = readdirSync5(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync5(join14(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
         if (planFiles.length > 0) {
-          const content = readFileSync12(join12(planDir, planFiles[0].name), "utf-8");
+          const content = readFileSync13(join14(planDir, planFiles[0].name), "utf-8");
           const taskCount = (content.match(/^###\s+Task\s+\d+/gim) ?? []).length;
           const doneCount = (content.match(/^###\s+Task\s+\d+.*\[done\]/gim) ?? []).length;
           if (taskCount > 0) {
@@ -3092,8 +3315,8 @@ async function postCompact(_ev) {
 function findLatestFile(stateDir, prefix) {
   try {
     const files = readdirSync5(stateDir).filter((f) => f.startsWith(prefix) && f.endsWith(".json")).map((f) => ({
-      path: join12(stateDir, f),
-      mtime: statSync5(join12(stateDir, f)).mtimeMs
+      path: join14(stateDir, f),
+      mtime: statSync5(join14(stateDir, f)).mtimeMs
     })).sort((a, b) => b.mtime - a.mtime);
     return files.length > 0 ? files[0].path : null;
   } catch {
@@ -3102,9 +3325,9 @@ function findLatestFile(stateDir, prefix) {
 }
 function safeReadJson(path, fallback) {
   try {
-    if (!existsSync15(path))
+    if (!existsSync17(path))
       return fallback;
-    return JSON.parse(readFileSync12(path, "utf-8"));
+    return JSON.parse(readFileSync13(path, "utf-8"));
   } catch {
     return fallback;
   }
@@ -3118,7 +3341,7 @@ init_pending_fixes();
 init_session_state();
 init_lazy_init();
 init_respond();
-import { join as join13 } from "node:path";
+import { join as join15 } from "node:path";
 var EVENT_MAP = {
   "post-tool": () => Promise.resolve().then(() => (init_post_tool(), exports_post_tool)),
   "pre-tool": () => Promise.resolve().then(() => (init_pre_tool(), exports_pre_tool)),
@@ -3163,7 +3386,7 @@ async function dispatch(event) {
     setFixesSessionScope(ev.session_id);
     if (ev.session_id !== _lastWrittenSessionId) {
       try {
-        atomicWriteJson(join13(process.cwd(), ".qult", ".state", "latest-session.json"), {
+        atomicWriteJson(join15(process.cwd(), ".qult", ".state", "latest-session.json"), {
           session_id: ev.session_id,
           updated_at: new Date().toISOString()
         });

@@ -661,7 +661,8 @@ Why this change is needed.
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		await subagentStop({
 			agent_type: "qult-quality-reviewer",
-			last_assistant_message: "Quality: PASS\nScore: Design=3 Maintainability=4\nNo issues found.",
+			last_assistant_message:
+				"Quality: PASS\nScore: Design=3 Maintainability=4\n- [low] src/foo.ts — minor design issue",
 		});
 		expect(exitCode).toBeNull();
 	});
@@ -698,17 +699,19 @@ Why this change is needed.
 
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 
-		// Stage 1: Spec PASS with low scores
+		// Stage 1: Spec PASS with low scores (findings required for < 4)
 		await subagentStop({
 			agent_type: "qult-spec-reviewer",
-			last_assistant_message: "Spec: PASS\nScore: Completeness=3 Accuracy=3\nNo issues found.",
+			last_assistant_message:
+				"Spec: PASS\nScore: Completeness=3 Accuracy=3\n- [low] src/a.ts — gap\n- [low] src/b.ts — gap",
 		});
 		expect(exitCode).toBeNull();
 
 		// Stage 2: Quality PASS with low scores
 		await subagentStop({
 			agent_type: "qult-quality-reviewer",
-			last_assistant_message: "Quality: PASS\nScore: Design=3 Maintainability=3\nNo issues found.",
+			last_assistant_message:
+				"Quality: PASS\nScore: Design=3 Maintainability=3\n- [low] src/c.ts — issue\n- [low] src/d.ts — issue",
 		});
 		expect(exitCode).toBeNull();
 
@@ -717,7 +720,7 @@ Why this change is needed.
 			subagentStop({
 				agent_type: "qult-security-reviewer",
 				last_assistant_message:
-					"Security: PASS\nScore: Vulnerability=3 Hardening=3\nNo issues found.",
+					"Security: PASS\nScore: Vulnerability=3 Hardening=3\n- [low] src/e.ts — weak\n- [low] src/f.ts — weak",
 			}),
 		).rejects.toThrow("process.exit");
 		expect(exitCode).toBe(2);
@@ -788,14 +791,44 @@ Why this change is needed.
 	// --- Score-findings consistency tests ---
 
 	describe("scoresFindingsConsistency", () => {
-		it("all 5/5 with no findings: warns to stderr but allows", async () => {
+		it("all 5/5 with 'No issues found' declaration: allows", async () => {
 			const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 			await subagentStop({
 				agent_type: "qult-spec-reviewer",
 				last_assistant_message: "Spec: PASS\nScore: Completeness=5 Accuracy=5\nNo issues found.",
 			});
 			expect(exitCode).toBeNull();
-			expect(stderrCapture.join("")).toContain("verify review thoroughness");
+		});
+
+		it("all 5/5 with no findings and no declaration: blocks", async () => {
+			const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+			await expect(
+				subagentStop({
+					agent_type: "qult-spec-reviewer",
+					last_assistant_message: "Spec: PASS\nScore: Completeness=5 Accuracy=5",
+				}),
+			).rejects.toThrow("process.exit");
+			expect(exitCode).toBe(2);
+			expect(stderrCapture.join("")).toContain("Perfect scores require");
+		});
+
+		it("low score without findings: blocks", async () => {
+			// dimension_floor=1 to isolate evidence-based scoring test
+			writeFileSync(
+				join(TEST_DIR, ".qult", "config.json"),
+				JSON.stringify({ review: { dimension_floor: 1 } }),
+			);
+			resetAllCaches();
+
+			const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+			await expect(
+				subagentStop({
+					agent_type: "qult-quality-reviewer",
+					last_assistant_message: "Quality: PASS\nScore: Design=3 Maintainability=5",
+				}),
+			).rejects.toThrow("process.exit");
+			expect(exitCode).toBe(2);
+			expect(stderrCapture.join("")).toContain("scored below 4/5 but no findings cited");
 		});
 
 		it("critical finding with high scores: blocks", async () => {
@@ -849,6 +882,43 @@ Why this change is needed.
 			});
 			expect(exitCode).toBeNull();
 		});
+	});
+
+	// ── Adversarial reviewer ──────────────────────────────
+
+	it("qult-adversarial-reviewer with PASS: allows", async () => {
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		await subagentStop({
+			agent_type: "qult-adversarial-reviewer",
+			last_assistant_message:
+				"Adversarial: PASS\nScore: EdgeCases=4 LogicCorrectness=5\nNo issues found.",
+		});
+		expect(exitCode).toBeNull();
+	});
+
+	it("qult-adversarial-reviewer with FAIL: blocks", async () => {
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		await expect(
+			subagentStop({
+				agent_type: "qult-adversarial-reviewer",
+				last_assistant_message:
+					"Adversarial: FAIL\nScore: EdgeCases=2 LogicCorrectness=3\n- [high] src/foo.ts:10 — off-by-one in loop",
+			}),
+		).rejects.toThrow("process.exit");
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("FAIL");
+	});
+
+	it("qult-adversarial-reviewer with empty output: blocks", async () => {
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		await expect(
+			subagentStop({
+				agent_type: "qult-adversarial-reviewer",
+				last_assistant_message: "",
+			}),
+		).rejects.toThrow("process.exit");
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("empty output");
 	});
 
 	it("Plan agent with invalid plan (missing sections): blocks", async () => {

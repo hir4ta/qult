@@ -635,7 +635,8 @@ describe("score distribution bias detection", () => {
 		const handler = (await import("../subagent-stop/index.ts")).default;
 		await handler({
 			agent_type: "qult-spec-reviewer",
-			last_assistant_message: "Spec: PASS\nScore: Completeness=5 Accuracy=3\nNo issues found.",
+			last_assistant_message:
+				"Spec: PASS\nScore: Completeness=5 Accuracy=3\n- [low] src/a.ts — minor gap",
 		});
 		await handler({
 			agent_type: "qult-quality-reviewer",
@@ -644,7 +645,7 @@ describe("score distribution bias detection", () => {
 		await handler({
 			agent_type: "qult-security-reviewer",
 			last_assistant_message:
-				"Security: PASS\nScore: Vulnerability=3 Hardening=4\nNo issues found.",
+				"Security: PASS\nScore: Vulnerability=3 Hardening=4\n- [low] src/b.ts — minor weakness",
 		});
 
 		const stderr = stderrCapture.join("");

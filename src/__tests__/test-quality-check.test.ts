@@ -195,6 +195,107 @@ it("coupled", () => {
 		});
 	});
 
+	describe("always-true assertion detection", () => {
+		it("detects expect(true).toBe(true) in isolation", async () => {
+			const file = join(TEST_DIR, "always-tobe.test.ts");
+			writeFileSync(
+				file,
+				`
+it("always true", () => {
+  expect(true).toBe(true);
+});
+`,
+			);
+			const result = await analyze(file);
+			const smells = result!.smells.filter((s) => s.type === "always-true");
+			expect(smells.length).toBe(1);
+			expect(smells[0]!.message).toContain("Always-true");
+		});
+
+		it("detects expect(1).toBeTruthy()", async () => {
+			const file = join(TEST_DIR, "always-truthy.test.ts");
+			writeFileSync(
+				file,
+				`
+it("always truthy", () => {
+  expect(1).toBeTruthy();
+});
+`,
+			);
+			const result = await analyze(file);
+			const smells = result!.smells.filter((s) => s.type === "always-true");
+			expect(smells.length).toBe(1);
+		});
+
+		it("detects both patterns together", async () => {
+			const file = join(TEST_DIR, "always-both.test.ts");
+			writeFileSync(
+				file,
+				`
+it("always true", () => {
+  expect(true).toBe(true);
+  expect(1).toBeTruthy();
+});
+`,
+			);
+			const result = await analyze(file);
+			const smells = result!.smells.filter((s) => s.type === "always-true");
+			expect(smells.length).toBe(2);
+		});
+	});
+
+	describe("constant-to-constant assertion detection", () => {
+		it("detects expect('hello').toBe('hello')", async () => {
+			const file = join(TEST_DIR, "const.test.ts");
+			writeFileSync(
+				file,
+				`
+it("constant self", () => {
+  expect("hello").toBe("hello");
+});
+`,
+			);
+			const result = await analyze(file);
+			const smells = result!.smells.filter((s) => s.type === "constant-self");
+			expect(smells.length).toBe(1);
+			expect(smells[0]!.message).toContain("literal compared to itself");
+		});
+	});
+
+	describe("snapshot-only detection", () => {
+		it("detects file with only snapshot assertions", async () => {
+			const file = join(TEST_DIR, "snap.test.ts");
+			writeFileSync(
+				file,
+				`
+it("snapshot only", () => {
+  expect(result).toMatchSnapshot();
+});
+`,
+			);
+			const result = await analyze(file);
+			const smells = result!.smells.filter((s) => s.type === "snapshot-only");
+			expect(smells.length).toBe(1);
+			expect(smells[0]!.message).toContain("snapshots");
+		});
+
+		it("no warning when snapshot mixed with value assertions", async () => {
+			const file = join(TEST_DIR, "mixed.test.ts");
+			writeFileSync(
+				file,
+				`
+it("mixed", () => {
+  expect(result).toMatchSnapshot();
+  expect(result.name).toBe("foo");
+});
+`,
+			);
+			const result = await analyze(file);
+			const smells = result!.smells.filter((s) => s.type === "snapshot-only");
+			expect(smells.length).toBe(0);
+		});
+	});
+
 	it("returns null for non-existent file", async () => {
 		const result = await analyze(join(TEST_DIR, "nope.test.ts"));
 		expect(result).toBeNull();

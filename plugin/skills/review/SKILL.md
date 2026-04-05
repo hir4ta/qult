@@ -1,15 +1,15 @@
 ---
 name: review
-description: "Independent 3-stage code review: Spec compliance → Code quality → Security. Spawns specialized reviewers, then filters by Succinctness/Accuracy/Actionability. Use before a major commit or as a review gate. NOT for trivial changes."
+description: "Independent 4-stage code review: Spec compliance → Code quality → Security → Adversarial edge cases. Spawns specialized reviewers, then filters by Succinctness/Accuracy/Actionability. Use before a major commit or as a review gate. NOT for trivial changes."
 ---
 
 # /qult:review
 
-Three-stage code review: independent specialized reviewers → Judge filter.
+Four-stage code review: independent specialized reviewers → Judge filter.
 
 > **Quality by Structure, Not by Promise.**
-> Three pairs of eyes, each seeing what the others miss.
-> The Wall blocks completion until all three stages pass.
+> Four pairs of eyes, each seeing what the others miss.
+> The Wall blocks completion until all stages pass.
 
 ## Stage 0: Run on_review gates (runtime verification)
 
@@ -99,18 +99,38 @@ If Security: PASS, record the scores:
 mcp__plugin_qult_qult__record_stage_scores({ stage: "Security", scores: { vulnerability: N, hardening: N } })
 ```
 
-## Stage 4: Judge filter
+## Stage 4: Adversarial Reviewer (edge cases & logic correctness)
 
-For EACH finding from ALL three reviewers, verify:
+Spawn one `adversarial-reviewer` agent.
+
+In the agent prompt, include:
+- One-line instruction: "Find edge cases, logic errors, and silent failures in the uncommitted changes that other reviewers missed."
+
+The adversarial-reviewer evaluates **EdgeCases** and **LogicCorrectness** in an independent context.
+
+Collect output: `Adversarial: PASS/FAIL`, `Score: EdgeCases=N LogicCorrectness=N`, findings.
+
+**Post-validation**: Verify the agent output contains `Adversarial: PASS` or `Adversarial: FAIL` and `Score: EdgeCases=N LogicCorrectness=N`. If the output does not contain a verdict line, the agent malfunctioned — re-spawn it with a clearer prompt. Do NOT fabricate scores. Also verify the agent did not modify any files — adversarial reviewer is read-only.
+
+Note: Adversarial stage scores are recorded independently and NOT included in the 3-stage aggregate (/30). They serve as an additional safety net for silent failure detection.
+
+If Adversarial: PASS, record the scores:
+```
+mcp__plugin_qult_qult__record_stage_scores({ stage: "Adversarial", scores: { edgeCases: N, logicCorrectness: N } })
+```
+
+## Stage 5: Judge filter
+
+For EACH finding from ALL four reviewers, verify:
 - **Succinctness**: Clear and to the point? Not vague or rambling?
 - **Accuracy**: Technically correct in this codebase's context? Not a false positive?
 - **Actionability**: Includes a concrete fix? Not just "consider X"?
 
 Discard findings that fail any criterion. Report only what passes all three.
 
-## Stage 5: Score aggregation & iteration
+## Stage 6: Score aggregation & iteration
 
-After Stage 4, aggregate all scores:
+After Stage 5, aggregate all scores:
 
 ```
 Total: Completeness + Accuracy + Design + Maintainability + Vulnerability + Hardening = N/30
@@ -128,7 +148,7 @@ Maximum 3 iterations total. After max iterations, the review proceeds regardless
 
 ## Output
 
-Summary block showing all three stages:
+Summary block showing all four stages:
 
 ```
 ## Review Summary
@@ -142,7 +162,10 @@ No issues found.
 ### Security: PASS — Vulnerability=5 Hardening=4
 No issues found.
 
-### Aggregate: 26/30
+### Adversarial: PASS — EdgeCases=4 LogicCorrectness=5
+No issues found.
+
+### Aggregate: 26/30 (+ Adversarial 9/10)
 ```
 
 Then for each passing finding from the Judge filter:
@@ -151,9 +174,9 @@ Then for each passing finding from the Judge filter:
 Fix: concrete suggestion
 ```
 
-If all three stages pass with no findings: "Review complete. All clear."
+If all four stages pass with no findings: "Review complete. All clear."
 
-## Stage 6: Record review completion
+## Stage 7: Record review completion
 
 **This step is mandatory.** After all stages pass and the summary is output:
 

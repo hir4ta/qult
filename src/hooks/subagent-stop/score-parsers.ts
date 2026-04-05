@@ -27,6 +27,7 @@ const REVIEW_DIMENSIONS = ["Correctness", "Design", "Security"] as const;
 const SPEC_DIMENSIONS = ["Completeness", "Accuracy"] as const;
 const QUALITY_DIMENSIONS = ["Design", "Maintainability"] as const;
 const SECURITY_DIMENSIONS = ["Vulnerability", "Hardening"] as const;
+const ADVERSARIAL_DIMENSIONS = ["EdgeCases", "LogicCorrectness"] as const;
 
 function escapeRegex(s: string): string {
 	return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -83,4 +84,17 @@ export function parseSecurityScores(output: string): SecurityReviewScores | null
 	const scores = parseDimensionScores(output, SECURITY_DIMENSIONS);
 	if (!scores) return null;
 	return { vulnerability: scores.Vulnerability!, hardening: scores.Hardening! };
+}
+
+/** Adversarial reviewer scores (2 dimensions, /10 max) */
+export interface AdversarialReviewScores {
+	edgeCases: number;
+	logicCorrectness: number;
+}
+
+/** Parse adversarial reviewer scores. */
+export function parseAdversarialScores(output: string): AdversarialReviewScores | null {
+	const scores = parseDimensionScores(output, ADVERSARIAL_DIMENSIONS);
+	if (!scores) return null;
+	return { edgeCases: scores.EdgeCases!, logicCorrectness: scores.LogicCorrectness! };
 }

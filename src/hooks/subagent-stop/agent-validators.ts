@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "../../config.ts";
 import { atomicWriteJson } from "../../state/atomic-write.ts";
+import { checkCalibration, recordCalibration } from "../../state/calibration.ts";
 import {
 	clearStageScores,
 	getPlanEvalIteration,
@@ -25,6 +26,7 @@ import {
 	validatePlanStructure,
 } from "./plan-validators.ts";
 import {
+	parseAdversarialScores,
 	parseDimensionScores,
 	parseQualityScores,
 	parseSecurityScores,
@@ -43,6 +45,10 @@ const QUALITY_PASS_RE = /^Quality:\s*PASS/im;
 const QUALITY_FAIL_RE = /^Quality:\s*FAIL/im;
 const SECURITY_PASS_RE = /^Security:\s*PASS/im;
 const SECURITY_FAIL_RE = /^Security:\s*FAIL/im;
+
+// Adversarial reviewer verdicts
+const ADVERSARIAL_PASS_RE = /^Adversarial:\s*PASS/im;
+const ADVERSARIAL_FAIL_RE = /^Adversarial:\s*FAIL/im;
 
 // Plan evaluator verdicts
 const PLAN_PASS_RE = /^Plan:\s*PASS/im;
@@ -66,6 +72,7 @@ export default async function subagentStop(ev: HookEvent): Promise<void> {
 		"qult-spec-reviewer",
 		"qult-quality-reviewer",
 		"qult-security-reviewer",
+		"qult-adversarial-reviewer",
 		"qult-plan-evaluator",
 	]);
 	if (!output && KNOWN_REVIEWERS.has(normalized)) {
@@ -89,6 +96,16 @@ export default async function subagentStop(ev: HookEvent): Promise<void> {
 		);
 		// After final stage, check aggregate across all 3 stages
 		checkAggregateScore();
+	} else if (normalized === "qult-adversarial-reviewer") {
+		validateStageReviewer(
+			output,
+			ADVERSARIAL_PASS_RE,
+			ADVERSARIAL_FAIL_RE,
+			parseAdversarialScores,
+			"Adversarial",
+		);
+		// Adversarial is Stage 4 — FAIL blocks via validateStageReviewer, but scores are excluded from /30 aggregate.
+		// Findings are extracted by validateStageReviewer for Flywheel persistence.
 	} else if (normalized === "qult-plan-evaluator") {
 		validatePlanEvaluator(output);
 	} else if (normalized === "Plan") {
@@ -252,16 +269,18 @@ function validateStageReviewer(
 
 /** Check consistency between findings severity and scores.
  *  - Critical/high findings + all scores 4+ → block (contradiction)
- *  - All 5/5 + no findings → warn to stderr (suspicious but not blocked) */
+ *  - All 5/5 + no findings → block (perfect score requires evidence of thoroughness)
+ *  - Any dimension < 4 + no findings → block (low score must cite evidence) */
 function checkScoreFindingsConsistency(
 	output: string,
 	scores: Record<string, number>,
 	stageName: string,
 ): void {
 	const criticalHighCount = (output.match(/\[(critical|high)\]/gi) ?? []).length;
+	const hasFindings = FINDING_RE.test(output);
 	const allScoresHigh = Object.values(scores).every((v) => v >= 4);
 	const allPerfect = Object.values(scores).every((v) => v === 5);
-	const noFindings = !FINDING_RE.test(output);
+	const hasNoIssuesDeclaration = NO_ISSUES_RE.test(output);
 
 	if (criticalHighCount > 0 && allScoresHigh) {
 		block(
@@ -269,9 +288,19 @@ function checkScoreFindingsConsistency(
 		);
 	}
 
-	if (allPerfect && noFindings) {
-		process.stderr.write(
-			`[qult] ${stageName}: all dimensions 5/5 with no findings — verify review thoroughness.\n`,
+	// Evidence-based scoring: low scores must cite specific findings
+	const belowThreshold = Object.entries(scores).filter(([, v]) => v < 4);
+	if (belowThreshold.length > 0 && !hasFindings) {
+		const dims = belowThreshold.map(([name, score]) => `${name} (${score}/5)`).join(", ");
+		block(
+			`${stageName}: ${dims} scored below 4/5 but no findings cited. Low scores must include at least one [severity] file — description finding as evidence. Rerun the review with concrete findings.`,
+		);
+	}
+
+	// Perfect scores with no findings — block (requires evidence of thoroughness)
+	if (allPerfect && !hasFindings && !hasNoIssuesDeclaration) {
+		block(
+			`${stageName}: all dimensions 5/5 with no findings and no explicit 'No issues found' declaration. Perfect scores require either findings or an explicit declaration. Rerun the review.`,
 		);
 	}
 }
@@ -333,6 +362,16 @@ function checkAggregateScore(): void {
 			try {
 				const mergedHistory = persistReviewFindings();
 				if (mergedHistory) detectRepeatedPatterns(mergedHistory);
+			} catch {
+				/* fail-open */
+			}
+			// Cross-session calibration: record and check for bias
+			try {
+				recordCalibration(aggregate, stageScores);
+				const calibrationWarnings = checkCalibration();
+				for (const w of calibrationWarnings) {
+					process.stderr.write(`[qult] ${w.message}\n`);
+				}
 			} catch {
 				/* fail-open */
 			}

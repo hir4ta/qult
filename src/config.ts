@@ -18,6 +18,10 @@ export interface QultConfig {
 	gates: {
 		output_max_chars: number;
 		default_timeout: number;
+		/** Run related test file on edit (opt-in). Requires on_commit.test gate. */
+		test_on_edit: boolean;
+		/** Timeout for test-on-edit gate in ms (default: 15000) */
+		test_on_edit_timeout: number;
 	};
 }
 
@@ -36,6 +40,8 @@ const DEFAULTS: QultConfig = {
 	gates: {
 		output_max_chars: 2000,
 		default_timeout: 10000,
+		test_on_edit: false,
+		test_on_edit_timeout: 15000,
 	},
 };
 
@@ -63,6 +69,9 @@ function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): voi
 		const g = raw.gates as Record<string, unknown>;
 		if (typeof g.output_max_chars === "number") config.gates.output_max_chars = g.output_max_chars;
 		if (typeof g.default_timeout === "number") config.gates.default_timeout = g.default_timeout;
+		if (typeof g.test_on_edit === "boolean") config.gates.test_on_edit = g.test_on_edit;
+		if (typeof g.test_on_edit_timeout === "number")
+			config.gates.test_on_edit_timeout = g.test_on_edit_timeout;
 	}
 }
 
@@ -123,6 +132,11 @@ export function loadConfig(): QultConfig {
 	config.gates.output_max_chars = envInt("QULT_GATE_OUTPUT_MAX") ?? config.gates.output_max_chars;
 	config.gates.default_timeout =
 		envInt("QULT_GATE_DEFAULT_TIMEOUT") ?? config.gates.default_timeout;
+	const testOnEditEnv = process.env.QULT_TEST_ON_EDIT;
+	if (testOnEditEnv === "1" || testOnEditEnv === "true") config.gates.test_on_edit = true;
+	else if (testOnEditEnv === "0" || testOnEditEnv === "false") config.gates.test_on_edit = false;
+	config.gates.test_on_edit_timeout =
+		envInt("QULT_TEST_ON_EDIT_TIMEOUT") ?? config.gates.test_on_edit_timeout;
 
 	_cache = config;
 	return config;
