@@ -184,6 +184,9 @@ qult provides a full development workflow through 12 skills and 7 agents:
 | record_test_pass | Record that tests have passed |
 | record_stage_scores | Record per-stage review dimension scores |
 | record_human_approval | Record architect's human review approval (opt-in) |
+| get_harness_report | Harness effectiveness analysis: gate catch rates, review trends, idle gate detection |
+| get_handoff_document | Structured session handoff for context resets (plan progress, pending fixes, changed files) |
+| get_metrics_dashboard | Historical metrics visualization: gate failures, security warnings, review scores |
 
 ## Installation
 
@@ -510,6 +513,10 @@ Beyond traditional linting and testing, qult addresses failure modes specific to
 | **Read-only reviewer enforcement** | Reviewers may modify files or commit despite read-only constraint | SubagentStop detects unauthorized commits by comparing HEAD against session state |
 | **Human review gate** | AI review alone is insufficient (research consensus) | Opt-in `require_human_approval` config. Blocks commit until architect calls `record_human_approval` |
 | **Codebase-aware explore** | AI asks generic questions instead of project-specific ones | Phase 0 scans codebase for relevant types/patterns and generates context questions |
+| **Impact analysis** | AI runs only direct test file, missing affected consumers | Import graph traces changed file → importers → their test files. Catches regressions in downstream consumers |
+| **Review tier system** | Same 4-stage review for 1-file fix and 20-file feature | Tiered review: skip (1-2 files), light (3-4), standard (5-7 or plan), deep (8+ with e2e) |
+| **Harness effectiveness report** | No way to know if gates are still catching real issues | Analyzes metrics history: gate catch rates, review trends, idle gate detection |
+| **Context handoff** | Context resets lose all session state | Structured handoff document with plan progress, pending fixes, changed files for fresh sessions |
 
 ## Design principles
 

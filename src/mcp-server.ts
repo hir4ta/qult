@@ -695,7 +695,9 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 						{
 							type: "text",
 							text: generateHandoffDocument({
-								changedFiles: Array.isArray(state.changed_file_paths) ? state.changed_file_paths : [],
+								changedFiles: Array.isArray(state.changed_file_paths)
+									? state.changed_file_paths
+									: [],
 								pendingFixes: Array.isArray(fixes) ? fixes : [],
 								planTasks: plan?.tasks ?? null,
 								testPassed: !!state.test_passed_at,
