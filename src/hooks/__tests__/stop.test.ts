@@ -5,6 +5,7 @@ import { resetAllCaches } from "../../state/flush.ts";
 import { writePendingFixes } from "../../state/pending-fixes.ts";
 import {
 	recordChangedFile,
+	recordHumanApproval,
 	recordReview,
 	recordTaskVerifyResult,
 } from "../../state/session-state.ts";
@@ -90,7 +91,7 @@ describe("stop hook", () => {
 		expect(errOutput).toContain("review");
 	});
 
-	it("blocks when plan tasks have Verify field but no verify result recorded", async () => {
+	it("warns (advisory) when plan tasks have Verify field but no verify result recorded", async () => {
 		const planDir = join(TEST_DIR, ".claude", "plans");
 		mkdirSync(planDir, { recursive: true });
 		writeFileSync(
@@ -106,13 +107,10 @@ describe("stop hook", () => {
 		recordReview();
 
 		const handler = (await import("../stop.ts")).default;
-		try {
-			await handler({ hook_type: "Stop" });
-		} catch {
-			// process.exit(2)
-		}
+		await handler({ hook_type: "Stop" });
 
-		expect(exitCode).toBe(2);
+		// Advisory warning, not blocking
+		expect(exitCode).toBeNull();
 		expect(stderrCapture.join("")).toContain("Verify");
 		expect(stderrCapture.join("")).toContain("TaskCreate");
 	});
@@ -181,6 +179,42 @@ describe("stop hook", () => {
 
 		const errOutput = stderrCapture.join("");
 		expect(errOutput).toContain("/qult:finish");
+	});
+
+	it("blocks when require_human_approval enabled and no approval", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ review: { require_human_approval: true } }),
+		);
+		resetAllCaches();
+		recordChangedFile("/project/src/feature.ts");
+		recordReview();
+
+		const handler = (await import("../stop.ts")).default;
+		try {
+			await handler({ hook_type: "Stop" });
+		} catch {
+			// process.exit(2)
+		}
+
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("Human approval");
+	});
+
+	it("allows when require_human_approval enabled and approval recorded", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ review: { require_human_approval: true } }),
+		);
+		resetAllCaches();
+		recordChangedFile("/project/src/feature.ts");
+		recordReview();
+		recordHumanApproval();
+
+		const handler = (await import("../stop.ts")).default;
+		await handler({ hook_type: "Stop" });
+
+		expect(exitCode).toBeNull();
 	});
 
 	it("does not block when stop_hook_active is true (prevent infinite loop)", async () => {
