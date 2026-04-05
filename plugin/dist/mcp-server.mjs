@@ -1,6 +1,6 @@
 // src/mcp-server.ts
-import { existsSync as existsSync5, readdirSync as readdirSync2, readFileSync as readFileSync4, statSync as statSync2 } from "node:fs";
-import { join as join4 } from "node:path";
+import { existsSync as existsSync6, readdirSync as readdirSync2, readFileSync as readFileSync5, statSync as statSync2 } from "node:fs";
+import { join as join5 } from "node:path";
 import { createInterface } from "node:readline";
 
 // src/config.ts
@@ -118,6 +118,147 @@ function loadConfig() {
   return config;
 }
 
+// src/handoff.ts
+function generateHandoffDocument(input) {
+  const { changedFiles, pendingFixes, planTasks, testPassed, reviewDone, disabledGates } = input;
+  if (changedFiles.length === 0 && !planTasks && pendingFixes.length === 0) {
+    return "No active session data to hand off.";
+  }
+  const sections = [];
+  sections.push(`## Session Handoff
+`);
+  const gateLines = [];
+  gateLines.push(`- Tests: ${testPassed ? "PASSED" : "NOT PASSED"}`);
+  gateLines.push(`- Review: ${reviewDone ? "DONE" : "NOT DONE"}`);
+  if (disabledGates.length > 0) {
+    gateLines.push(`- Disabled gates: ${disabledGates.join(", ")}`);
+  }
+  sections.push(`## Gate Status
+${gateLines.join(`
+`)}
+`);
+  if (changedFiles.length > 0) {
+    const fileList = changedFiles.map((f) => `- ${f}`).join(`
+`);
+    sections.push(`## Files Changed (${changedFiles.length})
+${fileList}
+`);
+  }
+  if (pendingFixes.length > 0) {
+    const fixLines = pendingFixes.map((f) => `- [${f.gate}] ${f.file}: ${f.errors[0]?.slice(0, 150) ?? "error"}`).join(`
+`);
+    sections.push(`## Pending Fixes
+${fixLines}
+`);
+  }
+  if (planTasks && planTasks.length > 0) {
+    const done = planTasks.filter((t) => t.status === "done").length;
+    const taskLines = planTasks.map((t) => `- [${t.status}] ${t.taskNumber ? `Task ${t.taskNumber}: ` : ""}${t.name}`).join(`
+`);
+    sections.push(`## Plan Progress (${done}/${planTasks.length} done)
+${taskLines}
+`);
+  }
+  return sections.join(`
+`);
+}
+
+// src/harness-report.ts
+var MIN_TREND_SESSIONS = 3;
+var IDLE_GATE_THRESHOLD = 10;
+function generateHarnessReport(metrics, auditLog) {
+  const recommendations = [];
+  const gateFailureSessions = metrics.filter((m) => m.gate_failures > 0).length;
+  const securityWarningSessions = metrics.filter((m) => m.security_warnings > 0).length;
+  const reviewScores = metrics.filter((m) => m.review_score !== null).map((m) => m.review_score);
+  const averageReviewScore = reviewScores.length > 0 ? reviewScores.reduce((a, b) => a + b, 0) / reviewScores.length : null;
+  const reviewTrend = computeReviewTrend(reviewScores);
+  const disableEntries = auditLog.filter((e) => e.action === "disable_gate");
+  const disablesByGate = {};
+  for (const entry of disableEntries) {
+    const gate = entry.gate_name ?? "unknown";
+    disablesByGate[gate] = (disablesByGate[gate] ?? 0) + 1;
+  }
+  if (metrics.length >= IDLE_GATE_THRESHOLD && gateFailureSessions === 0) {
+    recommendations.push({
+      type: "idle_gate",
+      message: `No gate failures in ${metrics.length} sessions. Consider reviewing if all gates are still necessary.`
+    });
+  }
+  if (metrics.length >= 5 && securityWarningSessions >= Math.ceil(metrics.length * 0.6)) {
+    recommendations.push({
+      type: "security_recurring",
+      message: `Security warnings in ${securityWarningSessions}/${metrics.length} sessions. Consider adding .claude/rules/ for security patterns.`
+    });
+  }
+  return {
+    totalSessions: metrics.length,
+    gateFailureSessions,
+    securityWarningSessions,
+    averageReviewScore,
+    reviewTrend,
+    gateDisableCount: disableEntries.length,
+    disablesByGate,
+    recommendations
+  };
+}
+function computeReviewTrend(scores) {
+  if (scores.length < MIN_TREND_SESSIONS)
+    return "insufficient_data";
+  const recent = scores.slice(-MIN_TREND_SESSIONS);
+  let improving = 0;
+  let declining = 0;
+  for (let i = 1;i < recent.length; i++) {
+    if (recent[i] > recent[i - 1])
+      improving++;
+    else if (recent[i] < recent[i - 1])
+      declining++;
+  }
+  if (improving > declining)
+    return "improving";
+  if (declining > improving)
+    return "declining";
+  return "stable";
+}
+
+// src/metrics-dashboard.ts
+function generateMetricsDashboard(metrics) {
+  if (metrics.length === 0) {
+    return "No metrics data available yet. Metrics are recorded after each session.";
+  }
+  const lines = [];
+  lines.push(`## Metrics Dashboard (${metrics.length} sessions)
+`);
+  const totalGateFailures = metrics.reduce((sum, m) => sum + m.gate_failures, 0);
+  const totalSecurityWarnings = metrics.reduce((sum, m) => sum + m.security_warnings, 0);
+  const reviewScores = metrics.filter((m) => m.review_score !== null).map((m) => m.review_score);
+  const avgGateFailures = totalGateFailures / metrics.length;
+  const avgReviewScore = reviewScores.length > 0 ? reviewScores.reduce((a, b) => a + b, 0) / reviewScores.length : null;
+  lines.push("### Summary");
+  lines.push(`- Gate failures: ${totalGateFailures} total, avg ${avgGateFailures.toFixed(1)} gate failures/session`);
+  lines.push(`- Security warnings: ${totalSecurityWarnings} total`);
+  if (avgReviewScore !== null) {
+    lines.push(`- Review scores: avg ${avgReviewScore.toFixed(1)}/40 across ${reviewScores.length} reviews`);
+  }
+  lines.push("");
+  lines.push("### Recent Sessions");
+  const recent = metrics.slice(-10).reverse();
+  for (const m of recent) {
+    const date = m.timestamp.slice(0, 10);
+    const parts = [];
+    if (m.gate_failures > 0)
+      parts.push(`${m.gate_failures} gate failure(s)`);
+    if (m.security_warnings > 0)
+      parts.push(`${m.security_warnings} security warning(s)`);
+    if (m.review_score !== null)
+      parts.push(`${m.review_score}/40`);
+    parts.push(`${m.files_changed} files`);
+    lines.push(`- ${date}: ${parts.join(", ")}`);
+  }
+  return lines.join(`
+`);
+}
+
 // src/state/atomic-write.ts
 import { existsSync as existsSync2, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -166,13 +307,148 @@ function readAuditLog(cwd) {
   }
 }
 
-// src/state/plan-status.ts
-import { existsSync as existsSync4, readdirSync, readFileSync as readFileSync3, statSync } from "node:fs";
+// src/state/metrics.ts
+import { existsSync as existsSync4, readFileSync as readFileSync3 } from "node:fs";
 import { join as join3 } from "node:path";
+var STATE_DIR2 = ".qult/.state";
+var METRICS_FILE = "metrics-history.json";
+function readMetricsHistory(cwd) {
+  try {
+    const metricsPath = join3(cwd, STATE_DIR2, METRICS_FILE);
+    if (!existsSync4(metricsPath))
+      return [];
+    const parsed = JSON.parse(readFileSync3(metricsPath, "utf-8"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+// src/state/plan-status.ts
+import { existsSync as existsSync5, readdirSync, readFileSync as readFileSync4, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join as join4 } from "node:path";
+var TASK_RE = /^###\s+Task\s+(\d+)[\s:\-\u2013\u2014]+(.+?)(?:\s*\[([^\]]+)\])?\s*$/i;
+function normalizeStatus(raw) {
+  if (!raw)
+    return "pending";
+  const s = raw.toLowerCase().trim();
+  if (s === "done" || s === "complete" || s === "completed" || s === "finished")
+    return "done";
+  if (s === "in-progress" || s === "wip" || s === "started" || s === "working")
+    return "in-progress";
+  return "pending";
+}
+var CHECKBOX_RE = /^-\s+\[([ xX])\]\s*(.+)$/;
+var FILE_LINE_RE = /^\s*-\s*\*\*File\*\*:\s*(.+)$/;
+var VERIFY_LINE_RE = /^\s*-\s*\*\*Verify\*\*:\s*(.+)$/;
+function parsePlanTasks(content) {
+  const tasks = [];
+  const lines = content.split(`
+`);
+  for (let i = 0;i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    const taskMatch = trimmed.match(TASK_RE);
+    if (taskMatch) {
+      const taskNumber = Number(taskMatch[1]);
+      const name = taskMatch[2].trim();
+      const status = normalizeStatus(taskMatch[3]);
+      let file;
+      let verify;
+      for (let j = i + 1;j < lines.length; j++) {
+        const nextTrimmed = lines[j].trim();
+        if (/^###?\s/.test(nextTrimmed))
+          break;
+        const fileMatch = nextTrimmed.match(FILE_LINE_RE);
+        if (fileMatch) {
+          file = fileMatch[1].trim();
+          continue;
+        }
+        const verifyMatch = nextTrimmed.match(VERIFY_LINE_RE);
+        if (verifyMatch) {
+          verify = verifyMatch[1].trim();
+        }
+      }
+      tasks.push({ name, status, taskNumber, file, verify });
+      continue;
+    }
+    const checkMatch = trimmed.match(CHECKBOX_RE);
+    if (checkMatch) {
+      const checked = checkMatch[1] !== " ";
+      const name = checkMatch[2].trim();
+      tasks.push({ name, status: checked ? "done" : "pending" });
+    }
+  }
+  return tasks;
+}
+function scanPlanDir(dir) {
+  try {
+    if (!existsSync5(dir))
+      return [];
+    return readdirSync(dir).filter((f) => f.endsWith(".md")).map((f) => ({
+      path: join4(dir, f),
+      mtime: statSync(join4(dir, f)).mtimeMs
+    })).sort((a, b) => b.mtime - a.mtime);
+  } catch {
+    return [];
+  }
+}
+function getLatestPlanPath() {
+  try {
+    const candidates = [];
+    const projectDir = join4(process.cwd(), ".claude", "plans");
+    candidates.push(...scanPlanDir(projectDir));
+    const envDir = process.env.CLAUDE_PLANS_DIR;
+    if (envDir) {
+      candidates.push(...scanPlanDir(envDir));
+    }
+    if (!_disableHomeFallback) {
+      try {
+        const homeDir = join4(homedir(), ".claude", "plans");
+        const homeFiles = scanPlanDir(homeDir);
+        const recentCutoff = Date.now() - 24 * 60 * 60 * 1000;
+        candidates.push(...homeFiles.filter((f) => f.mtime > recentCutoff));
+      } catch {}
+    }
+    if (candidates.length === 0)
+      return null;
+    candidates.sort((a, b) => b.mtime - a.mtime);
+    return candidates[0].path;
+  } catch {
+    return null;
+  }
+}
+var _planCache = null;
+var _planCachePath = null;
+var _planCacheMtime = null;
+var _disableHomeFallback = false;
+function getActivePlan() {
+  const path = getLatestPlanPath();
+  if (!path)
+    return null;
+  let mtime = null;
+  try {
+    mtime = statSync(path).mtimeMs;
+    if (_planCache && _planCachePath === path && _planCacheMtime === mtime)
+      return _planCache;
+  } catch {}
+  try {
+    const content = readFileSync4(path, "utf-8");
+    const tasks = parsePlanTasks(content);
+    if (tasks.length === 0)
+      return null;
+    _planCache = { tasks, path };
+    _planCachePath = path;
+    _planCacheMtime = mtime;
+    return _planCache;
+  } catch {
+    return null;
+  }
+}
 function hasPlanFile() {
   try {
-    const planDir = join3(process.cwd(), ".claude", "plans");
-    if (!existsSync4(planDir))
+    const planDir = join4(process.cwd(), ".claude", "plans");
+    if (!existsSync5(planDir))
       return false;
     return readdirSync(planDir).some((f) => f.endsWith(".md"));
   } catch {
@@ -181,7 +457,7 @@ function hasPlanFile() {
 }
 
 // src/mcp-server.ts
-var STATE_DIR2 = ".qult/.state";
+var STATE_DIR3 = ".qult/.state";
 var GATES_PATH = ".qult/gates.json";
 var PROTOCOL_VERSION = "2024-11-05";
 var SERVER_NAME = "qult";
@@ -194,9 +470,9 @@ function readJson(path, fallback) {
   if (cached && cached.expires > now)
     return cached.value;
   try {
-    if (!existsSync5(path))
+    if (!existsSync6(path))
       return fallback;
-    const value = JSON.parse(readFileSync4(path, "utf-8"));
+    const value = JSON.parse(readFileSync5(path, "utf-8"));
     _jsonCache.set(path, { value, expires: now + CACHE_TTL_MS });
     return value;
   } catch {
@@ -204,26 +480,26 @@ function readJson(path, fallback) {
   }
 }
 function findLatestStateFile(cwd, prefix) {
-  const dir = join4(cwd, STATE_DIR2);
-  const nonScoped = join4(dir, `${prefix}.json`);
+  const dir = join5(cwd, STATE_DIR3);
+  const nonScoped = join5(dir, `${prefix}.json`);
   try {
-    if (!existsSync5(dir))
+    if (!existsSync6(dir))
       return nonScoped;
     try {
-      const markerPath = join4(dir, "latest-session.json");
-      if (existsSync5(markerPath)) {
-        const marker = JSON.parse(readFileSync4(markerPath, "utf-8"));
+      const markerPath = join5(dir, "latest-session.json");
+      if (existsSync6(markerPath)) {
+        const marker = JSON.parse(readFileSync5(markerPath, "utf-8"));
         if (marker?.session_id) {
-          const scoped = join4(dir, `${prefix}-${marker.session_id}.json`);
-          if (existsSync5(scoped))
+          const scoped = join5(dir, `${prefix}-${marker.session_id}.json`);
+          if (existsSync6(scoped))
             return scoped;
         }
       }
     } catch {}
-    const files = readdirSync2(dir).filter((f) => f.startsWith(prefix) && f.endsWith(".json")).map((f) => ({ name: f, mtime: statSync2(join4(dir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
+    const files = readdirSync2(dir).filter((f) => f.startsWith(prefix) && f.endsWith(".json")).map((f) => ({ name: f, mtime: statSync2(join5(dir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
     if (files.length === 0)
       return nonScoped;
-    return join4(dir, files[0].name);
+    return join5(dir, files[0].name);
   } catch {
     return nonScoped;
   }
@@ -241,7 +517,7 @@ function formatPendingFixes(fixes) {
 `);
 }
 function getValidGateNames(cwd) {
-  const gatesPath = join4(cwd, GATES_PATH);
+  const gatesPath = join5(cwd, GATES_PATH);
   const gates = readJson(gatesPath, null);
   const names = new Set([
     "review",
@@ -391,6 +667,21 @@ var TOOL_DEFS = [
       },
       required: ["stage", "scores"]
     }
+  },
+  {
+    name: "get_harness_report",
+    description: "Returns a harness effectiveness report analyzing which gates catch issues, review score trends, and recommendations for unused gates. Call to assess harness health.",
+    inputSchema: { type: "object", properties: {} }
+  },
+  {
+    name: "get_handoff_document",
+    description: "Returns a structured handoff document for starting a fresh session. Includes session state, plan progress, pending fixes, and changed files. Call before ending a long session or when context is degraded.",
+    inputSchema: { type: "object", properties: {} }
+  },
+  {
+    name: "get_metrics_dashboard",
+    description: "Returns a formatted metrics dashboard showing gate failure trends, security warning trends, and review score history across recent sessions.",
+    inputSchema: { type: "object", properties: {} }
   }
 ];
 function handleTool(name, cwd, args) {
@@ -415,7 +706,7 @@ function handleTool(name, cwd, args) {
       return { content: [{ type: "text", text: JSON.stringify(state, null, 2) }] };
     }
     case "get_gate_config": {
-      const gatesPath = join4(cwd, GATES_PATH);
+      const gatesPath = join5(cwd, GATES_PATH);
       const gates = readJson(gatesPath, null);
       if (!gates) {
         return {
@@ -533,7 +824,7 @@ function handleTool(name, cwd, args) {
           content: [{ type: "text", text: "dimension_floor must be between 1 and 5." }]
         };
       }
-      const configPath = join4(cwd, ".qult", "config.json");
+      const configPath = join5(cwd, ".qult", "config.json");
       const config = readJson(configPath, {});
       const [section, field] = key.split(".");
       if (!section || !field) {
@@ -740,6 +1031,50 @@ function handleTool(name, cwd, args) {
           { type: "text", text: `Stage scores recorded: ${stage} = ${JSON.stringify(scores)}` }
         ]
       };
+    }
+    case "get_harness_report": {
+      try {
+        const metrics = readMetricsHistory(cwd);
+        const auditLog = readAuditLog(cwd);
+        const report = generateHarnessReport(metrics, auditLog);
+        return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
+      } catch {
+        return { content: [{ type: "text", text: "No harness data available yet." }] };
+      }
+    }
+    case "get_handoff_document": {
+      try {
+        const statePath = findLatestStateFile(cwd, "session-state");
+        const state = readJson(statePath, {});
+        const fixesPath = findLatestStateFile(cwd, "pending-fixes");
+        const fixes = readJson(fixesPath, []);
+        const plan = getActivePlan();
+        return {
+          content: [
+            {
+              type: "text",
+              text: generateHandoffDocument({
+                changedFiles: Array.isArray(state.changed_file_paths) ? state.changed_file_paths : [],
+                pendingFixes: Array.isArray(fixes) ? fixes : [],
+                planTasks: plan?.tasks ?? null,
+                testPassed: !!state.test_passed_at,
+                reviewDone: !!state.review_completed_at,
+                disabledGates: Array.isArray(state.disabled_gates) ? state.disabled_gates : []
+              })
+            }
+          ]
+        };
+      } catch {
+        return { content: [{ type: "text", text: "No active session data to hand off." }] };
+      }
+    }
+    case "get_metrics_dashboard": {
+      try {
+        const metrics = readMetricsHistory(cwd);
+        return { content: [{ type: "text", text: generateMetricsDashboard(metrics) }] };
+      } catch {
+        return { content: [{ type: "text", text: "No metrics data available yet." }] };
+      }
     }
     default:
       return { isError: true, content: [{ type: "text", text: `Unknown tool: ${name}` }] };

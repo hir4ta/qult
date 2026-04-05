@@ -315,27 +315,25 @@ function scanPlanDir(dir) {
 }
 function getLatestPlanPath() {
   try {
+    const candidates = [];
     const projectDir = join4(process.cwd(), ".claude", "plans");
-    const projectFiles = scanPlanDir(projectDir);
-    if (projectFiles.length > 0)
-      return projectFiles[0].path;
+    candidates.push(...scanPlanDir(projectDir));
     const envDir = process.env.CLAUDE_PLANS_DIR;
     if (envDir) {
-      const envFiles = scanPlanDir(envDir);
-      if (envFiles.length > 0)
-        return envFiles[0].path;
+      candidates.push(...scanPlanDir(envDir));
     }
     if (!_disableHomeFallback) {
       try {
         const homeDir = join4(homedir(), ".claude", "plans");
         const homeFiles = scanPlanDir(homeDir);
         const recentCutoff = Date.now() - 24 * 60 * 60 * 1000;
-        const recentHome = homeFiles.filter((f) => f.mtime > recentCutoff);
-        if (recentHome.length > 0)
-          return recentHome[0].path;
+        candidates.push(...homeFiles.filter((f) => f.mtime > recentCutoff));
       } catch {}
     }
-    return null;
+    if (candidates.length === 0)
+      return null;
+    candidates.sort((a, b) => b.mtime - a.mtime);
+    return candidates[0].path;
   } catch {
     return null;
   }
@@ -380,6 +378,19 @@ var init_plan_status = __esm(() => {
   FILE_LINE_RE = /^\s*-\s*\*\*File\*\*:\s*(.+)$/;
   VERIFY_LINE_RE = /^\s*-\s*\*\*Verify\*\*:\s*(.+)$/;
 });
+
+// src/review-tier.ts
+function computeReviewTier(changedFiles, hasPlan, config) {
+  const threshold = config.review.required_changed_files;
+  if (changedFiles >= DEEP_THRESHOLD)
+    return "deep";
+  if (hasPlan || changedFiles >= threshold)
+    return "standard";
+  if (changedFiles >= 3)
+    return "light";
+  return "skip";
+}
+var DEEP_THRESHOLD = 8;
 
 // src/state/session-state.ts
 import { existsSync as existsSync6, readFileSync as readFileSync5 } from "node:fs";
@@ -491,13 +502,11 @@ function recordChangedFile(filePath2) {
   writeState(state);
 }
 function isReviewRequired() {
-  if (getActivePlan() !== null)
-    return true;
   const state = readSessionState();
   const changedCount = state.changed_file_paths?.length ?? 0;
-  if (changedCount >= loadConfig().review.required_changed_files)
-    return true;
-  return false;
+  const hasPlan = getActivePlan() !== null;
+  const tier = computeReviewTier(changedCount, hasPlan, loadConfig());
+  return tier === "standard" || tier === "deep";
 }
 function readLastTestPass() {
   const state = readSessionState();
