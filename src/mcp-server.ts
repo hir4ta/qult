@@ -12,7 +12,9 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { loadConfig } from "./config.ts";
 import { atomicWriteJson } from "./state/atomic-write.ts";
+import { hasPlanFile } from "./state/plan-status.ts";
 import type { GatesConfig, PendingFix } from "./types.ts";
 
 const STATE_DIR = ".qult/.state";
@@ -392,6 +394,30 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 		}
 		case "record_review": {
 			const statePath = findLatestStateFile(cwd, "session-state");
+
+			// Plan-required enforcement: refuse if many files changed without a plan
+			try {
+				const state = readJson<Record<string, unknown>>(statePath, {});
+				const changedPaths = Array.isArray(state.changed_file_paths)
+					? state.changed_file_paths
+					: [];
+				const threshold = loadConfig().review.required_changed_files;
+
+				if (changedPaths.length >= threshold && !hasPlanFile()) {
+					return {
+						isError: true,
+						content: [
+							{
+								type: "text",
+								text: `Cannot record review: ${changedPaths.length} files changed without a plan. Run /qult:plan-generator first.`,
+							},
+						],
+					};
+				}
+			} catch {
+				/* fail-open: if state read fails, allow record_review */
+			}
+
 			try {
 				const state = readJson<Record<string, unknown>>(statePath, {});
 				state.review_completed_at = new Date().toISOString();

@@ -222,6 +222,11 @@ describe("preTool: Bash git commit checks", () => {
 			}),
 		);
 
+		// Plan required for 6+ files
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(join(planDir, "test-plan.md"), "## Tasks\n### Task 1: test [done]\n");
+
 		const { disableGate, recordChangedFile, recordTestPass } = await import(
 			"../state/session-state.ts"
 		);
@@ -235,6 +240,69 @@ describe("preTool: Bash git commit checks", () => {
 		await preTool({
 			tool_name: "Bash",
 			tool_input: { command: 'git commit -m "large change"' },
+		});
+
+		expect(exitCode).toBeNull();
+	});
+
+	it("DENY commit when plan required but missing", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({
+				on_commit: { test: { command: "vitest run", timeout: 30000 } },
+			}),
+		);
+
+		const { recordChangedFile, recordTestPass, recordReview } = await import(
+			"../state/session-state.ts"
+		);
+		recordTestPass("vitest run");
+		recordReview(); // review recorded — but no plan
+		for (let i = 0; i < 6; i++) {
+			recordChangedFile(`/project/src/file${i}.ts`);
+		}
+		// No plan directory created
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		try {
+			await preTool({
+				tool_name: "Bash",
+				tool_input: { command: 'git commit -m "bypass attempt"' },
+			});
+		} catch {
+			/* exit(2) */
+		}
+
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("plan");
+	});
+
+	it("allows commit when plan exists with many changed files", async () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "gates.json"),
+			JSON.stringify({
+				on_commit: { test: { command: "vitest run", timeout: 30000 } },
+			}),
+		);
+
+		const { recordChangedFile, recordTestPass, recordReview } = await import(
+			"../state/session-state.ts"
+		);
+		recordTestPass("vitest run");
+		recordReview();
+		for (let i = 0; i < 6; i++) {
+			recordChangedFile(`/project/src/file${i}.ts`);
+		}
+
+		// Create a plan
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(join(planDir, "test-plan.md"), "## Tasks\n### Task 1: test [done]\n");
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({
+			tool_name: "Bash",
+			tool_input: { command: 'git commit -m "planned change"' },
 		});
 
 		expect(exitCode).toBeNull();

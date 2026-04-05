@@ -52,7 +52,7 @@ function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): voi
 		if (typeof r.score_threshold === "number") config.review.score_threshold = r.score_threshold;
 		if (typeof r.max_iterations === "number") config.review.max_iterations = r.max_iterations;
 		if (typeof r.required_changed_files === "number")
-			config.review.required_changed_files = r.required_changed_files;
+			config.review.required_changed_files = Math.max(1, r.required_changed_files);
 		if (typeof r.dimension_floor === "number")
 			config.review.dimension_floor = Math.max(1, Math.min(5, r.dimension_floor));
 	}

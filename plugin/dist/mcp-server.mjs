@@ -1,14 +1,118 @@
 // src/mcp-server.ts
-import { existsSync as existsSync2, readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync as existsSync4, readdirSync as readdirSync2, readFileSync as readFileSync3, statSync as statSync2 } from "node:fs";
+import { join as join3 } from "node:path";
 import { createInterface } from "node:readline";
 
+// src/config.ts
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+var DEFAULTS = {
+  review: {
+    score_threshold: 26,
+    max_iterations: 3,
+    required_changed_files: 5,
+    dimension_floor: 4
+  },
+  plan_eval: {
+    score_threshold: 10,
+    max_iterations: 2,
+    registry_files: []
+  },
+  gates: {
+    output_max_chars: 2000,
+    default_timeout: 1e4,
+    test_on_edit: false,
+    test_on_edit_timeout: 15000
+  }
+};
+function applyConfigLayer(config, raw) {
+  if (raw.review && typeof raw.review === "object") {
+    const r = raw.review;
+    if (typeof r.score_threshold === "number")
+      config.review.score_threshold = r.score_threshold;
+    if (typeof r.max_iterations === "number")
+      config.review.max_iterations = r.max_iterations;
+    if (typeof r.required_changed_files === "number")
+      config.review.required_changed_files = Math.max(1, r.required_changed_files);
+    if (typeof r.dimension_floor === "number")
+      config.review.dimension_floor = Math.max(1, Math.min(5, r.dimension_floor));
+  }
+  if (raw.plan_eval && typeof raw.plan_eval === "object") {
+    const p = raw.plan_eval;
+    if (typeof p.score_threshold === "number")
+      config.plan_eval.score_threshold = p.score_threshold;
+    if (typeof p.max_iterations === "number")
+      config.plan_eval.max_iterations = p.max_iterations;
+    if (Array.isArray(p.registry_files))
+      config.plan_eval.registry_files = p.registry_files.filter((f) => typeof f === "string");
+  }
+  if (raw.gates && typeof raw.gates === "object") {
+    const g = raw.gates;
+    if (typeof g.output_max_chars === "number")
+      config.gates.output_max_chars = g.output_max_chars;
+    if (typeof g.default_timeout === "number")
+      config.gates.default_timeout = g.default_timeout;
+    if (typeof g.test_on_edit === "boolean")
+      config.gates.test_on_edit = g.test_on_edit;
+    if (typeof g.test_on_edit_timeout === "number")
+      config.gates.test_on_edit_timeout = g.test_on_edit_timeout;
+  }
+}
+var _cache = null;
+function loadConfig() {
+  if (_cache)
+    return _cache;
+  const config = structuredClone(DEFAULTS);
+  try {
+    const pluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
+    if (pluginDataDir) {
+      const prefsPath = join(pluginDataDir, "preferences.json");
+      if (existsSync(prefsPath)) {
+        const raw = JSON.parse(readFileSync(prefsPath, "utf-8"));
+        applyConfigLayer(config, raw);
+      }
+    }
+  } catch {}
+  try {
+    const configPath = join(process.cwd(), ".qult", "config.json");
+    if (existsSync(configPath)) {
+      const raw = JSON.parse(readFileSync(configPath, "utf-8"));
+      applyConfigLayer(config, raw);
+    }
+  } catch {}
+  const envInt = (key) => {
+    const val = process.env[key];
+    if (val === undefined)
+      return;
+    const n = Number.parseInt(val, 10);
+    return Number.isNaN(n) ? undefined : n;
+  };
+  config.review.score_threshold = envInt("QULT_REVIEW_SCORE_THRESHOLD") ?? config.review.score_threshold;
+  config.review.max_iterations = envInt("QULT_REVIEW_MAX_ITERATIONS") ?? config.review.max_iterations;
+  config.review.required_changed_files = envInt("QULT_REVIEW_REQUIRED_FILES") ?? config.review.required_changed_files;
+  const rawFloor = envInt("QULT_REVIEW_DIMENSION_FLOOR");
+  if (rawFloor !== undefined)
+    config.review.dimension_floor = Math.max(1, Math.min(5, rawFloor));
+  config.plan_eval.score_threshold = envInt("QULT_PLAN_EVAL_SCORE_THRESHOLD") ?? config.plan_eval.score_threshold;
+  config.plan_eval.max_iterations = envInt("QULT_PLAN_EVAL_MAX_ITERATIONS") ?? config.plan_eval.max_iterations;
+  config.gates.output_max_chars = envInt("QULT_GATE_OUTPUT_MAX") ?? config.gates.output_max_chars;
+  config.gates.default_timeout = envInt("QULT_GATE_DEFAULT_TIMEOUT") ?? config.gates.default_timeout;
+  const testOnEditEnv = process.env.QULT_TEST_ON_EDIT;
+  if (testOnEditEnv === "1" || testOnEditEnv === "true")
+    config.gates.test_on_edit = true;
+  else if (testOnEditEnv === "0" || testOnEditEnv === "false")
+    config.gates.test_on_edit = false;
+  config.gates.test_on_edit_timeout = envInt("QULT_TEST_ON_EDIT_TIMEOUT") ?? config.gates.test_on_edit_timeout;
+  _cache = config;
+  return config;
+}
+
 // src/state/atomic-write.ts
-import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync as existsSync2, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 function atomicWriteJson(filePath, data) {
   const dir = dirname(filePath);
-  if (!existsSync(dir))
+  if (!existsSync2(dir))
     mkdirSync(dir, { recursive: true });
   const tmp = `${filePath}.${process.pid}.tmp`;
   try {
@@ -19,6 +123,20 @@ function atomicWriteJson(filePath, data) {
       unlinkSync(tmp);
     } catch {}
     throw err;
+  }
+}
+
+// src/state/plan-status.ts
+import { existsSync as existsSync3, readdirSync, readFileSync as readFileSync2, statSync } from "node:fs";
+import { join as join2 } from "node:path";
+function hasPlanFile() {
+  try {
+    const planDir = join2(process.cwd(), ".claude", "plans");
+    if (!existsSync3(planDir))
+      return false;
+    return readdirSync(planDir).some((f) => f.endsWith(".md"));
+  } catch {
+    return false;
   }
 }
 
@@ -36,9 +154,9 @@ function readJson(path, fallback) {
   if (cached && cached.expires > now)
     return cached.value;
   try {
-    if (!existsSync2(path))
+    if (!existsSync4(path))
       return fallback;
-    const value = JSON.parse(readFileSync(path, "utf-8"));
+    const value = JSON.parse(readFileSync3(path, "utf-8"));
     _jsonCache.set(path, { value, expires: now + CACHE_TTL_MS });
     return value;
   } catch {
@@ -46,26 +164,26 @@ function readJson(path, fallback) {
   }
 }
 function findLatestStateFile(cwd, prefix) {
-  const dir = join(cwd, STATE_DIR);
-  const nonScoped = join(dir, `${prefix}.json`);
+  const dir = join3(cwd, STATE_DIR);
+  const nonScoped = join3(dir, `${prefix}.json`);
   try {
-    if (!existsSync2(dir))
+    if (!existsSync4(dir))
       return nonScoped;
     try {
-      const markerPath = join(dir, "latest-session.json");
-      if (existsSync2(markerPath)) {
-        const marker = JSON.parse(readFileSync(markerPath, "utf-8"));
+      const markerPath = join3(dir, "latest-session.json");
+      if (existsSync4(markerPath)) {
+        const marker = JSON.parse(readFileSync3(markerPath, "utf-8"));
         if (marker?.session_id) {
-          const scoped = join(dir, `${prefix}-${marker.session_id}.json`);
-          if (existsSync2(scoped))
+          const scoped = join3(dir, `${prefix}-${marker.session_id}.json`);
+          if (existsSync4(scoped))
             return scoped;
         }
       }
     } catch {}
-    const files = readdirSync(dir).filter((f) => f.startsWith(prefix) && f.endsWith(".json")).map((f) => ({ name: f, mtime: statSync(join(dir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
+    const files = readdirSync2(dir).filter((f) => f.startsWith(prefix) && f.endsWith(".json")).map((f) => ({ name: f, mtime: statSync2(join3(dir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
     if (files.length === 0)
       return nonScoped;
-    return join(dir, files[0].name);
+    return join3(dir, files[0].name);
   } catch {
     return nonScoped;
   }
@@ -83,7 +201,7 @@ function formatPendingFixes(fixes) {
 `);
 }
 function getValidGateNames(cwd) {
-  const gatesPath = join(cwd, GATES_PATH);
+  const gatesPath = join3(cwd, GATES_PATH);
   const gates = readJson(gatesPath, null);
   const names = new Set(["review", "security-check", "dead-import-check"]);
   if (gates) {
@@ -229,7 +347,7 @@ function handleTool(name, cwd, args) {
       return { content: [{ type: "text", text: JSON.stringify(state, null, 2) }] };
     }
     case "get_gate_config": {
-      const gatesPath = join(cwd, GATES_PATH);
+      const gatesPath = join3(cwd, GATES_PATH);
       const gates = readJson(gatesPath, null);
       if (!gates) {
         return {
@@ -318,7 +436,7 @@ function handleTool(name, cwd, args) {
           content: [{ type: "text", text: "dimension_floor must be between 1 and 5." }]
         };
       }
-      const configPath = join(cwd, ".qult", "config.json");
+      const configPath = join3(cwd, ".qult", "config.json");
       const config = readJson(configPath, {});
       const [section, field] = key.split(".");
       if (!section || !field) {
@@ -348,6 +466,22 @@ function handleTool(name, cwd, args) {
     }
     case "record_review": {
       const statePath = findLatestStateFile(cwd, "session-state");
+      try {
+        const state = readJson(statePath, {});
+        const changedPaths = Array.isArray(state.changed_file_paths) ? state.changed_file_paths : [];
+        const threshold = loadConfig().review.required_changed_files;
+        if (changedPaths.length >= threshold && !hasPlanFile()) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: `Cannot record review: ${changedPaths.length} files changed without a plan. Run /qult:plan-generator first.`
+              }
+            ]
+          };
+        }
+      } catch {}
       try {
         const state = readJson(statePath, {});
         state.review_completed_at = new Date().toISOString();

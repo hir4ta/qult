@@ -47,7 +47,7 @@ function applyConfigLayer(config, raw) {
     if (typeof r.max_iterations === "number")
       config.review.max_iterations = r.max_iterations;
     if (typeof r.required_changed_files === "number")
-      config.review.required_changed_files = r.required_changed_files;
+      config.review.required_changed_files = Math.max(1, r.required_changed_files);
     if (typeof r.dimension_floor === "number")
       config.review.dimension_floor = Math.max(1, Math.min(5, r.dimension_floor));
   }
@@ -325,6 +325,16 @@ function getActivePlan() {
     return _planCache;
   } catch {
     return null;
+  }
+}
+function hasPlanFile() {
+  try {
+    const planDir = join4(process.cwd(), ".claude", "plans");
+    if (!existsSync5(planDir))
+      return false;
+    return readdirSync(planDir).some((f) => f.endsWith(".md"));
+  } catch {
+    return false;
   }
 }
 var TASK_RE, CHECKBOX_RE, FILE_LINE_RE, VERIFY_LINE_RE, _planCache = null, _planCachePath = null, _planCacheMtime = null;
@@ -2194,6 +2204,11 @@ function checkBash(ev) {
       deny("Run tests before committing. No test pass recorded since last commit.");
     }
   }
+  const state = readSessionState();
+  const changedCount = state.changed_file_paths?.length ?? 0;
+  if (changedCount >= loadConfig().review.required_changed_files && !hasPlanFile()) {
+    deny(`${changedCount} files changed without a plan. Run /qult:plan-generator before committing.`);
+  }
   if (!readLastReview()) {
     if (isReviewRequired() && !isGateDisabled("review")) {
       deny("Run /qult:review before committing. Independent review is required.");
@@ -2202,6 +2217,7 @@ function checkBash(ev) {
 }
 var GIT_COMMIT_RE2, driftWarnedFiles;
 var init_pre_tool = __esm(() => {
+  init_config();
   init_load();
   init_pending_fixes();
   init_plan_status();

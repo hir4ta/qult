@@ -1,7 +1,8 @@
 import { resolve } from "node:path";
+import { loadConfig } from "../config.ts";
 import { loadGates } from "../gates/load.ts";
 import { readPendingFixes } from "../state/pending-fixes.ts";
-import { getActivePlan, parseVerifyField } from "../state/plan-status.ts";
+import { getActivePlan, hasPlanFile, parseVerifyField } from "../state/plan-status.ts";
 import {
 	isGateDisabled,
 	isReviewRequired,
@@ -185,6 +186,15 @@ function checkBash(ev: HookEvent): void {
 		if (!allCommitGatesDisabled && !readLastTestPass()) {
 			deny("Run tests before committing. No test pass recorded since last commit.");
 		}
+	}
+
+	// Require plan when many files changed (structural enforcement — not bypassable)
+	const state = readSessionState();
+	const changedCount = state.changed_file_paths?.length ?? 0;
+	if (changedCount >= loadConfig().review.required_changed_files && !hasPlanFile()) {
+		deny(
+			`${changedCount} files changed without a plan. Run /qult:plan-generator before committing.`,
+		);
 	}
 
 	// Require independent review before commit (independent of gates config)

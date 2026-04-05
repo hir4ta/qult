@@ -446,6 +446,47 @@ describe("handleTool: record_review", () => {
 		expect(result.content[0]!.text).toContain("recorded");
 		expect(result.content[0]!.text).toContain("26");
 	});
+
+	it("refuses when plan required but missing", () => {
+		resetMcpCache();
+
+		// Set up session state with 6+ changed files (exceeds default threshold of 5)
+		const stateFile = findLatestStateFile(TEST_DIR, "session-state");
+		writeFileSync(
+			stateFile,
+			JSON.stringify({
+				changed_file_paths: ["/a.ts", "/b.ts", "/c.ts", "/d.ts", "/e.ts", "/f.ts"],
+			}),
+		);
+		resetMcpCache();
+
+		const result = handleTool("record_review", TEST_DIR, { aggregate_score: 28 });
+		expect(result.isError).toBe(true);
+		expect(result.content[0]!.text).toContain("plan");
+	});
+
+	it("succeeds when plan exists despite many changed files", () => {
+		resetMcpCache();
+
+		// Set up session state with 6+ changed files
+		const stateFile = findLatestStateFile(TEST_DIR, "session-state");
+		writeFileSync(
+			stateFile,
+			JSON.stringify({
+				changed_file_paths: ["/a.ts", "/b.ts", "/c.ts", "/d.ts", "/e.ts", "/f.ts"],
+			}),
+		);
+
+		// Create a plan file
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(join(planDir, "test-plan.md"), "## Tasks\n### Task 1: test [done]\n");
+		resetMcpCache();
+
+		const result = handleTool("record_review", TEST_DIR, { aggregate_score: 28 });
+		expect(result.isError).toBeUndefined();
+		expect(result.content[0]!.text).toContain("recorded");
+	});
 });
 
 describe("handleTool: record_test_pass", () => {

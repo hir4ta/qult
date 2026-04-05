@@ -138,6 +138,18 @@ export function getActivePlan(): { tasks: PlanTask[]; path: string } | null {
 	}
 }
 
+/** Check whether a plan file exists in .claude/plans/ (any .md file counts).
+ *  Unlike getActivePlan(), this does NOT require parseable tasks — file presence is sufficient. */
+export function hasPlanFile(): boolean {
+	try {
+		const planDir = join(process.cwd(), ".claude", "plans");
+		if (!existsSync(planDir)) return false;
+		return readdirSync(planDir).some((f) => f.endsWith(".md"));
+	} catch {
+		return false; // fail-open
+	}
+}
+
 /** Reset plan cache (for tests). */
 export function resetPlanCache(): void {
 	_planCache = null;

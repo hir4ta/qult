@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetGatesCache } from "../gates/load.ts";
-import { resetAllCaches } from "../state/flush.ts";
+import { flushAll, resetAllCaches } from "../state/flush.ts";
 import { readPendingFixes, setFixesSessionScope } from "../state/pending-fixes.ts";
 import {
 	flush as flushSessionState,
@@ -1379,6 +1379,11 @@ describe("Scenario: MCP record_review allows commit", () => {
 		for (let i = 0; i < 6; i++) recordChangedFile(`src/file${i}.ts`);
 		recordTestPass("bun vitest run");
 
+		// Create plan (required for 6+ changed files)
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(join(planDir, "test-plan.md"), "## Tasks\n### Task 1: test [done]\n");
+
 		// Without record_review → commit blocked
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
 		await expect(
@@ -2049,5 +2054,46 @@ describe("Scenario: Dead import detection is advisory only", () => {
 			});
 			expect(exitCode).toBeNull();
 		}
+	});
+});
+
+// ============================================================
+// Plan-required bypass prevention
+// ============================================================
+
+describe("Scenario: plan-required blocks record_review and commit", () => {
+	it("MCP record_review refuses and PreToolUse denies commit without plan", async () => {
+		// Set up 6+ changed files in session state (no plan)
+		const { recordChangedFile, recordTestPass } = await import("../state/session-state.ts");
+		recordTestPass("vitest run");
+		for (let i = 0; i < 6; i++) {
+			recordChangedFile(`/project/src/file${i}.ts`);
+		}
+		flushAll();
+
+		// MCP record_review should refuse
+		const { handleTool, resetMcpCache } = await import("../mcp-server.ts");
+		resetMcpCache();
+		const reviewResult = handleTool("record_review", TEST_DIR, { aggregate_score: 28 });
+		expect(reviewResult.isError).toBe(true);
+		expect(reviewResult.content[0]!.text).toContain("plan");
+
+		// PreToolUse should also deny git commit
+		// First record review directly in state to simulate bypass
+		const { recordReview } = await import("../state/session-state.ts");
+		recordReview();
+		flushAll();
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		try {
+			await preTool({
+				tool_name: "Bash",
+				tool_input: { command: 'git commit -m "bypass attempt"' },
+			});
+		} catch {
+			/* exit(2) */
+		}
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("plan");
 	});
 });
