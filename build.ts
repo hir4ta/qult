@@ -6,8 +6,8 @@
  */
 export type { };
 
-const pkg = await Bun.file("package.json").json();
-const version = pkg.version ?? "dev";
+const pluginMeta = await Bun.file("plugin/.claude-plugin/plugin.json").json();
+const version = pluginMeta.version ?? "dev";
 
 // Build hook entry (plugin: node dist/hook.mjs <event>)
 const hookResult = await Bun.build({

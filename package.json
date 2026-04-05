@@ -1,6 +1,5 @@
 {
   "name": "qult",
-  "version": "0.24.3",
   "type": "module",
   "files": [
     "dist/"
