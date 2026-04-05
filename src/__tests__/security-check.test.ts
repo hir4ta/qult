@@ -181,4 +181,48 @@ describe("detectSecurityPatterns", () => {
 		const fixes = await detect(file);
 		expect(fixes[0]!.gate).toBe("security-check");
 	});
+
+	describe("block comment skipping", () => {
+		it("skips secret inside /* ... */ block comment", async () => {
+			const file = join(TEST_DIR, "block-comment.ts");
+			writeFileSync(
+				file,
+				`/*
+ * const key = "AKIAIOSFODNN7EXAMPLE1";
+ */
+const x = 1;
+`,
+			);
+			const fixes = await detect(file);
+			expect(fixes.length).toBe(0);
+		});
+
+		it("skips dangerous pattern inside /* ... */ block comment", async () => {
+			const file = join(TEST_DIR, "block-comment-eval.ts");
+			writeFileSync(
+				file,
+				`/* example: eval(userInput) is dangerous */
+function safe() {
+  return 42;
+}
+`,
+			);
+			const fixes = await detect(file);
+			expect(fixes.length).toBe(0);
+		});
+
+		it("detects pattern on line after block comment ends", async () => {
+			const file = join(TEST_DIR, "after-block.ts");
+			writeFileSync(
+				file,
+				`/* start
+   end */
+const key = "AKIAIOSFODNN7EXAMPLE1";
+`,
+			);
+			const fixes = await detect(file);
+			expect(fixes.length).toBe(1);
+			expect(fixes[0]!.errors[0]).toContain("AWS access key");
+		});
+	});
 });

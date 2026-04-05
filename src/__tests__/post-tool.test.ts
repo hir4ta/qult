@@ -250,6 +250,30 @@ describe("postTool: Bash handling", () => {
 		const { readLastTestPass } = await import("../state/session-state.ts");
 		expect(readLastTestPass()).toBeNull();
 	});
+
+	it("records test pass using structured exitCode field (Task 5)", async () => {
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Bash",
+			tool_input: { command: "bun vitest run" },
+			tool_response: { exitCode: 0 },
+		});
+
+		const { readLastTestPass } = await import("../state/session-state.ts");
+		expect(readLastTestPass()).toBeTruthy();
+	});
+
+	it("does not record test pass when structured exitCode is non-zero", async () => {
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Bash",
+			tool_input: { command: "bun vitest run" },
+			tool_response: { exitCode: 1 },
+		});
+
+		const { readLastTestPass } = await import("../state/session-state.ts");
+		expect(readLastTestPass()).toBeNull();
+	});
 });
 
 describe("postTool: disabled gate skip", () => {

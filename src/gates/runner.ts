@@ -76,6 +76,17 @@ export function smartTruncate(text: string, maxChars: number): string {
 	return `${head}\n... (${truncated} chars truncated) ...\n${tail}`;
 }
 
+/** Build PATH env with extra_path + node_modules/.bin prepended. */
+function buildPath(extraPaths: string[]): string {
+	const cwd = process.cwd();
+	const extra = extraPaths
+		.filter((p) => !p.includes(":")) // reject paths with colon (PATH injection)
+		.map((p) => (p.startsWith("/") ? p : `${cwd}/${p}`))
+		.join(":");
+	const prefix = extra ? `${extra}:` : "";
+	return `${prefix}${cwd}/node_modules/.bin:${process.env.PATH}`;
+}
+
 /** Run a single gate command asynchronously. Returns pass/fail + output + duration. */
 export function runGateAsync(
 	name: string,
@@ -96,7 +107,7 @@ export function runGateAsync(
 				timeout,
 				env: {
 					...process.env,
-					PATH: `${process.cwd()}/node_modules/.bin:${process.env.PATH}`,
+					PATH: buildPath(config.gates.extra_path),
 				},
 				encoding: "utf-8",
 			},
@@ -131,7 +142,7 @@ export function runGate(name: string, gate: GateDefinition, file?: string): Gate
 			stdio: ["ignore", "pipe", "pipe"],
 			env: {
 				...process.env,
-				PATH: `${process.cwd()}/node_modules/.bin:${process.env.PATH}`,
+				PATH: buildPath(config.gates.extra_path),
 			},
 			encoding: "utf-8",
 		});

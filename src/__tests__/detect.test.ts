@@ -7,6 +7,7 @@ import {
 	formatDetectionSummary,
 	hasAnyGates,
 } from "../gates/detect.ts";
+import { detectExportBreakingChanges } from "../hooks/detectors/export-check.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-detect-test");
 
@@ -125,6 +126,33 @@ describe("detectGates", () => {
 		writeFileSync(join(TEST_DIR, "node_modules", ".bin", "vitest"), "");
 		const gates = detectGates(TEST_DIR);
 		expect(gates.on_commit?.test?.command).toBe("bun vitest run");
+	});
+});
+
+describe("detectExportBreakingChanges: path traversal prevention", () => {
+	const originalCwd = process.cwd();
+
+	beforeEach(() => {
+		mkdirSync(TEST_DIR, { recursive: true });
+		process.chdir(TEST_DIR);
+	});
+
+	afterEach(() => {
+		process.chdir(originalCwd);
+		rmSync(TEST_DIR, { recursive: true, force: true });
+	});
+
+	it("returns empty array for path outside cwd", () => {
+		const outsidePath = "/tmp/outside-cwd-file.ts";
+		const result = detectExportBreakingChanges(outsidePath);
+		expect(result).toEqual([]);
+	});
+
+	it("returns empty array for path that starts with cwd string but lacks separator", () => {
+		// e.g. cwd is /foo/bar, file is /foo/barbaz/file.ts — must not match
+		const trickPath = `${TEST_DIR}extra/file.ts`;
+		const result = detectExportBreakingChanges(trickPath);
+		expect(result).toEqual([]);
 	});
 });
 

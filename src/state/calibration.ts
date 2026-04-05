@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteJson } from "./atomic-write.ts";
@@ -9,6 +10,8 @@ export interface CalibrationEntry {
 	date: string;
 	aggregate: number;
 	stages: Record<string, Record<string, number>>;
+	/** Project identifier (cwd hash). Absent in legacy entries. */
+	project?: string;
 }
 
 export interface CalibrationData {
@@ -25,6 +28,12 @@ function calibrationPath(): string | null {
 	const pluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
 	if (!pluginDataDir) return null;
 	return join(pluginDataDir, CALIBRATION_FILE);
+}
+
+/** Generate a stable project identifier from cwd. */
+export function projectId(): string {
+	const cwd = process.cwd();
+	return createHash("sha256").update(cwd).digest("hex").slice(0, 12);
 }
 
 /** Read calibration data from cross-session storage. Returns null if unavailable. */
@@ -55,6 +64,7 @@ export function recordCalibration(
 		date: new Date().toISOString(),
 		aggregate,
 		stages: stageScores,
+		project: projectId(),
 	});
 
 	// Trim to max entries
@@ -68,7 +78,10 @@ export function recordCalibration(
 	const mean = scores.reduce((s, v) => s + v, 0) / count;
 	const variance = scores.reduce((s, v) => s + (v - mean) ** 2, 0) / count;
 	const stddev = Math.sqrt(variance);
-	const perfectCount = data.entries.filter((e) => e.aggregate === 30).length;
+	const perfectCount = data.entries.filter((e) => {
+		const dims = Object.values(e.stages).flatMap((s) => Object.values(s));
+		return dims.length > 0 && dims.every((v) => v === 5);
+	}).length;
 
 	data.stats = {
 		mean: Math.round(mean * 100) / 100,
@@ -85,36 +98,57 @@ export interface CalibrationWarning {
 	message: string;
 }
 
-/** Check for calibration anomalies. Returns warnings (non-blocking). */
+/** Check for calibration anomalies. Returns warnings (non-blocking).
+ *  Filters by current project. Legacy entries (no project field) are included in all checks. */
 export function checkCalibration(): CalibrationWarning[] {
 	const data = readCalibration();
-	if (!data || data.stats.count < 5) return []; // Need minimum data
+	if (!data) return [];
+
+	const currentProject = projectId();
+	const projectEntries = data.entries.filter((e) => !e.project || e.project === currentProject);
+	if (projectEntries.length < 5) return []; // Need minimum data
+
+	// Recompute stats for project-scoped entries
+	const scores = projectEntries.map((e) => e.aggregate);
+	const count = scores.length;
+	const mean = scores.reduce((s, v) => s + v, 0) / count;
+	const variance = scores.reduce((s, v) => s + (v - mean) ** 2, 0) / count;
+	const stddev = Math.sqrt(variance);
 
 	const warnings: CalibrationWarning[] = [];
 
 	// High mean + low variance → systematically inflated scores
-	if (data.stats.mean > 28 && data.stats.stddev < 1.5) {
+	// Threshold is 93% of max observed score (dynamic for /30 or /40 scale)
+	const maxObserved = Math.max(...scores, 1);
+	const highMeanThreshold = maxObserved * 0.93;
+	const roundedMean = Math.round(mean * 100) / 100;
+	const roundedStddev = Math.round(stddev * 100) / 100;
+	if (roundedMean > highMeanThreshold && roundedStddev < 1.5) {
 		warnings.push({
 			type: "high_mean",
-			message: `Cross-session calibration: mean ${data.stats.mean}/30 with σ=${data.stats.stddev} across ${data.stats.count} reviews. Scores may be systematically inflated.`,
+			message: `Cross-session calibration: mean ${roundedMean} with σ=${roundedStddev} across ${count} reviews. Scores may be systematically inflated.`,
 		});
 	}
 
 	// Low variance alone (even with moderate mean)
-	if (data.stats.count >= 10 && data.stats.stddev < 0.8) {
+	if (count >= 10 && roundedStddev < 0.8) {
 		warnings.push({
 			type: "low_variance",
-			message: `Cross-session calibration: σ=${data.stats.stddev} across ${data.stats.count} reviews suggests reviewers are not differentiating between codebases.`,
+			message: `Cross-session calibration: σ=${roundedStddev} across ${count} reviews suggests reviewers are not differentiating.`,
 		});
 	}
 
-	// Perfect score streak
-	const recentPerfect = data.entries.slice(-3).every((e) => e.aggregate === 30);
-	if (recentPerfect && data.stats.count >= 3) {
+	// Perfect score streak (project-scoped)
+	const recentEntries = projectEntries.slice(-3);
+	const maxPossible = recentEntries.every((e) => {
+		const dims = Object.values(e.stages).flatMap((s) => Object.values(s));
+		return dims.length > 0 && dims.every((v) => v === 5);
+	});
+	if (maxPossible && recentEntries.length >= 3) {
 		warnings.push({
 			type: "perfect_streak",
 			message:
-				"Cross-session calibration: 3+ consecutive perfect scores (30/30). No code is perfect — reviewers may need recalibration.",
+				"Cross-session calibration: 3+ consecutive perfect scores. No code is perfect — reviewers may need recalibration.",
 		});
 	}
 

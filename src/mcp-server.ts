@@ -211,7 +211,7 @@ const TOOL_DEFS: ToolDef[] = [
 			properties: {
 				aggregate_score: {
 					type: "number",
-					description: "Aggregate review score (e.g. 26 out of 30)",
+					description: "Aggregate review score (e.g. 34 out of 40 for 4-stage review)",
 				},
 			},
 		},
@@ -234,7 +234,7 @@ const TOOL_DEFS: ToolDef[] = [
 	{
 		name: "record_stage_scores",
 		description:
-			"Record review scores for a specific stage (Spec, Quality, or Security). Call after each review stage passes with scores. Used for 3-stage aggregate score tracking.",
+			"Record review scores for a specific stage (Spec, Quality, Security, or Adversarial). Call after each review stage passes with scores. Used for 4-stage aggregate score tracking (/40).",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -394,10 +394,10 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 		}
 		case "record_review": {
 			const statePath = findLatestStateFile(cwd, "session-state");
+			const state = readJson<Record<string, unknown>>(statePath, {});
 
 			// Plan-required enforcement: refuse if many files changed without a plan
 			try {
-				const state = readJson<Record<string, unknown>>(statePath, {});
 				const changedPaths = Array.isArray(state.changed_file_paths)
 					? state.changed_file_paths
 					: [];
@@ -419,7 +419,6 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			}
 
 			try {
-				const state = readJson<Record<string, unknown>>(statePath, {});
 				state.review_completed_at = new Date().toISOString();
 				atomicWriteJson(statePath, state);
 				_jsonCache.delete(statePath);
@@ -427,7 +426,7 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 				return { isError: true, content: [{ type: "text", text: "Failed to record review." }] };
 			}
 			const score = typeof args?.aggregate_score === "number" ? args.aggregate_score : null;
-			const msg = score !== null ? `Review recorded (aggregate: ${score}/30).` : "Review recorded.";
+			const msg = score !== null ? `Review recorded (aggregate: ${score}).` : "Review recorded.";
 			return { content: [{ type: "text", text: msg }] };
 		}
 		case "record_test_pass": {
@@ -559,7 +558,7 @@ function handleRequest(parsed: JsonRpcRequest, cwd: string): JsonRpcResponse | n
 						"- When requirements are unclear, use /qult:explore to interview the architect.",
 						"- When debugging, use /qult:debug for structured root-cause analysis.",
 						"- When finishing a branch, use /qult:finish for structured completion.",
-						"- Independent 3-stage review (/qult:review) is required for large changes or when a plan is active.",
+						"- Independent 4-stage review (/qult:review) is required for large changes or when a plan is active.",
 					].join("\n"),
 				},
 			};

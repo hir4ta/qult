@@ -22,12 +22,14 @@ export interface QultConfig {
 		test_on_edit: boolean;
 		/** Timeout for test-on-edit gate in ms (default: 15000) */
 		test_on_edit_timeout: number;
+		/** Additional PATH directories for gate command execution (e.g. [".venv/bin", "../node_modules/.bin"]) */
+		extra_path: string[];
 	};
 }
 
 const DEFAULTS: QultConfig = {
 	review: {
-		score_threshold: 26,
+		score_threshold: 34,
 		max_iterations: 3,
 		required_changed_files: 5,
 		dimension_floor: 4,
@@ -42,6 +44,7 @@ const DEFAULTS: QultConfig = {
 		default_timeout: 10000,
 		test_on_edit: false,
 		test_on_edit_timeout: 15000,
+		extra_path: [],
 	},
 };
 
@@ -72,6 +75,10 @@ function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): voi
 		if (typeof g.test_on_edit === "boolean") config.gates.test_on_edit = g.test_on_edit;
 		if (typeof g.test_on_edit_timeout === "number")
 			config.gates.test_on_edit_timeout = g.test_on_edit_timeout;
+		if (Array.isArray(g.extra_path))
+			config.gates.extra_path = g.extra_path.filter(
+				(p: unknown) => typeof p === "string" && p.trim().length > 0,
+			);
 	}
 }
 

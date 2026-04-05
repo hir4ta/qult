@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { isGateDisabled } from "../../state/session-state.ts";
 import type { PendingFix } from "../../types.ts";
@@ -70,13 +70,25 @@ function detectPythonImports(file: string, content: string): PendingFix[] {
 	const cwd = process.cwd();
 	const missingModules: string[] = [];
 
+	// Resolve site-packages directories once
+	const sitePackagesDirs = findPythonSitePackages(cwd);
+
 	for (const line of content.split("\n")) {
 		if (line.trimStart().startsWith("#")) continue;
 		const match = line.match(PY_IMPORT_RE);
 		if (!match) continue;
 		const moduleName = (match[1] ?? match[2])!;
 		if (PY_STDLIB.has(moduleName)) continue;
+		// Skip internal/private modules (e.g. _thread, _collections_abc)
+		if (moduleName.startsWith("_")) continue;
 		if (existsSync(join(cwd, `${moduleName}.py`)) || existsSync(join(cwd, moduleName))) continue;
+		// Check site-packages
+		if (
+			sitePackagesDirs.some(
+				(dir) => existsSync(join(dir, moduleName)) || existsSync(join(dir, `${moduleName}.py`)),
+			)
+		)
+			continue;
 		missingModules.push(moduleName);
 	}
 
@@ -398,3 +410,25 @@ const PY_STDLIB = new Set([
 	"zipimport",
 	"zlib",
 ]);
+
+/** Find Python site-packages directories in common virtual environment locations. */
+function findPythonSitePackages(cwd: string): string[] {
+	const dirs: string[] = [];
+	const venvRoots = [join(cwd, ".venv"), join(cwd, "venv")];
+	for (const root of venvRoots) {
+		try {
+			if (!existsSync(root)) continue;
+			const libDir = join(root, "lib");
+			if (!existsSync(libDir)) continue;
+			// Python venvs: lib/python3.X/site-packages
+			const entries = readdirSync(libDir).filter((e) => e.startsWith("python"));
+			for (const entry of entries) {
+				const sp = join(libDir, entry, "site-packages");
+				if (existsSync(sp)) dirs.push(sp);
+			}
+		} catch {
+			/* fail-open */
+		}
+	}
+	return dirs;
+}

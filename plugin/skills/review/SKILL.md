@@ -112,7 +112,7 @@ Collect output: `Adversarial: PASS/FAIL`, `Score: EdgeCases=N LogicCorrectness=N
 
 **Post-validation**: Verify the agent output contains `Adversarial: PASS` or `Adversarial: FAIL` and `Score: EdgeCases=N LogicCorrectness=N`. If the output does not contain a verdict line, the agent malfunctioned — re-spawn it with a clearer prompt. Do NOT fabricate scores. Also verify the agent did not modify any files — adversarial reviewer is read-only.
 
-Note: Adversarial stage scores are recorded independently and NOT included in the 3-stage aggregate (/30). They serve as an additional safety net for silent failure detection.
+Note: Adversarial stage scores are included in the 4-stage aggregate (/40). All four stages contribute to the overall threshold check.
 
 If Adversarial: PASS, record the scores:
 ```
@@ -133,7 +133,7 @@ Discard findings that fail any criterion. Report only what passes all three.
 After Stage 5, aggregate all scores:
 
 ```
-Total: Completeness + Accuracy + Design + Maintainability + Vulnerability + Hardening = N/30
+Total: Completeness + Accuracy + Design + Maintainability + Vulnerability + Hardening + EdgeCases + LogicCorrectness = N/40
 ```
 
 The SubagentStop hook enforces score thresholds for each reviewer independently.
@@ -165,7 +165,7 @@ No issues found.
 ### Adversarial: PASS — EdgeCases=4 LogicCorrectness=5
 No issues found.
 
-### Aggregate: 26/30 (+ Adversarial 9/10)
+### Aggregate: 34/40
 ```
 
 Then for each passing finding from the Judge filter:

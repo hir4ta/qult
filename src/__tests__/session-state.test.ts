@@ -276,4 +276,17 @@ describe("session-state: gate failure escalation", () => {
 		const count2 = incrementGateFailure("/src/loop.ts", "lint");
 		expect(count2).toBe(100);
 	});
+
+	it("incrementGateFailure evicts oldest entries when key count exceeds 200", () => {
+		// Insert 200 unique file:gate keys with count=1
+		for (let i = 0; i < 200; i++) {
+			incrementGateFailure(`/src/file${i}.ts`, "lint");
+		}
+		// All 200 should be present
+		expect(Object.keys(readSessionState().gate_failure_counts).length).toBe(200);
+
+		// Adding one more (201st) should trigger eviction back to 200
+		incrementGateFailure("/src/file-extra.ts", "lint");
+		expect(Object.keys(readSessionState().gate_failure_counts).length).toBe(200);
+	});
 });

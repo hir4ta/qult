@@ -47,6 +47,53 @@ describe("post-compact handler", () => {
 		expect(output).toContain("/src/bar.ts");
 	});
 
+	it("includes first error detail per pending fix (Task 8)", async () => {
+		const fixes: PendingFix[] = [
+			{ file: "/src/foo.ts", errors: ["Missing semicolon at line 5", "extra error"], gate: "lint" },
+			{ file: "/src/bar.ts", errors: ["Type error: expected string"], gate: "typecheck" },
+		];
+		writeFileSync(join(STATE_DIR, "pending-fixes.json"), JSON.stringify(fixes));
+
+		const postCompact = (await import("../post-compact.ts")).default;
+		await postCompact({ hook_event_name: "PostCompact" });
+
+		const output = stdoutCapture.join("");
+		expect(output).toContain("Missing semicolon at line 5");
+		expect(output).toContain("Type error: expected string");
+		// Second error should not appear (only first per file)
+		expect(output).not.toContain("extra error");
+	});
+
+	it("injects review findings from review-findings-history.json (Task 8)", async () => {
+		const findings = [
+			{
+				file: "src/a.ts",
+				severity: "high",
+				description: "SQL injection risk in query builder",
+				stage: "Security",
+				timestamp: "2026-01-01T00:00:00Z",
+			},
+			{
+				file: "src/b.ts",
+				severity: "medium",
+				description: "Missing input validation",
+				stage: "Spec",
+				timestamp: "2026-01-02T00:00:00Z",
+			},
+		];
+		writeFileSync(join(STATE_DIR, "review-findings-history.json"), JSON.stringify(findings));
+
+		const postCompact = (await import("../post-compact.ts")).default;
+		await postCompact({ hook_event_name: "PostCompact" });
+
+		const output = stdoutCapture.join("");
+		expect(output).toContain("Recent review findings");
+		expect(output).toContain("SQL injection risk");
+		expect(output).toContain("Missing input validation");
+		expect(output).toContain("[high]");
+		expect(output).toContain("[medium]");
+	});
+
 	it("outputs session state summary to stdout", async () => {
 		const state = {
 			test_passed_at: "2026-03-31T00:00:00Z",

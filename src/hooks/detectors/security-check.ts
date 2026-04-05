@@ -166,10 +166,46 @@ export function detectSecurityPatterns(file: string): PendingFix[] {
 
 	// Languages where `*` at line start is a comment (JSDoc / block comment body)
 	const starIsComment = JS_TS_EXTS.has(ext) || ext === ".java" || ext === ".kt" || ext === ".cs";
+	// Languages that support /* ... */ block comments
+	const hasBlockComments =
+		JS_TS_EXTS.has(ext) ||
+		ext === ".java" ||
+		ext === ".kt" ||
+		ext === ".cs" ||
+		ext === ".go" ||
+		ext === ".rs";
+	let inBlockComment = false;
 
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i]!;
 		const trimmed = line.trimStart();
+
+		// Track block comment state — strip comment portions from the line for scanning
+		if (hasBlockComments) {
+			if (inBlockComment) {
+				const endIdx = line.indexOf("*/");
+				if (endIdx >= 0) {
+					inBlockComment = false;
+					// Replace everything up to and including */ with spaces, scan the rest
+					const afterComment = line.slice(endIdx + 2);
+					if (!afterComment.trim()) continue; // nothing after comment
+					// Fall through to scan afterComment portion via the patterns below
+				} else {
+					continue;
+				}
+			}
+			if (!inBlockComment && trimmed.startsWith("/*")) {
+				const endIdx = line.indexOf("*/", line.indexOf("/*") + 2);
+				if (endIdx < 0) {
+					inBlockComment = true;
+					continue;
+				}
+				// Single-line /* ... */: strip the comment portion, scan remainder
+				const afterComment = line.slice(endIdx + 2);
+				if (!afterComment.trim()) continue; // entire line is comment
+				// Fall through with original line — patterns will match on code after */
+			}
+		}
 
 		// Skip comments (// for C-family, # for Python/Ruby, * for JSDoc-style block comments)
 		if (trimmed.startsWith("//") || trimmed.startsWith("#")) continue;

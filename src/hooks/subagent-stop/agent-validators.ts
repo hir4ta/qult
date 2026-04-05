@@ -94,8 +94,6 @@ export default async function subagentStop(ev: HookEvent): Promise<void> {
 			parseSecurityScores,
 			"Security",
 		);
-		// After final stage, check aggregate across all 3 stages
-		checkAggregateScore();
 	} else if (normalized === "qult-adversarial-reviewer") {
 		validateStageReviewer(
 			output,
@@ -104,8 +102,6 @@ export default async function subagentStop(ev: HookEvent): Promise<void> {
 			parseAdversarialScores,
 			"Adversarial",
 		);
-		// Adversarial is Stage 4 — FAIL blocks via validateStageReviewer, but scores are excluded from /30 aggregate.
-		// Findings are extracted by validateStageReviewer for Flywheel persistence.
 	} else if (normalized === "qult-plan-evaluator") {
 		validatePlanEvaluator(output);
 	} else if (normalized === "Plan") {
@@ -264,6 +260,43 @@ function validateStageReviewer(
 		} catch {
 			/* fail-open */
 		}
+
+		// Check if all stages are complete → run aggregate check
+		tryAggregateCheck();
+	}
+}
+
+/** Check if all review stages have scores and run aggregate check if so.
+ *  Fires when all 4 stages (Spec/Quality/Security/Adversarial) have valid scores.
+ *  /qult:review always runs all 4 stages sequentially, so this fires after Adversarial. */
+const ALL_STAGES = ["Spec", "Quality", "Security", "Adversarial"];
+
+function tryAggregateCheck(): void {
+	try {
+		const stageScores = getStageScores();
+		const completedStages = ALL_STAGES.filter(
+			(s) => stageScores[s] && typeof stageScores[s] === "object" && !Array.isArray(stageScores[s]),
+		);
+		const hasAllStages = completedStages.length === ALL_STAGES.length;
+
+		if (hasAllStages) {
+			checkAggregateScore(ALL_STAGES);
+		}
+		// If only 3 base stages (Spec/Quality/Security), warn that Adversarial is required
+		// but do not trigger aggregate check yet — wait for Adversarial to appear.
+		// This prevents incomplete reviews from being accidentally approved.
+		if (
+			completedStages.length === 3 &&
+			completedStages.includes("Security") &&
+			!completedStages.includes("Adversarial")
+		) {
+			process.stderr.write(
+				`[qult] Review warning: only ${completedStages.length}/4 stages completed. Adversarial reviewer has not run yet. All 4 stages are required for a complete review. Waiting for Adversarial stage...\n`,
+			);
+		}
+	} catch (err) {
+		if (err instanceof Error && err.message.startsWith("process.exit")) throw err;
+		// fail-open
 	}
 }
 
@@ -305,26 +338,19 @@ function checkScoreFindingsConsistency(
 	}
 }
 
-/** Check aggregate score across all 3 stages. Blocks if below threshold. */
-function checkAggregateScore(): void {
+/** Check aggregate score across all completed stages. Blocks if below threshold.
+ *  @param stages — Stage names to include in aggregate (e.g. ["Spec", "Quality", "Security", "Adversarial"]) */
+function checkAggregateScore(stages: string[]): void {
 	try {
 		const stageScores = getStageScores();
-		const stages = ["Spec", "Quality", "Security"];
-		// Only check if all 3 stages have valid score objects
-		if (
-			!stages.every(
-				(s) =>
-					stageScores[s] && typeof stageScores[s] === "object" && !Array.isArray(stageScores[s]),
-			)
-		)
-			return;
 
 		const allScores = stages.flatMap((s) =>
 			Object.values(stageScores[s]!).filter((v) => typeof v === "number" && v >= 1 && v <= 5),
 		);
-		// If any stage has no valid scores, skip aggregate (fail-open)
-		if (allScores.length !== 6) return;
+		// Each stage should have 2 dimensions; if not, skip (fail-open)
+		if (allScores.length !== stages.length * 2) return;
 		const aggregate = allScores.reduce((sum, v) => sum + v, 0);
+		const maxScore = allScores.length * 5;
 		const config = loadConfig();
 		const threshold = config.review.score_threshold;
 		const maxIter = config.review.max_iterations;
@@ -334,7 +360,7 @@ function checkAggregateScore(): void {
 			const uniqueScores = new Set(allScores);
 			if (uniqueScores.size === 1) {
 				process.stderr.write(
-					`[qult] Review bias warning: all 6 dimensions scored identically (${allScores[0]}/5). This may indicate template answers.\n`,
+					`[qult] Review bias warning: all ${allScores.length} dimensions scored identically (${allScores[0]}/5). This may indicate template answers.\n`,
 				);
 			} else if (Math.max(...allScores) - Math.min(...allScores) < 2) {
 				process.stderr.write(
@@ -395,7 +421,7 @@ function checkAggregateScore(): void {
 			const weakest = findWeakestDimension(allDims);
 			const trend = detectTrend(history);
 
-			let msg = `Review aggregate ${aggregate}/30 below threshold ${threshold}/30. Iteration ${iterCount}/${maxIter}.`;
+			let msg = `Review aggregate ${aggregate}/${maxScore} below threshold ${threshold}/${maxScore}. Iteration ${iterCount}/${maxIter}.`;
 			if (weakest) {
 				if (trend === "improving" && history.length >= 2) {
 					const prev = history[history.length - 2]!;
@@ -412,7 +438,7 @@ function checkAggregateScore(): void {
 
 		// Max iterations reached — allow with warning to stderr
 		process.stderr.write(
-			`[qult] Max review iterations (${maxIter}) reached. Aggregate ${aggregate}/30 below threshold ${threshold}/30. Proceeding anyway.\n`,
+			`[qult] Max review iterations (${maxIter}) reached. Aggregate ${aggregate}/${maxScore} below threshold ${threshold}/${maxScore}. Proceeding anyway.\n`,
 		);
 		resetReviewIteration();
 		recordReview();

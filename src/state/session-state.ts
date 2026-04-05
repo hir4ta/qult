@@ -411,6 +411,7 @@ export function readTaskVerifyResult(taskKey: string): { passed: boolean; ran_at
 // ── Gate failure escalation ─────────────────────────────
 
 const MAX_GATE_FAILURE_COUNT = 100;
+const MAX_GATE_FAILURE_KEYS = 200;
 
 /** Increment gate failure count for a file:gate combination. Returns the new count (capped at 100). */
 export function incrementGateFailure(file: string, gateName: string): number {
@@ -419,6 +420,20 @@ export function incrementGateFailure(file: string, gateName: string): number {
 	const key = `${file}:${gateName}`;
 	const count = Math.min((state.gate_failure_counts[key] ?? 0) + 1, MAX_GATE_FAILURE_COUNT);
 	state.gate_failure_counts[key] = count;
+
+	// Evict oldest entries if key count exceeds limit
+	const keys = Object.keys(state.gate_failure_counts);
+	if (keys.length > MAX_GATE_FAILURE_KEYS) {
+		// Remove entries with lowest counts first (least problematic files)
+		const sorted = [...keys].sort(
+			(a, b) => (state.gate_failure_counts[a] ?? 0) - (state.gate_failure_counts[b] ?? 0),
+		);
+		const toRemove = sorted.slice(0, keys.length - MAX_GATE_FAILURE_KEYS);
+		for (const k of toRemove) {
+			delete state.gate_failure_counts[k];
+		}
+	}
+
 	writeState(state);
 	return count;
 }

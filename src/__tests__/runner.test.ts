@@ -3,12 +3,14 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetConfigCache } from "../config.ts";
 import { deduplicateErrors, runGate, runGateAsync, smartTruncate } from "../gates/runner.ts";
+import { resetAllCaches } from "../state/flush.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-runner-test");
 const originalCwd = process.cwd();
 
 beforeEach(() => {
 	resetConfigCache();
+	resetAllCaches();
 	mkdirSync(TEST_DIR, { recursive: true });
 	process.chdir(TEST_DIR);
 });
@@ -186,5 +188,45 @@ describe("deduplicateErrors", () => {
 		expect(outputLines[0]).toContain("TS2322");
 		expect(outputLines[1]).toContain("7 more TS2322");
 		expect(outputLines[2]).toContain("TS2345");
+	});
+});
+
+describe("runGate: extra_path config (Task 9)", () => {
+	it("makes commands in extra_path directories available", () => {
+		// Create a fake binary in a custom bin dir
+		const customBin = join(TEST_DIR, "custom-bin");
+		mkdirSync(customBin, { recursive: true });
+		writeFileSync(join(customBin, "my-tool"), "#!/bin/sh\necho 'my-tool output'\n", {
+			mode: 0o755,
+		});
+
+		// Write qult config with extra_path
+		mkdirSync(join(TEST_DIR, ".qult"), { recursive: true });
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ gates: { extra_path: ["custom-bin"] } }),
+		);
+		resetConfigCache();
+
+		const result = runGate("custom", { command: "my-tool", timeout: 3000 });
+		expect(result.passed).toBe(true);
+		expect(result.output).toContain("my-tool output");
+	});
+
+	it("extra_path with absolute path also works", () => {
+		const customBin = join(TEST_DIR, "abs-bin");
+		mkdirSync(customBin, { recursive: true });
+		writeFileSync(join(customBin, "abs-tool"), "#!/bin/sh\necho 'abs-tool ok'\n", { mode: 0o755 });
+
+		mkdirSync(join(TEST_DIR, ".qult"), { recursive: true });
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ gates: { extra_path: [customBin] } }),
+		);
+		resetConfigCache();
+
+		const result = runGate("abs", { command: "abs-tool", timeout: 3000 });
+		expect(result.passed).toBe(true);
+		expect(result.output).toContain("abs-tool ok");
 	});
 });

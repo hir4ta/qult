@@ -1,7 +1,12 @@
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { checkCalibration, readCalibration, recordCalibration } from "../state/calibration.ts";
+import {
+	checkCalibration,
+	projectId,
+	readCalibration,
+	recordCalibration,
+} from "../state/calibration.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-calibration-test");
 const PLUGIN_DATA = join(TEST_DIR, "plugin-data");
@@ -62,11 +67,17 @@ describe("checkCalibration", () => {
 
 	it("warns on perfect score streak", () => {
 		// Need 5 entries minimum
+		const perfectStages = {
+			Spec: { completeness: 5, accuracy: 5 },
+			Quality: { design: 5, maintainability: 5 },
+			Security: { vulnerability: 5, hardening: 5 },
+			Adversarial: { edgecases: 5, logiccorrectness: 5 },
+		};
 		recordCalibration(26, {});
 		recordCalibration(26, {});
-		recordCalibration(30, {});
-		recordCalibration(30, {});
-		recordCalibration(30, {});
+		recordCalibration(40, perfectStages);
+		recordCalibration(40, perfectStages);
+		recordCalibration(40, perfectStages);
 		const warnings = checkCalibration();
 		expect(warnings.some((w) => w.type === "perfect_streak")).toBe(true);
 	});
@@ -90,5 +101,62 @@ describe("readCalibration", () => {
 	it("returns null when CLAUDE_PLUGIN_DATA not set", () => {
 		vi.stubEnv("CLAUDE_PLUGIN_DATA", "");
 		expect(readCalibration()).toBeNull();
+	});
+});
+
+describe("projectId (Task 12)", () => {
+	it("returns a 12-character hex string", () => {
+		const id = projectId();
+		expect(id).toMatch(/^[0-9a-f]{12}$/);
+	});
+
+	it("returns the same value for the same cwd", () => {
+		expect(projectId()).toBe(projectId());
+	});
+});
+
+describe("checkCalibration: project-scoped filtering (Task 12)", () => {
+	it("excludes entries from a different project", () => {
+		const currentProject = projectId();
+		const otherProject = currentProject === "aaaaaaaaaaaa" ? "bbbbbbbbbbbb" : "aaaaaaaaaaaa";
+
+		// Record 6 entries: 3 from current project (high scores), 3 from another project (low scores)
+		// If filtering works, only current-project entries should be checked (< 5 → no warnings)
+		const data = {
+			entries: [
+				{ date: "2024-01-01", aggregate: 29, stages: {}, project: currentProject },
+				{ date: "2024-01-02", aggregate: 29, stages: {}, project: currentProject },
+				{ date: "2024-01-03", aggregate: 29, stages: {}, project: currentProject },
+				{ date: "2024-01-04", aggregate: 15, stages: {}, project: otherProject },
+				{ date: "2024-01-05", aggregate: 15, stages: {}, project: otherProject },
+				{ date: "2024-01-06", aggregate: 15, stages: {}, project: otherProject },
+			],
+			stats: { count: 6, mean: 22, stddev: 7 },
+		};
+		writeFileSync(join(PLUGIN_DATA, "review-calibration.json"), JSON.stringify(data));
+
+		// Only 3 current-project entries → below minimum of 5 → no warnings
+		const warnings = checkCalibration();
+		expect(warnings.length).toBe(0);
+	});
+
+	it("includes legacy entries without project field (backward compat)", () => {
+		const data = {
+			entries: [
+				{ date: "2024-01-01", aggregate: 29, stages: {} },
+				{ date: "2024-01-02", aggregate: 29, stages: {} },
+				{ date: "2024-01-03", aggregate: 29, stages: {} },
+				{ date: "2024-01-04", aggregate: 29, stages: {} },
+				{ date: "2024-01-05", aggregate: 29, stages: {} },
+				{ date: "2024-01-06", aggregate: 29, stages: {} },
+			],
+			stats: { count: 6, mean: 29, stddev: 0 },
+		};
+		writeFileSync(join(PLUGIN_DATA, "review-calibration.json"), JSON.stringify(data));
+
+		const warnings = checkCalibration();
+		// Legacy entries (no project) treated as all-project → all 6 included
+		// mean=29, stddev=0 — high_mean warning should fire (mean > maxObserved * 0.93, stddev < 1.5)
+		expect(warnings.length).toBeGreaterThan(0);
 	});
 });

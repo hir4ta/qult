@@ -690,10 +690,10 @@ Why this change is needed.
 
 	// --- 3-stage aggregate score tests ---
 
-	it("3-stage review: aggregate below threshold after security-reviewer blocks", async () => {
+	it("4-stage review: aggregate below threshold after adversarial-reviewer blocks", async () => {
 		writeFileSync(
 			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 24, dimension_floor: 1 } }),
+			JSON.stringify({ review: { score_threshold: 32, dimension_floor: 1 } }),
 		);
 		resetAllCaches();
 
@@ -715,23 +715,31 @@ Why this change is needed.
 		});
 		expect(exitCode).toBeNull();
 
-		// Stage 3: Security PASS — aggregate = 3+3+3+3+3+3 = 18 < 24
+		// Stage 3: Security PASS
+		await subagentStop({
+			agent_type: "qult-security-reviewer",
+			last_assistant_message:
+				"Security: PASS\nScore: Vulnerability=3 Hardening=3\n- [low] src/e.ts — weak\n- [low] src/f.ts — weak",
+		});
+		expect(exitCode).toBeNull();
+
+		// Stage 4: Adversarial PASS — aggregate = 8*3 = 24 < 32
 		await expect(
 			subagentStop({
-				agent_type: "qult-security-reviewer",
+				agent_type: "qult-adversarial-reviewer",
 				last_assistant_message:
-					"Security: PASS\nScore: Vulnerability=3 Hardening=3\n- [low] src/e.ts — weak\n- [low] src/f.ts — weak",
+					"Adversarial: PASS\nScore: EdgeCases=3 LogicCorrectness=3\n- [low] src/g.ts — edge case\n- [low] src/h.ts — logic",
 			}),
 		).rejects.toThrow("process.exit");
 		expect(exitCode).toBe(2);
-		expect(stderrCapture.join("")).toContain("18/30");
+		expect(stderrCapture.join("")).toContain("24/40");
 		expect(stderrCapture.join("")).toContain("below threshold");
 	});
 
-	it("3-stage review: aggregate at threshold after security-reviewer allows", async () => {
+	it("4-stage review: aggregate at threshold after adversarial-reviewer allows", async () => {
 		writeFileSync(
 			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 24 } }),
+			JSON.stringify({ review: { score_threshold: 32 } }),
 		);
 		resetAllCaches();
 
@@ -749,25 +757,32 @@ Why this change is needed.
 			last_assistant_message: "Quality: PASS\nScore: Design=4 Maintainability=4\nNo issues found.",
 		});
 
-		// Stage 3: Security PASS — aggregate = 4+4+4+4+4+4 = 24 >= 24
+		// Stage 3: Security PASS
 		await subagentStop({
 			agent_type: "qult-security-reviewer",
 			last_assistant_message:
 				"Security: PASS\nScore: Vulnerability=4 Hardening=4\nNo issues found.",
 		});
+
+		// Stage 4: Adversarial PASS — aggregate = 8*4 = 32 >= 32
+		await subagentStop({
+			agent_type: "qult-adversarial-reviewer",
+			last_assistant_message:
+				"Adversarial: PASS\nScore: EdgeCases=4 LogicCorrectness=4\nNo issues found.",
+		});
 		expect(exitCode).toBeNull();
 	});
 
-	it("3-stage review: stage scores are cleared after successful aggregate", async () => {
+	it("4-stage review: stage scores are cleared after successful aggregate", async () => {
 		writeFileSync(
 			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 24 } }),
+			JSON.stringify({ review: { score_threshold: 32 } }),
 		);
 		resetAllCaches();
 
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 
-		// Complete all 3 stages with passing scores
+		// Complete all 4 stages with passing scores
 		await subagentStop({
 			agent_type: "qult-spec-reviewer",
 			last_assistant_message: "Spec: PASS\nScore: Completeness=5 Accuracy=5\nNo issues found.",
@@ -780,6 +795,11 @@ Why this change is needed.
 			agent_type: "qult-security-reviewer",
 			last_assistant_message:
 				"Security: PASS\nScore: Vulnerability=5 Hardening=4\nNo issues found.",
+		});
+		await subagentStop({
+			agent_type: "qult-adversarial-reviewer",
+			last_assistant_message:
+				"Adversarial: PASS\nScore: EdgeCases=4 LogicCorrectness=4\nNo issues found.",
 		});
 
 		// Verify stage scores are cleared (next review starts fresh)

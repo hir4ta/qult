@@ -572,10 +572,10 @@ describe("plan-evaluator SubagentStop", () => {
 });
 
 describe("score distribution bias detection", () => {
-	it("warns on identical scores across all 6 dimensions", async () => {
+	it("warns on identical scores across all 8 dimensions", async () => {
 		writeFileSync(
 			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 24, dimension_floor: 1 } }),
+			JSON.stringify({ review: { score_threshold: 32, dimension_floor: 1 } }),
 		);
 		resetAllCaches();
 
@@ -593,6 +593,11 @@ describe("score distribution bias detection", () => {
 			last_assistant_message:
 				"Security: PASS\nScore: Vulnerability=4 Hardening=4\nNo issues found.",
 		});
+		await handler({
+			agent_type: "qult-adversarial-reviewer",
+			last_assistant_message:
+				"Adversarial: PASS\nScore: EdgeCases=4 LogicCorrectness=4\nNo issues found.",
+		});
 
 		const stderr = stderrCapture.join("");
 		expect(stderr).toContain("scored identically");
@@ -602,7 +607,7 @@ describe("score distribution bias detection", () => {
 	it("warns on low variance scores (max-min < 2)", async () => {
 		writeFileSync(
 			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 24, dimension_floor: 1 } }),
+			JSON.stringify({ review: { score_threshold: 32, dimension_floor: 1 } }),
 		);
 		resetAllCaches();
 
@@ -619,6 +624,11 @@ describe("score distribution bias detection", () => {
 			agent_type: "qult-security-reviewer",
 			last_assistant_message:
 				"Security: PASS\nScore: Vulnerability=4 Hardening=5\nNo issues found.",
+		});
+		await handler({
+			agent_type: "qult-adversarial-reviewer",
+			last_assistant_message:
+				"Adversarial: PASS\nScore: EdgeCases=4 LogicCorrectness=5\nNo issues found.",
 		});
 
 		const stderr = stderrCapture.join("");
@@ -646,6 +656,11 @@ describe("score distribution bias detection", () => {
 			agent_type: "qult-security-reviewer",
 			last_assistant_message:
 				"Security: PASS\nScore: Vulnerability=3 Hardening=4\n- [low] src/b.ts — minor weakness",
+		});
+		await handler({
+			agent_type: "qult-adversarial-reviewer",
+			last_assistant_message:
+				"Adversarial: PASS\nScore: EdgeCases=5 LogicCorrectness=3\n- [low] src/c.ts — edge case",
 		});
 
 		const stderr = stderrCapture.join("");

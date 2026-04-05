@@ -301,6 +301,64 @@ it("mixed", () => {
 		expect(result).toBeNull();
 	});
 
+	it("returns null when no test cases found (testCount === 0)", async () => {
+		const file = join(TEST_DIR, "no-tests.test.ts");
+		writeFileSync(
+			file,
+			`// This file has no it() or test() calls
+const helper = () => 42;
+`,
+		);
+		const result = await analyze(file);
+		expect(result).toBeNull();
+	});
+
+	describe("beforeEach/afterEach assertion exclusion (Task 11)", () => {
+		it("does not count assertions inside beforeEach toward avgAssertions", async () => {
+			const file = join(TEST_DIR, "setup-assert.test.ts");
+			writeFileSync(
+				file,
+				`
+beforeEach(() => {
+  expect(setup).toBeDefined();
+  expect(config).not.toBeNull();
+});
+
+it("real test", () => {
+  expect(result).toBe(42);
+});
+`,
+			);
+			const result = await analyze(file);
+			expect(result).not.toBeNull();
+			expect(result!.testCount).toBe(1);
+			// Only the assertion in the it() block should count (not beforeEach's 2)
+			expect(result!.assertionCount).toBe(1);
+			expect(result!.avgAssertions).toBe(1);
+		});
+
+		it("does not count assertions inside afterEach toward avgAssertions", async () => {
+			const file = join(TEST_DIR, "teardown-assert.test.ts");
+			writeFileSync(
+				file,
+				`
+afterEach(() => {
+  expect(cleanupCalled).toBe(true);
+});
+
+it("test one", () => {
+  expect(value).toBe(1);
+  expect(other).toBe(2);
+});
+`,
+			);
+			const result = await analyze(file);
+			expect(result).not.toBeNull();
+			// afterEach assertion excluded; 2 assertions in it()
+			expect(result!.assertionCount).toBe(2);
+		});
+	});
+
 	it("skips comments in analysis", async () => {
 		const file = join(TEST_DIR, "commented.test.ts");
 		writeFileSync(

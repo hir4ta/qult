@@ -70,6 +70,43 @@ const SNAPSHOT_RE = /\.toMatchSnapshot\s*\(|\.toMatchInlineSnapshot\s*\(/g;
 const IMPL_COUPLED_RE =
 	/expect\s*\(\s*\w+\s*\)\s*\.(?:toHaveBeenCalled|toHaveBeenCalledWith|toHaveBeenCalledTimes)\s*\(/;
 
+// ── Setup/teardown block detection ─────────────────────────
+const SETUP_BLOCK_RE = /\b(beforeEach|afterEach|beforeAll|afterAll)\s*\(/;
+
+/** Count assertions, excluding those inside setup/teardown blocks.
+ *  Uses simple brace-depth tracking — not perfect but avoids false positives. */
+function countAssertionsOutsideSetup(code: string): number {
+	const lines = code.split("\n");
+	let inSetupBlock = false;
+	let braceDepth = 0;
+	let setupStartDepth = 0;
+	let count = 0;
+
+	for (const line of lines) {
+		if (!inSetupBlock && SETUP_BLOCK_RE.test(line)) {
+			inSetupBlock = true;
+			setupStartDepth = braceDepth;
+		}
+
+		for (const ch of line) {
+			if (ch === "{") braceDepth++;
+			else if (ch === "}") {
+				braceDepth--;
+				if (inSetupBlock && braceDepth <= setupStartDepth) {
+					inSetupBlock = false;
+				}
+			}
+		}
+
+		if (!inSetupBlock) {
+			const matches = line.match(ASSERTION_RE);
+			if (matches) count += matches.length;
+		}
+	}
+
+	return count;
+}
+
 /** Analyze test quality for a given test file. Pure function (no side effects).
  *  Returns null if file cannot be analyzed. */
 export function analyzeTestQuality(file: string): TestQualityResult | null {
@@ -94,8 +131,11 @@ export function analyzeTestQuality(file: string): TestQualityResult | null {
 		.join("\n");
 
 	const lines = content.split("\n");
-	const assertionCount = (codeOnly.match(ASSERTION_RE) ?? []).length;
-	const testCount = (codeOnly.match(TEST_CASE_RE) ?? []).length || 1;
+	const testCount = (codeOnly.match(TEST_CASE_RE) ?? []).length;
+	// Skip quality check if no test cases found
+	if (testCount === 0) return null;
+	// Count assertions excluding those in setup/teardown blocks
+	const assertionCount = countAssertionsOutsideSetup(codeOnly);
 	const avgAssertions = assertionCount / testCount;
 
 	const smells: TestSmell[] = [];

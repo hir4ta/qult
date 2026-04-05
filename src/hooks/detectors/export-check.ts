@@ -20,7 +20,8 @@ export function detectExportBreakingChanges(file: string): PendingFix[] {
 	let oldContent: string;
 	try {
 		const cwd = process.cwd();
-		const relPath = file.startsWith(cwd) ? file.slice(cwd.length + 1) : file;
+		if (!file.startsWith(`${cwd}/`) && file !== cwd) return [];
+		const relPath = file.slice(cwd.length + 1);
 		oldContent = execSync(`git show HEAD:${relPath}`, {
 			cwd,
 			encoding: "utf-8",

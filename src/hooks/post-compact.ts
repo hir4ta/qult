@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { HookEvent, PendingFix } from "../types.ts";
+import { sanitizeForStderr } from "./sanitize.ts";
 
 /**
  * PostCompact: re-inject qult state summary into Claude's context after compaction.
@@ -14,7 +15,7 @@ export default async function postCompact(_ev: HookEvent): Promise<void> {
 
 		const parts: string[] = [];
 
-		// Pending fixes
+		// Pending fixes (with first error detail per file)
 		const fixesPath = findLatestFile(stateDir, "pending-fixes");
 		if (fixesPath) {
 			const fixes = safeReadJson<PendingFix[]>(fixesPath, []);
@@ -22,6 +23,9 @@ export default async function postCompact(_ev: HookEvent): Promise<void> {
 				parts.push(`[qult] ${fixes.length} pending fix(es):`);
 				for (const fix of fixes) {
 					parts.push(`  [${fix.gate}] ${fix.file}`);
+					if (fix.errors?.length > 0) {
+						parts.push(`    ${sanitizeForStderr(fix.errors[0]!.slice(0, 200))}`);
+					}
 				}
 			}
 		}
@@ -91,12 +95,39 @@ export default async function postCompact(_ev: HookEvent): Promise<void> {
 			/* fail-open */
 		}
 
+		// Recent review findings (from Flywheel history)
+		try {
+			const findingsPath = join(stateDir, "review-findings-history.json");
+			if (existsSync(findingsPath)) {
+				const findings = safeReadJson<FindingEntry[]>(findingsPath, []);
+				if (findings.length > 0) {
+					const recent = findings.slice(-5);
+					parts.push("[qult] Recent review findings:");
+					for (const f of recent) {
+						parts.push(
+							`  [${sanitizeForStderr(f.severity)}] ${sanitizeForStderr(f.file)} — ${sanitizeForStderr(f.description.slice(0, 150))}`,
+						);
+					}
+				}
+			}
+		} catch {
+			/* fail-open */
+		}
+
 		if (parts.length > 0) {
 			process.stdout.write(parts.join("\n"));
 		}
 	} catch {
 		/* fail-open */
 	}
+}
+
+interface FindingEntry {
+	file: string;
+	severity: string;
+	description: string;
+	stage: string;
+	timestamp: string;
 }
 
 /** Find the latest file matching prefix in state dir (by mtime). */

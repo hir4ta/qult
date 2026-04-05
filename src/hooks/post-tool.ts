@@ -415,6 +415,14 @@ function isTestCommand(command: string): boolean {
 /** Test command detected: record pass only if exit code 0 is explicitly present.
  *  Requires positive evidence of success — absence of exit code does NOT count as pass. */
 function onTestCommand(ev: HookEvent, command: string): void {
+	// Prefer structured exitCode from tool_response (more reliable than regex)
+	const structuredCode = getStructuredExitCode(ev);
+	if (structuredCode !== null) {
+		if (structuredCode === 0) recordTestPass(command);
+		return;
+	}
+
+	// Fallback: parse exit code from text output
 	const output = getToolOutput(ev);
 	const exitCodeMatch = output.match(/exit code (\d+)/i) ?? output.match(/exited with (\d+)/i);
 	const isPass = exitCodeMatch ? Number(exitCodeMatch[1]) === 0 : false;
@@ -422,6 +430,16 @@ function onTestCommand(ev: HookEvent, command: string): void {
 	if (isPass) {
 		recordTestPass(command);
 	}
+}
+
+/** Extract structured exit code from tool_response if available. Returns null if not present. */
+function getStructuredExitCode(ev: HookEvent): number | null {
+	if (ev.tool_response != null && typeof ev.tool_response === "object") {
+		const resp = ev.tool_response as Record<string, unknown>;
+		if (typeof resp.exitCode === "number") return resp.exitCode;
+		if (typeof resp.exit_code === "number") return resp.exit_code;
+	}
+	return null;
 }
 
 /** Extract tool output as string from tool_response (official) or tool_output (legacy) */
