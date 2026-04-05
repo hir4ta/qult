@@ -12,6 +12,23 @@ const originalCwd = process.cwd();
 beforeEach(() => {
 	resetAllCaches();
 	mkdirSync(STATE_DIR, { recursive: true });
+	// Create dummy source files for claim grounding (file existence check)
+	mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+	for (const name of [
+		"foo.ts",
+		"a.ts",
+		"b.ts",
+		"c.ts",
+		"d.ts",
+		"e.ts",
+		"f.ts",
+		"g.ts",
+		"h.ts",
+		"api.ts",
+		"types.ts",
+	]) {
+		writeFileSync(join(TEST_DIR, "src", name), "// dummy");
+	}
 	process.chdir(TEST_DIR);
 	stderrCapture = [];
 	exitCode = null;
@@ -965,5 +982,89 @@ Why this change is needed.
 		).rejects.toThrow("process.exit");
 		expect(exitCode).toBe(2);
 		expect(stderrCapture.join("")).toContain("structural issues");
+	});
+});
+
+// --- Claim grounding integration tests ---
+
+describe("claim grounding in SubagentStop", () => {
+	it("blocks reviewer with nonexistent file reference", async () => {
+		// Write valid session state and config
+		writeFileSync(join(STATE_DIR, "session-state.json"), JSON.stringify({}));
+
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		const output = [
+			"Spec: PASS",
+			"Score: Completeness=5 Accuracy=5",
+			"[medium] src/nonexistent-file.ts:10 — missing validation",
+			"No issues found",
+		].join("\n");
+
+		await expect(
+			subagentStop({
+				agent_type: "qult:spec-reviewer",
+				last_assistant_message: output,
+			}),
+		).rejects.toThrow("process.exit");
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("ungrounded");
+		expect(stderrCapture.join("")).toContain("src/nonexistent-file.ts");
+	});
+
+	it("allows reviewer when referenced files exist", async () => {
+		writeFileSync(join(STATE_DIR, "session-state.json"), JSON.stringify({}));
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "src", "real-file.ts"), "export function validate() {}");
+
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		const output = [
+			"Spec: PASS",
+			"Score: Completeness=5 Accuracy=5",
+			"[medium] src/real-file.ts:1 — `validate` should check bounds",
+		].join("\n");
+
+		// Should not throw (or throw for aggregate check, not grounding)
+		try {
+			await subagentStop({
+				agent_type: "qult:spec-reviewer",
+				last_assistant_message: output,
+			});
+		} catch (_e) {
+			// May throw for aggregate check or other reasons, but not for grounding
+			if (stderrCapture.join("").includes("ungrounded")) {
+				throw new Error("Should not block for grounding when file exists");
+			}
+		}
+	});
+});
+
+// --- Cross-validation integration tests ---
+
+describe("cross-validation in SubagentStop", () => {
+	it("blocks on cross-validation contradiction: security no-issues vs detector findings", async () => {
+		// Write security-check pending fixes
+		writeFileSync(
+			join(STATE_DIR, "pending-fixes.json"),
+			JSON.stringify([
+				{ file: "src/foo.ts", errors: ["L10: Hardcoded API key"], gate: "security-check" },
+			]),
+		);
+		writeFileSync(join(STATE_DIR, "session-state.json"), JSON.stringify({}));
+		resetAllCaches();
+
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		const output = ["Security: PASS", "Score: Vulnerability=5 Hardening=5", "No issues found"].join(
+			"\n",
+		);
+
+		await expect(
+			subagentStop({
+				agent_type: "qult:security-reviewer",
+				last_assistant_message: output,
+			}),
+		).rejects.toThrow("process.exit");
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("contradiction");
+		expect(stderrCapture.join("")).toContain("security-check");
 	});
 });

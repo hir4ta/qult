@@ -1,6 +1,6 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetAllCaches } from "../state/flush.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-security-check-test");
@@ -224,5 +224,55 @@ const key = "AKIAIOSFODNN7EXAMPLE1";
 			expect(fixes.length).toBe(1);
 			expect(fixes[0]!.errors[0]).toContain("AWS access key");
 		});
+	});
+});
+
+describe("emitAdvisoryWarnings", () => {
+	let stderrCapture: string[] = [];
+
+	beforeEach(() => {
+		stderrCapture = [];
+		vi.spyOn(process.stderr, "write").mockImplementation((data) => {
+			stderrCapture.push(typeof data === "string" ? data : data.toString());
+			return true;
+		});
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	async function detectWithAdvisory(file: string) {
+		const { detectSecurityPatterns } = await import("../hooks/detectors/security-check.ts");
+		detectSecurityPatterns(file);
+		return stderrCapture;
+	}
+
+	it("emits advisory warning for unprotected route", async () => {
+		const file = join(TEST_DIR, "routes.ts");
+		writeFileSync(file, `app.get("/api/data", handler);\n`);
+		const warnings = await detectWithAdvisory(file);
+		expect(warnings.some((w) => w.includes("API route"))).toBe(true);
+	});
+
+	it("does not warn when auth middleware is present", async () => {
+		const file = join(TEST_DIR, "routes.ts");
+		writeFileSync(file, `app.get("/api/data", authMiddleware, handler);\n`);
+		const warnings = await detectWithAdvisory(file);
+		expect(warnings.some((w) => w.includes("API route"))).toBe(false);
+	});
+
+	it("emits advisory warning for WebSocket without auth", async () => {
+		const file = join(TEST_DIR, "ws.ts");
+		writeFileSync(file, `wss.on("connection", (socket) => { socket.send("hi"); });\n`);
+		const warnings = await detectWithAdvisory(file);
+		expect(warnings.some((w) => w.includes("WebSocket"))).toBe(true);
+	});
+
+	it("does not emit advisory for non-JS files", async () => {
+		const file = join(TEST_DIR, "notes.md");
+		writeFileSync(file, `app.get("/api/data", handler);\n`);
+		const warnings = await detectWithAdvisory(file);
+		expect(warnings.some((w) => w.includes("API route"))).toBe(false);
 	});
 });

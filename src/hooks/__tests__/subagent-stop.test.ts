@@ -11,6 +11,27 @@ const originalCwd = process.cwd();
 beforeEach(() => {
 	resetAllCaches();
 	mkdirSync(join(TEST_DIR, ".qult", ".state"), { recursive: true });
+	// Create dummy source files for claim grounding
+	mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+	for (const name of [
+		"foo.ts",
+		"a.ts",
+		"b.ts",
+		"c.ts",
+		"d.ts",
+		"e.ts",
+		"f.ts",
+		"g.ts",
+		"h.ts",
+		"api.ts",
+		"types.ts",
+		"auth.ts",
+		"my-component.tsx",
+		"utils.ts",
+		"widget.ts",
+	]) {
+		writeFileSync(join(TEST_DIR, "src", name), "// dummy");
+	}
 	process.chdir(TEST_DIR);
 	stderrCapture = [];
 	exitCode = null;

@@ -1692,6 +1692,9 @@ function detectSecurityPatterns(file) {
       }
     }
   }
+  if (JS_TS_EXTS.has(ext)) {
+    emitAdvisoryWarnings(file, content);
+  }
   if (errors.length === 0)
     return [];
   return [
@@ -1702,7 +1705,23 @@ function detectSecurityPatterns(file) {
     }
   ];
 }
-var CHECKABLE_EXTS, MAX_CHECK_SIZE2 = 500000, SECRET_PATTERNS, JS_TS_EXTS, PY_EXTS3, DANGEROUS_PATTERNS;
+function emitAdvisoryWarnings(file, content) {
+  try {
+    const lines = content.split(`
+`);
+    for (let i = 0;i < lines.length; i++) {
+      const line = lines[i];
+      for (const { re, suppress, desc } of ADVISORY_PATTERNS) {
+        if (re.test(line) && !suppress.test(line)) {
+          const relative = file.split("/").slice(-3).join("/");
+          process.stderr.write(`[qult] Security advisory: ${relative}:${i + 1} — ${desc}
+`);
+        }
+      }
+    }
+  } catch {}
+}
+var CHECKABLE_EXTS, MAX_CHECK_SIZE2 = 500000, SECRET_PATTERNS, JS_TS_EXTS, PY_EXTS3, DANGEROUS_PATTERNS, ADVISORY_PATTERNS;
 var init_security_check = __esm(() => {
   init_session_state();
   CHECKABLE_EXTS = new Set([
@@ -1792,6 +1811,18 @@ var init_security_check = __esm(() => {
       re: /dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*(?!["'`])[a-zA-Z_$]/,
       desc: "dangerouslySetInnerHTML with dynamic value — XSS risk",
       exts: JS_TS_EXTS
+    }
+  ];
+  ADVISORY_PATTERNS = [
+    {
+      re: /\bapp\.(?:get|post|put|delete|patch)\s*\(\s*["'`]\/api\//,
+      suppress: /auth|middleware|protect|guard|verify|session/i,
+      desc: "API route — verify auth middleware is applied"
+    },
+    {
+      re: /\bwss?\.on\s*\(\s*["'`]connection["'`]/,
+      suppress: /auth|token|verify|session|guard/i,
+      desc: "WebSocket handler — verify authentication is applied"
     }
   ];
 });
@@ -2585,6 +2616,117 @@ var init_calibration = __esm(() => {
   init_atomic_write();
 });
 
+// src/hooks/subagent-stop/claim-grounding.ts
+import { existsSync as existsSync14, readFileSync as readFileSync11, statSync as statSync4 } from "node:fs";
+import { join as join12 } from "node:path";
+function groundClaims(output, cwd) {
+  try {
+    const ungrounded = [];
+    let total = 0;
+    for (const match of output.matchAll(FINDING_FILE_RE)) {
+      total++;
+      const filePath2 = match[2];
+      const description = match[4] ?? "";
+      const absPath = join12(cwd, filePath2);
+      const normalizedCwd = cwd.replace(/\/+$/, "");
+      if (!absPath.startsWith(`${normalizedCwd}/`)) {
+        ungrounded.push(`Path traversal rejected: ${filePath2}`);
+        continue;
+      }
+      if (!existsSync14(absPath)) {
+        ungrounded.push(`File not found: ${filePath2}`);
+        continue;
+      }
+      let fileContent = null;
+      for (const funcMatch of description.matchAll(FUNC_REF_RE)) {
+        const funcName = funcMatch[1];
+        if (!fileContent) {
+          try {
+            const size = statSync4(absPath).size;
+            if (size > MAX_FILE_SIZE)
+              break;
+            fileContent = readFileSync11(absPath, "utf-8");
+          } catch {
+            break;
+          }
+        }
+        if (!fileContent.includes(funcName)) {
+          ungrounded.push(`Symbol \`${funcName}\` not found in ${filePath2}`);
+        }
+      }
+    }
+    return { total, ungrounded };
+  } catch {
+    return { total: 0, ungrounded: [] };
+  }
+}
+var FINDING_FILE_RE, FUNC_REF_RE, MAX_FILE_SIZE = 500000;
+var init_claim_grounding = __esm(() => {
+  FINDING_FILE_RE = /\[(critical|high|medium|low)\]\s+((?:[^\s:]+\/[^\s:]+|[^\s:]+\.\w{1,5}))(?::(\d+))?\s+[—–]\s+(.+?)(?:\n|$)/gi;
+  FUNC_REF_RE = /`([a-zA-Z_$][a-zA-Z0-9_$]*)`/g;
+});
+
+// src/hooks/subagent-stop/cross-validation.ts
+function crossValidate(output, stageName) {
+  try {
+    const contradictions = [];
+    if (stageName === "Security") {
+      checkSecurityContradiction(output, contradictions);
+    } else if (stageName === "Spec") {
+      checkSpecContradiction(output, contradictions);
+    } else if (stageName === "Quality") {
+      checkQualityContradiction(output, contradictions);
+    }
+    return { contradictions };
+  } catch {
+    return { contradictions: [] };
+  }
+}
+function checkSecurityContradiction(output, contradictions) {
+  if (!NO_ISSUES_RE.test(output))
+    return;
+  const fixes = readPendingFixes().filter((f) => f.gate === "security-check");
+  if (fixes.length > 0) {
+    const files = fixes.map((f) => f.file).join(", ");
+    contradictions.push(`Security reviewer declared "No issues found" but security-check detector found ${fixes.length} issue(s) in: ${files}`);
+  }
+}
+function checkSpecContradiction(output, contradictions) {
+  if (!ALL_COMPLETE_RE.test(output))
+    return;
+  const plan = getActivePlan();
+  if (!plan)
+    return;
+  const pending = plan.tasks.filter((t) => t.status === "pending" || t.status === "in-progress");
+  if (pending.length > 0) {
+    const names = pending.map((t) => t.name).join(", ");
+    contradictions.push(`Spec reviewer claims all tasks complete but plan has ${pending.length} pending task(s): ${names}`);
+  }
+}
+function checkQualityContradiction(output, contradictions) {
+  if (!NO_ISSUES_RE.test(output))
+    return;
+  try {
+    const state = readSessionState();
+    const deadImports = state.dead_import_warning_count ?? 0;
+    const driftWarnings = state.drift_warning_count ?? 0;
+    if (deadImports >= 3) {
+      contradictions.push(`Quality reviewer declared "No issues found" but session has ${deadImports} dead-import warnings`);
+    }
+    if (driftWarnings >= 3) {
+      contradictions.push(`Quality reviewer declared "No issues found" but session has ${driftWarnings} convention drift warnings`);
+    }
+  } catch {}
+}
+var NO_ISSUES_RE, ALL_COMPLETE_RE;
+var init_cross_validation = __esm(() => {
+  init_pending_fixes();
+  init_plan_status();
+  init_session_state();
+  NO_ISSUES_RE = /no issues found/i;
+  ALL_COMPLETE_RE = /all tasks?\s+(?:complete|done|implemented)/i;
+});
+
 // src/hooks/subagent-stop/trend-analysis.ts
 function detectTrend(history) {
   if (history.length < 2)
@@ -2844,8 +2986,8 @@ var init_score_parsers = __esm(() => {
 });
 
 // src/hooks/subagent-stop/agent-validators.ts
-import { existsSync as existsSync14, readdirSync as readdirSync5, readFileSync as readFileSync11, statSync as statSync4 } from "node:fs";
-import { join as join12 } from "node:path";
+import { existsSync as existsSync15, readdirSync as readdirSync5, readFileSync as readFileSync12, statSync as statSync5 } from "node:fs";
+import { join as join13 } from "node:path";
 async function subagentStop(ev) {
   if (ev.stop_hook_active)
     return;
@@ -2882,16 +3024,16 @@ async function subagentStop(ev) {
 }
 function validatePlan() {
   try {
-    const planDir = join12(process.cwd(), ".claude", "plans");
-    if (!existsSync14(planDir))
+    const planDir = join13(process.cwd(), ".claude", "plans");
+    if (!existsSync15(planDir))
       return;
     const files = readdirSync5(planDir).filter((f) => f.endsWith(".md")).map((f) => ({
       name: f,
-      mtime: statSync4(join12(planDir, f)).mtimeMs
+      mtime: statSync5(join13(planDir, f)).mtimeMs
     })).sort((a, b) => b.mtime - a.mtime);
     if (files.length === 0)
       return;
-    const content = readFileSync11(join12(planDir, files[0].name), "utf-8");
+    const content = readFileSync12(join13(planDir, files[0].name), "utf-8");
     const structErrors = validatePlanStructure(content);
     if (structErrors.length > 0) {
       block(`Plan structural issues:
@@ -2940,7 +3082,7 @@ function validatePlanEvaluator(output) {
 }
 function validateStageReviewer(output, passRe, failRe, scoreParser, stageName) {
   const hasVerdict = passRe.test(output) || failRe.test(output);
-  const hasFindings = FINDING_RE.test(output) || NO_ISSUES_RE.test(output);
+  const hasFindings = FINDING_RE.test(output) || NO_ISSUES_RE2.test(output);
   const scores = scoreParser(output);
   const hasScore = scores !== null;
   if (!hasVerdict && !hasFindings && !hasScore) {
@@ -2968,6 +3110,30 @@ function validateStageReviewer(output, passRe, failRe, scoreParser, stageName) {
     try {
       extractFindings(output, stageName);
     } catch {}
+    try {
+      const grounding = groundClaims(output, process.cwd());
+      if (grounding.ungrounded.length > 0) {
+        block(`${stageName}: reviewer references ungrounded claims:
+${grounding.ungrounded.map((c) => `  - ${c}`).join(`
+`)}
+Fix references and re-run /qult:review.`);
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("process.exit"))
+        throw err;
+    }
+    try {
+      const cv = crossValidate(output, stageName);
+      if (cv.contradictions.length > 0) {
+        block(`${stageName}: cross-validation contradiction(s):
+${cv.contradictions.map((c) => `  - ${c}`).join(`
+`)}
+Reconcile findings and re-run /qult:review.`);
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("process.exit"))
+        throw err;
+    }
     tryAggregateCheck();
   }
 }
@@ -2993,7 +3159,7 @@ function checkScoreFindingsConsistency(output, scores, stageName) {
   const hasFindings = FINDING_RE.test(output);
   const allScoresHigh = Object.values(scores).every((v) => v >= 4);
   const allPerfect = Object.values(scores).every((v) => v === 5);
-  const hasNoIssuesDeclaration = NO_ISSUES_RE.test(output);
+  const hasNoIssuesDeclaration = NO_ISSUES_RE2.test(output);
   if (criticalHighCount > 0 && allScoresHigh) {
     block(`${stageName}: PASS but ${criticalHighCount} critical/high finding(s) with all scores 4+/5. Reconcile findings with scores and rerun the review.`);
   }
@@ -3101,11 +3267,11 @@ function extractFindings(output, stageName) {
 function persistReviewFindings() {
   if (_currentFindings.length === 0)
     return null;
-  const historyPath = join12(process.cwd(), ".qult", ".state", FINDINGS_HISTORY_FILE);
+  const historyPath = join13(process.cwd(), ".qult", ".state", FINDINGS_HISTORY_FILE);
   let history = [];
   try {
-    if (existsSync14(historyPath)) {
-      history = JSON.parse(readFileSync11(historyPath, "utf-8"));
+    if (existsSync15(historyPath)) {
+      history = JSON.parse(readFileSync12(historyPath, "utf-8"));
     }
   } catch {
     history = [];
@@ -3146,19 +3312,21 @@ function detectRepeatedPatterns(history) {
 function resetFindingsCache() {
   _currentFindings = [];
 }
-var SEVERITY_PATTERN, FINDING_RE, NO_ISSUES_RE, SPEC_PASS_RE, SPEC_FAIL_RE, QUALITY_PASS_RE, QUALITY_FAIL_RE, SECURITY_PASS_RE, SECURITY_FAIL_RE, ADVERSARIAL_PASS_RE, ADVERSARIAL_FAIL_RE, PLAN_PASS_RE, PLAN_REVISE_RE, ALL_STAGES, FINDINGS_HISTORY_FILE = "review-findings-history.json", MAX_FINDINGS = 100, _currentFindings;
+var SEVERITY_PATTERN, FINDING_RE, NO_ISSUES_RE2, SPEC_PASS_RE, SPEC_FAIL_RE, QUALITY_PASS_RE, QUALITY_FAIL_RE, SECURITY_PASS_RE, SECURITY_FAIL_RE, ADVERSARIAL_PASS_RE, ADVERSARIAL_FAIL_RE, PLAN_PASS_RE, PLAN_REVISE_RE, ALL_STAGES, FINDINGS_HISTORY_FILE = "review-findings-history.json", MAX_FINDINGS = 100, _currentFindings;
 var init_agent_validators = __esm(() => {
   init_config();
   init_atomic_write();
   init_calibration();
   init_session_state();
   init_respond();
+  init_claim_grounding();
+  init_cross_validation();
   init_message_builders();
   init_plan_validators();
   init_score_parsers();
   SEVERITY_PATTERN = /\[(critical|high|medium|low)\]/;
   FINDING_RE = new RegExp(SEVERITY_PATTERN.source, "i");
-  NO_ISSUES_RE = /no issues found/i;
+  NO_ISSUES_RE2 = /no issues found/i;
   SPEC_PASS_RE = /^Spec:\s*PASS/im;
   SPEC_FAIL_RE = /^Spec:\s*FAIL/im;
   QUALITY_PASS_RE = /^Quality:\s*PASS/im;
@@ -3185,21 +3353,25 @@ __export(exports_subagent_stop, {
   parseQualityScores: () => parseQualityScores,
   parseDimensionScores: () => parseDimensionScores,
   parseAdversarialScores: () => parseAdversarialScores,
+  groundClaims: () => groundClaims,
   extractFindings: () => extractFindings,
   default: () => subagentStop,
+  crossValidate: () => crossValidate,
   buildReviewBlockMessage: () => buildReviewBlockMessage,
   buildPlanEvalBlockMessage: () => buildPlanEvalBlockMessage,
   PLAN_EVAL_DIMENSIONS: () => PLAN_EVAL_DIMENSIONS
 });
 var init_subagent_stop = __esm(() => {
   init_agent_validators();
+  init_claim_grounding();
+  init_cross_validation();
   init_message_builders();
   init_plan_validators();
   init_score_parsers();
 });
 
 // src/hooks/detectors/test-quality-check.ts
-import { existsSync as existsSync15, readFileSync as readFileSync12 } from "node:fs";
+import { existsSync as existsSync16, readFileSync as readFileSync13 } from "node:fs";
 import { resolve as resolve4 } from "node:path";
 function countAssertionsOutsideSetup(code) {
   const lines = code.split(`
@@ -3236,11 +3408,11 @@ function analyzeTestQuality(file) {
   const absPath = resolve4(cwd, file);
   if (!absPath.startsWith(cwd))
     return null;
-  if (!existsSync15(absPath))
+  if (!existsSync16(absPath))
     return null;
   let content;
   try {
-    content = readFileSync12(absPath, "utf-8");
+    content = readFileSync13(absPath, "utf-8");
   } catch {
     return null;
   }
@@ -3464,21 +3636,85 @@ var init_task_completed = __esm(() => {
   SAFE_SHELL_ARG_RE = /^[a-zA-Z0-9_/.@-]+$/;
 });
 
+// src/state/metrics.ts
+import { existsSync as existsSync17, readFileSync as readFileSync14 } from "node:fs";
+import { join as join14 } from "node:path";
+function recordSessionMetrics(cwd, metrics) {
+  try {
+    const metricsPath = join14(cwd, STATE_DIR3, METRICS_FILE);
+    let history = readMetricsHistory(cwd);
+    history.push(metrics);
+    if (history.length > MAX_ENTRIES2) {
+      history = history.slice(-MAX_ENTRIES2);
+    }
+    atomicWriteJson(metricsPath, history);
+  } catch {}
+}
+function readMetricsHistory(cwd) {
+  try {
+    const metricsPath = join14(cwd, STATE_DIR3, METRICS_FILE);
+    if (!existsSync17(metricsPath))
+      return [];
+    const parsed = JSON.parse(readFileSync14(metricsPath, "utf-8"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+function detectRecurringPatterns(cwd) {
+  try {
+    const history = readMetricsHistory(cwd);
+    if (history.length < 5)
+      return;
+    const recent = history.slice(-5);
+    const gateFailSessions = recent.filter((s) => s.gate_failures > 0).length;
+    if (gateFailSessions >= 4) {
+      process.stderr.write(`[qult] Pattern: gate failures in ${gateFailSessions}/5 recent sessions. Consider reviewing toolchain configuration.
+`);
+    }
+    const secWarnSessions = recent.filter((s) => s.security_warnings > 0).length;
+    if (secWarnSessions >= 4) {
+      process.stderr.write(`[qult] Pattern: security warnings in ${secWarnSessions}/5 recent sessions. Consider adding .claude/rules/ for security patterns.
+`);
+    }
+  } catch {}
+}
+var STATE_DIR3 = ".qult/.state", METRICS_FILE = "metrics-history.json", MAX_ENTRIES2 = 50;
+var init_metrics = __esm(() => {
+  init_atomic_write();
+});
+
 // src/hooks/session-start.ts
 var exports_session_start = {};
 __export(exports_session_start, {
   default: () => sessionStart
 });
-import { existsSync as existsSync16, mkdirSync as mkdirSync3 } from "node:fs";
-import { join as join13 } from "node:path";
+import { existsSync as existsSync18, mkdirSync as mkdirSync3 } from "node:fs";
+import { join as join15 } from "node:path";
 async function sessionStart(ev) {
   try {
-    const stateDir = join13(process.cwd(), ".qult", ".state");
-    if (!existsSync16(stateDir)) {
+    const stateDir = join15(process.cwd(), ".qult", ".state");
+    if (!existsSync18(stateDir)) {
       mkdirSync3(stateDir, { recursive: true });
     }
     cleanupStaleScopedFiles(stateDir);
     if (ev.source === "startup" || ev.source === "clear") {
+      try {
+        const cwd = process.cwd();
+        const prevState = readSessionState();
+        const gateFailures = Object.values(prevState.gate_failure_counts ?? {}).reduce((sum, v) => sum + (typeof v === "number" ? v : 0), 0);
+        if (gateFailures > 0 || (prevState.security_warning_count ?? 0) > 0 || (prevState.changed_file_paths ?? []).length > 0) {
+          recordSessionMetrics(cwd, {
+            session_id: ev.session_id ?? "unknown",
+            timestamp: new Date().toISOString(),
+            gate_failures: gateFailures,
+            security_warnings: prevState.security_warning_count ?? 0,
+            review_score: prevState.review_completed_at ? Array.isArray(prevState.review_score_history) ? prevState.review_score_history.slice(-1)[0] ?? null : null : null,
+            files_changed: (prevState.changed_file_paths ?? []).length
+          });
+        }
+        detectRecurringPatterns(cwd);
+      } catch {}
       writePendingFixes([]);
       try {
         flush();
@@ -3489,7 +3725,9 @@ async function sessionStart(ev) {
 }
 var init_session_start = __esm(() => {
   init_cleanup();
+  init_metrics();
   init_pending_fixes();
+  init_session_state();
   init_lazy_init();
 });
 
@@ -3498,12 +3736,12 @@ var exports_post_compact = {};
 __export(exports_post_compact, {
   default: () => postCompact
 });
-import { existsSync as existsSync17, readdirSync as readdirSync6, readFileSync as readFileSync13, statSync as statSync5 } from "node:fs";
-import { join as join14 } from "node:path";
+import { existsSync as existsSync19, readdirSync as readdirSync6, readFileSync as readFileSync15, statSync as statSync6 } from "node:fs";
+import { join as join16 } from "node:path";
 async function postCompact(_ev) {
   try {
-    const stateDir = join14(process.cwd(), ".qult", ".state");
-    if (!existsSync17(stateDir))
+    const stateDir = join16(process.cwd(), ".qult", ".state");
+    if (!existsSync19(stateDir))
       return;
     const parts = [];
     const fixesPath2 = findLatestFile(stateDir, "pending-fixes");
@@ -3524,8 +3762,8 @@ async function postCompact(_ev) {
       const state = safeReadJson(statePath, {});
       if (Object.keys(state).length > 0) {
         const summary = [];
-        const gatesPath = join14(process.cwd(), ".qult", "gates.json");
-        const hasGates = existsSync17(gatesPath);
+        const gatesPath = join16(process.cwd(), ".qult", "gates.json");
+        const hasGates = existsSync19(gatesPath);
         if (state.test_passed_at)
           summary.push(`test_passed_at: ${state.test_passed_at}`);
         else if (hasGates)
@@ -3561,11 +3799,11 @@ async function postCompact(_ev) {
       }
     }
     try {
-      const planDir = join14(process.cwd(), ".claude", "plans");
-      if (existsSync17(planDir)) {
-        const planFiles = readdirSync6(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync5(join14(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
+      const planDir = join16(process.cwd(), ".claude", "plans");
+      if (existsSync19(planDir)) {
+        const planFiles = readdirSync6(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync6(join16(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
         if (planFiles.length > 0) {
-          const content = readFileSync13(join14(planDir, planFiles[0].name), "utf-8");
+          const content = readFileSync15(join16(planDir, planFiles[0].name), "utf-8");
           const taskCount = (content.match(/^###\s+Task\s+\d+/gim) ?? []).length;
           const doneCount = (content.match(/^###\s+Task\s+\d+.*\[done\]/gim) ?? []).length;
           if (taskCount > 0) {
@@ -3575,8 +3813,8 @@ async function postCompact(_ev) {
       }
     } catch {}
     try {
-      const findingsPath = join14(stateDir, "review-findings-history.json");
-      if (existsSync17(findingsPath)) {
+      const findingsPath = join16(stateDir, "review-findings-history.json");
+      if (existsSync19(findingsPath)) {
         const findings = safeReadJson(findingsPath, []);
         if (findings.length > 0) {
           const recent = findings.slice(-5);
@@ -3596,8 +3834,8 @@ async function postCompact(_ev) {
 function findLatestFile(stateDir, prefix) {
   try {
     const files = readdirSync6(stateDir).filter((f) => f.startsWith(prefix) && f.endsWith(".json")).map((f) => ({
-      path: join14(stateDir, f),
-      mtime: statSync5(join14(stateDir, f)).mtimeMs
+      path: join16(stateDir, f),
+      mtime: statSync6(join16(stateDir, f)).mtimeMs
     })).sort((a, b) => b.mtime - a.mtime);
     return files.length > 0 ? files[0].path : null;
   } catch {
@@ -3606,9 +3844,9 @@ function findLatestFile(stateDir, prefix) {
 }
 function safeReadJson(path, fallback) {
   try {
-    if (!existsSync17(path))
+    if (!existsSync19(path))
       return fallback;
-    return JSON.parse(readFileSync13(path, "utf-8"));
+    return JSON.parse(readFileSync15(path, "utf-8"));
   } catch {
     return fallback;
   }
@@ -3622,7 +3860,7 @@ init_pending_fixes();
 init_session_state();
 init_lazy_init();
 init_respond();
-import { join as join15 } from "node:path";
+import { join as join17 } from "node:path";
 var EVENT_MAP = {
   "post-tool": () => Promise.resolve().then(() => (init_post_tool(), exports_post_tool)),
   "pre-tool": () => Promise.resolve().then(() => (init_pre_tool(), exports_pre_tool)),
@@ -3667,7 +3905,7 @@ async function dispatch(event) {
     setFixesSessionScope(ev.session_id);
     if (ev.session_id !== _lastWrittenSessionId) {
       try {
-        atomicWriteJson(join15(process.cwd(), ".qult", ".state", "latest-session.json"), {
+        atomicWriteJson(join17(process.cwd(), ".qult", ".state", "latest-session.json"), {
           session_id: ev.session_id,
           updated_at: new Date().toISOString()
         });

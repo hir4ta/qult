@@ -140,6 +140,10 @@ When you find a security issue, report it. NEVER rationalize it away:
 - "this would require a sophisticated attacker" → Sophisticated attackers exist. Report it.
 - "this is low risk" → You assess the vulnerability. The Judge assesses the risk.
 
+## Computational Detector Integration
+
+Before starting your review, call `get_pending_fixes` to check for `security-check` gate findings. These are computational (deterministic) detections of hardcoded secrets, dangerous patterns (eval, innerHTML, SQL injection), and advisory warnings (unprotected API routes, WebSocket handlers). Incorporate these findings into your evaluation — if the detector found issues, verify and include them. Your verdict must not contradict detector findings (cross-validation will flag this).
+
 ## What NOT to do
 
 - Do not evaluate spec compliance — that is the spec-reviewer's job

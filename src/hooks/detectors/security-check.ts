@@ -235,6 +235,11 @@ export function detectSecurityPatterns(file: string): PendingFix[] {
 		}
 	}
 
+	// Advisory patterns (stderr only, not PendingFix)
+	if (JS_TS_EXTS.has(ext)) {
+		emitAdvisoryWarnings(file, content);
+	}
+
 	if (errors.length === 0) return [];
 
 	return [
@@ -244,4 +249,43 @@ export function detectSecurityPatterns(file: string): PendingFix[] {
 			gate: "security-check",
 		},
 	];
+}
+
+// ── Advisory patterns (stderr-only, informational for reviewers) ──
+
+interface AdvisoryPattern {
+	re: RegExp;
+	/** Regex that, if present on the same line, suppresses the warning */
+	suppress: RegExp;
+	desc: string;
+}
+
+const ADVISORY_PATTERNS: AdvisoryPattern[] = [
+	{
+		re: /\bapp\.(?:get|post|put|delete|patch)\s*\(\s*["'`]\/api\//,
+		suppress: /auth|middleware|protect|guard|verify|session/i,
+		desc: "API route — verify auth middleware is applied",
+	},
+	{
+		re: /\bwss?\.on\s*\(\s*["'`]connection["'`]/,
+		suppress: /auth|token|verify|session|guard/i,
+		desc: "WebSocket handler — verify authentication is applied",
+	},
+];
+
+function emitAdvisoryWarnings(file: string, content: string): void {
+	try {
+		const lines = content.split("\n");
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i]!;
+			for (const { re, suppress, desc } of ADVISORY_PATTERNS) {
+				if (re.test(line) && !suppress.test(line)) {
+					const relative = file.split("/").slice(-3).join("/");
+					process.stderr.write(`[qult] Security advisory: ${relative}:${i + 1} — ${desc}\n`);
+				}
+			}
+		}
+	} catch {
+		/* fail-open */
+	}
 }

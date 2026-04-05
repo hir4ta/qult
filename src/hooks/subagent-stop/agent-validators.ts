@@ -19,6 +19,8 @@ import {
 } from "../../state/session-state.ts";
 import type { HookEvent } from "../../types.ts";
 import { block } from "../respond.ts";
+import { groundClaims } from "./claim-grounding.ts";
+import { crossValidate } from "./cross-validation.ts";
 import { buildPlanEvalBlockMessage } from "./message-builders.ts";
 import {
 	PLAN_EVAL_DIMENSIONS,
@@ -258,6 +260,32 @@ function validateStageReviewer(
 		try {
 			extractFindings(output, stageName);
 		} catch {
+			/* fail-open */
+		}
+
+		// Claim grounding: verify file/symbol references in reviewer output
+		try {
+			const grounding = groundClaims(output, process.cwd());
+			if (grounding.ungrounded.length > 0) {
+				block(
+					`${stageName}: reviewer references ungrounded claims:\n${grounding.ungrounded.map((c) => `  - ${c}`).join("\n")}\nFix references and re-run /qult:review.`,
+				);
+			}
+		} catch (err) {
+			if (err instanceof Error && err.message.startsWith("process.exit")) throw err;
+			/* fail-open */
+		}
+
+		// Cross-validation: check reviewer claims against computational detector results
+		try {
+			const cv = crossValidate(output, stageName);
+			if (cv.contradictions.length > 0) {
+				block(
+					`${stageName}: cross-validation contradiction(s):\n${cv.contradictions.map((c) => `  - ${c}`).join("\n")}\nReconcile findings and re-run /qult:review.`,
+				);
+			}
+		} catch (err) {
+			if (err instanceof Error && err.message.startsWith("process.exit")) throw err;
 			/* fail-open */
 		}
 

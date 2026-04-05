@@ -51,6 +51,37 @@ function setupPassingGates(): void {
 beforeEach(() => {
 	resetAllCaches();
 	mkdirSync(STATE_DIR, { recursive: true });
+	// Create dummy source files for claim grounding
+	mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+	for (const name of [
+		"foo.ts",
+		"a.ts",
+		"b.ts",
+		"c.ts",
+		"d.ts",
+		"e.ts",
+		"f.ts",
+		"g.ts",
+		"h.ts",
+		"api.ts",
+		"types.ts",
+		"bar.ts",
+		"app.py",
+		"auth.ts",
+		"config.ts",
+		"feature.ts",
+		"file.ts",
+		"handler.ts",
+		"helper.ts",
+		"other.ts",
+		"real.ts",
+		"strike.ts",
+		"unrelated.ts",
+		"unused.ts",
+		"util.ts",
+	]) {
+		writeFileSync(join(TEST_DIR, "src", name), "// dummy");
+	}
 	process.chdir(TEST_DIR);
 	stdoutCapture = [];
 	stderrCapture = [];
@@ -2188,5 +2219,31 @@ describe("Scenario: Incomplete review (only 3 of 4 stages) blocks", () => {
 		expect(stderr).toContain("Review warning");
 		expect(stderr).toContain("only 3/4 stages");
 		expect(stderr).toContain("Adversarial");
+	});
+});
+
+describe("Simulation: claim grounding blocks reviewer with nonexistent file", () => {
+	it("blocks reviewer with ungrounded claims", async () => {
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		// Only create one file — the reviewer references two, so one is ungrounded
+		writeFileSync(join(TEST_DIR, "src", "real.ts"), "export function foo() {}");
+
+		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
+		const output = [
+			"Spec: PASS",
+			"Score: Completeness=4 Accuracy=4",
+			"[low] src/ghost.ts:10 — missing error handling",
+			"[low] src/phantom.ts:20 — no validation",
+		].join("\n");
+
+		await expect(
+			subagentStop({
+				agent_type: "qult-spec-reviewer",
+				last_assistant_message: output,
+			}),
+		).rejects.toThrow("process.exit");
+		expect(exitCode).toBe(2);
+		expect(stderrCapture.join("")).toContain("ungrounded");
+		expect(stderrCapture.join("")).toContain("src/ghost.ts");
 	});
 });

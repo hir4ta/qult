@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetAllCaches } from "../../state/flush.ts";
@@ -118,5 +118,35 @@ describe("session-start handler", () => {
 		await expect(
 			sessionStart({ hook_event_name: "SessionStart", source: "startup" } as never),
 		).resolves.not.toThrow();
+	});
+
+	it("records metrics on startup", async () => {
+		// Arrange: write previous session state with gate failures
+		writeFileSync(
+			join(STATE_DIR, "session-state.json"),
+			JSON.stringify({
+				gate_failure_counts: { "src/foo.ts:lint": 2, "src/bar.ts:typecheck": 1 },
+				security_warning_count: 1,
+				changed_file_paths: ["src/foo.ts", "src/bar.ts"],
+				review_completed_at: null,
+				review_score_history: [],
+			}),
+		);
+		resetAllCaches();
+
+		const sessionStart = (await import("../session-start.ts")).default;
+		await sessionStart({
+			hook_event_name: "SessionStart",
+			source: "startup",
+			session_id: "test-session",
+		} as never);
+
+		const metricsPath = join(STATE_DIR, "metrics-history.json");
+		expect(existsSync(metricsPath)).toBe(true);
+		const history = JSON.parse(readFileSync(metricsPath, "utf-8"));
+		expect(history).toHaveLength(1);
+		expect(history[0].gate_failures).toBe(3);
+		expect(history[0].security_warnings).toBe(1);
+		expect(history[0].files_changed).toBe(2);
 	});
 });

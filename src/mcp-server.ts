@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { loadConfig } from "./config.ts";
 import { atomicWriteJson } from "./state/atomic-write.ts";
+import { appendAuditLog } from "./state/audit-log.ts";
 import { hasPlanFile } from "./state/plan-status.ts";
 import type { GatesConfig, PendingFix } from "./types.ts";
 
@@ -156,7 +157,7 @@ const TOOL_DEFS: ToolDef[] = [
 	{
 		name: "disable_gate",
 		description:
-			"Temporarily disable a gate for this session. The gate will not run on file edits or block commits. Use when a gate is broken or irrelevant for current work. Re-enable with enable_gate.",
+			"Temporarily disable a gate for this session. The gate will not run on file edits or block commits. Use when a gate is broken or irrelevant for current work. Re-enable with enable_gate. Maximum 2 gates can be disabled per session.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -164,8 +165,12 @@ const TOOL_DEFS: ToolDef[] = [
 					type: "string",
 					description: "Gate name to disable (e.g. 'lint', 'typecheck', 'test')",
 				},
+				reason: {
+					type: "string",
+					description: "Why this gate should be disabled (min 10 chars). Required for audit trail.",
+				},
 			},
-			required: ["gate_name"],
+			required: ["gate_name", "reason"],
 		},
 	},
 	{
@@ -200,7 +205,17 @@ const TOOL_DEFS: ToolDef[] = [
 		name: "clear_pending_fixes",
 		description:
 			"Clear all pending lint/typecheck fixes. Use when fixes are false positives or already resolved outside qult.",
-		inputSchema: { type: "object", properties: {} },
+		inputSchema: {
+			type: "object",
+			properties: {
+				reason: {
+					type: "string",
+					description:
+						"Why pending fixes should be cleared (min 10 chars). Required for audit trail.",
+				},
+			},
+			required: ["reason"],
+		},
 	},
 	{
 		name: "record_review",
@@ -286,8 +301,20 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 		}
 		case "disable_gate": {
 			const gateName = typeof args?.gate_name === "string" ? args.gate_name : null;
+			const reason = typeof args?.reason === "string" ? args.reason : null;
 			if (!gateName) {
 				return { isError: true, content: [{ type: "text", text: "Missing gate_name parameter." }] };
+			}
+			if (!reason || reason.length < 10) {
+				return {
+					isError: true,
+					content: [
+						{
+							type: "text",
+							text: "Missing or too short reason parameter (min 10 chars). Explain WHY the gate should be disabled.",
+						},
+					],
+				};
 			}
 			if (!isValidGateName(gateName, cwd)) {
 				return {
@@ -303,6 +330,18 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			const statePath = findLatestStateFile(cwd, "session-state");
 			const state = readJson<Record<string, unknown>>(statePath, {});
 			const disabled = Array.isArray(state.disabled_gates) ? state.disabled_gates : [];
+			// Max 2 gates disabled per session
+			if (!disabled.includes(gateName) && disabled.length >= 2) {
+				return {
+					isError: true,
+					content: [
+						{
+							type: "text",
+							text: `Maximum 2 gates can be disabled per session. Currently disabled: ${disabled.join(", ")}. Re-enable a gate first.`,
+						},
+					],
+				};
+			}
 			if (!disabled.includes(gateName)) {
 				disabled.push(gateName);
 			}
@@ -313,6 +352,12 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			} catch {
 				return { isError: true, content: [{ type: "text", text: "Failed to write state." }] };
 			}
+			appendAuditLog(cwd, {
+				action: "disable_gate",
+				reason,
+				gate_name: gateName,
+				timestamp: new Date().toISOString(),
+			});
 			return { content: [{ type: "text", text: `Gate '${gateName}' disabled for this session.` }] };
 		}
 		case "enable_gate": {
@@ -383,6 +428,18 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			return { content: [{ type: "text", text: `Config set: ${key} = ${value}` }] };
 		}
 		case "clear_pending_fixes": {
+			const reason = typeof args?.reason === "string" ? args.reason : null;
+			if (!reason || reason.length < 10) {
+				return {
+					isError: true,
+					content: [
+						{
+							type: "text",
+							text: "Missing or too short reason parameter (min 10 chars). Explain WHY pending fixes should be cleared.",
+						},
+					],
+				};
+			}
 			const fixesPath = findLatestStateFile(cwd, "pending-fixes");
 			try {
 				atomicWriteJson(fixesPath, []);
@@ -390,6 +447,11 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			} catch {
 				return { isError: true, content: [{ type: "text", text: "Failed to clear fixes." }] };
 			}
+			appendAuditLog(cwd, {
+				action: "clear_pending_fixes",
+				reason,
+				timestamp: new Date().toISOString(),
+			});
 			return { content: [{ type: "text", text: "All pending fixes cleared." }] };
 		}
 		case "record_review": {

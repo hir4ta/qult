@@ -1,4 +1,6 @@
 export { default, extractFindings, resetFindingsCache } from "./agent-validators.ts";
+export { groundClaims } from "./claim-grounding.ts";
+export { crossValidate } from "./cross-validation.ts";
 export { buildPlanEvalBlockMessage, buildReviewBlockMessage } from "./message-builders.ts";
 export {
 	PLAN_EVAL_DIMENSIONS,

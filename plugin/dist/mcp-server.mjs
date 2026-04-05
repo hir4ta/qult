@@ -1,6 +1,6 @@
 // src/mcp-server.ts
-import { existsSync as existsSync4, readdirSync as readdirSync2, readFileSync as readFileSync3, statSync as statSync2 } from "node:fs";
-import { join as join3 } from "node:path";
+import { existsSync as existsSync5, readdirSync as readdirSync2, readFileSync as readFileSync4, statSync as statSync2 } from "node:fs";
+import { join as join4 } from "node:path";
 import { createInterface } from "node:readline";
 
 // src/config.ts
@@ -129,13 +129,42 @@ function atomicWriteJson(filePath, data) {
   }
 }
 
-// src/state/plan-status.ts
-import { existsSync as existsSync3, readdirSync, readFileSync as readFileSync2, statSync } from "node:fs";
+// src/state/audit-log.ts
+import { existsSync as existsSync3, readFileSync as readFileSync2 } from "node:fs";
 import { join as join2 } from "node:path";
+var STATE_DIR = ".qult/.state";
+var AUDIT_LOG_FILE = "audit-log.json";
+var MAX_ENTRIES = 200;
+function appendAuditLog(cwd, entry) {
+  try {
+    const logPath = join2(cwd, STATE_DIR, AUDIT_LOG_FILE);
+    let log = readAuditLog(cwd);
+    log.push(entry);
+    if (log.length > MAX_ENTRIES) {
+      log = log.slice(-MAX_ENTRIES);
+    }
+    atomicWriteJson(logPath, log);
+  } catch {}
+}
+function readAuditLog(cwd) {
+  try {
+    const logPath = join2(cwd, STATE_DIR, AUDIT_LOG_FILE);
+    if (!existsSync3(logPath))
+      return [];
+    const parsed = JSON.parse(readFileSync2(logPath, "utf-8"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+// src/state/plan-status.ts
+import { existsSync as existsSync4, readdirSync, readFileSync as readFileSync3, statSync } from "node:fs";
+import { join as join3 } from "node:path";
 function hasPlanFile() {
   try {
-    const planDir = join2(process.cwd(), ".claude", "plans");
-    if (!existsSync3(planDir))
+    const planDir = join3(process.cwd(), ".claude", "plans");
+    if (!existsSync4(planDir))
       return false;
     return readdirSync(planDir).some((f) => f.endsWith(".md"));
   } catch {
@@ -144,7 +173,7 @@ function hasPlanFile() {
 }
 
 // src/mcp-server.ts
-var STATE_DIR = ".qult/.state";
+var STATE_DIR2 = ".qult/.state";
 var GATES_PATH = ".qult/gates.json";
 var PROTOCOL_VERSION = "2024-11-05";
 var SERVER_NAME = "qult";
@@ -157,9 +186,9 @@ function readJson(path, fallback) {
   if (cached && cached.expires > now)
     return cached.value;
   try {
-    if (!existsSync4(path))
+    if (!existsSync5(path))
       return fallback;
-    const value = JSON.parse(readFileSync3(path, "utf-8"));
+    const value = JSON.parse(readFileSync4(path, "utf-8"));
     _jsonCache.set(path, { value, expires: now + CACHE_TTL_MS });
     return value;
   } catch {
@@ -167,26 +196,26 @@ function readJson(path, fallback) {
   }
 }
 function findLatestStateFile(cwd, prefix) {
-  const dir = join3(cwd, STATE_DIR);
-  const nonScoped = join3(dir, `${prefix}.json`);
+  const dir = join4(cwd, STATE_DIR2);
+  const nonScoped = join4(dir, `${prefix}.json`);
   try {
-    if (!existsSync4(dir))
+    if (!existsSync5(dir))
       return nonScoped;
     try {
-      const markerPath = join3(dir, "latest-session.json");
-      if (existsSync4(markerPath)) {
-        const marker = JSON.parse(readFileSync3(markerPath, "utf-8"));
+      const markerPath = join4(dir, "latest-session.json");
+      if (existsSync5(markerPath)) {
+        const marker = JSON.parse(readFileSync4(markerPath, "utf-8"));
         if (marker?.session_id) {
-          const scoped = join3(dir, `${prefix}-${marker.session_id}.json`);
-          if (existsSync4(scoped))
+          const scoped = join4(dir, `${prefix}-${marker.session_id}.json`);
+          if (existsSync5(scoped))
             return scoped;
         }
       }
     } catch {}
-    const files = readdirSync2(dir).filter((f) => f.startsWith(prefix) && f.endsWith(".json")).map((f) => ({ name: f, mtime: statSync2(join3(dir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
+    const files = readdirSync2(dir).filter((f) => f.startsWith(prefix) && f.endsWith(".json")).map((f) => ({ name: f, mtime: statSync2(join4(dir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
     if (files.length === 0)
       return nonScoped;
-    return join3(dir, files[0].name);
+    return join4(dir, files[0].name);
   } catch {
     return nonScoped;
   }
@@ -204,7 +233,7 @@ function formatPendingFixes(fixes) {
 `);
 }
 function getValidGateNames(cwd) {
-  const gatesPath = join3(cwd, GATES_PATH);
+  const gatesPath = join4(cwd, GATES_PATH);
   const gates = readJson(gatesPath, null);
   const names = new Set(["review", "security-check", "dead-import-check"]);
   if (gates) {
@@ -238,16 +267,20 @@ var TOOL_DEFS = [
   },
   {
     name: "disable_gate",
-    description: "Temporarily disable a gate for this session. The gate will not run on file edits or block commits. Use when a gate is broken or irrelevant for current work. Re-enable with enable_gate.",
+    description: "Temporarily disable a gate for this session. The gate will not run on file edits or block commits. Use when a gate is broken or irrelevant for current work. Re-enable with enable_gate. Maximum 2 gates can be disabled per session.",
     inputSchema: {
       type: "object",
       properties: {
         gate_name: {
           type: "string",
           description: "Gate name to disable (e.g. 'lint', 'typecheck', 'test')"
+        },
+        reason: {
+          type: "string",
+          description: "Why this gate should be disabled (min 10 chars). Required for audit trail."
         }
       },
-      required: ["gate_name"]
+      required: ["gate_name", "reason"]
     }
   },
   {
@@ -280,7 +313,16 @@ var TOOL_DEFS = [
   {
     name: "clear_pending_fixes",
     description: "Clear all pending lint/typecheck fixes. Use when fixes are false positives or already resolved outside qult.",
-    inputSchema: { type: "object", properties: {} }
+    inputSchema: {
+      type: "object",
+      properties: {
+        reason: {
+          type: "string",
+          description: "Why pending fixes should be cleared (min 10 chars). Required for audit trail."
+        }
+      },
+      required: ["reason"]
+    }
   },
   {
     name: "record_review",
@@ -350,7 +392,7 @@ function handleTool(name, cwd, args) {
       return { content: [{ type: "text", text: JSON.stringify(state, null, 2) }] };
     }
     case "get_gate_config": {
-      const gatesPath = join3(cwd, GATES_PATH);
+      const gatesPath = join4(cwd, GATES_PATH);
       const gates = readJson(gatesPath, null);
       if (!gates) {
         return {
@@ -362,8 +404,20 @@ function handleTool(name, cwd, args) {
     }
     case "disable_gate": {
       const gateName = typeof args?.gate_name === "string" ? args.gate_name : null;
+      const reason = typeof args?.reason === "string" ? args.reason : null;
       if (!gateName) {
         return { isError: true, content: [{ type: "text", text: "Missing gate_name parameter." }] };
+      }
+      if (!reason || reason.length < 10) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: "Missing or too short reason parameter (min 10 chars). Explain WHY the gate should be disabled."
+            }
+          ]
+        };
       }
       if (!isValidGateName(gateName, cwd)) {
         return {
@@ -379,6 +433,17 @@ function handleTool(name, cwd, args) {
       const statePath = findLatestStateFile(cwd, "session-state");
       const state = readJson(statePath, {});
       const disabled = Array.isArray(state.disabled_gates) ? state.disabled_gates : [];
+      if (!disabled.includes(gateName) && disabled.length >= 2) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `Maximum 2 gates can be disabled per session. Currently disabled: ${disabled.join(", ")}. Re-enable a gate first.`
+            }
+          ]
+        };
+      }
       if (!disabled.includes(gateName)) {
         disabled.push(gateName);
       }
@@ -389,6 +454,12 @@ function handleTool(name, cwd, args) {
       } catch {
         return { isError: true, content: [{ type: "text", text: "Failed to write state." }] };
       }
+      appendAuditLog(cwd, {
+        action: "disable_gate",
+        reason,
+        gate_name: gateName,
+        timestamp: new Date().toISOString()
+      });
       return { content: [{ type: "text", text: `Gate '${gateName}' disabled for this session.` }] };
     }
     case "enable_gate": {
@@ -439,7 +510,7 @@ function handleTool(name, cwd, args) {
           content: [{ type: "text", text: "dimension_floor must be between 1 and 5." }]
         };
       }
-      const configPath = join3(cwd, ".qult", "config.json");
+      const configPath = join4(cwd, ".qult", "config.json");
       const config = readJson(configPath, {});
       const [section, field] = key.split(".");
       if (!section || !field) {
@@ -458,6 +529,18 @@ function handleTool(name, cwd, args) {
       return { content: [{ type: "text", text: `Config set: ${key} = ${value}` }] };
     }
     case "clear_pending_fixes": {
+      const reason = typeof args?.reason === "string" ? args.reason : null;
+      if (!reason || reason.length < 10) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: "Missing or too short reason parameter (min 10 chars). Explain WHY pending fixes should be cleared."
+            }
+          ]
+        };
+      }
       const fixesPath = findLatestStateFile(cwd, "pending-fixes");
       try {
         atomicWriteJson(fixesPath, []);
@@ -465,6 +548,11 @@ function handleTool(name, cwd, args) {
       } catch {
         return { isError: true, content: [{ type: "text", text: "Failed to clear fixes." }] };
       }
+      appendAuditLog(cwd, {
+        action: "clear_pending_fixes",
+        reason,
+        timestamp: new Date().toISOString()
+      });
       return { content: [{ type: "text", text: "All pending fixes cleared." }] };
     }
     case "record_review": {

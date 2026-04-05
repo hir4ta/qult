@@ -287,7 +287,10 @@ describe("handleTool: disable_gate / enable_gate", () => {
 		writeFileSync(statePath, JSON.stringify({ disabled_gates: [] }));
 		resetMcpCache();
 
-		const result = handleTool("disable_gate", TEST_DIR, { gate_name: "lint" });
+		const result = handleTool("disable_gate", TEST_DIR, {
+			gate_name: "lint",
+			reason: "Gate is broken for this test session",
+		});
 		expect(result.content[0]!.text).toContain("disabled");
 
 		const state = JSON.parse(readFileSync(statePath, "utf-8"));
@@ -302,7 +305,10 @@ describe("handleTool: disable_gate / enable_gate", () => {
 		);
 		resetMcpCache();
 
-		const result = handleTool("disable_gate", TEST_DIR, { gate_name: "typo" });
+		const result = handleTool("disable_gate", TEST_DIR, {
+			gate_name: "typo",
+			reason: "Testing unknown gate rejection",
+		});
 		expect(result.isError).toBe(true);
 		expect(result.content[0]!.text).toContain("Unknown gate");
 	});
@@ -312,7 +318,10 @@ describe("handleTool: disable_gate / enable_gate", () => {
 		writeFileSync(statePath, JSON.stringify({ disabled_gates: [] }));
 		resetMcpCache();
 
-		const result = handleTool("disable_gate", TEST_DIR, { gate_name: "review" });
+		const result = handleTool("disable_gate", TEST_DIR, {
+			gate_name: "review",
+			reason: "Review not needed for documentation changes",
+		});
 		expect(result.content[0]!.text).toContain("disabled");
 	});
 
@@ -321,11 +330,58 @@ describe("handleTool: disable_gate / enable_gate", () => {
 		writeFileSync(statePath, JSON.stringify({ disabled_gates: [] }));
 		resetMcpCache();
 
-		const secResult = handleTool("disable_gate", TEST_DIR, { gate_name: "security-check" });
+		const secResult = handleTool("disable_gate", TEST_DIR, {
+			gate_name: "security-check",
+			reason: "Security patterns causing false positives",
+		});
 		expect(secResult.content[0]!.text).toContain("disabled");
 
-		const deadResult = handleTool("disable_gate", TEST_DIR, { gate_name: "dead-import-check" });
+		// Re-enable security-check before disabling dead-import to stay under limit
+		handleTool("enable_gate", TEST_DIR, { gate_name: "security-check" });
+		resetMcpCache();
+
+		const deadResult = handleTool("disable_gate", TEST_DIR, {
+			gate_name: "dead-import-check",
+			reason: "Dead import check causing false positives",
+		});
 		expect(deadResult.content[0]!.text).toContain("disabled");
+	});
+
+	it("disable_gate requires reason parameter", () => {
+		const result = handleTool("disable_gate", TEST_DIR, { gate_name: "review" });
+		expect(result.isError).toBe(true);
+		expect(result.content[0]!.text).toContain("reason");
+	});
+
+	it("disable_gate rejects short reason", () => {
+		const result = handleTool("disable_gate", TEST_DIR, { gate_name: "review", reason: "short" });
+		expect(result.isError).toBe(true);
+		expect(result.content[0]!.text).toContain("10 chars");
+	});
+
+	it("disable_gate rejects when 2 gates already disabled", () => {
+		const statePath = join(STATE_DIR, "session-state.json");
+		writeFileSync(statePath, JSON.stringify({ disabled_gates: ["review", "security-check"] }));
+		resetMcpCache();
+
+		const result = handleTool("disable_gate", TEST_DIR, {
+			gate_name: "dead-import-check",
+			reason: "Need to disable a third gate",
+		});
+		expect(result.isError).toBe(true);
+		expect(result.content[0]!.text).toContain("Maximum 2");
+	});
+
+	it("disable_gate writes audit log entry", () => {
+		const result = handleTool("disable_gate", TEST_DIR, {
+			gate_name: "review",
+			reason: "Review gate is misconfigured",
+		});
+		expect(result.isError).toBeFalsy();
+		const auditLog = JSON.parse(readFileSync(join(STATE_DIR, "audit-log.json"), "utf-8"));
+		expect(auditLog).toHaveLength(1);
+		expect(auditLog[0].action).toBe("disable_gate");
+		expect(auditLog[0].gate_name).toBe("review");
 	});
 
 	it("enable_gate removes gate from disabled_gates", () => {
@@ -348,7 +404,7 @@ describe("handleTool: disable_gate / enable_gate", () => {
 	});
 
 	it("disable_gate returns error without gate_name", () => {
-		const result = handleTool("disable_gate", TEST_DIR, {});
+		const result = handleTool("disable_gate", TEST_DIR, { reason: "Testing missing gate_name" });
 		expect(result.isError).toBe(true);
 	});
 });
@@ -359,7 +415,9 @@ describe("handleTool: clear_pending_fixes", () => {
 		writeFileSync(fixesPath, JSON.stringify([{ file: "a.ts", errors: ["err"], gate: "lint" }]));
 		resetMcpCache();
 
-		const result = handleTool("clear_pending_fixes", TEST_DIR);
+		const result = handleTool("clear_pending_fixes", TEST_DIR, {
+			reason: "False positives from linter update",
+		});
 		expect(result.content[0]!.text).toContain("cleared");
 
 		const fixes = JSON.parse(readFileSync(fixesPath, "utf-8"));
@@ -371,8 +429,37 @@ describe("handleTool: clear_pending_fixes", () => {
 		resetMcpCache();
 
 		// Should not throw (fail-open)
-		const result = handleTool("clear_pending_fixes", TEST_DIR);
+		const result = handleTool("clear_pending_fixes", TEST_DIR, {
+			reason: "Testing graceful handling of missing state",
+		});
 		expect(result.content[0]!.text).toContain("cleared");
+	});
+
+	it("requires reason parameter", () => {
+		const result = handleTool("clear_pending_fixes", TEST_DIR, {});
+		expect(result.isError).toBe(true);
+		expect(result.content[0]!.text).toContain("reason");
+	});
+
+	it("rejects short reason", () => {
+		const result = handleTool("clear_pending_fixes", TEST_DIR, { reason: "short" });
+		expect(result.isError).toBe(true);
+		expect(result.content[0]!.text).toContain("10 chars");
+	});
+
+	it("writes audit log entry", () => {
+		const fixesPath = join(STATE_DIR, "pending-fixes.json");
+		writeFileSync(fixesPath, JSON.stringify([]));
+		resetMcpCache();
+
+		handleTool("clear_pending_fixes", TEST_DIR, {
+			reason: "All fixes are false positives",
+		});
+
+		const auditLog = JSON.parse(readFileSync(join(STATE_DIR, "audit-log.json"), "utf-8"));
+		expect(auditLog).toHaveLength(1);
+		expect(auditLog[0].action).toBe("clear_pending_fixes");
+		expect(auditLog[0].reason).toBe("All fixes are false positives");
 	});
 });
 
