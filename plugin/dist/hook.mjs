@@ -2304,11 +2304,22 @@ function checkTddOrder(resolvedTarget) {
     return;
   }
 }
+function hasSourceChanges(paths) {
+  return paths.some((p) => {
+    const ext = p.slice(p.lastIndexOf("."));
+    return SOURCE_EXTS.has(ext);
+  });
+}
 function checkBash(ev) {
   const command = typeof ev.tool_input?.command === "string" ? ev.tool_input.command : null;
   if (!command)
     return;
   if (!GIT_COMMIT_RE2.test(command))
+    return;
+  const state = readSessionState();
+  const changedPaths = state.changed_file_paths ?? [];
+  const changedCount = changedPaths.length;
+  if (!hasSourceChanges(changedPaths))
     return;
   const gates = loadGates();
   if (gates?.on_commit && Object.keys(gates.on_commit).length > 0) {
@@ -2317,8 +2328,6 @@ function checkBash(ev) {
       deny("Run tests before committing. No test pass recorded since last commit.");
     }
   }
-  const state = readSessionState();
-  const changedCount = state.changed_file_paths?.length ?? 0;
   if (changedCount > 0) {
     if (changedCount >= loadConfig().review.required_changed_files && !hasPlanFile()) {
       deny(`${changedCount} files changed without a plan. Run /qult:plan-generator before committing.`);
@@ -2330,7 +2339,7 @@ function checkBash(ev) {
     }
   }
 }
-var GIT_COMMIT_RE2, driftWarnedFiles;
+var GIT_COMMIT_RE2, driftWarnedFiles, SOURCE_EXTS;
 var init_pre_tool = __esm(() => {
   init_config();
   init_load();
@@ -2340,6 +2349,27 @@ var init_pre_tool = __esm(() => {
   init_respond();
   GIT_COMMIT_RE2 = /\bgit\s+(?:-\S+(?:\s+\S+)?\s+)*commit\b/i;
   driftWarnedFiles = new Set;
+  SOURCE_EXTS = new Set([
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mts",
+    ".cts",
+    ".mjs",
+    ".cjs",
+    ".py",
+    ".pyi",
+    ".go",
+    ".rs",
+    ".rb",
+    ".java",
+    ".kt",
+    ".php",
+    ".cs",
+    ".vue",
+    ".svelte"
+  ]);
 });
 
 // src/hooks/stop.ts
@@ -2358,9 +2388,14 @@ async function stop(ev) {
 ${fileList}`);
   }
   const state = readSessionState();
-  const hasChanges = (state.changed_file_paths?.length ?? 0) > 0;
+  const changedPaths = state.changed_file_paths ?? [];
+  const hasChanges = changedPaths.length > 0;
+  const hasSourceChanges2 = hasChanges && changedPaths.some((p) => {
+    const ext = p.slice(p.lastIndexOf("."));
+    return SOURCE_EXTS2.has(ext);
+  });
   const plan = getActivePlan();
-  if (plan && hasChanges) {
+  if (plan && hasSourceChanges2) {
     const incomplete = plan.tasks.filter((t) => t.status !== "done");
     if (incomplete.length > 0) {
       const taskList = incomplete.map((t) => `  [${t.status}] ${t.name}`).join(`
@@ -2382,7 +2417,7 @@ ${list}
 Use TaskCreate to track tasks so TaskCompleted triggers Verify test execution.`);
     }
   }
-  if (hasChanges) {
+  if (hasSourceChanges2) {
     if (!plan) {
       const changed = state.changed_file_paths.length;
       const threshold = loadConfig().review.required_changed_files;
@@ -2414,13 +2449,34 @@ Use TaskCreate to track tasks so TaskCompleted triggers Verify test execution.`)
     block(`${testQualityCount} test quality warnings emitted this session. Improve test assertions before finishing.`);
   }
 }
-var SECURITY_ESCALATION_THRESHOLD = 10, DRIFT_ESCALATION_THRESHOLD = 8, TEST_QUALITY_ESCALATION_THRESHOLD = 8;
+var SECURITY_ESCALATION_THRESHOLD = 10, SOURCE_EXTS2, DRIFT_ESCALATION_THRESHOLD = 8, TEST_QUALITY_ESCALATION_THRESHOLD = 8;
 var init_stop = __esm(() => {
   init_config();
   init_pending_fixes();
   init_plan_status();
   init_session_state();
   init_respond();
+  SOURCE_EXTS2 = new Set([
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mts",
+    ".cts",
+    ".mjs",
+    ".cjs",
+    ".py",
+    ".pyi",
+    ".go",
+    ".rs",
+    ".rb",
+    ".java",
+    ".kt",
+    ".php",
+    ".cs",
+    ".vue",
+    ".svelte"
+  ]);
 });
 
 // src/state/calibration.ts
