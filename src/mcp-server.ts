@@ -13,9 +13,13 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { loadConfig } from "./config.ts";
+import { generateHandoffDocument } from "./handoff.ts";
+import { generateHarnessReport } from "./harness-report.ts";
+import { generateMetricsDashboard } from "./metrics-dashboard.ts";
 import { atomicWriteJson } from "./state/atomic-write.ts";
-import { appendAuditLog } from "./state/audit-log.ts";
-import { hasPlanFile } from "./state/plan-status.ts";
+import { appendAuditLog, readAuditLog } from "./state/audit-log.ts";
+import { readMetricsHistory } from "./state/metrics.ts";
+import { getActivePlan, hasPlanFile } from "./state/plan-status.ts";
 import type { GatesConfig, PendingFix } from "./types.ts";
 
 const STATE_DIR = ".qult/.state";
@@ -281,6 +285,24 @@ const TOOL_DEFS: ToolDef[] = [
 			},
 			required: ["stage", "scores"],
 		},
+	},
+	{
+		name: "get_harness_report",
+		description:
+			"Returns a harness effectiveness report analyzing which gates catch issues, review score trends, and recommendations for unused gates. Call to assess harness health.",
+		inputSchema: { type: "object", properties: {} },
+	},
+	{
+		name: "get_handoff_document",
+		description:
+			"Returns a structured handoff document for starting a fresh session. Includes session state, plan progress, pending fixes, and changed files. Call before ending a long session or when context is degraded.",
+		inputSchema: { type: "object", properties: {} },
+	},
+	{
+		name: "get_metrics_dashboard",
+		description:
+			"Returns a formatted metrics dashboard showing gate failure trends, security warning trends, and review score history across recent sessions.",
+		inputSchema: { type: "object", properties: {} },
 	},
 ];
 
@@ -650,6 +672,50 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 					{ type: "text", text: `Stage scores recorded: ${stage} = ${JSON.stringify(scores)}` },
 				],
 			};
+		}
+		case "get_harness_report": {
+			try {
+				const metrics = readMetricsHistory(cwd);
+				const auditLog = readAuditLog(cwd);
+				const report = generateHarnessReport(metrics, auditLog);
+				return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
+			} catch {
+				return { content: [{ type: "text", text: "No harness data available yet." }] };
+			}
+		}
+		case "get_handoff_document": {
+			try {
+				const statePath = findLatestStateFile(cwd, "session-state");
+				const state = readJson<Record<string, unknown>>(statePath, {});
+				const fixesPath = findLatestStateFile(cwd, "pending-fixes");
+				const fixes = readJson<PendingFix[]>(fixesPath, []);
+				const plan = getActivePlan();
+				return {
+					content: [
+						{
+							type: "text",
+							text: generateHandoffDocument({
+								changedFiles: Array.isArray(state.changed_file_paths) ? state.changed_file_paths : [],
+								pendingFixes: Array.isArray(fixes) ? fixes : [],
+								planTasks: plan?.tasks ?? null,
+								testPassed: !!state.test_passed_at,
+								reviewDone: !!state.review_completed_at,
+								disabledGates: Array.isArray(state.disabled_gates) ? state.disabled_gates : [],
+							}),
+						},
+					],
+				};
+			} catch {
+				return { content: [{ type: "text", text: "No active session data to hand off." }] };
+			}
+		}
+		case "get_metrics_dashboard": {
+			try {
+				const metrics = readMetricsHistory(cwd);
+				return { content: [{ type: "text", text: generateMetricsDashboard(metrics) }] };
+			} catch {
+				return { content: [{ type: "text", text: "No metrics data available yet." }] };
+			}
 		}
 		default:
 			return { isError: true, content: [{ type: "text", text: `Unknown tool: ${name}` }] };

@@ -207,7 +207,7 @@ describe("handleRequest (JSON-RPC)", () => {
 	it("tools/list returns all tool definitions", () => {
 		const response = handleRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" }, TEST_DIR);
 		const result = response!.result as { tools: { name: string }[] };
-		expect(result.tools).toHaveLength(12);
+		expect(result.tools).toHaveLength(15);
 		expect(result.tools.map((t) => t.name)).toEqual([
 			"get_pending_fixes",
 			"get_session_status",
@@ -221,6 +221,9 @@ describe("handleRequest (JSON-RPC)", () => {
 			"get_detector_summary",
 			"record_human_approval",
 			"record_stage_scores",
+			"get_harness_report",
+			"get_handoff_document",
+			"get_metrics_dashboard",
 		]);
 	});
 
@@ -264,8 +267,8 @@ describe("handleRequest (JSON-RPC)", () => {
 });
 
 describe("TOOL_DEFS", () => {
-	it("has 12 tool definitions", () => {
-		expect(TOOL_DEFS).toHaveLength(12);
+	it("has 15 tool definitions", () => {
+		expect(TOOL_DEFS).toHaveLength(15);
 	});
 
 	it("each tool has name, description, and inputSchema", () => {

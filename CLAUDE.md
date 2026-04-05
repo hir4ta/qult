@@ -77,6 +77,7 @@ qult/
 - Claude が状態を取得・操作する経路
 - raw stdio JSON-RPC 実装 (SDK 依存なし)
 - 読み取り: get_pending_fixes, get_session_status, get_gate_config, get_detector_summary
+- 分析: get_harness_report, get_handoff_document, get_metrics_dashboard
 - 操作: disable_gate, enable_gate, clear_pending_fixes, set_config
 - 記録: record_review, record_test_pass, record_stage_scores, record_human_approval
 - disable_gate は gate 名をバリデーション（gates.json のキー + "review", "security-check", "dead-import-check", "duplication-check"）
