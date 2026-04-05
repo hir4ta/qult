@@ -1,5 +1,5 @@
 {
 	"name": "qult",
-	"version": "0.23.3",
+	"version": "0.24.0",
 	"description": "Quality evaluator harness — enforces lint, typecheck, test, and review gates via hooks + MCP"
 }
