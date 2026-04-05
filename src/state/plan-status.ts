@@ -106,19 +106,20 @@ function scanPlanDir(dir: string): { path: string; mtime: number }[] {
 }
 
 /** Get the path of the latest plan file (by mtime). Returns null if none found.
- *  Search order: .claude/plans/ (project) → CLAUDE_PLANS_DIR env → ~/.claude/plans/ (user home) */
+ *  Collects candidates from all sources, then returns the most recently modified.
+ *  Sources: .claude/plans/ (project) → CLAUDE_PLANS_DIR env → ~/.claude/plans/ (user home, <24h) */
 function getLatestPlanPath(): string | null {
 	try {
-		// 1. Project-local plans (primary)
+		const candidates: { path: string; mtime: number }[] = [];
+
+		// 1. Project-local plans
 		const projectDir = join(process.cwd(), ".claude", "plans");
-		const projectFiles = scanPlanDir(projectDir);
-		if (projectFiles.length > 0) return projectFiles[0]!.path;
+		candidates.push(...scanPlanDir(projectDir));
 
 		// 2. CLAUDE_PLANS_DIR env var (explicit override)
 		const envDir = process.env.CLAUDE_PLANS_DIR;
 		if (envDir) {
-			const envFiles = scanPlanDir(envDir);
-			if (envFiles.length > 0) return envFiles[0]!.path;
+			candidates.push(...scanPlanDir(envDir));
 		}
 
 		// 3. User home ~/.claude/plans/ (Claude Code stores plans here in some modes)
@@ -128,14 +129,17 @@ function getLatestPlanPath(): string | null {
 				const homeDir = join(homedir(), ".claude", "plans");
 				const homeFiles = scanPlanDir(homeDir);
 				const recentCutoff = Date.now() - 24 * 60 * 60 * 1000;
-				const recentHome = homeFiles.filter((f) => f.mtime > recentCutoff);
-				if (recentHome.length > 0) return recentHome[0]!.path;
+				candidates.push(...homeFiles.filter((f) => f.mtime > recentCutoff));
 			} catch {
 				/* fail-open: homedir() may fail in sandboxed environments */
 			}
 		}
 
-		return null;
+		if (candidates.length === 0) return null;
+
+		// Return the most recently modified file across all sources
+		candidates.sort((a, b) => b.mtime - a.mtime);
+		return candidates[0]!.path;
 	} catch {
 		return null;
 	}
