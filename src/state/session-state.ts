@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "../config.ts";
 import { loadGates } from "../gates/load.ts";
+import { computeReviewTier } from "../review-tier.ts";
 import { atomicWriteJson } from "./atomic-write.ts";
 import { getActivePlan } from "./plan-status.ts";
 
@@ -235,13 +236,14 @@ export function recordChangedFile(filePath: string): void {
 }
 
 /** Determine if independent review is required for current session.
- *  Required when: plan is active OR changed_files >= threshold. */
+ *  Required when review tier is "standard" or "deep" (plan active OR changed_files >= threshold).
+ *  Returns false for "skip" (1-2 files) and "light" (3-4 files, no plan). */
 export function isReviewRequired(): boolean {
-	if (getActivePlan() !== null) return true;
 	const state = readSessionState();
 	const changedCount = state.changed_file_paths?.length ?? 0;
-	if (changedCount >= loadConfig().review.required_changed_files) return true;
-	return false;
+	const hasPlan = getActivePlan() !== null;
+	const tier = computeReviewTier(changedCount, hasPlan, loadConfig());
+	return tier === "standard" || tier === "deep";
 }
 
 // ── Test gate ───────────────────────────────────────────────
