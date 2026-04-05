@@ -103,7 +103,12 @@ function getValidGateNames(cwd: string): string[] {
 	const gatesPath = join(cwd, GATES_PATH);
 	const gates = readJson<GatesConfig | null>(gatesPath, null);
 	// "review" = session policy gate; others = computational detectors (no external command)
-	const names = new Set<string>(["review", "security-check", "dead-import-check"]);
+	const names = new Set<string>([
+		"review",
+		"security-check",
+		"dead-import-check",
+		"duplication-check",
+	]);
 	if (gates) {
 		for (const category of [gates.on_write, gates.on_commit, gates.on_review]) {
 			if (category) {
@@ -245,6 +250,18 @@ const TOOL_DEFS: ToolDef[] = [
 			},
 			required: ["command"],
 		},
+	},
+	{
+		name: "get_detector_summary",
+		description:
+			"Returns a consolidated summary of all computational detector findings from the current session. Includes escalation counters (security, dead-import, drift, test-quality, duplication warnings) and pending fixes grouped by gate. Call before /qult:review to collect ground truth for reviewers.",
+		inputSchema: { type: "object", properties: {} },
+	},
+	{
+		name: "record_human_approval",
+		description:
+			"Record that the architect has reviewed and approved the changes. Required when review.require_human_approval is enabled in config. Call after the human has reviewed the code.",
+		inputSchema: { type: "object", properties: {} },
 	},
 	{
 		name: "record_stage_scores",
@@ -454,6 +471,54 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			});
 			return { content: [{ type: "text", text: "All pending fixes cleared." }] };
 		}
+		case "get_detector_summary": {
+			const statePath = findLatestStateFile(cwd, "session-state");
+			const state = readJson<Record<string, unknown>>(statePath, {});
+			const fixesPath = findLatestStateFile(cwd, "pending-fixes");
+			const fixes = readJson<PendingFix[]>(fixesPath, []);
+
+			const lines: string[] = [];
+
+			// Escalation counters
+			const counters = [
+				"security_warning_count",
+				"dead_import_warning_count",
+				"drift_warning_count",
+				"test_quality_warning_count",
+				"duplication_warning_count",
+			] as const;
+			for (const key of counters) {
+				const val = typeof state[key] === "number" ? (state[key] as number) : 0;
+				if (val > 0) lines.push(`${key}: ${val}`);
+			}
+
+			// Pending fixes grouped by gate (use project-relative paths)
+			if (Array.isArray(fixes) && fixes.length > 0) {
+				const byGate: Record<string, PendingFix[]> = {};
+				for (const fix of fixes) {
+					const g = fix.gate ?? "unknown";
+					if (!byGate[g]) byGate[g] = [];
+					byGate[g].push(fix);
+				}
+				for (const [gate, gateFixes] of Object.entries(byGate)) {
+					lines.push(`\n[${gate}] ${gateFixes.length} issue(s):`);
+					for (const fix of gateFixes) {
+						const relPath = fix.file.startsWith(`${cwd}/`)
+							? fix.file.slice(cwd.length + 1)
+							: fix.file;
+						lines.push(`  ${relPath}`);
+						for (const err of fix.errors.slice(0, 3)) {
+							lines.push(`    ${err.slice(0, 200)}`);
+						}
+					}
+				}
+			}
+
+			if (lines.length === 0) {
+				return { content: [{ type: "text", text: "No detector findings." }] };
+			}
+			return { content: [{ type: "text", text: lines.join("\n") }] };
+		}
 		case "record_review": {
 			const statePath = findLatestStateFile(cwd, "session-state");
 			const state = readJson<Record<string, unknown>>(statePath, {});
@@ -510,6 +575,35 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 				};
 			}
 			return { content: [{ type: "text", text: `Test pass recorded: ${cmd}` }] };
+		}
+		case "record_human_approval": {
+			// Guard: require that review has been completed first
+			const haStatePath = findLatestStateFile(cwd, "session-state");
+			const haState = readJson<Record<string, unknown>>(haStatePath, {});
+			if (!haState.review_completed_at) {
+				return {
+					isError: true,
+					content: [
+						{
+							type: "text",
+							text: "Cannot record human approval: no review has been completed yet. Run /qult:review first.",
+						},
+					],
+				};
+			}
+			try {
+				haState.human_review_approved_at = new Date().toISOString();
+				atomicWriteJson(haStatePath, haState);
+				_jsonCache.delete(haStatePath);
+			} catch {
+				return { isError: true, content: [{ type: "text", text: "Failed to record approval." }] };
+			}
+			appendAuditLog(cwd, {
+				action: "record_human_approval",
+				reason: "Architect approved changes",
+				timestamp: new Date().toISOString(),
+			});
+			return { content: [{ type: "text", text: "Human approval recorded." }] };
 		}
 		case "record_stage_scores": {
 			const stage = typeof args?.stage === "string" ? args.stage : null;
@@ -626,6 +720,13 @@ function handleRequest(parsed: JsonRpcRequest, cwd: string): JsonRpcResponse | n
 						"- Hooks detect test pass best-effort via output parsing. If tests passed but hook didn't detect it, call record_test_pass explicitly.",
 						"- After committing, session state resets (test/review cleared). This is expected — gates only apply to uncommitted changes.",
 						"- MCP tools (record_test_pass, record_review) are the authoritative state management mechanism.",
+						"",
+						"## Ground Truth for Reviews",
+						"- Before running /qult:review, call get_detector_summary to collect computational detector findings (security, imports, duplications, test quality).",
+						"- Pass detector findings as context to each reviewer stage — reviewers must not contradict detector results.",
+						"",
+						"## Human Approval",
+						"- If review.require_human_approval is enabled, call record_human_approval after the architect has reviewed and approved the changes.",
 					].join("\n"),
 				},
 			};

@@ -204,10 +204,10 @@ describe("handleRequest (JSON-RPC)", () => {
 		expect(serverInfo.name).toBe("qult");
 	});
 
-	it("tools/list returns 7 tool definitions", () => {
+	it("tools/list returns all tool definitions", () => {
 		const response = handleRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" }, TEST_DIR);
 		const result = response!.result as { tools: { name: string }[] };
-		expect(result.tools).toHaveLength(10);
+		expect(result.tools).toHaveLength(12);
 		expect(result.tools.map((t) => t.name)).toEqual([
 			"get_pending_fixes",
 			"get_session_status",
@@ -218,6 +218,8 @@ describe("handleRequest (JSON-RPC)", () => {
 			"clear_pending_fixes",
 			"record_review",
 			"record_test_pass",
+			"get_detector_summary",
+			"record_human_approval",
 			"record_stage_scores",
 		]);
 	});
@@ -262,8 +264,8 @@ describe("handleRequest (JSON-RPC)", () => {
 });
 
 describe("TOOL_DEFS", () => {
-	it("has 10 tool definitions", () => {
-		expect(TOOL_DEFS).toHaveLength(10);
+	it("has 12 tool definitions", () => {
+		expect(TOOL_DEFS).toHaveLength(12);
 	});
 
 	it("each tool has name, description, and inputSchema", () => {
@@ -622,5 +624,79 @@ describe("handleTool: record_stage_scores", () => {
 	it("returns error without required params", () => {
 		expect(handleTool("record_stage_scores", TEST_DIR, {}).isError).toBe(true);
 		expect(handleTool("record_stage_scores", TEST_DIR, { stage: "Spec" }).isError).toBe(true);
+	});
+});
+
+describe("record_human_approval", () => {
+	it("records approval timestamp in session state", () => {
+		writeFileSync(
+			join(STATE_DIR, "session-state.json"),
+			JSON.stringify({ review_completed_at: new Date().toISOString() }),
+		);
+		resetMcpCache();
+
+		const result = handleTool("record_human_approval", TEST_DIR);
+		expect(result.content[0]!.text).toContain("Human approval recorded");
+
+		const stateFile = findLatestStateFile(TEST_DIR, "session-state");
+		const state = JSON.parse(readFileSync(stateFile, "utf-8"));
+		expect(typeof state.human_review_approved_at).toBe("string");
+		expect(state.human_review_approved_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+	});
+
+	it("rejects when no review has been completed", () => {
+		writeFileSync(join(STATE_DIR, "session-state.json"), JSON.stringify({}));
+		resetMcpCache();
+
+		const result = handleTool("record_human_approval", TEST_DIR);
+		expect(result.isError).toBe(true);
+		expect(result.content[0]!.text).toContain("no review has been completed");
+	});
+});
+
+describe("get_detector_summary", () => {
+	it("returns 'No detector findings.' on clean state", () => {
+		const result = handleTool("get_detector_summary", TEST_DIR);
+		expect(result.content[0]!.text).toBe("No detector findings.");
+	});
+
+	it("returns summary when security warnings and pending fixes exist", () => {
+		writeFileSync(
+			join(STATE_DIR, "session-state.json"),
+			JSON.stringify({ security_warning_count: 3 }),
+		);
+		writeFileSync(
+			join(STATE_DIR, "pending-fixes.json"),
+			JSON.stringify([
+				{ file: "src/foo.ts", errors: ["L5: Hardcoded API key"], gate: "security-check" },
+			]),
+		);
+		resetMcpCache();
+
+		const result = handleTool("get_detector_summary", TEST_DIR);
+		const text = result.content[0]!.text;
+		expect(text).toContain("security_warning_count: 3");
+		expect(text).toContain("security-check");
+		expect(text).toContain("src/foo.ts");
+	});
+
+	it("includes all non-zero escalation counters", () => {
+		writeFileSync(
+			join(STATE_DIR, "session-state.json"),
+			JSON.stringify({
+				dead_import_warning_count: 2,
+				drift_warning_count: 4,
+				test_quality_warning_count: 1,
+				duplication_warning_count: 3,
+			}),
+		);
+		resetMcpCache();
+
+		const result = handleTool("get_detector_summary", TEST_DIR);
+		const text = result.content[0]!.text;
+		expect(text).toContain("dead_import_warning_count: 2");
+		expect(text).toContain("drift_warning_count: 4");
+		expect(text).toContain("test_quality_warning_count: 1");
+		expect(text).toContain("duplication_warning_count: 3");
 	});
 });

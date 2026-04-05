@@ -43,7 +43,7 @@ Why this change is needed — the problem and intended outcome.
 
 ## Rules
 
-- Write the plan in the same language the architect used in the feature description
+- **CRITICAL — Output Language**: Write ALL plan content in the SAME language as the architect's feature description. If the description is in Japanese, write Context, Change, Boundary, and Success Criteria text in Japanese. If an explicit `Output language:` instruction is provided, follow it. Structural markers (`## Context`, `### Task N:`, `**File**`, `**Change**`, `**Boundary**`, `**Verify**`, `## Success Criteria`) remain in English as they are parsed by the system.
 - Each task: 1-2 files, ≤15 LOC change. Split larger work into more tasks
 - Fewer tasks > more tasks. Only what's necessary
 - Every task MUST have File, Change, Boundary, and Verify fields

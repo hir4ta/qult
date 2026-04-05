@@ -8,6 +8,7 @@ export interface QultConfig {
 		max_iterations: number;
 		required_changed_files: number;
 		dimension_floor: number;
+		require_human_approval: boolean;
 	};
 	plan_eval: {
 		score_threshold: number;
@@ -33,6 +34,7 @@ const DEFAULTS: QultConfig = {
 		max_iterations: 3,
 		required_changed_files: 5,
 		dimension_floor: 4,
+		require_human_approval: false,
 	},
 	plan_eval: {
 		score_threshold: 10,
@@ -58,6 +60,8 @@ function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): voi
 			config.review.required_changed_files = Math.max(1, r.required_changed_files);
 		if (typeof r.dimension_floor === "number")
 			config.review.dimension_floor = Math.max(1, Math.min(5, r.dimension_floor));
+		if (typeof r.require_human_approval === "boolean")
+			config.review.require_human_approval = r.require_human_approval;
 	}
 	if (raw.plan_eval && typeof raw.plan_eval === "object") {
 		const p = raw.plan_eval as Record<string, unknown>;
@@ -139,6 +143,11 @@ export function loadConfig(): QultConfig {
 	config.gates.output_max_chars = envInt("QULT_GATE_OUTPUT_MAX") ?? config.gates.output_max_chars;
 	config.gates.default_timeout =
 		envInt("QULT_GATE_DEFAULT_TIMEOUT") ?? config.gates.default_timeout;
+	const humanApprovalEnv = process.env.QULT_REQUIRE_HUMAN_APPROVAL;
+	if (humanApprovalEnv === "1" || humanApprovalEnv === "true")
+		config.review.require_human_approval = true;
+	else if (humanApprovalEnv === "0" || humanApprovalEnv === "false")
+		config.review.require_human_approval = false;
 	const testOnEditEnv = process.env.QULT_TEST_ON_EDIT;
 	if (testOnEditEnv === "1" || testOnEditEnv === "true") config.gates.test_on_edit = true;
 	else if (testOnEditEnv === "0" || testOnEditEnv === "false") config.gates.test_on_edit = false;

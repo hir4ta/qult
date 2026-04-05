@@ -85,6 +85,10 @@ export interface SessionState {
 	drift_warning_count: number;
 	/** Dead import warnings emitted this session (for escalation) */
 	dead_import_warning_count: number;
+	/** Duplication warnings emitted this session (for escalation) */
+	duplication_warning_count: number;
+	/** When human review was approved (ISO timestamp, null = not approved) */
+	human_review_approved_at: string | null;
 }
 
 function filePath(): string {
@@ -113,6 +117,8 @@ function defaultState(): SessionState {
 		test_quality_warning_count: 0,
 		drift_warning_count: 0,
 		dead_import_warning_count: 0,
+		duplication_warning_count: 0,
+		human_review_approved_at: null,
 	};
 }
 
@@ -311,6 +317,8 @@ export function clearOnCommit(): void {
 	state.test_quality_warning_count = 0;
 	state.drift_warning_count = 0;
 	state.dead_import_warning_count = 0;
+	state.duplication_warning_count = 0;
+	state.human_review_approved_at = null;
 	writeState(state);
 }
 
@@ -494,7 +502,8 @@ type EscalationCounter =
 	| "security_warning_count"
 	| "test_quality_warning_count"
 	| "drift_warning_count"
-	| "dead_import_warning_count";
+	| "dead_import_warning_count"
+	| "duplication_warning_count";
 
 /** Increment an escalation counter. Returns the new count. */
 export function incrementEscalation(counter: EscalationCounter): number {
@@ -508,4 +517,20 @@ export function incrementEscalation(counter: EscalationCounter): number {
 /** Read an escalation counter value. */
 export function readEscalation(counter: EscalationCounter): number {
 	return readSessionState()[counter] ?? 0;
+}
+
+// ── Human review approval ─────────────────────────────────
+
+/** Record human review approval. */
+export function recordHumanApproval(): void {
+	const state = readSessionState();
+	state.human_review_approved_at = new Date().toISOString();
+	writeState(state);
+}
+
+/** Read human review approval. Returns null if not approved. */
+export function readHumanApproval(): { approved_at: string } | null {
+	const state = readSessionState();
+	if (!state.human_review_approved_at) return null;
+	return { approved_at: state.human_review_approved_at };
 }

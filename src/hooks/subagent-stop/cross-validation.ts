@@ -46,14 +46,29 @@ function checkSpecContradiction(output: string, contradictions: string[]): void 
 	if (!ALL_COMPLETE_RE.test(output)) return;
 
 	const plan = getActivePlan();
-	if (!plan) return;
+	if (plan) {
+		const pending = plan.tasks.filter((t) => t.status === "pending" || t.status === "in-progress");
+		if (pending.length > 0) {
+			const names = pending.map((t) => t.name).join(", ");
+			contradictions.push(
+				`Spec reviewer claims all tasks complete but plan has ${pending.length} pending task(s): ${names}`,
+			);
+		}
+	}
 
-	const pending = plan.tasks.filter((t) => t.status === "pending" || t.status === "in-progress");
-	if (pending.length > 0) {
-		const names = pending.map((t) => t.name).join(", ");
-		contradictions.push(
-			`Spec reviewer claims all tasks complete but plan has ${pending.length} pending task(s): ${names}`,
-		);
+	// Check gate failures: repeated failures (3+) indicate unresolved issues
+	try {
+		const state = readSessionState();
+		const failures = state.gate_failure_counts ?? {};
+		const repeatedFailures = Object.entries(failures).filter(([, count]) => count >= 3);
+		if (repeatedFailures.length > 0) {
+			const files = repeatedFailures.map(([key]) => key).join(", ");
+			contradictions.push(
+				`Spec reviewer claims all tasks complete but ${repeatedFailures.length} gate failure(s) with 3+ repeats: ${files}`,
+			);
+		}
+	} catch {
+		/* fail-open */
 	}
 }
 
@@ -73,6 +88,20 @@ function checkQualityContradiction(output: string, contradictions: string[]): vo
 		if (driftWarnings >= 3) {
 			contradictions.push(
 				`Quality reviewer declared "No issues found" but session has ${driftWarnings} convention drift warnings`,
+			);
+		}
+
+		const testQuality = state.test_quality_warning_count ?? 0;
+		if (testQuality >= 3) {
+			contradictions.push(
+				`Quality reviewer declared "No issues found" but session has ${testQuality} test quality warnings`,
+			);
+		}
+
+		const duplication = state.duplication_warning_count ?? 0;
+		if (duplication >= 3) {
+			contradictions.push(
+				`Quality reviewer declared "No issues found" but session has ${duplication} duplication warnings`,
 			);
 		}
 	} catch {

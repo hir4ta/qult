@@ -19,9 +19,12 @@ This ensures that design decisions from `/qult:explore` are carried into the pla
 
 ## Stage 1: Plan generation (independent agent)
 
+Detect the language of `$ARGUMENTS` (e.g., Japanese, English, Chinese, Korean, etc.). If the language is not English, include an explicit instruction in the agent prompt: `Output language: <detected language name>` (e.g., `Output language: 日本語`).
+
 Spawn one `plan-generator` agent with:
 - The user's feature description: `$ARGUMENTS`
 - The spec document content (if found in Stage 0)
+- The output language instruction (if non-English detected)
 
 The agent analyzes the codebase independently and outputs a complete plan in markdown format.
 

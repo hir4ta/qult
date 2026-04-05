@@ -106,6 +106,10 @@ When you find a gap, report it. Do NOT rationalize it away:
 - "this consumer probably doesn't need updating" → Check. Read the consumer file.
 - "the test covers this implicitly" → Read the test. Does it EXPLICITLY verify this behavior?
 
+## Computational Detector Integration
+
+Before starting your review, check the detector findings provided in your prompt context. These are deterministic (computational) results from qult's on-write gates and detectors. If gate failures exist for files in the diff (e.g., lint errors, type errors with 3+ repeated failures), your Completeness assessment must account for them — declaring "all tasks complete" while gate failures persist is a contradiction that cross-validation will flag.
+
 ## What NOT to do
 
 - Do not evaluate code quality (design, naming, complexity) — that is the quality-reviewer's job

@@ -1691,8 +1691,8 @@ describe("Scenario: Evaluator blocks on critical findings with high scores", () 
 // Workflow enforcement: Stop blocks on missing Verify results
 // ============================================================
 
-describe("Scenario: Stop blocks when Verify results not recorded", () => {
-	it("blocks when plan tasks done but Verify results missing", async () => {
+describe("Scenario: Stop warns when Verify results not recorded (advisory)", () => {
+	it("warns (advisory) when plan tasks done but Verify results missing", async () => {
 		const planDir = join(TEST_DIR, ".claude", "plans");
 		mkdirSync(planDir, { recursive: true });
 		writeFileSync(
@@ -1713,12 +1713,10 @@ describe("Scenario: Stop blocks when Verify results not recorded", () => {
 		recordReview();
 
 		const stop = (await import("../hooks/stop.ts")).default;
-		try {
-			await stop({ hook_type: "Stop" });
-		} catch {
-			/* exit(2) */
-		}
-		expect(exitCode).toBe(2);
+		await stop({ hook_type: "Stop" });
+
+		// Advisory warning, not blocking (tasks not tracked via TaskCreate)
+		expect(exitCode).toBeNull();
 		expect(stderrCapture.join("")).toContain("Verify");
 		expect(stderrCapture.join("")).toContain("TaskCreate");
 	});

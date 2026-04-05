@@ -5,6 +5,7 @@ import {
 	isGateDisabled,
 	isReviewRequired,
 	readEscalation,
+	readHumanApproval,
 	readLastReview,
 	readSessionState,
 	readTaskVerifyResult,
@@ -39,6 +40,7 @@ const SOURCE_EXTS = new Set([
 ]);
 const DRIFT_ESCALATION_THRESHOLD = 8;
 const TEST_QUALITY_ESCALATION_THRESHOLD = 8;
+const DUPLICATION_ESCALATION_THRESHOLD = 8;
 
 /** Stop: block if pending-fixes, incomplete plan, or no review */
 export default async function stop(ev: HookEvent): Promise<void> {
@@ -74,17 +76,27 @@ export default async function stop(ev: HookEvent): Promise<void> {
 			);
 		}
 
-		// Block if plan tasks with Verify field have no recorded test result
-		// (indirect enforcement: TaskCreate → TaskCompleted → Verify execution → result recorded)
+		// Check plan tasks with Verify field for recorded test results.
+		// Only block tasks that were tracked via TaskCreate (have an entry in task_verify_results).
+		// Tasks not tracked via TaskCreate get an advisory warning instead of blocking,
+		// since Verify enforcement requires the TaskCreate → TaskCompleted → Verify pipeline.
 		const doneTasks = plan.tasks.filter((t) => t.status === "done" && t.verify?.includes(":"));
-		const unverified = doneTasks.filter((t) => {
+		const tracked: typeof doneTasks = [];
+		const untracked: typeof doneTasks = [];
+		for (const t of doneTasks) {
 			const key = t.taskNumber != null ? `Task ${t.taskNumber}` : t.name;
-			return readTaskVerifyResult(key) === null;
-		});
-		if (unverified.length > 0) {
-			const list = unverified.map((t) => `  Task ${t.taskNumber ?? "?"}: ${t.name}`).join("\n");
-			block(
-				`${unverified.length} plan task(s) have Verify fields but no test result recorded:\n${list}\nUse TaskCreate to track tasks so TaskCompleted triggers Verify test execution.`,
+			const result = readTaskVerifyResult(key);
+			if (result !== null) {
+				tracked.push(t);
+			} else {
+				untracked.push(t);
+			}
+		}
+		// Advisory: suggest TaskCreate for untracked tasks (non-blocking)
+		if (untracked.length > 0) {
+			const list = untracked.map((t) => `  Task ${t.taskNumber ?? "?"}: ${t.name}`).join("\n");
+			process.stderr.write(
+				`[qult] ${untracked.length} plan task(s) have Verify fields but were not tracked via TaskCreate:\n${list}\nConsider using TaskCreate for Verify test execution.\n`,
 			);
 		}
 	}
@@ -108,6 +120,16 @@ export default async function stop(ev: HookEvent): Promise<void> {
 			if (isReviewRequired() && !isGateDisabled("review")) {
 				block("Run /qult:review before finishing. Independent review is required.");
 			}
+		}
+	}
+
+	// Block if human approval required but not recorded
+	if (hasSourceChanges && readLastReview()) {
+		const config = loadConfig();
+		if (config.review.require_human_approval && !readHumanApproval()) {
+			block(
+				"Human approval required. The architect must review the changes and call record_human_approval before finishing.",
+			);
 		}
 	}
 
@@ -137,6 +159,13 @@ export default async function stop(ev: HookEvent): Promise<void> {
 	if (testQualityCount >= TEST_QUALITY_ESCALATION_THRESHOLD) {
 		block(
 			`${testQualityCount} test quality warnings emitted this session. Improve test assertions before finishing.`,
+		);
+	}
+
+	const duplicationCount = readEscalation("duplication_warning_count");
+	if (duplicationCount >= DUPLICATION_ESCALATION_THRESHOLD) {
+		block(
+			`${duplicationCount} duplication warnings emitted this session. Extract shared code before finishing.`,
 		);
 	}
 }

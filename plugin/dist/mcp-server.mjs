@@ -11,7 +11,8 @@ var DEFAULTS = {
     score_threshold: 34,
     max_iterations: 3,
     required_changed_files: 5,
-    dimension_floor: 4
+    dimension_floor: 4,
+    require_human_approval: false
   },
   plan_eval: {
     score_threshold: 10,
@@ -37,6 +38,8 @@ function applyConfigLayer(config, raw) {
       config.review.required_changed_files = Math.max(1, r.required_changed_files);
     if (typeof r.dimension_floor === "number")
       config.review.dimension_floor = Math.max(1, Math.min(5, r.dimension_floor));
+    if (typeof r.require_human_approval === "boolean")
+      config.review.require_human_approval = r.require_human_approval;
   }
   if (raw.plan_eval && typeof raw.plan_eval === "object") {
     const p = raw.plan_eval;
@@ -100,6 +103,11 @@ function loadConfig() {
   config.plan_eval.max_iterations = envInt("QULT_PLAN_EVAL_MAX_ITERATIONS") ?? config.plan_eval.max_iterations;
   config.gates.output_max_chars = envInt("QULT_GATE_OUTPUT_MAX") ?? config.gates.output_max_chars;
   config.gates.default_timeout = envInt("QULT_GATE_DEFAULT_TIMEOUT") ?? config.gates.default_timeout;
+  const humanApprovalEnv = process.env.QULT_REQUIRE_HUMAN_APPROVAL;
+  if (humanApprovalEnv === "1" || humanApprovalEnv === "true")
+    config.review.require_human_approval = true;
+  else if (humanApprovalEnv === "0" || humanApprovalEnv === "false")
+    config.review.require_human_approval = false;
   const testOnEditEnv = process.env.QULT_TEST_ON_EDIT;
   if (testOnEditEnv === "1" || testOnEditEnv === "true")
     config.gates.test_on_edit = true;
@@ -235,7 +243,12 @@ function formatPendingFixes(fixes) {
 function getValidGateNames(cwd) {
   const gatesPath = join4(cwd, GATES_PATH);
   const gates = readJson(gatesPath, null);
-  const names = new Set(["review", "security-check", "dead-import-check"]);
+  const names = new Set([
+    "review",
+    "security-check",
+    "dead-import-check",
+    "duplication-check"
+  ]);
   if (gates) {
     for (const category of [gates.on_write, gates.on_commit, gates.on_review]) {
       if (category) {
@@ -350,6 +363,16 @@ var TOOL_DEFS = [
       },
       required: ["command"]
     }
+  },
+  {
+    name: "get_detector_summary",
+    description: "Returns a consolidated summary of all computational detector findings from the current session. Includes escalation counters (security, dead-import, drift, test-quality, duplication warnings) and pending fixes grouped by gate. Call before /qult:review to collect ground truth for reviewers.",
+    inputSchema: { type: "object", properties: {} }
+  },
+  {
+    name: "record_human_approval",
+    description: "Record that the architect has reviewed and approved the changes. Required when review.require_human_approval is enabled in config. Call after the human has reviewed the code.",
+    inputSchema: { type: "object", properties: {} }
   },
   {
     name: "record_stage_scores",
@@ -555,6 +578,50 @@ function handleTool(name, cwd, args) {
       });
       return { content: [{ type: "text", text: "All pending fixes cleared." }] };
     }
+    case "get_detector_summary": {
+      const statePath = findLatestStateFile(cwd, "session-state");
+      const state = readJson(statePath, {});
+      const fixesPath = findLatestStateFile(cwd, "pending-fixes");
+      const fixes = readJson(fixesPath, []);
+      const lines = [];
+      const counters = [
+        "security_warning_count",
+        "dead_import_warning_count",
+        "drift_warning_count",
+        "test_quality_warning_count",
+        "duplication_warning_count"
+      ];
+      for (const key of counters) {
+        const val = typeof state[key] === "number" ? state[key] : 0;
+        if (val > 0)
+          lines.push(`${key}: ${val}`);
+      }
+      if (Array.isArray(fixes) && fixes.length > 0) {
+        const byGate = {};
+        for (const fix of fixes) {
+          const g = fix.gate ?? "unknown";
+          if (!byGate[g])
+            byGate[g] = [];
+          byGate[g].push(fix);
+        }
+        for (const [gate, gateFixes] of Object.entries(byGate)) {
+          lines.push(`
+[${gate}] ${gateFixes.length} issue(s):`);
+          for (const fix of gateFixes) {
+            const relPath = fix.file.startsWith(`${cwd}/`) ? fix.file.slice(cwd.length + 1) : fix.file;
+            lines.push(`  ${relPath}`);
+            for (const err of fix.errors.slice(0, 3)) {
+              lines.push(`    ${err.slice(0, 200)}`);
+            }
+          }
+        }
+      }
+      if (lines.length === 0) {
+        return { content: [{ type: "text", text: "No detector findings." }] };
+      }
+      return { content: [{ type: "text", text: lines.join(`
+`) }] };
+    }
     case "record_review": {
       const statePath = findLatestStateFile(cwd, "session-state");
       const state = readJson(statePath, {});
@@ -603,6 +670,34 @@ function handleTool(name, cwd, args) {
         };
       }
       return { content: [{ type: "text", text: `Test pass recorded: ${cmd}` }] };
+    }
+    case "record_human_approval": {
+      const haStatePath = findLatestStateFile(cwd, "session-state");
+      const haState = readJson(haStatePath, {});
+      if (!haState.review_completed_at) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: "Cannot record human approval: no review has been completed yet. Run /qult:review first."
+            }
+          ]
+        };
+      }
+      try {
+        haState.human_review_approved_at = new Date().toISOString();
+        atomicWriteJson(haStatePath, haState);
+        _jsonCache.delete(haStatePath);
+      } catch {
+        return { isError: true, content: [{ type: "text", text: "Failed to record approval." }] };
+      }
+      appendAuditLog(cwd, {
+        action: "record_human_approval",
+        reason: "Architect approved changes",
+        timestamp: new Date().toISOString()
+      });
+      return { content: [{ type: "text", text: "Human approval recorded." }] };
     }
     case "record_stage_scores": {
       const stage = typeof args?.stage === "string" ? args.stage : null;
@@ -691,7 +786,14 @@ function handleRequest(parsed, cwd) {
             "## Hook/MCP Roles",
             "- Hooks detect test pass best-effort via output parsing. If tests passed but hook didn't detect it, call record_test_pass explicitly.",
             "- After committing, session state resets (test/review cleared). This is expected — gates only apply to uncommitted changes.",
-            "- MCP tools (record_test_pass, record_review) are the authoritative state management mechanism."
+            "- MCP tools (record_test_pass, record_review) are the authoritative state management mechanism.",
+            "",
+            "## Ground Truth for Reviews",
+            "- Before running /qult:review, call get_detector_summary to collect computational detector findings (security, imports, duplications, test quality).",
+            "- Pass detector findings as context to each reviewer stage — reviewers must not contradict detector results.",
+            "",
+            "## Human Approval",
+            "- If review.require_human_approval is enabled, call record_human_approval after the architect has reviewed and approved the changes."
           ].join(`
 `)
         }

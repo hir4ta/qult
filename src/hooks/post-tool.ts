@@ -25,6 +25,7 @@ import {
 import type { HookEvent, PendingFix } from "../types.ts";
 import { detectConventionDrift } from "./detectors/convention-check.ts";
 import { detectDeadImports } from "./detectors/dead-import-check.ts";
+import { detectCrossFileDuplication, detectDuplication } from "./detectors/duplication-check.ts";
 import { detectExportBreakingChanges } from "./detectors/export-check.ts";
 import { detectHallucinatedImports } from "./detectors/import-check.ts";
 import { detectSecurityPatterns } from "./detectors/security-check.ts";
@@ -188,6 +189,25 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 			for (const w of warnings) {
 				process.stderr.write(`[qult] Convention: ${w}\n`);
 				incrementEscalation("drift_warning_count");
+			}
+		}
+	} catch {
+		/* fail-open */
+	}
+
+	// Duplication detection (intra-file: blocking, cross-file: advisory)
+	try {
+		const dupFixes = detectDuplication(file);
+		if (dupFixes.length > 0) {
+			newFixes.push(...dupFixes);
+			incrementEscalation("duplication_warning_count");
+		}
+		const sessionFiles = readSessionState().changed_file_paths ?? [];
+		const crossDupWarnings = detectCrossFileDuplication(file, sessionFiles);
+		if (crossDupWarnings.length > 0) {
+			incrementEscalation("duplication_warning_count");
+			for (const w of crossDupWarnings) {
+				process.stderr.write(`[qult] Duplication: ${w}\n`);
 			}
 		}
 	} catch {

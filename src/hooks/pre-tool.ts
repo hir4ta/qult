@@ -6,6 +6,7 @@ import { getActivePlan, hasPlanFile, parseVerifyField } from "../state/plan-stat
 import {
 	isGateDisabled,
 	isReviewRequired,
+	readHumanApproval,
 	readLastReview,
 	readLastTestPass,
 	readSessionState,
@@ -239,6 +240,13 @@ function checkBash(ev: HookEvent): void {
 			if (isReviewRequired() && !isGateDisabled("review")) {
 				deny("Run /qult:review before committing. Independent review is required.");
 			}
+		}
+
+		// Require human approval when configured
+		if (readLastReview() && loadConfig().review.require_human_approval && !readHumanApproval()) {
+			deny(
+				"Human approval required before committing. The architect must review and call record_human_approval.",
+			);
 		}
 	}
 }

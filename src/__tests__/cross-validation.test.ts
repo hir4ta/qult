@@ -94,6 +94,47 @@ describe("crossValidate", () => {
 		expect(result.contradictions).toEqual([]);
 	});
 
+	it("detects spec contradiction: gate failures exist but reviewer says all complete", () => {
+		writeFileSync(
+			join(STATE_DIR, "session-state.json"),
+			JSON.stringify({
+				gate_failure_counts: { "src/foo.ts:lint": 3, "src/bar.ts:typecheck": 4 },
+			}),
+		);
+		resetAllCaches();
+
+		const output = "Spec: PASS\nScore: Completeness=5 Accuracy=5\nAll tasks complete";
+		const result = crossValidate(output, "Spec");
+		expect(result.contradictions.length).toBeGreaterThan(0);
+		expect(result.contradictions[0]).toContain("gate failure");
+	});
+
+	it("detects quality contradiction: test quality warnings but no issues found", () => {
+		writeFileSync(
+			join(STATE_DIR, "session-state.json"),
+			JSON.stringify({ test_quality_warning_count: 5 }),
+		);
+		resetAllCaches();
+
+		const output = "Quality: PASS\nScore: Design=5 Maintainability=5\nNo issues found";
+		const result = crossValidate(output, "Quality");
+		expect(result.contradictions.length).toBeGreaterThan(0);
+		expect(result.contradictions[0]).toContain("test quality");
+	});
+
+	it("detects quality contradiction: duplication warnings but no issues found", () => {
+		writeFileSync(
+			join(STATE_DIR, "session-state.json"),
+			JSON.stringify({ duplication_warning_count: 4 }),
+		);
+		resetAllCaches();
+
+		const output = "Quality: PASS\nScore: Design=5 Maintainability=5\nNo issues found";
+		const result = crossValidate(output, "Quality");
+		expect(result.contradictions.length).toBeGreaterThan(0);
+		expect(result.contradictions[0]).toContain("duplication");
+	});
+
 	it("does not flag security when pending-fixes are from non-security gates", () => {
 		writeFileSync(
 			join(STATE_DIR, "pending-fixes.json"),

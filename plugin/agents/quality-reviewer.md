@@ -133,6 +133,10 @@ When you find a problem, report it. Do NOT rationalize it away:
 - "this probably won't cause issues" → "Probably" is not "never". Report it.
 - "the existing code already handles this" → Verify. Does it really?
 
+## Computational Detector Integration
+
+Before starting your review, check the detector findings provided in your prompt context. These are deterministic (computational) results from qult's on-write detectors — dead imports, convention drift warnings, test quality issues, and code duplication findings. Incorporate these into your evaluation: if detectors found dead imports or duplication issues, verify and include them. Your verdict must not contradict detector findings (cross-validation will flag "No issues found" when detectors reported problems).
+
 ## What NOT to do
 
 - Do not evaluate spec compliance (plan adherence) — that is the spec-reviewer's job

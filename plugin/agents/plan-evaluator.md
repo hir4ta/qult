@@ -18,7 +18,7 @@ You will receive a plan file path. Read it and evaluate across three dimensions:
 
 - **Feasibility**: Can Claude Code realistically execute each task? Check: do the referenced files exist? Are changes scoped to 1-2 files per task? Is the Change description actionable without guessing? Are the tools needed available?
 - **Completeness**: Does the plan cover all affected files? If a type or interface changes, do callers and tests get updated? If a registry file (init.ts, types.ts, session-state.ts) is modified, are consumer files (hooks, doctor, tests) included? Check the Success Criteria: does every task's outcome map to at least one criterion?
-- **Clarity**: Is each task unambiguous? Can you determine exactly what code to write from the Change field alone, without interpreting intent? Are Boundary fields specific (not just "don't break things")? Are Verify fields pointing to real test files with specific test function names?
+- **Clarity**: Is each task unambiguous? Can you determine exactly what code to write from the Change field alone, without interpreting intent? Are Boundary fields specific (not just "don't break things")? Are Verify fields pointing to real test files with specific test function names? **Language consistency**: If the Context section is in a non-English language, verify ALL content text (Change descriptions, Boundary descriptions, Success Criteria text) is in that same language. Structural markers (`## Context`, `### Task N:`, `**File**`, `**Change**`, `**Boundary**`, `**Verify**`) remain in English. Flag language mixing (e.g., Japanese Context but English Change descriptions) as a Clarity issue (score 3).
 
 ## Evaluation process
 

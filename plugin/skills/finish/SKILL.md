@@ -29,6 +29,7 @@ Run verification before anything else:
 1. Call `mcp__plugin_qult_qult__get_session_status()` — check test and review status
 2. Call `mcp__plugin_qult_qult__get_pending_fixes()` — check for unresolved issues
 3. Run the project's test command via Bash
+4. If `review.require_human_approval` is enabled in `.qult/config.json`, check `human_review_approved_at` in session status. If null, add `Human approval: not recorded` to the BLOCKED list and instruct the architect to review the changes, then call `mcp__plugin_qult_qult__record_human_approval()` to record their approval
 
 **If any gate is NOT clear:**
 ```

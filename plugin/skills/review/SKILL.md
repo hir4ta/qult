@@ -42,6 +42,16 @@ If an active plan exists in `.claude/plans/`, extract acceptance criteria:
 4. Only include tasks with a non-empty Verify field
 5. If no plan file exists or no Verify fields are found, skip this stage entirely
 
+## Stage 0.7: Collect detector findings (ground truth)
+
+Before spawning reviewers, collect computational detector results as ground truth:
+
+1. Call `mcp__plugin_qult_qult__get_detector_summary()`
+2. If the result is NOT "No detector findings.", store it as a `## Detector Findings` block
+3. This block will be included in each reviewer's prompt as context
+
+These findings are deterministic (not LLM-generated) and serve as ground truth that reviewers must not contradict.
+
 ## Stage 1: Spec Reviewer (implementation completeness)
 
 Spawn one `spec-reviewer` agent.
@@ -49,6 +59,7 @@ Spawn one `spec-reviewer` agent.
 In the agent prompt, include:
 - The on_review gate results from Stage 0 (if any)
 - The plan acceptance criteria from Stage 0.5 (if any)
+- The detector findings from Stage 0.7 (if any)
 - One-line instruction: "Verify the uncommitted changes match the plan and all consumers are updated."
 
 The spec-reviewer evaluates **Completeness** and **Accuracy** in an independent context.
@@ -68,6 +79,7 @@ Spawn one `quality-reviewer` agent.
 
 In the agent prompt, include:
 - The on_review gate results from Stage 0 (if any)
+- The detector findings from Stage 0.7 (if any)
 - One-line instruction: "Review the uncommitted changes for design quality and maintainability issues."
 
 The quality-reviewer evaluates **Design** and **Maintainability** in an independent context.
@@ -86,6 +98,7 @@ mcp__plugin_qult_qult__record_stage_scores({ stage: "Quality", scores: { design:
 Spawn one `security-reviewer` agent.
 
 In the agent prompt, include:
+- The detector findings from Stage 0.7 (if any)
 - One-line instruction: "Review the uncommitted changes for security vulnerabilities and hardening gaps."
 
 The security-reviewer evaluates **Vulnerability** and **Hardening** in an independent context.
@@ -104,6 +117,7 @@ mcp__plugin_qult_qult__record_stage_scores({ stage: "Security", scores: { vulner
 Spawn one `adversarial-reviewer` agent.
 
 In the agent prompt, include:
+- The detector findings from Stage 0.7 (if any)
 - One-line instruction: "Find edge cases, logic errors, and silent failures in the uncommitted changes that other reviewers missed."
 
 The adversarial-reviewer evaluates **EdgeCases** and **LogicCorrectness** in an independent context.

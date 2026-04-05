@@ -50,6 +50,8 @@ function applyConfigLayer(config, raw) {
       config.review.required_changed_files = Math.max(1, r.required_changed_files);
     if (typeof r.dimension_floor === "number")
       config.review.dimension_floor = Math.max(1, Math.min(5, r.dimension_floor));
+    if (typeof r.require_human_approval === "boolean")
+      config.review.require_human_approval = r.require_human_approval;
   }
   if (raw.plan_eval && typeof raw.plan_eval === "object") {
     const p = raw.plan_eval;
@@ -112,6 +114,11 @@ function loadConfig() {
   config.plan_eval.max_iterations = envInt("QULT_PLAN_EVAL_MAX_ITERATIONS") ?? config.plan_eval.max_iterations;
   config.gates.output_max_chars = envInt("QULT_GATE_OUTPUT_MAX") ?? config.gates.output_max_chars;
   config.gates.default_timeout = envInt("QULT_GATE_DEFAULT_TIMEOUT") ?? config.gates.default_timeout;
+  const humanApprovalEnv = process.env.QULT_REQUIRE_HUMAN_APPROVAL;
+  if (humanApprovalEnv === "1" || humanApprovalEnv === "true")
+    config.review.require_human_approval = true;
+  else if (humanApprovalEnv === "0" || humanApprovalEnv === "false")
+    config.review.require_human_approval = false;
   const testOnEditEnv = process.env.QULT_TEST_ON_EDIT;
   if (testOnEditEnv === "1" || testOnEditEnv === "true")
     config.gates.test_on_edit = true;
@@ -128,7 +135,8 @@ var init_config = __esm(() => {
       score_threshold: 34,
       max_iterations: 3,
       required_changed_files: 5,
-      dimension_floor: 4
+      dimension_floor: 4,
+      require_human_approval: false
     },
     plan_eval: {
       score_threshold: 10,
@@ -405,7 +413,9 @@ function defaultState() {
     security_warning_count: 0,
     test_quality_warning_count: 0,
     drift_warning_count: 0,
-    dead_import_warning_count: 0
+    dead_import_warning_count: 0,
+    duplication_warning_count: 0,
+    human_review_approved_at: null
   };
 }
 function readSessionState() {
@@ -547,6 +557,8 @@ function clearOnCommit() {
   state.test_quality_warning_count = 0;
   state.drift_warning_count = 0;
   state.dead_import_warning_count = 0;
+  state.duplication_warning_count = 0;
+  state.human_review_approved_at = null;
   writeState(state);
 }
 function getReviewIteration() {
@@ -660,6 +672,12 @@ function incrementEscalation(counter) {
 }
 function readEscalation(counter) {
   return readSessionState()[counter] ?? 0;
+}
+function readHumanApproval() {
+  const state = readSessionState();
+  if (!state.human_review_approved_at)
+    return null;
+  return { approved_at: state.human_review_approved_at };
 }
 var STATE_DIR2 = ".qult/.state", FILE = "session-state.json", _cache4 = null, _dirty2 = false, _sessionScope2 = null, TOOL_EXTS, MAX_GATE_FAILURE_COUNT = 100, MAX_GATE_FAILURE_KEYS = 200;
 var init_session_state = __esm(() => {
@@ -1136,17 +1154,179 @@ var init_dead_import_check = __esm(() => {
   PY_IMPORT_RE = /^\s*import\s+(.+)/;
 });
 
+// src/hooks/detectors/duplication-check.ts
+import { existsSync as existsSync9, readFileSync as readFileSync7 } from "node:fs";
+import { extname as extname3, resolve } from "node:path";
+function normalizeLine(line) {
+  const trimmed = line.trim();
+  if (trimmed === "")
+    return null;
+  if (trimmed.startsWith("//") || trimmed.startsWith("#"))
+    return null;
+  if (trimmed.startsWith("* ") || trimmed.startsWith("*/"))
+    return null;
+  if (/^\s*(import\b|from\b|require\b|export\b)/.test(line))
+    return null;
+  return trimmed;
+}
+function buildHashWindows(content) {
+  const lines = content.split(`
+`);
+  const normalized = [];
+  for (let i = 0;i < lines.length; i++) {
+    const norm = normalizeLine(lines[i]);
+    if (norm !== null) {
+      normalized.push({ line: i + 1, text: norm });
+    }
+  }
+  const windows = new Map;
+  for (let i = 0;i <= normalized.length - MIN_BLOCK_LINES; i++) {
+    const key = normalized.slice(i, i + MIN_BLOCK_LINES).map((n) => n.text).join(`
+`);
+    const startLine = normalized[i].line;
+    const existing = windows.get(key);
+    if (existing) {
+      existing.push(startLine);
+    } else {
+      windows.set(key, [startLine]);
+    }
+  }
+  return windows;
+}
+function detectDuplication(file) {
+  if (isGateDisabled("duplication-check"))
+    return [];
+  const ext = extname3(file).toLowerCase();
+  if (!CHECKABLE_EXTS.has(ext))
+    return [];
+  if (!existsSync9(file))
+    return [];
+  let content;
+  try {
+    content = readFileSync7(file, "utf-8");
+  } catch {
+    return [];
+  }
+  if (content.length > MAX_CHECK_SIZE2)
+    return [];
+  const windows = buildHashWindows(content);
+  const errors = [];
+  const reported = new Set;
+  for (const [hash, positions] of windows) {
+    if (positions.length < 2)
+      continue;
+    const key = `${positions[0]}-${positions[1]}`;
+    if (reported.has(key))
+      continue;
+    reported.add(key);
+    const preview = hash.split(`
+`)[0].slice(0, 80);
+    errors.push(`Intra-file duplicate (${MIN_BLOCK_LINES}+ lines) at L${positions[0]} and L${positions[1]}: "${preview}..."`);
+  }
+  if (errors.length === 0)
+    return [];
+  return [{ file, errors, gate: "duplication-check" }];
+}
+function detectCrossFileDuplication(file, sessionFiles) {
+  if (isGateDisabled("duplication-check"))
+    return [];
+  if (sessionFiles.length > MAX_SESSION_FILES) {
+    process.stderr.write(`[qult] Cross-file duplication check skipped: session has ${sessionFiles.length} files, max ${MAX_SESSION_FILES} allowed. Increase MAX_SESSION_FILES to enable on large refactorings.
+`);
+    return [];
+  }
+  const ext = extname3(file).toLowerCase();
+  if (!CHECKABLE_EXTS.has(ext))
+    return [];
+  if (!existsSync9(file))
+    return [];
+  let content;
+  try {
+    content = readFileSync7(file, "utf-8");
+  } catch {
+    return [];
+  }
+  if (content.length > MAX_CHECK_SIZE2)
+    return [];
+  const sourceWindows = buildHashWindows(content);
+  const warnings = [];
+  const cwd = process.cwd();
+  for (const otherFile of sessionFiles) {
+    if (otherFile === file)
+      continue;
+    const absOther = resolve(otherFile);
+    if (!absOther.startsWith(`${cwd}/`))
+      continue;
+    if (!existsSync9(otherFile))
+      continue;
+    const otherExt = extname3(otherFile).toLowerCase();
+    if (!CHECKABLE_EXTS.has(otherExt))
+      continue;
+    let otherContent;
+    try {
+      otherContent = readFileSync7(otherFile, "utf-8");
+    } catch {
+      continue;
+    }
+    if (otherContent.length > MAX_CHECK_SIZE2)
+      continue;
+    const otherWindows = buildHashWindows(otherContent);
+    let matchCount = 0;
+    for (const hash of sourceWindows.keys()) {
+      if (otherWindows.has(hash)) {
+        matchCount++;
+      }
+    }
+    if (matchCount > 0) {
+      const relPath = getRelativePath(otherFile, cwd);
+      const preview = Array.from(sourceWindows.keys())[0].split(`
+`)[0].slice(0, 80);
+      const blockCountLabel = matchCount === 1 ? "block" : "blocks";
+      warnings.push(`Cross-file duplicate with ${relPath}: ${matchCount} matching ${blockCountLabel} found. Preview: "${preview}..."`);
+    }
+  }
+  return warnings;
+}
+function getRelativePath(filePath2, cwd) {
+  const full = filePath2.startsWith(cwd) ? filePath2.slice(cwd.length + 1) : filePath2;
+  const segments = full.split("/");
+  if (segments.length <= 3)
+    return full;
+  return `${segments[0]}/.../.../${segments[segments.length - 2]}/${segments[segments.length - 1]}`;
+}
+var CHECKABLE_EXTS, MAX_CHECK_SIZE2 = 500000, MIN_BLOCK_LINES = 4, MAX_SESSION_FILES = 20;
+var init_duplication_check = __esm(() => {
+  init_session_state();
+  CHECKABLE_EXTS = new Set([
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mts",
+    ".cts",
+    ".mjs",
+    ".cjs",
+    ".py",
+    ".pyi",
+    ".go",
+    ".rs",
+    ".rb",
+    ".java",
+    ".kt"
+  ]);
+});
+
 // src/hooks/detectors/export-check.ts
 import { execSync as execSync2 } from "node:child_process";
-import { existsSync as existsSync9, readFileSync as readFileSync7 } from "node:fs";
-import { extname as extname3 } from "node:path";
+import { existsSync as existsSync10, readFileSync as readFileSync8 } from "node:fs";
+import { extname as extname4 } from "node:path";
 function detectExportBreakingChanges(file) {
   if (isGateDisabled("export-check"))
     return [];
-  const ext = extname3(file).toLowerCase();
+  const ext = extname4(file).toLowerCase();
   if (!TS_JS_EXTS2.has(ext))
     return [];
-  if (!existsSync9(file))
+  if (!existsSync10(file))
     return [];
   let oldContent;
   try {
@@ -1163,7 +1343,7 @@ function detectExportBreakingChanges(file) {
   } catch {
     return [];
   }
-  const newContent = readFileSync7(file, "utf-8");
+  const newContent = readFileSync8(file, "utf-8");
   const oldExports = new Set;
   for (const match of oldContent.matchAll(EXPORT_RE)) {
     oldExports.add(match[1]);
@@ -1191,17 +1371,17 @@ var init_export_check = __esm(() => {
 });
 
 // src/hooks/detectors/import-check.ts
-import { existsSync as existsSync10, readdirSync as readdirSync4, readFileSync as readFileSync8 } from "node:fs";
-import { extname as extname4, join as join9, resolve } from "node:path";
+import { existsSync as existsSync11, readdirSync as readdirSync4, readFileSync as readFileSync9 } from "node:fs";
+import { extname as extname5, join as join9, resolve as resolve2 } from "node:path";
 function detectHallucinatedImports(file) {
   if (isGateDisabled("import-check"))
     return [];
-  const ext = extname4(file).toLowerCase();
+  const ext = extname5(file).toLowerCase();
   if (!TS_JS_EXTS3.has(ext) && !PY_EXTS2.has(ext) && !GO_EXTS.has(ext))
     return [];
-  if (!existsSync10(file))
+  if (!existsSync11(file))
     return [];
-  const content = readFileSync8(file, "utf-8");
+  const content = readFileSync9(file, "utf-8");
   if (content.length > MAX_IMPORT_CHECK_SIZE)
     return [];
   if (PY_EXTS2.has(ext))
@@ -1232,7 +1412,7 @@ function detectTsJsImports(file, content) {
       continue;
     if (pkgName.includes(".."))
       continue;
-    if (!existsSync10(join9(cwd, "node_modules", pkgName))) {
+    if (!existsSync11(join9(cwd, "node_modules", pkgName))) {
       missingPkgs.push(pkgName);
     }
   }
@@ -1263,9 +1443,9 @@ function detectPythonImports(file, content) {
       continue;
     if (moduleName.startsWith("_"))
       continue;
-    if (existsSync10(join9(cwd, `${moduleName}.py`)) || existsSync10(join9(cwd, moduleName)))
+    if (existsSync11(join9(cwd, `${moduleName}.py`)) || existsSync11(join9(cwd, moduleName)))
       continue;
-    if (sitePackagesDirs.some((dir) => existsSync10(join9(dir, moduleName)) || existsSync10(join9(dir, `${moduleName}.py`))))
+    if (sitePackagesDirs.some((dir) => existsSync11(join9(dir, moduleName)) || existsSync11(join9(dir, `${moduleName}.py`))))
       continue;
     missingModules.push(moduleName);
   }
@@ -1288,7 +1468,7 @@ function detectGoImports(file, content) {
   const missingPkgs = [];
   let goSum = null;
   try {
-    goSum = readFileSync8(join9(cwd, "go.sum"), "utf-8");
+    goSum = readFileSync9(join9(cwd, "go.sum"), "utf-8");
   } catch {}
   const lines = content.split(`
 `);
@@ -1319,9 +1499,9 @@ function detectGoImports(file, content) {
     const topPkg = importPath.split("/")[0];
     if (GO_STDLIB_PREFIXES.has(topPkg))
       continue;
-    const vendorDir = resolve(cwd, "vendor");
-    const vendorPath = resolve(vendorDir, importPath);
-    if (vendorPath.startsWith(`${vendorDir}/`) && existsSync10(vendorPath))
+    const vendorDir = resolve2(cwd, "vendor");
+    const vendorPath = resolve2(vendorDir, importPath);
+    if (vendorPath.startsWith(`${vendorDir}/`) && existsSync11(vendorPath))
       continue;
     if (goSum?.includes(`${importPath} `))
       continue;
@@ -1343,15 +1523,15 @@ function findPythonSitePackages(cwd) {
   const venvRoots = [join9(cwd, ".venv"), join9(cwd, "venv")];
   for (const root of venvRoots) {
     try {
-      if (!existsSync10(root))
+      if (!existsSync11(root))
         continue;
       const libDir = join9(root, "lib");
-      if (!existsSync10(libDir))
+      if (!existsSync11(libDir))
         continue;
       const entries = readdirSync4(libDir).filter((e) => e.startsWith("python"));
       for (const entry of entries) {
         const sp = join9(libDir, entry, "site-packages");
-        if (existsSync10(sp))
+        if (existsSync11(sp))
           dirs.push(sp);
       }
     } catch {}
@@ -1614,23 +1794,23 @@ var init_import_check = __esm(() => {
 });
 
 // src/hooks/detectors/security-check.ts
-import { existsSync as existsSync11, readFileSync as readFileSync9 } from "node:fs";
-import { extname as extname5 } from "node:path";
+import { existsSync as existsSync12, readFileSync as readFileSync10 } from "node:fs";
+import { extname as extname6 } from "node:path";
 function detectSecurityPatterns(file) {
   if (isGateDisabled("security-check"))
     return [];
-  const ext = extname5(file).toLowerCase();
-  if (!CHECKABLE_EXTS.has(ext))
+  const ext = extname6(file).toLowerCase();
+  if (!CHECKABLE_EXTS2.has(ext))
     return [];
-  if (!existsSync11(file))
+  if (!existsSync12(file))
     return [];
   let content;
   try {
-    content = readFileSync9(file, "utf-8");
+    content = readFileSync10(file, "utf-8");
   } catch {
     return [];
   }
-  if (content.length > MAX_CHECK_SIZE2)
+  if (content.length > MAX_CHECK_SIZE3)
     return [];
   const errors = [];
   const lines = content.split(`
@@ -1722,10 +1902,10 @@ function emitAdvisoryWarnings(file, content) {
     }
   } catch {}
 }
-var CHECKABLE_EXTS, MAX_CHECK_SIZE2 = 500000, SECRET_PATTERNS, JS_TS_EXTS, PY_EXTS3, DANGEROUS_PATTERNS, ADVISORY_PATTERNS;
+var CHECKABLE_EXTS2, MAX_CHECK_SIZE3 = 500000, SECRET_PATTERNS, JS_TS_EXTS, PY_EXTS3, DANGEROUS_PATTERNS, ADVISORY_PATTERNS;
 var init_security_check = __esm(() => {
   init_session_state();
-  CHECKABLE_EXTS = new Set([
+  CHECKABLE_EXTS2 = new Set([
     ".ts",
     ".tsx",
     ".js",
@@ -1829,17 +2009,17 @@ var init_security_check = __esm(() => {
 });
 
 // src/hooks/detectors/test-file-resolver.ts
-import { existsSync as existsSync12 } from "node:fs";
-import { basename as basename2, dirname as dirname3, extname as extname6, join as join10 } from "node:path";
+import { existsSync as existsSync13 } from "node:fs";
+import { basename as basename2, dirname as dirname3, extname as extname7, join as join10 } from "node:path";
 function resolveTestFile(sourceFile) {
-  const ext = extname6(sourceFile);
+  const ext = extname7(sourceFile);
   const base = basename2(sourceFile, ext);
   const dir = dirname3(sourceFile);
   if (isTestFile(sourceFile))
     return null;
   for (const pattern of TEST_PATTERNS) {
     const candidate = pattern(dir, base, ext);
-    if (candidate && existsSync12(candidate)) {
+    if (candidate && existsSync13(candidate)) {
       return candidate;
     }
   }
@@ -1869,7 +2049,7 @@ var exports_post_tool = {};
 __export(exports_post_tool, {
   default: () => postTool
 });
-import { dirname as dirname4, extname as extname7, resolve as resolve2 } from "node:path";
+import { dirname as dirname4, extname as extname8, resolve as resolve3 } from "node:path";
 async function postTool(ev) {
   const tool = ev.tool_name;
   if (!tool)
@@ -1884,10 +2064,10 @@ async function handleEditWrite(ev) {
   const rawFile = typeof ev.tool_input?.file_path === "string" ? ev.tool_input.file_path : null;
   if (!rawFile)
     return;
-  const file = resolve2(rawFile);
+  const file = resolve3(rawFile);
   try {
     const existingFixes = readPendingFixes();
-    if (existingFixes.length > 0 && !existingFixes.some((f) => resolve2(f.file) === file)) {
+    if (existingFixes.length > 0 && !existingFixes.some((f) => resolve3(f.file) === file)) {
       deny(`Fix existing errors before editing other files (PostToolUse fallback):
 ${existingFixes.map((f) => `  ${f.file}`).join(`
 `)}`);
@@ -1896,13 +2076,13 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
     if (err instanceof Error && err.message.startsWith("process.exit"))
       throw err;
   }
-  const qultDir = resolve2(process.cwd(), ".qult");
+  const qultDir = resolve3(process.cwd(), ".qult");
   if (file.startsWith(`${qultDir}/`) || file === qultDir)
     return;
   const gates = loadGates();
   if (!gates?.on_write)
     return;
-  const fileExt = extname7(file).toLowerCase();
+  const fileExt = extname8(file).toLowerCase();
   const gatedExts = getGatedExtensions();
   const sessionId = ev.session_id;
   const gateEntries = [];
@@ -1988,6 +2168,22 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
     }
   } catch {}
   try {
+    const dupFixes = detectDuplication(file);
+    if (dupFixes.length > 0) {
+      newFixes.push(...dupFixes);
+      incrementEscalation("duplication_warning_count");
+    }
+    const sessionFiles = readSessionState().changed_file_paths ?? [];
+    const crossDupWarnings = detectCrossFileDuplication(file, sessionFiles);
+    if (crossDupWarnings.length > 0) {
+      incrementEscalation("duplication_warning_count");
+      for (const w of crossDupWarnings) {
+        process.stderr.write(`[qult] Duplication: ${w}
+`);
+      }
+    }
+  } catch {}
+  try {
     const config = loadConfig();
     if (config.gates.test_on_edit && newFixes.length === 0) {
       const testFile = resolveTestFile(file);
@@ -2058,7 +2254,7 @@ function checkOverEngineering() {
   const changed = state.changed_file_paths ?? [];
   const totalChanged = changed.length;
   const cwd = process.cwd();
-  const planFiles = new Set(plan.tasks.filter((t) => t.file).map((t) => resolve2(cwd, t.file)));
+  const planFiles = new Set(plan.tasks.filter((t) => t.file).map((t) => resolve3(cwd, t.file)));
   const unplannedCount = changed.filter((f) => !planFiles.has(f)).length;
   const planTaskCount = plan.tasks.filter((t) => t.file).length;
   if (unplannedCount > 5 || totalChanged > planTaskCount * 2) {
@@ -2213,6 +2409,7 @@ var init_post_tool = __esm(() => {
   init_session_state();
   init_convention_check();
   init_dead_import_check();
+  init_duplication_check();
   init_export_check();
   init_import_check();
   init_security_check();
@@ -2229,7 +2426,7 @@ var exports_pre_tool = {};
 __export(exports_pre_tool, {
   default: () => preTool
 });
-import { resolve as resolve3 } from "node:path";
+import { resolve as resolve4 } from "node:path";
 async function preTool(ev) {
   const tool = ev.tool_name;
   if (tool === "ExitPlanMode") {
@@ -2250,10 +2447,10 @@ function checkEditWrite(ev) {
   const targetFile = typeof ev.tool_input?.file_path === "string" ? ev.tool_input.file_path : null;
   if (!targetFile)
     return;
-  const resolvedTarget = resolve3(targetFile);
+  const resolvedTarget = resolve4(targetFile);
   const fixes = readPendingFixes();
   if (fixes.length > 0) {
-    const isFixingPendingFile = fixes.some((f) => resolve3(f.file) === resolvedTarget);
+    const isFixingPendingFile = fixes.some((f) => resolve4(f.file) === resolvedTarget);
     if (!isFixingPendingFile) {
       const fileList = fixes.map((f) => {
         const totalErrors = f.errors.length;
@@ -2296,7 +2493,7 @@ function suggestTaskCreate(resolvedTarget) {
   for (const task of plan.tasks) {
     if (!task.file)
       continue;
-    const taskFile = resolve3(cwd, task.file);
+    const taskFile = resolve4(cwd, task.file);
     if (resolvedTarget === taskFile) {
       process.stderr.write(`[qult] Plan task detected for ${task.file}. Use TaskCreate to track progress and enable Verify test execution.
 `);
@@ -2311,7 +2508,7 @@ function checkTaskDrift(resolvedTarget) {
   if (driftWarnedFiles.has(resolvedTarget))
     return;
   const cwd = process.cwd();
-  const planFiles = new Set(plan.tasks.filter((t) => t.file).map((t) => resolve3(cwd, t.file)));
+  const planFiles = new Set(plan.tasks.filter((t) => t.file).map((t) => resolve4(cwd, t.file)));
   if (planFiles.has(resolvedTarget))
     return;
   const relative = resolvedTarget.startsWith(cwd) ? resolvedTarget.slice(cwd.length + 1) : resolvedTarget;
@@ -2331,10 +2528,10 @@ function checkTddOrder(resolvedTarget) {
     const parsed = parseVerifyField(task.verify);
     if (!parsed)
       continue;
-    const implFile = resolve3(cwd, task.file);
+    const implFile = resolve4(cwd, task.file);
     if (resolvedTarget !== implFile)
       continue;
-    const testFile = resolve3(cwd, parsed.file);
+    const testFile = resolve4(cwd, parsed.file);
     if (resolvedTarget === testFile)
       return;
     if (!changed.includes(testFile)) {
@@ -2380,6 +2577,9 @@ function checkBash(ev) {
       if (isReviewRequired() && !isGateDisabled("review")) {
         deny("Run /qult:review before committing. Independent review is required.");
       }
+    }
+    if (readLastReview() && loadConfig().review.require_human_approval && !readHumanApproval()) {
+      deny("Human approval required before committing. The architect must review and call record_human_approval.");
     }
   }
 }
@@ -2449,16 +2649,24 @@ ${taskList}
 Plan: ${plan.path}`);
     }
     const doneTasks = plan.tasks.filter((t) => t.status === "done" && t.verify?.includes(":"));
-    const unverified = doneTasks.filter((t) => {
+    const tracked = [];
+    const untracked = [];
+    for (const t of doneTasks) {
       const key = t.taskNumber != null ? `Task ${t.taskNumber}` : t.name;
-      return readTaskVerifyResult(key) === null;
-    });
-    if (unverified.length > 0) {
-      const list = unverified.map((t) => `  Task ${t.taskNumber ?? "?"}: ${t.name}`).join(`
+      const result = readTaskVerifyResult(key);
+      if (result !== null) {
+        tracked.push(t);
+      } else {
+        untracked.push(t);
+      }
+    }
+    if (untracked.length > 0) {
+      const list = untracked.map((t) => `  Task ${t.taskNumber ?? "?"}: ${t.name}`).join(`
 `);
-      block(`${unverified.length} plan task(s) have Verify fields but no test result recorded:
+      process.stderr.write(`[qult] ${untracked.length} plan task(s) have Verify fields but were not tracked via TaskCreate:
 ${list}
-Use TaskCreate to track tasks so TaskCompleted triggers Verify test execution.`);
+Consider using TaskCreate for Verify test execution.
+`);
     }
   }
   if (hasSourceChanges2) {
@@ -2474,6 +2682,12 @@ Use TaskCreate to track tasks so TaskCompleted triggers Verify test execution.`)
       if (isReviewRequired() && !isGateDisabled("review")) {
         block("Run /qult:review before finishing. Independent review is required.");
       }
+    }
+  }
+  if (hasSourceChanges2 && readLastReview()) {
+    const config = loadConfig();
+    if (config.review.require_human_approval && !readHumanApproval()) {
+      block("Human approval required. The architect must review the changes and call record_human_approval before finishing.");
     }
   }
   if (readLastReview()) {
@@ -2492,8 +2706,12 @@ Use TaskCreate to track tasks so TaskCompleted triggers Verify test execution.`)
   if (testQualityCount >= TEST_QUALITY_ESCALATION_THRESHOLD) {
     block(`${testQualityCount} test quality warnings emitted this session. Improve test assertions before finishing.`);
   }
+  const duplicationCount = readEscalation("duplication_warning_count");
+  if (duplicationCount >= DUPLICATION_ESCALATION_THRESHOLD) {
+    block(`${duplicationCount} duplication warnings emitted this session. Extract shared code before finishing.`);
+  }
 }
-var SECURITY_ESCALATION_THRESHOLD = 10, SOURCE_EXTS2, DRIFT_ESCALATION_THRESHOLD = 8, TEST_QUALITY_ESCALATION_THRESHOLD = 8;
+var SECURITY_ESCALATION_THRESHOLD = 10, SOURCE_EXTS2, DRIFT_ESCALATION_THRESHOLD = 8, TEST_QUALITY_ESCALATION_THRESHOLD = 8, DUPLICATION_ESCALATION_THRESHOLD = 8;
 var init_stop = __esm(() => {
   init_config();
   init_pending_fixes();
@@ -2525,7 +2743,7 @@ var init_stop = __esm(() => {
 
 // src/state/calibration.ts
 import { createHash } from "node:crypto";
-import { existsSync as existsSync13, readFileSync as readFileSync10 } from "node:fs";
+import { existsSync as existsSync14, readFileSync as readFileSync11 } from "node:fs";
 import { join as join11 } from "node:path";
 function calibrationPath() {
   const pluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
@@ -2539,10 +2757,10 @@ function projectId() {
 }
 function readCalibration() {
   const path = calibrationPath();
-  if (!path || !existsSync13(path))
+  if (!path || !existsSync14(path))
     return null;
   try {
-    return JSON.parse(readFileSync10(path, "utf-8"));
+    return JSON.parse(readFileSync11(path, "utf-8"));
   } catch {
     return null;
   }
@@ -2630,7 +2848,7 @@ var init_calibration = __esm(() => {
 });
 
 // src/hooks/subagent-stop/claim-grounding.ts
-import { existsSync as existsSync14, readFileSync as readFileSync11, statSync as statSync4 } from "node:fs";
+import { existsSync as existsSync15, readFileSync as readFileSync12, statSync as statSync4 } from "node:fs";
 import { join as join12 } from "node:path";
 function groundClaims(output, cwd) {
   try {
@@ -2646,7 +2864,7 @@ function groundClaims(output, cwd) {
         ungrounded.push(`Path traversal rejected: ${filePath2}`);
         continue;
       }
-      if (!existsSync14(absPath)) {
+      if (!existsSync15(absPath)) {
         ungrounded.push(`File not found: ${filePath2}`);
         continue;
       }
@@ -2658,7 +2876,7 @@ function groundClaims(output, cwd) {
             const size = statSync4(absPath).size;
             if (size > MAX_FILE_SIZE)
               break;
-            fileContent = readFileSync11(absPath, "utf-8");
+            fileContent = readFileSync12(absPath, "utf-8");
           } catch {
             break;
           }
@@ -2708,13 +2926,22 @@ function checkSpecContradiction(output, contradictions) {
   if (!ALL_COMPLETE_RE.test(output))
     return;
   const plan = getActivePlan();
-  if (!plan)
-    return;
-  const pending = plan.tasks.filter((t) => t.status === "pending" || t.status === "in-progress");
-  if (pending.length > 0) {
-    const names = pending.map((t) => t.name).join(", ");
-    contradictions.push(`Spec reviewer claims all tasks complete but plan has ${pending.length} pending task(s): ${names}`);
+  if (plan) {
+    const pending = plan.tasks.filter((t) => t.status === "pending" || t.status === "in-progress");
+    if (pending.length > 0) {
+      const names = pending.map((t) => t.name).join(", ");
+      contradictions.push(`Spec reviewer claims all tasks complete but plan has ${pending.length} pending task(s): ${names}`);
+    }
   }
+  try {
+    const state = readSessionState();
+    const failures = state.gate_failure_counts ?? {};
+    const repeatedFailures = Object.entries(failures).filter(([, count]) => count >= 3);
+    if (repeatedFailures.length > 0) {
+      const files = repeatedFailures.map(([key]) => key).join(", ");
+      contradictions.push(`Spec reviewer claims all tasks complete but ${repeatedFailures.length} gate failure(s) with 3+ repeats: ${files}`);
+    }
+  } catch {}
 }
 function checkQualityContradiction(output, contradictions) {
   if (!NO_ISSUES_RE.test(output))
@@ -2728,6 +2955,14 @@ function checkQualityContradiction(output, contradictions) {
     }
     if (driftWarnings >= 3) {
       contradictions.push(`Quality reviewer declared "No issues found" but session has ${driftWarnings} convention drift warnings`);
+    }
+    const testQuality = state.test_quality_warning_count ?? 0;
+    if (testQuality >= 3) {
+      contradictions.push(`Quality reviewer declared "No issues found" but session has ${testQuality} test quality warnings`);
+    }
+    const duplication = state.duplication_warning_count ?? 0;
+    if (duplication >= 3) {
+      contradictions.push(`Quality reviewer declared "No issues found" but session has ${duplication} duplication warnings`);
     }
   } catch {}
 }
@@ -2999,7 +3234,7 @@ var init_score_parsers = __esm(() => {
 });
 
 // src/hooks/subagent-stop/agent-validators.ts
-import { existsSync as existsSync15, readdirSync as readdirSync5, readFileSync as readFileSync12, statSync as statSync5 } from "node:fs";
+import { existsSync as existsSync16, readdirSync as readdirSync5, readFileSync as readFileSync13, statSync as statSync5 } from "node:fs";
 import { join as join13 } from "node:path";
 async function subagentStop(ev) {
   if (ev.stop_hook_active)
@@ -3038,7 +3273,7 @@ async function subagentStop(ev) {
 function validatePlan() {
   try {
     const planDir = join13(process.cwd(), ".claude", "plans");
-    if (!existsSync15(planDir))
+    if (!existsSync16(planDir))
       return;
     const files = readdirSync5(planDir).filter((f) => f.endsWith(".md")).map((f) => ({
       name: f,
@@ -3046,7 +3281,7 @@ function validatePlan() {
     })).sort((a, b) => b.mtime - a.mtime);
     if (files.length === 0)
       return;
-    const content = readFileSync12(join13(planDir, files[0].name), "utf-8");
+    const content = readFileSync13(join13(planDir, files[0].name), "utf-8");
     const structErrors = validatePlanStructure(content);
     if (structErrors.length > 0) {
       block(`Plan structural issues:
@@ -3281,8 +3516,8 @@ function persistReviewFindings() {
   const historyPath = join13(process.cwd(), ".qult", ".state", FINDINGS_HISTORY_FILE);
   let history = [];
   try {
-    if (existsSync15(historyPath)) {
-      history = JSON.parse(readFileSync12(historyPath, "utf-8"));
+    if (existsSync16(historyPath)) {
+      history = JSON.parse(readFileSync13(historyPath, "utf-8"));
     }
   } catch {
     history = [];
@@ -3382,8 +3617,8 @@ var init_subagent_stop = __esm(() => {
 });
 
 // src/hooks/detectors/test-quality-check.ts
-import { existsSync as existsSync16, readFileSync as readFileSync13 } from "node:fs";
-import { resolve as resolve4 } from "node:path";
+import { existsSync as existsSync17, readFileSync as readFileSync14 } from "node:fs";
+import { resolve as resolve5 } from "node:path";
 function countAssertionsOutsideSetup(code) {
   const lines = code.split(`
 `);
@@ -3415,19 +3650,19 @@ function countAssertionsOutsideSetup(code) {
   return count;
 }
 function analyzeTestQuality(file) {
-  const cwd = resolve4(process.cwd());
-  const absPath = resolve4(cwd, file);
+  const cwd = resolve5(process.cwd());
+  const absPath = resolve5(cwd, file);
   if (!absPath.startsWith(cwd))
     return null;
-  if (!existsSync16(absPath))
+  if (!existsSync17(absPath))
     return null;
   let content;
   try {
-    content = readFileSync13(absPath, "utf-8");
+    content = readFileSync14(absPath, "utf-8");
   } catch {
     return null;
   }
-  if (content.length > MAX_CHECK_SIZE3)
+  if (content.length > MAX_CHECK_SIZE4)
     return null;
   const codeOnly = content.split(`
 `).filter((line) => !line.trimStart().startsWith("//")).join(`
@@ -3533,7 +3768,7 @@ function formatTestQualityWarnings(file, result, taskKey) {
   }
   return warnings;
 }
-var MAX_CHECK_SIZE3 = 500000, ASSERTION_RE, TEST_CASE_RE, WEAK_MATCHERS, TRIVIAL_ASSERTION_RE, EMPTY_TEST_RE, MOCK_RE, ALWAYS_TRUE_RE, CONSTANT_SELF_RE, SNAPSHOT_RE, IMPL_COUPLED_RE, SETUP_BLOCK_RE;
+var MAX_CHECK_SIZE4 = 500000, ASSERTION_RE, TEST_CASE_RE, WEAK_MATCHERS, TRIVIAL_ASSERTION_RE, EMPTY_TEST_RE, MOCK_RE, ALWAYS_TRUE_RE, CONSTANT_SELF_RE, SNAPSHOT_RE, IMPL_COUPLED_RE, SETUP_BLOCK_RE;
 var init_test_quality_check = __esm(() => {
   ASSERTION_RE = /\b(expect|assert|should)\s*[.(]/g;
   TEST_CASE_RE = /\b(it|test)\s*\(/g;
@@ -3648,7 +3883,7 @@ var init_task_completed = __esm(() => {
 });
 
 // src/state/metrics.ts
-import { existsSync as existsSync17, readFileSync as readFileSync14 } from "node:fs";
+import { existsSync as existsSync18, readFileSync as readFileSync15 } from "node:fs";
 import { join as join14 } from "node:path";
 function recordSessionMetrics(cwd, metrics) {
   try {
@@ -3664,9 +3899,9 @@ function recordSessionMetrics(cwd, metrics) {
 function readMetricsHistory(cwd) {
   try {
     const metricsPath = join14(cwd, STATE_DIR3, METRICS_FILE);
-    if (!existsSync17(metricsPath))
+    if (!existsSync18(metricsPath))
       return [];
-    const parsed = JSON.parse(readFileSync14(metricsPath, "utf-8"));
+    const parsed = JSON.parse(readFileSync15(metricsPath, "utf-8"));
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
@@ -3700,12 +3935,12 @@ var exports_session_start = {};
 __export(exports_session_start, {
   default: () => sessionStart
 });
-import { existsSync as existsSync18, mkdirSync as mkdirSync3 } from "node:fs";
+import { existsSync as existsSync19, mkdirSync as mkdirSync3 } from "node:fs";
 import { join as join15 } from "node:path";
 async function sessionStart(ev) {
   try {
     const stateDir = join15(process.cwd(), ".qult", ".state");
-    if (!existsSync18(stateDir)) {
+    if (!existsSync19(stateDir)) {
       mkdirSync3(stateDir, { recursive: true });
     }
     cleanupStaleScopedFiles(stateDir);
@@ -3747,12 +3982,12 @@ var exports_post_compact = {};
 __export(exports_post_compact, {
   default: () => postCompact
 });
-import { existsSync as existsSync19, readdirSync as readdirSync6, readFileSync as readFileSync15, statSync as statSync6 } from "node:fs";
+import { existsSync as existsSync20, readdirSync as readdirSync6, readFileSync as readFileSync16, statSync as statSync6 } from "node:fs";
 import { join as join16 } from "node:path";
 async function postCompact(_ev) {
   try {
     const stateDir = join16(process.cwd(), ".qult", ".state");
-    if (!existsSync19(stateDir))
+    if (!existsSync20(stateDir))
       return;
     const parts = [];
     const fixesPath2 = findLatestFile(stateDir, "pending-fixes");
@@ -3774,7 +4009,7 @@ async function postCompact(_ev) {
       if (Object.keys(state).length > 0) {
         const summary = [];
         const gatesPath = join16(process.cwd(), ".qult", "gates.json");
-        const hasGates = existsSync19(gatesPath);
+        const hasGates = existsSync20(gatesPath);
         if (state.test_passed_at)
           summary.push(`test_passed_at: ${state.test_passed_at}`);
         else if (hasGates)
@@ -3811,10 +4046,10 @@ async function postCompact(_ev) {
     }
     try {
       const planDir = join16(process.cwd(), ".claude", "plans");
-      if (existsSync19(planDir)) {
+      if (existsSync20(planDir)) {
         const planFiles = readdirSync6(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync6(join16(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
         if (planFiles.length > 0) {
-          const content = readFileSync15(join16(planDir, planFiles[0].name), "utf-8");
+          const content = readFileSync16(join16(planDir, planFiles[0].name), "utf-8");
           const taskCount = (content.match(/^###\s+Task\s+\d+/gim) ?? []).length;
           const doneCount = (content.match(/^###\s+Task\s+\d+.*\[done\]/gim) ?? []).length;
           if (taskCount > 0) {
@@ -3825,7 +4060,7 @@ async function postCompact(_ev) {
     } catch {}
     try {
       const findingsPath = join16(stateDir, "review-findings-history.json");
-      if (existsSync19(findingsPath)) {
+      if (existsSync20(findingsPath)) {
         const findings = safeReadJson(findingsPath, []);
         if (findings.length > 0) {
           const recent = findings.slice(-5);
@@ -3855,9 +4090,9 @@ function findLatestFile(stateDir, prefix) {
 }
 function safeReadJson(path, fallback) {
   try {
-    if (!existsSync19(path))
+    if (!existsSync20(path))
       return fallback;
-    return JSON.parse(readFileSync15(path, "utf-8"));
+    return JSON.parse(readFileSync16(path, "utf-8"));
   } catch {
     return fallback;
   }
@@ -3891,13 +4126,13 @@ async function dispatch(event) {
   }
   let input;
   try {
-    input = await new Promise((resolve5, reject) => {
+    input = await new Promise((resolve6, reject) => {
       let data = "";
       process.stdin.setEncoding("utf-8");
       process.stdin.on("data", (chunk) => {
         data += chunk;
       });
-      process.stdin.on("end", () => resolve5(data));
+      process.stdin.on("end", () => resolve6(data));
       process.stdin.on("error", reject);
     });
   } catch {
