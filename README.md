@@ -18,7 +18,9 @@ AI coding agents are powerful but unreliable at self-regulation.
 - They commit without running tests.
 - They praise their own code and call the review done.
 
-The emerging discipline of **harness engineering**, first named by [OpenAI](https://openai.com/index/harness-engineering/) and formalized by [Martin Fowler](https://martinfowler.com/articles/exploring-gen-ai/harness-engineering.html), addresses this:
+Anthropic's [Harness Design](https://www.anthropic.com/engineering/harness-design-long-running-apps) article identifies two root causes: **context coherence loss** (models degrade as context fills) and **self-evaluation bias** (agents praise their own mediocre work). The solution: separate generation from evaluation, and enforce quality structurally.
+
+The broader discipline of **harness engineering**, formalized by [Martin Fowler](https://martinfowler.com/articles/exploring-gen-ai/harness-engineering.html), frames this as:
 
 > **Agent = Model + Harness.** Enforce invariants, don't micromanage implementations.
 
@@ -632,15 +634,15 @@ Do not delete `.qult/.state/` to bypass. This clears all session tracking and ma
 
 Academic papers and industry sources that validate qult's design:
 
-- [OpenAI: Harness Engineering](https://openai.com/index/harness-engineering/) — "Agent = Model + Harness. Enforce invariants, not micromanage implementations."
+- [Anthropic: Harness Design](https://www.anthropic.com/engineering/harness-design-long-running-apps) — Generator-Evaluator pattern, self-evaluation bias, context coherence loss
+- [Anthropic: Effective Harnesses](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) — Long-running agent session design, structured handoff
 - [Martin Fowler: Harness Engineering](https://martinfowler.com/articles/exploring-gen-ai/harness-engineering.html) — Guides (feedforward) + Sensors (feedback) taxonomy
+- [Martin Fowler: Humans and Agents](https://martinfowler.com/articles/exploring-gen-ai/humans-and-agents.html) — "On the Loop" model, Agentic Flywheel
 - [TDAD: Test-Driven Agentic Development](https://arxiv.org/abs/2603.17973) — Prompt-only TDD increases regressions; structural enforcement reduces them
 - [The Specification as Quality Gate](https://arxiv.org/abs/2603.25773) — Deterministic verification first, AI review for residual only
 - [VibeGuard](https://arxiv.org/abs/2604.01052) — Security gate framework for AI-generated code
-- [Anthropic: Harness Design](https://www.anthropic.com/engineering/harness-design-long-running-apps) — Generator-Evaluator pattern
 - [IEEE Spectrum: AI Coding Degrades](https://spectrum.ieee.org/ai-coding-degrades) — Silent failures in AI-generated code
 - [arXiv: AI-Specific Code Smells](https://arxiv.org/abs/2509.20491) — SpecDetect4AI: 22 AI-specific code smells, 88.66% precision
-- [Martin Fowler: Humans and Agents](https://martinfowler.com/articles/exploring-gen-ai/humans-and-agents.html) — "On the Loop" model, Agentic Flywheel
 - [PGS: Property-Generated Solver](https://ai-scholar.tech/en/articles/llm-paper/property-generated-solver) — +37.3% correctness via property-based testing
 
 ## Stack
