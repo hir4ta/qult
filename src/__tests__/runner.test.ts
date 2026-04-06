@@ -58,7 +58,7 @@ describe("runGate", () => {
 	});
 
 	it("truncates long output using smart head+tail", () => {
-		// Generate output longer than default max (2000 chars)
+		// Generate output longer than default max (3500 chars)
 		// Use python for portability (brace expansion is bash-only, CI uses sh)
 		const result = runGate("long-gate", {
 			command: `python3 -c "print('-' * 5000)"`,
@@ -66,7 +66,7 @@ describe("runGate", () => {
 		});
 		expect(result.passed).toBe(true);
 		// Smart truncation: output should be capped + contain truncation marker
-		expect(result.output.length).toBeLessThanOrEqual(2100); // 2000 + marker overhead
+		expect(result.output.length).toBeLessThanOrEqual(3600); // 3500 + marker overhead
 		expect(result.output).toContain("chars truncated");
 	});
 });

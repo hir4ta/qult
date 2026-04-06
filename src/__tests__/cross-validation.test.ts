@@ -125,7 +125,7 @@ describe("crossValidate", () => {
 	it("detects quality contradiction: duplication warnings but no issues found", () => {
 		writeFileSync(
 			join(STATE_DIR, "session-state.json"),
-			JSON.stringify({ duplication_warning_count: 4 }),
+			JSON.stringify({ duplication_warning_count: 6 }),
 		);
 		resetAllCaches();
 

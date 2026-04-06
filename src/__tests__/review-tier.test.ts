@@ -56,4 +56,29 @@ describe("computeReviewTier", () => {
 		// 2 files → skip (below light threshold of 3)
 		expect(computeReviewTier(2, false, config)).toBe("skip");
 	});
+
+	it("returns deep when high-risk file paths are present", () => {
+		const paths = ["src/utils.ts", "src/auth/login.ts"];
+		expect(computeReviewTier(2, false, DEFAULT_CONFIG, paths)).toBe("deep");
+	});
+
+	it("escalates when code changes lack test changes (3+ files)", () => {
+		const paths = ["src/foo.ts", "src/bar.ts", "src/baz.ts"];
+		expect(computeReviewTier(3, false, DEFAULT_CONFIG, paths)).toBe("standard");
+	});
+
+	it("does not escalate when test files are included", () => {
+		const paths = ["src/foo.ts", "src/bar.ts", "src/__tests__/foo.test.ts"];
+		expect(computeReviewTier(3, false, DEFAULT_CONFIG, paths)).toBe("light");
+	});
+
+	it("preserves old behavior when changedFilePaths is undefined", () => {
+		expect(computeReviewTier(3, false, DEFAULT_CONFIG, undefined)).toBe("light");
+		expect(computeReviewTier(5, false, DEFAULT_CONFIG, undefined)).toBe("standard");
+	});
+
+	it("does not escalate code-without-tests for fewer than 3 files", () => {
+		const paths = ["src/foo.ts", "src/bar.ts"];
+		expect(computeReviewTier(2, false, DEFAULT_CONFIG, paths)).toBe("skip");
+	});
 });

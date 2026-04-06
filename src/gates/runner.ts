@@ -14,7 +14,7 @@ export interface GateResult {
 	duration_ms: number;
 }
 
-const ERROR_CODE_RE = /\b([A-Z]{1,4}\d{4,5})\b/;
+const ERROR_CODE_RE = /\b([A-Z]{1,4}\d{1,5}|ERR_[A-Z_]+|E\d{3,5})\b/;
 
 /** Deduplicate lines sharing the same error code. Keeps first occurrence + summary. */
 export function deduplicateErrors(text: string): string {
@@ -115,8 +115,11 @@ export function runGateAsync(
 				const duration_ms = Date.now() - start;
 				if (err) {
 					const raw = (stdout ?? "") + (stderr ?? "");
+					const isTimeout = "killed" in err && err.killed && duration_ms >= timeout - 100;
+					const prefix = isTimeout ? `TIMEOUT after ${timeout}ms\n` : "";
 					const output =
-						smartTruncate(deduplicateErrors(raw), maxChars) || `Exit code ${err.code ?? 1}`;
+						prefix +
+						(smartTruncate(deduplicateErrors(raw), maxChars) || `Exit code ${err.code ?? 1}`);
 					resolve({ name, passed: false, output, duration_ms });
 				} else {
 					const output = smartTruncate(stdout ?? "", maxChars);
@@ -154,8 +157,11 @@ export function runGate(name: string, gate: GateDefinition, file?: string): Gate
 		const stdout = "stdout" in e && typeof e.stdout === "string" ? e.stdout : "";
 		const stderr = "stderr" in e && typeof e.stderr === "string" ? e.stderr : "";
 		const status = "status" in e && typeof e.status === "number" ? e.status : 1;
+		const isTimeout = "signal" in e && e.signal === "SIGTERM" && duration_ms >= timeout - 100;
+		const prefix = isTimeout ? `TIMEOUT after ${timeout}ms\n` : "";
 		const output =
-			smartTruncate(deduplicateErrors(stdout + stderr), maxChars) || `Exit code ${status}`;
+			prefix +
+			(smartTruncate(deduplicateErrors(stdout + stderr), maxChars) || `Exit code ${status}`);
 		return {
 			name,
 			passed: false,

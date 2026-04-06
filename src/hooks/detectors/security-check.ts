@@ -135,6 +135,35 @@ const DANGEROUS_PATTERNS: DangerousPattern[] = [
 		desc: "dangerouslySetInnerHTML with dynamic value — XSS risk",
 		exts: JS_TS_EXTS,
 	},
+	// OWASP A07: Password comparison without constant-time (timing attack)
+	{
+		re: /password\s*(?:===|!==|==|!=)\s*(?!null\b|undefined\b|["'`])[a-zA-Z_$]/i,
+		desc: "Password compared with === instead of constant-time comparison — timing attack risk",
+		exts: JS_TS_EXTS,
+	},
+	// OWASP A07: Session token in URL query parameter
+	{
+		re: /[?&](?:token|sessionId|session_id|auth_token|access_token)=/i,
+		desc: "Session/auth token in URL query parameter — token leakage via referrer/logs",
+	},
+	// OWASP A08: Deserialization of untrusted JSON from user input
+	{
+		re: /JSON\.parse\s*\(\s*(?:req(?:uest)?\.body|req\.query|req\.params|ctx\.request\.body)/,
+		desc: "JSON.parse on raw user input without validation — insecure deserialization risk",
+		exts: JS_TS_EXTS,
+	},
+	// OWASP A08: Python pickle/yaml unsafe deserialization
+	{
+		re: /(?:pickle\.loads?|yaml\.(?:load|unsafe_load))\s*\(/,
+		desc: "Unsafe deserialization (pickle/yaml.load) — arbitrary code execution risk",
+		exts: PY_EXTS,
+	},
+	// Environment variable leakage in responses
+	{
+		re: /(?:res\.(?:json|send|write)|response\.(?:json|send|write))\s*\(.*process\.env/,
+		desc: "process.env leaked in HTTP response — environment variable disclosure",
+		exts: JS_TS_EXTS,
+	},
 ];
 
 /** Detect hardcoded secrets and dangerous code patterns.

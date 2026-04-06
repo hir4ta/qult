@@ -114,8 +114,8 @@ flowchart TB
     Spec --> Quality
     Quality --> Security
     Security --> Adversarial
-    Adversarial -- "Any FAIL / aggregate < 34 / dimension < 4" --> Claude
-    Adversarial -- "All PASS + aggregate >= 34/40 + all dims >= 4" --> Done["Commit"]
+    Adversarial -- "Any FAIL / aggregate < 30 / dimension < 4" --> Claude
+    Adversarial -- "All PASS + aggregate >= 30/40 + all dims >= 4" --> Done["Commit"]
 
     style Generator fill:#7fbbb3,color:#2d353b,stroke:#7fbbb3
     style Evaluator fill:#e69875,color:#2d353b,stroke:#e69875
@@ -166,7 +166,7 @@ qult provides a full development workflow through 12 skills and 7 agents:
 | **The Wall** (enforcement) | PostToolUse | Runs lint/type gates + hallucinated import detection + export breaking change detection. Outputs gate summary to stderr |
 | **The Wall** (enforcement) | PreToolUse | DENY if pending fixes, require test/review before commit, force selfcheck on ExitPlanMode |
 | **Completion gate** (enforcement) | Stop | Block if unresolved errors, incomplete tasks, or missing review |
-| **Subagent** (enforcement) | SubagentStop | Validates review output, enforces dimension floor + aggregate threshold (34/40), score bias detection, read-only enforcement, Agentic Flywheel |
+| **Subagent** (enforcement) | SubagentStop | Validates review output, enforces dimension floor + aggregate threshold (30/40), score bias detection, read-only enforcement, Agentic Flywheel |
 | **Task verify** (advisory) | TaskCompleted | Runs Verify test immediately, checks test quality (assertion count) |
 | **Context** (advisory) | PostCompact | Re-injects pending fixes, session state, disabled gates, review iteration, plan progress |
 
@@ -226,7 +226,7 @@ All quality rules are delivered via MCP server instructions. No files are placed
 |---------|-------------|
 | `/qult:explore` | Design exploration. Interview the architect before coding |
 | `/qult:plan-generator` | Generate structured plan from feature description |
-| `/qult:review` | 3-stage independent code review (Spec + Quality + Security) |
+| `/qult:review` | 4-stage independent code review (Spec + Quality + Security + Adversarial) |
 | `/qult:finish` | Structured branch completion (merge/PR/hold/discard) |
 | `/qult:debug` | Structured root-cause debugging |
 | `/qult:status` | Show current quality gate status |
@@ -257,7 +257,7 @@ qult's review (`/qult:review`) spawns four specialized reviewers in sequence, wi
 | 1 | **Spec Reviewer** | Sonnet | Completeness + Accuracy | Does the implementation match the plan? Are consumers updated? |
 | 2 | **Quality Reviewer** | Opus | Design + Maintainability | Is the code well-designed? Are edge cases handled? |
 | 3 | **Security Reviewer** | Opus | Vulnerability + Hardening | Are there injection risks? Is defense-in-depth applied? |
-| 4 | **Adversarial Reviewer** | Haiku | EdgeCases + LogicCorrectness | Silent failures, off-by-one, type coercion, race conditions? |
+| 4 | **Adversarial Reviewer** | Sonnet | EdgeCases + LogicCorrectness | Silent failures, off-by-one, type coercion, race conditions? |
 
 Each agent scores 2 dimensions (1-5 each). Total: **8 dimensions / 40 points**.
 
@@ -270,7 +270,7 @@ qult enforces quality at two levels:
 1. **Dimension floor** (default: 4/5)
    - Any single dimension below the floor blocks immediately, regardless of aggregate score
    - Prevents "excellent code with terrible security" from passing
-2. **Aggregate threshold** (default: 34/40)
+2. **Aggregate threshold** (default: 30/40)
    - After all 4 stages complete, the combined score across all 8 dimensions must meet the threshold
    - Maximum 3 iterations
 
@@ -291,42 +291,57 @@ Customize thresholds in `.qult/config.json` (all optional):
 ```json
 {
   "review": {
-    "score_threshold": 34,
+    "score_threshold": 30,
     "max_iterations": 3,
     "required_changed_files": 5,
     "dimension_floor": 4,
     "require_human_approval": false
   },
+  "plan_eval": {
+    "score_threshold": 12
+  },
   "gates": {
-    "output_max_chars": 2000,
+    "output_max_chars": 3500,
     "default_timeout": 10000
+  },
+  "escalation": {
+    "security_threshold": 10,
+    "drift_threshold": 8,
+    "test_quality_threshold": 8,
+    "duplication_threshold": 8
   }
 }
 ```
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `review.score_threshold` | number | 34 | Aggregate score required to pass 4-stage review (max 40) |
+| `review.score_threshold` | number | 30 | Aggregate score required to pass 4-stage review (max 40) |
 | `review.max_iterations` | number | 3 | Maximum review retry iterations |
 | `review.required_changed_files` | number | 5 | Number of changed files that triggers mandatory review |
 | `review.dimension_floor` | number | 4 | Minimum score per dimension (1-5). Any dimension below this blocks regardless of aggregate |
 | `review.require_human_approval` | boolean | false | Require architect to call `record_human_approval` before commit (opt-in) |
-| `gates.output_max_chars` | number | 2000 | Max gate output chars (excess is truncated) |
+| `plan_eval.score_threshold` | number | 12 | Plan evaluation score required to pass (max 15) |
+| `gates.output_max_chars` | number | 3500 | Max gate output chars (excess is truncated) |
 | `gates.default_timeout` | number | 10000 | Gate command timeout (ms) |
+| `escalation.security_threshold` | number | 10 | Security warnings before blocking session completion |
+| `escalation.drift_threshold` | number | 8 | Convention drift warnings before blocking |
+| `escalation.test_quality_threshold` | number | 8 | Test quality warnings before blocking |
+| `escalation.duplication_threshold` | number | 8 | Duplication warnings before blocking |
 
-Environment variable overrides: `QULT_REVIEW_SCORE_THRESHOLD`, `QULT_REVIEW_MAX_ITERATIONS`, `QULT_REVIEW_REQUIRED_FILES`, `QULT_REVIEW_DIMENSION_FLOOR`, `QULT_REQUIRE_HUMAN_APPROVAL`, `QULT_GATE_OUTPUT_MAX`, `QULT_GATE_DEFAULT_TIMEOUT`
+Environment variable overrides: `QULT_REVIEW_SCORE_THRESHOLD`, `QULT_REVIEW_MAX_ITERATIONS`, `QULT_REVIEW_REQUIRED_FILES`, `QULT_REVIEW_DIMENSION_FLOOR`, `QULT_REQUIRE_HUMAN_APPROVAL`, `QULT_PLAN_EVAL_SCORE_THRESHOLD`, `QULT_GATE_OUTPUT_MAX`, `QULT_GATE_DEFAULT_TIMEOUT`, `QULT_ESCALATION_SECURITY`, `QULT_ESCALATION_DRIFT`, `QULT_ESCALATION_TEST_QUALITY`, `QULT_ESCALATION_DUPLICATION`
 
 <details>
 <summary><strong>Review score threshold rationale</strong></summary>
 
 The 4-stage reviewer scores eight dimensions (Completeness, Accuracy, Design, Maintainability, Vulnerability, Hardening, EdgeCases, LogicCorrectness) on a 1-5 scale.
 
-**Aggregate threshold** (default 34/40):
+**Aggregate threshold** (default 30/40):
 
 | Score example | Total | Result |
 | --- | --- | --- |
-| 5+4+5+4+4+4+4+4 | 34 | Pass. Solid code passes at the threshold |
-| 4+4+4+4+4+4+4+4 | 32 | Fail. Consistent "good" is no longer enough. AI reviewers tend toward leniency |
+| 4+4+4+4+4+4+4+4 | 32 | Pass. Consistent "good" passes comfortably |
+| 4+4+3+4+4+4+4+4 | 31 | Pass. One weak area is acceptable if others are solid |
+| 4+3+4+3+4+4+3+4 | 29 | Fail. Multiple areas below expectations |
 | 3+3+3+3+3+3+3+3 | 24 | Fail significantly. Consistent mediocrity is caught |
 | 5+5+4+4+5+5+4+5 | 37 | Strong code passes comfortably |
 
@@ -335,7 +350,7 @@ The 4-stage reviewer scores eight dimensions (Completeness, Accuracy, Design, Ma
 | Score example | Total | Result |
 | --- | --- | --- |
 | 5+5+5+5+3+3+5+5 | 36 | Aggregate passes, but **blocked**. Vulnerability=3 is below floor (3/5 means "reachable wrong output" per quality-reviewer rubric) |
-| 4+4+4+4+5+5+4+4 | 34 | Pass. All dimensions at or above floor |
+| 4+4+4+4+4+4+4+4 | 32 | Pass. All dimensions at or above floor |
 
 The dimension floor prevents a dangerous pattern where excellent scores in some areas mask critical weakness in others (especially security). The default of 4 was chosen because 3/5 in the quality-reviewer rubric means "a reachable code path produces wrong output," which is not acceptable for production code.
 
@@ -539,7 +554,7 @@ Beyond traditional linting and testing, qult addresses failure modes specific to
 | **spec-reviewer** | Sonnet | Verifies implementation matches the plan (Completeness, Accuracy) |
 | **quality-reviewer** | Opus | Evaluates code quality (Design, Maintainability) |
 | **security-reviewer** | Opus | OWASP Top 10 security review (Vulnerability, Hardening) |
-| **adversarial-reviewer** | Haiku | Devil's advocate: edge cases, logic errors, silent failures (EdgeCases, LogicCorrectness) |
+| **adversarial-reviewer** | Sonnet | Devil's advocate: edge cases, logic errors, silent failures (EdgeCases, LogicCorrectness) |
 
 ## Data storage
 

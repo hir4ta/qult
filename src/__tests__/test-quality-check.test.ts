@@ -407,3 +407,110 @@ describe("formatTestQualityWarnings", () => {
 		expect(warnings[0]).toContain("2x weak-matcher");
 	});
 });
+
+describe("new test quality smells", () => {
+	async function analyze(file: string) {
+		const { analyzeTestQuality } = await import("../hooks/detectors/test-quality-check.ts");
+		return analyzeTestQuality(file);
+	}
+
+	it("detects async test without await", async () => {
+		const file = join(TEST_DIR, "async.test.ts");
+		writeFileSync(
+			file,
+			[
+				'it("missing async keyword usage", async () => {',
+				"  const result = fetchData();",
+				"  expect(result).toBe(42);",
+				"});",
+			].join("\n"),
+		);
+		const result = await analyze(file);
+		expect(result).not.toBeNull();
+		const smell = result!.smells.find((s) => s.type === "async-no-await");
+		expect(smell).toBeDefined();
+		expect(smell!.message).toContain("await");
+	});
+
+	it("does not flag async test with await", async () => {
+		const file = join(TEST_DIR, "async-ok.test.ts");
+		writeFileSync(
+			file,
+			[
+				'it("async with await", async () => {',
+				"  const result = await fetchData();",
+				"  expect(result).toBe(42);",
+				"});",
+			].join("\n"),
+		);
+		const result = await analyze(file);
+		expect(result).not.toBeNull();
+		const smell = result!.smells.find((s) => s.type === "async-no-await");
+		expect(smell).toBeUndefined();
+	});
+
+	it("detects module-level let (shared mutable state)", async () => {
+		const file = join(TEST_DIR, "shared.test.ts");
+		writeFileSync(
+			file,
+			[
+				"let counter = 0;",
+				"",
+				'it("increments", () => {',
+				"  counter++;",
+				"  expect(counter).toBe(1);",
+				"});",
+			].join("\n"),
+		);
+		const result = await analyze(file);
+		expect(result).not.toBeNull();
+		const smell = result!.smells.find((s) => s.type === "shared-mutable-state");
+		expect(smell).toBeDefined();
+		expect(smell!.message).toContain("mutable state");
+	});
+
+	it("detects large test file", async () => {
+		const file = join(TEST_DIR, "large.test.ts");
+		const testLines = Array.from(
+			{ length: 510 },
+			(_, i) => `it("test ${i}", () => { expect(${i}).toBe(${i}); });`,
+		);
+		writeFileSync(file, testLines.join("\n"));
+		const result = await analyze(file);
+		expect(result).not.toBeNull();
+		const smell = result!.smells.find((s) => s.type === "large-test-file");
+		expect(smell).toBeDefined();
+		expect(smell!.message).toContain("510");
+	});
+
+	it("detects snapshot bloat when .snap file exceeds size threshold", async () => {
+		const file = join(TEST_DIR, "snapshot.test.ts");
+		writeFileSync(file, 'it("renders", () => { expect(tree).toMatchSnapshot(); });\n');
+
+		// Create the __snapshots__ directory and a bloated .snap file
+		const snapDir = join(TEST_DIR, "__snapshots__");
+		mkdirSync(snapDir, { recursive: true });
+		const snapFile = join(snapDir, "snapshot.test.ts.snap");
+		writeFileSync(snapFile, "x".repeat(6000)); // > LARGE_SNAPSHOT_CHARS (5000)
+
+		const result = await analyze(file);
+		expect(result).not.toBeNull();
+		const smell = result!.smells.find((s) => s.type === "snapshot-bloat");
+		expect(smell).toBeDefined();
+		expect(smell!.message).toContain("snapshot");
+	});
+
+	it("does not flag snapshot bloat below threshold", async () => {
+		const file = join(TEST_DIR, "small-snap.test.ts");
+		writeFileSync(file, 'it("renders", () => { expect(tree).toMatchSnapshot(); });\n');
+
+		const snapDir = join(TEST_DIR, "__snapshots__");
+		mkdirSync(snapDir, { recursive: true });
+		writeFileSync(join(snapDir, "small-snap.test.ts.snap"), "x".repeat(100));
+
+		const result = await analyze(file);
+		expect(result).not.toBeNull();
+		const smell = result!.smells.find((s) => s.type === "snapshot-bloat");
+		expect(smell).toBeUndefined();
+	});
+});

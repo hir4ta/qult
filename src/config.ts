@@ -26,27 +26,39 @@ export interface QultConfig {
 		/** Additional PATH directories for gate command execution (e.g. [".venv/bin", "../node_modules/.bin"]) */
 		extra_path: string[];
 	};
+	escalation: {
+		security_threshold: number;
+		drift_threshold: number;
+		test_quality_threshold: number;
+		duplication_threshold: number;
+	};
 }
 
 const DEFAULTS: QultConfig = {
 	review: {
-		score_threshold: 34,
+		score_threshold: 30,
 		max_iterations: 3,
 		required_changed_files: 5,
 		dimension_floor: 4,
 		require_human_approval: false,
 	},
 	plan_eval: {
-		score_threshold: 10,
+		score_threshold: 12,
 		max_iterations: 2,
 		registry_files: [],
 	},
 	gates: {
-		output_max_chars: 2000,
+		output_max_chars: 3500,
 		default_timeout: 10000,
 		test_on_edit: false,
 		test_on_edit_timeout: 15000,
 		extra_path: [],
+	},
+	escalation: {
+		security_threshold: 10,
+		drift_threshold: 8,
+		test_quality_threshold: 8,
+		duplication_threshold: 8,
 	},
 };
 
@@ -83,6 +95,17 @@ function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): voi
 			config.gates.extra_path = g.extra_path.filter(
 				(p: unknown) => typeof p === "string" && p.trim().length > 0,
 			);
+	}
+	if (raw.escalation && typeof raw.escalation === "object") {
+		const e = raw.escalation as Record<string, unknown>;
+		if (typeof e.security_threshold === "number")
+			config.escalation.security_threshold = Math.max(1, e.security_threshold);
+		if (typeof e.drift_threshold === "number")
+			config.escalation.drift_threshold = Math.max(1, e.drift_threshold);
+		if (typeof e.test_quality_threshold === "number")
+			config.escalation.test_quality_threshold = Math.max(1, e.test_quality_threshold);
+		if (typeof e.duplication_threshold === "number")
+			config.escalation.duplication_threshold = Math.max(1, e.duplication_threshold);
 	}
 }
 
@@ -153,6 +176,14 @@ export function loadConfig(): QultConfig {
 	else if (testOnEditEnv === "0" || testOnEditEnv === "false") config.gates.test_on_edit = false;
 	config.gates.test_on_edit_timeout =
 		envInt("QULT_TEST_ON_EDIT_TIMEOUT") ?? config.gates.test_on_edit_timeout;
+	const secEsc = envInt("QULT_ESCALATION_SECURITY");
+	if (secEsc !== undefined) config.escalation.security_threshold = Math.max(1, secEsc);
+	const driftEsc = envInt("QULT_ESCALATION_DRIFT");
+	if (driftEsc !== undefined) config.escalation.drift_threshold = Math.max(1, driftEsc);
+	const tqEsc = envInt("QULT_ESCALATION_TEST_QUALITY");
+	if (tqEsc !== undefined) config.escalation.test_quality_threshold = Math.max(1, tqEsc);
+	const dupEsc = envInt("QULT_ESCALATION_DUPLICATION");
+	if (dupEsc !== undefined) config.escalation.duplication_threshold = Math.max(1, dupEsc);
 
 	_cache = config;
 	return config;

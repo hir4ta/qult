@@ -154,6 +154,53 @@ describe("detectSecurityPatterns", () => {
 			expect(fixes.length).toBe(0);
 		});
 
+		it("detects password comparison without constant-time", async () => {
+			const file = join(TEST_DIR, "auth.ts");
+			writeFileSync(file, "if (password === storedPassword) { login(); }\n");
+			const fixes = await detect(file);
+			expect(fixes.length).toBe(1);
+			expect(fixes[0]!.errors[0]).toContain("timing attack");
+		});
+
+		it("allows password null check", async () => {
+			const file = join(TEST_DIR, "auth-null.ts");
+			writeFileSync(file, "if (password === null) { throw new Error(); }\n");
+			const fixes = await detect(file);
+			expect(fixes.length).toBe(0);
+		});
+
+		it("detects session token in URL", async () => {
+			const file = join(TEST_DIR, "redirect.ts");
+			writeFileSync(file, 'const url = "/api/data?token=abc123";\n');
+			const fixes = await detect(file);
+			expect(fixes.length).toBe(1);
+			expect(fixes[0]!.errors[0]).toContain("token leakage");
+		});
+
+		it("detects JSON.parse on req.body", async () => {
+			const file = join(TEST_DIR, "handler.ts");
+			writeFileSync(file, "const data = JSON.parse(req.body);\n");
+			const fixes = await detect(file);
+			expect(fixes.length).toBe(1);
+			expect(fixes[0]!.errors[0]).toContain("deserialization");
+		});
+
+		it("detects Python pickle.loads", async () => {
+			const file = join(TEST_DIR, "handler.py");
+			writeFileSync(file, "data = pickle.loads(user_input)\n");
+			const fixes = await detect(file);
+			expect(fixes.length).toBe(1);
+			expect(fixes[0]!.errors[0]).toContain("pickle");
+		});
+
+		it("detects process.env in HTTP response", async () => {
+			const file = join(TEST_DIR, "debug.ts");
+			writeFileSync(file, "res.json({ env: process.env });\n");
+			const fixes = await detect(file);
+			expect(fixes.length).toBe(1);
+			expect(fixes[0]!.errors[0]).toContain("process.env");
+		});
+
 		it("detects dangerous patterns in test files too", async () => {
 			const file = join(TEST_DIR, "handler.test.ts");
 			writeFileSync(file, `function run(code: string) {\n  return eval(code);\n}\n`);

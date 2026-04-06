@@ -54,8 +54,10 @@ export function groundClaims(output: string, cwd: string): GroundingResult {
 						break; // fail-open: can't read file, skip function checks
 					}
 				}
-				// Simple presence check: function/method/variable name appears in file
-				if (!fileContent.includes(funcName)) {
+				// Word-boundary check: function/method/variable name appears as a distinct token
+				const escaped = funcName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+				const wordRe = new RegExp(`\\b${escaped}\\b`);
+				if (!wordRe.test(fileContent)) {
 					ungrounded.push(`Symbol \`${funcName}\` not found in ${filePath}`);
 				}
 			}

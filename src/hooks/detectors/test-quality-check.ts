@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 
 const MAX_CHECK_SIZE = 500_000;
 
@@ -69,6 +69,19 @@ const SNAPSHOT_RE = /\.toMatchSnapshot\s*\(|\.toMatchInlineSnapshot\s*\(/g;
 // Assertions that test internal method calls rather than behavior
 const IMPL_COUPLED_RE =
 	/expect\s*\(\s*\w+\s*\)\s*\.(?:toHaveBeenCalled|toHaveBeenCalledWith|toHaveBeenCalledTimes)\s*\(/;
+
+// ── Async test without await ──────────────────────────────
+const ASYNC_TEST_RE = /\b(?:it|test)\s*\(\s*["'`][^"'`]*["'`]\s*,\s*async\s/;
+const AWAIT_RE = /\bawait\b/;
+
+// ── Module-level mutable state ───────────────────────────
+const MODULE_LET_RE = /^let\s+\w+\s*(?:[:=])/;
+
+// ── Large test file threshold ────────────────────────────
+const LARGE_TEST_FILE_LINES = 500;
+
+// ── Large snapshot threshold (chars) ─────────────────────
+const LARGE_SNAPSHOT_CHARS = 5000;
 
 // ── Setup/teardown block detection ─────────────────────────
 const SETUP_BLOCK_RE = /\b(beforeEach|afterEach|beforeAll|afterAll)\s*\(/;
@@ -222,6 +235,84 @@ export function analyzeTestQuality(file: string): TestQualityResult | null {
 			line: 0,
 			message: `Mock overuse: ${mockCount} mocks vs ${assertionCount} assertions — tests may verify mocks, not behavior`,
 		});
+	}
+
+	// Async test without await: promise may silently pass without being awaited
+	let inAsyncTest = false;
+	let asyncTestLine = 0;
+	let asyncTestHasAwait = false;
+	let asyncBraceDepth = 0;
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i]!;
+		if (!inAsyncTest && ASYNC_TEST_RE.test(line)) {
+			inAsyncTest = true;
+			asyncTestLine = i + 1;
+			asyncTestHasAwait = false;
+			asyncBraceDepth = 0;
+		}
+		if (inAsyncTest) {
+			if (AWAIT_RE.test(line)) asyncTestHasAwait = true;
+			for (const ch of line) {
+				if (ch === "{") asyncBraceDepth++;
+				else if (ch === "}") {
+					asyncBraceDepth--;
+					if (asyncBraceDepth <= 0) {
+						if (!asyncTestHasAwait) {
+							smells.push({
+								type: "async-no-await",
+								line: asyncTestLine,
+								message: "Async test without await — promises may resolve after test completes",
+							});
+						}
+						inAsyncTest = false;
+					}
+				}
+			}
+		}
+	}
+
+	// Module-level mutable state: `let` at top level suggests shared test state
+	let moduleLetCount = 0;
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i]!;
+		if (MODULE_LET_RE.test(line)) {
+			moduleLetCount++;
+			if (moduleLetCount === 1) {
+				smells.push({
+					type: "shared-mutable-state",
+					line: i + 1,
+					message:
+						"Module-level `let` in test file — shared mutable state may cause test isolation issues",
+				});
+			}
+		}
+	}
+
+	// Large test file: suggests mixing concerns
+	if (lines.length > LARGE_TEST_FILE_LINES) {
+		smells.push({
+			type: "large-test-file",
+			line: 0,
+			message: `Test file has ${lines.length} lines (>${LARGE_TEST_FILE_LINES}) — consider splitting by concern`,
+		});
+	}
+
+	// Snapshot file bloat: check corresponding .snap file
+	try {
+		const snapDir = `${dirname(absPath)}/__snapshots__/`;
+		const snapFile = `${snapDir}${basename(absPath)}.snap`;
+		if (existsSync(snapFile)) {
+			const snapContent = readFileSync(snapFile, "utf-8");
+			if (snapContent.length > LARGE_SNAPSHOT_CHARS) {
+				smells.push({
+					type: "snapshot-bloat",
+					line: 0,
+					message: `Snapshot file is ${Math.round(snapContent.length / 1024)}KB — large snapshots capture implementation details`,
+				});
+			}
+		}
+	} catch {
+		/* fail-open */
 	}
 
 	return { testCount, assertionCount, avgAssertions, smells };

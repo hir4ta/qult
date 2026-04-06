@@ -13,9 +13,6 @@ import {
 import type { HookEvent } from "../types.ts";
 import { block } from "./respond.ts";
 
-// Escalation thresholds: advisory warnings become blocking after N occurrences
-const SECURITY_ESCALATION_THRESHOLD = 10;
-
 /** Source code extensions — non-source changes (version bumps, build artifacts) skip gates. */
 const SOURCE_EXTS = new Set([
 	".ts",
@@ -38,9 +35,6 @@ const SOURCE_EXTS = new Set([
 	".vue",
 	".svelte",
 ]);
-const DRIFT_ESCALATION_THRESHOLD = 8;
-const TEST_QUALITY_ESCALATION_THRESHOLD = 8;
-const DUPLICATION_ESCALATION_THRESHOLD = 8;
 
 /** Stop: block if pending-fixes, incomplete plan, or no review */
 export default async function stop(ev: HookEvent): Promise<void> {
@@ -124,7 +118,8 @@ export default async function stop(ev: HookEvent): Promise<void> {
 	}
 
 	// Block if human approval required but not recorded
-	if (hasSourceChanges && readLastReview()) {
+	const lastReview = readLastReview();
+	if (hasSourceChanges && lastReview) {
 		const config = loadConfig();
 		if (config.review.require_human_approval && !readHumanApproval()) {
 			block(
@@ -134,36 +129,38 @@ export default async function stop(ev: HookEvent): Promise<void> {
 	}
 
 	// Guide: suggest /qult:finish when review is complete (advisory, not blocking)
-	if (readLastReview()) {
+	if (lastReview) {
 		process.stderr.write(
 			"[qult] Review complete. Run /qult:finish for structured branch completion (merge/PR/hold/discard).\n",
 		);
 	}
 
 	// Escalation: block if excessive quality warnings accumulated (advisory → enforcement)
+	const escalation = loadConfig().escalation;
+
 	const securityCount = readEscalation("security_warning_count");
-	if (securityCount >= SECURITY_ESCALATION_THRESHOLD && !isGateDisabled("security-check")) {
+	if (securityCount >= escalation.security_threshold && !isGateDisabled("security-check")) {
 		block(
 			`${securityCount} security warnings emitted this session. Fix security issues before finishing.`,
 		);
 	}
 
 	const driftCount = readEscalation("drift_warning_count");
-	if (driftCount >= DRIFT_ESCALATION_THRESHOLD) {
+	if (driftCount >= escalation.drift_threshold) {
 		block(
 			`${driftCount} drift warnings emitted this session. Review scope and address drift before finishing.`,
 		);
 	}
 
 	const testQualityCount = readEscalation("test_quality_warning_count");
-	if (testQualityCount >= TEST_QUALITY_ESCALATION_THRESHOLD) {
+	if (testQualityCount >= escalation.test_quality_threshold) {
 		block(
 			`${testQualityCount} test quality warnings emitted this session. Improve test assertions before finishing.`,
 		);
 	}
 
 	const duplicationCount = readEscalation("duplication_warning_count");
-	if (duplicationCount >= DUPLICATION_ESCALATION_THRESHOLD) {
+	if (duplicationCount >= escalation.duplication_threshold) {
 		block(
 			`${duplicationCount} duplication warnings emitted this session. Extract shared code before finishing.`,
 		);

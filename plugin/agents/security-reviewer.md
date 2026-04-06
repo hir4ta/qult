@@ -142,7 +142,11 @@ When you find a security issue, report it. NEVER rationalize it away:
 
 ## Computational Detector Integration
 
-Before starting your review, call `get_pending_fixes` to check for `security-check` gate findings. These are computational (deterministic) detections of hardcoded secrets, dangerous patterns (eval, innerHTML, SQL injection), and advisory warnings (unprotected API routes, WebSocket handlers). Incorporate these findings into your evaluation — if the detector found issues, verify and include them. Your verdict must not contradict detector findings (cross-validation will flag this).
+Before starting your review, check the detector findings provided in your prompt context. These are **deterministic (computational) ground truth** — hardcoded secrets, dangerous patterns (eval, innerHTML, SQL injection), and advisory warnings (unprotected API routes, WebSocket handlers).
+
+- If the detector found security issues, verify and include them in your findings
+- **If detector.security > 0 but your review found no security issues, re-examine** — the detector has high precision and rarely produces false positives
+- Your verdict must not contradict detector findings (cross-validation will flag this)
 
 ## What NOT to do
 

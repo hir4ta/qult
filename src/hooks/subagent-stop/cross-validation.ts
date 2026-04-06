@@ -79,29 +79,38 @@ function checkQualityContradiction(output: string, contradictions: string[]): vo
 		const state = readSessionState();
 		const deadImports = state.dead_import_warning_count ?? 0;
 		const driftWarnings = state.drift_warning_count ?? 0;
+		const testQuality = state.test_quality_warning_count ?? 0;
+		const duplication = state.duplication_warning_count ?? 0;
 
-		if (deadImports >= 3) {
+		// Only flag contradiction when total warnings are significant (≥5)
+		// or a single type is overwhelming (≥5), to reduce false positives
+		const totalWarnings = deadImports + driftWarnings + testQuality + duplication;
+		if (totalWarnings < 5) return;
+
+		if (deadImports >= 5) {
 			contradictions.push(
 				`Quality reviewer declared "No issues found" but session has ${deadImports} dead-import warnings`,
 			);
 		}
-		if (driftWarnings >= 3) {
+		if (driftWarnings >= 5) {
 			contradictions.push(
 				`Quality reviewer declared "No issues found" but session has ${driftWarnings} convention drift warnings`,
 			);
 		}
-
-		const testQuality = state.test_quality_warning_count ?? 0;
-		if (testQuality >= 3) {
+		if (testQuality >= 5) {
 			contradictions.push(
 				`Quality reviewer declared "No issues found" but session has ${testQuality} test quality warnings`,
 			);
 		}
-
-		const duplication = state.duplication_warning_count ?? 0;
-		if (duplication >= 3) {
+		if (duplication >= 5) {
 			contradictions.push(
 				`Quality reviewer declared "No issues found" but session has ${duplication} duplication warnings`,
+			);
+		}
+		// Catch cases where no single type hits 5 but the total is significant
+		if (contradictions.length === 0 && totalWarnings >= 5) {
+			contradictions.push(
+				`Quality reviewer declared "No issues found" but session has ${totalWarnings} total quality warnings (dead-imports: ${deadImports}, drift: ${driftWarnings}, test-quality: ${testQuality}, duplication: ${duplication})`,
 			);
 		}
 	} catch {

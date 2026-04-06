@@ -23,17 +23,23 @@ afterEach(() => {
 	delete process.env.QULT_GATE_DEFAULT_TIMEOUT;
 	delete process.env.QULT_REVIEW_DIMENSION_FLOOR;
 	delete process.env.CLAUDE_PLUGIN_DATA;
+	delete process.env.QULT_ESCALATION_SECURITY;
+	delete process.env.QULT_ESCALATION_DRIFT;
+	delete process.env.QULT_ESCALATION_TEST_QUALITY;
+	delete process.env.QULT_ESCALATION_DUPLICATION;
 });
 
 describe("loadConfig", () => {
 	it("returns defaults when no config file exists", () => {
 		const config = loadConfig();
-		expect(config.review.score_threshold).toBe(34);
+		expect(config.review.score_threshold).toBe(30);
 		expect(config.review.max_iterations).toBe(3);
 		expect(config.review.required_changed_files).toBe(5);
 		expect(config.review.dimension_floor).toBe(4);
-		expect(config.gates.output_max_chars).toBe(2000);
+		expect(config.gates.output_max_chars).toBe(3500);
 		expect(config.gates.default_timeout).toBe(10000);
+		expect(config.escalation.security_threshold).toBe(10);
+		expect(config.escalation.drift_threshold).toBe(8);
 	});
 
 	it("reads from .qult/config.json", () => {
@@ -68,13 +74,13 @@ describe("loadConfig", () => {
 	it("ignores invalid env var values", () => {
 		process.env.QULT_REVIEW_SCORE_THRESHOLD = "not-a-number";
 		const config = loadConfig();
-		expect(config.review.score_threshold).toBe(34); // default
+		expect(config.review.score_threshold).toBe(30); // default
 	});
 
 	it("handles corrupt config file gracefully", () => {
 		writeFileSync(join(TEST_DIR, ".qult", "config.json"), "not json");
 		const config = loadConfig();
-		expect(config.review.score_threshold).toBe(34); // default
+		expect(config.review.score_threshold).toBe(30); // default
 	});
 
 	it("caches result across calls", () => {
@@ -107,7 +113,7 @@ describe("loadConfig", () => {
 		const config = loadConfig();
 		expect(config.review.dimension_floor).toBe(2);
 		// Other defaults preserved
-		expect(config.review.score_threshold).toBe(34);
+		expect(config.review.score_threshold).toBe(30);
 	});
 });
 
@@ -156,7 +162,7 @@ describe("CLAUDE_PLUGIN_DATA layer", () => {
 	it("skips when CLAUDE_PLUGIN_DATA is not set", () => {
 		delete process.env.CLAUDE_PLUGIN_DATA;
 		const config = loadConfig();
-		expect(config.review.score_threshold).toBe(34); // default
+		expect(config.review.score_threshold).toBe(30); // default
 	});
 
 	it("skips when preferences.json is missing", () => {
@@ -165,7 +171,7 @@ describe("CLAUDE_PLUGIN_DATA layer", () => {
 		// no preferences.json
 		process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
 		const config = loadConfig();
-		expect(config.review.score_threshold).toBe(34); // default
+		expect(config.review.score_threshold).toBe(30); // default
 	});
 
 	it("skips when preferences.json is corrupt", () => {
@@ -174,7 +180,7 @@ describe("CLAUDE_PLUGIN_DATA layer", () => {
 		writeFileSync(join(pluginDataDir, "preferences.json"), "not json");
 		process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
 		const config = loadConfig();
-		expect(config.review.score_threshold).toBe(34); // default
+		expect(config.review.score_threshold).toBe(30); // default
 	});
 });
 
@@ -221,5 +227,34 @@ describe("extra_path validation", () => {
 		);
 		const config = loadConfig();
 		expect(config.gates.extra_path).toEqual([".venv/bin", "/usr/local/bin"]);
+	});
+});
+
+describe("escalation config", () => {
+	it("reads escalation from config file", () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ escalation: { security_threshold: 5, drift_threshold: 3 } }),
+		);
+		const config = loadConfig();
+		expect(config.escalation.security_threshold).toBe(5);
+		expect(config.escalation.drift_threshold).toBe(3);
+		expect(config.escalation.test_quality_threshold).toBe(8);
+	});
+
+	it("env vars override escalation config", () => {
+		process.env.QULT_ESCALATION_SECURITY = "15";
+		const config = loadConfig();
+		expect(config.escalation.security_threshold).toBe(15);
+	});
+
+	it("enforces minimum of 1 for escalation thresholds", () => {
+		writeFileSync(
+			join(TEST_DIR, ".qult", "config.json"),
+			JSON.stringify({ escalation: { security_threshold: 0, drift_threshold: -5 } }),
+		);
+		const config = loadConfig();
+		expect(config.escalation.security_threshold).toBe(1);
+		expect(config.escalation.drift_threshold).toBe(1);
 	});
 });

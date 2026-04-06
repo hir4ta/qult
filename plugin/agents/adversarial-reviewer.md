@@ -1,7 +1,7 @@
 ---
 name: adversarial-reviewer
 description: "Devil's advocate reviewer. Finds edge cases, logic errors, and silent failures that other reviewers missed. Use as Stage 4 of /qult:review for catching subtle bugs. NOT for spec compliance, code quality, or security — those are separate stages."
-model: haiku
+model: sonnet
 allowed-tools:
   - Read
   - Glob
@@ -39,6 +39,8 @@ For each function, try to construct inputs that:
 - Exercise error paths (network failure, disk full, permission denied)
 - Race against concurrent modifications
 - Exploit order-of-operations assumptions
+- **Concurrency/timing**: If code uses shared state (globals, singletons, caches, files), construct scenarios with two parallel callers — can they corrupt each other's state?
+- **Floating-point traps**: `0.1 + 0.2 !== 0.3`, currency calculations with decimals, comparison with `===` on computed floats
 
 ### Step 3: Check Test Coverage
 

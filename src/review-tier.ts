@@ -6,23 +6,55 @@ export type ReviewTier = "skip" | "light" | "standard" | "deep";
 /** Deep review threshold (files). */
 const DEEP_THRESHOLD = 8;
 
+/** File path patterns that indicate high-risk changes requiring deeper review. */
+const HIGH_RISK_RE =
+	/(?:^|\/)(?:auth|security|crypto|secret|permission|credential|session|token|password|oauth|saml|jwt)/i;
+
+/** Source code extensions for test-absence escalation. */
+const SOURCE_EXT_RE =
+	/\.(?:ts|tsx|js|jsx|mts|cts|mjs|cjs|py|pyi|go|rs|rb|java|kt|php|cs|vue|svelte)$/;
+
 /**
  * Determine review tier based on change scope.
  *
  * - skip: 1-2 files, no plan → no review needed
  * - light: 3+ files below required_changed_files, no plan → 2-stage (Spec + Quality)
  * - standard: >= required_changed_files or plan active → full 4-stage review
- * - deep: 8+ files → 4-stage + on_review gates (e2e)
+ * - deep: 8+ files, or high-risk files changed, or code changes without tests → 4-stage + on_review gates (e2e)
  */
 export function computeReviewTier(
 	changedFiles: number,
 	hasPlan: boolean,
 	config: QultConfig,
+	changedFilePaths?: string[],
 ): ReviewTier {
 	const threshold = config.review.required_changed_files;
 
 	// Deep: large changes always get full treatment + e2e
 	if (changedFiles >= DEEP_THRESHOLD) return "deep";
+
+	// Risk-based escalation (when file paths are available)
+	if (changedFilePaths && changedFilePaths.length > 0) {
+		// High-risk files (auth, security, crypto, etc.) → deep
+		if (changedFilePaths.some((p) => HIGH_RISK_RE.test(p))) return "deep";
+
+		// Code changes without any test changes → escalate one tier
+		const hasCodeChanges = changedFilePaths.some(
+			(p) =>
+				SOURCE_EXT_RE.test(p) &&
+				!p.includes(".test.") &&
+				!p.includes(".spec.") &&
+				!p.includes("__tests__"),
+		);
+		const hasTestChanges = changedFilePaths.some(
+			(p) => p.includes(".test.") || p.includes(".spec.") || p.includes("__tests__"),
+		);
+		if (hasCodeChanges && !hasTestChanges && changedFiles >= 3) {
+			// Escalate: light → standard, standard → deep
+			if (hasPlan || changedFiles >= threshold) return "deep";
+			return "standard";
+		}
+	}
 
 	// Standard: plan active or at/above threshold
 	if (hasPlan || changedFiles >= threshold) return "standard";

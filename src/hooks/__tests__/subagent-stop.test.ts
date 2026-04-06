@@ -579,7 +579,7 @@ describe("plan-evaluator SubagentStop", () => {
 			hook_type: "SubagentStop",
 			agent_type: "qult-plan-evaluator",
 			last_assistant_message:
-				"Plan: PASS\nScore: Feasibility=4 Completeness=3 Clarity=3\n\nNo issues found.",
+				"Plan: PASS\nScore: Feasibility=4 Completeness=4 Clarity=4\n\nNo issues found.",
 		});
 		expect(exitCode).toBeNull();
 	});

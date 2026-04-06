@@ -242,7 +242,7 @@ export function isReviewRequired(): boolean {
 	const state = readSessionState();
 	const changedCount = state.changed_file_paths?.length ?? 0;
 	const hasPlan = getActivePlan() !== null;
-	const tier = computeReviewTier(changedCount, hasPlan, loadConfig());
+	const tier = computeReviewTier(changedCount, hasPlan, loadConfig(), state.changed_file_paths);
 	return tier === "standard" || tier === "deep";
 }
 
