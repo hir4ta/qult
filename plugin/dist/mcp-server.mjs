@@ -8,23 +8,29 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 var DEFAULTS = {
   review: {
-    score_threshold: 34,
+    score_threshold: 30,
     max_iterations: 3,
     required_changed_files: 5,
     dimension_floor: 4,
     require_human_approval: false
   },
   plan_eval: {
-    score_threshold: 10,
+    score_threshold: 12,
     max_iterations: 2,
     registry_files: []
   },
   gates: {
-    output_max_chars: 2000,
+    output_max_chars: 3500,
     default_timeout: 1e4,
     test_on_edit: false,
     test_on_edit_timeout: 15000,
     extra_path: []
+  },
+  escalation: {
+    security_threshold: 10,
+    drift_threshold: 8,
+    test_quality_threshold: 8,
+    duplication_threshold: 8
   }
 };
 function applyConfigLayer(config, raw) {
@@ -62,6 +68,17 @@ function applyConfigLayer(config, raw) {
       config.gates.test_on_edit_timeout = g.test_on_edit_timeout;
     if (Array.isArray(g.extra_path))
       config.gates.extra_path = g.extra_path.filter((p) => typeof p === "string" && p.trim().length > 0);
+  }
+  if (raw.escalation && typeof raw.escalation === "object") {
+    const e = raw.escalation;
+    if (typeof e.security_threshold === "number")
+      config.escalation.security_threshold = Math.max(1, e.security_threshold);
+    if (typeof e.drift_threshold === "number")
+      config.escalation.drift_threshold = Math.max(1, e.drift_threshold);
+    if (typeof e.test_quality_threshold === "number")
+      config.escalation.test_quality_threshold = Math.max(1, e.test_quality_threshold);
+    if (typeof e.duplication_threshold === "number")
+      config.escalation.duplication_threshold = Math.max(1, e.duplication_threshold);
   }
 }
 var _cache = null;
@@ -114,6 +131,18 @@ function loadConfig() {
   else if (testOnEditEnv === "0" || testOnEditEnv === "false")
     config.gates.test_on_edit = false;
   config.gates.test_on_edit_timeout = envInt("QULT_TEST_ON_EDIT_TIMEOUT") ?? config.gates.test_on_edit_timeout;
+  const secEsc = envInt("QULT_ESCALATION_SECURITY");
+  if (secEsc !== undefined)
+    config.escalation.security_threshold = Math.max(1, secEsc);
+  const driftEsc = envInt("QULT_ESCALATION_DRIFT");
+  if (driftEsc !== undefined)
+    config.escalation.drift_threshold = Math.max(1, driftEsc);
+  const tqEsc = envInt("QULT_ESCALATION_TEST_QUALITY");
+  if (tqEsc !== undefined)
+    config.escalation.test_quality_threshold = Math.max(1, tqEsc);
+  const dupEsc = envInt("QULT_ESCALATION_DUPLICATION");
+  if (dupEsc !== undefined)
+    config.escalation.duplication_threshold = Math.max(1, dupEsc);
   _cache = config;
   return config;
 }

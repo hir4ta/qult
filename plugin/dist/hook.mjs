@@ -75,6 +75,17 @@ function applyConfigLayer(config, raw) {
     if (Array.isArray(g.extra_path))
       config.gates.extra_path = g.extra_path.filter((p) => typeof p === "string" && p.trim().length > 0);
   }
+  if (raw.escalation && typeof raw.escalation === "object") {
+    const e = raw.escalation;
+    if (typeof e.security_threshold === "number")
+      config.escalation.security_threshold = Math.max(1, e.security_threshold);
+    if (typeof e.drift_threshold === "number")
+      config.escalation.drift_threshold = Math.max(1, e.drift_threshold);
+    if (typeof e.test_quality_threshold === "number")
+      config.escalation.test_quality_threshold = Math.max(1, e.test_quality_threshold);
+    if (typeof e.duplication_threshold === "number")
+      config.escalation.duplication_threshold = Math.max(1, e.duplication_threshold);
+  }
 }
 function loadConfig() {
   if (_cache)
@@ -125,6 +136,18 @@ function loadConfig() {
   else if (testOnEditEnv === "0" || testOnEditEnv === "false")
     config.gates.test_on_edit = false;
   config.gates.test_on_edit_timeout = envInt("QULT_TEST_ON_EDIT_TIMEOUT") ?? config.gates.test_on_edit_timeout;
+  const secEsc = envInt("QULT_ESCALATION_SECURITY");
+  if (secEsc !== undefined)
+    config.escalation.security_threshold = Math.max(1, secEsc);
+  const driftEsc = envInt("QULT_ESCALATION_DRIFT");
+  if (driftEsc !== undefined)
+    config.escalation.drift_threshold = Math.max(1, driftEsc);
+  const tqEsc = envInt("QULT_ESCALATION_TEST_QUALITY");
+  if (tqEsc !== undefined)
+    config.escalation.test_quality_threshold = Math.max(1, tqEsc);
+  const dupEsc = envInt("QULT_ESCALATION_DUPLICATION");
+  if (dupEsc !== undefined)
+    config.escalation.duplication_threshold = Math.max(1, dupEsc);
   _cache = config;
   return config;
 }
@@ -132,23 +155,29 @@ var DEFAULTS, _cache = null;
 var init_config = __esm(() => {
   DEFAULTS = {
     review: {
-      score_threshold: 34,
+      score_threshold: 30,
       max_iterations: 3,
       required_changed_files: 5,
       dimension_floor: 4,
       require_human_approval: false
     },
     plan_eval: {
-      score_threshold: 10,
+      score_threshold: 12,
       max_iterations: 2,
       registry_files: []
     },
     gates: {
-      output_max_chars: 2000,
+      output_max_chars: 3500,
       default_timeout: 1e4,
       test_on_edit: false,
       test_on_edit_timeout: 15000,
       extra_path: []
+    },
+    escalation: {
+      security_threshold: 10,
+      drift_threshold: 8,
+      test_quality_threshold: 8,
+      duplication_threshold: 8
     }
   };
 });
@@ -380,17 +409,32 @@ var init_plan_status = __esm(() => {
 });
 
 // src/review-tier.ts
-function computeReviewTier(changedFiles, hasPlan, config) {
+function computeReviewTier(changedFiles, hasPlan, config, changedFilePaths) {
   const threshold = config.review.required_changed_files;
   if (changedFiles >= DEEP_THRESHOLD)
     return "deep";
+  if (changedFilePaths && changedFilePaths.length > 0) {
+    if (changedFilePaths.some((p) => HIGH_RISK_RE.test(p)))
+      return "deep";
+    const hasCodeChanges = changedFilePaths.some((p) => SOURCE_EXT_RE.test(p) && !p.includes(".test.") && !p.includes(".spec.") && !p.includes("__tests__"));
+    const hasTestChanges = changedFilePaths.some((p) => p.includes(".test.") || p.includes(".spec.") || p.includes("__tests__"));
+    if (hasCodeChanges && !hasTestChanges && changedFiles >= 3) {
+      if (hasPlan || changedFiles >= threshold)
+        return "deep";
+      return "standard";
+    }
+  }
   if (hasPlan || changedFiles >= threshold)
     return "standard";
   if (changedFiles >= 3)
     return "light";
   return "skip";
 }
-var DEEP_THRESHOLD = 8;
+var DEEP_THRESHOLD = 8, HIGH_RISK_RE, SOURCE_EXT_RE;
+var init_review_tier = __esm(() => {
+  HIGH_RISK_RE = /(?:^|\/)(?:auth|security|crypto|secret|permission|credential|session|token|password|oauth|saml|jwt)/i;
+  SOURCE_EXT_RE = /\.(?:ts|tsx|js|jsx|mts|cts|mjs|cjs|py|pyi|go|rs|rb|java|kt|php|cs|vue|svelte)$/;
+});
 
 // src/state/session-state.ts
 import { existsSync as existsSync6, readFileSync as readFileSync5 } from "node:fs";
@@ -505,7 +549,7 @@ function isReviewRequired() {
   const state = readSessionState();
   const changedCount = state.changed_file_paths?.length ?? 0;
   const hasPlan = getActivePlan() !== null;
-  const tier = computeReviewTier(changedCount, hasPlan, loadConfig());
+  const tier = computeReviewTier(changedCount, hasPlan, loadConfig(), state.changed_file_paths);
   return tier === "standard" || tier === "deep";
 }
 function readLastTestPass() {
@@ -692,6 +736,7 @@ var STATE_DIR2 = ".qult/.state", FILE = "session-state.json", _cache4 = null, _d
 var init_session_state = __esm(() => {
   init_config();
   init_load();
+  init_review_tier();
   init_atomic_write();
   init_plan_status();
   TOOL_EXTS = [
@@ -910,7 +955,10 @@ function runGateAsync(name, gate, file) {
       const duration_ms = Date.now() - start;
       if (err) {
         const raw = (stdout ?? "") + (stderr ?? "");
-        const output = smartTruncate(deduplicateErrors(raw), maxChars) || `Exit code ${err.code ?? 1}`;
+        const isTimeout = "killed" in err && err.killed && duration_ms >= timeout - 100;
+        const prefix = isTimeout ? `TIMEOUT after ${timeout}ms
+` : "";
+        const output = prefix + (smartTruncate(deduplicateErrors(raw), maxChars) || `Exit code ${err.code ?? 1}`);
         resolve({ name, passed: false, output, duration_ms });
       } else {
         const output = smartTruncate(stdout ?? "", maxChars);
@@ -944,7 +992,10 @@ function runGate(name, gate, file) {
     const stdout = "stdout" in e && typeof e.stdout === "string" ? e.stdout : "";
     const stderr = "stderr" in e && typeof e.stderr === "string" ? e.stderr : "";
     const status = "status" in e && typeof e.status === "number" ? e.status : 1;
-    const output = smartTruncate(deduplicateErrors(stdout + stderr), maxChars) || `Exit code ${status}`;
+    const isTimeout = "signal" in e && e.signal === "SIGTERM" && duration_ms >= timeout - 100;
+    const prefix = isTimeout ? `TIMEOUT after ${timeout}ms
+` : "";
+    const output = prefix + (smartTruncate(deduplicateErrors(stdout + stderr), maxChars) || `Exit code ${status}`);
     return {
       name,
       passed: false,
@@ -956,7 +1007,7 @@ function runGate(name, gate, file) {
 var ERROR_CODE_RE;
 var init_runner = __esm(() => {
   init_config();
-  ERROR_CODE_RE = /\b([A-Z]{1,4}\d{4,5})\b/;
+  ERROR_CODE_RE = /\b([A-Z]{1,4}\d{1,5}|ERR_[A-Z_]+|E\d{3,5})\b/;
 });
 
 // src/hooks/detectors/convention-check.ts
@@ -2001,6 +2052,30 @@ var init_security_check = __esm(() => {
       re: /dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*(?!["'`])[a-zA-Z_$]/,
       desc: "dangerouslySetInnerHTML with dynamic value — XSS risk",
       exts: JS_TS_EXTS
+    },
+    {
+      re: /password\s*(?:===|!==|==|!=)\s*(?!null\b|undefined\b|["'`])[a-zA-Z_$]/i,
+      desc: "Password compared with === instead of constant-time comparison — timing attack risk",
+      exts: JS_TS_EXTS
+    },
+    {
+      re: /[?&](?:token|sessionId|session_id|auth_token|access_token)=/i,
+      desc: "Session/auth token in URL query parameter — token leakage via referrer/logs"
+    },
+    {
+      re: /JSON\.parse\s*\(\s*(?:req(?:uest)?\.body|req\.query|req\.params|ctx\.request\.body)/,
+      desc: "JSON.parse on raw user input without validation — insecure deserialization risk",
+      exts: JS_TS_EXTS
+    },
+    {
+      re: /(?:pickle\.loads?|yaml\.(?:load|unsafe_load))\s*\(/,
+      desc: "Unsafe deserialization (pickle/yaml.load) — arbitrary code execution risk",
+      exts: PY_EXTS3
+    },
+    {
+      re: /(?:res\.(?:json|send|write)|response\.(?:json|send|write))\s*\(.*process\.env/,
+      desc: "process.env leaked in HTTP response — environment variable disclosure",
+      exts: JS_TS_EXTS
     }
   ];
   ADVISORY_PATTERNS = [
@@ -2693,34 +2768,36 @@ Consider using TaskCreate for Verify test execution.
       }
     }
   }
-  if (hasSourceChanges2 && readLastReview()) {
+  const lastReview = readLastReview();
+  if (hasSourceChanges2 && lastReview) {
     const config = loadConfig();
     if (config.review.require_human_approval && !readHumanApproval()) {
       block("Human approval required. The architect must review the changes and call record_human_approval before finishing.");
     }
   }
-  if (readLastReview()) {
+  if (lastReview) {
     process.stderr.write(`[qult] Review complete. Run /qult:finish for structured branch completion (merge/PR/hold/discard).
 `);
   }
+  const escalation = loadConfig().escalation;
   const securityCount = readEscalation("security_warning_count");
-  if (securityCount >= SECURITY_ESCALATION_THRESHOLD && !isGateDisabled("security-check")) {
+  if (securityCount >= escalation.security_threshold && !isGateDisabled("security-check")) {
     block(`${securityCount} security warnings emitted this session. Fix security issues before finishing.`);
   }
   const driftCount = readEscalation("drift_warning_count");
-  if (driftCount >= DRIFT_ESCALATION_THRESHOLD) {
+  if (driftCount >= escalation.drift_threshold) {
     block(`${driftCount} drift warnings emitted this session. Review scope and address drift before finishing.`);
   }
   const testQualityCount = readEscalation("test_quality_warning_count");
-  if (testQualityCount >= TEST_QUALITY_ESCALATION_THRESHOLD) {
+  if (testQualityCount >= escalation.test_quality_threshold) {
     block(`${testQualityCount} test quality warnings emitted this session. Improve test assertions before finishing.`);
   }
   const duplicationCount = readEscalation("duplication_warning_count");
-  if (duplicationCount >= DUPLICATION_ESCALATION_THRESHOLD) {
+  if (duplicationCount >= escalation.duplication_threshold) {
     block(`${duplicationCount} duplication warnings emitted this session. Extract shared code before finishing.`);
   }
 }
-var SECURITY_ESCALATION_THRESHOLD = 10, SOURCE_EXTS2, DRIFT_ESCALATION_THRESHOLD = 8, TEST_QUALITY_ESCALATION_THRESHOLD = 8, DUPLICATION_ESCALATION_THRESHOLD = 8;
+var SOURCE_EXTS2;
 var init_stop = __esm(() => {
   init_config();
   init_pending_fixes();
@@ -2890,7 +2967,9 @@ function groundClaims(output, cwd) {
             break;
           }
         }
-        if (!fileContent.includes(funcName)) {
+        const escaped = funcName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const wordRe = new RegExp(`\\b${escaped}\\b`);
+        if (!wordRe.test(fileContent)) {
           ungrounded.push(`Symbol \`${funcName}\` not found in ${filePath2}`);
         }
       }
@@ -2959,19 +3038,25 @@ function checkQualityContradiction(output, contradictions) {
     const state = readSessionState();
     const deadImports = state.dead_import_warning_count ?? 0;
     const driftWarnings = state.drift_warning_count ?? 0;
-    if (deadImports >= 3) {
+    const testQuality = state.test_quality_warning_count ?? 0;
+    const duplication = state.duplication_warning_count ?? 0;
+    const totalWarnings = deadImports + driftWarnings + testQuality + duplication;
+    if (totalWarnings < 5)
+      return;
+    if (deadImports >= 5) {
       contradictions.push(`Quality reviewer declared "No issues found" but session has ${deadImports} dead-import warnings`);
     }
-    if (driftWarnings >= 3) {
+    if (driftWarnings >= 5) {
       contradictions.push(`Quality reviewer declared "No issues found" but session has ${driftWarnings} convention drift warnings`);
     }
-    const testQuality = state.test_quality_warning_count ?? 0;
-    if (testQuality >= 3) {
+    if (testQuality >= 5) {
       contradictions.push(`Quality reviewer declared "No issues found" but session has ${testQuality} test quality warnings`);
     }
-    const duplication = state.duplication_warning_count ?? 0;
-    if (duplication >= 3) {
+    if (duplication >= 5) {
       contradictions.push(`Quality reviewer declared "No issues found" but session has ${duplication} duplication warnings`);
+    }
+    if (contradictions.length === 0 && totalWarnings >= 5) {
+      contradictions.push(`Quality reviewer declared "No issues found" but session has ${totalWarnings} total quality warnings (dead-imports: ${deadImports}, drift: ${driftWarnings}, test-quality: ${testQuality}, duplication: ${duplication})`);
     }
   } catch {}
 }
@@ -3666,7 +3751,7 @@ var init_subagent_stop = __esm(() => {
 
 // src/hooks/detectors/test-quality-check.ts
 import { existsSync as existsSync17, readFileSync as readFileSync14 } from "node:fs";
-import { resolve as resolve5 } from "node:path";
+import { basename as basename3, dirname as dirname5, resolve as resolve5 } from "node:path";
 function countAssertionsOutsideSetup(code) {
   const lines = code.split(`
 `);
@@ -3791,6 +3876,75 @@ function analyzeTestQuality(file) {
       message: `Mock overuse: ${mockCount} mocks vs ${assertionCount} assertions — tests may verify mocks, not behavior`
     });
   }
+  let inAsyncTest = false;
+  let asyncTestLine = 0;
+  let asyncTestHasAwait = false;
+  let asyncBraceDepth = 0;
+  for (let i = 0;i < lines.length; i++) {
+    const line = lines[i];
+    if (!inAsyncTest && ASYNC_TEST_RE.test(line)) {
+      inAsyncTest = true;
+      asyncTestLine = i + 1;
+      asyncTestHasAwait = false;
+      asyncBraceDepth = 0;
+    }
+    if (inAsyncTest) {
+      if (AWAIT_RE.test(line))
+        asyncTestHasAwait = true;
+      for (const ch of line) {
+        if (ch === "{")
+          asyncBraceDepth++;
+        else if (ch === "}") {
+          asyncBraceDepth--;
+          if (asyncBraceDepth <= 0) {
+            if (!asyncTestHasAwait) {
+              smells.push({
+                type: "async-no-await",
+                line: asyncTestLine,
+                message: "Async test without await — promises may resolve after test completes"
+              });
+            }
+            inAsyncTest = false;
+          }
+        }
+      }
+    }
+  }
+  let moduleLetCount = 0;
+  for (let i = 0;i < lines.length; i++) {
+    const line = lines[i];
+    if (MODULE_LET_RE.test(line)) {
+      moduleLetCount++;
+      if (moduleLetCount === 1) {
+        smells.push({
+          type: "shared-mutable-state",
+          line: i + 1,
+          message: "Module-level `let` in test file — shared mutable state may cause test isolation issues"
+        });
+      }
+    }
+  }
+  if (lines.length > LARGE_TEST_FILE_LINES) {
+    smells.push({
+      type: "large-test-file",
+      line: 0,
+      message: `Test file has ${lines.length} lines (>${LARGE_TEST_FILE_LINES}) — consider splitting by concern`
+    });
+  }
+  try {
+    const snapDir = `${dirname5(absPath)}/__snapshots__/`;
+    const snapFile = `${snapDir}${basename3(absPath)}.snap`;
+    if (existsSync17(snapFile)) {
+      const snapContent = readFileSync14(snapFile, "utf-8");
+      if (snapContent.length > LARGE_SNAPSHOT_CHARS) {
+        smells.push({
+          type: "snapshot-bloat",
+          line: 0,
+          message: `Snapshot file is ${Math.round(snapContent.length / 1024)}KB — large snapshots capture implementation details`
+        });
+      }
+    }
+  } catch {}
   return { testCount, assertionCount, avgAssertions, smells };
 }
 function formatTestQualityWarnings(file, result, taskKey) {
@@ -3816,7 +3970,7 @@ function formatTestQualityWarnings(file, result, taskKey) {
   }
   return warnings;
 }
-var MAX_CHECK_SIZE4 = 500000, ASSERTION_RE, TEST_CASE_RE, WEAK_MATCHERS, TRIVIAL_ASSERTION_RE, EMPTY_TEST_RE, MOCK_RE, ALWAYS_TRUE_RE, CONSTANT_SELF_RE, SNAPSHOT_RE, IMPL_COUPLED_RE, SETUP_BLOCK_RE;
+var MAX_CHECK_SIZE4 = 500000, ASSERTION_RE, TEST_CASE_RE, WEAK_MATCHERS, TRIVIAL_ASSERTION_RE, EMPTY_TEST_RE, MOCK_RE, ALWAYS_TRUE_RE, CONSTANT_SELF_RE, SNAPSHOT_RE, IMPL_COUPLED_RE, ASYNC_TEST_RE, AWAIT_RE, MODULE_LET_RE, LARGE_TEST_FILE_LINES = 500, LARGE_SNAPSHOT_CHARS = 5000, SETUP_BLOCK_RE;
 var init_test_quality_check = __esm(() => {
   ASSERTION_RE = /\b(expect|assert|should)\s*[.(]/g;
   TEST_CASE_RE = /\b(it|test)\s*\(/g;
@@ -3835,6 +3989,9 @@ var init_test_quality_check = __esm(() => {
   CONSTANT_SELF_RE = /expect\s*\(\s*(["'`][^"'`]*["'`]|\d+)\s*\)\s*\.(?:toBe|toEqual)\s*\(\s*\1\s*\)/;
   SNAPSHOT_RE = /\.toMatchSnapshot\s*\(|\.toMatchInlineSnapshot\s*\(/g;
   IMPL_COUPLED_RE = /expect\s*\(\s*\w+\s*\)\s*\.(?:toHaveBeenCalled|toHaveBeenCalledWith|toHaveBeenCalledTimes)\s*\(/;
+  ASYNC_TEST_RE = /\b(?:it|test)\s*\(\s*["'`][^"'`]*["'`]\s*,\s*async\s/;
+  AWAIT_RE = /\bawait\b/;
+  MODULE_LET_RE = /^let\s+\w+\s*(?:[:=])/;
   SETUP_BLOCK_RE = /\b(beforeEach|afterEach|beforeAll|afterAll)\s*\(/;
 });
 
