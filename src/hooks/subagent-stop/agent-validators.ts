@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, normalize } from "node:path";
 import { loadConfig } from "../../config.ts";
 import { atomicWriteJson } from "../../state/atomic-write.ts";
 import { checkCalibration, recordCalibration } from "../../state/calibration.ts";
@@ -281,16 +281,8 @@ function validateStageReviewer(
 	if (passRe.test(output) && scores) {
 		const scoreEntries = scores as Record<string, number>;
 
-		// Record stage scores BEFORE floor check.
-		// block() throws, so recordStageScores must come first to persist scores.
-		// This is intentional: /qult:review always reruns all 3 stages per cycle,
-		// so partial stage scores are cleared at next aggregate check.
-		try {
-			recordStageScores(stageName, scoreEntries);
-		} catch {
-			/* fail-open */
-		}
-
+		// Record scores AFTER floor check: if block() fires it throws, skipping recordStageScores,
+		// so no partial state persists when a dimension is below the floor.
 		const floor = loadConfig().review.dimension_floor;
 		const belowFloor = Object.entries(scoreEntries).filter(
 			([, v]) => typeof v === "number" && v < floor,
@@ -301,6 +293,13 @@ function validateStageReviewer(
 			block(
 				`${stageName}: PASS but ${dims} below minimum ${floor}/5. Fix these dimensions and re-run /qult:review.`,
 			);
+		}
+
+		// Record stage scores AFTER floor check passes — ensures no partial state
+		try {
+			recordStageScores(stageName, scoreEntries);
+		} catch {
+			/* fail-open */
 		}
 
 		// Score-findings consistency check
@@ -542,12 +541,13 @@ const MAX_FINDINGS = 100;
 let _currentFindings: FindingRecord[] = [];
 
 /** Extract findings from reviewer output and cache for persistence.
- *  Separator: em-dash (—) or en-dash (–) only. Plain hyphen excluded to avoid misparsing hyphenated filenames. */
+ *  Separator: em-dash (—), en-dash (–), or plain hyphen surrounded by spaces. */
 export function extractFindings(output: string, stageName: string): void {
-	const findingRe = /\[(critical|high|medium|low)\]\s*(\S+?)(?::\d+)?\s+[—–]\s+(.+?)(?:\n|$)/gi;
+	const findingRe =
+		/\[(critical|high|medium|low)\]\s*(\S+?)(?::\d+)?\s+(?:[—–]|\s-\s)\s*(.+?)(?:\n|$)/gi;
 	for (const match of output.matchAll(findingRe)) {
 		_currentFindings.push({
-			file: match[2]!,
+			file: normalize(match[2]!), // normalize paths (./src/file.ts → src/file.ts)
 			severity: match[1]!.toLowerCase(),
 			description: match[3]!.trim().slice(0, 200),
 			stage: stageName,

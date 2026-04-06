@@ -95,14 +95,20 @@ function loadConfig() {
         applyConfigLayer(config, raw);
       }
     }
-  } catch {}
+  } catch (e) {
+    process.stderr.write(`[qult] Warning: invalid preferences.json, using defaults: ${e instanceof Error ? e.message : "parse error"}
+`);
+  }
   try {
     const configPath = join(process.cwd(), ".qult", "config.json");
     if (existsSync(configPath)) {
       const raw = JSON.parse(readFileSync(configPath, "utf-8"));
       applyConfigLayer(config, raw);
     }
-  } catch {}
+  } catch (e) {
+    process.stderr.write(`[qult] Warning: invalid .qult/config.json, using defaults: ${e instanceof Error ? e.message : "parse error"}
+`);
+  }
   const envInt = (key) => {
     const val = process.env[key];
     if (val === undefined)
@@ -426,12 +432,13 @@ function getLatestPlanPath() {
   try {
     const candidates = [];
     const projectDir = join4(process.cwd(), ".claude", "plans");
-    candidates.push(...scanPlanDir(projectDir));
+    const projectPlans = scanPlanDir(projectDir);
+    candidates.push(...projectPlans);
     const envDir = process.env.CLAUDE_PLANS_DIR;
     if (envDir) {
       candidates.push(...scanPlanDir(envDir));
     }
-    if (!_disableHomeFallback) {
+    if (!_disableHomeFallback && projectPlans.length === 0 && candidates.length === 0) {
       try {
         const homeDir = join4(homedir(), ".claude", "plans");
         const homeFiles = scanPlanDir(homeDir);
@@ -751,13 +758,13 @@ function handleTool(name, cwd, args) {
       if (!gateName) {
         return { isError: true, content: [{ type: "text", text: "Missing gate_name parameter." }] };
       }
-      if (!reason || reason.length < 10) {
+      if (!reason || reason.length < 10 || new Set(reason).size < 5) {
         return {
           isError: true,
           content: [
             {
               type: "text",
-              text: "Missing or too short reason parameter (min 10 chars). Explain WHY the gate should be disabled."
+              text: "Missing or insufficient reason parameter (min 10 chars, min 5 unique characters). Explain WHY the gate should be disabled."
             }
           ]
         };
@@ -873,13 +880,13 @@ function handleTool(name, cwd, args) {
     }
     case "clear_pending_fixes": {
       const reason = typeof args?.reason === "string" ? args.reason : null;
-      if (!reason || reason.length < 10) {
+      if (!reason || reason.length < 10 || new Set(reason).size < 5) {
         return {
           isError: true,
           content: [
             {
               type: "text",
-              text: "Missing or too short reason parameter (min 10 chars). Explain WHY pending fixes should be cleared."
+              text: "Missing or insufficient reason parameter (min 10 chars, min 5 unique characters). Explain WHY pending fixes should be cleared."
             }
           ]
         };

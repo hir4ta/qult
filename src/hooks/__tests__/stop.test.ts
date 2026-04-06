@@ -115,7 +115,7 @@ describe("stop hook", () => {
 		expect(stderrCapture.join("")).toContain("TaskCreate");
 	});
 
-	it("allows when plan tasks have Verify results recorded", async () => {
+	it("allows when plan tasks have passing Verify results recorded", async () => {
 		const planDir = join(TEST_DIR, ".claude", "plans");
 		mkdirSync(planDir, { recursive: true });
 		writeFileSync(
@@ -127,13 +127,43 @@ describe("stop hook", () => {
 				"- **Verify**: src/__tests__/foo.test.ts:testFoo",
 			].join("\n"),
 		);
+		recordChangedFile(`${TEST_DIR}/src/foo.ts`);
 		recordReview();
-		recordTaskVerifyResult("Task 1", false);
+		recordTaskVerifyResult("Task 1", true);
 
 		const handler = (await import("../stop.ts")).default;
 		await handler({ hook_type: "Stop" });
 
 		expect(exitCode).toBeNull();
+	});
+
+	it("blocks when plan task Verify test failed", async () => {
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			[
+				"## Tasks",
+				"### Task 1: Add feature [done]",
+				"- **File**: src/foo.ts",
+				"- **Verify**: src/__tests__/foo.test.ts:testFoo",
+			].join("\n"),
+		);
+		recordChangedFile(`${TEST_DIR}/src/foo.ts`);
+		recordReview();
+		recordTaskVerifyResult("Task 1", false);
+
+		const handler = (await import("../stop.ts")).default;
+		try {
+			await handler({ hook_type: "Stop" });
+		} catch {
+			// process.exit(2)
+		}
+
+		expect(exitCode).toBe(2);
+		const errOutput = stderrCapture.join("");
+		expect(errOutput).toContain("failing Verify tests");
+		expect(errOutput).toContain("Task 1");
 	});
 
 	it("allows when plan tasks have no Verify field", async () => {

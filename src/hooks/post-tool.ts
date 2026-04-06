@@ -306,7 +306,8 @@ function checkOverEngineering(): void {
 	const unplannedCount = changed.filter((f) => !planFiles.has(f)).length;
 	const planTaskCount = plan.tasks.filter((t) => t.file).length;
 
-	if (unplannedCount > 5 || totalChanged > planTaskCount * 2) {
+	const overEngThreshold = loadConfig().review.required_changed_files;
+	if (unplannedCount > overEngThreshold || totalChanged > planTaskCount * 2) {
 		process.stderr.write(
 			`[qult] Over-engineering risk: ${unplannedCount} unplanned file(s) out of ${totalChanged} changed. Review scope.\n`,
 		);

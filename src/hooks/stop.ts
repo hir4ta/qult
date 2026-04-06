@@ -77,14 +77,25 @@ export default async function stop(ev: HookEvent): Promise<void> {
 		const doneTasks = plan.tasks.filter((t) => t.status === "done" && t.verify?.includes(":"));
 		const tracked: typeof doneTasks = [];
 		const untracked: typeof doneTasks = [];
+		const failed: { task: (typeof doneTasks)[number]; key: string }[] = [];
 		for (const t of doneTasks) {
 			const key = t.taskNumber != null ? `Task ${t.taskNumber}` : t.name;
 			const result = readTaskVerifyResult(key);
 			if (result !== null) {
 				tracked.push(t);
+				// Block if Verify test was tracked but did NOT pass
+				if (result.passed !== true) {
+					failed.push({ task: t, key });
+				}
 			} else {
 				untracked.push(t);
 			}
+		}
+		if (failed.length > 0) {
+			const list = failed.map((f) => `  ${f.key}: ${f.task.name}`).join("\n");
+			block(
+				`${failed.length} plan task(s) have failing Verify tests:\n${list}\nFix tests before finishing.`,
+			);
 		}
 		// Advisory: suggest TaskCreate for untracked tasks (non-blocking)
 		if (untracked.length > 0) {

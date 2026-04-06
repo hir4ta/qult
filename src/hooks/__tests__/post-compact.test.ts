@@ -60,8 +60,8 @@ describe("post-compact handler", () => {
 		const output = stdoutCapture.join("");
 		expect(output).toContain("Missing semicolon at line 5");
 		expect(output).toContain("Type error: expected string");
-		// Second error should not appear (only first per file)
-		expect(output).not.toContain("extra error");
+		// Now shows up to 3 errors per file (improved from 1)
+		expect(output).toContain("extra error");
 	});
 
 	it("injects review findings from review-findings-history.json (Task 8)", async () => {

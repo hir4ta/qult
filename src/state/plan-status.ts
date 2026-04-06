@@ -112,9 +112,10 @@ function getLatestPlanPath(): string | null {
 	try {
 		const candidates: { path: string; mtime: number }[] = [];
 
-		// 1. Project-local plans
+		// 1. Project-local plans (highest priority)
 		const projectDir = join(process.cwd(), ".claude", "plans");
-		candidates.push(...scanPlanDir(projectDir));
+		const projectPlans = scanPlanDir(projectDir);
+		candidates.push(...projectPlans);
 
 		// 2. CLAUDE_PLANS_DIR env var (explicit override)
 		const envDir = process.env.CLAUDE_PLANS_DIR;
@@ -123,8 +124,10 @@ function getLatestPlanPath(): string | null {
 		}
 
 		// 3. User home ~/.claude/plans/ (Claude Code stores plans here in some modes)
-		// Only consider files modified within the last 24 hours to avoid stale cross-project plans
-		if (!_disableHomeFallback) {
+		// Only use as fallback when NO project-local or env plans exist.
+		// This prevents cross-project plan contamination (e.g. project B's plan
+		// blocking commits in project A because it was most recently modified).
+		if (!_disableHomeFallback && projectPlans.length === 0 && candidates.length === 0) {
 			try {
 				const homeDir = join(homedir(), ".claude", "plans");
 				const homeFiles = scanPlanDir(homeDir);

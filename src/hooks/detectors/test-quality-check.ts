@@ -238,6 +238,7 @@ export function analyzeTestQuality(file: string): TestQualityResult | null {
 	}
 
 	// Async test without await: promise may silently pass without being awaited
+	// Uses string-aware brace counting to avoid false positives from braces in strings/templates
 	let inAsyncTest = false;
 	let asyncTestLine = 0;
 	let asyncTestHasAwait = false;
@@ -252,7 +253,26 @@ export function analyzeTestQuality(file: string): TestQualityResult | null {
 		}
 		if (inAsyncTest) {
 			if (AWAIT_RE.test(line)) asyncTestHasAwait = true;
+			// Count braces outside strings/templates/regex
+			let inStr: string | null = null;
+			let escaped = false;
 			for (const ch of line) {
+				if (escaped) {
+					escaped = false;
+					continue;
+				}
+				if (ch === "\\") {
+					escaped = true;
+					continue;
+				}
+				if (inStr) {
+					if (ch === inStr) inStr = null;
+					continue;
+				}
+				if (ch === '"' || ch === "'" || ch === "`") {
+					inStr = ch;
+					continue;
+				}
 				if (ch === "{") asyncBraceDepth++;
 				else if (ch === "}") {
 					asyncBraceDepth--;

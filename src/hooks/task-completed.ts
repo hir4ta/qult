@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { loadConfig } from "../config.ts";
 import { loadGates } from "../gates/load.ts";
 import { getActivePlan, parseVerifyField } from "../state/plan-status.ts";
 import { incrementEscalation, recordTaskVerifyResult } from "../state/session-state.ts";
@@ -14,7 +15,7 @@ const TEST_RUNNER_RE: [RegExp, (file: string, testName: string) => string[]][] =
 	[/\bmocha\b/, (f, t) => ["mocha", f, "--grep", t]],
 ];
 
-const VERIFY_TIMEOUT = 15_000;
+const DEFAULT_VERIFY_TIMEOUT = 15_000;
 
 /** Only allow safe characters in shell arguments (alphanumeric, path separators, dots, hyphens, underscores, @). */
 const SAFE_SHELL_ARG_RE = /^[a-zA-Z0-9_/.@-]+$/;
@@ -49,13 +50,21 @@ export default async function taskCompleted(ev: HookEvent): Promise<void> {
 	const taskKey = task.taskNumber != null ? `Task ${task.taskNumber}` : task.name;
 
 	try {
+		const config = loadConfig();
+		const verifyTimeout = config.gates.test_on_edit_timeout ?? DEFAULT_VERIFY_TIMEOUT;
+		const extraPath = config.gates.extra_path
+			.filter((p) => !p.includes(":"))
+			.map((p) => (p.startsWith("/") ? p : `${process.cwd()}/${p}`))
+			.join(":");
+		const pathPrefix = extraPath ? `${extraPath}:` : "";
+
 		const result = spawnSync(args[0]!, args.slice(1), {
 			cwd: process.cwd(),
-			timeout: VERIFY_TIMEOUT,
+			timeout: verifyTimeout,
 			stdio: ["ignore", "pipe", "pipe"],
 			env: {
 				...process.env,
-				PATH: `${process.cwd()}/node_modules/.bin:${process.env.PATH}`,
+				PATH: `${pathPrefix}${process.cwd()}/node_modules/.bin:${process.env.PATH}`,
 			},
 		});
 		const passed = result.status === 0;

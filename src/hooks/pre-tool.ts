@@ -159,7 +159,9 @@ function checkTddOrder(resolvedTarget: string): void {
 		if (resolvedTarget === testFile) return;
 
 		if (!changed.includes(testFile)) {
-			deny(`TDD: write the test first. Edit ${parsed.file} before ${task.file}.`);
+			deny(
+				`TDD enforcement: テストファイル ${parsed.file} を先に編集してください（RED→GREEN→REFACTOR）。実装ファイル ${task.file} はテスト編集後に編集できます。`,
+			);
 		}
 
 		// RED verification: if Verify test was run and passed BEFORE implementation, it's a no-op test

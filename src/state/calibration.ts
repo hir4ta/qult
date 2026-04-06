@@ -106,7 +106,17 @@ export function checkCalibration(): CalibrationWarning[] {
 
 	const currentProject = projectId();
 	const projectEntries = data.entries.filter((e) => !e.project || e.project === currentProject);
-	if (projectEntries.length < 5) return []; // Need minimum data
+
+	// Warn for new projects with insufficient calibration data
+	if (projectEntries.length > 0 && projectEntries.length < 3) {
+		return [
+			{
+				type: "low_variance" as const,
+				message: `Cross-session calibration: only ${projectEntries.length} review(s) recorded for this project. Scores may not be reliable yet.`,
+			},
+		];
+	}
+	if (projectEntries.length < 5) return []; // Need minimum data for anomaly detection
 
 	// Recompute stats for project-scoped entries
 	const scores = projectEntries.map((e) => e.aggregate);

@@ -102,10 +102,12 @@ function detectDeadTsJsImports(content: string): string[] {
 	}
 
 	// Check usage: search for each import name in the rest of the code
-	// Remove import lines from content for usage search
+	// Remove import lines AND strip comments to avoid false "used" matches from comments
 	const codeWithoutImports = lines
 		.filter((line) => !line.trimStart().startsWith("import "))
-		.join("\n");
+		.map((line) => line.replace(/\/\/.*$/, "")) // strip line comments
+		.join("\n")
+		.replace(/\/\*[\s\S]*?\*\//g, ""); // strip block comments
 
 	const warnings: string[] = [];
 	for (const { name, line } of imports) {
@@ -165,11 +167,12 @@ function detectDeadPythonImports(content: string): string[] {
 		}
 	}
 
-	// Remove import lines for usage search
+	// Remove import lines and strip comments for usage search
 	const codeWithoutImports = lines
 		.filter(
 			(line) => !line.trimStart().startsWith("import ") && !line.trimStart().startsWith("from "),
 		)
+		.map((line) => line.replace(/#.*$/, "")) // strip Python line comments
 		.join("\n");
 
 	const warnings: string[] = [];

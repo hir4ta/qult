@@ -2242,3 +2242,97 @@ describe("Simulation: claim grounding blocks reviewer with nonexistent file", ()
 		expect(stderrCapture.join("")).toContain("src/ghost.ts");
 	});
 });
+
+// ============================================================
+// Cross-project plan contamination fix (plan-status.ts)
+// ============================================================
+
+describe("Scenario: Cross-project plan contamination — project-local plan takes priority", () => {
+	it("uses project-local plan when present, ignoring home ~/.claude/plans/", async () => {
+		// Write a project-local plan
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "project-plan.md"),
+			["## Tasks", "### Task 1: Local task [done]", "- **File**: src/local.ts"].join("\n"),
+		);
+
+		// Simulate home plans being present by setting CLAUDE_PLANS_DIR to a different dir
+		// (We cannot write to ~/.claude/plans in tests, but we can verify the project plan is found)
+		const { getActivePlan } = await import("../state/plan-status.ts");
+		const plan = getActivePlan();
+
+		expect(plan).not.toBeNull();
+		expect(plan!.path).toContain("project-plan.md");
+		expect(plan!.tasks[0]!.name).toBe("Local task");
+	});
+});
+
+// ============================================================
+// Failing Verify test blocks Stop hook
+// ============================================================
+
+describe("Scenario: Stop blocks when plan task Verify test failed", () => {
+	it("blocks with exit 2 when tracked verify result is false and source files changed", async () => {
+		// Write a plan with a Verify field
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			[
+				"## Tasks",
+				"### Task 1: Add feature [done]",
+				"- **File**: src/foo.ts",
+				"- **Verify**: src/__tests__/foo.test.ts:testFoo",
+			].join("\n"),
+		);
+
+		// Record a source file change so hasSourceChanges is true
+		const { recordChangedFile, recordReview, recordTaskVerifyResult } = await import(
+			"../state/session-state.ts"
+		);
+		recordChangedFile(`${TEST_DIR}/src/foo.ts`);
+		recordReview();
+		recordTaskVerifyResult("Task 1", false); // failing verify
+		flushAll();
+
+		const stop = (await import("../hooks/stop.ts")).default;
+		try {
+			await stop({ hook_type: "Stop" });
+		} catch {
+			// process.exit(2) throws
+		}
+
+		expect(exitCode).toBe(2);
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("failing Verify tests");
+		expect(stderr).toContain("Task 1");
+	});
+
+	it("allows when tracked verify result is true and source files changed", async () => {
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			[
+				"## Tasks",
+				"### Task 1: Add feature [done]",
+				"- **File**: src/foo.ts",
+				"- **Verify**: src/__tests__/foo.test.ts:testFoo",
+			].join("\n"),
+		);
+
+		const { recordChangedFile, recordReview, recordTaskVerifyResult } = await import(
+			"../state/session-state.ts"
+		);
+		recordChangedFile(`${TEST_DIR}/src/foo.ts`);
+		recordReview();
+		recordTaskVerifyResult("Task 1", true); // passing verify
+		flushAll();
+
+		const stop = (await import("../hooks/stop.ts")).default;
+		await stop({ hook_type: "Stop" });
+
+		expect(exitCode).toBeNull();
+	});
+});

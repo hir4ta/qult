@@ -6,9 +6,11 @@ export type ReviewTier = "skip" | "light" | "standard" | "deep";
 /** Deep review threshold (files). */
 const DEEP_THRESHOLD = 8;
 
-/** File path patterns that indicate high-risk changes requiring deeper review. */
+/** File path patterns that indicate high-risk changes requiring deeper review.
+ *  Matches source files containing these keywords as directory or file name segments.
+ *  Excludes non-source files (docs, configs) via SOURCE_EXT_RE check at call site. */
 const HIGH_RISK_RE =
-	/(?:^|\/)(?:auth|security|crypto|secret|permission|credential|session|token|password|oauth|saml|jwt)/i;
+	/(?:^|\/)(?:auth|security|crypto|secret|permission|credential|session|token|password|oauth|saml|jwt)(?:\/|[^/]*\.(?:ts|tsx|js|jsx|mts|cts|mjs|cjs|py|pyi|go|rs|rb|java|kt|php|cs)$)/i;
 
 /** Source code extensions for test-absence escalation. */
 const SOURCE_EXT_RE =
@@ -47,7 +49,14 @@ export function computeReviewTier(
 				!p.includes("__tests__"),
 		);
 		const hasTestChanges = changedFilePaths.some(
-			(p) => p.includes(".test.") || p.includes(".spec.") || p.includes("__tests__"),
+			(p) =>
+				p.includes(".test.") ||
+				p.includes(".spec.") ||
+				p.includes("__tests__") ||
+				/_test\.go$/.test(p) ||
+				/_spec\.rb$/.test(p) ||
+				/\/test_[^/]+\.py$/.test(p) ||
+				/\/tests\//.test(p),
 		);
 		if (hasCodeChanges && !hasTestChanges && changedFiles >= 3) {
 			// Escalate: light → standard, standard → deep

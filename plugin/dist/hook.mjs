@@ -37,6 +37,12 @@ function atomicWriteJson(filePath, data) {
 var init_atomic_write = () => {};
 
 // src/config.ts
+var exports_config = {};
+__export(exports_config, {
+  resetConfigCache: () => resetConfigCache,
+  loadConfig: () => loadConfig,
+  DEFAULTS: () => DEFAULTS
+});
 import { existsSync as existsSync2, readFileSync } from "node:fs";
 import { join } from "node:path";
 function applyConfigLayer(config, raw) {
@@ -100,14 +106,20 @@ function loadConfig() {
         applyConfigLayer(config, raw);
       }
     }
-  } catch {}
+  } catch (e) {
+    process.stderr.write(`[qult] Warning: invalid preferences.json, using defaults: ${e instanceof Error ? e.message : "parse error"}
+`);
+  }
   try {
     const configPath = join(process.cwd(), ".qult", "config.json");
     if (existsSync2(configPath)) {
       const raw = JSON.parse(readFileSync(configPath, "utf-8"));
       applyConfigLayer(config, raw);
     }
-  } catch {}
+  } catch (e) {
+    process.stderr.write(`[qult] Warning: invalid .qult/config.json, using defaults: ${e instanceof Error ? e.message : "parse error"}
+`);
+  }
   const envInt = (key) => {
     const val = process.env[key];
     if (val === undefined)
@@ -150,6 +162,9 @@ function loadConfig() {
     config.escalation.duplication_threshold = Math.max(1, dupEsc);
   _cache = config;
   return config;
+}
+function resetConfigCache() {
+  _cache = null;
 }
 var DEFAULTS, _cache = null;
 var init_config = __esm(() => {
@@ -346,12 +361,13 @@ function getLatestPlanPath() {
   try {
     const candidates = [];
     const projectDir = join4(process.cwd(), ".claude", "plans");
-    candidates.push(...scanPlanDir(projectDir));
+    const projectPlans = scanPlanDir(projectDir);
+    candidates.push(...projectPlans);
     const envDir = process.env.CLAUDE_PLANS_DIR;
     if (envDir) {
       candidates.push(...scanPlanDir(envDir));
     }
-    if (!_disableHomeFallback) {
+    if (!_disableHomeFallback && projectPlans.length === 0 && candidates.length === 0) {
       try {
         const homeDir = join4(homedir(), ".claude", "plans");
         const homeFiles = scanPlanDir(homeDir);
@@ -417,7 +433,7 @@ function computeReviewTier(changedFiles, hasPlan, config, changedFilePaths) {
     if (changedFilePaths.some((p) => HIGH_RISK_RE.test(p)))
       return "deep";
     const hasCodeChanges = changedFilePaths.some((p) => SOURCE_EXT_RE.test(p) && !p.includes(".test.") && !p.includes(".spec.") && !p.includes("__tests__"));
-    const hasTestChanges = changedFilePaths.some((p) => p.includes(".test.") || p.includes(".spec.") || p.includes("__tests__"));
+    const hasTestChanges = changedFilePaths.some((p) => p.includes(".test.") || p.includes(".spec.") || p.includes("__tests__") || /_test\.go$/.test(p) || /_spec\.rb$/.test(p) || /\/test_[^/]+\.py$/.test(p) || /\/tests\//.test(p));
     if (hasCodeChanges && !hasTestChanges && changedFiles >= 3) {
       if (hasPlan || changedFiles >= threshold)
         return "deep";
@@ -432,7 +448,7 @@ function computeReviewTier(changedFiles, hasPlan, config, changedFilePaths) {
 }
 var DEEP_THRESHOLD = 8, HIGH_RISK_RE, SOURCE_EXT_RE;
 var init_review_tier = __esm(() => {
-  HIGH_RISK_RE = /(?:^|\/)(?:auth|security|crypto|secret|permission|credential|session|token|password|oauth|saml|jwt)/i;
+  HIGH_RISK_RE = /(?:^|\/)(?:auth|security|crypto|secret|permission|credential|session|token|password|oauth|saml|jwt)(?:\/|[^/]*\.(?:ts|tsx|js|jsx|mts|cts|mjs|cjs|py|pyi|go|rs|rb|java|kt|php|cs)$)/i;
   SOURCE_EXT_RE = /\.(?:ts|tsx|js|jsx|mts|cts|mjs|cjs|py|pyi|go|rs|rb|java|kt|php|cs|vue|svelte)$/;
 });
 
@@ -440,7 +456,7 @@ var init_review_tier = __esm(() => {
 import { existsSync as existsSync6, readFileSync as readFileSync5 } from "node:fs";
 import { join as join5 } from "node:path";
 function setStateSessionScope(sessionId) {
-  if (!/^[\w-]+$/.test(sessionId))
+  if (!/^[\w.\-:]+$/.test(sessionId))
     return;
   _sessionScope2 = sessionId;
 }
@@ -873,7 +889,8 @@ var init_respond = __esm(() => {
 // src/gates/runner.ts
 import { exec, execSync } from "node:child_process";
 function shellEscape(s) {
-  return `'${s.replace(/'/g, "'\\''")}'`;
+  const escaped = s.replace(/'/g, "'\\''").replace(/`/g, "'\\`'");
+  return `'${escaped}'`;
 }
 function deduplicateErrors(text) {
   const lines = text.split(`
@@ -1129,8 +1146,8 @@ function detectDeadTsJsImports(content) {
       imports.push({ name: nsMatch[1], line: i + 1 });
     }
   }
-  const codeWithoutImports = lines.filter((line) => !line.trimStart().startsWith("import ")).join(`
-`);
+  const codeWithoutImports = lines.filter((line) => !line.trimStart().startsWith("import ")).map((line) => line.replace(/\/\/.*$/, "")).join(`
+`).replace(/\/\*[\s\S]*?\*\//g, "");
   const warnings = [];
   for (const { name, line } of imports) {
     const usageRe = new RegExp(`\\b${escapeRegex(name)}\\b`);
@@ -1175,7 +1192,7 @@ function detectDeadPythonImports(content) {
       }
     }
   }
-  const codeWithoutImports = lines.filter((line) => !line.trimStart().startsWith("import ") && !line.trimStart().startsWith("from ")).join(`
+  const codeWithoutImports = lines.filter((line) => !line.trimStart().startsWith("import ") && !line.trimStart().startsWith("from ")).map((line) => line.replace(/#.*$/, "")).join(`
 `);
   const warnings = [];
   for (const { name, line } of imports) {
@@ -1223,7 +1240,9 @@ function normalizeLine(line) {
     return null;
   if (trimmed.startsWith("//") || trimmed.startsWith("#"))
     return null;
-  if (trimmed.startsWith("* ") || trimmed.startsWith("*/"))
+  if (trimmed.startsWith("* ") || trimmed.startsWith("*/") || trimmed === "*")
+    return null;
+  if (trimmed.startsWith("/*"))
     return null;
   if (/^\s*(import\b|from\b|require\b|export\b)/.test(line))
     return null;
@@ -1450,6 +1469,24 @@ function detectHallucinatedImports(file) {
     return detectGoImports(file, content);
   return detectTsJsImports(file, content);
 }
+function loadTsConfigPaths(cwd) {
+  const aliases = new Set;
+  try {
+    const tsconfigPath = join9(cwd, "tsconfig.json");
+    if (!existsSync11(tsconfigPath))
+      return aliases;
+    const raw = readFileSync9(tsconfigPath, "utf-8");
+    const cleaned = raw.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    const tsconfig = JSON.parse(cleaned);
+    const paths = tsconfig?.compilerOptions?.paths;
+    if (paths && typeof paths === "object") {
+      for (const alias of Object.keys(paths)) {
+        aliases.add(alias.replace(/\/\*$/, ""));
+      }
+    }
+  } catch {}
+  return aliases;
+}
 function detectTsJsImports(file, content) {
   const cwd = process.cwd();
   const missingPkgs = [];
@@ -1459,6 +1496,7 @@ function detectTsJsImports(file, content) {
   } catch {
     builtins = FALLBACK_BUILTINS;
   }
+  const tsPaths = loadTsConfigPaths(cwd);
   for (const line of content.split(`
 `)) {
     if (line.trimStart().startsWith("//"))
@@ -1471,6 +1509,8 @@ function detectTsJsImports(file, content) {
     if (pkgName.startsWith("node:") || builtins.has(pkgName))
       continue;
     if (pkgName.includes(".."))
+      continue;
+    if (tsPaths.has(pkgName) || tsPaths.has(specifier.replace(/\/.*$/, "")))
       continue;
     if (!existsSync11(join9(cwd, "node_modules", pkgName))) {
       missingPkgs.push(pkgName);
@@ -1883,13 +1923,14 @@ function detectSecurityPatterns(file) {
   for (let i = 0;i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trimStart();
+    let scanLine = line;
     if (hasBlockComments) {
       if (inBlockComment) {
         const endIdx = line.indexOf("*/");
         if (endIdx >= 0) {
           inBlockComment = false;
-          const afterComment = line.slice(endIdx + 2);
-          if (!afterComment.trim())
+          scanLine = line.slice(endIdx + 2);
+          if (!scanLine.trim())
             continue;
         } else {
           continue;
@@ -1901,23 +1942,24 @@ function detectSecurityPatterns(file) {
           inBlockComment = true;
           continue;
         }
-        const afterComment = line.slice(endIdx + 2);
-        if (!afterComment.trim())
+        scanLine = line.slice(endIdx + 2);
+        if (!scanLine.trim())
           continue;
       }
     }
-    if (trimmed.startsWith("//") || trimmed.startsWith("#"))
+    const scanTrimmed = scanLine.trimStart();
+    if (scanTrimmed.startsWith("//") || scanTrimmed.startsWith("#"))
       continue;
-    if (starIsComment && trimmed.startsWith("*"))
+    if (starIsComment && scanTrimmed.startsWith("*"))
       continue;
     if (!isTestFile) {
       for (const { re, desc } of SECRET_PATTERNS) {
-        if (re.test(line)) {
-          if (/process\.env\b/.test(line))
+        if (re.test(scanLine)) {
+          if (/process\.env\b/.test(scanLine))
             continue;
-          if (/os\.environ/.test(line))
+          if (/os\.environ/.test(scanLine))
             continue;
-          if (/\$\{?\w*ENV\w*\}?/.test(line))
+          if (/\$\{?\w*ENV\w*\}?/.test(scanLine))
             continue;
           errors.push(`L${i + 1}: ${desc}`);
           break;
@@ -1927,9 +1969,8 @@ function detectSecurityPatterns(file) {
     for (const { re, desc, exts } of DANGEROUS_PATTERNS) {
       if (exts && !exts.has(ext))
         continue;
-      if (re.test(line)) {
+      if (re.test(scanLine)) {
         errors.push(`L${i + 1}: ${desc}`);
-        break;
       }
     }
   }
@@ -2081,12 +2122,12 @@ var init_security_check = __esm(() => {
   ADVISORY_PATTERNS = [
     {
       re: /\bapp\.(?:get|post|put|delete|patch)\s*\(\s*["'`]\/api\//,
-      suppress: /auth|middleware|protect|guard|verify|session/i,
+      suppress: /(?:auth|middleware|protect|guard|verify|session)/i,
       desc: "API route — verify auth middleware is applied"
     },
     {
       re: /\bwss?\.on\s*\(\s*["'`]connection["'`]/,
-      suppress: /auth|token|verify|session|guard/i,
+      suppress: /(?:auth|token|verify|session|guard)/i,
       desc: "WebSocket handler — verify authentication is applied"
     }
   ];
@@ -2341,7 +2382,8 @@ function checkOverEngineering() {
   const planFiles = new Set(plan.tasks.filter((t) => t.file).map((t) => resolve3(cwd, t.file)));
   const unplannedCount = changed.filter((f) => !planFiles.has(f)).length;
   const planTaskCount = plan.tasks.filter((t) => t.file).length;
-  if (unplannedCount > 5 || totalChanged > planTaskCount * 2) {
+  const overEngThreshold = loadConfig().review.required_changed_files;
+  if (unplannedCount > overEngThreshold || totalChanged > planTaskCount * 2) {
     process.stderr.write(`[qult] Over-engineering risk: ${unplannedCount} unplanned file(s) out of ${totalChanged} changed. Review scope.
 `);
   }
@@ -2619,7 +2661,7 @@ function checkTddOrder(resolvedTarget) {
     if (resolvedTarget === testFile)
       return;
     if (!changed.includes(testFile)) {
-      deny(`TDD: write the test first. Edit ${parsed.file} before ${task.file}.`);
+      deny(`TDD enforcement: テストファイル ${parsed.file} を先に編集してください（RED→GREEN→REFACTOR）。実装ファイル ${task.file} はテスト編集後に編集できます。`);
     }
     const taskKey = task.taskNumber != null ? `Task ${task.taskNumber}` : task.name;
     const verifyResult = readTaskVerifyResult(taskKey);
@@ -2735,14 +2777,25 @@ Plan: ${plan.path}`);
     const doneTasks = plan.tasks.filter((t) => t.status === "done" && t.verify?.includes(":"));
     const tracked = [];
     const untracked = [];
+    const failed = [];
     for (const t of doneTasks) {
       const key = t.taskNumber != null ? `Task ${t.taskNumber}` : t.name;
       const result = readTaskVerifyResult(key);
       if (result !== null) {
         tracked.push(t);
+        if (result.passed !== true) {
+          failed.push({ task: t, key });
+        }
       } else {
         untracked.push(t);
       }
+    }
+    if (failed.length > 0) {
+      const list = failed.map((f) => `  ${f.key}: ${f.task.name}`).join(`
+`);
+      block(`${failed.length} plan task(s) have failing Verify tests:
+${list}
+Fix tests before finishing.`);
     }
     if (untracked.length > 0) {
       const list = untracked.map((t) => `  Task ${t.taskNumber ?? "?"}: ${t.name}`).join(`
@@ -2891,6 +2944,14 @@ function checkCalibration() {
     return [];
   const currentProject = projectId();
   const projectEntries = data.entries.filter((e) => !e.project || e.project === currentProject);
+  if (projectEntries.length > 0 && projectEntries.length < 3) {
+    return [
+      {
+        type: "low_variance",
+        message: `Cross-session calibration: only ${projectEntries.length} review(s) recorded for this project. Scores may not be reliable yet.`
+      }
+    ];
+  }
   if (projectEntries.length < 5)
     return [];
   const scores = projectEntries.map((e) => e.aggregate);
@@ -3330,7 +3391,7 @@ var init_score_parsers = __esm(() => {
 // src/hooks/subagent-stop/agent-validators.ts
 import { execSync as execSync3 } from "node:child_process";
 import { existsSync as existsSync16, readdirSync as readdirSync5, readFileSync as readFileSync13, statSync as statSync5 } from "node:fs";
-import { join as join13 } from "node:path";
+import { join as join13, normalize } from "node:path";
 function checkReadOnlyViolation(normalized) {
   if (!READ_ONLY_REVIEWERS.has(normalized))
     return;
@@ -3468,9 +3529,6 @@ function validateStageReviewer(output, passRe, failRe, scoreParser, stageName) {
   }
   if (passRe.test(output) && scores) {
     const scoreEntries = scores;
-    try {
-      recordStageScores(stageName, scoreEntries);
-    } catch {}
     const floor = loadConfig().review.dimension_floor;
     const belowFloor = Object.entries(scoreEntries).filter(([, v]) => typeof v === "number" && v < floor);
     if (belowFloor.length > 0) {
@@ -3478,6 +3536,9 @@ function validateStageReviewer(output, passRe, failRe, scoreParser, stageName) {
       const dims = belowFloor.map(([name, score]) => `${capitalize(name)} (${score}/5)`).join(", ");
       block(`${stageName}: PASS but ${dims} below minimum ${floor}/5. Fix these dimensions and re-run /qult:review.`);
     }
+    try {
+      recordStageScores(stageName, scoreEntries);
+    } catch {}
     checkScoreFindingsConsistency(output, scoreEntries, stageName);
     try {
       extractFindings(output, stageName);
@@ -3625,10 +3686,10 @@ function checkAggregateScore(stages) {
   }
 }
 function extractFindings(output, stageName) {
-  const findingRe = /\[(critical|high|medium|low)\]\s*(\S+?)(?::\d+)?\s+[—–]\s+(.+?)(?:\n|$)/gi;
+  const findingRe = /\[(critical|high|medium|low)\]\s*(\S+?)(?::\d+)?\s+(?:[—–]|\s-\s)\s*(.+?)(?:\n|$)/gi;
   for (const match of output.matchAll(findingRe)) {
     _currentFindings.push({
-      file: match[2],
+      file: normalize(match[2]),
       severity: match[1].toLowerCase(),
       description: match[3].trim().slice(0, 200),
       stage: stageName,
@@ -3891,7 +3952,26 @@ function analyzeTestQuality(file) {
     if (inAsyncTest) {
       if (AWAIT_RE.test(line))
         asyncTestHasAwait = true;
+      let inStr = null;
+      let escaped = false;
       for (const ch of line) {
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (ch === "\\") {
+          escaped = true;
+          continue;
+        }
+        if (inStr) {
+          if (ch === inStr)
+            inStr = null;
+          continue;
+        }
+        if (ch === '"' || ch === "'" || ch === "`") {
+          inStr = ch;
+          continue;
+        }
         if (ch === "{")
           asyncBraceDepth++;
         else if (ch === "}") {
@@ -4024,13 +4104,17 @@ async function taskCompleted(ev) {
   const args = argsBuilder(parsed.file, parsed.testName);
   const taskKey = task.taskNumber != null ? `Task ${task.taskNumber}` : task.name;
   try {
+    const config = loadConfig();
+    const verifyTimeout = config.gates.test_on_edit_timeout ?? DEFAULT_VERIFY_TIMEOUT;
+    const extraPath = config.gates.extra_path.filter((p) => !p.includes(":")).map((p) => p.startsWith("/") ? p : `${process.cwd()}/${p}`).join(":");
+    const pathPrefix = extraPath ? `${extraPath}:` : "";
     const result = spawnSync(args[0], args.slice(1), {
       cwd: process.cwd(),
-      timeout: VERIFY_TIMEOUT,
+      timeout: verifyTimeout,
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
-        PATH: `${process.cwd()}/node_modules/.bin:${process.env.PATH}`
+        PATH: `${pathPrefix}${process.cwd()}/node_modules/.bin:${process.env.PATH}`
       }
     });
     const passed = result.status === 0;
@@ -4070,8 +4154,9 @@ function detectTestRunner() {
   } catch {}
   return null;
 }
-var TEST_RUNNER_RE, VERIFY_TIMEOUT = 15000, SAFE_SHELL_ARG_RE;
+var TEST_RUNNER_RE, DEFAULT_VERIFY_TIMEOUT = 15000, SAFE_SHELL_ARG_RE;
 var init_task_completed = __esm(() => {
+  init_config();
   init_load();
   init_plan_status();
   init_session_state();
@@ -4120,12 +4205,15 @@ function detectRecurringPatterns(cwd) {
     const recent = history.slice(-5);
     const gateFailSessions = recent.filter((s) => s.gate_failures > 0).length;
     if (gateFailSessions >= 4) {
-      process.stderr.write(`[qult] Pattern: gate failures in ${gateFailSessions}/5 recent sessions. Consider reviewing toolchain configuration.
+      const totalGateFailures = recent.reduce((sum, s) => sum + s.gate_failures, 0);
+      const avgFailures = (totalGateFailures / recent.length).toFixed(1);
+      process.stderr.write(`[qult] Pattern: gate failures in ${gateFailSessions}/5 recent sessions (avg ${avgFailures}/session). Review toolchain or add .claude/rules/ entries.
 `);
     }
     const secWarnSessions = recent.filter((s) => s.security_warnings > 0).length;
     if (secWarnSessions >= 4) {
-      process.stderr.write(`[qult] Pattern: security warnings in ${secWarnSessions}/5 recent sessions. Consider adding .claude/rules/ for security patterns.
+      const totalSecWarnings = recent.reduce((sum, s) => sum + s.security_warnings, 0);
+      process.stderr.write(`[qult] Pattern: ${totalSecWarnings} security warnings across ${secWarnSessions}/5 recent sessions. Consider adding .claude/rules/ for security patterns.
 `);
     }
   } catch {}
@@ -4203,7 +4291,11 @@ async function postCompact(_ev) {
         for (const fix of fixes) {
           parts.push(`  [${fix.gate}] ${fix.file}`);
           if (fix.errors?.length > 0) {
-            parts.push(`    ${sanitizeForStderr(fix.errors[0].slice(0, 200))}`);
+            const shown = fix.errors.slice(0, 3).map((e) => `    ${sanitizeForStderr(e.slice(0, 200))}`);
+            parts.push(...shown);
+            if (fix.errors.length > 3) {
+              parts.push(`    ... and ${fix.errors.length - 3} more error(s)`);
+            }
           }
         }
       }
@@ -4274,6 +4366,25 @@ async function postCompact(_ev) {
             parts.push(`  [${sanitizeForStderr(f.severity)}] ${sanitizeForStderr(f.file)} — ${sanitizeForStderr(f.description.slice(0, 150))}`);
           }
         }
+      }
+    } catch {}
+    try {
+      const { DEFAULTS: DEFAULTS2, loadConfig: loadConfig2 } = await Promise.resolve().then(() => (init_config(), exports_config));
+      const config = loadConfig2();
+      const d = DEFAULTS2;
+      const overrides = [];
+      if (config.review.score_threshold !== d.review.score_threshold)
+        overrides.push(`score_threshold=${config.review.score_threshold}`);
+      if (config.review.dimension_floor !== d.review.dimension_floor)
+        overrides.push(`dimension_floor=${config.review.dimension_floor}`);
+      if (config.review.required_changed_files !== d.review.required_changed_files)
+        overrides.push(`required_changed_files=${config.review.required_changed_files}`);
+      if (config.review.require_human_approval)
+        overrides.push("require_human_approval=true");
+      if (config.gates.test_on_edit)
+        overrides.push("test_on_edit=true");
+      if (overrides.length > 0) {
+        parts.push(`[qult] Config overrides: ${overrides.join(", ")}`);
       }
     } catch {}
     if (parts.length > 0) {

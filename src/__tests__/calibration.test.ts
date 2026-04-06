@@ -52,8 +52,15 @@ describe("recordCalibration", () => {
 });
 
 describe("checkCalibration", () => {
-	it("returns empty warnings with insufficient data", () => {
+	it("returns insufficient data warning for new projects (1-2 reviews)", () => {
 		recordCalibration(28, {});
+		const warnings = checkCalibration();
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0]!.type).toBe("low_variance");
+		expect(warnings[0]!.message).toContain("only 1 review");
+	});
+
+	it("returns empty warnings with zero data", () => {
 		expect(checkCalibration()).toEqual([]);
 	});
 

@@ -16,9 +16,10 @@ let _dirty = false;
 // Session-scoped file path: session-state-{sessionId}.json
 let _sessionScope: string | null = null;
 
-/** Set session scope for state file isolation. Rejects path-traversal characters. */
+/** Set session scope for state file isolation. Rejects path-traversal characters.
+ *  Allows alphanumeric, hyphens, underscores, dots, and colons (some environments use these). */
 export function setStateSessionScope(sessionId: string): void {
-	if (!/^[\w-]+$/.test(sessionId)) return;
+	if (!/^[\w.\-:]+$/.test(sessionId)) return;
 	_sessionScope = sessionId;
 }
 

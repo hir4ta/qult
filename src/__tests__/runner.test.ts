@@ -2,7 +2,13 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetConfigCache } from "../config.ts";
-import { deduplicateErrors, runGate, runGateAsync, smartTruncate } from "../gates/runner.ts";
+import {
+	deduplicateErrors,
+	runGate,
+	runGateAsync,
+	shellEscape,
+	smartTruncate,
+} from "../gates/runner.ts";
 import { resetAllCaches } from "../state/flush.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-runner-test");
@@ -140,6 +146,38 @@ describe("smartTruncate", () => {
 		expect(match).not.toBeNull();
 		const truncatedChars = Number(match![1]);
 		expect(truncatedChars).toBeGreaterThan(size - maxChars - 100);
+	});
+});
+
+describe("shellEscape", () => {
+	it("wraps in single quotes", () => {
+		expect(shellEscape("foo")).toBe("'foo'");
+	});
+
+	it("escapes single quotes to prevent injection", () => {
+		const result = shellEscape("it's");
+		expect(result).toBe("'it'\\''s'");
+		expect(result).not.toContain("it's");
+	});
+
+	it("escapes backticks to prevent command substitution injection", () => {
+		// Implementation: backtick → '\`' (split into separate single-quoted segments)
+		// e.g. "a`b" → "'a'\\`'b'" so the backtick is never inside a live shell context
+		const result = shellEscape("file`rm -rf /`.ts");
+		// The result must contain the escaped form \` (backslash + backtick)
+		expect(result).toContain("\\`");
+		// Verify the raw backtick is neutralized: any ` must be preceded by backslash
+		const noEscapeBacktick = result.replace(/\\`/g, "");
+		expect(noEscapeBacktick).not.toContain("`");
+	});
+
+	it("handles both single quotes and backticks together", () => {
+		const result = shellEscape("it's`dangerous`");
+		// Single quotes are escaped
+		expect(result).not.toContain("it's");
+		// Backticks are escaped (any ` in result is preceded by \)
+		const noEscapeBacktick = result.replace(/\\`/g, "");
+		expect(noEscapeBacktick).not.toContain("`");
 	});
 });
 

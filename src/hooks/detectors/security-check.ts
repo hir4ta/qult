@@ -210,15 +210,15 @@ export function detectSecurityPatterns(file: string): PendingFix[] {
 		const trimmed = line.trimStart();
 
 		// Track block comment state — strip comment portions from the line for scanning
+		let scanLine = line; // the portion of the line to scan for patterns
 		if (hasBlockComments) {
 			if (inBlockComment) {
 				const endIdx = line.indexOf("*/");
 				if (endIdx >= 0) {
 					inBlockComment = false;
-					// Replace everything up to and including */ with spaces, scan the rest
-					const afterComment = line.slice(endIdx + 2);
-					if (!afterComment.trim()) continue; // nothing after comment
-					// Fall through to scan afterComment portion via the patterns below
+					// Only scan content AFTER the closing comment marker
+					scanLine = line.slice(endIdx + 2);
+					if (!scanLine.trim()) continue; // nothing after comment
 				} else {
 					continue;
 				}
@@ -229,37 +229,36 @@ export function detectSecurityPatterns(file: string): PendingFix[] {
 					inBlockComment = true;
 					continue;
 				}
-				// Single-line /* ... */: strip the comment portion, scan remainder
-				const afterComment = line.slice(endIdx + 2);
-				if (!afterComment.trim()) continue; // entire line is comment
-				// Fall through with original line — patterns will match on code after */
+				// Single-line /* ... */: only scan content after the comment
+				scanLine = line.slice(endIdx + 2);
+				if (!scanLine.trim()) continue; // entire line is comment
 			}
 		}
 
 		// Skip comments (// for C-family, # for Python/Ruby, * for JSDoc-style block comments)
-		if (trimmed.startsWith("//") || trimmed.startsWith("#")) continue;
-		if (starIsComment && trimmed.startsWith("*")) continue;
+		const scanTrimmed = scanLine.trimStart();
+		if (scanTrimmed.startsWith("//") || scanTrimmed.startsWith("#")) continue;
+		if (starIsComment && scanTrimmed.startsWith("*")) continue;
 
 		// Secret patterns (skip test files)
 		if (!isTestFile) {
 			for (const { re, desc } of SECRET_PATTERNS) {
-				if (re.test(line)) {
+				if (re.test(scanLine)) {
 					// Exclude common false positives: env var references, config keys without values
-					if (/process\.env\b/.test(line)) continue;
-					if (/os\.environ/.test(line)) continue;
-					if (/\$\{?\w*ENV\w*\}?/.test(line)) continue;
+					if (/process\.env\b/.test(scanLine)) continue;
+					if (/os\.environ/.test(scanLine)) continue;
+					if (/\$\{?\w*ENV\w*\}?/.test(scanLine)) continue;
 					errors.push(`L${i + 1}: ${desc}`);
-					break; // one finding per line
+					break; // one secret finding per line (secrets are mutually exclusive patterns)
 				}
 			}
 		}
 
-		// Dangerous patterns (always check, including tests)
+		// Dangerous patterns (always check, including tests) — collect ALL matches per line
 		for (const { re, desc, exts } of DANGEROUS_PATTERNS) {
 			if (exts && !exts.has(ext)) continue;
-			if (re.test(line)) {
+			if (re.test(scanLine)) {
 				errors.push(`L${i + 1}: ${desc}`);
-				break; // one finding per line
 			}
 		}
 	}
@@ -292,12 +291,12 @@ interface AdvisoryPattern {
 const ADVISORY_PATTERNS: AdvisoryPattern[] = [
 	{
 		re: /\bapp\.(?:get|post|put|delete|patch)\s*\(\s*["'`]\/api\//,
-		suppress: /auth|middleware|protect|guard|verify|session/i,
+		suppress: /(?:auth|middleware|protect|guard|verify|session)/i,
 		desc: "API route — verify auth middleware is applied",
 	},
 	{
 		re: /\bwss?\.on\s*\(\s*["'`]connection["'`]/,
-		suppress: /auth|token|verify|session|guard/i,
+		suppress: /(?:auth|token|verify|session|guard)/i,
 		desc: "WebSocket handler — verify authentication is applied",
 	},
 ];

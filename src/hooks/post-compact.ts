@@ -15,7 +15,7 @@ export default async function postCompact(_ev: HookEvent): Promise<void> {
 
 		const parts: string[] = [];
 
-		// Pending fixes (with first error detail per file)
+		// Pending fixes (with up to 3 error details per file)
 		const fixesPath = findLatestFile(stateDir, "pending-fixes");
 		if (fixesPath) {
 			const fixes = safeReadJson<PendingFix[]>(fixesPath, []);
@@ -24,7 +24,13 @@ export default async function postCompact(_ev: HookEvent): Promise<void> {
 				for (const fix of fixes) {
 					parts.push(`  [${fix.gate}] ${fix.file}`);
 					if (fix.errors?.length > 0) {
-						parts.push(`    ${sanitizeForStderr(fix.errors[0]!.slice(0, 200))}`);
+						const shown = fix.errors
+							.slice(0, 3)
+							.map((e) => `    ${sanitizeForStderr(e.slice(0, 200))}`);
+						parts.push(...shown);
+						if (fix.errors.length > 3) {
+							parts.push(`    ... and ${fix.errors.length - 3} more error(s)`);
+						}
 					}
 				}
 			}
@@ -109,6 +115,27 @@ export default async function postCompact(_ev: HookEvent): Promise<void> {
 						);
 					}
 				}
+			}
+		} catch {
+			/* fail-open */
+		}
+
+		// Config overrides (re-inject non-default settings after compaction)
+		try {
+			const { DEFAULTS, loadConfig } = await import("../config.ts");
+			const config = loadConfig();
+			const d = DEFAULTS;
+			const overrides: string[] = [];
+			if (config.review.score_threshold !== d.review.score_threshold)
+				overrides.push(`score_threshold=${config.review.score_threshold}`);
+			if (config.review.dimension_floor !== d.review.dimension_floor)
+				overrides.push(`dimension_floor=${config.review.dimension_floor}`);
+			if (config.review.required_changed_files !== d.review.required_changed_files)
+				overrides.push(`required_changed_files=${config.review.required_changed_files}`);
+			if (config.review.require_human_approval) overrides.push("require_human_approval=true");
+			if (config.gates.test_on_edit) overrides.push("test_on_edit=true");
+			if (overrides.length > 0) {
+				parts.push(`[qult] Config overrides: ${overrides.join(", ")}`);
 			}
 		} catch {
 			/* fail-open */

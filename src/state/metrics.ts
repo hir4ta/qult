@@ -50,19 +50,22 @@ export function detectRecurringPatterns(cwd: string): void {
 
 		const recent = history.slice(-5);
 
-		// Check gate failure frequency
+		// Check gate failure frequency with trend (must be increasing or sustained)
 		const gateFailSessions = recent.filter((s) => s.gate_failures > 0).length;
 		if (gateFailSessions >= 4) {
+			const totalGateFailures = recent.reduce((sum, s) => sum + s.gate_failures, 0);
+			const avgFailures = (totalGateFailures / recent.length).toFixed(1);
 			process.stderr.write(
-				`[qult] Pattern: gate failures in ${gateFailSessions}/5 recent sessions. Consider reviewing toolchain configuration.\n`,
+				`[qult] Pattern: gate failures in ${gateFailSessions}/5 recent sessions (avg ${avgFailures}/session). Review toolchain or add .claude/rules/ entries.\n`,
 			);
 		}
 
-		// Check security warning frequency
+		// Check security warning frequency with detail
 		const secWarnSessions = recent.filter((s) => s.security_warnings > 0).length;
 		if (secWarnSessions >= 4) {
+			const totalSecWarnings = recent.reduce((sum, s) => sum + s.security_warnings, 0);
 			process.stderr.write(
-				`[qult] Pattern: security warnings in ${secWarnSessions}/5 recent sessions. Consider adding .claude/rules/ for security patterns.\n`,
+				`[qult] Pattern: ${totalSecWarnings} security warnings across ${secWarnSessions}/5 recent sessions. Consider adding .claude/rules/ for security patterns.\n`,
 			);
 		}
 	} catch {

@@ -2,9 +2,12 @@ import { exec, execSync } from "node:child_process";
 import { loadConfig } from "../config.ts";
 import type { GateDefinition } from "../types.ts";
 
-/** Shell-escape a string for safe interpolation into a shell command. */
+/** Shell-escape a string for safe interpolation into a shell command.
+ *  Wraps in single quotes and escapes single quotes + backticks to prevent injection. */
 export function shellEscape(s: string): string {
-	return `'${s.replace(/'/g, "'\\''")}'`;
+	// Replace single quotes and backticks to prevent shell injection
+	const escaped = s.replace(/'/g, "'\\''").replace(/`/g, "'\\`'");
+	return `'${escaped}'`;
 }
 
 export interface GateResult {

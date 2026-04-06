@@ -30,8 +30,9 @@ function normalizeLine(line: string): string | null {
 	const trimmed = line.trim();
 	if (trimmed === "") return null;
 	if (trimmed.startsWith("//") || trimmed.startsWith("#")) return null;
-	// Block comment continuation: "* text" or "*/" but not "*ptr" (dereference/multiplication)
-	if (trimmed.startsWith("* ") || trimmed.startsWith("*/")) return null;
+	// Block comment lines: "* text", "*/", "/*", bare "*" (JSDoc body)
+	if (trimmed.startsWith("* ") || trimmed.startsWith("*/") || trimmed === "*") return null;
+	if (trimmed.startsWith("/*")) return null;
 	// Skip import/require/export lines (commonly duplicated by necessity)
 	if (/^\s*(import\b|from\b|require\b|export\b)/.test(line)) return null;
 	return trimmed;

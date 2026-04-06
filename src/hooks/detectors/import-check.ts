@@ -27,6 +27,29 @@ export function detectHallucinatedImports(file: string): PendingFix[] {
 	return detectTsJsImports(file, content);
 }
 
+/** Load tsconfig.json path aliases (compilerOptions.paths) for the project. */
+function loadTsConfigPaths(cwd: string): Set<string> {
+	const aliases = new Set<string>();
+	try {
+		const tsconfigPath = join(cwd, "tsconfig.json");
+		if (!existsSync(tsconfigPath)) return aliases;
+		const raw = readFileSync(tsconfigPath, "utf-8");
+		// Strip comments (// and /* */) for JSON parsing
+		const cleaned = raw.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+		const tsconfig = JSON.parse(cleaned);
+		const paths = tsconfig?.compilerOptions?.paths;
+		if (paths && typeof paths === "object") {
+			for (const alias of Object.keys(paths)) {
+				// Convert "~/*" or "@utils/*" → "~" or "@utils"
+				aliases.add(alias.replace(/\/\*$/, ""));
+			}
+		}
+	} catch {
+		/* fail-open */
+	}
+	return aliases;
+}
+
 function detectTsJsImports(file: string, content: string): PendingFix[] {
 	const cwd = process.cwd();
 	const missingPkgs: string[] = [];
@@ -36,6 +59,8 @@ function detectTsJsImports(file: string, content: string): PendingFix[] {
 	} catch {
 		builtins = FALLBACK_BUILTINS;
 	}
+
+	const tsPaths = loadTsConfigPaths(cwd);
 
 	for (const line of content.split("\n")) {
 		if (line.trimStart().startsWith("//")) continue;
@@ -47,6 +72,8 @@ function detectTsJsImports(file: string, content: string): PendingFix[] {
 			: specifier.split("/")[0]!;
 		if (pkgName.startsWith("node:") || builtins.has(pkgName)) continue;
 		if (pkgName.includes("..")) continue;
+		// Skip tsconfig path aliases (e.g. @utils, ~)
+		if (tsPaths.has(pkgName) || tsPaths.has(specifier.replace(/\/.*$/, ""))) continue;
 		if (!existsSync(join(cwd, "node_modules", pkgName))) {
 			missingPkgs.push(pkgName);
 		}

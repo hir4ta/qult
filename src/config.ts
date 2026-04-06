@@ -34,7 +34,7 @@ export interface QultConfig {
 	};
 }
 
-const DEFAULTS: QultConfig = {
+export const DEFAULTS: QultConfig = {
 	review: {
 		score_threshold: 30,
 		max_iterations: 3,
@@ -128,8 +128,11 @@ export function loadConfig(): QultConfig {
 				applyConfigLayer(config, raw);
 			}
 		}
-	} catch {
-		// fail-open: use defaults
+	} catch (e) {
+		// fail-open with warning: user should know their config is invalid
+		process.stderr.write(
+			`[qult] Warning: invalid preferences.json, using defaults: ${e instanceof Error ? e.message : "parse error"}\n`,
+		);
 	}
 
 	// Layer 1: .qult/config.json (project-level)
@@ -139,8 +142,11 @@ export function loadConfig(): QultConfig {
 			const raw = JSON.parse(readFileSync(configPath, "utf-8"));
 			applyConfigLayer(config, raw);
 		}
-	} catch {
-		// fail-open: use defaults
+	} catch (e) {
+		// fail-open with warning: user should know their config is invalid
+		process.stderr.write(
+			`[qult] Warning: invalid .qult/config.json, using defaults: ${e instanceof Error ? e.message : "parse error"}\n`,
+		);
 	}
 
 	// Layer 2: QULT_* environment variables

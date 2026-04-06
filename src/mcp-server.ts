@@ -344,13 +344,13 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			if (!gateName) {
 				return { isError: true, content: [{ type: "text", text: "Missing gate_name parameter." }] };
 			}
-			if (!reason || reason.length < 10) {
+			if (!reason || reason.length < 10 || new Set(reason).size < 5) {
 				return {
 					isError: true,
 					content: [
 						{
 							type: "text",
-							text: "Missing or too short reason parameter (min 10 chars). Explain WHY the gate should be disabled.",
+							text: "Missing or insufficient reason parameter (min 10 chars, min 5 unique characters). Explain WHY the gate should be disabled.",
 						},
 					],
 				};
@@ -468,13 +468,13 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 		}
 		case "clear_pending_fixes": {
 			const reason = typeof args?.reason === "string" ? args.reason : null;
-			if (!reason || reason.length < 10) {
+			if (!reason || reason.length < 10 || new Set(reason).size < 5) {
 				return {
 					isError: true,
 					content: [
 						{
 							type: "text",
-							text: "Missing or too short reason parameter (min 10 chars). Explain WHY pending fixes should be cleared.",
+							text: "Missing or insufficient reason parameter (min 10 chars, min 5 unique characters). Explain WHY pending fixes should be cleared.",
 						},
 					],
 				};
