@@ -219,7 +219,7 @@ export function analyzeTestQuality(file: string): TestQualityResult | null {
 	// Snapshot-only test: all assertions are snapshot matchers, no value assertions
 	const snapshotCount = (codeOnly.match(SNAPSHOT_RE) ?? []).length;
 	const nonSnapshotAssertions = assertionCount - snapshotCount;
-	if (snapshotCount > 0 && nonSnapshotAssertions === 0) {
+	if (snapshotCount > 0 && nonSnapshotAssertions <= 0) {
 		smells.push({
 			type: "snapshot-only",
 			line: 0,
@@ -384,11 +384,16 @@ export function analyzeTestQuality(file: string): TestQualityResult | null {
 	}
 
 	// ── New smell: missing-boundary ──────────────────────────
-	// If expect() calls never use boundary values (0, -1, null, undefined, NaN, "", [], Infinity)
+	// If assertion chains never use boundary values (0, -1, null, undefined, NaN, "", [], Infinity)
+	// Checks both expect() args AND matcher args (e.g., .toBe(0), .toEqual(null))
 	if (testCount >= 3) {
-		const boundaryRe =
-			/expect\s*\([^)]*(?:\b0\b|\b-1\b|\bnull\b|\bundefined\b|\bNaN\b|\bInfinity\b|["'`]{2}|\[\s*\])/;
-		if (!boundaryRe.test(codeOnly)) {
+		const boundaryValueRe =
+			/(?:\b0\b|\b-1\b|\bnull\b|\bundefined\b|\bNaN\b|\bInfinity\b|["'`]{2}|\[\s*\])/;
+		const hasExpectLine = /expect\s*\(/.test(codeOnly);
+		const hasBoundary =
+			hasExpectLine &&
+			codeOnly.split("\n").some((line) => /expect\s*\(/.test(line) && boundaryValueRe.test(line));
+		if (!hasBoundary) {
 			smells.push({
 				type: "missing-boundary",
 				line: 0,
@@ -399,22 +404,27 @@ export function analyzeTestQuality(file: string): TestQualityResult | null {
 	}
 
 	// ── New smell: concentrated-pattern ──────────────────────
-	// If 80%+ of assertions use the same matcher (e.g., all toBe(true))
+	// If 80%+ of assertions use the same matcher name (e.g., all use .toBe)
 	if (testCount >= 5 && assertionCount >= 5) {
-		const matcherRe = /\.(?:toBe|toEqual|toStrictEqual|toThrow|toMatch|toContain)\s*\([^)]*\)/g;
+		const matcherNameRe = /\.(toBe|toEqual|toStrictEqual|toThrow|toMatch|toContain)\s*\(/g;
 		const matcherCounts = new Map<string, number>();
-		for (const m of codeOnly.matchAll(matcherRe)) {
-			const key = m[0]!.trim();
+		let totalMatched = 0;
+		for (const m of codeOnly.matchAll(matcherNameRe)) {
+			const key = m[1]!;
 			matcherCounts.set(key, (matcherCounts.get(key) ?? 0) + 1);
+			totalMatched++;
 		}
-		for (const [matcher, count] of matcherCounts) {
-			if (count / assertionCount >= 0.8) {
-				smells.push({
-					type: "concentrated-pattern",
-					line: 0,
-					message: `${Math.round((count / assertionCount) * 100)}% of assertions use ${matcher.slice(0, 40)} — tests may miss diverse behaviors`,
-				});
-				break;
+		if (totalMatched > 0) {
+			for (const [matcher, count] of matcherCounts) {
+				const ratio = Math.min(count / totalMatched, 1.0);
+				if (ratio >= 0.8) {
+					smells.push({
+						type: "concentrated-pattern",
+						line: 0,
+						message: `${Math.round(ratio * 100)}% of assertions use .${matcher}() — tests may miss diverse behaviors`,
+					});
+					break;
+				}
 			}
 		}
 	}
@@ -428,7 +438,7 @@ function findImplFile(testPath: string): string | null {
 		const dir = dirname(testPath);
 		const base = basename(testPath);
 		// Common patterns: foo.test.ts -> foo.ts, foo.spec.ts -> foo.ts
-		const implName = base.replace(/\.(?:test|spec)/, "");
+		const implName = base.replace(/\.(?:test|spec)(\.[^.]+)$/, "$1");
 		// Check in same dir
 		const sameDirPath = resolve(dir, implName);
 		if (existsSync(sameDirPath)) return sameDirPath;

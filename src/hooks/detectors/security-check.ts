@@ -314,6 +314,8 @@ interface AdvisoryPattern {
 	/** Regex that, if present on the same line, suppresses the warning */
 	suppress: RegExp;
 	desc: string;
+	/** File extensions this pattern applies to (empty = all checkable) */
+	exts?: Set<string>;
 }
 
 const ADVISORY_PATTERNS: AdvisoryPattern[] = [
@@ -321,11 +323,13 @@ const ADVISORY_PATTERNS: AdvisoryPattern[] = [
 		re: /\bapp\.(?:get|post|put|delete|patch)\s*\(\s*["'`]\/api\//,
 		suppress: /(?:auth|middleware|protect|guard|verify|session)/i,
 		desc: "API route — verify auth middleware is applied",
+		exts: JS_TS_EXTS,
 	},
 	{
 		re: /\bwss?\.on\s*\(\s*["'`]connection["'`]/,
 		suppress: /(?:auth|token|verify|session|guard)/i,
 		desc: "WebSocket handler — verify authentication is applied",
+		exts: JS_TS_EXTS,
 	},
 	// OWASP A05: CORS wildcard
 	{
@@ -338,6 +342,7 @@ const ADVISORY_PATTERNS: AdvisoryPattern[] = [
 		re: /\bcors\s*\(\s*\)/,
 		suppress: /(?:\/\/\s*(?:dev|test|local))/i,
 		desc: "cors() with no options — allows all origins by default",
+		exts: JS_TS_EXTS,
 	},
 	// OWASP A05: Debug mode hardcoded
 	{
@@ -356,6 +361,7 @@ const ADVISORY_PATTERNS: AdvisoryPattern[] = [
 		re: /(?:console\.(?:log|info|warn|debug)|logger\.(?:info|warn|debug|log))\s*\(.*(?:password|passwd|secret|token|apiKey|api_key|credential|private_key)/i,
 		suppress: /(?:mask|redact|sanitize|\*{3,})/i,
 		desc: "Potential sensitive data in log output — mask before logging",
+		exts: JS_TS_EXTS,
 	},
 	// Unsafe dependency versions
 	{
@@ -367,10 +373,12 @@ const ADVISORY_PATTERNS: AdvisoryPattern[] = [
 
 function emitAdvisoryWarnings(file: string, content: string): void {
 	try {
+		const ext = extname(file).toLowerCase();
 		const lines = content.split("\n");
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i]!;
-			for (const { re, suppress, desc } of ADVISORY_PATTERNS) {
+			for (const { re, suppress, desc, exts } of ADVISORY_PATTERNS) {
+				if (exts && !exts.has(ext)) continue;
 				if (re.test(line) && !suppress.test(line)) {
 					const relative = file.split("/").slice(-3).join("/");
 					process.stderr.write(`[qult] Security advisory: ${relative}:${i + 1} — ${desc}\n`);

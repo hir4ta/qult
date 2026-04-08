@@ -170,11 +170,17 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 		const semanticFixes = detectSemanticPatterns(file);
 		if (semanticFixes.length > 0) {
 			newFixes.push(...semanticFixes);
-			const count = incrementEscalation("semantic_warning_count");
-			if (count >= 8) {
-				process.stderr.write(
-					`[qult] Semantic escalation: ${count} semantic warnings this session. Review code for silent failures.\n`,
-				);
+			// Don't count test file warnings toward escalation (false positive reduction)
+			const fileName = file.split("/").pop() ?? "";
+			const isTestFile =
+				fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_");
+			if (!isTestFile) {
+				const count = incrementEscalation("semantic_warning_count");
+				if (count >= 8) {
+					process.stderr.write(
+						`[qult] Semantic escalation: ${count} semantic warnings this session. Review code for silent failures.\n`,
+					);
+				}
 			}
 		}
 	} catch {
