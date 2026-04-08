@@ -1440,7 +1440,7 @@ describe("Scenario: MCP record_review allows commit", () => {
 
 		const { handleTool } = await import("../mcp-server.ts");
 		const { recordChangedFile, recordFinishStarted, recordTestPass } = await import(
-			"../state/session-state.ts",
+			"../state/session-state.ts"
 		);
 
 		// Simulate enough changed files to trigger review requirement
@@ -2068,8 +2068,6 @@ describe("Scenario: Security escalation blocks Stop after threshold", () => {
 	it("stop blocks when security_warning_count >= 5", async () => {
 		setupPassingGates();
 		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
-
-		const postTool = (await import("../hooks/post-tool.ts")).default;
 
 		// Set escalation threshold to 5 for this test
 		setProjectConfig({ escalation: { security_threshold: 5 } });
