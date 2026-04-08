@@ -48,6 +48,7 @@ function getValidGateNames(): string[] {
 		"security-check",
 		"dead-import-check",
 		"duplication-check",
+		"semantic-check",
 	]);
 	if (gates) {
 		for (const category of [gates.on_write, gates.on_commit, gates.on_review]) {
@@ -466,6 +467,7 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 					"drift_warning_count",
 					"test_quality_warning_count",
 					"duplication_warning_count",
+					"semantic_warning_count",
 				] as const;
 				for (const key of counters) {
 					const val = typeof session[key] === "number" ? (session[key] as number) : 0;
@@ -717,7 +719,8 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 				test_quality_warning_count = 0,
 				drift_warning_count = 0,
 				dead_import_warning_count = 0,
-				duplication_warning_count = 0
+				duplication_warning_count = 0,
+				semantic_warning_count = 0
 				WHERE id = ?`).run(sid);
 			appendAuditLog({
 				action: "reset_escalation_counters",

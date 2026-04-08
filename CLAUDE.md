@@ -128,3 +128,11 @@ qult の設計は以下の論文・記事に基づいている。機能追加や
 - [Specification as Quality Gate](https://arxiv.org/abs/2603.25773) — AI が AI をレビューすると相関エラーが増幅。決定論的ゲートを先に、AI レビューは残余のみ。4 段階レビューの前に lint/typecheck/test を実行する根拠
 - [VibeGuard](https://arxiv.org/abs/2604.01052) — AI 生成コードのセキュリティゲートフレームワーク
 - [PGS: Property-Generated Solver](https://ai-scholar.tech/en/articles/llm-paper/property-generated-solver) — プロパティベーステストで +37.3% の正確性向上
+- [Google DeepMind: Scaling Agent Systems](https://arxiv.org/abs/2512.08296) — 独立エージェントはエラーを 17.2 倍に増幅。4 エージェント超で協調オーバーヘッドが利益を消費。マルチエージェント設計の上限根拠
+- [Columbia DAPLab: 9 Critical Failure Patterns](https://daplab.cs.columbia.edu/general/2026/01/08/9-critical-failure-patterns-of-coding-agents.html) — サイレント障害・ビジネスロジック不一致・コードベース認識劣化。構造的ゲートで防げる失敗と防げない失敗の分類
+- [Is Vibe Coding Safe? (CMU)](https://arxiv.org/abs/2512.03262) — 機能的に正しいコードの 61% がセキュアでない (10.5%)。プロンプトによるセキュリティ誘導は無効。構造的ゲート必須の根拠
+- [FeatureBench (ICLR 2026)](https://arxiv.org/abs/2602.10975) — SWE-bench 74.4% → 複雑な機能開発で 11.0%。タスク分割の構造的支援が不可欠
+- [Agent Drift](https://arxiv.org/abs/2601.04170) — semantic/coordination/behavioral drift の 3 分類。長時間セッションでの状態管理・アンカリングの根拠
+- [Code Review Agents in PRs](https://arxiv.org/abs/2604.03196) — AI レビューコメントの採用率 0.9-19.2%。レビュー結果を exit 2 で強制する設計の根拠
+- [METR: AI Developer Productivity](https://arxiv.org/abs/2507.09089) — 経験者 RCT で AI 使用時タスク完了が 19% 遅延。体感速度の錯覚を品質ゲートで補正する根拠
+- [Anthropic: Context Engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) — コンテキストエンジニアリングの体系的アプローチ。PostCompact 状態再注入の理論的基盤

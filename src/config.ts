@@ -30,6 +30,7 @@ export interface QultConfig {
 		drift_threshold: number;
 		test_quality_threshold: number;
 		duplication_threshold: number;
+		semantic_threshold: number;
 	};
 }
 
@@ -58,6 +59,7 @@ export const DEFAULTS: QultConfig = {
 		drift_threshold: 8,
 		test_quality_threshold: 8,
 		duplication_threshold: 8,
+		semantic_threshold: 8,
 	},
 };
 
@@ -202,6 +204,8 @@ export function loadConfig(): QultConfig {
 	if (tqEsc !== undefined) config.escalation.test_quality_threshold = Math.max(1, tqEsc);
 	const dupEsc = envInt("QULT_ESCALATION_DUPLICATION");
 	if (dupEsc !== undefined) config.escalation.duplication_threshold = Math.max(1, dupEsc);
+	const semEsc = envInt("QULT_ESCALATION_SEMANTIC");
+	if (semEsc !== undefined) config.escalation.semantic_threshold = Math.max(1, semEsc);
 
 	_cache = config;
 	return config;

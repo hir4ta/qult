@@ -21,6 +21,8 @@ export function crossValidate(output: string, stageName: string): CrossValidatio
 			checkSpecContradiction(output, contradictions);
 		} else if (stageName === "Quality") {
 			checkQualityContradiction(output, contradictions);
+		} else if (stageName === "Adversarial") {
+			checkAdversarialContradiction(output, contradictions);
 		}
 
 		return { contradictions };
@@ -115,5 +117,52 @@ function checkQualityContradiction(output: string, contradictions: string[]): vo
 		}
 	} catch {
 		/* fail-open */
+	}
+}
+
+function checkAdversarialContradiction(output: string, contradictions: string[]): void {
+	if (!NO_ISSUES_RE.test(output)) return;
+
+	try {
+		const state = readSessionState();
+		const semanticWarnings = state.semantic_warning_count ?? 0;
+		const testQuality = state.test_quality_warning_count ?? 0;
+
+		if (semanticWarnings >= 3) {
+			contradictions.push(
+				`Adversarial reviewer declared "No issues found" but session has ${semanticWarnings} semantic warnings (silent failures)`,
+			);
+		}
+		if (testQuality >= 3) {
+			contradictions.push(
+				`Adversarial reviewer declared "No issues found" but session has ${testQuality} test quality warnings`,
+			);
+		}
+	} catch {
+		/* fail-open */
+	}
+}
+
+/** Cross-validate reviewer scores against each other. Call after all stages complete.
+ *  Returns contradictions found. Fail-open: returns empty on any error. */
+export function crossValidateReviewers(
+	stageScores: Record<string, Record<string, number>>,
+): string[] {
+	try {
+		const contradictions: string[] = [];
+
+		const spec = stageScores.Spec;
+		const quality = stageScores.Quality;
+
+		// Spec says complete but Quality says poor design → potential contradiction
+		if (spec?.completeness === 5 && quality?.design != null && quality.design <= 2) {
+			contradictions.push(
+				"Spec rated Completeness=5 but Quality rated Design≤2 — fully complete code with poor design warrants investigation",
+			);
+		}
+
+		return contradictions;
+	} catch {
+		return []; // fail-open
 	}
 }

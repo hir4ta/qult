@@ -2322,3 +2322,191 @@ describe("Scenario: Stop blocks when plan task Verify test failed", () => {
 		expect(exitCode).toBeNull();
 	});
 });
+
+// ============================================================
+// Semantic check detector
+// ============================================================
+
+describe("Semantic check: silent failure detection", () => {
+	it("detects empty catch block", async () => {
+		const file = join(TEST_DIR, "src/foo.ts");
+		writeFileSync(file, `try {\n  doSomething();\n} catch (e) {\n}\n`);
+
+		const { detectSemanticPatterns } = await import("../hooks/detectors/semantic-check.ts");
+		const fixes = detectSemanticPatterns(file);
+		expect(fixes.length).toBe(1);
+		expect(fixes[0]!.gate).toBe("semantic-check");
+		expect(fixes[0]!.errors[0]).toContain("Empty catch block");
+	});
+
+	it("allows catch with fail-open comment", async () => {
+		const file = join(TEST_DIR, "src/foo.ts");
+		writeFileSync(file, `try {\n  doSomething();\n} catch {\n  /* fail-open */\n}\n`);
+
+		const { detectSemanticPatterns } = await import("../hooks/detectors/semantic-check.ts");
+		const fixes = detectSemanticPatterns(file);
+		expect(fixes.length).toBe(0);
+	});
+
+	it("detects bare .map() call", async () => {
+		const file = join(TEST_DIR, "src/foo.ts");
+		writeFileSync(file, `const items = [1, 2, 3];\nitems.map(x => x * 2);\n`);
+
+		const { detectSemanticPatterns } = await import("../hooks/detectors/semantic-check.ts");
+		const fixes = detectSemanticPatterns(file);
+		expect(fixes.length).toBe(1);
+		expect(fixes[0]!.errors[0]).toContain("Return value of pure method discarded");
+	});
+
+	it("detects assignment in condition", async () => {
+		const file = join(TEST_DIR, "src/foo.ts");
+		writeFileSync(file, `let x = 5;\nif (x = 10) {\n  console.log(x);\n}\n`);
+
+		const { detectSemanticPatterns } = await import("../hooks/detectors/semantic-check.ts");
+		const fixes = detectSemanticPatterns(file);
+		expect(fixes.length).toBe(1);
+		expect(fixes[0]!.errors[0]).toContain("Assignment (=) inside condition");
+	});
+});
+
+// ============================================================
+// Security check: expanded patterns
+// ============================================================
+
+describe("Security check: expanded patterns", () => {
+	it("detects path traversal risk", async () => {
+		const file = join(TEST_DIR, "src/foo.ts");
+		writeFileSync(file, `const data = readFile(req.query.path);\n`);
+
+		const { detectSecurityPatterns } = await import("../hooks/detectors/security-check.ts");
+		const fixes = detectSecurityPatterns(file);
+		expect(fixes.length).toBe(1);
+		expect(fixes[0]!.errors[0]).toContain("path traversal");
+	});
+
+	it("detects prototype pollution", async () => {
+		const file = join(TEST_DIR, "src/foo.ts");
+		writeFileSync(file, `obj.__proto__["admin"] = true;\n`);
+
+		const { detectSecurityPatterns } = await import("../hooks/detectors/security-check.ts");
+		const fixes = detectSecurityPatterns(file);
+		expect(fixes.length).toBe(1);
+		expect(fixes[0]!.errors[0]).toContain("Prototype pollution");
+	});
+
+	it("emits CORS advisory", async () => {
+		const file = join(TEST_DIR, "src/foo.ts");
+		writeFileSync(file, `const headers = { "Access-Control-Allow-Origin": "*" };\n`);
+
+		const { detectSecurityPatterns } = await import("../hooks/detectors/security-check.ts");
+		detectSecurityPatterns(file);
+		const advisories = stderrCapture.join("");
+		expect(advisories).toContain("CORS wildcard");
+	});
+});
+
+// ============================================================
+// Test quality: enhanced smell detection
+// ============================================================
+
+describe("Test quality: enhanced smells", () => {
+	it("detects happy-path-only tests", async () => {
+		const file = join(TEST_DIR, "src/foo.test.ts");
+		writeFileSync(
+			file,
+			[
+				'import { expect, it } from "vitest";',
+				'it("returns correct value", () => { expect(fn(1)).toBe(2); });',
+				'it("handles normal input", () => { expect(fn(2)).toBe(4); });',
+				'it("works with valid data", () => { expect(fn(3)).toBe(6); });',
+			].join("\n"),
+		);
+
+		const { analyzeTestQuality } = await import("../hooks/detectors/test-quality-check.ts");
+		const result = analyzeTestQuality(file);
+		expect(result).not.toBeNull();
+		const smellTypes = result!.smells.map((s) => s.type);
+		expect(smellTypes).toContain("happy-path-only");
+	});
+
+	it("detects missing boundary values", async () => {
+		const file = join(TEST_DIR, "src/foo.test.ts");
+		writeFileSync(
+			file,
+			[
+				'import { expect, it } from "vitest";',
+				'it("test 1", () => { expect(fn(5)).toBe(10); });',
+				'it("test 2", () => { expect(fn(10)).toBe(20); });',
+				'it("test 3", () => { expect(fn(100)).toBe(200); });',
+			].join("\n"),
+		);
+
+		const { analyzeTestQuality } = await import("../hooks/detectors/test-quality-check.ts");
+		const result = analyzeTestQuality(file);
+		expect(result).not.toBeNull();
+		const smellTypes = result!.smells.map((s) => s.type);
+		expect(smellTypes).toContain("missing-boundary");
+	});
+});
+
+// ============================================================
+// Plan: Success Criteria parsing
+// ============================================================
+
+describe("Plan: parseSuccessCriteria", () => {
+	it("extracts criteria from plan content", async () => {
+		const { parseSuccessCriteria } = await import("../state/plan-status.ts");
+		const content = [
+			"## Tasks",
+			"### Task 1: Foo [done]",
+			"",
+			"## Success Criteria",
+			"",
+			"- `bun vitest run` — all tests pass",
+			"- `bun tsc --noEmit` — no type errors",
+			"- security-check: 8 → ~23 patterns",
+			"",
+			"## Notes",
+			"some note",
+		].join("\n");
+
+		const criteria = parseSuccessCriteria(content);
+		expect(criteria).toHaveLength(3);
+		expect(criteria[0]).toContain("bun vitest run");
+		expect(criteria[2]).toContain("security-check");
+	});
+
+	it("returns empty array when no Success Criteria section", async () => {
+		const { parseSuccessCriteria } = await import("../state/plan-status.ts");
+		const content = "## Tasks\n### Task 1: Foo [done]\n";
+		const criteria = parseSuccessCriteria(content);
+		expect(criteria).toHaveLength(0);
+	});
+});
+
+// ============================================================
+// Cross-validation: reviewer contradictions
+// ============================================================
+
+describe("Cross-validation: reviewer contradictions", () => {
+	it("detects Adversarial 'no issues' with semantic warnings", async () => {
+		const { incrementEscalation } = await import("../state/session-state.ts");
+		for (let i = 0; i < 3; i++) incrementEscalation("semantic_warning_count");
+		flushAll();
+
+		const { crossValidate } = await import("../hooks/subagent-stop/cross-validation.ts");
+		const result = crossValidate("No issues found.", "Adversarial");
+		expect(result.contradictions.length).toBeGreaterThan(0);
+		expect(result.contradictions[0]).toContain("semantic warnings");
+	});
+
+	it("detects inter-reviewer score contradictions", async () => {
+		const { crossValidateReviewers } = await import("../hooks/subagent-stop/cross-validation.ts");
+		const result = crossValidateReviewers({
+			Spec: { completeness: 5, accuracy: 5 },
+			Quality: { design: 2, maintainability: 3 },
+		});
+		expect(result.length).toBeGreaterThan(0);
+		expect(result[0]).toContain("Completeness=5");
+	});
+});

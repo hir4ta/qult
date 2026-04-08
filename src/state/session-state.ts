@@ -50,6 +50,7 @@ export interface SessionState {
 	drift_warning_count: number;
 	dead_import_warning_count: number;
 	duplication_warning_count: number;
+	semantic_warning_count: number;
 	human_review_approved_at: string | null;
 }
 
@@ -79,6 +80,7 @@ function defaultState(): SessionState {
 		drift_warning_count: 0,
 		dead_import_warning_count: 0,
 		duplication_warning_count: 0,
+		semantic_warning_count: 0,
 		human_review_approved_at: null,
 	};
 }
@@ -115,6 +117,7 @@ export function readSessionState(): SessionState {
 		state.drift_warning_count = (row.drift_warning_count as number) ?? 0;
 		state.dead_import_warning_count = (row.dead_import_warning_count as number) ?? 0;
 		state.duplication_warning_count = (row.duplication_warning_count as number) ?? 0;
+		state.semantic_warning_count = (row.semantic_warning_count as number) ?? 0;
 
 		// Read child tables
 		const changedFiles = db
@@ -206,7 +209,8 @@ export function flush(): void {
 				test_quality_warning_count = ?,
 				drift_warning_count = ?,
 				dead_import_warning_count = ?,
-				duplication_warning_count = ?
+				duplication_warning_count = ?,
+				semantic_warning_count = ?
 				WHERE id = ?`).run(
 				state.last_commit_at,
 				state.test_passed_at,
@@ -221,6 +225,7 @@ export function flush(): void {
 				state.drift_warning_count,
 				state.dead_import_warning_count,
 				state.duplication_warning_count,
+				state.semantic_warning_count,
 				sid,
 			);
 
@@ -459,6 +464,7 @@ export function clearOnCommit(): void {
 	state.drift_warning_count = 0;
 	state.dead_import_warning_count = 0;
 	state.duplication_warning_count = 0;
+	state.semantic_warning_count = 0;
 	state.human_review_approved_at = null;
 	writeState(state);
 }
@@ -622,7 +628,8 @@ type EscalationCounter =
 	| "test_quality_warning_count"
 	| "drift_warning_count"
 	| "dead_import_warning_count"
-	| "duplication_warning_count";
+	| "duplication_warning_count"
+	| "semantic_warning_count";
 
 export function incrementEscalation(counter: EscalationCounter): number {
 	const state = readSessionState();
@@ -643,6 +650,7 @@ export function resetEscalationCounters(): void {
 	state.drift_warning_count = 0;
 	state.dead_import_warning_count = 0;
 	state.duplication_warning_count = 0;
+	state.semantic_warning_count = 0;
 	writeState(state);
 }
 

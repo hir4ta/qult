@@ -29,6 +29,7 @@ import { detectCrossFileDuplication, detectDuplication } from "./detectors/dupli
 import { detectExportBreakingChanges } from "./detectors/export-check.ts";
 import { detectHallucinatedImports } from "./detectors/import-check.ts";
 import { detectSecurityPatterns } from "./detectors/security-check.ts";
+import { detectSemanticPatterns } from "./detectors/semantic-check.ts";
 import { resolveTestFile } from "./detectors/test-file-resolver.ts";
 import { deny } from "./respond.ts";
 
@@ -158,6 +159,22 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 						`[qult] Security escalation: ${count} security warnings this session. Review security posture.\n`,
 					);
 				}
+			}
+		}
+	} catch {
+		/* fail-open */
+	}
+
+	// Semantic pattern detection (silent failures: empty catch, ignored return, assignment in condition)
+	try {
+		const semanticFixes = detectSemanticPatterns(file);
+		if (semanticFixes.length > 0) {
+			newFixes.push(...semanticFixes);
+			const count = incrementEscalation("semantic_warning_count");
+			if (count >= 8) {
+				process.stderr.write(
+					`[qult] Semantic escalation: ${count} semantic warnings this session. Review code for silent failures.\n`,
+				);
 			}
 		}
 	} catch {

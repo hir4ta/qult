@@ -40,7 +40,13 @@ If an active plan exists in `.claude/plans/`, extract acceptance criteria:
    - Task 3: <name> — Verify: <test file>:<test function>
    ```
 4. Only include tasks with a non-empty Verify field
-5. If no plan file exists or no Verify fields are found, skip this stage entirely
+5. Also extract **Success Criteria** (bullet points under `## Success Criteria` section):
+   ```
+   ## Success Criteria (from plan)
+   - `bun vitest run` — all tests pass
+   - security-check: 8 → ~23 patterns
+   ```
+6. If no plan file exists or no Verify fields/Success Criteria are found, skip this stage entirely
 
 ## Stage 0.7: Collect detector findings (ground truth)
 
@@ -52,81 +58,86 @@ Before spawning reviewers, collect computational detector results as ground trut
 
 These findings are deterministic (not LLM-generated) and serve as ground truth that reviewers must not contradict.
 
-## Stage 1: Spec Reviewer (implementation completeness)
+## Round 1: Spec + Security (parallel — no overlap)
 
-Spawn one `spec-reviewer` agent.
+Spawn `spec-reviewer` and `security-reviewer` **in parallel** (single message, two Agent tool calls). These stages have no overlap: Spec checks plan compliance, Security checks vulnerabilities.
+
+### Stage 1: Spec Reviewer
 
 In the agent prompt, include:
 - The on_review gate results from Stage 0 (if any)
 - The plan acceptance criteria from Stage 0.5 (if any)
+- The Success Criteria from Stage 0.5 (if any) — these are the human-written ground truth for spec verification
 - The detector findings from Stage 0.7 (if any)
-- One-line instruction: "Verify the uncommitted changes match the plan and all consumers are updated."
-
-The spec-reviewer evaluates **Completeness** and **Accuracy** in an independent context.
+- One-line instruction: "Verify the uncommitted changes match the plan and all consumers are updated. Use Success Criteria as ground truth."
 
 Collect output: `Spec: PASS/FAIL`, `Score: Completeness=N Accuracy=N`, findings.
 
-**Post-validation**: Verify the agent output contains `Spec: PASS` or `Spec: FAIL` and `Score: Completeness=N Accuracy=N`. If the output does not contain a verdict line, the agent malfunctioned — re-spawn it with a clearer prompt. Do NOT fabricate scores.
+**Post-validation**: Verify the agent output contains verdict and scores. If missing, re-spawn. Do NOT fabricate scores.
 
 If Spec: PASS, record the scores:
 ```
 mcp__plugin_qult_qult__record_stage_scores({ stage: "Spec", scores: { completeness: N, accuracy: N } })
 ```
 
-## Stage 2: Quality Reviewer (design & maintainability)
-
-Spawn one `quality-reviewer` agent.
-
-In the agent prompt, include:
-- The on_review gate results from Stage 0 (if any)
-- The detector findings from Stage 0.7 (if any)
-- One-line instruction: "Review the uncommitted changes for design quality and maintainability issues."
-
-The quality-reviewer evaluates **Design** and **Maintainability** in an independent context.
-
-Collect output: `Quality: PASS/FAIL`, `Score: Design=N Maintainability=N`, findings.
-
-**Post-validation**: Verify the agent output contains `Quality: PASS` or `Quality: FAIL` and `Score: Design=N Maintainability=N`. If the output does not contain a verdict line, the agent malfunctioned — re-spawn it with a clearer prompt. Do NOT fabricate scores.
-
-If Quality: PASS, record the scores:
-```
-mcp__plugin_qult_qult__record_stage_scores({ stage: "Quality", scores: { design: N, maintainability: N } })
-```
-
-## Stage 3: Security Reviewer (vulnerability & hardening)
-
-Spawn one `security-reviewer` agent.
+### Stage 3: Security Reviewer
 
 In the agent prompt, include:
 - The detector findings from Stage 0.7 (if any)
 - One-line instruction: "Review the uncommitted changes for security vulnerabilities and hardening gaps."
 
-The security-reviewer evaluates **Vulnerability** and **Hardening** in an independent context.
-
 Collect output: `Security: PASS/FAIL`, `Score: Vulnerability=N Hardening=N`, findings.
 
-**Post-validation**: Verify the agent output contains `Security: PASS` or `Security: FAIL` and `Score: Vulnerability=N Hardening=N`. If the output does not contain a verdict line, the agent malfunctioned — re-spawn it with a clearer prompt. Do NOT fabricate scores. Also verify the agent did not modify any files (check `git status` for unexpected changes) — security reviewer is read-only.
+**Post-validation**: Verify verdict, scores, and that the agent did not modify files (read-only).
 
 If Security: PASS, record the scores:
 ```
 mcp__plugin_qult_qult__record_stage_scores({ stage: "Security", scores: { vulnerability: N, hardening: N } })
 ```
 
-## Stage 4: Adversarial Reviewer (edge cases & logic correctness)
+### Round 1 summary
 
-Spawn one `adversarial-reviewer` agent.
+After both agents complete, extract a **1-line summary** of each finding from each reviewer. Build a `Prior findings` block:
+
+```
+## Prior findings (do not duplicate)
+- Spec: [1-line summary of each finding, or "No issues"]
+- Security: [1-line summary of each finding, or "No issues"]
+```
+
+## Round 2: Quality + Adversarial (parallel — with Round 1 context)
+
+Spawn `quality-reviewer` and `adversarial-reviewer` **in parallel**. Both receive the Round 1 findings summary to avoid duplicating already-reported issues.
+
+### Stage 2: Quality Reviewer
+
+In the agent prompt, include:
+- The on_review gate results from Stage 0 (if any)
+- The detector findings from Stage 0.7 (if any)
+- The **Prior findings** block from Round 1
+- One-line instruction: "Review the uncommitted changes for design quality and maintainability issues. Do not duplicate findings already reported by Spec/Security reviewers."
+
+Collect output: `Quality: PASS/FAIL`, `Score: Design=N Maintainability=N`, findings.
+
+**Post-validation**: Verify verdict and scores. Do NOT fabricate scores.
+
+If Quality: PASS, record the scores:
+```
+mcp__plugin_qult_qult__record_stage_scores({ stage: "Quality", scores: { design: N, maintainability: N } })
+```
+
+### Stage 4: Adversarial Reviewer
 
 In the agent prompt, include:
 - The detector findings from Stage 0.7 (if any)
-- One-line instruction: "Find edge cases, logic errors, and silent failures in the uncommitted changes that other reviewers missed."
-
-The adversarial-reviewer evaluates **EdgeCases** and **LogicCorrectness** in an independent context.
+- The **Prior findings** block from Round 1
+- One-line instruction: "Find edge cases, logic errors, and silent failures in the uncommitted changes that other reviewers missed. Do not duplicate findings already reported."
 
 Collect output: `Adversarial: PASS/FAIL`, `Score: EdgeCases=N LogicCorrectness=N`, findings.
 
-**Post-validation**: Verify the agent output contains `Adversarial: PASS` or `Adversarial: FAIL` and `Score: EdgeCases=N LogicCorrectness=N`. If the output does not contain a verdict line, the agent malfunctioned — re-spawn it with a clearer prompt. Do NOT fabricate scores. Also verify the agent did not modify any files — adversarial reviewer is read-only.
+**Post-validation**: Verify verdict, scores, and that the agent did not modify files (read-only).
 
-Note: Adversarial stage scores are included in the 4-stage aggregate (/40). All four stages contribute to the overall threshold check.
+Note: Adversarial stage scores are included in the 4-stage aggregate (/40).
 
 If Adversarial: PASS, record the scores:
 ```
@@ -139,8 +150,9 @@ For EACH finding from ALL four reviewers, verify:
 - **Succinctness**: Clear and to the point? Not vague or rambling?
 - **Accuracy**: Technically correct in this codebase's context? Not a false positive?
 - **Actionability**: Includes a concrete fix? Not just "consider X"?
+- **Uniqueness**: Not a duplicate of a finding already reported by another reviewer (same file:line, same issue). If duplicate, keep the one from the more relevant stage (e.g., security finding from Security, not Adversarial).
 
-Discard findings that fail any criterion. Report only what passes all three.
+Discard findings that fail any criterion. Report only what passes all four.
 
 ## Stage 6: Score aggregation & iteration
 

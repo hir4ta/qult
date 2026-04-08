@@ -215,3 +215,29 @@ export function resetPlanCache(): void {
 	_planCachePath = null;
 	_planCacheMtime = null;
 }
+
+/** Parse Success Criteria bullet points from a plan markdown string.
+ *  Extracts items under the `## Success Criteria` section header. */
+export function parseSuccessCriteria(content: string): string[] {
+	const lines = content.split("\n");
+	const criteria: string[] = [];
+	let inSection = false;
+
+	for (const line of lines) {
+		const trimmed = line.trim();
+		if (/^##\s+Success\s+Criteria/i.test(trimmed)) {
+			inSection = true;
+			continue;
+		}
+		// Stop at next heading
+		if (inSection && /^##\s/.test(trimmed)) break;
+		if (!inSection) continue;
+
+		// Match bullet points: - item or * item
+		const bulletMatch = trimmed.match(/^[-*]\s+(.+)/);
+		if (bulletMatch) {
+			criteria.push(bulletMatch[1]!.trim());
+		}
+	}
+	return criteria;
+}

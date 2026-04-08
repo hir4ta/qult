@@ -164,6 +164,36 @@ const DANGEROUS_PATTERNS: DangerousPattern[] = [
 		desc: "process.env leaked in HTTP response — environment variable disclosure",
 		exts: JS_TS_EXTS,
 	},
+	// OWASP A01: Path traversal — file operations with user input
+	{
+		re: /(?:readFile|writeFile|createReadStream|createWriteStream|readdir|unlink|rmSync)\s*\(.*(?:req\.|params\.|query\.|ctx\.(?:request|params|query))/,
+		desc: "File operation with user-controlled path — path traversal risk",
+		exts: JS_TS_EXTS,
+	},
+	// OWASP A10: SSRF — HTTP requests with user-controlled URLs
+	{
+		re: /(?:fetch|axios\.(?:get|post|put|delete|patch|request)|http\.(?:get|request)|got|urllib\.request\.urlopen)\s*\(.*(?:req\.|params\.|query\.|ctx\.(?:request|params|query))/,
+		desc: "HTTP request with user-controlled URL — SSRF risk",
+		exts: JS_TS_EXTS,
+	},
+	// OWASP A10: SSRF — Python requests with user input
+	{
+		re: /requests\.(?:get|post|put|delete|patch|head)\s*\(\s*(?!["'])[a-zA-Z_]/,
+		desc: "HTTP request with dynamic URL — SSRF risk",
+		exts: PY_EXTS,
+	},
+	// Prototype pollution — __proto__ or constructor.prototype assignment
+	{
+		re: /(?:__proto__|constructor\s*\.\s*prototype)\s*(?:\[|\.\s*\w+\s*=)/,
+		desc: "Prototype pollution — __proto__/constructor.prototype mutation",
+		exts: JS_TS_EXTS,
+	},
+	// Dynamic require/import with variable (supply-chain risk)
+	{
+		re: /\brequire\s*\(\s*(?!["'`])[a-zA-Z_$]/,
+		desc: "Dynamic require() with variable — supply-chain/injection risk",
+		exts: JS_TS_EXTS,
+	},
 ];
 
 /** Detect hardcoded secrets and dangerous code patterns.
@@ -264,9 +294,7 @@ export function detectSecurityPatterns(file: string): PendingFix[] {
 	}
 
 	// Advisory patterns (stderr only, not PendingFix)
-	if (JS_TS_EXTS.has(ext)) {
-		emitAdvisoryWarnings(file, content);
-	}
+	emitAdvisoryWarnings(file, content);
 
 	if (errors.length === 0) return [];
 
@@ -298,6 +326,42 @@ const ADVISORY_PATTERNS: AdvisoryPattern[] = [
 		re: /\bwss?\.on\s*\(\s*["'`]connection["'`]/,
 		suppress: /(?:auth|token|verify|session|guard)/i,
 		desc: "WebSocket handler — verify authentication is applied",
+	},
+	// OWASP A05: CORS wildcard
+	{
+		re: /Access-Control-Allow-Origin['":\s]*\*/,
+		suppress: /(?:localhost|127\.0\.0\.1|development|test)/i,
+		desc: "CORS wildcard origin (*) — restrict to specific origins in production",
+	},
+	// OWASP A05: cors() without options
+	{
+		re: /\bcors\s*\(\s*\)/,
+		suppress: /(?:\/\/\s*(?:dev|test|local))/i,
+		desc: "cors() with no options — allows all origins by default",
+	},
+	// OWASP A05: Debug mode hardcoded
+	{
+		re: /\bdebug\s*[:=]\s*true\b/,
+		suppress: /(?:test|spec|mock|\.test\.|\.spec\.)/i,
+		desc: "Hardcoded debug=true — verify this is not in production config",
+	},
+	// Source map exposure in config
+	{
+		re: /\bsourceMap\s*[:=]\s*true\b/,
+		suppress: /(?:dev|development|test)/i,
+		desc: "Source maps enabled — verify they are not shipped to production (VibeGuard)",
+	},
+	// OWASP A09: Sensitive data in logs
+	{
+		re: /(?:console\.(?:log|info|warn|debug)|logger\.(?:info|warn|debug|log))\s*\(.*(?:password|passwd|secret|token|apiKey|api_key|credential|private_key)/i,
+		suppress: /(?:mask|redact|sanitize|\*{3,})/i,
+		desc: "Potential sensitive data in log output — mask before logging",
+	},
+	// Unsafe dependency versions
+	{
+		re: /["']\s*(?:\*|latest)\s*["']\s*$/,
+		suppress: /(?:peerDependencies|devDependencies|optionalDependencies)/i,
+		desc: "Wildcard/latest dependency version — pin to specific version for supply-chain safety",
 	},
 ];
 

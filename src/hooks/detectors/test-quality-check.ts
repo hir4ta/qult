@@ -335,7 +335,114 @@ export function analyzeTestQuality(file: string): TestQualityResult | null {
 		/* fail-open */
 	}
 
+	// ── New smell: no-error-path ─────────────────────────────
+	// If test has no toThrow/rejects/catch/error assertions but implementation has throw/reject
+	if (testCount >= 2) {
+		const hasErrorAssertions =
+			/(?:toThrow|rejects\.toThrow|\.rejects\.|\.catch\s*\(|expect\(.*error)/i.test(codeOnly);
+		if (!hasErrorAssertions) {
+			try {
+				const implFile = findImplFile(absPath);
+				if (implFile) {
+					const implContent = readFileSync(implFile, "utf-8");
+					if (/\bthrow\b|\breject\b|Promise\.reject/m.test(implContent)) {
+						smells.push({
+							type: "no-error-path",
+							line: 0,
+							message:
+								"Implementation has throw/reject but test has no error-path assertions (toThrow, rejects, catch)",
+						});
+					}
+				}
+			} catch {
+				/* fail-open */
+			}
+		}
+	}
+
+	// ── New smell: happy-path-only ───────────────────────────
+	// If all test descriptions are positive (no "invalid", "error", "fail", etc.)
+	if (testCount >= 3) {
+		const descRe = /\b(?:it|test)\s*\(\s*["'`]([^"'`]*)["'`]/g;
+		const negativeRe =
+			/\b(?:invalid|error|fail|reject|throw|empty|null|missing|not\b|negative|undefined|wrong|bad|broken|illegal)/i;
+		let allPositive = true;
+		for (const match of codeOnly.matchAll(descRe)) {
+			if (negativeRe.test(match[1]!)) {
+				allPositive = false;
+				break;
+			}
+		}
+		if (allPositive) {
+			smells.push({
+				type: "happy-path-only",
+				line: 0,
+				message:
+					"All test descriptions are positive — consider testing error/edge cases (invalid input, null, empty)",
+			});
+		}
+	}
+
+	// ── New smell: missing-boundary ──────────────────────────
+	// If expect() calls never use boundary values (0, -1, null, undefined, NaN, "", [], Infinity)
+	if (testCount >= 3) {
+		const boundaryRe =
+			/expect\s*\([^)]*(?:\b0\b|\b-1\b|\bnull\b|\bundefined\b|\bNaN\b|\bInfinity\b|["'`]{2}|\[\s*\])/;
+		if (!boundaryRe.test(codeOnly)) {
+			smells.push({
+				type: "missing-boundary",
+				line: 0,
+				message:
+					"No boundary values tested (0, -1, null, undefined, NaN, empty string/array) — consider edge cases",
+			});
+		}
+	}
+
+	// ── New smell: concentrated-pattern ──────────────────────
+	// If 80%+ of assertions use the same matcher (e.g., all toBe(true))
+	if (testCount >= 5 && assertionCount >= 5) {
+		const matcherRe = /\.(?:toBe|toEqual|toStrictEqual|toThrow|toMatch|toContain)\s*\([^)]*\)/g;
+		const matcherCounts = new Map<string, number>();
+		for (const m of codeOnly.matchAll(matcherRe)) {
+			const key = m[0]!.trim();
+			matcherCounts.set(key, (matcherCounts.get(key) ?? 0) + 1);
+		}
+		for (const [matcher, count] of matcherCounts) {
+			if (count / assertionCount >= 0.8) {
+				smells.push({
+					type: "concentrated-pattern",
+					line: 0,
+					message: `${Math.round((count / assertionCount) * 100)}% of assertions use ${matcher.slice(0, 40)} — tests may miss diverse behaviors`,
+				});
+				break;
+			}
+		}
+	}
+
 	return { testCount, assertionCount, avgAssertions, smells };
+}
+
+/** Find implementation file for a test file. Simple heuristic using naming conventions. */
+function findImplFile(testPath: string): string | null {
+	try {
+		const dir = dirname(testPath);
+		const base = basename(testPath);
+		// Common patterns: foo.test.ts -> foo.ts, foo.spec.ts -> foo.ts
+		const implName = base.replace(/\.(?:test|spec)/, "");
+		// Check in same dir
+		const sameDirPath = resolve(dir, implName);
+		if (existsSync(sameDirPath)) return sameDirPath;
+		// Check in parent dir (src/__tests__/foo.test.ts -> src/foo.ts)
+		const parentDir = dirname(dir);
+		const parentPath = resolve(parentDir, implName);
+		if (existsSync(parentPath)) return parentPath;
+		// Check in src/ dir (tests/foo.test.ts -> src/foo.ts)
+		const srcPath = resolve(parentDir, "src", implName);
+		if (existsSync(srcPath)) return srcPath;
+		return null;
+	} catch {
+		return null;
+	}
 }
 
 /** Format test quality result as warning lines for stderr output. */

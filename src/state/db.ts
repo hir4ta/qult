@@ -11,7 +11,7 @@ import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const DB_DIR = join(homedir(), ".qult");
 const DB_PATH = join(DB_DIR, "qult.db");
@@ -76,6 +76,14 @@ function migrateSchema(db: Database): void {
 		// Version 2: remove calibration table
 		db.exec("DROP TABLE IF EXISTS calibration");
 	}
+	if (version < 3) {
+		// Version 3: add semantic_warning_count to sessions
+		try {
+			db.exec("ALTER TABLE sessions ADD COLUMN semantic_warning_count INTEGER NOT NULL DEFAULT 0");
+		} catch {
+			/* fail-open: column may already exist */
+		}
+	}
 	db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -103,7 +111,8 @@ function createTablesV1(db: Database): void {
 			test_quality_warning_count  INTEGER NOT NULL DEFAULT 0,
 			drift_warning_count         INTEGER NOT NULL DEFAULT 0,
 			dead_import_warning_count   INTEGER NOT NULL DEFAULT 0,
-			duplication_warning_count   INTEGER NOT NULL DEFAULT 0
+			duplication_warning_count   INTEGER NOT NULL DEFAULT 0,
+			semantic_warning_count     INTEGER NOT NULL DEFAULT 0
 		);
 		CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
 

@@ -105,6 +105,17 @@ export default async function stop(ev: HookEvent): Promise<void> {
 				`[qult] ${untracked.length} plan task(s) have Verify fields but were not tracked via TaskCreate:\n${list}\nConsider using TaskCreate for Verify test execution.\n`,
 			);
 		}
+
+		// Advisory: done tasks with File but no Verify field (spec ground truth gap)
+		const doneNoVerify = plan.tasks.filter((t) => t.status === "done" && t.file && !t.verify);
+		if (doneNoVerify.length > 0) {
+			const list = doneNoVerify
+				.map((t) => `  Task ${t.taskNumber ?? "?"}: ${t.name} (File: ${t.file})`)
+				.join("\n");
+			process.stderr.write(
+				`[qult] ${doneNoVerify.length} completed task(s) have File but no Verify field — add test verification for spec compliance:\n${list}\n`,
+			);
+		}
 	}
 
 	// Skip plan-required and review gates when no source files changed (post-commit or release state)
@@ -174,6 +185,13 @@ export default async function stop(ev: HookEvent): Promise<void> {
 	if (duplicationCount >= escalation.duplication_threshold) {
 		block(
 			`${duplicationCount} duplication warnings emitted this session. Extract shared code before finishing.`,
+		);
+	}
+
+	const semanticCount = readEscalation("semantic_warning_count");
+	if (semanticCount >= escalation.semantic_threshold && !isGateDisabled("semantic-check")) {
+		block(
+			`${semanticCount} semantic warnings emitted this session. Fix silent failure patterns before finishing.`,
 		);
 	}
 }

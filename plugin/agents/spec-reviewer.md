@@ -107,6 +107,17 @@ Severity: critical > high > medium > low
 
 If no real issues found: `Spec: PASS` then score, then "No issues found."
 
+## Success Criteria Verification
+
+If Success Criteria are provided as structured data in your prompt context (extracted from the plan):
+
+1. For each criterion that contains a **backtick command** (e.g., `` `bun vitest run` ``), run the command and verify it exits 0
+2. For each criterion that contains a **measurable assertion** (e.g., "N patterns added", "no type errors"), verify by reading the relevant files or running the check
+3. If a criterion cannot be computationally verified, note it as "manual verification required"
+4. **Accuracy score must reflect** whether Success Criteria were met — a PASS with unmet criteria is a contradiction
+
+This is the "specification as ground truth" principle: the human-written plan is the authoritative reference, not the implementer's claims.
+
 ## Anti-self-persuasion
 
 When you find a gap, report it. Do NOT rationalize it away:
