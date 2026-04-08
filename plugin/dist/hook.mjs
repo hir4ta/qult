@@ -1,4 +1,4 @@
-import { createRequire } from "node:module";
+// @bun
 var __defProp = Object.defineProperty;
 var __returnValue = (v) => v;
 function __exportSetter(name, newValue) {
@@ -14,27 +14,239 @@ var __export = (target, all) => {
     });
 };
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
-var __require = /* @__PURE__ */ createRequire(import.meta.url);
+var __require = import.meta.require;
 
-// src/state/atomic-write.ts
-import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
-function atomicWriteJson(filePath, data) {
-  const dir = dirname(filePath);
-  if (!existsSync(dir))
-    mkdirSync(dir, { recursive: true });
-  const tmp = `${filePath}.${process.pid}.tmp`;
-  try {
-    writeFileSync(tmp, JSON.stringify(data, null, 2));
-    renameSync(tmp, filePath);
-  } catch (err) {
-    try {
-      unlinkSync(tmp);
-    } catch {}
-    throw err;
-  }
+// src/state/db.ts
+import { Database } from "bun:sqlite";
+import { mkdirSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
+function getDb() {
+  if (_db)
+    return _db;
+  mkdirSync(DB_DIR, { recursive: true });
+  _db = new Database(DB_PATH);
+  configurePragmas(_db);
+  ensureSchema(_db);
+  return _db;
 }
-var init_atomic_write = () => {};
+function configurePragmas(db) {
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA busy_timeout = 5000");
+  db.exec("PRAGMA foreign_keys = ON");
+}
+function ensureSchema(db) {
+  db.exec(`
+		CREATE TABLE IF NOT EXISTS projects (
+			id         INTEGER PRIMARY KEY,
+			path       TEXT    NOT NULL UNIQUE,
+			created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		);
+
+		CREATE TABLE IF NOT EXISTS sessions (
+			id                          TEXT    PRIMARY KEY,
+			project_id                  INTEGER NOT NULL REFERENCES projects(id),
+			started_at                  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			last_commit_at              TEXT,
+			test_passed_at              TEXT,
+			test_command                TEXT,
+			review_completed_at         TEXT,
+			review_iteration            INTEGER NOT NULL DEFAULT 0,
+			plan_eval_iteration         INTEGER NOT NULL DEFAULT 0,
+			plan_selfcheck_blocked_at   TEXT,
+			human_review_approved_at    TEXT,
+			security_warning_count      INTEGER NOT NULL DEFAULT 0,
+			test_quality_warning_count  INTEGER NOT NULL DEFAULT 0,
+			drift_warning_count         INTEGER NOT NULL DEFAULT 0,
+			dead_import_warning_count   INTEGER NOT NULL DEFAULT 0,
+			duplication_warning_count   INTEGER NOT NULL DEFAULT 0
+		);
+		CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
+
+		CREATE TABLE IF NOT EXISTS pending_fixes (
+			id         INTEGER PRIMARY KEY,
+			session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			file       TEXT    NOT NULL,
+			gate       TEXT    NOT NULL,
+			errors     TEXT    NOT NULL,
+			UNIQUE(session_id, file, gate)
+		);
+		CREATE INDEX IF NOT EXISTS idx_pending_fixes_session ON pending_fixes(session_id);
+
+		CREATE TABLE IF NOT EXISTS changed_files (
+			session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			file_path  TEXT NOT NULL,
+			changed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			PRIMARY KEY (session_id, file_path)
+		);
+
+		CREATE TABLE IF NOT EXISTS disabled_gates (
+			session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			gate_name   TEXT NOT NULL,
+			reason      TEXT NOT NULL,
+			disabled_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			PRIMARY KEY (session_id, gate_name)
+		);
+
+		CREATE TABLE IF NOT EXISTS ran_gates (
+			session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			gate_name  TEXT NOT NULL,
+			ran_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			PRIMARY KEY (session_id, gate_name)
+		);
+
+		CREATE TABLE IF NOT EXISTS task_verify_results (
+			session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			task_key   TEXT    NOT NULL,
+			passed     INTEGER NOT NULL,
+			ran_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			PRIMARY KEY (session_id, task_key)
+		);
+
+		CREATE TABLE IF NOT EXISTS gate_failure_counts (
+			session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			file       TEXT    NOT NULL,
+			gate       TEXT    NOT NULL,
+			count      INTEGER NOT NULL DEFAULT 1,
+			PRIMARY KEY (session_id, file, gate)
+		);
+
+		CREATE TABLE IF NOT EXISTS review_scores (
+			id              INTEGER PRIMARY KEY,
+			session_id      TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			iteration       INTEGER NOT NULL,
+			aggregate_score REAL    NOT NULL,
+			recorded_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			UNIQUE(session_id, iteration)
+		);
+		CREATE INDEX IF NOT EXISTS idx_review_scores_session ON review_scores(session_id);
+
+		CREATE TABLE IF NOT EXISTS review_stage_scores (
+			id          INTEGER PRIMARY KEY,
+			session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			stage       TEXT NOT NULL,
+			dimension   TEXT NOT NULL,
+			score       REAL NOT NULL,
+			recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			UNIQUE(session_id, stage, dimension)
+		);
+		CREATE INDEX IF NOT EXISTS idx_stage_scores_session ON review_stage_scores(session_id);
+
+		CREATE TABLE IF NOT EXISTS plan_eval_scores (
+			id              INTEGER PRIMARY KEY,
+			session_id      TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			iteration       INTEGER NOT NULL,
+			aggregate_score REAL    NOT NULL,
+			recorded_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			UNIQUE(session_id, iteration)
+		);
+
+		CREATE TABLE IF NOT EXISTS gate_configs (
+			project_id         INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			phase              TEXT    NOT NULL,
+			gate_name          TEXT    NOT NULL,
+			command            TEXT    NOT NULL,
+			timeout            INTEGER,
+			run_once_per_batch INTEGER NOT NULL DEFAULT 0,
+			extensions         TEXT,
+			PRIMARY KEY (project_id, phase, gate_name)
+		);
+
+		CREATE TABLE IF NOT EXISTS project_configs (
+			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			key        TEXT    NOT NULL,
+			value      TEXT    NOT NULL,
+			PRIMARY KEY (project_id, key)
+		);
+
+		CREATE TABLE IF NOT EXISTS global_configs (
+			key   TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		);
+
+		CREATE TABLE IF NOT EXISTS audit_log (
+			id         INTEGER PRIMARY KEY,
+			project_id INTEGER NOT NULL REFERENCES projects(id),
+			session_id TEXT,
+			action     TEXT NOT NULL,
+			gate_name  TEXT,
+			reason     TEXT,
+			created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		);
+		CREATE INDEX IF NOT EXISTS idx_audit_log_session ON audit_log(session_id);
+
+		CREATE TABLE IF NOT EXISTS session_metrics (
+			id                     INTEGER PRIMARY KEY,
+			session_id             TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			project_id             INTEGER NOT NULL REFERENCES projects(id),
+			gate_failure_count     INTEGER NOT NULL DEFAULT 0,
+			security_warning_count INTEGER NOT NULL DEFAULT 0,
+			review_aggregate       REAL,
+			files_changed          INTEGER NOT NULL DEFAULT 0,
+			recorded_at            TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		);
+		CREATE INDEX IF NOT EXISTS idx_metrics_project ON session_metrics(project_id);
+
+		CREATE TABLE IF NOT EXISTS calibration (
+			id          INTEGER PRIMARY KEY,
+			project_id  INTEGER NOT NULL REFERENCES projects(id),
+			session_id  TEXT    NOT NULL,
+			aggregate   REAL    NOT NULL,
+			stages      TEXT    NOT NULL,
+			recorded_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		);
+		CREATE INDEX IF NOT EXISTS idx_calibration_project ON calibration(project_id);
+
+		CREATE TABLE IF NOT EXISTS review_findings (
+			id          INTEGER PRIMARY KEY,
+			session_id  TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			project_id  INTEGER NOT NULL REFERENCES projects(id),
+			file        TEXT    NOT NULL,
+			severity    TEXT    NOT NULL,
+			description TEXT    NOT NULL,
+			stage       TEXT    NOT NULL,
+			recorded_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		);
+		CREATE INDEX IF NOT EXISTS idx_review_findings_session ON review_findings(session_id);
+	`);
+}
+function setProjectPath(path) {
+  if (path === _projectPathCache)
+    return;
+  _projectPathCache = path;
+  _projectIdCache = null;
+}
+function getProjectId() {
+  if (_projectIdCache !== null)
+    return _projectIdCache;
+  const path = _projectPathCache ?? process.cwd();
+  const db = getDb();
+  db.prepare("INSERT OR IGNORE INTO projects (path) VALUES (?)").run(path);
+  const row = db.prepare("SELECT id FROM projects WHERE path = ?").get(path);
+  if (!row)
+    throw new Error(`Failed to resolve project: ${path}`);
+  _projectIdCache = row.id;
+  return _projectIdCache;
+}
+function setSessionScope(sessionId) {
+  if (!/^[\w.\-:]+$/.test(sessionId))
+    return;
+  _sessionId = sessionId;
+}
+function getSessionId() {
+  return _sessionId;
+}
+function ensureSession() {
+  const db = getDb();
+  const projectId = getProjectId();
+  db.prepare("INSERT OR IGNORE INTO sessions (id, project_id) VALUES (?, ?)").run(_sessionId, projectId);
+}
+var DB_DIR, DB_PATH, DEFAULT_SESSION_ID = "__default__", _db = null, _projectIdCache = null, _projectPathCache = null, _sessionId;
+var init_db = __esm(() => {
+  DB_DIR = join(homedir(), ".qult");
+  DB_PATH = join(DB_DIR, "qult.db");
+  _sessionId = DEFAULT_SESSION_ID;
+});
 
 // src/config.ts
 var exports_config = {};
@@ -43,8 +255,6 @@ __export(exports_config, {
   loadConfig: () => loadConfig,
   DEFAULTS: () => DEFAULTS
 });
-import { existsSync as existsSync2, readFileSync } from "node:fs";
-import { join } from "node:path";
 function applyConfigLayer(config, raw) {
   if (raw.review && typeof raw.review === "object") {
     const r = raw.review;
@@ -93,33 +303,41 @@ function applyConfigLayer(config, raw) {
       config.escalation.duplication_threshold = Math.max(1, e.duplication_threshold);
   }
 }
+function kvRowsToRaw(rows) {
+  const raw = {};
+  for (const row of rows) {
+    const [section, field] = row.key.split(".");
+    if (!section || !field)
+      continue;
+    if (!raw[section])
+      raw[section] = {};
+    try {
+      raw[section][field] = JSON.parse(row.value);
+    } catch {
+      raw[section][field] = row.value;
+    }
+  }
+  return raw;
+}
 function loadConfig() {
   if (_cache)
     return _cache;
   const config = structuredClone(DEFAULTS);
   try {
-    const pluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
-    if (pluginDataDir) {
-      const prefsPath = join(pluginDataDir, "preferences.json");
-      if (existsSync2(prefsPath)) {
-        const raw = JSON.parse(readFileSync(prefsPath, "utf-8"));
-        applyConfigLayer(config, raw);
-      }
+    const db = getDb();
+    const globalRows = db.prepare("SELECT key, value FROM global_configs").all();
+    if (globalRows.length > 0) {
+      applyConfigLayer(config, kvRowsToRaw(globalRows));
     }
-  } catch (e) {
-    process.stderr.write(`[qult] Warning: invalid preferences.json, using defaults: ${e instanceof Error ? e.message : "parse error"}
-`);
-  }
+  } catch {}
   try {
-    const configPath = join(process.cwd(), ".qult", "config.json");
-    if (existsSync2(configPath)) {
-      const raw = JSON.parse(readFileSync(configPath, "utf-8"));
-      applyConfigLayer(config, raw);
+    const db = getDb();
+    const projectId = getProjectId();
+    const projectRows = db.prepare("SELECT key, value FROM project_configs WHERE project_id = ?").all(projectId);
+    if (projectRows.length > 0) {
+      applyConfigLayer(config, kvRowsToRaw(projectRows));
     }
-  } catch (e) {
-    process.stderr.write(`[qult] Warning: invalid .qult/config.json, using defaults: ${e instanceof Error ? e.message : "parse error"}
-`);
-  }
+  } catch {}
   const envInt = (key) => {
     const val = process.env[key];
     if (val === undefined)
@@ -168,6 +386,7 @@ function resetConfigCache() {
 }
 var DEFAULTS, _cache = null;
 var init_config = __esm(() => {
+  init_db();
   DEFAULTS = {
     review: {
       score_threshold: 30,
@@ -198,51 +417,60 @@ var init_config = __esm(() => {
 });
 
 // src/gates/load.ts
-import { existsSync as existsSync3, readFileSync as readFileSync2 } from "node:fs";
-import { join as join2 } from "node:path";
 function loadGates() {
   if (_cache2 !== undefined)
     return _cache2;
   try {
-    const path = join2(process.cwd(), ".qult", "gates.json");
-    if (!existsSync3(path)) {
+    const db = getDb();
+    const projectId = getProjectId();
+    const rows = db.prepare("SELECT phase, gate_name, command, timeout, run_once_per_batch, extensions FROM gate_configs WHERE project_id = ?").all(projectId);
+    if (rows.length === 0) {
       _cache2 = null;
       return null;
     }
-    const parsed = JSON.parse(readFileSync2(path, "utf-8"));
-    _cache2 = parsed;
-    return parsed;
+    const config = {};
+    for (const row of rows) {
+      const phase = row.phase;
+      if (!config[phase])
+        config[phase] = {};
+      const gate = { command: row.command };
+      if (row.timeout)
+        gate.timeout = row.timeout;
+      if (row.run_once_per_batch)
+        gate.run_once_per_batch = true;
+      if (row.extensions) {
+        try {
+          gate.extensions = JSON.parse(row.extensions);
+        } catch {}
+      }
+      config[phase][row.gate_name] = gate;
+    }
+    _cache2 = config;
+    return config;
   } catch {
     _cache2 = null;
     return null;
   }
 }
 var _cache2;
-var init_load = () => {};
+var init_load = __esm(() => {
+  init_db();
+});
 
 // src/state/pending-fixes.ts
-import { existsSync as existsSync4, readFileSync as readFileSync3 } from "node:fs";
-import { join as join3 } from "node:path";
-function setFixesSessionScope(sessionId) {
-  if (!/^[\w-]+$/.test(sessionId))
-    return;
-  _sessionScope = sessionId;
-}
-function fixesPath() {
-  const file = _sessionScope ? `pending-fixes-${_sessionScope}.json` : FIXES_FILE;
-  return join3(process.cwd(), STATE_DIR, file);
-}
 function readPendingFixes() {
   if (_cache3)
     return _cache3;
   try {
-    const path = fixesPath();
-    if (!existsSync4(path)) {
-      _cache3 = [];
-      return _cache3;
-    }
-    const raw = readFileSync3(path, "utf-8");
-    _cache3 = JSON.parse(raw);
+    const db = getDb();
+    const sid = getSessionId();
+    ensureSession();
+    const rows = db.prepare("SELECT file, gate, errors FROM pending_fixes WHERE session_id = ?").all(sid);
+    _cache3 = rows.map((r) => ({
+      file: r.file,
+      gate: r.gate,
+      errors: JSON.parse(r.errors)
+    }));
     return _cache3;
   } catch {
     _cache3 = [];
@@ -268,7 +496,20 @@ function flush() {
   if (!_dirty || !_cache3)
     return;
   try {
-    atomicWriteJson(fixesPath(), _cache3);
+    const db = getDb();
+    const sid = getSessionId();
+    db.exec("BEGIN");
+    try {
+      db.prepare("DELETE FROM pending_fixes WHERE session_id = ?").run(sid);
+      const insert = db.prepare("INSERT INTO pending_fixes (session_id, file, gate, errors) VALUES (?, ?, ?, ?)");
+      for (const fix of _cache3) {
+        insert.run(sid, fix.file, fix.gate, JSON.stringify(fix.errors));
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
   } catch (e) {
     if (e instanceof Error)
       process.stderr.write(`[qult] write error: ${e.message}
@@ -276,15 +517,15 @@ function flush() {
   }
   _dirty = false;
 }
-var STATE_DIR = ".qult/.state", FIXES_FILE = "pending-fixes.json", _cache3 = null, _dirty = false, _sessionScope = null;
+var _cache3 = null, _dirty = false;
 var init_pending_fixes = __esm(() => {
-  init_atomic_write();
+  init_db();
 });
 
 // src/state/plan-status.ts
-import { existsSync as existsSync5, readdirSync, readFileSync as readFileSync4, statSync } from "node:fs";
-import { homedir } from "node:os";
-import { join as join4 } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "fs";
+import { homedir as homedir2 } from "os";
+import { join as join2 } from "path";
 function normalizeStatus(raw) {
   if (!raw)
     return "pending";
@@ -347,11 +588,11 @@ function parseVerifyField(verify) {
 }
 function scanPlanDir(dir) {
   try {
-    if (!existsSync5(dir))
+    if (!existsSync(dir))
       return [];
     return readdirSync(dir).filter((f) => f.endsWith(".md")).map((f) => ({
-      path: join4(dir, f),
-      mtime: statSync(join4(dir, f)).mtimeMs
+      path: join2(dir, f),
+      mtime: statSync(join2(dir, f)).mtimeMs
     })).sort((a, b) => b.mtime - a.mtime);
   } catch {
     return [];
@@ -360,7 +601,7 @@ function scanPlanDir(dir) {
 function getLatestPlanPath() {
   try {
     const candidates = [];
-    const projectDir = join4(process.cwd(), ".claude", "plans");
+    const projectDir = join2(process.cwd(), ".claude", "plans");
     const projectPlans = scanPlanDir(projectDir);
     candidates.push(...projectPlans);
     const envDir = process.env.CLAUDE_PLANS_DIR;
@@ -369,7 +610,7 @@ function getLatestPlanPath() {
     }
     if (!_disableHomeFallback && projectPlans.length === 0 && candidates.length === 0) {
       try {
-        const homeDir = join4(homedir(), ".claude", "plans");
+        const homeDir = join2(homedir2(), ".claude", "plans");
         const homeFiles = scanPlanDir(homeDir);
         const recentCutoff = Date.now() - 24 * 60 * 60 * 1000;
         candidates.push(...homeFiles.filter((f) => f.mtime > recentCutoff));
@@ -394,7 +635,7 @@ function getActivePlan() {
       return _planCache;
   } catch {}
   try {
-    const content = readFileSync4(path, "utf-8");
+    const content = readFileSync(path, "utf-8");
     const tasks = parsePlanTasks(content);
     if (tasks.length === 0)
       return null;
@@ -408,8 +649,8 @@ function getActivePlan() {
 }
 function hasPlanFile() {
   try {
-    const planDir = join4(process.cwd(), ".claude", "plans");
-    if (!existsSync5(planDir))
+    const planDir = join2(process.cwd(), ".claude", "plans");
+    if (!existsSync(planDir))
       return false;
     return readdirSync(planDir).some((f) => f.endsWith(".md"));
   } catch {
@@ -453,17 +694,6 @@ var init_review_tier = __esm(() => {
 });
 
 // src/state/session-state.ts
-import { existsSync as existsSync6, readFileSync as readFileSync5 } from "node:fs";
-import { join as join5 } from "node:path";
-function setStateSessionScope(sessionId) {
-  if (!/^[\w.\-:]+$/.test(sessionId))
-    return;
-  _sessionScope2 = sessionId;
-}
-function filePath() {
-  const file = _sessionScope2 ? `session-state-${_sessionScope2}.json` : FILE;
-  return join5(process.cwd(), STATE_DIR2, file);
-}
 function defaultState() {
   return {
     last_commit_at: new Date().toISOString(),
@@ -493,22 +723,54 @@ function readSessionState() {
   if (_cache4)
     return _cache4;
   try {
-    const path = filePath();
-    if (!existsSync6(path)) {
+    const db = getDb();
+    const sid = getSessionId();
+    ensureSession();
+    const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sid);
+    if (!row) {
       _cache4 = defaultState();
       return _cache4;
     }
-    const raw = JSON.parse(readFileSync5(path, "utf-8"));
-    if (!Array.isArray(raw.review_score_history) && typeof raw.review_last_aggregate === "number" && raw.review_last_aggregate > 0) {
-      raw.review_score_history = [raw.review_last_aggregate];
+    const state = defaultState();
+    state.last_commit_at = row.last_commit_at ?? state.last_commit_at;
+    state.test_passed_at = row.test_passed_at ?? null;
+    state.test_command = row.test_command ?? null;
+    state.review_completed_at = row.review_completed_at ?? null;
+    state.review_iteration = row.review_iteration ?? 0;
+    state.plan_eval_iteration = row.plan_eval_iteration ?? 0;
+    state.plan_selfcheck_blocked_at = row.plan_selfcheck_blocked_at ?? null;
+    state.human_review_approved_at = row.human_review_approved_at ?? null;
+    state.security_warning_count = row.security_warning_count ?? 0;
+    state.test_quality_warning_count = row.test_quality_warning_count ?? 0;
+    state.drift_warning_count = row.drift_warning_count ?? 0;
+    state.dead_import_warning_count = row.dead_import_warning_count ?? 0;
+    state.duplication_warning_count = row.duplication_warning_count ?? 0;
+    const changedFiles = db.prepare("SELECT file_path FROM changed_files WHERE session_id = ?").all(sid);
+    state.changed_file_paths = changedFiles.map((r) => r.file_path);
+    const disabledGates = db.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?").all(sid);
+    state.disabled_gates = disabledGates.map((r) => r.gate_name);
+    const ranGates = db.prepare("SELECT gate_name, ran_at FROM ran_gates WHERE session_id = ?").all(sid);
+    for (const g of ranGates) {
+      state.ran_gates[g.gate_name] = { session_id: sid, ran_at: g.ran_at };
     }
-    if (!Array.isArray(raw.plan_eval_score_history) && typeof raw.plan_eval_last_aggregate === "number" && raw.plan_eval_last_aggregate > 0) {
-      raw.plan_eval_score_history = [raw.plan_eval_last_aggregate];
+    const taskResults = db.prepare("SELECT task_key, passed, ran_at FROM task_verify_results WHERE session_id = ?").all(sid);
+    for (const t of taskResults) {
+      state.task_verify_results[t.task_key] = { passed: !!t.passed, ran_at: t.ran_at };
     }
-    const state = { ...defaultState(), ...raw };
-    if (state.review_stage_scores && (typeof state.review_stage_scores !== "object" || Array.isArray(state.review_stage_scores))) {
-      state.review_stage_scores = {};
+    const gateFailures = db.prepare("SELECT file, gate, count FROM gate_failure_counts WHERE session_id = ?").all(sid);
+    for (const f of gateFailures) {
+      state.gate_failure_counts[`${f.file}:${f.gate}`] = f.count;
     }
+    const reviewScores = db.prepare("SELECT aggregate_score FROM review_scores WHERE session_id = ? ORDER BY iteration").all(sid);
+    state.review_score_history = reviewScores.map((r) => r.aggregate_score);
+    const stageScores = db.prepare("SELECT stage, dimension, score FROM review_stage_scores WHERE session_id = ?").all(sid);
+    for (const s of stageScores) {
+      if (!state.review_stage_scores[s.stage])
+        state.review_stage_scores[s.stage] = {};
+      state.review_stage_scores[s.stage][s.dimension] = s.score;
+    }
+    const planScores = db.prepare("SELECT aggregate_score FROM plan_eval_scores WHERE session_id = ? ORDER BY iteration").all(sid);
+    state.plan_eval_score_history = planScores.map((r) => r.aggregate_score);
     _cache4 = state;
     return state;
   } catch {
@@ -524,7 +786,78 @@ function flush2() {
   if (!_dirty2 || !_cache4)
     return;
   try {
-    atomicWriteJson(filePath(), _cache4);
+    const db = getDb();
+    const sid = getSessionId();
+    const state = _cache4;
+    db.exec("BEGIN");
+    try {
+      db.prepare(`UPDATE sessions SET
+				last_commit_at = ?,
+				test_passed_at = ?,
+				test_command = ?,
+				review_completed_at = ?,
+				review_iteration = ?,
+				plan_eval_iteration = ?,
+				plan_selfcheck_blocked_at = ?,
+				human_review_approved_at = ?,
+				security_warning_count = ?,
+				test_quality_warning_count = ?,
+				drift_warning_count = ?,
+				dead_import_warning_count = ?,
+				duplication_warning_count = ?
+				WHERE id = ?`).run(state.last_commit_at, state.test_passed_at, state.test_command, state.review_completed_at, state.review_iteration, state.plan_eval_iteration, state.plan_selfcheck_blocked_at, state.human_review_approved_at, state.security_warning_count, state.test_quality_warning_count, state.drift_warning_count, state.dead_import_warning_count, state.duplication_warning_count, sid);
+      db.prepare("DELETE FROM changed_files WHERE session_id = ?").run(sid);
+      const insertFile = db.prepare("INSERT INTO changed_files (session_id, file_path) VALUES (?, ?)");
+      for (const fp of state.changed_file_paths) {
+        insertFile.run(sid, fp);
+      }
+      db.prepare("DELETE FROM disabled_gates WHERE session_id = ?").run(sid);
+      const insertGate = db.prepare("INSERT INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)");
+      for (const g of state.disabled_gates) {
+        insertGate.run(sid, g, "");
+      }
+      db.prepare("DELETE FROM ran_gates WHERE session_id = ?").run(sid);
+      const insertRan = db.prepare("INSERT INTO ran_gates (session_id, gate_name, ran_at) VALUES (?, ?, ?)");
+      for (const [name, entry] of Object.entries(state.ran_gates)) {
+        insertRan.run(sid, name, entry.ran_at);
+      }
+      db.prepare("DELETE FROM task_verify_results WHERE session_id = ?").run(sid);
+      const insertTask = db.prepare("INSERT INTO task_verify_results (session_id, task_key, passed, ran_at) VALUES (?, ?, ?, ?)");
+      for (const [key, result] of Object.entries(state.task_verify_results)) {
+        insertTask.run(sid, key, result.passed ? 1 : 0, result.ran_at);
+      }
+      db.prepare("DELETE FROM gate_failure_counts WHERE session_id = ?").run(sid);
+      const insertFailure = db.prepare("INSERT INTO gate_failure_counts (session_id, file, gate, count) VALUES (?, ?, ?, ?)");
+      for (const [key, count] of Object.entries(state.gate_failure_counts)) {
+        const lastColon = key.lastIndexOf(":");
+        if (lastColon === -1)
+          continue;
+        const file = key.slice(0, lastColon);
+        const gate = key.slice(lastColon + 1);
+        insertFailure.run(sid, file, gate, count);
+      }
+      db.prepare("DELETE FROM review_scores WHERE session_id = ?").run(sid);
+      const insertReview = db.prepare("INSERT INTO review_scores (session_id, iteration, aggregate_score) VALUES (?, ?, ?)");
+      for (let i = 0;i < state.review_score_history.length; i++) {
+        insertReview.run(sid, i + 1, state.review_score_history[i]);
+      }
+      db.prepare("DELETE FROM review_stage_scores WHERE session_id = ?").run(sid);
+      const insertStage = db.prepare("INSERT INTO review_stage_scores (session_id, stage, dimension, score) VALUES (?, ?, ?, ?)");
+      for (const [stage, dims] of Object.entries(state.review_stage_scores)) {
+        for (const [dim, score] of Object.entries(dims)) {
+          insertStage.run(sid, stage, dim, score);
+        }
+      }
+      db.prepare("DELETE FROM plan_eval_scores WHERE session_id = ?").run(sid);
+      const insertPlan = db.prepare("INSERT INTO plan_eval_scores (session_id, iteration, aggregate_score) VALUES (?, ?, ?)");
+      for (let i = 0;i < state.plan_eval_score_history.length; i++) {
+        insertPlan.run(sid, i + 1, state.plan_eval_score_history[i]);
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
   } catch (e) {
     if (e instanceof Error)
       process.stderr.write(`[qult] state write error: ${e.message}
@@ -552,12 +885,12 @@ function getGatedExtensions() {
   }
   return exts;
 }
-function recordChangedFile(filePath2) {
+function recordChangedFile(filePath) {
   const state = readSessionState();
   if (!state.changed_file_paths)
     state.changed_file_paths = [];
-  if (!state.changed_file_paths.includes(filePath2)) {
-    state.changed_file_paths.push(filePath2);
+  if (!state.changed_file_paths.includes(filePath)) {
+    state.changed_file_paths.push(filePath);
   }
   writeState(state);
 }
@@ -748,12 +1081,12 @@ function readHumanApproval() {
     return null;
   return { approved_at: state.human_review_approved_at };
 }
-var STATE_DIR2 = ".qult/.state", FILE = "session-state.json", _cache4 = null, _dirty2 = false, _sessionScope2 = null, TOOL_EXTS, MAX_GATE_FAILURE_COUNT = 100, MAX_GATE_FAILURE_KEYS = 200;
+var _cache4 = null, _dirty2 = false, TOOL_EXTS, MAX_GATE_FAILURE_COUNT = 100, MAX_GATE_FAILURE_KEYS = 200;
 var init_session_state = __esm(() => {
   init_config();
   init_load();
   init_review_tier();
-  init_atomic_write();
+  init_db();
   init_plan_status();
   TOOL_EXTS = [
     [/\bbiome\b/, [".js", ".jsx", ".ts", ".tsx", ".css", ".graphql"]],
@@ -784,32 +1117,7 @@ var init_flush = __esm(() => {
   init_session_state();
 });
 
-// src/state/cleanup.ts
-import { readdirSync as readdirSync2, statSync as statSync2, unlinkSync as unlinkSync2 } from "node:fs";
-import { join as join6 } from "node:path";
-function cleanupStaleScopedFiles(stateDir) {
-  try {
-    const now = Date.now();
-    for (const file of readdirSync2(stateDir)) {
-      if (!SCOPED_FILE_RE.test(file))
-        continue;
-      const filePath2 = join6(stateDir, file);
-      const age = now - statSync2(filePath2).mtimeMs;
-      if (age > STALE_MS) {
-        unlinkSync2(filePath2);
-      }
-    }
-  } catch {}
-}
-var STALE_MS, SCOPED_FILE_RE;
-var init_cleanup = __esm(() => {
-  STALE_MS = 24 * 60 * 60 * 1000;
-  SCOPED_FILE_RE = /^(session-state|pending-fixes)-.+\.json$/;
-});
-
 // src/hooks/lazy-init.ts
-import { existsSync as existsSync7, mkdirSync as mkdirSync2 } from "node:fs";
-import { join as join7 } from "node:path";
 function markSessionStartCompleted() {
   _sessionStartCompleted = true;
 }
@@ -820,17 +1128,11 @@ function lazyInit() {
     return;
   _initialized = true;
   try {
-    const stateDir = join7(process.cwd(), ".qult", ".state");
-    if (!existsSync7(stateDir)) {
-      mkdirSync2(stateDir, { recursive: true });
-    }
-    cleanupStaleScopedFiles(stateDir);
     writePendingFixes([]);
   } catch {}
 }
 var _initialized = false, _sessionStartCompleted = false;
 var init_lazy_init = __esm(() => {
-  init_cleanup();
   init_pending_fixes();
 });
 
@@ -887,7 +1189,7 @@ var init_respond = __esm(() => {
 });
 
 // src/gates/runner.ts
-import { exec, execSync } from "node:child_process";
+import { exec, execSync } from "child_process";
 function shellEscape(s) {
   const escaped = s.replace(/'/g, "'\\''").replace(/`/g, "'\\`'");
   return `'${escaped}'`;
@@ -1028,8 +1330,8 @@ var init_runner = __esm(() => {
 });
 
 // src/hooks/detectors/convention-check.ts
-import { readdirSync as readdirSync3, statSync as statSync3 } from "node:fs";
-import { basename, dirname as dirname2, extname, join as join8 } from "node:path";
+import { readdirSync as readdirSync2, statSync as statSync2 } from "fs";
+import { basename, dirname, extname, join as join3 } from "path";
 function classify(name) {
   if (KEBAB_RE.test(name))
     return "kebab-case";
@@ -1042,14 +1344,14 @@ function classify(name) {
   return "other";
 }
 function detectConventionDrift(file) {
-  const dir = dirname2(file);
+  const dir = dirname(file);
   const fileName = basename(file);
   const stem = basename(fileName, extname(fileName));
   let siblings;
   try {
-    siblings = readdirSync3(dir).filter((f) => {
+    siblings = readdirSync2(dir).filter((f) => {
       try {
-        return f !== fileName && statSync3(join8(dir, f)).isFile();
+        return f !== fileName && statSync2(join3(dir, f)).isFile();
       } catch {
         return false;
       }
@@ -1092,19 +1394,19 @@ var init_convention_check = __esm(() => {
 });
 
 // src/hooks/detectors/dead-import-check.ts
-import { existsSync as existsSync8, readFileSync as readFileSync6 } from "node:fs";
-import { extname as extname2 } from "node:path";
+import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
+import { extname as extname2 } from "path";
 function detectDeadImports(file) {
   if (isGateDisabled("dead-import-check"))
     return [];
   const ext = extname2(file).toLowerCase();
   if (!TS_JS_EXTS.has(ext) && !PY_EXTS.has(ext))
     return [];
-  if (!existsSync8(file))
+  if (!existsSync2(file))
     return [];
   let content;
   try {
-    content = readFileSync6(file, "utf-8");
+    content = readFileSync2(file, "utf-8");
   } catch {
     return [];
   }
@@ -1152,7 +1454,7 @@ function detectDeadTsJsImports(content) {
   for (const { name, line } of imports) {
     const usageRe = new RegExp(`\\b${escapeRegex(name)}\\b`);
     if (!usageRe.test(codeWithoutImports)) {
-      warnings.push(sanitizeForStderr(`L${line}: unused import "${name}" — consider removing`));
+      warnings.push(sanitizeForStderr(`L${line}: unused import "${name}" \u2014 consider removing`));
     }
   }
   return warnings;
@@ -1198,7 +1500,7 @@ function detectDeadPythonImports(content) {
   for (const { name, line } of imports) {
     const usageRe = new RegExp(`\\b${escapeRegex(name)}\\b`);
     if (!usageRe.test(codeWithoutImports)) {
-      warnings.push(sanitizeForStderr(`L${line}: unused import "${name}" — consider removing`));
+      warnings.push(sanitizeForStderr(`L${line}: unused import "${name}" \u2014 consider removing`));
     }
   }
   return warnings;
@@ -1232,8 +1534,8 @@ var init_dead_import_check = __esm(() => {
 });
 
 // src/hooks/detectors/duplication-check.ts
-import { existsSync as existsSync9, readFileSync as readFileSync7 } from "node:fs";
-import { extname as extname3, resolve } from "node:path";
+import { existsSync as existsSync3, readFileSync as readFileSync3 } from "fs";
+import { extname as extname3, resolve } from "path";
 function normalizeLine(line) {
   const trimmed = line.trim();
   if (trimmed === "")
@@ -1278,11 +1580,11 @@ function detectDuplication(file) {
   const ext = extname3(file).toLowerCase();
   if (!CHECKABLE_EXTS.has(ext))
     return [];
-  if (!existsSync9(file))
+  if (!existsSync3(file))
     return [];
   let content;
   try {
-    content = readFileSync7(file, "utf-8");
+    content = readFileSync3(file, "utf-8");
   } catch {
     return [];
   }
@@ -1317,11 +1619,11 @@ function detectCrossFileDuplication(file, sessionFiles) {
   const ext = extname3(file).toLowerCase();
   if (!CHECKABLE_EXTS.has(ext))
     return [];
-  if (!existsSync9(file))
+  if (!existsSync3(file))
     return [];
   let content;
   try {
-    content = readFileSync7(file, "utf-8");
+    content = readFileSync3(file, "utf-8");
   } catch {
     return [];
   }
@@ -1336,14 +1638,14 @@ function detectCrossFileDuplication(file, sessionFiles) {
     const absOther = resolve(otherFile);
     if (!absOther.startsWith(`${cwd}/`))
       continue;
-    if (!existsSync9(otherFile))
+    if (!existsSync3(otherFile))
       continue;
     const otherExt = extname3(otherFile).toLowerCase();
     if (!CHECKABLE_EXTS.has(otherExt))
       continue;
     let otherContent;
     try {
-      otherContent = readFileSync7(otherFile, "utf-8");
+      otherContent = readFileSync3(otherFile, "utf-8");
     } catch {
       continue;
     }
@@ -1366,8 +1668,8 @@ function detectCrossFileDuplication(file, sessionFiles) {
   }
   return warnings;
 }
-function getRelativePath(filePath2, cwd) {
-  const full = filePath2.startsWith(cwd) ? filePath2.slice(cwd.length + 1) : filePath2;
+function getRelativePath(filePath, cwd) {
+  const full = filePath.startsWith(cwd) ? filePath.slice(cwd.length + 1) : filePath;
   const segments = full.split("/");
   if (segments.length <= 3)
     return full;
@@ -1396,16 +1698,16 @@ var init_duplication_check = __esm(() => {
 });
 
 // src/hooks/detectors/export-check.ts
-import { execSync as execSync2 } from "node:child_process";
-import { existsSync as existsSync10, readFileSync as readFileSync8 } from "node:fs";
-import { extname as extname4 } from "node:path";
+import { execSync as execSync2 } from "child_process";
+import { existsSync as existsSync4, readFileSync as readFileSync4 } from "fs";
+import { extname as extname4 } from "path";
 function detectExportBreakingChanges(file) {
   if (isGateDisabled("export-check"))
     return [];
   const ext = extname4(file).toLowerCase();
   if (!TS_JS_EXTS2.has(ext))
     return [];
-  if (!existsSync10(file))
+  if (!existsSync4(file))
     return [];
   let oldContent;
   try {
@@ -1422,7 +1724,7 @@ function detectExportBreakingChanges(file) {
   } catch {
     return [];
   }
-  const newContent = readFileSync8(file, "utf-8");
+  const newContent = readFileSync4(file, "utf-8");
   const oldExports = new Set;
   for (const match of oldContent.matchAll(EXPORT_RE)) {
     oldExports.add(match[1]);
@@ -1450,17 +1752,17 @@ var init_export_check = __esm(() => {
 });
 
 // src/hooks/detectors/import-check.ts
-import { existsSync as existsSync11, readdirSync as readdirSync4, readFileSync as readFileSync9 } from "node:fs";
-import { extname as extname5, join as join9, resolve as resolve2 } from "node:path";
+import { existsSync as existsSync5, readdirSync as readdirSync3, readFileSync as readFileSync5 } from "fs";
+import { extname as extname5, join as join4, resolve as resolve2 } from "path";
 function detectHallucinatedImports(file) {
   if (isGateDisabled("import-check"))
     return [];
   const ext = extname5(file).toLowerCase();
   if (!TS_JS_EXTS3.has(ext) && !PY_EXTS2.has(ext) && !GO_EXTS.has(ext))
     return [];
-  if (!existsSync11(file))
+  if (!existsSync5(file))
     return [];
-  const content = readFileSync9(file, "utf-8");
+  const content = readFileSync5(file, "utf-8");
   if (content.length > MAX_IMPORT_CHECK_SIZE)
     return [];
   if (PY_EXTS2.has(ext))
@@ -1472,10 +1774,10 @@ function detectHallucinatedImports(file) {
 function loadTsConfigPaths(cwd) {
   const aliases = new Set;
   try {
-    const tsconfigPath = join9(cwd, "tsconfig.json");
-    if (!existsSync11(tsconfigPath))
+    const tsconfigPath = join4(cwd, "tsconfig.json");
+    if (!existsSync5(tsconfigPath))
       return aliases;
-    const raw = readFileSync9(tsconfigPath, "utf-8");
+    const raw = readFileSync5(tsconfigPath, "utf-8");
     const cleaned = raw.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
     const tsconfig = JSON.parse(cleaned);
     const paths = tsconfig?.compilerOptions?.paths;
@@ -1492,7 +1794,7 @@ function detectTsJsImports(file, content) {
   const missingPkgs = [];
   let builtins;
   try {
-    builtins = new Set(__require("node:module").builtinModules);
+    builtins = new Set(__require("module").builtinModules);
   } catch {
     builtins = FALLBACK_BUILTINS;
   }
@@ -1512,7 +1814,7 @@ function detectTsJsImports(file, content) {
       continue;
     if (tsPaths.has(pkgName) || tsPaths.has(specifier.replace(/\/.*$/, "")))
       continue;
-    if (!existsSync11(join9(cwd, "node_modules", pkgName))) {
+    if (!existsSync5(join4(cwd, "node_modules", pkgName))) {
       missingPkgs.push(pkgName);
     }
   }
@@ -1543,9 +1845,9 @@ function detectPythonImports(file, content) {
       continue;
     if (moduleName.startsWith("_"))
       continue;
-    if (existsSync11(join9(cwd, `${moduleName}.py`)) || existsSync11(join9(cwd, moduleName)))
+    if (existsSync5(join4(cwd, `${moduleName}.py`)) || existsSync5(join4(cwd, moduleName)))
       continue;
-    if (sitePackagesDirs.some((dir) => existsSync11(join9(dir, moduleName)) || existsSync11(join9(dir, `${moduleName}.py`))))
+    if (sitePackagesDirs.some((dir) => existsSync5(join4(dir, moduleName)) || existsSync5(join4(dir, `${moduleName}.py`))))
       continue;
     missingModules.push(moduleName);
   }
@@ -1568,7 +1870,7 @@ function detectGoImports(file, content) {
   const missingPkgs = [];
   let goSum = null;
   try {
-    goSum = readFileSync9(join9(cwd, "go.sum"), "utf-8");
+    goSum = readFileSync5(join4(cwd, "go.sum"), "utf-8");
   } catch {}
   const lines = content.split(`
 `);
@@ -1601,7 +1903,7 @@ function detectGoImports(file, content) {
       continue;
     const vendorDir = resolve2(cwd, "vendor");
     const vendorPath = resolve2(vendorDir, importPath);
-    if (vendorPath.startsWith(`${vendorDir}/`) && existsSync11(vendorPath))
+    if (vendorPath.startsWith(`${vendorDir}/`) && existsSync5(vendorPath))
       continue;
     if (goSum?.includes(`${importPath} `))
       continue;
@@ -1620,18 +1922,18 @@ function detectGoImports(file, content) {
 }
 function findPythonSitePackages(cwd) {
   const dirs = [];
-  const venvRoots = [join9(cwd, ".venv"), join9(cwd, "venv")];
+  const venvRoots = [join4(cwd, ".venv"), join4(cwd, "venv")];
   for (const root of venvRoots) {
     try {
-      if (!existsSync11(root))
+      if (!existsSync5(root))
         continue;
-      const libDir = join9(root, "lib");
-      if (!existsSync11(libDir))
+      const libDir = join4(root, "lib");
+      if (!existsSync5(libDir))
         continue;
-      const entries = readdirSync4(libDir).filter((e) => e.startsWith("python"));
+      const entries = readdirSync3(libDir).filter((e) => e.startsWith("python"));
       for (const entry of entries) {
-        const sp = join9(libDir, entry, "site-packages");
-        if (existsSync11(sp))
+        const sp = join4(libDir, entry, "site-packages");
+        if (existsSync5(sp))
           dirs.push(sp);
       }
     } catch {}
@@ -1894,19 +2196,19 @@ var init_import_check = __esm(() => {
 });
 
 // src/hooks/detectors/security-check.ts
-import { existsSync as existsSync12, readFileSync as readFileSync10 } from "node:fs";
-import { extname as extname6 } from "node:path";
+import { existsSync as existsSync6, readFileSync as readFileSync6 } from "fs";
+import { extname as extname6 } from "path";
 function detectSecurityPatterns(file) {
   if (isGateDisabled("security-check"))
     return [];
   const ext = extname6(file).toLowerCase();
   if (!CHECKABLE_EXTS2.has(ext))
     return [];
-  if (!existsSync12(file))
+  if (!existsSync6(file))
     return [];
   let content;
   try {
-    content = readFileSync10(file, "utf-8");
+    content = readFileSync6(file, "utf-8");
   } catch {
     return [];
   }
@@ -1996,7 +2298,7 @@ function emitAdvisoryWarnings(file, content) {
       for (const { re, suppress, desc } of ADVISORY_PATTERNS) {
         if (re.test(line) && !suppress.test(line)) {
           const relative = file.split("/").slice(-3).join("/");
-          process.stderr.write(`[qult] Security advisory: ${relative}:${i + 1} — ${desc}
+          process.stderr.write(`[qult] Security advisory: ${relative}:${i + 1} \u2014 ${desc}
 `);
         }
       }
@@ -2053,69 +2355,69 @@ var init_security_check = __esm(() => {
   DANGEROUS_PATTERNS = [
     {
       re: /\beval\s*\(\s*(?!["'`])[a-zA-Z_$]/,
-      desc: "eval() with dynamic input — command injection risk",
+      desc: "eval() with dynamic input \u2014 command injection risk",
       exts: JS_TS_EXTS
     },
     {
       re: /\.innerHTML\s*=\s*(?!["'`]|`\s*$)[a-zA-Z_$]/,
-      desc: "innerHTML assignment with dynamic value — XSS risk",
+      desc: "innerHTML assignment with dynamic value \u2014 XSS risk",
       exts: JS_TS_EXTS
     },
     {
       re: /document\.write\s*\(\s*(?!["'`])[a-zA-Z_$]/,
-      desc: "document.write() with dynamic input — XSS risk",
+      desc: "document.write() with dynamic input \u2014 XSS risk",
       exts: JS_TS_EXTS
     },
     {
       re: /\b(?:exec|execSync)\s*\(\s*(?:`[^`]*\$\{|[a-zA-Z_$](?!['"]))/,
-      desc: "exec/execSync with dynamic command — command injection risk",
+      desc: "exec/execSync with dynamic command \u2014 command injection risk",
       exts: JS_TS_EXTS
     },
     {
       re: /(?:SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER)\s+.*["'`]\s*\+\s*[a-zA-Z_$]/i,
-      desc: "SQL string concatenation — SQL injection risk"
+      desc: "SQL string concatenation \u2014 SQL injection risk"
     },
     {
       re: /(?:SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER)\s+.*\$\{/i,
-      desc: "SQL template literal with interpolation — SQL injection risk"
+      desc: "SQL template literal with interpolation \u2014 SQL injection risk"
     },
     {
       re: /(?:os\.system|subprocess\.(?:call|run|Popen|check_output))\s*\(\s*f["']/,
-      desc: "Shell command with f-string — command injection risk",
+      desc: "Shell command with f-string \u2014 command injection risk",
       exts: PY_EXTS3
     },
     {
       re: /\b(?:eval|exec)\s*\(\s*(?!["'])[a-zA-Z_]/,
-      desc: "eval/exec with dynamic input — code injection risk",
+      desc: "eval/exec with dynamic input \u2014 code injection risk",
       exts: PY_EXTS3
     },
     {
       re: /dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*(?!["'`])[a-zA-Z_$]/,
-      desc: "dangerouslySetInnerHTML with dynamic value — XSS risk",
+      desc: "dangerouslySetInnerHTML with dynamic value \u2014 XSS risk",
       exts: JS_TS_EXTS
     },
     {
       re: /password\s*(?:===|!==|==|!=)\s*(?!null\b|undefined\b|["'`])[a-zA-Z_$]/i,
-      desc: "Password compared with === instead of constant-time comparison — timing attack risk",
+      desc: "Password compared with === instead of constant-time comparison \u2014 timing attack risk",
       exts: JS_TS_EXTS
     },
     {
       re: /[?&](?:token|sessionId|session_id|auth_token|access_token)=/i,
-      desc: "Session/auth token in URL query parameter — token leakage via referrer/logs"
+      desc: "Session/auth token in URL query parameter \u2014 token leakage via referrer/logs"
     },
     {
       re: /JSON\.parse\s*\(\s*(?:req(?:uest)?\.body|req\.query|req\.params|ctx\.request\.body)/,
-      desc: "JSON.parse on raw user input without validation — insecure deserialization risk",
+      desc: "JSON.parse on raw user input without validation \u2014 insecure deserialization risk",
       exts: JS_TS_EXTS
     },
     {
       re: /(?:pickle\.loads?|yaml\.(?:load|unsafe_load))\s*\(/,
-      desc: "Unsafe deserialization (pickle/yaml.load) — arbitrary code execution risk",
+      desc: "Unsafe deserialization (pickle/yaml.load) \u2014 arbitrary code execution risk",
       exts: PY_EXTS3
     },
     {
       re: /(?:res\.(?:json|send|write)|response\.(?:json|send|write))\s*\(.*process\.env/,
-      desc: "process.env leaked in HTTP response — environment variable disclosure",
+      desc: "process.env leaked in HTTP response \u2014 environment variable disclosure",
       exts: JS_TS_EXTS
     }
   ];
@@ -2123,28 +2425,28 @@ var init_security_check = __esm(() => {
     {
       re: /\bapp\.(?:get|post|put|delete|patch)\s*\(\s*["'`]\/api\//,
       suppress: /(?:auth|middleware|protect|guard|verify|session)/i,
-      desc: "API route — verify auth middleware is applied"
+      desc: "API route \u2014 verify auth middleware is applied"
     },
     {
       re: /\bwss?\.on\s*\(\s*["'`]connection["'`]/,
       suppress: /(?:auth|token|verify|session|guard)/i,
-      desc: "WebSocket handler — verify authentication is applied"
+      desc: "WebSocket handler \u2014 verify authentication is applied"
     }
   ];
 });
 
 // src/hooks/detectors/test-file-resolver.ts
-import { existsSync as existsSync13 } from "node:fs";
-import { basename as basename2, dirname as dirname3, extname as extname7, join as join10 } from "node:path";
+import { existsSync as existsSync7 } from "fs";
+import { basename as basename2, dirname as dirname2, extname as extname7, join as join5 } from "path";
 function resolveTestFile(sourceFile) {
   const ext = extname7(sourceFile);
   const base = basename2(sourceFile, ext);
-  const dir = dirname3(sourceFile);
+  const dir = dirname2(sourceFile);
   if (isTestFile(sourceFile))
     return null;
   for (const pattern of TEST_PATTERNS) {
     const candidate = pattern(dir, base, ext);
-    if (candidate && existsSync13(candidate)) {
+    if (candidate && existsSync7(candidate)) {
       return candidate;
     }
   }
@@ -2157,15 +2459,15 @@ function isTestFile(file) {
 var TEST_PATTERNS;
 var init_test_file_resolver = __esm(() => {
   TEST_PATTERNS = [
-    (dir, name, ext) => join10(dir, `${name}.test${ext}`),
-    (dir, name, ext) => join10(dir, `${name}.spec${ext}`),
-    (dir, name, ext) => join10(dir, "__tests__", `${name}.test${ext}`),
-    (dir, name, ext) => join10(dir, "__tests__", `${name}.spec${ext}`),
-    (dir, name, ext) => join10(dir, "tests", `${name}.test${ext}`),
-    (dir, name, ext) => ext === ".py" ? join10(dir, `test_${name}${ext}`) : null,
-    (dir, name, ext) => ext === ".py" ? join10(dir, "tests", `test_${name}${ext}`) : null,
-    (dir, name, ext) => ext === ".go" ? join10(dir, `${name}_test${ext}`) : null,
-    (dir, name, ext) => ext === ".rs" ? join10(dir, "tests", `${name}${ext}`) : null
+    (dir, name, ext) => join5(dir, `${name}.test${ext}`),
+    (dir, name, ext) => join5(dir, `${name}.spec${ext}`),
+    (dir, name, ext) => join5(dir, "__tests__", `${name}.test${ext}`),
+    (dir, name, ext) => join5(dir, "__tests__", `${name}.spec${ext}`),
+    (dir, name, ext) => join5(dir, "tests", `${name}.test${ext}`),
+    (dir, name, ext) => ext === ".py" ? join5(dir, `test_${name}${ext}`) : null,
+    (dir, name, ext) => ext === ".py" ? join5(dir, "tests", `test_${name}${ext}`) : null,
+    (dir, name, ext) => ext === ".go" ? join5(dir, `${name}_test${ext}`) : null,
+    (dir, name, ext) => ext === ".rs" ? join5(dir, "tests", `${name}${ext}`) : null
   ];
 });
 
@@ -2174,7 +2476,7 @@ var exports_post_tool = {};
 __export(exports_post_tool, {
   default: () => postTool
 });
-import { dirname as dirname4, extname as extname8, resolve as resolve3 } from "node:path";
+import { dirname as dirname3, extname as extname8, resolve as resolve3 } from "path";
 async function postTool(ev) {
   const tool = ev.tool_name;
   if (!tool)
@@ -2416,7 +2718,7 @@ function buildTestFileCommand(testCommand, testFile) {
     return `${testCommand} ${escaped}`;
   }
   if (/\bgo\s+test\b/.test(testCommand)) {
-    return `go test -v -run . ${shellEscape(dirname4(testFile))}`;
+    return `go test -v -run . ${shellEscape(dirname3(testFile))}`;
   }
   if (/\bmocha\b/.test(testCommand)) {
     return `${testCommand} ${escaped}`;
@@ -2552,7 +2854,7 @@ var exports_pre_tool = {};
 __export(exports_pre_tool, {
   default: () => preTool
 });
-import { resolve as resolve4 } from "node:path";
+import { resolve as resolve4 } from "path";
 async function preTool(ev) {
   const tool = ev.tool_name;
   if (tool === "ExitPlanMode") {
@@ -2661,7 +2963,7 @@ function checkTddOrder(resolvedTarget) {
     if (resolvedTarget === testFile)
       return;
     if (!changed.includes(testFile)) {
-      deny(`TDD enforcement: テストファイル ${parsed.file} を先に編集してください（RED→GREEN→REFACTOR）。実装ファイル ${task.file} はテスト編集後に編集できます。`);
+      deny(`TDD enforcement: \u30C6\u30B9\u30C8\u30D5\u30A1\u30A4\u30EB ${parsed.file} \u3092\u5148\u306B\u7DE8\u96C6\u3057\u3066\u304F\u3060\u3055\u3044\uFF08RED\u2192GREEN\u2192REFACTOR\uFF09\u3002\u5B9F\u88C5\u30D5\u30A1\u30A4\u30EB ${task.file} \u306F\u30C6\u30B9\u30C8\u7DE8\u96C6\u5F8C\u306B\u7DE8\u96C6\u3067\u304D\u307E\u3059\u3002`);
     }
     const taskKey = task.taskNumber != null ? `Task ${task.taskNumber}` : task.name;
     const verifyResult = readTaskVerifyResult(taskKey);
@@ -2881,62 +3183,53 @@ var init_stop = __esm(() => {
 });
 
 // src/state/calibration.ts
-import { createHash } from "node:crypto";
-import { existsSync as existsSync14, readFileSync as readFileSync11 } from "node:fs";
-import { join as join11 } from "node:path";
-function calibrationPath() {
-  const pluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
-  if (!pluginDataDir)
-    return null;
-  return join11(pluginDataDir, CALIBRATION_FILE);
-}
-function projectId() {
-  const cwd = process.cwd();
-  return createHash("sha256").update(cwd).digest("hex").slice(0, 12);
-}
 function readCalibration() {
-  const path = calibrationPath();
-  if (!path || !existsSync14(path))
-    return null;
   try {
-    return JSON.parse(readFileSync11(path, "utf-8"));
+    const db = getDb();
+    const rows = db.prepare("SELECT aggregate, stages, recorded_at, project_id FROM calibration ORDER BY id DESC LIMIT ?").all(MAX_ENTRIES);
+    if (rows.length === 0)
+      return null;
+    const entries = rows.map((r) => ({
+      date: r.recorded_at,
+      aggregate: r.aggregate,
+      stages: JSON.parse(r.stages),
+      project: String(r.project_id)
+    }));
+    const scores = entries.map((e) => e.aggregate);
+    const count = scores.length;
+    const mean = scores.reduce((s, v) => s + v, 0) / count;
+    const variance = scores.reduce((s, v) => s + (v - mean) ** 2, 0) / count;
+    const stddev = Math.sqrt(variance);
+    const perfectCount = entries.filter((e) => {
+      const dims = Object.values(e.stages).flatMap((s) => Object.values(s));
+      return dims.length > 0 && dims.every((v) => v === 5);
+    }).length;
+    return {
+      entries,
+      stats: {
+        mean: Math.round(mean * 100) / 100,
+        stddev: Math.round(stddev * 100) / 100,
+        count,
+        perfect_count: perfectCount
+      }
+    };
   } catch {
     return null;
   }
 }
 function recordCalibration(aggregate, stageScores) {
-  const path = calibrationPath();
-  if (!path)
-    return;
-  const data = readCalibration() ?? {
-    entries: [],
-    stats: { mean: 0, stddev: 0, count: 0, perfect_count: 0 }
-  };
-  data.entries.push({
-    date: new Date().toISOString(),
-    aggregate,
-    stages: stageScores,
-    project: projectId()
-  });
-  if (data.entries.length > MAX_ENTRIES) {
-    data.entries = data.entries.slice(-MAX_ENTRIES);
-  }
-  const scores = data.entries.map((e) => e.aggregate);
-  const count = scores.length;
-  const mean = scores.reduce((s, v) => s + v, 0) / count;
-  const variance = scores.reduce((s, v) => s + (v - mean) ** 2, 0) / count;
-  const stddev = Math.sqrt(variance);
-  const perfectCount = data.entries.filter((e) => {
-    const dims = Object.values(e.stages).flatMap((s) => Object.values(s));
-    return dims.length > 0 && dims.every((v) => v === 5);
-  }).length;
-  data.stats = {
-    mean: Math.round(mean * 100) / 100,
-    stddev: Math.round(stddev * 100) / 100,
-    count,
-    perfect_count: perfectCount
-  };
-  atomicWriteJson(path, data);
+  try {
+    const db = getDb();
+    const projectId = getProjectId();
+    const sid = getSessionId();
+    db.prepare("INSERT INTO calibration (project_id, session_id, aggregate, stages) VALUES (?, ?, ?, ?)").run(projectId, sid, aggregate, JSON.stringify(stageScores));
+    db.prepare(`DELETE FROM calibration WHERE id NOT IN (
+				SELECT id FROM calibration ORDER BY id DESC LIMIT ?
+			)`).run(MAX_ENTRIES);
+  } catch {}
+}
+function projectId() {
+  return String(getProjectId());
 }
 function checkCalibration() {
   const data = readCalibration();
@@ -2967,13 +3260,13 @@ function checkCalibration() {
   if (roundedMean > highMeanThreshold && roundedStddev < 1.5) {
     warnings.push({
       type: "high_mean",
-      message: `Cross-session calibration: mean ${roundedMean} with σ=${roundedStddev} across ${count} reviews. Scores may be systematically inflated.`
+      message: `Cross-session calibration: mean ${roundedMean} with \u03C3=${roundedStddev} across ${count} reviews. Scores may be systematically inflated.`
     });
   }
   if (count >= 10 && roundedStddev < 0.8) {
     warnings.push({
       type: "low_variance",
-      message: `Cross-session calibration: σ=${roundedStddev} across ${count} reviews suggests reviewers are not differentiating.`
+      message: `Cross-session calibration: \u03C3=${roundedStddev} across ${count} reviews suggests reviewers are not differentiating.`
     });
   }
   const recentEntries = projectEntries.slice(-3);
@@ -2984,35 +3277,35 @@ function checkCalibration() {
   if (maxPossible && recentEntries.length >= 3) {
     warnings.push({
       type: "perfect_streak",
-      message: "Cross-session calibration: 3+ consecutive perfect scores. No code is perfect — reviewers may need recalibration."
+      message: "Cross-session calibration: 3+ consecutive perfect scores. No code is perfect \u2014 reviewers may need recalibration."
     });
   }
   return warnings;
 }
-var CALIBRATION_FILE = "review-calibration.json", MAX_ENTRIES = 50;
+var MAX_ENTRIES = 50;
 var init_calibration = __esm(() => {
-  init_atomic_write();
+  init_db();
 });
 
 // src/hooks/subagent-stop/claim-grounding.ts
-import { existsSync as existsSync15, readFileSync as readFileSync12, statSync as statSync4 } from "node:fs";
-import { join as join12 } from "node:path";
+import { existsSync as existsSync8, readFileSync as readFileSync7, statSync as statSync3 } from "fs";
+import { join as join6 } from "path";
 function groundClaims(output, cwd) {
   try {
     const ungrounded = [];
     let total = 0;
     for (const match of output.matchAll(FINDING_FILE_RE)) {
       total++;
-      const filePath2 = match[2];
+      const filePath = match[2];
       const description = match[4] ?? "";
-      const absPath = join12(cwd, filePath2);
+      const absPath = join6(cwd, filePath);
       const normalizedCwd = cwd.replace(/\/+$/, "");
       if (!absPath.startsWith(`${normalizedCwd}/`)) {
-        ungrounded.push(`Path traversal rejected: ${filePath2}`);
+        ungrounded.push(`Path traversal rejected: ${filePath}`);
         continue;
       }
-      if (!existsSync15(absPath)) {
-        ungrounded.push(`File not found: ${filePath2}`);
+      if (!existsSync8(absPath)) {
+        ungrounded.push(`File not found: ${filePath}`);
         continue;
       }
       let fileContent = null;
@@ -3020,10 +3313,10 @@ function groundClaims(output, cwd) {
         const funcName = funcMatch[1];
         if (!fileContent) {
           try {
-            const size = statSync4(absPath).size;
+            const size = statSync3(absPath).size;
             if (size > MAX_FILE_SIZE)
               break;
-            fileContent = readFileSync12(absPath, "utf-8");
+            fileContent = readFileSync7(absPath, "utf-8");
           } catch {
             break;
           }
@@ -3031,7 +3324,7 @@ function groundClaims(output, cwd) {
         const escaped = funcName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         const wordRe = new RegExp(`\\b${escaped}\\b`);
         if (!wordRe.test(fileContent)) {
-          ungrounded.push(`Symbol \`${funcName}\` not found in ${filePath2}`);
+          ungrounded.push(`Symbol \`${funcName}\` not found in ${filePath}`);
         }
       }
     }
@@ -3042,7 +3335,7 @@ function groundClaims(output, cwd) {
 }
 var FINDING_FILE_RE, FUNC_REF_RE, MAX_FILE_SIZE = 500000;
 var init_claim_grounding = __esm(() => {
-  FINDING_FILE_RE = /\[(critical|high|medium|low)\]\s+((?:[^\s:]+\/[^\s:]+|[^\s:]+\.\w{1,5}))(?::(\d+))?\s+[—–]\s+(.+?)(?:\n|$)/gi;
+  FINDING_FILE_RE = /\[(critical|high|medium|low)\]\s+((?:[^\s:]+\/[^\s:]+|[^\s:]+\.\w{1,5}))(?::(\d+))?\s+[\u2014\u2013]\s+(.+?)(?:\n|$)/gi;
   FUNC_REF_RE = /`([a-zA-Z_$][a-zA-Z0-9_$]*)`/g;
 });
 
@@ -3166,14 +3459,14 @@ function buildReviewBlockMessage(scores, history, aggregate, threshold, iterCoun
   }
   if (trend === "improving" && history.length >= 2) {
     const prev = history[history.length - 2];
-    return `${header} Score improved ${prev}→${aggregate}. Focus on remaining weak dimension: ${weakest.name} (${weakest.score}/5).`;
+    return `${header} Score improved ${prev}\u2192${aggregate}. Focus on remaining weak dimension: ${weakest.name} (${weakest.score}/5).`;
   }
   if (trend === "regressing" && history.length >= 2) {
     const prev = history[history.length - 2];
-    return `${header} Score regressed ${prev}→${aggregate}. Last changes introduced new issues — revert recent ${weakest.name.toLowerCase()}-related changes and take a minimal approach.`;
+    return `${header} Score regressed ${prev}\u2192${aggregate}. Last changes introduced new issues \u2014 revert recent ${weakest.name.toLowerCase()}-related changes and take a minimal approach.`;
   }
   if (history.length >= 2) {
-    return `${header} ${weakest.name} stuck at ${weakest.score}/5 for ${history.length} iterations. Current approach is not working — try a fundamentally different structure.`;
+    return `${header} ${weakest.name} stuck at ${weakest.score}/5 for ${history.length} iterations. Current approach is not working \u2014 try a fundamentally different structure.`;
   }
   return `${header} Weakest dimension: ${weakest.name} (${weakest.score}/5). Fix this area first.`;
 }
@@ -3186,14 +3479,14 @@ function buildPlanEvalBlockMessage(dimensions, history, aggregate, threshold, it
   }
   if (trend === "improving" && history.length >= 2) {
     const prev = history[history.length - 2];
-    return `${header} Score improved ${prev}→${aggregate}. Focus on remaining weak dimension: ${weakest.name} (${weakest.score}/5).`;
+    return `${header} Score improved ${prev}\u2192${aggregate}. Focus on remaining weak dimension: ${weakest.name} (${weakest.score}/5).`;
   }
   if (trend === "regressing" && history.length >= 2) {
     const prev = history[history.length - 2];
-    return `${header} Score regressed ${prev}→${aggregate}. Last revision made the plan worse — revert recent changes to ${weakest.name.toLowerCase()} and try a different approach.`;
+    return `${header} Score regressed ${prev}\u2192${aggregate}. Last revision made the plan worse \u2014 revert recent changes to ${weakest.name.toLowerCase()} and try a different approach.`;
   }
   if (history.length >= 2) {
-    return `${header} ${weakest.name} stuck at ${weakest.score}/5 for ${history.length} iterations. Current approach is not working — restructure the plan differently.`;
+    return `${header} ${weakest.name} stuck at ${weakest.score}/5 for ${history.length} iterations. Current approach is not working \u2014 restructure the plan differently.`;
   }
   return `${header} Weakest dimension: ${weakest.name} (${weakest.score}/5). Fix this area first.`;
 }
@@ -3389,9 +3682,9 @@ var init_score_parsers = __esm(() => {
 });
 
 // src/hooks/subagent-stop/agent-validators.ts
-import { execSync as execSync3 } from "node:child_process";
-import { existsSync as existsSync16, readdirSync as readdirSync5, readFileSync as readFileSync13, statSync as statSync5 } from "node:fs";
-import { join as join13, normalize } from "node:path";
+import { execSync as execSync3 } from "child_process";
+import { existsSync as existsSync9, readdirSync as readdirSync4, readFileSync as readFileSync8, statSync as statSync4 } from "fs";
+import { join as join7, normalize } from "path";
 function checkReadOnlyViolation(normalized) {
   if (!READ_ONLY_REVIEWERS.has(normalized))
     return;
@@ -3459,16 +3752,16 @@ async function subagentStop(ev) {
 }
 function validatePlan() {
   try {
-    const planDir = join13(process.cwd(), ".claude", "plans");
-    if (!existsSync16(planDir))
+    const planDir = join7(process.cwd(), ".claude", "plans");
+    if (!existsSync9(planDir))
       return;
-    const files = readdirSync5(planDir).filter((f) => f.endsWith(".md")).map((f) => ({
+    const files = readdirSync4(planDir).filter((f) => f.endsWith(".md")).map((f) => ({
       name: f,
-      mtime: statSync5(join13(planDir, f)).mtimeMs
+      mtime: statSync4(join7(planDir, f)).mtimeMs
     })).sort((a, b) => b.mtime - a.mtime);
     if (files.length === 0)
       return;
-    const content = readFileSync13(join13(planDir, files[0].name), "utf-8");
+    const content = readFileSync8(join7(planDir, files[0].name), "utf-8");
     const structErrors = validatePlanStructure(content);
     if (structErrors.length > 0) {
       block(`Plan structural issues:
@@ -3599,7 +3892,7 @@ function checkScoreFindingsConsistency(output, scores, stageName) {
   const belowThreshold = Object.entries(scores).filter(([, v]) => v < 4);
   if (belowThreshold.length > 0 && !hasFindings) {
     const dims = belowThreshold.map(([name, score]) => `${name} (${score}/5)`).join(", ");
-    block(`${stageName}: ${dims} scored below 4/5 but no findings cited. Low scores must include at least one [severity] file — description finding as evidence. Rerun the review with concrete findings.`);
+    block(`${stageName}: ${dims} scored below 4/5 but no findings cited. Low scores must include at least one [severity] file \u2014 description finding as evidence. Rerun the review with concrete findings.`);
   }
   if (allPerfect && !hasFindings && !hasNoIssuesDeclaration) {
     block(`${stageName}: all dimensions 5/5 with no findings and no explicit 'No issues found' declaration. Perfect scores require either findings or an explicit declaration. Rerun the review.`);
@@ -3666,10 +3959,10 @@ function checkAggregateScore(stages) {
       if (weakest) {
         if (trend === "improving" && history.length >= 2) {
           const prev = history[history.length - 2];
-          msg += ` Score improved ${prev}→${aggregate}. Focus on: ${weakest.name} (${weakest.score}/5).`;
+          msg += ` Score improved ${prev}\u2192${aggregate}. Focus on: ${weakest.name} (${weakest.score}/5).`;
         } else if (trend === "regressing" && history.length >= 2) {
           const prev = history[history.length - 2];
-          msg += ` Score regressed ${prev}→${aggregate}. Revert recent ${weakest.name.toLowerCase()}-related changes.`;
+          msg += ` Score regressed ${prev}\u2192${aggregate}. Revert recent ${weakest.name.toLowerCase()}-related changes.`;
         } else {
           msg += ` Weakest: ${weakest.name} (${weakest.score}/5). Fix and re-run /qult:review.`;
         }
@@ -3686,7 +3979,7 @@ function checkAggregateScore(stages) {
   }
 }
 function extractFindings(output, stageName) {
-  const findingRe = /\[(critical|high|medium|low)\]\s*(\S+?)(?::\d+)?\s+(?:[—–]|\s-\s)\s*(.+?)(?:\n|$)/gi;
+  const findingRe = /\[(critical|high|medium|low)\]\s*(\S+?)(?::\d+)?\s+(?:[\u2014\u2013]|\s-\s)\s*(.+?)(?:\n|$)/gi;
   for (const match of output.matchAll(findingRe)) {
     _currentFindings.push({
       file: normalize(match[2]),
@@ -3700,22 +3993,31 @@ function extractFindings(output, stageName) {
 function persistReviewFindings() {
   if (_currentFindings.length === 0)
     return null;
-  const historyPath = join13(process.cwd(), ".qult", ".state", FINDINGS_HISTORY_FILE);
-  let history = [];
   try {
-    if (existsSync16(historyPath)) {
-      history = JSON.parse(readFileSync13(historyPath, "utf-8"));
+    const db = getDb();
+    const projectId2 = getProjectId();
+    const sid = getSessionId();
+    const insert = db.prepare("INSERT INTO review_findings (session_id, project_id, file, severity, description, stage) VALUES (?, ?, ?, ?, ?, ?)");
+    for (const f of _currentFindings) {
+      insert.run(sid, projectId2, f.file, f.severity, f.description, f.stage);
     }
+    db.prepare(`DELETE FROM review_findings WHERE project_id = ? AND id NOT IN (
+				SELECT id FROM review_findings WHERE project_id = ? ORDER BY id DESC LIMIT ?
+			)`).run(projectId2, projectId2, MAX_FINDINGS);
+    const rows = db.prepare("SELECT file, severity, description, stage, recorded_at FROM review_findings WHERE project_id = ? ORDER BY id DESC LIMIT ?").all(projectId2, MAX_FINDINGS);
+    const history = rows.map((r) => ({
+      file: r.file,
+      severity: r.severity,
+      description: r.description,
+      stage: r.stage,
+      timestamp: r.recorded_at
+    }));
+    _currentFindings = [];
+    return history;
   } catch {
-    history = [];
+    _currentFindings = [];
+    return null;
   }
-  history.push(..._currentFindings);
-  if (history.length > MAX_FINDINGS) {
-    history = history.slice(-MAX_FINDINGS);
-  }
-  atomicWriteJson(historyPath, history);
-  _currentFindings = [];
-  return history;
 }
 function detectRepeatedPatterns(history) {
   const fileCounts = {};
@@ -3745,10 +4047,10 @@ function detectRepeatedPatterns(history) {
 function resetFindingsCache() {
   _currentFindings = [];
 }
-var READ_ONLY_REVIEWERS, SEVERITY_PATTERN, FINDING_RE, NO_ISSUES_RE2, SPEC_PASS_RE, SPEC_FAIL_RE, QUALITY_PASS_RE, QUALITY_FAIL_RE, SECURITY_PASS_RE, SECURITY_FAIL_RE, ADVERSARIAL_PASS_RE, ADVERSARIAL_FAIL_RE, PLAN_PASS_RE, PLAN_REVISE_RE, ALL_STAGES, FINDINGS_HISTORY_FILE = "review-findings-history.json", MAX_FINDINGS = 100, _currentFindings;
+var READ_ONLY_REVIEWERS, SEVERITY_PATTERN, FINDING_RE, NO_ISSUES_RE2, SPEC_PASS_RE, SPEC_FAIL_RE, QUALITY_PASS_RE, QUALITY_FAIL_RE, SECURITY_PASS_RE, SECURITY_FAIL_RE, ADVERSARIAL_PASS_RE, ADVERSARIAL_FAIL_RE, PLAN_PASS_RE, PLAN_REVISE_RE, ALL_STAGES, MAX_FINDINGS = 100, _currentFindings;
 var init_agent_validators = __esm(() => {
   init_config();
-  init_atomic_write();
+  init_db();
   init_calibration();
   init_session_state();
   init_respond();
@@ -3811,8 +4113,8 @@ var init_subagent_stop = __esm(() => {
 });
 
 // src/hooks/detectors/test-quality-check.ts
-import { existsSync as existsSync17, readFileSync as readFileSync14 } from "node:fs";
-import { basename as basename3, dirname as dirname5, resolve as resolve5 } from "node:path";
+import { existsSync as existsSync10, readFileSync as readFileSync9 } from "fs";
+import { basename as basename3, dirname as dirname4, resolve as resolve5 } from "path";
 function countAssertionsOutsideSetup(code) {
   const lines = code.split(`
 `);
@@ -3848,11 +4150,11 @@ function analyzeTestQuality(file) {
   const absPath = resolve5(cwd, file);
   if (!absPath.startsWith(cwd))
     return null;
-  if (!existsSync17(absPath))
+  if (!existsSync10(absPath))
     return null;
   let content;
   try {
-    content = readFileSync14(absPath, "utf-8");
+    content = readFileSync9(absPath, "utf-8");
   } catch {
     return null;
   }
@@ -3879,7 +4181,7 @@ function analyzeTestQuality(file) {
         smells.push({
           type: "weak-matcher",
           line: i + 1,
-          message: `Weak matcher ${name} — consider asserting a specific value`
+          message: `Weak matcher ${name} \u2014 consider asserting a specific value`
         });
         break;
       }
@@ -3895,14 +4197,14 @@ function analyzeTestQuality(file) {
       smells.push({
         type: "empty-test",
         line: i + 1,
-        message: "Empty test body — no assertions"
+        message: "Empty test body \u2014 no assertions"
       });
     }
     if (ALWAYS_TRUE_RE.test(line)) {
       smells.push({
         type: "always-true",
         line: i + 1,
-        message: "Always-true assertion — tests a literal, not computed behavior"
+        message: "Always-true assertion \u2014 tests a literal, not computed behavior"
       });
     }
     if (CONSTANT_SELF_RE.test(line)) {
@@ -3916,7 +4218,7 @@ function analyzeTestQuality(file) {
       smells.push({
         type: "impl-coupled",
         line: i + 1,
-        message: "Tests mock calls instead of behavior — consider asserting outputs"
+        message: "Tests mock calls instead of behavior \u2014 consider asserting outputs"
       });
     }
   }
@@ -3926,7 +4228,7 @@ function analyzeTestQuality(file) {
     smells.push({
       type: "snapshot-only",
       line: 0,
-      message: `All ${snapshotCount} assertion(s) are snapshots — add value-based assertions to verify behavior`
+      message: `All ${snapshotCount} assertion(s) are snapshots \u2014 add value-based assertions to verify behavior`
     });
   }
   const mockCount = (codeOnly.match(MOCK_RE) ?? []).length;
@@ -3934,7 +4236,7 @@ function analyzeTestQuality(file) {
     smells.push({
       type: "mock-overuse",
       line: 0,
-      message: `Mock overuse: ${mockCount} mocks vs ${assertionCount} assertions — tests may verify mocks, not behavior`
+      message: `Mock overuse: ${mockCount} mocks vs ${assertionCount} assertions \u2014 tests may verify mocks, not behavior`
     });
   }
   let inAsyncTest = false;
@@ -3981,7 +4283,7 @@ function analyzeTestQuality(file) {
               smells.push({
                 type: "async-no-await",
                 line: asyncTestLine,
-                message: "Async test without await — promises may resolve after test completes"
+                message: "Async test without await \u2014 promises may resolve after test completes"
               });
             }
             inAsyncTest = false;
@@ -3999,7 +4301,7 @@ function analyzeTestQuality(file) {
         smells.push({
           type: "shared-mutable-state",
           line: i + 1,
-          message: "Module-level `let` in test file — shared mutable state may cause test isolation issues"
+          message: "Module-level `let` in test file \u2014 shared mutable state may cause test isolation issues"
         });
       }
     }
@@ -4008,19 +4310,19 @@ function analyzeTestQuality(file) {
     smells.push({
       type: "large-test-file",
       line: 0,
-      message: `Test file has ${lines.length} lines (>${LARGE_TEST_FILE_LINES}) — consider splitting by concern`
+      message: `Test file has ${lines.length} lines (>${LARGE_TEST_FILE_LINES}) \u2014 consider splitting by concern`
     });
   }
   try {
-    const snapDir = `${dirname5(absPath)}/__snapshots__/`;
+    const snapDir = `${dirname4(absPath)}/__snapshots__/`;
     const snapFile = `${snapDir}${basename3(absPath)}.snap`;
-    if (existsSync17(snapFile)) {
-      const snapContent = readFileSync14(snapFile, "utf-8");
+    if (existsSync10(snapFile)) {
+      const snapContent = readFileSync9(snapFile, "utf-8");
       if (snapContent.length > LARGE_SNAPSHOT_CHARS) {
         smells.push({
           type: "snapshot-bloat",
           line: 0,
-          message: `Snapshot file is ${Math.round(snapContent.length / 1024)}KB — large snapshots capture implementation details`
+          message: `Snapshot file is ${Math.round(snapContent.length / 1024)}KB \u2014 large snapshots capture implementation details`
         });
       }
     }
@@ -4045,7 +4347,7 @@ function formatTestQualityWarnings(file, result, taskKey) {
     } else {
       const lineNums = items.slice(0, 5).map((s) => s.line).filter((l) => l > 0).join(",");
       const suffix = items.length > 5 ? ` (+${items.length - 5} more)` : "";
-      warnings.push(`${prefix}${file}: ${items.length}x ${type} (L${lineNums}${suffix}) — ${items[0].message}`);
+      warnings.push(`${prefix}${file}: ${items.length}x ${type} (L${lineNums}${suffix}) \u2014 ${items[0].message}`);
     }
   }
   return warnings;
@@ -4081,7 +4383,7 @@ __export(exports_task_completed, {
   default: () => taskCompleted,
   checkVerifyTestQuality: () => checkVerifyTestQuality
 });
-import { spawnSync } from "node:child_process";
+import { spawnSync } from "child_process";
 async function taskCompleted(ev) {
   const subject = ev.task_subject;
   if (!subject)
@@ -4173,33 +4475,38 @@ var init_task_completed = __esm(() => {
 });
 
 // src/state/metrics.ts
-import { existsSync as existsSync18, readFileSync as readFileSync15 } from "node:fs";
-import { join as join14 } from "node:path";
-function recordSessionMetrics(cwd, metrics) {
+function recordSessionMetrics(_cwd, metrics) {
   try {
-    const metricsPath = join14(cwd, STATE_DIR3, METRICS_FILE);
-    let history = readMetricsHistory(cwd);
-    history.push(metrics);
-    if (history.length > MAX_ENTRIES2) {
-      history = history.slice(-MAX_ENTRIES2);
-    }
-    atomicWriteJson(metricsPath, history);
+    const db = getDb();
+    const projectId2 = getProjectId();
+    db.prepare(`INSERT INTO session_metrics (session_id, project_id, gate_failure_count, security_warning_count, review_aggregate, files_changed)
+			 VALUES (?, ?, ?, ?, ?, ?)`).run(metrics.session_id, projectId2, metrics.gate_failures, metrics.security_warnings, metrics.review_score, metrics.files_changed);
+    db.prepare(`DELETE FROM session_metrics WHERE project_id = ? AND id NOT IN (
+				SELECT id FROM session_metrics WHERE project_id = ? ORDER BY id DESC LIMIT ?
+			)`).run(projectId2, projectId2, MAX_ENTRIES2);
   } catch {}
 }
-function readMetricsHistory(cwd) {
+function readMetricsHistory(_cwd) {
   try {
-    const metricsPath = join14(cwd, STATE_DIR3, METRICS_FILE);
-    if (!existsSync18(metricsPath))
-      return [];
-    const parsed = JSON.parse(readFileSync15(metricsPath, "utf-8"));
-    return Array.isArray(parsed) ? parsed : [];
+    const db = getDb();
+    const projectId2 = getProjectId();
+    const rows = db.prepare(`SELECT session_id, recorded_at, gate_failure_count, security_warning_count, review_aggregate, files_changed
+				 FROM session_metrics WHERE project_id = ? ORDER BY id DESC LIMIT ?`).all(projectId2, MAX_ENTRIES2);
+    return rows.map((r) => ({
+      session_id: r.session_id,
+      timestamp: r.recorded_at,
+      gate_failures: r.gate_failure_count,
+      security_warnings: r.security_warning_count,
+      review_score: r.review_aggregate,
+      files_changed: r.files_changed
+    }));
   } catch {
     return [];
   }
 }
-function detectRecurringPatterns(cwd) {
+function detectRecurringPatterns(_cwd) {
   try {
-    const history = readMetricsHistory(cwd);
+    const history = readMetricsHistory(_cwd);
     if (history.length < 5)
       return;
     const recent = history.slice(-5);
@@ -4218,9 +4525,9 @@ function detectRecurringPatterns(cwd) {
     }
   } catch {}
 }
-var STATE_DIR3 = ".qult/.state", METRICS_FILE = "metrics-history.json", MAX_ENTRIES2 = 50;
+var MAX_ENTRIES2 = 50;
 var init_metrics = __esm(() => {
-  init_atomic_write();
+  init_db();
 });
 
 // src/hooks/session-start.ts
@@ -4228,18 +4535,11 @@ var exports_session_start = {};
 __export(exports_session_start, {
   default: () => sessionStart
 });
-import { existsSync as existsSync19, mkdirSync as mkdirSync3 } from "node:fs";
-import { join as join15 } from "node:path";
 async function sessionStart(ev) {
   try {
-    const stateDir = join15(process.cwd(), ".qult", ".state");
-    if (!existsSync19(stateDir)) {
-      mkdirSync3(stateDir, { recursive: true });
-    }
-    cleanupStaleScopedFiles(stateDir);
     if (ev.source === "startup" || ev.source === "clear") {
       try {
-        const cwd = process.cwd();
+        const cwd = ev.cwd ?? process.cwd();
         const prevState = readSessionState();
         const gateFailures = Object.values(prevState.gate_failure_counts ?? {}).reduce((sum, v) => sum + (typeof v === "number" ? v : 0), 0);
         if (gateFailures > 0 || (prevState.security_warning_count ?? 0) > 0 || (prevState.changed_file_paths ?? []).length > 0) {
@@ -4263,7 +4563,6 @@ async function sessionStart(ev) {
   } catch {}
 }
 var init_session_start = __esm(() => {
-  init_cleanup();
   init_metrics();
   init_pending_fixes();
   init_session_state();
@@ -4275,78 +4574,59 @@ var exports_post_compact = {};
 __export(exports_post_compact, {
   default: () => postCompact
 });
-import { existsSync as existsSync20, readdirSync as readdirSync6, readFileSync as readFileSync16, statSync as statSync6 } from "node:fs";
-import { join as join16 } from "node:path";
+import { existsSync as existsSync11, readdirSync as readdirSync5, readFileSync as readFileSync10, statSync as statSync5 } from "fs";
+import { join as join8 } from "path";
 async function postCompact(_ev) {
   try {
-    const stateDir = join16(process.cwd(), ".qult", ".state");
-    if (!existsSync20(stateDir))
-      return;
     const parts = [];
-    const fixesPath2 = findLatestFile(stateDir, "pending-fixes");
-    if (fixesPath2) {
-      const fixes = safeReadJson(fixesPath2, []);
-      if (fixes.length > 0) {
-        parts.push(`[qult] ${fixes.length} pending fix(es):`);
-        for (const fix of fixes) {
-          parts.push(`  [${fix.gate}] ${fix.file}`);
-          if (fix.errors?.length > 0) {
-            const shown = fix.errors.slice(0, 3).map((e) => `    ${sanitizeForStderr(e.slice(0, 200))}`);
-            parts.push(...shown);
-            if (fix.errors.length > 3) {
-              parts.push(`    ... and ${fix.errors.length - 3} more error(s)`);
-            }
+    const fixes = readPendingFixes();
+    if (fixes.length > 0) {
+      parts.push(`[qult] ${fixes.length} pending fix(es):`);
+      for (const fix of fixes) {
+        parts.push(`  [${fix.gate}] ${fix.file}`);
+        if (fix.errors?.length > 0) {
+          const shown = fix.errors.slice(0, 3).map((e) => `    ${sanitizeForStderr(e.slice(0, 200))}`);
+          parts.push(...shown);
+          if (fix.errors.length > 3) {
+            parts.push(`    ... and ${fix.errors.length - 3} more error(s)`);
           }
         }
       }
     }
-    const statePath = findLatestFile(stateDir, "session-state");
-    if (statePath) {
-      const state = safeReadJson(statePath, {});
-      if (Object.keys(state).length > 0) {
-        const summary = [];
-        const gatesPath = join16(process.cwd(), ".qult", "gates.json");
-        const hasGates = existsSync20(gatesPath);
-        if (state.test_passed_at)
-          summary.push(`test_passed_at: ${state.test_passed_at}`);
-        else if (hasGates)
-          summary.push("tests: NOT PASSED");
-        if (state.review_completed_at)
-          summary.push(`review_completed_at: ${state.review_completed_at}`);
-        else if (hasGates)
-          summary.push("review: NOT DONE");
-        const files = state.changed_file_paths;
-        if (Array.isArray(files) && files.length > 0)
-          summary.push(`${files.length} file(s) changed`);
-        const disabled = state.disabled_gates;
-        if (Array.isArray(disabled) && disabled.length > 0)
-          summary.push(`disabled gates: ${disabled.join(", ")}`);
-        const reviewIter = state.review_iteration;
-        if (typeof reviewIter === "number" && reviewIter > 0)
-          summary.push(`review iteration: ${reviewIter}`);
-        const secWarn = state.security_warning_count;
-        if (typeof secWarn === "number" && secWarn > 0)
-          summary.push(`security warnings: ${secWarn}`);
-        const testQWarn = state.test_quality_warning_count;
-        if (typeof testQWarn === "number" && testQWarn > 0)
-          summary.push(`test quality warnings: ${testQWarn}`);
-        const driftWarn = state.drift_warning_count;
-        if (typeof driftWarn === "number" && driftWarn > 0)
-          summary.push(`drift warnings: ${driftWarn}`);
-        const deadImpWarn = state.dead_import_warning_count;
-        if (typeof deadImpWarn === "number" && deadImpWarn > 0)
-          summary.push(`dead import warnings: ${deadImpWarn}`);
-        if (summary.length > 0) {
-          parts.push(`[qult] Session: ${summary.join(", ")}`);
-        }
-      }
+    const state = readSessionState();
+    const summary = [];
+    const hasGates = loadGates() !== null;
+    if (state.test_passed_at)
+      summary.push(`test_passed_at: ${state.test_passed_at}`);
+    else if (hasGates)
+      summary.push("tests: NOT PASSED");
+    if (state.review_completed_at)
+      summary.push(`review_completed_at: ${state.review_completed_at}`);
+    else if (hasGates)
+      summary.push("review: NOT DONE");
+    if (state.changed_file_paths.length > 0)
+      summary.push(`${state.changed_file_paths.length} file(s) changed`);
+    if (state.disabled_gates.length > 0)
+      summary.push(`disabled gates: ${state.disabled_gates.join(", ")}`);
+    if (state.review_iteration > 0)
+      summary.push(`review iteration: ${state.review_iteration}`);
+    if (state.security_warning_count > 0)
+      summary.push(`security warnings: ${state.security_warning_count}`);
+    if (state.test_quality_warning_count > 0)
+      summary.push(`test quality warnings: ${state.test_quality_warning_count}`);
+    if (state.drift_warning_count > 0)
+      summary.push(`drift warnings: ${state.drift_warning_count}`);
+    if (state.dead_import_warning_count > 0)
+      summary.push(`dead import warnings: ${state.dead_import_warning_count}`);
+    if (summary.length > 0) {
+      parts.push(`[qult] Session: ${summary.join(", ")}`);
     }
     try {
-      const planDir = join16(process.cwd(), ".claude", "plans");
-      if (existsSync20(planDir)) {
-        const planFiles = readdirSync6(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync6(join16(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
+      const planDir = join8(process.cwd(), ".claude", "plans");
+      if (existsSync11(planDir)) {
+        const planFiles = readdirSync5(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync5(join8(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
         if (planFiles.length > 0) {
-          const content = readFileSync16(join16(planDir, planFiles[0].name), "utf-8");
+          const content = readFileSync10(join8(planDir, planFiles[0].name), "utf-8");
           const taskCount = (content.match(/^###\s+Task\s+\d+/gim) ?? []).length;
           const doneCount = (content.match(/^###\s+Task\s+\d+.*\[done\]/gim) ?? []).length;
           if (taskCount > 0) {
@@ -4356,15 +4636,13 @@ async function postCompact(_ev) {
       }
     } catch {}
     try {
-      const findingsPath = join16(stateDir, "review-findings-history.json");
-      if (existsSync20(findingsPath)) {
-        const findings = safeReadJson(findingsPath, []);
-        if (findings.length > 0) {
-          const recent = findings.slice(-5);
-          parts.push("[qult] Recent review findings:");
-          for (const f of recent) {
-            parts.push(`  [${sanitizeForStderr(f.severity)}] ${sanitizeForStderr(f.file)} — ${sanitizeForStderr(f.description.slice(0, 150))}`);
-          }
+      const db = getDb();
+      const sid = getSessionId();
+      const findings = db.prepare("SELECT file, severity, description FROM review_findings WHERE session_id = ? ORDER BY id DESC LIMIT 5").all(sid);
+      if (findings.length > 0) {
+        parts.push("[qult] Recent review findings:");
+        for (const f of findings) {
+          parts.push(`  [${sanitizeForStderr(f.severity)}] ${sanitizeForStderr(f.file)} \u2014 ${sanitizeForStderr(f.description.slice(0, 150))}`);
         }
       }
     } catch {}
@@ -4393,36 +4671,18 @@ async function postCompact(_ev) {
     }
   } catch {}
 }
-function findLatestFile(stateDir, prefix) {
-  try {
-    const files = readdirSync6(stateDir).filter((f) => f.startsWith(prefix) && f.endsWith(".json")).map((f) => ({
-      path: join16(stateDir, f),
-      mtime: statSync6(join16(stateDir, f)).mtimeMs
-    })).sort((a, b) => b.mtime - a.mtime);
-    return files.length > 0 ? files[0].path : null;
-  } catch {
-    return null;
-  }
-}
-function safeReadJson(path, fallback) {
-  try {
-    if (!existsSync20(path))
-      return fallback;
-    return JSON.parse(readFileSync16(path, "utf-8"));
-  } catch {
-    return fallback;
-  }
-}
-var init_post_compact = () => {};
+var init_post_compact = __esm(() => {
+  init_load();
+  init_db();
+  init_pending_fixes();
+  init_session_state();
+});
 
 // src/hooks/dispatcher.ts
-init_atomic_write();
+init_db();
 init_flush();
-init_pending_fixes();
-init_session_state();
 init_lazy_init();
 init_respond();
-import { join as join17 } from "node:path";
 var EVENT_MAP = {
   "post-tool": () => Promise.resolve().then(() => (init_post_tool(), exports_post_tool)),
   "pre-tool": () => Promise.resolve().then(() => (init_pre_tool(), exports_pre_tool)),
@@ -4432,7 +4692,6 @@ var EVENT_MAP = {
   "session-start": () => Promise.resolve().then(() => (init_session_start(), exports_session_start)),
   "post-compact": () => Promise.resolve().then(() => (init_post_compact(), exports_post_compact))
 };
-var _lastWrittenSessionId;
 async function dispatch(event) {
   const loader = EVENT_MAP[event];
   if (!loader) {
@@ -4462,19 +4721,15 @@ async function dispatch(event) {
   } catch {
     return;
   }
-  if (ev.session_id) {
-    setStateSessionScope(ev.session_id);
-    setFixesSessionScope(ev.session_id);
-    if (ev.session_id !== _lastWrittenSessionId) {
-      try {
-        atomicWriteJson(join17(process.cwd(), ".qult", ".state", "latest-session.json"), {
-          session_id: ev.session_id,
-          updated_at: new Date().toISOString()
-        });
-        _lastWrittenSessionId = ev.session_id;
-      } catch {}
-    }
+  if (ev.cwd) {
+    setProjectPath(ev.cwd);
   }
+  if (ev.session_id) {
+    setSessionScope(ev.session_id);
+  }
+  try {
+    ensureSession();
+  } catch {}
   lazyInit();
   const debug = !!process.env.QULT_DEBUG;
   setCurrentEvent(event);

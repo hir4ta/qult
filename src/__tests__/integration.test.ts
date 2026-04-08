@@ -1,32 +1,41 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetGatesCache } from "../gates/load.ts";
+import { resetGatesCache, saveGates } from "../gates/load.ts";
+import { closeDb, ensureSession, setProjectPath, setSessionScope, useTestDb } from "../state/db.ts";
 import { resetAllCaches } from "../state/flush.ts";
+import { flush as flushPendingFixes, writePendingFixes } from "../state/pending-fixes.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-integration-test");
-const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 const originalCwd = process.cwd();
 let stdoutCapture: string[];
 let stderrCapture: string[];
 let exitCode: number | null;
 
 beforeEach(() => {
+	useTestDb();
+	setProjectPath(TEST_DIR);
+	setSessionScope("test-session");
+	ensureSession();
 	resetAllCaches();
-	mkdirSync(STATE_DIR, { recursive: true });
-	// Create a minimal gates.json with real biome
-	writeFileSync(
-		join(TEST_DIR, ".qult", "gates.json"),
-		JSON.stringify({
-			on_write: {
-				lint: {
-					command: "biome check {file} --no-errors-on-unmatched",
-					timeout: 5000,
-				},
+	mkdirSync(TEST_DIR, { recursive: true });
+
+	// Create a minimal gates config with real biome
+	saveGates({
+		on_write: {
+			lint: {
+				command: "biome check {file} --no-errors-on-unmatched",
+				timeout: 5000,
 			},
-		}),
-	);
-	writeFileSync(join(STATE_DIR, "pending-fixes.json"), "[]");
+		},
+	});
+	resetAllCaches();
+
+	// Initialize empty pending fixes
+	writePendingFixes([]);
+	flushPendingFixes();
+	resetAllCaches();
+
 	// Need biome.json for biome to work
 	writeFileSync(
 		join(TEST_DIR, "biome.json"),
@@ -57,6 +66,7 @@ beforeEach(() => {
 afterEach(() => {
 	vi.restoreAllMocks();
 	process.chdir(originalCwd);
+	closeDb();
 	rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
@@ -118,17 +128,14 @@ describe("Integration: real biome gate", () => {
 describe("Integration: real tsc gate", { timeout: 15000 }, () => {
 	beforeEach(() => {
 		// Configure tsc as typecheck gate
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_write: {
-					typecheck: {
-						command: `bun tsc --noEmit --project ${join(TEST_DIR, "tsconfig.json")}`,
-						timeout: 10000,
-					},
+		saveGates({
+			on_write: {
+				typecheck: {
+					command: `bun tsc --noEmit --project ${join(TEST_DIR, "tsconfig.json")}`,
+					timeout: 10000,
 				},
-			}),
-		);
+			},
+		});
 		resetGatesCache();
 		// Minimal tsconfig.json
 		writeFileSync(
@@ -179,14 +186,11 @@ describe("Integration: real tsc gate", { timeout: 15000 }, () => {
 
 describe("Integration: test command detection", () => {
 	it("records test pass when vitest command succeeds", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_commit: {
-					test: { command: "bun vitest run", timeout: 10000 },
-				},
-			}),
-		);
+		saveGates({
+			on_commit: {
+				test: { command: "bun vitest run", timeout: 10000 },
+			},
+		});
 		resetGatesCache();
 
 		const postTool = (await import("../hooks/post-tool.ts")).default;
@@ -204,14 +208,11 @@ describe("Integration: test command detection", () => {
 	});
 
 	it("does not record test pass when exit code is non-zero", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_commit: {
-					test: { command: "bun vitest run", timeout: 10000 },
-				},
-			}),
-		);
+		saveGates({
+			on_commit: {
+				test: { command: "bun vitest run", timeout: 10000 },
+			},
+		});
 		resetGatesCache();
 
 		const postTool = (await import("../hooks/post-tool.ts")).default;

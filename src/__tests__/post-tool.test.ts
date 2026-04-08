@@ -1,17 +1,24 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { saveGates } from "../gates/load.ts";
+import { closeDb, ensureSession, setProjectPath, setSessionScope, useTestDb } from "../state/db.ts";
 import { resetAllCaches } from "../state/flush.ts";
+import type { GatesConfig } from "../types.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-posttool-test");
-const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 let stdoutCapture: string[] = [];
 let stderrCapture: string[] = [];
 const originalCwd = process.cwd();
 
 beforeEach(() => {
+	useTestDb();
+	setProjectPath(TEST_DIR);
+	setSessionScope("test-session");
+	ensureSession();
 	resetAllCaches();
-	mkdirSync(STATE_DIR, { recursive: true });
+	rmSync(TEST_DIR, { recursive: true, force: true });
+	mkdirSync(TEST_DIR, { recursive: true });
 	process.chdir(TEST_DIR);
 	stdoutCapture = [];
 	stderrCapture = [];
@@ -28,20 +35,19 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.restoreAllMocks();
+	closeDb();
 	process.chdir(originalCwd);
 	rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
 describe("postTool: Edit/Write gate execution", () => {
 	it("adds pending-fixes when gate fails", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_write: {
-					lint: { command: "echo 'lint error' && exit 1", timeout: 3000 },
-				},
-			}),
-		);
+		saveGates({
+			on_write: {
+				lint: { command: "echo 'lint error' && exit 1", timeout: 3000 },
+			},
+		} as GatesConfig);
+		resetAllCaches();
 
 		const postTool = (await import("../hooks/post-tool.ts")).default;
 		await postTool({
@@ -59,12 +65,10 @@ describe("postTool: Edit/Write gate execution", () => {
 	});
 
 	it("does not add pending-fixes when gate passes", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_write: { lint: { command: "echo ok", timeout: 3000 } },
-			}),
-		);
+		saveGates({
+			on_write: { lint: { command: "echo ok", timeout: 3000 } },
+		} as GatesConfig);
+		resetAllCaches();
 
 		const postTool = (await import("../hooks/post-tool.ts")).default;
 		await postTool({
@@ -88,39 +92,14 @@ describe("postTool: Edit/Write gate execution", () => {
 	});
 });
 
-describe("postTool: .qult/ file skip", () => {
-	it("skips gate execution for files inside .qult/", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_write: {
-					lint: { command: "echo 'lint error' && exit 1", timeout: 3000 },
-				},
-			}),
-		);
-
-		const postTool = (await import("../hooks/post-tool.ts")).default;
-		await postTool({
-			tool_name: "Write",
-			tool_input: { file_path: join(TEST_DIR, ".qult", "gates.json") },
-		});
-
-		const { readPendingFixes } = await import("../state/pending-fixes.ts");
-		expect(readPendingFixes().length).toBe(0);
-		expect(stdoutCapture.join("")).toBe("");
-	});
-});
-
 describe("postTool: non-gated extension skip", () => {
 	it("skips per-file gate for .md files when gate uses biome", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_write: {
-					lint: { command: "biome check {file} || exit 1", timeout: 3000 },
-				},
-			}),
-		);
+		saveGates({
+			on_write: {
+				lint: { command: "biome check {file} || exit 1", timeout: 3000 },
+			},
+		} as GatesConfig);
+		resetAllCaches();
 
 		const postTool = (await import("../hooks/post-tool.ts")).default;
 		await postTool({
@@ -135,12 +114,10 @@ describe("postTool: non-gated extension skip", () => {
 
 describe("postTool: test command detection from gates", () => {
 	it("detects custom test command from on_commit gate", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_commit: { test: { command: "npm run test:integration", timeout: 30000 } },
-			}),
-		);
+		saveGates({
+			on_commit: { test: { command: "npm run test:integration", timeout: 30000 } },
+		} as GatesConfig);
+		resetAllCaches();
 
 		const postTool = (await import("../hooks/post-tool.ts")).default;
 		await postTool({
@@ -154,12 +131,10 @@ describe("postTool: test command detection from gates", () => {
 	});
 
 	it("detects test when bash command contains gate command", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_commit: { test: { command: "bun vitest run", timeout: 30000 } },
-			}),
-		);
+		saveGates({
+			on_commit: { test: { command: "bun vitest run", timeout: 30000 } },
+		} as GatesConfig);
+		resetAllCaches();
 
 		const postTool = (await import("../hooks/post-tool.ts")).default;
 		await postTool({
@@ -186,12 +161,10 @@ describe("postTool: test command detection from gates", () => {
 	});
 
 	it("does not fallback to regex when on_commit gates exist but command differs", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_commit: { test: { command: "npm run test:integration", timeout: 30000 } },
-			}),
-		);
+		saveGates({
+			on_commit: { test: { command: "npm run test:integration", timeout: 30000 } },
+		} as GatesConfig);
+		resetAllCaches();
 
 		const postTool = (await import("../hooks/post-tool.ts")).default;
 		// "vitest" would match TEST_CMD_RE, but should NOT match since on_commit has a different command
@@ -208,10 +181,8 @@ describe("postTool: test command detection from gates", () => {
 
 describe("postTool: Bash handling", () => {
 	it("clears state on git commit", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({ on_write: { lint: { command: "echo ok" } } }),
-		);
+		saveGates({ on_write: { lint: { command: "echo ok" } } } as GatesConfig);
+		resetAllCaches();
 
 		const { recordTestPass, readSessionState } = await import("../state/session-state.ts");
 		recordTestPass("vitest run");
@@ -278,14 +249,12 @@ describe("postTool: Bash handling", () => {
 
 describe("postTool: disabled gate skip", () => {
 	it("skips disabled gate — no pending-fixes created", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_write: {
-					lint: { command: "echo 'lint error' && exit 1", timeout: 3000 },
-				},
-			}),
-		);
+		saveGates({
+			on_write: {
+				lint: { command: "echo 'lint error' && exit 1", timeout: 3000 },
+			},
+		} as GatesConfig);
+		resetAllCaches();
 
 		const { disableGate } = await import("../state/session-state.ts");
 		disableGate("lint");
@@ -303,14 +272,12 @@ describe("postTool: disabled gate skip", () => {
 
 describe("postTool: gate execution summary to stderr", () => {
 	it("outputs gate results after Edit", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_write: {
-					lint: { command: "echo 'OK' && exit 0", timeout: 3000 },
-				},
-			}),
-		);
+		saveGates({
+			on_write: {
+				lint: { command: "echo 'OK' && exit 0", timeout: 3000 },
+			},
+		} as GatesConfig);
+		resetAllCaches();
 
 		const postTool = (await import("../hooks/post-tool.ts")).default;
 		await postTool({
@@ -324,14 +291,12 @@ describe("postTool: gate execution summary to stderr", () => {
 	});
 
 	it("shows FAIL and pending fix count on gate failure", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_write: {
-					lint: { command: "echo 'error' && exit 1", timeout: 3000 },
-				},
-			}),
-		);
+		saveGates({
+			on_write: {
+				lint: { command: "echo 'error' && exit 1", timeout: 3000 },
+			},
+		} as GatesConfig);
+		resetAllCaches();
 
 		const postTool = (await import("../hooks/post-tool.ts")).default;
 		await postTool({
@@ -347,14 +312,12 @@ describe("postTool: gate execution summary to stderr", () => {
 
 describe("postTool: 3-Strike gate failure escalation", () => {
 	it("does not warn before 3 failures, warns on 3rd failure", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_write: {
-					lint: { command: "echo 'error' && exit 1", timeout: 3000 },
-				},
-			}),
-		);
+		saveGates({
+			on_write: {
+				lint: { command: "echo 'error' && exit 1", timeout: 3000 },
+			},
+		} as GatesConfig);
+		resetAllCaches();
 
 		const postTool = (await import("../hooks/post-tool.ts")).default;
 		const { resetGatesCache } = await import("../gates/load.ts");
@@ -388,14 +351,12 @@ describe("postTool: 3-Strike gate failure escalation", () => {
 describe("postTool: hallucinated import detection", () => {
 	beforeEach(() => {
 		// Setup passing gates so gate execution doesn't interfere
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_write: {
-					lint: { command: "echo 'OK' && exit 0", timeout: 3000 },
-				},
-			}),
-		);
+		saveGates({
+			on_write: {
+				lint: { command: "echo 'OK' && exit 0", timeout: 3000 },
+			},
+		} as GatesConfig);
+		resetAllCaches();
 	});
 
 	it("creates pending-fix for nonexistent package import", async () => {
@@ -475,12 +436,10 @@ describe("postTool: hallucinated import detection", () => {
 
 describe("postTool: Python hallucinated import detection", () => {
 	beforeEach(() => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_write: { lint: { command: "echo 'OK' && exit 0", timeout: 3000 } },
-			}),
-		);
+		saveGates({
+			on_write: { lint: { command: "echo 'OK' && exit 0", timeout: 3000 } },
+		} as GatesConfig);
+		resetAllCaches();
 	});
 
 	it("flags import of nonexistent module", async () => {
@@ -564,12 +523,10 @@ describe("postTool: Python hallucinated import detection", () => {
 
 describe("postTool: Go hallucinated import detection", () => {
 	beforeEach(() => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_write: { lint: { command: "echo 'OK' && exit 0", timeout: 3000 } },
-			}),
-		);
+		saveGates({
+			on_write: { lint: { command: "echo 'OK' && exit 0", timeout: 3000 } },
+		} as GatesConfig);
+		resetAllCaches();
 	});
 
 	it("flags nonexistent third-party import", async () => {
@@ -650,12 +607,10 @@ describe("postTool: Go hallucinated import detection", () => {
 
 describe("postTool: export breaking change detection", () => {
 	beforeEach(() => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_write: { lint: { command: "echo ok && exit 0", timeout: 3000 } },
-			}),
-		);
+		saveGates({
+			on_write: { lint: { command: "echo ok && exit 0", timeout: 3000 } },
+		} as GatesConfig);
+		resetAllCaches();
 	});
 
 	it("detects removed export and creates pending-fix", async () => {
@@ -736,12 +691,10 @@ describe("postTool: export breaking change detection", () => {
 
 describe("postTool: convention drift detection", () => {
 	beforeEach(() => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_write: { lint: { command: "echo ok && exit 0", timeout: 3000 } },
-			}),
-		);
+		saveGates({
+			on_write: { lint: { command: "echo ok && exit 0", timeout: 3000 } },
+		} as GatesConfig);
+		resetAllCaches();
 	});
 
 	it("warns when new file uses different naming convention than siblings", async () => {
@@ -803,12 +756,10 @@ describe("postTool: convention drift detection", () => {
 
 describe("postTool: over-engineering detection", () => {
 	beforeEach(() => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_write: { lint: { command: "echo ok && exit 0", timeout: 3000 } },
-			}),
-		);
+		saveGates({
+			on_write: { lint: { command: "echo ok && exit 0", timeout: 3000 } },
+		} as GatesConfig);
+		resetAllCaches();
 	});
 
 	it("warns when unplanned file count exceeds threshold", async () => {

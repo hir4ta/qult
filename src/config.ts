@@ -1,7 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { getDb, getProjectId } from "./state/db.ts";
 
-/** User-configurable settings in .qult/config.json */
+/** User-configurable settings */
 export interface QultConfig {
 	review: {
 		score_threshold: number;
@@ -23,7 +22,7 @@ export interface QultConfig {
 		test_on_edit: boolean;
 		/** Timeout for test-on-edit gate in ms (default: 15000) */
 		test_on_edit_timeout: number;
-		/** Additional PATH directories for gate command execution (e.g. [".venv/bin", "../node_modules/.bin"]) */
+		/** Additional PATH directories for gate command execution */
 		extra_path: string[];
 	};
 	escalation: {
@@ -109,47 +108,60 @@ function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): voi
 	}
 }
 
+/** Convert DB KV rows to a nested config object for applyConfigLayer. */
+function kvRowsToRaw(rows: { key: string; value: string }[]): Record<string, unknown> {
+	const raw: Record<string, Record<string, unknown>> = {};
+	for (const row of rows) {
+		const [section, field] = row.key.split(".");
+		if (!section || !field) continue;
+		if (!raw[section]) raw[section] = {};
+		try {
+			raw[section][field] = JSON.parse(row.value);
+		} catch {
+			raw[section][field] = row.value;
+		}
+	}
+	return raw;
+}
+
 // Process-scoped cache
 let _cache: QultConfig | null = null;
 
-/** Load config with layered precedence: defaults → .qult/config.json → QULT_* env vars */
+/** Load config with layered precedence: defaults → global_configs → project_configs → QULT_* env vars */
 export function loadConfig(): QultConfig {
 	if (_cache) return _cache;
 
 	const config = structuredClone(DEFAULTS);
 
-	// Layer 0.5: ${CLAUDE_PLUGIN_DATA}/preferences.json (user-level cross-project)
+	// Layer 1: global_configs (user-level cross-project, replaces preferences.json)
 	try {
-		const pluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
-		if (pluginDataDir) {
-			const prefsPath = join(pluginDataDir, "preferences.json");
-			if (existsSync(prefsPath)) {
-				const raw = JSON.parse(readFileSync(prefsPath, "utf-8"));
-				applyConfigLayer(config, raw);
-			}
+		const db = getDb();
+		const globalRows = db.prepare("SELECT key, value FROM global_configs").all() as {
+			key: string;
+			value: string;
+		}[];
+		if (globalRows.length > 0) {
+			applyConfigLayer(config, kvRowsToRaw(globalRows));
 		}
-	} catch (e) {
-		// fail-open with warning: user should know their config is invalid
-		process.stderr.write(
-			`[qult] Warning: invalid preferences.json, using defaults: ${e instanceof Error ? e.message : "parse error"}\n`,
-		);
+	} catch {
+		/* fail-open */
 	}
 
-	// Layer 1: .qult/config.json (project-level)
+	// Layer 2: project_configs (project-level, replaces .qult/config.json)
 	try {
-		const configPath = join(process.cwd(), ".qult", "config.json");
-		if (existsSync(configPath)) {
-			const raw = JSON.parse(readFileSync(configPath, "utf-8"));
-			applyConfigLayer(config, raw);
+		const db = getDb();
+		const projectId = getProjectId();
+		const projectRows = db
+			.prepare("SELECT key, value FROM project_configs WHERE project_id = ?")
+			.all(projectId) as { key: string; value: string }[];
+		if (projectRows.length > 0) {
+			applyConfigLayer(config, kvRowsToRaw(projectRows));
 		}
-	} catch (e) {
-		// fail-open with warning: user should know their config is invalid
-		process.stderr.write(
-			`[qult] Warning: invalid .qult/config.json, using defaults: ${e instanceof Error ? e.message : "parse error"}\n`,
-		);
+	} catch {
+		/* fail-open */
 	}
 
-	// Layer 2: QULT_* environment variables
+	// Layer 3: QULT_* environment variables
 	const envInt = (key: string): number | undefined => {
 		const val = process.env[key];
 		if (val === undefined) return undefined;

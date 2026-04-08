@@ -1,120 +1,36 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { handleRequest, handleTool, TOOL_DEFS } from "../mcp-server.ts";
 import {
-	findLatestStateFile,
-	handleRequest,
-	handleTool,
-	readJson,
-	resetMcpCache,
-	TOOL_DEFS,
-} from "../mcp-server.ts";
+	closeDb,
+	ensureSession,
+	getDb,
+	getProjectId,
+	getSessionId,
+	setProjectPath,
+	setSessionScope,
+	useTestDb,
+} from "../state/db.ts";
+import { resetAllCaches } from "../state/flush.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-mcp-test");
-const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 const originalCwd = process.cwd();
 
 beforeEach(() => {
-	resetMcpCache();
-	mkdirSync(STATE_DIR, { recursive: true });
+	resetAllCaches();
+	mkdirSync(TEST_DIR, { recursive: true });
+	useTestDb();
+	setProjectPath(TEST_DIR);
+	setSessionScope("test-session");
+	ensureSession();
 	process.chdir(TEST_DIR);
 });
 
 afterEach(() => {
 	process.chdir(originalCwd);
+	closeDb();
 	rmSync(TEST_DIR, { recursive: true, force: true });
-});
-
-describe("readJson", () => {
-	it("reads valid JSON file", () => {
-		const path = join(TEST_DIR, "test.json");
-		writeFileSync(path, JSON.stringify({ key: "value" }));
-		expect(readJson(path, null)).toEqual({ key: "value" });
-	});
-
-	it("returns fallback for missing file", () => {
-		expect(readJson(join(TEST_DIR, "nonexistent.json"), [])).toEqual([]);
-	});
-
-	it("returns fallback for corrupt JSON", () => {
-		const path = join(TEST_DIR, "corrupt.json");
-		writeFileSync(path, "not valid json{{{");
-		expect(readJson(path, [])).toEqual([]);
-	});
-});
-
-describe("findLatestStateFile", () => {
-	it("returns non-scoped file when no scoped files exist", () => {
-		const result = findLatestStateFile(TEST_DIR, "pending-fixes");
-		expect(result).toBe(join(STATE_DIR, "pending-fixes.json"));
-	});
-
-	it("returns most recently modified file", () => {
-		const older = join(STATE_DIR, "pending-fixes-session-old.json");
-		const newer = join(STATE_DIR, "pending-fixes-session-new.json");
-		writeFileSync(older, "[]");
-
-		const pastTime = Date.now() - 10000;
-		const { utimesSync } = require("node:fs");
-		utimesSync(older, pastTime / 1000, pastTime / 1000);
-
-		writeFileSync(newer, '[{"file":"new"}]');
-		const result = findLatestStateFile(TEST_DIR, "pending-fixes");
-		expect(result).toBe(newer);
-	});
-
-	it("prefers session from latest-session.json over mtime", () => {
-		const target = join(STATE_DIR, "pending-fixes-abc.json");
-		const newer = join(STATE_DIR, "pending-fixes-xyz.json");
-		writeFileSync(target, '[{"file":"abc"}]');
-
-		const pastTime = Date.now() - 10000;
-		const { utimesSync } = require("node:fs");
-		utimesSync(target, pastTime / 1000, pastTime / 1000);
-		writeFileSync(newer, '[{"file":"xyz"}]');
-
-		writeFileSync(
-			join(STATE_DIR, "latest-session.json"),
-			JSON.stringify({ session_id: "abc", updated_at: new Date().toISOString() }),
-		);
-
-		const result = findLatestStateFile(TEST_DIR, "pending-fixes");
-		expect(result).toBe(target);
-	});
-
-	it("falls back to mtime when latest-session.json is corrupt", () => {
-		const older = join(STATE_DIR, "pending-fixes-old.json");
-		const newer = join(STATE_DIR, "pending-fixes-new.json");
-		writeFileSync(older, "[]");
-
-		const pastTime = Date.now() - 10000;
-		const { utimesSync } = require("node:fs");
-		utimesSync(older, pastTime / 1000, pastTime / 1000);
-		writeFileSync(newer, "[]");
-
-		writeFileSync(join(STATE_DIR, "latest-session.json"), "not valid json{{{");
-
-		const result = findLatestStateFile(TEST_DIR, "pending-fixes");
-		expect(result).toBe(newer);
-	});
-
-	it("falls back to mtime when latest-session.json points to nonexistent session", () => {
-		const existing = join(STATE_DIR, "pending-fixes-real.json");
-		writeFileSync(existing, "[]");
-		writeFileSync(
-			join(STATE_DIR, "latest-session.json"),
-			JSON.stringify({ session_id: "ghost", updated_at: new Date().toISOString() }),
-		);
-
-		const result = findLatestStateFile(TEST_DIR, "pending-fixes");
-		expect(result).toBe(existing);
-	});
-
-	it("returns non-scoped path when state dir does not exist", () => {
-		rmSync(join(TEST_DIR, ".qult"), { recursive: true, force: true });
-		const result = findLatestStateFile(TEST_DIR, "pending-fixes");
-		expect(result).toContain("pending-fixes.json");
-	});
 });
 
 describe("handleTool", () => {
@@ -123,9 +39,12 @@ describe("handleTool", () => {
 		expect(result.content[0]!.text).toBe("No pending fixes.");
 	});
 
-	it("get_pending_fixes returns formatted fixes from state file", () => {
-		const fixes = [{ file: "/src/foo.ts", errors: ["error: unused var"], gate: "lint" }];
-		writeFileSync(join(STATE_DIR, "pending-fixes.json"), JSON.stringify(fixes));
+	it("get_pending_fixes returns formatted fixes from DB", () => {
+		const db = getDb();
+		const sid = getSessionId();
+		db.prepare(
+			"INSERT INTO pending_fixes (session_id, file, gate, errors) VALUES (?, ?, ?, ?)",
+		).run(sid, "/src/foo.ts", "lint", JSON.stringify(["error: unused var"]));
 
 		const result = handleTool("get_pending_fixes", TEST_DIR);
 		const text = result.content[0]!.text;
@@ -134,13 +53,13 @@ describe("handleTool", () => {
 		expect(text).toContain("error: unused var");
 	});
 
-	it("get_session_status returns state from file", () => {
-		const state = {
-			last_commit_at: "2026-01-01T00:00:00Z",
-			test_passed_at: null,
-			review_completed_at: null,
-		};
-		writeFileSync(join(STATE_DIR, "session-state.json"), JSON.stringify(state));
+	it("get_session_status returns state from DB", () => {
+		const db = getDb();
+		const sid = getSessionId();
+		db.prepare("UPDATE sessions SET last_commit_at = ? WHERE id = ?").run(
+			"2026-01-01T00:00:00Z",
+			sid,
+		);
 
 		const result = handleTool("get_session_status", TEST_DIR);
 		const parsed = JSON.parse(result.content[0]!.text);
@@ -148,18 +67,56 @@ describe("handleTool", () => {
 		expect(parsed.test_passed_at).toBeNull();
 	});
 
-	it("get_session_status returns isError when no state", () => {
+	it("get_session_status returns isError when no session", () => {
+		// Delete the session so it's not found
+		const db = getDb();
+		db.prepare("DELETE FROM sessions").run();
+
 		const result = handleTool("get_session_status", TEST_DIR);
 		expect(result.content[0]!.text).toContain("No session state");
 		expect(result.isError).toBe(true);
 	});
 
-	it("get_gate_config returns gates from file", () => {
-		const gates = {
-			on_write: { lint: { command: "bun biome check {file}" } },
-			on_commit: { test: { command: "bun vitest run" } },
-		};
-		writeFileSync(join(TEST_DIR, ".qult", "gates.json"), JSON.stringify(gates));
+	it("write tools return error when no active session exists", () => {
+		// Delete all sessions to simulate no hook having ever run
+		const db = getDb();
+		db.prepare("DELETE FROM sessions").run();
+		db.prepare("DELETE FROM projects").run();
+
+		const writeCases: [string, Record<string, unknown>][] = [
+			["record_review", { aggregate_score: 30 }],
+			["record_test_pass", { command: "bun test" }],
+			["disable_gate", { gate_name: "lint", reason: "broken gate temporarily" }],
+			["clear_pending_fixes", { reason: "all fixes resolved" }],
+			["record_human_approval", {}],
+		];
+		for (const [tool, args] of writeCases) {
+			const result = handleTool(tool, TEST_DIR, args);
+			expect(result.isError, `${tool} should return isError`).toBe(true);
+			expect(result.content[0]!.text).toContain("No active session");
+		}
+	});
+
+	it("read tools work even without an active session", () => {
+		const db = getDb();
+		db.prepare("DELETE FROM sessions").run();
+		db.prepare("DELETE FROM projects").run();
+
+		const result = handleTool("get_pending_fixes", TEST_DIR);
+		expect(result.isError).toBeUndefined();
+		expect(result.content[0]!.text).toBe("No pending fixes.");
+	});
+
+	it("get_gate_config returns gates from DB", () => {
+		const db = getDb();
+		const projectId = getProjectId();
+		db.prepare(
+			"INSERT INTO gate_configs (project_id, phase, gate_name, command) VALUES (?, ?, ?, ?)",
+		).run(projectId, "on_write", "lint", "bun biome check {file}");
+		db.prepare(
+			"INSERT INTO gate_configs (project_id, phase, gate_name, command) VALUES (?, ?, ?, ?)",
+		).run(projectId, "on_commit", "test", "bun vitest run");
+		resetAllCaches();
 
 		const result = handleTool("get_gate_config", TEST_DIR);
 		const parsed = JSON.parse(result.content[0]!.text);
@@ -171,15 +128,6 @@ describe("handleTool", () => {
 		const result = handleTool("get_gate_config", TEST_DIR);
 		expect(result.content[0]!.text).toContain("No gates configured");
 		expect(result.isError).toBe(true);
-	});
-
-	it("get_pending_fixes reads session-scoped file", () => {
-		const fixes = [{ file: "/src/bar.ts", errors: ["type error"], gate: "typecheck" }];
-		writeFileSync(join(STATE_DIR, "pending-fixes-abc123.json"), JSON.stringify(fixes));
-
-		const result = handleTool("get_pending_fixes", TEST_DIR);
-		const text = result.content[0]!.text;
-		expect(text).toContain("[typecheck] /src/bar.ts");
 	});
 
 	it("returns error for unknown tool", () => {
@@ -281,16 +229,13 @@ describe("TOOL_DEFS", () => {
 });
 
 describe("handleTool: disable_gate / enable_gate", () => {
-	it("disable_gate adds gate to disabled_gates in state file", () => {
-		// Write gates.json and initial session state
-		const qultDir = join(TEST_DIR, ".qult");
-		writeFileSync(
-			join(qultDir, "gates.json"),
-			JSON.stringify({ on_write: { lint: { command: "echo ok" } } }),
-		);
-		const statePath = join(STATE_DIR, "session-state.json");
-		writeFileSync(statePath, JSON.stringify({ disabled_gates: [] }));
-		resetMcpCache();
+	it("disable_gate adds gate to disabled_gates in DB", () => {
+		const db = getDb();
+		const projectId = getProjectId();
+		db.prepare(
+			"INSERT INTO gate_configs (project_id, phase, gate_name, command) VALUES (?, ?, ?, ?)",
+		).run(projectId, "on_write", "lint", "echo ok");
+		resetAllCaches();
 
 		const result = handleTool("disable_gate", TEST_DIR, {
 			gate_name: "lint",
@@ -298,17 +243,20 @@ describe("handleTool: disable_gate / enable_gate", () => {
 		});
 		expect(result.content[0]!.text).toContain("disabled");
 
-		const state = JSON.parse(readFileSync(statePath, "utf-8"));
-		expect(state.disabled_gates).toContain("lint");
+		const sid = getSessionId();
+		const rows = db
+			.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?")
+			.all(sid) as { gate_name: string }[];
+		expect(rows.map((r) => r.gate_name)).toContain("lint");
 	});
 
 	it("disable_gate rejects unknown gate name", () => {
-		const qultDir = join(TEST_DIR, ".qult");
-		writeFileSync(
-			join(qultDir, "gates.json"),
-			JSON.stringify({ on_write: { lint: { command: "echo ok" } } }),
-		);
-		resetMcpCache();
+		const db = getDb();
+		const projectId = getProjectId();
+		db.prepare(
+			"INSERT INTO gate_configs (project_id, phase, gate_name, command) VALUES (?, ?, ?, ?)",
+		).run(projectId, "on_write", "lint", "echo ok");
+		resetAllCaches();
 
 		const result = handleTool("disable_gate", TEST_DIR, {
 			gate_name: "typo",
@@ -319,10 +267,6 @@ describe("handleTool: disable_gate / enable_gate", () => {
 	});
 
 	it("disable_gate accepts 'review' as valid gate name", () => {
-		const statePath = join(STATE_DIR, "session-state.json");
-		writeFileSync(statePath, JSON.stringify({ disabled_gates: [] }));
-		resetMcpCache();
-
 		const result = handleTool("disable_gate", TEST_DIR, {
 			gate_name: "review",
 			reason: "Review not needed for documentation changes",
@@ -331,10 +275,6 @@ describe("handleTool: disable_gate / enable_gate", () => {
 	});
 
 	it("disable_gate accepts computational detector names (security-check, dead-import-check)", () => {
-		const statePath = join(STATE_DIR, "session-state.json");
-		writeFileSync(statePath, JSON.stringify({ disabled_gates: [] }));
-		resetMcpCache();
-
 		const secResult = handleTool("disable_gate", TEST_DIR, {
 			gate_name: "security-check",
 			reason: "Security patterns causing false positives",
@@ -343,7 +283,6 @@ describe("handleTool: disable_gate / enable_gate", () => {
 
 		// Re-enable security-check before disabling dead-import to stay under limit
 		handleTool("enable_gate", TEST_DIR, { gate_name: "security-check" });
-		resetMcpCache();
 
 		const deadResult = handleTool("disable_gate", TEST_DIR, {
 			gate_name: "dead-import-check",
@@ -365,9 +304,18 @@ describe("handleTool: disable_gate / enable_gate", () => {
 	});
 
 	it("disable_gate rejects when 2 gates already disabled", () => {
-		const statePath = join(STATE_DIR, "session-state.json");
-		writeFileSync(statePath, JSON.stringify({ disabled_gates: ["review", "security-check"] }));
-		resetMcpCache();
+		const db = getDb();
+		const sid = getSessionId();
+		db.prepare("INSERT INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)").run(
+			sid,
+			"review",
+			"test reason 1 for review",
+		);
+		db.prepare("INSERT INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)").run(
+			sid,
+			"security-check",
+			"test reason 2 for security",
+		);
 
 		const result = handleTool("disable_gate", TEST_DIR, {
 			gate_name: "dead-import-check",
@@ -383,29 +331,38 @@ describe("handleTool: disable_gate / enable_gate", () => {
 			reason: "Review gate is misconfigured",
 		});
 		expect(result.isError).toBeFalsy();
-		const auditLog = JSON.parse(readFileSync(join(STATE_DIR, "audit-log.json"), "utf-8"));
-		expect(auditLog).toHaveLength(1);
-		expect(auditLog[0].action).toBe("disable_gate");
-		expect(auditLog[0].gate_name).toBe("review");
+
+		const db = getDb();
+		const projectId = getProjectId();
+		const rows = db
+			.prepare("SELECT action, gate_name FROM audit_log WHERE project_id = ?")
+			.all(projectId) as { action: string; gate_name: string }[];
+		expect(rows).toHaveLength(1);
+		expect(rows[0]!.action).toBe("disable_gate");
+		expect(rows[0]!.gate_name).toBe("review");
 	});
 
 	it("enable_gate removes gate from disabled_gates", () => {
-		const qultDir = join(TEST_DIR, ".qult");
-		writeFileSync(
-			join(qultDir, "gates.json"),
-			JSON.stringify({
-				on_write: { lint: { command: "echo ok" }, typecheck: { command: "echo ok" } },
-			}),
+		const db = getDb();
+		const sid = getSessionId();
+		db.prepare("INSERT INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)").run(
+			sid,
+			"lint",
+			"test reason for lint",
 		);
-		const statePath = join(STATE_DIR, "session-state.json");
-		writeFileSync(statePath, JSON.stringify({ disabled_gates: ["lint", "typecheck"] }));
-		resetMcpCache();
+		db.prepare("INSERT INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)").run(
+			sid,
+			"typecheck",
+			"test reason for typecheck",
+		);
 
 		const result = handleTool("enable_gate", TEST_DIR, { gate_name: "lint" });
 		expect(result.content[0]!.text).toContain("re-enabled");
 
-		const state = JSON.parse(readFileSync(statePath, "utf-8"));
-		expect(state.disabled_gates).toEqual(["typecheck"]);
+		const rows = db
+			.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?")
+			.all(sid) as { gate_name: string }[];
+		expect(rows.map((r) => r.gate_name)).toEqual(["typecheck"]);
 	});
 
 	it("disable_gate returns error without gate_name", () => {
@@ -416,24 +373,22 @@ describe("handleTool: disable_gate / enable_gate", () => {
 
 describe("handleTool: clear_pending_fixes", () => {
 	it("clears all pending fixes", () => {
-		const fixesPath = join(STATE_DIR, "pending-fixes.json");
-		writeFileSync(fixesPath, JSON.stringify([{ file: "a.ts", errors: ["err"], gate: "lint" }]));
-		resetMcpCache();
+		const db = getDb();
+		const sid = getSessionId();
+		db.prepare(
+			"INSERT INTO pending_fixes (session_id, file, gate, errors) VALUES (?, ?, ?, ?)",
+		).run(sid, "a.ts", "lint", JSON.stringify(["err"]));
 
 		const result = handleTool("clear_pending_fixes", TEST_DIR, {
 			reason: "False positives from linter update",
 		});
 		expect(result.content[0]!.text).toContain("cleared");
 
-		const fixes = JSON.parse(readFileSync(fixesPath, "utf-8"));
-		expect(fixes).toEqual([]);
+		const rows = db.prepare("SELECT * FROM pending_fixes WHERE session_id = ?").all(sid);
+		expect(rows).toEqual([]);
 	});
 
-	it("handles missing state dir gracefully", () => {
-		rmSync(STATE_DIR, { recursive: true, force: true });
-		resetMcpCache();
-
-		// Should not throw (fail-open)
+	it("handles empty state gracefully", () => {
 		const result = handleTool("clear_pending_fixes", TEST_DIR, {
 			reason: "Testing graceful handling of missing state",
 		});
@@ -453,27 +408,23 @@ describe("handleTool: clear_pending_fixes", () => {
 	});
 
 	it("writes audit log entry", () => {
-		const fixesPath = join(STATE_DIR, "pending-fixes.json");
-		writeFileSync(fixesPath, JSON.stringify([]));
-		resetMcpCache();
-
 		handleTool("clear_pending_fixes", TEST_DIR, {
 			reason: "All fixes are false positives",
 		});
 
-		const auditLog = JSON.parse(readFileSync(join(STATE_DIR, "audit-log.json"), "utf-8"));
-		expect(auditLog).toHaveLength(1);
-		expect(auditLog[0].action).toBe("clear_pending_fixes");
-		expect(auditLog[0].reason).toBe("All fixes are false positives");
+		const db = getDb();
+		const projectId = getProjectId();
+		const rows = db
+			.prepare("SELECT action, reason FROM audit_log WHERE project_id = ?")
+			.all(projectId) as { action: string; reason: string }[];
+		expect(rows).toHaveLength(1);
+		expect(rows[0]!.action).toBe("clear_pending_fixes");
+		expect(rows[0]!.reason).toBe("All fixes are false positives");
 	});
 });
 
 describe("handleTool: set_config", () => {
 	it("sets a valid config key", () => {
-		const qultDir = join(TEST_DIR, ".qult");
-		mkdirSync(qultDir, { recursive: true });
-		resetMcpCache();
-
 		const result = handleTool("set_config", TEST_DIR, {
 			key: "review.score_threshold",
 			value: 10,
@@ -481,8 +432,12 @@ describe("handleTool: set_config", () => {
 		expect(result.content[0]!.text).toContain("Config set");
 		expect(result.content[0]!.text).toContain("10");
 
-		const config = JSON.parse(readFileSync(join(qultDir, "config.json"), "utf-8"));
-		expect(config.review.score_threshold).toBe(10);
+		const db = getDb();
+		const projectId = getProjectId();
+		const row = db
+			.prepare("SELECT value FROM project_configs WHERE project_id = ? AND key = ?")
+			.get(projectId, "review.score_threshold") as { value: string };
+		expect(JSON.parse(row.value)).toBe(10);
 	});
 
 	it("rejects invalid config key", () => {
@@ -500,57 +455,35 @@ describe("handleTool: set_config", () => {
 		const noValue = handleTool("set_config", TEST_DIR, { key: "review.score_threshold" });
 		expect(noValue.isError).toBe(true);
 	});
-
-	it("merges with existing config", () => {
-		const qultDir = join(TEST_DIR, ".qult");
-		mkdirSync(qultDir, { recursive: true });
-		writeFileSync(
-			join(qultDir, "config.json"),
-			JSON.stringify({ review: { score_threshold: 12, max_iterations: 3 } }),
-		);
-		resetMcpCache();
-
-		handleTool("set_config", TEST_DIR, { key: "review.score_threshold", value: 10 });
-
-		const config = JSON.parse(readFileSync(join(qultDir, "config.json"), "utf-8"));
-		expect(config.review.score_threshold).toBe(10);
-		expect(config.review.max_iterations).toBe(3);
-	});
 });
 
 describe("handleTool: record_review", () => {
 	it("sets review_completed_at in session state", () => {
-		resetMcpCache();
-
 		const result = handleTool("record_review", TEST_DIR);
 		expect(result.content[0]!.text).toContain("recorded");
 
-		const stateFile = findLatestStateFile(TEST_DIR, "session-state");
-		const state = JSON.parse(readFileSync(stateFile, "utf-8"));
-		expect(state.review_completed_at).toBeTruthy();
-		expect(typeof state.review_completed_at).toBe("string");
+		const db = getDb();
+		const sid = getSessionId();
+		const row = db.prepare("SELECT review_completed_at FROM sessions WHERE id = ?").get(sid) as {
+			review_completed_at: string | null;
+		};
+		expect(row.review_completed_at).toBeTruthy();
+		expect(typeof row.review_completed_at).toBe("string");
 	});
 
 	it("includes aggregate score in response", () => {
-		resetMcpCache();
-
 		const result = handleTool("record_review", TEST_DIR, { aggregate_score: 26 });
 		expect(result.content[0]!.text).toContain("recorded");
 		expect(result.content[0]!.text).toContain("26");
 	});
 
 	it("refuses when plan required but missing", () => {
-		resetMcpCache();
-
-		// Set up session state with 6+ changed files (exceeds default threshold of 5)
-		const stateFile = findLatestStateFile(TEST_DIR, "session-state");
-		writeFileSync(
-			stateFile,
-			JSON.stringify({
-				changed_file_paths: ["/a.ts", "/b.ts", "/c.ts", "/d.ts", "/e.ts", "/f.ts"],
-			}),
-		);
-		resetMcpCache();
+		const db = getDb();
+		const sid = getSessionId();
+		// Insert 6+ changed files (exceeds default threshold of 5)
+		for (const f of ["/a.ts", "/b.ts", "/c.ts", "/d.ts", "/e.ts", "/f.ts"]) {
+			db.prepare("INSERT INTO changed_files (session_id, file_path) VALUES (?, ?)").run(sid, f);
+		}
 
 		const result = handleTool("record_review", TEST_DIR, { aggregate_score: 28 });
 		expect(result.isError).toBe(true);
@@ -558,22 +491,17 @@ describe("handleTool: record_review", () => {
 	});
 
 	it("succeeds when plan exists despite many changed files", () => {
-		resetMcpCache();
-
-		// Set up session state with 6+ changed files
-		const stateFile = findLatestStateFile(TEST_DIR, "session-state");
-		writeFileSync(
-			stateFile,
-			JSON.stringify({
-				changed_file_paths: ["/a.ts", "/b.ts", "/c.ts", "/d.ts", "/e.ts", "/f.ts"],
-			}),
-		);
+		const db = getDb();
+		const sid = getSessionId();
+		for (const f of ["/a.ts", "/b.ts", "/c.ts", "/d.ts", "/e.ts", "/f.ts"]) {
+			db.prepare("INSERT INTO changed_files (session_id, file_path) VALUES (?, ?)").run(sid, f);
+		}
 
 		// Create a plan file
 		const planDir = join(TEST_DIR, ".claude", "plans");
 		mkdirSync(planDir, { recursive: true });
 		writeFileSync(join(planDir, "test-plan.md"), "## Tasks\n### Task 1: test [done]\n");
-		resetMcpCache();
+		resetAllCaches();
 
 		const result = handleTool("record_review", TEST_DIR, { aggregate_score: 28 });
 		expect(result.isError).toBeUndefined();
@@ -583,15 +511,19 @@ describe("handleTool: record_review", () => {
 
 describe("handleTool: record_test_pass", () => {
 	it("sets test_passed_at and test_command in session state", () => {
-		resetMcpCache();
-
 		const result = handleTool("record_test_pass", TEST_DIR, { command: "bun vitest run" });
 		expect(result.content[0]!.text).toContain("Test pass recorded");
 
-		const stateFile = findLatestStateFile(TEST_DIR, "session-state");
-		const state = JSON.parse(readFileSync(stateFile, "utf-8"));
-		expect(state.test_passed_at).toBeTruthy();
-		expect(state.test_command).toBe("bun vitest run");
+		const db = getDb();
+		const sid = getSessionId();
+		const row = db
+			.prepare("SELECT test_passed_at, test_command FROM sessions WHERE id = ?")
+			.get(sid) as {
+			test_passed_at: string | null;
+			test_command: string | null;
+		};
+		expect(row.test_passed_at).toBeTruthy();
+		expect(row.test_command).toBe("bun vitest run");
 	});
 
 	it("returns error without command", () => {
@@ -602,17 +534,20 @@ describe("handleTool: record_test_pass", () => {
 
 describe("handleTool: record_stage_scores", () => {
 	it("records scores for a valid stage", () => {
-		resetMcpCache();
-
 		const result = handleTool("record_stage_scores", TEST_DIR, {
 			stage: "Spec",
 			scores: { completeness: 5, accuracy: 4 },
 		});
 		expect(result.content[0]!.text).toContain("Spec");
 
-		const stateFile = findLatestStateFile(TEST_DIR, "session-state");
-		const state = JSON.parse(readFileSync(stateFile, "utf-8"));
-		expect(state.review_stage_scores.Spec).toEqual({ completeness: 5, accuracy: 4 });
+		const db = getDb();
+		const sid = getSessionId();
+		const rows = db
+			.prepare("SELECT stage, dimension, score FROM review_stage_scores WHERE session_id = ?")
+			.all(sid) as { stage: string; dimension: string; score: number }[];
+		const scoreMap: Record<string, number> = {};
+		for (const r of rows) scoreMap[r.dimension] = r.score;
+		expect(scoreMap).toEqual({ completeness: 5, accuracy: 4 });
 	});
 
 	it("rejects invalid stage name", () => {
@@ -632,28 +567,29 @@ describe("handleTool: record_stage_scores", () => {
 
 describe("record_human_approval", () => {
 	it("records approval timestamp in session state", () => {
-		writeFileSync(
-			join(STATE_DIR, "session-state.json"),
-			JSON.stringify({ review_completed_at: new Date().toISOString() }),
+		const db = getDb();
+		const sid = getSessionId();
+		db.prepare("UPDATE sessions SET review_completed_at = ? WHERE id = ?").run(
+			new Date().toISOString(),
+			sid,
 		);
-		resetMcpCache();
 
 		const result = handleTool("record_human_approval", TEST_DIR);
 		expect(result.content[0]!.text).toContain("Human approval recorded");
 
-		const stateFile = findLatestStateFile(TEST_DIR, "session-state");
-		const state = JSON.parse(readFileSync(stateFile, "utf-8"));
-		expect(typeof state.human_review_approved_at).toBe("string");
-		expect(state.human_review_approved_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+		const row = db
+			.prepare("SELECT human_review_approved_at FROM sessions WHERE id = ?")
+			.get(sid) as {
+			human_review_approved_at: string | null;
+		};
+		expect(typeof row.human_review_approved_at).toBe("string");
+		expect(row.human_review_approved_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 	});
 
 	it("rejects when no review has been completed", () => {
-		writeFileSync(join(STATE_DIR, "session-state.json"), JSON.stringify({}));
-		resetMcpCache();
-
 		const result = handleTool("record_human_approval", TEST_DIR);
 		expect(result.isError).toBe(true);
-		expect(result.content[0]!.text).toContain("no review has been completed");
+		expect(result.content[0]!.text).toContain("no review");
 	});
 });
 
@@ -664,17 +600,12 @@ describe("get_detector_summary", () => {
 	});
 
 	it("returns summary when security warnings and pending fixes exist", () => {
-		writeFileSync(
-			join(STATE_DIR, "session-state.json"),
-			JSON.stringify({ security_warning_count: 3 }),
-		);
-		writeFileSync(
-			join(STATE_DIR, "pending-fixes.json"),
-			JSON.stringify([
-				{ file: "src/foo.ts", errors: ["L5: Hardcoded API key"], gate: "security-check" },
-			]),
-		);
-		resetMcpCache();
+		const db = getDb();
+		const sid = getSessionId();
+		db.prepare("UPDATE sessions SET security_warning_count = ? WHERE id = ?").run(3, sid);
+		db.prepare(
+			"INSERT INTO pending_fixes (session_id, file, gate, errors) VALUES (?, ?, ?, ?)",
+		).run(sid, "src/foo.ts", "security-check", JSON.stringify(["L5: Hardcoded API key"]));
 
 		const result = handleTool("get_detector_summary", TEST_DIR);
 		const text = result.content[0]!.text;
@@ -684,16 +615,11 @@ describe("get_detector_summary", () => {
 	});
 
 	it("includes all non-zero escalation counters", () => {
-		writeFileSync(
-			join(STATE_DIR, "session-state.json"),
-			JSON.stringify({
-				dead_import_warning_count: 2,
-				drift_warning_count: 4,
-				test_quality_warning_count: 1,
-				duplication_warning_count: 3,
-			}),
-		);
-		resetMcpCache();
+		const db = getDb();
+		const sid = getSessionId();
+		db.prepare(
+			"UPDATE sessions SET dead_import_warning_count = ?, drift_warning_count = ?, test_quality_warning_count = ?, duplication_warning_count = ? WHERE id = ?",
+		).run(2, 4, 1, 3, sid);
 
 		const result = handleTool("get_detector_summary", TEST_DIR);
 		const text = result.content[0]!.text;

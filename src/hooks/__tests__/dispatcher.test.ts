@@ -1,12 +1,18 @@
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	closeDb,
+	ensureSession,
+	setProjectPath,
+	setSessionScope,
+	useTestDb,
+} from "../../state/db.ts";
 import { resetAllCaches } from "../../state/flush.ts";
 import { resetLazyInit } from "../lazy-init.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-dispatcher");
-const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 const originalCwd = process.cwd();
 
 function mockStdin(data: string): void {
@@ -20,10 +26,14 @@ let stderrCapture: string[];
 let exitCode: number | null;
 
 beforeEach(() => {
+	useTestDb();
+	setProjectPath(TEST_DIR);
+	setSessionScope("test-session");
+	ensureSession();
 	resetAllCaches();
 	resetLazyInit();
 	rmSync(TEST_DIR, { recursive: true, force: true });
-	mkdirSync(STATE_DIR, { recursive: true });
+	mkdirSync(TEST_DIR, { recursive: true });
 	process.chdir(TEST_DIR);
 	stderrCapture = [];
 	exitCode = null;
@@ -40,6 +50,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.restoreAllMocks();
+	closeDb();
 	process.chdir(originalCwd);
 	rmSync(TEST_DIR, { recursive: true, force: true });
 });
@@ -125,34 +136,35 @@ describe("dispatch()", () => {
 		expect(exitCode).toBeNull();
 	});
 
-	it("sets session scope and writes latest-session.json when session_id is present", async () => {
+	it("sets session scope in DB when session_id is present", async () => {
 		mockStdin(JSON.stringify({ session_id: "test-sess-123" }));
 
 		const { dispatch } = await import("../dispatcher.ts");
 		await dispatch("session-start");
 
-		const latestPath = join(STATE_DIR, "latest-session.json");
-		expect(existsSync(latestPath)).toBe(true);
-		const content = JSON.parse(readFileSync(latestPath, "utf-8"));
-		expect(content.session_id).toBe("test-sess-123");
-		expect(content.updated_at).toBeTruthy();
+		const { getDb } = await import("../../state/db.ts");
+		const db = getDb();
+		const row = db.prepare("SELECT id FROM sessions WHERE id = ?").get("test-sess-123") as {
+			id: string;
+		} | null;
+		expect(row).not.toBeNull();
+		expect(row!.id).toBe("test-sess-123");
 	});
 
-	it("does not rewrite latest-session.json for the same session_id", async () => {
+	it("is idempotent for the same session_id", async () => {
 		const { dispatch } = await import("../dispatcher.ts");
 
 		mockStdin(JSON.stringify({ session_id: "sess-dup" }));
 		await dispatch("session-start");
 
-		const latestPath = join(STATE_DIR, "latest-session.json");
-		const first = readFileSync(latestPath, "utf-8");
-
-		// Second dispatch with same session_id
+		// Second dispatch with same session_id should not error
 		mockStdin(JSON.stringify({ session_id: "sess-dup" }));
 		await dispatch("session-start");
 
-		const second = readFileSync(latestPath, "utf-8");
-		expect(first).toBe(second);
+		const { getDb } = await import("../../state/db.ts");
+		const db = getDb();
+		const rows = db.prepare("SELECT id FROM sessions WHERE id = ?").all("sess-dup");
+		expect(rows).toHaveLength(1);
 	});
 
 	it("dispatches to the correct handler", async () => {

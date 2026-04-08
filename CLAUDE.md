@@ -11,7 +11,9 @@
 
 ## スタック
 
-TypeScript (Bun 1.3+, ESM) / vitest (テスト) / Biome (lint) / raw JSON-RPC MCP (状態公開)
+TypeScript (Bun 1.3+, ESM) / vitest (テスト) / Biome (lint) / bun:sqlite (状態管理) / raw JSON-RPC MCP (状態公開)
+
+**ランタイム要件**: Bun 必須（hooks, MCP server は `bun` で実行）
 
 ## コマンド
 
@@ -54,22 +56,23 @@ qult/
 
 ### ビルド
 
-- `bun build.ts` → `plugin/dist/hook.mjs` + `plugin/dist/mcp-server.mjs`
-- **dependencies ゼロ** — 全て devDependencies + bun build バンドル
+- `bun build.ts` → `plugin/dist/hook.mjs` + `plugin/dist/mcp-server.mjs` (target: bun)
+- **npm dependencies ゼロ** — 全て devDependencies + bun build バンドル。bun:sqlite はランタイム組み込み
+- `better-sqlite3` は devDependency（vitest 用の bun:sqlite 互換 shim）
 
 ### Hook 設計 (7 hooks)
 
 - 全 hook は fail-open (try-catch で握りつぶす)
 - exit 2 = DENY/block (唯一の強制手段)。stderr に理由を出力
 - **enforcement hooks は stdout 不使用** — plugin hook output bug (#16538) を回避
-- SessionStart: .qult/.state/ 初期化、stale ファイル掃除、startup/clear 時のみ pending-fixes クリア
+- SessionStart: DB セッション初期化、startup/clear 時のみ pending-fixes クリア
 - PostToolUse: gate 並列実行 (Promise.allSettled) → state 書き込み (pending-fixes)
 - PreToolUse: pending-fixes チェック → exit 2 (DENY)。Bash は `if: "Bash(git commit*)"` で絞り込み
 - Stop/SubagentStop: 完了条件チェック → exit 2 (block)
 - TaskCompleted: Verify テスト実行 → state 書き込み
 - PostCompact: compaction 後に pending-fixes と session 状態を stdout で再注入
 - PreToolUse (ExitPlanMode): 1回目を DENY してセッション全体の漏れチェックを強制
-- 全 state file 書き込みは atomic write (write-to-temp + rename)
+- 全 state は `~/.qult/qult.db` (SQLite WAL mode) に保存。プロジェクト内に `.qult/` は作らない
 - lazyInit: SessionStart が発火しない環境向けの fallback
 
 ### MCP Server
@@ -80,12 +83,12 @@ qult/
 - 分析: get_harness_report, get_handoff_document, get_metrics_dashboard
 - 操作: disable_gate, enable_gate, clear_pending_fixes, set_config
 - 記録: record_review, record_test_pass, record_stage_scores, record_human_approval
-- disable_gate は gate 名をバリデーション（gates.json のキー + "review", "security-check", "dead-import-check", "duplication-check"）
+- disable_gate は gate 名をバリデーション（gate_configs テーブルのキー + "review", "security-check", "dead-import-check", "duplication-check"）
 - MCP tool の呼び出しルールは MCP server instructions で注入（プロジェクトにファイル配置しない）
 
 ### Config 優先順位
 
-- DEFAULTS < `${CLAUDE_PLUGIN_DATA}/preferences.json` < `.qult/config.json` < `QULT_*` env
+- DEFAULTS < `global_configs` テーブル < `project_configs` テーブル < `QULT_*` env
 
 ### Gates
 

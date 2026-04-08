@@ -13,7 +13,7 @@ const version = pluginMeta.version ?? "dev";
 const hookResult = await Bun.build({
   entrypoints: ["./src/hook-entry.ts"],
   outdir: "./plugin/dist",
-  target: "node",
+  target: "bun",
   minify: false,
   naming: "hook.mjs",
   define: {
@@ -30,7 +30,7 @@ if (!hookResult.success) {
 const mcpResult = await Bun.build({
   entrypoints: ["./src/mcp-server.ts"],
   outdir: "./plugin/dist",
-  target: "node",
+  target: "bun",
   minify: false,
   naming: "mcp-server.mjs",
   define: {

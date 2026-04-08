@@ -38,14 +38,14 @@ export interface HookEvent {
  * State communication is handled via MCP server tools.
  */
 
-/** Pending fix entry stored in .qult/.state/pending-fixes.json */
+/** Pending fix entry stored in the pending_fixes DB table */
 export interface PendingFix {
 	file: string;
 	errors: string[];
 	gate: string;
 }
 
-/** Gate configuration in .qult/gates.json */
+/** Gate configuration stored in the gate_configs DB table */
 export interface GatesConfig {
 	on_write?: Record<string, GateDefinition>;
 	on_commit?: Record<string, GateDefinition>;

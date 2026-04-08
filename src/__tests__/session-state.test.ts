@@ -1,6 +1,8 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { saveGates } from "../gates/load.ts";
+import { closeDb, ensureSession, setProjectPath, setSessionScope, useTestDb } from "../state/db.ts";
 import { resetAllCaches } from "../state/flush.ts";
 import {
 	clearOnCommit,
@@ -19,17 +21,21 @@ import {
 } from "../state/session-state.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-session-state");
-const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 const originalCwd = process.cwd();
 
 beforeEach(() => {
+	useTestDb();
+	setProjectPath(TEST_DIR);
+	setSessionScope("test-session");
+	ensureSession();
 	resetAllCaches();
-	mkdirSync(STATE_DIR, { recursive: true });
+	mkdirSync(TEST_DIR, { recursive: true });
 	process.chdir(TEST_DIR);
 });
 
 afterEach(() => {
 	process.chdir(originalCwd);
+	closeDb();
 	rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
@@ -125,17 +131,15 @@ describe("session-state: isReviewRequired", () => {
 
 describe("session-state: getGatedExtensions with gate.extensions", () => {
 	it("uses gate extensions when provided", () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_write: {
-					lint: {
-						command: "biome check {file}",
-						extensions: [".ts", ".tsx", ".vue"],
-					},
+		saveGates({
+			on_write: {
+				lint: {
+					command: "biome check {file}",
+					extensions: [".ts", ".tsx", ".vue"],
 				},
-			}),
-		);
+			},
+		});
+		resetAllCaches();
 		const exts = getGatedExtensions();
 		expect(exts.has(".ts")).toBe(true);
 		expect(exts.has(".vue")).toBe(true);
@@ -144,12 +148,10 @@ describe("session-state: getGatedExtensions with gate.extensions", () => {
 	});
 
 	it("falls back to TOOL_EXTS when extensions not provided", () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_write: { lint: { command: "biome check {file}" } },
-			}),
-		);
+		saveGates({
+			on_write: { lint: { command: "biome check {file}" } },
+		});
+		resetAllCaches();
 		const exts = getGatedExtensions();
 		expect(exts.has(".ts")).toBe(true);
 		expect(exts.has(".tsx")).toBe(true);
@@ -157,18 +159,16 @@ describe("session-state: getGatedExtensions with gate.extensions", () => {
 	});
 
 	it("combines gate.extensions and TOOL_EXTS fallback across gates", () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_write: {
-					lint: {
-						command: "biome check {file}",
-						extensions: [".ts", ".vue"],
-					},
-					typecheck: { command: "tsc --noEmit" },
+		saveGates({
+			on_write: {
+				lint: {
+					command: "biome check {file}",
+					extensions: [".ts", ".vue"],
 				},
-			}),
-		);
+				typecheck: { command: "tsc --noEmit" },
+			},
+		});
+		resetAllCaches();
 		const exts = getGatedExtensions();
 		// lint gate: explicit .ts, .vue
 		expect(exts.has(".vue")).toBe(true);

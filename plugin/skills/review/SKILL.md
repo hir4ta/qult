@@ -13,9 +13,9 @@ Four-stage code review: independent specialized reviewers → Judge filter.
 
 ## Stage 0: Run on_review gates (runtime verification)
 
-Before spawning reviewers, run any `on_review` gates defined in `.qult/gates.json`:
+Before spawning reviewers, run any `on_review` gates:
 
-1. Read `.qult/gates.json` — if no `on_review` section, skip to Stage 1
+1. Call `mcp__plugin_qult_qult__get_gate_config()` — if no `on_review` section, skip to Stage 1
 2. For each gate in `on_review`, run the command via Bash with the gate's `timeout` value (in ms) as the Bash tool timeout. If no timeout is specified, default to 60000ms.
 3. Collect results as a summary block:
    ```

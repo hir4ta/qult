@@ -1,19 +1,38 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { saveGates } from "../../gates/load.ts";
+import {
+	closeDb,
+	ensureSession,
+	getDb,
+	getSessionId,
+	setProjectPath,
+	setSessionScope,
+	useTestDb,
+} from "../../state/db.ts";
 import { resetAllCaches } from "../../state/flush.ts";
+import { writePendingFixes } from "../../state/pending-fixes.ts";
+import {
+	disableGate,
+	recordChangedFile,
+	recordReviewIteration,
+} from "../../state/session-state.ts";
 import type { PendingFix } from "../../types.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-post-compact");
-const QULT_DIR = join(TEST_DIR, ".qult");
-const STATE_DIR = join(QULT_DIR, ".state");
-const originalCwd = process.cwd();
 
 let stdoutCapture: string[] = [];
+const originalCwd = process.cwd();
 
 beforeEach(() => {
+	useTestDb();
+	setProjectPath(TEST_DIR);
+	setSessionScope("test-session");
+	ensureSession();
 	resetAllCaches();
-	mkdirSync(STATE_DIR, { recursive: true });
+	rmSync(TEST_DIR, { recursive: true, force: true });
+	mkdirSync(TEST_DIR, { recursive: true });
 	process.chdir(TEST_DIR);
 	stdoutCapture = [];
 
@@ -26,6 +45,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.restoreAllMocks();
+	closeDb();
 	process.chdir(originalCwd);
 	rmSync(TEST_DIR, { recursive: true, force: true });
 });
@@ -36,7 +56,7 @@ describe("post-compact handler", () => {
 			{ file: "/src/foo.ts", errors: ["err1", "err2"], gate: "lint" },
 			{ file: "/src/bar.ts", errors: ["err3"], gate: "typecheck" },
 		];
-		writeFileSync(join(STATE_DIR, "pending-fixes.json"), JSON.stringify(fixes));
+		writePendingFixes(fixes);
 
 		const postCompact = (await import("../post-compact.ts")).default;
 		await postCompact({ hook_event_name: "PostCompact" });
@@ -52,7 +72,7 @@ describe("post-compact handler", () => {
 			{ file: "/src/foo.ts", errors: ["Missing semicolon at line 5", "extra error"], gate: "lint" },
 			{ file: "/src/bar.ts", errors: ["Type error: expected string"], gate: "typecheck" },
 		];
-		writeFileSync(join(STATE_DIR, "pending-fixes.json"), JSON.stringify(fixes));
+		writePendingFixes(fixes);
 
 		const postCompact = (await import("../post-compact.ts")).default;
 		await postCompact({ hook_event_name: "PostCompact" });
@@ -64,24 +84,17 @@ describe("post-compact handler", () => {
 		expect(output).toContain("extra error");
 	});
 
-	it("injects review findings from review-findings-history.json (Task 8)", async () => {
-		const findings = [
-			{
-				file: "src/a.ts",
-				severity: "high",
-				description: "SQL injection risk in query builder",
-				stage: "Security",
-				timestamp: "2026-01-01T00:00:00Z",
-			},
-			{
-				file: "src/b.ts",
-				severity: "medium",
-				description: "Missing input validation",
-				stage: "Spec",
-				timestamp: "2026-01-02T00:00:00Z",
-			},
-		];
-		writeFileSync(join(STATE_DIR, "review-findings-history.json"), JSON.stringify(findings));
+	it("injects review findings from DB (Task 8)", async () => {
+		const db = getDb();
+		const sid = getSessionId();
+		const { getProjectId } = await import("../../state/db.ts");
+		const projectId = getProjectId();
+		db.prepare(
+			"INSERT INTO review_findings (session_id, project_id, file, severity, description, stage) VALUES (?, ?, ?, ?, ?, ?)",
+		).run(sid, projectId, "src/a.ts", "high", "SQL injection risk in query builder", "Security");
+		db.prepare(
+			"INSERT INTO review_findings (session_id, project_id, file, severity, description, stage) VALUES (?, ?, ?, ?, ?, ?)",
+		).run(sid, projectId, "src/b.ts", "medium", "Missing input validation", "Spec");
 
 		const postCompact = (await import("../post-compact.ts")).default;
 		await postCompact({ hook_event_name: "PostCompact" });
@@ -95,12 +108,11 @@ describe("post-compact handler", () => {
 	});
 
 	it("outputs session state summary to stdout", async () => {
-		const state = {
-			test_passed_at: "2026-03-31T00:00:00Z",
-			review_completed_at: null,
-			changed_file_paths: ["/src/a.ts", "/src/b.ts", "/src/c.ts"],
-		};
-		writeFileSync(join(STATE_DIR, "session-state.json"), JSON.stringify(state));
+		const { recordTestPass } = await import("../../state/session-state.ts");
+		recordTestPass("vitest run");
+		recordChangedFile("/src/a.ts");
+		recordChangedFile("/src/b.ts");
+		recordChangedFile("/src/c.ts");
 
 		const postCompact = (await import("../post-compact.ts")).default;
 		await postCompact({ hook_event_name: "PostCompact" });
@@ -119,11 +131,8 @@ describe("post-compact handler", () => {
 	});
 
 	it("includes disabled gates in session summary", async () => {
-		const state = {
-			disabled_gates: ["lint", "review"],
-			changed_file_paths: [],
-		};
-		writeFileSync(join(STATE_DIR, "session-state.json"), JSON.stringify(state));
+		disableGate("lint");
+		disableGate("review");
 
 		const postCompact = (await import("../post-compact.ts")).default;
 		await postCompact({ hook_event_name: "PostCompact" });
@@ -133,11 +142,8 @@ describe("post-compact handler", () => {
 	});
 
 	it("includes review iteration in session summary", async () => {
-		const state = {
-			review_iteration: 2,
-			changed_file_paths: [],
-		};
-		writeFileSync(join(STATE_DIR, "session-state.json"), JSON.stringify(state));
+		recordReviewIteration(30);
+		recordReviewIteration(32);
 
 		const postCompact = (await import("../post-compact.ts")).default;
 		await postCompact({ hook_event_name: "PostCompact" });
@@ -167,17 +173,9 @@ describe("post-compact handler", () => {
 	});
 
 	it("includes NOT PASSED / NOT DONE when tests and review are incomplete", async () => {
-		// Requires gates.json to exist for NOT PASSED/NOT DONE to show
-		writeFileSync(
-			join(QULT_DIR, "gates.json"),
-			JSON.stringify({ on_commit: { test: { command: "vitest run" } } }),
-		);
-		const state = {
-			test_passed_at: null,
-			review_completed_at: null,
-			changed_file_paths: ["a.ts"],
-		};
-		writeFileSync(join(STATE_DIR, "session-state.json"), JSON.stringify(state));
+		saveGates({ on_commit: { test: { command: "vitest run" } } });
+		resetAllCaches();
+		recordChangedFile("a.ts");
 
 		const postCompact = (await import("../post-compact.ts")).default;
 		await postCompact({ hook_event_name: "PostCompact" });
@@ -188,7 +186,7 @@ describe("post-compact handler", () => {
 	});
 
 	it("fail-open on errors", async () => {
-		rmSync(TEST_DIR, { recursive: true, force: true });
+		closeDb();
 		const postCompact = (await import("../post-compact.ts")).default;
 		await expect(postCompact({ hook_event_name: "PostCompact" })).resolves.not.toThrow();
 	});

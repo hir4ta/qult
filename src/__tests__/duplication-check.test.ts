@@ -1,20 +1,26 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { closeDb, ensureSession, setProjectPath, setSessionScope, useTestDb } from "../state/db.ts";
 import { resetAllCaches } from "../state/flush.ts";
+import { disableGate, flush as flushSessionState } from "../state/session-state.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-duplication-check-test");
-const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 const originalCwd = process.cwd();
 
 beforeEach(() => {
+	useTestDb();
+	setProjectPath(TEST_DIR);
+	setSessionScope("test-session");
+	ensureSession();
 	resetAllCaches();
-	mkdirSync(STATE_DIR, { recursive: true });
+	mkdirSync(TEST_DIR, { recursive: true });
 	process.chdir(TEST_DIR);
 });
 
 afterEach(() => {
 	process.chdir(originalCwd);
+	closeDb();
 	rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
@@ -69,10 +75,8 @@ describe("detectDuplication", () => {
 	});
 
 	it("returns empty when gate disabled", async () => {
-		writeFileSync(
-			join(STATE_DIR, "session-state.json"),
-			JSON.stringify({ disabled_gates: ["duplication-check"] }),
-		);
+		disableGate("duplication-check");
+		flushSessionState();
 		resetAllCaches();
 
 		const file = join(TEST_DIR, "dup2.ts");
@@ -138,10 +142,8 @@ describe("detectCrossFileDuplication", () => {
 
 		const warnings = await detectCross(fileA, [fileB]);
 		expect(warnings.length).toBeGreaterThan(0);
-		// Should report multiple matching blocks, showing the count
 		expect(warnings[0]).toContain("matching");
 		expect(warnings[0]).toContain("blocks");
-		// Verify it's not reporting as "1 matching block" (which was the old bug)
 		expect(warnings[0]).not.toContain("1 matching block");
 	});
 
@@ -159,7 +161,6 @@ describe("detectCrossFileDuplication", () => {
 		const fileA = join(TEST_DIR, "many-a.ts");
 		writeFileSync(fileA, "function foo() {\nconst x = 1;\nconst y = 2;\nconst z = 3;\n}");
 
-		// Create 21 dummy session files to exceed threshold
 		const sessionFiles = [fileA];
 		for (let i = 0; i < 21; i++) {
 			sessionFiles.push(join(TEST_DIR, `dummy-${i}.ts`));

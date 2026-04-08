@@ -1,6 +1,10 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { HookEvent, PendingFix } from "../types.ts";
+import { loadGates } from "../gates/load.ts";
+import { getDb, getSessionId } from "../state/db.ts";
+import { readPendingFixes } from "../state/pending-fixes.ts";
+import { readSessionState } from "../state/session-state.ts";
+import type { HookEvent } from "../types.ts";
 import { sanitizeForStderr } from "./sanitize.ts";
 
 /**
@@ -10,74 +14,49 @@ import { sanitizeForStderr } from "./sanitize.ts";
  */
 export default async function postCompact(_ev: HookEvent): Promise<void> {
 	try {
-		const stateDir = join(process.cwd(), ".qult", ".state");
-		if (!existsSync(stateDir)) return;
-
 		const parts: string[] = [];
 
 		// Pending fixes (with up to 3 error details per file)
-		const fixesPath = findLatestFile(stateDir, "pending-fixes");
-		if (fixesPath) {
-			const fixes = safeReadJson<PendingFix[]>(fixesPath, []);
-			if (fixes.length > 0) {
-				parts.push(`[qult] ${fixes.length} pending fix(es):`);
-				for (const fix of fixes) {
-					parts.push(`  [${fix.gate}] ${fix.file}`);
-					if (fix.errors?.length > 0) {
-						const shown = fix.errors
-							.slice(0, 3)
-							.map((e) => `    ${sanitizeForStderr(e.slice(0, 200))}`);
-						parts.push(...shown);
-						if (fix.errors.length > 3) {
-							parts.push(`    ... and ${fix.errors.length - 3} more error(s)`);
-						}
+		const fixes = readPendingFixes();
+		if (fixes.length > 0) {
+			parts.push(`[qult] ${fixes.length} pending fix(es):`);
+			for (const fix of fixes) {
+				parts.push(`  [${fix.gate}] ${fix.file}`);
+				if (fix.errors?.length > 0) {
+					const shown = fix.errors
+						.slice(0, 3)
+						.map((e) => `    ${sanitizeForStderr(e.slice(0, 200))}`);
+					parts.push(...shown);
+					if (fix.errors.length > 3) {
+						parts.push(`    ... and ${fix.errors.length - 3} more error(s)`);
 					}
 				}
 			}
 		}
 
 		// Session state summary
-		const statePath = findLatestFile(stateDir, "session-state");
-		if (statePath) {
-			const state = safeReadJson<Record<string, unknown>>(statePath, {});
-			if (Object.keys(state).length > 0) {
-				const summary: string[] = [];
-				// Only show NOT PASSED / NOT DONE when gates exist (avoid misleading for doc-only projects)
-				const gatesPath = join(process.cwd(), ".qult", "gates.json");
-				const hasGates = existsSync(gatesPath);
-				if (state.test_passed_at) summary.push(`test_passed_at: ${state.test_passed_at}`);
-				else if (hasGates) summary.push("tests: NOT PASSED");
-				if (state.review_completed_at)
-					summary.push(`review_completed_at: ${state.review_completed_at}`);
-				else if (hasGates) summary.push("review: NOT DONE");
-				const files = state.changed_file_paths;
-				if (Array.isArray(files) && files.length > 0)
-					summary.push(`${files.length} file(s) changed`);
-				// Disabled gates
-				const disabled = state.disabled_gates;
-				if (Array.isArray(disabled) && disabled.length > 0)
-					summary.push(`disabled gates: ${disabled.join(", ")}`);
-				// Review iteration
-				const reviewIter = state.review_iteration;
-				if (typeof reviewIter === "number" && reviewIter > 0)
-					summary.push(`review iteration: ${reviewIter}`);
-				// Quality escalation counters
-				const secWarn = state.security_warning_count;
-				if (typeof secWarn === "number" && secWarn > 0)
-					summary.push(`security warnings: ${secWarn}`);
-				const testQWarn = state.test_quality_warning_count;
-				if (typeof testQWarn === "number" && testQWarn > 0)
-					summary.push(`test quality warnings: ${testQWarn}`);
-				const driftWarn = state.drift_warning_count;
-				if (typeof driftWarn === "number" && driftWarn > 0)
-					summary.push(`drift warnings: ${driftWarn}`);
-				const deadImpWarn = state.dead_import_warning_count;
-				if (typeof deadImpWarn === "number" && deadImpWarn > 0)
-					summary.push(`dead import warnings: ${deadImpWarn}`);
-				if (summary.length > 0) {
-					parts.push(`[qult] Session: ${summary.join(", ")}`);
-				}
-			}
+		const state = readSessionState();
+		const summary: string[] = [];
+		const hasGates = loadGates() !== null;
+		if (state.test_passed_at) summary.push(`test_passed_at: ${state.test_passed_at}`);
+		else if (hasGates) summary.push("tests: NOT PASSED");
+		if (state.review_completed_at)
+			summary.push(`review_completed_at: ${state.review_completed_at}`);
+		else if (hasGates) summary.push("review: NOT DONE");
+		if (state.changed_file_paths.length > 0)
+			summary.push(`${state.changed_file_paths.length} file(s) changed`);
+		if (state.disabled_gates.length > 0)
+			summary.push(`disabled gates: ${state.disabled_gates.join(", ")}`);
+		if (state.review_iteration > 0) summary.push(`review iteration: ${state.review_iteration}`);
+		if (state.security_warning_count > 0)
+			summary.push(`security warnings: ${state.security_warning_count}`);
+		if (state.test_quality_warning_count > 0)
+			summary.push(`test quality warnings: ${state.test_quality_warning_count}`);
+		if (state.drift_warning_count > 0) summary.push(`drift warnings: ${state.drift_warning_count}`);
+		if (state.dead_import_warning_count > 0)
+			summary.push(`dead import warnings: ${state.dead_import_warning_count}`);
+		if (summary.length > 0) {
+			parts.push(`[qult] Session: ${summary.join(", ")}`);
 		}
 
 		// Plan task status
@@ -101,26 +80,28 @@ export default async function postCompact(_ev: HookEvent): Promise<void> {
 			/* fail-open */
 		}
 
-		// Recent review findings (from Flywheel history)
+		// Recent review findings from DB
 		try {
-			const findingsPath = join(stateDir, "review-findings-history.json");
-			if (existsSync(findingsPath)) {
-				const findings = safeReadJson<FindingEntry[]>(findingsPath, []);
-				if (findings.length > 0) {
-					const recent = findings.slice(-5);
-					parts.push("[qult] Recent review findings:");
-					for (const f of recent) {
-						parts.push(
-							`  [${sanitizeForStderr(f.severity)}] ${sanitizeForStderr(f.file)} — ${sanitizeForStderr(f.description.slice(0, 150))}`,
-						);
-					}
+			const db = getDb();
+			const sid = getSessionId();
+			const findings = db
+				.prepare(
+					"SELECT file, severity, description FROM review_findings WHERE session_id = ? ORDER BY id DESC LIMIT 5",
+				)
+				.all(sid) as { file: string; severity: string; description: string }[];
+			if (findings.length > 0) {
+				parts.push("[qult] Recent review findings:");
+				for (const f of findings) {
+					parts.push(
+						`  [${sanitizeForStderr(f.severity)}] ${sanitizeForStderr(f.file)} — ${sanitizeForStderr(f.description.slice(0, 150))}`,
+					);
 				}
 			}
 		} catch {
 			/* fail-open */
 		}
 
-		// Config overrides (re-inject non-default settings after compaction)
+		// Config overrides
 		try {
 			const { DEFAULTS, loadConfig } = await import("../config.ts");
 			const config = loadConfig();
@@ -146,38 +127,5 @@ export default async function postCompact(_ev: HookEvent): Promise<void> {
 		}
 	} catch {
 		/* fail-open */
-	}
-}
-
-interface FindingEntry {
-	file: string;
-	severity: string;
-	description: string;
-	stage: string;
-	timestamp: string;
-}
-
-/** Find the latest file matching prefix in state dir (by mtime). */
-function findLatestFile(stateDir: string, prefix: string): string | null {
-	try {
-		const files = readdirSync(stateDir)
-			.filter((f) => f.startsWith(prefix) && f.endsWith(".json"))
-			.map((f) => ({
-				path: join(stateDir, f),
-				mtime: statSync(join(stateDir, f)).mtimeMs,
-			}))
-			.sort((a, b) => b.mtime - a.mtime);
-		return files.length > 0 ? files[0]!.path : null;
-	} catch {
-		return null;
-	}
-}
-
-function safeReadJson<T>(path: string, fallback: T): T {
-	try {
-		if (!existsSync(path)) return fallback;
-		return JSON.parse(readFileSync(path, "utf-8")) as T;
-	} catch {
-		return fallback;
 	}
 }

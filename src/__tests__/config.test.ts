@@ -1,20 +1,43 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadConfig, resetConfigCache } from "../config.ts";
+import {
+	closeDb,
+	ensureSession,
+	getDb,
+	getProjectId,
+	setProjectPath,
+	setSessionScope,
+	useTestDb,
+} from "../state/db.ts";
 
-const TEST_DIR = join(import.meta.dirname, ".tmp-config-test");
-const originalCwd = process.cwd();
+const TEST_DIR = "/tmp/.tmp-config-test";
+
+function setProjectConfig(key: string, value: unknown): void {
+	const db = getDb();
+	const projectId = getProjectId();
+	db.prepare(
+		"INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)",
+	).run(projectId, key, JSON.stringify(value));
+}
+
+function setGlobalConfig(key: string, value: unknown): void {
+	const db = getDb();
+	db.prepare("INSERT OR REPLACE INTO global_configs (key, value) VALUES (?, ?)").run(
+		key,
+		JSON.stringify(value),
+	);
+}
 
 beforeEach(() => {
+	useTestDb();
+	setProjectPath(TEST_DIR);
+	setSessionScope("test-session");
+	ensureSession();
 	resetConfigCache();
-	mkdirSync(join(TEST_DIR, ".qult"), { recursive: true });
-	process.chdir(TEST_DIR);
 });
 
 afterEach(() => {
-	process.chdir(originalCwd);
-	rmSync(TEST_DIR, { recursive: true, force: true });
+	closeDb();
 	// Clean env vars
 	delete process.env.QULT_REVIEW_SCORE_THRESHOLD;
 	delete process.env.QULT_REVIEW_MAX_ITERATIONS;
@@ -30,7 +53,7 @@ afterEach(() => {
 });
 
 describe("loadConfig", () => {
-	it("returns defaults when no config file exists", () => {
+	it("returns defaults when no config exists", () => {
 		const config = loadConfig();
 		expect(config.review.score_threshold).toBe(30);
 		expect(config.review.max_iterations).toBe(3);
@@ -42,14 +65,10 @@ describe("loadConfig", () => {
 		expect(config.escalation.drift_threshold).toBe(8);
 	});
 
-	it("reads from .qult/config.json", () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({
-				review: { score_threshold: 10, max_iterations: 5 },
-				gates: { output_max_chars: 3000 },
-			}),
-		);
+	it("reads from project_configs DB", () => {
+		setProjectConfig("review.score_threshold", 10);
+		setProjectConfig("review.max_iterations", 5);
+		setProjectConfig("gates.output_max_chars", 3000);
 		const config = loadConfig();
 		expect(config.review.score_threshold).toBe(10);
 		expect(config.review.max_iterations).toBe(5);
@@ -59,13 +78,8 @@ describe("loadConfig", () => {
 		expect(config.gates.default_timeout).toBe(10000);
 	});
 
-	it("env vars override config file", () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({
-				review: { score_threshold: 10 },
-			}),
-		);
+	it("env vars override project config", () => {
+		setProjectConfig("review.score_threshold", 10);
 		process.env.QULT_REVIEW_SCORE_THRESHOLD = "14";
 		const config = loadConfig();
 		expect(config.review.score_threshold).toBe(14);
@@ -77,8 +91,8 @@ describe("loadConfig", () => {
 		expect(config.review.score_threshold).toBe(30); // default
 	});
 
-	it("handles corrupt config file gracefully", () => {
-		writeFileSync(join(TEST_DIR, ".qult", "config.json"), "not json");
+	it("handles missing project config gracefully", () => {
+		// No project_configs inserted → should return defaults
 		const config = loadConfig();
 		expect(config.review.score_threshold).toBe(30); // default
 	});
@@ -105,11 +119,8 @@ describe("loadConfig", () => {
 		expect(config.gates.default_timeout).toBe(5000);
 	});
 
-	it("reads dimension_floor from config file", () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { dimension_floor: 2 } }),
-		);
+	it("reads dimension_floor from project config", () => {
+		setProjectConfig("review.dimension_floor", 2);
 		const config = loadConfig();
 		expect(config.review.dimension_floor).toBe(2);
 		// Other defaults preserved
@@ -117,68 +128,28 @@ describe("loadConfig", () => {
 	});
 });
 
-describe("CLAUDE_PLUGIN_DATA layer", () => {
-	it("reads preferences.json from CLAUDE_PLUGIN_DATA", () => {
-		const pluginDataDir = join(TEST_DIR, "plugin-data");
-		mkdirSync(pluginDataDir, { recursive: true });
-		writeFileSync(
-			join(pluginDataDir, "preferences.json"),
-			JSON.stringify({ review: { score_threshold: 10 } }),
-		);
-		process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+describe("global_configs layer", () => {
+	it("reads from global_configs", () => {
+		setGlobalConfig("review.score_threshold", 10);
 		const config = loadConfig();
 		expect(config.review.score_threshold).toBe(10);
 	});
 
-	it("project config overrides CLAUDE_PLUGIN_DATA", () => {
-		const pluginDataDir = join(TEST_DIR, "plugin-data");
-		mkdirSync(pluginDataDir, { recursive: true });
-		writeFileSync(
-			join(pluginDataDir, "preferences.json"),
-			JSON.stringify({ review: { score_threshold: 10 } }),
-		);
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 14 } }),
-		);
-		process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+	it("project config overrides global_configs", () => {
+		setGlobalConfig("review.score_threshold", 10);
+		setProjectConfig("review.score_threshold", 14);
 		const config = loadConfig();
 		expect(config.review.score_threshold).toBe(14);
 	});
 
-	it("env vars override CLAUDE_PLUGIN_DATA", () => {
-		const pluginDataDir = join(TEST_DIR, "plugin-data");
-		mkdirSync(pluginDataDir, { recursive: true });
-		writeFileSync(
-			join(pluginDataDir, "preferences.json"),
-			JSON.stringify({ review: { score_threshold: 10 } }),
-		);
-		process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+	it("env vars override global_configs", () => {
+		setGlobalConfig("review.score_threshold", 10);
 		process.env.QULT_REVIEW_SCORE_THRESHOLD = "15";
 		const config = loadConfig();
 		expect(config.review.score_threshold).toBe(15);
 	});
 
-	it("skips when CLAUDE_PLUGIN_DATA is not set", () => {
-		delete process.env.CLAUDE_PLUGIN_DATA;
-		const config = loadConfig();
-		expect(config.review.score_threshold).toBe(30); // default
-	});
-
-	it("skips when preferences.json is missing", () => {
-		const pluginDataDir = join(TEST_DIR, "plugin-data");
-		mkdirSync(pluginDataDir, { recursive: true });
-		// no preferences.json
-		process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
-		const config = loadConfig();
-		expect(config.review.score_threshold).toBe(30); // default
-	});
-
-	it("skips when preferences.json is corrupt", () => {
-		const pluginDataDir = join(TEST_DIR, "plugin-data");
-		mkdirSync(pluginDataDir, { recursive: true });
-		writeFileSync(join(pluginDataDir, "preferences.json"), "not json");
-		process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+	it("returns defaults when no global_configs exist", () => {
 		const config = loadConfig();
 		expect(config.review.score_threshold).toBe(30); // default
 	});
@@ -186,28 +157,14 @@ describe("CLAUDE_PLUGIN_DATA layer", () => {
 
 describe("extra_path validation", () => {
 	it("rejects empty strings in extra_path", () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({
-				gates: {
-					extra_path: ["", ".venv/bin", "  ", "/usr/local/bin"],
-				},
-			}),
-		);
+		setProjectConfig("gates.extra_path", ["", ".venv/bin", "  ", "/usr/local/bin"]);
 		const config = loadConfig();
 		// Empty strings and whitespace-only strings should be filtered out
 		expect(config.gates.extra_path).toEqual([".venv/bin", "/usr/local/bin"]);
 	});
 
 	it("accepts valid paths in extra_path", () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({
-				gates: {
-					extra_path: [".venv/bin", "/usr/local/bin", "../node_modules/.bin"],
-				},
-			}),
-		);
+		setProjectConfig("gates.extra_path", [".venv/bin", "/usr/local/bin", "../node_modules/.bin"]);
 		const config = loadConfig();
 		expect(config.gates.extra_path).toEqual([
 			".venv/bin",
@@ -217,25 +174,16 @@ describe("extra_path validation", () => {
 	});
 
 	it("ignores non-string items in extra_path", () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({
-				gates: {
-					extra_path: [".venv/bin", 123, null, "/usr/local/bin", undefined],
-				},
-			}),
-		);
+		setProjectConfig("gates.extra_path", [".venv/bin", 123, null, "/usr/local/bin"]);
 		const config = loadConfig();
 		expect(config.gates.extra_path).toEqual([".venv/bin", "/usr/local/bin"]);
 	});
 });
 
 describe("escalation config", () => {
-	it("reads escalation from config file", () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ escalation: { security_threshold: 5, drift_threshold: 3 } }),
-		);
+	it("reads escalation from project config", () => {
+		setProjectConfig("escalation.security_threshold", 5);
+		setProjectConfig("escalation.drift_threshold", 3);
 		const config = loadConfig();
 		expect(config.escalation.security_threshold).toBe(5);
 		expect(config.escalation.drift_threshold).toBe(3);
@@ -249,10 +197,8 @@ describe("escalation config", () => {
 	});
 
 	it("enforces minimum of 1 for escalation thresholds", () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ escalation: { security_threshold: 0, drift_threshold: -5 } }),
-		);
+		setProjectConfig("escalation.security_threshold", 0);
+		setProjectConfig("escalation.drift_threshold", -5);
 		const config = loadConfig();
 		expect(config.escalation.security_threshold).toBe(1);
 		expect(config.escalation.drift_threshold).toBe(1);

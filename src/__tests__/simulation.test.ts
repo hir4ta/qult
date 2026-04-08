@@ -1,16 +1,23 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetGatesCache } from "../gates/load.ts";
-import { flushAll, resetAllCaches } from "../state/flush.ts";
-import { readPendingFixes, setFixesSessionScope } from "../state/pending-fixes.ts";
+import { resetGatesCache, saveGates } from "../gates/load.ts";
 import {
-	flush as flushSessionState,
+	closeDb,
+	ensureSession,
+	getDb,
+	getProjectId,
+	setProjectPath,
+	setSessionScope,
+	useTestDb,
+} from "../state/db.ts";
+import { flushAll, resetAllCaches } from "../state/flush.ts";
+import { readPendingFixes } from "../state/pending-fixes.ts";
+import {
 	readSessionState,
 	recordReview,
 	recordTestPass,
 	resetCache as resetSessionCache,
-	setStateSessionScope,
 } from "../state/session-state.ts";
 import type { GatesConfig } from "../types.ts";
 
@@ -20,8 +27,6 @@ import type { GatesConfig } from "../types.ts";
  */
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-simulation");
-const QULT_DIR = join(TEST_DIR, ".qult");
-const STATE_DIR = join(QULT_DIR, ".state");
 
 let stdoutCapture: string[] = [];
 let stderrCapture: string[] = [];
@@ -34,7 +39,7 @@ function setupFailingLintGate(): void {
 			lint: { command: "echo 'Error: unused import' && exit 1", timeout: 3000 },
 		},
 	};
-	writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
+	saveGates(gates);
 	resetGatesCache();
 }
 
@@ -44,13 +49,35 @@ function setupPassingGates(): void {
 			lint: { command: "echo 'OK' && exit 0", timeout: 3000 },
 		},
 	};
-	writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
+	saveGates(gates);
 	resetGatesCache();
 }
 
+/** Write config key-value pairs to the project_configs table in DB. */
+function setProjectConfig(config: Record<string, unknown>): void {
+	const db = getDb();
+	const projectId = getProjectId();
+	const stmt = db.prepare(
+		"INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)",
+	);
+	function flatten(obj: Record<string, unknown>, prefix = ""): void {
+		for (const [k, v] of Object.entries(obj)) {
+			const key = prefix ? `${prefix}.${k}` : k;
+			if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+				flatten(v as Record<string, unknown>, key);
+			} else {
+				stmt.run(projectId, key, JSON.stringify(v));
+			}
+		}
+	}
+	flatten(config);
+}
+
 beforeEach(() => {
+	useTestDb();
 	resetAllCaches();
-	mkdirSync(STATE_DIR, { recursive: true });
+	mkdirSync(TEST_DIR, { recursive: true });
+	process.chdir(TEST_DIR);
 	// Create dummy source files for claim grounding
 	mkdirSync(join(TEST_DIR, "src"), { recursive: true });
 	for (const name of [
@@ -83,6 +110,9 @@ beforeEach(() => {
 		writeFileSync(join(TEST_DIR, "src", name), "// dummy");
 	}
 	process.chdir(TEST_DIR);
+	setProjectPath(TEST_DIR);
+	setSessionScope("test-session");
+	ensureSession();
 	stdoutCapture = [];
 	stderrCapture = [];
 	exitCode = null;
@@ -103,6 +133,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.restoreAllMocks();
+	closeDb();
 	process.chdir(originalCwd);
 	rmSync(TEST_DIR, { recursive: true, force: true });
 });
@@ -216,7 +247,7 @@ describe("Scenario 3: Fix clears only that file's errors", () => {
 
 describe("Scenario 4: Git commit resets state", () => {
 	it("state cleared after commit", async () => {
-		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify({}));
+		saveGates({});
 
 		const { recordTestPass, readSessionState } = await import("../state/session-state.ts");
 		recordTestPass("vitest run");
@@ -353,32 +384,16 @@ describe("Scenario 8: Stop infinite loop prevention", () => {
 // Session start + init
 // ============================================================
 
-describe("Scenario 9: lazyInit creates state dir and clears pending-fixes", () => {
-	it("lazyInit initializes .qult/.state/ and produces no stdout", async () => {
-		writeFileSync(join(QULT_DIR, "gates.json"), "{}");
+describe("Scenario 9: lazyInit clears pending-fixes and produces no stdout", () => {
+	it("lazyInit initializes DB state and produces no stdout", async () => {
+		saveGates({});
 
 		const { lazyInit, resetLazyInit } = await import("../hooks/lazy-init.ts");
 		resetLazyInit();
 		lazyInit();
 
 		expect(stdoutCapture.join("")).toBe("");
-		const { existsSync } = await import("node:fs");
-		expect(existsSync(join(TEST_DIR, ".qult", ".state"))).toBe(true);
-	});
-});
-
-describe("Scenario 10: Edit .qult/ files does not trigger gates", () => {
-	it("skips gate execution when editing .qult/gates.json", async () => {
-		setupFailingLintGate();
-
-		const postTool = (await import("../hooks/post-tool.ts")).default;
-		await postTool({
-			tool_name: "Write",
-			tool_input: { file_path: join(QULT_DIR, "gates.json") },
-		});
-
 		expect(readPendingFixes()).toHaveLength(0);
-		expect(stdoutCapture.join("")).not.toContain("lint error");
 	});
 });
 
@@ -442,7 +457,7 @@ describe("Scenario 11: Plan status tracking — Stop blocks on incomplete plan",
 
 describe("Scenario 12: run_once_per_batch skips typecheck on 2nd edit", () => {
 	it("typecheck runs once, clears on commit", async () => {
-		const gates = {
+		const gates: GatesConfig = {
 			on_write: {
 				lint: { command: "echo lint-ok", timeout: 3000 },
 				typecheck: {
@@ -452,7 +467,7 @@ describe("Scenario 12: run_once_per_batch skips typecheck on 2nd edit", () => {
 				},
 			},
 		};
-		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
+		saveGates(gates);
 
 		const { clearOnCommit, readSessionState } = await import("../state/session-state.ts");
 		clearOnCommit();
@@ -540,7 +555,7 @@ describe("Scenario 14: git commit DENIED without test pass", () => {
 			on_write: { lint: { command: "echo 'OK' && exit 0", timeout: 3000 } },
 			on_commit: { test: { command: "echo 'OK' && exit 0", timeout: 3000 } },
 		};
-		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
+		saveGates(gates);
 
 		const planDir = join(TEST_DIR, ".claude", "plans");
 		mkdirSync(planDir, { recursive: true });
@@ -684,14 +699,11 @@ describe("Scenario 17: biome check --write clears stale pending-fixes", () => {
 
 describe("Scenario: Non-gated file extensions are skipped", () => {
 	it("biome gate skips .md files but runs on .ts files", async () => {
-		writeFileSync(
-			join(QULT_DIR, "gates.json"),
-			JSON.stringify({
-				on_write: {
-					lint: { command: "biome check {file} || exit 1", timeout: 3000 },
-				},
-			}),
-		);
+		saveGates({
+			on_write: {
+				lint: { command: "biome check {file} || exit 1", timeout: 3000 },
+			},
+		});
 
 		const postTool = (await import("../hooks/post-tool.ts")).default;
 
@@ -710,10 +722,7 @@ describe("Scenario: Non-gated file extensions are skipped", () => {
 
 describe("Scenario: 3-stage review score threshold — high scores clears gate", () => {
 	it("aggregate >= threshold allows after all 3 stages", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 24 } }),
-		);
+		setProjectConfig({ review: { score_threshold: 24 } });
 		resetAllCaches();
 
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
@@ -741,10 +750,7 @@ describe("Scenario: 3-stage review score threshold — high scores clears gate",
 
 describe("Scenario: 3-stage review score threshold — low scores blocks", () => {
 	it("aggregate < threshold blocks after all 4 stages", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 32, dimension_floor: 1 } }),
-		);
+		setProjectConfig({ review: { score_threshold: 32, dimension_floor: 1 } });
 		resetAllCaches();
 
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
@@ -815,7 +821,8 @@ describe("Scenario: gates.json with on_review section loads correctly", () => {
 			on_commit: { test: { command: "vitest run", timeout: 30000 } },
 			on_review: { e2e: { command: "playwright test", timeout: 60000 } },
 		};
-		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
+		saveGates(gates);
+		resetGatesCache();
 
 		const { loadGates } = await import("../gates/load.ts");
 		const loaded = loadGates();
@@ -963,10 +970,7 @@ describe("Scenario: Plan validation full flow", () => {
 
 describe("Scenario: Adaptive 4-stage review block mentions weakest dimension", () => {
 	it("first iteration block mentions weakest dimension across all stages", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 32, dimension_floor: 1 } }),
-		);
+		setProjectConfig({ review: { score_threshold: 32, dimension_floor: 1 } });
 		resetAllCaches();
 
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
@@ -1029,13 +1033,10 @@ describe("Scenario: TaskCompleted verifies plan task", () => {
 		);
 
 		// Set up gates with test runner
-		writeFileSync(
-			join(QULT_DIR, "gates.json"),
-			JSON.stringify({
-				on_write: { lint: { command: "echo ok", timeout: 3000 } },
-				on_commit: { test: { command: "vitest run", timeout: 30000 } },
-			}),
-		);
+		saveGates({
+			on_write: { lint: { command: "echo ok", timeout: 3000 } },
+			on_commit: { test: { command: "vitest run", timeout: 30000 } },
+		});
 
 		const handler = (await import("../hooks/task-completed.ts")).default;
 		await handler({
@@ -1048,7 +1049,7 @@ describe("Scenario: TaskCompleted verifies plan task", () => {
 	});
 
 	it("silently returns when no plan exists", async () => {
-		writeFileSync(join(QULT_DIR, "gates.json"), "{}");
+		saveGates({});
 
 		const handler = (await import("../hooks/task-completed.ts")).default;
 		await handler({
@@ -1102,7 +1103,7 @@ describe("Scenario 18: test pass recorded → commit allowed", () => {
 				test: { command: "vitest run", timeout: 30000 },
 			},
 		};
-		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
+		saveGates(gates);
 		resetGatesCache();
 	}
 
@@ -1216,7 +1217,7 @@ describe("Scenario 9: Parallel gate execution collects results correctly", () =>
 				typecheck: { command: "echo 'Type error in foo.ts' && exit 1", timeout: 3000 },
 			},
 		};
-		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
+		saveGates(gates);
 		resetGatesCache();
 
 		const postTool = (await import("../hooks/post-tool.ts")).default;
@@ -1243,7 +1244,7 @@ describe("Scenario 10: Parallel gate with timeout — timeout gate fails, other 
 				slow: { command: "sleep 10", timeout: 200 },
 			},
 		};
-		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
+		saveGates(gates);
 		resetGatesCache();
 
 		const postTool = (await import("../hooks/post-tool.ts")).default;
@@ -1329,10 +1330,7 @@ describe("Scenario: TDD enforcement — test file must be edited before impl fil
 
 describe("Scenario: Dimension floor blocks PASS with weak dimension", () => {
 	it("blocks spec PASS when a dimension is below floor", async () => {
-		writeFileSync(
-			join(QULT_DIR, "config.json"),
-			JSON.stringify({ review: { dimension_floor: 3 } }),
-		);
+		setProjectConfig({ review: { dimension_floor: 3 } });
 		resetAllCaches();
 
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
@@ -1349,10 +1347,7 @@ describe("Scenario: Dimension floor blocks PASS with weak dimension", () => {
 
 describe("Scenario: 4-stage aggregate score enforcement", () => {
 	it("blocks when aggregate is below threshold after all 4 stages", async () => {
-		writeFileSync(
-			join(QULT_DIR, "config.json"),
-			JSON.stringify({ review: { score_threshold: 32, dimension_floor: 1 } }),
-		);
+		setProjectConfig({ review: { score_threshold: 32, dimension_floor: 1 } });
 		resetAllCaches();
 
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
@@ -1394,10 +1389,7 @@ describe("Scenario: 4-stage aggregate score enforcement", () => {
 	});
 
 	it("allows when aggregate meets threshold", async () => {
-		writeFileSync(
-			join(QULT_DIR, "config.json"),
-			JSON.stringify({ review: { score_threshold: 32, dimension_floor: 1 } }),
-		);
+		setProjectConfig({ review: { score_threshold: 32, dimension_floor: 1 } });
 		resetAllCaches();
 
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
@@ -1433,7 +1425,7 @@ describe("Scenario: MCP record_review allows commit", () => {
 		const gates: GatesConfig = {
 			on_commit: { test: { command: "echo ok", timeout: 3000 } },
 		};
-		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
+		saveGates(gates);
 		resetGatesCache();
 
 		const { handleTool } = await import("../mcp-server.ts");
@@ -1479,7 +1471,7 @@ describe("Scenario: MCP record_test_pass allows commit", () => {
 		const gates: GatesConfig = {
 			on_commit: { test: { command: "echo ok", timeout: 3000 } },
 		};
-		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
+		saveGates(gates);
 		resetGatesCache();
 
 		const { recordChangedFile } = await import("../state/session-state.ts");
@@ -1515,10 +1507,7 @@ describe("Scenario: MCP record_test_pass allows commit", () => {
 
 describe("Scenario: 3-stage aggregate max iterations allows with warning", () => {
 	it("allows review after max iterations despite low aggregate", async () => {
-		writeFileSync(
-			join(QULT_DIR, "config.json"),
-			JSON.stringify({ review: { score_threshold: 36, max_iterations: 2, dimension_floor: 1 } }),
-		);
+		setProjectConfig({ review: { score_threshold: 36, max_iterations: 2, dimension_floor: 1 } });
 		resetAllCaches();
 
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
@@ -1629,13 +1618,10 @@ describe("Scenario: tddRedSimulation", () => {
 			].join("\n"),
 		);
 
-		writeFileSync(
-			join(QULT_DIR, "gates.json"),
-			JSON.stringify({
-				on_write: { lint: { command: "echo ok", timeout: 3000 } },
-				on_commit: { test: { command: "vitest run", timeout: 30000 } },
-			}),
-		);
+		saveGates({
+			on_write: { lint: { command: "echo ok", timeout: 3000 } },
+			on_commit: { test: { command: "vitest run", timeout: 30000 } },
+		});
 
 		const { recordChangedFile, recordTaskVerifyResult } = await import("../state/session-state.ts");
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
@@ -1767,46 +1753,56 @@ describe("Scenario: Plan without evaluator blocks", () => {
 describe("Scenario: Concurrent session state isolation", () => {
 	it("session A and session B write independently", () => {
 		// Session A: record test pass
-		setStateSessionScope("session-A");
-		setFixesSessionScope("session-A");
+		setSessionScope("session-A");
+		ensureSession();
 		recordTestPass("vitest run");
-		flushSessionState();
+		flushAll();
 
 		// Session B: record review (separate scope)
 		resetSessionCache();
-		setStateSessionScope("session-B");
-		setFixesSessionScope("session-B");
+		setSessionScope("session-B");
+		ensureSession();
 		recordReview();
-		flushSessionState();
+		flushAll();
 
 		// Verify session A: test passed, no review
 		resetSessionCache();
-		setStateSessionScope("session-A");
+		setSessionScope("session-A");
 		const stateA = readSessionState();
 		expect(stateA.test_passed_at).not.toBeNull();
 		expect(stateA.review_completed_at).toBeNull();
 
 		// Verify session B: no test, review done
 		resetSessionCache();
-		setStateSessionScope("session-B");
+		setSessionScope("session-B");
 		const stateB = readSessionState();
 		expect(stateB.test_passed_at).toBeNull();
 		expect(stateB.review_completed_at).not.toBeNull();
 	});
 
-	it("latest-session.json reflects last writer", async () => {
-		const { atomicWriteJson } = await import("../state/atomic-write.ts");
-		const markerPath = join(STATE_DIR, "latest-session.json");
+	it("findLatestSessionId returns most recent session", async () => {
+		const { findLatestSessionId } = await import("../state/db.ts");
+		const db = getDb();
 
-		// Session A writes marker
-		atomicWriteJson(markerPath, { session_id: "session-A", updated_at: new Date().toISOString() });
-		let marker = JSON.parse(readFileSync(markerPath, "utf-8"));
-		expect(marker.session_id).toBe("session-A");
+		// Ensure beforeEach's test-session has the earliest timestamp
+		db.prepare(
+			"UPDATE sessions SET started_at = '2025-01-01T00:00:00.000Z' WHERE id = 'test-session'",
+		).run();
 
-		// Session B overwrites marker
-		atomicWriteJson(markerPath, { session_id: "session-B", updated_at: new Date().toISOString() });
-		marker = JSON.parse(readFileSync(markerPath, "utf-8"));
-		expect(marker.session_id).toBe("session-B");
+		setSessionScope("session-A");
+		ensureSession();
+		db.prepare(
+			"UPDATE sessions SET started_at = '2025-01-01T00:00:01.000Z' WHERE id = 'session-A'",
+		).run();
+
+		setSessionScope("session-B");
+		ensureSession();
+		db.prepare(
+			"UPDATE sessions SET started_at = '2025-01-01T00:00:02.000Z' WHERE id = 'session-B'",
+		).run();
+
+		const latest = findLatestSessionId();
+		expect(latest).toBe("session-B");
 	});
 });
 
@@ -1823,7 +1819,7 @@ describe("Scenario: Parallel on_write gates (1 fail, 2 pass)", () => {
 				format: { command: "echo 'formatted' && exit 0", timeout: 3000 },
 			},
 		};
-		writeFileSync(join(QULT_DIR, "gates.json"), JSON.stringify(gates));
+		saveGates(gates);
 		resetGatesCache();
 
 		const postTool = (await import("../hooks/post-tool.ts")).default;
@@ -2149,8 +2145,7 @@ describe("Scenario: plan-required blocks record_review and commit", () => {
 		flushAll();
 
 		// MCP record_review should refuse
-		const { handleTool, resetMcpCache } = await import("../mcp-server.ts");
-		resetMcpCache();
+		const { handleTool } = await import("../mcp-server.ts");
 		const reviewResult = handleTool("record_review", TEST_DIR, { aggregate_score: 28 });
 		expect(reviewResult.isError).toBe(true);
 		expect(reviewResult.content[0]!.text).toContain("plan");
@@ -2181,10 +2176,7 @@ describe("Scenario: plan-required blocks record_review and commit", () => {
 
 describe("Scenario: Incomplete review (only 3 of 4 stages) blocks", () => {
 	it("blocks when Spec/Quality/Security complete but Adversarial is missing", async () => {
-		writeFileSync(
-			join(QULT_DIR, "config.json"),
-			JSON.stringify({ review: { score_threshold: 30, dimension_floor: 1 } }),
-		);
+		setProjectConfig({ review: { score_threshold: 30, dimension_floor: 1 } });
 		resetAllCaches();
 
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;

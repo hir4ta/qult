@@ -1,6 +1,8 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetGatesCache, saveGates } from "../gates/load.ts";
+import { closeDb, ensureSession, setProjectPath, setSessionScope, useTestDb } from "../state/db.ts";
 import { resetAllCaches } from "../state/flush.ts";
 
 vi.mock("node:child_process", () => ({
@@ -10,7 +12,6 @@ vi.mock("node:child_process", () => ({
 import { spawnSync } from "node:child_process";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-task-completed-test");
-const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 let stderrCapture: string[] = [];
 let exitCode: number | null = null;
 const originalCwd = process.cwd();
@@ -22,7 +23,9 @@ function writePlan(content: string): void {
 }
 
 function writeGates(config: Record<string, unknown>): void {
-	writeFileSync(join(TEST_DIR, ".qult", "gates.json"), JSON.stringify(config));
+	saveGates(config as Parameters<typeof saveGates>[0]);
+	resetGatesCache();
+	resetAllCaches();
 }
 
 function makePlanContent(opts: {
@@ -42,8 +45,12 @@ function makePlanContent(opts: {
 }
 
 beforeEach(() => {
+	useTestDb();
+	setProjectPath(TEST_DIR);
+	setSessionScope("test-session");
+	ensureSession();
 	resetAllCaches();
-	mkdirSync(STATE_DIR, { recursive: true });
+	mkdirSync(TEST_DIR, { recursive: true });
 	process.chdir(TEST_DIR);
 	stderrCapture = [];
 	exitCode = null;
@@ -63,6 +70,7 @@ beforeEach(() => {
 afterEach(() => {
 	vi.restoreAllMocks();
 	process.chdir(originalCwd);
+	closeDb();
 	rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
@@ -259,7 +267,7 @@ describe("taskCompleted: test runner detection", () => {
 		expect(spawnSync).not.toHaveBeenCalled();
 	});
 
-	it("returns without action when no gates file exists", async () => {
+	it("returns without action when no gates exist", async () => {
 		writePlan(makePlanContent({ verify: "src/__tests__/foo.test.ts:testFoo" }));
 
 		const taskCompleted = await loadTaskCompleted();

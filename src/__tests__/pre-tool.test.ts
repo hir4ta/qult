@@ -1,17 +1,24 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { saveGates } from "../gates/load.ts";
+import { closeDb, ensureSession, setProjectPath, setSessionScope, useTestDb } from "../state/db.ts";
 import { resetAllCaches } from "../state/flush.ts";
+import type { GatesConfig } from "../types.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-pretool-test");
-const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 let stderrCapture: string[] = [];
 let exitCode: number | null = null;
 const originalCwd = process.cwd();
 
 beforeEach(() => {
+	useTestDb();
+	setProjectPath(TEST_DIR);
+	setSessionScope("test-session");
+	ensureSession();
 	resetAllCaches();
-	mkdirSync(STATE_DIR, { recursive: true });
+	rmSync(TEST_DIR, { recursive: true, force: true });
+	mkdirSync(TEST_DIR, { recursive: true });
 	process.chdir(TEST_DIR);
 	stderrCapture = [];
 	exitCode = null;
@@ -29,6 +36,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.restoreAllMocks();
+	closeDb();
 	process.chdir(originalCwd);
 	rmSync(TEST_DIR, { recursive: true, force: true });
 });
@@ -86,12 +94,10 @@ describe("preTool: Edit/Write checks", () => {
 
 describe("preTool: Bash git commit checks", () => {
 	it("DENY commit without test pass when on_commit gates exist", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_commit: { test: { command: "vitest run", timeout: 30000 } },
-			}),
-		);
+		saveGates({
+			on_commit: { test: { command: "vitest run", timeout: 30000 } },
+		} as GatesConfig);
+		resetAllCaches();
 
 		const { recordChangedFile } = await import("../state/session-state.ts");
 		recordChangedFile("/fake/src/file.ts");
@@ -112,12 +118,10 @@ describe("preTool: Bash git commit checks", () => {
 	});
 
 	it("allows commit without review for small change", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_commit: { test: { command: "vitest run", timeout: 30000 } },
-			}),
-		);
+		saveGates({
+			on_commit: { test: { command: "vitest run", timeout: 30000 } },
+		} as GatesConfig);
+		resetAllCaches();
 
 		const { recordTestPass } = await import("../state/session-state.ts");
 		recordTestPass("vitest run");
@@ -159,12 +163,10 @@ describe("preTool: Bash git commit checks", () => {
 	});
 
 	it("DENY commit without review when plan is active", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_commit: { test: { command: "vitest run", timeout: 30000 } },
-			}),
-		);
+		saveGates({
+			on_commit: { test: { command: "vitest run", timeout: 30000 } },
+		} as GatesConfig);
+		resetAllCaches();
 
 		const planDir = join(TEST_DIR, ".claude", "plans");
 		mkdirSync(planDir, { recursive: true });
@@ -193,12 +195,10 @@ describe("preTool: Bash git commit checks", () => {
 	});
 
 	it("DENY commit without review when many files changed", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_commit: { test: { command: "vitest run", timeout: 30000 } },
-			}),
-		);
+		saveGates({
+			on_commit: { test: { command: "vitest run", timeout: 30000 } },
+		} as GatesConfig);
+		resetAllCaches();
 
 		const { recordChangedFile, recordTestPass } = await import("../state/session-state.ts");
 		recordTestPass("vitest run");
@@ -222,12 +222,10 @@ describe("preTool: Bash git commit checks", () => {
 	});
 
 	it("allows commit when review is disabled via disable_gate", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_commit: { test: { command: "vitest run", timeout: 30000 } },
-			}),
-		);
+		saveGates({
+			on_commit: { test: { command: "vitest run", timeout: 30000 } },
+		} as GatesConfig);
+		resetAllCaches();
 
 		// Plan required for 6+ files
 		const planDir = join(TEST_DIR, ".claude", "plans");
@@ -253,12 +251,10 @@ describe("preTool: Bash git commit checks", () => {
 	});
 
 	it("DENY commit when plan required but missing", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_commit: { test: { command: "vitest run", timeout: 30000 } },
-			}),
-		);
+		saveGates({
+			on_commit: { test: { command: "vitest run", timeout: 30000 } },
+		} as GatesConfig);
+		resetAllCaches();
 
 		const { recordChangedFile, recordTestPass, recordReview } = await import(
 			"../state/session-state.ts"
@@ -285,12 +281,10 @@ describe("preTool: Bash git commit checks", () => {
 	});
 
 	it("allows commit when plan exists with many changed files", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_commit: { test: { command: "vitest run", timeout: 30000 } },
-			}),
-		);
+		saveGates({
+			on_commit: { test: { command: "vitest run", timeout: 30000 } },
+		} as GatesConfig);
+		resetAllCaches();
 
 		const { recordChangedFile, recordTestPass, recordReview } = await import(
 			"../state/session-state.ts"
@@ -326,12 +320,10 @@ describe("preTool: Bash git commit checks", () => {
 	});
 
 	it("DENY git -c key=value commit (config args before commit)", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_commit: { test: { command: "vitest run", timeout: 30000 } },
-			}),
-		);
+		saveGates({
+			on_commit: { test: { command: "vitest run", timeout: 30000 } },
+		} as GatesConfig);
+		resetAllCaches();
 
 		const { recordChangedFile } = await import("../state/session-state.ts");
 		recordChangedFile("/fake/src/file.ts");
@@ -350,12 +342,10 @@ describe("preTool: Bash git commit checks", () => {
 	});
 
 	it("DENY case-insensitive GIT COMMIT", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "gates.json"),
-			JSON.stringify({
-				on_commit: { test: { command: "vitest run", timeout: 30000 } },
-			}),
-		);
+		saveGates({
+			on_commit: { test: { command: "vitest run", timeout: 30000 } },
+		} as GatesConfig);
+		resetAllCaches();
 
 		const { recordChangedFile } = await import("../state/session-state.ts");
 		recordChangedFile("/fake/src/file.ts");

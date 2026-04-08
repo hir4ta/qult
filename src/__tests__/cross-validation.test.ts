@@ -1,17 +1,27 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { closeDb, ensureSession, setProjectPath, setSessionScope, useTestDb } from "../state/db.ts";
 import { resetAllCaches } from "../state/flush.ts";
+import { flush as flushPendingFixes, writePendingFixes } from "../state/pending-fixes.ts";
+import {
+	flush as flushSessionState,
+	incrementEscalation,
+	incrementGateFailure,
+} from "../state/session-state.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-cross-validation-test");
-const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 const PLANS_DIR = join(TEST_DIR, ".claude", "plans");
 let stderrCapture: string[] = [];
 const originalCwd = process.cwd();
 
 beforeEach(() => {
+	useTestDb();
+	setProjectPath(TEST_DIR);
+	setSessionScope("test-session");
+	ensureSession();
 	resetAllCaches();
-	mkdirSync(STATE_DIR, { recursive: true });
+	mkdirSync(TEST_DIR, { recursive: true });
 	process.chdir(TEST_DIR);
 	stderrCapture = [];
 
@@ -24,6 +34,7 @@ beforeEach(() => {
 afterEach(() => {
 	vi.restoreAllMocks();
 	process.chdir(originalCwd);
+	closeDb();
 	rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
@@ -31,13 +42,10 @@ import { crossValidate } from "../hooks/subagent-stop/cross-validation.ts";
 
 describe("crossValidate", () => {
 	it("detects security contradiction: reviewer says no issues but detector found some", () => {
-		// Write pending-fixes with security-check gate
-		writeFileSync(
-			join(STATE_DIR, "pending-fixes.json"),
-			JSON.stringify([
-				{ file: "src/foo.ts", errors: ["L10: Hardcoded API key"], gate: "security-check" },
-			]),
-		);
+		writePendingFixes([
+			{ file: "src/foo.ts", errors: ["L10: Hardcoded API key"], gate: "security-check" },
+		]);
+		flushPendingFixes();
 		resetAllCaches();
 
 		const output = "Security: PASS\nScore: Vulnerability=5 Hardening=5\nNo issues found";
@@ -66,10 +74,11 @@ describe("crossValidate", () => {
 	});
 
 	it("detects quality contradiction: high scores but dead-import warnings", () => {
-		writeFileSync(
-			join(STATE_DIR, "session-state.json"),
-			JSON.stringify({ dead_import_warning_count: 5 }),
-		);
+		// Set dead_import_warning_count to 5 via incrementEscalation
+		for (let i = 0; i < 5; i++) {
+			incrementEscalation("dead_import_warning_count");
+		}
+		flushSessionState();
 		resetAllCaches();
 
 		const output = "Quality: PASS\nScore: Design=5 Maintainability=5\nNo issues found";
@@ -79,8 +88,8 @@ describe("crossValidate", () => {
 	});
 
 	it("returns no contradictions when states align", () => {
-		writeFileSync(join(STATE_DIR, "pending-fixes.json"), JSON.stringify([]));
-		writeFileSync(join(STATE_DIR, "session-state.json"), JSON.stringify({}));
+		writePendingFixes([]);
+		flushPendingFixes();
 		resetAllCaches();
 
 		const output = "Security: PASS\nScore: Vulnerability=5 Hardening=5\nNo issues found";
@@ -88,19 +97,20 @@ describe("crossValidate", () => {
 		expect(result.contradictions).toEqual([]);
 	});
 
-	it("is fail-open on missing state files", () => {
-		// crossValidate reads state via process.cwd(), so missing state = empty = no contradictions
+	it("is fail-open on fresh session", () => {
 		const result = crossValidate("Quality: PASS\nScore: Design=5 Maintainability=5", "Quality");
 		expect(result.contradictions).toEqual([]);
 	});
 
 	it("detects spec contradiction: gate failures exist but reviewer says all complete", () => {
-		writeFileSync(
-			join(STATE_DIR, "session-state.json"),
-			JSON.stringify({
-				gate_failure_counts: { "src/foo.ts:lint": 3, "src/bar.ts:typecheck": 4 },
-			}),
-		);
+		// Set gate failures >= 3
+		for (let i = 0; i < 3; i++) {
+			incrementGateFailure("src/foo.ts", "lint");
+		}
+		for (let i = 0; i < 4; i++) {
+			incrementGateFailure("src/bar.ts", "typecheck");
+		}
+		flushSessionState();
 		resetAllCaches();
 
 		const output = "Spec: PASS\nScore: Completeness=5 Accuracy=5\nAll tasks complete";
@@ -110,10 +120,10 @@ describe("crossValidate", () => {
 	});
 
 	it("detects quality contradiction: test quality warnings but no issues found", () => {
-		writeFileSync(
-			join(STATE_DIR, "session-state.json"),
-			JSON.stringify({ test_quality_warning_count: 5 }),
-		);
+		for (let i = 0; i < 5; i++) {
+			incrementEscalation("test_quality_warning_count");
+		}
+		flushSessionState();
 		resetAllCaches();
 
 		const output = "Quality: PASS\nScore: Design=5 Maintainability=5\nNo issues found";
@@ -123,10 +133,10 @@ describe("crossValidate", () => {
 	});
 
 	it("detects quality contradiction: duplication warnings but no issues found", () => {
-		writeFileSync(
-			join(STATE_DIR, "session-state.json"),
-			JSON.stringify({ duplication_warning_count: 6 }),
-		);
+		for (let i = 0; i < 6; i++) {
+			incrementEscalation("duplication_warning_count");
+		}
+		flushSessionState();
 		resetAllCaches();
 
 		const output = "Quality: PASS\nScore: Design=5 Maintainability=5\nNo issues found";
@@ -136,10 +146,8 @@ describe("crossValidate", () => {
 	});
 
 	it("does not flag security when pending-fixes are from non-security gates", () => {
-		writeFileSync(
-			join(STATE_DIR, "pending-fixes.json"),
-			JSON.stringify([{ file: "src/foo.ts", errors: ["missing semicolon"], gate: "lint" }]),
-		);
+		writePendingFixes([{ file: "src/foo.ts", errors: ["missing semicolon"], gate: "lint" }]);
+		flushPendingFixes();
 		resetAllCaches();
 
 		const output = "Security: PASS\nScore: Vulnerability=5 Hardening=5\nNo issues found";

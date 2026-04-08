@@ -1,17 +1,49 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	closeDb,
+	ensureSession,
+	getDb,
+	getProjectId,
+	setProjectPath,
+	setSessionScope,
+	useTestDb,
+} from "../state/db.ts";
 import { resetAllCaches } from "../state/flush.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-subagent-stop-test");
-const STATE_DIR = join(TEST_DIR, ".qult", ".state");
+
+function setProjectConfig(config: Record<string, unknown>): void {
+	const db = getDb();
+	const projectId = getProjectId();
+	const stmt = db.prepare(
+		"INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)",
+	);
+	function flatten(obj: Record<string, unknown>, prefix = ""): void {
+		for (const [k, v] of Object.entries(obj)) {
+			const key = prefix ? `${prefix}.${k}` : k;
+			if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+				flatten(v as Record<string, unknown>, key);
+			} else {
+				stmt.run(projectId, key, JSON.stringify(v));
+			}
+		}
+	}
+	flatten(config);
+}
 let stderrCapture: string[] = [];
 let exitCode: number | null = null;
 const originalCwd = process.cwd();
 
 beforeEach(() => {
+	useTestDb();
+	setProjectPath(TEST_DIR);
+	setSessionScope("test-session");
+	ensureSession();
 	resetAllCaches();
-	mkdirSync(STATE_DIR, { recursive: true });
+	rmSync(TEST_DIR, { recursive: true, force: true });
+	mkdirSync(TEST_DIR, { recursive: true });
 	// Create dummy source files for claim grounding (file existence check)
 	mkdirSync(join(TEST_DIR, "src"), { recursive: true });
 	for (const name of [
@@ -46,6 +78,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.restoreAllMocks();
+	closeDb();
 	process.chdir(originalCwd);
 	rmSync(TEST_DIR, { recursive: true, force: true });
 });
@@ -386,10 +419,7 @@ Why this change is needed.
 
 	it("registry file without consumer triggers warning", () => {
 		// Write config with registry_files to enable the check
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ plan_eval: { registry_files: ["types.ts", "session-state.ts"] } }),
-		);
+		setProjectConfig({ plan_eval: { registry_files: ["types.ts", "session-state.ts"] } });
 		resetAllCaches();
 
 		const plan = validPlan.replace("src/foo.ts", "src/types.ts");
@@ -630,10 +660,7 @@ Why this change is needed.
 	});
 
 	it("qult-spec-reviewer with PASS but dimension below floor: blocks", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { dimension_floor: 3 } }),
-		);
+		setProjectConfig({ review: { dimension_floor: 3 } });
 		resetAllCaches();
 
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
@@ -649,10 +676,7 @@ Why this change is needed.
 	});
 
 	it("qult-security-reviewer with PASS but dimension below floor: blocks", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { dimension_floor: 3 } }),
-		);
+		setProjectConfig({ review: { dimension_floor: 3 } });
 		resetAllCaches();
 
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
@@ -669,10 +693,7 @@ Why this change is needed.
 	});
 
 	it("qult-quality-reviewer with PASS and all dimensions at floor: allows", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { dimension_floor: 3 } }),
-		);
+		setProjectConfig({ review: { dimension_floor: 3 } });
 		resetAllCaches();
 
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
@@ -708,10 +729,7 @@ Why this change is needed.
 	// --- 3-stage aggregate score tests ---
 
 	it("4-stage review: aggregate below threshold after adversarial-reviewer blocks", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 32, dimension_floor: 1 } }),
-		);
+		setProjectConfig({ review: { score_threshold: 32, dimension_floor: 1 } });
 		resetAllCaches();
 
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
@@ -754,10 +772,7 @@ Why this change is needed.
 	});
 
 	it("4-stage review: aggregate at threshold after adversarial-reviewer allows", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 32 } }),
-		);
+		setProjectConfig({ review: { score_threshold: 32 } });
 		resetAllCaches();
 
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
@@ -791,10 +806,7 @@ Why this change is needed.
 	});
 
 	it("4-stage review: stage scores are cleared after successful aggregate", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 32 } }),
-		);
+		setProjectConfig({ review: { score_threshold: 32 } });
 		resetAllCaches();
 
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
@@ -851,10 +863,7 @@ Why this change is needed.
 
 		it("low score without findings: blocks", async () => {
 			// dimension_floor=1 to isolate evidence-based scoring test
-			writeFileSync(
-				join(TEST_DIR, ".qult", "config.json"),
-				JSON.stringify({ review: { dimension_floor: 1 } }),
-			);
+			setProjectConfig({ review: { dimension_floor: 1 } });
 			resetAllCaches();
 
 			const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
@@ -905,10 +914,7 @@ Why this change is needed.
 		});
 
 		it("critical finding with low scores: allows (consistent)", async () => {
-			writeFileSync(
-				join(TEST_DIR, ".qult", "config.json"),
-				JSON.stringify({ review: { dimension_floor: 1 } }),
-			);
+			setProjectConfig({ review: { dimension_floor: 1 } });
 			resetAllCaches();
 
 			const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
@@ -989,8 +995,7 @@ Why this change is needed.
 
 describe("claim grounding in SubagentStop", () => {
 	it("blocks reviewer with nonexistent file reference", async () => {
-		// Write valid session state and config
-		writeFileSync(join(STATE_DIR, "session-state.json"), JSON.stringify({}));
+		// Session state is already initialized via ensureSession()
 
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		const output = [
@@ -1012,7 +1017,6 @@ describe("claim grounding in SubagentStop", () => {
 	});
 
 	it("allows reviewer when referenced files exist", async () => {
-		writeFileSync(join(STATE_DIR, "session-state.json"), JSON.stringify({}));
 		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
 		writeFileSync(join(TEST_DIR, "src", "real-file.ts"), "export function validate() {}");
 
@@ -1042,15 +1046,11 @@ describe("claim grounding in SubagentStop", () => {
 
 describe("cross-validation in SubagentStop", () => {
 	it("blocks on cross-validation contradiction: security no-issues vs detector findings", async () => {
-		// Write security-check pending fixes
-		writeFileSync(
-			join(STATE_DIR, "pending-fixes.json"),
-			JSON.stringify([
-				{ file: "src/foo.ts", errors: ["L10: Hardcoded API key"], gate: "security-check" },
-			]),
-		);
-		writeFileSync(join(STATE_DIR, "session-state.json"), JSON.stringify({}));
-		resetAllCaches();
+		// Write security-check pending fixes via module
+		const { writePendingFixes } = await import("../state/pending-fixes.ts");
+		writePendingFixes([
+			{ file: "src/foo.ts", errors: ["L10: Hardcoded API key"], gate: "security-check" },
+		]);
 
 		const subagentStop = (await import("../hooks/subagent-stop/index.ts")).default;
 		const output = ["Security: PASS", "Score: Vulnerability=5 Hardening=5", "No issues found"].join(

@@ -1,6 +1,6 @@
 ---
 name: skip
-description: Temporarily disable or re-enable quality gates (lint, typecheck, test, review), or clear false-positive pending fixes. Use when a gate is broken, irrelevant for current work, or producing false positives. NOT for permanently removing gates (edit .qult/gates.json instead).
+description: Temporarily disable or re-enable quality gates (lint, typecheck, test, review), or clear false-positive pending fixes. Use when a gate is broken, irrelevant for current work, or producing false positives. NOT for permanently removing gates (re-run /qult:init to reconfigure).
 user_invocable: true
 ---
 
@@ -37,7 +37,7 @@ The user will specify what they want:
 
 - Disabled gates reset automatically on new sessions
 - `review` is a special gate name that skips the independent review requirement
-- Valid gate names: any key from `.qult/gates.json` (lint, typecheck, test, etc.) plus `review`
+- Valid gate names: any key from gate_configs in DB (lint, typecheck, test, etc.) plus `review`
 - To see current gate status, use `/qult:status`
 - To change thresholds, use `/qult:config`
-- To permanently change gates, edit `.qult/gates.json`
+- To permanently change gates, re-run `/qult:init` to reconfigure

@@ -1,6 +1,6 @@
 ---
 name: init
-description: "Set up or re-initialize qult for the current project. Creates .qult/ directory, detects gates, and configures .gitignore. Idempotent — safe to run multiple times. Use for initial setup or after changing toolchain. NOT for config changes (use /qult:config)."
+description: "Set up or re-initialize qult for the current project. Registers project in DB, detects gates, and stores config. Idempotent — safe to run multiple times. Use for initial setup or after changing toolchain. NOT for config changes (use /qult:config)."
 user-invocable: true
 allowed-tools:
   - Read
@@ -8,17 +8,19 @@ allowed-tools:
   - Glob
   - Grep
   - Bash
+  - mcp__plugin_qult_qult__get_gate_config
+  - mcp__plugin_qult_qult__get_session_status
 ---
 
 # /qult:init
 
 Set up or re-initialize qult for this project. Idempotent — safe to run anytime.
 
-## Step 1: Create `.qult/.state/` directory
+## Step 1: Verify DB connectivity
 
-Create if it doesn't exist. Skip if it already exists.
+Call `mcp__plugin_qult_qult__get_session_status` to verify the qult MCP server is running and the DB is accessible. If it fails, check that Bun is installed and the qult plugin is loaded.
 
-## Step 2: Detect gates and write `.qult/gates.json`
+## Step 2: Detect gates
 
 Analyze the project toolchain and generate gate configuration.
 
@@ -35,11 +37,11 @@ Look for:
 
 Read the relevant config files to confirm which tools are actually configured.
 
-If no toolchain config files are found, report "No tools detected" and write an empty `{}` to gates.json.
+If no toolchain config files are found, report "No tools detected".
 
 ### 2b: Build gates config
 
-Write `.qult/gates.json` using this schema:
+Build the gate config using this structure:
 
 ```json
 {
@@ -61,7 +63,7 @@ Rules:
 - `run_once_per_batch: true` for expensive commands that check the whole project (typecheck, full lint)
 - `on_commit` commands run before each commit (unit/integration tests)
 - `on_review` commands run during code review (e2e, browser tests)
-- Omit empty categories — don't write `"on_write": {}`
+- Omit empty categories
 - Prefer fast tools (biome > eslint, ruff > flake8, pyright > mypy)
 - Use the project's package manager (bun/pnpm/yarn/npm, uv/poetry, cargo, go)
 
@@ -69,27 +71,38 @@ Rules:
 
 For each gate command, confirm the tool is available (e.g. `which biome`, `cargo --version`). Do NOT run full test suites or commands that modify state. If a tool is not installed, remove that gate.
 
-## Step 3: Add `.qult/` to `.gitignore`
+### 2d: Store gates in DB
 
-Add `.qult/` to `.gitignore` if not already present. Skip if already there.
+Write the detected gates to the DB using Bash:
+```bash
+bun -e "
+const { getDb, setProjectPath, getProjectId } = require('$CLAUDE_PLUGIN_ROOT/dist/mcp-server.mjs');
+// ... or use MCP tools
+"
+```
 
-## Step 4: Clean up legacy files
+Alternatively, use the MCP server: call `mcp__plugin_qult_qult__get_gate_config` to verify gates are stored.
+
+**Note**: The gate config is stored in `~/.qult/qult.db`, NOT in a project file. No project directory is modified.
+
+## Step 3: Clean up legacy files
 
 Remove if they exist (from older qult versions):
+- `.qult/` directory (entire directory — no longer needed, state is in `~/.qult/qult.db`)
 - `.claude/rules/qult.md` (old single rule file)
 - `.claude/rules/qult-gates.md` (replaced by MCP instructions)
 - `.claude/rules/qult-quality.md` (replaced by MCP instructions)
 - `.claude/rules/qult-plan.md` (replaced by MCP instructions)
-- `.qult/hook.mjs` (old standalone hook)
 - Old qult entries in `.claude/settings.local.json` containing `.qult/hook.mjs`
+- Remove `.qult/` from `.gitignore` if present (no longer needed)
 
 ## Output
 
 ```
 qult initialized:
-  .qult/.state/ — ready
-  gates.json — N on_write, N on_commit, N on_review
-  .gitignore — .qult/ added
+  DB: ~/.qult/qult.db — connected
+  Gates: N on_write, N on_commit, N on_review
+  Legacy cleanup: (list removed items, or "none")
 ```
 
 If hooks don't fire in VS Code or your environment, suggest: `/qult:register-hooks`

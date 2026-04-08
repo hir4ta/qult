@@ -65,10 +65,6 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 		/* fail-open */
 	}
 
-	// Skip qult's own state/config files
-	const qultDir = resolve(process.cwd(), ".qult");
-	if (file.startsWith(`${qultDir}/`) || file === qultDir) return;
-
 	const gates = loadGates();
 	if (!gates?.on_write) return;
 

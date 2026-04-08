@@ -1,6 +1,15 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	closeDb,
+	ensureSession,
+	getDb,
+	getProjectId,
+	setProjectPath,
+	setSessionScope,
+	useTestDb,
+} from "../../state/db.ts";
 import { resetAllCaches } from "../../state/flush.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-subagent-stop-test");
@@ -9,8 +18,13 @@ let exitCode: number | null = null;
 const originalCwd = process.cwd();
 
 beforeEach(() => {
+	useTestDb();
+	setProjectPath(TEST_DIR);
+	setSessionScope("test-session");
+	ensureSession();
 	resetAllCaches();
-	mkdirSync(join(TEST_DIR, ".qult", ".state"), { recursive: true });
+	rmSync(TEST_DIR, { recursive: true, force: true });
+	mkdirSync(TEST_DIR, { recursive: true });
 	// Create dummy source files for claim grounding
 	mkdirSync(join(TEST_DIR, "src"), { recursive: true });
 	for (const name of [
@@ -48,6 +62,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.restoreAllMocks();
+	closeDb();
 	process.chdir(originalCwd);
 	rmSync(TEST_DIR, { recursive: true, force: true });
 });
@@ -441,10 +456,11 @@ describe("validatePlanHeuristics", () => {
 
 	it("flags registry file without consumer file in plan", async () => {
 		// Write config with registry_files to enable the check
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ plan_eval: { registry_files: ["session-state.ts", "types.ts"] } }),
-		);
+		const db = getDb();
+		const projectId = getProjectId();
+		db.prepare(
+			"INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)",
+		).run(projectId, "plan_eval.registry_files", JSON.stringify(["session-state.ts", "types.ts"]));
 		resetAllCaches();
 
 		const { validatePlanHeuristics } = await import("../subagent-stop/index.ts");
@@ -594,10 +610,14 @@ describe("plan-evaluator SubagentStop", () => {
 
 describe("score distribution bias detection", () => {
 	it("warns on identical scores across all 8 dimensions", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 32, dimension_floor: 1 } }),
-		);
+		const db = getDb();
+		const projectId = getProjectId();
+		db.prepare(
+			"INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)",
+		).run(projectId, "review.score_threshold", "32");
+		db.prepare(
+			"INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)",
+		).run(projectId, "review.dimension_floor", "1");
 		resetAllCaches();
 
 		const handler = (await import("../subagent-stop/index.ts")).default;
@@ -626,10 +646,14 @@ describe("score distribution bias detection", () => {
 	});
 
 	it("warns on low variance scores (max-min < 2)", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 32, dimension_floor: 1 } }),
-		);
+		const db = getDb();
+		const projectId = getProjectId();
+		db.prepare(
+			"INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)",
+		).run(projectId, "review.score_threshold", "32");
+		db.prepare(
+			"INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)",
+		).run(projectId, "review.dimension_floor", "1");
 		resetAllCaches();
 
 		const handler = (await import("../subagent-stop/index.ts")).default;
@@ -657,10 +681,14 @@ describe("score distribution bias detection", () => {
 	});
 
 	it("does not warn on well-distributed scores", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { score_threshold: 24, dimension_floor: 1 } }),
-		);
+		const db = getDb();
+		const projectId = getProjectId();
+		db.prepare(
+			"INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)",
+		).run(projectId, "review.score_threshold", "24");
+		db.prepare(
+			"INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)",
+		).run(projectId, "review.dimension_floor", "1");
 		resetAllCaches();
 
 		const handler = (await import("../subagent-stop/index.ts")).default;

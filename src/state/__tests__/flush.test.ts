@@ -1,52 +1,68 @@
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+	closeDb,
+	ensureSession,
+	getDb,
+	getSessionId,
+	setProjectPath,
+	setSessionScope,
+	useTestDb,
+} from "../db.ts";
 import { flushAll, resetAllCaches } from "../flush.ts";
 import { readPendingFixes, writePendingFixes } from "../pending-fixes.ts";
-import { readSessionState } from "../session-state.ts";
+import {
+	disableGate,
+	enableGate,
+	flush as flushSessionState,
+	readSessionState,
+	resetCache as resetSessionStateCache,
+} from "../session-state.ts";
 
-const TEST_DIR = join(import.meta.dirname, ".tmp-flush-test");
-const STATE_DIR = join(TEST_DIR, ".qult", ".state");
-const originalCwd = process.cwd();
+const TEST_DIR = "/tmp/.tmp-flush-test";
 
 beforeEach(() => {
+	useTestDb();
+	setProjectPath(TEST_DIR);
+	setSessionScope("test-session");
+	ensureSession();
 	resetAllCaches();
-	mkdirSync(STATE_DIR, { recursive: true });
-	process.chdir(TEST_DIR);
 });
 
 afterEach(() => {
-	process.chdir(originalCwd);
-	rmSync(TEST_DIR, { recursive: true, force: true });
+	closeDb();
 });
 
 describe("cache behavior", () => {
-	it("read returns cached value on second call without disk I/O", () => {
+	it("read returns cached value on second call without DB I/O", () => {
 		const first = readSessionState();
 		const second = readSessionState();
 		expect(first).toBe(second); // same reference = cache hit
 	});
 
-	it("write updates cache without flushing to disk", () => {
+	it("write updates cache without flushing to DB", () => {
 		writePendingFixes([{ file: "a.ts", errors: ["err"], gate: "lint" }]);
 
 		// Cache returns new value
 		expect(readPendingFixes()).toHaveLength(1);
-		// Disk is still empty (no flush yet)
-		const diskPath = join(STATE_DIR, "pending-fixes.json");
-		expect(existsSync(diskPath)).toBe(false);
+		// DB is still empty (no flush yet)
+		const db = getDb();
+		const sid = getSessionId();
+		const rows = db.prepare("SELECT * FROM pending_fixes WHERE session_id = ?").all(sid);
+		expect(rows).toHaveLength(0);
 	});
 
-	it("flushAll writes dirty caches to disk", () => {
+	it("flushAll writes dirty caches to DB", () => {
 		writePendingFixes([{ file: "b.ts", errors: ["err2"], gate: "typecheck" }]);
 
 		flushAll();
 
-		const diskPath = join(STATE_DIR, "pending-fixes.json");
-		expect(existsSync(diskPath)).toBe(true);
-		const disk = JSON.parse(readFileSync(diskPath, "utf-8"));
-		expect(disk).toHaveLength(1);
-		expect(disk[0].file).toBe("b.ts");
+		const db = getDb();
+		const sid = getSessionId();
+		const rows = db
+			.prepare("SELECT file, gate FROM pending_fixes WHERE session_id = ?")
+			.all(sid) as { file: string; gate: string }[];
+		expect(rows).toHaveLength(1);
+		expect(rows[0]!.file).toBe("b.ts");
 	});
 
 	it("flushAll skips clean caches (no unnecessary writes)", () => {
@@ -54,8 +70,11 @@ describe("cache behavior", () => {
 		readSessionState();
 		flushAll();
 
-		const diskPath = join(STATE_DIR, "session-state.json");
-		expect(existsSync(diskPath)).toBe(false);
+		// Session row exists (from ensureSession) but no additional child data was written
+		const db = getDb();
+		const sid = getSessionId();
+		const rows = db.prepare("SELECT * FROM pending_fixes WHERE session_id = ?").all(sid);
+		expect(rows).toHaveLength(0);
 	});
 
 	it("resetAllCaches clears all module caches", () => {
@@ -65,7 +84,85 @@ describe("cache behavior", () => {
 
 		resetAllCaches();
 
-		// After reset, readPendingFixes reads from disk (which is empty)
+		// After reset, readPendingFixes reads from DB (which is empty since we didn't flush)
 		expect(readPendingFixes()).toEqual([]);
+	});
+});
+
+describe("_dirty flag on flush failure", () => {
+	it("remains dirty when flush throws (so next flush can retry)", () => {
+		// Mark state dirty
+		disableGate("lint");
+
+		// Break the DB connection so flush() will fail
+		const db = getDb();
+		db.close();
+
+		// flush() must not throw (fail-open)
+		expect(() => flushSessionState()).not.toThrow();
+
+		// Re-open a fresh in-memory DB
+		useTestDb();
+		setProjectPath(TEST_DIR);
+		setSessionScope("test-session");
+		ensureSession();
+
+		// The second flush should succeed and persist the gate,
+		// because _dirty remained true after the first failure
+		flushSessionState();
+
+		const db2 = getDb();
+		const sid = getSessionId();
+		const rows = db2
+			.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?")
+			.all(sid) as { gate_name: string }[];
+		expect(rows.map((r) => r.gate_name)).toContain("lint");
+	});
+});
+
+describe("disabled_gates merge on flush", () => {
+	it("does not clobber MCP-added gates when in-memory set is empty", () => {
+		const db = getDb();
+		const sid = getSessionId();
+
+		// Simulate MCP writing a gate directly to DB (bypassing in-memory cache)
+		db.prepare(
+			"INSERT OR REPLACE INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)",
+		).run(sid, "lint", "disabled via MCP");
+
+		// In-memory cache has a different gate added, doesn't know about "lint"
+		disableGate("typecheck");
+		flushSessionState();
+
+		// "lint" written by MCP should still be present
+		const rows = db
+			.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?")
+			.all(sid) as { gate_name: string }[];
+		const names = rows.map((r) => r.gate_name).sort();
+		expect(names).toContain("lint");
+		expect(names).toContain("typecheck");
+	});
+
+	it("removes re-enabled gate from DB even if MCP had written it", () => {
+		const db = getDb();
+		const sid = getSessionId();
+
+		// Gate starts disabled in DB
+		db.prepare(
+			"INSERT OR REPLACE INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)",
+		).run(sid, "lint", "old reason");
+
+		// Process reads state and re-enables lint
+		disableGate("lint"); // load into cache first
+		resetSessionStateCache();
+		// Re-read from DB so cache knows about "lint"
+		readSessionState();
+		enableGate("lint"); // removes from cache
+		flushSessionState();
+
+		const rows = db
+			.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?")
+			.all(sid) as { gate_name: string }[];
+		expect(rows.map((r) => r.gate_name)).not.toContain("lint");
 	});
 });

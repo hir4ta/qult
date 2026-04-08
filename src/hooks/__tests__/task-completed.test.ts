@@ -2,6 +2,14 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { saveGates } from "../../gates/load.ts";
+import {
+	closeDb,
+	ensureSession,
+	setProjectPath,
+	setSessionScope,
+	useTestDb,
+} from "../../state/db.ts";
 import { resetAllCaches } from "../../state/flush.ts";
 
 vi.mock("node:child_process", () => ({
@@ -11,14 +19,18 @@ vi.mock("node:child_process", () => ({
 const mockedSpawnSync = vi.mocked(spawnSync);
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-task-completed-test");
-const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 let stdoutCapture: string[] = [];
 let stderrCapture: string[] = [];
 const originalCwd = process.cwd();
 
 beforeEach(() => {
+	useTestDb();
+	setProjectPath(TEST_DIR);
+	setSessionScope("test-session");
+	ensureSession();
 	resetAllCaches();
-	mkdirSync(STATE_DIR, { recursive: true });
+	rmSync(TEST_DIR, { recursive: true, force: true });
+	mkdirSync(TEST_DIR, { recursive: true });
 	process.chdir(TEST_DIR);
 	stdoutCapture = [];
 	mockedSpawnSync.mockReset();
@@ -44,6 +56,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.restoreAllMocks();
+	closeDb();
 	process.chdir(originalCwd);
 	rmSync(TEST_DIR, { recursive: true, force: true });
 });
@@ -55,7 +68,8 @@ function writePlan(content: string): void {
 }
 
 function writeGates(gates: Record<string, unknown>): void {
-	writeFileSync(join(TEST_DIR, ".qult", "gates.json"), JSON.stringify(gates));
+	saveGates(gates as import("../../types.ts").GatesConfig);
+	resetAllCaches();
 }
 
 const PLAN_WITH_VERIFY = `## Context

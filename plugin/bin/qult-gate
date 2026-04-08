@@ -8,12 +8,11 @@
 #   qult-gate version      Show qult version
 #
 # This script is added to PATH by the qult plugin.
-# It reads .qult/gates.json and executes gate commands directly.
+# It queries ~/.qult/qult.db for gate configuration.
 
 set -euo pipefail
 
-QULT_DIR=".qult"
-GATES_FILE="${QULT_DIR}/gates.json"
+DB_PATH="${HOME}/.qult/qult.db"
 
 # Colors
 RED='\033[0;31m'
@@ -27,44 +26,45 @@ cmd="${1:-help}"
 case "$cmd" in
   status)
     echo -e "${CYAN}qult gate status${NC}"
-    if [ ! -f "$GATES_FILE" ]; then
-      echo -e "${YELLOW}No gates configured.${NC} Run /qult:init"
+    if [ ! -f "$DB_PATH" ]; then
+      echo -e "${YELLOW}No DB found.${NC} Run /qult:init"
       exit 0
     fi
 
     # Show gates
     echo -e "\n${CYAN}Gates:${NC}"
-    if command -v node >/dev/null 2>&1; then
-      node -e "
-        const g = JSON.parse(require('fs').readFileSync('$GATES_FILE','utf8'));
-        for (const [cat, gates] of Object.entries(g)) {
-          for (const [name, def] of Object.entries(gates)) {
-            console.log('  ' + cat + '/' + name + ': ' + def.command);
-          }
-        }
+    if command -v bun >/dev/null 2>&1; then
+      bun -e "
+        const { Database } = require('bun:sqlite');
+        const db = new Database('$DB_PATH', { readonly: true });
+        const cwd = process.cwd();
+        const project = db.prepare('SELECT id FROM projects WHERE path = ?').get(cwd);
+        if (!project) { console.log('  Project not registered. Run /qult:init'); process.exit(0); }
+        const gates = db.prepare('SELECT phase, gate_name, command FROM gate_configs WHERE project_id = ?').all(project.id);
+        if (gates.length === 0) { console.log('  No gates configured.'); process.exit(0); }
+        for (const g of gates) { console.log('  ' + g.phase + '/' + g.gate_name + ': ' + g.command); }
+        db.close();
       "
     else
-      cat "$GATES_FILE"
+      echo -e "${YELLOW}Bun required for qult-gate.${NC}"
+      exit 1
     fi
 
     # Show pending fixes
     echo -e "\n${CYAN}State:${NC}"
-    state_dir="${QULT_DIR}/.state"
-    if [ -d "$state_dir" ]; then
-      pf=$(find "$state_dir" -name 'pending-fixes*.json' -newer "$state_dir" 2>/dev/null | head -1)
-      if [ -n "$pf" ] && [ -f "$pf" ]; then
-        fixes=$(node -e "const f=JSON.parse(require('fs').readFileSync('$pf','utf8')); console.log(f.length || 0)" 2>/dev/null || echo "?")
-        if [ "$fixes" = "0" ]; then
-          echo -e "  Pending fixes: ${GREEN}none${NC}"
-        else
-          echo -e "  Pending fixes: ${RED}${fixes}${NC}"
-        fi
-      else
-        echo -e "  Pending fixes: ${GREEN}none${NC}"
-      fi
-    else
-      echo -e "  State dir: ${YELLOW}not found${NC}"
-    fi
+    bun -e "
+      const { Database } = require('bun:sqlite');
+      const db = new Database('$DB_PATH', { readonly: true });
+      const cwd = process.cwd();
+      const project = db.prepare('SELECT id FROM projects WHERE path = ?').get(cwd);
+      if (!project) { console.log('  No session data.'); process.exit(0); }
+      const session = db.prepare('SELECT id FROM sessions WHERE project_id = ? ORDER BY started_at DESC LIMIT 1').get(project.id);
+      if (!session) { console.log('  No active session.'); process.exit(0); }
+      const fixes = db.prepare('SELECT count(*) as n FROM pending_fixes WHERE session_id = ?').get(session.id);
+      if (fixes.n === 0) { console.log('  Pending fixes: \x1b[32mnone\x1b[0m'); }
+      else { console.log('  Pending fixes: \x1b[31m' + fixes.n + '\x1b[0m'); }
+      db.close();
+    "
     ;;
 
   run-lint)
@@ -73,21 +73,26 @@ case "$cmd" in
       echo "Usage: qult-gate run-lint <file>"
       exit 1
     fi
-    if [ ! -f "$GATES_FILE" ]; then
-      echo "No gates configured."
+    if [ ! -f "$DB_PATH" ]; then
+      echo "No DB found. Run /qult:init"
       exit 0
     fi
     echo -e "${CYAN}Running on_write gates on ${file}${NC}"
-    node -e "
-      const g = JSON.parse(require('fs').readFileSync('$GATES_FILE','utf8'));
-      const gates = g.on_write || {};
+    bun -e "
+      const { Database } = require('bun:sqlite');
       const { execSync } = require('child_process');
+      const db = new Database('$DB_PATH', { readonly: true });
+      const cwd = process.cwd();
+      const project = db.prepare('SELECT id FROM projects WHERE path = ?').get(cwd);
+      if (!project) { console.log('Project not registered.'); process.exit(0); }
+      const gates = db.prepare(\"SELECT gate_name, command, timeout FROM gate_configs WHERE project_id = ? AND phase = 'on_write'\").all(project.id);
+      db.close();
       let ok = true;
-      for (const [name, def] of Object.entries(gates)) {
-        const cmd = def.command.replace('{file}', '$file');
-        process.stdout.write('  ' + name + ': ');
+      for (const g of gates) {
+        const cmd = g.command.replace('{file}', '$file');
+        process.stdout.write('  ' + g.gate_name + ': ');
         try {
-          execSync(cmd, { stdio: 'pipe', timeout: def.timeout || 10000 });
+          execSync(cmd, { stdio: 'pipe', timeout: g.timeout || 10000 });
           console.log('\x1b[32mPASS\x1b[0m');
         } catch (e) {
           console.log('\x1b[31mFAIL\x1b[0m');
@@ -100,20 +105,25 @@ case "$cmd" in
     ;;
 
   run-test)
-    if [ ! -f "$GATES_FILE" ]; then
-      echo "No gates configured."
+    if [ ! -f "$DB_PATH" ]; then
+      echo "No DB found. Run /qult:init"
       exit 0
     fi
     echo -e "${CYAN}Running on_commit gates${NC}"
-    node -e "
-      const g = JSON.parse(require('fs').readFileSync('$GATES_FILE','utf8'));
-      const gates = g.on_commit || {};
+    bun -e "
+      const { Database } = require('bun:sqlite');
       const { execSync } = require('child_process');
+      const db = new Database('$DB_PATH', { readonly: true });
+      const cwd = process.cwd();
+      const project = db.prepare('SELECT id FROM projects WHERE path = ?').get(cwd);
+      if (!project) { console.log('Project not registered.'); process.exit(0); }
+      const gates = db.prepare(\"SELECT gate_name, command, timeout FROM gate_configs WHERE project_id = ? AND phase = 'on_commit'\").all(project.id);
+      db.close();
       let ok = true;
-      for (const [name, def] of Object.entries(gates)) {
-        process.stdout.write('  ' + name + ': ');
+      for (const g of gates) {
+        process.stdout.write('  ' + g.gate_name + ': ');
         try {
-          execSync(def.command, { stdio: 'pipe', timeout: def.timeout || 30000 });
+          execSync(g.command, { stdio: 'pipe', timeout: g.timeout || 30000 });
           console.log('\x1b[32mPASS\x1b[0m');
         } catch (e) {
           console.log('\x1b[31mFAIL\x1b[0m');
@@ -127,7 +137,7 @@ case "$cmd" in
 
   version)
     if [ -f "${CLAUDE_PLUGIN_ROOT:-}/dist/hook.mjs" ]; then
-      node -e "
+      bun -e "
         const src = require('fs').readFileSync('${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs','utf8');
         const m = src.match(/__QULT_VERSION__.*?\"([^\"]+)\"/);
         console.log('qult ' + (m ? m[1] : 'unknown'));
@@ -138,7 +148,7 @@ case "$cmd" in
     ;;
 
   help|*)
-    echo "qult-gate — Quality gate CLI"
+    echo "qult-gate — Quality gate CLI (requires Bun)"
     echo ""
     echo "Commands:"
     echo "  status       Show gate config and pending fixes"

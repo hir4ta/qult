@@ -1,20 +1,27 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	closeDb,
+	ensureSession,
+	setProjectPath,
+	setSessionScope,
+	useTestDb,
+} from "../../state/db.ts";
 import { resetAllCaches } from "../../state/flush.ts";
+import { writePendingFixes } from "../../state/pending-fixes.ts";
+import { disableGate, recordChangedFile, recordTestPass } from "../../state/session-state.ts";
 
-const TEST_DIR = join(import.meta.dirname, ".tmp-respond");
-const STATE_DIR = join(TEST_DIR, ".qult", ".state");
+const TEST_DIR = "/tmp/.tmp-respond-test";
 
 let stdoutCapture: string[] = [];
 let stderrCapture: string[] = [];
 let exitCode: number | null = null;
-const originalCwd = process.cwd();
 
 beforeEach(() => {
+	useTestDb();
+	setProjectPath(TEST_DIR);
+	setSessionScope("test-session");
+	ensureSession();
 	resetAllCaches();
-	mkdirSync(STATE_DIR, { recursive: true });
-	process.chdir(TEST_DIR);
 	stdoutCapture = [];
 	stderrCapture = [];
 	exitCode = null;
@@ -35,8 +42,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.restoreAllMocks();
-	process.chdir(originalCwd);
-	rmSync(TEST_DIR, { recursive: true, force: true });
+	closeDb();
 });
 
 describe("setCurrentEvent / getCurrentEvent", () => {
@@ -140,10 +146,7 @@ describe("block() fail-open", () => {
 
 describe("compactStateSummary()", () => {
 	it("includes pending fixes count when fixes exist", async () => {
-		writeFileSync(
-			join(STATE_DIR, "pending-fixes.json"),
-			JSON.stringify([{ file: "a.ts", errors: ["error"], gate: "lint" }]),
-		);
+		writePendingFixes([{ file: "a.ts", errors: ["error"], gate: "lint" }]);
 		const { compactStateSummary } = await import("../respond.ts");
 		const summary = compactStateSummary();
 		expect(summary).toContain("1 pending fix(es)");
@@ -157,38 +160,31 @@ describe("compactStateSummary()", () => {
 	});
 
 	it("shows PASS when tests passed", async () => {
-		writeFileSync(
-			join(STATE_DIR, "session-state.json"),
-			JSON.stringify({ test_passed_at: "2024-01-01T00:00:00Z", test_command: "vitest" }),
-		);
+		recordTestPass("vitest");
 		const { compactStateSummary } = await import("../respond.ts");
 		const summary = compactStateSummary();
 		expect(summary).toContain("tests: PASS");
 	});
 
 	it("includes changed file count", async () => {
-		writeFileSync(
-			join(STATE_DIR, "session-state.json"),
-			JSON.stringify({ changed_file_paths: ["a.ts", "b.ts", "c.ts"] }),
-		);
+		recordChangedFile("a.ts");
+		recordChangedFile("b.ts");
+		recordChangedFile("c.ts");
 		const { compactStateSummary } = await import("../respond.ts");
 		const summary = compactStateSummary();
 		expect(summary).toContain("3 file(s) changed");
 	});
 
 	it("includes disabled gates", async () => {
-		writeFileSync(
-			join(STATE_DIR, "session-state.json"),
-			JSON.stringify({ disabled_gates: ["lint", "review"] }),
-		);
+		disableGate("lint");
+		disableGate("review");
 		const { compactStateSummary } = await import("../respond.ts");
 		const summary = compactStateSummary();
 		expect(summary).toContain("disabled: lint,review");
 	});
 
 	it("returns empty string on error (fail-open)", async () => {
-		// Remove state dir to trigger error
-		rmSync(TEST_DIR, { recursive: true, force: true });
+		closeDb();
 		const { compactStateSummary } = await import("../respond.ts");
 		const summary = compactStateSummary();
 		// Should not throw, returns empty or valid summary

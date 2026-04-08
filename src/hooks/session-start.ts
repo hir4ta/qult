@@ -1,27 +1,31 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { cleanupStaleScopedFiles } from "../state/cleanup.ts";
 import { detectRecurringPatterns, recordSessionMetrics } from "../state/metrics.ts";
 import { flush as flushPendingFixes, writePendingFixes } from "../state/pending-fixes.ts";
 import { readSessionState } from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
 import { markSessionStartCompleted } from "./lazy-init.ts";
 
-/** SessionStart: initialize state directory, clean stale files, optionally clear pending-fixes. */
+let _legacyWarned = false;
+
+/** SessionStart: record previous session metrics, optionally clear pending-fixes. */
 export default async function sessionStart(ev: HookEvent): Promise<void> {
 	try {
-		const stateDir = join(process.cwd(), ".qult", ".state");
-		if (!existsSync(stateDir)) {
-			mkdirSync(stateDir, { recursive: true });
+		// Legacy .qult/ directory warning (once per process)
+		if (!_legacyWarned) {
+			_legacyWarned = true;
+			const cwd = ev.cwd ?? process.cwd();
+			if (existsSync(join(cwd, ".qult"))) {
+				process.stderr.write(
+					"[qult] Legacy .qult/ directory detected. State is now stored in ~/.qult/qult.db. You can safely delete .qult/ from this project.\n",
+				);
+			}
 		}
-
-		cleanupStaleScopedFiles(stateDir);
-
 		// Only clear pending-fixes on fresh session start (not compact/resume)
 		if (ev.source === "startup" || ev.source === "clear") {
 			// Record metrics from previous session before clearing state
 			try {
-				const cwd = process.cwd();
+				const cwd = ev.cwd ?? process.cwd();
 				const prevState = readSessionState();
 				const gateFailures = Object.values(prevState.gate_failure_counts ?? {}).reduce(
 					(sum: number, v: unknown) => sum + (typeof v === "number" ? v : 0),

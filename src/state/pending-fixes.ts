@@ -1,48 +1,33 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { PendingFix } from "../types.ts";
-import { atomicWriteJson } from "./atomic-write.ts";
-
-const STATE_DIR = ".qult/.state";
-const FIXES_FILE = "pending-fixes.json";
+import { ensureSession, getDb, getSessionId } from "./db.ts";
 
 // Process-scoped cache
 let _cache: PendingFix[] | null = null;
 let _dirty = false;
 
-// Session-scoped file path: pending-fixes-{sessionId}.json
-let _sessionScope: string | null = null;
-
-/** Set session scope for pending-fixes file isolation. Rejects path-traversal characters. */
-export function setFixesSessionScope(sessionId: string): void {
-	if (!/^[\w-]+$/.test(sessionId)) return;
-	_sessionScope = sessionId;
-}
-
-function fixesPath(): string {
-	const file = _sessionScope ? `pending-fixes-${_sessionScope}.json` : FIXES_FILE;
-	return join(process.cwd(), STATE_DIR, file);
-}
-
 /** Read current pending fixes. Returns empty array on any error (fail-open). */
 export function readPendingFixes(): PendingFix[] {
 	if (_cache) return _cache;
 	try {
-		const path = fixesPath();
-		if (!existsSync(path)) {
-			_cache = [];
-			return _cache;
-		}
-		const raw = readFileSync(path, "utf-8");
-		_cache = JSON.parse(raw);
-		return _cache!;
+		const db = getDb();
+		const sid = getSessionId();
+		ensureSession();
+		const rows = db
+			.prepare("SELECT file, gate, errors FROM pending_fixes WHERE session_id = ?")
+			.all(sid) as { file: string; gate: string; errors: string }[];
+		_cache = rows.map((r) => ({
+			file: r.file,
+			gate: r.gate,
+			errors: JSON.parse(r.errors) as string[],
+		}));
+		return _cache;
 	} catch {
 		_cache = [];
 		return _cache;
 	}
 }
 
-/** Write pending fixes to state file (cache only — flushed at end of hook). */
+/** Write pending fixes (cache only — flushed at end of hook). */
 export function writePendingFixes(fixes: PendingFix[]): void {
 	_cache = fixes;
 	_dirty = true;
@@ -63,11 +48,27 @@ export function clearPendingFixesForFile(file: string): void {
 	}
 }
 
-/** Flush cached fixes to disk if dirty. */
+/** Flush cached fixes to DB if dirty. */
 export function flush(): void {
 	if (!_dirty || !_cache) return;
 	try {
-		atomicWriteJson(fixesPath(), _cache);
+		const db = getDb();
+		const sid = getSessionId();
+
+		db.exec("BEGIN");
+		try {
+			db.prepare("DELETE FROM pending_fixes WHERE session_id = ?").run(sid);
+			const insert = db.prepare(
+				"INSERT INTO pending_fixes (session_id, file, gate, errors) VALUES (?, ?, ?, ?)",
+			);
+			for (const fix of _cache) {
+				insert.run(sid, fix.file, fix.gate, JSON.stringify(fix.errors));
+			}
+			db.exec("COMMIT");
+		} catch (err) {
+			db.exec("ROLLBACK");
+			throw err;
+		}
 	} catch (e) {
 		if (e instanceof Error) process.stderr.write(`[qult] write error: ${e.message}\n`);
 	}
@@ -78,5 +79,4 @@ export function flush(): void {
 export function resetCache(): void {
 	_cache = null;
 	_dirty = false;
-	_sessionScope = null;
 }

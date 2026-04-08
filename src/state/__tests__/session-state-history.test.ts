@@ -1,6 +1,5 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { closeDb, ensureSession, setProjectPath, setSessionScope, useTestDb } from "../db.ts";
 import { resetAllCaches } from "../flush.ts";
 import {
 	clearOnCommit,
@@ -14,19 +13,18 @@ import {
 	resetReviewIteration,
 } from "../session-state.ts";
 
-const TEST_DIR = join(import.meta.dirname, ".tmp-history");
-const STATE_DIR = join(TEST_DIR, ".qult", ".state");
-const originalCwd = process.cwd();
+const TEST_DIR = "/tmp/.tmp-history";
 
 beforeEach(() => {
+	useTestDb();
+	setProjectPath(TEST_DIR);
+	setSessionScope("test-session");
+	ensureSession();
 	resetAllCaches();
-	mkdirSync(STATE_DIR, { recursive: true });
-	process.chdir(TEST_DIR);
 });
 
 afterEach(() => {
-	process.chdir(originalCwd);
-	rmSync(TEST_DIR, { recursive: true, force: true });
+	closeDb();
 });
 
 describe("review score history", () => {
@@ -71,24 +69,5 @@ describe("plan eval score history", () => {
 
 		resetPlanEvalIteration();
 		expect(getPlanEvalScoreHistory()).toEqual([]);
-	});
-});
-
-describe("legacy migration", () => {
-	it("migrates scalar review_last_aggregate to array", () => {
-		writeFileSync(
-			join(STATE_DIR, "session-state.json"),
-			JSON.stringify({
-				review_iteration: 1,
-				review_last_aggregate: 9,
-				plan_eval_iteration: 0,
-				plan_eval_last_aggregate: 0,
-			}),
-		);
-		resetAllCaches();
-
-		const state = readSessionState();
-		expect(state.review_score_history).toEqual([9]);
-		expect(state.plan_eval_score_history).toEqual([]);
 	});
 });

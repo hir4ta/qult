@@ -13,14 +13,14 @@ View or change qult configuration values.
 The user will specify what they want:
 - "show config" / "current settings" -> show current config
 - "set score threshold to 10" / "lower review threshold" -> change a value
-- "reset config" -> delete .qult/config.json to use defaults
+- "reset config" -> use MCP set_config to reset values to defaults
 
 ## Steps
 
 ### Show current config
 
 1. Call `mcp__plugin_qult_qult__get_session_status()` for current session state
-2. Read `.qult/config.json` if it exists (via Read tool)
+2. Call `mcp__plugin_qult_qult__get_gate_config()` for current config values (stored in DB)
 3. Present current values with defaults noted
 
 ### Change a config value
@@ -38,5 +38,5 @@ Allowed keys:
 
 ### Reset config
 
-1. Delete `.qult/config.json` via Bash `rm .qult/config.json`
+1. For each config key, call `mcp__plugin_qult_qult__set_config({ key: "<key>", value: <default_value> })` with its default value
 2. Confirm reset to defaults

@@ -1,20 +1,32 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetAllCaches } from "../../state/flush.ts";
-import { readPendingFixes } from "../../state/pending-fixes.ts";
-import type { PendingFix } from "../../types.ts";
+import {
+	closeDb,
+	ensureSession,
+	getDb,
+	getProjectId,
+	setProjectPath,
+	setSessionScope,
+	useTestDb,
+} from "../../state/db.ts";
+import { flushAll, resetAllCaches } from "../../state/flush.ts";
+import { readPendingFixes, writePendingFixes } from "../../state/pending-fixes.ts";
+import { recordChangedFile } from "../../state/session-state.ts";
 import { resetLazyInit } from "../lazy-init.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-session-start");
-const QULT_DIR = join(TEST_DIR, ".qult");
-const STATE_DIR = join(QULT_DIR, ".state");
 const originalCwd = process.cwd();
 
 beforeEach(() => {
+	useTestDb();
+	setProjectPath(TEST_DIR);
+	setSessionScope("test-session");
+	ensureSession();
 	resetAllCaches();
 	resetLazyInit();
-	mkdirSync(STATE_DIR, { recursive: true });
+	rmSync(TEST_DIR, { recursive: true, force: true });
+	mkdirSync(TEST_DIR, { recursive: true });
 	process.chdir(TEST_DIR);
 
 	vi.spyOn(process.stdout, "write").mockImplementation(() => true);
@@ -23,23 +35,14 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.restoreAllMocks();
+	closeDb();
 	process.chdir(originalCwd);
 	rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
 describe("session-start handler", () => {
-	it("creates .qult/.state/ directory if missing", async () => {
-		rmSync(STATE_DIR, { recursive: true, force: true });
-		const sessionStart = (await import("../session-start.ts")).default;
-
-		await sessionStart({ hook_event_name: "SessionStart", source: "startup" } as never);
-
-		expect(existsSync(STATE_DIR)).toBe(true);
-	});
-
 	it("clears pending-fixes on startup source", async () => {
-		const fixes: PendingFix[] = [{ file: "/src/foo.ts", errors: ["err"], gate: "lint" }];
-		writeFileSync(join(STATE_DIR, "pending-fixes.json"), JSON.stringify(fixes));
+		writePendingFixes([{ file: "/src/foo.ts", errors: ["err"], gate: "lint" }]);
 		resetAllCaches();
 
 		const sessionStart = (await import("../session-start.ts")).default;
@@ -51,8 +54,7 @@ describe("session-start handler", () => {
 	});
 
 	it("clears pending-fixes on clear source", async () => {
-		const fixes: PendingFix[] = [{ file: "/src/foo.ts", errors: ["err"], gate: "lint" }];
-		writeFileSync(join(STATE_DIR, "pending-fixes.json"), JSON.stringify(fixes));
+		writePendingFixes([{ file: "/src/foo.ts", errors: ["err"], gate: "lint" }]);
 		resetAllCaches();
 
 		const sessionStart = (await import("../session-start.ts")).default;
@@ -64,8 +66,8 @@ describe("session-start handler", () => {
 	});
 
 	it("does NOT clear pending-fixes on compact source", async () => {
-		const fixes: PendingFix[] = [{ file: "/src/foo.ts", errors: ["err"], gate: "lint" }];
-		writeFileSync(join(STATE_DIR, "pending-fixes.json"), JSON.stringify(fixes));
+		writePendingFixes([{ file: "/src/foo.ts", errors: ["err"], gate: "lint" }]);
+		flushAll();
 		resetAllCaches();
 
 		const sessionStart = (await import("../session-start.ts")).default;
@@ -77,8 +79,8 @@ describe("session-start handler", () => {
 	});
 
 	it("does NOT clear pending-fixes on resume source", async () => {
-		const fixes: PendingFix[] = [{ file: "/src/foo.ts", errors: ["err"], gate: "lint" }];
-		writeFileSync(join(STATE_DIR, "pending-fixes.json"), JSON.stringify(fixes));
+		writePendingFixes([{ file: "/src/foo.ts", errors: ["err"], gate: "lint" }]);
+		flushAll();
 		resetAllCaches();
 
 		const sessionStart = (await import("../session-start.ts")).default;
@@ -87,19 +89,6 @@ describe("session-start handler", () => {
 		resetAllCaches();
 		const remaining = readPendingFixes();
 		expect(remaining.length).toBe(1);
-	});
-
-	it("cleans up stale scoped files (>24h)", async () => {
-		const staleFile = join(STATE_DIR, "pending-fixes-old-session.json");
-		writeFileSync(staleFile, "[]");
-		const { utimesSync } = await import("node:fs");
-		const pastTime = (Date.now() - 25 * 60 * 60 * 1000) / 1000;
-		utimesSync(staleFile, pastTime, pastTime);
-
-		const sessionStart = (await import("../session-start.ts")).default;
-		await sessionStart({ hook_event_name: "SessionStart", source: "startup" } as never);
-
-		expect(existsSync(staleFile)).toBe(false);
 	});
 
 	it("sets flag so lazyInit becomes no-op", async () => {
@@ -112,8 +101,8 @@ describe("session-start handler", () => {
 	});
 
 	it("fail-open on errors", async () => {
-		rmSync(TEST_DIR, { recursive: true, force: true });
-		// Even when the base dir doesn't exist, should not throw
+		closeDb();
+		// Even when the DB is closed, should not throw
 		const sessionStart = (await import("../session-start.ts")).default;
 		await expect(
 			sessionStart({ hook_event_name: "SessionStart", source: "startup" } as never),
@@ -121,17 +110,18 @@ describe("session-start handler", () => {
 	});
 
 	it("records metrics on startup", async () => {
-		// Arrange: write previous session state with gate failures
-		writeFileSync(
-			join(STATE_DIR, "session-state.json"),
-			JSON.stringify({
-				gate_failure_counts: { "src/foo.ts:lint": 2, "src/bar.ts:typecheck": 1 },
-				security_warning_count: 1,
-				changed_file_paths: ["src/foo.ts", "src/bar.ts"],
-				review_completed_at: null,
-				review_score_history: [],
-			}),
+		// Arrange: populate session state with gate failures and changed files
+		const { incrementGateFailure, incrementEscalation } = await import(
+			"../../state/session-state.ts"
 		);
+		const { flushAll } = await import("../../state/flush.ts");
+		incrementGateFailure("src/foo.ts", "lint");
+		incrementGateFailure("src/foo.ts", "lint");
+		incrementGateFailure("src/bar.ts", "typecheck");
+		incrementEscalation("security_warning_count");
+		recordChangedFile("src/foo.ts");
+		recordChangedFile("src/bar.ts");
+		flushAll();
 		resetAllCaches();
 
 		const sessionStart = (await import("../session-start.ts")).default;
@@ -141,12 +131,18 @@ describe("session-start handler", () => {
 			session_id: "test-session",
 		} as never);
 
-		const metricsPath = join(STATE_DIR, "metrics-history.json");
-		expect(existsSync(metricsPath)).toBe(true);
-		const history = JSON.parse(readFileSync(metricsPath, "utf-8"));
-		expect(history).toHaveLength(1);
-		expect(history[0].gate_failures).toBe(3);
-		expect(history[0].security_warnings).toBe(1);
-		expect(history[0].files_changed).toBe(2);
+		const db = getDb();
+		const projectId = getProjectId();
+		const rows = db
+			.prepare("SELECT * FROM session_metrics WHERE project_id = ?")
+			.all(projectId) as {
+			gate_failure_count: number;
+			security_warning_count: number;
+			files_changed: number;
+		}[];
+		expect(rows).toHaveLength(1);
+		expect(rows[0]!.gate_failure_count).toBe(3);
+		expect(rows[0]!.security_warning_count).toBe(1);
+		expect(rows[0]!.files_changed).toBe(2);
 	});
 });

@@ -1,27 +1,8 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { loadConfig } from "../config.ts";
 import { loadGates } from "../gates/load.ts";
 import { computeReviewTier } from "../review-tier.ts";
-import { atomicWriteJson } from "./atomic-write.ts";
+import { ensureSession, getDb, getSessionId } from "./db.ts";
 import { getActivePlan } from "./plan-status.ts";
-
-const STATE_DIR = ".qult/.state";
-const FILE = "session-state.json";
-
-// Process-scoped cache: read once from disk, flush once at end
-let _cache: SessionState | null = null;
-let _dirty = false;
-
-// Session-scoped file path: session-state-{sessionId}.json
-let _sessionScope: string | null = null;
-
-/** Set session scope for state file isolation. Rejects path-traversal characters.
- *  Allows alphanumeric, hyphens, underscores, dots, and colons (some environments use these). */
-export function setStateSessionScope(sessionId: string): void {
-	if (!/^[\w.\-:]+$/.test(sessionId)) return;
-	_sessionScope = sessionId;
-}
 
 /**
  * Per-session quality state.
@@ -31,72 +12,50 @@ export function setStateSessionScope(sessionId: string): void {
  */
 export interface SessionState {
 	// ── Commit lifecycle ─────────────────────────────────────
-	/** When the last commit gate reset occurred (ISO timestamp) */
 	last_commit_at: string;
 
 	// ── Test gate ────────────────────────────────────────────
-	/** When tests last passed (ISO timestamp, null = not passed since last commit) */
 	test_passed_at: string | null;
-	/** The test command that was detected as passing */
 	test_command: string | null;
 
 	// ── Review gate ──────────────────────────────────────────
-	/** When independent review last completed (ISO timestamp) */
 	review_completed_at: string | null;
-	/** Number of review iterations in current cycle (0 = not started) */
 	review_iteration: number;
-	/** Aggregate scores per iteration for trend detection */
 	review_score_history: number[];
-	/** Per-stage scores for 3-stage aggregate (e.g. {"Spec": {"completeness": 5, "accuracy": 4}}) */
 	review_stage_scores: Record<string, Record<string, number>>;
 
 	// ── Plan evaluation ──────────────────────────────────────
-	/** Number of plan evaluation iterations (0 = not started) */
 	plan_eval_iteration: number;
-	/** Aggregate scores per iteration for trend detection */
 	plan_eval_score_history: number[];
-	/** When ExitPlanMode was first denied for selfcheck (null = not yet) */
 	plan_selfcheck_blocked_at: string | null;
 
 	// ── Gate batch tracking ──────────────────────────────────
-	/** Per-gate run tracking for run_once_per_batch dedup */
 	ran_gates: Record<string, { session_id: string; ran_at: string }>;
 
 	// ── File tracking ────────────────────────────────────────
-	/** Files edited this session (for review threshold) */
 	changed_file_paths: string[];
 
 	// ── Gate override ────────────────────────────────────────
-	/** Gates temporarily disabled for this session */
 	disabled_gates: string[];
 
 	// ── TDD RED verification ─────────────────────────────────
-	/** Per-task Verify test results for RED-GREEN enforcement (key = "Task N") */
 	task_verify_results: Record<string, { passed: boolean; ran_at: string }>;
 
 	// ── Gate failure escalation ──────────────────────────────
-	/** Per-file:gate failure count for 3-Strike escalation (key = "file:gate") */
 	gate_failure_counts: Record<string, number>;
 
-	// ── Quality escalation counters ────��────────────────────
-	/** Security warnings emitted this session (for escalation) */
+	// ── Quality escalation counters ──────────────────────────
 	security_warning_count: number;
-	/** Test quality warnings emitted this session (for escalation) */
 	test_quality_warning_count: number;
-	/** Drift warnings emitted this session (for escalation) */
 	drift_warning_count: number;
-	/** Dead import warnings emitted this session (for escalation) */
 	dead_import_warning_count: number;
-	/** Duplication warnings emitted this session (for escalation) */
 	duplication_warning_count: number;
-	/** When human review was approved (ISO timestamp, null = not approved) */
 	human_review_approved_at: string | null;
 }
 
-function filePath(): string {
-	const file = _sessionScope ? `session-state-${_sessionScope}.json` : FILE;
-	return join(process.cwd(), STATE_DIR, file);
-}
+// Process-scoped cache: read once from DB, flush once at end
+let _cache: SessionState | null = null;
+let _dirty = false;
 
 function defaultState(): SessionState {
 	return {
@@ -124,39 +83,91 @@ function defaultState(): SessionState {
 	};
 }
 
-/** Read session state. Returns defaults on error (fail-open). */
+/** Read session state from DB. Returns defaults on error (fail-open). */
 export function readSessionState(): SessionState {
 	if (_cache) return _cache;
 	try {
-		const path = filePath();
-		if (!existsSync(path)) {
+		const db = getDb();
+		const sid = getSessionId();
+		ensureSession();
+
+		// Read session scalar fields
+		const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sid) as Record<
+			string,
+			unknown
+		> | null;
+		if (!row) {
 			_cache = defaultState();
 			return _cache;
 		}
-		const raw = JSON.parse(readFileSync(path, "utf-8"));
-		// Migrate legacy scalar fields before merge
-		if (
-			!Array.isArray(raw.review_score_history) &&
-			typeof raw.review_last_aggregate === "number" &&
-			raw.review_last_aggregate > 0
-		) {
-			raw.review_score_history = [raw.review_last_aggregate];
+
+		const state = defaultState();
+		state.last_commit_at = (row.last_commit_at as string) ?? state.last_commit_at;
+		state.test_passed_at = (row.test_passed_at as string | null) ?? null;
+		state.test_command = (row.test_command as string | null) ?? null;
+		state.review_completed_at = (row.review_completed_at as string | null) ?? null;
+		state.review_iteration = (row.review_iteration as number) ?? 0;
+		state.plan_eval_iteration = (row.plan_eval_iteration as number) ?? 0;
+		state.plan_selfcheck_blocked_at = (row.plan_selfcheck_blocked_at as string | null) ?? null;
+		state.human_review_approved_at = (row.human_review_approved_at as string | null) ?? null;
+		state.security_warning_count = (row.security_warning_count as number) ?? 0;
+		state.test_quality_warning_count = (row.test_quality_warning_count as number) ?? 0;
+		state.drift_warning_count = (row.drift_warning_count as number) ?? 0;
+		state.dead_import_warning_count = (row.dead_import_warning_count as number) ?? 0;
+		state.duplication_warning_count = (row.duplication_warning_count as number) ?? 0;
+
+		// Read child tables
+		const changedFiles = db
+			.prepare("SELECT file_path FROM changed_files WHERE session_id = ?")
+			.all(sid) as { file_path: string }[];
+		state.changed_file_paths = changedFiles.map((r) => r.file_path);
+
+		const disabledGates = db
+			.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?")
+			.all(sid) as { gate_name: string }[];
+		state.disabled_gates = disabledGates.map((r) => r.gate_name);
+
+		const ranGates = db
+			.prepare("SELECT gate_name, ran_at FROM ran_gates WHERE session_id = ?")
+			.all(sid) as { gate_name: string; ran_at: string }[];
+		for (const g of ranGates) {
+			state.ran_gates[g.gate_name] = { session_id: sid, ran_at: g.ran_at };
 		}
-		if (
-			!Array.isArray(raw.plan_eval_score_history) &&
-			typeof raw.plan_eval_last_aggregate === "number" &&
-			raw.plan_eval_last_aggregate > 0
-		) {
-			raw.plan_eval_score_history = [raw.plan_eval_last_aggregate];
+
+		const taskResults = db
+			.prepare("SELECT task_key, passed, ran_at FROM task_verify_results WHERE session_id = ?")
+			.all(sid) as { task_key: string; passed: number; ran_at: string }[];
+		for (const t of taskResults) {
+			state.task_verify_results[t.task_key] = { passed: !!t.passed, ran_at: t.ran_at };
 		}
-		const state = { ...defaultState(), ...raw };
-		// Validate review_stage_scores shape (must be Record<string, Record<string, number>>)
-		if (
-			state.review_stage_scores &&
-			(typeof state.review_stage_scores !== "object" || Array.isArray(state.review_stage_scores))
-		) {
-			state.review_stage_scores = {};
+
+		const gateFailures = db
+			.prepare("SELECT file, gate, count FROM gate_failure_counts WHERE session_id = ?")
+			.all(sid) as { file: string; gate: string; count: number }[];
+		for (const f of gateFailures) {
+			state.gate_failure_counts[`${f.file}:${f.gate}`] = f.count;
 		}
+
+		const reviewScores = db
+			.prepare("SELECT aggregate_score FROM review_scores WHERE session_id = ? ORDER BY iteration")
+			.all(sid) as { aggregate_score: number }[];
+		state.review_score_history = reviewScores.map((r) => r.aggregate_score);
+
+		const stageScores = db
+			.prepare("SELECT stage, dimension, score FROM review_stage_scores WHERE session_id = ?")
+			.all(sid) as { stage: string; dimension: string; score: number }[];
+		for (const s of stageScores) {
+			if (!state.review_stage_scores[s.stage]) state.review_stage_scores[s.stage] = {};
+			state.review_stage_scores[s.stage]![s.dimension] = s.score;
+		}
+
+		const planScores = db
+			.prepare(
+				"SELECT aggregate_score FROM plan_eval_scores WHERE session_id = ? ORDER BY iteration",
+			)
+			.all(sid) as { aggregate_score: number }[];
+		state.plan_eval_score_history = planScores.map((r) => r.aggregate_score);
+
 		_cache = state;
 		return state;
 	} catch {
@@ -170,27 +181,162 @@ function writeState(state: SessionState): void {
 	_dirty = true;
 }
 
-/** Flush cached state to disk if dirty. */
+/** Flush cached state to DB if dirty. */
 export function flush(): void {
 	if (!_dirty || !_cache) return;
 	try {
-		atomicWriteJson(filePath(), _cache);
+		const db = getDb();
+		const sid = getSessionId();
+		const state = _cache;
+
+		// Use a transaction for atomicity
+		db.exec("BEGIN");
+		try {
+			// Update session scalars
+			db.prepare(`UPDATE sessions SET
+				last_commit_at = ?,
+				test_passed_at = ?,
+				test_command = ?,
+				review_completed_at = ?,
+				review_iteration = ?,
+				plan_eval_iteration = ?,
+				plan_selfcheck_blocked_at = ?,
+				human_review_approved_at = ?,
+				security_warning_count = ?,
+				test_quality_warning_count = ?,
+				drift_warning_count = ?,
+				dead_import_warning_count = ?,
+				duplication_warning_count = ?
+				WHERE id = ?`).run(
+				state.last_commit_at,
+				state.test_passed_at,
+				state.test_command,
+				state.review_completed_at,
+				state.review_iteration,
+				state.plan_eval_iteration,
+				state.plan_selfcheck_blocked_at,
+				state.human_review_approved_at,
+				state.security_warning_count,
+				state.test_quality_warning_count,
+				state.drift_warning_count,
+				state.dead_import_warning_count,
+				state.duplication_warning_count,
+				sid,
+			);
+
+			// Sync changed_files
+			db.prepare("DELETE FROM changed_files WHERE session_id = ?").run(sid);
+			const insertFile = db.prepare(
+				"INSERT INTO changed_files (session_id, file_path) VALUES (?, ?)",
+			);
+			for (const fp of state.changed_file_paths) {
+				insertFile.run(sid, fp);
+			}
+
+			// Sync disabled_gates: merge (INSERT OR IGNORE) to avoid clobbering
+			// concurrent MCP disable_gate writes that bypassed the cache.
+			// Re-enable (enableGate) already removes from cache so stale rows
+			// are cleaned up by the DELETE of rows not in the in-memory set.
+			const inMemoryGates = new Set(state.disabled_gates);
+			const dbGates = db
+				.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?")
+				.all(sid) as { gate_name: string }[];
+			// Remove gates that were re-enabled in-process but exist in DB
+			for (const { gate_name } of dbGates) {
+				if (!inMemoryGates.has(gate_name)) {
+					db.prepare("DELETE FROM disabled_gates WHERE session_id = ? AND gate_name = ?").run(
+						sid,
+						gate_name,
+					);
+				}
+			}
+			// Insert gates that are in-memory but not yet in DB
+			const insertGate = db.prepare(
+				"INSERT OR IGNORE INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)",
+			);
+			for (const g of state.disabled_gates) {
+				insertGate.run(sid, g, "");
+			}
+
+			// Sync ran_gates
+			db.prepare("DELETE FROM ran_gates WHERE session_id = ?").run(sid);
+			const insertRan = db.prepare(
+				"INSERT INTO ran_gates (session_id, gate_name, ran_at) VALUES (?, ?, ?)",
+			);
+			for (const [name, entry] of Object.entries(state.ran_gates)) {
+				insertRan.run(sid, name, entry.ran_at);
+			}
+
+			// Sync task_verify_results
+			db.prepare("DELETE FROM task_verify_results WHERE session_id = ?").run(sid);
+			const insertTask = db.prepare(
+				"INSERT INTO task_verify_results (session_id, task_key, passed, ran_at) VALUES (?, ?, ?, ?)",
+			);
+			for (const [key, result] of Object.entries(state.task_verify_results)) {
+				insertTask.run(sid, key, result.passed ? 1 : 0, result.ran_at);
+			}
+
+			// Sync gate_failure_counts
+			db.prepare("DELETE FROM gate_failure_counts WHERE session_id = ?").run(sid);
+			const insertFailure = db.prepare(
+				"INSERT INTO gate_failure_counts (session_id, file, gate, count) VALUES (?, ?, ?, ?)",
+			);
+			for (const [key, count] of Object.entries(state.gate_failure_counts)) {
+				const lastColon = key.lastIndexOf(":");
+				if (lastColon === -1) continue;
+				const file = key.slice(0, lastColon);
+				const gate = key.slice(lastColon + 1);
+				insertFailure.run(sid, file, gate, count);
+			}
+
+			// Sync review_scores
+			db.prepare("DELETE FROM review_scores WHERE session_id = ?").run(sid);
+			const insertReview = db.prepare(
+				"INSERT INTO review_scores (session_id, iteration, aggregate_score) VALUES (?, ?, ?)",
+			);
+			for (let i = 0; i < state.review_score_history.length; i++) {
+				insertReview.run(sid, i + 1, state.review_score_history[i]!);
+			}
+
+			// Sync review_stage_scores
+			db.prepare("DELETE FROM review_stage_scores WHERE session_id = ?").run(sid);
+			const insertStage = db.prepare(
+				"INSERT INTO review_stage_scores (session_id, stage, dimension, score) VALUES (?, ?, ?, ?)",
+			);
+			for (const [stage, dims] of Object.entries(state.review_stage_scores)) {
+				for (const [dim, score] of Object.entries(dims)) {
+					insertStage.run(sid, stage, dim, score);
+				}
+			}
+
+			// Sync plan_eval_scores
+			db.prepare("DELETE FROM plan_eval_scores WHERE session_id = ?").run(sid);
+			const insertPlan = db.prepare(
+				"INSERT INTO plan_eval_scores (session_id, iteration, aggregate_score) VALUES (?, ?, ?)",
+			);
+			for (let i = 0; i < state.plan_eval_score_history.length; i++) {
+				insertPlan.run(sid, i + 1, state.plan_eval_score_history[i]!);
+			}
+
+			db.exec("COMMIT");
+		} catch (err) {
+			db.exec("ROLLBACK");
+			throw err;
+		}
+		_dirty = false;
 	} catch (e) {
 		if (e instanceof Error) process.stderr.write(`[qult] state write error: ${e.message}\n`);
 	}
-	_dirty = false;
 }
 
 /** Reset cache (for tests). */
 export function resetCache(): void {
 	_cache = null;
 	_dirty = false;
-	_sessionScope = null;
 }
 
 // ── File extension heuristic (for gated-file filtering) ─────
 
-// Tool keyword → file extensions the tool meaningfully checks
 const TOOL_EXTS: [RegExp, string[]][] = [
 	[/\bbiome\b/, [".js", ".jsx", ".ts", ".tsx", ".css", ".graphql"]],
 	[/\beslint\b/, [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".vue", ".svelte"]],
@@ -202,9 +348,6 @@ const TOOL_EXTS: [RegExp, string[]][] = [
 	[/\bcargo\s+(clippy|check)\b/, [".rs"]],
 ];
 
-/** Get file extensions covered by on_write gates.
- *  If a gate defines `extensions`, those are used directly.
- *  Otherwise, falls back to TOOL_EXTS heuristic. */
 export function getGatedExtensions(): Set<string> {
 	const gates = loadGates();
 	if (!gates?.on_write) return new Set();
@@ -226,7 +369,6 @@ export function getGatedExtensions(): Set<string> {
 
 // ── File tracking ───────────────────────────────────────────
 
-/** Record a changed file path (deduplicated) */
 export function recordChangedFile(filePath: string): void {
 	const state = readSessionState();
 	if (!state.changed_file_paths) state.changed_file_paths = [];
@@ -236,9 +378,6 @@ export function recordChangedFile(filePath: string): void {
 	writeState(state);
 }
 
-/** Determine if independent review is required for current session.
- *  Required when review tier is "standard" or "deep" (plan active OR changed_files >= threshold).
- *  Returns false for "skip" (1-2 files) and "light" (3-4 files, no plan). */
 export function isReviewRequired(): boolean {
 	const state = readSessionState();
 	const changedCount = state.changed_file_paths?.length ?? 0;
@@ -299,7 +438,6 @@ export function markGateRan(gateName: string, sessionId: string): void {
 
 // ── Commit lifecycle reset ──────────────────────────────────
 
-/** Clear all per-commit fields. Called when git commit is detected. */
 export function clearOnCommit(): void {
 	const state = readSessionState();
 	state.last_commit_at = new Date().toISOString();
@@ -327,12 +465,10 @@ export function clearOnCommit(): void {
 
 // ── Review iteration tracking ───────────────────────────────
 
-/** Get current review iteration count (0 = not started). */
 export function getReviewIteration(): number {
 	return readSessionState().review_iteration ?? 0;
 }
 
-/** Record a review iteration with aggregate score. Increments iteration counter. */
 export function recordReviewIteration(aggregate: number): void {
 	const state = readSessionState();
 	state.review_iteration = (state.review_iteration ?? 0) + 1;
@@ -340,12 +476,10 @@ export function recordReviewIteration(aggregate: number): void {
 	writeState(state);
 }
 
-/** Get review score history (one entry per iteration). */
 export function getReviewScoreHistory(): number[] {
 	return readSessionState().review_score_history;
 }
 
-/** Reset review iteration state (called on review gate clear). */
 export function resetReviewIteration(): void {
 	const state = readSessionState();
 	state.review_iteration = 0;
@@ -355,7 +489,6 @@ export function resetReviewIteration(): void {
 
 // ── Review stage scores (3-stage aggregate) ───────────────────
 
-/** Record scores for a review stage (e.g., "Spec", "Quality", "Security"). */
 export function recordStageScores(stageName: string, scores: Record<string, number>): void {
 	const state = readSessionState();
 	if (!state.review_stage_scores) state.review_stage_scores = {};
@@ -363,12 +496,10 @@ export function recordStageScores(stageName: string, scores: Record<string, numb
 	writeState(state);
 }
 
-/** Get all recorded stage scores. Returns empty object if none. */
 export function getStageScores(): Record<string, Record<string, number>> {
 	return readSessionState().review_stage_scores ?? {};
 }
 
-/** Clear all stage scores (after aggregate check or on commit reset). */
 export function clearStageScores(): void {
 	const state = readSessionState();
 	state.review_stage_scores = {};
@@ -377,12 +508,10 @@ export function clearStageScores(): void {
 
 // ── Plan evaluation iteration tracking ──────────────────────
 
-/** Get current plan evaluation iteration count (0 = not started). */
 export function getPlanEvalIteration(): number {
 	return readSessionState().plan_eval_iteration ?? 0;
 }
 
-/** Record a plan evaluation iteration with aggregate score. */
 export function recordPlanEvalIteration(aggregate: number): void {
 	const state = readSessionState();
 	state.plan_eval_iteration = (state.plan_eval_iteration ?? 0) + 1;
@@ -390,12 +519,10 @@ export function recordPlanEvalIteration(aggregate: number): void {
 	writeState(state);
 }
 
-/** Get plan evaluation score history. */
 export function getPlanEvalScoreHistory(): number[] {
 	return readSessionState().plan_eval_score_history;
 }
 
-/** Reset plan evaluation iteration state. */
 export function resetPlanEvalIteration(): void {
 	const state = readSessionState();
 	state.plan_eval_iteration = 0;
@@ -405,7 +532,6 @@ export function resetPlanEvalIteration(): void {
 
 // ── TDD RED verification ────────────────────────────────
 
-/** Record a task's Verify test result (pass/fail). Key is "Task N". */
 export function recordTaskVerifyResult(taskKey: string, passed: boolean): void {
 	const state = readSessionState();
 	if (!state.task_verify_results) state.task_verify_results = {};
@@ -413,7 +539,6 @@ export function recordTaskVerifyResult(taskKey: string, passed: boolean): void {
 	writeState(state);
 }
 
-/** Read a task's Verify test result. Returns null if not yet recorded. */
 export function readTaskVerifyResult(taskKey: string): { passed: boolean; ran_at: string } | null {
 	const state = readSessionState();
 	return state.task_verify_results?.[taskKey] ?? null;
@@ -424,7 +549,6 @@ export function readTaskVerifyResult(taskKey: string): { passed: boolean; ran_at
 const MAX_GATE_FAILURE_COUNT = 100;
 const MAX_GATE_FAILURE_KEYS = 200;
 
-/** Increment gate failure count for a file:gate combination. Returns the new count (capped at 100). */
 export function incrementGateFailure(file: string, gateName: string): number {
 	const state = readSessionState();
 	if (!state.gate_failure_counts) state.gate_failure_counts = {};
@@ -432,10 +556,8 @@ export function incrementGateFailure(file: string, gateName: string): number {
 	const count = Math.min((state.gate_failure_counts[key] ?? 0) + 1, MAX_GATE_FAILURE_COUNT);
 	state.gate_failure_counts[key] = count;
 
-	// Evict oldest entries if key count exceeds limit
 	const keys = Object.keys(state.gate_failure_counts);
 	if (keys.length > MAX_GATE_FAILURE_KEYS) {
-		// Remove entries with lowest counts first (least problematic files)
 		const sorted = [...keys].sort(
 			(a, b) => (state.gate_failure_counts[a] ?? 0) - (state.gate_failure_counts[b] ?? 0),
 		);
@@ -449,7 +571,6 @@ export function incrementGateFailure(file: string, gateName: string): number {
 	return count;
 }
 
-/** Reset gate failure count for a file:gate (called when gate passes). */
 export function resetGateFailure(file: string, gateName: string): void {
 	const state = readSessionState();
 	if (!state.gate_failure_counts) return;
@@ -462,13 +583,11 @@ export function resetGateFailure(file: string, gateName: string): void {
 
 // ── Gate override ───────────────────────────────────────
 
-/** Check if a gate is currently disabled. */
 export function isGateDisabled(gateName: string): boolean {
 	const state = readSessionState();
 	return (state.disabled_gates ?? []).includes(gateName);
 }
 
-/** Disable a gate for the current session. */
 export function disableGate(gateName: string): void {
 	const state = readSessionState();
 	if (!state.disabled_gates) state.disabled_gates = [];
@@ -478,7 +597,6 @@ export function disableGate(gateName: string): void {
 	writeState(state);
 }
 
-/** Re-enable a previously disabled gate. */
 export function enableGate(gateName: string): void {
 	const state = readSessionState();
 	state.disabled_gates = (state.disabled_gates ?? []).filter((g) => g !== gateName);
@@ -487,12 +605,10 @@ export function enableGate(gateName: string): void {
 
 // ── Plan selfcheck gate ─────────────────────────────────────
 
-/** Check if plan selfcheck has already been blocked (1-time gate). */
 export function wasPlanSelfcheckBlocked(): boolean {
 	return readSessionState().plan_selfcheck_blocked_at != null;
 }
 
-/** Record that plan selfcheck deny was issued. Next ExitPlanMode will pass. */
 export function recordPlanSelfcheckBlocked(): void {
 	const state = readSessionState();
 	state.plan_selfcheck_blocked_at = new Date().toISOString();
@@ -508,7 +624,6 @@ type EscalationCounter =
 	| "dead_import_warning_count"
 	| "duplication_warning_count";
 
-/** Increment an escalation counter. Returns the new count. */
 export function incrementEscalation(counter: EscalationCounter): number {
 	const state = readSessionState();
 	const count = (state[counter] ?? 0) + 1;
@@ -517,21 +632,18 @@ export function incrementEscalation(counter: EscalationCounter): number {
 	return count;
 }
 
-/** Read an escalation counter value. */
 export function readEscalation(counter: EscalationCounter): number {
 	return readSessionState()[counter] ?? 0;
 }
 
 // ── Human review approval ─────────────────────────────────
 
-/** Record human review approval. */
 export function recordHumanApproval(): void {
 	const state = readSessionState();
 	state.human_review_approved_at = new Date().toISOString();
 	writeState(state);
 }
 
-/** Read human review approval. Returns null if not approved. */
 export function readHumanApproval(): { approved_at: string } | null {
 	const state = readSessionState();
 	if (!state.human_review_approved_at) return null;

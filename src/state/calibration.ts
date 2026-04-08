@@ -1,16 +1,11 @@
-import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { atomicWriteJson } from "./atomic-write.ts";
+import { getDb, getProjectId, getSessionId } from "./db.ts";
 
-const CALIBRATION_FILE = "review-calibration.json";
 const MAX_ENTRIES = 50;
 
 export interface CalibrationEntry {
 	date: string;
 	aggregate: number;
 	stages: Record<string, Record<string, number>>;
-	/** Project identifier (cwd hash). Absent in legacy entries. */
 	project?: string;
 }
 
@@ -24,73 +19,82 @@ export interface CalibrationData {
 	};
 }
 
-function calibrationPath(): string | null {
-	const pluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
-	if (!pluginDataDir) return null;
-	return join(pluginDataDir, CALIBRATION_FILE);
-}
-
-/** Generate a stable project identifier from cwd. */
-export function projectId(): string {
-	const cwd = process.cwd();
-	return createHash("sha256").update(cwd).digest("hex").slice(0, 12);
-}
-
-/** Read calibration data from cross-session storage. Returns null if unavailable. */
+/** Read calibration data from DB. Returns null if unavailable. */
 export function readCalibration(): CalibrationData | null {
-	const path = calibrationPath();
-	if (!path || !existsSync(path)) return null;
 	try {
-		return JSON.parse(readFileSync(path, "utf-8"));
+		const db = getDb();
+		const rows = db
+			.prepare(
+				"SELECT aggregate, stages, recorded_at, project_id FROM calibration ORDER BY id DESC LIMIT ?",
+			)
+			.all(MAX_ENTRIES) as {
+			aggregate: number;
+			stages: string;
+			recorded_at: string;
+			project_id: number;
+		}[];
+
+		if (rows.length === 0) return null;
+
+		const entries: CalibrationEntry[] = rows.reverse().map((r) => ({
+			date: r.recorded_at,
+			aggregate: r.aggregate,
+			stages: JSON.parse(r.stages) as Record<string, Record<string, number>>,
+			project: String(r.project_id),
+		}));
+
+		const scores = entries.map((e) => e.aggregate);
+		const count = scores.length;
+		const mean = scores.reduce((s, v) => s + v, 0) / count;
+		const variance = scores.reduce((s, v) => s + (v - mean) ** 2, 0) / count;
+		const stddev = Math.sqrt(variance);
+		const perfectCount = entries.filter((e) => {
+			const dims = Object.values(e.stages).flatMap((s) => Object.values(s));
+			return dims.length > 0 && dims.every((v) => v === 5);
+		}).length;
+
+		return {
+			entries,
+			stats: {
+				mean: Math.round(mean * 100) / 100,
+				stddev: Math.round(stddev * 100) / 100,
+				count,
+				perfect_count: perfectCount,
+			},
+		};
 	} catch {
 		return null;
 	}
 }
 
-/** Record a review score to cross-session calibration data. */
+/** Record a review score to calibration data. */
 export function recordCalibration(
 	aggregate: number,
 	stageScores: Record<string, Record<string, number>>,
 ): void {
-	const path = calibrationPath();
-	if (!path) return;
+	try {
+		const db = getDb();
+		const projectId = getProjectId();
+		const sid = getSessionId();
 
-	const data = readCalibration() ?? {
-		entries: [],
-		stats: { mean: 0, stddev: 0, count: 0, perfect_count: 0 },
-	};
+		db.prepare(
+			"INSERT INTO calibration (project_id, session_id, aggregate, stages) VALUES (?, ?, ?, ?)",
+		).run(projectId, sid, aggregate, JSON.stringify(stageScores));
 
-	data.entries.push({
-		date: new Date().toISOString(),
-		aggregate,
-		stages: stageScores,
-		project: projectId(),
-	});
-
-	// Trim to max entries
-	if (data.entries.length > MAX_ENTRIES) {
-		data.entries = data.entries.slice(-MAX_ENTRIES);
+		// Trim oldest entries beyond max, scoped to this project
+		db.prepare(
+			`DELETE FROM calibration WHERE project_id = ? AND id NOT IN (
+				SELECT id FROM calibration WHERE project_id = ? ORDER BY id DESC LIMIT ?
+			)`,
+		).run(projectId, projectId, MAX_ENTRIES);
+	} catch {
+		/* fail-open */
 	}
+}
 
-	// Recompute stats
-	const scores = data.entries.map((e) => e.aggregate);
-	const count = scores.length;
-	const mean = scores.reduce((s, v) => s + v, 0) / count;
-	const variance = scores.reduce((s, v) => s + (v - mean) ** 2, 0) / count;
-	const stddev = Math.sqrt(variance);
-	const perfectCount = data.entries.filter((e) => {
-		const dims = Object.values(e.stages).flatMap((s) => Object.values(s));
-		return dims.length > 0 && dims.every((v) => v === 5);
-	}).length;
-
-	data.stats = {
-		mean: Math.round(mean * 100) / 100,
-		stddev: Math.round(stddev * 100) / 100,
-		count,
-		perfect_count: perfectCount,
-	};
-
-	atomicWriteJson(path, data);
+/** Generate a stable project identifier. Now returns DB project_id as string. */
+export function projectId(): string {
+	return String(getProjectId());
 }
 
 export interface CalibrationWarning {
@@ -98,8 +102,7 @@ export interface CalibrationWarning {
 	message: string;
 }
 
-/** Check for calibration anomalies. Returns warnings (non-blocking).
- *  Filters by current project. Legacy entries (no project field) are included in all checks. */
+/** Check for calibration anomalies. Returns warnings (non-blocking). */
 export function checkCalibration(): CalibrationWarning[] {
 	const data = readCalibration();
 	if (!data) return [];
@@ -107,7 +110,6 @@ export function checkCalibration(): CalibrationWarning[] {
 	const currentProject = projectId();
 	const projectEntries = data.entries.filter((e) => !e.project || e.project === currentProject);
 
-	// Warn for new projects with insufficient calibration data
 	if (projectEntries.length > 0 && projectEntries.length < 3) {
 		return [
 			{
@@ -116,9 +118,8 @@ export function checkCalibration(): CalibrationWarning[] {
 			},
 		];
 	}
-	if (projectEntries.length < 5) return []; // Need minimum data for anomaly detection
+	if (projectEntries.length < 5) return [];
 
-	// Recompute stats for project-scoped entries
 	const scores = projectEntries.map((e) => e.aggregate);
 	const count = scores.length;
 	const mean = scores.reduce((s, v) => s + v, 0) / count;
@@ -127,8 +128,6 @@ export function checkCalibration(): CalibrationWarning[] {
 
 	const warnings: CalibrationWarning[] = [];
 
-	// High mean + low variance → systematically inflated scores
-	// Threshold is 93% of max observed score (dynamic for /30 or /40 scale)
 	const maxObserved = Math.max(...scores, 1);
 	const highMeanThreshold = maxObserved * 0.93;
 	const roundedMean = Math.round(mean * 100) / 100;
@@ -140,7 +139,6 @@ export function checkCalibration(): CalibrationWarning[] {
 		});
 	}
 
-	// Low variance alone (even with moderate mean)
 	if (count >= 10 && roundedStddev < 0.8) {
 		warnings.push({
 			type: "low_variance",
@@ -148,7 +146,6 @@ export function checkCalibration(): CalibrationWarning[] {
 		});
 	}
 
-	// Perfect score streak (project-scoped)
 	const recentEntries = projectEntries.slice(-3);
 	const maxPossible = recentEntries.every((e) => {
 		const dims = Object.values(e.stages).flatMap((s) => Object.values(s));

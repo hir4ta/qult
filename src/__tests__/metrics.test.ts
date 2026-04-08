@@ -1,20 +1,35 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	closeDb,
+	ensureSession,
+	getDb,
+	getProjectId,
+	setProjectPath,
+	setSessionScope,
+	useTestDb,
+} from "../state/db.ts";
 
-const TEST_DIR = join(import.meta.dirname, ".tmp-metrics-test");
-const STATE_DIR = join(TEST_DIR, ".qult", ".state");
-const originalCwd = process.cwd();
+const TEST_DIR = "/tmp/.tmp-metrics-test";
+
+function createSession(sessionId: string): void {
+	const db = getDb();
+	const projectId = getProjectId();
+	db.prepare("INSERT OR IGNORE INTO sessions (id, project_id) VALUES (?, ?)").run(
+		sessionId,
+		projectId,
+	);
+}
 
 beforeEach(() => {
-	mkdirSync(STATE_DIR, { recursive: true });
-	process.chdir(TEST_DIR);
+	useTestDb();
+	setProjectPath(TEST_DIR);
+	setSessionScope("test-session");
+	ensureSession();
 });
 
 afterEach(() => {
 	vi.restoreAllMocks();
-	process.chdir(originalCwd);
-	rmSync(TEST_DIR, { recursive: true, force: true });
+	closeDb();
 });
 
 import type { SessionMetrics } from "../state/metrics.ts";
@@ -26,6 +41,7 @@ import {
 
 describe("recordSessionMetrics", () => {
 	it("records session metrics", () => {
+		createSession("s1");
 		recordSessionMetrics(TEST_DIR, {
 			session_id: "s1",
 			timestamp: "2026-01-01T00:00:00Z",
@@ -42,6 +58,8 @@ describe("recordSessionMetrics", () => {
 	});
 
 	it("appends to existing history", () => {
+		createSession("s1");
+		createSession("s2");
 		recordSessionMetrics(TEST_DIR, {
 			session_id: "s1",
 			timestamp: "2026-01-01T00:00:00Z",
@@ -64,15 +82,19 @@ describe("recordSessionMetrics", () => {
 	});
 
 	it("trims to 50 entries", () => {
-		const existing: SessionMetrics[] = Array.from({ length: 50 }, (_, i) => ({
-			session_id: `s${i}`,
-			timestamp: `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00Z`,
-			gate_failures: 0,
-			security_warnings: 0,
-			review_score: null,
-			files_changed: 1,
-		}));
-		writeFileSync(join(STATE_DIR, "metrics-history.json"), JSON.stringify(existing));
+		for (let i = 0; i <= 50; i++) {
+			createSession(`s${i}`);
+		}
+		for (let i = 0; i < 50; i++) {
+			recordSessionMetrics(TEST_DIR, {
+				session_id: `s${i}`,
+				timestamp: `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00Z`,
+				gate_failures: 0,
+				security_warnings: 0,
+				review_score: null,
+				files_changed: 1,
+			});
+		}
 
 		recordSessionMetrics(TEST_DIR, {
 			session_id: "s50",
@@ -85,18 +107,13 @@ describe("recordSessionMetrics", () => {
 
 		const history = readMetricsHistory(TEST_DIR);
 		expect(history).toHaveLength(50);
-		expect(history[history.length - 1]!.session_id).toBe("s50");
+		// Newest first (DESC order)
+		expect(history[0]!.session_id).toBe("s50");
 	});
 });
 
 describe("readMetricsHistory", () => {
-	it("returns empty on missing file", () => {
-		const history = readMetricsHistory(TEST_DIR);
-		expect(history).toEqual([]);
-	});
-
-	it("returns empty on corrupt data", () => {
-		writeFileSync(join(STATE_DIR, "metrics-history.json"), "not json {{");
+	it("returns empty on no entries", () => {
 		const history = readMetricsHistory(TEST_DIR);
 		expect(history).toEqual([]);
 	});
@@ -113,8 +130,15 @@ describe("detectRecurringPatterns", () => {
 		});
 	});
 
+	function insertMetrics(metrics: SessionMetrics[]): void {
+		for (const m of metrics) {
+			createSession(m.session_id);
+			recordSessionMetrics(TEST_DIR, m);
+		}
+	}
+
 	it("emits warning for frequent gate failures (4/5 sessions)", () => {
-		const history: SessionMetrics[] = [
+		insertMetrics([
 			{
 				session_id: "s1",
 				timestamp: "t1",
@@ -155,15 +179,14 @@ describe("detectRecurringPatterns", () => {
 				review_score: null,
 				files_changed: 4,
 			},
-		];
-		writeFileSync(join(STATE_DIR, "metrics-history.json"), JSON.stringify(history));
+		]);
 
 		detectRecurringPatterns(TEST_DIR);
 		expect(stderrCapture.some((w) => w.includes("gate failure"))).toBe(true);
 	});
 
 	it("does not warn when failures are infrequent (2/5 sessions)", () => {
-		const history: SessionMetrics[] = [
+		insertMetrics([
 			{
 				session_id: "s1",
 				timestamp: "t1",
@@ -204,15 +227,14 @@ describe("detectRecurringPatterns", () => {
 				review_score: null,
 				files_changed: 4,
 			},
-		];
-		writeFileSync(join(STATE_DIR, "metrics-history.json"), JSON.stringify(history));
+		]);
 
 		detectRecurringPatterns(TEST_DIR);
 		expect(stderrCapture.some((w) => w.includes("gate failure"))).toBe(false);
 	});
 
 	it("does not warn with fewer than 5 sessions", () => {
-		const history: SessionMetrics[] = [
+		insertMetrics([
 			{
 				session_id: "s1",
 				timestamp: "t1",
@@ -229,20 +251,18 @@ describe("detectRecurringPatterns", () => {
 				review_score: null,
 				files_changed: 3,
 			},
-		];
-		writeFileSync(join(STATE_DIR, "metrics-history.json"), JSON.stringify(history));
+		]);
 
 		detectRecurringPatterns(TEST_DIR);
 		expect(stderrCapture).toHaveLength(0);
 	});
 
-	it("is fail-open on missing file", () => {
-		// Should not throw
+	it("is fail-open on empty data", () => {
 		expect(() => detectRecurringPatterns(TEST_DIR)).not.toThrow();
 	});
 
 	it("emits warning for frequent security warnings", () => {
-		const history: SessionMetrics[] = [
+		insertMetrics([
 			{
 				session_id: "s1",
 				timestamp: "t1",
@@ -283,8 +303,7 @@ describe("detectRecurringPatterns", () => {
 				review_score: null,
 				files_changed: 4,
 			},
-		];
-		writeFileSync(join(STATE_DIR, "metrics-history.json"), JSON.stringify(history));
+		]);
 
 		detectRecurringPatterns(TEST_DIR);
 		expect(stderrCapture.some((w) => w.includes("security warning"))).toBe(true);

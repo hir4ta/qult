@@ -1,11 +1,242 @@
+// @bun
 // src/mcp-server.ts
-import { existsSync as existsSync6, readdirSync as readdirSync2, readFileSync as readFileSync5, statSync as statSync2 } from "node:fs";
-import { join as join5 } from "node:path";
-import { createInterface } from "node:readline";
+import { createInterface } from "readline";
+
+// src/state/db.ts
+import { Database } from "bun:sqlite";
+import { mkdirSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
+var DB_DIR = join(homedir(), ".qult");
+var DB_PATH = join(DB_DIR, "qult.db");
+var DEFAULT_SESSION_ID = "__default__";
+var _db = null;
+function getDb() {
+  if (_db)
+    return _db;
+  mkdirSync(DB_DIR, { recursive: true });
+  _db = new Database(DB_PATH);
+  configurePragmas(_db);
+  ensureSchema(_db);
+  return _db;
+}
+function configurePragmas(db) {
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA busy_timeout = 5000");
+  db.exec("PRAGMA foreign_keys = ON");
+}
+function ensureSchema(db) {
+  db.exec(`
+		CREATE TABLE IF NOT EXISTS projects (
+			id         INTEGER PRIMARY KEY,
+			path       TEXT    NOT NULL UNIQUE,
+			created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		);
+
+		CREATE TABLE IF NOT EXISTS sessions (
+			id                          TEXT    PRIMARY KEY,
+			project_id                  INTEGER NOT NULL REFERENCES projects(id),
+			started_at                  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			last_commit_at              TEXT,
+			test_passed_at              TEXT,
+			test_command                TEXT,
+			review_completed_at         TEXT,
+			review_iteration            INTEGER NOT NULL DEFAULT 0,
+			plan_eval_iteration         INTEGER NOT NULL DEFAULT 0,
+			plan_selfcheck_blocked_at   TEXT,
+			human_review_approved_at    TEXT,
+			security_warning_count      INTEGER NOT NULL DEFAULT 0,
+			test_quality_warning_count  INTEGER NOT NULL DEFAULT 0,
+			drift_warning_count         INTEGER NOT NULL DEFAULT 0,
+			dead_import_warning_count   INTEGER NOT NULL DEFAULT 0,
+			duplication_warning_count   INTEGER NOT NULL DEFAULT 0
+		);
+		CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
+
+		CREATE TABLE IF NOT EXISTS pending_fixes (
+			id         INTEGER PRIMARY KEY,
+			session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			file       TEXT    NOT NULL,
+			gate       TEXT    NOT NULL,
+			errors     TEXT    NOT NULL,
+			UNIQUE(session_id, file, gate)
+		);
+		CREATE INDEX IF NOT EXISTS idx_pending_fixes_session ON pending_fixes(session_id);
+
+		CREATE TABLE IF NOT EXISTS changed_files (
+			session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			file_path  TEXT NOT NULL,
+			changed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			PRIMARY KEY (session_id, file_path)
+		);
+
+		CREATE TABLE IF NOT EXISTS disabled_gates (
+			session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			gate_name   TEXT NOT NULL,
+			reason      TEXT NOT NULL,
+			disabled_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			PRIMARY KEY (session_id, gate_name)
+		);
+
+		CREATE TABLE IF NOT EXISTS ran_gates (
+			session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			gate_name  TEXT NOT NULL,
+			ran_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			PRIMARY KEY (session_id, gate_name)
+		);
+
+		CREATE TABLE IF NOT EXISTS task_verify_results (
+			session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			task_key   TEXT    NOT NULL,
+			passed     INTEGER NOT NULL,
+			ran_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			PRIMARY KEY (session_id, task_key)
+		);
+
+		CREATE TABLE IF NOT EXISTS gate_failure_counts (
+			session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			file       TEXT    NOT NULL,
+			gate       TEXT    NOT NULL,
+			count      INTEGER NOT NULL DEFAULT 1,
+			PRIMARY KEY (session_id, file, gate)
+		);
+
+		CREATE TABLE IF NOT EXISTS review_scores (
+			id              INTEGER PRIMARY KEY,
+			session_id      TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			iteration       INTEGER NOT NULL,
+			aggregate_score REAL    NOT NULL,
+			recorded_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			UNIQUE(session_id, iteration)
+		);
+		CREATE INDEX IF NOT EXISTS idx_review_scores_session ON review_scores(session_id);
+
+		CREATE TABLE IF NOT EXISTS review_stage_scores (
+			id          INTEGER PRIMARY KEY,
+			session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			stage       TEXT NOT NULL,
+			dimension   TEXT NOT NULL,
+			score       REAL NOT NULL,
+			recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			UNIQUE(session_id, stage, dimension)
+		);
+		CREATE INDEX IF NOT EXISTS idx_stage_scores_session ON review_stage_scores(session_id);
+
+		CREATE TABLE IF NOT EXISTS plan_eval_scores (
+			id              INTEGER PRIMARY KEY,
+			session_id      TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			iteration       INTEGER NOT NULL,
+			aggregate_score REAL    NOT NULL,
+			recorded_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			UNIQUE(session_id, iteration)
+		);
+
+		CREATE TABLE IF NOT EXISTS gate_configs (
+			project_id         INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			phase              TEXT    NOT NULL,
+			gate_name          TEXT    NOT NULL,
+			command            TEXT    NOT NULL,
+			timeout            INTEGER,
+			run_once_per_batch INTEGER NOT NULL DEFAULT 0,
+			extensions         TEXT,
+			PRIMARY KEY (project_id, phase, gate_name)
+		);
+
+		CREATE TABLE IF NOT EXISTS project_configs (
+			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			key        TEXT    NOT NULL,
+			value      TEXT    NOT NULL,
+			PRIMARY KEY (project_id, key)
+		);
+
+		CREATE TABLE IF NOT EXISTS global_configs (
+			key   TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		);
+
+		CREATE TABLE IF NOT EXISTS audit_log (
+			id         INTEGER PRIMARY KEY,
+			project_id INTEGER NOT NULL REFERENCES projects(id),
+			session_id TEXT,
+			action     TEXT NOT NULL,
+			gate_name  TEXT,
+			reason     TEXT,
+			created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		);
+		CREATE INDEX IF NOT EXISTS idx_audit_log_session ON audit_log(session_id);
+
+		CREATE TABLE IF NOT EXISTS session_metrics (
+			id                     INTEGER PRIMARY KEY,
+			session_id             TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			project_id             INTEGER NOT NULL REFERENCES projects(id),
+			gate_failure_count     INTEGER NOT NULL DEFAULT 0,
+			security_warning_count INTEGER NOT NULL DEFAULT 0,
+			review_aggregate       REAL,
+			files_changed          INTEGER NOT NULL DEFAULT 0,
+			recorded_at            TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		);
+		CREATE INDEX IF NOT EXISTS idx_metrics_project ON session_metrics(project_id);
+
+		CREATE TABLE IF NOT EXISTS calibration (
+			id          INTEGER PRIMARY KEY,
+			project_id  INTEGER NOT NULL REFERENCES projects(id),
+			session_id  TEXT    NOT NULL,
+			aggregate   REAL    NOT NULL,
+			stages      TEXT    NOT NULL,
+			recorded_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		);
+		CREATE INDEX IF NOT EXISTS idx_calibration_project ON calibration(project_id);
+
+		CREATE TABLE IF NOT EXISTS review_findings (
+			id          INTEGER PRIMARY KEY,
+			session_id  TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			project_id  INTEGER NOT NULL REFERENCES projects(id),
+			file        TEXT    NOT NULL,
+			severity    TEXT    NOT NULL,
+			description TEXT    NOT NULL,
+			stage       TEXT    NOT NULL,
+			recorded_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		);
+		CREATE INDEX IF NOT EXISTS idx_review_findings_session ON review_findings(session_id);
+	`);
+}
+var _projectIdCache = null;
+var _projectPathCache = null;
+function setProjectPath(path) {
+  if (path === _projectPathCache)
+    return;
+  _projectPathCache = path;
+  _projectIdCache = null;
+}
+function getProjectId() {
+  if (_projectIdCache !== null)
+    return _projectIdCache;
+  const path = _projectPathCache ?? process.cwd();
+  const db = getDb();
+  db.prepare("INSERT OR IGNORE INTO projects (path) VALUES (?)").run(path);
+  const row = db.prepare("SELECT id FROM projects WHERE path = ?").get(path);
+  if (!row)
+    throw new Error(`Failed to resolve project: ${path}`);
+  _projectIdCache = row.id;
+  return _projectIdCache;
+}
+var _sessionId = DEFAULT_SESSION_ID;
+function setSessionScope(sessionId) {
+  if (!/^[\w.\-:]+$/.test(sessionId))
+    return;
+  _sessionId = sessionId;
+}
+function getSessionId() {
+  return _sessionId;
+}
+function findLatestSessionId() {
+  const db = getDb();
+  const projectId = getProjectId();
+  const row = db.prepare("SELECT id FROM sessions WHERE project_id = ? ORDER BY started_at DESC LIMIT 1").get(projectId);
+  return row?.id ?? null;
+}
 
 // src/config.ts
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 var DEFAULTS = {
   review: {
     score_threshold: 30,
@@ -81,34 +312,42 @@ function applyConfigLayer(config, raw) {
       config.escalation.duplication_threshold = Math.max(1, e.duplication_threshold);
   }
 }
+function kvRowsToRaw(rows) {
+  const raw = {};
+  for (const row of rows) {
+    const [section, field] = row.key.split(".");
+    if (!section || !field)
+      continue;
+    if (!raw[section])
+      raw[section] = {};
+    try {
+      raw[section][field] = JSON.parse(row.value);
+    } catch {
+      raw[section][field] = row.value;
+    }
+  }
+  return raw;
+}
 var _cache = null;
 function loadConfig() {
   if (_cache)
     return _cache;
   const config = structuredClone(DEFAULTS);
   try {
-    const pluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
-    if (pluginDataDir) {
-      const prefsPath = join(pluginDataDir, "preferences.json");
-      if (existsSync(prefsPath)) {
-        const raw = JSON.parse(readFileSync(prefsPath, "utf-8"));
-        applyConfigLayer(config, raw);
-      }
+    const db = getDb();
+    const globalRows = db.prepare("SELECT key, value FROM global_configs").all();
+    if (globalRows.length > 0) {
+      applyConfigLayer(config, kvRowsToRaw(globalRows));
     }
-  } catch (e) {
-    process.stderr.write(`[qult] Warning: invalid preferences.json, using defaults: ${e instanceof Error ? e.message : "parse error"}
-`);
-  }
+  } catch {}
   try {
-    const configPath = join(process.cwd(), ".qult", "config.json");
-    if (existsSync(configPath)) {
-      const raw = JSON.parse(readFileSync(configPath, "utf-8"));
-      applyConfigLayer(config, raw);
+    const db = getDb();
+    const projectId = getProjectId();
+    const projectRows = db.prepare("SELECT key, value FROM project_configs WHERE project_id = ?").all(projectId);
+    if (projectRows.length > 0) {
+      applyConfigLayer(config, kvRowsToRaw(projectRows));
     }
-  } catch (e) {
-    process.stderr.write(`[qult] Warning: invalid .qult/config.json, using defaults: ${e instanceof Error ? e.message : "parse error"}
-`);
-  }
+  } catch {}
   const envInt = (key) => {
     const val = process.env[key];
     if (val === undefined)
@@ -151,6 +390,44 @@ function loadConfig() {
     config.escalation.duplication_threshold = Math.max(1, dupEsc);
   _cache = config;
   return config;
+}
+
+// src/gates/load.ts
+var _cache2;
+function loadGates() {
+  if (_cache2 !== undefined)
+    return _cache2;
+  try {
+    const db = getDb();
+    const projectId = getProjectId();
+    const rows = db.prepare("SELECT phase, gate_name, command, timeout, run_once_per_batch, extensions FROM gate_configs WHERE project_id = ?").all(projectId);
+    if (rows.length === 0) {
+      _cache2 = null;
+      return null;
+    }
+    const config = {};
+    for (const row of rows) {
+      const phase = row.phase;
+      if (!config[phase])
+        config[phase] = {};
+      const gate = { command: row.command };
+      if (row.timeout)
+        gate.timeout = row.timeout;
+      if (row.run_once_per_batch)
+        gate.run_once_per_batch = true;
+      if (row.extensions) {
+        try {
+          gate.extensions = JSON.parse(row.extensions);
+        } catch {}
+      }
+      config[phase][row.gate_name] = gate;
+    }
+    _cache2 = config;
+    return config;
+  } catch {
+    _cache2 = null;
+    return null;
+  }
 }
 
 // src/handoff.ts
@@ -294,75 +571,60 @@ function generateMetricsDashboard(metrics) {
 `);
 }
 
-// src/state/atomic-write.ts
-import { existsSync as existsSync2, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
-function atomicWriteJson(filePath, data) {
-  const dir = dirname(filePath);
-  if (!existsSync2(dir))
-    mkdirSync(dir, { recursive: true });
-  const tmp = `${filePath}.${process.pid}.tmp`;
-  try {
-    writeFileSync(tmp, JSON.stringify(data, null, 2));
-    renameSync(tmp, filePath);
-  } catch (err) {
-    try {
-      unlinkSync(tmp);
-    } catch {}
-    throw err;
-  }
-}
-
 // src/state/audit-log.ts
-import { existsSync as existsSync3, readFileSync as readFileSync2 } from "node:fs";
-import { join as join2 } from "node:path";
-var STATE_DIR = ".qult/.state";
-var AUDIT_LOG_FILE = "audit-log.json";
 var MAX_ENTRIES = 200;
-function appendAuditLog(cwd, entry) {
+function appendAuditLog(_cwd, entry) {
   try {
-    const logPath = join2(cwd, STATE_DIR, AUDIT_LOG_FILE);
-    let log = readAuditLog(cwd);
-    log.push(entry);
-    if (log.length > MAX_ENTRIES) {
-      log = log.slice(-MAX_ENTRIES);
-    }
-    atomicWriteJson(logPath, log);
+    const db = getDb();
+    const projectId = getProjectId();
+    const sid = getSessionId();
+    db.prepare("INSERT INTO audit_log (project_id, session_id, action, gate_name, reason) VALUES (?, ?, ?, ?, ?)").run(projectId, sid, entry.action, entry.gate_name ?? null, entry.reason);
+    db.prepare(`DELETE FROM audit_log WHERE project_id = ? AND id NOT IN (
+				SELECT id FROM audit_log WHERE project_id = ? ORDER BY id DESC LIMIT ?
+			)`).run(projectId, projectId, MAX_ENTRIES);
   } catch {}
 }
-function readAuditLog(cwd) {
+function readAuditLog(_cwd) {
   try {
-    const logPath = join2(cwd, STATE_DIR, AUDIT_LOG_FILE);
-    if (!existsSync3(logPath))
-      return [];
-    const parsed = JSON.parse(readFileSync2(logPath, "utf-8"));
-    return Array.isArray(parsed) ? parsed : [];
+    const db = getDb();
+    const projectId = getProjectId();
+    const rows = db.prepare("SELECT action, reason, gate_name, created_at FROM audit_log WHERE project_id = ? ORDER BY id DESC LIMIT ?").all(projectId, MAX_ENTRIES);
+    return rows.map((r) => ({
+      action: r.action,
+      reason: r.reason ?? "",
+      gate_name: r.gate_name ?? undefined,
+      timestamp: r.created_at
+    }));
   } catch {
     return [];
   }
 }
 
 // src/state/metrics.ts
-import { existsSync as existsSync4, readFileSync as readFileSync3 } from "node:fs";
-import { join as join3 } from "node:path";
-var STATE_DIR2 = ".qult/.state";
-var METRICS_FILE = "metrics-history.json";
-function readMetricsHistory(cwd) {
+var MAX_ENTRIES2 = 50;
+function readMetricsHistory(_cwd) {
   try {
-    const metricsPath = join3(cwd, STATE_DIR2, METRICS_FILE);
-    if (!existsSync4(metricsPath))
-      return [];
-    const parsed = JSON.parse(readFileSync3(metricsPath, "utf-8"));
-    return Array.isArray(parsed) ? parsed : [];
+    const db = getDb();
+    const projectId = getProjectId();
+    const rows = db.prepare(`SELECT session_id, recorded_at, gate_failure_count, security_warning_count, review_aggregate, files_changed
+				 FROM session_metrics WHERE project_id = ? ORDER BY id DESC LIMIT ?`).all(projectId, MAX_ENTRIES2);
+    return rows.map((r) => ({
+      session_id: r.session_id,
+      timestamp: r.recorded_at,
+      gate_failures: r.gate_failure_count,
+      security_warnings: r.security_warning_count,
+      review_score: r.review_aggregate,
+      files_changed: r.files_changed
+    }));
   } catch {
     return [];
   }
 }
 
 // src/state/plan-status.ts
-import { existsSync as existsSync5, readdirSync, readFileSync as readFileSync4, statSync } from "node:fs";
-import { homedir } from "node:os";
-import { join as join4 } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "fs";
+import { homedir as homedir2 } from "os";
+import { join as join2 } from "path";
 var TASK_RE = /^###\s+Task\s+(\d+)[\s:\-\u2013\u2014]+(.+?)(?:\s*\[([^\]]+)\])?\s*$/i;
 function normalizeStatus(raw) {
   if (!raw)
@@ -418,11 +680,11 @@ function parsePlanTasks(content) {
 }
 function scanPlanDir(dir) {
   try {
-    if (!existsSync5(dir))
+    if (!existsSync(dir))
       return [];
     return readdirSync(dir).filter((f) => f.endsWith(".md")).map((f) => ({
-      path: join4(dir, f),
-      mtime: statSync(join4(dir, f)).mtimeMs
+      path: join2(dir, f),
+      mtime: statSync(join2(dir, f)).mtimeMs
     })).sort((a, b) => b.mtime - a.mtime);
   } catch {
     return [];
@@ -431,7 +693,7 @@ function scanPlanDir(dir) {
 function getLatestPlanPath() {
   try {
     const candidates = [];
-    const projectDir = join4(process.cwd(), ".claude", "plans");
+    const projectDir = join2(process.cwd(), ".claude", "plans");
     const projectPlans = scanPlanDir(projectDir);
     candidates.push(...projectPlans);
     const envDir = process.env.CLAUDE_PLANS_DIR;
@@ -440,7 +702,7 @@ function getLatestPlanPath() {
     }
     if (!_disableHomeFallback && projectPlans.length === 0 && candidates.length === 0) {
       try {
-        const homeDir = join4(homedir(), ".claude", "plans");
+        const homeDir = join2(homedir2(), ".claude", "plans");
         const homeFiles = scanPlanDir(homeDir);
         const recentCutoff = Date.now() - 24 * 60 * 60 * 1000;
         candidates.push(...homeFiles.filter((f) => f.mtime > recentCutoff));
@@ -469,7 +731,7 @@ function getActivePlan() {
       return _planCache;
   } catch {}
   try {
-    const content = readFileSync4(path, "utf-8");
+    const content = readFileSync(path, "utf-8");
     const tasks = parsePlanTasks(content);
     if (tasks.length === 0)
       return null;
@@ -483,8 +745,8 @@ function getActivePlan() {
 }
 function hasPlanFile() {
   try {
-    const planDir = join4(process.cwd(), ".claude", "plans");
-    if (!existsSync5(planDir))
+    const planDir = join2(process.cwd(), ".claude", "plans");
+    if (!existsSync(planDir))
       return false;
     return readdirSync(planDir).some((f) => f.endsWith(".md"));
   } catch {
@@ -493,68 +755,18 @@ function hasPlanFile() {
 }
 
 // src/mcp-server.ts
-var STATE_DIR3 = ".qult/.state";
-var GATES_PATH = ".qult/gates.json";
 var PROTOCOL_VERSION = "2024-11-05";
 var SERVER_NAME = "qult";
 var SERVER_VERSION = "1.0.0";
-var CACHE_TTL_MS = 2000;
-var _jsonCache = new Map;
-function readJson(path, fallback) {
-  const now = Date.now();
-  const cached = _jsonCache.get(path);
-  if (cached && cached.expires > now)
-    return cached.value;
-  try {
-    if (!existsSync6(path))
-      return fallback;
-    const value = JSON.parse(readFileSync5(path, "utf-8"));
-    _jsonCache.set(path, { value, expires: now + CACHE_TTL_MS });
-    return value;
-  } catch {
-    return fallback;
-  }
+function resolveSession(cwd) {
+  setProjectPath(cwd);
+  const latest = findLatestSessionId();
+  if (latest)
+    setSessionScope(latest);
+  return latest;
 }
-function findLatestStateFile(cwd, prefix) {
-  const dir = join5(cwd, STATE_DIR3);
-  const nonScoped = join5(dir, `${prefix}.json`);
-  try {
-    if (!existsSync6(dir))
-      return nonScoped;
-    try {
-      const markerPath = join5(dir, "latest-session.json");
-      if (existsSync6(markerPath)) {
-        const marker = JSON.parse(readFileSync5(markerPath, "utf-8"));
-        if (marker?.session_id) {
-          const scoped = join5(dir, `${prefix}-${marker.session_id}.json`);
-          if (existsSync6(scoped))
-            return scoped;
-        }
-      }
-    } catch {}
-    const files = readdirSync2(dir).filter((f) => f.startsWith(prefix) && f.endsWith(".json")).map((f) => ({ name: f, mtime: statSync2(join5(dir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
-    if (files.length === 0)
-      return nonScoped;
-    return join5(dir, files[0].name);
-  } catch {
-    return nonScoped;
-  }
-}
-function formatPendingFixes(fixes) {
-  const lines = [`${fixes.length} pending fix(es):
-`];
-  for (const fix of fixes) {
-    lines.push(`[${fix.gate}] ${fix.file}`);
-    for (const err of fix.errors) {
-      lines.push(`  ${err}`);
-    }
-  }
-  return lines.join(`
-`);
-}
-function getValidGateNames(cwd) {
-  const gatesPath = join5(cwd, GATES_PATH);
-  const gates = readJson(gatesPath, null);
+function getValidGateNames() {
+  const gates = loadGates();
   const names = new Set([
     "review",
     "security-check",
@@ -571,8 +783,8 @@ function getValidGateNames(cwd) {
   }
   return [...names];
 }
-function isValidGateName(name, cwd) {
-  return getValidGateNames(cwd).includes(name);
+function isValidGateName(name) {
+  return getValidGateNames().includes(name);
 }
 var TOOL_DEFS = [
   {
@@ -619,18 +831,12 @@ var TOOL_DEFS = [
   },
   {
     name: "set_config",
-    description: "Set a qult config value in .qult/config.json. Allowed keys: review.score_threshold, review.max_iterations, review.required_changed_files, review.dimension_floor, plan_eval.score_threshold, plan_eval.max_iterations.",
+    description: "Set a qult config value. Allowed keys: review.score_threshold, review.max_iterations, review.required_changed_files, review.dimension_floor, plan_eval.score_threshold, plan_eval.max_iterations.",
     inputSchema: {
       type: "object",
       properties: {
-        key: {
-          type: "string",
-          description: "Config key (e.g. 'review.score_threshold')"
-        },
-        value: {
-          type: "number",
-          description: "Numeric value to set"
-        }
+        key: { type: "string", description: "Config key (e.g. 'review.score_threshold')" },
+        value: { type: "number", description: "Numeric value to set" }
       },
       required: ["key", "value"]
     }
@@ -668,82 +874,86 @@ var TOOL_DEFS = [
     inputSchema: {
       type: "object",
       properties: {
-        command: {
-          type: "string",
-          description: "The test command that was run (e.g. 'bun vitest run')"
-        }
+        command: { type: "string", description: "The test command that was run (e.g. 'bun vitest run')" }
       },
       required: ["command"]
     }
   },
   {
     name: "get_detector_summary",
-    description: "Returns a consolidated summary of all computational detector findings from the current session. Includes escalation counters (security, dead-import, drift, test-quality, duplication warnings) and pending fixes grouped by gate. Call before /qult:review to collect ground truth for reviewers.",
+    description: "Returns a consolidated summary of all computational detector findings from the current session. Includes escalation counters and pending fixes grouped by gate. Call before /qult:review to collect ground truth for reviewers.",
     inputSchema: { type: "object", properties: {} }
   },
   {
     name: "record_human_approval",
-    description: "Record that the architect has reviewed and approved the changes. Required when review.require_human_approval is enabled in config. Call after the human has reviewed the code.",
+    description: "Record that the architect has reviewed and approved the changes. Required when review.require_human_approval is enabled.",
     inputSchema: { type: "object", properties: {} }
   },
   {
     name: "record_stage_scores",
-    description: "Record review scores for a specific stage (Spec, Quality, Security, or Adversarial). Call after each review stage passes with scores. Used for 4-stage aggregate score tracking (/40).",
+    description: "Record review scores for a specific stage (Spec, Quality, Security, or Adversarial). Used for 4-stage aggregate score tracking (/40).",
     inputSchema: {
       type: "object",
       properties: {
-        stage: {
-          type: "string",
-          description: "Stage name: 'Spec', 'Quality', or 'Security'"
-        },
-        scores: {
-          type: "object",
-          description: "Dimension scores (e.g. {completeness: 5, accuracy: 4} for Spec stage)"
-        }
+        stage: { type: "string", description: "Stage name: 'Spec', 'Quality', 'Security', or 'Adversarial'" },
+        scores: { type: "object", description: "Dimension scores (e.g. {completeness: 5, accuracy: 4})" }
       },
       required: ["stage", "scores"]
     }
   },
   {
     name: "get_harness_report",
-    description: "Returns a harness effectiveness report analyzing which gates catch issues, review score trends, and recommendations for unused gates. Call to assess harness health.",
+    description: "Returns a harness effectiveness report analyzing which gates catch issues and review score trends.",
     inputSchema: { type: "object", properties: {} }
   },
   {
     name: "get_handoff_document",
-    description: "Returns a structured handoff document for starting a fresh session. Includes session state, plan progress, pending fixes, and changed files. Call before ending a long session or when context is degraded.",
+    description: "Returns a structured handoff document for starting a fresh session. Call before ending a long session.",
     inputSchema: { type: "object", properties: {} }
   },
   {
     name: "get_metrics_dashboard",
-    description: "Returns a formatted metrics dashboard showing gate failure trends, security warning trends, and review score history across recent sessions.",
+    description: "Returns a formatted metrics dashboard showing gate failure trends and review score history.",
     inputSchema: { type: "object", properties: {} }
   }
 ];
 function handleTool(name, cwd, args) {
+  resolveSession(cwd);
+  const db = getDb();
+  const sid = getSessionId();
   switch (name) {
     case "get_pending_fixes": {
-      const path = findLatestStateFile(cwd, "pending-fixes");
-      const fixes = readJson(path, []);
-      if (!Array.isArray(fixes) || fixes.length === 0) {
+      const rows = db.prepare("SELECT file, gate, errors FROM pending_fixes WHERE session_id = ?").all(sid);
+      if (rows.length === 0) {
         return { content: [{ type: "text", text: "No pending fixes." }] };
       }
-      return { content: [{ type: "text", text: formatPendingFixes(fixes) }] };
+      const fixes = rows.map((r) => ({
+        file: r.file,
+        gate: r.gate,
+        errors: JSON.parse(r.errors)
+      }));
+      const lines = [`${fixes.length} pending fix(es):
+`];
+      for (const fix of fixes) {
+        lines.push(`[${fix.gate}] ${fix.file}`);
+        for (const err of fix.errors)
+          lines.push(`  ${err}`);
+      }
+      return { content: [{ type: "text", text: lines.join(`
+`) }] };
     }
     case "get_session_status": {
-      const path = findLatestStateFile(cwd, "session-state");
-      const state = readJson(path, null);
-      if (!state) {
+      const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sid);
+      if (!row) {
         return {
           isError: true,
           content: [{ type: "text", text: "No session state. Run /qult:init to set up." }]
         };
       }
-      return { content: [{ type: "text", text: JSON.stringify(state, null, 2) }] };
+      return { content: [{ type: "text", text: JSON.stringify(row, null, 2) }] };
     }
     case "get_gate_config": {
-      const gatesPath = join5(cwd, GATES_PATH);
-      const gates = readJson(gatesPath, null);
+      const gates = loadGates();
       if (!gates) {
         return {
           isError: true,
@@ -761,49 +971,23 @@ function handleTool(name, cwd, args) {
       if (!reason || reason.length < 10 || new Set(reason).size < 5) {
         return {
           isError: true,
-          content: [
-            {
-              type: "text",
-              text: "Missing or insufficient reason parameter (min 10 chars, min 5 unique characters). Explain WHY the gate should be disabled."
-            }
-          ]
+          content: [{ type: "text", text: "Missing or insufficient reason (min 10 chars, min 5 unique)." }]
         };
       }
-      if (!isValidGateName(gateName, cwd)) {
+      if (!isValidGateName(gateName)) {
         return {
           isError: true,
-          content: [
-            {
-              type: "text",
-              text: `Unknown gate '${gateName}'. Valid gates: ${getValidGateNames(cwd).join(", ")}`
-            }
-          ]
+          content: [{ type: "text", text: `Unknown gate '${gateName}'. Valid: ${getValidGateNames().join(", ")}` }]
         };
       }
-      const statePath = findLatestStateFile(cwd, "session-state");
-      const state = readJson(statePath, {});
-      const disabled = Array.isArray(state.disabled_gates) ? state.disabled_gates : [];
-      if (!disabled.includes(gateName) && disabled.length >= 2) {
+      const disabled = db.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?").all(sid);
+      if (!disabled.some((d) => d.gate_name === gateName) && disabled.length >= 2) {
         return {
           isError: true,
-          content: [
-            {
-              type: "text",
-              text: `Maximum 2 gates can be disabled per session. Currently disabled: ${disabled.join(", ")}. Re-enable a gate first.`
-            }
-          ]
+          content: [{ type: "text", text: `Maximum 2 gates disabled. Currently: ${disabled.map((d) => d.gate_name).join(", ")}` }]
         };
       }
-      if (!disabled.includes(gateName)) {
-        disabled.push(gateName);
-      }
-      state.disabled_gates = disabled;
-      try {
-        atomicWriteJson(statePath, state);
-        _jsonCache.delete(statePath);
-      } catch {
-        return { isError: true, content: [{ type: "text", text: "Failed to write state." }] };
-      }
+      db.prepare("INSERT OR REPLACE INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)").run(sid, gateName, reason);
       appendAuditLog(cwd, {
         action: "disable_gate",
         reason,
@@ -817,26 +1001,14 @@ function handleTool(name, cwd, args) {
       if (!gateName) {
         return { isError: true, content: [{ type: "text", text: "Missing gate_name parameter." }] };
       }
-      const statePath = findLatestStateFile(cwd, "session-state");
-      const state = readJson(statePath, {});
-      const disabled = Array.isArray(state.disabled_gates) ? state.disabled_gates : [];
-      state.disabled_gates = disabled.filter((g) => g !== gateName);
-      try {
-        atomicWriteJson(statePath, state);
-        _jsonCache.delete(statePath);
-      } catch {
-        return { isError: true, content: [{ type: "text", text: "Failed to write state." }] };
-      }
+      db.prepare("DELETE FROM disabled_gates WHERE session_id = ? AND gate_name = ?").run(sid, gateName);
       return { content: [{ type: "text", text: `Gate '${gateName}' re-enabled.` }] };
     }
     case "set_config": {
       const key = typeof args?.key === "string" ? args.key : null;
       const value = typeof args?.value === "number" ? args.value : null;
       if (!key || value === null) {
-        return {
-          isError: true,
-          content: [{ type: "text", text: "Missing key or value parameter." }]
-        };
+        return { isError: true, content: [{ type: "text", text: "Missing key or value parameter." }] };
       }
       const ALLOWED_KEYS = [
         "review.score_threshold",
@@ -847,35 +1019,13 @@ function handleTool(name, cwd, args) {
         "plan_eval.max_iterations"
       ];
       if (!ALLOWED_KEYS.includes(key)) {
-        return {
-          isError: true,
-          content: [
-            { type: "text", text: `Invalid key '${key}'. Allowed: ${ALLOWED_KEYS.join(", ")}` }
-          ]
-        };
+        return { isError: true, content: [{ type: "text", text: `Invalid key. Allowed: ${ALLOWED_KEYS.join(", ")}` }] };
       }
       if (key === "review.dimension_floor" && (value < 1 || value > 5)) {
-        return {
-          isError: true,
-          content: [{ type: "text", text: "dimension_floor must be between 1 and 5." }]
-        };
+        return { isError: true, content: [{ type: "text", text: "dimension_floor must be 1-5." }] };
       }
-      const configPath = join5(cwd, ".qult", "config.json");
-      const config = readJson(configPath, {});
-      const [section, field] = key.split(".");
-      if (!section || !field) {
-        return { isError: true, content: [{ type: "text", text: "Invalid key format." }] };
-      }
-      if (!config[section] || typeof config[section] !== "object") {
-        config[section] = {};
-      }
-      config[section][field] = value;
-      try {
-        atomicWriteJson(configPath, config);
-        _jsonCache.delete(configPath);
-      } catch {
-        return { isError: true, content: [{ type: "text", text: "Failed to write config." }] };
-      }
+      const projectId = getProjectId();
+      db.prepare("INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)").run(projectId, key, JSON.stringify(value));
       return { content: [{ type: "text", text: `Config set: ${key} = ${value}` }] };
     }
     case "clear_pending_fixes": {
@@ -883,21 +1033,10 @@ function handleTool(name, cwd, args) {
       if (!reason || reason.length < 10 || new Set(reason).size < 5) {
         return {
           isError: true,
-          content: [
-            {
-              type: "text",
-              text: "Missing or insufficient reason parameter (min 10 chars, min 5 unique characters). Explain WHY pending fixes should be cleared."
-            }
-          ]
+          content: [{ type: "text", text: "Missing or insufficient reason (min 10 chars, min 5 unique)." }]
         };
       }
-      const fixesPath = findLatestStateFile(cwd, "pending-fixes");
-      try {
-        atomicWriteJson(fixesPath, []);
-        _jsonCache.delete(fixesPath);
-      } catch {
-        return { isError: true, content: [{ type: "text", text: "Failed to clear fixes." }] };
-      }
+      db.prepare("DELETE FROM pending_fixes WHERE session_id = ?").run(sid);
       appendAuditLog(cwd, {
         action: "clear_pending_fixes",
         reason,
@@ -906,30 +1045,30 @@ function handleTool(name, cwd, args) {
       return { content: [{ type: "text", text: "All pending fixes cleared." }] };
     }
     case "get_detector_summary": {
-      const statePath = findLatestStateFile(cwd, "session-state");
-      const state = readJson(statePath, {});
-      const fixesPath = findLatestStateFile(cwd, "pending-fixes");
-      const fixes = readJson(fixesPath, []);
+      const session = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sid);
+      const fixes = db.prepare("SELECT file, gate, errors FROM pending_fixes WHERE session_id = ?").all(sid);
       const lines = [];
-      const counters = [
-        "security_warning_count",
-        "dead_import_warning_count",
-        "drift_warning_count",
-        "test_quality_warning_count",
-        "duplication_warning_count"
-      ];
-      for (const key of counters) {
-        const val = typeof state[key] === "number" ? state[key] : 0;
-        if (val > 0)
-          lines.push(`${key}: ${val}`);
+      if (session) {
+        const counters = [
+          "security_warning_count",
+          "dead_import_warning_count",
+          "drift_warning_count",
+          "test_quality_warning_count",
+          "duplication_warning_count"
+        ];
+        for (const key of counters) {
+          const val = typeof session[key] === "number" ? session[key] : 0;
+          if (val > 0)
+            lines.push(`${key}: ${val}`);
+        }
       }
-      if (Array.isArray(fixes) && fixes.length > 0) {
+      if (fixes.length > 0) {
         const byGate = {};
         for (const fix of fixes) {
           const g = fix.gate ?? "unknown";
           if (!byGate[g])
             byGate[g] = [];
-          byGate[g].push(fix);
+          byGate[g].push({ file: fix.file, errors: JSON.parse(fix.errors) });
         }
         for (const [gate, gateFixes] of Object.entries(byGate)) {
           lines.push(`
@@ -950,30 +1089,17 @@ function handleTool(name, cwd, args) {
 `) }] };
     }
     case "record_review": {
-      const statePath = findLatestStateFile(cwd, "session-state");
-      const state = readJson(statePath, {});
       try {
-        const changedPaths = Array.isArray(state.changed_file_paths) ? state.changed_file_paths : [];
+        const changedFiles = db.prepare("SELECT file_path FROM changed_files WHERE session_id = ?").all(sid);
         const threshold = loadConfig().review.required_changed_files;
-        if (changedPaths.length >= threshold && !hasPlanFile()) {
+        if (changedFiles.length >= threshold && !hasPlanFile()) {
           return {
             isError: true,
-            content: [
-              {
-                type: "text",
-                text: `Cannot record review: ${changedPaths.length} files changed without a plan. Run /qult:plan-generator first.`
-              }
-            ]
+            content: [{ type: "text", text: `Cannot record review: ${changedFiles.length} files changed without a plan.` }]
           };
         }
       } catch {}
-      try {
-        state.review_completed_at = new Date().toISOString();
-        atomicWriteJson(statePath, state);
-        _jsonCache.delete(statePath);
-      } catch {
-        return { isError: true, content: [{ type: "text", text: "Failed to record review." }] };
-      }
+      db.prepare("UPDATE sessions SET review_completed_at = ? WHERE id = ?").run(new Date().toISOString(), sid);
       const score = typeof args?.aggregate_score === "number" ? args.aggregate_score : null;
       const msg = score !== null ? `Review recorded (aggregate: ${score}).` : "Review recorded.";
       return { content: [{ type: "text", text: msg }] };
@@ -983,42 +1109,18 @@ function handleTool(name, cwd, args) {
       if (!cmd) {
         return { isError: true, content: [{ type: "text", text: "Missing command parameter." }] };
       }
-      const statePath = findLatestStateFile(cwd, "session-state");
-      try {
-        const state = readJson(statePath, {});
-        state.test_passed_at = new Date().toISOString();
-        state.test_command = cmd;
-        atomicWriteJson(statePath, state);
-        _jsonCache.delete(statePath);
-      } catch {
-        return {
-          isError: true,
-          content: [{ type: "text", text: "Failed to record test pass." }]
-        };
-      }
+      db.prepare("UPDATE sessions SET test_passed_at = ?, test_command = ? WHERE id = ?").run(new Date().toISOString(), cmd, sid);
       return { content: [{ type: "text", text: `Test pass recorded: ${cmd}` }] };
     }
     case "record_human_approval": {
-      const haStatePath = findLatestStateFile(cwd, "session-state");
-      const haState = readJson(haStatePath, {});
-      if (!haState.review_completed_at) {
+      const session = db.prepare("SELECT review_completed_at FROM sessions WHERE id = ?").get(sid);
+      if (!session?.review_completed_at) {
         return {
           isError: true,
-          content: [
-            {
-              type: "text",
-              text: "Cannot record human approval: no review has been completed yet. Run /qult:review first."
-            }
-          ]
+          content: [{ type: "text", text: "Cannot record approval: no review completed. Run /qult:review first." }]
         };
       }
-      try {
-        haState.human_review_approved_at = new Date().toISOString();
-        atomicWriteJson(haStatePath, haState);
-        _jsonCache.delete(haStatePath);
-      } catch {
-        return { isError: true, content: [{ type: "text", text: "Failed to record approval." }] };
-      }
+      db.prepare("UPDATE sessions SET human_review_approved_at = ? WHERE id = ?").run(new Date().toISOString(), sid);
       appendAuditLog(cwd, {
         action: "record_human_approval",
         reason: "Architect approved changes",
@@ -1030,42 +1132,18 @@ function handleTool(name, cwd, args) {
       const stage = typeof args?.stage === "string" ? args.stage : null;
       const scores = args?.scores;
       if (!stage || !scores || typeof scores !== "object") {
-        return {
-          isError: true,
-          content: [{ type: "text", text: "Missing stage or scores parameter." }]
-        };
+        return { isError: true, content: [{ type: "text", text: "Missing stage or scores parameter." }] };
       }
       const validStages = ["Spec", "Quality", "Security", "Adversarial"];
       if (!validStages.includes(stage)) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: `Invalid stage '${stage}'. Must be: ${validStages.join(", ")}`
-            }
-          ]
-        };
+        return { isError: true, content: [{ type: "text", text: `Invalid stage. Must be: ${validStages.join(", ")}` }] };
       }
-      const statePath = findLatestStateFile(cwd, "session-state");
-      try {
-        const state = readJson(statePath, {});
-        if (!state.review_stage_scores || typeof state.review_stage_scores !== "object" || Array.isArray(state.review_stage_scores)) {
-          state.review_stage_scores = {};
-        }
-        state.review_stage_scores[stage] = scores;
-        atomicWriteJson(statePath, state);
-        _jsonCache.delete(statePath);
-      } catch {
-        return {
-          isError: true,
-          content: [{ type: "text", text: "Failed to record stage scores." }]
-        };
+      const insertScore = db.prepare("INSERT OR REPLACE INTO review_stage_scores (session_id, stage, dimension, score) VALUES (?, ?, ?, ?)");
+      for (const [dim, score] of Object.entries(scores)) {
+        insertScore.run(sid, stage, dim, score);
       }
       return {
-        content: [
-          { type: "text", text: `Stage scores recorded: ${stage} = ${JSON.stringify(scores)}` }
-        ]
+        content: [{ type: "text", text: `Stage scores recorded: ${stage} = ${JSON.stringify(scores)}` }]
       };
     }
     case "get_harness_report": {
@@ -1080,25 +1158,27 @@ function handleTool(name, cwd, args) {
     }
     case "get_handoff_document": {
       try {
-        const statePath = findLatestStateFile(cwd, "session-state");
-        const state = readJson(statePath, {});
-        const fixesPath = findLatestStateFile(cwd, "pending-fixes");
-        const fixes = readJson(fixesPath, []);
+        const session = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sid);
+        const fixes = db.prepare("SELECT file, gate, errors FROM pending_fixes WHERE session_id = ?").all(sid);
+        const changedFiles = db.prepare("SELECT file_path FROM changed_files WHERE session_id = ?").all(sid);
+        const disabledGates = db.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?").all(sid);
         const plan = getActivePlan();
         return {
-          content: [
-            {
-              type: "text",
-              text: generateHandoffDocument({
-                changedFiles: Array.isArray(state.changed_file_paths) ? state.changed_file_paths : [],
-                pendingFixes: Array.isArray(fixes) ? fixes : [],
-                planTasks: plan?.tasks ?? null,
-                testPassed: !!state.test_passed_at,
-                reviewDone: !!state.review_completed_at,
-                disabledGates: Array.isArray(state.disabled_gates) ? state.disabled_gates : []
-              })
-            }
-          ]
+          content: [{
+            type: "text",
+            text: generateHandoffDocument({
+              changedFiles: changedFiles.map((r) => r.file_path),
+              pendingFixes: fixes.map((r) => ({
+                file: r.file,
+                gate: r.gate,
+                errors: JSON.parse(r.errors)
+              })),
+              planTasks: plan?.tasks ?? null,
+              testPassed: !!session?.test_passed_at,
+              reviewDone: !!session?.review_completed_at,
+              disabledGates: disabledGates.map((r) => r.gate_name)
+            })
+          }]
         };
       } catch {
         return { content: [{ type: "text", text: "No active session data to hand off." }] };
@@ -1156,12 +1236,12 @@ function handleRequest(parsed, cwd) {
             "",
             "## Hook/MCP Roles",
             "- Hooks detect test pass best-effort via output parsing. If tests passed but hook didn't detect it, call record_test_pass explicitly.",
-            "- After committing, session state resets (test/review cleared). This is expected — gates only apply to uncommitted changes.",
+            "- After committing, session state resets (test/review cleared). This is expected \u2014 gates only apply to uncommitted changes.",
             "- MCP tools (record_test_pass, record_review) are the authoritative state management mechanism.",
             "",
             "## Ground Truth for Reviews",
             "- Before running /qult:review, call get_detector_summary to collect computational detector findings (security, imports, duplications, test quality).",
-            "- Pass detector findings as context to each reviewer stage — reviewers must not contradict detector results.",
+            "- Pass detector findings as context to each reviewer stage \u2014 reviewers must not contradict detector results.",
             "",
             "## Human Approval",
             "- If review.require_human_approval is enabled, call record_human_approval after the architect has reviewed and approved the changes."
@@ -1175,11 +1255,7 @@ function handleRequest(parsed, cwd) {
       const params = parsed.params;
       const toolName = params?.name;
       if (typeof toolName !== "string") {
-        return {
-          jsonrpc: "2.0",
-          id,
-          error: { code: -32602, message: "Missing tool name" }
-        };
+        return { jsonrpc: "2.0", id, error: { code: -32602, message: "Missing tool name" } };
       }
       const toolArgs = typeof params?.arguments === "object" ? params.arguments : undefined;
       return { jsonrpc: "2.0", id, result: handleTool(toolName, cwd, toolArgs) };
@@ -1187,11 +1263,7 @@ function handleRequest(parsed, cwd) {
     case "ping":
       return { jsonrpc: "2.0", id, result: {} };
     default:
-      return {
-        jsonrpc: "2.0",
-        id,
-        error: { code: -32601, message: `Method not found: ${parsed.method}` }
-      };
+      return { jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${parsed.method}` } };
   }
 }
 async function main() {
@@ -1222,14 +1294,8 @@ main().catch((err) => {
 `);
   process.exit(1);
 });
-function resetMcpCache() {
-  _jsonCache.clear();
-}
 export {
-  resetMcpCache,
-  readJson,
   handleTool,
   handleRequest,
-  findLatestStateFile,
   TOOL_DEFS
 };

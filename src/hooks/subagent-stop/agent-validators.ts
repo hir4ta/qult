@@ -2,8 +2,8 @@ import { execSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { loadConfig } from "../../config.ts";
-import { atomicWriteJson } from "../../state/atomic-write.ts";
 import { checkCalibration, recordCalibration } from "../../state/calibration.ts";
+import { getDb, getProjectId, getSessionId } from "../../state/db.ts";
 import {
 	clearStageScores,
 	getPlanEvalIteration,
@@ -535,7 +535,6 @@ interface FindingRecord {
 	timestamp: string;
 }
 
-const FINDINGS_HISTORY_FILE = "review-findings-history.json";
 const MAX_FINDINGS = 100;
 
 let _currentFindings: FindingRecord[] = [];
@@ -556,25 +555,45 @@ export function extractFindings(output: string, stageName: string): void {
 	}
 }
 
-/** Persist accumulated findings to history file. Returns merged history for detectRepeatedPatterns. */
+/** Persist accumulated findings to DB. Returns merged history for detectRepeatedPatterns. */
 function persistReviewFindings(): FindingRecord[] | null {
 	if (_currentFindings.length === 0) return null;
-	const historyPath = join(process.cwd(), ".qult", ".state", FINDINGS_HISTORY_FILE);
-	let history: FindingRecord[] = [];
 	try {
-		if (existsSync(historyPath)) {
-			history = JSON.parse(readFileSync(historyPath, "utf-8"));
+		const db = getDb();
+		const projectId = getProjectId();
+		const sid = getSessionId();
+		const insert = db.prepare(
+			"INSERT INTO review_findings (session_id, project_id, file, severity, description, stage) VALUES (?, ?, ?, ?, ?, ?)",
+		);
+		for (const f of _currentFindings) {
+			insert.run(sid, projectId, f.file, f.severity, f.description, f.stage);
 		}
+		// Trim oldest entries
+		db.prepare(
+			`DELETE FROM review_findings WHERE project_id = ? AND id NOT IN (
+				SELECT id FROM review_findings WHERE project_id = ? ORDER BY id DESC LIMIT ?
+			)`,
+		).run(projectId, projectId, MAX_FINDINGS);
+
+		// Read merged history for pattern detection
+		const rows = db
+			.prepare(
+				"SELECT file, severity, description, stage, recorded_at FROM review_findings WHERE project_id = ? ORDER BY id DESC LIMIT ?",
+			)
+			.all(projectId, MAX_FINDINGS) as FindingRecord[];
+		const history = rows.map((r) => ({
+			file: r.file,
+			severity: r.severity,
+			description: r.description,
+			stage: r.stage,
+			timestamp: (r as unknown as { recorded_at: string }).recorded_at,
+		}));
+		_currentFindings = [];
+		return history;
 	} catch {
-		history = [];
+		_currentFindings = [];
+		return null;
 	}
-	history.push(..._currentFindings);
-	if (history.length > MAX_FINDINGS) {
-		history = history.slice(-MAX_FINDINGS);
-	}
-	atomicWriteJson(historyPath, history);
-	_currentFindings = [];
-	return history;
 }
 
 /** Detect repeated findings and suggest rules. Takes merged history to avoid redundant I/O. */

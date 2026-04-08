@@ -1,6 +1,3 @@
-import { existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
-import { cleanupStaleScopedFiles } from "../state/cleanup.ts";
 import { writePendingFixes } from "../state/pending-fixes.ts";
 
 let _initialized = false;
@@ -21,8 +18,6 @@ export function isSessionStartCompleted(): boolean {
  * Called at the start of every dispatch(), idempotent.
  *
  * - Skipped if SessionStart already ran
- * - Ensures .qult/.state/ exists
- * - Cleans up stale session-scoped files (>24h)
  * - Clears pending-fixes for fresh session start
  */
 export function lazyInit(): void {
@@ -31,11 +26,6 @@ export function lazyInit(): void {
 	_initialized = true;
 
 	try {
-		const stateDir = join(process.cwd(), ".qult", ".state");
-		if (!existsSync(stateDir)) {
-			mkdirSync(stateDir, { recursive: true });
-		}
-		cleanupStaleScopedFiles(stateDir);
 		writePendingFixes([]);
 	} catch {
 		/* fail-open */

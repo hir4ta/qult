@@ -1,6 +1,15 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	closeDb,
+	ensureSession,
+	getDb,
+	getProjectId,
+	setProjectPath,
+	setSessionScope,
+	useTestDb,
+} from "../../state/db.ts";
 import { resetAllCaches } from "../../state/flush.ts";
 import { writePendingFixes } from "../../state/pending-fixes.ts";
 import {
@@ -11,15 +20,19 @@ import {
 } from "../../state/session-state.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-stop-test");
-const STATE_DIR = join(TEST_DIR, ".qult", ".state");
 let stdoutCapture: string[] = [];
 let stderrCapture: string[] = [];
 let exitCode: number | null = null;
 const originalCwd = process.cwd();
 
 beforeEach(() => {
+	useTestDb();
+	setProjectPath(TEST_DIR);
+	setSessionScope("test-session");
+	ensureSession();
 	resetAllCaches();
-	mkdirSync(STATE_DIR, { recursive: true });
+	rmSync(TEST_DIR, { recursive: true, force: true });
+	mkdirSync(TEST_DIR, { recursive: true });
 	process.chdir(TEST_DIR);
 	stdoutCapture = [];
 	stderrCapture = [];
@@ -41,6 +54,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.restoreAllMocks();
+	closeDb();
 	process.chdir(originalCwd);
 	rmSync(TEST_DIR, { recursive: true, force: true });
 });
@@ -212,10 +226,11 @@ describe("stop hook", () => {
 	});
 
 	it("blocks when require_human_approval enabled and no approval", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { require_human_approval: true } }),
-		);
+		const db = getDb();
+		const projectId = getProjectId();
+		db.prepare(
+			"INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)",
+		).run(projectId, "review.require_human_approval", "true");
 		resetAllCaches();
 		recordChangedFile("/project/src/feature.ts");
 		recordReview();
@@ -232,10 +247,11 @@ describe("stop hook", () => {
 	});
 
 	it("allows when require_human_approval enabled and approval recorded", async () => {
-		writeFileSync(
-			join(TEST_DIR, ".qult", "config.json"),
-			JSON.stringify({ review: { require_human_approval: true } }),
-		);
+		const db = getDb();
+		const projectId = getProjectId();
+		db.prepare(
+			"INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)",
+		).run(projectId, "review.require_human_approval", "true");
 		resetAllCaches();
 		recordChangedFile("/project/src/feature.ts");
 		recordReview();
