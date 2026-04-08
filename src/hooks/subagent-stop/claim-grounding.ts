@@ -56,6 +56,7 @@ export function groundClaims(output: string, cwd: string): GroundingResult {
 				}
 				// Word-boundary check: function/method/variable name appears as a distinct token
 				const escaped = funcName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+				// nosemgrep: detect-non-literal-regexp — input is escapeRegex'd internal symbol name, not user input
 				const wordRe = new RegExp(`\\b${escaped}\\b`);
 				if (!wordRe.test(fileContent)) {
 					ungrounded.push(`Symbol \`${funcName}\` not found in ${filePath}`);

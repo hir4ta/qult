@@ -156,3 +156,19 @@ qult の設計は以下の論文・記事に基づいている。機能追加や
 - [AgentFixer](https://arxiv.org/abs/2603.29848) — LLM エージェントシステムの障害検出から修正推奨へ
 - [Near-Miss: Latent Policy Failure Detection](https://arxiv.org/abs/2603.29665) — エージェントワークフローの潜在的ポリシー違反を検出
 - [Agentic Evaluation Framework](https://arxiv.org/abs/2603.15976) — 3段階14評価器: バイナリゲート → 定量メトリクス → LLM品質評価。agents-evaluating-agents パラダイム
+- [Stack Overflow: Are Bugs Inevitable with AI Agents?](https://stackoverflow.blog/2026/01/28/are-bugs-and-incidents-inevitable-with-ai-coding-agents/) — AI コードは 1.7 倍のバグ、ロジックエラー 75% 増、セキュリティバグ 1.5-2 倍。変更失敗率 30% 増、PR あたりインシデント 23.5% 増。品質ゲートの定量的必要性
+- [MIT Tech Review: Rules Fail at the Prompt, Succeed at the Boundary](https://www.technologyreview.com/2026/01/28/1131003/rules-fail-at-the-prompt-succeed-at-the-boundary/) — プロンプトレベルのルールは構造的に失敗する。境界での強制のみが有効。The Wall 哲学の直接的な裏付け
+- [Vibe Coding in Practice: Flow, Technical Debt, and Guidelines](https://arxiv.org/abs/2512.11922) — Vibe コーディングの実践分析。フロー・技術負債・持続可能な使用ガイドライン。認知負債と所有権の断片化
+- [Agentic Property-Based Testing](https://arxiv.org/abs/2510.09907) — AI エージェントが自律的に PBT を生成。100 パッケージで 56% が有効なバグ、NumPy 等にパッチマージ。PBT 統合の将来方向
+- [Anthropic: Property-Based Testing with Claude](https://red.anthropic.com/2026/property-based-testing/) — Anthropic 公式の PBT ガイド。AI 生成コードの検証にプロパティベーステストを適用する手法
+- [HubSpot Sidekick: Multi-Model AI Code Review](https://www.infoq.com/news/2026/03/hubspot-ai-code-review-agent/) — マルチモデル AI レビューで 90% 高速化、80% エンジニア承認率。セカンダリ judge agent パターン
+- [Faros AI: AI Productivity Paradox](https://www.faros.ai/blog/ai-software-engineering) — AI 導入はバグ/開発者 9% 増、PR サイズ 154% 増。チームレベルの改善が組織レベルにスケールしない。個別最適と全体最適の乖離
+- [AI Code Security Crisis 2026](https://www.growexx.com/blog/ai-code-security-crisis-2026-cto-guide/) — AI 生成コードが 5 件に 1 件のセキュリティ侵害の原因。CVE 月次開示数が急増 (Jan:6→Mar:35)。構造的セキュリティゲートの緊急性
+- [AI Code Vulnerabilities 2.74x](https://www.softwareseni.com/ai-generated-code-security-risks-why-vulnerabilities-increase-2-74x-and-how-to-prevent-them/) — AI 生成コードの脆弱性は人間の 2.74 倍。45% にセキュリティ欠陥。インジェクション 33.1%、XSS 86% 失敗率
+- [GitGuardian: Shifting Security Left for AI Agents](https://blog.gitguardian.com/shifting-security-left-for-ai-agents-enforcing-ai-generated-code-security-with-gitguardian-mcp/) — MCP 経由で AI エージェントにシークレット検出を統合。セキュリティの左シフトをエージェント時代に適用
+- [Context Drift Kills Agents](https://zylos.ai/research/2026-02-28-ai-agent-context-compression-strategies) — 企業 AI 障害の 65% がコンテキストドリフトまたはメモリ喪失。35 分超で成功率低下、タスク時間 2 倍で失敗率 4 倍。PostCompact 再注入の定量的根拠
+- [Simon Willison: Red/Green TDD for Agents](https://simonwillison.net/guides/agentic-engineering-patterns/red-green-tdd/) — エージェントに RED→GREEN→REFACTOR を構造的に強制するパターン。qult の TDD enforcement の実務的裏付け
+- [Martin Kleppmann: AI Will Make Formal Verification Mainstream](https://martin.kleppmann.com/2025/12/08/ai-formal-verification.html) — AI + 形式検証 (vericoding) の方向性。プロパティベーステストから形式証明への橋渡し
+- [Investigating Autonomous Agent Contributions in the Wild](https://arxiv.org/html/2604.00917v1) — 実環境での自律エージェント活動パターン分析。コード変更の時間経過に伴う品質変動
+- [OpenAI Codex: 1M Lines Zero Manual Code](https://www.nxcode.io/resources/news/harness-engineering-complete-guide-ai-agent-codex-2026) — OpenAI が 100 万行をエージェントのみで生成。厳格なハーネス設計が前提。「ハーネスなきエージェントは負債製造機」
+- [AgentPex: 83% of "Perfect" Traces Have Violations](https://arxiv.org/abs/2603.23806) — outcome が完璧でも 83% の Claude トレースに手続き的違反。outcome ベンチマークの限界を定量化。構造的監査の追加根拠

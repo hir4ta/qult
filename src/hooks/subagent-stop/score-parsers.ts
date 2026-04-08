@@ -35,6 +35,7 @@ function escapeRegex(s: string): string {
 
 /** Parse a single named dimension score from output. Order-independent. */
 function parseDimensionScore(output: string, name: string): number | null {
+	// nosemgrep: detect-non-literal-regexp — input is escapeRegex'd internal dimension name, not user input
 	const re = new RegExp(`${escapeRegex(name)}[=:]\\s*(\\d+)`, "i");
 	const m = re.exec(output);
 	if (!m) return null;

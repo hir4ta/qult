@@ -1,0 +1,152 @@
+rules:
+  # ── Command Injection ─────────────────────────────────────────
+  - id: qult-exec-dynamic-command
+    patterns:
+      - pattern-either:
+          - pattern: exec($CMD, ...)
+          - pattern: execSync($CMD, ...)
+      - pattern-not: exec("...", ...)
+      - pattern-not: execSync("...", ...)
+      - metavariable-regex:
+          metavariable: $CMD
+          regex: ^(?!["'`])
+    message: >
+      exec/execSync called with dynamic command — command injection risk.
+      Use execFile/execFileSync or validate input.
+    languages: [typescript, javascript]
+    severity: ERROR
+    paths:
+      exclude:
+        - "**/__tests__/**"
+        - "**/test/**"
+        # runner.ts intentionally executes dynamic gate commands from DB config
+        - "**/gates/runner.ts"
+
+  # ── SQL Injection ─────────────────────────────────────────────
+  - id: qult-sql-template-literal
+    pattern: $DB.prepare(`...${$VAR}...`)
+    message: >
+      SQL query built with template literal interpolation — use parameterized queries.
+    languages: [typescript, javascript]
+    severity: ERROR
+    paths:
+      exclude:
+        - "**/__tests__/**"
+
+  # ── Prototype Pollution ───────────────────────────────────────
+  - id: qult-prototype-pollution
+    pattern-either:
+      - pattern: $OBJ["__proto__"]
+      - pattern: $OBJ.__proto__ = ...
+      - pattern: $OBJ.constructor.prototype
+    message: >
+      Prototype pollution risk — avoid __proto__ or constructor.prototype access.
+    languages: [typescript, javascript]
+    severity: ERROR
+
+  # ── Path Traversal ────────────────────────────────────────────
+  - id: qult-path-traversal
+    patterns:
+      - pattern-either:
+          - pattern: readFileSync($PATH, ...)
+          - pattern: writeFileSync($PATH, ...)
+          - pattern: readFile($PATH, ...)
+          - pattern: createReadStream($PATH, ...)
+      - pattern-not-inside: |
+          if (!$PATH.startsWith($CWD)) { ... }
+          ...
+      - metavariable-pattern:
+          metavariable: $PATH
+          patterns:
+            - pattern-not: "..."
+    message: >
+      File operation with potentially untrusted path — validate path does not escape project root.
+    languages: [typescript, javascript]
+    severity: WARNING
+    paths:
+      exclude:
+        - "**/__tests__/**"
+        - "**/test/**"
+
+  # ── Hardcoded Secrets ─────────────────────────────────────────
+  - id: qult-hardcoded-api-key
+    pattern-either:
+      - pattern: |
+          $KEY = "AKIA..."
+      - pattern: |
+          $KEY = "ghp_..."
+      - pattern: |
+          $KEY = "sk_live_..."
+      - pattern: |
+          $KEY = "sk_test_..."
+      - pattern: |
+          $KEY = "xox..."
+    message: >
+      Hardcoded API key or token detected — use environment variables.
+    languages: [typescript, javascript]
+    severity: ERROR
+
+  # ── Unsafe Deserialization ────────────────────────────────────
+  - id: qult-unsafe-json-parse
+    patterns:
+      - pattern: JSON.parse($INPUT)
+      - metavariable-pattern:
+          metavariable: $INPUT
+          patterns:
+            - pattern-either:
+                - pattern: req.body
+                - pattern: req.query
+                - pattern: req.params
+                - pattern: ctx.request.body
+    message: >
+      JSON.parse on raw user input without validation — validate/sanitize first.
+    languages: [typescript, javascript]
+    severity: WARNING
+
+  # ── eval with dynamic input ───────────────────────────────────
+  - id: qult-eval-dynamic
+    patterns:
+      - pattern: eval($X)
+      - pattern-not: eval("...")
+    message: >
+      eval() with dynamic input — code injection risk. Avoid eval entirely.
+    languages: [typescript, javascript]
+    severity: ERROR
+
+  # ── innerHTML XSS ─────────────────────────────────────────────
+  - id: qult-innerhtml-xss
+    patterns:
+      - pattern: $EL.innerHTML = $VAL
+      - pattern-not: $EL.innerHTML = "..."
+      - pattern-not: $EL.innerHTML = `...`
+    message: >
+      innerHTML assignment with dynamic value — XSS risk. Use textContent or sanitize.
+    languages: [typescript, javascript]
+    severity: ERROR
+    paths:
+      exclude:
+        - "**/__tests__/**"
+
+  # ── Weak Crypto ───────────────────────────────────────────────
+  - id: qult-weak-crypto-md5
+    pattern-either:
+      - pattern: createHash("md5")
+      - pattern: createHash('md5')
+    message: >
+      MD5 is cryptographically weak — use SHA-256 or stronger.
+    languages: [typescript, javascript]
+    severity: WARNING
+
+  # ── Missing Error Handling in Async ───────────────────────────
+  - id: qult-unhandled-promise
+    pattern: |
+      $PROMISE.then(...)
+    fix: |
+      $PROMISE.then(...).catch(...)
+    message: >
+      Promise without .catch() — unhandled rejection risk. Add error handling.
+    languages: [typescript, javascript]
+    severity: WARNING
+    paths:
+      exclude:
+        - "**/__tests__/**"
