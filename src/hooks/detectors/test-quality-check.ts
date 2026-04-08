@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname, extname, resolve } from "node:path";
 
 const MAX_CHECK_SIZE = 500_000;
 
@@ -530,7 +530,7 @@ export function formatTestQualityWarnings(
 			(s) => s.type === "happy-path-only" || s.type === "missing-boundary",
 		);
 		if (hasPbtSmell) {
-			const ext = file.slice(file.lastIndexOf(".")).toLowerCase();
+			const ext = extname(file).toLowerCase();
 			const JS_TS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
 			const PY = new Set([".py", ".pyi"]);
 			if (JS_TS.has(ext)) {

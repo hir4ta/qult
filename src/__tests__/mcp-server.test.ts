@@ -721,12 +721,12 @@ describe("archive_plan", () => {
 		expect(existsSync(join(plansDir, "archive", "test-plan.md"))).toBe(true);
 	});
 
-	it("does not error for non-existent plan path under .claude/plans/", () => {
+	it("returns 'not found' for non-existent plan path under .claude/plans/", () => {
 		const plansDir = join(TEST_DIR, ".claude", "plans");
 		mkdirSync(plansDir, { recursive: true });
 		const fakePath = join(plansDir, "non-existent.md");
 		const result = handleTool("archive_plan", TEST_DIR, { plan_path: fakePath });
-		expect(result.content[0]!.text).toContain("archived");
+		expect(result.content[0]!.text).toContain("not found");
 	});
 
 	it("rejects path traversal attempts", () => {

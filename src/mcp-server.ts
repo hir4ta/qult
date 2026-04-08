@@ -9,6 +9,7 @@
  * to eliminate the 660KB SDK dependency and reduce coupling to SDK releases.
  */
 
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -757,6 +758,9 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 				resolve(join(cwd, ".claude", "plans")),
 				resolve(join(homedir(), ".claude", "plans")),
 			];
+			// Support CLAUDE_PLANS_DIR env var (custom plan directory)
+			const envPlansDir = process.env.CLAUDE_PLANS_DIR;
+			if (envPlansDir) allowedBases.push(resolve(envPlansDir));
 			const isAllowed =
 				allowedBases.some((base) => resolvedPath.startsWith(`${base}/`)) &&
 				resolvedPath.endsWith(".md");
@@ -764,6 +768,14 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 				return {
 					content: [
 						{ type: "text", text: "Error: plan_path must be a .md file under .claude/plans/" },
+					],
+				};
+			}
+			// Check if file exists before archiving (distinguish no-op from success)
+			if (!existsSync(resolvedPath)) {
+				return {
+					content: [
+						{ type: "text", text: "Plan not found (already archived or path incorrect)." },
 					],
 				};
 			}
