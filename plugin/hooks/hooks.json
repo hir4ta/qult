@@ -15,7 +15,7 @@
 		],
 		"PreToolUse": [
 			{
-				"matcher": "Edit|Write|ExitPlanMode",
+				"matcher": "Edit|Write|ExitPlanMode|EnterPlanMode",
 				"hooks": [
 					{
 						"type": "command",

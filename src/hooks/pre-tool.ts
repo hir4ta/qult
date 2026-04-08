@@ -25,13 +25,25 @@ const driftWarnedFiles = new Set<string>();
 export default async function preTool(ev: HookEvent): Promise<void> {
 	const tool = ev.tool_name;
 
-	if (tool === "ExitPlanMode") {
+	if (tool === "EnterPlanMode") {
+		checkEnterPlanMode();
+	} else if (tool === "ExitPlanMode") {
 		checkExitPlanMode();
 	} else if (tool === "Edit" || tool === "Write") {
 		checkEditWrite(ev);
 	} else if (tool === "Bash") {
 		checkBash(ev);
 	}
+}
+
+/** Block EnterPlanMode: redirect to /qult:plan-generator.
+ *  Manual plan writing bypasses plan-evaluator scoring. */
+function checkEnterPlanMode(): void {
+	deny(
+		"Use /qult:plan-generator instead of entering plan mode directly. " +
+			"Manual plans bypass plan-evaluator validation. " +
+			"Run /qult:plan-generator to create a structured, evaluated plan.",
+	);
 }
 
 /** 1-time gate: block ExitPlanMode once to force a selfcheck.
@@ -242,6 +254,13 @@ function checkBash(ev: HookEvent): void {
 			if (isReviewRequired() && !isGateDisabled("review")) {
 				deny("Run /qult:review before committing. Independent review is required.");
 			}
+		}
+
+		// Advisory: recommend /qult:finish when plan is active
+		if (hasPlanFile()) {
+			process.stderr.write(
+				"[qult] Plan is active. Use /qult:finish for structured branch completion (merge/PR/hold/discard checklist).\n",
+			);
 		}
 
 		// Require human approval when configured

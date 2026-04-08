@@ -3378,13 +3378,18 @@ __export(exports_pre_tool, {
 import { resolve as resolve4 } from "path";
 async function preTool(ev) {
   const tool = ev.tool_name;
-  if (tool === "ExitPlanMode") {
+  if (tool === "EnterPlanMode") {
+    checkEnterPlanMode();
+  } else if (tool === "ExitPlanMode") {
     checkExitPlanMode();
   } else if (tool === "Edit" || tool === "Write") {
     checkEditWrite(ev);
   } else if (tool === "Bash") {
     checkBash(ev);
   }
+}
+function checkEnterPlanMode() {
+  deny("Use /qult:plan-generator instead of entering plan mode directly. " + "Manual plans bypass plan-evaluator validation. " + "Run /qult:plan-generator to create a structured, evaluated plan.");
 }
 function checkExitPlanMode() {
   if (wasPlanSelfcheckBlocked())
@@ -3527,6 +3532,10 @@ function checkBash(ev) {
       if (isReviewRequired() && !isGateDisabled("review")) {
         deny("Run /qult:review before committing. Independent review is required.");
       }
+    }
+    if (hasPlanFile()) {
+      process.stderr.write(`[qult] Plan is active. Use /qult:finish for structured branch completion (merge/PR/hold/discard checklist).
+`);
     }
     if (readLastReview() && loadConfig().review.require_human_approval && !readHumanApproval()) {
       deny("Human approval required before committing. The architect must review and call record_human_approval.");

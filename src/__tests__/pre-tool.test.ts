@@ -2,7 +2,14 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { saveGates } from "../gates/load.ts";
-import { closeDb, ensureSession, setProjectPath, setSessionScope, useTestDb } from "../state/db.ts";
+import {
+	closeDb,
+	ensureSession,
+	getDb,
+	setProjectPath,
+	setSessionScope,
+	useTestDb,
+} from "../state/db.ts";
 import { resetAllCaches } from "../state/flush.ts";
 import type { GatesConfig } from "../types.ts";
 
@@ -614,6 +621,55 @@ describe("preTool: ExitPlanMode selfcheck gate", () => {
 		await preTool({ tool_name: "ExitPlanMode" });
 
 		expect(exitCode).toBeNull();
+	});
+});
+
+describe("preTool: EnterPlanMode redirect to plan-generator", () => {
+	it("DENY EnterPlanMode and redirect to /qult:plan-generator", async () => {
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		try {
+			await preTool({ tool_name: "EnterPlanMode" });
+		} catch {
+			/* exit(2) */
+		}
+
+		expect(exitCode).toBe(2);
+		const errOutput = stderrCapture.join("");
+		expect(errOutput).toContain("plan-generator");
+	});
+});
+
+describe("preTool: git commit with active plan redirects to /qult:finish", () => {
+	it("warns on git commit when plan is active", async () => {
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			"### Task 1: Test [done]\n- **File**: src/foo.ts\n",
+		);
+
+		// Set up session state: test passed, review done, source file changed
+		const db = getDb();
+		db.prepare("INSERT INTO changed_files (session_id, file_path) VALUES (?, ?)").run(
+			"test-session",
+			join(TEST_DIR, "src/foo.ts"),
+		);
+		db.prepare("UPDATE sessions SET test_passed_at = ?, review_completed_at = ? WHERE id = ?").run(
+			new Date().toISOString(),
+			new Date().toISOString(),
+			"test-session",
+		);
+		resetAllCaches();
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({
+			tool_name: "Bash",
+			tool_input: { command: "git commit -m 'test'" },
+		});
+
+		// Should warn (stderr) but not DENY — finish enforcement is advisory
+		const errOutput = stderrCapture.join("");
+		expect(errOutput).toContain("qult:finish");
 	});
 });
 
