@@ -7,7 +7,7 @@ import { Database } from "bun:sqlite";
 import { chmodSync, mkdirSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
-var SCHEMA_VERSION = 2;
+var SCHEMA_VERSION = 3;
 var DB_DIR = join(homedir(), ".qult");
 var DB_PATH = join(DB_DIR, "qult.db");
 var DEFAULT_SESSION_ID = "__default__";
@@ -39,6 +39,11 @@ function migrateSchema(db) {
   if (version < 2) {
     db.exec("DROP TABLE IF EXISTS calibration");
   }
+  if (version < 3) {
+    try {
+      db.exec("ALTER TABLE sessions ADD COLUMN semantic_warning_count INTEGER NOT NULL DEFAULT 0");
+    } catch {}
+  }
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 function createTablesV1(db) {
@@ -65,7 +70,8 @@ function createTablesV1(db) {
 			test_quality_warning_count  INTEGER NOT NULL DEFAULT 0,
 			drift_warning_count         INTEGER NOT NULL DEFAULT 0,
 			dead_import_warning_count   INTEGER NOT NULL DEFAULT 0,
-			duplication_warning_count   INTEGER NOT NULL DEFAULT 0
+			duplication_warning_count   INTEGER NOT NULL DEFAULT 0,
+			semantic_warning_count     INTEGER NOT NULL DEFAULT 0
 		);
 		CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
 
@@ -533,7 +539,7 @@ function parsePlanTasks(content) {
           break;
         const fileMatch = nextTrimmed.match(FILE_LINE_RE);
         if (fileMatch) {
-          file = fileMatch[1].trim();
+          file = fileMatch[1].trim().replace(/[`"']/g, "");
           continue;
         }
         const verifyMatch = nextTrimmed.match(VERIFY_LINE_RE);
@@ -636,7 +642,8 @@ function getValidGateNames() {
     "review",
     "security-check",
     "dead-import-check",
-    "duplication-check"
+    "duplication-check",
+    "semantic-check"
   ]);
   if (gates) {
     for (const category of [gates.on_write, gates.on_commit, gates.on_review]) {
@@ -998,7 +1005,8 @@ function handleTool(name, cwd, args) {
           "dead_import_warning_count",
           "drift_warning_count",
           "test_quality_warning_count",
-          "duplication_warning_count"
+          "duplication_warning_count",
+          "semantic_warning_count"
         ];
         for (const key of counters) {
           const val = typeof session2[key] === "number" ? session2[key] : 0;
@@ -1214,7 +1222,8 @@ function handleTool(name, cwd, args) {
 				test_quality_warning_count = 0,
 				drift_warning_count = 0,
 				dead_import_warning_count = 0,
-				duplication_warning_count = 0
+				duplication_warning_count = 0,
+				semantic_warning_count = 0
 				WHERE id = ?`).run(sid);
       appendAuditLog({
         action: "reset_escalation_counters",

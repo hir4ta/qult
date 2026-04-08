@@ -48,6 +48,11 @@ function migrateSchema(db) {
   if (version < 2) {
     db.exec("DROP TABLE IF EXISTS calibration");
   }
+  if (version < 3) {
+    try {
+      db.exec("ALTER TABLE sessions ADD COLUMN semantic_warning_count INTEGER NOT NULL DEFAULT 0");
+    } catch {}
+  }
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 function createTablesV1(db) {
@@ -74,7 +79,8 @@ function createTablesV1(db) {
 			test_quality_warning_count  INTEGER NOT NULL DEFAULT 0,
 			drift_warning_count         INTEGER NOT NULL DEFAULT 0,
 			dead_import_warning_count   INTEGER NOT NULL DEFAULT 0,
-			duplication_warning_count   INTEGER NOT NULL DEFAULT 0
+			duplication_warning_count   INTEGER NOT NULL DEFAULT 0,
+			semantic_warning_count     INTEGER NOT NULL DEFAULT 0
 		);
 		CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
 
@@ -250,7 +256,7 @@ function ensureSession() {
   const projectId = getProjectId();
   db.prepare("INSERT OR IGNORE INTO sessions (id, project_id) VALUES (?, ?)").run(_sessionId, projectId);
 }
-var SCHEMA_VERSION = 2, DB_DIR, DB_PATH, DEFAULT_SESSION_ID = "__default__", _db = null, _projectIdCache = null, _projectPathCache = null, _sessionId;
+var SCHEMA_VERSION = 3, DB_DIR, DB_PATH, DEFAULT_SESSION_ID = "__default__", _db = null, _projectIdCache = null, _projectPathCache = null, _sessionId;
 var init_db = __esm(() => {
   DB_DIR = join(homedir(), ".qult");
   DB_PATH = join(DB_DIR, "qult.db");
@@ -387,6 +393,9 @@ function loadConfig() {
   const dupEsc = envInt("QULT_ESCALATION_DUPLICATION");
   if (dupEsc !== undefined)
     config.escalation.duplication_threshold = Math.max(1, dupEsc);
+  const semEsc = envInt("QULT_ESCALATION_SEMANTIC");
+  if (semEsc !== undefined)
+    config.escalation.semantic_threshold = Math.max(1, semEsc);
   _cache = config;
   return config;
 }
@@ -420,7 +429,8 @@ var init_config = __esm(() => {
       security_threshold: 10,
       drift_threshold: 8,
       test_quality_threshold: 8,
-      duplication_threshold: 8
+      duplication_threshold: 8,
+      semantic_threshold: 8
     }
   };
 });
@@ -564,7 +574,7 @@ function parsePlanTasks(content) {
           break;
         const fileMatch = nextTrimmed.match(FILE_LINE_RE);
         if (fileMatch) {
-          file = fileMatch[1].trim();
+          file = fileMatch[1].trim().replace(/[`"']/g, "");
           continue;
         }
         const verifyMatch = nextTrimmed.match(VERIFY_LINE_RE);
@@ -732,6 +742,7 @@ function defaultState() {
     drift_warning_count: 0,
     dead_import_warning_count: 0,
     duplication_warning_count: 0,
+    semantic_warning_count: 0,
     human_review_approved_at: null
   };
 }
@@ -761,6 +772,7 @@ function readSessionState() {
     state.drift_warning_count = row.drift_warning_count ?? 0;
     state.dead_import_warning_count = row.dead_import_warning_count ?? 0;
     state.duplication_warning_count = row.duplication_warning_count ?? 0;
+    state.semantic_warning_count = row.semantic_warning_count ?? 0;
     const changedFiles = db.prepare("SELECT file_path FROM changed_files WHERE session_id = ?").all(sid);
     state.changed_file_paths = changedFiles.map((r) => r.file_path);
     const disabledGates = db.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?").all(sid);
@@ -820,8 +832,9 @@ function flush2() {
 				test_quality_warning_count = ?,
 				drift_warning_count = ?,
 				dead_import_warning_count = ?,
-				duplication_warning_count = ?
-				WHERE id = ?`).run(state.last_commit_at, state.test_passed_at, state.test_command, state.review_completed_at, state.review_iteration, state.plan_eval_iteration, state.plan_selfcheck_blocked_at, state.human_review_approved_at, state.security_warning_count, state.test_quality_warning_count, state.drift_warning_count, state.dead_import_warning_count, state.duplication_warning_count, sid);
+				duplication_warning_count = ?,
+				semantic_warning_count = ?
+				WHERE id = ?`).run(state.last_commit_at, state.test_passed_at, state.test_command, state.review_completed_at, state.review_iteration, state.plan_eval_iteration, state.plan_selfcheck_blocked_at, state.human_review_approved_at, state.security_warning_count, state.test_quality_warning_count, state.drift_warning_count, state.dead_import_warning_count, state.duplication_warning_count, state.semantic_warning_count, sid);
       db.prepare("DELETE FROM changed_files WHERE session_id = ?").run(sid);
       const insertFile = db.prepare("INSERT INTO changed_files (session_id, file_path) VALUES (?, ?)");
       for (const fp of state.changed_file_paths) {
@@ -946,12 +959,17 @@ function recordReview() {
   state.review_completed_at = new Date().toISOString();
   writeState(state);
 }
-function shouldSkipGate(gateName, sessionId) {
+function shouldSkipGate(gateName, sessionId, currentFile) {
   const state = readSessionState();
   const entry = state.ran_gates[gateName];
   if (!entry)
     return false;
-  return entry.session_id === sessionId;
+  if (entry.session_id !== sessionId)
+    return false;
+  if (currentFile && !(state.changed_file_paths ?? []).includes(currentFile)) {
+    return false;
+  }
+  return true;
 }
 function markGateRan(gateName, sessionId) {
   const state = readSessionState();
@@ -982,6 +1000,7 @@ function clearOnCommit() {
   state.drift_warning_count = 0;
   state.dead_import_warning_count = 0;
   state.duplication_warning_count = 0;
+  state.semantic_warning_count = 0;
   state.human_review_approved_at = null;
   writeState(state);
 }
@@ -2311,9 +2330,7 @@ function detectSecurityPatterns(file) {
       }
     }
   }
-  if (JS_TS_EXTS.has(ext)) {
-    emitAdvisoryWarnings(file, content);
-  }
+  emitAdvisoryWarnings(file, content);
   if (errors.length === 0)
     return [];
   return [
@@ -2326,11 +2343,14 @@ function detectSecurityPatterns(file) {
 }
 function emitAdvisoryWarnings(file, content) {
   try {
+    const ext = extname6(file).toLowerCase();
     const lines = content.split(`
 `);
     for (let i = 0;i < lines.length; i++) {
       const line = lines[i];
-      for (const { re, suppress, desc } of ADVISORY_PATTERNS) {
+      for (const { re, suppress, desc, exts } of ADVISORY_PATTERNS) {
+        if (exts && !exts.has(ext))
+          continue;
         if (re.test(line) && !suppress.test(line)) {
           const relative = file.split("/").slice(-3).join("/");
           process.stderr.write(`[qult] Security advisory: ${relative}:${i + 1} \u2014 ${desc}
@@ -2454,34 +2474,246 @@ var init_security_check = __esm(() => {
       re: /(?:res\.(?:json|send|write)|response\.(?:json|send|write))\s*\(.*process\.env/,
       desc: "process.env leaked in HTTP response \u2014 environment variable disclosure",
       exts: JS_TS_EXTS
+    },
+    {
+      re: /(?:readFile|writeFile|createReadStream|createWriteStream|readdir|unlink|rmSync)\s*\(.*(?:req\.|params\.|query\.|ctx\.(?:request|params|query))/,
+      desc: "File operation with user-controlled path \u2014 path traversal risk",
+      exts: JS_TS_EXTS
+    },
+    {
+      re: /(?:fetch|axios\.(?:get|post|put|delete|patch|request)|http\.(?:get|request)|got|urllib\.request\.urlopen)\s*\(.*(?:req\.|params\.|query\.|ctx\.(?:request|params|query))/,
+      desc: "HTTP request with user-controlled URL \u2014 SSRF risk",
+      exts: JS_TS_EXTS
+    },
+    {
+      re: /requests\.(?:get|post|put|delete|patch|head)\s*\(\s*(?!["'])[a-zA-Z_]/,
+      desc: "HTTP request with dynamic URL \u2014 SSRF risk",
+      exts: PY_EXTS3
+    },
+    {
+      re: /(?:__proto__|constructor\s*\.\s*prototype)\s*(?:\[|\.\s*\w+\s*=)/,
+      desc: "Prototype pollution \u2014 __proto__/constructor.prototype mutation",
+      exts: JS_TS_EXTS
+    },
+    {
+      re: /\brequire\s*\(\s*(?!["'`])[a-zA-Z_$]/,
+      desc: "Dynamic require() with variable \u2014 supply-chain/injection risk",
+      exts: JS_TS_EXTS
     }
   ];
   ADVISORY_PATTERNS = [
     {
       re: /\bapp\.(?:get|post|put|delete|patch)\s*\(\s*["'`]\/api\//,
       suppress: /(?:auth|middleware|protect|guard|verify|session)/i,
-      desc: "API route \u2014 verify auth middleware is applied"
+      desc: "API route \u2014 verify auth middleware is applied",
+      exts: JS_TS_EXTS
     },
     {
       re: /\bwss?\.on\s*\(\s*["'`]connection["'`]/,
       suppress: /(?:auth|token|verify|session|guard)/i,
-      desc: "WebSocket handler \u2014 verify authentication is applied"
+      desc: "WebSocket handler \u2014 verify authentication is applied",
+      exts: JS_TS_EXTS
+    },
+    {
+      re: /Access-Control-Allow-Origin['":\s]*\*/,
+      suppress: /(?:localhost|127\.0\.0\.1|development|test)/i,
+      desc: "CORS wildcard origin (*) \u2014 restrict to specific origins in production"
+    },
+    {
+      re: /\bcors\s*\(\s*\)/,
+      suppress: /(?:\/\/\s*(?:dev|test|local))/i,
+      desc: "cors() with no options \u2014 allows all origins by default",
+      exts: JS_TS_EXTS
+    },
+    {
+      re: /\bdebug\s*[:=]\s*true\b/,
+      suppress: /(?:test|spec|mock|\.test\.|\.spec\.)/i,
+      desc: "Hardcoded debug=true \u2014 verify this is not in production config"
+    },
+    {
+      re: /\bsourceMap\s*[:=]\s*true\b/,
+      suppress: /(?:dev|development|test)/i,
+      desc: "Source maps enabled \u2014 verify they are not shipped to production (VibeGuard)"
+    },
+    {
+      re: /(?:console\.(?:log|info|warn|debug)|logger\.(?:info|warn|debug|log))\s*\(.*(?:password|passwd|secret|token|apiKey|api_key|credential|private_key)/i,
+      suppress: /(?:mask|redact|sanitize|\*{3,})/i,
+      desc: "Potential sensitive data in log output \u2014 mask before logging",
+      exts: JS_TS_EXTS
+    },
+    {
+      re: /["']\s*(?:\*|latest)\s*["']\s*$/,
+      suppress: /(?:peerDependencies|devDependencies|optionalDependencies)/i,
+      desc: "Wildcard/latest dependency version \u2014 pin to specific version for supply-chain safety"
     }
   ];
 });
 
+// src/hooks/detectors/semantic-check.ts
+import { existsSync as existsSync7, readFileSync as readFileSync7 } from "fs";
+import { extname as extname7 } from "path";
+function detectEmptyCatch(lines) {
+  const errors = [];
+  for (let i = 0;i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith("//") || trimmed.startsWith("#") || trimmed.startsWith("*"))
+      continue;
+    if (!/\bcatch\b/.test(trimmed))
+      continue;
+    if (!trimmed.includes("{"))
+      continue;
+    if (INTENTIONAL_RE.test(line))
+      continue;
+    if (i > 0 && INTENTIONAL_RE.test(lines[i - 1]))
+      continue;
+    const afterBrace = trimmed.slice(trimmed.indexOf("{") + 1);
+    if (/^\s*\}/.test(afterBrace)) {
+      errors.push(`L${i + 1}: Empty catch block \u2014 errors silently swallowed`);
+      continue;
+    }
+    if (afterBrace.trim() === "") {
+      const next = lines[i + 1]?.trimStart() ?? "";
+      if (INTENTIONAL_RE.test(lines[i + 1] ?? ""))
+        continue;
+      if (/^\}/.test(next)) {
+        errors.push(`L${i + 1}: Empty catch block \u2014 errors silently swallowed`);
+      }
+    }
+  }
+  return errors;
+}
+function detectIgnoredReturn(lines) {
+  const errors = [];
+  for (let i = 0;i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith("//") || trimmed.startsWith("#") || trimmed.startsWith("*"))
+      continue;
+    if (!PURE_METHODS_RE.test(trimmed))
+      continue;
+    if (/(?:^|[\s(,=])\b(?:return|const|let|var|yield|await)\s/.test(trimmed))
+      continue;
+    if (/=\s*(?:[a-zA-Z_$][\w$.]*\s*\.\s*)?(?:map|filter|reduce)/.test(trimmed))
+      continue;
+    if (CHAIN_CONTINUATION_RE.test(line))
+      continue;
+    const nextLine = lines[i + 1]?.trimStart() ?? "";
+    if (nextLine.startsWith("."))
+      continue;
+    if (INTENTIONAL_RE.test(line))
+      continue;
+    errors.push(`L${i + 1}: Return value of pure method discarded \u2014 probable no-op (assign or remove)`);
+  }
+  return errors;
+}
+function detectConditionAssignment(lines) {
+  const errors = [];
+  for (let i = 0;i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith("//") || trimmed.startsWith("*"))
+      continue;
+    if (!CONDITION_ASSIGNMENT_RE.test(trimmed))
+      continue;
+    if (DESTRUCTURE_RE.test(trimmed))
+      continue;
+    if (INTENTIONAL_RE.test(line))
+      continue;
+    if (i > 0 && INTENTIONAL_RE.test(lines[i - 1]))
+      continue;
+    const condMatch = trimmed.match(/\b(?:if|while)\s*\((.+)\)/);
+    if (!condMatch)
+      continue;
+    const cond = condMatch[1];
+    const stripped = cond.replace(/(?:[!=<>]=|=>|===|!==)/g, "");
+    if (!stripped.includes("="))
+      continue;
+    errors.push(`L${i + 1}: Assignment (=) inside condition \u2014 use === for comparison`);
+  }
+  return errors;
+}
+function emitPbtAdvisory(file, content) {
+  try {
+    const fileName = file.split("/").pop() ?? "";
+    const isTestFile2 = fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_");
+    if (!isTestFile2)
+      return;
+    const testCases = content.match(TEST_CASE_RE);
+    if (!testCases || testCases.length < 5)
+      return;
+    if (PBT_IMPORT_RE.test(content))
+      return;
+    const relative = file.split("/").slice(-3).join("/");
+    process.stderr.write(`[qult] Advisory: ${relative} has ${testCases.length} test cases \u2014 consider property-based testing for broader coverage
+`);
+  } catch {}
+}
+function detectSemanticPatterns(file) {
+  if (isGateDisabled("semantic-check"))
+    return [];
+  const ext = extname7(file).toLowerCase();
+  if (!CHECKABLE_EXTS3.has(ext))
+    return [];
+  if (!existsSync7(file))
+    return [];
+  let content;
+  try {
+    content = readFileSync7(file, "utf-8");
+  } catch {
+    return [];
+  }
+  if (content.length > MAX_CHECK_SIZE4)
+    return [];
+  const lines = content.split(`
+`);
+  const errors = [];
+  if (JS_TS_EXTS2.has(ext)) {
+    errors.push(...detectEmptyCatch(lines));
+    errors.push(...detectIgnoredReturn(lines));
+    errors.push(...detectConditionAssignment(lines));
+  }
+  if (PY_EXTS4.has(ext)) {
+    errors.push(...detectEmptyCatch(lines));
+  }
+  emitPbtAdvisory(file, content);
+  if (errors.length === 0)
+    return [];
+  return [
+    {
+      file,
+      errors: errors.map((e) => sanitizeForStderr(e.slice(0, 300))),
+      gate: "semantic-check"
+    }
+  ];
+}
+var JS_TS_EXTS2, PY_EXTS4, CHECKABLE_EXTS3, MAX_CHECK_SIZE4 = 500000, INTENTIONAL_RE, PURE_METHODS_RE, CHAIN_CONTINUATION_RE, CONDITION_ASSIGNMENT_RE, DESTRUCTURE_RE, TEST_CASE_RE, PBT_IMPORT_RE;
+var init_semantic_check = __esm(() => {
+  init_session_state();
+  JS_TS_EXTS2 = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
+  PY_EXTS4 = new Set([".py", ".pyi"]);
+  CHECKABLE_EXTS3 = new Set([...JS_TS_EXTS2, ...PY_EXTS4, ".go", ".rs", ".rb", ".java", ".kt"]);
+  INTENTIONAL_RE = /(?:\/\/|\/\*|#)\s*(?:fail-open|intentional|deliberate|nolint|noqa|NOLINT)/i;
+  PURE_METHODS_RE = /^\s*(?:[a-zA-Z_$][\w$.]*\s*\.\s*)?(?:map|filter|reduce|flatMap|flat|slice|concat|toSorted|toReversed|toSpliced|replace|replaceAll|trim|trimStart|trimEnd|padStart|padEnd|substring|toLowerCase|toUpperCase)\s*\(/;
+  CHAIN_CONTINUATION_RE = /\)\s*\./;
+  CONDITION_ASSIGNMENT_RE = /\b(?:if|while)\s*\(.*[^!=<>]=(?!=)[^=]/;
+  DESTRUCTURE_RE = /\b(?:const|let|var)\s/;
+  TEST_CASE_RE = /\b(?:it|test)\s*\(/g;
+  PBT_IMPORT_RE = /(?:fast-check|@fast-check|fc\.|property\s*\(|forAll\s*\(|arbitrary)/;
+});
+
 // src/hooks/detectors/test-file-resolver.ts
-import { existsSync as existsSync7 } from "fs";
-import { basename as basename3, dirname as dirname3, extname as extname7, join as join5 } from "path";
+import { existsSync as existsSync8 } from "fs";
+import { basename as basename3, dirname as dirname3, extname as extname8, join as join5 } from "path";
 function resolveTestFile(sourceFile) {
-  const ext = extname7(sourceFile);
+  const ext = extname8(sourceFile);
   const base = basename3(sourceFile, ext);
   const dir = dirname3(sourceFile);
   if (isTestFile2(sourceFile))
     return null;
   for (const pattern of TEST_PATTERNS) {
     const candidate = pattern(dir, base, ext);
-    if (candidate && existsSync7(candidate)) {
+    if (candidate && existsSync8(candidate)) {
       return candidate;
     }
   }
@@ -2511,7 +2743,7 @@ var exports_post_tool = {};
 __export(exports_post_tool, {
   default: () => postTool
 });
-import { dirname as dirname4, extname as extname8, resolve as resolve3 } from "path";
+import { dirname as dirname4, extname as extname9, resolve as resolve3 } from "path";
 async function postTool(ev) {
   const tool = ev.tool_name;
   if (!tool)
@@ -2541,14 +2773,14 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
   const gates = loadGates();
   if (!gates?.on_write)
     return;
-  const fileExt = extname8(file).toLowerCase();
+  const fileExt = extname9(file).toLowerCase();
   const gatedExts = getGatedExtensions();
   const sessionId = ev.session_id;
   const gateEntries = [];
   for (const [name, gate] of Object.entries(gates.on_write)) {
     if (isGateDisabled(name))
       continue;
-    if (gate.run_once_per_batch && sessionId && shouldSkipGate(name, sessionId))
+    if (gate.run_once_per_batch && sessionId && shouldSkipGate(name, sessionId, file))
       continue;
     const hasPlaceholder = gate.command.includes("{file}");
     if (hasPlaceholder && gatedExts.size > 0 && !gatedExts.has(fileExt))
@@ -2590,13 +2822,14 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
     const exportFixes = detectExportBreakingChanges(file);
     newFixes.push(...exportFixes);
   } catch {}
+  const existingFixKeys = new Set(readPendingFixes().map((f) => `${resolve3(f.file)}:${f.gate}`));
+  const fileName = file.split("/").pop() ?? "";
+  const isTestFile3 = fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_");
   try {
     const securityFixes = detectSecurityPatterns(file);
     if (securityFixes.length > 0) {
       newFixes.push(...securityFixes);
-      const fileName = file.split("/").pop() ?? "";
-      const isTestFile3 = fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_");
-      if (!isTestFile3) {
+      if (!isTestFile3 && !existingFixKeys.has(`${file}:security-check`)) {
         const count = incrementEscalation("security_warning_count");
         if (count >= 10) {
           process.stderr.write(`[qult] Security escalation: ${count} security warnings this session. Review security posture.
@@ -2606,9 +2839,24 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
     }
   } catch {}
   try {
+    const semanticFixes = detectSemanticPatterns(file);
+    if (semanticFixes.length > 0) {
+      newFixes.push(...semanticFixes);
+      if (!isTestFile3 && !existingFixKeys.has(`${file}:semantic-check`)) {
+        const count = incrementEscalation("semantic_warning_count");
+        if (count >= 8) {
+          process.stderr.write(`[qult] Semantic escalation: ${count} semantic warnings this session. Review code for silent failures.
+`);
+        }
+      }
+    }
+  } catch {}
+  try {
     const deadImportWarnings = detectDeadImports(file);
     if (deadImportWarnings.length > 0) {
-      incrementEscalation("dead_import_warning_count");
+      if (!existingFixKeys.has(`${file}:dead-import-check`)) {
+        incrementEscalation("dead_import_warning_count");
+      }
       for (const w of deadImportWarnings) {
         process.stderr.write(`[qult] Dead import: ${w}
 `);
@@ -2630,12 +2878,16 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
     const dupFixes = detectDuplication(file);
     if (dupFixes.length > 0) {
       newFixes.push(...dupFixes);
-      incrementEscalation("duplication_warning_count");
+      if (!existingFixKeys.has(`${file}:duplication-check`)) {
+        incrementEscalation("duplication_warning_count");
+      }
     }
     const sessionFiles = readSessionState().changed_file_paths ?? [];
     const crossDupWarnings = detectCrossFileDuplication(file, sessionFiles);
     if (crossDupWarnings.length > 0) {
-      incrementEscalation("duplication_warning_count");
+      if (!existingFixKeys.has(`${file}:duplication-check`)) {
+        incrementEscalation("duplication_warning_count");
+      }
       for (const w of crossDupWarnings) {
         process.stderr.write(`[qult] Duplication: ${w}
 `);
@@ -2873,6 +3125,7 @@ var init_post_tool = __esm(() => {
   init_export_check();
   init_import_check();
   init_security_check();
+  init_semantic_check();
   init_test_file_resolver();
   init_respond();
   planWarnedAt = new Set;
@@ -3140,6 +3393,14 @@ ${list}
 Consider using TaskCreate for Verify test execution.
 `);
     }
+    const doneNoVerify = plan.tasks.filter((t) => t.status === "done" && t.file && !t.verify);
+    if (doneNoVerify.length > 0) {
+      const list = doneNoVerify.map((t) => `  Task ${t.taskNumber ?? "?"}: ${t.name} (File: ${t.file})`).join(`
+`);
+      process.stderr.write(`[qult] ${doneNoVerify.length} completed task(s) have File but no Verify field \u2014 add test verification for spec compliance:
+${list}
+`);
+    }
   }
   if (hasSourceChanges2) {
     if (!plan) {
@@ -3184,6 +3445,10 @@ Consider using TaskCreate for Verify test execution.
   if (duplicationCount >= escalation.duplication_threshold) {
     block(`${duplicationCount} duplication warnings emitted this session. Extract shared code before finishing.`);
   }
+  const semanticCount = readEscalation("semantic_warning_count");
+  if (semanticCount >= escalation.semantic_threshold && !isGateDisabled("semantic-check")) {
+    block(`${semanticCount} semantic warnings emitted this session. Fix silent failure patterns before finishing.`);
+  }
 }
 var SOURCE_EXTS2;
 var init_stop = __esm(() => {
@@ -3216,7 +3481,7 @@ var init_stop = __esm(() => {
 });
 
 // src/hooks/subagent-stop/claim-grounding.ts
-import { existsSync as existsSync8, readFileSync as readFileSync7, statSync as statSync3 } from "fs";
+import { existsSync as existsSync9, readFileSync as readFileSync8, statSync as statSync3 } from "fs";
 import { join as join6 } from "path";
 function groundClaims(output, cwd) {
   try {
@@ -3232,7 +3497,7 @@ function groundClaims(output, cwd) {
         ungrounded.push(`Path traversal rejected: ${filePath}`);
         continue;
       }
-      if (!existsSync8(absPath)) {
+      if (!existsSync9(absPath)) {
         ungrounded.push(`File not found: ${filePath}`);
         continue;
       }
@@ -3244,7 +3509,7 @@ function groundClaims(output, cwd) {
             const size = statSync3(absPath).size;
             if (size > MAX_FILE_SIZE)
               break;
-            fileContent = readFileSync7(absPath, "utf-8");
+            fileContent = readFileSync8(absPath, "utf-8");
           } catch {
             break;
           }
@@ -3277,6 +3542,8 @@ function crossValidate(output, stageName) {
       checkSpecContradiction(output, contradictions);
     } else if (stageName === "Quality") {
       checkQualityContradiction(output, contradictions);
+    } else if (stageName === "Adversarial") {
+      checkAdversarialContradiction(output, contradictions);
     }
     return { contradictions };
   } catch {
@@ -3341,6 +3608,34 @@ function checkQualityContradiction(output, contradictions) {
       contradictions.push(`Quality reviewer declared "No issues found" but session has ${totalWarnings} total quality warnings (dead-imports: ${deadImports}, drift: ${driftWarnings}, test-quality: ${testQuality}, duplication: ${duplication})`);
     }
   } catch {}
+}
+function checkAdversarialContradiction(output, contradictions) {
+  if (!NO_ISSUES_RE.test(output))
+    return;
+  try {
+    const state = readSessionState();
+    const semanticWarnings = state.semantic_warning_count ?? 0;
+    const testQuality = state.test_quality_warning_count ?? 0;
+    if (semanticWarnings >= 3) {
+      contradictions.push(`Adversarial reviewer declared "No issues found" but session has ${semanticWarnings} semantic warnings (silent failures)`);
+    }
+    if (testQuality >= 3) {
+      contradictions.push(`Adversarial reviewer declared "No issues found" but session has ${testQuality} test quality warnings`);
+    }
+  } catch {}
+}
+function crossValidateReviewers(stageScores) {
+  try {
+    const contradictions = [];
+    const spec = stageScores.Spec;
+    const quality = stageScores.Quality;
+    if (spec?.completeness === 5 && quality?.design != null && quality.design <= 2) {
+      contradictions.push("Spec rated Completeness=5 but Quality rated Design\u22642 \u2014 fully complete code with poor design warrants investigation");
+    }
+    return contradictions;
+  } catch {
+    return [];
+  }
 }
 var NO_ISSUES_RE, ALL_COMPLETE_RE;
 var init_cross_validation = __esm(() => {
@@ -3611,7 +3906,7 @@ var init_score_parsers = __esm(() => {
 
 // src/hooks/subagent-stop/agent-validators.ts
 import { execSync as execSync3 } from "child_process";
-import { existsSync as existsSync9, readdirSync as readdirSync4, readFileSync as readFileSync8, statSync as statSync4 } from "fs";
+import { existsSync as existsSync10, readdirSync as readdirSync4, readFileSync as readFileSync9, statSync as statSync4 } from "fs";
 import { join as join7, normalize } from "path";
 function checkReadOnlyViolation(normalized) {
   if (!READ_ONLY_REVIEWERS.has(normalized))
@@ -3681,7 +3976,7 @@ async function subagentStop(ev) {
 function validatePlan() {
   try {
     const planDir = join7(process.cwd(), ".claude", "plans");
-    if (!existsSync9(planDir))
+    if (!existsSync10(planDir))
       return;
     const files = readdirSync4(planDir).filter((f) => f.endsWith(".md")).map((f) => ({
       name: f,
@@ -3689,7 +3984,7 @@ function validatePlan() {
     })).sort((a, b) => b.mtime - a.mtime);
     if (files.length === 0)
       return;
-    const content = readFileSync8(join7(planDir, files[0].name), "utf-8");
+    const content = readFileSync9(join7(planDir, files[0].name), "utf-8");
     const structErrors = validatePlanStructure(content);
     if (structErrors.length > 0) {
       block(`Plan structural issues:
@@ -4017,6 +4312,7 @@ __export(exports_subagent_stop, {
   groundClaims: () => groundClaims,
   extractFindings: () => extractFindings,
   default: () => subagentStop,
+  crossValidateReviewers: () => crossValidateReviewers,
   crossValidate: () => crossValidate,
   buildReviewBlockMessage: () => buildReviewBlockMessage,
   buildPlanEvalBlockMessage: () => buildPlanEvalBlockMessage,
@@ -4032,7 +4328,7 @@ var init_subagent_stop = __esm(() => {
 });
 
 // src/hooks/detectors/test-quality-check.ts
-import { existsSync as existsSync10, readFileSync as readFileSync9 } from "fs";
+import { existsSync as existsSync11, readFileSync as readFileSync10 } from "fs";
 import { basename as basename4, dirname as dirname5, resolve as resolve5 } from "path";
 function countAssertionsOutsideSetup(code) {
   const lines = code.split(`
@@ -4069,22 +4365,22 @@ function analyzeTestQuality(file) {
   const absPath = resolve5(cwd, file);
   if (!absPath.startsWith(cwd))
     return null;
-  if (!existsSync10(absPath))
+  if (!existsSync11(absPath))
     return null;
   let content;
   try {
-    content = readFileSync9(absPath, "utf-8");
+    content = readFileSync10(absPath, "utf-8");
   } catch {
     return null;
   }
-  if (content.length > MAX_CHECK_SIZE4)
+  if (content.length > MAX_CHECK_SIZE5)
     return null;
   const codeOnly = content.split(`
 `).filter((line) => !line.trimStart().startsWith("//")).join(`
 `);
   const lines = content.split(`
 `);
-  const testCount = (codeOnly.match(TEST_CASE_RE) ?? []).length;
+  const testCount = (codeOnly.match(TEST_CASE_RE2) ?? []).length;
   if (testCount === 0)
     return null;
   const assertionCount = countAssertionsOutsideSetup(codeOnly);
@@ -4143,7 +4439,7 @@ function analyzeTestQuality(file) {
   }
   const snapshotCount = (codeOnly.match(SNAPSHOT_RE) ?? []).length;
   const nonSnapshotAssertions = assertionCount - snapshotCount;
-  if (snapshotCount > 0 && nonSnapshotAssertions === 0) {
+  if (snapshotCount > 0 && nonSnapshotAssertions <= 0) {
     smells.push({
       type: "snapshot-only",
       line: 0,
@@ -4235,8 +4531,8 @@ function analyzeTestQuality(file) {
   try {
     const snapDir = `${dirname5(absPath)}/__snapshots__/`;
     const snapFile = `${snapDir}${basename4(absPath)}.snap`;
-    if (existsSync10(snapFile)) {
-      const snapContent = readFileSync9(snapFile, "utf-8");
+    if (existsSync11(snapFile)) {
+      const snapContent = readFileSync10(snapFile, "utf-8");
       if (snapContent.length > LARGE_SNAPSHOT_CHARS) {
         smells.push({
           type: "snapshot-bloat",
@@ -4246,7 +4542,99 @@ function analyzeTestQuality(file) {
       }
     }
   } catch {}
+  if (testCount >= 2) {
+    const hasErrorAssertions = /(?:toThrow|rejects\.toThrow|\.rejects\.|\.catch\s*\(|expect\(.*error)/i.test(codeOnly);
+    if (!hasErrorAssertions) {
+      try {
+        const implFile = findImplFile(absPath);
+        if (implFile) {
+          const implContent = readFileSync10(implFile, "utf-8");
+          if (/\bthrow\b|\breject\b|Promise\.reject/m.test(implContent)) {
+            smells.push({
+              type: "no-error-path",
+              line: 0,
+              message: "Implementation has throw/reject but test has no error-path assertions (toThrow, rejects, catch)"
+            });
+          }
+        }
+      } catch {}
+    }
+  }
+  if (testCount >= 3) {
+    const descRe = /\b(?:it|test)\s*\(\s*["'`]([^"'`]*)["'`]/g;
+    const negativeRe = /\b(?:invalid|error|fail|reject|throw|empty|null|missing|not\b|negative|undefined|wrong|bad|broken|illegal)/i;
+    let allPositive = true;
+    for (const match of codeOnly.matchAll(descRe)) {
+      if (negativeRe.test(match[1])) {
+        allPositive = false;
+        break;
+      }
+    }
+    if (allPositive) {
+      smells.push({
+        type: "happy-path-only",
+        line: 0,
+        message: "All test descriptions are positive \u2014 consider testing error/edge cases (invalid input, null, empty)"
+      });
+    }
+  }
+  if (testCount >= 3) {
+    const boundaryValueRe = /(?:\b0\b|\b-1\b|\bnull\b|\bundefined\b|\bNaN\b|\bInfinity\b|["'`]{2}|\[\s*\])/;
+    const hasExpectLine = /expect\s*\(/.test(codeOnly);
+    const hasBoundary = hasExpectLine && codeOnly.split(`
+`).some((line) => /expect\s*\(/.test(line) && boundaryValueRe.test(line));
+    if (!hasBoundary) {
+      smells.push({
+        type: "missing-boundary",
+        line: 0,
+        message: "No boundary values tested (0, -1, null, undefined, NaN, empty string/array) \u2014 consider edge cases"
+      });
+    }
+  }
+  if (testCount >= 5 && assertionCount >= 5) {
+    const matcherNameRe = /\.(toBe|toEqual|toStrictEqual|toThrow|toMatch|toContain)\s*\(/g;
+    const matcherCounts = new Map;
+    let totalMatched = 0;
+    for (const m of codeOnly.matchAll(matcherNameRe)) {
+      const key = m[1];
+      matcherCounts.set(key, (matcherCounts.get(key) ?? 0) + 1);
+      totalMatched++;
+    }
+    if (totalMatched > 0) {
+      for (const [matcher, count] of matcherCounts) {
+        const ratio = Math.min(count / totalMatched, 1);
+        if (ratio >= 0.8) {
+          smells.push({
+            type: "concentrated-pattern",
+            line: 0,
+            message: `${Math.round(ratio * 100)}% of assertions use .${matcher}() \u2014 tests may miss diverse behaviors`
+          });
+          break;
+        }
+      }
+    }
+  }
   return { testCount, assertionCount, avgAssertions, smells };
+}
+function findImplFile(testPath) {
+  try {
+    const dir = dirname5(testPath);
+    const base = basename4(testPath);
+    const implName = base.replace(/\.(?:test|spec)(\.[^.]+)$/, "$1");
+    const sameDirPath = resolve5(dir, implName);
+    if (existsSync11(sameDirPath))
+      return sameDirPath;
+    const parentDir = dirname5(dir);
+    const parentPath = resolve5(parentDir, implName);
+    if (existsSync11(parentPath))
+      return parentPath;
+    const srcPath = resolve5(parentDir, "src", implName);
+    if (existsSync11(srcPath))
+      return srcPath;
+    return null;
+  } catch {
+    return null;
+  }
 }
 function formatTestQualityWarnings(file, result, taskKey) {
   const warnings = [];
@@ -4271,10 +4659,10 @@ function formatTestQualityWarnings(file, result, taskKey) {
   }
   return warnings;
 }
-var MAX_CHECK_SIZE4 = 500000, ASSERTION_RE, TEST_CASE_RE, WEAK_MATCHERS, TRIVIAL_ASSERTION_RE, EMPTY_TEST_RE, MOCK_RE, ALWAYS_TRUE_RE, CONSTANT_SELF_RE, SNAPSHOT_RE, IMPL_COUPLED_RE, ASYNC_TEST_RE, AWAIT_RE, MODULE_LET_RE, LARGE_TEST_FILE_LINES = 500, LARGE_SNAPSHOT_CHARS = 5000, SETUP_BLOCK_RE;
+var MAX_CHECK_SIZE5 = 500000, ASSERTION_RE, TEST_CASE_RE2, WEAK_MATCHERS, TRIVIAL_ASSERTION_RE, EMPTY_TEST_RE, MOCK_RE, ALWAYS_TRUE_RE, CONSTANT_SELF_RE, SNAPSHOT_RE, IMPL_COUPLED_RE, ASYNC_TEST_RE, AWAIT_RE, MODULE_LET_RE, LARGE_TEST_FILE_LINES = 500, LARGE_SNAPSHOT_CHARS = 5000, SETUP_BLOCK_RE;
 var init_test_quality_check = __esm(() => {
   ASSERTION_RE = /\b(expect|assert|should)\s*[.(]/g;
-  TEST_CASE_RE = /\b(it|test)\s*\(/g;
+  TEST_CASE_RE2 = /\b(it|test)\s*\(/g;
   WEAK_MATCHERS = [
     { re: /\.toBeTruthy\s*\(\s*\)/, name: "toBeTruthy()" },
     { re: /\.toBeFalsy\s*\(\s*\)/, name: "toBeFalsy()" },
@@ -4454,14 +4842,14 @@ var exports_session_start = {};
 __export(exports_session_start, {
   default: () => sessionStart
 });
-import { existsSync as existsSync11 } from "fs";
+import { existsSync as existsSync12 } from "fs";
 import { join as join8 } from "path";
 async function sessionStart(ev) {
   try {
     if (!_legacyWarned) {
       _legacyWarned = true;
       const cwd = ev.cwd ?? process.cwd();
-      if (existsSync11(join8(cwd, ".qult"))) {
+      if (existsSync12(join8(cwd, ".qult"))) {
         process.stderr.write(`[qult] Legacy .qult/ directory detected. State is now stored in ~/.qult/qult.db. You can safely delete .qult/ from this project.
 `);
       }
@@ -4503,7 +4891,7 @@ var exports_post_compact = {};
 __export(exports_post_compact, {
   default: () => postCompact
 });
-import { existsSync as existsSync12, readdirSync as readdirSync5, readFileSync as readFileSync10, statSync as statSync5 } from "fs";
+import { existsSync as existsSync13, readdirSync as readdirSync5, readFileSync as readFileSync11, statSync as statSync5 } from "fs";
 import { join as join9 } from "path";
 async function postCompact(_ev) {
   try {
@@ -4552,10 +4940,10 @@ async function postCompact(_ev) {
     }
     try {
       const planDir = join9(process.cwd(), ".claude", "plans");
-      if (existsSync12(planDir)) {
+      if (existsSync13(planDir)) {
         const planFiles = readdirSync5(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync5(join9(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
         if (planFiles.length > 0) {
-          const content = readFileSync10(join9(planDir, planFiles[0].name), "utf-8");
+          const content = readFileSync11(join9(planDir, planFiles[0].name), "utf-8");
           const taskCount = (content.match(/^###\s+Task\s+\d+/gim) ?? []).length;
           const doneCount = (content.match(/^###\s+Task\s+\d+.*\[done\]/gim) ?? []).length;
           if (taskCount > 0) {
