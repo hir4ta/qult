@@ -631,9 +631,9 @@ var init_pending_fixes = __esm(() => {
 });
 
 // src/state/plan-status.ts
-import { existsSync, readdirSync, readFileSync, statSync } from "fs";
+import { existsSync, mkdirSync as mkdirSync2, readdirSync, readFileSync, renameSync, statSync } from "fs";
 import { homedir as homedir2 } from "os";
-import { join as join2 } from "path";
+import { basename, dirname, join as join2 } from "path";
 function normalizeStatus(raw) {
   if (!raw)
     return "pending";
@@ -1468,7 +1468,7 @@ var init_runner = __esm(() => {
 
 // src/hooks/detectors/convention-check.ts
 import { readdirSync as readdirSync2, statSync as statSync2 } from "fs";
-import { basename, dirname, extname, join as join3 } from "path";
+import { basename as basename2, dirname as dirname2, extname, join as join3 } from "path";
 function classify(name) {
   if (KEBAB_RE.test(name))
     return "kebab-case";
@@ -1481,9 +1481,9 @@ function classify(name) {
   return "other";
 }
 function detectConventionDrift(file) {
-  const dir = dirname(file);
-  const fileName = basename(file);
-  const stem = basename(fileName, extname(fileName));
+  const dir = dirname2(file);
+  const fileName = basename2(file);
+  const stem = basename2(fileName, extname(fileName));
   let siblings;
   try {
     siblings = readdirSync2(dir).filter((f) => {
@@ -1492,7 +1492,7 @@ function detectConventionDrift(file) {
       } catch {
         return false;
       }
-    }).map((f) => basename(f, extname(f)));
+    }).map((f) => basename2(f, extname(f)));
   } catch {
     return [];
   }
@@ -1672,12 +1672,12 @@ var init_dead_import_check = __esm(() => {
 
 // src/hooks/detectors/duplication-check.ts
 import { existsSync as existsSync3, readFileSync as readFileSync3 } from "fs";
-import { basename as basename2, dirname as dirname2, extname as extname3, resolve } from "path";
+import { basename as basename3, dirname as dirname3, extname as extname3, resolve } from "path";
 function isTestFile(filePath) {
-  const name = basename2(filePath);
+  const name = basename3(filePath);
   if (/\.(test|spec)\.[^.]+$/.test(name))
     return true;
-  const parent = basename2(dirname2(filePath));
+  const parent = basename3(dirname3(filePath));
   return parent === "__tests__";
 }
 function normalizeLine(line) {
@@ -2947,11 +2947,11 @@ var init_semantic_check = __esm(() => {
 
 // src/hooks/detectors/test-file-resolver.ts
 import { existsSync as existsSync8 } from "fs";
-import { basename as basename3, dirname as dirname3, extname as extname8, join as join5 } from "path";
+import { basename as basename4, dirname as dirname4, extname as extname8, join as join5 } from "path";
 function resolveTestFile(sourceFile) {
   const ext = extname8(sourceFile);
-  const base = basename3(sourceFile, ext);
-  const dir = dirname3(sourceFile);
+  const base = basename4(sourceFile, ext);
+  const dir = dirname4(sourceFile);
   if (isTestFile2(sourceFile))
     return null;
   for (const pattern of TEST_PATTERNS) {
@@ -2963,7 +2963,7 @@ function resolveTestFile(sourceFile) {
   return null;
 }
 function isTestFile2(file) {
-  const base = basename3(file);
+  const base = basename4(file);
   return /\.(test|spec)\.\w+$/.test(base) || /^test_\w+\.py$/.test(base) || /_test\.go$/.test(base) || /\/(__tests__|tests)\//.test(file);
 }
 var TEST_PATTERNS;
@@ -2986,7 +2986,7 @@ var exports_post_tool = {};
 __export(exports_post_tool, {
   default: () => postTool
 });
-import { dirname as dirname4, extname as extname9, resolve as resolve3 } from "path";
+import { dirname as dirname5, extname as extname9, resolve as resolve3 } from "path";
 async function postTool(ev) {
   const tool = ev.tool_name;
   if (!tool)
@@ -3245,7 +3245,7 @@ function buildTestFileCommand(testCommand, testFile) {
     return `${testCommand} ${escaped}`;
   }
   if (/\bgo\s+test\b/.test(testCommand)) {
-    return `go test -v -run . ${shellEscape(dirname4(testFile))}`;
+    return `go test -v -run . ${shellEscape(dirname5(testFile))}`;
   }
   if (/\bmocha\b/.test(testCommand)) {
     return `${testCommand} ${escaped}`;
@@ -4606,7 +4606,7 @@ var init_subagent_stop = __esm(() => {
 
 // src/hooks/detectors/test-quality-check.ts
 import { existsSync as existsSync11, readFileSync as readFileSync10 } from "fs";
-import { basename as basename4, dirname as dirname5, resolve as resolve5 } from "path";
+import { basename as basename5, dirname as dirname6, extname as extname10, resolve as resolve5 } from "path";
 function countAssertionsOutsideSetup(code) {
   const lines = code.split(`
 `);
@@ -4826,8 +4826,8 @@ function analyzeTestQuality(file) {
     });
   }
   try {
-    const snapDir = `${dirname5(absPath)}/__snapshots__/`;
-    const snapFile = `${snapDir}${basename4(absPath)}.snap`;
+    const snapDir = `${dirname6(absPath)}/__snapshots__/`;
+    const snapFile = `${snapDir}${basename5(absPath)}.snap`;
     if (existsSync11(snapFile)) {
       const snapContent = readFileSync10(snapFile, "utf-8");
       if (snapContent.length > LARGE_SNAPSHOT_CHARS) {
@@ -4915,13 +4915,13 @@ function analyzeTestQuality(file) {
 }
 function findImplFile(testPath) {
   try {
-    const dir = dirname5(testPath);
-    const base = basename4(testPath);
+    const dir = dirname6(testPath);
+    const base = basename5(testPath);
     const implName = base.replace(/\.(?:test|spec)(\.[^.]+)$/, "$1");
     const sameDirPath = resolve5(dir, implName);
     if (existsSync11(sameDirPath))
       return sameDirPath;
-    const parentDir = dirname5(dir);
+    const parentDir = dirname6(dir);
     const parentPath = resolve5(parentDir, implName);
     if (existsSync11(parentPath))
       return parentPath;
@@ -4952,6 +4952,21 @@ function formatTestQualityWarnings(file, result, taskKey) {
       const lineNums = items.slice(0, 5).map((s) => s.line).filter((l) => l > 0).join(",");
       const suffix = items.length > 5 ? ` (+${items.length - 5} more)` : "";
       warnings.push(`${prefix}${file}: ${items.length}x ${type} (L${lineNums}${suffix}) \u2014 ${items[0].message}`);
+    }
+  }
+  if (!result.isPbt) {
+    const hasPbtSmell = result.smells.some((s) => s.type === "happy-path-only" || s.type === "missing-boundary");
+    if (hasPbtSmell) {
+      const ext = extname10(file).toLowerCase();
+      const JS_TS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
+      const PY = new Set([".py", ".pyi"]);
+      if (JS_TS.has(ext)) {
+        warnings.push(`${prefix}${file}: Consider property-based testing with fast-check: fc.assert(fc.property(fc.integer(), (n) => ...)) to auto-discover edge cases`);
+      } else if (PY.has(ext)) {
+        warnings.push(`${prefix}${file}: Consider property-based testing with hypothesis: @given(st.integers()) to auto-discover edge cases`);
+      } else {
+        warnings.push(`${prefix}${file}: Consider property-based testing to auto-discover edge cases and boundary values`);
+      }
     }
   }
   return warnings;
@@ -5080,6 +5095,35 @@ var init_task_completed = __esm(() => {
   ];
   SAFE_SHELL_ARG_RE = /^[a-zA-Z0-9_/.@-]+$/;
 });
+
+// src/gates/detect.ts
+import { existsSync as existsSync12, readFileSync as readFileSync11 } from "fs";
+import { join as join8 } from "path";
+function isReachable(exe, root) {
+  if (!/^[a-zA-Z0-9_-]+$/.test(exe))
+    return false;
+  const nodeModulesBin = join8(root, "node_modules", ".bin", exe);
+  if (existsSync12(nodeModulesBin))
+    return true;
+  try {
+    const { execFileSync } = __require("child_process");
+    execFileSync("/bin/sh", ["-c", `command -v ${exe}`], {
+      encoding: "utf-8",
+      stdio: "pipe"
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+function emitSemgrepWarning(root) {
+  try {
+    if (!isReachable("semgrep", root)) {
+      process.stderr.write("[qult] Semgrep is not installed. Built-in security-check is active as fallback. " + "Install: `brew install semgrep` or `pip install semgrep` for deeper SAST analysis.\n");
+    }
+  } catch {}
+}
+var init_detect = () => {};
 
 // src/state/metrics.ts
 function recordSessionMetrics(metrics) {
@@ -5241,14 +5285,14 @@ var exports_session_start = {};
 __export(exports_session_start, {
   default: () => sessionStart
 });
-import { existsSync as existsSync12 } from "fs";
-import { join as join8 } from "path";
+import { existsSync as existsSync13 } from "fs";
+import { join as join9 } from "path";
 async function sessionStart(ev) {
   try {
     if (!_legacyWarned) {
       _legacyWarned = true;
       const cwd = ev.cwd ?? process.cwd();
-      if (existsSync12(join8(cwd, ".qult"))) {
+      if (existsSync13(join9(cwd, ".qult"))) {
         process.stderr.write(`[qult] Legacy .qult/ directory detected. State is now stored in ~/.qult/qult.db. You can safely delete .qult/ from this project.
 `);
       }
@@ -5290,12 +5334,18 @@ async function sessionStart(ev) {
         flush();
       } catch {}
     }
+    if (ev.source === "startup") {
+      try {
+        emitSemgrepWarning(ev.cwd ?? process.cwd());
+      } catch {}
+    }
     markSessionStartCompleted();
   } catch {}
 }
 var _legacyWarned = false;
 var init_session_start = __esm(() => {
   init_config();
+  init_detect();
   init_metrics();
   init_pending_fixes();
   init_session_state();
@@ -5307,8 +5357,8 @@ var exports_post_compact = {};
 __export(exports_post_compact, {
   default: () => postCompact
 });
-import { existsSync as existsSync13, readdirSync as readdirSync5, readFileSync as readFileSync11, statSync as statSync5 } from "fs";
-import { join as join9 } from "path";
+import { existsSync as existsSync14, readdirSync as readdirSync5, readFileSync as readFileSync12, statSync as statSync5 } from "fs";
+import { join as join10 } from "path";
 async function postCompact(_ev) {
   try {
     const parts = [];
@@ -5355,11 +5405,11 @@ async function postCompact(_ev) {
       parts.push(`[qult] Session: ${summary.join(", ")}`);
     }
     try {
-      const planDir = join9(process.cwd(), ".claude", "plans");
-      if (existsSync13(planDir)) {
-        const planFiles = readdirSync5(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync5(join9(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
+      const planDir = join10(process.cwd(), ".claude", "plans");
+      if (existsSync14(planDir)) {
+        const planFiles = readdirSync5(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync5(join10(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
         if (planFiles.length > 0) {
-          const content = readFileSync11(join9(planDir, planFiles[0].name), "utf-8");
+          const content = readFileSync12(join10(planDir, planFiles[0].name), "utf-8");
           const taskCount = (content.match(/^###\s+Task\s+\d+/gim) ?? []).length;
           const doneCount = (content.match(/^###\s+Task\s+\d+.*\[done\]/gim) ?? []).length;
           if (taskCount > 0) {

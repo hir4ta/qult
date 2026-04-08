@@ -1,5 +1,8 @@
 // @bun
 // src/mcp-server.ts
+import { existsSync as existsSync2 } from "fs";
+import { homedir as homedir3 } from "os";
+import { join as join3, resolve } from "path";
 import { createInterface } from "readline";
 
 // src/state/db.ts
@@ -872,9 +875,9 @@ function readAuditLog() {
 }
 
 // src/state/plan-status.ts
-import { existsSync, readdirSync, readFileSync, statSync } from "fs";
+import { existsSync, mkdirSync as mkdirSync2, readdirSync, readFileSync, renameSync, statSync } from "fs";
 import { homedir as homedir2 } from "os";
-import { join as join2 } from "path";
+import { basename, dirname, join as join2 } from "path";
 var TASK_RE = /^###\s+Task\s+(\d+)[\s:\-\u2013\u2014]+(.+?)(?:\s*\[([^\]]+)\])?\s*$/i;
 function normalizeStatus(raw) {
   if (!raw)
@@ -992,6 +995,24 @@ function getActivePlan() {
   } catch {
     return null;
   }
+}
+function resetPlanCache() {
+  _planCache = null;
+  _planCachePath = null;
+  _planCacheMtime = null;
+}
+function archivePlanFile(planPath) {
+  try {
+    if (!planPath.endsWith(".md"))
+      return;
+    if (!existsSync(planPath))
+      return;
+    const dir = dirname(planPath);
+    const archiveDir = join2(dir, "archive");
+    mkdirSync2(archiveDir, { recursive: true });
+    renameSync(planPath, join2(archiveDir, basename(planPath)));
+    resetPlanCache();
+  } catch {}
 }
 
 // src/state/session-state.ts
@@ -1296,6 +1317,20 @@ var TOOL_DEFS = [
     inputSchema: { type: "object", properties: {} }
   },
   {
+    name: "archive_plan",
+    description: "Archive a completed plan file to prevent detection in future sessions. Moves the plan to an archive/ subdirectory. Call after /qult:finish completes successfully.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        plan_path: {
+          type: "string",
+          description: "Absolute path to the plan file to archive"
+        }
+      },
+      required: ["plan_path"]
+    }
+  },
+  {
     name: "save_gates",
     description: "Save gate configuration for the current project. Use during /qult:init to register detected gates. Replaces all existing gates atomically.",
     inputSchema: {
@@ -1320,7 +1355,8 @@ var WRITE_TOOLS = new Set([
   "record_human_approval",
   "record_stage_scores",
   "reset_escalation_counters",
-  "record_finish_started"
+  "record_finish_started",
+  "archive_plan"
 ]);
 function handleTool(name, cwd, args) {
   const session = resolveSession(cwd);
@@ -1699,6 +1735,38 @@ function handleTool(name, cwd, args) {
     case "record_finish_started": {
       recordFinishStarted();
       return { content: [{ type: "text", text: "Finish started recorded." }] };
+    }
+    case "archive_plan": {
+      const planPath = typeof args?.plan_path === "string" ? args.plan_path : null;
+      if (!planPath) {
+        return { content: [{ type: "text", text: "Error: plan_path is required." }] };
+      }
+      const resolvedPath = resolve(cwd, planPath);
+      const allowedBases = [
+        resolve(join3(cwd, ".claude", "plans")),
+        resolve(join3(homedir3(), ".claude", "plans"))
+      ];
+      const envPlansDir = process.env.CLAUDE_PLANS_DIR;
+      if (envPlansDir)
+        allowedBases.push(resolve(envPlansDir));
+      const isAllowed = allowedBases.some((base) => resolvedPath.startsWith(`${base}/`)) && resolvedPath.endsWith(".md");
+      if (!isAllowed) {
+        return {
+          content: [
+            { type: "text", text: "Error: plan_path must be a .md file under .claude/plans/" }
+          ]
+        };
+      }
+      if (!existsSync2(resolvedPath)) {
+        return {
+          content: [
+            { type: "text", text: "Plan not found (already archived or path incorrect)." }
+          ]
+        };
+      }
+      archivePlanFile(resolvedPath);
+      resetPlanCache();
+      return { content: [{ type: "text", text: "Plan archived." }] };
     }
     case "save_gates": {
       const gates = args?.gates;
