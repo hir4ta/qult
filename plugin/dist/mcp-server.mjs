@@ -989,6 +989,16 @@ function getActivePlan() {
   }
 }
 
+// src/state/session-state.ts
+var FINISH_MARKER = "__finish_started__";
+function recordFinishStarted() {
+  try {
+    const db = getDb();
+    const sid = getSessionId();
+    db.prepare("INSERT OR IGNORE INTO ran_gates (session_id, gate_name) VALUES (?, ?)").run(sid, FINISH_MARKER);
+  } catch {}
+}
+
 // src/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
 var SERVER_NAME = "qult";
@@ -1181,6 +1191,11 @@ var TOOL_DEFS = [
     inputSchema: { type: "object", properties: {} }
   },
   {
+    name: "record_finish_started",
+    description: "Record that /qult:finish has been started. Call at the beginning of /qult:finish skill. Required for the commit gate to allow commits when a plan is active.",
+    inputSchema: { type: "object", properties: {} }
+  },
+  {
     name: "save_gates",
     description: "Save gate configuration for the current project. Use during /qult:init to register detected gates. Replaces all existing gates atomically.",
     inputSchema: {
@@ -1204,7 +1219,8 @@ var WRITE_TOOLS = new Set([
   "record_test_pass",
   "record_human_approval",
   "record_stage_scores",
-  "reset_escalation_counters"
+  "reset_escalation_counters",
+  "record_finish_started"
 ]);
 function handleTool(name, cwd, args) {
   const session = resolveSession(cwd);
@@ -1579,6 +1595,10 @@ function handleTool(name, cwd, args) {
       } catch {
         return { content: [{ type: "text", text: "No flywheel data available yet." }] };
       }
+    }
+    case "record_finish_started": {
+      recordFinishStarted();
+      return { content: [{ type: "text", text: "Finish started recorded." }] };
     }
     case "save_gates": {
       const gates = args?.gates;

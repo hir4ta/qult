@@ -1195,6 +1195,16 @@ function recordPlanSelfcheckBlocked() {
   state.plan_selfcheck_blocked_at = new Date().toISOString();
   writeState(state);
 }
+function wasFinishStarted() {
+  try {
+    const db = getDb();
+    const sid = getSessionId();
+    const row = db.prepare("SELECT 1 FROM ran_gates WHERE session_id = ? AND gate_name = ?").get(sid, FINISH_MARKER);
+    return !!row;
+  } catch {
+    return false;
+  }
+}
 function incrementEscalation(counter) {
   const state = readSessionState();
   const count = (state[counter] ?? 0) + 1;
@@ -1211,7 +1221,7 @@ function readHumanApproval() {
     return null;
   return { approved_at: state.human_review_approved_at };
 }
-var _cache4 = null, _dirty2 = false, TOOL_EXTS, MAX_GATE_FAILURE_COUNT = 100, MAX_GATE_FAILURE_KEYS = 200;
+var _cache4 = null, _dirty2 = false, TOOL_EXTS, MAX_GATE_FAILURE_COUNT = 100, MAX_GATE_FAILURE_KEYS = 200, FINISH_MARKER = "__finish_started__";
 var init_session_state = __esm(() => {
   init_config();
   init_load();
@@ -3533,9 +3543,8 @@ function checkBash(ev) {
         deny("Run /qult:review before committing. Independent review is required.");
       }
     }
-    if (hasPlanFile()) {
-      process.stderr.write(`[qult] Plan is active. Use /qult:finish for structured branch completion (merge/PR/hold/discard checklist).
-`);
+    if (hasPlanFile() && !wasFinishStarted()) {
+      deny("Plan is active. Use /qult:finish for structured branch completion. " + "Direct commits bypass the completion checklist (merge/PR/hold/discard). " + "/qult:finish will handle the commit after the checklist passes.");
     }
     if (readLastReview() && loadConfig().review.require_human_approval && !readHumanApproval()) {
       deny("Human approval required before committing. The architect must review and call record_human_approval.");

@@ -239,10 +239,11 @@ describe("preTool: Bash git commit checks", () => {
 		mkdirSync(planDir, { recursive: true });
 		writeFileSync(join(planDir, "test-plan.md"), "## Tasks\n### Task 1: test [done]\n");
 
-		const { disableGate, recordChangedFile, recordTestPass } = await import(
+		const { disableGate, recordChangedFile, recordFinishStarted, recordTestPass } = await import(
 			"../state/session-state.ts"
 		);
 		recordTestPass("vitest run");
+		recordFinishStarted(); // finish gate unlock
 		for (let i = 0; i < 6; i++) {
 			recordChangedFile(`/project/src/file${i}.ts`);
 		}
@@ -289,11 +290,12 @@ describe("preTool: Bash git commit checks", () => {
 		} as GatesConfig);
 		resetAllCaches();
 
-		const { recordChangedFile, recordTestPass, recordReview } = await import(
+		const { recordChangedFile, recordFinishStarted, recordTestPass, recordReview } = await import(
 			"../state/session-state.ts"
 		);
 		recordTestPass("vitest run");
 		recordReview();
+		recordFinishStarted(); // finish gate unlock
 		for (let i = 0; i < 6; i++) {
 			recordChangedFile(`/project/src/file${i}.ts`);
 		}
@@ -639,8 +641,8 @@ describe("preTool: EnterPlanMode redirect to plan-generator", () => {
 	});
 });
 
-describe("preTool: git commit with active plan redirects to /qult:finish", () => {
-	it("warns on git commit when plan is active", async () => {
+describe("preTool: git commit with active plan requires /qult:finish", () => {
+	it("DENY git commit when plan active and finish not started", async () => {
 		const planDir = join(TEST_DIR, ".claude", "plans");
 		mkdirSync(planDir, { recursive: true });
 		writeFileSync(
@@ -648,7 +650,6 @@ describe("preTool: git commit with active plan redirects to /qult:finish", () =>
 			"### Task 1: Test [done]\n- **File**: src/foo.ts\n",
 		);
 
-		// Set up session state: test passed, review done, source file changed
 		const db = getDb();
 		db.prepare("INSERT INTO changed_files (session_id, file_path) VALUES (?, ?)").run(
 			"test-session",
@@ -662,14 +663,52 @@ describe("preTool: git commit with active plan redirects to /qult:finish", () =>
 		resetAllCaches();
 
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		try {
+			await preTool({
+				tool_name: "Bash",
+				tool_input: { command: "git commit -m 'test'" },
+			});
+		} catch {
+			/* exit(2) */
+		}
+
+		expect(exitCode).toBe(2);
+		const errOutput = stderrCapture.join("");
+		expect(errOutput).toContain("qult:finish");
+	});
+
+	it("allows git commit when finish was started", async () => {
+		const planDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(planDir, { recursive: true });
+		writeFileSync(
+			join(planDir, "test-plan.md"),
+			"### Task 1: Test [done]\n- **File**: src/foo.ts\n",
+		);
+
+		const db = getDb();
+		db.prepare("INSERT INTO changed_files (session_id, file_path) VALUES (?, ?)").run(
+			"test-session",
+			join(TEST_DIR, "src/foo.ts"),
+		);
+		db.prepare("UPDATE sessions SET test_passed_at = ?, review_completed_at = ? WHERE id = ?").run(
+			new Date().toISOString(),
+			new Date().toISOString(),
+			"test-session",
+		);
+		// Record finish started
+		db.prepare("INSERT INTO ran_gates (session_id, gate_name) VALUES (?, ?)").run(
+			"test-session",
+			"__finish_started__",
+		);
+		resetAllCaches();
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
 		await preTool({
 			tool_name: "Bash",
 			tool_input: { command: "git commit -m 'test'" },
 		});
 
-		// Should warn (stderr) but not DENY — finish enforcement is advisory
-		const errOutput = stderrCapture.join("");
-		expect(errOutput).toContain("qult:finish");
+		expect(exitCode).toBeNull();
 	});
 });
 

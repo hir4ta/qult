@@ -22,6 +22,10 @@ If tests fail, stop. If review is incomplete, stop. The Wall stands.
 
 ## Process
 
+### Step 0: Record Finish Started
+
+**First**, call `mcp__plugin_qult_qult__record_finish_started()` to unlock the commit gate. Without this call, the commit gate will DENY all commits when a plan is active.
+
 ### Step 1: Verify All Gates
 
 Run verification before anything else:

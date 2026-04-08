@@ -571,10 +571,10 @@ describe("Scenario 14: git commit DENIED without test pass", () => {
 		mkdirSync(planDir, { recursive: true });
 		writeFileSync(join(planDir, "test-plan.md"), "## Tasks\n### Task 1: implement [done]\n");
 
-		const { clearOnCommit, recordChangedFile, recordTestPass, recordReview } = await import(
-			"../state/session-state.ts"
-		);
+		const { clearOnCommit, recordChangedFile, recordFinishStarted, recordTestPass, recordReview } =
+			await import("../state/session-state.ts");
 		clearOnCommit();
+		recordFinishStarted(); // unlock finish gate (plan is active)
 		for (let i = 0; i < 5; i++) recordChangedFile(`/fake/changed-file${i}.ts`);
 
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
@@ -606,8 +606,9 @@ describe("Scenario 14: git commit DENIED without test pass", () => {
 		}
 		expect(exitCode).toBe(2);
 
-		// Test pass + review → allow
+		// Test pass + review + finish → allow
 		recordReview();
+		recordFinishStarted();
 		stdoutCapture = [];
 		exitCode = null;
 		await preTool({
@@ -1438,7 +1439,9 @@ describe("Scenario: MCP record_review allows commit", () => {
 		resetGatesCache();
 
 		const { handleTool } = await import("../mcp-server.ts");
-		const { recordChangedFile, recordTestPass } = await import("../state/session-state.ts");
+		const { recordChangedFile, recordFinishStarted, recordTestPass } = await import(
+			"../state/session-state.ts",
+		);
 
 		// Simulate enough changed files to trigger review requirement
 		for (let i = 0; i < 6; i++) recordChangedFile(`src/file${i}.ts`);
@@ -1461,8 +1464,9 @@ describe("Scenario: MCP record_review allows commit", () => {
 		exitCode = null;
 		stderrCapture = [];
 
-		// Record review via MCP
+		// Record review via MCP + finish started
 		handleTool("record_review", TEST_DIR, { aggregate_score: 26 });
+		recordFinishStarted();
 
 		// Now commit should pass
 		resetAllCaches();

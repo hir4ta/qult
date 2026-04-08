@@ -26,6 +26,7 @@ import {
 } from "./state/db.ts";
 import { getFlywheelRecommendations, readMetricsHistory } from "./state/metrics.ts";
 import { getActivePlan } from "./state/plan-status.ts";
+import { recordFinishStarted } from "./state/session-state.ts";
 import type { PendingFix } from "./types.ts";
 
 const PROTOCOL_VERSION = "2024-11-05";
@@ -258,6 +259,12 @@ const TOOL_DEFS: ToolDef[] = [
 		inputSchema: { type: "object", properties: {} },
 	},
 	{
+		name: "record_finish_started",
+		description:
+			"Record that /qult:finish has been started. Call at the beginning of /qult:finish skill. Required for the commit gate to allow commits when a plan is active.",
+		inputSchema: { type: "object", properties: {} },
+	},
+	{
 		name: "save_gates",
 		description:
 			"Save gate configuration for the current project. Use during /qult:init to register detected gates. Replaces all existing gates atomically.",
@@ -285,6 +292,7 @@ const WRITE_TOOLS = new Set([
 	"record_human_approval",
 	"record_stage_scores",
 	"reset_escalation_counters",
+	"record_finish_started",
 ]);
 
 function handleTool(name: string, cwd: string, args?: Record<string, unknown>): ToolResult {
@@ -715,6 +723,10 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			} catch {
 				return { content: [{ type: "text", text: "No flywheel data available yet." }] };
 			}
+		}
+		case "record_finish_started": {
+			recordFinishStarted();
+			return { content: [{ type: "text", text: "Finish started recorded." }] };
 		}
 		// Not in WRITE_TOOLS: save_gates is a project-level operation used during /qult:init,
 		// which may run before any session-creating hook has fired.

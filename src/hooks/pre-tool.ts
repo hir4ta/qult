@@ -12,6 +12,7 @@ import {
 	readSessionState,
 	readTaskVerifyResult,
 	recordPlanSelfcheckBlocked,
+	wasFinishStarted,
 	wasPlanSelfcheckBlocked,
 } from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
@@ -256,10 +257,12 @@ function checkBash(ev: HookEvent): void {
 			}
 		}
 
-		// Advisory: recommend /qult:finish when plan is active
-		if (hasPlanFile()) {
-			process.stderr.write(
-				"[qult] Plan is active. Use /qult:finish for structured branch completion (merge/PR/hold/discard checklist).\n",
+		// Require /qult:finish when plan is active (structural enforcement)
+		if (hasPlanFile() && !wasFinishStarted()) {
+			deny(
+				"Plan is active. Use /qult:finish for structured branch completion. " +
+					"Direct commits bypass the completion checklist (merge/PR/hold/discard). " +
+					"/qult:finish will handle the commit after the checklist passes.",
 			);
 		}
 

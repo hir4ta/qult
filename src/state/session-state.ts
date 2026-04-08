@@ -628,6 +628,36 @@ export function recordPlanSelfcheckBlocked(): void {
 	writeState(state);
 }
 
+// ── Finish started marker ────────────────────────────────────
+
+const FINISH_MARKER = "__finish_started__";
+
+export function wasFinishStarted(): boolean {
+	try {
+		const db = getDb();
+		const sid = getSessionId();
+		const row = db
+			.prepare("SELECT 1 FROM ran_gates WHERE session_id = ? AND gate_name = ?")
+			.get(sid, FINISH_MARKER);
+		return !!row;
+	} catch {
+		return false; // fail-open
+	}
+}
+
+export function recordFinishStarted(): void {
+	try {
+		const db = getDb();
+		const sid = getSessionId();
+		db.prepare("INSERT OR IGNORE INTO ran_gates (session_id, gate_name) VALUES (?, ?)").run(
+			sid,
+			FINISH_MARKER,
+		);
+	} catch {
+		/* fail-open */
+	}
+}
+
 // ── Quality escalation counters ────────────────────────────
 
 type EscalationCounter =
