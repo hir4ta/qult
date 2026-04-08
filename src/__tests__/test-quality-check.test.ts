@@ -621,3 +621,69 @@ it("test2", () => {
 		expect(fewAssertions.length).toBe(1);
 	});
 });
+
+describe("PBT recommendation in formatTestQualityWarnings", () => {
+	it("includes PBT recommendation for happy-path-only smell in TS file", async () => {
+		const { formatTestQualityWarnings } = await import("../hooks/detectors/test-quality-check.ts");
+		const result = {
+			testCount: 5,
+			assertionCount: 10,
+			avgAssertions: 2,
+			smells: [{ type: "happy-path-only", line: 0, message: "All test descriptions are positive" }],
+			isPbt: false,
+		};
+		const warnings = formatTestQualityWarnings("foo.test.ts", result);
+		const pbtWarnings = warnings.filter(
+			(w) => w.includes("fast-check") || w.includes("property-based"),
+		);
+		expect(pbtWarnings.length).toBeGreaterThanOrEqual(1);
+	});
+
+	it("includes PBT recommendation for missing-boundary smell in TS file", async () => {
+		const { formatTestQualityWarnings } = await import("../hooks/detectors/test-quality-check.ts");
+		const result = {
+			testCount: 5,
+			assertionCount: 10,
+			avgAssertions: 2,
+			smells: [{ type: "missing-boundary", line: 0, message: "No boundary values tested" }],
+			isPbt: false,
+		};
+		const warnings = formatTestQualityWarnings("bar.test.ts", result);
+		const pbtWarnings = warnings.filter(
+			(w) => w.includes("fast-check") || w.includes("property-based"),
+		);
+		expect(pbtWarnings.length).toBeGreaterThanOrEqual(1);
+	});
+
+	it("includes hypothesis recommendation for Python test file", async () => {
+		const { formatTestQualityWarnings } = await import("../hooks/detectors/test-quality-check.ts");
+		const result = {
+			testCount: 5,
+			assertionCount: 10,
+			avgAssertions: 2,
+			smells: [{ type: "happy-path-only", line: 0, message: "All test descriptions are positive" }],
+			isPbt: false,
+		};
+		const warnings = formatTestQualityWarnings("test_foo.py", result);
+		const pbtWarnings = warnings.filter(
+			(w) => w.includes("hypothesis") || w.includes("property-based"),
+		);
+		expect(pbtWarnings.length).toBeGreaterThanOrEqual(1);
+	});
+
+	it("does not include PBT recommendation when isPbt is true", async () => {
+		const { formatTestQualityWarnings } = await import("../hooks/detectors/test-quality-check.ts");
+		const result = {
+			testCount: 5,
+			assertionCount: 10,
+			avgAssertions: 2,
+			smells: [{ type: "happy-path-only", line: 0, message: "All test descriptions are positive" }],
+			isPbt: true,
+		};
+		const warnings = formatTestQualityWarnings("foo.test.ts", result);
+		const pbtWarnings = warnings.filter(
+			(w) => w.includes("fast-check") || w.includes("hypothesis") || w.includes("property-based"),
+		);
+		expect(pbtWarnings.length).toBe(0);
+	});
+});

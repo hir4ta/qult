@@ -524,5 +524,30 @@ export function formatTestQualityWarnings(
 		}
 	}
 
+	// PBT recommendation when edge-case coverage is weak
+	if (!result.isPbt) {
+		const hasPbtSmell = result.smells.some(
+			(s) => s.type === "happy-path-only" || s.type === "missing-boundary",
+		);
+		if (hasPbtSmell) {
+			const ext = file.slice(file.lastIndexOf(".")).toLowerCase();
+			const JS_TS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
+			const PY = new Set([".py", ".pyi"]);
+			if (JS_TS.has(ext)) {
+				warnings.push(
+					`${prefix}${file}: Consider property-based testing with fast-check: fc.assert(fc.property(fc.integer(), (n) => ...)) to auto-discover edge cases`,
+				);
+			} else if (PY.has(ext)) {
+				warnings.push(
+					`${prefix}${file}: Consider property-based testing with hypothesis: @given(st.integers()) to auto-discover edge cases`,
+				);
+			} else {
+				warnings.push(
+					`${prefix}${file}: Consider property-based testing to auto-discover edge cases and boundary values`,
+				);
+			}
+		}
+	}
+
 	return warnings;
 }

@@ -327,7 +327,7 @@ const PROBE_RULES: ProbeRule[] = [
 ];
 
 /** Check if an executable is reachable via PATH or node_modules/.bin */
-function isReachable(exe: string, root: string): boolean {
+export function isReachable(exe: string, root: string): boolean {
 	// Validate exe to prevent command injection (only alphanumeric, dash, underscore)
 	if (!/^[a-zA-Z0-9_-]+$/.test(exe)) return false;
 	const nodeModulesBin = join(root, "node_modules", ".bin", exe);
@@ -512,6 +512,21 @@ export function detectGates(root: string): GatesConfig {
 		config[category]![name] = gate;
 	}
 	return config;
+}
+
+/** Emit a stderr warning if Semgrep is not installed.
+ *  Called once per session from session-start.ts. */
+export function emitSemgrepWarning(root: string): void {
+	try {
+		if (!isReachable("semgrep", root)) {
+			process.stderr.write(
+				"[qult] Semgrep is not installed. Built-in security-check is active as fallback. " +
+					"Install: `brew install semgrep` or `pip install semgrep` for deeper SAST analysis.\n",
+			);
+		}
+	} catch {
+		/* fail-open */
+	}
 }
 
 /** Returns true if gates config has any gates defined */

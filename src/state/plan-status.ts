@@ -1,6 +1,6 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 export interface PlanTask {
 	name: string;
@@ -240,4 +240,22 @@ export function parseSuccessCriteria(content: string): string[] {
 		}
 	}
 	return criteria;
+}
+
+/** Archive a plan file by moving it to an archive/ subdirectory.
+ *  Fail-open: does not throw on any error. */
+export function archivePlanFile(planPath: string): void {
+	try {
+		if (!existsSync(planPath)) return;
+		const dir = dirname(planPath);
+		const archiveDir = join(dir, "archive");
+		mkdirSync(archiveDir, { recursive: true });
+		renameSync(planPath, join(archiveDir, basename(planPath)));
+		// Invalidate plan cache
+		_planCache = null;
+		_planCachePath = null;
+		_planCacheMtime = null;
+	} catch {
+		/* fail-open */
+	}
 }

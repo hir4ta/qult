@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "../config.ts";
+import { emitSemgrepWarning } from "../gates/detect.ts";
 import {
 	detectRecurringPatterns,
 	getFlywheelRecommendations,
@@ -88,6 +89,15 @@ export default async function sessionStart(ev: HookEvent): Promise<void> {
 			writePendingFixes([]);
 			try {
 				flushPendingFixes();
+			} catch {
+				/* fail-open */
+			}
+		}
+
+		// Semgrep installation check (once per startup)
+		if (ev.source === "startup") {
+			try {
+				emitSemgrepWarning(ev.cwd ?? process.cwd());
 			} catch {
 				/* fail-open */
 			}

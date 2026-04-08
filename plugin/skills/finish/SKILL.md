@@ -106,9 +106,11 @@ Use AskUserQuestion with these exact options. Wait for the architect's choice.
 
 ### Step 5: Cleanup
 
-If the branch was a git worktree:
-1. `git worktree remove [path]` (after merge/discard)
-2. Report worktree cleanup status
+1. **Archive plan file**: If a plan was active during this session, call `mcp__plugin_qult_qult__archive_plan({ plan_path: "<path>" })` to move the plan file to `archive/` subdirectory. This prevents the plan from being detected in future sessions. Get the plan path from `get_session_status` or the plan file location in `.claude/plans/`.
+
+2. **Worktree cleanup**: If the branch was a git worktree:
+   - `git worktree remove [path]` (after merge/discard)
+   - Report worktree cleanup status
 
 ## Anti-Patterns
 

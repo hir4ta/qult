@@ -85,6 +85,14 @@ flowchart LR
 
 **Requires [Bun](https://bun.sh)** (hooks and MCP server run on Bun runtime).
 
+**Recommended: [Semgrep](https://semgrep.dev)** for deeper SAST analysis. Built-in security checks work as fallback without Semgrep.
+
+```bash
+brew install semgrep  # macOS
+# or
+pip install semgrep   # pip
+```
+
 ### Install
 
 ```

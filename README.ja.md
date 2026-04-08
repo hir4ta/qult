@@ -85,6 +85,14 @@ flowchart LR
 
 **[Bun](https://bun.sh) が必要**（hooks と MCP server は Bun ランタイムで実行）。
 
+**推奨: [Semgrep](https://semgrep.dev)** — より深い SAST 解析。未インストール時は内蔵セキュリティチェックがフォールバックとして動作。
+
+```bash
+brew install semgrep  # macOS
+# or
+pip install semgrep   # pip
+```
+
 ### インストール
 
 ```

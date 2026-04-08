@@ -13,7 +13,7 @@
 
 TypeScript (Bun 1.3+, ESM) / vitest (テスト) / Biome (lint) / bun:sqlite (状態管理) / raw JSON-RPC MCP (状態公開)
 
-**ランタイム要件**: Bun 必須（hooks, MCP server は `bun` で実行）
+**ランタイム要件**: Bun 必須（hooks, MCP server は `bun` で実行）、Semgrep 推奨（未インストール時は内蔵 security-check がフォールバック。`brew install semgrep` or `pip install semgrep`）
 
 ## コマンド
 

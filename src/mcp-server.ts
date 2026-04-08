@@ -9,6 +9,8 @@
  * to eliminate the 660KB SDK dependency and reduce coupling to SDK releases.
  */
 
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { loadConfig, resetConfigCache } from "./config.ts";
 import { loadGates, saveGates } from "./gates/load.ts";
@@ -25,7 +27,7 @@ import {
 	setSessionScope,
 } from "./state/db.ts";
 import { getFlywheelRecommendations, readMetricsHistory } from "./state/metrics.ts";
-import { getActivePlan } from "./state/plan-status.ts";
+import { archivePlanFile, getActivePlan, resetPlanCache } from "./state/plan-status.ts";
 import { recordFinishStarted } from "./state/session-state.ts";
 import type { PendingFix } from "./types.ts";
 
@@ -265,6 +267,21 @@ const TOOL_DEFS: ToolDef[] = [
 		inputSchema: { type: "object", properties: {} },
 	},
 	{
+		name: "archive_plan",
+		description:
+			"Archive a completed plan file to prevent detection in future sessions. Moves the plan to an archive/ subdirectory. Call after /qult:finish completes successfully.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				plan_path: {
+					type: "string",
+					description: "Absolute path to the plan file to archive",
+				},
+			},
+			required: ["plan_path"],
+		},
+	},
+	{
 		name: "save_gates",
 		description:
 			"Save gate configuration for the current project. Use during /qult:init to register detected gates. Replaces all existing gates atomically.",
@@ -293,6 +310,7 @@ const WRITE_TOOLS = new Set([
 	"record_stage_scores",
 	"reset_escalation_counters",
 	"record_finish_started",
+	"archive_plan",
 ]);
 
 function handleTool(name: string, cwd: string, args?: Record<string, unknown>): ToolResult {
@@ -727,6 +745,31 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 		case "record_finish_started": {
 			recordFinishStarted();
 			return { content: [{ type: "text", text: "Finish started recorded." }] };
+		}
+		case "archive_plan": {
+			const planPath = typeof args?.plan_path === "string" ? args.plan_path : null;
+			if (!planPath) {
+				return { content: [{ type: "text", text: "Error: plan_path is required." }] };
+			}
+			// Path traversal guard: plan_path must resolve under .claude/plans/
+			const resolvedPath = resolve(planPath);
+			const allowedBases = [
+				resolve(join(cwd, ".claude", "plans")),
+				resolve(join(homedir(), ".claude", "plans")),
+			];
+			const isAllowed =
+				allowedBases.some((base) => resolvedPath.startsWith(`${base}/`) || resolvedPath === base) &&
+				resolvedPath.endsWith(".md");
+			if (!isAllowed) {
+				return {
+					content: [
+						{ type: "text", text: "Error: plan_path must be a .md file under .claude/plans/" },
+					],
+				};
+			}
+			archivePlanFile(resolvedPath);
+			resetPlanCache();
+			return { content: [{ type: "text", text: `Plan archived: ${resolvedPath}` }] };
 		}
 		// Not in WRITE_TOOLS: save_gates is a project-level operation used during /qult:init,
 		// which may run before any session-creating hook has fired.

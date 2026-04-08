@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetGatesCache, saveGates } from "../gates/load.ts";
@@ -2601,5 +2601,54 @@ describe("Escalation counter deduplication", () => {
 
 		// Counts should be same (no inflation from re-edit)
 		expect(secondCount).toBe(firstCount);
+	});
+});
+
+describe("Plan archive after finish", () => {
+	beforeEach(() => {
+		mkdirSync(TEST_DIR, { recursive: true });
+		process.chdir(TEST_DIR);
+		useTestDb();
+		setProjectPath(TEST_DIR);
+		setSessionScope("sim-archive-test");
+		ensureSession();
+		resetAllCaches();
+	});
+
+	afterEach(() => {
+		flushAll();
+		closeDb();
+		process.chdir(originalCwd);
+		rmSync(TEST_DIR, { recursive: true, force: true });
+	});
+
+	it("plan file is archived after finish and not detected in next session", async () => {
+		// Create a plan file
+		const plansDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(plansDir, { recursive: true });
+		const planPath = join(plansDir, "test-plan.md");
+		writeFileSync(
+			planPath,
+			"## Context\nTest\n\n## Tasks\n### Task 1: Test [done]\n- **File**: src/test.ts\n- **Verify**: src/test.test.ts:test",
+		);
+
+		// Verify plan is detected
+		const { getActivePlan, hasPlanFile, archivePlanFile } = await import("../state/plan-status.ts");
+		expect(hasPlanFile()).toBe(true);
+		const plan = getActivePlan();
+		expect(plan).not.toBeNull();
+
+		// Archive the plan (simulating /qult:finish cleanup)
+		archivePlanFile(planPath);
+
+		// Verify plan is no longer detected
+		expect(existsSync(planPath)).toBe(false);
+		expect(existsSync(join(plansDir, "archive", "test-plan.md"))).toBe(true);
+
+		// hasPlanFile should still return true because archive/ contains .md files
+		// but getActivePlan should return null because scanPlanDir uses non-recursive readdirSync
+		// Note: hasPlanFile checks readdirSync which lists entries (including "archive" dir name)
+		// but filters by .endsWith(".md") — "archive" doesn't end in .md, so it's excluded
+		expect(hasPlanFile()).toBe(false);
 	});
 });

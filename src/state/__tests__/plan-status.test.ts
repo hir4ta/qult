@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { normalizeStatus, parsePlanTasks } from "../plan-status.ts";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { archivePlanFile, normalizeStatus, parsePlanTasks } from "../plan-status.ts";
 
 describe("parsePlanTasks", () => {
 	it("parses tasks with status markers and taskNumber", () => {
@@ -208,5 +210,48 @@ describe("normalizeStatus", () => {
 		expect(normalizeStatus("unknown")).toBe("pending");
 		expect(normalizeStatus(undefined)).toBe("pending");
 		expect(normalizeStatus("")).toBe("pending");
+	});
+});
+
+describe("archivePlanFile", () => {
+	const ARCHIVE_TEST_DIR = join(import.meta.dirname, ".tmp-archive-test");
+	const plansDir = join(ARCHIVE_TEST_DIR, "plans");
+
+	beforeEach(() => {
+		mkdirSync(plansDir, { recursive: true });
+	});
+
+	afterEach(() => {
+		rmSync(ARCHIVE_TEST_DIR, { recursive: true, force: true });
+	});
+
+	it("moves plan file to archive directory", () => {
+		const planPath = join(plansDir, "test-plan.md");
+		writeFileSync(planPath, "# Plan\n## Tasks\n### Task 1: Test [done]");
+
+		archivePlanFile(planPath);
+
+		expect(existsSync(planPath)).toBe(false);
+		const archivedPath = join(plansDir, "archive", "test-plan.md");
+		expect(existsSync(archivedPath)).toBe(true);
+		expect(readFileSync(archivedPath, "utf-8")).toContain("# Plan");
+	});
+
+	it("creates archive directory automatically", () => {
+		const archiveDir = join(plansDir, "archive");
+		expect(existsSync(archiveDir)).toBe(false);
+
+		const planPath = join(plansDir, "auto-create.md");
+		writeFileSync(planPath, "# Plan");
+
+		archivePlanFile(planPath);
+
+		expect(existsSync(archiveDir)).toBe(true);
+		expect(existsSync(join(archiveDir, "auto-create.md"))).toBe(true);
+	});
+
+	it("does not throw for non-existent file (fail-open)", () => {
+		const fakePath = join(plansDir, "non-existent.md");
+		expect(() => archivePlanFile(fakePath)).not.toThrow();
 	});
 });

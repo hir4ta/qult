@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { handleRequest, handleTool, TOOL_DEFS } from "../mcp-server.ts";
@@ -155,7 +155,7 @@ describe("handleRequest (JSON-RPC)", () => {
 	it("tools/list returns all tool definitions", () => {
 		const response = handleRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" }, TEST_DIR);
 		const result = response!.result as { tools: { name: string }[] };
-		expect(result.tools).toHaveLength(19);
+		expect(result.tools).toHaveLength(20);
 		expect(result.tools.map((t) => t.name)).toEqual([
 			"get_pending_fixes",
 			"get_session_status",
@@ -175,6 +175,7 @@ describe("handleRequest (JSON-RPC)", () => {
 			"get_metrics_dashboard",
 			"get_flywheel_recommendations",
 			"record_finish_started",
+			"archive_plan",
 			"save_gates",
 		]);
 	});
@@ -219,8 +220,8 @@ describe("handleRequest (JSON-RPC)", () => {
 });
 
 describe("TOOL_DEFS", () => {
-	it("has 19 tool definitions", () => {
-		expect(TOOL_DEFS).toHaveLength(19);
+	it("has 20 tool definitions", () => {
+		expect(TOOL_DEFS).toHaveLength(20);
 	});
 
 	it("each tool has name, description, and inputSchema", () => {
@@ -704,5 +705,42 @@ describe("handleTool: save_gates", () => {
 		const parsed = JSON.parse(result.content[0]!.text);
 		expect(parsed.on_write).toBeUndefined();
 		expect(parsed.on_commit.test.command).toBe("vitest run");
+	});
+});
+
+describe("archive_plan", () => {
+	it("archive_plan tool moves plan file to archive", () => {
+		const plansDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(plansDir, { recursive: true });
+		const planPath = join(plansDir, "test-plan.md");
+		writeFileSync(planPath, "# Plan\n## Tasks\n### Task 1: Test [done]");
+
+		const result = handleTool("archive_plan", TEST_DIR, { plan_path: planPath });
+		expect(result.content[0]!.text).toContain("archived");
+		expect(existsSync(planPath)).toBe(false);
+		expect(existsSync(join(plansDir, "archive", "test-plan.md"))).toBe(true);
+	});
+
+	it("does not error for non-existent plan path under .claude/plans/", () => {
+		const plansDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(plansDir, { recursive: true });
+		const fakePath = join(plansDir, "non-existent.md");
+		const result = handleTool("archive_plan", TEST_DIR, { plan_path: fakePath });
+		expect(result.content[0]!.text).toContain("archived");
+	});
+
+	it("rejects path traversal attempts", () => {
+		const maliciousPath = "/etc/passwd";
+		const result = handleTool("archive_plan", TEST_DIR, { plan_path: maliciousPath });
+		expect(result.content[0]!.text).toContain("Error");
+	});
+
+	it("rejects non-.md file paths", () => {
+		const plansDir = join(TEST_DIR, ".claude", "plans");
+		mkdirSync(plansDir, { recursive: true });
+		const nonMdPath = join(plansDir, "malicious.sh");
+		writeFileSync(nonMdPath, "#!/bin/bash");
+		const result = handleTool("archive_plan", TEST_DIR, { plan_path: nonMdPath });
+		expect(result.content[0]!.text).toContain("Error");
 	});
 });
