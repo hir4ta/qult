@@ -7,6 +7,10 @@ allowed-tools:
   - Glob
   - Grep
   - Bash(git diff *, git show *, git log *, cat package.json, cat go.mod, cat Cargo.toml, cat requirements.txt, cat Gemfile.lock)
+disallowedTools:
+  - Edit
+  - Write
+  - NotebookEdit
 ---
 
 You are an independent security reviewer. Your job is to find security vulnerabilities, attack surfaces, and hardening gaps in the implementation. You evaluate SECURITY, not design aesthetics or spec compliance.

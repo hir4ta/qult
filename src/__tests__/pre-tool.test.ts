@@ -145,7 +145,7 @@ describe("preTool: Bash git commit checks", () => {
 		);
 
 		const { recordChangedFile } = await import("../state/session-state.ts");
-		recordChangedFile("/fake/changed-file.ts");
+		for (let i = 0; i < 5; i++) recordChangedFile(`/fake/changed-file${i}.ts`);
 
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
 		try {
@@ -176,7 +176,7 @@ describe("preTool: Bash git commit checks", () => {
 		);
 
 		const { recordChangedFile, recordTestPass } = await import("../state/session-state.ts");
-		recordChangedFile("/fake/changed-file.ts");
+		for (let i = 0; i < 5; i++) recordChangedFile(`/fake/changed-file${i}.ts`);
 		recordTestPass("vitest run");
 
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
@@ -250,7 +250,7 @@ describe("preTool: Bash git commit checks", () => {
 		expect(exitCode).toBeNull();
 	});
 
-	it("DENY commit when plan required but missing", async () => {
+	it("advisory warning when plan missing but many files changed", async () => {
 		saveGates({
 			on_commit: { test: { command: "vitest run", timeout: 30000 } },
 		} as GatesConfig);
@@ -267,17 +267,13 @@ describe("preTool: Bash git commit checks", () => {
 		// No plan directory created
 
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
-		try {
-			await preTool({
-				tool_name: "Bash",
-				tool_input: { command: 'git commit -m "bypass attempt"' },
-			});
-		} catch {
-			/* exit(2) */
-		}
+		await preTool({
+			tool_name: "Bash",
+			tool_input: { command: 'git commit -m "bypass attempt"' },
+		});
 
-		expect(exitCode).toBe(2);
-		expect(stderrCapture.join("")).toContain("plan");
+		expect(exitCode).toBeNull(); // advisory, not deny
+		expect(stderrCapture.join("")).toContain("Advisory");
 	});
 
 	it("allows commit when plan exists with many changed files", async () => {

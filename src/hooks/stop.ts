@@ -2,6 +2,7 @@ import { loadConfig } from "../config.ts";
 import { readPendingFixes } from "../state/pending-fixes.ts";
 import { getActivePlan } from "../state/plan-status.ts";
 import {
+	getReviewIteration,
 	isGateDisabled,
 	isReviewRequired,
 	readEscalation,
@@ -113,16 +114,15 @@ export default async function stop(ev: HookEvent): Promise<void> {
 			const changed = state.changed_file_paths.length;
 			const threshold = loadConfig().review.required_changed_files;
 			if (changed >= threshold) {
-				block(
-					`${changed} files changed without a plan. Run /qult:plan-generator before continuing.\n` +
-						"Large changes require a structured plan so TDD enforcement, task verification, and scope tracking can function.",
+				process.stderr.write(
+					`[qult] Advisory: ${changed} files changed without a plan. Consider using /qult:explore for complex changes.\n`,
 				);
 			}
 		}
 
 		// Block if no review has been run (conditional on change size / plan)
 		if (!readLastReview()) {
-			if (isReviewRequired() && !isGateDisabled("review")) {
+			if (isReviewRequired() && !isGateDisabled("review") && getReviewIteration() === 0) {
 				block("Run /qult:review before finishing. Independent review is required.");
 			}
 		}

@@ -11,7 +11,7 @@ import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const DB_DIR = join(homedir(), ".qult");
 const DB_PATH = join(DB_DIR, "qult.db");
@@ -69,8 +69,13 @@ function migrateSchema(db: Database): void {
 	const version = (db.prepare("PRAGMA user_version").get() as { user_version: number })
 		.user_version;
 	if (version >= SCHEMA_VERSION) return;
-	// Version 0 → 1: initial schema creation
-	createTablesV1(db);
+	if (version < 1) {
+		createTablesV1(db);
+	}
+	if (version < 2) {
+		// Version 2: remove calibration table
+		db.exec("DROP TABLE IF EXISTS calibration");
+	}
 	db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -225,16 +230,6 @@ function createTablesV1(db: Database): void {
 			recorded_at            TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		);
 		CREATE INDEX IF NOT EXISTS idx_metrics_project ON session_metrics(project_id);
-
-		CREATE TABLE IF NOT EXISTS calibration (
-			id          INTEGER PRIMARY KEY,
-			project_id  INTEGER NOT NULL REFERENCES projects(id),
-			session_id  TEXT    NOT NULL,
-			aggregate   REAL    NOT NULL,
-			stages      TEXT    NOT NULL,
-			recorded_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-		);
-		CREATE INDEX IF NOT EXISTS idx_calibration_project ON calibration(project_id);
 
 		CREATE TABLE IF NOT EXISTS review_findings (
 			id          INTEGER PRIMARY KEY,

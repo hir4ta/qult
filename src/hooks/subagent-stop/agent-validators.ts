@@ -2,7 +2,6 @@ import { execSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { loadConfig } from "../../config.ts";
-import { checkCalibration, recordCalibration } from "../../state/calibration.ts";
 import { getDb, getProjectId, getSessionId } from "../../state/db.ts";
 import {
 	clearStageScores,
@@ -465,16 +464,6 @@ function checkAggregateScore(stages: string[]): void {
 			try {
 				const mergedHistory = persistReviewFindings();
 				if (mergedHistory) detectRepeatedPatterns(mergedHistory);
-			} catch {
-				/* fail-open */
-			}
-			// Cross-session calibration: record and check for bias
-			try {
-				recordCalibration(aggregate, stageScores);
-				const calibrationWarnings = checkCalibration();
-				for (const w of calibrationWarnings) {
-					process.stderr.write(`[qult] ${w.message}\n`);
-				}
 			} catch {
 				/* fail-open */
 			}

@@ -565,7 +565,7 @@ describe("Scenario 14: git commit DENIED without test pass", () => {
 			"../state/session-state.ts"
 		);
 		clearOnCommit();
-		recordChangedFile("/fake/changed-file.ts");
+		for (let i = 0; i < 5; i++) recordChangedFile(`/fake/changed-file${i}.ts`);
 
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
 
@@ -581,8 +581,7 @@ describe("Scenario 14: git commit DENIED without test pass", () => {
 		}
 		expect(exitCode).toBe(2);
 
-		// Test pass but no review → DENY (plan active)
-		recordChangedFile("/fake/changed-file.ts");
+		// Test pass but no review → DENY (many files changed)
 		recordTestPass("vitest run");
 		stdoutCapture = [];
 		exitCode = null;
@@ -2134,8 +2133,8 @@ describe("Scenario: Dead import detection is advisory only", () => {
 // Plan-required bypass prevention
 // ============================================================
 
-describe("Scenario: plan-required blocks record_review and commit", () => {
-	it("MCP record_review refuses and PreToolUse denies commit without plan", async () => {
+describe("Scenario: plan-required is advisory (not blocking)", () => {
+	it("MCP record_review succeeds and PreToolUse shows advisory without plan", async () => {
 		// Set up 6+ changed files in session state (no plan)
 		const { recordChangedFile, recordTestPass } = await import("../state/session-state.ts");
 		recordTestPass("vitest run");
@@ -2144,29 +2143,24 @@ describe("Scenario: plan-required blocks record_review and commit", () => {
 		}
 		flushAll();
 
-		// MCP record_review should refuse
+		// MCP record_review should succeed (plan check removed)
 		const { handleTool } = await import("../mcp-server.ts");
 		const reviewResult = handleTool("record_review", TEST_DIR, { aggregate_score: 28 });
-		expect(reviewResult.isError).toBe(true);
-		expect(reviewResult.content[0]!.text).toContain("plan");
+		expect(reviewResult.isError).toBeUndefined();
+		expect(reviewResult.content[0]!.text).toContain("recorded");
 
-		// PreToolUse should also deny git commit
-		// First record review directly in state to simulate bypass
+		// PreToolUse should show advisory but not deny
 		const { recordReview } = await import("../state/session-state.ts");
 		recordReview();
 		flushAll();
 
 		const preTool = (await import("../hooks/pre-tool.ts")).default;
-		try {
-			await preTool({
-				tool_name: "Bash",
-				tool_input: { command: 'git commit -m "bypass attempt"' },
-			});
-		} catch {
-			/* exit(2) */
-		}
-		expect(exitCode).toBe(2);
-		expect(stderrCapture.join("")).toContain("plan");
+		await preTool({
+			tool_name: "Bash",
+			tool_input: { command: 'git commit -m "bypass attempt"' },
+		});
+		expect(exitCode).toBeNull(); // advisory, not deny
+		expect(stderrCapture.join("")).toContain("Advisory");
 	});
 });
 

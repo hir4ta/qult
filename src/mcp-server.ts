@@ -10,7 +10,6 @@
  */
 
 import { createInterface } from "node:readline";
-import { loadConfig } from "./config.ts";
 import { loadGates } from "./gates/load.ts";
 import { generateHandoffDocument } from "./handoff.ts";
 import { generateHarnessReport } from "./harness-report.ts";
@@ -25,7 +24,7 @@ import {
 	setSessionScope,
 } from "./state/db.ts";
 import { readMetricsHistory } from "./state/metrics.ts";
-import { getActivePlan, hasPlanFile } from "./state/plan-status.ts";
+import { getActivePlan } from "./state/plan-status.ts";
 import type { PendingFix } from "./types.ts";
 
 const PROTOCOL_VERSION = "2024-11-05";
@@ -218,6 +217,21 @@ const TOOL_DEFS: ToolDef[] = [
 		},
 	},
 	{
+		name: "reset_escalation_counters",
+		description:
+			"Reset all escalation counters (security, dead-import, drift, test-quality, duplication) to zero. Use during large refactors when accumulated warnings are no longer relevant.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				reason: {
+					type: "string",
+					description: "Why counters should be reset (min 10 chars). Required for audit trail.",
+				},
+			},
+			required: ["reason"],
+		},
+	},
+	{
 		name: "get_harness_report",
 		description:
 			"Returns a harness effectiveness report analyzing which gates catch issues and review score trends.",
@@ -246,6 +260,7 @@ const WRITE_TOOLS = new Set([
 	"record_test_pass",
 	"record_human_approval",
 	"record_stage_scores",
+	"reset_escalation_counters",
 ]);
 
 function handleTool(name: string, cwd: string, args?: Record<string, unknown>): ToolResult {
@@ -469,26 +484,6 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			return { content: [{ type: "text", text: lines.join("\n") }] };
 		}
 		case "record_review": {
-			// Plan-required enforcement
-			try {
-				const changedFiles = db
-					.prepare("SELECT file_path FROM changed_files WHERE session_id = ?")
-					.all(sid) as { file_path: string }[];
-				const threshold = loadConfig().review.required_changed_files;
-				if (changedFiles.length >= threshold && !hasPlanFile()) {
-					return {
-						isError: true,
-						content: [
-							{
-								type: "text",
-								text: `Cannot record review: ${changedFiles.length} files changed without a plan.`,
-							},
-						],
-					};
-				}
-			} catch {
-				/* fail-open */
-			}
 			db.prepare("UPDATE sessions SET review_completed_at = ? WHERE id = ?").run(
 				new Date().toISOString(),
 				sid,
@@ -621,6 +616,30 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			} catch {
 				return { content: [{ type: "text", text: "No metrics data available yet." }] };
 			}
+		}
+		case "reset_escalation_counters": {
+			const reason = typeof args?.reason === "string" ? args.reason : null;
+			if (!reason || reason.length < 10 || new Set(reason).size < 5) {
+				return {
+					isError: true,
+					content: [
+						{ type: "text", text: "Missing or insufficient reason (min 10 chars, min 5 unique)." },
+					],
+				};
+			}
+			db.prepare(`UPDATE sessions SET
+				security_warning_count = 0,
+				test_quality_warning_count = 0,
+				drift_warning_count = 0,
+				dead_import_warning_count = 0,
+				duplication_warning_count = 0
+				WHERE id = ?`).run(sid);
+			appendAuditLog({
+				action: "reset_escalation_counters",
+				reason,
+				timestamp: new Date().toISOString(),
+			});
+			return { content: [{ type: "text", text: "All escalation counters reset to zero." }] };
 		}
 		default:
 			return { isError: true, content: [{ type: "text", text: `Unknown tool: ${name}` }] };

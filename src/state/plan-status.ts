@@ -191,9 +191,19 @@ export function getActivePlan(): { tasks: PlanTask[]; path: string } | null {
  *  This is used for plan-required enforcement which should only apply to project-level plans. */
 export function hasPlanFile(): boolean {
 	try {
-		const planDir = join(process.cwd(), ".claude", "plans");
-		if (!existsSync(planDir)) return false;
-		return readdirSync(planDir).some((f) => f.endsWith(".md"));
+		// Check project-local plans
+		const projectPlanDir = join(process.cwd(), ".claude", "plans");
+		if (existsSync(projectPlanDir) && readdirSync(projectPlanDir).some((f) => f.endsWith(".md"))) {
+			return true;
+		}
+		// Check user home plans (same as getLatestPlanPath fallback)
+		if (!_disableHomeFallback) {
+			const homePlanDir = join(homedir(), ".claude", "plans");
+			if (existsSync(homePlanDir) && readdirSync(homePlanDir).some((f) => f.endsWith(".md"))) {
+				return true;
+			}
+		}
+		return false;
 	} catch {
 		return false;
 	}

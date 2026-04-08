@@ -195,7 +195,7 @@ describe("stop hook", () => {
 		expect(exitCode).toBeNull();
 	});
 
-	it("blocks when many files changed without a plan", async () => {
+	it("advisory warning when many files changed without a plan", async () => {
 		// Simulate 6 changed files (threshold is 5)
 		for (let i = 0; i < 6; i++) {
 			recordChangedFile(`/project/src/file${i}.ts`);
@@ -203,16 +203,11 @@ describe("stop hook", () => {
 		recordReview(); // review done, but no plan
 
 		const handler = (await import("../stop.ts")).default;
-		try {
-			await handler({ hook_type: "Stop" });
-		} catch {
-			// process.exit(2)
-		}
+		await handler({ hook_type: "Stop" });
 
-		expect(exitCode).toBe(2);
+		expect(exitCode).toBeNull(); // advisory, not block
 		const errOutput = stderrCapture.join("");
-		expect(errOutput).toContain("plan");
-		expect(errOutput).toContain("/qult:plan-generator");
+		expect(errOutput).toContain("Advisory");
 	});
 
 	it("suggests /qult:finish when review is complete", async () => {

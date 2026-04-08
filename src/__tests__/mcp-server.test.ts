@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { handleRequest, handleTool, TOOL_DEFS } from "../mcp-server.ts";
@@ -155,7 +155,7 @@ describe("handleRequest (JSON-RPC)", () => {
 	it("tools/list returns all tool definitions", () => {
 		const response = handleRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" }, TEST_DIR);
 		const result = response!.result as { tools: { name: string }[] };
-		expect(result.tools).toHaveLength(15);
+		expect(result.tools).toHaveLength(16);
 		expect(result.tools.map((t) => t.name)).toEqual([
 			"get_pending_fixes",
 			"get_session_status",
@@ -169,6 +169,7 @@ describe("handleRequest (JSON-RPC)", () => {
 			"get_detector_summary",
 			"record_human_approval",
 			"record_stage_scores",
+			"reset_escalation_counters",
 			"get_harness_report",
 			"get_handoff_document",
 			"get_metrics_dashboard",
@@ -215,8 +216,8 @@ describe("handleRequest (JSON-RPC)", () => {
 });
 
 describe("TOOL_DEFS", () => {
-	it("has 15 tool definitions", () => {
-		expect(TOOL_DEFS).toHaveLength(15);
+	it("has 16 tool definitions", () => {
+		expect(TOOL_DEFS).toHaveLength(16);
 	});
 
 	it("each tool has name, description, and inputSchema", () => {
@@ -477,31 +478,13 @@ describe("handleTool: record_review", () => {
 		expect(result.content[0]!.text).toContain("26");
 	});
 
-	it("refuses when plan required but missing", () => {
+	it("succeeds when many files changed without a plan", () => {
 		const db = getDb();
 		const sid = getSessionId();
 		// Insert 6+ changed files (exceeds default threshold of 5)
 		for (const f of ["/a.ts", "/b.ts", "/c.ts", "/d.ts", "/e.ts", "/f.ts"]) {
 			db.prepare("INSERT INTO changed_files (session_id, file_path) VALUES (?, ?)").run(sid, f);
 		}
-
-		const result = handleTool("record_review", TEST_DIR, { aggregate_score: 28 });
-		expect(result.isError).toBe(true);
-		expect(result.content[0]!.text).toContain("plan");
-	});
-
-	it("succeeds when plan exists despite many changed files", () => {
-		const db = getDb();
-		const sid = getSessionId();
-		for (const f of ["/a.ts", "/b.ts", "/c.ts", "/d.ts", "/e.ts", "/f.ts"]) {
-			db.prepare("INSERT INTO changed_files (session_id, file_path) VALUES (?, ?)").run(sid, f);
-		}
-
-		// Create a plan file
-		const planDir = join(TEST_DIR, ".claude", "plans");
-		mkdirSync(planDir, { recursive: true });
-		writeFileSync(join(planDir, "test-plan.md"), "## Tasks\n### Task 1: test [done]\n");
-		resetAllCaches();
 
 		const result = handleTool("record_review", TEST_DIR, { aggregate_score: 28 });
 		expect(result.isError).toBeUndefined();

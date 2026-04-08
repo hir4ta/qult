@@ -4,9 +4,10 @@ import { createInterface } from "readline";
 
 // src/state/db.ts
 import { Database } from "bun:sqlite";
-import { mkdirSync } from "fs";
+import { chmodSync, mkdirSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
+var SCHEMA_VERSION = 2;
 var DB_DIR = join(homedir(), ".qult");
 var DB_PATH = join(DB_DIR, "qult.db");
 var DEFAULT_SESSION_ID = "__default__";
@@ -14,10 +15,13 @@ var _db = null;
 function getDb() {
   if (_db)
     return _db;
-  mkdirSync(DB_DIR, { recursive: true });
+  mkdirSync(DB_DIR, { recursive: true, mode: 448 });
+  try {
+    chmodSync(DB_DIR, 448);
+  } catch {}
   _db = new Database(DB_PATH);
   configurePragmas(_db);
-  ensureSchema(_db);
+  migrateSchema(_db);
   return _db;
 }
 function configurePragmas(db) {
@@ -25,7 +29,19 @@ function configurePragmas(db) {
   db.exec("PRAGMA busy_timeout = 5000");
   db.exec("PRAGMA foreign_keys = ON");
 }
-function ensureSchema(db) {
+function migrateSchema(db) {
+  const version = db.prepare("PRAGMA user_version").get().user_version;
+  if (version >= SCHEMA_VERSION)
+    return;
+  if (version < 1) {
+    createTablesV1(db);
+  }
+  if (version < 2) {
+    db.exec("DROP TABLE IF EXISTS calibration");
+  }
+  db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+}
+function createTablesV1(db) {
   db.exec(`
 		CREATE TABLE IF NOT EXISTS projects (
 			id         INTEGER PRIMARY KEY,
@@ -177,16 +193,6 @@ function ensureSchema(db) {
 		);
 		CREATE INDEX IF NOT EXISTS idx_metrics_project ON session_metrics(project_id);
 
-		CREATE TABLE IF NOT EXISTS calibration (
-			id          INTEGER PRIMARY KEY,
-			project_id  INTEGER NOT NULL REFERENCES projects(id),
-			session_id  TEXT    NOT NULL,
-			aggregate   REAL    NOT NULL,
-			stages      TEXT    NOT NULL,
-			recorded_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-		);
-		CREATE INDEX IF NOT EXISTS idx_calibration_project ON calibration(project_id);
-
 		CREATE TABLE IF NOT EXISTS review_findings (
 			id          INTEGER PRIMARY KEY,
 			session_id  TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -222,9 +228,13 @@ function getProjectId() {
 }
 var _sessionId = DEFAULT_SESSION_ID;
 function setSessionScope(sessionId) {
-  if (!/^[\w.\-:]+$/.test(sessionId))
-    return;
+  if (!/^[\w.\-:]+$/.test(sessionId)) {
+    process.stderr.write(`[qult] Ignoring invalid session_id (contains illegal characters): ${sessionId.slice(0, 64)}
+`);
+    return false;
+  }
   _sessionId = sessionId;
+  return true;
 }
 function getSessionId() {
   return _sessionId;
@@ -236,173 +246,17 @@ function findLatestSessionId() {
   return row?.id ?? null;
 }
 
-// src/config.ts
-var DEFAULTS = {
-  review: {
-    score_threshold: 30,
-    max_iterations: 3,
-    required_changed_files: 5,
-    dimension_floor: 4,
-    require_human_approval: false
-  },
-  plan_eval: {
-    score_threshold: 12,
-    max_iterations: 2,
-    registry_files: []
-  },
-  gates: {
-    output_max_chars: 3500,
-    default_timeout: 1e4,
-    test_on_edit: false,
-    test_on_edit_timeout: 15000,
-    extra_path: []
-  },
-  escalation: {
-    security_threshold: 10,
-    drift_threshold: 8,
-    test_quality_threshold: 8,
-    duplication_threshold: 8
-  }
-};
-function applyConfigLayer(config, raw) {
-  if (raw.review && typeof raw.review === "object") {
-    const r = raw.review;
-    if (typeof r.score_threshold === "number")
-      config.review.score_threshold = r.score_threshold;
-    if (typeof r.max_iterations === "number")
-      config.review.max_iterations = r.max_iterations;
-    if (typeof r.required_changed_files === "number")
-      config.review.required_changed_files = Math.max(1, r.required_changed_files);
-    if (typeof r.dimension_floor === "number")
-      config.review.dimension_floor = Math.max(1, Math.min(5, r.dimension_floor));
-    if (typeof r.require_human_approval === "boolean")
-      config.review.require_human_approval = r.require_human_approval;
-  }
-  if (raw.plan_eval && typeof raw.plan_eval === "object") {
-    const p = raw.plan_eval;
-    if (typeof p.score_threshold === "number")
-      config.plan_eval.score_threshold = p.score_threshold;
-    if (typeof p.max_iterations === "number")
-      config.plan_eval.max_iterations = p.max_iterations;
-    if (Array.isArray(p.registry_files))
-      config.plan_eval.registry_files = p.registry_files.filter((f) => typeof f === "string");
-  }
-  if (raw.gates && typeof raw.gates === "object") {
-    const g = raw.gates;
-    if (typeof g.output_max_chars === "number")
-      config.gates.output_max_chars = g.output_max_chars;
-    if (typeof g.default_timeout === "number")
-      config.gates.default_timeout = g.default_timeout;
-    if (typeof g.test_on_edit === "boolean")
-      config.gates.test_on_edit = g.test_on_edit;
-    if (typeof g.test_on_edit_timeout === "number")
-      config.gates.test_on_edit_timeout = g.test_on_edit_timeout;
-    if (Array.isArray(g.extra_path))
-      config.gates.extra_path = g.extra_path.filter((p) => typeof p === "string" && p.trim().length > 0);
-  }
-  if (raw.escalation && typeof raw.escalation === "object") {
-    const e = raw.escalation;
-    if (typeof e.security_threshold === "number")
-      config.escalation.security_threshold = Math.max(1, e.security_threshold);
-    if (typeof e.drift_threshold === "number")
-      config.escalation.drift_threshold = Math.max(1, e.drift_threshold);
-    if (typeof e.test_quality_threshold === "number")
-      config.escalation.test_quality_threshold = Math.max(1, e.test_quality_threshold);
-    if (typeof e.duplication_threshold === "number")
-      config.escalation.duplication_threshold = Math.max(1, e.duplication_threshold);
-  }
-}
-function kvRowsToRaw(rows) {
-  const raw = {};
-  for (const row of rows) {
-    const [section, field] = row.key.split(".");
-    if (!section || !field)
-      continue;
-    if (!raw[section])
-      raw[section] = {};
-    try {
-      raw[section][field] = JSON.parse(row.value);
-    } catch {
-      raw[section][field] = row.value;
-    }
-  }
-  return raw;
-}
-var _cache = null;
-function loadConfig() {
-  if (_cache)
-    return _cache;
-  const config = structuredClone(DEFAULTS);
-  try {
-    const db = getDb();
-    const globalRows = db.prepare("SELECT key, value FROM global_configs").all();
-    if (globalRows.length > 0) {
-      applyConfigLayer(config, kvRowsToRaw(globalRows));
-    }
-  } catch {}
-  try {
-    const db = getDb();
-    const projectId = getProjectId();
-    const projectRows = db.prepare("SELECT key, value FROM project_configs WHERE project_id = ?").all(projectId);
-    if (projectRows.length > 0) {
-      applyConfigLayer(config, kvRowsToRaw(projectRows));
-    }
-  } catch {}
-  const envInt = (key) => {
-    const val = process.env[key];
-    if (val === undefined)
-      return;
-    const n = Number.parseInt(val, 10);
-    return Number.isNaN(n) ? undefined : n;
-  };
-  config.review.score_threshold = envInt("QULT_REVIEW_SCORE_THRESHOLD") ?? config.review.score_threshold;
-  config.review.max_iterations = envInt("QULT_REVIEW_MAX_ITERATIONS") ?? config.review.max_iterations;
-  config.review.required_changed_files = envInt("QULT_REVIEW_REQUIRED_FILES") ?? config.review.required_changed_files;
-  const rawFloor = envInt("QULT_REVIEW_DIMENSION_FLOOR");
-  if (rawFloor !== undefined)
-    config.review.dimension_floor = Math.max(1, Math.min(5, rawFloor));
-  config.plan_eval.score_threshold = envInt("QULT_PLAN_EVAL_SCORE_THRESHOLD") ?? config.plan_eval.score_threshold;
-  config.plan_eval.max_iterations = envInt("QULT_PLAN_EVAL_MAX_ITERATIONS") ?? config.plan_eval.max_iterations;
-  config.gates.output_max_chars = envInt("QULT_GATE_OUTPUT_MAX") ?? config.gates.output_max_chars;
-  config.gates.default_timeout = envInt("QULT_GATE_DEFAULT_TIMEOUT") ?? config.gates.default_timeout;
-  const humanApprovalEnv = process.env.QULT_REQUIRE_HUMAN_APPROVAL;
-  if (humanApprovalEnv === "1" || humanApprovalEnv === "true")
-    config.review.require_human_approval = true;
-  else if (humanApprovalEnv === "0" || humanApprovalEnv === "false")
-    config.review.require_human_approval = false;
-  const testOnEditEnv = process.env.QULT_TEST_ON_EDIT;
-  if (testOnEditEnv === "1" || testOnEditEnv === "true")
-    config.gates.test_on_edit = true;
-  else if (testOnEditEnv === "0" || testOnEditEnv === "false")
-    config.gates.test_on_edit = false;
-  config.gates.test_on_edit_timeout = envInt("QULT_TEST_ON_EDIT_TIMEOUT") ?? config.gates.test_on_edit_timeout;
-  const secEsc = envInt("QULT_ESCALATION_SECURITY");
-  if (secEsc !== undefined)
-    config.escalation.security_threshold = Math.max(1, secEsc);
-  const driftEsc = envInt("QULT_ESCALATION_DRIFT");
-  if (driftEsc !== undefined)
-    config.escalation.drift_threshold = Math.max(1, driftEsc);
-  const tqEsc = envInt("QULT_ESCALATION_TEST_QUALITY");
-  if (tqEsc !== undefined)
-    config.escalation.test_quality_threshold = Math.max(1, tqEsc);
-  const dupEsc = envInt("QULT_ESCALATION_DUPLICATION");
-  if (dupEsc !== undefined)
-    config.escalation.duplication_threshold = Math.max(1, dupEsc);
-  _cache = config;
-  return config;
-}
-
 // src/gates/load.ts
-var _cache2;
+var _cache;
 function loadGates() {
-  if (_cache2 !== undefined)
-    return _cache2;
+  if (_cache !== undefined)
+    return _cache;
   try {
     const db = getDb();
     const projectId = getProjectId();
     const rows = db.prepare("SELECT phase, gate_name, command, timeout, run_once_per_batch, extensions FROM gate_configs WHERE project_id = ?").all(projectId);
     if (rows.length === 0) {
-      _cache2 = null;
+      _cache = null;
       return null;
     }
     const config = {};
@@ -422,10 +276,10 @@ function loadGates() {
       }
       config[phase][row.gate_name] = gate;
     }
-    _cache2 = config;
+    _cache = config;
     return config;
   } catch {
-    _cache2 = null;
+    _cache = null;
     return null;
   }
 }
@@ -573,7 +427,7 @@ function generateMetricsDashboard(metrics) {
 
 // src/state/audit-log.ts
 var MAX_ENTRIES = 200;
-function appendAuditLog(_cwd, entry) {
+function appendAuditLog(entry) {
   try {
     const db = getDb();
     const projectId = getProjectId();
@@ -584,7 +438,7 @@ function appendAuditLog(_cwd, entry) {
 			)`).run(projectId, projectId, MAX_ENTRIES);
   } catch {}
 }
-function readAuditLog(_cwd) {
+function readAuditLog() {
   try {
     const db = getDb();
     const projectId = getProjectId();
@@ -602,7 +456,7 @@ function readAuditLog(_cwd) {
 
 // src/state/metrics.ts
 var MAX_ENTRIES2 = 50;
-function readMetricsHistory(_cwd) {
+function readMetricsHistory() {
   try {
     const db = getDb();
     const projectId = getProjectId();
@@ -743,16 +597,6 @@ function getActivePlan() {
     return null;
   }
 }
-function hasPlanFile() {
-  try {
-    const planDir = join2(process.cwd(), ".claude", "plans");
-    if (!existsSync(planDir))
-      return false;
-    return readdirSync(planDir).some((f) => f.endsWith(".md"));
-  } catch {
-    return false;
-  }
-}
 
 // src/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
@@ -874,7 +718,10 @@ var TOOL_DEFS = [
     inputSchema: {
       type: "object",
       properties: {
-        command: { type: "string", description: "The test command that was run (e.g. 'bun vitest run')" }
+        command: {
+          type: "string",
+          description: "The test command that was run (e.g. 'bun vitest run')"
+        }
       },
       required: ["command"]
     }
@@ -895,10 +742,30 @@ var TOOL_DEFS = [
     inputSchema: {
       type: "object",
       properties: {
-        stage: { type: "string", description: "Stage name: 'Spec', 'Quality', 'Security', or 'Adversarial'" },
-        scores: { type: "object", description: "Dimension scores (e.g. {completeness: 5, accuracy: 4})" }
+        stage: {
+          type: "string",
+          description: "Stage name: 'Spec', 'Quality', 'Security', or 'Adversarial'"
+        },
+        scores: {
+          type: "object",
+          description: "Dimension scores (e.g. {completeness: 5, accuracy: 4})"
+        }
       },
       required: ["stage", "scores"]
+    }
+  },
+  {
+    name: "reset_escalation_counters",
+    description: "Reset all escalation counters (security, dead-import, drift, test-quality, duplication) to zero. Use during large refactors when accumulated warnings are no longer relevant.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        reason: {
+          type: "string",
+          description: "Why counters should be reset (min 10 chars). Required for audit trail."
+        }
+      },
+      required: ["reason"]
     }
   },
   {
@@ -917,10 +784,32 @@ var TOOL_DEFS = [
     inputSchema: { type: "object", properties: {} }
   }
 ];
+var WRITE_TOOLS = new Set([
+  "disable_gate",
+  "enable_gate",
+  "set_config",
+  "clear_pending_fixes",
+  "record_review",
+  "record_test_pass",
+  "record_human_approval",
+  "record_stage_scores",
+  "reset_escalation_counters"
+]);
 function handleTool(name, cwd, args) {
-  resolveSession(cwd);
+  const session = resolveSession(cwd);
   const db = getDb();
   const sid = getSessionId();
+  if (session === null && WRITE_TOOLS.has(name)) {
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: "No active session found for this project. Trigger a hook (e.g. edit a file) to initialize the session, then retry."
+        }
+      ]
+    };
+  }
   switch (name) {
     case "get_pending_fixes": {
       const rows = db.prepare("SELECT file, gate, errors FROM pending_fixes WHERE session_id = ?").all(sid);
@@ -971,24 +860,36 @@ function handleTool(name, cwd, args) {
       if (!reason || reason.length < 10 || new Set(reason).size < 5) {
         return {
           isError: true,
-          content: [{ type: "text", text: "Missing or insufficient reason (min 10 chars, min 5 unique)." }]
+          content: [
+            { type: "text", text: "Missing or insufficient reason (min 10 chars, min 5 unique)." }
+          ]
         };
       }
       if (!isValidGateName(gateName)) {
         return {
           isError: true,
-          content: [{ type: "text", text: `Unknown gate '${gateName}'. Valid: ${getValidGateNames().join(", ")}` }]
+          content: [
+            {
+              type: "text",
+              text: `Unknown gate '${gateName}'. Valid: ${getValidGateNames().join(", ")}`
+            }
+          ]
         };
       }
       const disabled = db.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?").all(sid);
       if (!disabled.some((d) => d.gate_name === gateName) && disabled.length >= 2) {
         return {
           isError: true,
-          content: [{ type: "text", text: `Maximum 2 gates disabled. Currently: ${disabled.map((d) => d.gate_name).join(", ")}` }]
+          content: [
+            {
+              type: "text",
+              text: `Maximum 2 gates disabled. Currently: ${disabled.map((d) => d.gate_name).join(", ")}`
+            }
+          ]
         };
       }
       db.prepare("INSERT OR REPLACE INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)").run(sid, gateName, reason);
-      appendAuditLog(cwd, {
+      appendAuditLog({
         action: "disable_gate",
         reason,
         gate_name: gateName,
@@ -1008,7 +909,10 @@ function handleTool(name, cwd, args) {
       const key = typeof args?.key === "string" ? args.key : null;
       const value = typeof args?.value === "number" ? args.value : null;
       if (!key || value === null) {
-        return { isError: true, content: [{ type: "text", text: "Missing key or value parameter." }] };
+        return {
+          isError: true,
+          content: [{ type: "text", text: "Missing key or value parameter." }]
+        };
       }
       const ALLOWED_KEYS = [
         "review.score_threshold",
@@ -1019,7 +923,10 @@ function handleTool(name, cwd, args) {
         "plan_eval.max_iterations"
       ];
       if (!ALLOWED_KEYS.includes(key)) {
-        return { isError: true, content: [{ type: "text", text: `Invalid key. Allowed: ${ALLOWED_KEYS.join(", ")}` }] };
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Invalid key. Allowed: ${ALLOWED_KEYS.join(", ")}` }]
+        };
       }
       if (key === "review.dimension_floor" && (value < 1 || value > 5)) {
         return { isError: true, content: [{ type: "text", text: "dimension_floor must be 1-5." }] };
@@ -1033,11 +940,13 @@ function handleTool(name, cwd, args) {
       if (!reason || reason.length < 10 || new Set(reason).size < 5) {
         return {
           isError: true,
-          content: [{ type: "text", text: "Missing or insufficient reason (min 10 chars, min 5 unique)." }]
+          content: [
+            { type: "text", text: "Missing or insufficient reason (min 10 chars, min 5 unique)." }
+          ]
         };
       }
       db.prepare("DELETE FROM pending_fixes WHERE session_id = ?").run(sid);
-      appendAuditLog(cwd, {
+      appendAuditLog({
         action: "clear_pending_fixes",
         reason,
         timestamp: new Date().toISOString()
@@ -1045,10 +954,10 @@ function handleTool(name, cwd, args) {
       return { content: [{ type: "text", text: "All pending fixes cleared." }] };
     }
     case "get_detector_summary": {
-      const session = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sid);
+      const session2 = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sid);
       const fixes = db.prepare("SELECT file, gate, errors FROM pending_fixes WHERE session_id = ?").all(sid);
       const lines = [];
-      if (session) {
+      if (session2) {
         const counters = [
           "security_warning_count",
           "dead_import_warning_count",
@@ -1057,7 +966,7 @@ function handleTool(name, cwd, args) {
           "duplication_warning_count"
         ];
         for (const key of counters) {
-          const val = typeof session[key] === "number" ? session[key] : 0;
+          const val = typeof session2[key] === "number" ? session2[key] : 0;
           if (val > 0)
             lines.push(`${key}: ${val}`);
         }
@@ -1089,16 +998,6 @@ function handleTool(name, cwd, args) {
 `) }] };
     }
     case "record_review": {
-      try {
-        const changedFiles = db.prepare("SELECT file_path FROM changed_files WHERE session_id = ?").all(sid);
-        const threshold = loadConfig().review.required_changed_files;
-        if (changedFiles.length >= threshold && !hasPlanFile()) {
-          return {
-            isError: true,
-            content: [{ type: "text", text: `Cannot record review: ${changedFiles.length} files changed without a plan.` }]
-          };
-        }
-      } catch {}
       db.prepare("UPDATE sessions SET review_completed_at = ? WHERE id = ?").run(new Date().toISOString(), sid);
       const score = typeof args?.aggregate_score === "number" ? args.aggregate_score : null;
       const msg = score !== null ? `Review recorded (aggregate: ${score}).` : "Review recorded.";
@@ -1113,15 +1012,20 @@ function handleTool(name, cwd, args) {
       return { content: [{ type: "text", text: `Test pass recorded: ${cmd}` }] };
     }
     case "record_human_approval": {
-      const session = db.prepare("SELECT review_completed_at FROM sessions WHERE id = ?").get(sid);
-      if (!session?.review_completed_at) {
+      const session2 = db.prepare("SELECT review_completed_at FROM sessions WHERE id = ?").get(sid);
+      if (!session2?.review_completed_at) {
         return {
           isError: true,
-          content: [{ type: "text", text: "Cannot record approval: no review completed. Run /qult:review first." }]
+          content: [
+            {
+              type: "text",
+              text: "Cannot record approval: no review completed. Run /qult:review first."
+            }
+          ]
         };
       }
       db.prepare("UPDATE sessions SET human_review_approved_at = ? WHERE id = ?").run(new Date().toISOString(), sid);
-      appendAuditLog(cwd, {
+      appendAuditLog({
         action: "record_human_approval",
         reason: "Architect approved changes",
         timestamp: new Date().toISOString()
@@ -1132,24 +1036,32 @@ function handleTool(name, cwd, args) {
       const stage = typeof args?.stage === "string" ? args.stage : null;
       const scores = args?.scores;
       if (!stage || !scores || typeof scores !== "object") {
-        return { isError: true, content: [{ type: "text", text: "Missing stage or scores parameter." }] };
+        return {
+          isError: true,
+          content: [{ type: "text", text: "Missing stage or scores parameter." }]
+        };
       }
       const validStages = ["Spec", "Quality", "Security", "Adversarial"];
       if (!validStages.includes(stage)) {
-        return { isError: true, content: [{ type: "text", text: `Invalid stage. Must be: ${validStages.join(", ")}` }] };
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Invalid stage. Must be: ${validStages.join(", ")}` }]
+        };
       }
       const insertScore = db.prepare("INSERT OR REPLACE INTO review_stage_scores (session_id, stage, dimension, score) VALUES (?, ?, ?, ?)");
       for (const [dim, score] of Object.entries(scores)) {
         insertScore.run(sid, stage, dim, score);
       }
       return {
-        content: [{ type: "text", text: `Stage scores recorded: ${stage} = ${JSON.stringify(scores)}` }]
+        content: [
+          { type: "text", text: `Stage scores recorded: ${stage} = ${JSON.stringify(scores)}` }
+        ]
       };
     }
     case "get_harness_report": {
       try {
-        const metrics = readMetricsHistory(cwd);
-        const auditLog = readAuditLog(cwd);
+        const metrics = readMetricsHistory();
+        const auditLog = readAuditLog();
         const report = generateHarnessReport(metrics, auditLog);
         return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
       } catch {
@@ -1158,27 +1070,29 @@ function handleTool(name, cwd, args) {
     }
     case "get_handoff_document": {
       try {
-        const session = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sid);
+        const session2 = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sid);
         const fixes = db.prepare("SELECT file, gate, errors FROM pending_fixes WHERE session_id = ?").all(sid);
         const changedFiles = db.prepare("SELECT file_path FROM changed_files WHERE session_id = ?").all(sid);
         const disabledGates = db.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?").all(sid);
         const plan = getActivePlan();
         return {
-          content: [{
-            type: "text",
-            text: generateHandoffDocument({
-              changedFiles: changedFiles.map((r) => r.file_path),
-              pendingFixes: fixes.map((r) => ({
-                file: r.file,
-                gate: r.gate,
-                errors: JSON.parse(r.errors)
-              })),
-              planTasks: plan?.tasks ?? null,
-              testPassed: !!session?.test_passed_at,
-              reviewDone: !!session?.review_completed_at,
-              disabledGates: disabledGates.map((r) => r.gate_name)
-            })
-          }]
+          content: [
+            {
+              type: "text",
+              text: generateHandoffDocument({
+                changedFiles: changedFiles.map((r) => r.file_path),
+                pendingFixes: fixes.map((r) => ({
+                  file: r.file,
+                  gate: r.gate,
+                  errors: JSON.parse(r.errors)
+                })),
+                planTasks: plan?.tasks ?? null,
+                testPassed: !!session2?.test_passed_at,
+                reviewDone: !!session2?.review_completed_at,
+                disabledGates: disabledGates.map((r) => r.gate_name)
+              })
+            }
+          ]
         };
       } catch {
         return { content: [{ type: "text", text: "No active session data to hand off." }] };
@@ -1186,11 +1100,35 @@ function handleTool(name, cwd, args) {
     }
     case "get_metrics_dashboard": {
       try {
-        const metrics = readMetricsHistory(cwd);
+        const metrics = readMetricsHistory();
         return { content: [{ type: "text", text: generateMetricsDashboard(metrics) }] };
       } catch {
         return { content: [{ type: "text", text: "No metrics data available yet." }] };
       }
+    }
+    case "reset_escalation_counters": {
+      const reason = typeof args?.reason === "string" ? args.reason : null;
+      if (!reason || reason.length < 10 || new Set(reason).size < 5) {
+        return {
+          isError: true,
+          content: [
+            { type: "text", text: "Missing or insufficient reason (min 10 chars, min 5 unique)." }
+          ]
+        };
+      }
+      db.prepare(`UPDATE sessions SET
+				security_warning_count = 0,
+				test_quality_warning_count = 0,
+				drift_warning_count = 0,
+				dead_import_warning_count = 0,
+				duplication_warning_count = 0
+				WHERE id = ?`).run(sid);
+      appendAuditLog({
+        action: "reset_escalation_counters",
+        reason,
+        timestamp: new Date().toISOString()
+      });
+      return { content: [{ type: "text", text: "All escalation counters reset to zero." }] };
     }
     default:
       return { isError: true, content: [{ type: "text", text: `Unknown tool: ${name}` }] };
@@ -1263,7 +1201,11 @@ function handleRequest(parsed, cwd) {
     case "ping":
       return { jsonrpc: "2.0", id, result: {} };
     default:
-      return { jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${parsed.method}` } };
+      return {
+        jsonrpc: "2.0",
+        id,
+        error: { code: -32601, message: `Method not found: ${parsed.method}` }
+      };
   }
 }
 async function main() {

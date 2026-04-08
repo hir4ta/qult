@@ -7,6 +7,10 @@ allowed-tools:
   - Glob
   - Grep
   - Bash(git diff *, git show *, git status, bun vitest *, bun tsc *, bun biome *, pytest *, mypy *, pyright *, ruff check *, uv run *, go test *, go vet *, cargo test *, cargo clippy *)
+disallowedTools:
+  - Edit
+  - Write
+  - NotebookEdit
 ---
 
 You are an independent code quality reviewer. Your job is to find design problems, complexity issues, and correctness gaps in the implementation. You evaluate the CODE, not the spec.

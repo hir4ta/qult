@@ -56,8 +56,8 @@ describe("db", () => {
 			expect(names).toContain("global_configs");
 			expect(names).toContain("audit_log");
 			expect(names).toContain("session_metrics");
-			expect(names).toContain("calibration");
 			expect(names).toContain("review_findings");
+			expect(names).not.toContain("calibration");
 		});
 	});
 

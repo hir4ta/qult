@@ -18,16 +18,19 @@ var __require = import.meta.require;
 
 // src/state/db.ts
 import { Database } from "bun:sqlite";
-import { mkdirSync } from "fs";
+import { chmodSync, mkdirSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 function getDb() {
   if (_db)
     return _db;
-  mkdirSync(DB_DIR, { recursive: true });
+  mkdirSync(DB_DIR, { recursive: true, mode: 448 });
+  try {
+    chmodSync(DB_DIR, 448);
+  } catch {}
   _db = new Database(DB_PATH);
   configurePragmas(_db);
-  ensureSchema(_db);
+  migrateSchema(_db);
   return _db;
 }
 function configurePragmas(db) {
@@ -35,7 +38,19 @@ function configurePragmas(db) {
   db.exec("PRAGMA busy_timeout = 5000");
   db.exec("PRAGMA foreign_keys = ON");
 }
-function ensureSchema(db) {
+function migrateSchema(db) {
+  const version = db.prepare("PRAGMA user_version").get().user_version;
+  if (version >= SCHEMA_VERSION)
+    return;
+  if (version < 1) {
+    createTablesV1(db);
+  }
+  if (version < 2) {
+    db.exec("DROP TABLE IF EXISTS calibration");
+  }
+  db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+}
+function createTablesV1(db) {
   db.exec(`
 		CREATE TABLE IF NOT EXISTS projects (
 			id         INTEGER PRIMARY KEY,
@@ -187,16 +202,6 @@ function ensureSchema(db) {
 		);
 		CREATE INDEX IF NOT EXISTS idx_metrics_project ON session_metrics(project_id);
 
-		CREATE TABLE IF NOT EXISTS calibration (
-			id          INTEGER PRIMARY KEY,
-			project_id  INTEGER NOT NULL REFERENCES projects(id),
-			session_id  TEXT    NOT NULL,
-			aggregate   REAL    NOT NULL,
-			stages      TEXT    NOT NULL,
-			recorded_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-		);
-		CREATE INDEX IF NOT EXISTS idx_calibration_project ON calibration(project_id);
-
 		CREATE TABLE IF NOT EXISTS review_findings (
 			id          INTEGER PRIMARY KEY,
 			session_id  TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -229,9 +234,13 @@ function getProjectId() {
   return _projectIdCache;
 }
 function setSessionScope(sessionId) {
-  if (!/^[\w.\-:]+$/.test(sessionId))
-    return;
+  if (!/^[\w.\-:]+$/.test(sessionId)) {
+    process.stderr.write(`[qult] Ignoring invalid session_id (contains illegal characters): ${sessionId.slice(0, 64)}
+`);
+    return false;
+  }
   _sessionId = sessionId;
+  return true;
 }
 function getSessionId() {
   return _sessionId;
@@ -241,7 +250,7 @@ function ensureSession() {
   const projectId = getProjectId();
   db.prepare("INSERT OR IGNORE INTO sessions (id, project_id) VALUES (?, ?)").run(_sessionId, projectId);
 }
-var DB_DIR, DB_PATH, DEFAULT_SESSION_ID = "__default__", _db = null, _projectIdCache = null, _projectPathCache = null, _sessionId;
+var SCHEMA_VERSION = 2, DB_DIR, DB_PATH, DEFAULT_SESSION_ID = "__default__", _db = null, _projectIdCache = null, _projectPathCache = null, _sessionId;
 var init_db = __esm(() => {
   DB_DIR = join(homedir(), ".qult");
   DB_PATH = join(DB_DIR, "qult.db");
@@ -649,10 +658,17 @@ function getActivePlan() {
 }
 function hasPlanFile() {
   try {
-    const planDir = join2(process.cwd(), ".claude", "plans");
-    if (!existsSync(planDir))
-      return false;
-    return readdirSync(planDir).some((f) => f.endsWith(".md"));
+    const projectPlanDir = join2(process.cwd(), ".claude", "plans");
+    if (existsSync(projectPlanDir) && readdirSync(projectPlanDir).some((f) => f.endsWith(".md"))) {
+      return true;
+    }
+    if (!_disableHomeFallback) {
+      const homePlanDir = join2(homedir2(), ".claude", "plans");
+      if (existsSync(homePlanDir) && readdirSync(homePlanDir).some((f) => f.endsWith(".md"))) {
+        return true;
+      }
+    }
+    return false;
   } catch {
     return false;
   }
@@ -811,8 +827,14 @@ function flush2() {
       for (const fp of state.changed_file_paths) {
         insertFile.run(sid, fp);
       }
-      db.prepare("DELETE FROM disabled_gates WHERE session_id = ?").run(sid);
-      const insertGate = db.prepare("INSERT INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)");
+      const inMemoryGates = new Set(state.disabled_gates);
+      const dbGates = db.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?").all(sid);
+      for (const { gate_name } of dbGates) {
+        if (!inMemoryGates.has(gate_name)) {
+          db.prepare("DELETE FROM disabled_gates WHERE session_id = ? AND gate_name = ?").run(sid, gate_name);
+        }
+      }
+      const insertGate = db.prepare("INSERT OR IGNORE INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)");
       for (const g of state.disabled_gates) {
         insertGate.run(sid, g, "");
       }
@@ -858,12 +880,12 @@ function flush2() {
       db.exec("ROLLBACK");
       throw err;
     }
+    _dirty2 = false;
   } catch (e) {
     if (e instanceof Error)
       process.stderr.write(`[qult] state write error: ${e.message}
 `);
   }
-  _dirty2 = false;
 }
 function getGatedExtensions() {
   const gates = loadGates();
@@ -1535,7 +1557,14 @@ var init_dead_import_check = __esm(() => {
 
 // src/hooks/detectors/duplication-check.ts
 import { existsSync as existsSync3, readFileSync as readFileSync3 } from "fs";
-import { extname as extname3, resolve } from "path";
+import { basename as basename2, dirname as dirname2, extname as extname3, resolve } from "path";
+function isTestFile(filePath) {
+  const name = basename2(filePath);
+  if (/\.(test|spec)\.[^.]+$/.test(name))
+    return true;
+  const parent = basename2(dirname2(filePath));
+  return parent === "__tests__";
+}
 function normalizeLine(line) {
   const trimmed = line.trim();
   if (trimmed === "")
@@ -1575,6 +1604,8 @@ function buildHashWindows(content) {
   return windows;
 }
 function detectDuplication(file) {
+  if (isTestFile(file))
+    return [];
   if (isGateDisabled("duplication-check"))
     return [];
   const ext = extname3(file).toLowerCase();
@@ -1609,6 +1640,8 @@ function detectDuplication(file) {
   return [{ file, errors, gate: "duplication-check" }];
 }
 function detectCrossFileDuplication(file, sessionFiles) {
+  if (isTestFile(file))
+    return [];
   if (isGateDisabled("duplication-check"))
     return [];
   if (sessionFiles.length > MAX_SESSION_FILES) {
@@ -1634,6 +1667,8 @@ function detectCrossFileDuplication(file, sessionFiles) {
   const cwd = process.cwd();
   for (const otherFile of sessionFiles) {
     if (otherFile === file)
+      continue;
+    if (isTestFile(otherFile))
       continue;
     const absOther = resolve(otherFile);
     if (!absOther.startsWith(`${cwd}/`))
@@ -2218,7 +2253,7 @@ function detectSecurityPatterns(file) {
   const lines = content.split(`
 `);
   const fileName = file.split("/").pop() ?? "";
-  const isTestFile = fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_") || fileName.includes("_test.");
+  const isTestFile2 = fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_") || fileName.includes("_test.");
   const starIsComment = JS_TS_EXTS.has(ext) || ext === ".java" || ext === ".kt" || ext === ".cs";
   const hasBlockComments = JS_TS_EXTS.has(ext) || ext === ".java" || ext === ".kt" || ext === ".cs" || ext === ".go" || ext === ".rs";
   let inBlockComment = false;
@@ -2254,7 +2289,7 @@ function detectSecurityPatterns(file) {
       continue;
     if (starIsComment && scanTrimmed.startsWith("*"))
       continue;
-    if (!isTestFile) {
+    if (!isTestFile2) {
       for (const { re, desc } of SECRET_PATTERNS) {
         if (re.test(scanLine)) {
           if (/process\.env\b/.test(scanLine))
@@ -2437,12 +2472,12 @@ var init_security_check = __esm(() => {
 
 // src/hooks/detectors/test-file-resolver.ts
 import { existsSync as existsSync7 } from "fs";
-import { basename as basename2, dirname as dirname2, extname as extname7, join as join5 } from "path";
+import { basename as basename3, dirname as dirname3, extname as extname7, join as join5 } from "path";
 function resolveTestFile(sourceFile) {
   const ext = extname7(sourceFile);
-  const base = basename2(sourceFile, ext);
-  const dir = dirname2(sourceFile);
-  if (isTestFile(sourceFile))
+  const base = basename3(sourceFile, ext);
+  const dir = dirname3(sourceFile);
+  if (isTestFile2(sourceFile))
     return null;
   for (const pattern of TEST_PATTERNS) {
     const candidate = pattern(dir, base, ext);
@@ -2452,8 +2487,8 @@ function resolveTestFile(sourceFile) {
   }
   return null;
 }
-function isTestFile(file) {
-  const base = basename2(file);
+function isTestFile2(file) {
+  const base = basename3(file);
   return /\.(test|spec)\.\w+$/.test(base) || /^test_\w+\.py$/.test(base) || /_test\.go$/.test(base) || /\/(__tests__|tests)\//.test(file);
 }
 var TEST_PATTERNS;
@@ -2476,7 +2511,7 @@ var exports_post_tool = {};
 __export(exports_post_tool, {
   default: () => postTool
 });
-import { dirname as dirname3, extname as extname8, resolve as resolve3 } from "path";
+import { dirname as dirname4, extname as extname8, resolve as resolve3 } from "path";
 async function postTool(ev) {
   const tool = ev.tool_name;
   if (!tool)
@@ -2503,9 +2538,6 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
     if (err instanceof Error && err.message.startsWith("process.exit"))
       throw err;
   }
-  const qultDir = resolve3(process.cwd(), ".qult");
-  if (file.startsWith(`${qultDir}/`) || file === qultDir)
-    return;
   const gates = loadGates();
   if (!gates?.on_write)
     return;
@@ -2563,8 +2595,8 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
     if (securityFixes.length > 0) {
       newFixes.push(...securityFixes);
       const fileName = file.split("/").pop() ?? "";
-      const isTestFile2 = fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_");
-      if (!isTestFile2) {
+      const isTestFile3 = fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_");
+      if (!isTestFile3) {
         const count = incrementEscalation("security_warning_count");
         if (count >= 10) {
           process.stderr.write(`[qult] Security escalation: ${count} security warnings this session. Review security posture.
@@ -2718,7 +2750,7 @@ function buildTestFileCommand(testCommand, testFile) {
     return `${testCommand} ${escaped}`;
   }
   if (/\bgo\s+test\b/.test(testCommand)) {
-    return `go test -v -run . ${shellEscape(dirname3(testFile))}`;
+    return `go test -v -run . ${shellEscape(dirname4(testFile))}`;
   }
   if (/\bmocha\b/.test(testCommand)) {
     return `${testCommand} ${escaped}`;
@@ -2999,7 +3031,8 @@ function checkBash(ev) {
   }
   if (changedCount > 0) {
     if (changedCount >= loadConfig().review.required_changed_files && !hasPlanFile()) {
-      deny(`${changedCount} files changed without a plan. Run /qult:plan-generator before committing.`);
+      process.stderr.write(`[qult] Advisory: ${changedCount} files changed without a plan. Consider using /qult:explore for complex changes.
+`);
     }
     if (!readLastReview()) {
       if (isReviewRequired() && !isGateDisabled("review")) {
@@ -3113,12 +3146,12 @@ Consider using TaskCreate for Verify test execution.
       const changed = state.changed_file_paths.length;
       const threshold = loadConfig().review.required_changed_files;
       if (changed >= threshold) {
-        block(`${changed} files changed without a plan. Run /qult:plan-generator before continuing.
-` + "Large changes require a structured plan so TDD enforcement, task verification, and scope tracking can function.");
+        process.stderr.write(`[qult] Advisory: ${changed} files changed without a plan. Consider using /qult:explore for complex changes.
+`);
       }
     }
     if (!readLastReview()) {
-      if (isReviewRequired() && !isGateDisabled("review")) {
+      if (isReviewRequired() && !isGateDisabled("review") && getReviewIteration() === 0) {
         block("Run /qult:review before finishing. Independent review is required.");
       }
     }
@@ -3180,111 +3213,6 @@ var init_stop = __esm(() => {
     ".vue",
     ".svelte"
   ]);
-});
-
-// src/state/calibration.ts
-function readCalibration() {
-  try {
-    const db = getDb();
-    const rows = db.prepare("SELECT aggregate, stages, recorded_at, project_id FROM calibration ORDER BY id DESC LIMIT ?").all(MAX_ENTRIES);
-    if (rows.length === 0)
-      return null;
-    const entries = rows.map((r) => ({
-      date: r.recorded_at,
-      aggregate: r.aggregate,
-      stages: JSON.parse(r.stages),
-      project: String(r.project_id)
-    }));
-    const scores = entries.map((e) => e.aggregate);
-    const count = scores.length;
-    const mean = scores.reduce((s, v) => s + v, 0) / count;
-    const variance = scores.reduce((s, v) => s + (v - mean) ** 2, 0) / count;
-    const stddev = Math.sqrt(variance);
-    const perfectCount = entries.filter((e) => {
-      const dims = Object.values(e.stages).flatMap((s) => Object.values(s));
-      return dims.length > 0 && dims.every((v) => v === 5);
-    }).length;
-    return {
-      entries,
-      stats: {
-        mean: Math.round(mean * 100) / 100,
-        stddev: Math.round(stddev * 100) / 100,
-        count,
-        perfect_count: perfectCount
-      }
-    };
-  } catch {
-    return null;
-  }
-}
-function recordCalibration(aggregate, stageScores) {
-  try {
-    const db = getDb();
-    const projectId = getProjectId();
-    const sid = getSessionId();
-    db.prepare("INSERT INTO calibration (project_id, session_id, aggregate, stages) VALUES (?, ?, ?, ?)").run(projectId, sid, aggregate, JSON.stringify(stageScores));
-    db.prepare(`DELETE FROM calibration WHERE id NOT IN (
-				SELECT id FROM calibration ORDER BY id DESC LIMIT ?
-			)`).run(MAX_ENTRIES);
-  } catch {}
-}
-function projectId() {
-  return String(getProjectId());
-}
-function checkCalibration() {
-  const data = readCalibration();
-  if (!data)
-    return [];
-  const currentProject = projectId();
-  const projectEntries = data.entries.filter((e) => !e.project || e.project === currentProject);
-  if (projectEntries.length > 0 && projectEntries.length < 3) {
-    return [
-      {
-        type: "low_variance",
-        message: `Cross-session calibration: only ${projectEntries.length} review(s) recorded for this project. Scores may not be reliable yet.`
-      }
-    ];
-  }
-  if (projectEntries.length < 5)
-    return [];
-  const scores = projectEntries.map((e) => e.aggregate);
-  const count = scores.length;
-  const mean = scores.reduce((s, v) => s + v, 0) / count;
-  const variance = scores.reduce((s, v) => s + (v - mean) ** 2, 0) / count;
-  const stddev = Math.sqrt(variance);
-  const warnings = [];
-  const maxObserved = Math.max(...scores, 1);
-  const highMeanThreshold = maxObserved * 0.93;
-  const roundedMean = Math.round(mean * 100) / 100;
-  const roundedStddev = Math.round(stddev * 100) / 100;
-  if (roundedMean > highMeanThreshold && roundedStddev < 1.5) {
-    warnings.push({
-      type: "high_mean",
-      message: `Cross-session calibration: mean ${roundedMean} with \u03C3=${roundedStddev} across ${count} reviews. Scores may be systematically inflated.`
-    });
-  }
-  if (count >= 10 && roundedStddev < 0.8) {
-    warnings.push({
-      type: "low_variance",
-      message: `Cross-session calibration: \u03C3=${roundedStddev} across ${count} reviews suggests reviewers are not differentiating.`
-    });
-  }
-  const recentEntries = projectEntries.slice(-3);
-  const maxPossible = recentEntries.every((e) => {
-    const dims = Object.values(e.stages).flatMap((s) => Object.values(s));
-    return dims.length > 0 && dims.every((v) => v === 5);
-  });
-  if (maxPossible && recentEntries.length >= 3) {
-    warnings.push({
-      type: "perfect_streak",
-      message: "Cross-session calibration: 3+ consecutive perfect scores. No code is perfect \u2014 reviewers may need recalibration."
-    });
-  }
-  return warnings;
-}
-var MAX_ENTRIES = 50;
-var init_calibration = __esm(() => {
-  init_db();
 });
 
 // src/hooks/subagent-stop/claim-grounding.ts
@@ -3932,14 +3860,6 @@ function checkAggregateScore(stages) {
         if (mergedHistory)
           detectRepeatedPatterns(mergedHistory);
       } catch {}
-      try {
-        recordCalibration(aggregate, stageScores);
-        const calibrationWarnings = checkCalibration();
-        for (const w of calibrationWarnings) {
-          process.stderr.write(`[qult] ${w.message}
-`);
-        }
-      } catch {}
       recordReview();
       return;
     }
@@ -3995,16 +3915,16 @@ function persistReviewFindings() {
     return null;
   try {
     const db = getDb();
-    const projectId2 = getProjectId();
+    const projectId = getProjectId();
     const sid = getSessionId();
     const insert = db.prepare("INSERT INTO review_findings (session_id, project_id, file, severity, description, stage) VALUES (?, ?, ?, ?, ?, ?)");
     for (const f of _currentFindings) {
-      insert.run(sid, projectId2, f.file, f.severity, f.description, f.stage);
+      insert.run(sid, projectId, f.file, f.severity, f.description, f.stage);
     }
     db.prepare(`DELETE FROM review_findings WHERE project_id = ? AND id NOT IN (
 				SELECT id FROM review_findings WHERE project_id = ? ORDER BY id DESC LIMIT ?
-			)`).run(projectId2, projectId2, MAX_FINDINGS);
-    const rows = db.prepare("SELECT file, severity, description, stage, recorded_at FROM review_findings WHERE project_id = ? ORDER BY id DESC LIMIT ?").all(projectId2, MAX_FINDINGS);
+			)`).run(projectId, projectId, MAX_FINDINGS);
+    const rows = db.prepare("SELECT file, severity, description, stage, recorded_at FROM review_findings WHERE project_id = ? ORDER BY id DESC LIMIT ?").all(projectId, MAX_FINDINGS);
     const history = rows.map((r) => ({
       file: r.file,
       severity: r.severity,
@@ -4051,7 +3971,6 @@ var READ_ONLY_REVIEWERS, SEVERITY_PATTERN, FINDING_RE, NO_ISSUES_RE2, SPEC_PASS_
 var init_agent_validators = __esm(() => {
   init_config();
   init_db();
-  init_calibration();
   init_session_state();
   init_respond();
   init_claim_grounding();
@@ -4114,7 +4033,7 @@ var init_subagent_stop = __esm(() => {
 
 // src/hooks/detectors/test-quality-check.ts
 import { existsSync as existsSync10, readFileSync as readFileSync9 } from "fs";
-import { basename as basename3, dirname as dirname4, resolve as resolve5 } from "path";
+import { basename as basename4, dirname as dirname5, resolve as resolve5 } from "path";
 function countAssertionsOutsideSetup(code) {
   const lines = code.split(`
 `);
@@ -4314,8 +4233,8 @@ function analyzeTestQuality(file) {
     });
   }
   try {
-    const snapDir = `${dirname4(absPath)}/__snapshots__/`;
-    const snapFile = `${snapDir}${basename3(absPath)}.snap`;
+    const snapDir = `${dirname5(absPath)}/__snapshots__/`;
+    const snapFile = `${snapDir}${basename4(absPath)}.snap`;
     if (existsSync10(snapFile)) {
       const snapContent = readFileSync9(snapFile, "utf-8");
       if (snapContent.length > LARGE_SNAPSHOT_CHARS) {
@@ -4475,23 +4394,23 @@ var init_task_completed = __esm(() => {
 });
 
 // src/state/metrics.ts
-function recordSessionMetrics(_cwd, metrics) {
+function recordSessionMetrics(metrics) {
   try {
     const db = getDb();
-    const projectId2 = getProjectId();
+    const projectId = getProjectId();
     db.prepare(`INSERT INTO session_metrics (session_id, project_id, gate_failure_count, security_warning_count, review_aggregate, files_changed)
-			 VALUES (?, ?, ?, ?, ?, ?)`).run(metrics.session_id, projectId2, metrics.gate_failures, metrics.security_warnings, metrics.review_score, metrics.files_changed);
+			 VALUES (?, ?, ?, ?, ?, ?)`).run(metrics.session_id, projectId, metrics.gate_failures, metrics.security_warnings, metrics.review_score, metrics.files_changed);
     db.prepare(`DELETE FROM session_metrics WHERE project_id = ? AND id NOT IN (
 				SELECT id FROM session_metrics WHERE project_id = ? ORDER BY id DESC LIMIT ?
-			)`).run(projectId2, projectId2, MAX_ENTRIES2);
+			)`).run(projectId, projectId, MAX_ENTRIES);
   } catch {}
 }
-function readMetricsHistory(_cwd) {
+function readMetricsHistory() {
   try {
     const db = getDb();
-    const projectId2 = getProjectId();
+    const projectId = getProjectId();
     const rows = db.prepare(`SELECT session_id, recorded_at, gate_failure_count, security_warning_count, review_aggregate, files_changed
-				 FROM session_metrics WHERE project_id = ? ORDER BY id DESC LIMIT ?`).all(projectId2, MAX_ENTRIES2);
+				 FROM session_metrics WHERE project_id = ? ORDER BY id DESC LIMIT ?`).all(projectId, MAX_ENTRIES);
     return rows.map((r) => ({
       session_id: r.session_id,
       timestamp: r.recorded_at,
@@ -4504,9 +4423,9 @@ function readMetricsHistory(_cwd) {
     return [];
   }
 }
-function detectRecurringPatterns(_cwd) {
+function detectRecurringPatterns() {
   try {
-    const history = readMetricsHistory(_cwd);
+    const history = readMetricsHistory();
     if (history.length < 5)
       return;
     const recent = history.slice(-5);
@@ -4525,7 +4444,7 @@ function detectRecurringPatterns(_cwd) {
     }
   } catch {}
 }
-var MAX_ENTRIES2 = 50;
+var MAX_ENTRIES = 50;
 var init_metrics = __esm(() => {
   init_db();
 });
@@ -4535,15 +4454,24 @@ var exports_session_start = {};
 __export(exports_session_start, {
   default: () => sessionStart
 });
+import { existsSync as existsSync11 } from "fs";
+import { join as join8 } from "path";
 async function sessionStart(ev) {
   try {
+    if (!_legacyWarned) {
+      _legacyWarned = true;
+      const cwd = ev.cwd ?? process.cwd();
+      if (existsSync11(join8(cwd, ".qult"))) {
+        process.stderr.write(`[qult] Legacy .qult/ directory detected. State is now stored in ~/.qult/qult.db. You can safely delete .qult/ from this project.
+`);
+      }
+    }
     if (ev.source === "startup" || ev.source === "clear") {
       try {
-        const cwd = ev.cwd ?? process.cwd();
         const prevState = readSessionState();
         const gateFailures = Object.values(prevState.gate_failure_counts ?? {}).reduce((sum, v) => sum + (typeof v === "number" ? v : 0), 0);
         if (gateFailures > 0 || (prevState.security_warning_count ?? 0) > 0 || (prevState.changed_file_paths ?? []).length > 0) {
-          recordSessionMetrics(cwd, {
+          recordSessionMetrics({
             session_id: ev.session_id ?? "unknown",
             timestamp: new Date().toISOString(),
             gate_failures: gateFailures,
@@ -4552,7 +4480,7 @@ async function sessionStart(ev) {
             files_changed: (prevState.changed_file_paths ?? []).length
           });
         }
-        detectRecurringPatterns(cwd);
+        detectRecurringPatterns();
       } catch {}
       writePendingFixes([]);
       try {
@@ -4562,6 +4490,7 @@ async function sessionStart(ev) {
     markSessionStartCompleted();
   } catch {}
 }
+var _legacyWarned = false;
 var init_session_start = __esm(() => {
   init_metrics();
   init_pending_fixes();
@@ -4574,8 +4503,8 @@ var exports_post_compact = {};
 __export(exports_post_compact, {
   default: () => postCompact
 });
-import { existsSync as existsSync11, readdirSync as readdirSync5, readFileSync as readFileSync10, statSync as statSync5 } from "fs";
-import { join as join8 } from "path";
+import { existsSync as existsSync12, readdirSync as readdirSync5, readFileSync as readFileSync10, statSync as statSync5 } from "fs";
+import { join as join9 } from "path";
 async function postCompact(_ev) {
   try {
     const parts = [];
@@ -4622,11 +4551,11 @@ async function postCompact(_ev) {
       parts.push(`[qult] Session: ${summary.join(", ")}`);
     }
     try {
-      const planDir = join8(process.cwd(), ".claude", "plans");
-      if (existsSync11(planDir)) {
-        const planFiles = readdirSync5(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync5(join8(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
+      const planDir = join9(process.cwd(), ".claude", "plans");
+      if (existsSync12(planDir)) {
+        const planFiles = readdirSync5(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync5(join9(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
         if (planFiles.length > 0) {
-          const content = readFileSync10(join8(planDir, planFiles[0].name), "utf-8");
+          const content = readFileSync10(join9(planDir, planFiles[0].name), "utf-8");
           const taskCount = (content.match(/^###\s+Task\s+\d+/gim) ?? []).length;
           const doneCount = (content.match(/^###\s+Task\s+\d+.*\[done\]/gim) ?? []).length;
           if (taskCount > 0) {

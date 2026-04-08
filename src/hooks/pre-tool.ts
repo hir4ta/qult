@@ -232,8 +232,8 @@ function checkBash(ev: HookEvent): void {
 	if (changedCount > 0) {
 		// Require plan when many files changed (structural enforcement — not bypassable)
 		if (changedCount >= loadConfig().review.required_changed_files && !hasPlanFile()) {
-			deny(
-				`${changedCount} files changed without a plan. Run /qult:plan-generator before committing.`,
+			process.stderr.write(
+				`[qult] Advisory: ${changedCount} files changed without a plan. Consider using /qult:explore for complex changes.\n`,
 			);
 		}
 

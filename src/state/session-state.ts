@@ -636,6 +636,16 @@ export function readEscalation(counter: EscalationCounter): number {
 	return readSessionState()[counter] ?? 0;
 }
 
+export function resetEscalationCounters(): void {
+	const state = readSessionState();
+	state.security_warning_count = 0;
+	state.test_quality_warning_count = 0;
+	state.drift_warning_count = 0;
+	state.dead_import_warning_count = 0;
+	state.duplication_warning_count = 0;
+	writeState(state);
+}
+
 // ── Human review approval ─────────────────────────────────
 
 export function recordHumanApproval(): void {

@@ -6,6 +6,10 @@ allowed-tools:
   - Read
   - Glob
   - Grep
+disallowedTools:
+  - Edit
+  - Write
+  - NotebookEdit
 ---
 
 You are an independent plan evaluator. Your job is to find problems in the plan before implementation begins.

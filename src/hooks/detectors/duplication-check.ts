@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { extname, resolve } from "node:path";
+import { basename, dirname, extname, resolve } from "node:path";
 import { isGateDisabled } from "../../state/session-state.ts";
 import type { PendingFix } from "../../types.ts";
 
@@ -24,6 +24,13 @@ const CHECKABLE_EXTS = new Set([
 const MAX_CHECK_SIZE = 500_000;
 const MIN_BLOCK_LINES = 4;
 const MAX_SESSION_FILES = 20;
+
+function isTestFile(filePath: string): boolean {
+	const name = basename(filePath);
+	if (/\.(test|spec)\.[^.]+$/.test(name)) return true;
+	const parent = basename(dirname(filePath));
+	return parent === "__tests__";
+}
 
 /** Normalize a line for duplication comparison: trim whitespace, skip blanks and comments. */
 function normalizeLine(line: string): string | null {
@@ -71,6 +78,7 @@ function buildHashWindows(content: string): Map<string, number[]> {
 /** Detect duplicate code blocks within a single file.
  *  Returns PendingFix[] (blocking) for intra-file duplication. */
 export function detectDuplication(file: string): PendingFix[] {
+	if (isTestFile(file)) return [];
 	if (isGateDisabled("duplication-check")) return [];
 	const ext = extname(file).toLowerCase();
 	if (!CHECKABLE_EXTS.has(ext)) return [];
@@ -108,6 +116,7 @@ export function detectDuplication(file: string): PendingFix[] {
 /** Detect duplicate code blocks across files.
  *  Returns advisory warning strings (non-blocking). */
 export function detectCrossFileDuplication(file: string, sessionFiles: string[]): string[] {
+	if (isTestFile(file)) return [];
 	if (isGateDisabled("duplication-check")) return [];
 	if (sessionFiles.length > MAX_SESSION_FILES) {
 		// Fail-open with transparent warning: user must know check was skipped
@@ -134,6 +143,7 @@ export function detectCrossFileDuplication(file: string, sessionFiles: string[])
 	const cwd = process.cwd();
 	for (const otherFile of sessionFiles) {
 		if (otherFile === file) continue;
+		if (isTestFile(otherFile)) continue;
 		// Path traversal prevention: reject paths outside project root
 		const absOther = resolve(otherFile);
 		if (!absOther.startsWith(`${cwd}/`)) continue;
