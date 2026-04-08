@@ -10,6 +10,7 @@
  */
 
 import { createInterface } from "node:readline";
+import { loadConfig, resetConfigCache } from "./config.ts";
 import { loadGates, saveGates } from "./gates/load.ts";
 import { generateHandoffDocument } from "./handoff.ts";
 import { generateHarnessReport } from "./harness-report.ts";
@@ -23,7 +24,7 @@ import {
 	setProjectPath,
 	setSessionScope,
 } from "./state/db.ts";
-import { readMetricsHistory } from "./state/metrics.ts";
+import { getFlywheelRecommendations, readMetricsHistory } from "./state/metrics.ts";
 import { getActivePlan } from "./state/plan-status.ts";
 import type { PendingFix } from "./types.ts";
 
@@ -251,6 +252,12 @@ const TOOL_DEFS: ToolDef[] = [
 		inputSchema: { type: "object", properties: {} },
 	},
 	{
+		name: "get_flywheel_recommendations",
+		description:
+			"Returns threshold adjustment recommendations based on cross-session pattern analysis.",
+		inputSchema: { type: "object", properties: {} },
+	},
+	{
 		name: "save_gates",
 		description:
 			"Save gate configuration for the current project. Use during /qult:init to register detected gates. Replaces all existing gates atomically.",
@@ -327,7 +334,13 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 					content: [{ type: "text", text: "No session state. Run /qult:init to set up." }],
 				};
 			}
-			return { content: [{ type: "text", text: JSON.stringify(row, null, 2) }] };
+			// Include review model config so skills can read it
+			const config = loadConfig();
+			const enriched = {
+				...(row as Record<string, unknown>),
+				review_models: config.review.models,
+			};
+			return { content: [{ type: "text", text: JSON.stringify(enriched, null, 2) }] };
 		}
 		case "get_gate_config": {
 			const gates = loadGates();
@@ -402,34 +415,84 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 		}
 		case "set_config": {
 			const key = typeof args?.key === "string" ? args.key : null;
-			const value = typeof args?.value === "number" ? args.value : null;
+			const rawValue = args?.value;
+			const value =
+				typeof rawValue === "number"
+					? rawValue
+					: typeof rawValue === "string"
+						? rawValue
+						: typeof rawValue === "boolean"
+							? rawValue
+							: null;
 			if (!key || value === null) {
 				return {
 					isError: true,
 					content: [{ type: "text", text: "Missing key or value parameter." }],
 				};
 			}
-			const ALLOWED_KEYS = [
+			const ALLOWED_NUMBER_KEYS = [
 				"review.score_threshold",
 				"review.max_iterations",
 				"review.required_changed_files",
 				"review.dimension_floor",
 				"plan_eval.score_threshold",
 				"plan_eval.max_iterations",
+				"flywheel.min_sessions",
+				"escalation.security_threshold",
+				"escalation.drift_threshold",
+				"escalation.test_quality_threshold",
+				"escalation.duplication_threshold",
+				"escalation.semantic_threshold",
 			];
-			if (!ALLOWED_KEYS.includes(key)) {
+			const ALLOWED_MODEL_KEYS = [
+				"review.models.spec",
+				"review.models.quality",
+				"review.models.security",
+				"review.models.adversarial",
+				"plan_eval.models.generator",
+				"plan_eval.models.evaluator",
+			];
+			const ALLOWED_BOOLEAN_KEYS = ["flywheel.enabled", "review.require_human_approval"];
+			const ALL_ALLOWED = [...ALLOWED_NUMBER_KEYS, ...ALLOWED_MODEL_KEYS, ...ALLOWED_BOOLEAN_KEYS];
+			if (!ALL_ALLOWED.includes(key)) {
 				return {
 					isError: true,
-					content: [{ type: "text", text: `Invalid key. Allowed: ${ALLOWED_KEYS.join(", ")}` }],
+					content: [{ type: "text", text: `Invalid key. Allowed: ${ALL_ALLOWED.join(", ")}` }],
 				};
 			}
-			if (key === "review.dimension_floor" && (value < 1 || value > 5)) {
+			if (ALLOWED_NUMBER_KEYS.includes(key) && typeof value !== "number") {
+				return {
+					isError: true,
+					content: [{ type: "text", text: `Key '${key}' requires a number value.` }],
+				};
+			}
+			if (ALLOWED_MODEL_KEYS.includes(key)) {
+				const VALID_MODELS = ["sonnet", "opus", "haiku", "inherit"];
+				if (typeof value !== "string" || !VALID_MODELS.includes(value)) {
+					return {
+						isError: true,
+						content: [{ type: "text", text: `Model must be one of: ${VALID_MODELS.join(", ")}` }],
+					};
+				}
+			}
+			if (ALLOWED_BOOLEAN_KEYS.includes(key) && typeof value !== "boolean") {
+				return {
+					isError: true,
+					content: [{ type: "text", text: `Key '${key}' requires a boolean value.` }],
+				};
+			}
+			if (
+				key === "review.dimension_floor" &&
+				typeof value === "number" &&
+				(value < 1 || value > 5)
+			) {
 				return { isError: true, content: [{ type: "text", text: "dimension_floor must be 1-5." }] };
 			}
 			const projectId = getProjectId();
 			db.prepare(
 				"INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)",
 			).run(projectId, key, JSON.stringify(value));
+			resetConfigCache();
 			return { content: [{ type: "text", text: `Config set: ${key} = ${value}` }] };
 		}
 		case "clear_pending_fixes": {
@@ -582,7 +645,8 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			try {
 				const metrics = readMetricsHistory();
 				const auditLog = readAuditLog();
-				const report = generateHarnessReport(metrics, auditLog);
+				const cfg = loadConfig();
+				const report = generateHarnessReport(metrics, auditLog, cfg);
 				return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
 			} catch {
 				return { content: [{ type: "text", text: "No harness data available yet." }] };
@@ -633,6 +697,23 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 				return { content: [{ type: "text", text: generateMetricsDashboard(metrics) }] };
 			} catch {
 				return { content: [{ type: "text", text: "No metrics data available yet." }] };
+			}
+		}
+		case "get_flywheel_recommendations": {
+			try {
+				const config = loadConfig();
+				const metrics = readMetricsHistory();
+				const recs = getFlywheelRecommendations(metrics, config);
+				if (recs.length === 0) {
+					return {
+						content: [
+							{ type: "text", text: "No recommendations. Insufficient data or flywheel disabled." },
+						],
+					};
+				}
+				return { content: [{ type: "text", text: JSON.stringify(recs, null, 2) }] };
+			} catch {
+				return { content: [{ type: "text", text: "No flywheel data available yet." }] };
 			}
 		}
 		// Not in WRITE_TOOLS: save_gates is a project-level operation used during /qult:init,

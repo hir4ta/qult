@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULTS } from "../config.ts";
 import { generateHarnessReport } from "../harness-report.ts";
 import type { AuditEntry } from "../state/audit-log.ts";
 import type { SessionMetrics } from "../state/metrics.ts";
@@ -131,6 +132,35 @@ describe("generateHarnessReport", () => {
 		expect(report.totalSessions).toBe(0);
 		expect(report.recommendations).toEqual([]);
 		expect(report.reviewTrend).toBe("insufficient_data");
+	});
+
+	it("includes flywheel recommendations when config provided", () => {
+		// 12 sessions with increasing security warnings → worsening trend, frequency=100%
+		const metrics: SessionMetrics[] = Array.from({ length: 12 }, (_, i) => ({
+			session_id: `s${12 - i}`,
+			timestamp: `2026-04-${String(12 - i).padStart(2, "0")}`,
+			gate_failures: 0,
+			security_warnings: 12 - i, // DESC: s12(12), s11(11), ..., s1(1). After reverse: increasing
+			review_score: null,
+			files_changed: 3,
+			test_quality_warnings: 0,
+			duplication_warnings: 0,
+			semantic_warnings: 0,
+			drift_warnings: 0,
+			escalation_hit: false,
+		}));
+
+		const config = structuredClone(DEFAULTS);
+		const report = generateHarnessReport(metrics, [], config);
+		expect(report.flywheel_recommendations.length).toBeGreaterThan(0);
+		expect(report.flywheel_recommendations[0]!.direction).toBe("lower");
+		expect(Object.keys(report.metricTrends).length).toBeGreaterThan(0);
+	});
+
+	it("returns empty flywheel data when no config provided (backward compat)", () => {
+		const report = generateHarnessReport([], []);
+		expect(report.flywheel_recommendations).toEqual([]);
+		expect(report.metricTrends).toEqual({});
 	});
 
 	it("counts false positive rate from disable_gate audit entries", () => {

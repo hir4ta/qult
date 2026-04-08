@@ -23,6 +23,10 @@ qult implements the [Generator-Evaluator pattern](https://www.anthropic.com/engi
 - [Martin Fowler: Harness Engineering](https://martinfowler.com/articles/exploring-gen-ai/harness-engineering.html) — Guides (feedforward) + Sensors (feedback)
 - [TDAD](https://arxiv.org/abs/2603.17973) — Prompt-only TDD increases regressions (6%→10%); structural enforcement reduces to 1.8%
 - [Specification as Quality Gate](https://arxiv.org/abs/2603.25773) — AI reviewing AI is circular; deterministic gates must come first
+- [Nonstandard Errors](https://arxiv.org/abs/2603.16744) — Different model families have stable analytical styles; reviewer diversity reduces correlated errors
+- [AgentPex (Microsoft)](https://arxiv.org/abs/2603.23806) — Agents selectively ignore prompt rules; structural enforcement required
+- [CodeRabbit Report](https://www.coderabbit.ai/blog/state-of-ai-vs-human-code-generation-report) — AI code creates 1.7x more issues; quality gates as mitigation
+- [Triple Debt Model](https://arxiv.org/abs/2603.22106) — Technical + Cognitive + Intent debt in AI-assisted development
 
 </details>
 
@@ -66,9 +70,15 @@ flowchart LR
 | Blocks lint/type errors from spreading | **The Wall**: DENY until fixed |
 | Requires tests before commit | Gate check on `git commit` |
 | 4-stage independent code review | Spec + Quality + Security + Adversarial reviewers |
+| Configurable reviewer models per stage | Override model via config for review diversity |
 | Detects hallucinated imports | Checks imports against installed packages |
 | Detects export breaking changes | Compares with git HEAD |
+| Detects security patterns (25+ rules) | Secrets, injection, XSS, SSRF, weak crypto |
+| Detects semantic bugs (6+ patterns) | Empty catch, unreachable code, loose equality, switch fallthrough |
 | Detects code duplication | Intra-file blocking, cross-file advisory |
+| PBT-aware test quality checks | Skips false positives for property-based tests |
+| SAST integration (Semgrep on-write) | Auto-detects `.semgrep.yml`, runs per-file |
+| Cross-session learning (Flywheel) | Threshold adjustment recommendations based on patterns |
 | Preserves state across context compaction | Re-injects session state after compaction |
 
 ## Installation
@@ -138,7 +148,7 @@ rm -rf ~/.qult
 | Security | Vulnerability + Hardening | Are there security gaps? |
 | Adversarial | EdgeCases + LogicCorrectness | Edge cases, silent failures? |
 
-**Total: 8 dimensions / 40 points.** Default threshold: 30/40, dimension floor: 4/5.
+**Total: 8 dimensions / 40 points.** Default threshold: 30/40, dimension floor: 4/5. Reviewer models are configurable per stage via `review.models.*` config.
 
 <details>
 <summary>Score threshold details</summary>
@@ -183,8 +193,11 @@ All config is stored in the DB, manageable via `/qult:config` or MCP tools. Envi
 | `gates.output_max_chars` | 3500 | Max gate output chars |
 | `gates.default_timeout` | 10000 | Gate command timeout (ms) |
 | `escalation.*_threshold` | 8-10 | Warning count before blocking |
+| `review.models.*` | spec=sonnet, quality/security=opus, adversarial=sonnet | Per-stage reviewer model |
+| `flywheel.enabled` | true | Cross-session threshold recommendations |
+| `flywheel.min_sessions` | 10 | Min sessions for flywheel analysis |
 
-Env overrides: `QULT_REVIEW_SCORE_THRESHOLD`, `QULT_REVIEW_MAX_ITERATIONS`, etc.
+Env overrides: `QULT_REVIEW_SCORE_THRESHOLD`, `QULT_REVIEW_MODEL_SPEC`, `QULT_FLYWHEEL_ENABLED`, etc.
 
 </details>
 

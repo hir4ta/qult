@@ -8,12 +8,24 @@ export interface QultConfig {
 		required_changed_files: number;
 		dimension_floor: number;
 		require_human_approval: boolean;
+		/** Per-stage reviewer model override. Values: "sonnet", "opus", "haiku", "inherit" */
+		models: {
+			spec: string;
+			quality: string;
+			security: string;
+			adversarial: string;
+		};
 	};
 	plan_eval: {
 		score_threshold: number;
 		max_iterations: number;
 		/** File paths that trigger consumer-coverage heuristic. Config file only (no env var). */
 		registry_files: string[];
+		/** Model overrides for plan agents */
+		models: {
+			generator: string;
+			evaluator: string;
+		};
 	};
 	gates: {
 		output_max_chars: number;
@@ -32,6 +44,11 @@ export interface QultConfig {
 		duplication_threshold: number;
 		semantic_threshold: number;
 	};
+	/** Cross-session learning: threshold adjustment recommendations */
+	flywheel: {
+		enabled: boolean;
+		min_sessions: number;
+	};
 }
 
 export const DEFAULTS: QultConfig = {
@@ -41,11 +58,21 @@ export const DEFAULTS: QultConfig = {
 		required_changed_files: 5,
 		dimension_floor: 4,
 		require_human_approval: false,
+		models: {
+			spec: "sonnet",
+			quality: "opus",
+			security: "opus",
+			adversarial: "sonnet",
+		},
 	},
 	plan_eval: {
 		score_threshold: 12,
 		max_iterations: 2,
 		registry_files: [],
+		models: {
+			generator: "opus",
+			evaluator: "opus",
+		},
 	},
 	gates: {
 		output_max_chars: 3500,
@@ -61,6 +88,10 @@ export const DEFAULTS: QultConfig = {
 		duplication_threshold: 8,
 		semantic_threshold: 8,
 	},
+	flywheel: {
+		enabled: true,
+		min_sessions: 10,
+	},
 };
 
 /** Apply a raw config object on top of an existing QultConfig (field-by-field type-safe merge). */
@@ -75,6 +106,14 @@ function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): voi
 			config.review.dimension_floor = Math.max(1, Math.min(5, r.dimension_floor));
 		if (typeof r.require_human_approval === "boolean")
 			config.review.require_human_approval = r.require_human_approval;
+		if (r.models && typeof r.models === "object") {
+			const m = r.models as Record<string, unknown>;
+			if (typeof m.spec === "string" && m.spec) config.review.models.spec = m.spec;
+			if (typeof m.quality === "string" && m.quality) config.review.models.quality = m.quality;
+			if (typeof m.security === "string" && m.security) config.review.models.security = m.security;
+			if (typeof m.adversarial === "string" && m.adversarial)
+				config.review.models.adversarial = m.adversarial;
+		}
 	}
 	if (raw.plan_eval && typeof raw.plan_eval === "object") {
 		const p = raw.plan_eval as Record<string, unknown>;
@@ -84,6 +123,13 @@ function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): voi
 			config.plan_eval.registry_files = p.registry_files.filter(
 				(f: unknown) => typeof f === "string",
 			);
+		if (p.models && typeof p.models === "object") {
+			const m = p.models as Record<string, unknown>;
+			if (typeof m.generator === "string" && m.generator)
+				config.plan_eval.models.generator = m.generator;
+			if (typeof m.evaluator === "string" && m.evaluator)
+				config.plan_eval.models.evaluator = m.evaluator;
+		}
 	}
 	if (raw.gates && typeof raw.gates === "object") {
 		const g = raw.gates as Record<string, unknown>;
@@ -107,20 +153,41 @@ function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): voi
 			config.escalation.test_quality_threshold = Math.max(1, e.test_quality_threshold);
 		if (typeof e.duplication_threshold === "number")
 			config.escalation.duplication_threshold = Math.max(1, e.duplication_threshold);
+		if (typeof e.semantic_threshold === "number")
+			config.escalation.semantic_threshold = Math.max(1, e.semantic_threshold);
+	}
+	if (raw.flywheel && typeof raw.flywheel === "object") {
+		const f = raw.flywheel as Record<string, unknown>;
+		if (typeof f.enabled === "boolean") config.flywheel.enabled = f.enabled;
+		if (typeof f.min_sessions === "number")
+			config.flywheel.min_sessions = Math.max(1, f.min_sessions);
 	}
 }
 
-/** Convert DB KV rows to a nested config object for applyConfigLayer. */
+/** Convert DB KV rows to a nested config object for applyConfigLayer.
+ *  Supports 2-level (section.field) and 3-level (section.sub.field) keys. */
 function kvRowsToRaw(rows: { key: string; value: string }[]): Record<string, unknown> {
 	const raw: Record<string, Record<string, unknown>> = {};
 	for (const row of rows) {
-		const [section, field] = row.key.split(".");
-		if (!section || !field) continue;
+		const parts = row.key.split(".");
+		if (parts.length < 2) continue;
+		const section = parts[0]!;
 		if (!raw[section]) raw[section] = {};
+		let parsed: unknown;
 		try {
-			raw[section][field] = JSON.parse(row.value);
+			parsed = JSON.parse(row.value);
 		} catch {
-			raw[section][field] = row.value;
+			parsed = row.value;
+		}
+		if (parts.length === 2) {
+			raw[section][parts[1]!] = parsed;
+		} else if (parts.length === 3) {
+			// 3-level: e.g. review.models.spec → { review: { models: { spec: value } } }
+			const sub = parts[1]!;
+			if (!raw[section][sub] || typeof raw[section][sub] !== "object") {
+				raw[section][sub] = {};
+			}
+			(raw[section][sub] as Record<string, unknown>)[parts[2]!] = parsed;
 		}
 	}
 	return raw;
@@ -206,6 +273,30 @@ export function loadConfig(): QultConfig {
 	if (dupEsc !== undefined) config.escalation.duplication_threshold = Math.max(1, dupEsc);
 	const semEsc = envInt("QULT_ESCALATION_SEMANTIC");
 	if (semEsc !== undefined) config.escalation.semantic_threshold = Math.max(1, semEsc);
+
+	// Model env var overrides (non-empty string)
+	const envStr = (key: string): string | undefined => {
+		const val = process.env[key];
+		return val?.trim() ? val.trim() : undefined;
+	};
+	config.review.models.spec = envStr("QULT_REVIEW_MODEL_SPEC") ?? config.review.models.spec;
+	config.review.models.quality =
+		envStr("QULT_REVIEW_MODEL_QUALITY") ?? config.review.models.quality;
+	config.review.models.security =
+		envStr("QULT_REVIEW_MODEL_SECURITY") ?? config.review.models.security;
+	config.review.models.adversarial =
+		envStr("QULT_REVIEW_MODEL_ADVERSARIAL") ?? config.review.models.adversarial;
+	config.plan_eval.models.generator =
+		envStr("QULT_PLAN_EVAL_MODEL_GENERATOR") ?? config.plan_eval.models.generator;
+	config.plan_eval.models.evaluator =
+		envStr("QULT_PLAN_EVAL_MODEL_EVALUATOR") ?? config.plan_eval.models.evaluator;
+
+	// Flywheel env var overrides
+	const flywheelEnv = process.env.QULT_FLYWHEEL_ENABLED;
+	if (flywheelEnv === "1" || flywheelEnv === "true") config.flywheel.enabled = true;
+	else if (flywheelEnv === "0" || flywheelEnv === "false") config.flywheel.enabled = false;
+	const flywheelMin = envInt("QULT_FLYWHEEL_MIN_SESSIONS");
+	if (flywheelMin !== undefined) config.flywheel.min_sessions = Math.max(1, flywheelMin);
 
 	_cache = config;
 	return config;

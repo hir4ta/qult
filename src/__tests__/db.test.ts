@@ -289,6 +289,23 @@ describe("db", () => {
 			expect(files).toHaveLength(0);
 		});
 
+		it("schema v4 adds extended columns to session_metrics", () => {
+			const db = getDb();
+			const columns = db.prepare("PRAGMA table_info(session_metrics)").all() as { name: string }[];
+			const names = columns.map((c) => c.name);
+			expect(names).toContain("test_quality_warning_count");
+			expect(names).toContain("duplication_warning_count");
+			expect(names).toContain("semantic_warning_count");
+			expect(names).toContain("drift_warning_count");
+			expect(names).toContain("escalation_hit");
+		});
+
+		it("schema version is 4", () => {
+			const db = getDb();
+			const row = db.prepare("PRAGMA user_version").get() as { user_version: number };
+			expect(row.user_version).toBe(4);
+		});
+
 		it("gate_failure_counts uses separate file and gate columns", () => {
 			setProjectPath("/tmp/test");
 			setSessionScope("s1");

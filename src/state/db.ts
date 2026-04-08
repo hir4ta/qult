@@ -11,7 +11,7 @@ import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 const DB_DIR = join(homedir(), ".qult");
 const DB_PATH = join(DB_DIR, "qult.db");
@@ -82,6 +82,23 @@ function migrateSchema(db: Database): void {
 			db.exec("ALTER TABLE sessions ADD COLUMN semantic_warning_count INTEGER NOT NULL DEFAULT 0");
 		} catch {
 			/* fail-open: column may already exist */
+		}
+	}
+	if (version < 4) {
+		// Version 4: add extended metrics columns to session_metrics
+		const v4Columns = [
+			"test_quality_warning_count INTEGER NOT NULL DEFAULT 0",
+			"duplication_warning_count INTEGER NOT NULL DEFAULT 0",
+			"semantic_warning_count INTEGER NOT NULL DEFAULT 0",
+			"drift_warning_count INTEGER NOT NULL DEFAULT 0",
+			"escalation_hit INTEGER NOT NULL DEFAULT 0",
+		];
+		for (const col of v4Columns) {
+			try {
+				db.exec(`ALTER TABLE session_metrics ADD COLUMN ${col}`);
+			} catch {
+				/* fail-open: column may already exist */
+			}
 		}
 	}
 	db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
@@ -229,14 +246,19 @@ function createTablesV1(db: Database): void {
 		CREATE INDEX IF NOT EXISTS idx_audit_log_session ON audit_log(session_id);
 
 		CREATE TABLE IF NOT EXISTS session_metrics (
-			id                     INTEGER PRIMARY KEY,
-			session_id             TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			project_id             INTEGER NOT NULL REFERENCES projects(id),
-			gate_failure_count     INTEGER NOT NULL DEFAULT 0,
-			security_warning_count INTEGER NOT NULL DEFAULT 0,
-			review_aggregate       REAL,
-			files_changed          INTEGER NOT NULL DEFAULT 0,
-			recorded_at            TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			id                              INTEGER PRIMARY KEY,
+			session_id                      TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			project_id                      INTEGER NOT NULL REFERENCES projects(id),
+			gate_failure_count              INTEGER NOT NULL DEFAULT 0,
+			security_warning_count          INTEGER NOT NULL DEFAULT 0,
+			review_aggregate                REAL,
+			files_changed                   INTEGER NOT NULL DEFAULT 0,
+			test_quality_warning_count      INTEGER NOT NULL DEFAULT 0,
+			duplication_warning_count       INTEGER NOT NULL DEFAULT 0,
+			semantic_warning_count          INTEGER NOT NULL DEFAULT 0,
+			drift_warning_count             INTEGER NOT NULL DEFAULT 0,
+			escalation_hit                  INTEGER NOT NULL DEFAULT 0,
+			recorded_at                     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		);
 		CREATE INDEX IF NOT EXISTS idx_metrics_project ON session_metrics(project_id);
 

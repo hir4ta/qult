@@ -50,6 +50,15 @@ afterEach(() => {
 	delete process.env.QULT_ESCALATION_DRIFT;
 	delete process.env.QULT_ESCALATION_TEST_QUALITY;
 	delete process.env.QULT_ESCALATION_DUPLICATION;
+	delete process.env.QULT_ESCALATION_SEMANTIC;
+	delete process.env.QULT_REVIEW_MODEL_SPEC;
+	delete process.env.QULT_REVIEW_MODEL_QUALITY;
+	delete process.env.QULT_REVIEW_MODEL_SECURITY;
+	delete process.env.QULT_REVIEW_MODEL_ADVERSARIAL;
+	delete process.env.QULT_PLAN_EVAL_MODEL_GENERATOR;
+	delete process.env.QULT_PLAN_EVAL_MODEL_EVALUATOR;
+	delete process.env.QULT_FLYWHEEL_ENABLED;
+	delete process.env.QULT_FLYWHEEL_MIN_SESSIONS;
 });
 
 describe("loadConfig", () => {
@@ -177,6 +186,122 @@ describe("extra_path validation", () => {
 		setProjectConfig("gates.extra_path", [".venv/bin", 123, null, "/usr/local/bin"]);
 		const config = loadConfig();
 		expect(config.gates.extra_path).toEqual([".venv/bin", "/usr/local/bin"]);
+	});
+});
+
+describe("review.models config", () => {
+	it("returns default model values", () => {
+		const config = loadConfig();
+		expect(config.review.models).toEqual({
+			spec: "sonnet",
+			quality: "opus",
+			security: "opus",
+			adversarial: "sonnet",
+		});
+	});
+
+	it("reads models from project config", () => {
+		setProjectConfig("review.models.spec", "opus");
+		setProjectConfig("review.models.adversarial", "haiku");
+		const config = loadConfig();
+		expect(config.review.models.spec).toBe("opus");
+		expect(config.review.models.adversarial).toBe("haiku");
+		// Unset values keep defaults
+		expect(config.review.models.quality).toBe("opus");
+		expect(config.review.models.security).toBe("opus");
+	});
+
+	it("env vars override model config", () => {
+		setProjectConfig("review.models.spec", "opus");
+		process.env.QULT_REVIEW_MODEL_SPEC = "haiku";
+		const config = loadConfig();
+		expect(config.review.models.spec).toBe("haiku");
+	});
+
+	it("supports all model env vars", () => {
+		process.env.QULT_REVIEW_MODEL_SPEC = "opus";
+		process.env.QULT_REVIEW_MODEL_QUALITY = "haiku";
+		process.env.QULT_REVIEW_MODEL_SECURITY = "sonnet";
+		process.env.QULT_REVIEW_MODEL_ADVERSARIAL = "opus";
+		const config = loadConfig();
+		expect(config.review.models.spec).toBe("opus");
+		expect(config.review.models.quality).toBe("haiku");
+		expect(config.review.models.security).toBe("sonnet");
+		expect(config.review.models.adversarial).toBe("opus");
+	});
+
+	it("ignores empty string env vars for models", () => {
+		process.env.QULT_REVIEW_MODEL_SPEC = "";
+		const config = loadConfig();
+		expect(config.review.models.spec).toBe("sonnet"); // default
+	});
+});
+
+describe("plan_eval.models config", () => {
+	it("returns default plan_eval model values", () => {
+		const config = loadConfig();
+		expect(config.plan_eval.models).toEqual({
+			generator: "opus",
+			evaluator: "opus",
+		});
+	});
+
+	it("reads plan_eval models from project config", () => {
+		setProjectConfig("plan_eval.models.generator", "sonnet");
+		const config = loadConfig();
+		expect(config.plan_eval.models.generator).toBe("sonnet");
+		expect(config.plan_eval.models.evaluator).toBe("opus");
+	});
+
+	it("env vars override plan_eval models", () => {
+		process.env.QULT_PLAN_EVAL_MODEL_GENERATOR = "haiku";
+		process.env.QULT_PLAN_EVAL_MODEL_EVALUATOR = "sonnet";
+		const config = loadConfig();
+		expect(config.plan_eval.models.generator).toBe("haiku");
+		expect(config.plan_eval.models.evaluator).toBe("sonnet");
+	});
+});
+
+describe("flywheel config", () => {
+	it("returns default flywheel values", () => {
+		const config = loadConfig();
+		expect(config.flywheel).toEqual({
+			enabled: true,
+			min_sessions: 10,
+		});
+	});
+
+	it("reads flywheel from project config", () => {
+		setProjectConfig("flywheel.enabled", false);
+		setProjectConfig("flywheel.min_sessions", 20);
+		const config = loadConfig();
+		expect(config.flywheel.enabled).toBe(false);
+		expect(config.flywheel.min_sessions).toBe(20);
+	});
+
+	it("env vars override flywheel config", () => {
+		process.env.QULT_FLYWHEEL_ENABLED = "false";
+		process.env.QULT_FLYWHEEL_MIN_SESSIONS = "5";
+		const config = loadConfig();
+		expect(config.flywheel.enabled).toBe(false);
+		expect(config.flywheel.min_sessions).toBe(5);
+	});
+
+	it("handles boolean env var variations", () => {
+		process.env.QULT_FLYWHEEL_ENABLED = "0";
+		const config = loadConfig();
+		expect(config.flywheel.enabled).toBe(false);
+
+		resetConfigCache();
+		process.env.QULT_FLYWHEEL_ENABLED = "1";
+		const config2 = loadConfig();
+		expect(config2.flywheel.enabled).toBe(true);
+	});
+
+	it("enforces minimum of 1 for min_sessions", () => {
+		setProjectConfig("flywheel.min_sessions", 0);
+		const config = loadConfig();
+		expect(config.flywheel.min_sessions).toBe(1);
 	});
 });
 

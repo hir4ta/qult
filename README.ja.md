@@ -23,6 +23,10 @@ qult は [Generator-Evaluator パターン](https://www.anthropic.com/engineerin
 - [Martin Fowler: Harness Engineering](https://martinfowler.com/articles/exploring-gen-ai/harness-engineering.html) — ガイド (フィードフォワード) + センサー (フィードバック)
 - [TDAD](https://arxiv.org/abs/2603.17973) — プロンプトのみの TDD でリグレッション悪化 (6%→10%)。構造的強制で 1.8% に低減
 - [Specification as Quality Gate](https://arxiv.org/abs/2603.25773) — AI が AI をレビューすると相関エラーが増幅。決定論的ゲートが先
+- [Nonstandard Errors](https://arxiv.org/abs/2603.16744) — 異なるモデルファミリーは安定して異なる分析スタイル。レビュアー多様性で相関エラー軽減
+- [AgentPex (Microsoft)](https://arxiv.org/abs/2603.23806) — エージェントはプロンプトルールを選択的に無視。構造的強制が必要
+- [CodeRabbit Report](https://www.coderabbit.ai/blog/state-of-ai-vs-human-code-generation-report) — AI コードは 1.7 倍の問題を生成。品質ゲートが対策
+- [Triple Debt Model](https://arxiv.org/abs/2603.22106) — 技術負債 + 認知負債 + 意図負債
 
 </details>
 
@@ -66,9 +70,15 @@ flowchart LR
 | lint/型エラーの拡散をブロック | **The Wall**: 修正するまで DENY |
 | コミット前にテスト必須 | `git commit` 時にゲートチェック |
 | 4 段階独立コードレビュー | Spec + Quality + Security + Adversarial |
+| レビュアーモデルのステージ別設定 | config でモデル多様性を確保 |
 | ハルシネーション import 検出 | インストール済みパッケージと照合 |
 | export 破壊的変更検出 | git HEAD と比較 |
+| セキュリティパターン検出 (25+ ルール) | シークレット、インジェクション、XSS、弱い暗号 |
+| セマンティックバグ検出 (6+ パターン) | 空 catch、到達不能コード、switch fallthrough |
 | コード重複検出 | ファイル内はブロック、ファイル間は警告 |
+| PBT 対応テスト品質チェック | Property-Based Testing の誤検知回避 |
+| SAST 統合 (Semgrep on-write) | `.semgrep.yml` 自動検出、ファイル単位実行 |
+| セッション横断学習 (Flywheel) | パターン分析に基づく閾値調整推奨 |
 | コンテキスト圧縮後の状態保全 | 圧縮後にセッション状態を再注入 |
 
 ## インストール
@@ -183,8 +193,11 @@ rm -rf ~/.qult
 | `gates.output_max_chars` | 3500 | ゲート出力の最大文字数 |
 | `gates.default_timeout` | 10000 | ゲートコマンドのタイムアウト (ms) |
 | `escalation.*_threshold` | 8-10 | ブロックまでの警告回数 |
+| `review.models.*` | spec=sonnet, quality/security=opus, adversarial=sonnet | ステージ別レビュアーモデル |
+| `flywheel.enabled` | true | セッション横断の閾値推奨 |
+| `flywheel.min_sessions` | 10 | Flywheel 分析に必要な最低セッション数 |
 
-環境変数: `QULT_REVIEW_SCORE_THRESHOLD`, `QULT_REVIEW_MAX_ITERATIONS` 等。
+環境変数: `QULT_REVIEW_SCORE_THRESHOLD`, `QULT_REVIEW_MODEL_SPEC`, `QULT_FLYWHEEL_ENABLED` 等。
 
 </details>
 

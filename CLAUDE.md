@@ -80,15 +80,19 @@ qult/
 - Claude が状態を取得・操作する経路
 - raw stdio JSON-RPC 実装 (SDK 依存なし)
 - 読み取り: get_pending_fixes, get_session_status, get_gate_config, get_detector_summary
-- 分析: get_harness_report, get_handoff_document, get_metrics_dashboard
+- 分析: get_harness_report, get_handoff_document, get_metrics_dashboard, get_flywheel_recommendations
 - 操作: disable_gate, enable_gate, clear_pending_fixes, set_config, save_gates
 - 記録: record_review, record_test_pass, record_stage_scores, record_human_approval
+- get_flywheel_recommendations: セッション横断パターン分析に基づく閾値調整推奨を返す
 - disable_gate は gate 名をバリデーション（gate_configs テーブルのキー + "review", "security-check", "dead-import-check", "duplication-check"）
 - MCP tool の呼び出しルールは MCP server instructions で注入（プロジェクトにファイル配置しない）
 
 ### Config 優先順位
 
 - DEFAULTS < `global_configs` テーブル < `project_configs` テーブル < `QULT_*` env
+- review.models.*: ステージ別レビュアーモデル (`QULT_REVIEW_MODEL_SPEC/QUALITY/SECURITY/ADVERSARIAL`)
+- plan_eval.models.*: プランエージェントモデル (`QULT_PLAN_EVAL_MODEL_GENERATOR/EVALUATOR`)
+- flywheel.*: セッション横断学習 (`QULT_FLYWHEEL_ENABLED`, `QULT_FLYWHEEL_MIN_SESSIONS`)
 
 ### Gates
 
@@ -136,3 +140,19 @@ qult の設計は以下の論文・記事に基づいている。機能追加や
 - [Code Review Agents in PRs](https://arxiv.org/abs/2604.03196) — AI レビューコメントの採用率 0.9-19.2%。レビュー結果を exit 2 で強制する設計の根拠
 - [METR: AI Developer Productivity](https://arxiv.org/abs/2507.09089) — 経験者 RCT で AI 使用時タスク完了が 19% 遅延。体感速度の錯覚を品質ゲートで補正する根拠
 - [Anthropic: Context Engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) — コンテキストエンジニアリングの体系的アプローチ。PostCompact 状態再注入の理論的基盤
+- [Anthropic: 2026 Agentic Coding Trends](https://resources.anthropic.com/hubfs/2026%20Agentic%20Coding%20Trends%20Report.pdf) — 8つのトレンド: エンジニアリング役割の変化、マルチエージェント協調、ガードレールによるスケーラブルな品質保証
+- [Columbia DAPLab: Policy Enforcement](https://daplab.cs.columbia.edu/general/2026/01/10/vibe-coding-needs-policy-enforcement.html) — エージェントは要件を「好み」として扱う。ポリシーの構造的強制が必要。The Wall の理論的裏付け
+- [Columbia DAPLab: Agent README Problem](https://daplab.cs.columbia.edu/general/2026/03/31/your-ai-agent-doesnt-care-about-your-readme.html) — 人間向けドキュメントはエージェントに機能しない。AGENTS.md/llms.txt の必要性
+- [Microsoft Research: Willful Disobedience (AgentPex)](https://arxiv.org/abs/2603.23806) — エージェントはプロンプトルールを選択的に無視する。outcome ベンチマークは手続き的失敗を見逃す。構造的強制の追加根拠
+- [Detecting Silent Failures in Multi-Agent Systems](https://arxiv.org/abs/2511.04032) — マルチエージェントの異常検出。drift/cycle/missing-detail/tool-failure の分類。96-98% の検出精度
+- [CodeRabbit: AI vs Human Code Report](https://www.coderabbit.ai/blog/state-of-ai-vs-human-code-generation-report) — AI コードは 1.7 倍の問題を生成。セキュリティバグ 1.5-2 倍、過剰 I/O 8 倍。品質ゲートの定量的根拠
+- [Nonstandard Errors in AI Agents](https://arxiv.org/abs/2603.16744) — 150 エージェントの独立実験。異なるモデルファミリーは安定して異なる分析スタイル。レビュアーモデル多様性の根拠
+- [Triple Debt Model: Technical + Cognitive + Intent](https://arxiv.org/abs/2603.22106) — AI はコードを理解より速く生成する。認知負債・意図負債の概念。品質ゲートだけでは防げない新たな課題
+- [Debt Behind the AI Boom](https://arxiv.org/abs/2603.28592) — 304K AI コミットの実証分析。AI コードの品質問題が技術負債として蓄積するか検証
+- [VibeContract](https://arxiv.org/abs/2603.15691) — 自然言語意図をタスクレベル契約に分解。入出力・制約・振る舞いプロパティを明示化。property-based testing 統合の方向性
+- [AI Technical Debt and Maintenance](https://arxiv.org/abs/2510.10165) — AI コードはリワーク増加。コア開発者の生産性 19% 低下。短期的生産性 vs 長期持続性のトレードオフ
+- [Addy Osmani: The 80% Problem](https://addyo.substack.com/p/the-80-problem-in-agentic-coding) — エージェントは 80% を高速生成するが残り 20% に深いコンテキスト知識が必要。「エージェントは知らないことを知らない」
+- [TDFlow: Agentic Workflows for TDD](https://arxiv.org/abs/2510.23761) — リポジトリ規模のソフトウェアエンジニアリングをテスト解決タスクとしてフレーム化
+- [AgentFixer](https://arxiv.org/abs/2603.29848) — LLM エージェントシステムの障害検出から修正推奨へ
+- [Near-Miss: Latent Policy Failure Detection](https://arxiv.org/abs/2603.29665) — エージェントワークフローの潜在的ポリシー違反を検出
+- [Agentic Evaluation Framework](https://arxiv.org/abs/2603.15976) — 3段階14評価器: バイナリゲート → 定量メトリクス → LLM品質評価。agents-evaluating-agents パラダイム

@@ -200,6 +200,69 @@ describe("detectSecurityPatterns", () => {
 			expect(fixes[0]!.errors[0]).toContain("process.env");
 		});
 
+		it("detects Go exec.Command with string concatenation", async () => {
+			const file = join(TEST_DIR, "cmd.go");
+			writeFileSync(file, `cmd := exec.Command("sh", "-c", base + userInput)\n`);
+			const fixes = await detect(file);
+			expect(fixes.length).toBe(1);
+			expect(fixes[0]!.errors[0]).toContain("exec.Command");
+			expect(fixes[0]!.errors[0]).toContain("command injection");
+		});
+
+		it("detects Ruby system() with dynamic input", async () => {
+			const file = join(TEST_DIR, "cmd.rb");
+			writeFileSync(file, `system(user_input)\n`);
+			const fixes = await detect(file);
+			expect(fixes.length).toBe(1);
+			expect(fixes[0]!.errors[0]).toContain("system()");
+			expect(fixes[0]!.errors[0]).toContain("command injection");
+		});
+
+		it("detects Ruby send() with user input", async () => {
+			const file = join(TEST_DIR, "dispatch.rb");
+			writeFileSync(file, `obj.send(params[:method], args)\n`);
+			const fixes = await detect(file);
+			expect(fixes.length).toBe(1);
+			expect(fixes[0]!.errors[0]).toContain("send()");
+			expect(fixes[0]!.errors[0]).toContain("arbitrary method call");
+		});
+
+		it("detects Java Runtime.exec() with dynamic input", async () => {
+			const file = join(TEST_DIR, "Exec.java");
+			writeFileSync(file, `Runtime.getRuntime().exec(userCommand);\n`);
+			const fixes = await detect(file);
+			expect(fixes.length).toBe(1);
+			expect(fixes[0]!.errors[0]).toContain("Runtime.exec()");
+			expect(fixes[0]!.errors[0]).toContain("command injection");
+		});
+
+		it("detects MD5 usage as weak crypto", async () => {
+			const file = join(TEST_DIR, "hash.ts");
+			writeFileSync(file, `const hash = createHash("md5").update(data).digest("hex");\n`);
+			const fixes = await detect(file);
+			expect(fixes.length).toBe(1);
+			expect(fixes[0]!.errors[0]).toContain("MD5");
+			expect(fixes[0]!.errors[0]).toContain("cryptographically weak");
+		});
+
+		it("detects SHA1 for password hashing", async () => {
+			const file = join(TEST_DIR, "auth.ts");
+			writeFileSync(file, `const hashed = sha1(password);\n`);
+			const fixes = await detect(file);
+			expect(fixes.length).toBe(1);
+			expect(fixes[0]!.errors[0]).toContain("SHA1");
+			expect(fixes[0]!.errors[0]).toContain("bcrypt");
+		});
+
+		it("detects hardcoded IV/nonce", async () => {
+			const file = join(TEST_DIR, "crypto.ts");
+			writeFileSync(file, `const iv = "0123456789abcdef0123456789abcdef";\n`);
+			const fixes = await detect(file);
+			expect(fixes.length).toBe(1);
+			expect(fixes[0]!.errors[0]).toContain("Hardcoded IV/nonce");
+			expect(fixes[0]!.errors[0]).toContain("random generation");
+		});
+
 		it("detects dangerous patterns in test files too", async () => {
 			const file = join(TEST_DIR, "handler.test.ts");
 			writeFileSync(file, `function run(code: string) {\n  return eval(code);\n}\n`);
@@ -313,6 +376,21 @@ describe("emitAdvisoryWarnings", () => {
 		writeFileSync(file, `wss.on("connection", (socket) => { socket.send("hi"); });\n`);
 		const warnings = await detectWithAdvisory(file);
 		expect(warnings.some((w) => w.includes("WebSocket"))).toBe(true);
+	});
+
+	it("emits advisory warning for cookie with httpOnly: false", async () => {
+		const file = join(TEST_DIR, "session.ts");
+		writeFileSync(file, `res.cookie("sid", token, { httpOnly: false, secure: true });\n`);
+		const warnings = await detectWithAdvisory(file);
+		expect(warnings.some((w) => w.includes("httpOnly"))).toBe(true);
+		expect(warnings.some((w) => w.includes("session hijacking"))).toBe(true);
+	});
+
+	it("suppresses cookie advisory when line contains test/spec/mock", async () => {
+		const file = join(TEST_DIR, "session.ts");
+		writeFileSync(file, `// test: res.cookie("sid", token, { httpOnly: false });\n`);
+		const warnings = await detectWithAdvisory(file);
+		expect(warnings.some((w) => w.includes("httpOnly"))).toBe(false);
 	});
 
 	it("does not emit advisory for non-JS files", async () => {

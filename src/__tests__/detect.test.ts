@@ -176,6 +176,17 @@ describe("security gate detection", () => {
 		expect(gates.on_commit?.["security-gitleaks"]?.command).toContain("gitleaks");
 	});
 
+	it("detects security-semgrep-write as on_write gate when .semgrep.yml exists and semgrep reachable", () => {
+		writeFileSync(join(TEST_DIR, ".semgrep.yml"), "rules: []");
+		mkdirSync(join(TEST_DIR, "node_modules", ".bin"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "node_modules", ".bin", "semgrep"), "");
+		const gates = detectGates(TEST_DIR);
+		expect(gates.on_write?.["security-semgrep-write"]).toBeDefined();
+		expect(gates.on_write?.["security-semgrep-write"]?.command).toBe(
+			"semgrep scan --config auto --quiet {file}",
+		);
+	});
+
 	it("does not detect security-gosec when gosec is not reachable", () => {
 		writeFileSync(join(TEST_DIR, "go.mod"), "module example.com/test");
 		// No gosec in PATH or node_modules

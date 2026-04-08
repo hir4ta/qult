@@ -81,6 +81,9 @@ interface DangerousPattern {
 
 const JS_TS_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
 const PY_EXTS = new Set([".py", ".pyi"]);
+const GO_EXTS = new Set([".go"]);
+const RB_EXTS = new Set([".rb"]);
+const JAVA_EXTS = new Set([".java", ".kt"]);
 
 const DANGEROUS_PATTERNS: DangerousPattern[] = [
 	// eval() with variables (not static string)
@@ -193,6 +196,45 @@ const DANGEROUS_PATTERNS: DangerousPattern[] = [
 		re: /\brequire\s*\(\s*(?!["'`])[a-zA-Z_$]/,
 		desc: "Dynamic require() with variable — supply-chain/injection risk",
 		exts: JS_TS_EXTS,
+	},
+	// Go exec.Command with string concatenation
+	{
+		re: /exec\.Command\s*\(.*\+/,
+		desc: "exec.Command with string concatenation — command injection risk",
+		exts: GO_EXTS,
+	},
+	// Ruby system() with variable
+	{
+		re: /\bsystem\s*\(\s*(?!["'])[a-zA-Z_]/,
+		desc: "system() with dynamic input — command injection risk",
+		exts: RB_EXTS,
+	},
+	// Ruby send() with user input
+	{
+		re: /\.send\s*\(\s*(?:params|request|args)/,
+		desc: "send() with user input — arbitrary method call risk",
+		exts: RB_EXTS,
+	},
+	// Java Runtime.exec() with variable
+	{
+		re: /Runtime\s*\.\s*getRuntime\s*\(\s*\)\s*\.\s*exec\s*\(\s*(?!["'])[a-zA-Z_]/,
+		desc: "Runtime.exec() with dynamic input — command injection risk",
+		exts: JAVA_EXTS,
+	},
+	// Weak crypto MD5
+	{
+		re: /\b(?:createHash|MessageDigest\.getInstance)\s*\(\s*["'](?:md5|MD5)["']/,
+		desc: "MD5 usage — cryptographically weak, use SHA-256+",
+	},
+	// Weak crypto SHA1 for passwords
+	{
+		re: /(?:sha1|SHA1).*(?:password|passwd|pwd)/i,
+		desc: "SHA1 for password hashing — use bcrypt/scrypt/argon2",
+	},
+	// Hardcoded IV/nonce
+	{
+		re: /(?:iv|nonce|IV|NONCE)\s*[:=]\s*["'`][a-fA-F0-9]{16,}["'`]/,
+		desc: "Hardcoded IV/nonce — use random generation",
 	},
 ];
 
@@ -368,6 +410,13 @@ const ADVISORY_PATTERNS: AdvisoryPattern[] = [
 		re: /["']\s*(?:\*|latest)\s*["']\s*$/,
 		suppress: /(?:peerDependencies|devDependencies|optionalDependencies)/i,
 		desc: "Wildcard/latest dependency version — pin to specific version for supply-chain safety",
+	},
+	// Cookie missing httpOnly
+	{
+		re: /\.cookie\s*\(.*httpOnly\s*:\s*false/,
+		suppress: /(?:test|spec|mock)/i,
+		desc: "Cookie with httpOnly: false — session hijacking risk",
+		exts: JS_TS_EXTS,
 	},
 ];
 

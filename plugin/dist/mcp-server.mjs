@@ -7,7 +7,7 @@ import { Database } from "bun:sqlite";
 import { chmodSync, mkdirSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
-var SCHEMA_VERSION = 3;
+var SCHEMA_VERSION = 4;
 var DB_DIR = join(homedir(), ".qult");
 var DB_PATH = join(DB_DIR, "qult.db");
 var DEFAULT_SESSION_ID = "__default__";
@@ -43,6 +43,20 @@ function migrateSchema(db) {
     try {
       db.exec("ALTER TABLE sessions ADD COLUMN semantic_warning_count INTEGER NOT NULL DEFAULT 0");
     } catch {}
+  }
+  if (version < 4) {
+    const v4Columns = [
+      "test_quality_warning_count INTEGER NOT NULL DEFAULT 0",
+      "duplication_warning_count INTEGER NOT NULL DEFAULT 0",
+      "semantic_warning_count INTEGER NOT NULL DEFAULT 0",
+      "drift_warning_count INTEGER NOT NULL DEFAULT 0",
+      "escalation_hit INTEGER NOT NULL DEFAULT 0"
+    ];
+    for (const col of v4Columns) {
+      try {
+        db.exec(`ALTER TABLE session_metrics ADD COLUMN ${col}`);
+      } catch {}
+    }
   }
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
@@ -188,14 +202,19 @@ function createTablesV1(db) {
 		CREATE INDEX IF NOT EXISTS idx_audit_log_session ON audit_log(session_id);
 
 		CREATE TABLE IF NOT EXISTS session_metrics (
-			id                     INTEGER PRIMARY KEY,
-			session_id             TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			project_id             INTEGER NOT NULL REFERENCES projects(id),
-			gate_failure_count     INTEGER NOT NULL DEFAULT 0,
-			security_warning_count INTEGER NOT NULL DEFAULT 0,
-			review_aggregate       REAL,
-			files_changed          INTEGER NOT NULL DEFAULT 0,
-			recorded_at            TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			id                              INTEGER PRIMARY KEY,
+			session_id                      TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			project_id                      INTEGER NOT NULL REFERENCES projects(id),
+			gate_failure_count              INTEGER NOT NULL DEFAULT 0,
+			security_warning_count          INTEGER NOT NULL DEFAULT 0,
+			review_aggregate                REAL,
+			files_changed                   INTEGER NOT NULL DEFAULT 0,
+			test_quality_warning_count      INTEGER NOT NULL DEFAULT 0,
+			duplication_warning_count       INTEGER NOT NULL DEFAULT 0,
+			semantic_warning_count          INTEGER NOT NULL DEFAULT 0,
+			drift_warning_count             INTEGER NOT NULL DEFAULT 0,
+			escalation_hit                  INTEGER NOT NULL DEFAULT 0,
+			recorded_at                     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		);
 		CREATE INDEX IF NOT EXISTS idx_metrics_project ON session_metrics(project_id);
 
@@ -252,17 +271,250 @@ function findLatestSessionId() {
   return row?.id ?? null;
 }
 
-// src/gates/load.ts
-var _cache;
-function loadGates() {
-  if (_cache !== undefined)
+// src/config.ts
+var DEFAULTS = {
+  review: {
+    score_threshold: 30,
+    max_iterations: 3,
+    required_changed_files: 5,
+    dimension_floor: 4,
+    require_human_approval: false,
+    models: {
+      spec: "sonnet",
+      quality: "opus",
+      security: "opus",
+      adversarial: "sonnet"
+    }
+  },
+  plan_eval: {
+    score_threshold: 12,
+    max_iterations: 2,
+    registry_files: [],
+    models: {
+      generator: "opus",
+      evaluator: "opus"
+    }
+  },
+  gates: {
+    output_max_chars: 3500,
+    default_timeout: 1e4,
+    test_on_edit: false,
+    test_on_edit_timeout: 15000,
+    extra_path: []
+  },
+  escalation: {
+    security_threshold: 10,
+    drift_threshold: 8,
+    test_quality_threshold: 8,
+    duplication_threshold: 8,
+    semantic_threshold: 8
+  },
+  flywheel: {
+    enabled: true,
+    min_sessions: 10
+  }
+};
+function applyConfigLayer(config, raw) {
+  if (raw.review && typeof raw.review === "object") {
+    const r = raw.review;
+    if (typeof r.score_threshold === "number")
+      config.review.score_threshold = r.score_threshold;
+    if (typeof r.max_iterations === "number")
+      config.review.max_iterations = r.max_iterations;
+    if (typeof r.required_changed_files === "number")
+      config.review.required_changed_files = Math.max(1, r.required_changed_files);
+    if (typeof r.dimension_floor === "number")
+      config.review.dimension_floor = Math.max(1, Math.min(5, r.dimension_floor));
+    if (typeof r.require_human_approval === "boolean")
+      config.review.require_human_approval = r.require_human_approval;
+    if (r.models && typeof r.models === "object") {
+      const m = r.models;
+      if (typeof m.spec === "string" && m.spec)
+        config.review.models.spec = m.spec;
+      if (typeof m.quality === "string" && m.quality)
+        config.review.models.quality = m.quality;
+      if (typeof m.security === "string" && m.security)
+        config.review.models.security = m.security;
+      if (typeof m.adversarial === "string" && m.adversarial)
+        config.review.models.adversarial = m.adversarial;
+    }
+  }
+  if (raw.plan_eval && typeof raw.plan_eval === "object") {
+    const p = raw.plan_eval;
+    if (typeof p.score_threshold === "number")
+      config.plan_eval.score_threshold = p.score_threshold;
+    if (typeof p.max_iterations === "number")
+      config.plan_eval.max_iterations = p.max_iterations;
+    if (Array.isArray(p.registry_files))
+      config.plan_eval.registry_files = p.registry_files.filter((f) => typeof f === "string");
+    if (p.models && typeof p.models === "object") {
+      const m = p.models;
+      if (typeof m.generator === "string" && m.generator)
+        config.plan_eval.models.generator = m.generator;
+      if (typeof m.evaluator === "string" && m.evaluator)
+        config.plan_eval.models.evaluator = m.evaluator;
+    }
+  }
+  if (raw.gates && typeof raw.gates === "object") {
+    const g = raw.gates;
+    if (typeof g.output_max_chars === "number")
+      config.gates.output_max_chars = g.output_max_chars;
+    if (typeof g.default_timeout === "number")
+      config.gates.default_timeout = g.default_timeout;
+    if (typeof g.test_on_edit === "boolean")
+      config.gates.test_on_edit = g.test_on_edit;
+    if (typeof g.test_on_edit_timeout === "number")
+      config.gates.test_on_edit_timeout = g.test_on_edit_timeout;
+    if (Array.isArray(g.extra_path))
+      config.gates.extra_path = g.extra_path.filter((p) => typeof p === "string" && p.trim().length > 0);
+  }
+  if (raw.escalation && typeof raw.escalation === "object") {
+    const e = raw.escalation;
+    if (typeof e.security_threshold === "number")
+      config.escalation.security_threshold = Math.max(1, e.security_threshold);
+    if (typeof e.drift_threshold === "number")
+      config.escalation.drift_threshold = Math.max(1, e.drift_threshold);
+    if (typeof e.test_quality_threshold === "number")
+      config.escalation.test_quality_threshold = Math.max(1, e.test_quality_threshold);
+    if (typeof e.duplication_threshold === "number")
+      config.escalation.duplication_threshold = Math.max(1, e.duplication_threshold);
+    if (typeof e.semantic_threshold === "number")
+      config.escalation.semantic_threshold = Math.max(1, e.semantic_threshold);
+  }
+  if (raw.flywheel && typeof raw.flywheel === "object") {
+    const f = raw.flywheel;
+    if (typeof f.enabled === "boolean")
+      config.flywheel.enabled = f.enabled;
+    if (typeof f.min_sessions === "number")
+      config.flywheel.min_sessions = Math.max(1, f.min_sessions);
+  }
+}
+function kvRowsToRaw(rows) {
+  const raw = {};
+  for (const row of rows) {
+    const parts = row.key.split(".");
+    if (parts.length < 2)
+      continue;
+    const section = parts[0];
+    if (!raw[section])
+      raw[section] = {};
+    let parsed;
+    try {
+      parsed = JSON.parse(row.value);
+    } catch {
+      parsed = row.value;
+    }
+    if (parts.length === 2) {
+      raw[section][parts[1]] = parsed;
+    } else if (parts.length === 3) {
+      const sub = parts[1];
+      if (!raw[section][sub] || typeof raw[section][sub] !== "object") {
+        raw[section][sub] = {};
+      }
+      raw[section][sub][parts[2]] = parsed;
+    }
+  }
+  return raw;
+}
+var _cache = null;
+function loadConfig() {
+  if (_cache)
     return _cache;
+  const config = structuredClone(DEFAULTS);
+  try {
+    const db = getDb();
+    const globalRows = db.prepare("SELECT key, value FROM global_configs").all();
+    if (globalRows.length > 0) {
+      applyConfigLayer(config, kvRowsToRaw(globalRows));
+    }
+  } catch {}
+  try {
+    const db = getDb();
+    const projectId = getProjectId();
+    const projectRows = db.prepare("SELECT key, value FROM project_configs WHERE project_id = ?").all(projectId);
+    if (projectRows.length > 0) {
+      applyConfigLayer(config, kvRowsToRaw(projectRows));
+    }
+  } catch {}
+  const envInt = (key) => {
+    const val = process.env[key];
+    if (val === undefined)
+      return;
+    const n = Number.parseInt(val, 10);
+    return Number.isNaN(n) ? undefined : n;
+  };
+  config.review.score_threshold = envInt("QULT_REVIEW_SCORE_THRESHOLD") ?? config.review.score_threshold;
+  config.review.max_iterations = envInt("QULT_REVIEW_MAX_ITERATIONS") ?? config.review.max_iterations;
+  config.review.required_changed_files = envInt("QULT_REVIEW_REQUIRED_FILES") ?? config.review.required_changed_files;
+  const rawFloor = envInt("QULT_REVIEW_DIMENSION_FLOOR");
+  if (rawFloor !== undefined)
+    config.review.dimension_floor = Math.max(1, Math.min(5, rawFloor));
+  config.plan_eval.score_threshold = envInt("QULT_PLAN_EVAL_SCORE_THRESHOLD") ?? config.plan_eval.score_threshold;
+  config.plan_eval.max_iterations = envInt("QULT_PLAN_EVAL_MAX_ITERATIONS") ?? config.plan_eval.max_iterations;
+  config.gates.output_max_chars = envInt("QULT_GATE_OUTPUT_MAX") ?? config.gates.output_max_chars;
+  config.gates.default_timeout = envInt("QULT_GATE_DEFAULT_TIMEOUT") ?? config.gates.default_timeout;
+  const humanApprovalEnv = process.env.QULT_REQUIRE_HUMAN_APPROVAL;
+  if (humanApprovalEnv === "1" || humanApprovalEnv === "true")
+    config.review.require_human_approval = true;
+  else if (humanApprovalEnv === "0" || humanApprovalEnv === "false")
+    config.review.require_human_approval = false;
+  const testOnEditEnv = process.env.QULT_TEST_ON_EDIT;
+  if (testOnEditEnv === "1" || testOnEditEnv === "true")
+    config.gates.test_on_edit = true;
+  else if (testOnEditEnv === "0" || testOnEditEnv === "false")
+    config.gates.test_on_edit = false;
+  config.gates.test_on_edit_timeout = envInt("QULT_TEST_ON_EDIT_TIMEOUT") ?? config.gates.test_on_edit_timeout;
+  const secEsc = envInt("QULT_ESCALATION_SECURITY");
+  if (secEsc !== undefined)
+    config.escalation.security_threshold = Math.max(1, secEsc);
+  const driftEsc = envInt("QULT_ESCALATION_DRIFT");
+  if (driftEsc !== undefined)
+    config.escalation.drift_threshold = Math.max(1, driftEsc);
+  const tqEsc = envInt("QULT_ESCALATION_TEST_QUALITY");
+  if (tqEsc !== undefined)
+    config.escalation.test_quality_threshold = Math.max(1, tqEsc);
+  const dupEsc = envInt("QULT_ESCALATION_DUPLICATION");
+  if (dupEsc !== undefined)
+    config.escalation.duplication_threshold = Math.max(1, dupEsc);
+  const semEsc = envInt("QULT_ESCALATION_SEMANTIC");
+  if (semEsc !== undefined)
+    config.escalation.semantic_threshold = Math.max(1, semEsc);
+  const envStr = (key) => {
+    const val = process.env[key];
+    return val?.trim() ? val.trim() : undefined;
+  };
+  config.review.models.spec = envStr("QULT_REVIEW_MODEL_SPEC") ?? config.review.models.spec;
+  config.review.models.quality = envStr("QULT_REVIEW_MODEL_QUALITY") ?? config.review.models.quality;
+  config.review.models.security = envStr("QULT_REVIEW_MODEL_SECURITY") ?? config.review.models.security;
+  config.review.models.adversarial = envStr("QULT_REVIEW_MODEL_ADVERSARIAL") ?? config.review.models.adversarial;
+  config.plan_eval.models.generator = envStr("QULT_PLAN_EVAL_MODEL_GENERATOR") ?? config.plan_eval.models.generator;
+  config.plan_eval.models.evaluator = envStr("QULT_PLAN_EVAL_MODEL_EVALUATOR") ?? config.plan_eval.models.evaluator;
+  const flywheelEnv = process.env.QULT_FLYWHEEL_ENABLED;
+  if (flywheelEnv === "1" || flywheelEnv === "true")
+    config.flywheel.enabled = true;
+  else if (flywheelEnv === "0" || flywheelEnv === "false")
+    config.flywheel.enabled = false;
+  const flywheelMin = envInt("QULT_FLYWHEEL_MIN_SESSIONS");
+  if (flywheelMin !== undefined)
+    config.flywheel.min_sessions = Math.max(1, flywheelMin);
+  _cache = config;
+  return config;
+}
+function resetConfigCache() {
+  _cache = null;
+}
+
+// src/gates/load.ts
+var _cache2;
+function loadGates() {
+  if (_cache2 !== undefined)
+    return _cache2;
   try {
     const db = getDb();
     const projectId = getProjectId();
     const rows = db.prepare("SELECT phase, gate_name, command, timeout, run_once_per_batch, extensions FROM gate_configs WHERE project_id = ?").all(projectId);
     if (rows.length === 0) {
-      _cache = null;
+      _cache2 = null;
       return null;
     }
     const config = {};
@@ -282,10 +534,10 @@ function loadGates() {
       }
       config[phase][row.gate_name] = gate;
     }
-    _cache = config;
+    _cache2 = config;
     return config;
   } catch {
-    _cache = null;
+    _cache2 = null;
     return null;
   }
 }
@@ -308,7 +560,7 @@ function saveGates(gates) {
     db.exec("ROLLBACK");
     throw err;
   }
-  _cache = undefined;
+  _cache2 = undefined;
 }
 
 // src/handoff.ts
@@ -356,10 +608,130 @@ ${taskLines}
 `);
 }
 
+// src/state/metrics.ts
+var MAX_ENTRIES = 50;
+function readMetricsHistory() {
+  try {
+    const db = getDb();
+    const projectId = getProjectId();
+    const rows = db.prepare(`SELECT session_id, recorded_at, gate_failure_count, security_warning_count, review_aggregate, files_changed, test_quality_warning_count, duplication_warning_count, semantic_warning_count, drift_warning_count, escalation_hit
+				 FROM session_metrics WHERE project_id = ? ORDER BY id DESC LIMIT ?`).all(projectId, MAX_ENTRIES);
+    return rows.map((r) => ({
+      session_id: r.session_id,
+      timestamp: r.recorded_at,
+      gate_failures: r.gate_failure_count,
+      security_warnings: r.security_warning_count,
+      review_score: r.review_aggregate,
+      files_changed: r.files_changed,
+      test_quality_warnings: r.test_quality_warning_count ?? 0,
+      duplication_warnings: r.duplication_warning_count ?? 0,
+      semantic_warnings: r.semantic_warning_count ?? 0,
+      drift_warnings: r.drift_warning_count ?? 0,
+      escalation_hit: !!(r.escalation_hit ?? 0)
+    }));
+  } catch {
+    return [];
+  }
+}
+var METRIC_KEYS = [
+  "gate_failures",
+  "security_warnings",
+  "test_quality_warnings",
+  "duplication_warnings",
+  "semantic_warnings",
+  "drift_warnings"
+];
+var WINDOW_SIZES = [5, 10, 20];
+function computeWindowStats(values) {
+  const total = values.length;
+  const nonZero = values.filter((v) => v > 0);
+  const frequency = nonZero.length / total;
+  const intensity = nonZero.length > 0 ? nonZero.reduce((sum, v) => sum + v, 0) / nonZero.length : 0;
+  const mid = Math.floor(total / 2);
+  const firstHalf = values.slice(0, mid);
+  const secondHalf = values.slice(mid);
+  const avgFirst = firstHalf.reduce((s, v) => s + v, 0) / firstHalf.length;
+  const avgSecond = secondHalf.reduce((s, v) => s + v, 0) / secondHalf.length;
+  const diff = avgSecond - avgFirst;
+  const threshold = Math.max(0.1, avgFirst * 0.1);
+  const trend = diff > threshold ? "worsening" : diff < -threshold ? "improving" : "stable";
+  return { frequency, intensity, trend, sessionCount: total };
+}
+function analyzePatterns(history) {
+  const chronological = [...history].reverse();
+  return METRIC_KEYS.map((metric) => {
+    const windows = { short: null, medium: null, long: null };
+    const windowEntries = [
+      ["short", WINDOW_SIZES[0]],
+      ["medium", WINDOW_SIZES[1]],
+      ["long", WINDOW_SIZES[2]]
+    ];
+    for (const [key, size] of windowEntries) {
+      if (chronological.length >= size) {
+        const slice = chronological.slice(-size);
+        const values = slice.map((s) => s[metric] ?? 0);
+        windows[key] = computeWindowStats(values);
+      }
+    }
+    return { metric, windows };
+  });
+}
+var METRIC_TO_THRESHOLD = {
+  security_warnings: { key: "security_threshold", name: "security" },
+  test_quality_warnings: { key: "test_quality_threshold", name: "test quality" },
+  duplication_warnings: { key: "duplication_threshold", name: "duplication" },
+  semantic_warnings: { key: "semantic_threshold", name: "semantic" },
+  drift_warnings: { key: "drift_threshold", name: "drift" }
+};
+function getFlywheelRecommendations(history, config) {
+  if (!config.flywheel.enabled)
+    return [];
+  if (history.length < config.flywheel.min_sessions)
+    return [];
+  const analyses = analyzePatterns(history);
+  const recs = [];
+  for (const analysis of analyses) {
+    const mapping = METRIC_TO_THRESHOLD[analysis.metric];
+    if (!mapping)
+      continue;
+    const currentThreshold = config.escalation[mapping.key];
+    const stats = analysis.windows.medium ?? analysis.windows.short;
+    if (!stats)
+      continue;
+    const confidence = analysis.windows.long ? "high" : analysis.windows.medium ? "medium" : "low";
+    if (stats.frequency > 0.8 && stats.trend === "worsening") {
+      const suggested = Math.max(1, Math.floor(currentThreshold * 0.7));
+      if (suggested < currentThreshold) {
+        recs.push({
+          metric: mapping.name,
+          current_threshold: currentThreshold,
+          suggested_threshold: suggested,
+          direction: "lower",
+          confidence,
+          reason: `${mapping.name} warnings in ${(stats.frequency * 100).toFixed(0)}% of sessions with worsening trend`
+        });
+      }
+    } else if (stats.frequency < 0.2 && stats.trend === "stable" && analysis.windows.long) {
+      const suggested = Math.min(currentThreshold + 3, currentThreshold * 2, 100);
+      if (suggested > currentThreshold) {
+        recs.push({
+          metric: mapping.name,
+          current_threshold: currentThreshold,
+          suggested_threshold: Math.floor(suggested),
+          direction: "raise",
+          confidence,
+          reason: `${mapping.name} warnings in only ${(stats.frequency * 100).toFixed(0)}% of sessions, stable over ${stats.sessionCount} sessions`
+        });
+      }
+    }
+  }
+  return recs;
+}
+
 // src/harness-report.ts
 var MIN_TREND_SESSIONS = 3;
 var IDLE_GATE_THRESHOLD = 10;
-function generateHarnessReport(metrics, auditLog) {
+function generateHarnessReport(metrics, auditLog, config) {
   const recommendations = [];
   const gateFailureSessions = metrics.filter((m) => m.gate_failures > 0).length;
   const securityWarningSessions = metrics.filter((m) => m.security_warnings > 0).length;
@@ -384,6 +756,17 @@ function generateHarnessReport(metrics, auditLog) {
       message: `Security warnings in ${securityWarningSessions}/${metrics.length} sessions. Consider adding .claude/rules/ for security patterns.`
     });
   }
+  let flywheel_recommendations = [];
+  const metricTrends = {};
+  if (config) {
+    try {
+      const analyses = analyzePatterns(metrics);
+      for (const a of analyses) {
+        metricTrends[a.metric] = a.windows;
+      }
+      flywheel_recommendations = getFlywheelRecommendations(metrics, config);
+    } catch {}
+  }
   return {
     totalSessions: metrics.length,
     gateFailureSessions,
@@ -392,7 +775,9 @@ function generateHarnessReport(metrics, auditLog) {
     reviewTrend,
     gateDisableCount: disableEntries.length,
     disablesByGate,
-    recommendations
+    recommendations,
+    flywheel_recommendations,
+    metricTrends
   };
 }
 function computeReviewTrend(scores) {
@@ -453,7 +838,7 @@ function generateMetricsDashboard(metrics) {
 }
 
 // src/state/audit-log.ts
-var MAX_ENTRIES = 200;
+var MAX_ENTRIES2 = 200;
 function appendAuditLog(entry) {
   try {
     const db = getDb();
@@ -462,40 +847,19 @@ function appendAuditLog(entry) {
     db.prepare("INSERT INTO audit_log (project_id, session_id, action, gate_name, reason) VALUES (?, ?, ?, ?, ?)").run(projectId, sid, entry.action, entry.gate_name ?? null, entry.reason);
     db.prepare(`DELETE FROM audit_log WHERE project_id = ? AND id NOT IN (
 				SELECT id FROM audit_log WHERE project_id = ? ORDER BY id DESC LIMIT ?
-			)`).run(projectId, projectId, MAX_ENTRIES);
+			)`).run(projectId, projectId, MAX_ENTRIES2);
   } catch {}
 }
 function readAuditLog() {
   try {
     const db = getDb();
     const projectId = getProjectId();
-    const rows = db.prepare("SELECT action, reason, gate_name, created_at FROM audit_log WHERE project_id = ? ORDER BY id DESC LIMIT ?").all(projectId, MAX_ENTRIES);
+    const rows = db.prepare("SELECT action, reason, gate_name, created_at FROM audit_log WHERE project_id = ? ORDER BY id DESC LIMIT ?").all(projectId, MAX_ENTRIES2);
     return rows.map((r) => ({
       action: r.action,
       reason: r.reason ?? "",
       gate_name: r.gate_name ?? undefined,
       timestamp: r.created_at
-    }));
-  } catch {
-    return [];
-  }
-}
-
-// src/state/metrics.ts
-var MAX_ENTRIES2 = 50;
-function readMetricsHistory() {
-  try {
-    const db = getDb();
-    const projectId = getProjectId();
-    const rows = db.prepare(`SELECT session_id, recorded_at, gate_failure_count, security_warning_count, review_aggregate, files_changed
-				 FROM session_metrics WHERE project_id = ? ORDER BY id DESC LIMIT ?`).all(projectId, MAX_ENTRIES2);
-    return rows.map((r) => ({
-      session_id: r.session_id,
-      timestamp: r.recorded_at,
-      gate_failures: r.gate_failure_count,
-      security_warnings: r.security_warning_count,
-      review_score: r.review_aggregate,
-      files_changed: r.files_changed
     }));
   } catch {
     return [];
@@ -812,6 +1176,11 @@ var TOOL_DEFS = [
     inputSchema: { type: "object", properties: {} }
   },
   {
+    name: "get_flywheel_recommendations",
+    description: "Returns threshold adjustment recommendations based on cross-session pattern analysis.",
+    inputSchema: { type: "object", properties: {} }
+  },
+  {
     name: "save_gates",
     description: "Save gate configuration for the current project. Use during /qult:init to register detected gates. Replaces all existing gates atomically.",
     inputSchema: {
@@ -881,7 +1250,12 @@ function handleTool(name, cwd, args) {
           content: [{ type: "text", text: "No session state. Run /qult:init to set up." }]
         };
       }
-      return { content: [{ type: "text", text: JSON.stringify(row, null, 2) }] };
+      const config = loadConfig();
+      const enriched = {
+        ...row,
+        review_models: config.review.models
+      };
+      return { content: [{ type: "text", text: JSON.stringify(enriched, null, 2) }] };
     }
     case "get_gate_config": {
       const gates = loadGates();
@@ -949,32 +1323,71 @@ function handleTool(name, cwd, args) {
     }
     case "set_config": {
       const key = typeof args?.key === "string" ? args.key : null;
-      const value = typeof args?.value === "number" ? args.value : null;
+      const rawValue = args?.value;
+      const value = typeof rawValue === "number" ? rawValue : typeof rawValue === "string" ? rawValue : typeof rawValue === "boolean" ? rawValue : null;
       if (!key || value === null) {
         return {
           isError: true,
           content: [{ type: "text", text: "Missing key or value parameter." }]
         };
       }
-      const ALLOWED_KEYS = [
+      const ALLOWED_NUMBER_KEYS = [
         "review.score_threshold",
         "review.max_iterations",
         "review.required_changed_files",
         "review.dimension_floor",
         "plan_eval.score_threshold",
-        "plan_eval.max_iterations"
+        "plan_eval.max_iterations",
+        "flywheel.min_sessions",
+        "escalation.security_threshold",
+        "escalation.drift_threshold",
+        "escalation.test_quality_threshold",
+        "escalation.duplication_threshold",
+        "escalation.semantic_threshold"
       ];
-      if (!ALLOWED_KEYS.includes(key)) {
+      const ALLOWED_MODEL_KEYS = [
+        "review.models.spec",
+        "review.models.quality",
+        "review.models.security",
+        "review.models.adversarial",
+        "plan_eval.models.generator",
+        "plan_eval.models.evaluator"
+      ];
+      const ALLOWED_BOOLEAN_KEYS = ["flywheel.enabled", "review.require_human_approval"];
+      const ALL_ALLOWED = [...ALLOWED_NUMBER_KEYS, ...ALLOWED_MODEL_KEYS, ...ALLOWED_BOOLEAN_KEYS];
+      if (!ALL_ALLOWED.includes(key)) {
         return {
           isError: true,
-          content: [{ type: "text", text: `Invalid key. Allowed: ${ALLOWED_KEYS.join(", ")}` }]
+          content: [{ type: "text", text: `Invalid key. Allowed: ${ALL_ALLOWED.join(", ")}` }]
         };
       }
-      if (key === "review.dimension_floor" && (value < 1 || value > 5)) {
+      if (ALLOWED_NUMBER_KEYS.includes(key) && typeof value !== "number") {
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Key '${key}' requires a number value.` }]
+        };
+      }
+      if (ALLOWED_MODEL_KEYS.includes(key)) {
+        const VALID_MODELS = ["sonnet", "opus", "haiku", "inherit"];
+        if (typeof value !== "string" || !VALID_MODELS.includes(value)) {
+          return {
+            isError: true,
+            content: [{ type: "text", text: `Model must be one of: ${VALID_MODELS.join(", ")}` }]
+          };
+        }
+      }
+      if (ALLOWED_BOOLEAN_KEYS.includes(key) && typeof value !== "boolean") {
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Key '${key}' requires a boolean value.` }]
+        };
+      }
+      if (key === "review.dimension_floor" && typeof value === "number" && (value < 1 || value > 5)) {
         return { isError: true, content: [{ type: "text", text: "dimension_floor must be 1-5." }] };
       }
       const projectId = getProjectId();
       db.prepare("INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)").run(projectId, key, JSON.stringify(value));
+      resetConfigCache();
       return { content: [{ type: "text", text: `Config set: ${key} = ${value}` }] };
     }
     case "clear_pending_fixes": {
@@ -1105,7 +1518,8 @@ function handleTool(name, cwd, args) {
       try {
         const metrics = readMetricsHistory();
         const auditLog = readAuditLog();
-        const report = generateHarnessReport(metrics, auditLog);
+        const cfg = loadConfig();
+        const report = generateHarnessReport(metrics, auditLog, cfg);
         return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
       } catch {
         return { content: [{ type: "text", text: "No harness data available yet." }] };
@@ -1147,6 +1561,23 @@ function handleTool(name, cwd, args) {
         return { content: [{ type: "text", text: generateMetricsDashboard(metrics) }] };
       } catch {
         return { content: [{ type: "text", text: "No metrics data available yet." }] };
+      }
+    }
+    case "get_flywheel_recommendations": {
+      try {
+        const config = loadConfig();
+        const metrics = readMetricsHistory();
+        const recs = getFlywheelRecommendations(metrics, config);
+        if (recs.length === 0) {
+          return {
+            content: [
+              { type: "text", text: "No recommendations. Insufficient data or flywheel disabled." }
+            ]
+          };
+        }
+        return { content: [{ type: "text", text: JSON.stringify(recs, null, 2) }] };
+      } catch {
+        return { content: [{ type: "text", text: "No flywheel data available yet." }] };
       }
     }
     case "save_gates": {

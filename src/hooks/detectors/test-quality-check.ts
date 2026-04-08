@@ -13,6 +13,8 @@ export interface TestQualityResult {
 	avgAssertions: number;
 	/** Detected test smells */
 	smells: TestSmell[];
+	/** Whether the file uses property-based testing */
+	isPbt: boolean;
 }
 
 export interface TestSmell {
@@ -83,6 +85,12 @@ const LARGE_TEST_FILE_LINES = 500;
 // ── Large snapshot threshold (chars) ─────────────────────
 const LARGE_SNAPSHOT_CHARS = 5000;
 
+// ── PBT detection ──────────────────────────────────────────
+const PBT_RE =
+	/\b(?:fc\.assert|fc\.property|fast-check|@fast-check\/vitest|hypothesis\.given|@given)\b/;
+const PBT_DEGENERATE_RUNS_RE = /numRuns\s*:\s*1\b/;
+const PBT_CONSTRAINED_GEN_RE = /fc\.\w+\(\s*\{\s*min\s*:\s*(\d+)\s*,\s*max\s*:\s*\1\s*\}/;
+
 // ── Setup/teardown block detection ─────────────────────────
 const SETUP_BLOCK_RE = /\b(beforeEach|afterEach|beforeAll|afterAll)\s*\(/;
 
@@ -151,7 +159,29 @@ export function analyzeTestQuality(file: string): TestQualityResult | null {
 	const assertionCount = countAssertionsOutsideSetup(codeOnly);
 	const avgAssertions = assertionCount / testCount;
 
+	const isPbt = PBT_RE.test(content);
 	const smells: TestSmell[] = [];
+
+	// PBT-specific smells
+	if (isPbt) {
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i]!;
+			if (PBT_DEGENERATE_RUNS_RE.test(line)) {
+				smells.push({
+					type: "pbt-degenerate-runs",
+					line: i + 1,
+					message: "numRuns: 1 defeats the purpose of property-based testing — increase run count",
+				});
+			}
+			if (PBT_CONSTRAINED_GEN_RE.test(line)) {
+				smells.push({
+					type: "pbt-constrained-generator",
+					line: i + 1,
+					message: "Generator min equals max — produces a single constant value, not random input",
+				});
+			}
+		}
+	}
 
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i]!;
@@ -429,7 +459,7 @@ export function analyzeTestQuality(file: string): TestQualityResult | null {
 		}
 	}
 
-	return { testCount, assertionCount, avgAssertions, smells };
+	return { testCount, assertionCount, avgAssertions, smells, isPbt };
 }
 
 /** Find implementation file for a test file. Simple heuristic using naming conventions. */
@@ -464,7 +494,7 @@ export function formatTestQualityWarnings(
 	const warnings: string[] = [];
 	const prefix = taskKey ? `${taskKey}: ` : "";
 
-	if (result.avgAssertions < 2) {
+	if (result.avgAssertions < 2 && !result.isPbt) {
 		warnings.push(
 			`${prefix}${file} has ~${result.avgAssertions.toFixed(1)} assertions/test (minimum 2)`,
 		);

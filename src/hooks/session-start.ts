@@ -1,6 +1,12 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { detectRecurringPatterns, recordSessionMetrics } from "../state/metrics.ts";
+import { loadConfig } from "../config.ts";
+import {
+	detectRecurringPatterns,
+	getFlywheelRecommendations,
+	readMetricsHistory,
+	recordSessionMetrics,
+} from "../state/metrics.ts";
 import { flush as flushPendingFixes, writePendingFixes } from "../state/pending-fixes.ts";
 import { readSessionState } from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
@@ -24,6 +30,7 @@ export default async function sessionStart(ev: HookEvent): Promise<void> {
 		// Only clear pending-fixes on fresh session start (not compact/resume)
 		if (ev.source === "startup" || ev.source === "clear") {
 			// Record metrics from previous session before clearing state
+			const cfg = loadConfig();
 			try {
 				const prevState = readSessionState();
 				const gateFailures = Object.values(prevState.gate_failure_counts ?? {}).reduce(
@@ -46,9 +53,34 @@ export default async function sessionStart(ev: HookEvent): Promise<void> {
 								: null
 							: null,
 						files_changed: (prevState.changed_file_paths ?? []).length,
+						test_quality_warnings: prevState.test_quality_warning_count ?? 0,
+						duplication_warnings: prevState.duplication_warning_count ?? 0,
+						semantic_warnings: prevState.semantic_warning_count ?? 0,
+						drift_warnings: prevState.drift_warning_count ?? 0,
+						escalation_hit:
+							(prevState.security_warning_count ?? 0) >= cfg.escalation.security_threshold ||
+							(prevState.test_quality_warning_count ?? 0) >=
+								cfg.escalation.test_quality_threshold ||
+							(prevState.duplication_warning_count ?? 0) >= cfg.escalation.duplication_threshold ||
+							(prevState.semantic_warning_count ?? 0) >= cfg.escalation.semantic_threshold ||
+							(prevState.drift_warning_count ?? 0) >= cfg.escalation.drift_threshold,
 					});
 				}
 				detectRecurringPatterns();
+			} catch {
+				/* fail-open */
+			}
+
+			try {
+				if (cfg.flywheel.enabled) {
+					const hist = readMetricsHistory();
+					const recs = getFlywheelRecommendations(hist, cfg);
+					for (const rec of recs) {
+						process.stderr.write(
+							`[qult] Flywheel: ${rec.metric} — suggest ${rec.direction === "lower" ? "lowering" : "raising"} threshold from ${rec.current_threshold} to ${rec.suggested_threshold} (${rec.confidence} confidence). ${rec.reason}\n`,
+						);
+					}
+				}
 			} catch {
 				/* fail-open */
 			}

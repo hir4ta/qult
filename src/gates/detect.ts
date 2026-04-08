@@ -104,6 +104,16 @@ const PROBE_RULES: ProbeRule[] = [
 		executable: "golangci-lint",
 	},
 
+	// --- on_write: security (priority order) ---
+	{
+		configs: [".semgrep.yml", ".semgrep/rules.yml"],
+		name: "security-semgrep-write",
+		category: "on_write",
+		command: "semgrep scan --config auto --quiet {file}",
+		timeout: 5000,
+		executable: "semgrep",
+	},
+
 	// --- on_write: typecheck (priority order) ---
 	{
 		configs: ["tsconfig.json"],

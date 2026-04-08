@@ -1,5 +1,7 @@
+import type { QultConfig } from "./config.ts";
 import type { AuditEntry } from "./state/audit-log.ts";
-import type { SessionMetrics } from "./state/metrics.ts";
+import type { FlywheelRecommendation, MetricAnalysis, SessionMetrics } from "./state/metrics.ts";
+import { analyzePatterns, getFlywheelRecommendations } from "./state/metrics.ts";
 
 export interface HarnessRecommendation {
 	type: "idle_gate" | "high_failure_rate" | "security_recurring";
@@ -15,6 +17,8 @@ export interface HarnessReport {
 	gateDisableCount: number;
 	disablesByGate: Record<string, number>;
 	recommendations: HarnessRecommendation[];
+	flywheel_recommendations: FlywheelRecommendation[];
+	metricTrends: Record<string, MetricAnalysis["windows"]>;
 }
 
 /** Minimum sessions needed for trend analysis. */
@@ -30,6 +34,7 @@ const IDLE_GATE_THRESHOLD = 10;
 export function generateHarnessReport(
 	metrics: SessionMetrics[],
 	auditLog: AuditEntry[],
+	config?: QultConfig,
 ): HarnessReport {
 	const recommendations: HarnessRecommendation[] = [];
 
@@ -68,6 +73,21 @@ export function generateHarnessReport(
 		});
 	}
 
+	// Flywheel data (opt-in via config parameter)
+	let flywheel_recommendations: FlywheelRecommendation[] = [];
+	const metricTrends: Record<string, MetricAnalysis["windows"]> = {};
+	if (config) {
+		try {
+			const analyses = analyzePatterns(metrics);
+			for (const a of analyses) {
+				metricTrends[a.metric] = a.windows;
+			}
+			flywheel_recommendations = getFlywheelRecommendations(metrics, config);
+		} catch {
+			/* fail-open */
+		}
+	}
+
 	return {
 		totalSessions: metrics.length,
 		gateFailureSessions,
@@ -77,6 +97,8 @@ export function generateHarnessReport(
 		gateDisableCount: disableEntries.length,
 		disablesByGate,
 		recommendations,
+		flywheel_recommendations,
+		metricTrends,
 	};
 }
 

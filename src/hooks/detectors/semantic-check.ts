@@ -129,6 +129,152 @@ function detectConditionAssignment(lines: string[]): string[] {
 	return errors;
 }
 
+// ── Unreachable code after return/throw ──────────────────────
+
+function detectUnreachableCode(lines: string[]): string[] {
+	const errors: string[] = [];
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i]!;
+		const trimmed = line.trimStart();
+
+		// Skip comment lines
+		if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
+
+		// Match `return` or `throw` at statement level
+		if (!/^\s*(?:return\b|throw\b)/.test(line)) continue;
+
+		// Skip multiline return/throw: opening brace without closing on same line
+		// e.g. `return {` — the body continues on subsequent lines
+		const openBraces = (trimmed.match(/\{/g) ?? []).length;
+		const closeBraces = (trimmed.match(/\}/g) ?? []).length;
+		if (openBraces > closeBraces) continue;
+
+		// Look at next non-empty line
+		for (let j = i + 1; j < lines.length; j++) {
+			const nextTrimmed = lines[j]!.trimStart();
+			if (nextTrimmed === "") continue; // skip blank lines
+			if (nextTrimmed.startsWith("//") || nextTrimmed.startsWith("*")) continue; // skip comments
+
+			// Closing brace is OK (end of block containing this return/throw)
+			if (nextTrimmed.startsWith("}")) break;
+
+			// Check suppression
+			if (INTENTIONAL_RE.test(lines[j]!)) break;
+			if (INTENTIONAL_RE.test(line)) break;
+
+			errors.push(`L${j + 1}: Unreachable code after return/throw at L${i + 1}`);
+			break;
+		}
+	}
+	return errors;
+}
+
+// ── Loose equality detection (JS/TS only) ────────────────────
+
+// Match == or != but not === or !==
+const LOOSE_EQ_RE = /(?<![!=])(?:==|!=)(?!=)/;
+// Suppress: `== null` or `!= null`
+const NULL_COALESCE_RE = /(?:==|!=)\s*null\b/;
+// Strip string/template/regex literals to avoid false positives on quoted content
+const STRING_LITERAL_RE =
+	/(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|\/(?:[^/\\\n]|\\.)+\/[gimsuy]*)/g;
+
+function detectLooseEquality(lines: string[]): string[] {
+	const errors: string[] = [];
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i]!;
+		const trimmed = line.trimStart();
+
+		if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
+
+		// Strip string/regex literals before checking to avoid false positives
+		const stripped = trimmed.replace(STRING_LITERAL_RE, '""');
+		if (!LOOSE_EQ_RE.test(stripped)) continue;
+
+		// Suppress null coalescing pattern
+		if (NULL_COALESCE_RE.test(stripped)) continue;
+
+		if (INTENTIONAL_RE.test(line)) continue;
+
+		errors.push(`L${i + 1}: Loose equality (== or !=) — use === or !== for strict comparison`);
+	}
+	return errors;
+}
+
+// ── Switch fallthrough detection ─────────────────────────────
+
+// Also match `default:` as a case boundary
+const CASE_OR_DEFAULT_RE = /^\s*(?:case\b|default\s*:)/;
+const BREAK_RE = /^\s*(?:break|return|throw|continue)\b/;
+const FALLTHROUGH_COMMENT_RE = /(?:\/\/|\/\*)\s*fall\s*-?\s*through/i;
+
+function detectSwitchFallthrough(lines: string[]): string[] {
+	const errors: string[] = [];
+	let inCase = false;
+	let caseStartLine = 0;
+	let hasBreak = false;
+	let hasFallthroughComment = false;
+	let hasIntentional = false;
+	let hasCode = false;
+	// Track brace depth relative to the case entry so we don't exit on nested block }
+	let braceDepth = 0;
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i]!;
+		const trimmed = line.trimStart();
+
+		if (CASE_OR_DEFAULT_RE.test(trimmed)) {
+			// When we hit a new case/default, check if the previous case was missing break
+			if (inCase && hasCode && !hasBreak && !hasFallthroughComment && !hasIntentional) {
+				errors.push(
+					`L${i + 1}: Switch case fallthrough from case at L${caseStartLine} — add break, return, or // fallthrough comment`,
+				);
+			}
+			inCase = true;
+			caseStartLine = i + 1;
+			hasBreak = false;
+			hasFallthroughComment = false;
+			hasIntentional = false;
+			hasCode = false;
+			braceDepth = 0;
+			continue;
+		}
+
+		if (!inCase) continue;
+
+		// Track brace depth to distinguish nested block } from switch }
+		const opens = (line.match(/\{/g) ?? []).length;
+		const closes = (line.match(/\}/g) ?? []).length;
+		braceDepth += opens - closes;
+
+		// Check for break/return/throw/continue only at case level (depth 0)
+		if (braceDepth <= 0 && BREAK_RE.test(trimmed)) {
+			hasBreak = true;
+		}
+
+		// Check for fallthrough comment
+		if (FALLTHROUGH_COMMENT_RE.test(line)) {
+			hasFallthroughComment = true;
+		}
+
+		// Check for intentional suppression
+		if (INTENTIONAL_RE.test(line)) {
+			hasIntentional = true;
+		}
+
+		// Track if case has actual code (not just whitespace/comments)
+		if (trimmed !== "" && !trimmed.startsWith("//") && !trimmed.startsWith("*")) {
+			hasCode = true;
+		}
+
+		// End of switch: closing brace at depth -1 (below case level)
+		if (braceDepth < 0) {
+			inCase = false;
+		}
+	}
+	return errors;
+}
+
 // ── PBT advisory (non-blocking) ──────────────────────────────
 
 const TEST_CASE_RE = /\b(?:it|test)\s*\(/g;
@@ -180,6 +326,9 @@ export function detectSemanticPatterns(file: string): PendingFix[] {
 		errors.push(...detectEmptyCatch(lines));
 		errors.push(...detectIgnoredReturn(lines));
 		errors.push(...detectConditionAssignment(lines));
+		errors.push(...detectUnreachableCode(lines));
+		errors.push(...detectLooseEquality(lines));
+		errors.push(...detectSwitchFallthrough(lines));
 	}
 
 	// Python empty except

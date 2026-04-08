@@ -53,6 +53,20 @@ function migrateSchema(db) {
       db.exec("ALTER TABLE sessions ADD COLUMN semantic_warning_count INTEGER NOT NULL DEFAULT 0");
     } catch {}
   }
+  if (version < 4) {
+    const v4Columns = [
+      "test_quality_warning_count INTEGER NOT NULL DEFAULT 0",
+      "duplication_warning_count INTEGER NOT NULL DEFAULT 0",
+      "semantic_warning_count INTEGER NOT NULL DEFAULT 0",
+      "drift_warning_count INTEGER NOT NULL DEFAULT 0",
+      "escalation_hit INTEGER NOT NULL DEFAULT 0"
+    ];
+    for (const col of v4Columns) {
+      try {
+        db.exec(`ALTER TABLE session_metrics ADD COLUMN ${col}`);
+      } catch {}
+    }
+  }
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 function createTablesV1(db) {
@@ -197,14 +211,19 @@ function createTablesV1(db) {
 		CREATE INDEX IF NOT EXISTS idx_audit_log_session ON audit_log(session_id);
 
 		CREATE TABLE IF NOT EXISTS session_metrics (
-			id                     INTEGER PRIMARY KEY,
-			session_id             TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			project_id             INTEGER NOT NULL REFERENCES projects(id),
-			gate_failure_count     INTEGER NOT NULL DEFAULT 0,
-			security_warning_count INTEGER NOT NULL DEFAULT 0,
-			review_aggregate       REAL,
-			files_changed          INTEGER NOT NULL DEFAULT 0,
-			recorded_at            TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			id                              INTEGER PRIMARY KEY,
+			session_id                      TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			project_id                      INTEGER NOT NULL REFERENCES projects(id),
+			gate_failure_count              INTEGER NOT NULL DEFAULT 0,
+			security_warning_count          INTEGER NOT NULL DEFAULT 0,
+			review_aggregate                REAL,
+			files_changed                   INTEGER NOT NULL DEFAULT 0,
+			test_quality_warning_count      INTEGER NOT NULL DEFAULT 0,
+			duplication_warning_count       INTEGER NOT NULL DEFAULT 0,
+			semantic_warning_count          INTEGER NOT NULL DEFAULT 0,
+			drift_warning_count             INTEGER NOT NULL DEFAULT 0,
+			escalation_hit                  INTEGER NOT NULL DEFAULT 0,
+			recorded_at                     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		);
 		CREATE INDEX IF NOT EXISTS idx_metrics_project ON session_metrics(project_id);
 
@@ -256,7 +275,7 @@ function ensureSession() {
   const projectId = getProjectId();
   db.prepare("INSERT OR IGNORE INTO sessions (id, project_id) VALUES (?, ?)").run(_sessionId, projectId);
 }
-var SCHEMA_VERSION = 3, DB_DIR, DB_PATH, DEFAULT_SESSION_ID = "__default__", _db = null, _projectIdCache = null, _projectPathCache = null, _sessionId;
+var SCHEMA_VERSION = 4, DB_DIR, DB_PATH, DEFAULT_SESSION_ID = "__default__", _db = null, _projectIdCache = null, _projectPathCache = null, _sessionId;
 var init_db = __esm(() => {
   DB_DIR = join(homedir(), ".qult");
   DB_PATH = join(DB_DIR, "qult.db");
@@ -283,6 +302,17 @@ function applyConfigLayer(config, raw) {
       config.review.dimension_floor = Math.max(1, Math.min(5, r.dimension_floor));
     if (typeof r.require_human_approval === "boolean")
       config.review.require_human_approval = r.require_human_approval;
+    if (r.models && typeof r.models === "object") {
+      const m = r.models;
+      if (typeof m.spec === "string" && m.spec)
+        config.review.models.spec = m.spec;
+      if (typeof m.quality === "string" && m.quality)
+        config.review.models.quality = m.quality;
+      if (typeof m.security === "string" && m.security)
+        config.review.models.security = m.security;
+      if (typeof m.adversarial === "string" && m.adversarial)
+        config.review.models.adversarial = m.adversarial;
+    }
   }
   if (raw.plan_eval && typeof raw.plan_eval === "object") {
     const p = raw.plan_eval;
@@ -292,6 +322,13 @@ function applyConfigLayer(config, raw) {
       config.plan_eval.max_iterations = p.max_iterations;
     if (Array.isArray(p.registry_files))
       config.plan_eval.registry_files = p.registry_files.filter((f) => typeof f === "string");
+    if (p.models && typeof p.models === "object") {
+      const m = p.models;
+      if (typeof m.generator === "string" && m.generator)
+        config.plan_eval.models.generator = m.generator;
+      if (typeof m.evaluator === "string" && m.evaluator)
+        config.plan_eval.models.evaluator = m.evaluator;
+    }
   }
   if (raw.gates && typeof raw.gates === "object") {
     const g = raw.gates;
@@ -316,20 +353,40 @@ function applyConfigLayer(config, raw) {
       config.escalation.test_quality_threshold = Math.max(1, e.test_quality_threshold);
     if (typeof e.duplication_threshold === "number")
       config.escalation.duplication_threshold = Math.max(1, e.duplication_threshold);
+    if (typeof e.semantic_threshold === "number")
+      config.escalation.semantic_threshold = Math.max(1, e.semantic_threshold);
+  }
+  if (raw.flywheel && typeof raw.flywheel === "object") {
+    const f = raw.flywheel;
+    if (typeof f.enabled === "boolean")
+      config.flywheel.enabled = f.enabled;
+    if (typeof f.min_sessions === "number")
+      config.flywheel.min_sessions = Math.max(1, f.min_sessions);
   }
 }
 function kvRowsToRaw(rows) {
   const raw = {};
   for (const row of rows) {
-    const [section, field] = row.key.split(".");
-    if (!section || !field)
+    const parts = row.key.split(".");
+    if (parts.length < 2)
       continue;
+    const section = parts[0];
     if (!raw[section])
       raw[section] = {};
+    let parsed;
     try {
-      raw[section][field] = JSON.parse(row.value);
+      parsed = JSON.parse(row.value);
     } catch {
-      raw[section][field] = row.value;
+      parsed = row.value;
+    }
+    if (parts.length === 2) {
+      raw[section][parts[1]] = parsed;
+    } else if (parts.length === 3) {
+      const sub = parts[1];
+      if (!raw[section][sub] || typeof raw[section][sub] !== "object") {
+        raw[section][sub] = {};
+      }
+      raw[section][sub][parts[2]] = parsed;
     }
   }
   return raw;
@@ -396,6 +453,24 @@ function loadConfig() {
   const semEsc = envInt("QULT_ESCALATION_SEMANTIC");
   if (semEsc !== undefined)
     config.escalation.semantic_threshold = Math.max(1, semEsc);
+  const envStr = (key) => {
+    const val = process.env[key];
+    return val?.trim() ? val.trim() : undefined;
+  };
+  config.review.models.spec = envStr("QULT_REVIEW_MODEL_SPEC") ?? config.review.models.spec;
+  config.review.models.quality = envStr("QULT_REVIEW_MODEL_QUALITY") ?? config.review.models.quality;
+  config.review.models.security = envStr("QULT_REVIEW_MODEL_SECURITY") ?? config.review.models.security;
+  config.review.models.adversarial = envStr("QULT_REVIEW_MODEL_ADVERSARIAL") ?? config.review.models.adversarial;
+  config.plan_eval.models.generator = envStr("QULT_PLAN_EVAL_MODEL_GENERATOR") ?? config.plan_eval.models.generator;
+  config.plan_eval.models.evaluator = envStr("QULT_PLAN_EVAL_MODEL_EVALUATOR") ?? config.plan_eval.models.evaluator;
+  const flywheelEnv = process.env.QULT_FLYWHEEL_ENABLED;
+  if (flywheelEnv === "1" || flywheelEnv === "true")
+    config.flywheel.enabled = true;
+  else if (flywheelEnv === "0" || flywheelEnv === "false")
+    config.flywheel.enabled = false;
+  const flywheelMin = envInt("QULT_FLYWHEEL_MIN_SESSIONS");
+  if (flywheelMin !== undefined)
+    config.flywheel.min_sessions = Math.max(1, flywheelMin);
   _cache = config;
   return config;
 }
@@ -411,12 +486,22 @@ var init_config = __esm(() => {
       max_iterations: 3,
       required_changed_files: 5,
       dimension_floor: 4,
-      require_human_approval: false
+      require_human_approval: false,
+      models: {
+        spec: "sonnet",
+        quality: "opus",
+        security: "opus",
+        adversarial: "sonnet"
+      }
     },
     plan_eval: {
       score_threshold: 12,
       max_iterations: 2,
-      registry_files: []
+      registry_files: [],
+      models: {
+        generator: "opus",
+        evaluator: "opus"
+      }
     },
     gates: {
       output_max_chars: 3500,
@@ -431,6 +516,10 @@ var init_config = __esm(() => {
       test_quality_threshold: 8,
       duplication_threshold: 8,
       semantic_threshold: 8
+    },
+    flywheel: {
+      enabled: true,
+      min_sessions: 10
     }
   };
 });
@@ -2360,7 +2449,7 @@ function emitAdvisoryWarnings(file, content) {
     }
   } catch {}
 }
-var CHECKABLE_EXTS2, MAX_CHECK_SIZE3 = 500000, SECRET_PATTERNS, JS_TS_EXTS, PY_EXTS3, DANGEROUS_PATTERNS, ADVISORY_PATTERNS;
+var CHECKABLE_EXTS2, MAX_CHECK_SIZE3 = 500000, SECRET_PATTERNS, JS_TS_EXTS, PY_EXTS3, GO_EXTS2, RB_EXTS, JAVA_EXTS, DANGEROUS_PATTERNS, ADVISORY_PATTERNS;
 var init_security_check = __esm(() => {
   init_session_state();
   CHECKABLE_EXTS2 = new Set([
@@ -2407,6 +2496,9 @@ var init_security_check = __esm(() => {
   ];
   JS_TS_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
   PY_EXTS3 = new Set([".py", ".pyi"]);
+  GO_EXTS2 = new Set([".go"]);
+  RB_EXTS = new Set([".rb"]);
+  JAVA_EXTS = new Set([".java", ".kt"]);
   DANGEROUS_PATTERNS = [
     {
       re: /\beval\s*\(\s*(?!["'`])[a-zA-Z_$]/,
@@ -2499,6 +2591,38 @@ var init_security_check = __esm(() => {
       re: /\brequire\s*\(\s*(?!["'`])[a-zA-Z_$]/,
       desc: "Dynamic require() with variable \u2014 supply-chain/injection risk",
       exts: JS_TS_EXTS
+    },
+    {
+      re: /exec\.Command\s*\(.*\+/,
+      desc: "exec.Command with string concatenation \u2014 command injection risk",
+      exts: GO_EXTS2
+    },
+    {
+      re: /\bsystem\s*\(\s*(?!["'])[a-zA-Z_]/,
+      desc: "system() with dynamic input \u2014 command injection risk",
+      exts: RB_EXTS
+    },
+    {
+      re: /\.send\s*\(\s*(?:params|request|args)/,
+      desc: "send() with user input \u2014 arbitrary method call risk",
+      exts: RB_EXTS
+    },
+    {
+      re: /Runtime\s*\.\s*getRuntime\s*\(\s*\)\s*\.\s*exec\s*\(\s*(?!["'])[a-zA-Z_]/,
+      desc: "Runtime.exec() with dynamic input \u2014 command injection risk",
+      exts: JAVA_EXTS
+    },
+    {
+      re: /\b(?:createHash|MessageDigest\.getInstance)\s*\(\s*["'](?:md5|MD5)["']/,
+      desc: "MD5 usage \u2014 cryptographically weak, use SHA-256+"
+    },
+    {
+      re: /(?:sha1|SHA1).*(?:password|passwd|pwd)/i,
+      desc: "SHA1 for password hashing \u2014 use bcrypt/scrypt/argon2"
+    },
+    {
+      re: /(?:iv|nonce|IV|NONCE)\s*[:=]\s*["'`][a-fA-F0-9]{16,}["'`]/,
+      desc: "Hardcoded IV/nonce \u2014 use random generation"
     }
   ];
   ADVISORY_PATTERNS = [
@@ -2545,6 +2669,12 @@ var init_security_check = __esm(() => {
       re: /["']\s*(?:\*|latest)\s*["']\s*$/,
       suppress: /(?:peerDependencies|devDependencies|optionalDependencies)/i,
       desc: "Wildcard/latest dependency version \u2014 pin to specific version for supply-chain safety"
+    },
+    {
+      re: /\.cookie\s*\(.*httpOnly\s*:\s*false/,
+      suppress: /(?:test|spec|mock)/i,
+      desc: "Cookie with httpOnly: false \u2014 session hijacking risk",
+      exts: JS_TS_EXTS
     }
   ];
 });
@@ -2633,6 +2763,95 @@ function detectConditionAssignment(lines) {
   }
   return errors;
 }
+function detectUnreachableCode(lines) {
+  const errors = [];
+  for (let i = 0;i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith("//") || trimmed.startsWith("*"))
+      continue;
+    if (!/^\s*(?:return\b|throw\b)/.test(line))
+      continue;
+    if (!trimmed.endsWith(";"))
+      continue;
+    for (let j = i + 1;j < lines.length; j++) {
+      const nextTrimmed = lines[j].trimStart();
+      if (nextTrimmed === "")
+        continue;
+      if (nextTrimmed.startsWith("//") || nextTrimmed.startsWith("*"))
+        continue;
+      if (nextTrimmed.startsWith("}"))
+        break;
+      if (INTENTIONAL_RE.test(lines[j]))
+        break;
+      if (INTENTIONAL_RE.test(line))
+        break;
+      errors.push(`L${j + 1}: Unreachable code after return/throw at L${i + 1}`);
+      break;
+    }
+  }
+  return errors;
+}
+function detectLooseEquality(lines) {
+  const errors = [];
+  for (let i = 0;i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith("//") || trimmed.startsWith("*"))
+      continue;
+    if (!LOOSE_EQ_RE.test(trimmed))
+      continue;
+    if (NULL_COALESCE_RE.test(trimmed))
+      continue;
+    if (INTENTIONAL_RE.test(line))
+      continue;
+    errors.push(`L${i + 1}: Loose equality (== or !=) \u2014 use === or !== for strict comparison`);
+  }
+  return errors;
+}
+function detectSwitchFallthrough(lines) {
+  const errors = [];
+  let inCase = false;
+  let caseStartLine = 0;
+  let hasBreak = false;
+  let hasFallthroughComment = false;
+  let hasIntentional = false;
+  let hasCode = false;
+  for (let i = 0;i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trimStart();
+    if (CASE_RE.test(trimmed)) {
+      if (inCase && hasCode && !hasBreak && !hasFallthroughComment && !hasIntentional) {
+        errors.push(`L${i + 1}: Switch case fallthrough from case at L${caseStartLine} \u2014 add break, return, or // fallthrough comment`);
+      }
+      inCase = true;
+      caseStartLine = i + 1;
+      hasBreak = false;
+      hasFallthroughComment = false;
+      hasIntentional = false;
+      hasCode = false;
+      continue;
+    }
+    if (!inCase)
+      continue;
+    if (BREAK_RE.test(trimmed)) {
+      hasBreak = true;
+    }
+    if (FALLTHROUGH_COMMENT_RE.test(line)) {
+      hasFallthroughComment = true;
+    }
+    if (INTENTIONAL_RE.test(line)) {
+      hasIntentional = true;
+    }
+    if (trimmed !== "" && !trimmed.startsWith("//") && !trimmed.startsWith("*") && !trimmed.startsWith("}")) {
+      hasCode = true;
+    }
+    if (trimmed.startsWith("}")) {
+      inCase = false;
+    }
+  }
+  return errors;
+}
 function emitPbtAdvisory(file, content) {
   try {
     const fileName = file.split("/").pop() ?? "";
@@ -2672,6 +2891,9 @@ function detectSemanticPatterns(file) {
     errors.push(...detectEmptyCatch(lines));
     errors.push(...detectIgnoredReturn(lines));
     errors.push(...detectConditionAssignment(lines));
+    errors.push(...detectUnreachableCode(lines));
+    errors.push(...detectLooseEquality(lines));
+    errors.push(...detectSwitchFallthrough(lines));
   }
   if (PY_EXTS4.has(ext)) {
     errors.push(...detectEmptyCatch(lines));
@@ -2687,7 +2909,7 @@ function detectSemanticPatterns(file) {
     }
   ];
 }
-var JS_TS_EXTS2, PY_EXTS4, CHECKABLE_EXTS3, MAX_CHECK_SIZE4 = 500000, INTENTIONAL_RE, PURE_METHODS_RE, CHAIN_CONTINUATION_RE, CONDITION_ASSIGNMENT_RE, DESTRUCTURE_RE, TEST_CASE_RE, PBT_IMPORT_RE;
+var JS_TS_EXTS2, PY_EXTS4, CHECKABLE_EXTS3, MAX_CHECK_SIZE4 = 500000, INTENTIONAL_RE, PURE_METHODS_RE, CHAIN_CONTINUATION_RE, CONDITION_ASSIGNMENT_RE, DESTRUCTURE_RE, LOOSE_EQ_RE, NULL_COALESCE_RE, CASE_RE, BREAK_RE, FALLTHROUGH_COMMENT_RE, TEST_CASE_RE, PBT_IMPORT_RE;
 var init_semantic_check = __esm(() => {
   init_session_state();
   JS_TS_EXTS2 = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
@@ -2698,6 +2920,11 @@ var init_semantic_check = __esm(() => {
   CHAIN_CONTINUATION_RE = /\)\s*\./;
   CONDITION_ASSIGNMENT_RE = /\b(?:if|while)\s*\(.*[^!=<>]=(?!=)[^=]/;
   DESTRUCTURE_RE = /\b(?:const|let|var)\s/;
+  LOOSE_EQ_RE = /(?<![!=])(?:==|!=)(?!=)/;
+  NULL_COALESCE_RE = /(?:==|!=)\s*null\b/;
+  CASE_RE = /^\s*case\b/;
+  BREAK_RE = /^\s*(?:break|return|throw|continue)\b/;
+  FALLTHROUGH_COMMENT_RE = /(?:\/\/|\/\*)\s*fall\s*-?\s*through/i;
   TEST_CASE_RE = /\b(?:it|test)\s*\(/g;
   PBT_IMPORT_RE = /(?:fast-check|@fast-check|fc\.|property\s*\(|forAll\s*\(|arbitrary)/;
 });
@@ -4385,7 +4612,27 @@ function analyzeTestQuality(file) {
     return null;
   const assertionCount = countAssertionsOutsideSetup(codeOnly);
   const avgAssertions = assertionCount / testCount;
+  const isPbt = PBT_RE.test(content);
   const smells = [];
+  if (isPbt) {
+    for (let i = 0;i < lines.length; i++) {
+      const line = lines[i];
+      if (PBT_DEGENERATE_RUNS_RE.test(line)) {
+        smells.push({
+          type: "pbt-degenerate-runs",
+          line: i + 1,
+          message: "numRuns: 1 defeats the purpose of property-based testing \u2014 increase run count"
+        });
+      }
+      if (PBT_CONSTRAINED_GEN_RE.test(line)) {
+        smells.push({
+          type: "pbt-constrained-generator",
+          line: i + 1,
+          message: "Generator min equals max \u2014 produces a single constant value, not random input"
+        });
+      }
+    }
+  }
   for (let i = 0;i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trimStart();
@@ -4614,7 +4861,7 @@ function analyzeTestQuality(file) {
       }
     }
   }
-  return { testCount, assertionCount, avgAssertions, smells };
+  return { testCount, assertionCount, avgAssertions, smells, isPbt };
 }
 function findImplFile(testPath) {
   try {
@@ -4639,7 +4886,7 @@ function findImplFile(testPath) {
 function formatTestQualityWarnings(file, result, taskKey) {
   const warnings = [];
   const prefix = taskKey ? `${taskKey}: ` : "";
-  if (result.avgAssertions < 2) {
+  if (result.avgAssertions < 2 && !result.isPbt) {
     warnings.push(`${prefix}${file} has ~${result.avgAssertions.toFixed(1)} assertions/test (minimum 2)`);
   }
   const smellsByType = new Map;
@@ -4659,7 +4906,7 @@ function formatTestQualityWarnings(file, result, taskKey) {
   }
   return warnings;
 }
-var MAX_CHECK_SIZE5 = 500000, ASSERTION_RE, TEST_CASE_RE2, WEAK_MATCHERS, TRIVIAL_ASSERTION_RE, EMPTY_TEST_RE, MOCK_RE, ALWAYS_TRUE_RE, CONSTANT_SELF_RE, SNAPSHOT_RE, IMPL_COUPLED_RE, ASYNC_TEST_RE, AWAIT_RE, MODULE_LET_RE, LARGE_TEST_FILE_LINES = 500, LARGE_SNAPSHOT_CHARS = 5000, SETUP_BLOCK_RE;
+var MAX_CHECK_SIZE5 = 500000, ASSERTION_RE, TEST_CASE_RE2, WEAK_MATCHERS, TRIVIAL_ASSERTION_RE, EMPTY_TEST_RE, MOCK_RE, ALWAYS_TRUE_RE, CONSTANT_SELF_RE, SNAPSHOT_RE, IMPL_COUPLED_RE, ASYNC_TEST_RE, AWAIT_RE, MODULE_LET_RE, LARGE_TEST_FILE_LINES = 500, LARGE_SNAPSHOT_CHARS = 5000, PBT_RE, PBT_DEGENERATE_RUNS_RE, PBT_CONSTRAINED_GEN_RE, SETUP_BLOCK_RE;
 var init_test_quality_check = __esm(() => {
   ASSERTION_RE = /\b(expect|assert|should)\s*[.(]/g;
   TEST_CASE_RE2 = /\b(it|test)\s*\(/g;
@@ -4681,6 +4928,9 @@ var init_test_quality_check = __esm(() => {
   ASYNC_TEST_RE = /\b(?:it|test)\s*\(\s*["'`][^"'`]*["'`]\s*,\s*async\s/;
   AWAIT_RE = /\bawait\b/;
   MODULE_LET_RE = /^let\s+\w+\s*(?:[:=])/;
+  PBT_RE = /\b(?:fc\.assert|fc\.property|fast-check|@fast-check\/vitest|hypothesis\.given|@given)\b/;
+  PBT_DEGENERATE_RUNS_RE = /numRuns\s*:\s*1\b/;
+  PBT_CONSTRAINED_GEN_RE = /fc\.\w+\(\s*\{\s*min\s*:\s*(\d+)\s*,\s*max\s*:\s*\1\s*\}/;
   SETUP_BLOCK_RE = /\b(beforeEach|afterEach|beforeAll|afterAll)\s*\(/;
 });
 
@@ -4786,8 +5036,8 @@ function recordSessionMetrics(metrics) {
   try {
     const db = getDb();
     const projectId = getProjectId();
-    db.prepare(`INSERT INTO session_metrics (session_id, project_id, gate_failure_count, security_warning_count, review_aggregate, files_changed)
-			 VALUES (?, ?, ?, ?, ?, ?)`).run(metrics.session_id, projectId, metrics.gate_failures, metrics.security_warnings, metrics.review_score, metrics.files_changed);
+    db.prepare(`INSERT INTO session_metrics (session_id, project_id, gate_failure_count, security_warning_count, review_aggregate, files_changed, test_quality_warning_count, duplication_warning_count, semantic_warning_count, drift_warning_count, escalation_hit)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(metrics.session_id, projectId, metrics.gate_failures, metrics.security_warnings, metrics.review_score, metrics.files_changed, metrics.test_quality_warnings ?? 0, metrics.duplication_warnings ?? 0, metrics.semantic_warnings ?? 0, metrics.drift_warnings ?? 0, metrics.escalation_hit ? 1 : 0);
     db.prepare(`DELETE FROM session_metrics WHERE project_id = ? AND id NOT IN (
 				SELECT id FROM session_metrics WHERE project_id = ? ORDER BY id DESC LIMIT ?
 			)`).run(projectId, projectId, MAX_ENTRIES);
@@ -4797,7 +5047,7 @@ function readMetricsHistory() {
   try {
     const db = getDb();
     const projectId = getProjectId();
-    const rows = db.prepare(`SELECT session_id, recorded_at, gate_failure_count, security_warning_count, review_aggregate, files_changed
+    const rows = db.prepare(`SELECT session_id, recorded_at, gate_failure_count, security_warning_count, review_aggregate, files_changed, test_quality_warning_count, duplication_warning_count, semantic_warning_count, drift_warning_count, escalation_hit
 				 FROM session_metrics WHERE project_id = ? ORDER BY id DESC LIMIT ?`).all(projectId, MAX_ENTRIES);
     return rows.map((r) => ({
       session_id: r.session_id,
@@ -4805,18 +5055,101 @@ function readMetricsHistory() {
       gate_failures: r.gate_failure_count,
       security_warnings: r.security_warning_count,
       review_score: r.review_aggregate,
-      files_changed: r.files_changed
+      files_changed: r.files_changed,
+      test_quality_warnings: r.test_quality_warning_count ?? 0,
+      duplication_warnings: r.duplication_warning_count ?? 0,
+      semantic_warnings: r.semantic_warning_count ?? 0,
+      drift_warnings: r.drift_warning_count ?? 0,
+      escalation_hit: !!(r.escalation_hit ?? 0)
     }));
   } catch {
     return [];
   }
+}
+function computeWindowStats(values) {
+  const total = values.length;
+  const nonZero = values.filter((v) => v > 0);
+  const frequency = nonZero.length / total;
+  const intensity = nonZero.length > 0 ? nonZero.reduce((sum, v) => sum + v, 0) / nonZero.length : 0;
+  const mid = Math.floor(total / 2);
+  const firstHalf = values.slice(0, mid);
+  const secondHalf = values.slice(mid);
+  const avgFirst = firstHalf.reduce((s, v) => s + v, 0) / firstHalf.length;
+  const avgSecond = secondHalf.reduce((s, v) => s + v, 0) / secondHalf.length;
+  const diff = avgSecond - avgFirst;
+  const threshold = Math.max(0.1, avgFirst * 0.1);
+  const trend = diff > threshold ? "worsening" : diff < -threshold ? "improving" : "stable";
+  return { frequency, intensity, trend, sessionCount: total };
+}
+function analyzePatterns(history) {
+  const chronological = [...history].reverse();
+  return METRIC_KEYS.map((metric) => {
+    const windows = { short: null, medium: null, long: null };
+    const windowEntries = [
+      ["short", WINDOW_SIZES[0]],
+      ["medium", WINDOW_SIZES[1]],
+      ["long", WINDOW_SIZES[2]]
+    ];
+    for (const [key, size] of windowEntries) {
+      if (chronological.length >= size) {
+        const slice = chronological.slice(-size);
+        const values = slice.map((s) => s[metric] ?? 0);
+        windows[key] = computeWindowStats(values);
+      }
+    }
+    return { metric, windows };
+  });
+}
+function getFlywheelRecommendations(history, config) {
+  if (!config.flywheel.enabled)
+    return [];
+  if (history.length < config.flywheel.min_sessions)
+    return [];
+  const analyses = analyzePatterns(history);
+  const recs = [];
+  for (const analysis of analyses) {
+    const mapping = METRIC_TO_THRESHOLD[analysis.metric];
+    if (!mapping)
+      continue;
+    const currentThreshold = config.escalation[mapping.key];
+    const stats = analysis.windows.medium ?? analysis.windows.short;
+    if (!stats)
+      continue;
+    const confidence = analysis.windows.long ? "high" : analysis.windows.medium ? "medium" : "low";
+    if (stats.frequency > 0.8 && stats.trend === "worsening") {
+      const suggested = Math.max(1, Math.floor(currentThreshold * 0.7));
+      if (suggested < currentThreshold) {
+        recs.push({
+          metric: mapping.name,
+          current_threshold: currentThreshold,
+          suggested_threshold: suggested,
+          direction: "lower",
+          confidence,
+          reason: `${mapping.name} warnings in ${(stats.frequency * 100).toFixed(0)}% of sessions with worsening trend`
+        });
+      }
+    } else if (stats.frequency < 0.2 && stats.trend === "stable" && analysis.windows.long) {
+      const suggested = Math.min(currentThreshold + 3, currentThreshold * 2, 100);
+      if (suggested > currentThreshold) {
+        recs.push({
+          metric: mapping.name,
+          current_threshold: currentThreshold,
+          suggested_threshold: Math.floor(suggested),
+          direction: "raise",
+          confidence,
+          reason: `${mapping.name} warnings in only ${(stats.frequency * 100).toFixed(0)}% of sessions, stable over ${stats.sessionCount} sessions`
+        });
+      }
+    }
+  }
+  return recs;
 }
 function detectRecurringPatterns() {
   try {
     const history = readMetricsHistory();
     if (history.length < 5)
       return;
-    const recent = history.slice(-5);
+    const recent = history.slice(0, 5);
     const gateFailSessions = recent.filter((s) => s.gate_failures > 0).length;
     if (gateFailSessions >= 4) {
       const totalGateFailures = recent.reduce((sum, s) => sum + s.gate_failures, 0);
@@ -4832,9 +5165,25 @@ function detectRecurringPatterns() {
     }
   } catch {}
 }
-var MAX_ENTRIES = 50;
+var MAX_ENTRIES = 50, METRIC_KEYS, WINDOW_SIZES, METRIC_TO_THRESHOLD;
 var init_metrics = __esm(() => {
   init_db();
+  METRIC_KEYS = [
+    "gate_failures",
+    "security_warnings",
+    "test_quality_warnings",
+    "duplication_warnings",
+    "semantic_warnings",
+    "drift_warnings"
+  ];
+  WINDOW_SIZES = [5, 10, 20];
+  METRIC_TO_THRESHOLD = {
+    security_warnings: { key: "security_threshold", name: "security" },
+    test_quality_warnings: { key: "test_quality_threshold", name: "test quality" },
+    duplication_warnings: { key: "duplication_threshold", name: "duplication" },
+    semantic_warnings: { key: "semantic_threshold", name: "semantic" },
+    drift_warnings: { key: "drift_threshold", name: "drift" }
+  };
 });
 
 // src/hooks/session-start.ts
@@ -4855,6 +5204,7 @@ async function sessionStart(ev) {
       }
     }
     if (ev.source === "startup" || ev.source === "clear") {
+      const cfg = loadConfig();
       try {
         const prevState = readSessionState();
         const gateFailures = Object.values(prevState.gate_failure_counts ?? {}).reduce((sum, v) => sum + (typeof v === "number" ? v : 0), 0);
@@ -4865,10 +5215,25 @@ async function sessionStart(ev) {
             gate_failures: gateFailures,
             security_warnings: prevState.security_warning_count ?? 0,
             review_score: prevState.review_completed_at ? Array.isArray(prevState.review_score_history) ? prevState.review_score_history.slice(-1)[0] ?? null : null : null,
-            files_changed: (prevState.changed_file_paths ?? []).length
+            files_changed: (prevState.changed_file_paths ?? []).length,
+            test_quality_warnings: prevState.test_quality_warning_count ?? 0,
+            duplication_warnings: prevState.duplication_warning_count ?? 0,
+            semantic_warnings: prevState.semantic_warning_count ?? 0,
+            drift_warnings: prevState.drift_warning_count ?? 0,
+            escalation_hit: (prevState.security_warning_count ?? 0) >= cfg.escalation.security_threshold || (prevState.test_quality_warning_count ?? 0) >= cfg.escalation.test_quality_threshold || (prevState.duplication_warning_count ?? 0) >= cfg.escalation.duplication_threshold || (prevState.semantic_warning_count ?? 0) >= cfg.escalation.semantic_threshold || (prevState.drift_warning_count ?? 0) >= cfg.escalation.drift_threshold
           });
         }
         detectRecurringPatterns();
+      } catch {}
+      try {
+        if (cfg.flywheel.enabled) {
+          const hist = readMetricsHistory();
+          const recs = getFlywheelRecommendations(hist, cfg);
+          for (const rec of recs) {
+            process.stderr.write(`[qult] Flywheel: ${rec.metric} \u2014 suggest ${rec.direction === "lower" ? "lowering" : "raising"} threshold from ${rec.current_threshold} to ${rec.suggested_threshold} (${rec.confidence} confidence). ${rec.reason}
+`);
+          }
+        }
       } catch {}
       writePendingFixes([]);
       try {
@@ -4880,6 +5245,7 @@ async function sessionStart(ev) {
 }
 var _legacyWarned = false;
 var init_session_start = __esm(() => {
+  init_config();
   init_metrics();
   init_pending_fixes();
   init_session_state();

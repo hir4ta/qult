@@ -58,6 +58,20 @@ Before spawning reviewers, collect computational detector results as ground trut
 
 These findings are deterministic (not LLM-generated) and serve as ground truth that reviewers must not contradict.
 
+## Stage 0.8: Resolve reviewer models
+
+Before spawning reviewers, resolve the model for each stage:
+
+1. Call `mcp__plugin_qult_qult__get_session_status()` — the response includes `review_models` with per-stage model configuration
+2. Extract the model for each reviewer:
+   - `review_models.spec` → spec-reviewer model
+   - `review_models.quality` → quality-reviewer model
+   - `review_models.security` → security-reviewer model
+   - `review_models.adversarial` → adversarial-reviewer model
+3. When spawning each Agent, pass the `model` parameter to override the agent frontmatter default:
+   - Example: `Agent({ subagent_type: "qult:spec-reviewer", model: "opus", ... })`
+4. If a model value matches the agent's frontmatter default (spec=sonnet, quality=opus, security=opus, adversarial=sonnet), you may omit the `model` parameter
+
 ## Round 1: Spec + Security (parallel — no overlap)
 
 Spawn `spec-reviewer` and `security-reviewer` **in parallel** (single message, two Agent tool calls). These stages have no overlap: Spec checks plan compliance, Security checks vulnerabilities.

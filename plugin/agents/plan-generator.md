@@ -52,6 +52,16 @@ Why this change is needed — the problem and intended outcome.
 - Include consumer files (tests, registries, docs that reference changed code)
 - Do NOT use vague criteria: "tests pass", "code works", "lints clean"
 
+## Property-Based Testing (PBT) guidance
+
+When a task involves validation, parsing, serialization, or mathematical transformations, suggest property-based testing in the Verify field:
+
+- **JS/TS**: Use `fast-check` with vitest — `it("prop: ...", () => { fc.assert(fc.property(fc.string(), (s) => { ... })) })`
+- **Python**: Use `hypothesis` with pytest — `@given(st.text()) def test_prop(s): ...`
+- PBT tests run within existing test frameworks (vitest, pytest) — no new runner needed
+- Suitable properties: roundtrip (encode/decode), idempotence, commutativity, invariant preservation
+- Keep example-based tests for error cases and specific edge cases alongside PBT
+
 ## Anti-self-persuasion
 
 Do not skip Boundary fields. Do not use vague Verify references.

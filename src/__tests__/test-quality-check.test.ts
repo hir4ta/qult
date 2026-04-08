@@ -384,6 +384,7 @@ describe("formatTestQualityWarnings", () => {
 			assertionCount: 2,
 			avgAssertions: 0.67,
 			smells: [],
+			isPbt: false,
 		};
 		const warnings = formatTestQualityWarnings("foo.test.ts", result, "Task 1");
 		expect(warnings.length).toBe(1);
@@ -401,6 +402,7 @@ describe("formatTestQualityWarnings", () => {
 				{ type: "weak-matcher", line: 5, message: "Weak matcher toBeTruthy()" },
 				{ type: "weak-matcher", line: 12, message: "Weak matcher toBeDefined()" },
 			],
+			isPbt: false,
 		};
 		const warnings = formatTestQualityWarnings("bar.test.ts", result);
 		expect(warnings.length).toBe(1);
@@ -512,5 +514,110 @@ describe("new test quality smells", () => {
 		expect(result).not.toBeNull();
 		const smell = result!.smells.find((s) => s.type === "snapshot-bloat");
 		expect(smell).toBeUndefined();
+	});
+});
+
+describe("PBT-aware test quality", () => {
+	async function analyze(file: string) {
+		const { analyzeTestQuality } = await import("../hooks/detectors/test-quality-check.ts");
+		return analyzeTestQuality(file);
+	}
+
+	it("detects PBT file with fc.assert(fc.property(...))", async () => {
+		const file = join(TEST_DIR, "pbt.test.ts");
+		writeFileSync(
+			file,
+			`import fc from "fast-check";
+it("property test", () => {
+  fc.assert(fc.property(fc.integer(), (n) => {
+    expect(n + 0).toBe(n);
+  }));
+});
+`,
+		);
+		const result = await analyze(file);
+		expect(result).not.toBeNull();
+		expect(result!.isPbt).toBe(true);
+	});
+
+	it("PBT file with 1 assertion does NOT trigger few-assertions warning", async () => {
+		const file = join(TEST_DIR, "pbt-single.test.ts");
+		writeFileSync(
+			file,
+			`import fc from "fast-check";
+it("property test", () => {
+  fc.assert(fc.property(fc.integer(), (n) => {
+    expect(n + 0).toBe(n);
+  }));
+});
+`,
+		);
+		const result = await analyze(file);
+		expect(result).not.toBeNull();
+		expect(result!.isPbt).toBe(true);
+		// avgAssertions is 1.0 which would normally trigger warning, but PBT suppresses it
+		const { formatTestQualityWarnings } = await import("../hooks/detectors/test-quality-check.ts");
+		const warnings = formatTestQualityWarnings("pbt-single.test.ts", result!);
+		const fewAssertions = warnings.filter((w) => w.includes("assertions/test"));
+		expect(fewAssertions.length).toBe(0);
+	});
+
+	it("detects pbt-degenerate-runs smell for numRuns: 1", async () => {
+		const file = join(TEST_DIR, "degenerate.test.ts");
+		writeFileSync(
+			file,
+			`import fc from "fast-check";
+it("degenerate", () => {
+  fc.assert(fc.property(fc.integer(), (n) => {
+    expect(n).toBe(n);
+  }), { numRuns: 1 });
+});
+`,
+		);
+		const result = await analyze(file);
+		expect(result).not.toBeNull();
+		const smell = result!.smells.find((s) => s.type === "pbt-degenerate-runs");
+		expect(smell).toBeDefined();
+		expect(smell!.message).toContain("numRuns");
+	});
+
+	it("detects pbt-constrained-generator smell for fc.integer({ min: 5, max: 5 })", async () => {
+		const file = join(TEST_DIR, "constrained.test.ts");
+		writeFileSync(
+			file,
+			`import fc from "fast-check";
+it("constrained", () => {
+  fc.assert(fc.property(fc.integer({ min: 5, max: 5 }), (n) => {
+    expect(n).toBe(5);
+  }));
+});
+`,
+		);
+		const result = await analyze(file);
+		expect(result).not.toBeNull();
+		const smell = result!.smells.find((s) => s.type === "pbt-constrained-generator");
+		expect(smell).toBeDefined();
+		expect(smell!.message).toContain("min equals max");
+	});
+
+	it("regular (non-PBT) file still triggers few-assertions warning normally", async () => {
+		const file = join(TEST_DIR, "regular.test.ts");
+		writeFileSync(
+			file,
+			`it("test1", () => {
+  expect(1).toBe(1);
+});
+it("test2", () => {
+  expect(2).toBe(2);
+});
+`,
+		);
+		const result = await analyze(file);
+		expect(result).not.toBeNull();
+		expect(result!.isPbt).toBe(false);
+		const { formatTestQualityWarnings } = await import("../hooks/detectors/test-quality-check.ts");
+		const warnings = formatTestQualityWarnings("regular.test.ts", result!);
+		const fewAssertions = warnings.filter((w) => w.includes("assertions/test"));
+		expect(fewAssertions.length).toBe(1);
 	});
 });
