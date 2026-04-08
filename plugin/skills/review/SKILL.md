@@ -76,6 +76,8 @@ Before spawning reviewers, resolve the model for each stage:
 
 Spawn `spec-reviewer` and `security-reviewer` **in parallel** (single message, two Agent tool calls). These stages have no overlap: Spec checks plan compliance, Security checks vulnerabilities.
 
+**CRITICAL: Do NOT use `run_in_background: true`.** Reviewers must run in **foreground** so their results are returned directly. Background agents lose their final output, making verdict/score extraction unreliable.
+
 ### Stage 1: Spec Reviewer
 
 In the agent prompt, include:
@@ -121,7 +123,7 @@ After both agents complete, extract a **1-line summary** of each finding from ea
 
 ## Round 2: Quality + Adversarial (parallel — with Round 1 context)
 
-Spawn `quality-reviewer` and `adversarial-reviewer` **in parallel**. Both receive the Round 1 findings summary to avoid duplicating already-reported issues.
+Spawn `quality-reviewer` and `adversarial-reviewer` **in parallel** (single message, two Agent tool calls, **foreground — NOT background**). Both receive the Round 1 findings summary to avoid duplicating already-reported issues.
 
 ### Stage 2: Quality Reviewer
 

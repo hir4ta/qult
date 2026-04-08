@@ -246,15 +246,14 @@ export function parseSuccessCriteria(content: string): string[] {
  *  Fail-open: does not throw on any error. */
 export function archivePlanFile(planPath: string): void {
 	try {
+		// Defense-in-depth: only archive .md files
+		if (!planPath.endsWith(".md")) return;
 		if (!existsSync(planPath)) return;
 		const dir = dirname(planPath);
 		const archiveDir = join(dir, "archive");
 		mkdirSync(archiveDir, { recursive: true });
 		renameSync(planPath, join(archiveDir, basename(planPath)));
-		// Invalidate plan cache
-		_planCache = null;
-		_planCachePath = null;
-		_planCacheMtime = null;
+		resetPlanCache();
 	} catch {
 		/* fail-open */
 	}

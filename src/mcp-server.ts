@@ -752,13 +752,13 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 				return { content: [{ type: "text", text: "Error: plan_path is required." }] };
 			}
 			// Path traversal guard: plan_path must resolve under .claude/plans/
-			const resolvedPath = resolve(planPath);
+			const resolvedPath = resolve(cwd, planPath);
 			const allowedBases = [
 				resolve(join(cwd, ".claude", "plans")),
 				resolve(join(homedir(), ".claude", "plans")),
 			];
 			const isAllowed =
-				allowedBases.some((base) => resolvedPath.startsWith(`${base}/`) || resolvedPath === base) &&
+				allowedBases.some((base) => resolvedPath.startsWith(`${base}/`)) &&
 				resolvedPath.endsWith(".md");
 			if (!isAllowed) {
 				return {
@@ -769,7 +769,7 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			}
 			archivePlanFile(resolvedPath);
 			resetPlanCache();
-			return { content: [{ type: "text", text: `Plan archived: ${resolvedPath}` }] };
+			return { content: [{ type: "text", text: "Plan archived." }] };
 		}
 		// Not in WRITE_TOOLS: save_gates is a project-level operation used during /qult:init,
 		// which may run before any session-creating hook has fired.

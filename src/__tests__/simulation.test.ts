@@ -2645,10 +2645,8 @@ describe("Plan archive after finish", () => {
 		expect(existsSync(planPath)).toBe(false);
 		expect(existsSync(join(plansDir, "archive", "test-plan.md"))).toBe(true);
 
-		// hasPlanFile should still return true because archive/ contains .md files
-		// but getActivePlan should return null because scanPlanDir uses non-recursive readdirSync
-		// Note: hasPlanFile checks readdirSync which lists entries (including "archive" dir name)
-		// but filters by .endsWith(".md") — "archive" doesn't end in .md, so it's excluded
+		// hasPlanFile returns false: readdirSync lists "archive" (dir name, not .md),
+		// and .endsWith(".md") filter excludes it. Archived plans are invisible.
 		expect(hasPlanFile()).toBe(false);
 	});
 });
