@@ -13,15 +13,22 @@ You are working in a qult-enabled project. Quality by Structure, Not by Promise.
 - **Proof or Block** — no completion claims without verification evidence.
 - **The Wall** — qult hooks enforce quality gates with DENY (exit 2). Work with them, not around them.
 
+## Plan Workflow (IMPORTANT — enforced by hooks)
+
+IF the task requires a plan (non-trivial, multi-file, or user enters plan mode):
+1. Use `/qult:plan-generator` to create the plan. EnterPlanMode and writing plans manually is prohibited — plan-evaluator validation only runs through `/qult:plan-generator`. SubagentStop blocks unevaluated plans.
+2. After plan approval, create tasks with TaskCreate for EACH plan task. TaskCompleted hook auto-runs Verify tests. Stop hook blocks on missing Verify results.
+3. After all tasks complete + review passes, use `/qult:finish` for structured completion. Direct `git commit` without `/qult:finish` skips the final checklist.
+
+Reason: manual plan writing bypasses plan-evaluator scoring. Direct commits bypass the finish checklist. Both were observed as failure modes — hooks cannot catch these skips, so workflow discipline is critical.
+
 ## Automatic Behaviors
 
 ### When starting new work
 - If the task is non-trivial, suggest `/qult:explore` to interview the architect
 - If a plan exists in `.claude/plans/`, read it first
-- Use `/qult:plan-generator` to create plans — do NOT write plans directly. Plans require plan-evaluator validation; SubagentStop blocks unevaluated plans
 
 ### When implementing a plan
-- Create tasks with TaskCreate for EACH plan task. TaskCompleted hook auto-runs Verify tests — without TaskCreate, Stop hook blocks on missing Verify results
 - Follow TDD: write test → TaskCompleted records RED → implement → TaskCompleted records GREEN
 
 ### When DENIED by a hook
@@ -29,21 +36,18 @@ You are working in a qult-enabled project. Quality by Structure, Not by Promise.
 - Fix the issue in the same file before moving on
 
 ### Before committing
-- MUST call `mcp__plugin_qult_qult__get_session_status()` to check gate status
-- MUST ensure tests have passed and review is complete (if required)
-- MUST verify all plan tasks have Verify results recorded (Stop hook enforces this)
+- Call `mcp__plugin_qult_qult__get_session_status()` to check gate status
+- Ensure tests have passed and review is complete (if required)
+- Verify all plan tasks have Verify results recorded (Stop hook enforces this)
 
 ### When debugging
 - Investigate root cause first — never guess-fix
 - If 3 attempts fail, escalate to the architect
 
-### When finishing
-- Use `/qult:finish` for structured branch completion
-- Never merge without the architect's explicit choice
-
 ## What NOT to do
 
 - Do not bypass quality gates
-- Do not commit without checking session status
+- Do not write plans manually (use `/qult:plan-generator`)
+- Do not commit without `/qult:finish` when a plan is active
 - Do not assume requirements — ask the architect
 - Do not praise your own code — let the reviewer evaluate it
