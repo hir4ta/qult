@@ -1759,9 +1759,7 @@ function handleTool(name, cwd, args) {
       }
       if (!existsSync2(resolvedPath)) {
         return {
-          content: [
-            { type: "text", text: "Plan not found (already archived or path incorrect)." }
-          ]
+          content: [{ type: "text", text: "Plan not found (already archived or path incorrect)." }]
         };
       }
       archivePlanFile(resolvedPath);

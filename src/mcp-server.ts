@@ -774,9 +774,7 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			// Check if file exists before archiving (distinguish no-op from success)
 			if (!existsSync(resolvedPath)) {
 				return {
-					content: [
-						{ type: "text", text: "Plan not found (already archived or path incorrect)." },
-					],
+					content: [{ type: "text", text: "Plan not found (already archived or path incorrect)." }],
 				};
 			}
 			archivePlanFile(resolvedPath);

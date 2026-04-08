@@ -116,7 +116,7 @@ describe("detectSecurityPatterns", () => {
 
 		it("detects exec with template literal", async () => {
 			const file = join(TEST_DIR, "cmd.ts");
-			writeFileSync(file, "const result = execSync(`ls ${userDir}`);\n");
+			writeFileSync(file, "const result = execSync(`ls $" + "{userDir}`);\n");
 			const fixes = await detect(file);
 			expect(fixes.length).toBe(1);
 			expect(fixes[0]!.errors[0]).toContain("exec");
