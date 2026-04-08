@@ -115,3 +115,16 @@ qult/
 
 - Claude Code の hooks、plugins、skills、agents、MCP 等の公式仕様を調べるときは `claude-code-guide` エージェントを必ず使う
 - WebSearch や WebFetch で独自にリサーチしに行かないこと
+
+### 設計の参考文献
+
+qult の設計は以下の論文・記事に基づいている。機能追加や設計判断の際はこれらの原則に立ち返ること。
+
+- [Anthropic: Harness Design](https://www.anthropic.com/engineering/harness-design-long-running-apps) — Generator-Evaluator パターン、自己評価バイアス、コンテキスト一貫性の喪失。qult の hook（センサー）+ skill（ガイド）の二層構造の根拠
+- [Anthropic: Effective Harnesses](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) — 長時間セッション設計、構造化ハンドオフ
+- [Martin Fowler: Harness Engineering](https://martinfowler.com/articles/exploring-gen-ai/harness-engineering.html) — ガイド（フィードフォワード）+ センサー（フィードバック）の分類体系。Agent = Model + Harness
+- [Martin Fowler: Humans and Agents](https://martinfowler.com/articles/exploring-gen-ai/humans-and-agents.html) — "On the Loop" モデル、Agentic Flywheel
+- [TDAD: Test-Driven Agentic Development](https://arxiv.org/abs/2603.17973) — プロンプトのみの TDD はリグレッションを悪化させる (6%→10%)。構造的強制で 1.8% に低減。TDD 強制の根拠
+- [Specification as Quality Gate](https://arxiv.org/abs/2603.25773) — AI が AI をレビューすると相関エラーが増幅。決定論的ゲートを先に、AI レビューは残余のみ。4 段階レビューの前に lint/typecheck/test を実行する根拠
+- [VibeGuard](https://arxiv.org/abs/2604.01052) — AI 生成コードのセキュリティゲートフレームワーク
+- [PGS: Property-Generated Solver](https://ai-scholar.tech/en/articles/llm-paper/property-generated-solver) — プロパティベーステストで +37.3% の正確性向上
