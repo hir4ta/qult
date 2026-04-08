@@ -51,7 +51,7 @@ export function parsePlanTasks(content: string): PlanTask[] {
 				if (/^###?\s/.test(nextTrimmed)) break;
 				const fileMatch = nextTrimmed.match(FILE_LINE_RE);
 				if (fileMatch) {
-					file = fileMatch[1]!.trim();
+					file = fileMatch[1]!.trim().replace(/[`"']/g, "");
 					continue;
 				}
 				const verifyMatch = nextTrimmed.match(VERIFY_LINE_RE);

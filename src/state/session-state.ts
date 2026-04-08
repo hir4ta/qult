@@ -425,11 +425,18 @@ export function recordReview(): void {
 
 // ── Gate batch dedup ────────────────────────────────────────
 
-export function shouldSkipGate(gateName: string, sessionId: string): boolean {
+export function shouldSkipGate(gateName: string, sessionId: string, currentFile?: string): boolean {
 	const state = readSessionState();
 	const entry = state.ran_gates[gateName];
 	if (!entry) return false;
-	return entry.session_id === sessionId;
+	if (entry.session_id !== sessionId) return false;
+	// Invalidate if the current file being edited is NEW (not yet in changed_file_paths).
+	// recordChangedFile runs AFTER gates, so at this point the new file isn't recorded yet.
+	// Re-editing the same file is fine — only genuinely new files trigger re-run.
+	if (currentFile && !(state.changed_file_paths ?? []).includes(currentFile)) {
+		return false;
+	}
+	return true;
 }
 
 export function markGateRan(gateName: string, sessionId: string): void {

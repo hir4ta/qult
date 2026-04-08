@@ -82,7 +82,7 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 	}[] = [];
 	for (const [name, gate] of Object.entries(gates.on_write)) {
 		if (isGateDisabled(name)) continue;
-		if (gate.run_once_per_batch && sessionId && shouldSkipGate(name, sessionId)) continue;
+		if (gate.run_once_per_batch && sessionId && shouldSkipGate(name, sessionId, file)) continue;
 		const hasPlaceholder = gate.command.includes("{file}");
 		if (hasPlaceholder && gatedExts.size > 0 && !gatedExts.has(fileExt)) continue;
 		gateEntries.push({ name, gate, fileArg: hasPlaceholder ? file : undefined });
@@ -143,16 +143,19 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 		/* fail-open */
 	}
 
+	// Build a set of existing file:gate pairs to avoid re-counting escalation on re-edits
+	const existingFixKeys = new Set(readPendingFixes().map((f) => `${resolve(f.file)}:${f.gate}`));
+	const fileName = file.split("/").pop() ?? "";
+	const isTestFile =
+		fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_");
+
 	// Security pattern detection (computational on_write sensor — no external tools needed)
 	try {
 		const securityFixes = detectSecurityPatterns(file);
 		if (securityFixes.length > 0) {
 			newFixes.push(...securityFixes);
-			// Don't count test file warnings toward escalation (false positive reduction)
-			const fileName = file.split("/").pop() ?? "";
-			const isTestFile =
-				fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_");
-			if (!isTestFile) {
+			// Only count first occurrence per file (avoid re-edit inflation)
+			if (!isTestFile && !existingFixKeys.has(`${file}:security-check`)) {
 				const count = incrementEscalation("security_warning_count");
 				if (count >= 10) {
 					process.stderr.write(
@@ -170,11 +173,7 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 		const semanticFixes = detectSemanticPatterns(file);
 		if (semanticFixes.length > 0) {
 			newFixes.push(...semanticFixes);
-			// Don't count test file warnings toward escalation (false positive reduction)
-			const fileName = file.split("/").pop() ?? "";
-			const isTestFile =
-				fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_");
-			if (!isTestFile) {
+			if (!isTestFile && !existingFixKeys.has(`${file}:semantic-check`)) {
 				const count = incrementEscalation("semantic_warning_count");
 				if (count >= 8) {
 					process.stderr.write(
@@ -191,7 +190,9 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 	try {
 		const deadImportWarnings = detectDeadImports(file);
 		if (deadImportWarnings.length > 0) {
-			incrementEscalation("dead_import_warning_count");
+			if (!existingFixKeys.has(`${file}:dead-import-check`)) {
+				incrementEscalation("dead_import_warning_count");
+			}
 			for (const w of deadImportWarnings) {
 				process.stderr.write(`[qult] Dead import: ${w}\n`);
 			}
@@ -219,12 +220,16 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 		const dupFixes = detectDuplication(file);
 		if (dupFixes.length > 0) {
 			newFixes.push(...dupFixes);
-			incrementEscalation("duplication_warning_count");
+			if (!existingFixKeys.has(`${file}:duplication-check`)) {
+				incrementEscalation("duplication_warning_count");
+			}
 		}
 		const sessionFiles = readSessionState().changed_file_paths ?? [];
 		const crossDupWarnings = detectCrossFileDuplication(file, sessionFiles);
 		if (crossDupWarnings.length > 0) {
-			incrementEscalation("duplication_warning_count");
+			if (!existingFixKeys.has(`${file}:duplication-check`)) {
+				incrementEscalation("duplication_warning_count");
+			}
 			for (const w of crossDupWarnings) {
 				process.stderr.write(`[qult] Duplication: ${w}\n`);
 			}
