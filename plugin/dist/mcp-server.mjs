@@ -264,6 +264,11 @@ function setSessionScope(sessionId) {
 function getSessionId() {
   return _sessionId;
 }
+function ensureSession() {
+  const db = getDb();
+  const projectId = getProjectId();
+  db.prepare("INSERT OR IGNORE INTO sessions (id, project_id) VALUES (?, ?)").run(_sessionId, projectId);
+}
 function findLatestSessionId() {
   const db = getDb();
   const projectId = getProjectId();
@@ -990,12 +995,107 @@ function getActivePlan() {
 }
 
 // src/state/session-state.ts
-var FINISH_MARKER = "__finish_started__";
-function recordFinishStarted() {
+var _cache3 = null;
+var _dirty = false;
+function defaultState() {
+  return {
+    last_commit_at: new Date().toISOString(),
+    test_passed_at: null,
+    test_command: null,
+    review_completed_at: null,
+    ran_gates: {},
+    changed_file_paths: [],
+    review_iteration: 0,
+    review_score_history: [],
+    review_stage_scores: {},
+    plan_eval_iteration: 0,
+    plan_eval_score_history: [],
+    plan_selfcheck_blocked_at: null,
+    disabled_gates: [],
+    task_verify_results: {},
+    gate_failure_counts: {},
+    security_warning_count: 0,
+    test_quality_warning_count: 0,
+    drift_warning_count: 0,
+    dead_import_warning_count: 0,
+    duplication_warning_count: 0,
+    semantic_warning_count: 0,
+    human_review_approved_at: null
+  };
+}
+function readSessionState() {
+  if (_cache3)
+    return _cache3;
   try {
     const db = getDb();
     const sid = getSessionId();
-    db.prepare("INSERT OR IGNORE INTO ran_gates (session_id, gate_name) VALUES (?, ?)").run(sid, FINISH_MARKER);
+    ensureSession();
+    const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sid);
+    if (!row) {
+      _cache3 = defaultState();
+      return _cache3;
+    }
+    const state = defaultState();
+    state.last_commit_at = row.last_commit_at ?? state.last_commit_at;
+    state.test_passed_at = row.test_passed_at ?? null;
+    state.test_command = row.test_command ?? null;
+    state.review_completed_at = row.review_completed_at ?? null;
+    state.review_iteration = row.review_iteration ?? 0;
+    state.plan_eval_iteration = row.plan_eval_iteration ?? 0;
+    state.plan_selfcheck_blocked_at = row.plan_selfcheck_blocked_at ?? null;
+    state.human_review_approved_at = row.human_review_approved_at ?? null;
+    state.security_warning_count = row.security_warning_count ?? 0;
+    state.test_quality_warning_count = row.test_quality_warning_count ?? 0;
+    state.drift_warning_count = row.drift_warning_count ?? 0;
+    state.dead_import_warning_count = row.dead_import_warning_count ?? 0;
+    state.duplication_warning_count = row.duplication_warning_count ?? 0;
+    state.semantic_warning_count = row.semantic_warning_count ?? 0;
+    const changedFiles = db.prepare("SELECT file_path FROM changed_files WHERE session_id = ?").all(sid);
+    state.changed_file_paths = changedFiles.map((r) => r.file_path);
+    const disabledGates = db.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?").all(sid);
+    state.disabled_gates = disabledGates.map((r) => r.gate_name);
+    const ranGates = db.prepare("SELECT gate_name, ran_at FROM ran_gates WHERE session_id = ?").all(sid);
+    for (const g of ranGates) {
+      state.ran_gates[g.gate_name] = { session_id: sid, ran_at: g.ran_at };
+    }
+    const taskResults = db.prepare("SELECT task_key, passed, ran_at FROM task_verify_results WHERE session_id = ?").all(sid);
+    for (const t of taskResults) {
+      state.task_verify_results[t.task_key] = { passed: !!t.passed, ran_at: t.ran_at };
+    }
+    const gateFailures = db.prepare("SELECT file, gate, count FROM gate_failure_counts WHERE session_id = ?").all(sid);
+    for (const f of gateFailures) {
+      state.gate_failure_counts[`${f.file}:${f.gate}`] = f.count;
+    }
+    const reviewScores = db.prepare("SELECT aggregate_score FROM review_scores WHERE session_id = ? ORDER BY iteration").all(sid);
+    state.review_score_history = reviewScores.map((r) => r.aggregate_score);
+    const stageScores = db.prepare("SELECT stage, dimension, score FROM review_stage_scores WHERE session_id = ?").all(sid);
+    for (const s of stageScores) {
+      if (!state.review_stage_scores[s.stage])
+        state.review_stage_scores[s.stage] = {};
+      state.review_stage_scores[s.stage][s.dimension] = s.score;
+    }
+    const planScores = db.prepare("SELECT aggregate_score FROM plan_eval_scores WHERE session_id = ? ORDER BY iteration").all(sid);
+    state.plan_eval_score_history = planScores.map((r) => r.aggregate_score);
+    _cache3 = state;
+    return state;
+  } catch {
+    _cache3 = defaultState();
+    return _cache3;
+  }
+}
+function writeState(state) {
+  _cache3 = state;
+  _dirty = true;
+}
+var FINISH_MARKER = "__finish_started__";
+function recordFinishStarted() {
+  try {
+    const state = readSessionState();
+    state.ran_gates[FINISH_MARKER] = {
+      session_id: getSessionId(),
+      ran_at: new Date().toISOString()
+    };
+    writeState(state);
   } catch {}
 }
 

@@ -634,12 +634,7 @@ const FINISH_MARKER = "__finish_started__";
 
 export function wasFinishStarted(): boolean {
 	try {
-		const db = getDb();
-		const sid = getSessionId();
-		const row = db
-			.prepare("SELECT 1 FROM ran_gates WHERE session_id = ? AND gate_name = ?")
-			.get(sid, FINISH_MARKER);
-		return !!row;
+		return FINISH_MARKER in readSessionState().ran_gates;
 	} catch {
 		return false; // fail-open
 	}
@@ -647,12 +642,12 @@ export function wasFinishStarted(): boolean {
 
 export function recordFinishStarted(): void {
 	try {
-		const db = getDb();
-		const sid = getSessionId();
-		db.prepare("INSERT OR IGNORE INTO ran_gates (session_id, gate_name) VALUES (?, ?)").run(
-			sid,
-			FINISH_MARKER,
-		);
+		const state = readSessionState();
+		state.ran_gates[FINISH_MARKER] = {
+			session_id: getSessionId(),
+			ran_at: new Date().toISOString(),
+		};
+		writeState(state);
 	} catch {
 		/* fail-open */
 	}

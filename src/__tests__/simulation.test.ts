@@ -1464,12 +1464,12 @@ describe("Scenario: MCP record_review allows commit", () => {
 		exitCode = null;
 		stderrCapture = [];
 
-		// Record review via MCP + finish started
+		// Record review via MCP
 		handleTool("record_review", TEST_DIR, { aggregate_score: 26 });
-		recordFinishStarted();
 
-		// Now commit should pass
+		// Now commit should pass (reset caches first, then record finish)
 		resetAllCaches();
+		recordFinishStarted();
 		await preTool({ tool_name: "Bash", tool_input: { command: "git commit -m test" } });
 		expect(exitCode).toBeNull();
 	});

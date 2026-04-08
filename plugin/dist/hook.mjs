@@ -1197,10 +1197,7 @@ function recordPlanSelfcheckBlocked() {
 }
 function wasFinishStarted() {
   try {
-    const db = getDb();
-    const sid = getSessionId();
-    const row = db.prepare("SELECT 1 FROM ran_gates WHERE session_id = ? AND gate_name = ?").get(sid, FINISH_MARKER);
-    return !!row;
+    return FINISH_MARKER in readSessionState().ran_gates;
   } catch {
     return false;
   }
