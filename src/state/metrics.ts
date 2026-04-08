@@ -12,7 +12,7 @@ export interface SessionMetrics {
 const MAX_ENTRIES = 50;
 
 /** Record session metrics to history. Fail-open. */
-export function recordSessionMetrics(_cwd: string, metrics: SessionMetrics): void {
+export function recordSessionMetrics(metrics: SessionMetrics): void {
 	try {
 		const db = getDb();
 		const projectId = getProjectId();
@@ -41,7 +41,7 @@ export function recordSessionMetrics(_cwd: string, metrics: SessionMetrics): voi
 }
 
 /** Read metrics history. Returns empty array on any error. */
-export function readMetricsHistory(_cwd: string): SessionMetrics[] {
+export function readMetricsHistory(): SessionMetrics[] {
 	try {
 		const db = getDb();
 		const projectId = getProjectId();
@@ -72,9 +72,9 @@ export function readMetricsHistory(_cwd: string): SessionMetrics[] {
 }
 
 /** Detect recurring patterns across last 5 sessions. Emits stderr warnings. Fail-open. */
-export function detectRecurringPatterns(_cwd: string): void {
+export function detectRecurringPatterns(): void {
 	try {
-		const history = readMetricsHistory(_cwd);
+		const history = readMetricsHistory();
 		if (history.length < 5) return;
 
 		const recent = history.slice(-5);

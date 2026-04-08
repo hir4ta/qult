@@ -7,9 +7,11 @@
  */
 
 import { Database } from "bun:sqlite";
-import { mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
+const SCHEMA_VERSION = 1;
 
 const DB_DIR = join(homedir(), ".qult");
 const DB_PATH = join(DB_DIR, "qult.db");
@@ -22,10 +24,15 @@ let _db: Database | null = null;
 /** Open (or return cached) database connection. Creates ~/.qult/ and schema on first call. */
 export function getDb(): Database {
 	if (_db) return _db;
-	mkdirSync(DB_DIR, { recursive: true });
+	mkdirSync(DB_DIR, { recursive: true, mode: 0o700 });
+	try {
+		chmodSync(DB_DIR, 0o700);
+	} catch {
+		/* fail-open: permission change may fail on some filesystems */
+	}
 	_db = new Database(DB_PATH);
 	configurePragmas(_db);
-	ensureSchema(_db);
+	migrateSchema(_db);
 	return _db;
 }
 
@@ -34,7 +41,7 @@ export function useTestDb(): Database {
 	closeDb();
 	_db = new Database(":memory:");
 	configurePragmas(_db);
-	ensureSchema(_db);
+	migrateSchema(_db);
 	return _db;
 }
 
@@ -58,7 +65,16 @@ function configurePragmas(db: Database): void {
 
 // ── Schema ───────────────────────────────────────────────
 
-function ensureSchema(db: Database): void {
+function migrateSchema(db: Database): void {
+	const version = (db.prepare("PRAGMA user_version").get() as { user_version: number })
+		.user_version;
+	if (version >= SCHEMA_VERSION) return;
+	// Version 0 → 1: initial schema creation
+	createTablesV1(db);
+	db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+}
+
+function createTablesV1(db: Database): void {
 	db.exec(`
 		CREATE TABLE IF NOT EXISTS projects (
 			id         INTEGER PRIMARY KEY,

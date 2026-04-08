@@ -576,17 +576,24 @@ function persistReviewFindings(): FindingRecord[] | null {
 		).run(projectId, projectId, MAX_FINDINGS);
 
 		// Read merged history for pattern detection
+		interface FindingRow {
+			file: string;
+			severity: string;
+			description: string;
+			stage: string;
+			recorded_at: string;
+		}
 		const rows = db
 			.prepare(
 				"SELECT file, severity, description, stage, recorded_at FROM review_findings WHERE project_id = ? ORDER BY id DESC LIMIT ?",
 			)
-			.all(projectId, MAX_FINDINGS) as FindingRecord[];
-		const history = rows.map((r) => ({
+			.all(projectId, MAX_FINDINGS) as FindingRow[];
+		const history: FindingRecord[] = rows.map((r) => ({
 			file: r.file,
 			severity: r.severity,
 			description: r.description,
 			stage: r.stage,
-			timestamp: (r as unknown as { recorded_at: string }).recorded_at,
+			timestamp: r.recorded_at,
 		}));
 		_currentFindings = [];
 		return history;

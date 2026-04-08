@@ -78,18 +78,19 @@ case "$cmd" in
       exit 0
     fi
     echo -e "${CYAN}Running on_write gates on ${file}${NC}"
-    bun -e "
+    QULT_GATE_FILE="$file" bun -e "
       const { Database } = require('bun:sqlite');
       const { execSync } = require('child_process');
       const db = new Database('$DB_PATH', { readonly: true });
       const cwd = process.cwd();
+      const file = process.env.QULT_GATE_FILE;
       const project = db.prepare('SELECT id FROM projects WHERE path = ?').get(cwd);
       if (!project) { console.log('Project not registered.'); process.exit(0); }
       const gates = db.prepare(\"SELECT gate_name, command, timeout FROM gate_configs WHERE project_id = ? AND phase = 'on_write'\").all(project.id);
       db.close();
       let ok = true;
       for (const g of gates) {
-        const cmd = g.command.replace('{file}', '$file');
+        const cmd = g.command.replace('{file}', file);
         process.stdout.write('  ' + g.gate_name + ': ');
         try {
           execSync(cmd, { stdio: 'pipe', timeout: g.timeout || 10000 });

@@ -25,7 +25,6 @@ export default async function sessionStart(ev: HookEvent): Promise<void> {
 		if (ev.source === "startup" || ev.source === "clear") {
 			// Record metrics from previous session before clearing state
 			try {
-				const cwd = ev.cwd ?? process.cwd();
 				const prevState = readSessionState();
 				const gateFailures = Object.values(prevState.gate_failure_counts ?? {}).reduce(
 					(sum: number, v: unknown) => sum + (typeof v === "number" ? v : 0),
@@ -36,7 +35,7 @@ export default async function sessionStart(ev: HookEvent): Promise<void> {
 					(prevState.security_warning_count ?? 0) > 0 ||
 					(prevState.changed_file_paths ?? []).length > 0
 				) {
-					recordSessionMetrics(cwd, {
+					recordSessionMetrics({
 						session_id: ev.session_id ?? "unknown",
 						timestamp: new Date().toISOString(),
 						gate_failures: gateFailures,
@@ -49,7 +48,7 @@ export default async function sessionStart(ev: HookEvent): Promise<void> {
 						files_changed: (prevState.changed_file_paths ?? []).length,
 					});
 				}
-				detectRecurringPatterns(cwd);
+				detectRecurringPatterns();
 			} catch {
 				/* fail-open */
 			}

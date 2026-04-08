@@ -10,7 +10,7 @@ export interface AuditEntry {
 const MAX_ENTRIES = 200;
 
 /** Append an entry to the audit log. Fail-open: silently swallows errors. */
-export function appendAuditLog(_cwd: string, entry: AuditEntry): void {
+export function appendAuditLog(entry: AuditEntry): void {
 	try {
 		const db = getDb();
 		const projectId = getProjectId();
@@ -32,7 +32,7 @@ export function appendAuditLog(_cwd: string, entry: AuditEntry): void {
 }
 
 /** Read the audit log. Returns empty array on any error. */
-export function readAuditLog(_cwd: string): AuditEntry[] {
+export function readAuditLog(): AuditEntry[] {
 	try {
 		const db = getDb();
 		const projectId = getProjectId();

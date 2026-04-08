@@ -349,7 +349,7 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			db.prepare(
 				"INSERT OR REPLACE INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)",
 			).run(sid, gateName, reason);
-			appendAuditLog(cwd, {
+			appendAuditLog({
 				action: "disable_gate",
 				reason,
 				gate_name: gateName,
@@ -411,7 +411,7 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 				};
 			}
 			db.prepare("DELETE FROM pending_fixes WHERE session_id = ?").run(sid);
-			appendAuditLog(cwd, {
+			appendAuditLog({
 				action: "clear_pending_fixes",
 				reason,
 				timestamp: new Date().toISOString(),
@@ -530,7 +530,7 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 				new Date().toISOString(),
 				sid,
 			);
-			appendAuditLog(cwd, {
+			appendAuditLog({
 				action: "record_human_approval",
 				reason: "Architect approved changes",
 				timestamp: new Date().toISOString(),
@@ -567,8 +567,8 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 		}
 		case "get_harness_report": {
 			try {
-				const metrics = readMetricsHistory(cwd);
-				const auditLog = readAuditLog(cwd);
+				const metrics = readMetricsHistory();
+				const auditLog = readAuditLog();
 				const report = generateHarnessReport(metrics, auditLog);
 				return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
 			} catch {
@@ -616,7 +616,7 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 		}
 		case "get_metrics_dashboard": {
 			try {
-				const metrics = readMetricsHistory(cwd);
+				const metrics = readMetricsHistory();
 				return { content: [{ type: "text", text: generateMetricsDashboard(metrics) }] };
 			} catch {
 				return { content: [{ type: "text", text: "No metrics data available yet." }] };
