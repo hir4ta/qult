@@ -1068,3 +1068,5 @@ describe("cross-validation in SubagentStop", () => {
 		expect(stderrCapture.join("")).toContain("security-check");
 	});
 });
+
+// Read-only uncommitted change detection is tested in subagent-stop-readonly.test.ts

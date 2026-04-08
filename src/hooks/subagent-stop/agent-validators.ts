@@ -54,24 +54,62 @@ function checkReadOnlyViolation(normalized: string): void {
 
 	try {
 		const state = readSessionState();
-		if (!state.last_commit_at) return;
 
-		const headTime = execSync("git log -1 --format=%aI HEAD", {
-			timeout: 5000,
-			encoding: "utf-8",
-			stdio: ["pipe", "pipe", "pipe"],
-		}).trim();
-
-		if (headTime && new Date(headTime) > new Date(state.last_commit_at)) {
-			const commitMsg = execSync("git log -1 --format=%s HEAD", {
+		// Check 1: unauthorized commits
+		if (state.last_commit_at) {
+			const headTime = execSync("git log -1 --format=%aI HEAD", {
 				timeout: 5000,
 				encoding: "utf-8",
 				stdio: ["pipe", "pipe", "pipe"],
 			}).trim();
-			block(
-				`${normalized} violated read-only constraint: unauthorized commit detected ("${commitMsg.slice(0, 100)}"). ` +
-					"Reviewers must NOT commit. Revert with `git reset --soft HEAD~1` and rerun the review.",
-			);
+
+			if (headTime && new Date(headTime) > new Date(state.last_commit_at)) {
+				const commitMsg = execSync("git log -1 --format=%s HEAD", {
+					timeout: 5000,
+					encoding: "utf-8",
+					stdio: ["pipe", "pipe", "pipe"],
+				}).trim();
+				block(
+					`${normalized} violated read-only constraint: unauthorized commit detected ("${commitMsg.slice(0, 100)}"). ` +
+						"Reviewers must NOT commit. Revert with `git reset --soft HEAD~1` and rerun the review.",
+				);
+			}
+		}
+
+		// Check 2: unauthorized uncommitted changes (new files modified that weren't in changed_file_paths)
+		// Only run if we have tracked files (skip if no files tracked — can't compare meaningfully)
+		if (state.changed_file_paths.length > 0) {
+			const diffOutput = execSync("git diff --name-only", {
+				timeout: 5000,
+				encoding: "utf-8",
+				stdio: ["pipe", "pipe", "pipe"],
+			}).trim();
+			if (diffOutput) {
+				const diffFiles = new Set(diffOutput.split("\n").filter(Boolean));
+				// changed_file_paths stores absolute paths; git diff returns relative paths
+				// Normalize both to relative for comparison
+				const knownRelative = new Set(
+					state.changed_file_paths.map((p: string) => {
+						// If absolute, make relative to cwd
+						if (p.startsWith("/")) {
+							try {
+								const cwd = process.cwd();
+								return p.startsWith(cwd + "/") ? p.slice(cwd.length + 1) : p;
+							} catch {
+								return p;
+							}
+						}
+						return p;
+					}),
+				);
+				const newFiles = [...diffFiles].filter((f) => !knownRelative.has(f));
+				if (newFiles.length > 0) {
+					block(
+						`${normalized} violated read-only constraint: uncommitted changes detected in files not tracked before review: ${newFiles.slice(0, 5).join(", ")}. ` +
+							"Reviewers must NOT modify files. Restore with `git checkout -- <file>` and rerun the review.",
+					);
+				}
+			}
 		}
 	} catch (err) {
 		if (err instanceof Error && err.message.startsWith("process.exit")) throw err;

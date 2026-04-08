@@ -2772,7 +2772,9 @@ function detectUnreachableCode(lines) {
       continue;
     if (!/^\s*(?:return\b|throw\b)/.test(line))
       continue;
-    if (!trimmed.endsWith(";"))
+    const openBraces = (trimmed.match(/\{/g) ?? []).length;
+    const closeBraces = (trimmed.match(/\}/g) ?? []).length;
+    if (openBraces > closeBraces)
       continue;
     for (let j = i + 1;j < lines.length; j++) {
       const nextTrimmed = lines[j].trimStart();
@@ -2799,9 +2801,10 @@ function detectLooseEquality(lines) {
     const trimmed = line.trimStart();
     if (trimmed.startsWith("//") || trimmed.startsWith("*"))
       continue;
-    if (!LOOSE_EQ_RE.test(trimmed))
+    const stripped = trimmed.replace(STRING_LITERAL_RE, '""');
+    if (!LOOSE_EQ_RE.test(stripped))
       continue;
-    if (NULL_COALESCE_RE.test(trimmed))
+    if (NULL_COALESCE_RE.test(stripped))
       continue;
     if (INTENTIONAL_RE.test(line))
       continue;
@@ -2817,10 +2820,11 @@ function detectSwitchFallthrough(lines) {
   let hasFallthroughComment = false;
   let hasIntentional = false;
   let hasCode = false;
+  let braceDepth = 0;
   for (let i = 0;i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trimStart();
-    if (CASE_RE.test(trimmed)) {
+    if (CASE_OR_DEFAULT_RE.test(trimmed)) {
       if (inCase && hasCode && !hasBreak && !hasFallthroughComment && !hasIntentional) {
         errors.push(`L${i + 1}: Switch case fallthrough from case at L${caseStartLine} \u2014 add break, return, or // fallthrough comment`);
       }
@@ -2830,11 +2834,15 @@ function detectSwitchFallthrough(lines) {
       hasFallthroughComment = false;
       hasIntentional = false;
       hasCode = false;
+      braceDepth = 0;
       continue;
     }
     if (!inCase)
       continue;
-    if (BREAK_RE.test(trimmed)) {
+    const opens = (line.match(/\{/g) ?? []).length;
+    const closes = (line.match(/\}/g) ?? []).length;
+    braceDepth += opens - closes;
+    if (braceDepth <= 0 && BREAK_RE.test(trimmed)) {
       hasBreak = true;
     }
     if (FALLTHROUGH_COMMENT_RE.test(line)) {
@@ -2843,10 +2851,10 @@ function detectSwitchFallthrough(lines) {
     if (INTENTIONAL_RE.test(line)) {
       hasIntentional = true;
     }
-    if (trimmed !== "" && !trimmed.startsWith("//") && !trimmed.startsWith("*") && !trimmed.startsWith("}")) {
+    if (trimmed !== "" && !trimmed.startsWith("//") && !trimmed.startsWith("*")) {
       hasCode = true;
     }
-    if (trimmed.startsWith("}")) {
+    if (braceDepth < 0) {
       inCase = false;
     }
   }
@@ -2909,7 +2917,7 @@ function detectSemanticPatterns(file) {
     }
   ];
 }
-var JS_TS_EXTS2, PY_EXTS4, CHECKABLE_EXTS3, MAX_CHECK_SIZE4 = 500000, INTENTIONAL_RE, PURE_METHODS_RE, CHAIN_CONTINUATION_RE, CONDITION_ASSIGNMENT_RE, DESTRUCTURE_RE, LOOSE_EQ_RE, NULL_COALESCE_RE, CASE_RE, BREAK_RE, FALLTHROUGH_COMMENT_RE, TEST_CASE_RE, PBT_IMPORT_RE;
+var JS_TS_EXTS2, PY_EXTS4, CHECKABLE_EXTS3, MAX_CHECK_SIZE4 = 500000, INTENTIONAL_RE, PURE_METHODS_RE, CHAIN_CONTINUATION_RE, CONDITION_ASSIGNMENT_RE, DESTRUCTURE_RE, LOOSE_EQ_RE, NULL_COALESCE_RE, STRING_LITERAL_RE, CASE_OR_DEFAULT_RE, BREAK_RE, FALLTHROUGH_COMMENT_RE, TEST_CASE_RE, PBT_IMPORT_RE;
 var init_semantic_check = __esm(() => {
   init_session_state();
   JS_TS_EXTS2 = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
@@ -2922,7 +2930,8 @@ var init_semantic_check = __esm(() => {
   DESTRUCTURE_RE = /\b(?:const|let|var)\s/;
   LOOSE_EQ_RE = /(?<![!=])(?:==|!=)(?!=)/;
   NULL_COALESCE_RE = /(?:==|!=)\s*null\b/;
-  CASE_RE = /^\s*case\b/;
+  STRING_LITERAL_RE = /(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|\/(?:[^/\\\n]|\\.)+\/[gimsuy]*)/g;
+  CASE_OR_DEFAULT_RE = /^\s*(?:case\b|default\s*:)/;
   BREAK_RE = /^\s*(?:break|return|throw|continue)\b/;
   FALLTHROUGH_COMMENT_RE = /(?:\/\/|\/\*)\s*fall\s*-?\s*through/i;
   TEST_CASE_RE = /\b(?:it|test)\s*\(/g;
@@ -4140,20 +4149,46 @@ function checkReadOnlyViolation(normalized) {
     return;
   try {
     const state = readSessionState();
-    if (!state.last_commit_at)
-      return;
-    const headTime = execSync3("git log -1 --format=%aI HEAD", {
-      timeout: 5000,
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"]
-    }).trim();
-    if (headTime && new Date(headTime) > new Date(state.last_commit_at)) {
-      const commitMsg = execSync3("git log -1 --format=%s HEAD", {
+    if (state.last_commit_at) {
+      const headTime = execSync3("git log -1 --format=%aI HEAD", {
         timeout: 5000,
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"]
       }).trim();
-      block(`${normalized} violated read-only constraint: unauthorized commit detected ("${commitMsg.slice(0, 100)}"). ` + "Reviewers must NOT commit. Revert with `git reset --soft HEAD~1` and rerun the review.");
+      if (headTime && new Date(headTime) > new Date(state.last_commit_at)) {
+        const commitMsg = execSync3("git log -1 --format=%s HEAD", {
+          timeout: 5000,
+          encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"]
+        }).trim();
+        block(`${normalized} violated read-only constraint: unauthorized commit detected ("${commitMsg.slice(0, 100)}"). ` + "Reviewers must NOT commit. Revert with `git reset --soft HEAD~1` and rerun the review.");
+      }
+    }
+    if (state.changed_file_paths.length > 0) {
+      const diffOutput = execSync3("git diff --name-only", {
+        timeout: 5000,
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"]
+      }).trim();
+      if (diffOutput) {
+        const diffFiles = new Set(diffOutput.split(`
+`).filter(Boolean));
+        const knownRelative = new Set(state.changed_file_paths.map((p) => {
+          if (p.startsWith("/")) {
+            try {
+              const cwd = process.cwd();
+              return p.startsWith(cwd + "/") ? p.slice(cwd.length + 1) : p;
+            } catch {
+              return p;
+            }
+          }
+          return p;
+        }));
+        const newFiles = [...diffFiles].filter((f) => !knownRelative.has(f));
+        if (newFiles.length > 0) {
+          block(`${normalized} violated read-only constraint: uncommitted changes detected in files not tracked before review: ${newFiles.slice(0, 5).join(", ")}. ` + "Reviewers must NOT modify files. Restore with `git checkout -- <file>` and rerun the review.");
+        }
+      }
     }
   } catch (err) {
     if (err instanceof Error && err.message.startsWith("process.exit"))
@@ -5128,7 +5163,7 @@ function getFlywheelRecommendations(history, config) {
           reason: `${mapping.name} warnings in ${(stats.frequency * 100).toFixed(0)}% of sessions with worsening trend`
         });
       }
-    } else if (stats.frequency < 0.2 && stats.trend === "stable" && analysis.windows.long) {
+    } else if (stats.frequency < 0.2 && stats.trend === "stable" && analysis.windows.long && analysis.windows.long.frequency < 0.2) {
       const suggested = Math.min(currentThreshold + 3, currentThreshold * 2, 100);
       if (suggested > currentThreshold) {
         recs.push({

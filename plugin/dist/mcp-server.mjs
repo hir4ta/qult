@@ -711,7 +711,7 @@ function getFlywheelRecommendations(history, config) {
           reason: `${mapping.name} warnings in ${(stats.frequency * 100).toFixed(0)}% of sessions with worsening trend`
         });
       }
-    } else if (stats.frequency < 0.2 && stats.trend === "stable" && analysis.windows.long) {
+    } else if (stats.frequency < 0.2 && stats.trend === "stable" && analysis.windows.long && analysis.windows.long.frequency < 0.2) {
       const suggested = Math.min(currentThreshold + 3, currentThreshold * 2, 100);
       if (suggested > currentThreshold) {
         recs.push({
