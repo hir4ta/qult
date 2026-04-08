@@ -10,7 +10,7 @@
  */
 
 import { createInterface } from "node:readline";
-import { loadGates } from "./gates/load.ts";
+import { loadGates, saveGates } from "./gates/load.ts";
 import { generateHandoffDocument } from "./handoff.ts";
 import { generateHarnessReport } from "./harness-report.ts";
 import { generateMetricsDashboard } from "./metrics-dashboard.ts";
@@ -248,6 +248,22 @@ const TOOL_DEFS: ToolDef[] = [
 		description:
 			"Returns a formatted metrics dashboard showing gate failure trends and review score history.",
 		inputSchema: { type: "object", properties: {} },
+	},
+	{
+		name: "save_gates",
+		description:
+			"Save gate configuration for the current project. Use during /qult:init to register detected gates. Replaces all existing gates atomically.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				gates: {
+					type: "object",
+					description:
+						"GatesConfig: { on_write?: { lint: { command, timeout?, run_once_per_batch? }, ... }, on_commit?: { ... }, on_review?: { ... } }",
+				},
+			},
+			required: ["gates"],
+		},
 	},
 ];
 
@@ -616,6 +632,75 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			} catch {
 				return { content: [{ type: "text", text: "No metrics data available yet." }] };
 			}
+		}
+		// Not in WRITE_TOOLS: save_gates is a project-level operation used during /qult:init,
+		// which may run before any session-creating hook has fired.
+		case "save_gates": {
+			const gates = args?.gates;
+			if (!gates || typeof gates !== "object" || Array.isArray(gates)) {
+				return {
+					isError: true,
+					content: [{ type: "text", text: "Missing or invalid gates parameter." }],
+				};
+			}
+			// Validate structure: only known phases, each gate must have command string
+			const validPhases = ["on_write", "on_commit", "on_review"];
+			let totalGates = 0;
+			for (const [phase, gateMap] of Object.entries(gates)) {
+				if (!validPhases.includes(phase)) {
+					return {
+						isError: true,
+						content: [
+							{ type: "text", text: `Invalid phase '${phase}'. Valid: ${validPhases.join(", ")}` },
+						],
+					};
+				}
+				if (typeof gateMap !== "object" || gateMap === null || Array.isArray(gateMap)) {
+					return {
+						isError: true,
+						content: [{ type: "text", text: `Phase '${phase}' must be an object of gates.` }],
+					};
+				}
+				for (const [gateName, gateDef] of Object.entries(gateMap as Record<string, unknown>)) {
+					if (
+						typeof gateDef !== "object" ||
+						gateDef === null ||
+						typeof (gateDef as Record<string, unknown>).command !== "string" ||
+						((gateDef as Record<string, unknown>).command as string).trim() === ""
+					) {
+						return {
+							isError: true,
+							content: [
+								{
+									type: "text",
+									text: `Gate '${phase}.${gateName}' must have a non-empty command string.`,
+								},
+							],
+						};
+					}
+					totalGates++;
+				}
+			}
+			if (totalGates === 0) {
+				return {
+					isError: true,
+					content: [{ type: "text", text: "No gates provided." }],
+				};
+			}
+			saveGates(gates as import("./types.ts").GatesConfig);
+			appendAuditLog({
+				action: "save_gates",
+				reason: "Gates configured via /qult:init",
+				timestamp: new Date().toISOString(),
+			});
+			// Count gates per phase
+			const counts = validPhases
+				.map((p) => {
+					const m = (gates as Record<string, unknown>)[p];
+					return `${m && typeof m === "object" ? Object.keys(m).length : 0} ${p}`;
+				})
+				.filter((s) => !s.startsWith("0 "));
+			return { content: [{ type: "text", text: `Gates saved: ${counts.join(", ")}.` }] };
 		}
 		case "reset_escalation_counters": {
 			const reason = typeof args?.reason === "string" ? args.reason : null;

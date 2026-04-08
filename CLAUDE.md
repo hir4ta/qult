@@ -81,7 +81,7 @@ qult/
 - raw stdio JSON-RPC 実装 (SDK 依存なし)
 - 読み取り: get_pending_fixes, get_session_status, get_gate_config, get_detector_summary
 - 分析: get_harness_report, get_handoff_document, get_metrics_dashboard
-- 操作: disable_gate, enable_gate, clear_pending_fixes, set_config
+- 操作: disable_gate, enable_gate, clear_pending_fixes, set_config, save_gates
 - 記録: record_review, record_test_pass, record_stage_scores, record_human_approval
 - disable_gate は gate 名をバリデーション（gate_configs テーブルのキー + "review", "security-check", "dead-import-check", "duplication-check"）
 - MCP tool の呼び出しルールは MCP server instructions で注入（プロジェクトにファイル配置しない）

@@ -33,7 +33,7 @@ export function loadGates(): GatesConfig | null {
 			const phase = row.phase as keyof GatesConfig;
 			if (!config[phase]) config[phase] = {};
 			const gate: GateDefinition = { command: row.command };
-			if (row.timeout) gate.timeout = row.timeout;
+			if (row.timeout !== null) gate.timeout = row.timeout;
 			if (row.run_once_per_batch) gate.run_once_per_batch = true;
 			if (row.extensions) {
 				try {

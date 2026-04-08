@@ -265,7 +265,7 @@ function loadGates() {
       if (!config[phase])
         config[phase] = {};
       const gate = { command: row.command };
-      if (row.timeout)
+      if (row.timeout !== null)
         gate.timeout = row.timeout;
       if (row.run_once_per_batch)
         gate.run_once_per_batch = true;
@@ -282,6 +282,27 @@ function loadGates() {
     _cache = null;
     return null;
   }
+}
+function saveGates(gates) {
+  const db = getDb();
+  const projectId = getProjectId();
+  db.exec("BEGIN");
+  try {
+    db.prepare("DELETE FROM gate_configs WHERE project_id = ?").run(projectId);
+    const insert = db.prepare("INSERT INTO gate_configs (project_id, phase, gate_name, command, timeout, run_once_per_batch, extensions) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    for (const [phase, gateMap] of Object.entries(gates)) {
+      if (!gateMap)
+        continue;
+      for (const [name, gate] of Object.entries(gateMap)) {
+        insert.run(projectId, phase, name, gate.command, gate.timeout ?? null, gate.run_once_per_batch ? 1 : 0, gate.extensions ? JSON.stringify(gate.extensions) : null);
+      }
+    }
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+  _cache = undefined;
 }
 
 // src/handoff.ts
@@ -782,6 +803,20 @@ var TOOL_DEFS = [
     name: "get_metrics_dashboard",
     description: "Returns a formatted metrics dashboard showing gate failure trends and review score history.",
     inputSchema: { type: "object", properties: {} }
+  },
+  {
+    name: "save_gates",
+    description: "Save gate configuration for the current project. Use during /qult:init to register detected gates. Replaces all existing gates atomically.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        gates: {
+          type: "object",
+          description: "GatesConfig: { on_write?: { lint: { command, timeout?, run_once_per_batch? }, ... }, on_commit?: { ... }, on_review?: { ... } }"
+        }
+      },
+      required: ["gates"]
+    }
   }
 ];
 var WRITE_TOOLS = new Set([
@@ -1105,6 +1140,64 @@ function handleTool(name, cwd, args) {
       } catch {
         return { content: [{ type: "text", text: "No metrics data available yet." }] };
       }
+    }
+    case "save_gates": {
+      const gates = args?.gates;
+      if (!gates || typeof gates !== "object" || Array.isArray(gates)) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "Missing or invalid gates parameter." }]
+        };
+      }
+      const validPhases = ["on_write", "on_commit", "on_review"];
+      let totalGates = 0;
+      for (const [phase, gateMap] of Object.entries(gates)) {
+        if (!validPhases.includes(phase)) {
+          return {
+            isError: true,
+            content: [
+              { type: "text", text: `Invalid phase '${phase}'. Valid: ${validPhases.join(", ")}` }
+            ]
+          };
+        }
+        if (typeof gateMap !== "object" || gateMap === null || Array.isArray(gateMap)) {
+          return {
+            isError: true,
+            content: [{ type: "text", text: `Phase '${phase}' must be an object of gates.` }]
+          };
+        }
+        for (const [gateName, gateDef] of Object.entries(gateMap)) {
+          if (typeof gateDef !== "object" || gateDef === null || typeof gateDef.command !== "string" || gateDef.command.trim() === "") {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: "text",
+                  text: `Gate '${phase}.${gateName}' must have a non-empty command string.`
+                }
+              ]
+            };
+          }
+          totalGates++;
+        }
+      }
+      if (totalGates === 0) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "No gates provided." }]
+        };
+      }
+      saveGates(gates);
+      appendAuditLog({
+        action: "save_gates",
+        reason: "Gates configured via /qult:init",
+        timestamp: new Date().toISOString()
+      });
+      const counts = validPhases.map((p) => {
+        const m = gates[p];
+        return `${m && typeof m === "object" ? Object.keys(m).length : 0} ${p}`;
+      }).filter((s) => !s.startsWith("0 "));
+      return { content: [{ type: "text", text: `Gates saved: ${counts.join(", ")}.` }] };
     }
     case "reset_escalation_counters": {
       const reason = typeof args?.reason === "string" ? args.reason : null;

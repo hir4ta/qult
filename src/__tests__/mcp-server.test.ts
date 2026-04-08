@@ -155,7 +155,7 @@ describe("handleRequest (JSON-RPC)", () => {
 	it("tools/list returns all tool definitions", () => {
 		const response = handleRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" }, TEST_DIR);
 		const result = response!.result as { tools: { name: string }[] };
-		expect(result.tools).toHaveLength(16);
+		expect(result.tools).toHaveLength(17);
 		expect(result.tools.map((t) => t.name)).toEqual([
 			"get_pending_fixes",
 			"get_session_status",
@@ -173,6 +173,7 @@ describe("handleRequest (JSON-RPC)", () => {
 			"get_harness_report",
 			"get_handoff_document",
 			"get_metrics_dashboard",
+			"save_gates",
 		]);
 	});
 
@@ -216,8 +217,8 @@ describe("handleRequest (JSON-RPC)", () => {
 });
 
 describe("TOOL_DEFS", () => {
-	it("has 16 tool definitions", () => {
-		expect(TOOL_DEFS).toHaveLength(16);
+	it("has 17 tool definitions", () => {
+		expect(TOOL_DEFS).toHaveLength(17);
 	});
 
 	it("each tool has name, description, and inputSchema", () => {
@@ -610,5 +611,96 @@ describe("get_detector_summary", () => {
 		expect(text).toContain("drift_warning_count: 4");
 		expect(text).toContain("test_quality_warning_count: 1");
 		expect(text).toContain("duplication_warning_count: 3");
+	});
+});
+
+describe("handleTool: save_gates", () => {
+	it("saves gates and returns count summary", () => {
+		const gates = {
+			on_write: {
+				lint: { command: "biome check {file}", timeout: 3000 },
+				typecheck: { command: "tsc --noEmit", timeout: 10000, run_once_per_batch: true },
+			},
+			on_commit: {
+				test: { command: "vitest run", timeout: 30000 },
+			},
+		};
+		const result = handleTool("save_gates", TEST_DIR, { gates });
+		expect(result.isError).toBeUndefined();
+		expect(result.content[0]!.text).toContain("Gates saved");
+		expect(result.content[0]!.text).toContain("2 on_write");
+		expect(result.content[0]!.text).toContain("1 on_commit");
+	});
+
+	it("gates are readable via get_gate_config after save", () => {
+		const gates = {
+			on_write: { lint: { command: "biome check {file}" } },
+		};
+		handleTool("save_gates", TEST_DIR, { gates });
+		const result = handleTool("get_gate_config", TEST_DIR);
+		expect(result.isError).toBeUndefined();
+		const parsed = JSON.parse(result.content[0]!.text);
+		expect(parsed.on_write.lint.command).toBe("biome check {file}");
+	});
+
+	it("rejects missing gates parameter", () => {
+		const result = handleTool("save_gates", TEST_DIR, {});
+		expect(result.isError).toBe(true);
+		expect(result.content[0]!.text).toContain("Missing or invalid");
+	});
+
+	it("rejects array as gates parameter", () => {
+		const result = handleTool("save_gates", TEST_DIR, { gates: [{ on_write: {} }] });
+		expect(result.isError).toBe(true);
+		expect(result.content[0]!.text).toContain("Missing or invalid");
+	});
+
+	it("rejects invalid phase name", () => {
+		const result = handleTool("save_gates", TEST_DIR, {
+			gates: { on_invalid: { lint: { command: "biome" } } },
+		});
+		expect(result.isError).toBe(true);
+		expect(result.content[0]!.text).toContain("Invalid phase");
+	});
+
+	it("rejects non-object gateMap", () => {
+		const result = handleTool("save_gates", TEST_DIR, {
+			gates: { on_write: "not an object" },
+		});
+		expect(result.isError).toBe(true);
+		expect(result.content[0]!.text).toContain("must be an object");
+	});
+
+	it("rejects gate without command", () => {
+		const result = handleTool("save_gates", TEST_DIR, {
+			gates: { on_write: { lint: { timeout: 3000 } } },
+		});
+		expect(result.isError).toBe(true);
+		expect(result.content[0]!.text).toContain("must have a non-empty command");
+	});
+
+	it("rejects gate with empty command string", () => {
+		const result = handleTool("save_gates", TEST_DIR, {
+			gates: { on_write: { lint: { command: "  " } } },
+		});
+		expect(result.isError).toBe(true);
+		expect(result.content[0]!.text).toContain("must have a non-empty command");
+	});
+
+	it("rejects empty gates object", () => {
+		const result = handleTool("save_gates", TEST_DIR, { gates: {} });
+		expect(result.isError).toBe(true);
+		expect(result.content[0]!.text).toContain("No gates provided");
+	});
+
+	it("atomically replaces existing gates", () => {
+		const first = { on_write: { lint: { command: "eslint {file}" } } };
+		const second = { on_commit: { test: { command: "vitest run" } } };
+		handleTool("save_gates", TEST_DIR, { gates: first });
+		handleTool("save_gates", TEST_DIR, { gates: second });
+		const result = handleTool("get_gate_config", TEST_DIR);
+		const parsed = JSON.parse(result.content[0]!.text);
+		expect(parsed.on_write).toBeUndefined();
+		expect(parsed.on_commit.test.command).toBe("vitest run");
 	});
 });

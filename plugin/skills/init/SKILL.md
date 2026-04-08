@@ -10,6 +10,7 @@ allowed-tools:
   - Bash
   - mcp__plugin_qult_qult__get_gate_config
   - mcp__plugin_qult_qult__get_session_status
+  - mcp__plugin_qult_qult__save_gates
 ---
 
 # /qult:init
@@ -71,17 +72,11 @@ Rules:
 
 For each gate command, confirm the tool is available (e.g. `which biome`, `cargo --version`). Do NOT run full test suites or commands that modify state. If a tool is not installed, remove that gate.
 
-### 2d: Store gates in DB
+### 2d: Store gates via MCP
 
-Write the detected gates to the DB using Bash:
-```bash
-bun -e "
-const { getDb, setProjectPath, getProjectId } = require('$CLAUDE_PLUGIN_ROOT/dist/mcp-server.mjs');
-// ... or use MCP tools
-"
-```
+Call `mcp__plugin_qult_qult__save_gates` with the gates object built in 2b. This atomically replaces all existing gates and invalidates the MCP server's cache.
 
-Alternatively, use the MCP server: call `mcp__plugin_qult_qult__get_gate_config` to verify gates are stored.
+Then call `mcp__plugin_qult_qult__get_gate_config` to verify the gates were stored correctly.
 
 **Note**: The gate config is stored in `~/.qult/qult.db`, NOT in a project file. No project directory is modified.
 

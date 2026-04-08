@@ -443,7 +443,7 @@ function loadGates() {
       if (!config[phase])
         config[phase] = {};
       const gate = { command: row.command };
-      if (row.timeout)
+      if (row.timeout !== null)
         gate.timeout = row.timeout;
       if (row.run_once_per_batch)
         gate.run_once_per_batch = true;
