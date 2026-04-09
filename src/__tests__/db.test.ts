@@ -144,23 +144,25 @@ describe("db", () => {
 			expect(findLatestSessionId()).toBeNull();
 		});
 
-		it("returns the most recent session", () => {
+		it("returns the last inserted session (by rowid, not timestamp)", () => {
 			setProjectPath("/tmp/test-project");
 			const projectId = getProjectId();
 			const db = getDb();
 
-			db.prepare("INSERT INTO sessions (id, project_id, started_at) VALUES (?, ?, ?)").run(
-				"old-session",
-				projectId,
-				"2024-01-01T00:00:00.000Z",
-			);
+			// Insert "old" second — it should be returned because rowid is higher
 			db.prepare("INSERT INTO sessions (id, project_id, started_at) VALUES (?, ?, ?)").run(
 				"new-session",
 				projectId,
 				"2024-12-31T23:59:59.999Z",
 			);
+			db.prepare("INSERT INTO sessions (id, project_id, started_at) VALUES (?, ?, ?)").run(
+				"old-session",
+				projectId,
+				"2024-01-01T00:00:00.000Z",
+			);
 
-			expect(findLatestSessionId()).toBe("new-session");
+			// old-session was inserted last → highest rowid → should be returned
+			expect(findLatestSessionId()).toBe("old-session");
 		});
 
 		it("scopes to current project", () => {
@@ -182,6 +184,22 @@ describe("db", () => {
 			);
 
 			expect(findLatestSessionId()).toBe("session-b");
+		});
+
+		it("returns the session most recently ensured by hooks", () => {
+			setProjectPath("/tmp/test-project");
+			getProjectId(); // register project
+
+			// Simulate hooks creating sessions in order (as Claude Code sends different session_ids)
+			setSessionScope("session-1");
+			ensureSession();
+			setSessionScope("session-2");
+			ensureSession();
+			setSessionScope("session-3");
+			ensureSession();
+
+			// MCP server should find session-3 (last ensureSession call = highest rowid)
+			expect(findLatestSessionId()).toBe("session-3");
 		});
 	});
 

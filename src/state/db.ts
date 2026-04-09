@@ -348,12 +348,15 @@ export function ensureSession(): void {
 	);
 }
 
-/** Find the most recent session for the current project. Used by MCP server. */
+/** Find the most recent session for the current project. Used by MCP server.
+ *  Uses rowid (insertion order) instead of started_at to match the session
+ *  that hooks most recently called ensureSession() for. This prevents
+ *  MCP-hook session ID mismatch when multiple sessions exist. */
 export function findLatestSessionId(): string | null {
 	const db = getDb();
 	const projectId = getProjectId();
 	const row = db
-		.prepare("SELECT id FROM sessions WHERE project_id = ? ORDER BY started_at DESC LIMIT 1")
+		.prepare("SELECT id FROM sessions WHERE project_id = ? ORDER BY rowid DESC LIMIT 1")
 		.get(projectId) as { id: string } | null;
 	return row?.id ?? null;
 }
