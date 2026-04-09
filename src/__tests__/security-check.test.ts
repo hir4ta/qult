@@ -400,3 +400,87 @@ describe("emitAdvisoryWarnings", () => {
 		expect(warnings.some((w) => w.includes("API route"))).toBe(false);
 	});
 });
+
+describe("promoted advisory → blocking patterns", () => {
+	it("detects CORS wildcard as blocking PendingFix", async () => {
+		const file = join(TEST_DIR, "server.ts");
+		writeFileSync(file, `"Access-Control-Allow-Origin": "*"\n`);
+		const { detectSecurityPatterns } = await import("../hooks/detectors/security-check.ts");
+		const fixes = detectSecurityPatterns(file);
+		expect(fixes.length).toBeGreaterThan(0);
+		expect(fixes[0]!.errors.some((e) => e.includes("CORS wildcard"))).toBe(true);
+	});
+
+	it("suppresses CORS wildcard on localhost lines", async () => {
+		const file = join(TEST_DIR, "dev.ts");
+		writeFileSync(file, `"Access-Control-Allow-Origin": "*" // localhost\n`);
+		const { detectSecurityPatterns } = await import("../hooks/detectors/security-check.ts");
+		const fixes = detectSecurityPatterns(file);
+		const corsErrors = fixes.flatMap((f) => f.errors).filter((e) => e.includes("CORS wildcard"));
+		expect(corsErrors).toHaveLength(0);
+	});
+
+	it("detects hardcoded debug mode as blocking PendingFix", async () => {
+		const file = join(TEST_DIR, "config.ts");
+		writeFileSync(file, `const config = { debug: true };\n`);
+		const { detectSecurityPatterns } = await import("../hooks/detectors/security-check.ts");
+		const fixes = detectSecurityPatterns(file);
+		expect(fixes.length).toBeGreaterThan(0);
+		expect(fixes[0]!.errors.some((e) => e.includes("debug=true") || e.includes("debug"))).toBe(
+			true,
+		);
+	});
+
+	it("suppresses debug mode when line contains test/mock context", async () => {
+		const file = join(TEST_DIR, "config.ts");
+		writeFileSync(file, `const mockConfig = { debug: true }; // test config\n`);
+		const { detectSecurityPatterns } = await import("../hooks/detectors/security-check.ts");
+		const fixes = detectSecurityPatterns(file);
+		const debugErrors = fixes.flatMap((f) => f.errors).filter((e) => e.includes("debug"));
+		expect(debugErrors).toHaveLength(0);
+	});
+
+	it("detects source map exposure as blocking PendingFix", async () => {
+		const file = join(TEST_DIR, "build.ts");
+		writeFileSync(file, `const config = { sourceMap: true };\n`);
+		const { detectSecurityPatterns } = await import("../hooks/detectors/security-check.ts");
+		const fixes = detectSecurityPatterns(file);
+		expect(fixes.length).toBeGreaterThan(0);
+		expect(fixes[0]!.errors.some((e) => e.includes("Source map") || e.includes("source"))).toBe(
+			true,
+		);
+	});
+
+	it("suppresses source map when line contains dev context", async () => {
+		const file = join(TEST_DIR, "webpack.config.ts");
+		writeFileSync(file, `const config = { sourceMap: true }; // development only\n`);
+		const { detectSecurityPatterns } = await import("../hooks/detectors/security-check.ts");
+		const fixes = detectSecurityPatterns(file);
+		const srcMapErrors = fixes
+			.flatMap((f) => f.errors)
+			.filter((e) => e.includes("Source map") || e.includes("source"));
+		expect(srcMapErrors).toHaveLength(0);
+	});
+});
+
+describe("getAdvisoryAsPendingFixes", () => {
+	it("returns PendingFix for advisory patterns when called with content", async () => {
+		const file = join(TEST_DIR, "routes.ts");
+		const content = `app.get("/api/users", handler);\n`;
+		writeFileSync(file, content);
+		const { getAdvisoryAsPendingFixes } = await import("../hooks/detectors/security-check.ts");
+		const fixes = getAdvisoryAsPendingFixes(file, content);
+		expect(fixes.length).toBeGreaterThan(0);
+		expect(fixes[0]!.gate).toBe("security-check-advisory");
+		expect(fixes[0]!.errors.some((e: string) => e.includes("API route"))).toBe(true);
+	});
+
+	it("returns empty array for files with no advisory matches", async () => {
+		const file = join(TEST_DIR, "clean.ts");
+		const content = `const x = 1;\n`;
+		writeFileSync(file, content);
+		const { getAdvisoryAsPendingFixes } = await import("../hooks/detectors/security-check.ts");
+		const fixes = getAdvisoryAsPendingFixes(file, content);
+		expect(fixes).toHaveLength(0);
+	});
+});

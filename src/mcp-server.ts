@@ -54,6 +54,9 @@ function getValidGateNames(): string[] {
 		"dead-import-check",
 		"duplication-check",
 		"semantic-check",
+		"semgrep-required",
+		"test-quality-check",
+		"security-check-advisory",
 	]);
 	if (gates) {
 		for (const category of [gates.on_write, gates.on_commit, gates.on_review]) {

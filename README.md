@@ -77,7 +77,10 @@ flowchart LR
 | Detects semantic bugs (6+ patterns) | Empty catch, unreachable code, loose equality, switch fallthrough |
 | Detects code duplication | Intra-file blocking, cross-file advisory |
 | PBT-aware test quality checks | Skips false positives for property-based tests |
-| SAST integration (Semgrep on-write) | Auto-detects `.semgrep.yml`, runs per-file |
+| SAST integration (Semgrep required) | Semgrep mandatory; blocks commit when not installed |
+| Iterative security escalation | Advisory patterns promoted to blocking after N edits to same file |
+| Test quality blocking | Empty tests, always-true, trivial assertions blocked as pending-fixes |
+| Dead import escalation | Advisory dead imports promoted to blocking after warning threshold |
 | Cross-session learning (Flywheel) | Threshold adjustment recommendations based on patterns |
 | Preserves state across context compaction | Re-injects session state after compaction |
 
@@ -85,7 +88,7 @@ flowchart LR
 
 **Requires [Bun](https://bun.sh)** (hooks and MCP server run on Bun runtime).
 
-**Recommended: [Semgrep](https://semgrep.dev)** for deeper SAST analysis. Built-in security checks work as fallback without Semgrep.
+**Required: [Semgrep](https://semgrep.dev)** for SAST analysis. qult blocks commits when Semgrep is not installed (`/qult:skip semgrep-required` to temporarily bypass).
 
 ```bash
 brew install semgrep  # macOS
@@ -200,7 +203,10 @@ All config is stored in the DB, manageable via `/qult:config` or MCP tools. Envi
 | `plan_eval.score_threshold` | 12 | Plan evaluation score (/15) |
 | `gates.output_max_chars` | 3500 | Max gate output chars |
 | `gates.default_timeout` | 10000 | Gate command timeout (ms) |
+| `security.require_semgrep` | true | Require Semgrep installation |
 | `escalation.*_threshold` | 8-10 | Warning count before blocking |
+| `escalation.security_iterative_threshold` | 5 | Same-file edit count before advisory→blocking |
+| `escalation.dead_import_blocking_threshold` | 5 | Dead import warnings before blocking |
 | `review.models.*` | spec=sonnet, quality/security=opus, adversarial=sonnet | Per-stage reviewer model |
 | `flywheel.enabled` | true | Cross-session threshold recommendations |
 | `flywheel.min_sessions` | 10 | Min sessions for flywheel analysis |

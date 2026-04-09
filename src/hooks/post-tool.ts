@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { dirname, extname, resolve } from "node:path";
 import { loadConfig } from "../config.ts";
 import { loadGates } from "../gates/load.ts";
@@ -13,6 +14,7 @@ import {
 	clearOnCommit,
 	getGatedExtensions,
 	incrementEscalation,
+	incrementFileEditCount,
 	incrementGateFailure,
 	isGateDisabled,
 	markGateRan,
@@ -22,15 +24,16 @@ import {
 	resetGateFailure,
 	shouldSkipGate,
 } from "../state/session-state.ts";
-import type { HookEvent, PendingFix } from "../types.ts";
+import type { GateDefinition, HookEvent, PendingFix } from "../types.ts";
 import { detectConventionDrift } from "./detectors/convention-check.ts";
 import { detectDeadImports } from "./detectors/dead-import-check.ts";
 import { detectCrossFileDuplication, detectDuplication } from "./detectors/duplication-check.ts";
 import { detectExportBreakingChanges } from "./detectors/export-check.ts";
 import { detectHallucinatedImports } from "./detectors/import-check.ts";
-import { detectSecurityPatterns } from "./detectors/security-check.ts";
+import { detectSecurityPatterns, getAdvisoryAsPendingFixes } from "./detectors/security-check.ts";
 import { detectSemanticPatterns } from "./detectors/semantic-check.ts";
 import { resolveTestFile } from "./detectors/test-file-resolver.ts";
+import { analyzeTestQuality, getBlockingTestSmells } from "./detectors/test-quality-check.ts";
 import { deny } from "./respond.ts";
 
 /** PostToolUse: lint/type gate after Edit/Write, commit/test/lint-fix detection after Bash */
@@ -66,8 +69,9 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 		/* fail-open */
 	}
 
+	const config = loadConfig();
 	const gates = loadGates();
-	if (!gates?.on_write) return;
+	const hasWriteGates = !!gates?.on_write;
 
 	// File extension filter: skip per-file gates for extensions not covered by any gate tool
 	const fileExt = extname(file).toLowerCase();
@@ -77,15 +81,17 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 	// Filter gates, then run in parallel
 	const gateEntries: {
 		name: string;
-		gate: (typeof gates.on_write)[string];
+		gate: GateDefinition;
 		fileArg: string | undefined;
 	}[] = [];
-	for (const [name, gate] of Object.entries(gates.on_write)) {
-		if (isGateDisabled(name)) continue;
-		if (gate.run_once_per_batch && sessionId && shouldSkipGate(name, sessionId, file)) continue;
-		const hasPlaceholder = gate.command.includes("{file}");
-		if (hasPlaceholder && gatedExts.size > 0 && !gatedExts.has(fileExt)) continue;
-		gateEntries.push({ name, gate, fileArg: hasPlaceholder ? file : undefined });
+	if (hasWriteGates && gates?.on_write) {
+		for (const [name, gate] of Object.entries(gates.on_write)) {
+			if (isGateDisabled(name)) continue;
+			if (gate.run_once_per_batch && sessionId && shouldSkipGate(name, sessionId, file)) continue;
+			const hasPlaceholder = gate.command.includes("{file}");
+			if (hasPlaceholder && gatedExts.size > 0 && !gatedExts.has(fileExt)) continue;
+			gateEntries.push({ name, gate, fileArg: hasPlaceholder ? file : undefined });
+		}
 	}
 
 	const results = await Promise.allSettled(
@@ -147,7 +153,10 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 	const existingFixKeys = new Set(readPendingFixes().map((f) => `${resolve(f.file)}:${f.gate}`));
 	const fileName = file.split("/").pop() ?? "";
 	const isTestFile =
-		fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_");
+		fileName.includes(".test.") ||
+		fileName.includes(".spec.") ||
+		fileName.startsWith("test_") ||
+		fileName.includes("_test.");
 
 	// Security pattern detection (computational on_write sensor — no external tools needed)
 	try {
@@ -186,15 +195,27 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 		/* fail-open */
 	}
 
-	// Dead import detection (advisory)
+	// Dead import detection (advisory → blocking after escalation threshold)
 	try {
 		const deadImportWarnings = detectDeadImports(file);
 		if (deadImportWarnings.length > 0) {
+			let diCount = readSessionState().dead_import_warning_count ?? 0;
 			if (!existingFixKeys.has(`${file}:dead-import-check`)) {
-				incrementEscalation("dead_import_warning_count");
+				diCount = incrementEscalation("dead_import_warning_count");
 			}
-			for (const w of deadImportWarnings) {
-				process.stderr.write(`[qult] Dead import: ${w}\n`);
+			if (diCount >= config.escalation.dead_import_blocking_threshold) {
+				newFixes.push({
+					file,
+					gate: "dead-import-check",
+					errors: deadImportWarnings,
+				});
+				process.stderr.write(
+					`[qult] Dead import escalation: ${diCount} warnings exceeded threshold — promoting to blocking\n`,
+				);
+			} else {
+				for (const w of deadImportWarnings) {
+					process.stderr.write(`[qult] Dead import: ${w}\n`);
+				}
 			}
 		}
 	} catch {
@@ -238,9 +259,23 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 		/* fail-open */
 	}
 
+	// Test quality blocking: reject empty tests, always-true, trivial assertions
+	try {
+		if (isTestFile && !isGateDisabled("test-quality-check")) {
+			const tqResult = analyzeTestQuality(file);
+			if (tqResult) {
+				const blockingFixes = getBlockingTestSmells(file, tqResult);
+				if (blockingFixes.length > 0) {
+					newFixes.push(...blockingFixes);
+				}
+			}
+		}
+	} catch {
+		/* fail-open */
+	}
+
 	// Test-on-edit: run related test file when enabled and no lint/type errors
 	try {
-		const config = loadConfig();
 		if (config.gates.test_on_edit && newFixes.length === 0) {
 			const testFile = resolveTestFile(file);
 			if (testFile && gates?.on_commit?.test) {
@@ -258,6 +293,30 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 					} else {
 						process.stderr.write(`[qult] test-on-edit: ${testFile} PASS\n`);
 					}
+				}
+			}
+		}
+	} catch {
+		/* fail-open */
+	}
+
+	// Iterative security escalation: promote advisory → blocking after N edits
+	try {
+		if (!isGateDisabled("security-check-advisory")) {
+			const editCount = incrementFileEditCount(file);
+			const projectRoot = resolve(process.cwd());
+			if (
+				editCount >= config.escalation.security_iterative_threshold &&
+				file.startsWith(`${projectRoot}/`)
+			) {
+				const fileContent = readFileSync(file, "utf-8");
+				const advisoryFixes = getAdvisoryAsPendingFixes(file, fileContent);
+				if (advisoryFixes.length > 0) {
+					newFixes.push(...advisoryFixes);
+					const relative = file.split("/").slice(-3).join("/");
+					process.stderr.write(
+						`[qult] Iterative security escalation: ${relative} edited ${editCount} times — advisory patterns promoted to blocking\n`,
+					);
 				}
 			}
 		}

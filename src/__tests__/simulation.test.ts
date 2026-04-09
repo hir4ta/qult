@@ -2405,14 +2405,14 @@ describe("Security check: expanded patterns", () => {
 		expect(fixes[0]!.errors[0]).toContain("Prototype pollution");
 	});
 
-	it("emits CORS advisory", async () => {
+	it("detects CORS wildcard as blocking PendingFix (promoted from advisory)", async () => {
 		const file = join(TEST_DIR, "src/foo.ts");
 		writeFileSync(file, `const headers = { "Access-Control-Allow-Origin": "*" };\n`);
 
 		const { detectSecurityPatterns } = await import("../hooks/detectors/security-check.ts");
-		detectSecurityPatterns(file);
-		const advisories = stderrCapture.join("");
-		expect(advisories).toContain("CORS wildcard");
+		const fixes = detectSecurityPatterns(file);
+		expect(fixes.length).toBeGreaterThan(0);
+		expect(fixes[0]!.errors.some((e) => e.includes("CORS wildcard"))).toBe(true);
 	});
 });
 
@@ -2648,5 +2648,105 @@ describe("Plan archive after finish", () => {
 		// hasPlanFile returns false: readdirSync lists "archive" (dir name, not .md),
 		// and .endsWith(".md") filter excludes it. Archived plans are invisible.
 		expect(hasPlanFile()).toBe(false);
+	});
+});
+
+// ============================================================
+// Semgrep required — blocks commit when not installed
+// ============================================================
+
+describe("Scenario: Semgrep required", () => {
+	it("adds semgrep-required pending-fix on startup when semgrep not installed", async () => {
+		const originalPath = process.env.PATH;
+		process.env.PATH = "/nonexistent";
+		try {
+			const sessionStart = (await import("../hooks/session-start.ts")).default;
+			await sessionStart({
+				hook_event_name: "SessionStart",
+				source: "startup",
+				cwd: TEST_DIR,
+			} as never);
+
+			resetAllCaches();
+			const fixes = readPendingFixes();
+			expect(fixes.some((f) => f.gate === "semgrep-required")).toBe(true);
+		} finally {
+			process.env.PATH = originalPath;
+		}
+	});
+});
+
+// ============================================================
+// Iterative security escalation — advisory promoted after N edits
+// ============================================================
+
+describe("Scenario: Iterative security escalation", () => {
+	it("promotes advisory patterns to blocking after N edits to same file", async () => {
+		setupPassingGates();
+		const file = join(TEST_DIR, "src/routes.ts");
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(file, `app.get("/api/users", handler);\n`);
+
+		const { incrementFileEditCount, resetFileEditCounts } = await import(
+			"../state/session-state.ts"
+		);
+		resetFileEditCounts();
+		// Pre-increment to threshold - 1 (post-tool adds the last one)
+		for (let i = 0; i < 4; i++) incrementFileEditCount(file);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({ tool_name: "Edit", tool_input: { file_path: file } });
+
+		flushAll();
+		resetAllCaches();
+		const fixes = readPendingFixes();
+		expect(fixes.some((f) => f.gate === "security-check-advisory")).toBe(true);
+		expect(stderrCapture.join("")).toContain("Iterative security escalation");
+	});
+});
+
+// ============================================================
+// Dead import escalation promotes to blocking after threshold
+// ============================================================
+
+describe("Scenario: Dead import escalation", () => {
+	it("promotes dead imports to blocking after warning threshold", async () => {
+		setupPassingGates();
+		const file = join(TEST_DIR, "src/unused.ts");
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(file, `import { foo } from "bar";\nconst x = 1;\n`);
+
+		const { incrementEscalation } = await import("../state/session-state.ts");
+		for (let i = 0; i < 5; i++) incrementEscalation("dead_import_warning_count");
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({ tool_name: "Edit", tool_input: { file_path: file } });
+
+		flushAll();
+		resetAllCaches();
+		const fixes = readPendingFixes();
+		expect(fixes.some((f) => f.gate === "dead-import-check")).toBe(true);
+		expect(stderrCapture.join("")).toContain("Dead import escalation");
+	});
+});
+
+// ============================================================
+// Test quality blocking — empty test body creates pending-fix
+// ============================================================
+
+describe("Scenario: Test quality blocking", () => {
+	it("blocks empty test body on test file edit", async () => {
+		setupPassingGates();
+		const file = join(TEST_DIR, "src/empty.test.ts");
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(file, `import { it } from "vitest";\nit("does nothing", () => {});\n`);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({ tool_name: "Edit", tool_input: { file_path: file } });
+
+		flushAll();
+		resetAllCaches();
+		const fixes = readPendingFixes();
+		expect(fixes.some((f) => f.gate === "test-quality-check")).toBe(true);
 	});
 });

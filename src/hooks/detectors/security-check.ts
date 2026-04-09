@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { extname } from "node:path";
+import { basename, extname } from "node:path";
 import { isGateDisabled } from "../../state/session-state.ts";
 import type { PendingFix } from "../../types.ts";
 import { sanitizeForStderr } from "../sanitize.ts";
@@ -77,6 +77,10 @@ interface DangerousPattern {
 	desc: string;
 	/** File extensions this pattern applies to (empty = all checkable) */
 	exts?: Set<string>;
+	/** If present and matches the line, suppress the detection */
+	suppress?: RegExp;
+	/** If present and matches the file basename, suppress the detection */
+	suppressFile?: RegExp;
 }
 
 const JS_TS_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
@@ -236,6 +240,26 @@ const DANGEROUS_PATTERNS: DangerousPattern[] = [
 		re: /(?:iv|nonce|IV|NONCE)\s*[:=]\s*["'`][a-fA-F0-9]{16,}["'`]/,
 		desc: "Hardcoded IV/nonce — use random generation",
 	},
+	// Promoted from advisory: CORS wildcard
+	{
+		re: /Access-Control-Allow-Origin['":\s]*\*/,
+		suppress: /(?:localhost|127\.0\.0\.1|development|test)/i,
+		desc: "CORS wildcard origin (*) — restrict to specific origins in production",
+	},
+	// Promoted from advisory: Debug mode hardcoded
+	{
+		re: /\bdebug\s*[:=]\s*true\b/,
+		suppress: /(?:test|spec|mock|\.test\.|\.spec\.)/i,
+		suppressFile: /(?:\.test\.|\bspec\b|\.spec\.)/i,
+		desc: "Hardcoded debug=true — verify this is not in production config",
+	},
+	// Promoted from advisory: Source map exposure
+	{
+		re: /\bsourceMap\s*[:=]\s*true\b/,
+		suppress: /(?:dev|development|test)/i,
+		suppressFile: /(?:\.test\.|\bspec\b|\.spec\.)/i,
+		desc: "Source maps enabled — verify they are not shipped to production (VibeGuard)",
+	},
 ];
 
 /** Detect hardcoded secrets and dangerous code patterns.
@@ -327,9 +351,11 @@ export function detectSecurityPatterns(file: string): PendingFix[] {
 		}
 
 		// Dangerous patterns (always check, including tests) — collect ALL matches per line
-		for (const { re, desc, exts } of DANGEROUS_PATTERNS) {
+		for (const { re, desc, exts, suppress, suppressFile } of DANGEROUS_PATTERNS) {
 			if (exts && !exts.has(ext)) continue;
 			if (re.test(scanLine)) {
+				if (suppress?.test(scanLine)) continue;
+				if (suppressFile?.test(basename(file))) continue;
 				errors.push(`L${i + 1}: ${desc}`);
 			}
 		}
@@ -354,7 +380,7 @@ export function detectSecurityPatterns(file: string): PendingFix[] {
 interface AdvisoryPattern {
 	re: RegExp;
 	/** Regex that, if present on the same line, suppresses the warning */
-	suppress: RegExp;
+	suppress?: RegExp;
 	desc: string;
 	/** File extensions this pattern applies to (empty = all checkable) */
 	exts?: Set<string>;
@@ -373,30 +399,12 @@ const ADVISORY_PATTERNS: AdvisoryPattern[] = [
 		desc: "WebSocket handler — verify authentication is applied",
 		exts: JS_TS_EXTS,
 	},
-	// OWASP A05: CORS wildcard
-	{
-		re: /Access-Control-Allow-Origin['":\s]*\*/,
-		suppress: /(?:localhost|127\.0\.0\.1|development|test)/i,
-		desc: "CORS wildcard origin (*) — restrict to specific origins in production",
-	},
 	// OWASP A05: cors() without options
 	{
 		re: /\bcors\s*\(\s*\)/,
 		suppress: /(?:\/\/\s*(?:dev|test|local))/i,
 		desc: "cors() with no options — allows all origins by default",
 		exts: JS_TS_EXTS,
-	},
-	// OWASP A05: Debug mode hardcoded
-	{
-		re: /\bdebug\s*[:=]\s*true\b/,
-		suppress: /(?:test|spec|mock|\.test\.|\.spec\.)/i,
-		desc: "Hardcoded debug=true — verify this is not in production config",
-	},
-	// Source map exposure in config
-	{
-		re: /\bsourceMap\s*[:=]\s*true\b/,
-		suppress: /(?:dev|development|test)/i,
-		desc: "Source maps enabled — verify they are not shipped to production (VibeGuard)",
 	},
 	// OWASP A09: Sensitive data in logs
 	{
@@ -420,19 +428,51 @@ const ADVISORY_PATTERNS: AdvisoryPattern[] = [
 	},
 ];
 
+/** Shared advisory pattern matching (comment-aware). Used by both stderr warnings and blocking escalation. */
+function matchAdvisoryPatterns(
+	file: string,
+	content: string,
+): { line: number; desc: string }[] {
+	const ext = extname(file).toLowerCase();
+	if (!CHECKABLE_EXTS.has(ext)) return [];
+	if (content.length > MAX_CHECK_SIZE) return [];
+	const lines = content.split("\n");
+	const matches: { line: number; desc: string }[] = [];
+	for (let i = 0; i < lines.length; i++) {
+		const trimmed = lines[i]!.trimStart();
+		if (trimmed.startsWith("//") || trimmed.startsWith("#") || trimmed.startsWith("*")) continue;
+		for (const { re, suppress, desc, exts } of ADVISORY_PATTERNS) {
+			if (exts && !exts.has(ext)) continue;
+			if (re.test(lines[i]!) && !suppress?.test(lines[i]!)) {
+				matches.push({ line: i + 1, desc });
+			}
+		}
+	}
+	return matches;
+}
+
+/** Return advisory pattern matches as PendingFix[] (for iterative security escalation). */
+export function getAdvisoryAsPendingFixes(file: string, content: string): PendingFix[] {
+	try {
+		const matches = matchAdvisoryPatterns(file, content);
+		if (matches.length === 0) return [];
+		return [
+			{
+				file,
+				gate: "security-check-advisory",
+				errors: matches.map((m) => sanitizeForStderr(`L${m.line}: ${m.desc}`.slice(0, 300))),
+			},
+		];
+	} catch {
+		return [];
+	}
+}
+
 function emitAdvisoryWarnings(file: string, content: string): void {
 	try {
-		const ext = extname(file).toLowerCase();
-		const lines = content.split("\n");
-		for (let i = 0; i < lines.length; i++) {
-			const line = lines[i]!;
-			for (const { re, suppress, desc, exts } of ADVISORY_PATTERNS) {
-				if (exts && !exts.has(ext)) continue;
-				if (re.test(line) && !suppress.test(line)) {
-					const relative = file.split("/").slice(-3).join("/");
-					process.stderr.write(`[qult] Security advisory: ${relative}:${i + 1} — ${desc}\n`);
-				}
-			}
+		const relative = file.split("/").slice(-3).join("/");
+		for (const m of matchAdvisoryPatterns(file, content)) {
+			process.stderr.write(`[qult] Security advisory: ${relative}:${m.line} — ${m.desc}\n`);
 		}
 	} catch {
 		/* fail-open */

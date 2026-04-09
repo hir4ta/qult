@@ -384,6 +384,7 @@ describe("formatTestQualityWarnings", () => {
 			assertionCount: 2,
 			avgAssertions: 0.67,
 			smells: [],
+			blockingSmells: [],
 			isPbt: false,
 		};
 		const warnings = formatTestQualityWarnings("foo.test.ts", result, "Task 1");
@@ -402,6 +403,7 @@ describe("formatTestQualityWarnings", () => {
 				{ type: "weak-matcher", line: 5, message: "Weak matcher toBeTruthy()" },
 				{ type: "weak-matcher", line: 12, message: "Weak matcher toBeDefined()" },
 			],
+			blockingSmells: [],
 			isPbt: false,
 		};
 		const warnings = formatTestQualityWarnings("bar.test.ts", result);
@@ -630,6 +632,7 @@ describe("PBT recommendation in formatTestQualityWarnings", () => {
 			assertionCount: 10,
 			avgAssertions: 2,
 			smells: [{ type: "happy-path-only", line: 0, message: "All test descriptions are positive" }],
+			blockingSmells: [],
 			isPbt: false,
 		};
 		const warnings = formatTestQualityWarnings("foo.test.ts", result);
@@ -646,6 +649,7 @@ describe("PBT recommendation in formatTestQualityWarnings", () => {
 			assertionCount: 10,
 			avgAssertions: 2,
 			smells: [{ type: "missing-boundary", line: 0, message: "No boundary values tested" }],
+			blockingSmells: [],
 			isPbt: false,
 		};
 		const warnings = formatTestQualityWarnings("bar.test.ts", result);
@@ -662,6 +666,7 @@ describe("PBT recommendation in formatTestQualityWarnings", () => {
 			assertionCount: 10,
 			avgAssertions: 2,
 			smells: [{ type: "happy-path-only", line: 0, message: "All test descriptions are positive" }],
+			blockingSmells: [],
 			isPbt: false,
 		};
 		const warnings = formatTestQualityWarnings("test_foo.py", result);
@@ -678,6 +683,7 @@ describe("PBT recommendation in formatTestQualityWarnings", () => {
 			assertionCount: 10,
 			avgAssertions: 2,
 			smells: [{ type: "happy-path-only", line: 0, message: "All test descriptions are positive" }],
+			blockingSmells: [],
 			isPbt: true,
 		};
 		const warnings = formatTestQualityWarnings("foo.test.ts", result);
@@ -685,5 +691,68 @@ describe("PBT recommendation in formatTestQualityWarnings", () => {
 			(w) => w.includes("fast-check") || w.includes("hypothesis") || w.includes("property-based"),
 		);
 		expect(pbtWarnings.length).toBe(0);
+	});
+});
+
+describe("getBlockingTestSmells", () => {
+	it("returns PendingFix for empty test body", async () => {
+		const file = join(TEST_DIR, "empty.test.ts");
+		writeFileSync(file, `import { it } from "vitest";\nit("does nothing", () => {});\n`);
+		const { analyzeTestQuality, getBlockingTestSmells } = await import(
+			"../hooks/detectors/test-quality-check.ts"
+		);
+		const result = analyzeTestQuality(file);
+		expect(result).not.toBeNull();
+		const fixes = getBlockingTestSmells(file, result!);
+		expect(fixes.length).toBeGreaterThan(0);
+		expect(fixes[0]!.gate).toBe("test-quality-check");
+		expect(fixes[0]!.errors.some((e) => e.includes("Empty test body"))).toBe(true);
+	});
+
+	it("returns PendingFix for always-true assertion", async () => {
+		const file = join(TEST_DIR, "always-true.test.ts");
+		writeFileSync(
+			file,
+			`import { it, expect } from "vitest";\nit("trivial", () => { expect(true).toBe(true); });\n`,
+		);
+		const { analyzeTestQuality, getBlockingTestSmells } = await import(
+			"../hooks/detectors/test-quality-check.ts"
+		);
+		const result = analyzeTestQuality(file);
+		expect(result).not.toBeNull();
+		const fixes = getBlockingTestSmells(file, result!);
+		expect(fixes.length).toBeGreaterThan(0);
+		expect(fixes[0]!.gate).toBe("test-quality-check");
+	});
+
+	it("returns PendingFix for trivial assertion (expect(x).toBe(x))", async () => {
+		const file = join(TEST_DIR, "trivial.test.ts");
+		writeFileSync(
+			file,
+			`import { it, expect } from "vitest";\nit("self", () => { const x = 1; expect(x).toBe(x); });\n`,
+		);
+		const { analyzeTestQuality, getBlockingTestSmells } = await import(
+			"../hooks/detectors/test-quality-check.ts"
+		);
+		const result = analyzeTestQuality(file);
+		expect(result).not.toBeNull();
+		const fixes = getBlockingTestSmells(file, result!);
+		expect(fixes.length).toBeGreaterThan(0);
+		expect(fixes[0]!.gate).toBe("test-quality-check");
+	});
+
+	it("does NOT return PendingFix for advisory smells like weak-matcher", async () => {
+		const file = join(TEST_DIR, "weak.test.ts");
+		writeFileSync(
+			file,
+			`import { it, expect } from "vitest";\nit("weak", () => { expect(foo).toBeTruthy(); });\n`,
+		);
+		const { analyzeTestQuality, getBlockingTestSmells } = await import(
+			"../hooks/detectors/test-quality-check.ts"
+		);
+		const result = analyzeTestQuality(file);
+		expect(result).not.toBeNull();
+		const fixes = getBlockingTestSmells(file, result!);
+		expect(fixes).toHaveLength(0);
 	});
 });

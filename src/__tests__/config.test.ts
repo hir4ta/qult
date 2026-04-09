@@ -59,6 +59,9 @@ afterEach(() => {
 	delete process.env.QULT_PLAN_EVAL_MODEL_EVALUATOR;
 	delete process.env.QULT_FLYWHEEL_ENABLED;
 	delete process.env.QULT_FLYWHEEL_MIN_SESSIONS;
+	delete process.env.QULT_REQUIRE_SEMGREP;
+	delete process.env.QULT_ESCALATION_SECURITY_ITERATIVE;
+	delete process.env.QULT_ESCALATION_DEAD_IMPORT_BLOCKING;
 });
 
 describe("loadConfig", () => {
@@ -327,5 +330,63 @@ describe("escalation config", () => {
 		const config = loadConfig();
 		expect(config.escalation.security_threshold).toBe(1);
 		expect(config.escalation.drift_threshold).toBe(1);
+	});
+
+	it("returns default security_iterative_threshold", () => {
+		const config = loadConfig();
+		expect(config.escalation.security_iterative_threshold).toBe(5);
+	});
+
+	it("reads security_iterative_threshold from project config", () => {
+		setProjectConfig("escalation.security_iterative_threshold", 3);
+		const config = loadConfig();
+		expect(config.escalation.security_iterative_threshold).toBe(3);
+	});
+
+	it("env var overrides security_iterative_threshold", () => {
+		process.env.QULT_ESCALATION_SECURITY_ITERATIVE = "7";
+		const config = loadConfig();
+		expect(config.escalation.security_iterative_threshold).toBe(7);
+	});
+
+	it("returns default dead_import_blocking_threshold", () => {
+		const config = loadConfig();
+		expect(config.escalation.dead_import_blocking_threshold).toBe(5);
+	});
+
+	it("reads dead_import_blocking_threshold from project config", () => {
+		setProjectConfig("escalation.dead_import_blocking_threshold", 10);
+		const config = loadConfig();
+		expect(config.escalation.dead_import_blocking_threshold).toBe(10);
+	});
+
+	it("env var overrides dead_import_blocking_threshold", () => {
+		process.env.QULT_ESCALATION_DEAD_IMPORT_BLOCKING = "3";
+		const config = loadConfig();
+		expect(config.escalation.dead_import_blocking_threshold).toBe(3);
+	});
+});
+
+describe("security config", () => {
+	it("returns default require_semgrep as true", () => {
+		const config = loadConfig();
+		expect(config.security.require_semgrep).toBe(true);
+	});
+
+	it("reads require_semgrep from project config", () => {
+		setProjectConfig("security.require_semgrep", false);
+		const config = loadConfig();
+		expect(config.security.require_semgrep).toBe(false);
+	});
+
+	it("env var overrides require_semgrep", () => {
+		process.env.QULT_REQUIRE_SEMGREP = "false";
+		const config = loadConfig();
+		expect(config.security.require_semgrep).toBe(false);
+
+		resetConfigCache();
+		process.env.QULT_REQUIRE_SEMGREP = "1";
+		const config2 = loadConfig();
+		expect(config2.security.require_semgrep).toBe(true);
 	});
 });

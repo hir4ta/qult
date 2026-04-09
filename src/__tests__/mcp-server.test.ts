@@ -296,6 +296,30 @@ describe("handleTool: disable_gate / enable_gate", () => {
 		expect(deadResult.content[0]!.text).toContain("disabled");
 	});
 
+	it("disable_gate accepts new gate names (semgrep-required, test-quality-check, security-check-advisory)", () => {
+		const r1 = handleTool("disable_gate", TEST_DIR, {
+			gate_name: "semgrep-required",
+			reason: "Semgrep not available in CI",
+		});
+		expect(r1.content[0]!.text).toContain("disabled");
+
+		handleTool("enable_gate", TEST_DIR, { gate_name: "semgrep-required" });
+
+		const r2 = handleTool("disable_gate", TEST_DIR, {
+			gate_name: "test-quality-check",
+			reason: "Temporarily skip test quality",
+		});
+		expect(r2.content[0]!.text).toContain("disabled");
+
+		handleTool("enable_gate", TEST_DIR, { gate_name: "test-quality-check" });
+
+		const r3 = handleTool("disable_gate", TEST_DIR, {
+			gate_name: "security-check-advisory",
+			reason: "Advisory patterns not relevant",
+		});
+		expect(r3.content[0]!.text).toContain("disabled");
+	});
+
 	it("disable_gate requires reason parameter", () => {
 		const result = handleTool("disable_gate", TEST_DIR, { gate_name: "review" });
 		expect(result.isError).toBe(true);

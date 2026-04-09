@@ -11,7 +11,7 @@ import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 const DB_DIR = join(homedir(), ".qult");
 const DB_PATH = join(DB_DIR, "qult.db");
@@ -100,6 +100,15 @@ function migrateSchema(db: Database): void {
 				/* fail-open: column may already exist */
 			}
 		}
+	}
+	if (version < 5) {
+		// Version 5: add file_edit_counts table for iterative security escalation
+		db.exec(`CREATE TABLE IF NOT EXISTS file_edit_counts (
+			session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			file       TEXT    NOT NULL,
+			count      INTEGER NOT NULL DEFAULT 1,
+			PRIMARY KEY (session_id, file)
+		)`);
 	}
 	db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
@@ -273,6 +282,12 @@ function createTablesV1(db: Database): void {
 			recorded_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		);
 		CREATE INDEX IF NOT EXISTS idx_review_findings_session ON review_findings(session_id);
+		CREATE TABLE IF NOT EXISTS file_edit_counts (
+			session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			file       TEXT    NOT NULL,
+			count      INTEGER NOT NULL DEFAULT 1,
+			PRIMARY KEY (session_id, file)
+		);
 	`);
 }
 

@@ -833,3 +833,77 @@ describe("postTool: over-engineering detection", () => {
 		expect(stderr).not.toContain("Over-engineering");
 	});
 });
+
+describe("postTool: iterative security escalation", () => {
+	it("promotes advisory to blocking after N edits to same file", async () => {
+		// Create a file with advisory pattern (API route without auth)
+		const file = join(TEST_DIR, "routes.ts");
+		writeFileSync(file, `app.get("/api/users", handler);\n`);
+
+		const { incrementFileEditCount, resetFileEditCounts } = await import(
+			"../state/session-state.ts"
+		);
+		resetFileEditCounts();
+		// Simulate 4 prior edits (post-tool will add the 5th, reaching threshold of 5)
+		for (let i = 0; i < 4; i++) incrementFileEditCount(file);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: file },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const { flushAll } = await import("../state/flush.ts");
+		flushAll();
+		resetAllCaches();
+		const fixes = readPendingFixes();
+		expect(fixes.some((f) => f.gate === "security-check-advisory")).toBe(true);
+		expect(stderrCapture.join("")).toContain("Iterative security escalation");
+	});
+});
+
+describe("postTool: test-quality blocking", () => {
+	it("blocks empty test body on test file edit", async () => {
+		const file = join(TEST_DIR, "empty.test.ts");
+		writeFileSync(file, `import { it } from "vitest";\nit("does nothing", () => {});\n`);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: file },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const { flushAll } = await import("../state/flush.ts");
+		flushAll();
+		resetAllCaches();
+		const fixes = readPendingFixes();
+		expect(fixes.some((f) => f.gate === "test-quality-check")).toBe(true);
+	});
+});
+
+describe("postTool: dead-import escalation blocking", () => {
+	it("promotes dead imports to blocking after threshold", async () => {
+		const file = join(TEST_DIR, "unused.ts");
+		writeFileSync(file, `import { foo } from "bar";\nconst x = 1;\n`);
+
+		// Increment dead import count to threshold
+		const { incrementEscalation } = await import("../state/session-state.ts");
+		for (let i = 0; i < 5; i++) incrementEscalation("dead_import_warning_count");
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: file },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const { flushAll } = await import("../state/flush.ts");
+		flushAll();
+		resetAllCaches();
+		const fixes = readPendingFixes();
+		expect(fixes.some((f) => f.gate === "dead-import-check")).toBe(true);
+		expect(stderrCapture.join("")).toContain("Dead import escalation");
+	});
+});

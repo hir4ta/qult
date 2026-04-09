@@ -1,15 +1,19 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "../config.ts";
-import { emitSemgrepWarning } from "../gates/detect.ts";
+import { isReachable } from "../gates/detect.ts";
 import {
 	detectRecurringPatterns,
 	getFlywheelRecommendations,
 	readMetricsHistory,
 	recordSessionMetrics,
 } from "../state/metrics.ts";
-import { flush as flushPendingFixes, writePendingFixes } from "../state/pending-fixes.ts";
-import { readSessionState } from "../state/session-state.ts";
+import {
+	addPendingFixes,
+	flush as flushPendingFixes,
+	writePendingFixes,
+} from "../state/pending-fixes.ts";
+import { isGateDisabled, readSessionState } from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
 import { markSessionStartCompleted } from "./lazy-init.ts";
 
@@ -92,14 +96,33 @@ export default async function sessionStart(ev: HookEvent): Promise<void> {
 			} catch {
 				/* fail-open */
 			}
-		}
 
-		// Semgrep installation check (once per startup)
-		if (ev.source === "startup") {
-			try {
-				emitSemgrepWarning(ev.cwd ?? process.cwd());
-			} catch {
-				/* fail-open */
+			// Semgrep mandatory check (once per startup, after pending-fixes clear)
+			if (ev.source === "startup") {
+				try {
+					if (
+						cfg.security.require_semgrep &&
+						!isGateDisabled("semgrep-required") &&
+						!isReachable("semgrep", ev.cwd ?? process.cwd())
+					) {
+						addPendingFixes("(global)", [
+							{
+								file: "(global)",
+								gate: "semgrep-required",
+								errors: [
+									"Semgrep is required but not installed. Install: `brew install semgrep` or `pip install semgrep`. To skip: /qult:skip semgrep-required",
+								],
+							},
+						]);
+						try {
+							flushPendingFixes();
+						} catch {
+							/* fail-open */
+						}
+					}
+				} catch {
+					/* fail-open */
+				}
 			}
 		}
 

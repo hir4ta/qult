@@ -1,7 +1,16 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, extname, resolve } from "node:path";
+import type { PendingFix } from "../../types.ts";
 
 const MAX_CHECK_SIZE = 500_000;
+
+/** Smell types that are unambiguously bad (zero false-positive risk) */
+const BLOCKING_SMELL_TYPES = new Set([
+	"empty-test",
+	"always-true",
+	"trivial-assertion",
+	"constant-self",
+]);
 
 /** Result of test quality analysis */
 export interface TestQualityResult {
@@ -13,6 +22,8 @@ export interface TestQualityResult {
 	avgAssertions: number;
 	/** Detected test smells */
 	smells: TestSmell[];
+	/** Smells that should block (subset of smells) */
+	blockingSmells: TestSmell[];
 	/** Whether the file uses property-based testing */
 	isPbt: boolean;
 }
@@ -459,7 +470,20 @@ export function analyzeTestQuality(file: string): TestQualityResult | null {
 		}
 	}
 
-	return { testCount, assertionCount, avgAssertions, smells, isPbt };
+	const blockingSmells = smells.filter((s) => BLOCKING_SMELL_TYPES.has(s.type));
+	return { testCount, assertionCount, avgAssertions, smells, blockingSmells, isPbt };
+}
+
+/** Convert blocking test smells to PendingFix[]. */
+export function getBlockingTestSmells(file: string, result: TestQualityResult): PendingFix[] {
+	if (result.blockingSmells.length === 0) return [];
+	return [
+		{
+			file,
+			gate: "test-quality-check",
+			errors: result.blockingSmells.map((s) => `L${s.line}: ${s.message}`),
+		},
+	];
 }
 
 /** Find implementation file for a test file. Simple heuristic using naming conventions. */

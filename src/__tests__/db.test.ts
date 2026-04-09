@@ -300,10 +300,10 @@ describe("db", () => {
 			expect(names).toContain("escalation_hit");
 		});
 
-		it("schema version is 4", () => {
+		it("schema version is 5", () => {
 			const db = getDb();
 			const row = db.prepare("PRAGMA user_version").get() as { user_version: number };
-			expect(row.user_version).toBe(4);
+			expect(row.user_version).toBe(5);
 		});
 
 		it("gate_failure_counts uses separate file and gate columns", () => {

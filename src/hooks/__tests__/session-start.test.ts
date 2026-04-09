@@ -109,6 +109,84 @@ describe("session-start handler", () => {
 		).resolves.not.toThrow();
 	});
 
+	it("adds semgrep-required pending-fix when semgrep not installed", async () => {
+		// Restrict PATH so semgrep is not found (no node_modules/.bin/semgrep in TEST_DIR either)
+		const originalPath = process.env.PATH;
+		process.env.PATH = "/nonexistent";
+		try {
+			const sessionStart = (await import("../session-start.ts")).default;
+			await sessionStart({
+				hook_event_name: "SessionStart",
+				source: "startup",
+				cwd: TEST_DIR,
+			} as never);
+
+			resetAllCaches();
+			const fixes = readPendingFixes();
+			expect(fixes.some((f) => f.gate === "semgrep-required")).toBe(true);
+			const fix = fixes.find((f) => f.gate === "semgrep-required")!;
+			expect(fix.errors[0]).toContain("brew install semgrep");
+		} finally {
+			process.env.PATH = originalPath;
+		}
+	});
+
+	it("skips semgrep check when require_semgrep is false", async () => {
+		const originalPath = process.env.PATH;
+		process.env.PATH = "/nonexistent";
+		// Override config via env var
+		process.env.QULT_REQUIRE_SEMGREP = "false";
+		try {
+			const { resetConfigCache } = await import("../../config.ts");
+			resetConfigCache();
+
+			const sessionStart = (await import("../session-start.ts")).default;
+			await sessionStart({
+				hook_event_name: "SessionStart",
+				source: "startup",
+				cwd: TEST_DIR,
+			} as never);
+
+			resetAllCaches();
+			const fixes = readPendingFixes();
+			expect(fixes.some((f) => f.gate === "semgrep-required")).toBe(false);
+		} finally {
+			process.env.PATH = originalPath;
+			delete process.env.QULT_REQUIRE_SEMGREP;
+		}
+	});
+
+	it("skips semgrep check when gate is disabled", async () => {
+		const originalPath = process.env.PATH;
+		process.env.PATH = "/nonexistent";
+		try {
+			// Disable the gate via DB
+			const db = getDb();
+			const sid = db
+				.prepare("SELECT id FROM sessions WHERE project_id = ? ORDER BY rowid DESC LIMIT 1")
+				.get(getProjectId()) as { id: string } | undefined;
+			if (sid) {
+				db.prepare(
+					"INSERT OR REPLACE INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)",
+				).run(sid.id, "semgrep-required", "test");
+			}
+			resetAllCaches();
+
+			const sessionStart = (await import("../session-start.ts")).default;
+			await sessionStart({
+				hook_event_name: "SessionStart",
+				source: "startup",
+				cwd: TEST_DIR,
+			} as never);
+
+			resetAllCaches();
+			const fixes = readPendingFixes();
+			expect(fixes.some((f) => f.gate === "semgrep-required")).toBe(false);
+		} finally {
+			process.env.PATH = originalPath;
+		}
+	});
+
 	it("records metrics on startup", async () => {
 		// Arrange: populate session state with gate failures and changed files
 		const { incrementGateFailure, incrementEscalation } = await import(

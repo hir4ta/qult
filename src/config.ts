@@ -37,12 +37,21 @@ export interface QultConfig {
 		/** Additional PATH directories for gate command execution */
 		extra_path: string[];
 	};
+	/** Security enforcement */
+	security: {
+		/** Require Semgrep to be installed. Blocks commit when missing. */
+		require_semgrep: boolean;
+	};
 	escalation: {
 		security_threshold: number;
 		drift_threshold: number;
 		test_quality_threshold: number;
 		duplication_threshold: number;
 		semantic_threshold: number;
+		/** Same-file edit count before promoting security advisories to blocking */
+		security_iterative_threshold: number;
+		/** Dead-import warning count before promoting to blocking */
+		dead_import_blocking_threshold: number;
 	};
 	/** Cross-session learning: threshold adjustment recommendations */
 	flywheel: {
@@ -81,12 +90,17 @@ export const DEFAULTS: QultConfig = {
 		test_on_edit_timeout: 15000,
 		extra_path: [],
 	},
+	security: {
+		require_semgrep: true,
+	},
 	escalation: {
 		security_threshold: 10,
 		drift_threshold: 8,
 		test_quality_threshold: 8,
 		duplication_threshold: 8,
 		semantic_threshold: 8,
+		security_iterative_threshold: 5,
+		dead_import_blocking_threshold: 5,
 	},
 	flywheel: {
 		enabled: true,
@@ -143,6 +157,10 @@ function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): voi
 				(p: unknown) => typeof p === "string" && p.trim().length > 0,
 			);
 	}
+	if (raw.security && typeof raw.security === "object") {
+		const s = raw.security as Record<string, unknown>;
+		if (typeof s.require_semgrep === "boolean") config.security.require_semgrep = s.require_semgrep;
+	}
 	if (raw.escalation && typeof raw.escalation === "object") {
 		const e = raw.escalation as Record<string, unknown>;
 		if (typeof e.security_threshold === "number")
@@ -155,6 +173,13 @@ function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): voi
 			config.escalation.duplication_threshold = Math.max(1, e.duplication_threshold);
 		if (typeof e.semantic_threshold === "number")
 			config.escalation.semantic_threshold = Math.max(1, e.semantic_threshold);
+		if (typeof e.security_iterative_threshold === "number")
+			config.escalation.security_iterative_threshold = Math.max(1, e.security_iterative_threshold);
+		if (typeof e.dead_import_blocking_threshold === "number")
+			config.escalation.dead_import_blocking_threshold = Math.max(
+				1,
+				e.dead_import_blocking_threshold,
+			);
 	}
 	if (raw.flywheel && typeof raw.flywheel === "object") {
 		const f = raw.flywheel as Record<string, unknown>;
@@ -273,6 +298,19 @@ export function loadConfig(): QultConfig {
 	if (dupEsc !== undefined) config.escalation.duplication_threshold = Math.max(1, dupEsc);
 	const semEsc = envInt("QULT_ESCALATION_SEMANTIC");
 	if (semEsc !== undefined) config.escalation.semantic_threshold = Math.max(1, semEsc);
+	const secIterEsc = envInt("QULT_ESCALATION_SECURITY_ITERATIVE");
+	if (secIterEsc !== undefined)
+		config.escalation.security_iterative_threshold = Math.max(1, secIterEsc);
+	const deadImportEsc = envInt("QULT_ESCALATION_DEAD_IMPORT_BLOCKING");
+	if (deadImportEsc !== undefined)
+		config.escalation.dead_import_blocking_threshold = Math.max(1, deadImportEsc);
+
+	// Security env var overrides
+	const requireSemgrepEnv = process.env.QULT_REQUIRE_SEMGREP;
+	if (requireSemgrepEnv === "1" || requireSemgrepEnv === "true")
+		config.security.require_semgrep = true;
+	else if (requireSemgrepEnv === "0" || requireSemgrepEnv === "false")
+		config.security.require_semgrep = false;
 
 	// Model env var overrides (non-empty string)
 	const envStr = (key: string): string | undefined => {

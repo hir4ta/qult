@@ -1,13 +1,11 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	detectGates,
 	detectPackageManager,
-	emitSemgrepWarning,
 	formatDetectionSummary,
 	hasAnyGates,
-	isReachable,
 } from "../gates/detect.ts";
 import { detectExportBreakingChanges } from "../hooks/detectors/export-check.ts";
 
@@ -194,55 +192,6 @@ describe("security gate detection", () => {
 		// No gosec in PATH or node_modules
 		const gates = detectGates(TEST_DIR);
 		expect(gates.on_commit?.["security-gosec"]).toBeUndefined();
-	});
-});
-
-describe("emitSemgrepWarning", () => {
-	it("emits stderr warning when semgrep is not reachable", () => {
-		// Temporarily restrict PATH to ensure semgrep is not found
-		const originalPath = process.env.PATH;
-		process.env.PATH = "/nonexistent";
-		const spy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-		try {
-			// TEST_DIR has no node_modules/.bin/semgrep, and PATH has no semgrep
-			emitSemgrepWarning(TEST_DIR);
-			expect(spy).toHaveBeenCalled();
-			const output = spy.mock.calls.map((c: unknown[]) => String(c[0])).join("");
-			expect(output).toContain("semgrep");
-			expect(output).toContain("[qult]");
-		} finally {
-			spy.mockRestore();
-			process.env.PATH = originalPath;
-		}
-	});
-
-	it("does not emit warning when semgrep is reachable via node_modules", () => {
-		mkdirSync(join(TEST_DIR, "node_modules", ".bin"), { recursive: true });
-		writeFileSync(join(TEST_DIR, "node_modules", ".bin", "semgrep"), "");
-		// Restrict PATH so only node_modules detection matters
-		const originalPath = process.env.PATH;
-		process.env.PATH = "/nonexistent";
-		const spy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-		try {
-			emitSemgrepWarning(TEST_DIR);
-			const output = spy.mock.calls.map((c: unknown[]) => String(c[0])).join("");
-			expect(output).not.toContain("semgrep");
-		} finally {
-			spy.mockRestore();
-			process.env.PATH = originalPath;
-		}
-	});
-
-	it("does not emit warning when semgrep is reachable via system PATH", () => {
-		if (!isReachable("semgrep", TEST_DIR)) return; // Skip if not installed
-		const spy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-		try {
-			emitSemgrepWarning(TEST_DIR);
-			const output = spy.mock.calls.map((c: unknown[]) => String(c[0])).join("");
-			expect(output).not.toContain("semgrep");
-		} finally {
-			spy.mockRestore();
-		}
 	});
 });
 

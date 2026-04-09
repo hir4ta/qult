@@ -7,15 +7,18 @@ import { resetAllCaches } from "../state/flush.ts";
 import {
 	clearOnCommit,
 	getGatedExtensions,
+	incrementFileEditCount,
 	incrementGateFailure,
 	isReviewRequired,
 	markGateRan,
+	readFileEditCount,
 	readSessionState,
 	readTaskVerifyResult,
 	recordChangedFile,
 	recordReview,
 	recordTaskVerifyResult,
 	recordTestPass,
+	resetFileEditCounts,
 	resetGateFailure,
 	shouldSkipGate,
 } from "../state/session-state.ts";
@@ -288,5 +291,41 @@ describe("session-state: gate failure escalation", () => {
 		// Adding one more (201st) should trigger eviction back to 200
 		incrementGateFailure("/src/file-extra.ts", "lint");
 		expect(Object.keys(readSessionState().gate_failure_counts).length).toBe(200);
+	});
+});
+
+describe("file_edit_counts", () => {
+	it("returns 0 for untracked file", () => {
+		expect(readFileEditCount("/src/foo.ts")).toBe(0);
+	});
+
+	it("increments and returns new count", () => {
+		expect(incrementFileEditCount("/src/foo.ts")).toBe(1);
+		expect(incrementFileEditCount("/src/foo.ts")).toBe(2);
+		expect(incrementFileEditCount("/src/foo.ts")).toBe(3);
+		expect(readFileEditCount("/src/foo.ts")).toBe(3);
+	});
+
+	it("tracks multiple files independently", () => {
+		incrementFileEditCount("/src/a.ts");
+		incrementFileEditCount("/src/a.ts");
+		incrementFileEditCount("/src/b.ts");
+		expect(readFileEditCount("/src/a.ts")).toBe(2);
+		expect(readFileEditCount("/src/b.ts")).toBe(1);
+	});
+
+	it("resetFileEditCounts clears all counts", () => {
+		incrementFileEditCount("/src/a.ts");
+		incrementFileEditCount("/src/b.ts");
+		resetFileEditCounts();
+		expect(readFileEditCount("/src/a.ts")).toBe(0);
+		expect(readFileEditCount("/src/b.ts")).toBe(0);
+	});
+
+	it("clearOnCommit resets file edit counts", () => {
+		incrementFileEditCount("/src/a.ts");
+		incrementFileEditCount("/src/a.ts");
+		clearOnCommit();
+		expect(readFileEditCount("/src/a.ts")).toBe(0);
 	});
 });

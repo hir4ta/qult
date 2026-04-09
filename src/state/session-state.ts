@@ -450,6 +450,53 @@ export function markGateRan(gateName: string, sessionId: string): void {
 
 // ── Commit lifecycle reset ──────────────────────────────────
 
+// ── File edit counts (persisted to DB, cross-subprocess) ─────────
+
+/** Increment edit count for a file in the DB. Returns the new count. */
+export function incrementFileEditCount(file: string): number {
+	try {
+		const db = getDb();
+		const sid = getSessionId();
+		db.prepare(
+			"INSERT INTO file_edit_counts (session_id, file, count) VALUES (?, ?, 1) ON CONFLICT(session_id, file) DO UPDATE SET count = count + 1",
+		).run(sid, file);
+		const row = db
+			.prepare("SELECT count FROM file_edit_counts WHERE session_id = ? AND file = ?")
+			.get(sid, file) as { count: number } | null;
+		return row?.count ?? 1;
+	} catch (err) {
+		process.stderr.write(
+			`[qult] file_edit_counts error: ${err instanceof Error ? err.message : "unknown"} — iterative escalation may be degraded\n`,
+		);
+		return 1;
+	}
+}
+
+/** Read the current edit count for a file. Returns 0 if untracked. */
+export function readFileEditCount(file: string): number {
+	try {
+		const db = getDb();
+		const sid = getSessionId();
+		const row = db
+			.prepare("SELECT count FROM file_edit_counts WHERE session_id = ? AND file = ?")
+			.get(sid, file) as { count: number } | null;
+		return row?.count ?? 0;
+	} catch {
+		return 0;
+	}
+}
+
+/** Reset all file edit counts for this session (called on commit). */
+export function resetFileEditCounts(): void {
+	try {
+		const db = getDb();
+		const sid = getSessionId();
+		db.prepare("DELETE FROM file_edit_counts WHERE session_id = ?").run(sid);
+	} catch {
+		/* fail-open */
+	}
+}
+
 export function clearOnCommit(): void {
 	const state = readSessionState();
 	state.last_commit_at = new Date().toISOString();
@@ -473,6 +520,7 @@ export function clearOnCommit(): void {
 	state.duplication_warning_count = 0;
 	state.semantic_warning_count = 0;
 	state.human_review_approved_at = null;
+	resetFileEditCounts();
 	writeState(state);
 }
 

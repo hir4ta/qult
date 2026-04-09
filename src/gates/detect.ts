@@ -514,21 +514,6 @@ export function detectGates(root: string): GatesConfig {
 	return config;
 }
 
-/** Emit a stderr warning if Semgrep is not installed.
- *  Called once per session from session-start.ts. */
-export function emitSemgrepWarning(root: string): void {
-	try {
-		if (!isReachable("semgrep", root)) {
-			process.stderr.write(
-				"[qult] Semgrep is not installed. Built-in security-check is active as fallback. " +
-					"Install: `brew install semgrep` or `pip install semgrep` for deeper SAST analysis.\n",
-			);
-		}
-	} catch {
-		/* fail-open */
-	}
-}
-
 /** Returns true if gates config has any gates defined */
 export function hasAnyGates(gates: GatesConfig): boolean {
 	return (

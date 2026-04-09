@@ -77,7 +77,10 @@ flowchart LR
 | セマンティックバグ検出 (6+ パターン) | 空 catch、到達不能コード、switch fallthrough |
 | コード重複検出 | ファイル内はブロック、ファイル間は警告 |
 | PBT 対応テスト品質チェック | Property-Based Testing の誤検知回避 |
-| SAST 統合 (Semgrep on-write) | `.semgrep.yml` 自動検出、ファイル単位実行 |
+| SAST 統合 (Semgrep 必須) | Semgrep 必須化。未インストール時はコミットをブロック |
+| 反復セキュリティ昇格 | 同一ファイル N 回編集で advisory パターンを blocking に昇格 |
+| テスト品質 blocking | 空テスト・always-true・trivial assertion をブロック |
+| dead import エスカレーション | 警告閾値超過で blocking に昇格 |
 | セッション横断学習 (Flywheel) | パターン分析に基づく閾値調整推奨 |
 | コンテキスト圧縮後の状態保全 | 圧縮後にセッション状態を再注入 |
 
@@ -85,7 +88,7 @@ flowchart LR
 
 **[Bun](https://bun.sh) が必要**（hooks と MCP server は Bun ランタイムで実行）。
 
-**推奨: [Semgrep](https://semgrep.dev)** — より深い SAST 解析。未インストール時は内蔵セキュリティチェックがフォールバックとして動作。
+**必須: [Semgrep](https://semgrep.dev)** — SAST 解析。未インストール時はコミットをブロック（`/qult:skip semgrep-required` で一時的に回避可能）。
 
 ```bash
 brew install semgrep  # macOS
@@ -200,7 +203,10 @@ rm -rf ~/.qult
 | `plan_eval.score_threshold` | 12 | プラン評価スコア (/15) |
 | `gates.output_max_chars` | 3500 | ゲート出力の最大文字数 |
 | `gates.default_timeout` | 10000 | ゲートコマンドのタイムアウト (ms) |
+| `security.require_semgrep` | true | Semgrep インストール必須化 |
 | `escalation.*_threshold` | 8-10 | ブロックまでの警告回数 |
+| `escalation.security_iterative_threshold` | 5 | 同一ファイル編集回数で advisory→blocking |
+| `escalation.dead_import_blocking_threshold` | 5 | dead import 警告数で blocking 化 |
 | `review.models.*` | spec=sonnet, quality/security=opus, adversarial=sonnet | ステージ別レビュアーモデル |
 | `flywheel.enabled` | true | セッション横断の閾値推奨 |
 | `flywheel.min_sessions` | 10 | Flywheel 分析に必要な最低セッション数 |
