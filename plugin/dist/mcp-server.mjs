@@ -10,7 +10,7 @@ import { Database } from "bun:sqlite";
 import { chmodSync, mkdirSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
-var SCHEMA_VERSION = 4;
+var SCHEMA_VERSION = 5;
 var DB_DIR = join(homedir(), ".qult");
 var DB_PATH = join(DB_DIR, "qult.db");
 var DEFAULT_SESSION_ID = "__default__";
@@ -60,6 +60,14 @@ function migrateSchema(db) {
         db.exec(`ALTER TABLE session_metrics ADD COLUMN ${col}`);
       } catch {}
     }
+  }
+  if (version < 5) {
+    db.exec(`CREATE TABLE IF NOT EXISTS file_edit_counts (
+			session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			file       TEXT    NOT NULL,
+			count      INTEGER NOT NULL DEFAULT 1,
+			PRIMARY KEY (session_id, file)
+		)`);
   }
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
@@ -232,6 +240,12 @@ function createTablesV1(db) {
 			recorded_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		);
 		CREATE INDEX IF NOT EXISTS idx_review_findings_session ON review_findings(session_id);
+		CREATE TABLE IF NOT EXISTS file_edit_counts (
+			session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			file       TEXT    NOT NULL,
+			count      INTEGER NOT NULL DEFAULT 1,
+			PRIMARY KEY (session_id, file)
+		);
 	`);
 }
 var _projectIdCache = null;
@@ -275,7 +289,7 @@ function ensureSession() {
 function findLatestSessionId() {
   const db = getDb();
   const projectId = getProjectId();
-  const row = db.prepare("SELECT id FROM sessions WHERE project_id = ? ORDER BY started_at DESC LIMIT 1").get(projectId);
+  const row = db.prepare("SELECT id FROM sessions WHERE project_id = ? ORDER BY rowid DESC LIMIT 1").get(projectId);
   return row?.id ?? null;
 }
 
@@ -310,12 +324,17 @@ var DEFAULTS = {
     test_on_edit_timeout: 15000,
     extra_path: []
   },
+  security: {
+    require_semgrep: true
+  },
   escalation: {
     security_threshold: 10,
     drift_threshold: 8,
     test_quality_threshold: 8,
     duplication_threshold: 8,
-    semantic_threshold: 8
+    semantic_threshold: 8,
+    security_iterative_threshold: 5,
+    dead_import_blocking_threshold: 5
   },
   flywheel: {
     enabled: true,
@@ -376,6 +395,11 @@ function applyConfigLayer(config, raw) {
     if (Array.isArray(g.extra_path))
       config.gates.extra_path = g.extra_path.filter((p) => typeof p === "string" && p.trim().length > 0);
   }
+  if (raw.security && typeof raw.security === "object") {
+    const s = raw.security;
+    if (typeof s.require_semgrep === "boolean")
+      config.security.require_semgrep = s.require_semgrep;
+  }
   if (raw.escalation && typeof raw.escalation === "object") {
     const e = raw.escalation;
     if (typeof e.security_threshold === "number")
@@ -388,6 +412,10 @@ function applyConfigLayer(config, raw) {
       config.escalation.duplication_threshold = Math.max(1, e.duplication_threshold);
     if (typeof e.semantic_threshold === "number")
       config.escalation.semantic_threshold = Math.max(1, e.semantic_threshold);
+    if (typeof e.security_iterative_threshold === "number")
+      config.escalation.security_iterative_threshold = Math.max(1, e.security_iterative_threshold);
+    if (typeof e.dead_import_blocking_threshold === "number")
+      config.escalation.dead_import_blocking_threshold = Math.max(1, e.dead_import_blocking_threshold);
   }
   if (raw.flywheel && typeof raw.flywheel === "object") {
     const f = raw.flywheel;
@@ -487,6 +515,17 @@ function loadConfig() {
   const semEsc = envInt("QULT_ESCALATION_SEMANTIC");
   if (semEsc !== undefined)
     config.escalation.semantic_threshold = Math.max(1, semEsc);
+  const secIterEsc = envInt("QULT_ESCALATION_SECURITY_ITERATIVE");
+  if (secIterEsc !== undefined)
+    config.escalation.security_iterative_threshold = Math.max(1, secIterEsc);
+  const deadImportEsc = envInt("QULT_ESCALATION_DEAD_IMPORT_BLOCKING");
+  if (deadImportEsc !== undefined)
+    config.escalation.dead_import_blocking_threshold = Math.max(1, deadImportEsc);
+  const requireSemgrepEnv = process.env.QULT_REQUIRE_SEMGREP;
+  if (requireSemgrepEnv === "1" || requireSemgrepEnv === "true")
+    config.security.require_semgrep = true;
+  else if (requireSemgrepEnv === "0" || requireSemgrepEnv === "false")
+    config.security.require_semgrep = false;
   const envStr = (key) => {
     const val = process.env[key];
     return val?.trim() ? val.trim() : undefined;
@@ -1138,7 +1177,10 @@ function getValidGateNames() {
     "security-check",
     "dead-import-check",
     "duplication-check",
-    "semantic-check"
+    "semantic-check",
+    "semgrep-required",
+    "test-quality-check",
+    "security-check-advisory"
   ]);
   if (gates) {
     for (const category of [gates.on_write, gates.on_commit, gates.on_review]) {

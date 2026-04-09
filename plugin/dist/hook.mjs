@@ -67,6 +67,14 @@ function migrateSchema(db) {
       } catch {}
     }
   }
+  if (version < 5) {
+    db.exec(`CREATE TABLE IF NOT EXISTS file_edit_counts (
+			session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			file       TEXT    NOT NULL,
+			count      INTEGER NOT NULL DEFAULT 1,
+			PRIMARY KEY (session_id, file)
+		)`);
+  }
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 function createTablesV1(db) {
@@ -238,6 +246,12 @@ function createTablesV1(db) {
 			recorded_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		);
 		CREATE INDEX IF NOT EXISTS idx_review_findings_session ON review_findings(session_id);
+		CREATE TABLE IF NOT EXISTS file_edit_counts (
+			session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			file       TEXT    NOT NULL,
+			count      INTEGER NOT NULL DEFAULT 1,
+			PRIMARY KEY (session_id, file)
+		);
 	`);
 }
 function setProjectPath(path) {
@@ -275,7 +289,7 @@ function ensureSession() {
   const projectId = getProjectId();
   db.prepare("INSERT OR IGNORE INTO sessions (id, project_id) VALUES (?, ?)").run(_sessionId, projectId);
 }
-var SCHEMA_VERSION = 4, DB_DIR, DB_PATH, DEFAULT_SESSION_ID = "__default__", _db = null, _projectIdCache = null, _projectPathCache = null, _sessionId;
+var SCHEMA_VERSION = 5, DB_DIR, DB_PATH, DEFAULT_SESSION_ID = "__default__", _db = null, _projectIdCache = null, _projectPathCache = null, _sessionId;
 var init_db = __esm(() => {
   DB_DIR = join(homedir(), ".qult");
   DB_PATH = join(DB_DIR, "qult.db");
@@ -343,6 +357,11 @@ function applyConfigLayer(config, raw) {
     if (Array.isArray(g.extra_path))
       config.gates.extra_path = g.extra_path.filter((p) => typeof p === "string" && p.trim().length > 0);
   }
+  if (raw.security && typeof raw.security === "object") {
+    const s = raw.security;
+    if (typeof s.require_semgrep === "boolean")
+      config.security.require_semgrep = s.require_semgrep;
+  }
   if (raw.escalation && typeof raw.escalation === "object") {
     const e = raw.escalation;
     if (typeof e.security_threshold === "number")
@@ -355,6 +374,10 @@ function applyConfigLayer(config, raw) {
       config.escalation.duplication_threshold = Math.max(1, e.duplication_threshold);
     if (typeof e.semantic_threshold === "number")
       config.escalation.semantic_threshold = Math.max(1, e.semantic_threshold);
+    if (typeof e.security_iterative_threshold === "number")
+      config.escalation.security_iterative_threshold = Math.max(1, e.security_iterative_threshold);
+    if (typeof e.dead_import_blocking_threshold === "number")
+      config.escalation.dead_import_blocking_threshold = Math.max(1, e.dead_import_blocking_threshold);
   }
   if (raw.flywheel && typeof raw.flywheel === "object") {
     const f = raw.flywheel;
@@ -453,6 +476,17 @@ function loadConfig() {
   const semEsc = envInt("QULT_ESCALATION_SEMANTIC");
   if (semEsc !== undefined)
     config.escalation.semantic_threshold = Math.max(1, semEsc);
+  const secIterEsc = envInt("QULT_ESCALATION_SECURITY_ITERATIVE");
+  if (secIterEsc !== undefined)
+    config.escalation.security_iterative_threshold = Math.max(1, secIterEsc);
+  const deadImportEsc = envInt("QULT_ESCALATION_DEAD_IMPORT_BLOCKING");
+  if (deadImportEsc !== undefined)
+    config.escalation.dead_import_blocking_threshold = Math.max(1, deadImportEsc);
+  const requireSemgrepEnv = process.env.QULT_REQUIRE_SEMGREP;
+  if (requireSemgrepEnv === "1" || requireSemgrepEnv === "true")
+    config.security.require_semgrep = true;
+  else if (requireSemgrepEnv === "0" || requireSemgrepEnv === "false")
+    config.security.require_semgrep = false;
   const envStr = (key) => {
     const val = process.env[key];
     return val?.trim() ? val.trim() : undefined;
@@ -510,12 +544,17 @@ var init_config = __esm(() => {
       test_on_edit_timeout: 15000,
       extra_path: []
     },
+    security: {
+      require_semgrep: true
+    },
     escalation: {
       security_threshold: 10,
       drift_threshold: 8,
       test_quality_threshold: 8,
       duplication_threshold: 8,
-      semantic_threshold: 8
+      semantic_threshold: 8,
+      security_iterative_threshold: 5,
+      dead_import_blocking_threshold: 5
     },
     flywheel: {
       enabled: true,
@@ -1068,6 +1107,26 @@ function markGateRan(gateName, sessionId) {
   };
   writeState(state);
 }
+function incrementFileEditCount(file) {
+  try {
+    const db = getDb();
+    const sid = getSessionId();
+    db.prepare("INSERT INTO file_edit_counts (session_id, file, count) VALUES (?, ?, 1) ON CONFLICT(session_id, file) DO UPDATE SET count = count + 1").run(sid, file);
+    const row = db.prepare("SELECT count FROM file_edit_counts WHERE session_id = ? AND file = ?").get(sid, file);
+    return row?.count ?? 1;
+  } catch (err) {
+    process.stderr.write(`[qult] file_edit_counts error: ${err instanceof Error ? err.message : "unknown"} \u2014 iterative escalation may be degraded
+`);
+    return 1;
+  }
+}
+function resetFileEditCounts() {
+  try {
+    const db = getDb();
+    const sid = getSessionId();
+    db.prepare("DELETE FROM file_edit_counts WHERE session_id = ?").run(sid);
+  } catch {}
+}
 function clearOnCommit() {
   const state = readSessionState();
   state.last_commit_at = new Date().toISOString();
@@ -1091,6 +1150,7 @@ function clearOnCommit() {
   state.duplication_warning_count = 0;
   state.semantic_warning_count = 0;
   state.human_review_approved_at = null;
+  resetFileEditCounts();
   writeState(state);
 }
 function getReviewIteration() {
@@ -2347,7 +2407,7 @@ var init_import_check = __esm(() => {
 
 // src/hooks/detectors/security-check.ts
 import { existsSync as existsSync6, readFileSync as readFileSync6 } from "fs";
-import { extname as extname6 } from "path";
+import { basename as basename4, extname as extname6 } from "path";
 function detectSecurityPatterns(file) {
   if (isGateDisabled("security-check"))
     return [];
@@ -2418,10 +2478,14 @@ function detectSecurityPatterns(file) {
         }
       }
     }
-    for (const { re, desc, exts } of DANGEROUS_PATTERNS) {
+    for (const { re, desc, exts, suppress, suppressFile } of DANGEROUS_PATTERNS) {
       if (exts && !exts.has(ext))
         continue;
       if (re.test(scanLine)) {
+        if (suppress?.test(scanLine))
+          continue;
+        if (suppressFile?.test(basename4(file)))
+          continue;
         errors.push(`L${i + 1}: ${desc}`);
       }
     }
@@ -2437,22 +2501,51 @@ function detectSecurityPatterns(file) {
     }
   ];
 }
+function matchAdvisoryPatterns(file, content) {
+  const ext = extname6(file).toLowerCase();
+  if (!CHECKABLE_EXTS2.has(ext))
+    return [];
+  if (content.length > MAX_CHECK_SIZE3)
+    return [];
+  const lines = content.split(`
+`);
+  const matches = [];
+  for (let i = 0;i < lines.length; i++) {
+    const trimmed = lines[i].trimStart();
+    if (trimmed.startsWith("//") || trimmed.startsWith("#") || trimmed.startsWith("*"))
+      continue;
+    for (const { re, suppress, desc, exts } of ADVISORY_PATTERNS) {
+      if (exts && !exts.has(ext))
+        continue;
+      if (re.test(lines[i]) && !suppress?.test(lines[i])) {
+        matches.push({ line: i + 1, desc });
+      }
+    }
+  }
+  return matches;
+}
+function getAdvisoryAsPendingFixes(file, content) {
+  try {
+    const matches = matchAdvisoryPatterns(file, content);
+    if (matches.length === 0)
+      return [];
+    return [
+      {
+        file,
+        gate: "security-check-advisory",
+        errors: matches.map((m) => sanitizeForStderr(`L${m.line}: ${m.desc}`.slice(0, 300)))
+      }
+    ];
+  } catch {
+    return [];
+  }
+}
 function emitAdvisoryWarnings(file, content) {
   try {
-    const ext = extname6(file).toLowerCase();
-    const lines = content.split(`
+    const relative = file.split("/").slice(-3).join("/");
+    for (const m of matchAdvisoryPatterns(file, content)) {
+      process.stderr.write(`[qult] Security advisory: ${relative}:${m.line} \u2014 ${m.desc}
 `);
-    for (let i = 0;i < lines.length; i++) {
-      const line = lines[i];
-      for (const { re, suppress, desc, exts } of ADVISORY_PATTERNS) {
-        if (exts && !exts.has(ext))
-          continue;
-        if (re.test(line) && !suppress.test(line)) {
-          const relative = file.split("/").slice(-3).join("/");
-          process.stderr.write(`[qult] Security advisory: ${relative}:${i + 1} \u2014 ${desc}
-`);
-        }
-      }
     }
   } catch {}
 }
@@ -2630,6 +2723,23 @@ var init_security_check = __esm(() => {
     {
       re: /(?:iv|nonce|IV|NONCE)\s*[:=]\s*["'`][a-fA-F0-9]{16,}["'`]/,
       desc: "Hardcoded IV/nonce \u2014 use random generation"
+    },
+    {
+      re: /Access-Control-Allow-Origin['":\s]*\*/,
+      suppress: /(?:localhost|127\.0\.0\.1|development|test)/i,
+      desc: "CORS wildcard origin (*) \u2014 restrict to specific origins in production"
+    },
+    {
+      re: /\bdebug\s*[:=]\s*true\b/,
+      suppress: /(?:test|spec|mock|\.test\.|\.spec\.)/i,
+      suppressFile: /(?:\.test\.|\bspec\b|\.spec\.)/i,
+      desc: "Hardcoded debug=true \u2014 verify this is not in production config"
+    },
+    {
+      re: /\bsourceMap\s*[:=]\s*true\b/,
+      suppress: /(?:dev|development|test)/i,
+      suppressFile: /(?:\.test\.|\bspec\b|\.spec\.)/i,
+      desc: "Source maps enabled \u2014 verify they are not shipped to production (VibeGuard)"
     }
   ];
   ADVISORY_PATTERNS = [
@@ -2646,25 +2756,10 @@ var init_security_check = __esm(() => {
       exts: JS_TS_EXTS
     },
     {
-      re: /Access-Control-Allow-Origin['":\s]*\*/,
-      suppress: /(?:localhost|127\.0\.0\.1|development|test)/i,
-      desc: "CORS wildcard origin (*) \u2014 restrict to specific origins in production"
-    },
-    {
       re: /\bcors\s*\(\s*\)/,
       suppress: /(?:\/\/\s*(?:dev|test|local))/i,
       desc: "cors() with no options \u2014 allows all origins by default",
       exts: JS_TS_EXTS
-    },
-    {
-      re: /\bdebug\s*[:=]\s*true\b/,
-      suppress: /(?:test|spec|mock|\.test\.|\.spec\.)/i,
-      desc: "Hardcoded debug=true \u2014 verify this is not in production config"
-    },
-    {
-      re: /\bsourceMap\s*[:=]\s*true\b/,
-      suppress: /(?:dev|development|test)/i,
-      desc: "Source maps enabled \u2014 verify they are not shipped to production (VibeGuard)"
     },
     {
       re: /(?:console\.(?:log|info|warn|debug)|logger\.(?:info|warn|debug|log))\s*\(.*(?:password|passwd|secret|token|apiKey|api_key|credential|private_key)/i,
@@ -2947,10 +3042,10 @@ var init_semantic_check = __esm(() => {
 
 // src/hooks/detectors/test-file-resolver.ts
 import { existsSync as existsSync8 } from "fs";
-import { basename as basename4, dirname as dirname4, extname as extname8, join as join5 } from "path";
+import { basename as basename5, dirname as dirname4, extname as extname8, join as join5 } from "path";
 function resolveTestFile(sourceFile) {
   const ext = extname8(sourceFile);
-  const base = basename4(sourceFile, ext);
+  const base = basename5(sourceFile, ext);
   const dir = dirname4(sourceFile);
   if (isTestFile2(sourceFile))
     return null;
@@ -2963,7 +3058,7 @@ function resolveTestFile(sourceFile) {
   return null;
 }
 function isTestFile2(file) {
-  const base = basename4(file);
+  const base = basename5(file);
   return /\.(test|spec)\.\w+$/.test(base) || /^test_\w+\.py$/.test(base) || /_test\.go$/.test(base) || /\/(__tests__|tests)\//.test(file);
 }
 var TEST_PATTERNS;
@@ -2981,12 +3076,426 @@ var init_test_file_resolver = __esm(() => {
   ];
 });
 
+// src/hooks/detectors/test-quality-check.ts
+import { existsSync as existsSync9, readFileSync as readFileSync8 } from "fs";
+import { basename as basename6, dirname as dirname5, extname as extname9, resolve as resolve3 } from "path";
+function countAssertionsOutsideSetup(code) {
+  const lines = code.split(`
+`);
+  let inSetupBlock = false;
+  let braceDepth = 0;
+  let setupStartDepth = 0;
+  let count = 0;
+  for (const line of lines) {
+    if (!inSetupBlock && SETUP_BLOCK_RE.test(line)) {
+      inSetupBlock = true;
+      setupStartDepth = braceDepth;
+    }
+    for (const ch of line) {
+      if (ch === "{")
+        braceDepth++;
+      else if (ch === "}") {
+        braceDepth--;
+        if (inSetupBlock && braceDepth <= setupStartDepth) {
+          inSetupBlock = false;
+        }
+      }
+    }
+    if (!inSetupBlock) {
+      const matches = line.match(ASSERTION_RE);
+      if (matches)
+        count += matches.length;
+    }
+  }
+  return count;
+}
+function analyzeTestQuality(file) {
+  const cwd = resolve3(process.cwd());
+  const absPath = resolve3(cwd, file);
+  if (!absPath.startsWith(cwd))
+    return null;
+  if (!existsSync9(absPath))
+    return null;
+  let content;
+  try {
+    content = readFileSync8(absPath, "utf-8");
+  } catch {
+    return null;
+  }
+  if (content.length > MAX_CHECK_SIZE5)
+    return null;
+  const codeOnly = content.split(`
+`).filter((line) => !line.trimStart().startsWith("//")).join(`
+`);
+  const lines = content.split(`
+`);
+  const testCount = (codeOnly.match(TEST_CASE_RE2) ?? []).length;
+  if (testCount === 0)
+    return null;
+  const assertionCount = countAssertionsOutsideSetup(codeOnly);
+  const avgAssertions = assertionCount / testCount;
+  const isPbt = PBT_RE.test(content);
+  const smells = [];
+  if (isPbt) {
+    for (let i = 0;i < lines.length; i++) {
+      const line = lines[i];
+      if (PBT_DEGENERATE_RUNS_RE.test(line)) {
+        smells.push({
+          type: "pbt-degenerate-runs",
+          line: i + 1,
+          message: "numRuns: 1 defeats the purpose of property-based testing \u2014 increase run count"
+        });
+      }
+      if (PBT_CONSTRAINED_GEN_RE.test(line)) {
+        smells.push({
+          type: "pbt-constrained-generator",
+          line: i + 1,
+          message: "Generator min equals max \u2014 produces a single constant value, not random input"
+        });
+      }
+    }
+  }
+  for (let i = 0;i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith("//"))
+      continue;
+    for (const { re, name } of WEAK_MATCHERS) {
+      if (re.test(line)) {
+        smells.push({
+          type: "weak-matcher",
+          line: i + 1,
+          message: `Weak matcher ${name} \u2014 consider asserting a specific value`
+        });
+        break;
+      }
+    }
+    if (TRIVIAL_ASSERTION_RE.test(line)) {
+      smells.push({
+        type: "trivial-assertion",
+        line: i + 1,
+        message: "Trivial assertion: comparing variable to itself"
+      });
+    }
+    if (EMPTY_TEST_RE.test(line)) {
+      smells.push({
+        type: "empty-test",
+        line: i + 1,
+        message: "Empty test body \u2014 no assertions"
+      });
+    }
+    if (ALWAYS_TRUE_RE.test(line)) {
+      smells.push({
+        type: "always-true",
+        line: i + 1,
+        message: "Always-true assertion \u2014 tests a literal, not computed behavior"
+      });
+    }
+    if (CONSTANT_SELF_RE.test(line)) {
+      smells.push({
+        type: "constant-self",
+        line: i + 1,
+        message: "Constant-to-constant assertion: literal compared to itself"
+      });
+    }
+    if (IMPL_COUPLED_RE.test(line)) {
+      smells.push({
+        type: "impl-coupled",
+        line: i + 1,
+        message: "Tests mock calls instead of behavior \u2014 consider asserting outputs"
+      });
+    }
+  }
+  const snapshotCount = (codeOnly.match(SNAPSHOT_RE) ?? []).length;
+  const nonSnapshotAssertions = assertionCount - snapshotCount;
+  if (snapshotCount > 0 && nonSnapshotAssertions <= 0) {
+    smells.push({
+      type: "snapshot-only",
+      line: 0,
+      message: `All ${snapshotCount} assertion(s) are snapshots \u2014 add value-based assertions to verify behavior`
+    });
+  }
+  const mockCount = (codeOnly.match(MOCK_RE) ?? []).length;
+  if (mockCount > 0 && mockCount > assertionCount) {
+    smells.push({
+      type: "mock-overuse",
+      line: 0,
+      message: `Mock overuse: ${mockCount} mocks vs ${assertionCount} assertions \u2014 tests may verify mocks, not behavior`
+    });
+  }
+  let inAsyncTest = false;
+  let asyncTestLine = 0;
+  let asyncTestHasAwait = false;
+  let asyncBraceDepth = 0;
+  for (let i = 0;i < lines.length; i++) {
+    const line = lines[i];
+    if (!inAsyncTest && ASYNC_TEST_RE.test(line)) {
+      inAsyncTest = true;
+      asyncTestLine = i + 1;
+      asyncTestHasAwait = false;
+      asyncBraceDepth = 0;
+    }
+    if (inAsyncTest) {
+      if (AWAIT_RE.test(line))
+        asyncTestHasAwait = true;
+      let inStr = null;
+      let escaped = false;
+      for (const ch of line) {
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (ch === "\\") {
+          escaped = true;
+          continue;
+        }
+        if (inStr) {
+          if (ch === inStr)
+            inStr = null;
+          continue;
+        }
+        if (ch === '"' || ch === "'" || ch === "`") {
+          inStr = ch;
+          continue;
+        }
+        if (ch === "{")
+          asyncBraceDepth++;
+        else if (ch === "}") {
+          asyncBraceDepth--;
+          if (asyncBraceDepth <= 0) {
+            if (!asyncTestHasAwait) {
+              smells.push({
+                type: "async-no-await",
+                line: asyncTestLine,
+                message: "Async test without await \u2014 promises may resolve after test completes"
+              });
+            }
+            inAsyncTest = false;
+          }
+        }
+      }
+    }
+  }
+  let moduleLetCount = 0;
+  for (let i = 0;i < lines.length; i++) {
+    const line = lines[i];
+    if (MODULE_LET_RE.test(line)) {
+      moduleLetCount++;
+      if (moduleLetCount === 1) {
+        smells.push({
+          type: "shared-mutable-state",
+          line: i + 1,
+          message: "Module-level `let` in test file \u2014 shared mutable state may cause test isolation issues"
+        });
+      }
+    }
+  }
+  if (lines.length > LARGE_TEST_FILE_LINES) {
+    smells.push({
+      type: "large-test-file",
+      line: 0,
+      message: `Test file has ${lines.length} lines (>${LARGE_TEST_FILE_LINES}) \u2014 consider splitting by concern`
+    });
+  }
+  try {
+    const snapDir = `${dirname5(absPath)}/__snapshots__/`;
+    const snapFile = `${snapDir}${basename6(absPath)}.snap`;
+    if (existsSync9(snapFile)) {
+      const snapContent = readFileSync8(snapFile, "utf-8");
+      if (snapContent.length > LARGE_SNAPSHOT_CHARS) {
+        smells.push({
+          type: "snapshot-bloat",
+          line: 0,
+          message: `Snapshot file is ${Math.round(snapContent.length / 1024)}KB \u2014 large snapshots capture implementation details`
+        });
+      }
+    }
+  } catch {}
+  if (testCount >= 2) {
+    const hasErrorAssertions = /(?:toThrow|rejects\.toThrow|\.rejects\.|\.catch\s*\(|expect\(.*error)/i.test(codeOnly);
+    if (!hasErrorAssertions) {
+      try {
+        const implFile = findImplFile(absPath);
+        if (implFile) {
+          const implContent = readFileSync8(implFile, "utf-8");
+          if (/\bthrow\b|\breject\b|Promise\.reject/m.test(implContent)) {
+            smells.push({
+              type: "no-error-path",
+              line: 0,
+              message: "Implementation has throw/reject but test has no error-path assertions (toThrow, rejects, catch)"
+            });
+          }
+        }
+      } catch {}
+    }
+  }
+  if (testCount >= 3) {
+    const descRe = /\b(?:it|test)\s*\(\s*["'`]([^"'`]*)["'`]/g;
+    const negativeRe = /\b(?:invalid|error|fail|reject|throw|empty|null|missing|not\b|negative|undefined|wrong|bad|broken|illegal)/i;
+    let allPositive = true;
+    for (const match of codeOnly.matchAll(descRe)) {
+      if (negativeRe.test(match[1])) {
+        allPositive = false;
+        break;
+      }
+    }
+    if (allPositive) {
+      smells.push({
+        type: "happy-path-only",
+        line: 0,
+        message: "All test descriptions are positive \u2014 consider testing error/edge cases (invalid input, null, empty)"
+      });
+    }
+  }
+  if (testCount >= 3) {
+    const boundaryValueRe = /(?:\b0\b|\b-1\b|\bnull\b|\bundefined\b|\bNaN\b|\bInfinity\b|["'`]{2}|\[\s*\])/;
+    const hasExpectLine = /expect\s*\(/.test(codeOnly);
+    const hasBoundary = hasExpectLine && codeOnly.split(`
+`).some((line) => /expect\s*\(/.test(line) && boundaryValueRe.test(line));
+    if (!hasBoundary) {
+      smells.push({
+        type: "missing-boundary",
+        line: 0,
+        message: "No boundary values tested (0, -1, null, undefined, NaN, empty string/array) \u2014 consider edge cases"
+      });
+    }
+  }
+  if (testCount >= 5 && assertionCount >= 5) {
+    const matcherNameRe = /\.(toBe|toEqual|toStrictEqual|toThrow|toMatch|toContain)\s*\(/g;
+    const matcherCounts = new Map;
+    let totalMatched = 0;
+    for (const m of codeOnly.matchAll(matcherNameRe)) {
+      const key = m[1];
+      matcherCounts.set(key, (matcherCounts.get(key) ?? 0) + 1);
+      totalMatched++;
+    }
+    if (totalMatched > 0) {
+      for (const [matcher, count] of matcherCounts) {
+        const ratio = Math.min(count / totalMatched, 1);
+        if (ratio >= 0.8) {
+          smells.push({
+            type: "concentrated-pattern",
+            line: 0,
+            message: `${Math.round(ratio * 100)}% of assertions use .${matcher}() \u2014 tests may miss diverse behaviors`
+          });
+          break;
+        }
+      }
+    }
+  }
+  const blockingSmells = smells.filter((s) => BLOCKING_SMELL_TYPES.has(s.type));
+  return { testCount, assertionCount, avgAssertions, smells, blockingSmells, isPbt };
+}
+function getBlockingTestSmells(file, result) {
+  if (result.blockingSmells.length === 0)
+    return [];
+  return [
+    {
+      file,
+      gate: "test-quality-check",
+      errors: result.blockingSmells.map((s) => `L${s.line}: ${s.message}`)
+    }
+  ];
+}
+function findImplFile(testPath) {
+  try {
+    const dir = dirname5(testPath);
+    const base = basename6(testPath);
+    const implName = base.replace(/\.(?:test|spec)(\.[^.]+)$/, "$1");
+    const sameDirPath = resolve3(dir, implName);
+    if (existsSync9(sameDirPath))
+      return sameDirPath;
+    const parentDir = dirname5(dir);
+    const parentPath = resolve3(parentDir, implName);
+    if (existsSync9(parentPath))
+      return parentPath;
+    const srcPath = resolve3(parentDir, "src", implName);
+    if (existsSync9(srcPath))
+      return srcPath;
+    return null;
+  } catch {
+    return null;
+  }
+}
+function formatTestQualityWarnings(file, result, taskKey) {
+  const warnings = [];
+  const prefix = taskKey ? `${taskKey}: ` : "";
+  if (result.avgAssertions < 2 && !result.isPbt) {
+    warnings.push(`${prefix}${file} has ~${result.avgAssertions.toFixed(1)} assertions/test (minimum 2)`);
+  }
+  const smellsByType = new Map;
+  for (const smell of result.smells) {
+    const existing = smellsByType.get(smell.type) ?? [];
+    existing.push(smell);
+    smellsByType.set(smell.type, existing);
+  }
+  for (const [type, items] of smellsByType) {
+    if (items.length === 1) {
+      warnings.push(`${prefix}${file}:${items[0].line}: ${items[0].message}`);
+    } else {
+      const lineNums = items.slice(0, 5).map((s) => s.line).filter((l) => l > 0).join(",");
+      const suffix = items.length > 5 ? ` (+${items.length - 5} more)` : "";
+      warnings.push(`${prefix}${file}: ${items.length}x ${type} (L${lineNums}${suffix}) \u2014 ${items[0].message}`);
+    }
+  }
+  if (!result.isPbt) {
+    const hasPbtSmell = result.smells.some((s) => s.type === "happy-path-only" || s.type === "missing-boundary");
+    if (hasPbtSmell) {
+      const ext = extname9(file).toLowerCase();
+      const JS_TS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
+      const PY = new Set([".py", ".pyi"]);
+      if (JS_TS.has(ext)) {
+        warnings.push(`${prefix}${file}: Consider property-based testing with fast-check: fc.assert(fc.property(fc.integer(), (n) => ...)) to auto-discover edge cases`);
+      } else if (PY.has(ext)) {
+        warnings.push(`${prefix}${file}: Consider property-based testing with hypothesis: @given(st.integers()) to auto-discover edge cases`);
+      } else {
+        warnings.push(`${prefix}${file}: Consider property-based testing to auto-discover edge cases and boundary values`);
+      }
+    }
+  }
+  return warnings;
+}
+var MAX_CHECK_SIZE5 = 500000, BLOCKING_SMELL_TYPES, ASSERTION_RE, TEST_CASE_RE2, WEAK_MATCHERS, TRIVIAL_ASSERTION_RE, EMPTY_TEST_RE, MOCK_RE, ALWAYS_TRUE_RE, CONSTANT_SELF_RE, SNAPSHOT_RE, IMPL_COUPLED_RE, ASYNC_TEST_RE, AWAIT_RE, MODULE_LET_RE, LARGE_TEST_FILE_LINES = 500, LARGE_SNAPSHOT_CHARS = 5000, PBT_RE, PBT_DEGENERATE_RUNS_RE, PBT_CONSTRAINED_GEN_RE, SETUP_BLOCK_RE;
+var init_test_quality_check = __esm(() => {
+  BLOCKING_SMELL_TYPES = new Set([
+    "empty-test",
+    "always-true",
+    "trivial-assertion",
+    "constant-self"
+  ]);
+  ASSERTION_RE = /\b(expect|assert|should)\s*[.(]/g;
+  TEST_CASE_RE2 = /\b(it|test)\s*\(/g;
+  WEAK_MATCHERS = [
+    { re: /\.toBeTruthy\s*\(\s*\)/, name: "toBeTruthy()" },
+    { re: /\.toBeFalsy\s*\(\s*\)/, name: "toBeFalsy()" },
+    { re: /\.toBeDefined\s*\(\s*\)/, name: "toBeDefined()" },
+    { re: /\.toBeUndefined\s*\(\s*\)/, name: "toBeUndefined()" },
+    { re: /\.toBe\s*\(\s*true\s*\)/, name: "toBe(true)" },
+    { re: /\.toBe\s*\(\s*false\s*\)/, name: "toBe(false)" }
+  ];
+  TRIVIAL_ASSERTION_RE = /expect\s*\(\s*(\w+)\s*\)\s*\.(?:toBe|toEqual|toStrictEqual)\s*\(\s*\1\s*\)/;
+  EMPTY_TEST_RE = /\b(?:it|test)\s*\(\s*["'`][^"'`]*["'`]\s*,\s*(?:async\s+)?\(\s*\)\s*=>\s*\{\s*\}\s*\)/;
+  MOCK_RE = /\b(?:vi\.fn|jest\.fn|vi\.spyOn|jest\.spyOn|sinon\.stub|sinon\.spy|\.mockImplementation|\.mockReturnValue|\.mockResolvedValue|mock\()\s*\(/g;
+  ALWAYS_TRUE_RE = /expect\s*\(\s*(?:true|1|"[^"]*"|'[^']*'|\d+)\s*\)\s*\.(?:toBe\s*\(\s*(?:true|1)\s*\)|toBeTruthy\s*\(\s*\)|toBeDefined\s*\(\s*\))/;
+  CONSTANT_SELF_RE = /expect\s*\(\s*(["'`][^"'`]*["'`]|\d+)\s*\)\s*\.(?:toBe|toEqual)\s*\(\s*\1\s*\)/;
+  SNAPSHOT_RE = /\.toMatchSnapshot\s*\(|\.toMatchInlineSnapshot\s*\(/g;
+  IMPL_COUPLED_RE = /expect\s*\(\s*\w+\s*\)\s*\.(?:toHaveBeenCalled|toHaveBeenCalledWith|toHaveBeenCalledTimes)\s*\(/;
+  ASYNC_TEST_RE = /\b(?:it|test)\s*\(\s*["'`][^"'`]*["'`]\s*,\s*async\s/;
+  AWAIT_RE = /\bawait\b/;
+  MODULE_LET_RE = /^let\s+\w+\s*(?:[:=])/;
+  PBT_RE = /\b(?:fc\.assert|fc\.property|fast-check|@fast-check\/vitest|hypothesis\.given|@given)\b/;
+  PBT_DEGENERATE_RUNS_RE = /numRuns\s*:\s*1\b/;
+  PBT_CONSTRAINED_GEN_RE = /fc\.\w+\(\s*\{\s*min\s*:\s*(\d+)\s*,\s*max\s*:\s*\1\s*\}/;
+  SETUP_BLOCK_RE = /\b(beforeEach|afterEach|beforeAll|afterAll)\s*\(/;
+});
+
 // src/hooks/post-tool.ts
 var exports_post_tool = {};
 __export(exports_post_tool, {
   default: () => postTool
 });
-import { dirname as dirname5, extname as extname9, resolve as resolve3 } from "path";
+import { readFileSync as readFileSync9 } from "fs";
+import { dirname as dirname6, extname as extname10, resolve as resolve4 } from "path";
 async function postTool(ev) {
   const tool = ev.tool_name;
   if (!tool)
@@ -3001,10 +3510,10 @@ async function handleEditWrite(ev) {
   const rawFile = typeof ev.tool_input?.file_path === "string" ? ev.tool_input.file_path : null;
   if (!rawFile)
     return;
-  const file = resolve3(rawFile);
+  const file = resolve4(rawFile);
   try {
     const existingFixes = readPendingFixes();
-    if (existingFixes.length > 0 && !existingFixes.some((f) => resolve3(f.file) === file)) {
+    if (existingFixes.length > 0 && !existingFixes.some((f) => resolve4(f.file) === file)) {
       deny(`Fix existing errors before editing other files (PostToolUse fallback):
 ${existingFixes.map((f) => `  ${f.file}`).join(`
 `)}`);
@@ -3013,22 +3522,24 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
     if (err instanceof Error && err.message.startsWith("process.exit"))
       throw err;
   }
+  const config = loadConfig();
   const gates = loadGates();
-  if (!gates?.on_write)
-    return;
-  const fileExt = extname9(file).toLowerCase();
+  const hasWriteGates = !!gates?.on_write;
+  const fileExt = extname10(file).toLowerCase();
   const gatedExts = getGatedExtensions();
   const sessionId = ev.session_id;
   const gateEntries = [];
-  for (const [name, gate] of Object.entries(gates.on_write)) {
-    if (isGateDisabled(name))
-      continue;
-    if (gate.run_once_per_batch && sessionId && shouldSkipGate(name, sessionId, file))
-      continue;
-    const hasPlaceholder = gate.command.includes("{file}");
-    if (hasPlaceholder && gatedExts.size > 0 && !gatedExts.has(fileExt))
-      continue;
-    gateEntries.push({ name, gate, fileArg: hasPlaceholder ? file : undefined });
+  if (hasWriteGates && gates?.on_write) {
+    for (const [name, gate] of Object.entries(gates.on_write)) {
+      if (isGateDisabled(name))
+        continue;
+      if (gate.run_once_per_batch && sessionId && shouldSkipGate(name, sessionId, file))
+        continue;
+      const hasPlaceholder = gate.command.includes("{file}");
+      if (hasPlaceholder && gatedExts.size > 0 && !gatedExts.has(fileExt))
+        continue;
+      gateEntries.push({ name, gate, fileArg: hasPlaceholder ? file : undefined });
+    }
   }
   const results = await Promise.allSettled(gateEntries.map((entry) => runGateAsync(entry.name, entry.gate, entry.fileArg)));
   const newFixes = [];
@@ -3065,9 +3576,9 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
     const exportFixes = detectExportBreakingChanges(file);
     newFixes.push(...exportFixes);
   } catch {}
-  const existingFixKeys = new Set(readPendingFixes().map((f) => `${resolve3(f.file)}:${f.gate}`));
+  const existingFixKeys = new Set(readPendingFixes().map((f) => `${resolve4(f.file)}:${f.gate}`));
   const fileName = file.split("/").pop() ?? "";
-  const isTestFile3 = fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_");
+  const isTestFile3 = fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_") || fileName.includes("_test.");
   try {
     const securityFixes = detectSecurityPatterns(file);
     if (securityFixes.length > 0) {
@@ -3097,12 +3608,23 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
   try {
     const deadImportWarnings = detectDeadImports(file);
     if (deadImportWarnings.length > 0) {
+      let diCount = readSessionState().dead_import_warning_count ?? 0;
       if (!existingFixKeys.has(`${file}:dead-import-check`)) {
-        incrementEscalation("dead_import_warning_count");
+        diCount = incrementEscalation("dead_import_warning_count");
       }
-      for (const w of deadImportWarnings) {
-        process.stderr.write(`[qult] Dead import: ${w}
+      if (diCount >= config.escalation.dead_import_blocking_threshold) {
+        newFixes.push({
+          file,
+          gate: "dead-import-check",
+          errors: deadImportWarnings
+        });
+        process.stderr.write(`[qult] Dead import escalation: ${diCount} warnings exceeded threshold \u2014 promoting to blocking
 `);
+      } else {
+        for (const w of deadImportWarnings) {
+          process.stderr.write(`[qult] Dead import: ${w}
+`);
+        }
       }
     }
   } catch {}
@@ -3138,7 +3660,17 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
     }
   } catch {}
   try {
-    const config = loadConfig();
+    if (isTestFile3 && !isGateDisabled("test-quality-check")) {
+      const tqResult = analyzeTestQuality(file);
+      if (tqResult) {
+        const blockingFixes = getBlockingTestSmells(file, tqResult);
+        if (blockingFixes.length > 0) {
+          newFixes.push(...blockingFixes);
+        }
+      }
+    }
+  } catch {}
+  try {
     if (config.gates.test_on_edit && newFixes.length === 0) {
       const testFile = resolveTestFile(file);
       if (testFile && gates?.on_commit?.test) {
@@ -3157,6 +3689,22 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
             process.stderr.write(`[qult] test-on-edit: ${testFile} PASS
 `);
           }
+        }
+      }
+    }
+  } catch {}
+  try {
+    if (!isGateDisabled("security-check-advisory")) {
+      const editCount = incrementFileEditCount(file);
+      const projectRoot = resolve4(process.cwd());
+      if (editCount >= config.escalation.security_iterative_threshold && file.startsWith(`${projectRoot}/`)) {
+        const fileContent = readFileSync9(file, "utf-8");
+        const advisoryFixes = getAdvisoryAsPendingFixes(file, fileContent);
+        if (advisoryFixes.length > 0) {
+          newFixes.push(...advisoryFixes);
+          const relative = file.split("/").slice(-3).join("/");
+          process.stderr.write(`[qult] Iterative security escalation: ${relative} edited ${editCount} times \u2014 advisory patterns promoted to blocking
+`);
         }
       }
     }
@@ -3208,7 +3756,7 @@ function checkOverEngineering() {
   const changed = state.changed_file_paths ?? [];
   const totalChanged = changed.length;
   const cwd = process.cwd();
-  const planFiles = new Set(plan.tasks.filter((t) => t.file).map((t) => resolve3(cwd, t.file)));
+  const planFiles = new Set(plan.tasks.filter((t) => t.file).map((t) => resolve4(cwd, t.file)));
   const unplannedCount = changed.filter((f) => !planFiles.has(f)).length;
   const planTaskCount = plan.tasks.filter((t) => t.file).length;
   const overEngThreshold = loadConfig().review.required_changed_files;
@@ -3245,7 +3793,7 @@ function buildTestFileCommand(testCommand, testFile) {
     return `${testCommand} ${escaped}`;
   }
   if (/\bgo\s+test\b/.test(testCommand)) {
-    return `go test -v -run . ${shellEscape(dirname5(testFile))}`;
+    return `go test -v -run . ${shellEscape(dirname6(testFile))}`;
   }
   if (/\bmocha\b/.test(testCommand)) {
     return `${testCommand} ${escaped}`;
@@ -3370,6 +3918,7 @@ var init_post_tool = __esm(() => {
   init_security_check();
   init_semantic_check();
   init_test_file_resolver();
+  init_test_quality_check();
   init_respond();
   planWarnedAt = new Set;
   GIT_COMMIT_RE = /\bgit\s+(?:-\S+(?:\s+\S+)?\s+)*commit\b/i;
@@ -3382,7 +3931,7 @@ var exports_pre_tool = {};
 __export(exports_pre_tool, {
   default: () => preTool
 });
-import { resolve as resolve4 } from "path";
+import { resolve as resolve5 } from "path";
 async function preTool(ev) {
   const tool = ev.tool_name;
   if (tool === "EnterPlanMode") {
@@ -3408,10 +3957,10 @@ function checkEditWrite(ev) {
   const targetFile = typeof ev.tool_input?.file_path === "string" ? ev.tool_input.file_path : null;
   if (!targetFile)
     return;
-  const resolvedTarget = resolve4(targetFile);
+  const resolvedTarget = resolve5(targetFile);
   const fixes = readPendingFixes();
   if (fixes.length > 0) {
-    const isFixingPendingFile = fixes.some((f) => resolve4(f.file) === resolvedTarget);
+    const isFixingPendingFile = fixes.some((f) => resolve5(f.file) === resolvedTarget);
     if (!isFixingPendingFile) {
       const fileList = fixes.map((f) => {
         const totalErrors = f.errors.length;
@@ -3454,7 +4003,7 @@ function suggestTaskCreate(resolvedTarget) {
   for (const task of plan.tasks) {
     if (!task.file)
       continue;
-    const taskFile = resolve4(cwd, task.file);
+    const taskFile = resolve5(cwd, task.file);
     if (resolvedTarget === taskFile) {
       process.stderr.write(`[qult] Plan task detected for ${task.file}. Use TaskCreate to track progress and enable Verify test execution.
 `);
@@ -3469,7 +4018,7 @@ function checkTaskDrift(resolvedTarget) {
   if (driftWarnedFiles.has(resolvedTarget))
     return;
   const cwd = process.cwd();
-  const planFiles = new Set(plan.tasks.filter((t) => t.file).map((t) => resolve4(cwd, t.file)));
+  const planFiles = new Set(plan.tasks.filter((t) => t.file).map((t) => resolve5(cwd, t.file)));
   if (planFiles.has(resolvedTarget))
     return;
   const relative = resolvedTarget.startsWith(cwd) ? resolvedTarget.slice(cwd.length + 1) : resolvedTarget;
@@ -3489,10 +4038,10 @@ function checkTddOrder(resolvedTarget) {
     const parsed = parseVerifyField(task.verify);
     if (!parsed)
       continue;
-    const implFile = resolve4(cwd, task.file);
+    const implFile = resolve5(cwd, task.file);
     if (resolvedTarget !== implFile)
       continue;
-    const testFile = resolve4(cwd, parsed.file);
+    const testFile = resolve5(cwd, parsed.file);
     if (resolvedTarget === testFile)
       return;
     if (!changed.includes(testFile)) {
@@ -3732,7 +4281,7 @@ var init_stop = __esm(() => {
 });
 
 // src/hooks/subagent-stop/claim-grounding.ts
-import { existsSync as existsSync9, readFileSync as readFileSync8, statSync as statSync3 } from "fs";
+import { existsSync as existsSync10, readFileSync as readFileSync10, statSync as statSync3 } from "fs";
 import { join as join6 } from "path";
 function groundClaims(output, cwd) {
   try {
@@ -3748,7 +4297,7 @@ function groundClaims(output, cwd) {
         ungrounded.push(`Path traversal rejected: ${filePath}`);
         continue;
       }
-      if (!existsSync9(absPath)) {
+      if (!existsSync10(absPath)) {
         ungrounded.push(`File not found: ${filePath}`);
         continue;
       }
@@ -3760,7 +4309,7 @@ function groundClaims(output, cwd) {
             const size = statSync3(absPath).size;
             if (size > MAX_FILE_SIZE)
               break;
-            fileContent = readFileSync8(absPath, "utf-8");
+            fileContent = readFileSync10(absPath, "utf-8");
           } catch {
             break;
           }
@@ -4157,7 +4706,7 @@ var init_score_parsers = __esm(() => {
 
 // src/hooks/subagent-stop/agent-validators.ts
 import { execSync as execSync3 } from "child_process";
-import { existsSync as existsSync10, readdirSync as readdirSync4, readFileSync as readFileSync9, statSync as statSync4 } from "fs";
+import { existsSync as existsSync11, readdirSync as readdirSync4, readFileSync as readFileSync11, statSync as statSync4 } from "fs";
 import { join as join7, normalize } from "path";
 function checkReadOnlyViolation(normalized) {
   if (!READ_ONLY_REVIEWERS.has(normalized))
@@ -4253,7 +4802,7 @@ async function subagentStop(ev) {
 function validatePlan() {
   try {
     const planDir = join7(process.cwd(), ".claude", "plans");
-    if (!existsSync10(planDir))
+    if (!existsSync11(planDir))
       return;
     const files = readdirSync4(planDir).filter((f) => f.endsWith(".md")).map((f) => ({
       name: f,
@@ -4261,7 +4810,7 @@ function validatePlan() {
     })).sort((a, b) => b.mtime - a.mtime);
     if (files.length === 0)
       return;
-    const content = readFileSync9(join7(planDir, files[0].name), "utf-8");
+    const content = readFileSync11(join7(planDir, files[0].name), "utf-8");
     const structErrors = validatePlanStructure(content);
     if (structErrors.length > 0) {
       block(`Plan structural issues:
@@ -4604,401 +5153,6 @@ var init_subagent_stop = __esm(() => {
   init_score_parsers();
 });
 
-// src/hooks/detectors/test-quality-check.ts
-import { existsSync as existsSync11, readFileSync as readFileSync10 } from "fs";
-import { basename as basename5, dirname as dirname6, extname as extname10, resolve as resolve5 } from "path";
-function countAssertionsOutsideSetup(code) {
-  const lines = code.split(`
-`);
-  let inSetupBlock = false;
-  let braceDepth = 0;
-  let setupStartDepth = 0;
-  let count = 0;
-  for (const line of lines) {
-    if (!inSetupBlock && SETUP_BLOCK_RE.test(line)) {
-      inSetupBlock = true;
-      setupStartDepth = braceDepth;
-    }
-    for (const ch of line) {
-      if (ch === "{")
-        braceDepth++;
-      else if (ch === "}") {
-        braceDepth--;
-        if (inSetupBlock && braceDepth <= setupStartDepth) {
-          inSetupBlock = false;
-        }
-      }
-    }
-    if (!inSetupBlock) {
-      const matches = line.match(ASSERTION_RE);
-      if (matches)
-        count += matches.length;
-    }
-  }
-  return count;
-}
-function analyzeTestQuality(file) {
-  const cwd = resolve5(process.cwd());
-  const absPath = resolve5(cwd, file);
-  if (!absPath.startsWith(cwd))
-    return null;
-  if (!existsSync11(absPath))
-    return null;
-  let content;
-  try {
-    content = readFileSync10(absPath, "utf-8");
-  } catch {
-    return null;
-  }
-  if (content.length > MAX_CHECK_SIZE5)
-    return null;
-  const codeOnly = content.split(`
-`).filter((line) => !line.trimStart().startsWith("//")).join(`
-`);
-  const lines = content.split(`
-`);
-  const testCount = (codeOnly.match(TEST_CASE_RE2) ?? []).length;
-  if (testCount === 0)
-    return null;
-  const assertionCount = countAssertionsOutsideSetup(codeOnly);
-  const avgAssertions = assertionCount / testCount;
-  const isPbt = PBT_RE.test(content);
-  const smells = [];
-  if (isPbt) {
-    for (let i = 0;i < lines.length; i++) {
-      const line = lines[i];
-      if (PBT_DEGENERATE_RUNS_RE.test(line)) {
-        smells.push({
-          type: "pbt-degenerate-runs",
-          line: i + 1,
-          message: "numRuns: 1 defeats the purpose of property-based testing \u2014 increase run count"
-        });
-      }
-      if (PBT_CONSTRAINED_GEN_RE.test(line)) {
-        smells.push({
-          type: "pbt-constrained-generator",
-          line: i + 1,
-          message: "Generator min equals max \u2014 produces a single constant value, not random input"
-        });
-      }
-    }
-  }
-  for (let i = 0;i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trimStart();
-    if (trimmed.startsWith("//"))
-      continue;
-    for (const { re, name } of WEAK_MATCHERS) {
-      if (re.test(line)) {
-        smells.push({
-          type: "weak-matcher",
-          line: i + 1,
-          message: `Weak matcher ${name} \u2014 consider asserting a specific value`
-        });
-        break;
-      }
-    }
-    if (TRIVIAL_ASSERTION_RE.test(line)) {
-      smells.push({
-        type: "trivial-assertion",
-        line: i + 1,
-        message: "Trivial assertion: comparing variable to itself"
-      });
-    }
-    if (EMPTY_TEST_RE.test(line)) {
-      smells.push({
-        type: "empty-test",
-        line: i + 1,
-        message: "Empty test body \u2014 no assertions"
-      });
-    }
-    if (ALWAYS_TRUE_RE.test(line)) {
-      smells.push({
-        type: "always-true",
-        line: i + 1,
-        message: "Always-true assertion \u2014 tests a literal, not computed behavior"
-      });
-    }
-    if (CONSTANT_SELF_RE.test(line)) {
-      smells.push({
-        type: "constant-self",
-        line: i + 1,
-        message: "Constant-to-constant assertion: literal compared to itself"
-      });
-    }
-    if (IMPL_COUPLED_RE.test(line)) {
-      smells.push({
-        type: "impl-coupled",
-        line: i + 1,
-        message: "Tests mock calls instead of behavior \u2014 consider asserting outputs"
-      });
-    }
-  }
-  const snapshotCount = (codeOnly.match(SNAPSHOT_RE) ?? []).length;
-  const nonSnapshotAssertions = assertionCount - snapshotCount;
-  if (snapshotCount > 0 && nonSnapshotAssertions <= 0) {
-    smells.push({
-      type: "snapshot-only",
-      line: 0,
-      message: `All ${snapshotCount} assertion(s) are snapshots \u2014 add value-based assertions to verify behavior`
-    });
-  }
-  const mockCount = (codeOnly.match(MOCK_RE) ?? []).length;
-  if (mockCount > 0 && mockCount > assertionCount) {
-    smells.push({
-      type: "mock-overuse",
-      line: 0,
-      message: `Mock overuse: ${mockCount} mocks vs ${assertionCount} assertions \u2014 tests may verify mocks, not behavior`
-    });
-  }
-  let inAsyncTest = false;
-  let asyncTestLine = 0;
-  let asyncTestHasAwait = false;
-  let asyncBraceDepth = 0;
-  for (let i = 0;i < lines.length; i++) {
-    const line = lines[i];
-    if (!inAsyncTest && ASYNC_TEST_RE.test(line)) {
-      inAsyncTest = true;
-      asyncTestLine = i + 1;
-      asyncTestHasAwait = false;
-      asyncBraceDepth = 0;
-    }
-    if (inAsyncTest) {
-      if (AWAIT_RE.test(line))
-        asyncTestHasAwait = true;
-      let inStr = null;
-      let escaped = false;
-      for (const ch of line) {
-        if (escaped) {
-          escaped = false;
-          continue;
-        }
-        if (ch === "\\") {
-          escaped = true;
-          continue;
-        }
-        if (inStr) {
-          if (ch === inStr)
-            inStr = null;
-          continue;
-        }
-        if (ch === '"' || ch === "'" || ch === "`") {
-          inStr = ch;
-          continue;
-        }
-        if (ch === "{")
-          asyncBraceDepth++;
-        else if (ch === "}") {
-          asyncBraceDepth--;
-          if (asyncBraceDepth <= 0) {
-            if (!asyncTestHasAwait) {
-              smells.push({
-                type: "async-no-await",
-                line: asyncTestLine,
-                message: "Async test without await \u2014 promises may resolve after test completes"
-              });
-            }
-            inAsyncTest = false;
-          }
-        }
-      }
-    }
-  }
-  let moduleLetCount = 0;
-  for (let i = 0;i < lines.length; i++) {
-    const line = lines[i];
-    if (MODULE_LET_RE.test(line)) {
-      moduleLetCount++;
-      if (moduleLetCount === 1) {
-        smells.push({
-          type: "shared-mutable-state",
-          line: i + 1,
-          message: "Module-level `let` in test file \u2014 shared mutable state may cause test isolation issues"
-        });
-      }
-    }
-  }
-  if (lines.length > LARGE_TEST_FILE_LINES) {
-    smells.push({
-      type: "large-test-file",
-      line: 0,
-      message: `Test file has ${lines.length} lines (>${LARGE_TEST_FILE_LINES}) \u2014 consider splitting by concern`
-    });
-  }
-  try {
-    const snapDir = `${dirname6(absPath)}/__snapshots__/`;
-    const snapFile = `${snapDir}${basename5(absPath)}.snap`;
-    if (existsSync11(snapFile)) {
-      const snapContent = readFileSync10(snapFile, "utf-8");
-      if (snapContent.length > LARGE_SNAPSHOT_CHARS) {
-        smells.push({
-          type: "snapshot-bloat",
-          line: 0,
-          message: `Snapshot file is ${Math.round(snapContent.length / 1024)}KB \u2014 large snapshots capture implementation details`
-        });
-      }
-    }
-  } catch {}
-  if (testCount >= 2) {
-    const hasErrorAssertions = /(?:toThrow|rejects\.toThrow|\.rejects\.|\.catch\s*\(|expect\(.*error)/i.test(codeOnly);
-    if (!hasErrorAssertions) {
-      try {
-        const implFile = findImplFile(absPath);
-        if (implFile) {
-          const implContent = readFileSync10(implFile, "utf-8");
-          if (/\bthrow\b|\breject\b|Promise\.reject/m.test(implContent)) {
-            smells.push({
-              type: "no-error-path",
-              line: 0,
-              message: "Implementation has throw/reject but test has no error-path assertions (toThrow, rejects, catch)"
-            });
-          }
-        }
-      } catch {}
-    }
-  }
-  if (testCount >= 3) {
-    const descRe = /\b(?:it|test)\s*\(\s*["'`]([^"'`]*)["'`]/g;
-    const negativeRe = /\b(?:invalid|error|fail|reject|throw|empty|null|missing|not\b|negative|undefined|wrong|bad|broken|illegal)/i;
-    let allPositive = true;
-    for (const match of codeOnly.matchAll(descRe)) {
-      if (negativeRe.test(match[1])) {
-        allPositive = false;
-        break;
-      }
-    }
-    if (allPositive) {
-      smells.push({
-        type: "happy-path-only",
-        line: 0,
-        message: "All test descriptions are positive \u2014 consider testing error/edge cases (invalid input, null, empty)"
-      });
-    }
-  }
-  if (testCount >= 3) {
-    const boundaryValueRe = /(?:\b0\b|\b-1\b|\bnull\b|\bundefined\b|\bNaN\b|\bInfinity\b|["'`]{2}|\[\s*\])/;
-    const hasExpectLine = /expect\s*\(/.test(codeOnly);
-    const hasBoundary = hasExpectLine && codeOnly.split(`
-`).some((line) => /expect\s*\(/.test(line) && boundaryValueRe.test(line));
-    if (!hasBoundary) {
-      smells.push({
-        type: "missing-boundary",
-        line: 0,
-        message: "No boundary values tested (0, -1, null, undefined, NaN, empty string/array) \u2014 consider edge cases"
-      });
-    }
-  }
-  if (testCount >= 5 && assertionCount >= 5) {
-    const matcherNameRe = /\.(toBe|toEqual|toStrictEqual|toThrow|toMatch|toContain)\s*\(/g;
-    const matcherCounts = new Map;
-    let totalMatched = 0;
-    for (const m of codeOnly.matchAll(matcherNameRe)) {
-      const key = m[1];
-      matcherCounts.set(key, (matcherCounts.get(key) ?? 0) + 1);
-      totalMatched++;
-    }
-    if (totalMatched > 0) {
-      for (const [matcher, count] of matcherCounts) {
-        const ratio = Math.min(count / totalMatched, 1);
-        if (ratio >= 0.8) {
-          smells.push({
-            type: "concentrated-pattern",
-            line: 0,
-            message: `${Math.round(ratio * 100)}% of assertions use .${matcher}() \u2014 tests may miss diverse behaviors`
-          });
-          break;
-        }
-      }
-    }
-  }
-  return { testCount, assertionCount, avgAssertions, smells, isPbt };
-}
-function findImplFile(testPath) {
-  try {
-    const dir = dirname6(testPath);
-    const base = basename5(testPath);
-    const implName = base.replace(/\.(?:test|spec)(\.[^.]+)$/, "$1");
-    const sameDirPath = resolve5(dir, implName);
-    if (existsSync11(sameDirPath))
-      return sameDirPath;
-    const parentDir = dirname6(dir);
-    const parentPath = resolve5(parentDir, implName);
-    if (existsSync11(parentPath))
-      return parentPath;
-    const srcPath = resolve5(parentDir, "src", implName);
-    if (existsSync11(srcPath))
-      return srcPath;
-    return null;
-  } catch {
-    return null;
-  }
-}
-function formatTestQualityWarnings(file, result, taskKey) {
-  const warnings = [];
-  const prefix = taskKey ? `${taskKey}: ` : "";
-  if (result.avgAssertions < 2 && !result.isPbt) {
-    warnings.push(`${prefix}${file} has ~${result.avgAssertions.toFixed(1)} assertions/test (minimum 2)`);
-  }
-  const smellsByType = new Map;
-  for (const smell of result.smells) {
-    const existing = smellsByType.get(smell.type) ?? [];
-    existing.push(smell);
-    smellsByType.set(smell.type, existing);
-  }
-  for (const [type, items] of smellsByType) {
-    if (items.length === 1) {
-      warnings.push(`${prefix}${file}:${items[0].line}: ${items[0].message}`);
-    } else {
-      const lineNums = items.slice(0, 5).map((s) => s.line).filter((l) => l > 0).join(",");
-      const suffix = items.length > 5 ? ` (+${items.length - 5} more)` : "";
-      warnings.push(`${prefix}${file}: ${items.length}x ${type} (L${lineNums}${suffix}) \u2014 ${items[0].message}`);
-    }
-  }
-  if (!result.isPbt) {
-    const hasPbtSmell = result.smells.some((s) => s.type === "happy-path-only" || s.type === "missing-boundary");
-    if (hasPbtSmell) {
-      const ext = extname10(file).toLowerCase();
-      const JS_TS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
-      const PY = new Set([".py", ".pyi"]);
-      if (JS_TS.has(ext)) {
-        warnings.push(`${prefix}${file}: Consider property-based testing with fast-check: fc.assert(fc.property(fc.integer(), (n) => ...)) to auto-discover edge cases`);
-      } else if (PY.has(ext)) {
-        warnings.push(`${prefix}${file}: Consider property-based testing with hypothesis: @given(st.integers()) to auto-discover edge cases`);
-      } else {
-        warnings.push(`${prefix}${file}: Consider property-based testing to auto-discover edge cases and boundary values`);
-      }
-    }
-  }
-  return warnings;
-}
-var MAX_CHECK_SIZE5 = 500000, ASSERTION_RE, TEST_CASE_RE2, WEAK_MATCHERS, TRIVIAL_ASSERTION_RE, EMPTY_TEST_RE, MOCK_RE, ALWAYS_TRUE_RE, CONSTANT_SELF_RE, SNAPSHOT_RE, IMPL_COUPLED_RE, ASYNC_TEST_RE, AWAIT_RE, MODULE_LET_RE, LARGE_TEST_FILE_LINES = 500, LARGE_SNAPSHOT_CHARS = 5000, PBT_RE, PBT_DEGENERATE_RUNS_RE, PBT_CONSTRAINED_GEN_RE, SETUP_BLOCK_RE;
-var init_test_quality_check = __esm(() => {
-  ASSERTION_RE = /\b(expect|assert|should)\s*[.(]/g;
-  TEST_CASE_RE2 = /\b(it|test)\s*\(/g;
-  WEAK_MATCHERS = [
-    { re: /\.toBeTruthy\s*\(\s*\)/, name: "toBeTruthy()" },
-    { re: /\.toBeFalsy\s*\(\s*\)/, name: "toBeFalsy()" },
-    { re: /\.toBeDefined\s*\(\s*\)/, name: "toBeDefined()" },
-    { re: /\.toBeUndefined\s*\(\s*\)/, name: "toBeUndefined()" },
-    { re: /\.toBe\s*\(\s*true\s*\)/, name: "toBe(true)" },
-    { re: /\.toBe\s*\(\s*false\s*\)/, name: "toBe(false)" }
-  ];
-  TRIVIAL_ASSERTION_RE = /expect\s*\(\s*(\w+)\s*\)\s*\.(?:toBe|toEqual|toStrictEqual)\s*\(\s*\1\s*\)/;
-  EMPTY_TEST_RE = /\b(?:it|test)\s*\(\s*["'`][^"'`]*["'`]\s*,\s*(?:async\s+)?\(\s*\)\s*=>\s*\{\s*\}\s*\)/;
-  MOCK_RE = /\b(?:vi\.fn|jest\.fn|vi\.spyOn|jest\.spyOn|sinon\.stub|sinon\.spy|\.mockImplementation|\.mockReturnValue|\.mockResolvedValue|mock\()\s*\(/g;
-  ALWAYS_TRUE_RE = /expect\s*\(\s*(?:true|1|"[^"]*"|'[^']*'|\d+)\s*\)\s*\.(?:toBe\s*\(\s*(?:true|1)\s*\)|toBeTruthy\s*\(\s*\)|toBeDefined\s*\(\s*\))/;
-  CONSTANT_SELF_RE = /expect\s*\(\s*(["'`][^"'`]*["'`]|\d+)\s*\)\s*\.(?:toBe|toEqual)\s*\(\s*\1\s*\)/;
-  SNAPSHOT_RE = /\.toMatchSnapshot\s*\(|\.toMatchInlineSnapshot\s*\(/g;
-  IMPL_COUPLED_RE = /expect\s*\(\s*\w+\s*\)\s*\.(?:toHaveBeenCalled|toHaveBeenCalledWith|toHaveBeenCalledTimes)\s*\(/;
-  ASYNC_TEST_RE = /\b(?:it|test)\s*\(\s*["'`][^"'`]*["'`]\s*,\s*async\s/;
-  AWAIT_RE = /\bawait\b/;
-  MODULE_LET_RE = /^let\s+\w+\s*(?:[:=])/;
-  PBT_RE = /\b(?:fc\.assert|fc\.property|fast-check|@fast-check\/vitest|hypothesis\.given|@given)\b/;
-  PBT_DEGENERATE_RUNS_RE = /numRuns\s*:\s*1\b/;
-  PBT_CONSTRAINED_GEN_RE = /fc\.\w+\(\s*\{\s*min\s*:\s*(\d+)\s*,\s*max\s*:\s*\1\s*\}/;
-  SETUP_BLOCK_RE = /\b(beforeEach|afterEach|beforeAll|afterAll)\s*\(/;
-});
-
 // src/hooks/task-completed.ts
 var exports_task_completed = {};
 __export(exports_task_completed, {
@@ -5097,7 +5251,7 @@ var init_task_completed = __esm(() => {
 });
 
 // src/gates/detect.ts
-import { existsSync as existsSync12, readFileSync as readFileSync11 } from "fs";
+import { existsSync as existsSync12, readFileSync as readFileSync12 } from "fs";
 import { join as join8 } from "path";
 function isReachable(exe, root) {
   if (!/^[a-zA-Z0-9_-]+$/.test(exe))
@@ -5115,13 +5269,6 @@ function isReachable(exe, root) {
   } catch {
     return false;
   }
-}
-function emitSemgrepWarning(root) {
-  try {
-    if (!isReachable("semgrep", root)) {
-      process.stderr.write("[qult] Semgrep is not installed. Built-in security-check is active as fallback. " + "Install: `brew install semgrep` or `pip install semgrep` for deeper SAST analysis.\n");
-    }
-  } catch {}
 }
 var init_detect = () => {};
 
@@ -5333,11 +5480,24 @@ async function sessionStart(ev) {
       try {
         flush();
       } catch {}
-    }
-    if (ev.source === "startup") {
-      try {
-        emitSemgrepWarning(ev.cwd ?? process.cwd());
-      } catch {}
+      if (ev.source === "startup") {
+        try {
+          if (cfg.security.require_semgrep && !isGateDisabled("semgrep-required") && !isReachable("semgrep", ev.cwd ?? process.cwd())) {
+            addPendingFixes("(global)", [
+              {
+                file: "(global)",
+                gate: "semgrep-required",
+                errors: [
+                  "Semgrep is required but not installed. Install: `brew install semgrep` or `pip install semgrep`. To skip: /qult:skip semgrep-required"
+                ]
+              }
+            ]);
+            try {
+              flush();
+            } catch {}
+          }
+        } catch {}
+      }
     }
     markSessionStartCompleted();
   } catch {}
@@ -5357,7 +5517,7 @@ var exports_post_compact = {};
 __export(exports_post_compact, {
   default: () => postCompact
 });
-import { existsSync as existsSync14, readdirSync as readdirSync5, readFileSync as readFileSync12, statSync as statSync5 } from "fs";
+import { existsSync as existsSync14, readdirSync as readdirSync5, readFileSync as readFileSync13, statSync as statSync5 } from "fs";
 import { join as join10 } from "path";
 async function postCompact(_ev) {
   try {
@@ -5409,7 +5569,7 @@ async function postCompact(_ev) {
       if (existsSync14(planDir)) {
         const planFiles = readdirSync5(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync5(join10(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
         if (planFiles.length > 0) {
-          const content = readFileSync12(join10(planDir, planFiles[0].name), "utf-8");
+          const content = readFileSync13(join10(planDir, planFiles[0].name), "utf-8");
           const taskCount = (content.match(/^###\s+Task\s+\d+/gim) ?? []).length;
           const doneCount = (content.match(/^###\s+Task\s+\d+.*\[done\]/gim) ?? []).length;
           if (taskCount > 0) {
