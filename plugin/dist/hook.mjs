@@ -4741,7 +4741,7 @@ function checkReadOnlyViolation(normalized) {
           if (p.startsWith("/")) {
             try {
               const cwd = process.cwd();
-              return p.startsWith(cwd + "/") ? p.slice(cwd.length + 1) : p;
+              return p.startsWith(`${cwd}/`) ? p.slice(cwd.length + 1) : p;
             } catch {
               return p;
             }

@@ -429,10 +429,7 @@ const ADVISORY_PATTERNS: AdvisoryPattern[] = [
 ];
 
 /** Shared advisory pattern matching (comment-aware). Used by both stderr warnings and blocking escalation. */
-function matchAdvisoryPatterns(
-	file: string,
-	content: string,
-): { line: number; desc: string }[] {
+function matchAdvisoryPatterns(file: string, content: string): { line: number; desc: string }[] {
 	const ext = extname(file).toLowerCase();
 	if (!CHECKABLE_EXTS.has(ext)) return [];
 	if (content.length > MAX_CHECK_SIZE) return [];

@@ -67,7 +67,23 @@ git push origin main
 git push origin v<VERSION>
 ```
 
-## Verify Release
+## CI Verification
+
+**Push 後、必ず CI の完了を確認する。CI が失敗した場合はリリース未完了として扱う。**
+
+1. `gh run watch` で最新の CI run を監視（完了まで待機）
+2. CI が **success** → GitHub Release 作成に進む
+3. CI が **failure** → 以下を実施:
+   a. `gh run view <run-id> --log-failed` でエラー内容を確認
+   b. エラーを修正してコミット
+   c. **タグを打ち直す**: `git tag -d v<VERSION> && git push origin :refs/tags/v<VERSION>`
+   d. 修正コミット後に再タグ: `git tag v<VERSION> && git push origin main && git push origin v<VERSION>`
+   e. 再度 `gh run watch` で CI 成功を確認
+   f. 成功するまでこのループを繰り返す
+
+## Create Release
+
+CI 成功を確認した後のみ実行:
 
 ```
 gh release create v<VERSION> --generate-notes
@@ -80,4 +96,5 @@ gh release view v<VERSION>
 |------|-------|
 | Version | v<VERSION> |
 | Commit | <hash> |
+| CI | PASSED |
 | Release URL | https://github.com/hir4ta/qult/releases/tag/v<VERSION> |
