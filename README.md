@@ -10,25 +10,56 @@
 
 [Japanese / README.ja.md](README.ja.md)
 
-## Why qult?
+## The Problem: AI Code Quality Crisis
 
-AI coding agents are powerful but unreliable at self-regulation — they leave lint errors behind, commit without testing, and praise their own code.
+AI coding agents ship code fast — but the research shows a consistent pattern of quality degradation:
 
-qult implements the [Generator-Evaluator pattern](https://www.anthropic.com/engineering/harness-design-long-running-apps): separate generation from evaluation, enforce quality structurally.
+| Finding | Source |
+|---------|--------|
+| AI code produces **1.7x more issues** than human code | [CodeRabbit Report](https://www.coderabbit.ai/blog/state-of-ai-vs-human-code-generation-report) |
+| AI code has **2.74x more vulnerabilities** | [SoftwareSeni Analysis](https://www.softwareseni.com/ai-generated-code-security-risks-why-vulnerabilities-increase-2-74x-and-how-to-prevent-them/) |
+| Iterative AI edits **increase critical vulnerabilities by 37.6%** | [Security Degradation Study](https://arxiv.org/abs/2506.11022) |
+| Agents **selectively ignore 83% of prompt rules** | [AgentPex, Microsoft Research](https://arxiv.org/abs/2603.23806) |
+| AI review comments have **only 0.9–19.2% adoption rate** | [Code Review Agents Study](https://arxiv.org/abs/2604.03196) |
+| AI-assisted commits **leak secrets at 2x the baseline rate** | [GitGuardian 2026](https://blog.gitguardian.com/state-of-secrets-sprawl-2026/) |
 
-**Deterministic gates (lint, typecheck) → Executable specs (test) → AI review (residual only)**
+**The core issue**: Telling an AI agent "write clean code" is like telling a human "don't make mistakes." Rules at the prompt level [structurally fail](https://www.technologyreview.com/2026/01/28/1131003/rules-fail-at-the-prompt-succeed-at-the-boundary/). Existing tools (CodeRabbit, Copilot review, Qodo) can only **suggest** — and suggestions get ignored.
+
+## How qult Solves It
+
+qult doesn't suggest. It **blocks**.
+
+Instead of adding comments to a PR, qult intercepts Claude Code's tool calls at runtime and returns `exit 2` (DENY) when quality gates fail. The agent literally cannot proceed until the issue is fixed.
+
+This implements the [Generator-Evaluator pattern](https://www.anthropic.com/engineering/harness-design-long-running-apps) as a [reference monitor](https://arxiv.org/abs/2602.16708) — the same architecture that raised policy compliance from 48% to 93% in research.
+
+```
+Deterministic gates (lint, typecheck)
+  → Executable specs (test)
+    → AI review (residual only, multi-model for diversity)
+      → Proof or Block
+```
+
+| Approach | Mechanism | Compliance |
+|----------|-----------|------------|
+| Prompt rules ("write clean code") | Advisory | ~17% ([AgentPex](https://arxiv.org/abs/2603.23806)) |
+| AI code review (CodeRabbit, etc.) | Suggestion | 0.9–19.2% ([study](https://arxiv.org/abs/2604.03196)) |
+| **qult (exit 2 DENY)** | **Structural enforcement** | **Deterministic** |
 
 <details>
-<summary>Background & references</summary>
+<summary>Research foundations</summary>
 
 - [Anthropic: Harness Design](https://www.anthropic.com/engineering/harness-design-long-running-apps) — Generator-Evaluator pattern, self-evaluation bias
 - [Martin Fowler: Harness Engineering](https://martinfowler.com/articles/exploring-gen-ai/harness-engineering.html) — Guides (feedforward) + Sensors (feedback)
 - [TDAD](https://arxiv.org/abs/2603.17973) — Prompt-only TDD increases regressions (6%→10%); structural enforcement reduces to 1.8%
 - [Specification as Quality Gate](https://arxiv.org/abs/2603.25773) — AI reviewing AI is circular; deterministic gates must come first
+- [PCAS: Policy Compiler](https://arxiv.org/abs/2602.16708) — Reference monitor pattern; compliance 48%→93%
+- [AgentSpec: Behavioral Contracts](https://arxiv.org/abs/2602.22302) — Drift Bounds theorem; 88–100% hard constraint compliance at <10ms overhead
 - [Nonstandard Errors](https://arxiv.org/abs/2603.16744) — Different model families have stable analytical styles; reviewer diversity reduces correlated errors
 - [AgentPex (Microsoft)](https://arxiv.org/abs/2603.23806) — Agents selectively ignore prompt rules; structural enforcement required
 - [CodeRabbit Report](https://www.coderabbit.ai/blog/state-of-ai-vs-human-code-generation-report) — AI code creates 1.7x more issues; quality gates as mitigation
 - [Triple Debt Model](https://arxiv.org/abs/2603.22106) — Technical + Cognitive + Intent debt in AI-assisted development
+- [Semgrep + LLM Hybrid](https://semgrep.dev/products/semgrep-code/) — SAST alone 35.7% precision → hybrid with LLM triage 89.5%
 
 </details>
 

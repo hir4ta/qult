@@ -10,25 +10,56 @@
 
 [English / README.md](README.md)
 
-## なぜ qult？
+## 問題: AI コード品質の危機
 
-AI コーディングエージェントは強力だが、自己規律には頼れない。lint エラーを放置して次のファイルに行く。テストなしでコミットする。自分のコードを褒めてレビューを終える。
+AI コーディングエージェントは高速にコードを出力する。しかし研究が示すのは、一貫した品質劣化のパターンだ:
 
-qult は [Generator-Evaluator パターン](https://www.anthropic.com/engineering/harness-design-long-running-apps) を実装する。生成と評価を分離し、品質を構造的に強制する。
+| 事実 | 出典 |
+|------|------|
+| AI コードの問題は人間の **1.7 倍** | [CodeRabbit Report](https://www.coderabbit.ai/blog/state-of-ai-vs-human-code-generation-report) |
+| AI コードの脆弱性は **2.74 倍** | [SoftwareSeni 分析](https://www.softwareseni.com/ai-generated-code-security-risks-why-vulnerabilities-increase-2-74x-and-how-to-prevent-them/) |
+| 反復編集で重大脆弱性が **37.6% 増加** | [セキュリティ劣化研究](https://arxiv.org/abs/2506.11022) |
+| エージェントはプロンプトルールの **83% を選択的に無視** | [AgentPex, Microsoft Research](https://arxiv.org/abs/2603.23806) |
+| AI レビューコメントの採用率はわずか **0.9–19.2%** | [コードレビューエージェント研究](https://arxiv.org/abs/2604.03196) |
+| AI 支援コミットのシークレットリーク率は **ベースラインの 2 倍** | [GitGuardian 2026](https://blog.gitguardian.com/state-of-secrets-sprawl-2026/) |
 
-**決定論的ゲート (lint, typecheck) → 実行可能な仕様 (test) → AI レビュー (残余のみ)**
+**本質的な問題**: AI に「きれいなコードを書け」と言うのは、人間に「ミスをするな」と言うのと同じだ。プロンプトレベルのルールは[構造的に失敗する](https://www.technologyreview.com/2026/01/28/1131003/rules-fail-at-the-prompt-succeed-at-the-boundary/)。既存ツール（CodeRabbit、Copilot レビュー、Qodo）は **提案** しかできない。そして提案は無視される。
+
+## qult の解法
+
+qult は提案しない。**ブロックする。**
+
+PR にコメントを付ける代わりに、qult は Claude Code のツール呼び出しをランタイムで傍受し、品質ゲートが失敗したら `exit 2` (DENY) を返す。エージェントは問題を修正するまで文字通り先に進めない。
+
+これは [Generator-Evaluator パターン](https://www.anthropic.com/engineering/harness-design-long-running-apps) を [リファレンスモニタ](https://arxiv.org/abs/2602.16708) として実装したものだ。研究ではこのアーキテクチャがポリシー遵守率を 48% → 93% に引き上げた。
+
+```
+決定論的ゲート (lint, typecheck)
+  → 実行可能な仕様 (test)
+    → AI レビュー (残余のみ、モデル多様性で相関エラー軽減)
+      → Proof or Block
+```
+
+| アプローチ | メカニズム | 遵守率 |
+|-----------|-----------|--------|
+| プロンプトルール（「きれいに書け」） | 助言 | ~17% ([AgentPex](https://arxiv.org/abs/2603.23806)) |
+| AI コードレビュー（CodeRabbit 等） | 提案 | 0.9–19.2% ([研究](https://arxiv.org/abs/2604.03196)) |
+| **qult (exit 2 DENY)** | **構造的強制** | **決定論的** |
 
 <details>
-<summary>背景・参考文献</summary>
+<summary>研究的基盤</summary>
 
 - [Anthropic: Harness Design](https://www.anthropic.com/engineering/harness-design-long-running-apps) — Generator-Evaluator パターン、自己評価バイアス
 - [Martin Fowler: Harness Engineering](https://martinfowler.com/articles/exploring-gen-ai/harness-engineering.html) — ガイド (フィードフォワード) + センサー (フィードバック)
 - [TDAD](https://arxiv.org/abs/2603.17973) — プロンプトのみの TDD でリグレッション悪化 (6%→10%)。構造的強制で 1.8% に低減
 - [Specification as Quality Gate](https://arxiv.org/abs/2603.25773) — AI が AI をレビューすると相関エラーが増幅。決定論的ゲートが先
+- [PCAS: Policy Compiler](https://arxiv.org/abs/2602.16708) — リファレンスモニタパターン。遵守率 48%→93%
+- [AgentSpec: Behavioral Contracts](https://arxiv.org/abs/2602.22302) — Drift Bounds 定理。88–100% のハードコンストレイント遵守率、<10ms オーバーヘッド
 - [Nonstandard Errors](https://arxiv.org/abs/2603.16744) — 異なるモデルファミリーは安定して異なる分析スタイル。レビュアー多様性で相関エラー軽減
 - [AgentPex (Microsoft)](https://arxiv.org/abs/2603.23806) — エージェントはプロンプトルールを選択的に無視。構造的強制が必要
 - [CodeRabbit Report](https://www.coderabbit.ai/blog/state-of-ai-vs-human-code-generation-report) — AI コードは 1.7 倍の問題を生成。品質ゲートが対策
 - [Triple Debt Model](https://arxiv.org/abs/2603.22106) — 技術負債 + 認知負債 + 意図負債
+- [Semgrep + LLM Hybrid](https://semgrep.dev/products/semgrep-code/) — SAST 単体の精度 35.7% → LLM トリアージ併用で 89.5%
 
 </details>
 
