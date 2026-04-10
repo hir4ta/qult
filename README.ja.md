@@ -1,5 +1,7 @@
 # qult
 
+**qu**ality + c**ult** — コード品質への狂信的なこだわり。
+
 **Quality by Structure, Not by Promise.** コードの品質を壁で守る harness engineering ツール。
 
 > プロンプトは提案。hooks は強制。
@@ -216,13 +218,6 @@ rm -rf ~/.qult
 </details>
 
 ## トラブルシューティング
-
-<details>
-<summary>セッション開始時に "Hook Error" が表示される</summary>
-
-qult のバグではありません。Claude Code の既知の UI バグ ([#12671](https://github.com/anthropics/claude-code/issues/12671))。hooks は正常に動作しています。
-
-</details>
 
 <details>
 <summary>DENY したがツールが実行される</summary>

@@ -484,3 +484,108 @@ describe("getAdvisoryAsPendingFixes", () => {
 		expect(fixes).toHaveLength(0);
 	});
 });
+
+describe("extended secret patterns", () => {
+	async function detect(file: string) {
+		const { detectSecurityPatterns } = await import("../hooks/detectors/security-check.ts");
+		return detectSecurityPatterns(file);
+	}
+
+	it("detects Google API key", async () => {
+		const file = join(TEST_DIR, "config.ts");
+		writeFileSync(file, `const key = "AIzaSyA1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6Q";\n`);
+		const fixes = await detect(file);
+		expect(fixes.length).toBeGreaterThan(0);
+		expect(fixes[0]!.errors.some((e: string) => e.includes("Google API key"))).toBe(true);
+	});
+
+	it("detects SendGrid API key", async () => {
+		const file = join(TEST_DIR, "config.ts");
+		writeFileSync(file, `const key = "SG.abcdefghijklmnop.qrstuvwxyz123456";\n`);
+		const fixes = await detect(file);
+		expect(fixes.length).toBeGreaterThan(0);
+		expect(fixes[0]!.errors.some((e: string) => e.includes("SendGrid"))).toBe(true);
+	});
+
+	it("detects npm token", async () => {
+		const file = join(TEST_DIR, "config.ts");
+		writeFileSync(file, `const token = "npm_1234567890abcdefghijklmnopqrstuv";\n`);
+		const fixes = await detect(file);
+		expect(fixes.length).toBeGreaterThan(0);
+		expect(fixes[0]!.errors.some((e: string) => e.includes("npm token"))).toBe(true);
+	});
+
+	it("detects PyPI token", async () => {
+		const file = join(TEST_DIR, "config.ts");
+		writeFileSync(
+			file,
+			`const token = "pypi-AgEIcHlwaS5vcmcCJGI5ZmQ0ODJkLWQ3MDEtNDcxMjM0NTY3ODkw2OSI";\n`,
+		);
+		const fixes = await detect(file);
+		expect(fixes.length).toBeGreaterThan(0);
+		expect(fixes[0]!.errors.some((e: string) => e.includes("PyPI token"))).toBe(true);
+	});
+
+	it("detects DigitalOcean token", async () => {
+		const file = join(TEST_DIR, "config.ts");
+		// Build token dynamically to avoid GitHub push protection on test fixtures
+		const doToken = ["dop", "v1", "a".repeat(64)].join("_");
+		writeFileSync(file, `const token = "${doToken}";\n`);
+		const fixes = await detect(file);
+		expect(fixes.length).toBeGreaterThan(0);
+		expect(fixes[0]!.errors.some((e: string) => e.includes("DigitalOcean"))).toBe(true);
+	});
+
+	it("detects Twilio API key", async () => {
+		const file = join(TEST_DIR, "config.ts");
+		// Build token dynamically to avoid GitHub push protection on test fixtures
+		const twilioKey = "SK" + "ab12cd34".repeat(4);
+		writeFileSync(file, `const key = "${twilioKey}";\n`);
+		const fixes = await detect(file);
+		expect(fixes.length).toBeGreaterThan(0);
+		expect(fixes[0]!.errors.some((e: string) => e.includes("Twilio"))).toBe(true);
+	});
+
+	it("detects Azure JWT token", async () => {
+		const file = join(TEST_DIR, "config.ts");
+		writeFileSync(
+			file,
+			`const token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImtpZCI6Ik1mRjJ0QW1BeDhKcm1VMDBVN1NjQ3VWZ0tpRjRwNlZFZ3paWThURXBoX0EifQ.rest";
+`,
+		);
+		const fixes = await detect(file);
+		expect(fixes.length).toBeGreaterThan(0);
+		expect(fixes[0]!.errors.some((e: string) => e.includes("Hardcoded JWT"))).toBe(true);
+	});
+
+	it("detects Heroku API key in assignment", async () => {
+		const file = join(TEST_DIR, "config.ts");
+		writeFileSync(
+			file,
+			`const heroku_api_key = "12345678-1234-1234-1234-1234567890ab";
+`,
+		);
+		const fixes = await detect(file);
+		expect(fixes.length).toBeGreaterThan(0);
+		expect(fixes[0]!.errors.some((e: string) => e.includes("Heroku API key"))).toBe(true);
+	});
+
+	it("does not flag env var references", async () => {
+		const file = join(TEST_DIR, "config.ts");
+		writeFileSync(file, `const key = process.env.SENDGRID_API_KEY;\n`);
+		const fixes = await detect(file);
+		expect(fixes).toHaveLength(0);
+	});
+
+	it("skips test files", async () => {
+		const file = join(TEST_DIR, "config.test.ts");
+		writeFileSync(file, `const key = "AIzaSyA1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6Q";\n`);
+		const fixes = await detect(file);
+		// Test files skip secret detection
+		const googleKeyFixes = fixes.filter(
+			(f: { gate: string; errors: string[] }) =>
+				f.gate === "security-check" && f.errors.some((e) => e.includes("Google API key")),
+		);
+		expect(googleKeyFixes).toHaveLength(0);
+	});
+});

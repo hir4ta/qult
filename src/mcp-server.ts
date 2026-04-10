@@ -17,6 +17,7 @@ import { loadConfig, resetConfigCache } from "./config.ts";
 import { loadGates, saveGates } from "./gates/load.ts";
 import { generateHandoffDocument } from "./handoff.ts";
 import { generateHarnessReport } from "./harness-report.ts";
+import { computeFileHealthScore } from "./hooks/detectors/health-score.ts";
 import { generateMetricsDashboard } from "./metrics-dashboard.ts";
 import { appendAuditLog, readAuditLog } from "./state/audit-log.ts";
 import {
@@ -29,7 +30,6 @@ import {
 } from "./state/db.ts";
 import { getFlywheelRecommendations, readMetricsHistory } from "./state/metrics.ts";
 import { archivePlanFile, getActivePlan, resetPlanCache } from "./state/plan-status.ts";
-import { recordFinishStarted } from "./state/session-state.ts";
 import type { PendingFix } from "./types.ts";
 
 const PROTOCOL_VERSION = "2024-11-05";
@@ -57,6 +57,7 @@ function getValidGateNames(): string[] {
 		"semgrep-required",
 		"test-quality-check",
 		"security-check-advisory",
+		"coverage",
 	]);
 	if (gates) {
 		for (const category of [gates.on_write, gates.on_commit, gates.on_review]) {
@@ -199,6 +200,21 @@ const TOOL_DEFS: ToolDef[] = [
 		description:
 			"Returns a consolidated summary of all computational detector findings from the current session. Includes escalation counters and pending fixes grouped by gate. Call before /qult:review to collect ground truth for reviewers.",
 		inputSchema: { type: "object", properties: {} },
+	},
+	{
+		name: "get_file_health_score",
+		description:
+			"Compute a 0-10 health score for a file by aggregating findings from all computational detectors (security, semantic, duplication, dead-imports, hallucinated-imports, export-breaking, convention). 10 = no issues, 0 = critical. Returns score and per-detector breakdown.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				file_path: {
+					type: "string",
+					description: "Absolute path to the file to score",
+				},
+			},
+			required: ["file_path"],
+		},
 	},
 	{
 		name: "record_human_approval",
@@ -594,6 +610,40 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			}
 			return { content: [{ type: "text", text: lines.join("\n") }] };
 		}
+		case "get_file_health_score": {
+			const filePath = typeof args?.file_path === "string" ? args.file_path : "";
+			if (!filePath) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({ score: 10, breakdown: {}, error: "file_path required" }),
+						},
+					],
+				};
+			}
+			const resolvedHealth = resolve(filePath);
+			if (!resolvedHealth.startsWith(`${cwd}/`)) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								score: 10,
+								breakdown: {},
+								error: "file_path must be within project directory",
+							}),
+						},
+					],
+				};
+			}
+			try {
+				const result = computeFileHealthScore(resolvedHealth);
+				return { content: [{ type: "text", text: JSON.stringify(result) }] };
+			} catch {
+				return { content: [{ type: "text", text: JSON.stringify({ score: 10, breakdown: {} }) }] };
+			}
+		}
 		case "record_review": {
 			db.prepare("UPDATE sessions SET review_completed_at = ? WHERE id = ?").run(
 				new Date().toISOString(),
@@ -747,7 +797,10 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			}
 		}
 		case "record_finish_started": {
-			recordFinishStarted();
+			// Write directly to DB (not via writeState cache) so hook processes can read it immediately
+			db.prepare(
+				"INSERT OR REPLACE INTO ran_gates (session_id, gate_name, ran_at) VALUES (?, ?, ?)",
+			).run(sid, "__finish_started__", new Date().toISOString());
 			return { content: [{ type: "text", text: "Finish started recorded." }] };
 		}
 		case "archive_plan": {

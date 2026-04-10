@@ -195,6 +195,75 @@ describe("security gate detection", () => {
 	});
 });
 
+describe("coverage gate detection", () => {
+	it("detects coverage gate from vitest coverage dependency", () => {
+		writeFileSync(
+			join(TEST_DIR, "package.json"),
+			JSON.stringify({
+				devDependencies: { vitest: "^3.0.0", "@vitest/coverage-v8": "^3.0.0" },
+				scripts: { test: "vitest run" },
+			}),
+		);
+		writeFileSync(join(TEST_DIR, "bun.lockb"), "");
+		const gates = detectGates(TEST_DIR);
+		expect(gates.on_commit?.coverage).toBeDefined();
+		expect(gates.on_commit!.coverage!.command).toContain("coverage");
+	});
+
+	it("detects coverage gate from istanbul dependency", () => {
+		writeFileSync(
+			join(TEST_DIR, "package.json"),
+			JSON.stringify({
+				devDependencies: { vitest: "^3.0.0", "@vitest/coverage-istanbul": "^3.0.0" },
+				scripts: { test: "vitest run" },
+			}),
+		);
+		writeFileSync(join(TEST_DIR, "bun.lockb"), "");
+		const gates = detectGates(TEST_DIR);
+		expect(gates.on_commit?.coverage).toBeDefined();
+	});
+
+	it("does not detect coverage gate without coverage dependency", () => {
+		writeFileSync(
+			join(TEST_DIR, "package.json"),
+			JSON.stringify({
+				devDependencies: { vitest: "^3.0.0" },
+				scripts: { test: "vitest run" },
+			}),
+		);
+		writeFileSync(join(TEST_DIR, "bun.lockb"), "");
+		const gates = detectGates(TEST_DIR);
+		expect(gates.on_commit?.coverage).toBeUndefined();
+	});
+
+	it("detects coverage gate from jest with --coverage script", () => {
+		writeFileSync(
+			join(TEST_DIR, "package.json"),
+			JSON.stringify({
+				devDependencies: { jest: "^29.0.0" },
+				scripts: { test: "jest --coverage" },
+			}),
+		);
+		writeFileSync(join(TEST_DIR, "package-lock.json"), "{}");
+		const gates = detectGates(TEST_DIR);
+		expect(gates.on_commit?.coverage).toBeDefined();
+		expect(gates.on_commit!.coverage!.command).toContain("--coverage");
+	});
+
+	it("does not detect jest coverage gate without --coverage in scripts", () => {
+		writeFileSync(
+			join(TEST_DIR, "package.json"),
+			JSON.stringify({
+				devDependencies: { jest: "^29.0.0" },
+				scripts: { test: "jest" },
+			}),
+		);
+		writeFileSync(join(TEST_DIR, "package-lock.json"), "{}");
+		const gates = detectGates(TEST_DIR);
+		expect(gates.on_commit?.coverage).toBeUndefined();
+	});
+});
+
 describe("formatDetectionSummary", () => {
 	it("formats counts correctly", () => {
 		const gates = {

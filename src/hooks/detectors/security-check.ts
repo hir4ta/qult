@@ -45,6 +45,25 @@ const SECRET_PATTERNS: SecretPattern[] = [
 	{ re: /xox[bpas]-[A-Za-z0-9-]{10,}/, desc: "Slack token" },
 	// Stripe keys
 	{ re: /(?:sk|pk)_(?:test|live)_[A-Za-z0-9]{20,}/, desc: "Stripe key" },
+	// Google API key
+	{ re: /AIzaSy[A-Za-z0-9_-]{33}/, desc: "Google API key" },
+	// Twilio API key (SK + 32 hex, word boundary to avoid SHA/UUID false positives)
+	{ re: /\bSK[0-9a-fA-F]{32}\b/, desc: "Twilio API key" },
+	// SendGrid API key
+	{ re: /SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}/, desc: "SendGrid API key" },
+	// npm token
+	{ re: /npm_[A-Za-z0-9]{20,}/, desc: "npm token" },
+	// PyPI token
+	{ re: /pypi-[A-Za-z0-9_-]{40,}/, desc: "PyPI token" },
+	// DigitalOcean token
+	{ re: /dop_v1_[a-f0-9]{64}/, desc: "DigitalOcean token" },
+	// Hardcoded JWT token (matches any JWT with typ:JWT header)
+	{ re: /eyJ0eXAiOiJKV1Q[A-Za-z0-9._-]{20,}/, desc: "Hardcoded JWT token" },
+	// Heroku API key (UUID in assignment context)
+	{
+		re: /(?:heroku[_-]?(?:api[_-]?)?key|HEROKU[_-]?(?:API[_-]?)?KEY)\s*[:=]\s*["'`][0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}["'`]/,
+		desc: "Heroku API key",
+	},
 	// Generic bearer token in code
 	{
 		re: /["'`]Bearer\s+[A-Za-z0-9_\-/.+=]{20,}["'`]/,

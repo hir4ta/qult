@@ -1185,6 +1185,18 @@ describe("Scenario: ExitPlanMode selfcheck — blocks once, passes on retry", ()
 	});
 });
 
+describe("Scenario: ExitPlanMode skips selfcheck after plan-evaluator PASS", () => {
+	it("ExitPlanMode passes on first try when plan-evaluator scored above threshold", async () => {
+		const { recordPlanEvalIteration } = await import("../state/session-state.ts");
+		recordPlanEvalIteration(14); // above default threshold of 12
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({ tool_name: "ExitPlanMode" });
+
+		expect(exitCode).toBeNull(); // no DENY
+	});
+});
+
 // ============================================================
 // Disabled gate scenarios
 // ============================================================

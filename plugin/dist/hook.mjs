@@ -2576,6 +2576,17 @@ var init_security_check = __esm(() => {
     { re: /(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,}/, desc: "GitHub token" },
     { re: /xox[bpas]-[A-Za-z0-9-]{10,}/, desc: "Slack token" },
     { re: /(?:sk|pk)_(?:test|live)_[A-Za-z0-9]{20,}/, desc: "Stripe key" },
+    { re: /AIzaSy[A-Za-z0-9_-]{33}/, desc: "Google API key" },
+    { re: /\bSK[0-9a-fA-F]{32}\b/, desc: "Twilio API key" },
+    { re: /SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}/, desc: "SendGrid API key" },
+    { re: /npm_[A-Za-z0-9]{20,}/, desc: "npm token" },
+    { re: /pypi-[A-Za-z0-9_-]{40,}/, desc: "PyPI token" },
+    { re: /dop_v1_[a-f0-9]{64}/, desc: "DigitalOcean token" },
+    { re: /eyJ0eXAiOiJKV1Q[A-Za-z0-9._-]{20,}/, desc: "Hardcoded JWT token" },
+    {
+      re: /(?:heroku[_-]?(?:api[_-]?)?key|HEROKU[_-]?(?:API[_-]?)?KEY)\s*[:=]\s*["'`][0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}["'`]/,
+      desc: "Heroku API key"
+    },
     {
       re: /["'`]Bearer\s+[A-Za-z0-9_\-/.+=]{20,}["'`]/,
       desc: "Hardcoded Bearer token"
@@ -3950,6 +3961,12 @@ function checkEnterPlanMode() {
 function checkExitPlanMode() {
   if (wasPlanSelfcheckBlocked())
     return;
+  const scores = getPlanEvalScoreHistory();
+  if (scores.length > 0) {
+    const lastScore = scores[scores.length - 1];
+    if (lastScore >= loadConfig().plan_eval.score_threshold)
+      return;
+  }
   recordPlanSelfcheckBlocked();
   deny("Before finalizing the plan, review the entire session from start to now for omissions. " + "Check: missing files, untested edge cases, migration concerns, documentation gaps, " + "dependency changes, and anything discussed but not included in the plan. " + "After your review, call ExitPlanMode again.");
 }

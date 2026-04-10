@@ -624,6 +624,46 @@ describe("preTool: ExitPlanMode selfcheck gate", () => {
 
 		expect(exitCode).toBeNull();
 	});
+
+	it("skips ExitPlanMode selfcheck when plan-evaluator passed", async () => {
+		// Record plan-evaluator score above threshold (default 12)
+		const { recordPlanEvalIteration } = await import("../state/session-state.ts");
+		recordPlanEvalIteration(14);
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		await preTool({ tool_name: "ExitPlanMode" });
+
+		// Should pass through without DENY (no selfcheck needed)
+		expect(exitCode).toBeNull();
+	});
+
+	it("still DENY ExitPlanMode when plan-evaluator score below threshold", async () => {
+		// Record plan-evaluator score below threshold
+		const { recordPlanEvalIteration } = await import("../state/session-state.ts");
+		recordPlanEvalIteration(8);
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		try {
+			await preTool({ tool_name: "ExitPlanMode" });
+		} catch {
+			/* exit(2) */
+		}
+
+		expect(exitCode).toBe(2);
+	});
+
+	it("still DENY ExitPlanMode when no plan-evaluator ran", async () => {
+		// No recordPlanEvalIteration call — score_history is empty
+
+		const preTool = (await import("../hooks/pre-tool.ts")).default;
+		try {
+			await preTool({ tool_name: "ExitPlanMode" });
+		} catch {
+			/* exit(2) */
+		}
+
+		expect(exitCode).toBe(2);
+	});
 });
 
 describe("preTool: EnterPlanMode redirect to plan-generator", () => {

@@ -505,6 +505,67 @@ export function detectGates(root: string): GatesConfig {
 		}
 	}
 
+	// Coverage gate detection (devDeps-based, not config-file-based)
+	if (!found.has("on_commit:coverage") && pkg) {
+		const hasVitestCoverage =
+			pkg.devDeps.has("@vitest/coverage-v8") || pkg.devDeps.has("@vitest/coverage-istanbul");
+		const hasJestCoverage =
+			pkg.devDeps.has("jest") && Object.values(pkg.scripts).some((s) => s.includes("--coverage"));
+
+		if (hasVitestCoverage) {
+			const runner = pm === "bun" ? "bun" : (pm ?? "npx");
+			gates.push({
+				name: "coverage",
+				category: "on_commit",
+				gate: {
+					command:
+						runner === "bun" ? "bun vitest run --coverage" : `${runner} vitest run --coverage`,
+					timeout: 60000,
+					run_once_per_batch: true,
+				},
+			});
+			found.add("on_commit:coverage");
+		} else if (hasJestCoverage) {
+			const runner = pm ?? "npx";
+			gates.push({
+				name: "coverage",
+				category: "on_commit",
+				gate: {
+					command: `${runner} jest --coverage`,
+					timeout: 60000,
+					run_once_per_batch: true,
+				},
+			});
+			found.add("on_commit:coverage");
+		}
+	}
+
+	// Python coverage (pytest-cov)
+	if (!found.has("on_commit:coverage")) {
+		try {
+			if (hasPyprojectSection(root, "pytest") || existsSync(join(root, "pytest.ini"))) {
+				const pyproject = join(root, "pyproject.toml");
+				if (existsSync(pyproject)) {
+					const content = readFileSync(pyproject, "utf-8");
+					if (content.includes("pytest-cov") || content.includes("--cov")) {
+						gates.push({
+							name: "coverage",
+							category: "on_commit",
+							gate: {
+								command: "pytest --cov",
+								timeout: 60000,
+								run_once_per_batch: true,
+							},
+						});
+						found.add("on_commit:coverage");
+					}
+				}
+			}
+		} catch {
+			/* fail-open */
+		}
+	}
+
 	// Build GatesConfig
 	const config: GatesConfig = {};
 	for (const { name, category, gate } of gates) {

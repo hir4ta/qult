@@ -4,6 +4,7 @@ import { loadGates } from "../gates/load.ts";
 import { readPendingFixes } from "../state/pending-fixes.ts";
 import { getActivePlan, hasPlanFile, parseVerifyField } from "../state/plan-status.ts";
 import {
+	getPlanEvalScoreHistory,
 	isGateDisabled,
 	isReviewRequired,
 	readHumanApproval,
@@ -48,9 +49,18 @@ function checkEnterPlanMode(): void {
 }
 
 /** 1-time gate: block ExitPlanMode once to force a selfcheck.
+ *  Skip if plan-evaluator already passed (independent review is sufficient).
  *  Claude reviews the session for omissions, then calls ExitPlanMode again. */
 function checkExitPlanMode(): void {
 	if (wasPlanSelfcheckBlocked()) return; // already blocked once — pass through
+
+	// Skip selfcheck if plan-evaluator passed with sufficient score
+	const scores = getPlanEvalScoreHistory();
+	if (scores.length > 0) {
+		const lastScore = scores[scores.length - 1]!;
+		if (lastScore >= loadConfig().plan_eval.score_threshold) return;
+	}
+
 	recordPlanSelfcheckBlocked();
 	deny(
 		"Before finalizing the plan, review the entire session from start to now for omissions. " +

@@ -1,5 +1,7 @@
 # qult
 
+**qu**ality + c**ult** — A fanatical devotion to code quality.
+
 **Quality by Structure, Not by Promise.** A harness that enforces code quality through walls, not words.
 
 > Prompts are suggestions. Hooks are enforcement.
@@ -228,13 +230,6 @@ Gate categories:
 </details>
 
 ## Troubleshooting
-
-<details>
-<summary>"Hook Error" at session start</summary>
-
-Not a qult bug. Known Claude Code UI bug ([#12671](https://github.com/anthropics/claude-code/issues/12671)). Hooks are working correctly.
-
-</details>
 
 <details>
 <summary>DENY issued but tool still executes</summary>

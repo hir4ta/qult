@@ -155,7 +155,7 @@ describe("handleRequest (JSON-RPC)", () => {
 	it("tools/list returns all tool definitions", () => {
 		const response = handleRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" }, TEST_DIR);
 		const result = response!.result as { tools: { name: string }[] };
-		expect(result.tools).toHaveLength(20);
+		expect(result.tools).toHaveLength(21);
 		expect(result.tools.map((t) => t.name)).toEqual([
 			"get_pending_fixes",
 			"get_session_status",
@@ -167,6 +167,7 @@ describe("handleRequest (JSON-RPC)", () => {
 			"record_review",
 			"record_test_pass",
 			"get_detector_summary",
+			"get_file_health_score",
 			"record_human_approval",
 			"record_stage_scores",
 			"reset_escalation_counters",
@@ -220,8 +221,8 @@ describe("handleRequest (JSON-RPC)", () => {
 });
 
 describe("TOOL_DEFS", () => {
-	it("has 20 tool definitions", () => {
-		expect(TOOL_DEFS).toHaveLength(20);
+	it("has 21 tool definitions", () => {
+		expect(TOOL_DEFS).toHaveLength(21);
 	});
 
 	it("each tool has name, description, and inputSchema", () => {
@@ -318,6 +319,14 @@ describe("handleTool: disable_gate / enable_gate", () => {
 			reason: "Advisory patterns not relevant",
 		});
 		expect(r3.content[0]!.text).toContain("disabled");
+	});
+
+	it("disable_gate accepts coverage gate name", () => {
+		const result = handleTool("disable_gate", TEST_DIR, {
+			gate_name: "coverage",
+			reason: "Coverage gate not configured for this project",
+		});
+		expect(result.content[0]!.text).toContain("disabled");
 	});
 
 	it("disable_gate requires reason parameter", () => {
@@ -766,5 +775,47 @@ describe("archive_plan", () => {
 		writeFileSync(nonMdPath, "#!/bin/bash");
 		const result = handleTool("archive_plan", TEST_DIR, { plan_path: nonMdPath });
 		expect(result.content[0]!.text).toContain("Error");
+	});
+});
+
+describe("get_file_health_score", () => {
+	it("returns score for clean file", () => {
+		const file = join(TEST_DIR, "clean.ts");
+		writeFileSync(file, "export const x = 1;\n");
+		const result = handleTool("get_file_health_score", TEST_DIR, { file_path: file });
+		const parsed = JSON.parse(result.content[0]!.text);
+		expect(parsed.score).toBe(10);
+		expect(parsed.breakdown).toEqual({});
+	});
+
+	it("returns 10 for nonexistent file (fail-open)", () => {
+		const result = handleTool("get_file_health_score", TEST_DIR, {
+			file_path: "/nonexistent/path.ts",
+		});
+		const parsed = JSON.parse(result.content[0]!.text);
+		expect(parsed.score).toBe(10);
+		expect(parsed.breakdown).toEqual({});
+	});
+
+	it("rejects path outside project directory", () => {
+		const result = handleTool("get_file_health_score", TEST_DIR, {
+			file_path: "/etc/passwd",
+		});
+		const parsed = JSON.parse(result.content[0]!.text);
+		expect(parsed.error).toBeDefined();
+	});
+});
+
+describe("record_finish_started", () => {
+	it("persists to DB so hooks can read it via wasFinishStarted", async () => {
+		handleTool("record_finish_started", TEST_DIR, {});
+
+		// Reset ALL caches to simulate a fresh hook process
+		const { resetAllCaches } = await import("../state/flush.ts");
+		resetAllCaches();
+
+		// wasFinishStarted reads from DB via readSessionState — must see the marker
+		const { wasFinishStarted } = await import("../state/session-state.ts");
+		expect(wasFinishStarted()).toBe(true);
 	});
 });
