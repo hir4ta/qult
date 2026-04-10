@@ -1,15 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	closeDb,
-	ensureSession,
-	getDb,
-	getProjectId,
-	setProjectPath,
-	setSessionScope,
-	useTestDb,
-} from "../../state/db.ts";
+import { closeDb, getDb, getProjectId, setProjectPath, useTestDb } from "../../state/db.ts";
 import { resetAllCaches } from "../../state/flush.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-subagent-stop-test");
@@ -20,8 +12,6 @@ const originalCwd = process.cwd();
 beforeEach(() => {
 	useTestDb();
 	setProjectPath(TEST_DIR);
-	setSessionScope("test-session");
-	ensureSession();
 	resetAllCaches();
 	rmSync(TEST_DIR, { recursive: true, force: true });
 	mkdirSync(TEST_DIR, { recursive: true });

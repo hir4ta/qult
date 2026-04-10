@@ -4,6 +4,9 @@
  * All state is stored in ~/.qult/qult.db (WAL mode).
  * Hooks (short-lived) and MCP server (long-lived) share the same schema.
  * Each process gets its own connection via getDb().
+ *
+ * State is project-scoped (identified by cwd). No session concept —
+ * hooks and MCP always reference the same project row.
  */
 
 import { Database } from "bun:sqlite";
@@ -11,11 +14,10 @@ import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 const DB_DIR = join(homedir(), ".qult");
 const DB_PATH = join(DB_DIR, "qult.db");
-const DEFAULT_SESSION_ID = "__default__";
 
 // ── Singleton ────────────────────────────────────────────
 
@@ -54,7 +56,6 @@ export function closeDb(): void {
 	}
 	_db = null;
 	_projectIdCache = null;
-	_sessionId = DEFAULT_SESSION_ID;
 }
 
 function configurePragmas(db: Database): void {
@@ -70,223 +71,280 @@ function migrateSchema(db: Database): void {
 		.user_version;
 	if (version >= SCHEMA_VERSION) return;
 	if (version < 1) {
-		createTablesV1(db);
+		createTablesV6(db);
+		db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+		return;
 	}
-	if (version < 2) {
-		// Version 2: remove calibration table
-		db.exec("DROP TABLE IF EXISTS calibration");
-	}
+	// Legacy migrations (v1→v5) for existing databases
+	if (version < 2) db.exec("DROP TABLE IF EXISTS calibration");
 	if (version < 3) {
-		// Version 3: add semantic_warning_count to sessions
 		try {
 			db.exec("ALTER TABLE sessions ADD COLUMN semantic_warning_count INTEGER NOT NULL DEFAULT 0");
 		} catch {
-			/* fail-open: column may already exist */
+			/* fail-open */
 		}
 	}
 	if (version < 4) {
-		// Version 4: add extended metrics columns to session_metrics
-		const v4Columns = [
+		for (const col of [
 			"test_quality_warning_count INTEGER NOT NULL DEFAULT 0",
 			"duplication_warning_count INTEGER NOT NULL DEFAULT 0",
 			"semantic_warning_count INTEGER NOT NULL DEFAULT 0",
 			"drift_warning_count INTEGER NOT NULL DEFAULT 0",
 			"escalation_hit INTEGER NOT NULL DEFAULT 0",
-		];
-		for (const col of v4Columns) {
+		]) {
 			try {
 				db.exec(`ALTER TABLE session_metrics ADD COLUMN ${col}`);
 			} catch {
-				/* fail-open: column may already exist */
+				/* fail-open */
 			}
 		}
 	}
 	if (version < 5) {
-		// Version 5: add file_edit_counts table for iterative security escalation
 		db.exec(`CREATE TABLE IF NOT EXISTS file_edit_counts (
-			session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			file       TEXT    NOT NULL,
-			count      INTEGER NOT NULL DEFAULT 1,
+			session_id TEXT NOT NULL, file TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 1,
 			PRIMARY KEY (session_id, file)
 		)`);
 	}
+	// v6: migrate session-based → project-based state
+	if (version < 6) migrateToProjectState(db);
 	db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
-function createTablesV1(db: Database): void {
+/** Migrate from session-based state to project-based state. */
+function migrateToProjectState(db: Database): void {
+	// 1. Add state columns to projects
+	for (const col of [
+		"last_commit_at TEXT",
+		"test_passed_at TEXT",
+		"test_command TEXT",
+		"review_completed_at TEXT",
+		"review_iteration INTEGER NOT NULL DEFAULT 0",
+		"plan_eval_iteration INTEGER NOT NULL DEFAULT 0",
+		"plan_selfcheck_blocked_at TEXT",
+		"human_review_approved_at TEXT",
+		"security_warning_count INTEGER NOT NULL DEFAULT 0",
+		"test_quality_warning_count INTEGER NOT NULL DEFAULT 0",
+		"drift_warning_count INTEGER NOT NULL DEFAULT 0",
+		"dead_import_warning_count INTEGER NOT NULL DEFAULT 0",
+		"duplication_warning_count INTEGER NOT NULL DEFAULT 0",
+		"semantic_warning_count INTEGER NOT NULL DEFAULT 0",
+	]) {
+		try {
+			db.exec(`ALTER TABLE projects ADD COLUMN ${col}`);
+		} catch {
+			/* column may already exist */
+		}
+	}
+
+	// 2. Copy latest session state to projects
+	try {
+		db.exec(`UPDATE projects SET
+			test_passed_at = (SELECT s.test_passed_at FROM sessions s WHERE s.project_id = projects.id ORDER BY s.rowid DESC LIMIT 1),
+			review_completed_at = (SELECT s.review_completed_at FROM sessions s WHERE s.project_id = projects.id ORDER BY s.rowid DESC LIMIT 1),
+			review_iteration = COALESCE((SELECT s.review_iteration FROM sessions s WHERE s.project_id = projects.id ORDER BY s.rowid DESC LIMIT 1), 0)
+		`);
+	} catch {
+		/* fail-open */
+	}
+
+	// 3. Recreate child tables with project_id FK
+	const migrations: { name: string; ddl: string; copy: string }[] = [
+		{
+			name: "pending_fixes",
+			ddl: `(id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, file TEXT NOT NULL, gate TEXT NOT NULL, errors TEXT NOT NULL, UNIQUE(project_id, file, gate))`,
+			copy: `INSERT OR IGNORE INTO pending_fixes_v6 (project_id, file, gate, errors) SELECT s.project_id, t.file, t.gate, t.errors FROM pending_fixes t JOIN sessions s ON t.session_id = s.id`,
+		},
+		{
+			name: "changed_files",
+			ddl: `(project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, file_path TEXT NOT NULL, changed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), PRIMARY KEY (project_id, file_path))`,
+			copy: `INSERT OR IGNORE INTO changed_files_v6 (project_id, file_path) SELECT s.project_id, t.file_path FROM changed_files t JOIN sessions s ON t.session_id = s.id`,
+		},
+		{
+			name: "disabled_gates",
+			ddl: `(project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, gate_name TEXT NOT NULL, reason TEXT NOT NULL, disabled_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), PRIMARY KEY (project_id, gate_name))`,
+			copy: `INSERT OR IGNORE INTO disabled_gates_v6 (project_id, gate_name, reason) SELECT s.project_id, t.gate_name, t.reason FROM disabled_gates t JOIN sessions s ON t.session_id = s.id`,
+		},
+		{
+			name: "ran_gates",
+			ddl: `(project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, gate_name TEXT NOT NULL, ran_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), PRIMARY KEY (project_id, gate_name))`,
+			copy: `INSERT OR IGNORE INTO ran_gates_v6 (project_id, gate_name, ran_at) SELECT s.project_id, t.gate_name, t.ran_at FROM ran_gates t JOIN sessions s ON t.session_id = s.id`,
+		},
+		{
+			name: "task_verify_results",
+			ddl: `(project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, task_key TEXT NOT NULL, passed INTEGER NOT NULL, ran_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), PRIMARY KEY (project_id, task_key))`,
+			copy: `INSERT OR IGNORE INTO task_verify_results_v6 (project_id, task_key, passed, ran_at) SELECT s.project_id, t.task_key, t.passed, t.ran_at FROM task_verify_results t JOIN sessions s ON t.session_id = s.id`,
+		},
+		{
+			name: "gate_failure_counts",
+			ddl: `(project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, file TEXT NOT NULL, gate TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (project_id, file, gate))`,
+			copy: `INSERT OR IGNORE INTO gate_failure_counts_v6 (project_id, file, gate, count) SELECT s.project_id, t.file, t.gate, t.count FROM gate_failure_counts t JOIN sessions s ON t.session_id = s.id`,
+		},
+		{
+			name: "file_edit_counts",
+			ddl: `(project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, file TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (project_id, file))`,
+			copy: `INSERT OR IGNORE INTO file_edit_counts_v6 (project_id, file, count) SELECT s.project_id, t.file, t.count FROM file_edit_counts t JOIN sessions s ON t.session_id = s.id`,
+		},
+		{
+			name: "review_scores",
+			ddl: `(id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, iteration INTEGER NOT NULL, aggregate_score REAL NOT NULL, recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), UNIQUE(project_id, iteration))`,
+			copy: `INSERT OR IGNORE INTO review_scores_v6 (project_id, iteration, aggregate_score, recorded_at) SELECT s.project_id, t.iteration, t.aggregate_score, t.recorded_at FROM review_scores t JOIN sessions s ON t.session_id = s.id`,
+		},
+		{
+			name: "review_stage_scores",
+			ddl: `(id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, stage TEXT NOT NULL, dimension TEXT NOT NULL, score REAL NOT NULL, recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), UNIQUE(project_id, stage, dimension))`,
+			copy: `INSERT OR IGNORE INTO review_stage_scores_v6 (project_id, stage, dimension, score, recorded_at) SELECT s.project_id, t.stage, t.dimension, t.score, t.recorded_at FROM review_stage_scores t JOIN sessions s ON t.session_id = s.id`,
+		},
+		{
+			name: "plan_eval_scores",
+			ddl: `(id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, iteration INTEGER NOT NULL, aggregate_score REAL NOT NULL, recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), UNIQUE(project_id, iteration))`,
+			copy: `INSERT OR IGNORE INTO plan_eval_scores_v6 (project_id, iteration, aggregate_score, recorded_at) SELECT s.project_id, t.iteration, t.aggregate_score, t.recorded_at FROM plan_eval_scores t JOIN sessions s ON t.session_id = s.id`,
+		},
+		{
+			name: "review_findings",
+			ddl: `(id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id), file TEXT NOT NULL, severity TEXT NOT NULL, description TEXT NOT NULL, stage TEXT NOT NULL, recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')))`,
+			copy: `INSERT INTO review_findings_v6 (project_id, file, severity, description, stage, recorded_at) SELECT t.project_id, t.file, t.severity, t.description, t.stage, t.recorded_at FROM review_findings t`,
+		},
+	];
+
+	db.exec("PRAGMA foreign_keys = OFF");
+	for (const m of migrations) {
+		try {
+			db.exec(`CREATE TABLE ${m.name}_v6 ${m.ddl}`);
+			db.exec(m.copy);
+			db.exec(`DROP TABLE IF EXISTS ${m.name}`);
+			db.exec(`ALTER TABLE ${m.name}_v6 RENAME TO ${m.name}`);
+		} catch {
+			/* fail-open */
+		}
+	}
+
+	// session_metrics: make session_id nullable
+	try {
+		db.exec(`CREATE TABLE session_metrics_v6 (
+			id INTEGER PRIMARY KEY, session_id TEXT, project_id INTEGER NOT NULL REFERENCES projects(id),
+			gate_failure_count INTEGER NOT NULL DEFAULT 0, security_warning_count INTEGER NOT NULL DEFAULT 0,
+			review_aggregate REAL, files_changed INTEGER NOT NULL DEFAULT 0,
+			test_quality_warning_count INTEGER NOT NULL DEFAULT 0, duplication_warning_count INTEGER NOT NULL DEFAULT 0,
+			semantic_warning_count INTEGER NOT NULL DEFAULT 0, drift_warning_count INTEGER NOT NULL DEFAULT 0,
+			escalation_hit INTEGER NOT NULL DEFAULT 0,
+			recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		)`);
+		db.exec(`INSERT INTO session_metrics_v6 SELECT * FROM session_metrics`);
+		db.exec("DROP TABLE session_metrics");
+		db.exec("ALTER TABLE session_metrics_v6 RENAME TO session_metrics");
+	} catch {
+		/* fail-open */
+	}
+
+	db.exec("PRAGMA foreign_keys = ON");
+}
+
+/** Fresh database schema (version 6). */
+function createTablesV6(db: Database): void {
 	db.exec(`
 		CREATE TABLE IF NOT EXISTS projects (
-			id         INTEGER PRIMARY KEY,
-			path       TEXT    NOT NULL UNIQUE,
-			created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE,
+			created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			last_commit_at TEXT, test_passed_at TEXT, test_command TEXT,
+			review_completed_at TEXT, review_iteration INTEGER NOT NULL DEFAULT 0,
+			plan_eval_iteration INTEGER NOT NULL DEFAULT 0, plan_selfcheck_blocked_at TEXT,
+			human_review_approved_at TEXT,
+			security_warning_count INTEGER NOT NULL DEFAULT 0,
+			test_quality_warning_count INTEGER NOT NULL DEFAULT 0,
+			drift_warning_count INTEGER NOT NULL DEFAULT 0,
+			dead_import_warning_count INTEGER NOT NULL DEFAULT 0,
+			duplication_warning_count INTEGER NOT NULL DEFAULT 0,
+			semantic_warning_count INTEGER NOT NULL DEFAULT 0
 		);
-
 		CREATE TABLE IF NOT EXISTS sessions (
-			id                          TEXT    PRIMARY KEY,
-			project_id                  INTEGER NOT NULL REFERENCES projects(id),
-			started_at                  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			last_commit_at              TEXT,
-			test_passed_at              TEXT,
-			test_command                TEXT,
-			review_completed_at         TEXT,
-			review_iteration            INTEGER NOT NULL DEFAULT 0,
-			plan_eval_iteration         INTEGER NOT NULL DEFAULT 0,
-			plan_selfcheck_blocked_at   TEXT,
-			human_review_approved_at    TEXT,
-			security_warning_count      INTEGER NOT NULL DEFAULT 0,
-			test_quality_warning_count  INTEGER NOT NULL DEFAULT 0,
-			drift_warning_count         INTEGER NOT NULL DEFAULT 0,
-			dead_import_warning_count   INTEGER NOT NULL DEFAULT 0,
-			duplication_warning_count   INTEGER NOT NULL DEFAULT 0,
-			semantic_warning_count     INTEGER NOT NULL DEFAULT 0
+			id TEXT PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id),
+			started_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		);
-		CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
-
 		CREATE TABLE IF NOT EXISTS pending_fixes (
-			id         INTEGER PRIMARY KEY,
-			session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			file       TEXT    NOT NULL,
-			gate       TEXT    NOT NULL,
-			errors     TEXT    NOT NULL,
-			UNIQUE(session_id, file, gate)
+			id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			file TEXT NOT NULL, gate TEXT NOT NULL, errors TEXT NOT NULL,
+			UNIQUE(project_id, file, gate)
 		);
-		CREATE INDEX IF NOT EXISTS idx_pending_fixes_session ON pending_fixes(session_id);
-
 		CREATE TABLE IF NOT EXISTS changed_files (
-			session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			file_path  TEXT NOT NULL,
-			changed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			PRIMARY KEY (session_id, file_path)
+			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			file_path TEXT NOT NULL, changed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			PRIMARY KEY (project_id, file_path)
 		);
-
 		CREATE TABLE IF NOT EXISTS disabled_gates (
-			session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			gate_name   TEXT NOT NULL,
-			reason      TEXT NOT NULL,
+			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			gate_name TEXT NOT NULL, reason TEXT NOT NULL,
 			disabled_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			PRIMARY KEY (session_id, gate_name)
+			PRIMARY KEY (project_id, gate_name)
 		);
-
 		CREATE TABLE IF NOT EXISTS ran_gates (
-			session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			gate_name  TEXT NOT NULL,
-			ran_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			PRIMARY KEY (session_id, gate_name)
+			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			gate_name TEXT NOT NULL, ran_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			PRIMARY KEY (project_id, gate_name)
 		);
-
 		CREATE TABLE IF NOT EXISTS task_verify_results (
-			session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			task_key   TEXT    NOT NULL,
-			passed     INTEGER NOT NULL,
-			ran_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			PRIMARY KEY (session_id, task_key)
+			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			task_key TEXT NOT NULL, passed INTEGER NOT NULL,
+			ran_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			PRIMARY KEY (project_id, task_key)
 		);
-
 		CREATE TABLE IF NOT EXISTS gate_failure_counts (
-			session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			file       TEXT    NOT NULL,
-			gate       TEXT    NOT NULL,
-			count      INTEGER NOT NULL DEFAULT 1,
-			PRIMARY KEY (session_id, file, gate)
+			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			file TEXT NOT NULL, gate TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 1,
+			PRIMARY KEY (project_id, file, gate)
 		);
-
+		CREATE TABLE IF NOT EXISTS file_edit_counts (
+			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			file TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 1,
+			PRIMARY KEY (project_id, file)
+		);
 		CREATE TABLE IF NOT EXISTS review_scores (
-			id              INTEGER PRIMARY KEY,
-			session_id      TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			iteration       INTEGER NOT NULL,
-			aggregate_score REAL    NOT NULL,
-			recorded_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			UNIQUE(session_id, iteration)
-		);
-		CREATE INDEX IF NOT EXISTS idx_review_scores_session ON review_scores(session_id);
-
-		CREATE TABLE IF NOT EXISTS review_stage_scores (
-			id          INTEGER PRIMARY KEY,
-			session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			stage       TEXT NOT NULL,
-			dimension   TEXT NOT NULL,
-			score       REAL NOT NULL,
+			id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			iteration INTEGER NOT NULL, aggregate_score REAL NOT NULL,
 			recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			UNIQUE(session_id, stage, dimension)
+			UNIQUE(project_id, iteration)
 		);
-		CREATE INDEX IF NOT EXISTS idx_stage_scores_session ON review_stage_scores(session_id);
-
+		CREATE TABLE IF NOT EXISTS review_stage_scores (
+			id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			stage TEXT NOT NULL, dimension TEXT NOT NULL, score REAL NOT NULL,
+			recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			UNIQUE(project_id, stage, dimension)
+		);
 		CREATE TABLE IF NOT EXISTS plan_eval_scores (
-			id              INTEGER PRIMARY KEY,
-			session_id      TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			iteration       INTEGER NOT NULL,
-			aggregate_score REAL    NOT NULL,
-			recorded_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			UNIQUE(session_id, iteration)
+			id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			iteration INTEGER NOT NULL, aggregate_score REAL NOT NULL,
+			recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			UNIQUE(project_id, iteration)
 		);
-
 		CREATE TABLE IF NOT EXISTS gate_configs (
-			project_id         INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-			phase              TEXT    NOT NULL,
-			gate_name          TEXT    NOT NULL,
-			command            TEXT    NOT NULL,
-			timeout            INTEGER,
-			run_once_per_batch INTEGER NOT NULL DEFAULT 0,
-			extensions         TEXT,
+			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			phase TEXT NOT NULL, gate_name TEXT NOT NULL, command TEXT NOT NULL,
+			timeout INTEGER, run_once_per_batch INTEGER NOT NULL DEFAULT 0, extensions TEXT,
 			PRIMARY KEY (project_id, phase, gate_name)
 		);
-
 		CREATE TABLE IF NOT EXISTS project_configs (
 			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-			key        TEXT    NOT NULL,
-			value      TEXT    NOT NULL,
-			PRIMARY KEY (project_id, key)
+			key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (project_id, key)
 		);
-
-		CREATE TABLE IF NOT EXISTS global_configs (
-			key   TEXT PRIMARY KEY,
-			value TEXT NOT NULL
-		);
-
+		CREATE TABLE IF NOT EXISTS global_configs (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 		CREATE TABLE IF NOT EXISTS audit_log (
-			id         INTEGER PRIMARY KEY,
-			project_id INTEGER NOT NULL REFERENCES projects(id),
-			session_id TEXT,
-			action     TEXT NOT NULL,
-			gate_name  TEXT,
-			reason     TEXT,
+			id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id),
+			session_id TEXT, action TEXT NOT NULL, gate_name TEXT, reason TEXT,
 			created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		);
-		CREATE INDEX IF NOT EXISTS idx_audit_log_session ON audit_log(session_id);
-
 		CREATE TABLE IF NOT EXISTS session_metrics (
-			id                              INTEGER PRIMARY KEY,
-			session_id                      TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			project_id                      INTEGER NOT NULL REFERENCES projects(id),
-			gate_failure_count              INTEGER NOT NULL DEFAULT 0,
-			security_warning_count          INTEGER NOT NULL DEFAULT 0,
-			review_aggregate                REAL,
-			files_changed                   INTEGER NOT NULL DEFAULT 0,
-			test_quality_warning_count      INTEGER NOT NULL DEFAULT 0,
-			duplication_warning_count       INTEGER NOT NULL DEFAULT 0,
-			semantic_warning_count          INTEGER NOT NULL DEFAULT 0,
-			drift_warning_count             INTEGER NOT NULL DEFAULT 0,
-			escalation_hit                  INTEGER NOT NULL DEFAULT 0,
-			recorded_at                     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			id INTEGER PRIMARY KEY, session_id TEXT,
+			project_id INTEGER NOT NULL REFERENCES projects(id),
+			gate_failure_count INTEGER NOT NULL DEFAULT 0, security_warning_count INTEGER NOT NULL DEFAULT 0,
+			review_aggregate REAL, files_changed INTEGER NOT NULL DEFAULT 0,
+			test_quality_warning_count INTEGER NOT NULL DEFAULT 0, duplication_warning_count INTEGER NOT NULL DEFAULT 0,
+			semantic_warning_count INTEGER NOT NULL DEFAULT 0, drift_warning_count INTEGER NOT NULL DEFAULT 0,
+			escalation_hit INTEGER NOT NULL DEFAULT 0,
+			recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		);
-		CREATE INDEX IF NOT EXISTS idx_metrics_project ON session_metrics(project_id);
-
 		CREATE TABLE IF NOT EXISTS review_findings (
-			id          INTEGER PRIMARY KEY,
-			session_id  TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			project_id  INTEGER NOT NULL REFERENCES projects(id),
-			file        TEXT    NOT NULL,
-			severity    TEXT    NOT NULL,
-			description TEXT    NOT NULL,
-			stage       TEXT    NOT NULL,
-			recorded_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-		);
-		CREATE INDEX IF NOT EXISTS idx_review_findings_session ON review_findings(session_id);
-		CREATE TABLE IF NOT EXISTS file_edit_counts (
-			session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			file       TEXT    NOT NULL,
-			count      INTEGER NOT NULL DEFAULT 1,
-			PRIMARY KEY (session_id, file)
+			id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id),
+			file TEXT NOT NULL, severity TEXT NOT NULL, description TEXT NOT NULL,
+			stage TEXT NOT NULL, recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		);
 	`);
 }
@@ -300,7 +358,7 @@ let _projectPathCache: string | null = null;
 export function setProjectPath(path: string): void {
 	if (path === _projectPathCache) return;
 	_projectPathCache = path;
-	_projectIdCache = null; // invalidate
+	_projectIdCache = null;
 }
 
 /** Get the project ID for the current project path. Inserts if new. */
@@ -317,50 +375,6 @@ export function getProjectId(): number {
 	return _projectIdCache;
 }
 
-// ── Session resolution ───────────────────────────────────
-
-let _sessionId: string = DEFAULT_SESSION_ID;
-
-/** Set the session ID for this process. Rejects path-traversal characters. */
-export function setSessionScope(sessionId: string): boolean {
-	if (!/^[\w.\-:]+$/.test(sessionId)) {
-		process.stderr.write(
-			`[qult] Ignoring invalid session_id (contains illegal characters): ${sessionId.slice(0, 64)}\n`,
-		);
-		return false;
-	}
-	_sessionId = sessionId;
-	return true;
-}
-
-/** Get the current session ID. */
-export function getSessionId(): string {
-	return _sessionId;
-}
-
-/** Ensure the current session exists in the database. Call after setSessionScope + setProjectPath. */
-export function ensureSession(): void {
-	const db = getDb();
-	const projectId = getProjectId();
-	db.prepare("INSERT OR IGNORE INTO sessions (id, project_id) VALUES (?, ?)").run(
-		_sessionId,
-		projectId,
-	);
-}
-
-/** Find the most recent session for the current project. Used by MCP server.
- *  Uses rowid (insertion order) instead of started_at to match the session
- *  that hooks most recently called ensureSession() for. This prevents
- *  MCP-hook session ID mismatch when multiple sessions exist. */
-export function findLatestSessionId(): string | null {
-	const db = getDb();
-	const projectId = getProjectId();
-	const row = db
-		.prepare("SELECT id FROM sessions WHERE project_id = ? ORDER BY rowid DESC LIMIT 1")
-		.get(projectId) as { id: string } | null;
-	return row?.id ?? null;
-}
-
 // ── Exports for tests ────────────────────────────────────
 
-export { DB_DIR, DB_PATH, DEFAULT_SESSION_ID };
+export { DB_DIR, DB_PATH };

@@ -1,5 +1,5 @@
 import type { PendingFix } from "../types.ts";
-import { ensureSession, getDb, getSessionId } from "./db.ts";
+import { getDb, getProjectId } from "./db.ts";
 
 // Process-scoped cache
 let _cache: PendingFix[] | null = null;
@@ -10,11 +10,10 @@ export function readPendingFixes(): PendingFix[] {
 	if (_cache) return _cache;
 	try {
 		const db = getDb();
-		const sid = getSessionId();
-		ensureSession();
+		const pid = getProjectId();
 		const rows = db
-			.prepare("SELECT file, gate, errors FROM pending_fixes WHERE session_id = ?")
-			.all(sid) as { file: string; gate: string; errors: string }[];
+			.prepare("SELECT file, gate, errors FROM pending_fixes WHERE project_id = ?")
+			.all(pid) as { file: string; gate: string; errors: string }[];
 		_cache = rows.map((r) => ({
 			file: r.file,
 			gate: r.gate,
@@ -53,16 +52,16 @@ export function flush(): void {
 	if (!_dirty || !_cache) return;
 	try {
 		const db = getDb();
-		const sid = getSessionId();
+		const pid = getProjectId();
 
 		db.exec("BEGIN");
 		try {
-			db.prepare("DELETE FROM pending_fixes WHERE session_id = ?").run(sid);
+			db.prepare("DELETE FROM pending_fixes WHERE project_id = ?").run(pid);
 			const insert = db.prepare(
-				"INSERT INTO pending_fixes (session_id, file, gate, errors) VALUES (?, ?, ?, ?)",
+				"INSERT INTO pending_fixes (project_id, file, gate, errors) VALUES (?, ?, ?, ?)",
 			);
 			for (const fix of _cache) {
-				insert.run(sid, fix.file, fix.gate, JSON.stringify(fix.errors));
+				insert.run(pid, fix.file, fix.gate, JSON.stringify(fix.errors));
 			}
 			db.exec("COMMIT");
 		} catch (err) {

@@ -1,14 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadConfig, resetConfigCache } from "../config.ts";
-import {
-	closeDb,
-	ensureSession,
-	getDb,
-	getProjectId,
-	setProjectPath,
-	setSessionScope,
-	useTestDb,
-} from "../state/db.ts";
+import { closeDb, getDb, getProjectId, setProjectPath, useTestDb } from "../state/db.ts";
 
 const TEST_DIR = "/tmp/.tmp-config-test";
 
@@ -31,8 +23,6 @@ function setGlobalConfig(key: string, value: unknown): void {
 beforeEach(() => {
 	useTestDb();
 	setProjectPath(TEST_DIR);
-	setSessionScope("test-session");
-	ensureSession();
 	resetConfigCache();
 });
 

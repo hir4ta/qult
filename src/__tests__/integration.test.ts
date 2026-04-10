@@ -2,7 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetGatesCache, saveGates } from "../gates/load.ts";
-import { closeDb, ensureSession, setProjectPath, setSessionScope, useTestDb } from "../state/db.ts";
+import { closeDb, setProjectPath, useTestDb } from "../state/db.ts";
 import { resetAllCaches } from "../state/flush.ts";
 import { flush as flushPendingFixes, writePendingFixes } from "../state/pending-fixes.ts";
 
@@ -15,8 +15,6 @@ let exitCode: number | null;
 beforeEach(() => {
 	useTestDb();
 	setProjectPath(TEST_DIR);
-	setSessionScope("test-session");
-	ensureSession();
 	resetAllCaches();
 	mkdirSync(TEST_DIR, { recursive: true });
 

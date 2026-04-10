@@ -1,11 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-	closeDb,
-	ensureSession,
-	setProjectPath,
-	setSessionScope,
-	useTestDb,
-} from "../../state/db.ts";
+import { closeDb, setProjectPath, useTestDb } from "../../state/db.ts";
 import { resetAllCaches } from "../../state/flush.ts";
 import { readPendingFixes, writePendingFixes } from "../../state/pending-fixes.ts";
 import { lazyInit, resetLazyInit } from "../lazy-init.ts";
@@ -15,8 +9,6 @@ const TEST_DIR = "/tmp/.tmp-lazy-init-test";
 beforeEach(() => {
 	useTestDb();
 	setProjectPath(TEST_DIR);
-	setSessionScope("test-session");
-	ensureSession();
 	resetAllCaches();
 	resetLazyInit();
 });

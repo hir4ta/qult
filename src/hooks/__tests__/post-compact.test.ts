@@ -2,15 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { saveGates } from "../../gates/load.ts";
-import {
-	closeDb,
-	ensureSession,
-	getDb,
-	getSessionId,
-	setProjectPath,
-	setSessionScope,
-	useTestDb,
-} from "../../state/db.ts";
+import { closeDb, getDb, setProjectPath, useTestDb } from "../../state/db.ts";
 import { resetAllCaches } from "../../state/flush.ts";
 import { writePendingFixes } from "../../state/pending-fixes.ts";
 import {
@@ -28,8 +20,6 @@ const originalCwd = process.cwd();
 beforeEach(() => {
 	useTestDb();
 	setProjectPath(TEST_DIR);
-	setSessionScope("test-session");
-	ensureSession();
 	resetAllCaches();
 	rmSync(TEST_DIR, { recursive: true, force: true });
 	mkdirSync(TEST_DIR, { recursive: true });
@@ -86,15 +76,21 @@ describe("post-compact handler", () => {
 
 	it("injects review findings from DB (Task 8)", async () => {
 		const db = getDb();
-		const sid = getSessionId();
 		const { getProjectId } = await import("../../state/db.ts");
 		const projectId = getProjectId();
 		db.prepare(
-			"INSERT INTO review_findings (session_id, project_id, file, severity, description, stage) VALUES (?, ?, ?, ?, ?, ?)",
-		).run(sid, projectId, "src/a.ts", "high", "SQL injection risk in query builder", "Security");
+			"INSERT INTO review_findings (project_id, project_id, file, severity, description, stage) VALUES (?, ?, ?, ?, ?, ?)",
+		).run(
+			getProjectId(),
+			projectId,
+			"src/a.ts",
+			"high",
+			"SQL injection risk in query builder",
+			"Security",
+		);
 		db.prepare(
-			"INSERT INTO review_findings (session_id, project_id, file, severity, description, stage) VALUES (?, ?, ?, ?, ?, ?)",
-		).run(sid, projectId, "src/b.ts", "medium", "Missing input validation", "Spec");
+			"INSERT INTO review_findings (project_id, project_id, file, severity, description, stage) VALUES (?, ?, ?, ?, ?, ?)",
+		).run(getProjectId(), projectId, "src/b.ts", "medium", "Missing input validation", "Spec");
 
 		const postCompact = (await import("../post-compact.ts")).default;
 		await postCompact({ hook_event_name: "PostCompact" });

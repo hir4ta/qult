@@ -1,11 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	closeDb,
-	ensureSession,
-	setProjectPath,
-	setSessionScope,
-	useTestDb,
-} from "../../state/db.ts";
+import { closeDb, setProjectPath, useTestDb } from "../../state/db.ts";
 import { resetAllCaches } from "../../state/flush.ts";
 import { writePendingFixes } from "../../state/pending-fixes.ts";
 import { disableGate, recordChangedFile, recordTestPass } from "../../state/session-state.ts";
@@ -19,8 +13,6 @@ let exitCode: number | null = null;
 beforeEach(() => {
 	useTestDb();
 	setProjectPath(TEST_DIR);
-	setSessionScope("test-session");
-	ensureSession();
 	resetAllCaches();
 	stdoutCapture = [];
 	stderrCapture = [];

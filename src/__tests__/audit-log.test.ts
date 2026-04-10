@@ -1,13 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { closeDb, ensureSession, setProjectPath, setSessionScope, useTestDb } from "../state/db.ts";
+import { closeDb, setProjectPath, useTestDb } from "../state/db.ts";
 
 const TEST_DIR = "/tmp/.tmp-audit-log-test";
 
 beforeEach(() => {
 	useTestDb();
 	setProjectPath(TEST_DIR);
-	setSessionScope("test-session");
-	ensureSession();
 });
 
 afterEach(() => {

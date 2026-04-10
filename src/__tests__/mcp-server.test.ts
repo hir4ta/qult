@@ -2,16 +2,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { handleRequest, handleTool, TOOL_DEFS } from "../mcp-server.ts";
-import {
-	closeDb,
-	ensureSession,
-	getDb,
-	getProjectId,
-	getSessionId,
-	setProjectPath,
-	setSessionScope,
-	useTestDb,
-} from "../state/db.ts";
+import { closeDb, getDb, getProjectId, setProjectPath, useTestDb } from "../state/db.ts";
 import { resetAllCaches } from "../state/flush.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-mcp-test");
@@ -22,8 +13,6 @@ beforeEach(() => {
 	mkdirSync(TEST_DIR, { recursive: true });
 	useTestDb();
 	setProjectPath(TEST_DIR);
-	setSessionScope("test-session");
-	ensureSession();
 	process.chdir(TEST_DIR);
 });
 
@@ -41,10 +30,9 @@ describe("handleTool", () => {
 
 	it("get_pending_fixes returns formatted fixes from DB", () => {
 		const db = getDb();
-		const sid = getSessionId();
 		db.prepare(
-			"INSERT INTO pending_fixes (session_id, file, gate, errors) VALUES (?, ?, ?, ?)",
-		).run(sid, "/src/foo.ts", "lint", JSON.stringify(["error: unused var"]));
+			"INSERT INTO pending_fixes (project_id, file, gate, errors) VALUES (?, ?, ?, ?)",
+		).run(getProjectId(), "/src/foo.ts", "lint", JSON.stringify(["error: unused var"]));
 
 		const result = handleTool("get_pending_fixes", TEST_DIR);
 		const text = result.content[0]!.text;
@@ -55,10 +43,9 @@ describe("handleTool", () => {
 
 	it("get_session_status returns state from DB", () => {
 		const db = getDb();
-		const sid = getSessionId();
-		db.prepare("UPDATE sessions SET last_commit_at = ? WHERE id = ?").run(
+		db.prepare("UPDATE projects SET last_commit_at = ? WHERE id = ?").run(
 			"2026-01-01T00:00:00Z",
-			sid,
+			getProjectId(),
 		);
 
 		const result = handleTool("get_session_status", TEST_DIR);
@@ -67,21 +54,14 @@ describe("handleTool", () => {
 		expect(parsed.test_passed_at).toBeNull();
 	});
 
-	it("get_session_status returns isError when no session", () => {
-		// Delete the session so it's not found
-		const db = getDb();
-		db.prepare("DELETE FROM sessions").run();
-
+	it("get_session_status returns project state", () => {
 		const result = handleTool("get_session_status", TEST_DIR);
-		expect(result.content[0]!.text).toContain("No session state");
-		expect(result.isError).toBe(true);
+		expect(result.isError).toBeUndefined();
+		expect(result.content[0]!.text).toContain("id");
 	});
 
-	it("write tools return error when no active session exists", () => {
-		// Delete all sessions to simulate no hook having ever run
-		const db = getDb();
-		db.prepare("DELETE FROM sessions").run();
-		db.prepare("DELETE FROM projects").run();
+	it("write tools work with an active project", () => {
+		// Project is auto-created by setProjectPath + getProjectId
 
 		const writeCases: [string, Record<string, unknown>][] = [
 			["record_review", { aggregate_score: 30 }],
@@ -92,19 +72,9 @@ describe("handleTool", () => {
 		];
 		for (const [tool, args] of writeCases) {
 			const result = handleTool(tool, TEST_DIR, args);
-			expect(result.isError, `${tool} should return isError`).toBe(true);
-			expect(result.content[0]!.text).toContain("No active session");
+			// With project-based state, write tools always work (project auto-created)
+			expect(result.content).toBeDefined();
 		}
-	});
-
-	it("read tools work even without an active session", () => {
-		const db = getDb();
-		db.prepare("DELETE FROM sessions").run();
-		db.prepare("DELETE FROM projects").run();
-
-		const result = handleTool("get_pending_fixes", TEST_DIR);
-		expect(result.isError).toBeUndefined();
-		expect(result.content[0]!.text).toBe("No pending fixes.");
 	});
 
 	it("get_gate_config returns gates from DB", () => {
@@ -249,10 +219,9 @@ describe("handleTool: disable_gate / enable_gate", () => {
 		});
 		expect(result.content[0]!.text).toContain("disabled");
 
-		const sid = getSessionId();
 		const rows = db
-			.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?")
-			.all(sid) as { gate_name: string }[];
+			.prepare("SELECT gate_name FROM disabled_gates WHERE project_id = ?")
+			.all(getProjectId()) as { gate_name: string }[];
 		expect(rows.map((r) => r.gate_name)).toContain("lint");
 	});
 
@@ -343,14 +312,13 @@ describe("handleTool: disable_gate / enable_gate", () => {
 
 	it("disable_gate rejects when 2 gates already disabled", () => {
 		const db = getDb();
-		const sid = getSessionId();
-		db.prepare("INSERT INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)").run(
-			sid,
+		db.prepare("INSERT INTO disabled_gates (project_id, gate_name, reason) VALUES (?, ?, ?)").run(
+			getProjectId(),
 			"review",
 			"test reason 1 for review",
 		);
-		db.prepare("INSERT INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)").run(
-			sid,
+		db.prepare("INSERT INTO disabled_gates (project_id, gate_name, reason) VALUES (?, ?, ?)").run(
+			getProjectId(),
 			"security-check",
 			"test reason 2 for security",
 		);
@@ -382,14 +350,13 @@ describe("handleTool: disable_gate / enable_gate", () => {
 
 	it("enable_gate removes gate from disabled_gates", () => {
 		const db = getDb();
-		const sid = getSessionId();
-		db.prepare("INSERT INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)").run(
-			sid,
+		db.prepare("INSERT INTO disabled_gates (project_id, gate_name, reason) VALUES (?, ?, ?)").run(
+			getProjectId(),
 			"lint",
 			"test reason for lint",
 		);
-		db.prepare("INSERT INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)").run(
-			sid,
+		db.prepare("INSERT INTO disabled_gates (project_id, gate_name, reason) VALUES (?, ?, ?)").run(
+			getProjectId(),
 			"typecheck",
 			"test reason for typecheck",
 		);
@@ -398,8 +365,8 @@ describe("handleTool: disable_gate / enable_gate", () => {
 		expect(result.content[0]!.text).toContain("re-enabled");
 
 		const rows = db
-			.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?")
-			.all(sid) as { gate_name: string }[];
+			.prepare("SELECT gate_name FROM disabled_gates WHERE project_id = ?")
+			.all(getProjectId()) as { gate_name: string }[];
 		expect(rows.map((r) => r.gate_name)).toEqual(["typecheck"]);
 	});
 
@@ -412,17 +379,16 @@ describe("handleTool: disable_gate / enable_gate", () => {
 describe("handleTool: clear_pending_fixes", () => {
 	it("clears all pending fixes", () => {
 		const db = getDb();
-		const sid = getSessionId();
 		db.prepare(
-			"INSERT INTO pending_fixes (session_id, file, gate, errors) VALUES (?, ?, ?, ?)",
-		).run(sid, "a.ts", "lint", JSON.stringify(["err"]));
+			"INSERT INTO pending_fixes (project_id, file, gate, errors) VALUES (?, ?, ?, ?)",
+		).run(getProjectId(), "a.ts", "lint", JSON.stringify(["err"]));
 
 		const result = handleTool("clear_pending_fixes", TEST_DIR, {
 			reason: "False positives from linter update",
 		});
 		expect(result.content[0]!.text).toContain("cleared");
 
-		const rows = db.prepare("SELECT * FROM pending_fixes WHERE session_id = ?").all(sid);
+		const rows = db.prepare("SELECT * FROM pending_fixes WHERE project_id = ?").all(getProjectId());
 		expect(rows).toEqual([]);
 	});
 
@@ -501,8 +467,9 @@ describe("handleTool: record_review", () => {
 		expect(result.content[0]!.text).toContain("recorded");
 
 		const db = getDb();
-		const sid = getSessionId();
-		const row = db.prepare("SELECT review_completed_at FROM sessions WHERE id = ?").get(sid) as {
+		const row = db
+			.prepare("SELECT review_completed_at FROM projects WHERE id = ?")
+			.get(getProjectId()) as {
 			review_completed_at: string | null;
 		};
 		expect(row.review_completed_at).toBeTruthy();
@@ -517,10 +484,12 @@ describe("handleTool: record_review", () => {
 
 	it("succeeds when many files changed without a plan", () => {
 		const db = getDb();
-		const sid = getSessionId();
 		// Insert 6+ changed files (exceeds default threshold of 5)
 		for (const f of ["/a.ts", "/b.ts", "/c.ts", "/d.ts", "/e.ts", "/f.ts"]) {
-			db.prepare("INSERT INTO changed_files (session_id, file_path) VALUES (?, ?)").run(sid, f);
+			db.prepare("INSERT INTO changed_files (project_id, file_path) VALUES (?, ?)").run(
+				getProjectId(),
+				f,
+			);
 		}
 
 		const result = handleTool("record_review", TEST_DIR, { aggregate_score: 28 });
@@ -535,10 +504,9 @@ describe("handleTool: record_test_pass", () => {
 		expect(result.content[0]!.text).toContain("Test pass recorded");
 
 		const db = getDb();
-		const sid = getSessionId();
 		const row = db
-			.prepare("SELECT test_passed_at, test_command FROM sessions WHERE id = ?")
-			.get(sid) as {
+			.prepare("SELECT test_passed_at, test_command FROM projects WHERE id = ?")
+			.get(getProjectId()) as {
 			test_passed_at: string | null;
 			test_command: string | null;
 		};
@@ -561,10 +529,9 @@ describe("handleTool: record_stage_scores", () => {
 		expect(result.content[0]!.text).toContain("Spec");
 
 		const db = getDb();
-		const sid = getSessionId();
 		const rows = db
-			.prepare("SELECT stage, dimension, score FROM review_stage_scores WHERE session_id = ?")
-			.all(sid) as { stage: string; dimension: string; score: number }[];
+			.prepare("SELECT stage, dimension, score FROM review_stage_scores WHERE project_id = ?")
+			.all(getProjectId()) as { stage: string; dimension: string; score: number }[];
 		const scoreMap: Record<string, number> = {};
 		for (const r of rows) scoreMap[r.dimension] = r.score;
 		expect(scoreMap).toEqual({ completeness: 5, accuracy: 4 });
@@ -588,18 +555,17 @@ describe("handleTool: record_stage_scores", () => {
 describe("record_human_approval", () => {
 	it("records approval timestamp in session state", () => {
 		const db = getDb();
-		const sid = getSessionId();
-		db.prepare("UPDATE sessions SET review_completed_at = ? WHERE id = ?").run(
+		db.prepare("UPDATE projects SET review_completed_at = ? WHERE id = ?").run(
 			new Date().toISOString(),
-			sid,
+			getProjectId(),
 		);
 
 		const result = handleTool("record_human_approval", TEST_DIR);
 		expect(result.content[0]!.text).toContain("Human approval recorded");
 
 		const row = db
-			.prepare("SELECT human_review_approved_at FROM sessions WHERE id = ?")
-			.get(sid) as {
+			.prepare("SELECT human_review_approved_at FROM projects WHERE id = ?")
+			.get(getProjectId()) as {
 			human_review_approved_at: string | null;
 		};
 		expect(typeof row.human_review_approved_at).toBe("string");
@@ -621,11 +587,18 @@ describe("get_detector_summary", () => {
 
 	it("returns summary when security warnings and pending fixes exist", () => {
 		const db = getDb();
-		const sid = getSessionId();
-		db.prepare("UPDATE sessions SET security_warning_count = ? WHERE id = ?").run(3, sid);
+		db.prepare("UPDATE projects SET security_warning_count = ? WHERE id = ?").run(
+			3,
+			getProjectId(),
+		);
 		db.prepare(
-			"INSERT INTO pending_fixes (session_id, file, gate, errors) VALUES (?, ?, ?, ?)",
-		).run(sid, "src/foo.ts", "security-check", JSON.stringify(["L5: Hardcoded API key"]));
+			"INSERT INTO pending_fixes (project_id, file, gate, errors) VALUES (?, ?, ?, ?)",
+		).run(
+			getProjectId(),
+			"src/foo.ts",
+			"security-check",
+			JSON.stringify(["L5: Hardcoded API key"]),
+		);
 
 		const result = handleTool("get_detector_summary", TEST_DIR);
 		const text = result.content[0]!.text;
@@ -636,10 +609,9 @@ describe("get_detector_summary", () => {
 
 	it("includes all non-zero escalation counters", () => {
 		const db = getDb();
-		const sid = getSessionId();
 		db.prepare(
-			"UPDATE sessions SET dead_import_warning_count = ?, drift_warning_count = ?, test_quality_warning_count = ?, duplication_warning_count = ? WHERE id = ?",
-		).run(2, 4, 1, 3, sid);
+			"UPDATE projects SET dead_import_warning_count = ?, drift_warning_count = ?, test_quality_warning_count = ?, duplication_warning_count = ? WHERE id = ?",
+		).run(2, 4, 1, 3, getProjectId());
 
 		const result = handleTool("get_detector_summary", TEST_DIR);
 		const text = result.content[0]!.text;

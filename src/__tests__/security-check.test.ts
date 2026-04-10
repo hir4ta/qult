@@ -539,7 +539,7 @@ describe("extended secret patterns", () => {
 	it("detects Twilio API key", async () => {
 		const file = join(TEST_DIR, "config.ts");
 		// Build token dynamically to avoid GitHub push protection on test fixtures
-		const twilioKey = "SK" + "ab12cd34".repeat(4);
+		const twilioKey = `SK${"ab12cd34".repeat(4)}`;
 		writeFileSync(file, `const key = "${twilioKey}";\n`);
 		const fixes = await detect(file);
 		expect(fixes.length).toBeGreaterThan(0);

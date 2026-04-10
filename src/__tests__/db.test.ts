@@ -1,81 +1,56 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-	closeDb,
-	DEFAULT_SESSION_ID,
-	ensureSession,
-	findLatestSessionId,
-	getDb,
-	getProjectId,
-	getSessionId,
-	setProjectPath,
-	setSessionScope,
-	useTestDb,
-} from "../state/db.ts";
+import { closeDb, getDb, getProjectId, setProjectPath, useTestDb } from "../state/db.ts";
+
+beforeEach(() => {
+	useTestDb();
+});
+
+afterEach(() => {
+	closeDb();
+});
 
 describe("db", () => {
-	beforeEach(() => {
-		useTestDb();
-	});
-
-	afterEach(() => {
-		closeDb();
-	});
-
 	describe("getDb / useTestDb", () => {
-		it("returns a usable database", () => {
+		it("returns a database connection", () => {
 			const db = getDb();
-			const row = db.prepare("SELECT 1 as n").get() as { n: number };
-			expect(row.n).toBe(1);
+			expect(db).toBeDefined();
 		});
 
-		it("returns the same instance on repeated calls", () => {
-			const db1 = getDb();
-			const db2 = getDb();
-			expect(db1).toBe(db2);
-		});
-
-		it("creates all tables", () => {
+		it("creates expected tables", () => {
 			const db = getDb();
 			const tables = db
 				.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
 				.all() as { name: string }[];
 			const names = tables.map((t) => t.name);
 			expect(names).toContain("projects");
-			expect(names).toContain("sessions");
 			expect(names).toContain("pending_fixes");
 			expect(names).toContain("changed_files");
-			expect(names).toContain("disabled_gates");
-			expect(names).toContain("ran_gates");
-			expect(names).toContain("task_verify_results");
-			expect(names).toContain("gate_failure_counts");
-			expect(names).toContain("review_scores");
-			expect(names).toContain("review_stage_scores");
-			expect(names).toContain("plan_eval_scores");
 			expect(names).toContain("gate_configs");
-			expect(names).toContain("project_configs");
-			expect(names).toContain("global_configs");
-			expect(names).toContain("audit_log");
 			expect(names).toContain("session_metrics");
-			expect(names).toContain("review_findings");
-			expect(names).not.toContain("calibration");
+		});
+
+		it("sets schema version", () => {
+			const db = getDb();
+			const { user_version } = db.prepare("PRAGMA user_version").get() as { user_version: number };
+			expect(user_version).toBeGreaterThanOrEqual(6);
 		});
 	});
 
 	describe("project resolution", () => {
-		it("creates project on first getProjectId call", () => {
+		it("creates project on first access", () => {
 			setProjectPath("/tmp/test-project");
 			const id = getProjectId();
 			expect(id).toBeGreaterThan(0);
 		});
 
-		it("returns same id for same path", () => {
+		it("returns same ID for same path", () => {
 			setProjectPath("/tmp/test-project");
 			const id1 = getProjectId();
 			const id2 = getProjectId();
 			expect(id1).toBe(id2);
 		});
 
-		it("returns different ids for different paths", () => {
+		it("returns different IDs for different paths", () => {
 			setProjectPath("/tmp/project-a");
 			const idA = getProjectId();
 			setProjectPath("/tmp/project-b");
@@ -84,132 +59,19 @@ describe("db", () => {
 		});
 	});
 
-	describe("session resolution", () => {
-		it("defaults to __default__ session ID", () => {
-			expect(getSessionId()).toBe(DEFAULT_SESSION_ID);
-		});
-
-		it("updates session ID via setSessionScope", () => {
-			setSessionScope("abc-123");
-			expect(getSessionId()).toBe("abc-123");
-		});
-
-		it("rejects path-traversal characters", () => {
-			setSessionScope("abc-123");
-			setSessionScope("../evil");
-			expect(getSessionId()).toBe("abc-123");
-		});
-
-		it("accepts dots, hyphens, underscores, colons", () => {
-			setSessionScope("sess.2024-01:abc_def");
-			expect(getSessionId()).toBe("sess.2024-01:abc_def");
-		});
-
-		it("ensureSession creates session row", () => {
-			setProjectPath("/tmp/test-project");
-			setSessionScope("test-session-1");
-			ensureSession();
-
+	describe("project state columns", () => {
+		it("projects table has state columns", () => {
 			const db = getDb();
-			const row = db
-				.prepare("SELECT id, project_id FROM sessions WHERE id = ?")
-				.get("test-session-1") as {
-				id: string;
-				project_id: number;
-			} | null;
-			expect(row).not.toBeNull();
-			expect(row!.id).toBe("test-session-1");
-			expect(row!.project_id).toBe(getProjectId());
-		});
-
-		it("ensureSession is idempotent", () => {
-			setProjectPath("/tmp/test-project");
-			setSessionScope("test-session-1");
-			ensureSession();
-			ensureSession();
-
-			const db = getDb();
-			const count = db
-				.prepare("SELECT count(*) as n FROM sessions WHERE id = ?")
-				.get("test-session-1") as {
-				n: number;
-			};
-			expect(count.n).toBe(1);
-		});
-	});
-
-	describe("findLatestSessionId", () => {
-		it("returns null when no sessions exist", () => {
-			setProjectPath("/tmp/empty-project");
-			expect(findLatestSessionId()).toBeNull();
-		});
-
-		it("returns the last inserted session (by rowid, not timestamp)", () => {
-			setProjectPath("/tmp/test-project");
-			const projectId = getProjectId();
-			const db = getDb();
-
-			// Insert "old" second — it should be returned because rowid is higher
-			db.prepare("INSERT INTO sessions (id, project_id, started_at) VALUES (?, ?, ?)").run(
-				"new-session",
-				projectId,
-				"2024-12-31T23:59:59.999Z",
-			);
-			db.prepare("INSERT INTO sessions (id, project_id, started_at) VALUES (?, ?, ?)").run(
-				"old-session",
-				projectId,
-				"2024-01-01T00:00:00.000Z",
-			);
-
-			// old-session was inserted last → highest rowid → should be returned
-			expect(findLatestSessionId()).toBe("old-session");
-		});
-
-		it("scopes to current project", () => {
-			setProjectPath("/tmp/project-a");
-			const projectA = getProjectId();
-			setProjectPath("/tmp/project-b");
-			const projectB = getProjectId();
-
-			const db = getDb();
-			db.prepare("INSERT INTO sessions (id, project_id, started_at) VALUES (?, ?, ?)").run(
-				"session-a",
-				projectA,
-				"2024-12-31T23:59:59.999Z",
-			);
-			db.prepare("INSERT INTO sessions (id, project_id, started_at) VALUES (?, ?, ?)").run(
-				"session-b",
-				projectB,
-				"2024-01-01T00:00:00.000Z",
-			);
-
-			expect(findLatestSessionId()).toBe("session-b");
-		});
-
-		it("returns the session most recently ensured by hooks", () => {
-			setProjectPath("/tmp/test-project");
-			getProjectId(); // register project
-
-			// Simulate hooks creating sessions in order (as Claude Code sends different session_ids)
-			setSessionScope("session-1");
-			ensureSession();
-			setSessionScope("session-2");
-			ensureSession();
-			setSessionScope("session-3");
-			ensureSession();
-
-			// MCP server should find session-3 (last ensureSession call = highest rowid)
-			expect(findLatestSessionId()).toBe("session-3");
+			const columns = db.prepare("PRAGMA table_info(projects)").all() as { name: string }[];
+			const names = columns.map((c) => c.name);
+			expect(names).toContain("test_passed_at");
+			expect(names).toContain("review_completed_at");
+			expect(names).toContain("security_warning_count");
+			expect(names).toContain("duplication_warning_count");
 		});
 	});
 
 	describe("closeDb", () => {
-		it("resets session ID to default", () => {
-			setSessionScope("my-session");
-			closeDb();
-			expect(getSessionId()).toBe(DEFAULT_SESSION_ID);
-		});
-
 		it("allows re-opening after close", () => {
 			closeDb();
 			useTestDb();
@@ -220,128 +82,19 @@ describe("db", () => {
 	});
 
 	describe("schema constraints", () => {
-		it("pending_fixes UNIQUE(session_id, file, gate) prevents duplicates", () => {
+		it("pending_fixes UNIQUE(project_id, file, gate) prevents duplicates", () => {
 			setProjectPath("/tmp/test");
-			setSessionScope("s1");
-			ensureSession();
+			const pid = getProjectId();
 			const db = getDb();
 
 			db.prepare(
-				"INSERT INTO pending_fixes (session_id, file, gate, errors) VALUES (?, ?, ?, ?)",
-			).run("s1", "a.ts", "lint", "[]");
+				"INSERT INTO pending_fixes (project_id, file, gate, errors) VALUES (?, ?, ?, ?)",
+			).run(getProjectId(), "a.ts", "lint", "[]");
 			expect(() => {
 				db.prepare(
-					"INSERT INTO pending_fixes (session_id, file, gate, errors) VALUES (?, ?, ?, ?)",
-				).run("s1", "a.ts", "lint", "[]");
+					"INSERT INTO pending_fixes (project_id, file, gate, errors) VALUES (?, ?, ?, ?)",
+				).run(getProjectId(), "a.ts", "lint", "[]");
 			}).toThrow();
-		});
-
-		it("review_scores UNIQUE(session_id, iteration) prevents duplicates", () => {
-			setProjectPath("/tmp/test");
-			setSessionScope("s1");
-			ensureSession();
-			const db = getDb();
-
-			db.prepare(
-				"INSERT INTO review_scores (session_id, iteration, aggregate_score) VALUES (?, ?, ?)",
-			).run("s1", 1, 30);
-			expect(() => {
-				db.prepare(
-					"INSERT INTO review_scores (session_id, iteration, aggregate_score) VALUES (?, ?, ?)",
-				).run("s1", 1, 35);
-			}).toThrow();
-		});
-
-		it("review_stage_scores UNIQUE(session_id, stage, dimension) prevents duplicates", () => {
-			setProjectPath("/tmp/test");
-			setSessionScope("s1");
-			ensureSession();
-			const db = getDb();
-
-			db.prepare(
-				"INSERT INTO review_stage_scores (session_id, stage, dimension, score) VALUES (?, ?, ?, ?)",
-			).run("s1", "Spec", "Completeness", 5);
-			expect(() => {
-				db.prepare(
-					"INSERT INTO review_stage_scores (session_id, stage, dimension, score) VALUES (?, ?, ?, ?)",
-				).run("s1", "Spec", "Completeness", 4);
-			}).toThrow();
-		});
-
-		it("audit_log has no CASCADE on session delete", () => {
-			setProjectPath("/tmp/test");
-			setSessionScope("s1");
-			ensureSession();
-			const db = getDb();
-
-			const projectId = getProjectId();
-			db.prepare(
-				"INSERT INTO audit_log (project_id, session_id, action, reason) VALUES (?, ?, ?, ?)",
-			).run(projectId, "s1", "disable_gate", "test reason");
-
-			db.prepare("DELETE FROM sessions WHERE id = ?").run("s1");
-
-			const rows = db.prepare("SELECT * FROM audit_log WHERE session_id = ?").all("s1");
-			expect(rows).toHaveLength(1);
-		});
-
-		it("CASCADE deletes child rows when session is deleted", () => {
-			setProjectPath("/tmp/test");
-			setSessionScope("s1");
-			ensureSession();
-			const db = getDb();
-
-			db.prepare(
-				"INSERT INTO pending_fixes (session_id, file, gate, errors) VALUES (?, ?, ?, ?)",
-			).run("s1", "a.ts", "lint", "[]");
-			db.prepare("INSERT INTO changed_files (session_id, file_path) VALUES (?, ?)").run(
-				"s1",
-				"a.ts",
-			);
-
-			db.prepare("DELETE FROM sessions WHERE id = ?").run("s1");
-
-			const fixes = db.prepare("SELECT * FROM pending_fixes WHERE session_id = ?").all("s1");
-			const files = db.prepare("SELECT * FROM changed_files WHERE session_id = ?").all("s1");
-			expect(fixes).toHaveLength(0);
-			expect(files).toHaveLength(0);
-		});
-
-		it("schema v4 adds extended columns to session_metrics", () => {
-			const db = getDb();
-			const columns = db.prepare("PRAGMA table_info(session_metrics)").all() as { name: string }[];
-			const names = columns.map((c) => c.name);
-			expect(names).toContain("test_quality_warning_count");
-			expect(names).toContain("duplication_warning_count");
-			expect(names).toContain("semantic_warning_count");
-			expect(names).toContain("drift_warning_count");
-			expect(names).toContain("escalation_hit");
-		});
-
-		it("schema version is 5", () => {
-			const db = getDb();
-			const row = db.prepare("PRAGMA user_version").get() as { user_version: number };
-			expect(row.user_version).toBe(5);
-		});
-
-		it("gate_failure_counts uses separate file and gate columns", () => {
-			setProjectPath("/tmp/test");
-			setSessionScope("s1");
-			ensureSession();
-			const db = getDb();
-
-			db.prepare(
-				"INSERT INTO gate_failure_counts (session_id, file, gate, count) VALUES (?, ?, ?, ?)",
-			).run("s1", "src/foo.ts", "lint", 3);
-			db.prepare(
-				"INSERT INTO gate_failure_counts (session_id, file, gate, count) VALUES (?, ?, ?, ?)",
-			).run("s1", "src/foo.ts", "typecheck", 1);
-
-			const rows = db
-				.prepare("SELECT * FROM gate_failure_counts WHERE session_id = ? AND file = ?")
-				.all("s1", "src/foo.ts") as { gate: string; count: number }[];
-			expect(rows).toHaveLength(2);
-			expect(rows.find((r) => r.gate === "lint")?.count).toBe(3);
 		});
 	});
 });

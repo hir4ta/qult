@@ -1,7 +1,7 @@
 import { loadConfig } from "../config.ts";
 import { loadGates } from "../gates/load.ts";
 import { computeReviewTier } from "../review-tier.ts";
-import { ensureSession, getDb, getSessionId } from "./db.ts";
+import { getDb, getProjectId } from "./db.ts";
 import { getActivePlan } from "./plan-status.ts";
 
 /**
@@ -30,7 +30,7 @@ export interface SessionState {
 	plan_selfcheck_blocked_at: string | null;
 
 	// ── Gate batch tracking ──────────────────────────────────
-	ran_gates: Record<string, { session_id: string; ran_at: string }>;
+	ran_gates: Record<string, { ran_at: string }>;
 
 	// ── File tracking ────────────────────────────────────────
 	changed_file_paths: string[];
@@ -90,11 +90,10 @@ export function readSessionState(): SessionState {
 	if (_cache) return _cache;
 	try {
 		const db = getDb();
-		const sid = getSessionId();
-		ensureSession();
+		const pid = getProjectId();
 
-		// Read session scalar fields
-		const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sid) as Record<
+		// Read project state
+		const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(pid) as Record<
 			string,
 			unknown
 		> | null;
@@ -121,44 +120,44 @@ export function readSessionState(): SessionState {
 
 		// Read child tables
 		const changedFiles = db
-			.prepare("SELECT file_path FROM changed_files WHERE session_id = ?")
-			.all(sid) as { file_path: string }[];
+			.prepare("SELECT file_path FROM changed_files WHERE project_id = ?")
+			.all(pid) as { file_path: string }[];
 		state.changed_file_paths = changedFiles.map((r) => r.file_path);
 
 		const disabledGates = db
-			.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?")
-			.all(sid) as { gate_name: string }[];
+			.prepare("SELECT gate_name FROM disabled_gates WHERE project_id = ?")
+			.all(pid) as { gate_name: string }[];
 		state.disabled_gates = disabledGates.map((r) => r.gate_name);
 
 		const ranGates = db
-			.prepare("SELECT gate_name, ran_at FROM ran_gates WHERE session_id = ?")
-			.all(sid) as { gate_name: string; ran_at: string }[];
+			.prepare("SELECT gate_name, ran_at FROM ran_gates WHERE project_id = ?")
+			.all(pid) as { gate_name: string; ran_at: string }[];
 		for (const g of ranGates) {
-			state.ran_gates[g.gate_name] = { session_id: sid, ran_at: g.ran_at };
+			state.ran_gates[g.gate_name] = { ran_at: g.ran_at };
 		}
 
 		const taskResults = db
-			.prepare("SELECT task_key, passed, ran_at FROM task_verify_results WHERE session_id = ?")
-			.all(sid) as { task_key: string; passed: number; ran_at: string }[];
+			.prepare("SELECT task_key, passed, ran_at FROM task_verify_results WHERE project_id = ?")
+			.all(pid) as { task_key: string; passed: number; ran_at: string }[];
 		for (const t of taskResults) {
 			state.task_verify_results[t.task_key] = { passed: !!t.passed, ran_at: t.ran_at };
 		}
 
 		const gateFailures = db
-			.prepare("SELECT file, gate, count FROM gate_failure_counts WHERE session_id = ?")
-			.all(sid) as { file: string; gate: string; count: number }[];
+			.prepare("SELECT file, gate, count FROM gate_failure_counts WHERE project_id = ?")
+			.all(pid) as { file: string; gate: string; count: number }[];
 		for (const f of gateFailures) {
 			state.gate_failure_counts[`${f.file}:${f.gate}`] = f.count;
 		}
 
 		const reviewScores = db
-			.prepare("SELECT aggregate_score FROM review_scores WHERE session_id = ? ORDER BY iteration")
-			.all(sid) as { aggregate_score: number }[];
+			.prepare("SELECT aggregate_score FROM review_scores WHERE project_id = ? ORDER BY iteration")
+			.all(pid) as { aggregate_score: number }[];
 		state.review_score_history = reviewScores.map((r) => r.aggregate_score);
 
 		const stageScores = db
-			.prepare("SELECT stage, dimension, score FROM review_stage_scores WHERE session_id = ?")
-			.all(sid) as { stage: string; dimension: string; score: number }[];
+			.prepare("SELECT stage, dimension, score FROM review_stage_scores WHERE project_id = ?")
+			.all(pid) as { stage: string; dimension: string; score: number }[];
 		for (const s of stageScores) {
 			if (!state.review_stage_scores[s.stage]) state.review_stage_scores[s.stage] = {};
 			state.review_stage_scores[s.stage]![s.dimension] = s.score;
@@ -166,9 +165,9 @@ export function readSessionState(): SessionState {
 
 		const planScores = db
 			.prepare(
-				"SELECT aggregate_score FROM plan_eval_scores WHERE session_id = ? ORDER BY iteration",
+				"SELECT aggregate_score FROM plan_eval_scores WHERE project_id = ? ORDER BY iteration",
 			)
-			.all(sid) as { aggregate_score: number }[];
+			.all(pid) as { aggregate_score: number }[];
 		state.plan_eval_score_history = planScores.map((r) => r.aggregate_score);
 
 		_cache = state;
@@ -189,14 +188,14 @@ export function flush(): void {
 	if (!_dirty || !_cache) return;
 	try {
 		const db = getDb();
-		const sid = getSessionId();
+		const pid = getProjectId();
 		const state = _cache;
 
 		// Use a transaction for atomicity
 		db.exec("BEGIN");
 		try {
-			// Update session scalars
-			db.prepare(`UPDATE sessions SET
+			// Update project state
+			db.prepare(`UPDATE projects SET
 				last_commit_at = ?,
 				test_passed_at = ?,
 				test_command = ?,
@@ -226,16 +225,16 @@ export function flush(): void {
 				state.dead_import_warning_count,
 				state.duplication_warning_count,
 				state.semantic_warning_count,
-				sid,
+				pid,
 			);
 
 			// Sync changed_files
-			db.prepare("DELETE FROM changed_files WHERE session_id = ?").run(sid);
+			db.prepare("DELETE FROM changed_files WHERE project_id = ?").run(pid);
 			const insertFile = db.prepare(
-				"INSERT INTO changed_files (session_id, file_path) VALUES (?, ?)",
+				"INSERT INTO changed_files (project_id, file_path) VALUES (?, ?)",
 			);
 			for (const fp of state.changed_file_paths) {
-				insertFile.run(sid, fp);
+				insertFile.run(pid, fp);
 			}
 
 			// Sync disabled_gates: merge (INSERT OR IGNORE) to avoid clobbering
@@ -244,83 +243,83 @@ export function flush(): void {
 			// are cleaned up by the DELETE of rows not in the in-memory set.
 			const inMemoryGates = new Set(state.disabled_gates);
 			const dbGates = db
-				.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?")
-				.all(sid) as { gate_name: string }[];
+				.prepare("SELECT gate_name FROM disabled_gates WHERE project_id = ?")
+				.all(pid) as { gate_name: string }[];
 			// Remove gates that were re-enabled in-process but exist in DB
 			for (const { gate_name } of dbGates) {
 				if (!inMemoryGates.has(gate_name)) {
-					db.prepare("DELETE FROM disabled_gates WHERE session_id = ? AND gate_name = ?").run(
-						sid,
+					db.prepare("DELETE FROM disabled_gates WHERE project_id = ? AND gate_name = ?").run(
+						pid,
 						gate_name,
 					);
 				}
 			}
 			// Insert gates that are in-memory but not yet in DB
 			const insertGate = db.prepare(
-				"INSERT OR IGNORE INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)",
+				"INSERT OR IGNORE INTO disabled_gates (project_id, gate_name, reason) VALUES (?, ?, ?)",
 			);
 			for (const g of state.disabled_gates) {
-				insertGate.run(sid, g, "");
+				insertGate.run(pid, g, "");
 			}
 
 			// Sync ran_gates
-			db.prepare("DELETE FROM ran_gates WHERE session_id = ?").run(sid);
+			db.prepare("DELETE FROM ran_gates WHERE project_id = ?").run(pid);
 			const insertRan = db.prepare(
-				"INSERT INTO ran_gates (session_id, gate_name, ran_at) VALUES (?, ?, ?)",
+				"INSERT INTO ran_gates (project_id, gate_name, ran_at) VALUES (?, ?, ?)",
 			);
 			for (const [name, entry] of Object.entries(state.ran_gates)) {
-				insertRan.run(sid, name, entry.ran_at);
+				insertRan.run(pid, name, entry.ran_at);
 			}
 
 			// Sync task_verify_results
-			db.prepare("DELETE FROM task_verify_results WHERE session_id = ?").run(sid);
+			db.prepare("DELETE FROM task_verify_results WHERE project_id = ?").run(pid);
 			const insertTask = db.prepare(
-				"INSERT INTO task_verify_results (session_id, task_key, passed, ran_at) VALUES (?, ?, ?, ?)",
+				"INSERT INTO task_verify_results (project_id, task_key, passed, ran_at) VALUES (?, ?, ?, ?)",
 			);
 			for (const [key, result] of Object.entries(state.task_verify_results)) {
-				insertTask.run(sid, key, result.passed ? 1 : 0, result.ran_at);
+				insertTask.run(pid, key, result.passed ? 1 : 0, result.ran_at);
 			}
 
 			// Sync gate_failure_counts
-			db.prepare("DELETE FROM gate_failure_counts WHERE session_id = ?").run(sid);
+			db.prepare("DELETE FROM gate_failure_counts WHERE project_id = ?").run(pid);
 			const insertFailure = db.prepare(
-				"INSERT INTO gate_failure_counts (session_id, file, gate, count) VALUES (?, ?, ?, ?)",
+				"INSERT INTO gate_failure_counts (project_id, file, gate, count) VALUES (?, ?, ?, ?)",
 			);
 			for (const [key, count] of Object.entries(state.gate_failure_counts)) {
 				const lastColon = key.lastIndexOf(":");
 				if (lastColon === -1) continue;
 				const file = key.slice(0, lastColon);
 				const gate = key.slice(lastColon + 1);
-				insertFailure.run(sid, file, gate, count);
+				insertFailure.run(pid, file, gate, count);
 			}
 
 			// Sync review_scores
-			db.prepare("DELETE FROM review_scores WHERE session_id = ?").run(sid);
+			db.prepare("DELETE FROM review_scores WHERE project_id = ?").run(pid);
 			const insertReview = db.prepare(
-				"INSERT INTO review_scores (session_id, iteration, aggregate_score) VALUES (?, ?, ?)",
+				"INSERT INTO review_scores (project_id, iteration, aggregate_score) VALUES (?, ?, ?)",
 			);
 			for (let i = 0; i < state.review_score_history.length; i++) {
-				insertReview.run(sid, i + 1, state.review_score_history[i]!);
+				insertReview.run(pid, i + 1, state.review_score_history[i]!);
 			}
 
 			// Sync review_stage_scores
-			db.prepare("DELETE FROM review_stage_scores WHERE session_id = ?").run(sid);
+			db.prepare("DELETE FROM review_stage_scores WHERE project_id = ?").run(pid);
 			const insertStage = db.prepare(
-				"INSERT INTO review_stage_scores (session_id, stage, dimension, score) VALUES (?, ?, ?, ?)",
+				"INSERT INTO review_stage_scores (project_id, stage, dimension, score) VALUES (?, ?, ?, ?)",
 			);
 			for (const [stage, dims] of Object.entries(state.review_stage_scores)) {
 				for (const [dim, score] of Object.entries(dims)) {
-					insertStage.run(sid, stage, dim, score);
+					insertStage.run(pid, stage, dim, score);
 				}
 			}
 
 			// Sync plan_eval_scores
-			db.prepare("DELETE FROM plan_eval_scores WHERE session_id = ?").run(sid);
+			db.prepare("DELETE FROM plan_eval_scores WHERE project_id = ?").run(pid);
 			const insertPlan = db.prepare(
-				"INSERT INTO plan_eval_scores (session_id, iteration, aggregate_score) VALUES (?, ?, ?)",
+				"INSERT INTO plan_eval_scores (project_id, iteration, aggregate_score) VALUES (?, ?, ?)",
 			);
 			for (let i = 0; i < state.plan_eval_score_history.length; i++) {
-				insertPlan.run(sid, i + 1, state.plan_eval_score_history[i]!);
+				insertPlan.run(pid, i + 1, state.plan_eval_score_history[i]!);
 			}
 
 			db.exec("COMMIT");
@@ -425,24 +424,20 @@ export function recordReview(): void {
 
 // ── Gate batch dedup ────────────────────────────────────────
 
-export function shouldSkipGate(gateName: string, sessionId: string, currentFile?: string): boolean {
+export function shouldSkipGate(gateName: string, currentFile?: string): boolean {
 	const state = readSessionState();
 	const entry = state.ran_gates[gateName];
 	if (!entry) return false;
-	if (entry.session_id !== sessionId) return false;
 	// Invalidate if the current file being edited is NEW (not yet in changed_file_paths).
-	// recordChangedFile runs AFTER gates, so at this point the new file isn't recorded yet.
-	// Re-editing the same file is fine — only genuinely new files trigger re-run.
 	if (currentFile && !(state.changed_file_paths ?? []).includes(currentFile)) {
 		return false;
 	}
 	return true;
 }
 
-export function markGateRan(gateName: string, sessionId: string): void {
+export function markGateRan(gateName: string): void {
 	const state = readSessionState();
 	state.ran_gates[gateName] = {
-		session_id: sessionId,
 		ran_at: new Date().toISOString(),
 	};
 	writeState(state);
@@ -456,13 +451,13 @@ export function markGateRan(gateName: string, sessionId: string): void {
 export function incrementFileEditCount(file: string): number {
 	try {
 		const db = getDb();
-		const sid = getSessionId();
+		const pid = getProjectId();
 		db.prepare(
-			"INSERT INTO file_edit_counts (session_id, file, count) VALUES (?, ?, 1) ON CONFLICT(session_id, file) DO UPDATE SET count = count + 1",
-		).run(sid, file);
+			"INSERT INTO file_edit_counts (project_id, file, count) VALUES (?, ?, 1) ON CONFLICT(project_id, file) DO UPDATE SET count = count + 1",
+		).run(pid, file);
 		const row = db
-			.prepare("SELECT count FROM file_edit_counts WHERE session_id = ? AND file = ?")
-			.get(sid, file) as { count: number } | null;
+			.prepare("SELECT count FROM file_edit_counts WHERE project_id = ? AND file = ?")
+			.get(pid, file) as { count: number } | null;
 		return row?.count ?? 1;
 	} catch (err) {
 		process.stderr.write(
@@ -476,10 +471,10 @@ export function incrementFileEditCount(file: string): number {
 export function readFileEditCount(file: string): number {
 	try {
 		const db = getDb();
-		const sid = getSessionId();
+		const pid = getProjectId();
 		const row = db
-			.prepare("SELECT count FROM file_edit_counts WHERE session_id = ? AND file = ?")
-			.get(sid, file) as { count: number } | null;
+			.prepare("SELECT count FROM file_edit_counts WHERE project_id = ? AND file = ?")
+			.get(pid, file) as { count: number } | null;
 		return row?.count ?? 0;
 	} catch {
 		return 0;
@@ -490,8 +485,8 @@ export function readFileEditCount(file: string): number {
 export function resetFileEditCounts(): void {
 	try {
 		const db = getDb();
-		const sid = getSessionId();
-		db.prepare("DELETE FROM file_edit_counts WHERE session_id = ?").run(sid);
+		const pid = getProjectId();
+		db.prepare("DELETE FROM file_edit_counts WHERE project_id = ?").run(pid);
 	} catch {
 		/* fail-open */
 	}
@@ -692,7 +687,6 @@ export function recordFinishStarted(): void {
 	try {
 		const state = readSessionState();
 		state.ran_gates[FINISH_MARKER] = {
-			session_id: getSessionId(),
 			ran_at: new Date().toISOString(),
 		};
 		writeState(state);

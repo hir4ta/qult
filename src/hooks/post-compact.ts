@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { loadGates } from "../gates/load.ts";
-import { getDb, getSessionId } from "../state/db.ts";
+import { getDb, getProjectId } from "../state/db.ts";
 import { readPendingFixes } from "../state/pending-fixes.ts";
 import { readSessionState } from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
@@ -83,12 +83,12 @@ export default async function postCompact(_ev: HookEvent): Promise<void> {
 		// Recent review findings from DB
 		try {
 			const db = getDb();
-			const sid = getSessionId();
+			const pid = getProjectId();
 			const findings = db
 				.prepare(
-					"SELECT file, severity, description FROM review_findings WHERE session_id = ? ORDER BY id DESC LIMIT 5",
+					"SELECT file, severity, description FROM review_findings WHERE project_id = ? ORDER BY id DESC LIMIT 5",
 				)
-				.all(sid) as { file: string; severity: string; description: string }[];
+				.all(pid) as { file: string; severity: string; description: string }[];
 			if (findings.length > 0) {
 				parts.push("[qult] Recent review findings:");
 				for (const f of findings) {

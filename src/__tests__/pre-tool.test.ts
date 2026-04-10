@@ -2,14 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { saveGates } from "../gates/load.ts";
-import {
-	closeDb,
-	ensureSession,
-	getDb,
-	setProjectPath,
-	setSessionScope,
-	useTestDb,
-} from "../state/db.ts";
+import { closeDb, getDb, getProjectId, setProjectPath, useTestDb } from "../state/db.ts";
 import { resetAllCaches } from "../state/flush.ts";
 import type { GatesConfig } from "../types.ts";
 
@@ -21,8 +14,6 @@ const originalCwd = process.cwd();
 beforeEach(() => {
 	useTestDb();
 	setProjectPath(TEST_DIR);
-	setSessionScope("test-session");
-	ensureSession();
 	resetAllCaches();
 	rmSync(TEST_DIR, { recursive: true, force: true });
 	mkdirSync(TEST_DIR, { recursive: true });
@@ -691,14 +682,14 @@ describe("preTool: git commit with active plan requires /qult:finish", () => {
 		);
 
 		const db = getDb();
-		db.prepare("INSERT INTO changed_files (session_id, file_path) VALUES (?, ?)").run(
-			"test-session",
+		db.prepare("INSERT INTO changed_files (project_id, file_path) VALUES (?, ?)").run(
+			getProjectId(),
 			join(TEST_DIR, "src/foo.ts"),
 		);
-		db.prepare("UPDATE sessions SET test_passed_at = ?, review_completed_at = ? WHERE id = ?").run(
+		db.prepare("UPDATE projects SET test_passed_at = ?, review_completed_at = ? WHERE id = ?").run(
 			new Date().toISOString(),
 			new Date().toISOString(),
-			"test-session",
+			getProjectId(),
 		);
 		resetAllCaches();
 
@@ -726,18 +717,18 @@ describe("preTool: git commit with active plan requires /qult:finish", () => {
 		);
 
 		const db = getDb();
-		db.prepare("INSERT INTO changed_files (session_id, file_path) VALUES (?, ?)").run(
-			"test-session",
+		db.prepare("INSERT INTO changed_files (project_id, file_path) VALUES (?, ?)").run(
+			getProjectId(),
 			join(TEST_DIR, "src/foo.ts"),
 		);
-		db.prepare("UPDATE sessions SET test_passed_at = ?, review_completed_at = ? WHERE id = ?").run(
+		db.prepare("UPDATE projects SET test_passed_at = ?, review_completed_at = ? WHERE id = ?").run(
 			new Date().toISOString(),
 			new Date().toISOString(),
-			"test-session",
+			getProjectId(),
 		);
 		// Record finish started
-		db.prepare("INSERT INTO ran_gates (session_id, gate_name) VALUES (?, ?)").run(
-			"test-session",
+		db.prepare("INSERT INTO ran_gates (project_id, gate_name) VALUES (?, ?)").run(
+			getProjectId(),
 			"__finish_started__",
 		);
 		resetAllCaches();

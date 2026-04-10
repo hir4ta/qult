@@ -1,4 +1,4 @@
-import { getDb, getProjectId, getSessionId } from "./db.ts";
+import { getDb, getProjectId } from "./db.ts";
 
 export interface AuditEntry {
 	action: string;
@@ -14,11 +14,10 @@ export function appendAuditLog(entry: AuditEntry): void {
 	try {
 		const db = getDb();
 		const projectId = getProjectId();
-		const sid = getSessionId();
 
 		db.prepare(
 			"INSERT INTO audit_log (project_id, session_id, action, gate_name, reason) VALUES (?, ?, ?, ?, ?)",
-		).run(projectId, sid, entry.action, entry.gate_name ?? null, entry.reason);
+		).run(projectId, null, entry.action, entry.gate_name ?? null, entry.reason);
 
 		// Trim oldest entries beyond max
 		db.prepare(

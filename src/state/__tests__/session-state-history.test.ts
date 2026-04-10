@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { closeDb, ensureSession, setProjectPath, setSessionScope, useTestDb } from "../db.ts";
+import { closeDb, setProjectPath, useTestDb } from "../db.ts";
 import { resetAllCaches } from "../flush.ts";
 import {
 	clearOnCommit,
@@ -18,8 +18,6 @@ const TEST_DIR = "/tmp/.tmp-history";
 beforeEach(() => {
 	useTestDb();
 	setProjectPath(TEST_DIR);
-	setSessionScope("test-session");
-	ensureSession();
 	resetAllCaches();
 });
 

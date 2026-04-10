@@ -1,13 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	closeDb,
-	ensureSession,
-	getDb,
-	getProjectId,
-	setProjectPath,
-	setSessionScope,
-	useTestDb,
-} from "../state/db.ts";
+import { closeDb, getDb, getProjectId, setProjectPath, useTestDb } from "../state/db.ts";
 
 const TEST_DIR = "/tmp/.tmp-metrics-test";
 
@@ -23,8 +15,6 @@ function createSession(sessionId: string): void {
 beforeEach(() => {
 	useTestDb();
 	setProjectPath(TEST_DIR);
-	setSessionScope("test-session");
-	ensureSession();
 });
 
 afterEach(() => {

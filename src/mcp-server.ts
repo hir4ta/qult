@@ -20,14 +20,7 @@ import { generateHarnessReport } from "./harness-report.ts";
 import { computeFileHealthScore } from "./hooks/detectors/health-score.ts";
 import { generateMetricsDashboard } from "./metrics-dashboard.ts";
 import { appendAuditLog, readAuditLog } from "./state/audit-log.ts";
-import {
-	findLatestSessionId,
-	getDb,
-	getProjectId,
-	getSessionId,
-	setProjectPath,
-	setSessionScope,
-} from "./state/db.ts";
+import { getDb, getProjectId, setProjectPath } from "./state/db.ts";
 import { getFlywheelRecommendations, readMetricsHistory } from "./state/metrics.ts";
 import { archivePlanFile, getActivePlan, resetPlanCache } from "./state/plan-status.ts";
 import type { PendingFix } from "./types.ts";
@@ -37,12 +30,6 @@ const SERVER_NAME = "qult";
 const SERVER_VERSION = "1.0.0";
 
 /** Resolve the current session for MCP operations. Uses latest session for this project. */
-function resolveSession(cwd: string): string | null {
-	setProjectPath(cwd);
-	const latest = findLatestSessionId();
-	if (latest) setSessionScope(latest);
-	return latest;
-}
 
 // ── Gate name validation ────────────────────────────────────
 
@@ -319,44 +306,16 @@ const TOOL_DEFS: ToolDef[] = [
 	},
 ];
 
-const WRITE_TOOLS = new Set([
-	"disable_gate",
-	"enable_gate",
-	"set_config",
-	"clear_pending_fixes",
-	"record_review",
-	"record_test_pass",
-	"record_human_approval",
-	"record_stage_scores",
-	"reset_escalation_counters",
-	"record_finish_started",
-	"archive_plan",
-]);
-
 function handleTool(name: string, cwd: string, args?: Record<string, unknown>): ToolResult {
-	const session = resolveSession(cwd);
+	setProjectPath(cwd);
 	const db = getDb();
-	const sid = getSessionId();
-
-	// Guard: write tools require an active session (created by a hook).
-	// Read-only tools are allowed even before any hook has run.
-	if (session === null && WRITE_TOOLS.has(name)) {
-		return {
-			isError: true,
-			content: [
-				{
-					type: "text",
-					text: "No active session found for this project. Trigger a hook (e.g. edit a file) to initialize the session, then retry.",
-				},
-			],
-		};
-	}
+	const pid = getProjectId();
 
 	switch (name) {
 		case "get_pending_fixes": {
 			const rows = db
-				.prepare("SELECT file, gate, errors FROM pending_fixes WHERE session_id = ?")
-				.all(sid) as { file: string; gate: string; errors: string }[];
+				.prepare("SELECT file, gate, errors FROM pending_fixes WHERE project_id = ?")
+				.all(pid) as { file: string; gate: string; errors: string }[];
 			if (rows.length === 0) {
 				return { content: [{ type: "text", text: "No pending fixes." }] };
 			}
@@ -373,7 +332,7 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			return { content: [{ type: "text", text: lines.join("\n") }] };
 		}
 		case "get_session_status": {
-			const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sid);
+			const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(pid);
 			if (!row) {
 				return {
 					isError: true,
@@ -424,8 +383,8 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 				};
 			}
 			const disabled = db
-				.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?")
-				.all(sid) as { gate_name: string }[];
+				.prepare("SELECT gate_name FROM disabled_gates WHERE project_id = ?")
+				.all(pid) as { gate_name: string }[];
 			if (!disabled.some((d) => d.gate_name === gateName) && disabled.length >= 2) {
 				return {
 					isError: true,
@@ -438,8 +397,8 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 				};
 			}
 			db.prepare(
-				"INSERT OR REPLACE INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)",
-			).run(sid, gateName, reason);
+				"INSERT OR REPLACE INTO disabled_gates (project_id, gate_name, reason) VALUES (?, ?, ?)",
+			).run(pid, gateName, reason);
 			appendAuditLog({
 				action: "disable_gate",
 				reason,
@@ -453,8 +412,8 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			if (!gateName) {
 				return { isError: true, content: [{ type: "text", text: "Missing gate_name parameter." }] };
 			}
-			db.prepare("DELETE FROM disabled_gates WHERE session_id = ? AND gate_name = ?").run(
-				sid,
+			db.prepare("DELETE FROM disabled_gates WHERE project_id = ? AND gate_name = ?").run(
+				pid,
 				gateName,
 			);
 			return { content: [{ type: "text", text: `Gate '${gateName}' re-enabled.` }] };
@@ -551,7 +510,7 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 					],
 				};
 			}
-			db.prepare("DELETE FROM pending_fixes WHERE session_id = ?").run(sid);
+			db.prepare("DELETE FROM pending_fixes WHERE project_id = ?").run(pid);
 			appendAuditLog({
 				action: "clear_pending_fixes",
 				reason,
@@ -560,13 +519,13 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			return { content: [{ type: "text", text: "All pending fixes cleared." }] };
 		}
 		case "get_detector_summary": {
-			const session = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sid) as Record<
+			const session = db.prepare("SELECT * FROM projects WHERE id = ?").get(pid) as Record<
 				string,
 				unknown
 			> | null;
 			const fixes = db
-				.prepare("SELECT file, gate, errors FROM pending_fixes WHERE session_id = ?")
-				.all(sid) as { file: string; gate: string; errors: string }[];
+				.prepare("SELECT file, gate, errors FROM pending_fixes WHERE project_id = ?")
+				.all(pid) as { file: string; gate: string; errors: string }[];
 
 			const lines: string[] = [];
 			if (session) {
@@ -645,9 +604,9 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			}
 		}
 		case "record_review": {
-			db.prepare("UPDATE sessions SET review_completed_at = ? WHERE id = ?").run(
+			db.prepare("UPDATE projects SET review_completed_at = ? WHERE id = ?").run(
 				new Date().toISOString(),
-				sid,
+				pid,
 			);
 			const score = typeof args?.aggregate_score === "number" ? args.aggregate_score : null;
 			const msg = score !== null ? `Review recorded (aggregate: ${score}).` : "Review recorded.";
@@ -658,17 +617,17 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			if (!cmd) {
 				return { isError: true, content: [{ type: "text", text: "Missing command parameter." }] };
 			}
-			db.prepare("UPDATE sessions SET test_passed_at = ?, test_command = ? WHERE id = ?").run(
+			db.prepare("UPDATE projects SET test_passed_at = ?, test_command = ? WHERE id = ?").run(
 				new Date().toISOString(),
 				cmd,
-				sid,
+				pid,
 			);
 			return { content: [{ type: "text", text: `Test pass recorded: ${cmd}` }] };
 		}
 		case "record_human_approval": {
 			const session = db
-				.prepare("SELECT review_completed_at FROM sessions WHERE id = ?")
-				.get(sid) as {
+				.prepare("SELECT review_completed_at FROM projects WHERE id = ?")
+				.get(pid) as {
 				review_completed_at: string | null;
 			} | null;
 			if (!session?.review_completed_at) {
@@ -682,9 +641,9 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 					],
 				};
 			}
-			db.prepare("UPDATE sessions SET human_review_approved_at = ? WHERE id = ?").run(
+			db.prepare("UPDATE projects SET human_review_approved_at = ? WHERE id = ?").run(
 				new Date().toISOString(),
-				sid,
+				pid,
 			);
 			appendAuditLog({
 				action: "record_human_approval",
@@ -710,10 +669,10 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 				};
 			}
 			const insertScore = db.prepare(
-				"INSERT OR REPLACE INTO review_stage_scores (session_id, stage, dimension, score) VALUES (?, ?, ?, ?)",
+				"INSERT OR REPLACE INTO review_stage_scores (project_id, stage, dimension, score) VALUES (?, ?, ?, ?)",
 			);
 			for (const [dim, score] of Object.entries(scores as Record<string, number>)) {
-				insertScore.run(sid, stage, dim, score);
+				insertScore.run(pid, stage, dim, score);
 			}
 			return {
 				content: [
@@ -734,19 +693,19 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 		}
 		case "get_handoff_document": {
 			try {
-				const session = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sid) as Record<
+				const session = db.prepare("SELECT * FROM projects WHERE id = ?").get(pid) as Record<
 					string,
 					unknown
 				> | null;
 				const fixes = db
-					.prepare("SELECT file, gate, errors FROM pending_fixes WHERE session_id = ?")
-					.all(sid) as { file: string; gate: string; errors: string }[];
+					.prepare("SELECT file, gate, errors FROM pending_fixes WHERE project_id = ?")
+					.all(pid) as { file: string; gate: string; errors: string }[];
 				const changedFiles = db
-					.prepare("SELECT file_path FROM changed_files WHERE session_id = ?")
-					.all(sid) as { file_path: string }[];
+					.prepare("SELECT file_path FROM changed_files WHERE project_id = ?")
+					.all(pid) as { file_path: string }[];
 				const disabledGates = db
-					.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?")
-					.all(sid) as { gate_name: string }[];
+					.prepare("SELECT gate_name FROM disabled_gates WHERE project_id = ?")
+					.all(pid) as { gate_name: string }[];
 				const plan = getActivePlan();
 				return {
 					content: [
@@ -799,8 +758,8 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 		case "record_finish_started": {
 			// Write directly to DB (not via writeState cache) so hook processes can read it immediately
 			db.prepare(
-				"INSERT OR REPLACE INTO ran_gates (session_id, gate_name, ran_at) VALUES (?, ?, ?)",
-			).run(sid, "__finish_started__", new Date().toISOString());
+				"INSERT OR REPLACE INTO ran_gates (project_id, gate_name, ran_at) VALUES (?, ?, ?)",
+			).run(pid, "__finish_started__", new Date().toISOString());
 			return { content: [{ type: "text", text: "Finish started recorded." }] };
 		}
 		case "archive_plan": {
@@ -916,14 +875,14 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 					],
 				};
 			}
-			db.prepare(`UPDATE sessions SET
+			db.prepare(`UPDATE projects SET
 				security_warning_count = 0,
 				test_quality_warning_count = 0,
 				drift_warning_count = 0,
 				dead_import_warning_count = 0,
 				duplication_warning_count = 0,
 				semantic_warning_count = 0
-				WHERE id = ?`).run(sid);
+				WHERE id = ?`).run(pid);
 			appendAuditLog({
 				action: "reset_escalation_counters",
 				reason,

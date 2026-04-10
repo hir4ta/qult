@@ -1,11 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-	closeDb,
-	ensureSession,
-	setProjectPath,
-	setSessionScope,
-	useTestDb,
-} from "../../state/db.ts";
+import { closeDb, setProjectPath, useTestDb } from "../../state/db.ts";
 import { loadGates, resetGatesCache, saveGates } from "../load.ts";
 
 const TEST_DIR = "/tmp/.tmp-load-test";
@@ -13,8 +7,6 @@ const TEST_DIR = "/tmp/.tmp-load-test";
 beforeEach(() => {
 	useTestDb();
 	setProjectPath(TEST_DIR);
-	setSessionScope("test-session");
-	ensureSession();
 	resetGatesCache();
 });
 

@@ -2,7 +2,7 @@ import { execSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { loadConfig } from "../../config.ts";
-import { getDb, getProjectId, getSessionId } from "../../state/db.ts";
+import { getDb, getProjectId } from "../../state/db.ts";
 import {
 	clearStageScores,
 	getPlanEvalIteration,
@@ -587,20 +587,19 @@ function persistReviewFindings(): FindingRecord[] | null {
 	if (_currentFindings.length === 0) return null;
 	try {
 		const db = getDb();
-		const projectId = getProjectId();
-		const sid = getSessionId();
+		const pid = getProjectId();
 		const insert = db.prepare(
-			"INSERT INTO review_findings (session_id, project_id, file, severity, description, stage) VALUES (?, ?, ?, ?, ?, ?)",
+			"INSERT INTO review_findings (project_id, file, severity, description, stage) VALUES (?, ?, ?, ?, ?)",
 		);
 		for (const f of _currentFindings) {
-			insert.run(sid, projectId, f.file, f.severity, f.description, f.stage);
+			insert.run(pid, f.file, f.severity, f.description, f.stage);
 		}
 		// Trim oldest entries
 		db.prepare(
 			`DELETE FROM review_findings WHERE project_id = ? AND id NOT IN (
 				SELECT id FROM review_findings WHERE project_id = ? ORDER BY id DESC LIMIT ?
 			)`,
-		).run(projectId, projectId, MAX_FINDINGS);
+		).run(pid, pid, MAX_FINDINGS);
 
 		// Read merged history for pattern detection
 		interface FindingRow {
@@ -614,7 +613,7 @@ function persistReviewFindings(): FindingRecord[] | null {
 			.prepare(
 				"SELECT file, severity, description, stage, recorded_at FROM review_findings WHERE project_id = ? ORDER BY id DESC LIMIT ?",
 			)
-			.all(projectId, MAX_FINDINGS) as FindingRow[];
+			.all(pid, MAX_FINDINGS) as FindingRow[];
 		const history: FindingRecord[] = rows.map((r) => ({
 			file: r.file,
 			severity: r.severity,

@@ -2,15 +2,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetGatesCache, saveGates } from "../gates/load.ts";
-import {
-	closeDb,
-	ensureSession,
-	getDb,
-	getProjectId,
-	setProjectPath,
-	setSessionScope,
-	useTestDb,
-} from "../state/db.ts";
+import { closeDb, getDb, getProjectId, setProjectPath, useTestDb } from "../state/db.ts";
 import { flushAll, resetAllCaches } from "../state/flush.ts";
 import { readPendingFixes } from "../state/pending-fixes.ts";
 import {
@@ -111,8 +103,6 @@ beforeEach(() => {
 	}
 	process.chdir(TEST_DIR);
 	setProjectPath(TEST_DIR);
-	setSessionScope("test-session");
-	ensureSession();
 	stdoutCapture = [];
 	stderrCapture = [];
 	exitCode = null;
@@ -483,7 +473,7 @@ describe("Scenario 12: run_once_per_batch skips typecheck on re-edit, re-runs on
 			tool_name: "Edit",
 			tool_input: { file_path: join(TEST_DIR, "src/a.ts") },
 		});
-		expect(shouldSkipGate("typecheck", "test-session")).toBe(true);
+		expect(shouldSkipGate("typecheck")).toBe(true);
 
 		// Re-edit same file: typecheck skipped (same file, no invalidation)
 		await postTool({
@@ -492,7 +482,7 @@ describe("Scenario 12: run_once_per_batch skips typecheck on re-edit, re-runs on
 			tool_name: "Edit",
 			tool_input: { file_path: join(TEST_DIR, "src/a.ts") },
 		});
-		expect(shouldSkipGate("typecheck", "test-session")).toBe(true);
+		expect(shouldSkipGate("typecheck")).toBe(true);
 
 		// Edit new file: ran_gates invalidated, typecheck re-runs
 		await postTool({
@@ -502,7 +492,7 @@ describe("Scenario 12: run_once_per_batch skips typecheck on re-edit, re-runs on
 			tool_input: { file_path: join(TEST_DIR, "src/b.ts") },
 		});
 		// After re-run, gate is marked as ran again
-		expect(shouldSkipGate("typecheck", "test-session")).toBe(true);
+		expect(shouldSkipGate("typecheck")).toBe(true);
 
 		// Commit: clears ran_gates
 		await postTool({
@@ -1775,59 +1765,22 @@ describe("Scenario: Plan without evaluator blocks", () => {
 // Concurrent sessions: state isolation
 // ============================================================
 
-describe("Scenario: Concurrent session state isolation", () => {
-	it("session A and session B write independently", () => {
-		// Session A: record test pass
-		setSessionScope("session-A");
-		ensureSession();
+describe("Scenario: Project-based state persistence", () => {
+	it("state persists within same project across reads", () => {
+		// Record test pass
 		recordTestPass("vitest run");
 		flushAll();
 
-		// Session B: record review (separate scope)
+		// Record review (same project, state accumulates)
 		resetSessionCache();
-		setSessionScope("session-B");
-		ensureSession();
 		recordReview();
 		flushAll();
 
-		// Verify session A: test passed, no review
+		// Verify: both test and review recorded on same project
 		resetSessionCache();
-		setSessionScope("session-A");
-		const stateA = readSessionState();
-		expect(stateA.test_passed_at).not.toBeNull();
-		expect(stateA.review_completed_at).toBeNull();
-
-		// Verify session B: no test, review done
-		resetSessionCache();
-		setSessionScope("session-B");
-		const stateB = readSessionState();
-		expect(stateB.test_passed_at).toBeNull();
-		expect(stateB.review_completed_at).not.toBeNull();
-	});
-
-	it("findLatestSessionId returns most recent session", async () => {
-		const { findLatestSessionId } = await import("../state/db.ts");
-		const db = getDb();
-
-		// Ensure beforeEach's test-session has the earliest timestamp
-		db.prepare(
-			"UPDATE sessions SET started_at = '2025-01-01T00:00:00.000Z' WHERE id = 'test-session'",
-		).run();
-
-		setSessionScope("session-A");
-		ensureSession();
-		db.prepare(
-			"UPDATE sessions SET started_at = '2025-01-01T00:00:01.000Z' WHERE id = 'session-A'",
-		).run();
-
-		setSessionScope("session-B");
-		ensureSession();
-		db.prepare(
-			"UPDATE sessions SET started_at = '2025-01-01T00:00:02.000Z' WHERE id = 'session-B'",
-		).run();
-
-		const latest = findLatestSessionId();
-		expect(latest).toBe("session-B");
+		const state = readSessionState();
+		expect(state.test_passed_at).not.toBeNull();
+		expect(state.review_completed_at).not.toBeNull();
 	});
 });
 
@@ -2564,14 +2517,14 @@ describe("ran_gates invalidation on new file edit", () => {
 		);
 
 		recordChangedFile(`${TEST_DIR}/src/foo.ts`);
-		markGateRan("typecheck", "test-session");
+		markGateRan("typecheck");
 		flushAll();
 
 		// Same file → skip (already recorded)
-		expect(shouldSkipGate("typecheck", "test-session", `${TEST_DIR}/src/foo.ts`)).toBe(true);
+		expect(shouldSkipGate("typecheck", `${TEST_DIR}/src/foo.ts`)).toBe(true);
 
 		// New file → should invalidate (not in changed_file_paths yet)
-		expect(shouldSkipGate("typecheck", "test-session", `${TEST_DIR}/src/bar.ts`)).toBe(false);
+		expect(shouldSkipGate("typecheck", `${TEST_DIR}/src/bar.ts`)).toBe(false);
 	});
 });
 
@@ -2622,8 +2575,6 @@ describe("Plan archive after finish", () => {
 		process.chdir(TEST_DIR);
 		useTestDb();
 		setProjectPath(TEST_DIR);
-		setSessionScope("sim-archive-test");
-		ensureSession();
 		resetAllCaches();
 	});
 

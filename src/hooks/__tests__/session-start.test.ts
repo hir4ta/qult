@@ -1,15 +1,7 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	closeDb,
-	ensureSession,
-	getDb,
-	getProjectId,
-	setProjectPath,
-	setSessionScope,
-	useTestDb,
-} from "../../state/db.ts";
+import { closeDb, getDb, getProjectId, setProjectPath, useTestDb } from "../../state/db.ts";
 import { flushAll, resetAllCaches } from "../../state/flush.ts";
 import { readPendingFixes, writePendingFixes } from "../../state/pending-fixes.ts";
 import { recordChangedFile } from "../../state/session-state.ts";
@@ -21,8 +13,6 @@ const originalCwd = process.cwd();
 beforeEach(() => {
 	useTestDb();
 	setProjectPath(TEST_DIR);
-	setSessionScope("test-session");
-	ensureSession();
 	resetAllCaches();
 	resetLazyInit();
 	rmSync(TEST_DIR, { recursive: true, force: true });
@@ -162,14 +152,10 @@ describe("session-start handler", () => {
 		try {
 			// Disable the gate via DB
 			const db = getDb();
-			const sid = db
-				.prepare("SELECT id FROM sessions WHERE project_id = ? ORDER BY rowid DESC LIMIT 1")
-				.get(getProjectId()) as { id: string } | undefined;
-			if (sid) {
-				db.prepare(
-					"INSERT OR REPLACE INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)",
-				).run(sid.id, "semgrep-required", "test");
-			}
+			const pid = getProjectId();
+			db.prepare(
+				"INSERT OR REPLACE INTO disabled_gates (project_id, gate_name, reason) VALUES (?, ?, ?)",
+			).run(pid, "semgrep-required", "test");
 			resetAllCaches();
 
 			const sessionStart = (await import("../session-start.ts")).default;

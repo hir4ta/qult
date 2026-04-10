@@ -1,13 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-	closeDb,
-	ensureSession,
-	getDb,
-	getSessionId,
-	setProjectPath,
-	setSessionScope,
-	useTestDb,
-} from "../db.ts";
+import { closeDb, getDb, getProjectId, setProjectPath, useTestDb } from "../db.ts";
 import { flushAll, resetAllCaches } from "../flush.ts";
 import { readPendingFixes, writePendingFixes } from "../pending-fixes.ts";
 import {
@@ -23,8 +15,6 @@ const TEST_DIR = "/tmp/.tmp-flush-test";
 beforeEach(() => {
 	useTestDb();
 	setProjectPath(TEST_DIR);
-	setSessionScope("test-session");
-	ensureSession();
 	resetAllCaches();
 });
 
@@ -46,8 +36,7 @@ describe("cache behavior", () => {
 		expect(readPendingFixes()).toHaveLength(1);
 		// DB is still empty (no flush yet)
 		const db = getDb();
-		const sid = getSessionId();
-		const rows = db.prepare("SELECT * FROM pending_fixes WHERE session_id = ?").all(sid);
+		const rows = db.prepare("SELECT * FROM pending_fixes WHERE project_id = ?").all(getProjectId());
 		expect(rows).toHaveLength(0);
 	});
 
@@ -57,10 +46,9 @@ describe("cache behavior", () => {
 		flushAll();
 
 		const db = getDb();
-		const sid = getSessionId();
 		const rows = db
-			.prepare("SELECT file, gate FROM pending_fixes WHERE session_id = ?")
-			.all(sid) as { file: string; gate: string }[];
+			.prepare("SELECT file, gate FROM pending_fixes WHERE project_id = ?")
+			.all(getProjectId()) as { file: string; gate: string }[];
 		expect(rows).toHaveLength(1);
 		expect(rows[0]!.file).toBe("b.ts");
 	});
@@ -70,10 +58,8 @@ describe("cache behavior", () => {
 		readSessionState();
 		flushAll();
 
-		// Session row exists (from ensureSession) but no additional child data was written
 		const db = getDb();
-		const sid = getSessionId();
-		const rows = db.prepare("SELECT * FROM pending_fixes WHERE session_id = ?").all(sid);
+		const rows = db.prepare("SELECT * FROM pending_fixes WHERE project_id = ?").all(getProjectId());
 		expect(rows).toHaveLength(0);
 	});
 
@@ -104,18 +90,15 @@ describe("_dirty flag on flush failure", () => {
 		// Re-open a fresh in-memory DB
 		useTestDb();
 		setProjectPath(TEST_DIR);
-		setSessionScope("test-session");
-		ensureSession();
 
 		// The second flush should succeed and persist the gate,
 		// because _dirty remained true after the first failure
 		flushSessionState();
 
 		const db2 = getDb();
-		const sid = getSessionId();
 		const rows = db2
-			.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?")
-			.all(sid) as { gate_name: string }[];
+			.prepare("SELECT gate_name FROM disabled_gates WHERE project_id = ?")
+			.all(getProjectId()) as { gate_name: string }[];
 		expect(rows.map((r) => r.gate_name)).toContain("lint");
 	});
 });
@@ -123,12 +106,11 @@ describe("_dirty flag on flush failure", () => {
 describe("disabled_gates merge on flush", () => {
 	it("does not clobber MCP-added gates when in-memory set is empty", () => {
 		const db = getDb();
-		const sid = getSessionId();
 
 		// Simulate MCP writing a gate directly to DB (bypassing in-memory cache)
 		db.prepare(
-			"INSERT OR REPLACE INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)",
-		).run(sid, "lint", "disabled via MCP");
+			"INSERT OR REPLACE INTO disabled_gates (project_id, gate_name, reason) VALUES (?, ?, ?)",
+		).run(getProjectId(), "lint", "disabled via MCP");
 
 		// In-memory cache has a different gate added, doesn't know about "lint"
 		disableGate("typecheck");
@@ -136,8 +118,8 @@ describe("disabled_gates merge on flush", () => {
 
 		// "lint" written by MCP should still be present
 		const rows = db
-			.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?")
-			.all(sid) as { gate_name: string }[];
+			.prepare("SELECT gate_name FROM disabled_gates WHERE project_id = ?")
+			.all(getProjectId()) as { gate_name: string }[];
 		const names = rows.map((r) => r.gate_name).sort();
 		expect(names).toContain("lint");
 		expect(names).toContain("typecheck");
@@ -145,12 +127,11 @@ describe("disabled_gates merge on flush", () => {
 
 	it("removes re-enabled gate from DB even if MCP had written it", () => {
 		const db = getDb();
-		const sid = getSessionId();
 
 		// Gate starts disabled in DB
 		db.prepare(
-			"INSERT OR REPLACE INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)",
-		).run(sid, "lint", "old reason");
+			"INSERT OR REPLACE INTO disabled_gates (project_id, gate_name, reason) VALUES (?, ?, ?)",
+		).run(getProjectId(), "lint", "old reason");
 
 		// Process reads state and re-enables lint
 		disableGate("lint"); // load into cache first
@@ -161,8 +142,8 @@ describe("disabled_gates merge on flush", () => {
 		flushSessionState();
 
 		const rows = db
-			.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?")
-			.all(sid) as { gate_name: string }[];
+			.prepare("SELECT gate_name FROM disabled_gates WHERE project_id = ?")
+			.all(getProjectId()) as { gate_name: string }[];
 		expect(rows.map((r) => r.gate_name)).not.toContain("lint");
 	});
 });

@@ -43,25 +43,25 @@ function migrateSchema(db) {
   if (version >= SCHEMA_VERSION)
     return;
   if (version < 1) {
-    createTablesV1(db);
+    createTablesV6(db);
+    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+    return;
   }
-  if (version < 2) {
+  if (version < 2)
     db.exec("DROP TABLE IF EXISTS calibration");
-  }
   if (version < 3) {
     try {
       db.exec("ALTER TABLE sessions ADD COLUMN semantic_warning_count INTEGER NOT NULL DEFAULT 0");
     } catch {}
   }
   if (version < 4) {
-    const v4Columns = [
+    for (const col of [
       "test_quality_warning_count INTEGER NOT NULL DEFAULT 0",
       "duplication_warning_count INTEGER NOT NULL DEFAULT 0",
       "semantic_warning_count INTEGER NOT NULL DEFAULT 0",
       "drift_warning_count INTEGER NOT NULL DEFAULT 0",
       "escalation_hit INTEGER NOT NULL DEFAULT 0"
-    ];
-    for (const col of v4Columns) {
+    ]) {
       try {
         db.exec(`ALTER TABLE session_metrics ADD COLUMN ${col}`);
       } catch {}
@@ -69,188 +69,229 @@ function migrateSchema(db) {
   }
   if (version < 5) {
     db.exec(`CREATE TABLE IF NOT EXISTS file_edit_counts (
-			session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			file       TEXT    NOT NULL,
-			count      INTEGER NOT NULL DEFAULT 1,
+			session_id TEXT NOT NULL, file TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 1,
 			PRIMARY KEY (session_id, file)
 		)`);
   }
+  if (version < 6)
+    migrateToProjectState(db);
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
-function createTablesV1(db) {
+function migrateToProjectState(db) {
+  for (const col of [
+    "last_commit_at TEXT",
+    "test_passed_at TEXT",
+    "test_command TEXT",
+    "review_completed_at TEXT",
+    "review_iteration INTEGER NOT NULL DEFAULT 0",
+    "plan_eval_iteration INTEGER NOT NULL DEFAULT 0",
+    "plan_selfcheck_blocked_at TEXT",
+    "human_review_approved_at TEXT",
+    "security_warning_count INTEGER NOT NULL DEFAULT 0",
+    "test_quality_warning_count INTEGER NOT NULL DEFAULT 0",
+    "drift_warning_count INTEGER NOT NULL DEFAULT 0",
+    "dead_import_warning_count INTEGER NOT NULL DEFAULT 0",
+    "duplication_warning_count INTEGER NOT NULL DEFAULT 0",
+    "semantic_warning_count INTEGER NOT NULL DEFAULT 0"
+  ]) {
+    try {
+      db.exec(`ALTER TABLE projects ADD COLUMN ${col}`);
+    } catch {}
+  }
+  try {
+    db.exec(`UPDATE projects SET
+			test_passed_at = (SELECT s.test_passed_at FROM sessions s WHERE s.project_id = projects.id ORDER BY s.rowid DESC LIMIT 1),
+			review_completed_at = (SELECT s.review_completed_at FROM sessions s WHERE s.project_id = projects.id ORDER BY s.rowid DESC LIMIT 1),
+			review_iteration = COALESCE((SELECT s.review_iteration FROM sessions s WHERE s.project_id = projects.id ORDER BY s.rowid DESC LIMIT 1), 0)
+		`);
+  } catch {}
+  const migrations = [
+    {
+      name: "pending_fixes",
+      ddl: `(id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, file TEXT NOT NULL, gate TEXT NOT NULL, errors TEXT NOT NULL, UNIQUE(project_id, file, gate))`,
+      copy: `INSERT OR IGNORE INTO pending_fixes_v6 (project_id, file, gate, errors) SELECT s.project_id, t.file, t.gate, t.errors FROM pending_fixes t JOIN sessions s ON t.session_id = s.id`
+    },
+    {
+      name: "changed_files",
+      ddl: `(project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, file_path TEXT NOT NULL, changed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), PRIMARY KEY (project_id, file_path))`,
+      copy: `INSERT OR IGNORE INTO changed_files_v6 (project_id, file_path) SELECT s.project_id, t.file_path FROM changed_files t JOIN sessions s ON t.session_id = s.id`
+    },
+    {
+      name: "disabled_gates",
+      ddl: `(project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, gate_name TEXT NOT NULL, reason TEXT NOT NULL, disabled_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), PRIMARY KEY (project_id, gate_name))`,
+      copy: `INSERT OR IGNORE INTO disabled_gates_v6 (project_id, gate_name, reason) SELECT s.project_id, t.gate_name, t.reason FROM disabled_gates t JOIN sessions s ON t.session_id = s.id`
+    },
+    {
+      name: "ran_gates",
+      ddl: `(project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, gate_name TEXT NOT NULL, ran_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), PRIMARY KEY (project_id, gate_name))`,
+      copy: `INSERT OR IGNORE INTO ran_gates_v6 (project_id, gate_name, ran_at) SELECT s.project_id, t.gate_name, t.ran_at FROM ran_gates t JOIN sessions s ON t.session_id = s.id`
+    },
+    {
+      name: "task_verify_results",
+      ddl: `(project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, task_key TEXT NOT NULL, passed INTEGER NOT NULL, ran_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), PRIMARY KEY (project_id, task_key))`,
+      copy: `INSERT OR IGNORE INTO task_verify_results_v6 (project_id, task_key, passed, ran_at) SELECT s.project_id, t.task_key, t.passed, t.ran_at FROM task_verify_results t JOIN sessions s ON t.session_id = s.id`
+    },
+    {
+      name: "gate_failure_counts",
+      ddl: `(project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, file TEXT NOT NULL, gate TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (project_id, file, gate))`,
+      copy: `INSERT OR IGNORE INTO gate_failure_counts_v6 (project_id, file, gate, count) SELECT s.project_id, t.file, t.gate, t.count FROM gate_failure_counts t JOIN sessions s ON t.session_id = s.id`
+    },
+    {
+      name: "file_edit_counts",
+      ddl: `(project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, file TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (project_id, file))`,
+      copy: `INSERT OR IGNORE INTO file_edit_counts_v6 (project_id, file, count) SELECT s.project_id, t.file, t.count FROM file_edit_counts t JOIN sessions s ON t.session_id = s.id`
+    },
+    {
+      name: "review_scores",
+      ddl: `(id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, iteration INTEGER NOT NULL, aggregate_score REAL NOT NULL, recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), UNIQUE(project_id, iteration))`,
+      copy: `INSERT OR IGNORE INTO review_scores_v6 (project_id, iteration, aggregate_score, recorded_at) SELECT s.project_id, t.iteration, t.aggregate_score, t.recorded_at FROM review_scores t JOIN sessions s ON t.session_id = s.id`
+    },
+    {
+      name: "review_stage_scores",
+      ddl: `(id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, stage TEXT NOT NULL, dimension TEXT NOT NULL, score REAL NOT NULL, recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), UNIQUE(project_id, stage, dimension))`,
+      copy: `INSERT OR IGNORE INTO review_stage_scores_v6 (project_id, stage, dimension, score, recorded_at) SELECT s.project_id, t.stage, t.dimension, t.score, t.recorded_at FROM review_stage_scores t JOIN sessions s ON t.session_id = s.id`
+    },
+    {
+      name: "plan_eval_scores",
+      ddl: `(id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, iteration INTEGER NOT NULL, aggregate_score REAL NOT NULL, recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), UNIQUE(project_id, iteration))`,
+      copy: `INSERT OR IGNORE INTO plan_eval_scores_v6 (project_id, iteration, aggregate_score, recorded_at) SELECT s.project_id, t.iteration, t.aggregate_score, t.recorded_at FROM plan_eval_scores t JOIN sessions s ON t.session_id = s.id`
+    },
+    {
+      name: "review_findings",
+      ddl: `(id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id), file TEXT NOT NULL, severity TEXT NOT NULL, description TEXT NOT NULL, stage TEXT NOT NULL, recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')))`,
+      copy: `INSERT INTO review_findings_v6 (project_id, file, severity, description, stage, recorded_at) SELECT t.project_id, t.file, t.severity, t.description, t.stage, t.recorded_at FROM review_findings t`
+    }
+  ];
+  db.exec("PRAGMA foreign_keys = OFF");
+  for (const m of migrations) {
+    try {
+      db.exec(`CREATE TABLE ${m.name}_v6 ${m.ddl}`);
+      db.exec(m.copy);
+      db.exec(`DROP TABLE IF EXISTS ${m.name}`);
+      db.exec(`ALTER TABLE ${m.name}_v6 RENAME TO ${m.name}`);
+    } catch {}
+  }
+  try {
+    db.exec(`CREATE TABLE session_metrics_v6 (
+			id INTEGER PRIMARY KEY, session_id TEXT, project_id INTEGER NOT NULL REFERENCES projects(id),
+			gate_failure_count INTEGER NOT NULL DEFAULT 0, security_warning_count INTEGER NOT NULL DEFAULT 0,
+			review_aggregate REAL, files_changed INTEGER NOT NULL DEFAULT 0,
+			test_quality_warning_count INTEGER NOT NULL DEFAULT 0, duplication_warning_count INTEGER NOT NULL DEFAULT 0,
+			semantic_warning_count INTEGER NOT NULL DEFAULT 0, drift_warning_count INTEGER NOT NULL DEFAULT 0,
+			escalation_hit INTEGER NOT NULL DEFAULT 0,
+			recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		)`);
+    db.exec(`INSERT INTO session_metrics_v6 SELECT * FROM session_metrics`);
+    db.exec("DROP TABLE session_metrics");
+    db.exec("ALTER TABLE session_metrics_v6 RENAME TO session_metrics");
+  } catch {}
+  db.exec("PRAGMA foreign_keys = ON");
+}
+function createTablesV6(db) {
   db.exec(`
 		CREATE TABLE IF NOT EXISTS projects (
-			id         INTEGER PRIMARY KEY,
-			path       TEXT    NOT NULL UNIQUE,
-			created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE,
+			created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			last_commit_at TEXT, test_passed_at TEXT, test_command TEXT,
+			review_completed_at TEXT, review_iteration INTEGER NOT NULL DEFAULT 0,
+			plan_eval_iteration INTEGER NOT NULL DEFAULT 0, plan_selfcheck_blocked_at TEXT,
+			human_review_approved_at TEXT,
+			security_warning_count INTEGER NOT NULL DEFAULT 0,
+			test_quality_warning_count INTEGER NOT NULL DEFAULT 0,
+			drift_warning_count INTEGER NOT NULL DEFAULT 0,
+			dead_import_warning_count INTEGER NOT NULL DEFAULT 0,
+			duplication_warning_count INTEGER NOT NULL DEFAULT 0,
+			semantic_warning_count INTEGER NOT NULL DEFAULT 0
 		);
-
 		CREATE TABLE IF NOT EXISTS sessions (
-			id                          TEXT    PRIMARY KEY,
-			project_id                  INTEGER NOT NULL REFERENCES projects(id),
-			started_at                  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			last_commit_at              TEXT,
-			test_passed_at              TEXT,
-			test_command                TEXT,
-			review_completed_at         TEXT,
-			review_iteration            INTEGER NOT NULL DEFAULT 0,
-			plan_eval_iteration         INTEGER NOT NULL DEFAULT 0,
-			plan_selfcheck_blocked_at   TEXT,
-			human_review_approved_at    TEXT,
-			security_warning_count      INTEGER NOT NULL DEFAULT 0,
-			test_quality_warning_count  INTEGER NOT NULL DEFAULT 0,
-			drift_warning_count         INTEGER NOT NULL DEFAULT 0,
-			dead_import_warning_count   INTEGER NOT NULL DEFAULT 0,
-			duplication_warning_count   INTEGER NOT NULL DEFAULT 0,
-			semantic_warning_count     INTEGER NOT NULL DEFAULT 0
+			id TEXT PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id),
+			started_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		);
-		CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
-
 		CREATE TABLE IF NOT EXISTS pending_fixes (
-			id         INTEGER PRIMARY KEY,
-			session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			file       TEXT    NOT NULL,
-			gate       TEXT    NOT NULL,
-			errors     TEXT    NOT NULL,
-			UNIQUE(session_id, file, gate)
+			id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			file TEXT NOT NULL, gate TEXT NOT NULL, errors TEXT NOT NULL,
+			UNIQUE(project_id, file, gate)
 		);
-		CREATE INDEX IF NOT EXISTS idx_pending_fixes_session ON pending_fixes(session_id);
-
 		CREATE TABLE IF NOT EXISTS changed_files (
-			session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			file_path  TEXT NOT NULL,
-			changed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			PRIMARY KEY (session_id, file_path)
+			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			file_path TEXT NOT NULL, changed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			PRIMARY KEY (project_id, file_path)
 		);
-
 		CREATE TABLE IF NOT EXISTS disabled_gates (
-			session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			gate_name   TEXT NOT NULL,
-			reason      TEXT NOT NULL,
+			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			gate_name TEXT NOT NULL, reason TEXT NOT NULL,
 			disabled_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			PRIMARY KEY (session_id, gate_name)
+			PRIMARY KEY (project_id, gate_name)
 		);
-
 		CREATE TABLE IF NOT EXISTS ran_gates (
-			session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			gate_name  TEXT NOT NULL,
-			ran_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			PRIMARY KEY (session_id, gate_name)
+			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			gate_name TEXT NOT NULL, ran_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			PRIMARY KEY (project_id, gate_name)
 		);
-
 		CREATE TABLE IF NOT EXISTS task_verify_results (
-			session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			task_key   TEXT    NOT NULL,
-			passed     INTEGER NOT NULL,
-			ran_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			PRIMARY KEY (session_id, task_key)
+			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			task_key TEXT NOT NULL, passed INTEGER NOT NULL,
+			ran_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			PRIMARY KEY (project_id, task_key)
 		);
-
 		CREATE TABLE IF NOT EXISTS gate_failure_counts (
-			session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			file       TEXT    NOT NULL,
-			gate       TEXT    NOT NULL,
-			count      INTEGER NOT NULL DEFAULT 1,
-			PRIMARY KEY (session_id, file, gate)
+			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			file TEXT NOT NULL, gate TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 1,
+			PRIMARY KEY (project_id, file, gate)
 		);
-
+		CREATE TABLE IF NOT EXISTS file_edit_counts (
+			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			file TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 1,
+			PRIMARY KEY (project_id, file)
+		);
 		CREATE TABLE IF NOT EXISTS review_scores (
-			id              INTEGER PRIMARY KEY,
-			session_id      TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			iteration       INTEGER NOT NULL,
-			aggregate_score REAL    NOT NULL,
-			recorded_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			UNIQUE(session_id, iteration)
-		);
-		CREATE INDEX IF NOT EXISTS idx_review_scores_session ON review_scores(session_id);
-
-		CREATE TABLE IF NOT EXISTS review_stage_scores (
-			id          INTEGER PRIMARY KEY,
-			session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			stage       TEXT NOT NULL,
-			dimension   TEXT NOT NULL,
-			score       REAL NOT NULL,
+			id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			iteration INTEGER NOT NULL, aggregate_score REAL NOT NULL,
 			recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			UNIQUE(session_id, stage, dimension)
+			UNIQUE(project_id, iteration)
 		);
-		CREATE INDEX IF NOT EXISTS idx_stage_scores_session ON review_stage_scores(session_id);
-
+		CREATE TABLE IF NOT EXISTS review_stage_scores (
+			id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			stage TEXT NOT NULL, dimension TEXT NOT NULL, score REAL NOT NULL,
+			recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			UNIQUE(project_id, stage, dimension)
+		);
 		CREATE TABLE IF NOT EXISTS plan_eval_scores (
-			id              INTEGER PRIMARY KEY,
-			session_id      TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			iteration       INTEGER NOT NULL,
-			aggregate_score REAL    NOT NULL,
-			recorded_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			UNIQUE(session_id, iteration)
+			id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			iteration INTEGER NOT NULL, aggregate_score REAL NOT NULL,
+			recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			UNIQUE(project_id, iteration)
 		);
-
 		CREATE TABLE IF NOT EXISTS gate_configs (
-			project_id         INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-			phase              TEXT    NOT NULL,
-			gate_name          TEXT    NOT NULL,
-			command            TEXT    NOT NULL,
-			timeout            INTEGER,
-			run_once_per_batch INTEGER NOT NULL DEFAULT 0,
-			extensions         TEXT,
+			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			phase TEXT NOT NULL, gate_name TEXT NOT NULL, command TEXT NOT NULL,
+			timeout INTEGER, run_once_per_batch INTEGER NOT NULL DEFAULT 0, extensions TEXT,
 			PRIMARY KEY (project_id, phase, gate_name)
 		);
-
 		CREATE TABLE IF NOT EXISTS project_configs (
 			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-			key        TEXT    NOT NULL,
-			value      TEXT    NOT NULL,
-			PRIMARY KEY (project_id, key)
+			key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (project_id, key)
 		);
-
-		CREATE TABLE IF NOT EXISTS global_configs (
-			key   TEXT PRIMARY KEY,
-			value TEXT NOT NULL
-		);
-
+		CREATE TABLE IF NOT EXISTS global_configs (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 		CREATE TABLE IF NOT EXISTS audit_log (
-			id         INTEGER PRIMARY KEY,
-			project_id INTEGER NOT NULL REFERENCES projects(id),
-			session_id TEXT,
-			action     TEXT NOT NULL,
-			gate_name  TEXT,
-			reason     TEXT,
+			id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id),
+			session_id TEXT, action TEXT NOT NULL, gate_name TEXT, reason TEXT,
 			created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		);
-		CREATE INDEX IF NOT EXISTS idx_audit_log_session ON audit_log(session_id);
-
 		CREATE TABLE IF NOT EXISTS session_metrics (
-			id                              INTEGER PRIMARY KEY,
-			session_id                      TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			project_id                      INTEGER NOT NULL REFERENCES projects(id),
-			gate_failure_count              INTEGER NOT NULL DEFAULT 0,
-			security_warning_count          INTEGER NOT NULL DEFAULT 0,
-			review_aggregate                REAL,
-			files_changed                   INTEGER NOT NULL DEFAULT 0,
-			test_quality_warning_count      INTEGER NOT NULL DEFAULT 0,
-			duplication_warning_count       INTEGER NOT NULL DEFAULT 0,
-			semantic_warning_count          INTEGER NOT NULL DEFAULT 0,
-			drift_warning_count             INTEGER NOT NULL DEFAULT 0,
-			escalation_hit                  INTEGER NOT NULL DEFAULT 0,
-			recorded_at                     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			id INTEGER PRIMARY KEY, session_id TEXT,
+			project_id INTEGER NOT NULL REFERENCES projects(id),
+			gate_failure_count INTEGER NOT NULL DEFAULT 0, security_warning_count INTEGER NOT NULL DEFAULT 0,
+			review_aggregate REAL, files_changed INTEGER NOT NULL DEFAULT 0,
+			test_quality_warning_count INTEGER NOT NULL DEFAULT 0, duplication_warning_count INTEGER NOT NULL DEFAULT 0,
+			semantic_warning_count INTEGER NOT NULL DEFAULT 0, drift_warning_count INTEGER NOT NULL DEFAULT 0,
+			escalation_hit INTEGER NOT NULL DEFAULT 0,
+			recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		);
-		CREATE INDEX IF NOT EXISTS idx_metrics_project ON session_metrics(project_id);
-
 		CREATE TABLE IF NOT EXISTS review_findings (
-			id          INTEGER PRIMARY KEY,
-			session_id  TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			project_id  INTEGER NOT NULL REFERENCES projects(id),
-			file        TEXT    NOT NULL,
-			severity    TEXT    NOT NULL,
-			description TEXT    NOT NULL,
-			stage       TEXT    NOT NULL,
-			recorded_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-		);
-		CREATE INDEX IF NOT EXISTS idx_review_findings_session ON review_findings(session_id);
-		CREATE TABLE IF NOT EXISTS file_edit_counts (
-			session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			file       TEXT    NOT NULL,
-			count      INTEGER NOT NULL DEFAULT 1,
-			PRIMARY KEY (session_id, file)
+			id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id),
+			file TEXT NOT NULL, severity TEXT NOT NULL, description TEXT NOT NULL,
+			stage TEXT NOT NULL, recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		);
 	`);
 }
@@ -272,28 +313,10 @@ function getProjectId() {
   _projectIdCache = row.id;
   return _projectIdCache;
 }
-function setSessionScope(sessionId) {
-  if (!/^[\w.\-:]+$/.test(sessionId)) {
-    process.stderr.write(`[qult] Ignoring invalid session_id (contains illegal characters): ${sessionId.slice(0, 64)}
-`);
-    return false;
-  }
-  _sessionId = sessionId;
-  return true;
-}
-function getSessionId() {
-  return _sessionId;
-}
-function ensureSession() {
-  const db = getDb();
-  const projectId = getProjectId();
-  db.prepare("INSERT OR IGNORE INTO sessions (id, project_id) VALUES (?, ?)").run(_sessionId, projectId);
-}
-var SCHEMA_VERSION = 5, DB_DIR, DB_PATH, DEFAULT_SESSION_ID = "__default__", _db = null, _projectIdCache = null, _projectPathCache = null, _sessionId;
+var SCHEMA_VERSION = 6, DB_DIR, DB_PATH, _db = null, _projectIdCache = null, _projectPathCache = null;
 var init_db = __esm(() => {
   DB_DIR = join(homedir(), ".qult");
   DB_PATH = join(DB_DIR, "qult.db");
-  _sessionId = DEFAULT_SESSION_ID;
 });
 
 // src/config.ts
@@ -356,6 +379,8 @@ function applyConfigLayer(config, raw) {
       config.gates.test_on_edit_timeout = g.test_on_edit_timeout;
     if (Array.isArray(g.extra_path))
       config.gates.extra_path = g.extra_path.filter((p) => typeof p === "string" && p.trim().length > 0);
+    if (typeof g.coverage_threshold === "number")
+      config.gates.coverage_threshold = Math.max(0, Math.min(100, g.coverage_threshold));
   }
   if (raw.security && typeof raw.security === "object") {
     const s = raw.security;
@@ -461,6 +486,9 @@ function loadConfig() {
   else if (testOnEditEnv === "0" || testOnEditEnv === "false")
     config.gates.test_on_edit = false;
   config.gates.test_on_edit_timeout = envInt("QULT_TEST_ON_EDIT_TIMEOUT") ?? config.gates.test_on_edit_timeout;
+  const covThreshold = envInt("QULT_COVERAGE_THRESHOLD");
+  if (covThreshold !== undefined)
+    config.gates.coverage_threshold = Math.max(0, Math.min(100, covThreshold));
   const secEsc = envInt("QULT_ESCALATION_SECURITY");
   if (secEsc !== undefined)
     config.escalation.security_threshold = Math.max(1, secEsc);
@@ -522,10 +550,10 @@ var init_config = __esm(() => {
       dimension_floor: 4,
       require_human_approval: false,
       models: {
-        spec: "sonnet",
+        spec: "opus",
         quality: "opus",
         security: "opus",
-        adversarial: "sonnet"
+        adversarial: "opus"
       }
     },
     plan_eval: {
@@ -542,7 +570,8 @@ var init_config = __esm(() => {
       default_timeout: 1e4,
       test_on_edit: false,
       test_on_edit_timeout: 15000,
-      extra_path: []
+      extra_path: [],
+      coverage_threshold: 0
     },
     security: {
       require_semgrep: true
@@ -610,9 +639,8 @@ function readPendingFixes() {
     return _cache3;
   try {
     const db = getDb();
-    const sid = getSessionId();
-    ensureSession();
-    const rows = db.prepare("SELECT file, gate, errors FROM pending_fixes WHERE session_id = ?").all(sid);
+    const pid = getProjectId();
+    const rows = db.prepare("SELECT file, gate, errors FROM pending_fixes WHERE project_id = ?").all(pid);
     _cache3 = rows.map((r) => ({
       file: r.file,
       gate: r.gate,
@@ -644,13 +672,13 @@ function flush() {
     return;
   try {
     const db = getDb();
-    const sid = getSessionId();
+    const pid = getProjectId();
     db.exec("BEGIN");
     try {
-      db.prepare("DELETE FROM pending_fixes WHERE session_id = ?").run(sid);
-      const insert = db.prepare("INSERT INTO pending_fixes (session_id, file, gate, errors) VALUES (?, ?, ?, ?)");
+      db.prepare("DELETE FROM pending_fixes WHERE project_id = ?").run(pid);
+      const insert = db.prepare("INSERT INTO pending_fixes (project_id, file, gate, errors) VALUES (?, ?, ?, ?)");
       for (const fix of _cache3) {
-        insert.run(sid, fix.file, fix.gate, JSON.stringify(fix.errors));
+        insert.run(pid, fix.file, fix.gate, JSON.stringify(fix.errors));
       }
       db.exec("COMMIT");
     } catch (err) {
@@ -879,9 +907,8 @@ function readSessionState() {
     return _cache4;
   try {
     const db = getDb();
-    const sid = getSessionId();
-    ensureSession();
-    const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sid);
+    const pid = getProjectId();
+    const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(pid);
     if (!row) {
       _cache4 = defaultState();
       return _cache4;
@@ -901,31 +928,31 @@ function readSessionState() {
     state.dead_import_warning_count = row.dead_import_warning_count ?? 0;
     state.duplication_warning_count = row.duplication_warning_count ?? 0;
     state.semantic_warning_count = row.semantic_warning_count ?? 0;
-    const changedFiles = db.prepare("SELECT file_path FROM changed_files WHERE session_id = ?").all(sid);
+    const changedFiles = db.prepare("SELECT file_path FROM changed_files WHERE project_id = ?").all(pid);
     state.changed_file_paths = changedFiles.map((r) => r.file_path);
-    const disabledGates = db.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?").all(sid);
+    const disabledGates = db.prepare("SELECT gate_name FROM disabled_gates WHERE project_id = ?").all(pid);
     state.disabled_gates = disabledGates.map((r) => r.gate_name);
-    const ranGates = db.prepare("SELECT gate_name, ran_at FROM ran_gates WHERE session_id = ?").all(sid);
+    const ranGates = db.prepare("SELECT gate_name, ran_at FROM ran_gates WHERE project_id = ?").all(pid);
     for (const g of ranGates) {
-      state.ran_gates[g.gate_name] = { session_id: sid, ran_at: g.ran_at };
+      state.ran_gates[g.gate_name] = { ran_at: g.ran_at };
     }
-    const taskResults = db.prepare("SELECT task_key, passed, ran_at FROM task_verify_results WHERE session_id = ?").all(sid);
+    const taskResults = db.prepare("SELECT task_key, passed, ran_at FROM task_verify_results WHERE project_id = ?").all(pid);
     for (const t of taskResults) {
       state.task_verify_results[t.task_key] = { passed: !!t.passed, ran_at: t.ran_at };
     }
-    const gateFailures = db.prepare("SELECT file, gate, count FROM gate_failure_counts WHERE session_id = ?").all(sid);
+    const gateFailures = db.prepare("SELECT file, gate, count FROM gate_failure_counts WHERE project_id = ?").all(pid);
     for (const f of gateFailures) {
       state.gate_failure_counts[`${f.file}:${f.gate}`] = f.count;
     }
-    const reviewScores = db.prepare("SELECT aggregate_score FROM review_scores WHERE session_id = ? ORDER BY iteration").all(sid);
+    const reviewScores = db.prepare("SELECT aggregate_score FROM review_scores WHERE project_id = ? ORDER BY iteration").all(pid);
     state.review_score_history = reviewScores.map((r) => r.aggregate_score);
-    const stageScores = db.prepare("SELECT stage, dimension, score FROM review_stage_scores WHERE session_id = ?").all(sid);
+    const stageScores = db.prepare("SELECT stage, dimension, score FROM review_stage_scores WHERE project_id = ?").all(pid);
     for (const s of stageScores) {
       if (!state.review_stage_scores[s.stage])
         state.review_stage_scores[s.stage] = {};
       state.review_stage_scores[s.stage][s.dimension] = s.score;
     }
-    const planScores = db.prepare("SELECT aggregate_score FROM plan_eval_scores WHERE session_id = ? ORDER BY iteration").all(sid);
+    const planScores = db.prepare("SELECT aggregate_score FROM plan_eval_scores WHERE project_id = ? ORDER BY iteration").all(pid);
     state.plan_eval_score_history = planScores.map((r) => r.aggregate_score);
     _cache4 = state;
     return state;
@@ -943,11 +970,11 @@ function flush2() {
     return;
   try {
     const db = getDb();
-    const sid = getSessionId();
+    const pid = getProjectId();
     const state = _cache4;
     db.exec("BEGIN");
     try {
-      db.prepare(`UPDATE sessions SET
+      db.prepare(`UPDATE projects SET
 				last_commit_at = ?,
 				test_passed_at = ?,
 				test_command = ?,
@@ -962,59 +989,59 @@ function flush2() {
 				dead_import_warning_count = ?,
 				duplication_warning_count = ?,
 				semantic_warning_count = ?
-				WHERE id = ?`).run(state.last_commit_at, state.test_passed_at, state.test_command, state.review_completed_at, state.review_iteration, state.plan_eval_iteration, state.plan_selfcheck_blocked_at, state.human_review_approved_at, state.security_warning_count, state.test_quality_warning_count, state.drift_warning_count, state.dead_import_warning_count, state.duplication_warning_count, state.semantic_warning_count, sid);
-      db.prepare("DELETE FROM changed_files WHERE session_id = ?").run(sid);
-      const insertFile = db.prepare("INSERT INTO changed_files (session_id, file_path) VALUES (?, ?)");
+				WHERE id = ?`).run(state.last_commit_at, state.test_passed_at, state.test_command, state.review_completed_at, state.review_iteration, state.plan_eval_iteration, state.plan_selfcheck_blocked_at, state.human_review_approved_at, state.security_warning_count, state.test_quality_warning_count, state.drift_warning_count, state.dead_import_warning_count, state.duplication_warning_count, state.semantic_warning_count, pid);
+      db.prepare("DELETE FROM changed_files WHERE project_id = ?").run(pid);
+      const insertFile = db.prepare("INSERT INTO changed_files (project_id, file_path) VALUES (?, ?)");
       for (const fp of state.changed_file_paths) {
-        insertFile.run(sid, fp);
+        insertFile.run(pid, fp);
       }
       const inMemoryGates = new Set(state.disabled_gates);
-      const dbGates = db.prepare("SELECT gate_name FROM disabled_gates WHERE session_id = ?").all(sid);
+      const dbGates = db.prepare("SELECT gate_name FROM disabled_gates WHERE project_id = ?").all(pid);
       for (const { gate_name } of dbGates) {
         if (!inMemoryGates.has(gate_name)) {
-          db.prepare("DELETE FROM disabled_gates WHERE session_id = ? AND gate_name = ?").run(sid, gate_name);
+          db.prepare("DELETE FROM disabled_gates WHERE project_id = ? AND gate_name = ?").run(pid, gate_name);
         }
       }
-      const insertGate = db.prepare("INSERT OR IGNORE INTO disabled_gates (session_id, gate_name, reason) VALUES (?, ?, ?)");
+      const insertGate = db.prepare("INSERT OR IGNORE INTO disabled_gates (project_id, gate_name, reason) VALUES (?, ?, ?)");
       for (const g of state.disabled_gates) {
-        insertGate.run(sid, g, "");
+        insertGate.run(pid, g, "");
       }
-      db.prepare("DELETE FROM ran_gates WHERE session_id = ?").run(sid);
-      const insertRan = db.prepare("INSERT INTO ran_gates (session_id, gate_name, ran_at) VALUES (?, ?, ?)");
+      db.prepare("DELETE FROM ran_gates WHERE project_id = ?").run(pid);
+      const insertRan = db.prepare("INSERT INTO ran_gates (project_id, gate_name, ran_at) VALUES (?, ?, ?)");
       for (const [name, entry] of Object.entries(state.ran_gates)) {
-        insertRan.run(sid, name, entry.ran_at);
+        insertRan.run(pid, name, entry.ran_at);
       }
-      db.prepare("DELETE FROM task_verify_results WHERE session_id = ?").run(sid);
-      const insertTask = db.prepare("INSERT INTO task_verify_results (session_id, task_key, passed, ran_at) VALUES (?, ?, ?, ?)");
+      db.prepare("DELETE FROM task_verify_results WHERE project_id = ?").run(pid);
+      const insertTask = db.prepare("INSERT INTO task_verify_results (project_id, task_key, passed, ran_at) VALUES (?, ?, ?, ?)");
       for (const [key, result] of Object.entries(state.task_verify_results)) {
-        insertTask.run(sid, key, result.passed ? 1 : 0, result.ran_at);
+        insertTask.run(pid, key, result.passed ? 1 : 0, result.ran_at);
       }
-      db.prepare("DELETE FROM gate_failure_counts WHERE session_id = ?").run(sid);
-      const insertFailure = db.prepare("INSERT INTO gate_failure_counts (session_id, file, gate, count) VALUES (?, ?, ?, ?)");
+      db.prepare("DELETE FROM gate_failure_counts WHERE project_id = ?").run(pid);
+      const insertFailure = db.prepare("INSERT INTO gate_failure_counts (project_id, file, gate, count) VALUES (?, ?, ?, ?)");
       for (const [key, count] of Object.entries(state.gate_failure_counts)) {
         const lastColon = key.lastIndexOf(":");
         if (lastColon === -1)
           continue;
         const file = key.slice(0, lastColon);
         const gate = key.slice(lastColon + 1);
-        insertFailure.run(sid, file, gate, count);
+        insertFailure.run(pid, file, gate, count);
       }
-      db.prepare("DELETE FROM review_scores WHERE session_id = ?").run(sid);
-      const insertReview = db.prepare("INSERT INTO review_scores (session_id, iteration, aggregate_score) VALUES (?, ?, ?)");
+      db.prepare("DELETE FROM review_scores WHERE project_id = ?").run(pid);
+      const insertReview = db.prepare("INSERT INTO review_scores (project_id, iteration, aggregate_score) VALUES (?, ?, ?)");
       for (let i = 0;i < state.review_score_history.length; i++) {
-        insertReview.run(sid, i + 1, state.review_score_history[i]);
+        insertReview.run(pid, i + 1, state.review_score_history[i]);
       }
-      db.prepare("DELETE FROM review_stage_scores WHERE session_id = ?").run(sid);
-      const insertStage = db.prepare("INSERT INTO review_stage_scores (session_id, stage, dimension, score) VALUES (?, ?, ?, ?)");
+      db.prepare("DELETE FROM review_stage_scores WHERE project_id = ?").run(pid);
+      const insertStage = db.prepare("INSERT INTO review_stage_scores (project_id, stage, dimension, score) VALUES (?, ?, ?, ?)");
       for (const [stage, dims] of Object.entries(state.review_stage_scores)) {
         for (const [dim, score] of Object.entries(dims)) {
-          insertStage.run(sid, stage, dim, score);
+          insertStage.run(pid, stage, dim, score);
         }
       }
-      db.prepare("DELETE FROM plan_eval_scores WHERE session_id = ?").run(sid);
-      const insertPlan = db.prepare("INSERT INTO plan_eval_scores (session_id, iteration, aggregate_score) VALUES (?, ?, ?)");
+      db.prepare("DELETE FROM plan_eval_scores WHERE project_id = ?").run(pid);
+      const insertPlan = db.prepare("INSERT INTO plan_eval_scores (project_id, iteration, aggregate_score) VALUES (?, ?, ?)");
       for (let i = 0;i < state.plan_eval_score_history.length; i++) {
-        insertPlan.run(sid, i + 1, state.plan_eval_score_history[i]);
+        insertPlan.run(pid, i + 1, state.plan_eval_score_history[i]);
       }
       db.exec("COMMIT");
     } catch (err) {
@@ -1087,22 +1114,19 @@ function recordReview() {
   state.review_completed_at = new Date().toISOString();
   writeState(state);
 }
-function shouldSkipGate(gateName, sessionId, currentFile) {
+function shouldSkipGate(gateName, currentFile) {
   const state = readSessionState();
   const entry = state.ran_gates[gateName];
   if (!entry)
-    return false;
-  if (entry.session_id !== sessionId)
     return false;
   if (currentFile && !(state.changed_file_paths ?? []).includes(currentFile)) {
     return false;
   }
   return true;
 }
-function markGateRan(gateName, sessionId) {
+function markGateRan(gateName) {
   const state = readSessionState();
   state.ran_gates[gateName] = {
-    session_id: sessionId,
     ran_at: new Date().toISOString()
   };
   writeState(state);
@@ -1110,9 +1134,9 @@ function markGateRan(gateName, sessionId) {
 function incrementFileEditCount(file) {
   try {
     const db = getDb();
-    const sid = getSessionId();
-    db.prepare("INSERT INTO file_edit_counts (session_id, file, count) VALUES (?, ?, 1) ON CONFLICT(session_id, file) DO UPDATE SET count = count + 1").run(sid, file);
-    const row = db.prepare("SELECT count FROM file_edit_counts WHERE session_id = ? AND file = ?").get(sid, file);
+    const pid = getProjectId();
+    db.prepare("INSERT INTO file_edit_counts (project_id, file, count) VALUES (?, ?, 1) ON CONFLICT(project_id, file) DO UPDATE SET count = count + 1").run(pid, file);
+    const row = db.prepare("SELECT count FROM file_edit_counts WHERE project_id = ? AND file = ?").get(pid, file);
     return row?.count ?? 1;
   } catch (err) {
     process.stderr.write(`[qult] file_edit_counts error: ${err instanceof Error ? err.message : "unknown"} \u2014 iterative escalation may be degraded
@@ -1123,8 +1147,8 @@ function incrementFileEditCount(file) {
 function resetFileEditCounts() {
   try {
     const db = getDb();
-    const sid = getSessionId();
-    db.prepare("DELETE FROM file_edit_counts WHERE session_id = ?").run(sid);
+    const pid = getProjectId();
+    db.prepare("DELETE FROM file_edit_counts WHERE project_id = ?").run(pid);
   } catch {}
 }
 function clearOnCommit() {
@@ -1333,56 +1357,42 @@ var init_lazy_init = __esm(() => {
   init_pending_fixes();
 });
 
-// src/hooks/sanitize.ts
-function sanitizeForStderr(input) {
-  const noAnsi = input.replace(/\x1B\[[0-9;]*[A-Za-z]/g, "");
-  return noAnsi.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
-}
-
-// src/hooks/respond.ts
-function setCurrentEvent(event) {
-  _currentEvent = event;
-}
-function compactStateSummary() {
-  try {
-    const state = readSessionState();
-    const fixes = readPendingFixes();
-    const parts = [];
-    if (fixes.length > 0)
-      parts.push(`${fixes.length} pending fix(es)`);
-    parts.push(state.test_passed_at ? "tests: PASS" : "tests: NOT PASSED");
-    parts.push(state.review_completed_at ? "review: DONE" : "review: NOT DONE");
-    const changed = state.changed_file_paths?.length ?? 0;
-    if (changed > 0)
-      parts.push(`${changed} file(s) changed`);
-    const disabled = state.disabled_gates ?? [];
-    if (disabled.length > 0)
-      parts.push(`disabled: ${disabled.map((g) => sanitizeForStderr(g)).join(",")}`);
-    return `
-[qult state] ${parts.join(" | ")}`;
-  } catch {
-    return "";
+// src/gates/coverage-parser.ts
+function parseCoveragePercent(output) {
+  if (!output)
+    return null;
+  let match;
+  match = output.match(ISTANBUL_RE);
+  if (match)
+    return parseFloat(match[1]);
+  match = output.match(PYTEST_RE);
+  if (match)
+    return parseFloat(match[1]);
+  match = output.match(GO_RE);
+  if (match)
+    return parseFloat(match[1]);
+  match = output.match(TARPAULIN_RE);
+  if (match)
+    return parseFloat(match[1]);
+  if (/^TOTAL\s/m.test(output)) {
+    const totalLine = output.split(`
+`).find((l) => /^TOTAL\s/.test(l));
+    if (totalLine) {
+      const percentages = [...totalLine.matchAll(/([\d.]+)%/g)].map((m) => parseFloat(m[1]));
+      if (percentages.length >= 3)
+        return percentages[2];
+      if (percentages.length > 0)
+        return percentages[percentages.length - 1];
+    }
   }
+  return null;
 }
-function deny(reason) {
-  try {
-    flushAll();
-  } catch {}
-  process.stderr.write(reason + compactStateSummary());
-  process.exit(2);
-}
-function block(reason) {
-  try {
-    flushAll();
-  } catch {}
-  process.stderr.write(reason + compactStateSummary());
-  process.exit(2);
-}
-var _currentEvent = "unknown";
-var init_respond = __esm(() => {
-  init_flush();
-  init_pending_fixes();
-  init_session_state();
+var ISTANBUL_RE, PYTEST_RE, GO_RE, TARPAULIN_RE;
+var init_coverage_parser = __esm(() => {
+  ISTANBUL_RE = /All\s+files\s*\|[\s\d.]+\|[\s\d.]+\|[\s\d.]+\|\s*([\d.]+)\s*\|/;
+  PYTEST_RE = /^TOTAL\s+\d+\s+\d+\s+(\d+)%/m;
+  GO_RE = /coverage:\s*([\d.]+)%\s+of\s+statements/;
+  TARPAULIN_RE = /([\d.]+)%\s+coverage,\s+\d+\/\d+\s+lines\s+covered/;
 });
 
 // src/gates/runner.ts
@@ -1520,11 +1530,38 @@ function runGate(name, gate, file) {
     };
   }
 }
+function runCoverageGate(name, gate, threshold) {
+  if (threshold <= 0) {
+    return { name, passed: true, output: "coverage check skipped (threshold=0)", duration_ms: 0 };
+  }
+  const result = runGate(name, gate);
+  if (!result.passed)
+    return result;
+  const coverage = parseCoveragePercent(result.output);
+  if (coverage === null)
+    return result;
+  if (coverage < threshold) {
+    return {
+      name,
+      passed: false,
+      output: `Coverage ${coverage}% is below threshold ${threshold}%`,
+      duration_ms: result.duration_ms
+    };
+  }
+  return result;
+}
 var ERROR_CODE_RE;
 var init_runner = __esm(() => {
   init_config();
+  init_coverage_parser();
   ERROR_CODE_RE = /\b([A-Z]{1,4}\d{1,5}|ERR_[A-Z_]+|E\d{3,5})\b/;
 });
+
+// src/hooks/sanitize.ts
+function sanitizeForStderr(input) {
+  const noAnsi = input.replace(/\x1B\[[0-9;]*[A-Za-z]/g, "");
+  return noAnsi.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+}
 
 // src/hooks/detectors/convention-check.ts
 import { readdirSync as readdirSync2, statSync as statSync2 } from "fs";
@@ -3171,14 +3208,16 @@ function analyzeTestQuality(file) {
     const trimmed = line.trimStart();
     if (trimmed.startsWith("//"))
       continue;
-    for (const { re, name } of WEAK_MATCHERS) {
-      if (re.test(line)) {
-        smells.push({
-          type: "weak-matcher",
-          line: i + 1,
-          message: `Weak matcher ${name} \u2014 consider asserting a specific value`
-        });
-        break;
+    if (!isPbt) {
+      for (const { re, name } of WEAK_MATCHERS) {
+        if (re.test(line)) {
+          smells.push({
+            type: "weak-matcher",
+            line: i + 1,
+            message: `Weak matcher ${name} \u2014 consider asserting a specific value`
+          });
+          break;
+        }
       }
     }
     if (TRIVIAL_ASSERTION_RE.test(line)) {
@@ -3466,8 +3505,29 @@ function formatTestQualityWarnings(file, result, taskKey) {
   }
   return warnings;
 }
-var MAX_CHECK_SIZE5 = 500000, BLOCKING_SMELL_TYPES, ASSERTION_RE, TEST_CASE_RE2, WEAK_MATCHERS, TRIVIAL_ASSERTION_RE, EMPTY_TEST_RE, MOCK_RE, ALWAYS_TRUE_RE, CONSTANT_SELF_RE, SNAPSHOT_RE, IMPL_COUPLED_RE, ASYNC_TEST_RE, AWAIT_RE, MODULE_LET_RE, LARGE_TEST_FILE_LINES = 500, LARGE_SNAPSHOT_CHARS = 5000, PBT_RE, PBT_DEGENERATE_RUNS_RE, PBT_CONSTRAINED_GEN_RE, SETUP_BLOCK_RE;
+function suggestPbt(implFile) {
+  const name = basename6(implFile);
+  if (!PBT_CANDIDATE_RE.test(name))
+    return null;
+  const testFile = resolveTestFile(implFile);
+  if (!testFile || !existsSync9(testFile))
+    return null;
+  try {
+    const stats = __require("fs").statSync(testFile);
+    if (stats.size > MAX_CHECK_SIZE5)
+      return null;
+    const content = readFileSync8(testFile, "utf-8");
+    if (PBT_RE.test(content))
+      return null;
+  } catch {
+    return null;
+  }
+  const relative = implFile.split("/").slice(-3).join("/");
+  return `${relative}: Consider property-based testing (fast-check/hypothesis) for validation/serialization logic`;
+}
+var MAX_CHECK_SIZE5 = 500000, BLOCKING_SMELL_TYPES, ASSERTION_RE, TEST_CASE_RE2, WEAK_MATCHERS, TRIVIAL_ASSERTION_RE, EMPTY_TEST_RE, MOCK_RE, ALWAYS_TRUE_RE, CONSTANT_SELF_RE, SNAPSHOT_RE, IMPL_COUPLED_RE, ASYNC_TEST_RE, AWAIT_RE, MODULE_LET_RE, LARGE_TEST_FILE_LINES = 500, LARGE_SNAPSHOT_CHARS = 5000, PBT_RE, PBT_DEGENERATE_RUNS_RE, PBT_CONSTRAINED_GEN_RE, SETUP_BLOCK_RE, PBT_CANDIDATE_RE;
 var init_test_quality_check = __esm(() => {
+  init_test_file_resolver();
   BLOCKING_SMELL_TYPES = new Set([
     "empty-test",
     "always-true",
@@ -3498,6 +3558,49 @@ var init_test_quality_check = __esm(() => {
   PBT_DEGENERATE_RUNS_RE = /numRuns\s*:\s*1\b/;
   PBT_CONSTRAINED_GEN_RE = /fc\.\w+\(\s*\{\s*min\s*:\s*(\d+)\s*,\s*max\s*:\s*\1\s*\}/;
   SETUP_BLOCK_RE = /\b(beforeEach|afterEach|beforeAll|afterAll)\s*\(/;
+  PBT_CANDIDATE_RE = /(?:valid|parse|serial|codec|schema|encode|decode)/i;
+});
+
+// src/hooks/respond.ts
+function compactStateSummary() {
+  try {
+    const state = readSessionState();
+    const fixes = readPendingFixes();
+    const parts = [];
+    if (fixes.length > 0)
+      parts.push(`${fixes.length} pending fix(es)`);
+    parts.push(state.test_passed_at ? "tests: PASS" : "tests: NOT PASSED");
+    parts.push(state.review_completed_at ? "review: DONE" : "review: NOT DONE");
+    const changed = state.changed_file_paths?.length ?? 0;
+    if (changed > 0)
+      parts.push(`${changed} file(s) changed`);
+    const disabled = state.disabled_gates ?? [];
+    if (disabled.length > 0)
+      parts.push(`disabled: ${disabled.map((g) => sanitizeForStderr(g)).join(",")}`);
+    return `
+[qult state] ${parts.join(" | ")}`;
+  } catch {
+    return "";
+  }
+}
+function deny(reason) {
+  try {
+    flushAll();
+  } catch {}
+  process.stderr.write(reason + compactStateSummary());
+  process.exit(2);
+}
+function block(reason) {
+  try {
+    flushAll();
+  } catch {}
+  process.stderr.write(reason + compactStateSummary());
+  process.exit(2);
+}
+var init_respond = __esm(() => {
+  init_flush();
+  init_pending_fixes();
+  init_session_state();
 });
 
 // src/hooks/post-tool.ts
@@ -3538,13 +3641,12 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
   const hasWriteGates = !!gates?.on_write;
   const fileExt = extname10(file).toLowerCase();
   const gatedExts = getGatedExtensions();
-  const sessionId = ev.session_id;
   const gateEntries = [];
   if (hasWriteGates && gates?.on_write) {
     for (const [name, gate] of Object.entries(gates.on_write)) {
       if (isGateDisabled(name))
         continue;
-      if (gate.run_once_per_batch && sessionId && shouldSkipGate(name, sessionId, file))
+      if (gate.run_once_per_batch && shouldSkipGate(name, file))
         continue;
       const hasPlaceholder = gate.command.includes("{file}");
       if (hasPlaceholder && gatedExts.size > 0 && !gatedExts.has(fileExt))
@@ -3559,8 +3661,8 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
     const entry = gateEntries[i];
     try {
       if (settled.status === "fulfilled") {
-        if (entry.gate.run_once_per_batch && sessionId) {
-          markGateRan(entry.name, sessionId);
+        if (entry.gate.run_once_per_batch) {
+          markGateRan(entry.name);
         }
         if (!settled.value.passed) {
           newFixes.push({ file, errors: [settled.value.output], gate: entry.name });
@@ -3678,6 +3780,15 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
         if (blockingFixes.length > 0) {
           newFixes.push(...blockingFixes);
         }
+      }
+    }
+  } catch {}
+  try {
+    if (!isTestFile3) {
+      const pbtSuggestion = suggestPbt(file);
+      if (pbtSuggestion) {
+        process.stderr.write(`[qult] PBT advisory: ${pbtSuggestion}
+`);
       }
     }
   } catch {}
@@ -3831,10 +3942,21 @@ function onGitCommit() {
   const gates = loadGates();
   if (!gates?.on_commit)
     return;
+  const config = loadConfig();
+  const coverageThreshold = config.gates.coverage_threshold;
   for (const [name, gate] of Object.entries(gates.on_commit)) {
     try {
       if (isGateDisabled(name))
         continue;
+      if (name === "coverage" && coverageThreshold > 0) {
+        const result = runCoverageGate(name, gate, coverageThreshold);
+        if (!result.passed) {
+          addPendingFixes("__commit__", [
+            { file: "__commit__", errors: [result.output], gate: name }
+          ]);
+        }
+        continue;
+      }
       runGate(name, gate);
     } catch {}
   }
@@ -5053,16 +5175,15 @@ function persistReviewFindings() {
     return null;
   try {
     const db = getDb();
-    const projectId = getProjectId();
-    const sid = getSessionId();
-    const insert = db.prepare("INSERT INTO review_findings (session_id, project_id, file, severity, description, stage) VALUES (?, ?, ?, ?, ?, ?)");
+    const pid = getProjectId();
+    const insert = db.prepare("INSERT INTO review_findings (project_id, file, severity, description, stage) VALUES (?, ?, ?, ?, ?)");
     for (const f of _currentFindings) {
-      insert.run(sid, projectId, f.file, f.severity, f.description, f.stage);
+      insert.run(pid, f.file, f.severity, f.description, f.stage);
     }
     db.prepare(`DELETE FROM review_findings WHERE project_id = ? AND id NOT IN (
 				SELECT id FROM review_findings WHERE project_id = ? ORDER BY id DESC LIMIT ?
-			)`).run(projectId, projectId, MAX_FINDINGS);
-    const rows = db.prepare("SELECT file, severity, description, stage, recorded_at FROM review_findings WHERE project_id = ? ORDER BY id DESC LIMIT ?").all(projectId, MAX_FINDINGS);
+			)`).run(pid, pid, MAX_FINDINGS);
+    const rows = db.prepare("SELECT file, severity, description, stage, recorded_at FROM review_findings WHERE project_id = ? ORDER BY id DESC LIMIT ?").all(pid, MAX_FINDINGS);
     const history = rows.map((r) => ({
       file: r.file,
       severity: r.severity,
@@ -5597,8 +5718,8 @@ async function postCompact(_ev) {
     } catch {}
     try {
       const db = getDb();
-      const sid = getSessionId();
-      const findings = db.prepare("SELECT file, severity, description FROM review_findings WHERE session_id = ? ORDER BY id DESC LIMIT 5").all(sid);
+      const pid = getProjectId();
+      const findings = db.prepare("SELECT file, severity, description FROM review_findings WHERE project_id = ? ORDER BY id DESC LIMIT 5").all(pid);
       if (findings.length > 0) {
         parts.push("[qult] Recent review findings:");
         for (const f of findings) {
@@ -5642,7 +5763,6 @@ var init_post_compact = __esm(() => {
 init_db();
 init_flush();
 init_lazy_init();
-init_respond();
 var EVENT_MAP = {
   "post-tool": () => Promise.resolve().then(() => (init_post_tool(), exports_post_tool)),
   "pre-tool": () => Promise.resolve().then(() => (init_pre_tool(), exports_pre_tool)),
@@ -5684,15 +5804,8 @@ async function dispatch(event) {
   if (ev.cwd) {
     setProjectPath(ev.cwd);
   }
-  if (ev.session_id) {
-    setSessionScope(ev.session_id);
-  }
-  try {
-    ensureSession();
-  } catch {}
   lazyInit();
   const debug = !!process.env.QULT_DEBUG;
-  setCurrentEvent(event);
   try {
     if (debug)
       process.stderr.write(`[qult:debug] event=${event} input=${input.length}b
@@ -5712,7 +5825,6 @@ async function dispatch(event) {
     try {
       flushAll();
     } catch {}
-    setCurrentEvent("unknown");
   }
 }
 

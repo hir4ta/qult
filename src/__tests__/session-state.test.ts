@@ -2,7 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { saveGates } from "../gates/load.ts";
-import { closeDb, ensureSession, setProjectPath, setSessionScope, useTestDb } from "../state/db.ts";
+import { closeDb, setProjectPath, useTestDb } from "../state/db.ts";
 import { resetAllCaches } from "../state/flush.ts";
 import {
 	clearOnCommit,
@@ -29,8 +29,6 @@ const originalCwd = process.cwd();
 beforeEach(() => {
 	useTestDb();
 	setProjectPath(TEST_DIR);
-	setSessionScope("test-session");
-	ensureSession();
 	resetAllCaches();
 	mkdirSync(TEST_DIR, { recursive: true });
 	process.chdir(TEST_DIR);
@@ -75,23 +73,23 @@ describe("session-state: review tracking", () => {
 
 describe("session-state: gate batch tracking", () => {
 	it("shouldSkipGate returns false when not ran", () => {
-		expect(shouldSkipGate("lint", "session-1")).toBe(false);
+		expect(shouldSkipGate("lint")).toBe(false);
 	});
 
 	it("markGateRan then shouldSkipGate returns true for same session", () => {
-		markGateRan("typecheck", "session-1");
-		expect(shouldSkipGate("typecheck", "session-1")).toBe(true);
+		markGateRan("typecheck");
+		expect(shouldSkipGate("typecheck")).toBe(true);
 	});
 
-	it("shouldSkipGate returns false for different session", () => {
-		markGateRan("typecheck", "session-1");
-		expect(shouldSkipGate("typecheck", "session-2")).toBe(false);
+	it("shouldSkipGate returns true for same project after markGateRan", () => {
+		markGateRan("typecheck");
+		expect(shouldSkipGate("typecheck")).toBe(true);
 	});
 
 	it("clearOnCommit clears gate batch", () => {
-		markGateRan("typecheck", "session-1");
+		markGateRan("typecheck");
 		clearOnCommit();
-		expect(shouldSkipGate("typecheck", "session-1")).toBe(false);
+		expect(shouldSkipGate("typecheck")).toBe(false);
 	});
 });
 

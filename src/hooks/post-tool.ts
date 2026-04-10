@@ -80,8 +80,6 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 	// File extension filter: skip per-file gates for extensions not covered by any gate tool
 	const fileExt = extname(file).toLowerCase();
 	const gatedExts = getGatedExtensions();
-	const sessionId = ev.session_id;
-
 	// Filter gates, then run in parallel
 	const gateEntries: {
 		name: string;
@@ -91,7 +89,7 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 	if (hasWriteGates && gates?.on_write) {
 		for (const [name, gate] of Object.entries(gates.on_write)) {
 			if (isGateDisabled(name)) continue;
-			if (gate.run_once_per_batch && sessionId && shouldSkipGate(name, sessionId, file)) continue;
+			if (gate.run_once_per_batch && shouldSkipGate(name, file)) continue;
 			const hasPlaceholder = gate.command.includes("{file}");
 			if (hasPlaceholder && gatedExts.size > 0 && !gatedExts.has(fileExt)) continue;
 			gateEntries.push({ name, gate, fileArg: hasPlaceholder ? file : undefined });
@@ -108,8 +106,8 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 		const entry = gateEntries[i]!;
 		try {
 			if (settled.status === "fulfilled") {
-				if (entry.gate.run_once_per_batch && sessionId) {
-					markGateRan(entry.name, sessionId);
+				if (entry.gate.run_once_per_batch) {
+					markGateRan(entry.name);
 				}
 				if (!settled.value.passed) {
 					newFixes.push({ file, errors: [settled.value.output], gate: entry.name });

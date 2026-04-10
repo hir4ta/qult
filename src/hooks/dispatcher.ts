@@ -1,4 +1,4 @@
-import { ensureSession, setProjectPath, setSessionScope } from "../state/db.ts";
+import { setProjectPath } from "../state/db.ts";
 import { flushAll } from "../state/flush.ts";
 import type { HookEvent } from "../types.ts";
 import { lazyInit } from "./lazy-init.ts";
@@ -57,17 +57,9 @@ export async function dispatch(event: string): Promise<void> {
 		return; // fail-open: invalid JSON
 	}
 
-	// Set project and session scope for DB operations
+	// Set project scope for DB operations (project-based, no session concept)
 	if (ev.cwd) {
 		setProjectPath(ev.cwd);
-	}
-	if (ev.session_id) {
-		setSessionScope(ev.session_id);
-	}
-	try {
-		ensureSession();
-	} catch {
-		/* fail-open */
 	}
 
 	lazyInit();

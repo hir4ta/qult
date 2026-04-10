@@ -2,13 +2,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	closeDb,
-	ensureSession,
-	setProjectPath,
-	setSessionScope,
-	useTestDb,
-} from "../../state/db.ts";
+import { closeDb, setProjectPath, useTestDb } from "../../state/db.ts";
 import { resetAllCaches } from "../../state/flush.ts";
 import { resetLazyInit } from "../lazy-init.ts";
 
@@ -28,8 +22,6 @@ let exitCode: number | null;
 beforeEach(() => {
 	useTestDb();
 	setProjectPath(TEST_DIR);
-	setSessionScope("test-session");
-	ensureSession();
 	resetAllCaches();
 	resetLazyInit();
 	rmSync(TEST_DIR, { recursive: true, force: true });
@@ -134,37 +126,6 @@ describe("dispatch()", () => {
 		await dispatch("session-start");
 
 		expect(exitCode).toBeNull();
-	});
-
-	it("sets session scope in DB when session_id is present", async () => {
-		mockStdin(JSON.stringify({ session_id: "test-sess-123" }));
-
-		const { dispatch } = await import("../dispatcher.ts");
-		await dispatch("session-start");
-
-		const { getDb } = await import("../../state/db.ts");
-		const db = getDb();
-		const row = db.prepare("SELECT id FROM sessions WHERE id = ?").get("test-sess-123") as {
-			id: string;
-		} | null;
-		expect(row).not.toBeNull();
-		expect(row!.id).toBe("test-sess-123");
-	});
-
-	it("is idempotent for the same session_id", async () => {
-		const { dispatch } = await import("../dispatcher.ts");
-
-		mockStdin(JSON.stringify({ session_id: "sess-dup" }));
-		await dispatch("session-start");
-
-		// Second dispatch with same session_id should not error
-		mockStdin(JSON.stringify({ session_id: "sess-dup" }));
-		await dispatch("session-start");
-
-		const { getDb } = await import("../../state/db.ts");
-		const db = getDb();
-		const rows = db.prepare("SELECT id FROM sessions WHERE id = ?").all("sess-dup");
-		expect(rows).toHaveLength(1);
 	});
 
 	it("dispatches to the correct handler", async () => {
