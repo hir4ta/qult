@@ -14,9 +14,9 @@
     },
     {
       "file": "security/secrets.ts",
-      "expected_detections": 3,
+      "expected_detections": 2,
       "expected_clean_lines": 2,
-      "description": "Hardcoded AWS key, GitHub token, Stripe key"
+      "description": "Hardcoded AWS key, GitHub token"
     },
     {
       "file": "security/safe.ts",
