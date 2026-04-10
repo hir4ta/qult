@@ -109,7 +109,8 @@ flowchart LR
 | セキュリティパターン検出 (25+ ルール) | シークレット、インジェクション、XSS、弱い暗号 |
 | セマンティックバグ検出 (6+ パターン) | 空 catch、到達不能コード、switch fallthrough |
 | コード重複検出 | ファイル内はブロック、ファイル間は警告 |
-| PBT 対応テスト品質チェック | Property-Based Testing の誤検知回避 |
+| PBT 対応テスト品質チェック | PBT ファイルの weak-matcher 緩和 + バリデーション系ファイルで PBT 推奨 |
+| テストカバレッジゲート (opt-in) | カバレッジが閾値未満ならコミットをブロック |
 | SAST 統合 (Semgrep 必須) | Semgrep 必須化。未インストール時はコミットをブロック |
 | 反復セキュリティ昇格 | 同一ファイル N 回編集で advisory パターンを blocking に昇格 |
 | テスト品質 blocking | 空テスト・always-true・trivial assertion をブロック |
@@ -240,7 +241,8 @@ rm -rf ~/.qult
 | `escalation.*_threshold` | 8-10 | ブロックまでの警告回数 |
 | `escalation.security_iterative_threshold` | 5 | 同一ファイル編集回数で advisory→blocking |
 | `escalation.dead_import_blocking_threshold` | 5 | dead import 警告数で blocking 化 |
-| `review.models.*` | spec=sonnet, quality/security=opus, adversarial=sonnet | ステージ別レビュアーモデル |
+| `gates.coverage_threshold` | 0 | テストカバレッジ最低 % (0 = 無効、opt-in) |
+| `review.models.*` | 全 opus | ステージ別レビュアーモデル |
 | `flywheel.enabled` | true | セッション横断の閾値推奨 |
 | `flywheel.min_sessions` | 10 | Flywheel 分析に必要な最低セッション数 |
 

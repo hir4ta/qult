@@ -9,6 +9,7 @@ export default defineConfig({
 	},
 	test: {
 		pool: "forks",
+		exclude: ["**/fixtures/**", "**/node_modules/**"],
 		coverage: {
 			include: ["src/**/*.ts"],
 			exclude: [

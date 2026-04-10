@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, extname, resolve } from "node:path";
 import { loadConfig } from "../config.ts";
 import { loadGates } from "../gates/load.ts";
-import { runGate, runGateAsync, shellEscape } from "../gates/runner.ts";
+import { runCoverageGate, runGate, runGateAsync, shellEscape } from "../gates/runner.ts";
 import {
 	addPendingFixes,
 	clearPendingFixesForFile,
@@ -33,7 +33,11 @@ import { detectHallucinatedImports } from "./detectors/import-check.ts";
 import { detectSecurityPatterns, getAdvisoryAsPendingFixes } from "./detectors/security-check.ts";
 import { detectSemanticPatterns } from "./detectors/semantic-check.ts";
 import { resolveTestFile } from "./detectors/test-file-resolver.ts";
-import { analyzeTestQuality, getBlockingTestSmells } from "./detectors/test-quality-check.ts";
+import {
+	analyzeTestQuality,
+	getBlockingTestSmells,
+	suggestPbt,
+} from "./detectors/test-quality-check.ts";
 import { deny } from "./respond.ts";
 
 /** PostToolUse: lint/type gate after Edit/Write, commit/test/lint-fix detection after Bash */
@@ -274,6 +278,18 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 		/* fail-open */
 	}
 
+	// PBT suggestion: advise PBT for validation/serialization files
+	try {
+		if (!isTestFile) {
+			const pbtSuggestion = suggestPbt(file);
+			if (pbtSuggestion) {
+				process.stderr.write(`[qult] PBT advisory: ${pbtSuggestion}\n`);
+			}
+		}
+	} catch {
+		/* fail-open */
+	}
+
 	// Test-on-edit: run related test file when enabled and no lint/type errors
 	try {
 		if (config.gates.test_on_edit && newFixes.length === 0) {
@@ -485,9 +501,24 @@ function onGitCommit(): void {
 	const gates = loadGates();
 	if (!gates?.on_commit) return;
 
+	const config = loadConfig();
+	const coverageThreshold = config.gates.coverage_threshold;
+
 	for (const [name, gate] of Object.entries(gates.on_commit)) {
 		try {
 			if (isGateDisabled(name)) continue;
+
+			// Coverage gate: check coverage percentage against threshold
+			if (name === "coverage" && coverageThreshold > 0) {
+				const result = runCoverageGate(name, gate, coverageThreshold);
+				if (!result.passed) {
+					addPendingFixes("__commit__", [
+						{ file: "__commit__", errors: [result.output], gate: name },
+					]);
+				}
+				continue;
+			}
+
 			runGate(name, gate);
 		} catch {
 			// fail-open

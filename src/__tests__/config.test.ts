@@ -62,6 +62,7 @@ afterEach(() => {
 	delete process.env.QULT_REQUIRE_SEMGREP;
 	delete process.env.QULT_ESCALATION_SECURITY_ITERATIVE;
 	delete process.env.QULT_ESCALATION_DEAD_IMPORT_BLOCKING;
+	delete process.env.QULT_COVERAGE_THRESHOLD;
 });
 
 describe("loadConfig", () => {
@@ -196,10 +197,10 @@ describe("review.models config", () => {
 	it("returns default model values", () => {
 		const config = loadConfig();
 		expect(config.review.models).toEqual({
-			spec: "sonnet",
+			spec: "opus",
 			quality: "opus",
 			security: "opus",
-			adversarial: "sonnet",
+			adversarial: "opus",
 		});
 	});
 
@@ -236,7 +237,7 @@ describe("review.models config", () => {
 	it("ignores empty string env vars for models", () => {
 		process.env.QULT_REVIEW_MODEL_SPEC = "";
 		const config = loadConfig();
-		expect(config.review.models.spec).toBe("sonnet"); // default
+		expect(config.review.models.spec).toBe("opus"); // default
 	});
 });
 
@@ -388,5 +389,37 @@ describe("security config", () => {
 		process.env.QULT_REQUIRE_SEMGREP = "1";
 		const config2 = loadConfig();
 		expect(config2.security.require_semgrep).toBe(true);
+	});
+});
+
+describe("coverage_threshold config", () => {
+	it("returns default coverage_threshold as 0 (opt-in)", () => {
+		const config = loadConfig();
+		expect(config.gates.coverage_threshold).toBe(0);
+	});
+
+	it("reads coverage_threshold from project config", () => {
+		setProjectConfig("gates.coverage_threshold", 80);
+		const config = loadConfig();
+		expect(config.gates.coverage_threshold).toBe(80);
+	});
+
+	it("env var QULT_COVERAGE_THRESHOLD overrides project config", () => {
+		setProjectConfig("gates.coverage_threshold", 80);
+		process.env.QULT_COVERAGE_THRESHOLD = "90";
+		const config = loadConfig();
+		expect(config.gates.coverage_threshold).toBe(90);
+	});
+
+	it("clamps negative values to 0", () => {
+		process.env.QULT_COVERAGE_THRESHOLD = "-10";
+		const config = loadConfig();
+		expect(config.gates.coverage_threshold).toBe(0);
+	});
+
+	it("clamps values above 100 to 100", () => {
+		process.env.QULT_COVERAGE_THRESHOLD = "150";
+		const config = loadConfig();
+		expect(config.gates.coverage_threshold).toBe(100);
 	});
 });

@@ -1,6 +1,7 @@
 import { exec, execSync } from "node:child_process";
 import { loadConfig } from "../config.ts";
 import type { GateDefinition } from "../types.ts";
+import { parseCoveragePercent } from "./coverage-parser.ts";
 
 /** Shell-escape a string for safe interpolation into a shell command.
  *  Wraps in single quotes and escapes single quotes + backticks to prevent injection. */
@@ -172,4 +173,35 @@ export function runGate(name: string, gate: GateDefinition, file?: string): Gate
 			duration_ms,
 		};
 	}
+}
+
+/** Run a coverage gate: execute the test command, then check coverage percentage against threshold.
+ *  Returns pass if threshold=0 (disabled), test fails (fail handled by test gate), or coverage >= threshold.
+ *  Fail-open: if coverage output cannot be parsed, passes (coverage data may not be present). */
+export function runCoverageGate(name: string, gate: GateDefinition, threshold: number): GateResult {
+	if (threshold <= 0) {
+		return { name, passed: true, output: "coverage check skipped (threshold=0)", duration_ms: 0 };
+	}
+
+	const result = runGate(name, gate);
+
+	// If the underlying test command failed, propagate that failure
+	if (!result.passed) return result;
+
+	// Parse coverage from output
+	const coverage = parseCoveragePercent(result.output);
+
+	// Fail-open: if coverage output can't be parsed, pass
+	if (coverage === null) return result;
+
+	if (coverage < threshold) {
+		return {
+			name,
+			passed: false,
+			output: `Coverage ${coverage}% is below threshold ${threshold}%`,
+			duration_ms: result.duration_ms,
+		};
+	}
+
+	return result;
 }

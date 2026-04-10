@@ -58,6 +58,17 @@ Before spawning reviewers, collect computational detector results as ground trut
 
 These findings are deterministic (not LLM-generated) and serve as ground truth that reviewers must not contradict.
 
+## Stage 0.75: Diff prefetch
+
+Before spawning reviewers, collect the full diff to pass directly in reviewer prompts:
+
+1. Run `git diff HEAD` via Bash to get the full uncommitted diff
+2. If the diff is too large (> 50K chars), truncate with head/tail summary: first 30K + "... (N chars truncated) ..." + last 10K
+3. Store the diff as a `## Diff` block
+4. Include this block in EVERY reviewer's prompt — this eliminates the need for reviewers to run `git diff` themselves
+
+This is critical for efficiency: without diff prefetch, each reviewer independently runs `git diff` and file discovery, multiplying token consumption by 4x.
+
 ## Stage 0.8: Resolve reviewer models
 
 Before spawning reviewers, resolve the model for each stage:
@@ -85,7 +96,8 @@ In the agent prompt, include:
 - The plan acceptance criteria from Stage 0.5 (if any)
 - The Success Criteria from Stage 0.5 (if any) — these are the human-written ground truth for spec verification
 - The detector findings from Stage 0.7 (if any)
-- One-line instruction: "Verify the uncommitted changes match the plan and all consumers are updated. Use Success Criteria as ground truth."
+- The diff from Stage 0.75 — reviewers MUST NOT run git diff themselves
+- One-line instruction: "Verify the uncommitted changes match the plan and all consumers are updated. Use Success Criteria as ground truth. The diff is provided below — do NOT run git diff."
 
 Collect output: `Spec: PASS/FAIL`, `Score: Completeness=N Accuracy=N`, findings.
 
@@ -100,7 +112,8 @@ mcp__plugin_qult_qult__record_stage_scores({ stage: "Spec", scores: { completene
 
 In the agent prompt, include:
 - The detector findings from Stage 0.7 (if any)
-- One-line instruction: "Review the uncommitted changes for security vulnerabilities and hardening gaps."
+- The diff from Stage 0.75 — reviewers MUST NOT run git diff themselves
+- One-line instruction: "Review the uncommitted changes for security vulnerabilities and hardening gaps. The diff is provided below — do NOT run git diff."
 
 Collect output: `Security: PASS/FAIL`, `Score: Vulnerability=N Hardening=N`, findings.
 
@@ -130,8 +143,9 @@ Spawn `quality-reviewer` and `adversarial-reviewer` **in parallel** (single mess
 In the agent prompt, include:
 - The on_review gate results from Stage 0 (if any)
 - The detector findings from Stage 0.7 (if any)
+- The diff from Stage 0.75 — reviewers MUST NOT run git diff themselves
 - The **Prior findings** block from Round 1
-- One-line instruction: "Review the uncommitted changes for design quality and maintainability issues. Do not duplicate findings already reported by Spec/Security reviewers."
+- One-line instruction: "Review the uncommitted changes for design quality and maintainability issues. Do not duplicate findings already reported by Spec/Security reviewers. The diff is provided below — do NOT run git diff."
 
 Collect output: `Quality: PASS/FAIL`, `Score: Design=N Maintainability=N`, findings.
 
@@ -146,8 +160,9 @@ mcp__plugin_qult_qult__record_stage_scores({ stage: "Quality", scores: { design:
 
 In the agent prompt, include:
 - The detector findings from Stage 0.7 (if any)
+- The diff from Stage 0.75 — reviewers MUST NOT run git diff themselves
 - The **Prior findings** block from Round 1
-- One-line instruction: "Find edge cases, logic errors, and silent failures in the uncommitted changes that other reviewers missed. Do not duplicate findings already reported."
+- One-line instruction: "Find edge cases, logic errors, and silent failures in the uncommitted changes that other reviewers missed. Do not duplicate findings already reported. The diff is provided below — do NOT run git diff."
 
 Collect output: `Adversarial: PASS/FAIL`, `Score: EdgeCases=N LogicCorrectness=N`, findings.
 

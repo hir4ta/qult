@@ -37,7 +37,6 @@ qult/
 │   ├── .mcp.json                    # MCP server
 │   ├── skills/                      # 12 skills
 │   ├── agents/                      # 6 agents
-│   ├── bin/qult-gate                # CLI ツール
 │   ├── output-styles/               # 出力スタイル
 │   ├── .lsp.json                    # LSP server 設定
 │   ├── settings.json                # デフォルトエージェント設定

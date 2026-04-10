@@ -2,7 +2,6 @@ import { ensureSession, setProjectPath, setSessionScope } from "../state/db.ts";
 import { flushAll } from "../state/flush.ts";
 import type { HookEvent } from "../types.ts";
 import { lazyInit } from "./lazy-init.ts";
-import { setCurrentEvent } from "./respond.ts";
 
 /**
  * Hook classification: enforcement hooks use exit 2 (DENY/block),
@@ -74,7 +73,6 @@ export async function dispatch(event: string): Promise<void> {
 	lazyInit();
 
 	const debug = !!process.env.QULT_DEBUG;
-	setCurrentEvent(event);
 	try {
 		if (debug) process.stderr.write(`[qult:debug] event=${event} input=${input.length}b\n`);
 		const start = Date.now();
@@ -91,6 +89,5 @@ export async function dispatch(event: string): Promise<void> {
 		} catch {
 			/* fail-open */
 		}
-		setCurrentEvent("unknown");
 	}
 }

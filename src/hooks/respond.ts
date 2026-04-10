@@ -3,15 +3,6 @@ import { readPendingFixes } from "../state/pending-fixes.ts";
 import { readSessionState } from "../state/session-state.ts";
 import { sanitizeForStderr } from "./sanitize.ts";
 
-/** Current hook event name, set by dispatcher before calling handler */
-let _currentEvent = "unknown";
-export function setCurrentEvent(event: string): void {
-	_currentEvent = event;
-}
-export function getCurrentEvent(): string {
-	return _currentEvent;
-}
-
 /** Generate a compact one-line state summary for instruction drift defense.
  *  Appended to every deny/block message so Claude always sees the full picture. */
 export function compactStateSummary(): string {

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetConfigCache } from "../config.ts";
 import {
 	deduplicateErrors,
+	runCoverageGate,
 	runGate,
 	runGateAsync,
 	shellEscape,
@@ -259,5 +260,47 @@ describe("runGate: extra_path config (Task 9)", () => {
 		const result = runGate("abs", { command: "abs-tool", timeout: 3000 });
 		expect(result.passed).toBe(true);
 		expect(result.output).toContain("abs-tool ok");
+	});
+});
+
+describe("runCoverageGate", () => {
+	it("skips when threshold is 0 (disabled)", () => {
+		const result = runCoverageGate(
+			"coverage",
+			{ command: "echo 'coverage: 50.0% of statements'" },
+			0,
+		);
+		expect(result.passed).toBe(true);
+		expect(result.output).toContain("skipped");
+	});
+
+	it("passes when coverage meets threshold", () => {
+		const result = runCoverageGate(
+			"coverage",
+			{ command: "echo 'coverage: 85.0% of statements'" },
+			80,
+		);
+		expect(result.passed).toBe(true);
+	});
+
+	it("fails when coverage is below threshold", () => {
+		const result = runCoverageGate(
+			"coverage",
+			{ command: "echo 'coverage: 75.0% of statements'" },
+			80,
+		);
+		expect(result.passed).toBe(false);
+		expect(result.output).toContain("75");
+		expect(result.output).toContain("80");
+	});
+
+	it("passes when coverage output cannot be parsed (fail-open)", () => {
+		const result = runCoverageGate("coverage", { command: "echo 'all tests passed'" }, 80);
+		expect(result.passed).toBe(true);
+	});
+
+	it("fails when underlying gate command fails", () => {
+		const result = runCoverageGate("coverage", { command: "exit 1" }, 80);
+		expect(result.passed).toBe(false);
 	});
 });

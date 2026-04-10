@@ -36,6 +36,8 @@ export interface QultConfig {
 		test_on_edit_timeout: number;
 		/** Additional PATH directories for gate command execution */
 		extra_path: string[];
+		/** Minimum test coverage percentage to pass. 0 = disabled (opt-in). */
+		coverage_threshold: number;
 	};
 	/** Security enforcement */
 	security: {
@@ -68,10 +70,10 @@ export const DEFAULTS: QultConfig = {
 		dimension_floor: 4,
 		require_human_approval: false,
 		models: {
-			spec: "sonnet",
+			spec: "opus",
 			quality: "opus",
 			security: "opus",
-			adversarial: "sonnet",
+			adversarial: "opus",
 		},
 	},
 	plan_eval: {
@@ -89,6 +91,7 @@ export const DEFAULTS: QultConfig = {
 		test_on_edit: false,
 		test_on_edit_timeout: 15000,
 		extra_path: [],
+		coverage_threshold: 0,
 	},
 	security: {
 		require_semgrep: true,
@@ -156,6 +159,8 @@ function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): voi
 			config.gates.extra_path = g.extra_path.filter(
 				(p: unknown) => typeof p === "string" && p.trim().length > 0,
 			);
+		if (typeof g.coverage_threshold === "number")
+			config.gates.coverage_threshold = Math.max(0, Math.min(100, g.coverage_threshold));
 	}
 	if (raw.security && typeof raw.security === "object") {
 		const s = raw.security as Record<string, unknown>;
@@ -288,6 +293,9 @@ export function loadConfig(): QultConfig {
 	else if (testOnEditEnv === "0" || testOnEditEnv === "false") config.gates.test_on_edit = false;
 	config.gates.test_on_edit_timeout =
 		envInt("QULT_TEST_ON_EDIT_TIMEOUT") ?? config.gates.test_on_edit_timeout;
+	const covThreshold = envInt("QULT_COVERAGE_THRESHOLD");
+	if (covThreshold !== undefined)
+		config.gates.coverage_threshold = Math.max(0, Math.min(100, covThreshold));
 	const secEsc = envInt("QULT_ESCALATION_SECURITY");
 	if (secEsc !== undefined) config.escalation.security_threshold = Math.max(1, secEsc);
 	const driftEsc = envInt("QULT_ESCALATION_DRIFT");

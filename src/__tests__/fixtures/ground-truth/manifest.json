@@ -1,0 +1,50 @@
+{
+  "security": [
+    {
+      "file": "security/sql-injection.ts",
+      "expected_detections": 2,
+      "expected_clean_lines": 2,
+      "description": "SQL injection via string concat and template literal"
+    },
+    {
+      "file": "security/xss.ts",
+      "expected_detections": 2,
+      "expected_clean_lines": 1,
+      "description": "XSS via innerHTML and document.write"
+    },
+    {
+      "file": "security/secrets.ts",
+      "expected_detections": 3,
+      "expected_clean_lines": 2,
+      "description": "Hardcoded AWS key, GitHub token, Stripe key"
+    },
+    {
+      "file": "security/safe.ts",
+      "expected_detections": 0,
+      "expected_clean_lines": 5,
+      "description": "Safe patterns: env vars, parameterized queries, textContent"
+    }
+  ],
+  "semantic": [
+    {
+      "file": "semantic/empty-catch.ts",
+      "expected_detections": 2,
+      "expected_clean_lines": 2,
+      "description": "Empty catch blocks (excluding intentional/fail-open)"
+    },
+    {
+      "file": "semantic/safe.ts",
+      "expected_detections": 0,
+      "expected_clean_lines": 4,
+      "description": "Safe patterns: handled catch, used map, equality check"
+    }
+  ],
+  "test-quality": [
+    {
+      "file": "test-quality/bad.test.ts",
+      "expected_blocking": 4,
+      "expected_advisory": 1,
+      "description": "empty-test, always-true, trivial-assertion, constant-self, weak-matcher"
+    }
+  ]
+}

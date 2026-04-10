@@ -34,5 +34,12 @@
   },
   "files": {
     "includes": ["src/**", "build.ts"]
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["src/__tests__/fixtures/**"],
+      "linter": { "enabled": false },
+      "formatter": { "enabled": false }
+    }
+  ]
 }

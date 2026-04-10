@@ -109,7 +109,8 @@ flowchart LR
 | Detects security patterns (25+ rules) | Secrets, injection, XSS, SSRF, weak crypto |
 | Detects semantic bugs (6+ patterns) | Empty catch, unreachable code, loose equality, switch fallthrough |
 | Detects code duplication | Intra-file blocking, cross-file advisory |
-| PBT-aware test quality checks | Skips false positives for property-based tests |
+| PBT-aware test quality checks | Relaxes weak-matcher warnings for PBT files; suggests PBT for validation/serialization |
+| Test coverage gate (opt-in) | Blocks commit when coverage falls below threshold |
 | SAST integration (Semgrep required) | Semgrep mandatory; blocks commit when not installed |
 | Iterative security escalation | Advisory patterns promoted to blocking after N edits to same file |
 | Test quality blocking | Empty tests, always-true, trivial assertions blocked as pending-fixes |
@@ -240,7 +241,8 @@ All config is stored in the DB, manageable via `/qult:config` or MCP tools. Envi
 | `escalation.*_threshold` | 8-10 | Warning count before blocking |
 | `escalation.security_iterative_threshold` | 5 | Same-file edit count before advisory→blocking |
 | `escalation.dead_import_blocking_threshold` | 5 | Dead import warnings before blocking |
-| `review.models.*` | spec=sonnet, quality/security=opus, adversarial=sonnet | Per-stage reviewer model |
+| `gates.coverage_threshold` | 0 | Min test coverage % (0 = disabled, opt-in) |
+| `review.models.*` | all opus | Per-stage reviewer model |
 | `flywheel.enabled` | true | Cross-session threshold recommendations |
 | `flywheel.min_sessions` | 10 | Min sessions for flywheel analysis |
 

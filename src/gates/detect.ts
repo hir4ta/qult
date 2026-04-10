@@ -576,22 +576,3 @@ export function detectGates(root: string): GatesConfig {
 }
 
 /** Returns true if gates config has any gates defined */
-export function hasAnyGates(gates: GatesConfig): boolean {
-	return (
-		Object.keys(gates.on_write ?? {}).length > 0 ||
-		Object.keys(gates.on_commit ?? {}).length > 0 ||
-		Object.keys(gates.on_review ?? {}).length > 0
-	);
-}
-
-/** Format detection summary for CLI output */
-export function formatDetectionSummary(gates: GatesConfig): string {
-	const onWrite = Object.keys(gates.on_write ?? {}).length;
-	const onCommit = Object.keys(gates.on_commit ?? {}).length;
-	const onReview = Object.keys(gates.on_review ?? {}).length;
-	const parts: string[] = [];
-	if (onWrite > 0) parts.push(`${onWrite} on_write`);
-	if (onCommit > 0) parts.push(`${onCommit} on_commit`);
-	if (onReview > 0) parts.push(`${onReview} on_review`);
-	return parts.length > 0 ? `Gates detected: ${parts.join(", ")}` : "No gates detected";
-}

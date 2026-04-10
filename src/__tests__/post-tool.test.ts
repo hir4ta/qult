@@ -883,6 +883,91 @@ describe("postTool: test-quality blocking", () => {
 	});
 });
 
+describe("postTool: coverage gate on commit", () => {
+	it("blocks commit when coverage is below threshold", async () => {
+		// Set coverage threshold to 80%
+		const { getDb, getProjectId } = await import("../state/db.ts");
+		const db = getDb();
+		const projectId = getProjectId();
+		db.prepare(
+			"INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)",
+		).run(projectId, "gates.coverage_threshold", JSON.stringify(80));
+
+		// Set up a coverage gate that reports 75%
+		saveGates({
+			on_commit: {
+				coverage: { command: "echo 'coverage: 75.0% of statements'", timeout: 5000 },
+			},
+		} as GatesConfig);
+		resetAllCaches();
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Bash",
+			tool_input: { command: "git commit -m 'test'" },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const { flushAll } = await import("../state/flush.ts");
+		flushAll();
+		resetAllCaches();
+		const fixes = readPendingFixes();
+		expect(fixes.some((f) => f.gate === "coverage")).toBe(true);
+		expect(fixes.some((f) => f.errors.some((e) => e.includes("75")))).toBe(true);
+	});
+
+	it("does not block when coverage meets threshold", async () => {
+		const { getDb, getProjectId } = await import("../state/db.ts");
+		const db = getDb();
+		const projectId = getProjectId();
+		db.prepare(
+			"INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)",
+		).run(projectId, "gates.coverage_threshold", JSON.stringify(80));
+
+		saveGates({
+			on_commit: {
+				coverage: { command: "echo 'coverage: 85.0% of statements'", timeout: 5000 },
+			},
+		} as GatesConfig);
+		resetAllCaches();
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Bash",
+			tool_input: { command: "git commit -m 'test'" },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const { flushAll } = await import("../state/flush.ts");
+		flushAll();
+		resetAllCaches();
+		const fixes = readPendingFixes();
+		expect(fixes.some((f) => f.gate === "coverage")).toBe(false);
+	});
+
+	it("skips coverage check when threshold is 0 (default)", async () => {
+		saveGates({
+			on_commit: {
+				coverage: { command: "echo 'coverage: 50.0% of statements'", timeout: 5000 },
+			},
+		} as GatesConfig);
+		resetAllCaches();
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Bash",
+			tool_input: { command: "git commit -m 'test'" },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const { flushAll } = await import("../state/flush.ts");
+		flushAll();
+		resetAllCaches();
+		const fixes = readPendingFixes();
+		expect(fixes.some((f) => f.gate === "coverage")).toBe(false);
+	});
+});
+
 describe("postTool: dead-import escalation blocking", () => {
 	it("promotes dead imports to blocking after threshold", async () => {
 		const file = join(TEST_DIR, "unused.ts");

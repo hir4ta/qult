@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, extname, resolve } from "node:path";
 import type { PendingFix } from "../../types.ts";
+import { resolveTestFile } from "./test-file-resolver.ts";
 
 const MAX_CHECK_SIZE = 500_000;
 
@@ -199,15 +200,17 @@ export function analyzeTestQuality(file: string): TestQualityResult | null {
 		const trimmed = line.trimStart();
 		if (trimmed.startsWith("//")) continue;
 
-		// Weak matchers
-		for (const { re, name } of WEAK_MATCHERS) {
-			if (re.test(line)) {
-				smells.push({
-					type: "weak-matcher",
-					line: i + 1,
-					message: `Weak matcher ${name} — consider asserting a specific value`,
-				});
-				break;
+		// Weak matchers (skip for PBT files — toBeTruthy/toBeDefined are legitimate for property results)
+		if (!isPbt) {
+			for (const { re, name } of WEAK_MATCHERS) {
+				if (re.test(line)) {
+					smells.push({
+						type: "weak-matcher",
+						line: i + 1,
+						message: `Weak matcher ${name} — consider asserting a specific value`,
+					});
+					break;
+				}
 			}
 		}
 
@@ -574,4 +577,37 @@ export function formatTestQualityWarnings(
 	}
 
 	return warnings;
+}
+
+// ── PBT suggestion ──────────────────────────────────────────
+
+/** Keywords in filenames that suggest validation/serialization logic.
+ *  "format" excluded — too common (date-format.ts, string-format.ts). */
+const PBT_CANDIDATE_RE = /(?:valid|parse|serial|codec|schema|encode|decode)/i;
+
+/** Suggest property-based testing for validation/serialization implementation files.
+ *  Returns a suggestion message if the file is a PBT candidate and its test doesn't use PBT,
+ *  or null if not applicable. */
+export function suggestPbt(implFile: string): string | null {
+	const name = basename(implFile);
+
+	// Only suggest for files with validation/serialization keywords
+	if (!PBT_CANDIDATE_RE.test(name)) return null;
+
+	// Find corresponding test file
+	const testFile = resolveTestFile(implFile);
+	if (!testFile || !existsSync(testFile)) return null;
+
+	// Check if test already uses PBT (with file size guard)
+	try {
+		const stats = require("node:fs").statSync(testFile);
+		if (stats.size > MAX_CHECK_SIZE) return null;
+		const content = readFileSync(testFile, "utf-8");
+		if (PBT_RE.test(content)) return null;
+	} catch {
+		return null;
+	}
+
+	const relative = implFile.split("/").slice(-3).join("/");
+	return `${relative}: Consider property-based testing (fast-check/hypothesis) for validation/serialization logic`;
 }

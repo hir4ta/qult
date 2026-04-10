@@ -2762,3 +2762,57 @@ describe("Scenario: Test quality blocking", () => {
 		expect(fixes.some((f) => f.gate === "test-quality-check")).toBe(true);
 	});
 });
+
+// ============================================================
+// Coverage gate — blocks commit when coverage below threshold
+// ============================================================
+
+describe("Scenario: Coverage gate", () => {
+	it("blocks commit when coverage is below threshold", async () => {
+		// Set coverage gate + threshold
+		const gates: GatesConfig = {
+			on_commit: {
+				coverage: { command: "echo 'coverage: 75.0% of statements'", timeout: 5000 },
+			},
+		};
+		saveGates(gates);
+		resetGatesCache();
+		setProjectConfig({ "gates.coverage_threshold": 80 });
+		resetAllCaches();
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Bash",
+			tool_input: { command: "git commit -m 'test'" },
+		});
+
+		flushAll();
+		resetAllCaches();
+		const fixes = readPendingFixes();
+		expect(fixes.some((f) => f.gate === "coverage")).toBe(true);
+		expect(fixes.some((f) => f.errors.some((e) => e.includes("75")))).toBe(true);
+	});
+
+	it("passes commit when coverage meets threshold", async () => {
+		const gates: GatesConfig = {
+			on_commit: {
+				coverage: { command: "echo 'coverage: 85.0% of statements'", timeout: 5000 },
+			},
+		};
+		saveGates(gates);
+		resetGatesCache();
+		setProjectConfig({ "gates.coverage_threshold": 80 });
+		resetAllCaches();
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Bash",
+			tool_input: { command: "git commit -m 'test'" },
+		});
+
+		flushAll();
+		resetAllCaches();
+		const fixes = readPendingFixes();
+		expect(fixes.some((f) => f.gate === "coverage")).toBe(false);
+	});
+});

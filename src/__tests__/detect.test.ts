@@ -1,12 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-	detectGates,
-	detectPackageManager,
-	formatDetectionSummary,
-	hasAnyGates,
-} from "../gates/detect.ts";
+import { detectGates, detectPackageManager } from "../gates/detect.ts";
 import { detectExportBreakingChanges } from "../hooks/detectors/export-check.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-detect-test");
@@ -43,7 +38,8 @@ describe("detectPackageManager", () => {
 describe("detectGates", () => {
 	it("returns empty config for empty project", () => {
 		const gates = detectGates(TEST_DIR);
-		expect(hasAnyGates(gates)).toBe(false);
+		expect(Object.keys(gates.on_write ?? {}).length).toBe(0);
+		expect(Object.keys(gates.on_commit ?? {}).length).toBe(0);
 	});
 
 	it("detects biome from biome.json", () => {
@@ -261,19 +257,5 @@ describe("coverage gate detection", () => {
 		writeFileSync(join(TEST_DIR, "package-lock.json"), "{}");
 		const gates = detectGates(TEST_DIR);
 		expect(gates.on_commit?.coverage).toBeUndefined();
-	});
-});
-
-describe("formatDetectionSummary", () => {
-	it("formats counts correctly", () => {
-		const gates = {
-			on_write: { lint: { command: "biome check {file}" } },
-			on_commit: { test: { command: "vitest run" } },
-		};
-		expect(formatDetectionSummary(gates)).toBe("Gates detected: 1 on_write, 1 on_commit");
-	});
-
-	it("reports no gates", () => {
-		expect(formatDetectionSummary({})).toBe("No gates detected");
 	});
 });

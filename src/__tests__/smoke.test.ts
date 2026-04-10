@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 describe("smoke test", () => {
 	it("types module exports expected interfaces", async () => {
 		const types = await import("../types.ts");
-		// Verify the module loads without error and has expected shape
 		expect(types).toBeDefined();
 		expect(typeof types).toBe("object");
 	});

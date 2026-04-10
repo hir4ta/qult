@@ -1,6 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { suggestPbt } from "../hooks/detectors/test-quality-check.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-test-quality-test");
 const originalCwd = process.cwd();
@@ -754,5 +755,105 @@ describe("getBlockingTestSmells", () => {
 		expect(result).not.toBeNull();
 		const fixes = getBlockingTestSmells(file, result!);
 		expect(fixes).toHaveLength(0);
+	});
+});
+
+describe("PBT weak-matcher relaxation", () => {
+	it("does NOT report weak-matcher smells for PBT files", async () => {
+		const file = join(TEST_DIR, "pbt.test.ts");
+		writeFileSync(
+			file,
+			`import fc from "fast-check";\nimport { it, expect } from "vitest";\nit("prop", () => { fc.assert(fc.property(fc.integer(), (n) => { expect(n > 0).toBeTruthy(); })); });\n`,
+		);
+		const { analyzeTestQuality } = await import("../hooks/detectors/test-quality-check.ts");
+		const result = analyzeTestQuality(file);
+		expect(result).not.toBeNull();
+		expect(result!.isPbt).toBe(true);
+		const weakSmells = result!.smells.filter((s) => s.type === "weak-matcher");
+		expect(weakSmells).toHaveLength(0);
+	});
+
+	it("still reports weak-matcher smells for non-PBT files", async () => {
+		const file = join(TEST_DIR, "regular.test.ts");
+		writeFileSync(
+			file,
+			`import { it, expect } from "vitest";\nit("weak", () => { expect(foo).toBeTruthy(); });\n`,
+		);
+		const { analyzeTestQuality } = await import("../hooks/detectors/test-quality-check.ts");
+		const result = analyzeTestQuality(file);
+		expect(result).not.toBeNull();
+		expect(result!.isPbt).toBe(false);
+		const weakSmells = result!.smells.filter((s) => s.type === "weak-matcher");
+		expect(weakSmells.length).toBeGreaterThan(0);
+	});
+
+	it("still reports blocking smells (empty-test) even for PBT files", async () => {
+		const file = join(TEST_DIR, "pbt-empty.test.ts");
+		writeFileSync(
+			file,
+			`import fc from "fast-check";\nimport { it, expect } from "vitest";\nit("empty", () => {});\n`,
+		);
+		const { analyzeTestQuality } = await import("../hooks/detectors/test-quality-check.ts");
+		const result = analyzeTestQuality(file);
+		expect(result).not.toBeNull();
+		expect(result!.smells.some((s) => s.type === "empty-test")).toBe(true);
+	});
+});
+
+describe("PBT suggestion advisory", () => {
+	// Note: suggestPbt uses resolveTestFile which skips paths containing /__tests__/
+	// So we use /tmp for these tests to avoid false isTestFile detection
+	const PBT_DIR = "/tmp/.tmp-pbt-suggest-test";
+
+	beforeEach(() => {
+		mkdirSync(PBT_DIR, { recursive: true });
+	});
+
+	afterEach(() => {
+		rmSync(PBT_DIR, { recursive: true, force: true });
+	});
+
+	it("returns PBT suggestion for validator files without PBT", () => {
+		const implFile = join(PBT_DIR, "validator.ts");
+		const testFile = join(PBT_DIR, "validator.test.ts");
+		writeFileSync(implFile, `export function validateInput(s: string) { return s.length > 0; }\n`);
+		writeFileSync(
+			testFile,
+			`import { it, expect } from "vitest";\nit("validates", () => { expect(validateInput("a")).toBe(true); });\n`,
+		);
+		const suggestion = suggestPbt(implFile);
+		expect(suggestion).not.toBeNull();
+		expect(suggestion).toContain("property-based");
+	});
+
+	it("returns null for non-validator files", () => {
+		const implFile = join(PBT_DIR, "utils.ts");
+		writeFileSync(implFile, `export function add(a: number, b: number) { return a + b; }\n`);
+		const suggestion = suggestPbt(implFile);
+		expect(suggestion).toBeNull();
+	});
+
+	it("returns null for 'format' files (too common, removed from PBT candidates)", () => {
+		const implFile = join(PBT_DIR, "date-format.ts");
+		const testFile = join(PBT_DIR, "date-format.test.ts");
+		writeFileSync(implFile, `export function formatDate(d: Date) { return d.toISOString(); }\n`);
+		writeFileSync(
+			testFile,
+			`import { it, expect } from "vitest";\nit("formats", () => { expect(1).toBe(1); });\n`,
+		);
+		const suggestion = suggestPbt(implFile);
+		expect(suggestion).toBeNull();
+	});
+
+	it("returns null when test file already uses PBT", () => {
+		const implFile = join(PBT_DIR, "parser.ts");
+		const testFile = join(PBT_DIR, "parser.test.ts");
+		writeFileSync(implFile, `export function parseConfig(s: string) { return JSON.parse(s); }\n`);
+		writeFileSync(
+			testFile,
+			`import fc from "fast-check";\nimport { it, expect } from "vitest";\nit("prop", () => { fc.assert(fc.property(fc.string(), (s) => { try { parseConfig(s); } catch {} })); });\n`,
+		);
+		const suggestion = suggestPbt(implFile);
+		expect(suggestion).toBeNull();
 	});
 });

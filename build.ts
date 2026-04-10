@@ -45,4 +45,3 @@ if (!mcpResult.success) {
 
 const total = hookResult.outputs.length + mcpResult.outputs.length;
 console.log(`Built ${total} file(s) to plugin/dist/`);
-

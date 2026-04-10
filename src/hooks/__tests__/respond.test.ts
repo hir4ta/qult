@@ -45,16 +45,6 @@ afterEach(() => {
 	closeDb();
 });
 
-describe("setCurrentEvent / getCurrentEvent", () => {
-	it("stores and retrieves the current hook event name", async () => {
-		const { setCurrentEvent, getCurrentEvent } = await import("../respond.ts");
-		expect(getCurrentEvent()).toBe("unknown");
-		setCurrentEvent("pre-tool");
-		expect(getCurrentEvent()).toBe("pre-tool");
-		setCurrentEvent("unknown");
-	});
-});
-
 describe("deny()", () => {
 	it("exits with code 2 and writes reason to stderr only", async () => {
 		const { deny } = await import("../respond.ts");
