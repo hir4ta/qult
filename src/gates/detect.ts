@@ -137,7 +137,7 @@ const PROBE_RULES: ProbeRule[] = [
 		structured_command: "pyright --outputjson",
 	},
 	{
-		configs: ["mypy.ini"],
+		configs: ["mypy.ini", ".mypy.ini", "setup.cfg"],
 		name: "typecheck",
 		category: "on_write",
 		command: "mypy .",

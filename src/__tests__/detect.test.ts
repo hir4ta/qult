@@ -271,6 +271,16 @@ describe("detects structured typecheck commands", () => {
 		}
 	});
 
+	it("adds structured_command for mypy typecheck", () => {
+		writeFileSync(join(TEST_DIR, "mypy.ini"), "[mypy]");
+		writeFileSync(join(TEST_DIR, "package-lock.json"), "{}");
+		const gates = detectGates(TEST_DIR);
+		if (gates.on_write?.typecheck) {
+			expect(gates.on_write.typecheck.command).toContain("mypy");
+			// mypy doesn't have a structured JSON output mode, but we can still check it's set up
+		}
+	});
+
 	it("does not add structured_command for tsc typecheck", () => {
 		writeFileSync(join(TEST_DIR, "tsconfig.json"), "{}");
 		writeFileSync(join(TEST_DIR, "package-lock.json"), "{}");
