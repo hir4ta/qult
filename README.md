@@ -106,6 +106,8 @@ flowchart LR
 | Configurable reviewer models per stage | Override model via config for review diversity |
 | Detects hallucinated imports | Checks imports against installed packages |
 | Detects export breaking changes | Compares with git HEAD |
+| AST dataflow taint analysis (7 languages) | Tree-sitter WASM: tracks user input → dangerous sinks (eval, exec, SQL) across 3 hops |
+| Cyclomatic/cognitive complexity metrics (7 languages) | AST-based per-function complexity; warns when thresholds exceeded |
 | Detects security patterns (25+ rules) | Secrets, injection, XSS, SSRF, weak crypto |
 | Dependency vulnerability scanning | osv-scanner (all ecosystems: npm, pip, cargo, go, gem, composer, etc.) |
 | Hallucinated package detection | Blocks install of packages that don't exist in registry (AI-specific) |
@@ -119,7 +121,9 @@ flowchart LR
 | Iterative security escalation | Advisory patterns promoted to blocking after N edits to same file |
 | Test quality blocking | Empty tests, always-true, trivial assertions blocked as pending-fixes |
 | Dead import escalation | Advisory dead imports promoted to blocking after warning threshold |
+| Mutation testing integration | Stryker/mutmut gate detection + score parsing + PBT recommendation |
 | Cross-session learning (Flywheel) | Threshold adjustment recommendations based on patterns |
+| Flywheel auto-apply | Auto-raises thresholds when metrics are stable; cross-project knowledge transfer |
 | Preserves state across context compaction | Re-injects session state after compaction |
 
 ## Installation
@@ -274,8 +278,12 @@ All config is stored in the DB, manageable via `/qult:config` or MCP tools. Envi
 | `escalation.dead_import_blocking_threshold` | 5 | Dead import warnings before blocking |
 | `gates.coverage_threshold` | 0 | Min test coverage % (0 = disabled, opt-in) |
 | `review.models.*` | all opus | Per-stage reviewer model |
+| `gates.complexity_threshold` | 15 | Cyclomatic complexity warning threshold |
+| `gates.function_size_limit` | 50 | Function line count warning threshold |
+| `gates.mutation_score_threshold` | 0 | Min mutation score % (0 = disabled, opt-in) |
 | `flywheel.enabled` | true | Cross-session threshold recommendations |
 | `flywheel.min_sessions` | 10 | Min sessions for flywheel analysis |
+| `flywheel.auto_apply` | false | Auto-apply raise-direction recommendations |
 
 Env overrides: `QULT_REVIEW_SCORE_THRESHOLD`, `QULT_REVIEW_MODEL_SPEC`, `QULT_FLYWHEEL_ENABLED`, etc.
 
@@ -311,4 +319,4 @@ Run `/qult:register-hooks` to register hooks in `.claude/settings.local.json` as
 
 ## Stack
 
-TypeScript / Bun 1.3+ / bun:sqlite / vitest / Biome / zero npm dependencies
+TypeScript / Bun 1.3+ / bun:sqlite / vitest / Biome / web-tree-sitter (WASM) / mutation-testing-metrics

@@ -106,6 +106,8 @@ flowchart LR
 | レビュアーモデルのステージ別設定 | config でモデル多様性を確保 |
 | ハルシネーション import 検出 | インストール済みパッケージと照合 |
 | export 破壊的変更検出 | git HEAD と比較 |
+| AST データフロー汚染追跡 (7 言語対応) | Tree-sitter WASM: ユーザー入力 → 危険シンク (eval, exec, SQL) を 3 ホップ追跡 |
+| 循環的/認知的複雑度メトリクス (7 言語対応) | AST ベースの関数単位複雑度計算。閾値超過で警告 |
 | セキュリティパターン検出 (25+ ルール) | シークレット、インジェクション、XSS、弱い暗号 |
 | 依存パッケージ脆弱性スキャン | osv-scanner による全エコシステム対応 (npm, pip, cargo, go, gem, composer 等) |
 | 幻覚パッケージ検出 | レジストリに存在しないパッケージのインストールをブロック（AI 特有） |
@@ -119,7 +121,9 @@ flowchart LR
 | 反復セキュリティ昇格 | 同一ファイル N 回編集で advisory パターンを blocking に昇格 |
 | テスト品質 blocking | 空テスト・always-true・trivial assertion をブロック |
 | dead import エスカレーション | 警告閾値超過で blocking に昇格 |
+| ミューテーションテスト統合 | Stryker/mutmut ゲート検出 + スコア解析 + PBT 推奨 |
 | セッション横断学習 (Flywheel) | パターン分析に基づく閾値調整推奨 |
+| フライホイール自動適用 | 安定指標の閾値を自動引き上げ + プロジェクト間知識転移 |
 | コンテキスト圧縮後の状態保全 | 圧縮後にセッション状態を再注入 |
 
 ## インストール
@@ -274,8 +278,12 @@ rm -rf ~/.qult
 | `escalation.dead_import_blocking_threshold` | 5 | dead import 警告数で blocking 化 |
 | `gates.coverage_threshold` | 0 | テストカバレッジ最低 % (0 = 無効、opt-in) |
 | `review.models.*` | 全 opus | ステージ別レビュアーモデル |
+| `gates.complexity_threshold` | 15 | 循環的複雑度の警告閾値 |
+| `gates.function_size_limit` | 50 | 関数行数の警告閾値 |
+| `gates.mutation_score_threshold` | 0 | ミューテーションスコア最低 % (0 = 無効、opt-in) |
 | `flywheel.enabled` | true | セッション横断の閾値推奨 |
 | `flywheel.min_sessions` | 10 | Flywheel 分析に必要な最低セッション数 |
+| `flywheel.auto_apply` | false | raise 方向の推奨を自動適用 |
 
 環境変数: `QULT_REVIEW_SCORE_THRESHOLD`, `QULT_REVIEW_MODEL_SPEC`, `QULT_FLYWHEEL_ENABLED` 等。
 
@@ -299,4 +307,4 @@ Claude Code の既知のバグ ([#21988](https://github.com/anthropics/claude-co
 
 ## スタック
 
-TypeScript / Bun 1.3+ / bun:sqlite / vitest / Biome / npm 依存ゼロ
+TypeScript / Bun 1.3+ / bun:sqlite / vitest / Biome / web-tree-sitter (WASM) / mutation-testing-metrics
