@@ -2,9 +2,9 @@
 var __require = import.meta.require;
 
 // src/mcp-server.ts
-import { existsSync as existsSync10 } from "fs";
+import { existsSync as existsSync12 } from "fs";
 import { homedir as homedir3 } from "os";
-import { join as join5, resolve as resolve4 } from "path";
+import { join as join6, resolve as resolve5 } from "path";
 import { createInterface } from "readline";
 
 // src/state/db.ts
@@ -341,7 +341,9 @@ var DEFAULTS = {
     test_on_edit: false,
     test_on_edit_timeout: 15000,
     extra_path: [],
-    coverage_threshold: 0
+    coverage_threshold: 0,
+    consumer_typecheck: false,
+    import_graph_depth: 1
   },
   security: {
     require_semgrep: true
@@ -415,6 +417,10 @@ function applyConfigLayer(config, raw) {
       config.gates.extra_path = g.extra_path.filter((p) => typeof p === "string" && p.trim().length > 0);
     if (typeof g.coverage_threshold === "number")
       config.gates.coverage_threshold = Math.max(0, Math.min(100, g.coverage_threshold));
+    if (typeof g.consumer_typecheck === "boolean")
+      config.gates.consumer_typecheck = g.consumer_typecheck;
+    if (typeof g.import_graph_depth === "number")
+      config.gates.import_graph_depth = Math.max(1, Math.min(3, g.import_graph_depth));
   }
   if (raw.security && typeof raw.security === "object") {
     const s = raw.security;
@@ -524,6 +530,14 @@ function loadConfig() {
   const covThreshold = envInt("QULT_COVERAGE_THRESHOLD");
   if (covThreshold !== undefined)
     config.gates.coverage_threshold = Math.max(0, Math.min(100, covThreshold));
+  const consumerTcEnv = process.env.QULT_CONSUMER_TYPECHECK;
+  if (consumerTcEnv === "1" || consumerTcEnv === "true")
+    config.gates.consumer_typecheck = true;
+  else if (consumerTcEnv === "0" || consumerTcEnv === "false")
+    config.gates.consumer_typecheck = false;
+  const igDepth = envInt("QULT_IMPORT_GRAPH_DEPTH");
+  if (igDepth !== undefined)
+    config.gates.import_graph_depth = Math.max(1, Math.min(3, igDepth));
   const secEsc = envInt("QULT_ESCALATION_SECURITY");
   if (secEsc !== undefined)
     config.escalation.security_threshold = Math.max(1, secEsc);
@@ -1424,6 +1438,7 @@ import { existsSync as existsSync4, readFileSync as readFileSync4 } from "fs";
 import { extname as extname4 } from "path";
 var TS_JS_EXTS2 = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
 var EXPORT_RE = /\bexport\s+(?:default\s+)?(?:function|class|const|let|var|type|interface|enum)\s+(\w+)/g;
+var FUNC_SIG_RE = /\bexport\s+(?:default\s+)?function\s+(\w+)\s*\(([^)]*)\)/g;
 function detectExportBreakingChanges(file) {
   if (isGateDisabled("export-check"))
     return [];
@@ -1457,15 +1472,47 @@ function detectExportBreakingChanges(file) {
     newExports.add(match[1]);
   }
   const removed = [...oldExports].filter((name) => !newExports.has(name));
-  if (removed.length === 0)
-    return [];
-  return [
-    {
-      file,
-      errors: removed.map((name) => `Breaking change: export "${sanitizeForStderr(name)}" was removed`),
-      gate: "export-check"
+  const oldSigs = new Map;
+  for (const match of oldContent.matchAll(FUNC_SIG_RE)) {
+    const params = match[2].trim();
+    oldSigs.set(match[1], params ? params.split(",").length : 0);
+  }
+  const signatureChanges = [];
+  for (const match of newContent.matchAll(FUNC_SIG_RE)) {
+    const name = match[1];
+    const newParamCount = match[2].trim() ? match[2].trim().split(",").length : 0;
+    const oldParamCount = oldSigs.get(name);
+    if (oldParamCount !== undefined && oldParamCount !== newParamCount) {
+      signatureChanges.push(`Signature change: "${sanitizeForStderr(name)}" params ${oldParamCount}\u2192${newParamCount}. Consumers may break.`);
     }
+  }
+  const typeChanges = detectTypeFieldChanges(oldContent, newContent);
+  const errors = [
+    ...removed.map((name) => `Breaking change: export "${sanitizeForStderr(name)}" was removed`),
+    ...signatureChanges,
+    ...typeChanges
   ];
+  if (errors.length === 0)
+    return [];
+  return [{ file, errors, gate: "export-check" }];
+}
+function detectTypeFieldChanges(oldContent, newContent) {
+  const TYPE_DEF_RE = /\bexport\s+(?:type|interface)\s+(\w+)\s*(?:=\s*)?{([^}]*)}/g;
+  const countFields = (body) => body.split(/[;\n]/).map((s) => s.trim()).filter((s) => s && !s.startsWith("//")).length;
+  const oldTypes = new Map;
+  for (const m of oldContent.matchAll(TYPE_DEF_RE)) {
+    oldTypes.set(m[1], countFields(m[2]));
+  }
+  const changes = [];
+  for (const m of newContent.matchAll(TYPE_DEF_RE)) {
+    const name = m[1];
+    const newFields = countFields(m[2]);
+    const oldFields = oldTypes.get(name);
+    if (oldFields !== undefined && oldFields !== newFields) {
+      changes.push(`Type change: "${sanitizeForStderr(name)}" fields ${oldFields}\u2192${newFields}. Consumers may need updates.`);
+    }
+  }
+  return changes;
 }
 
 // src/hooks/detectors/import-check.ts
@@ -2852,6 +2899,36 @@ function analyzeTestQuality(file) {
       });
     }
   }
+  if (testCount >= 2) {
+    const testBodyRe = /\b(?:it|test)\s*\(\s*["'`]([^"'`]*)["'`]/g;
+    const assertRe = /\b(?:expect|assert|should)\s*[.(]/g;
+    const testBodies = [];
+    for (const match of codeOnly.matchAll(testBodyRe)) {
+      if (testBodies.length > 0) {
+        const prev = testBodies[testBodies.length - 1];
+        const body = codeOnly.slice(prev.start, match.index);
+        prev.assertions = (body.match(assertRe) ?? []).length;
+      }
+      testBodies.push({ name: match[1], start: match.index, assertions: 0 });
+    }
+    if (testBodies.length > 0) {
+      const last = testBodies[testBodies.length - 1];
+      const body = codeOnly.slice(last.start);
+      last.assertions = (body.match(assertRe) ?? []).length;
+    }
+    for (const tb of testBodies) {
+      if (tb.assertions === 0) {
+        continue;
+      }
+      if (tb.assertions === 1 && testCount >= 3) {
+        smells.push({
+          type: "thin-test",
+          line: 0,
+          message: `Test "${tb.name}" has only 1 assertion \u2014 consider adding edge case/boundary assertions`
+        });
+      }
+    }
+  }
   if (testCount >= 5 && assertionCount >= 5) {
     const matcherNameRe = /\.(toBe|toEqual|toStrictEqual|toThrow|toMatch|toContain)\s*\(/g;
     const matcherCounts = new Map;
@@ -2967,6 +3044,332 @@ function computeFileHealthScore(file) {
   const totalPenalty = Object.values(breakdown).reduce((sum, v) => sum + v, 0);
   const score = Math.max(0, Math.round((10 + totalPenalty) * 10) / 10);
   return { score, breakdown };
+}
+
+// src/hooks/detectors/import-graph.ts
+import { existsSync as existsSync10, lstatSync, readdirSync as readdirSync4, readFileSync as readFileSync9, statSync as statSync3 } from "fs";
+import { dirname as dirname5, extname as extname9, join as join5, resolve as resolve4 } from "path";
+var SCAN_EXTS = new Set([
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mts",
+  ".cts",
+  ".mjs",
+  ".cjs",
+  ".py",
+  ".go",
+  ".rs"
+]);
+var SKIP_DIRS = new Set([
+  "node_modules",
+  "dist",
+  "build",
+  ".next",
+  ".nuxt",
+  "coverage",
+  ".git",
+  ".qult",
+  "__pycache__",
+  ".venv",
+  "venv",
+  "target",
+  "vendor"
+]);
+var MAX_FILE_SIZE = 256 * 1024;
+var MAX_FILES = 2000;
+var MAX_DEPTH = 50;
+function stripComments(content) {
+  return content.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+}
+function extractRelativeImports(content, filePath) {
+  const stripped = stripComments(content);
+  const specifiers = [];
+  const ext = filePath ? extname9(filePath).toLowerCase() : "";
+  if (ext === ".py") {
+    const pyRel = /from\s+(\.[\w.]*)\s+import/g;
+    for (const match of stripped.matchAll(pyRel)) {
+      specifiers.push(match[1]);
+    }
+    return specifiers;
+  }
+  if (ext === ".go") {
+    const goSingle = /import\s+"([^"]+)"/g;
+    for (const match of stripped.matchAll(goSingle)) {
+      specifiers.push(match[1]);
+    }
+    const goBlock = /import\s*\(([\s\S]*?)\)/g;
+    for (const block of stripped.matchAll(goBlock)) {
+      const lines = block[1];
+      const lineRe = /\s*(?:\w+\s+)?"([^"]+)"/g;
+      for (const m of lines.matchAll(lineRe)) {
+        specifiers.push(m[1]);
+      }
+    }
+    return specifiers;
+  }
+  if (ext === ".rs") {
+    const modDecl = /\bmod\s+(\w+)\s*;/g;
+    for (const match of stripped.matchAll(modDecl)) {
+      specifiers.push(`mod:${match[1]}`);
+    }
+    const useCrate = /\buse\s+crate::(\w+)/g;
+    for (const match of stripped.matchAll(useCrate)) {
+      specifiers.push(`crate:${match[1]}`);
+    }
+    return specifiers;
+  }
+  const esm = /(?:import|export)\s+(?:[\s\S]*?\s+from\s+)?['"](\.[^'"]+)['"]/g;
+  const cjs = /require\(\s*['"](\.[^'"]+)['"]\s*\)/g;
+  const dynamic = /import\(\s*['"](\.[^'"]+)['"]\s*\)/g;
+  for (const match of stripped.matchAll(esm)) {
+    specifiers.push(match[1]);
+  }
+  for (const match of stripped.matchAll(cjs)) {
+    specifiers.push(match[1]);
+  }
+  for (const match of stripped.matchAll(dynamic)) {
+    specifiers.push(match[1]);
+  }
+  return specifiers;
+}
+function resolvePythonImport(specifier, fromFile) {
+  const dir = dirname5(fromFile);
+  const dotMatch = specifier.match(/^(\.+)(.*)/);
+  if (!dotMatch)
+    return null;
+  const dots = dotMatch[1].length;
+  const modulePart = dotMatch[2];
+  let base = dir;
+  for (let i = 1;i < dots; i++) {
+    base = dirname5(base);
+  }
+  if (!modulePart) {
+    return null;
+  }
+  const parts = modulePart.split(".");
+  const candidate = join5(base, ...parts);
+  if (existsSync10(`${candidate}.py`))
+    return `${candidate}.py`;
+  if (existsSync10(join5(candidate, "__init__.py")))
+    return join5(candidate, "__init__.py");
+  return null;
+}
+function resolveRustImport(specifier, fromFile, scanRoot) {
+  const dir = dirname5(fromFile);
+  if (specifier.startsWith("mod:")) {
+    const name = specifier.slice(4);
+    const asFile = join5(dir, `${name}.rs`);
+    if (existsSync10(asFile))
+      return asFile;
+    const asDir = join5(dir, name, "mod.rs");
+    if (existsSync10(asDir))
+      return asDir;
+  } else if (specifier.startsWith("crate:")) {
+    const name = specifier.slice(6);
+    const srcDir = join5(scanRoot, "src");
+    const asFile = join5(srcDir, `${name}.rs`);
+    if (existsSync10(asFile))
+      return asFile;
+    const asDir = join5(srcDir, name, "mod.rs");
+    if (existsSync10(asDir))
+      return asDir;
+  }
+  return null;
+}
+var _goModuleCache;
+function getGoModulePath(scanRoot) {
+  if (_goModuleCache !== undefined)
+    return _goModuleCache;
+  try {
+    const goMod = readFileSync9(join5(scanRoot, "go.mod"), "utf-8");
+    const match = goMod.match(/^module\s+(\S+)/m);
+    _goModuleCache = match ? match[1] : null;
+  } catch {
+    _goModuleCache = null;
+  }
+  return _goModuleCache;
+}
+function resolveGoImport(specifier, scanRoot) {
+  const modulePath = getGoModulePath(scanRoot);
+  if (!modulePath || !specifier.startsWith(modulePath))
+    return null;
+  const relPath = specifier.slice(modulePath.length + 1);
+  const dir = join5(scanRoot, relPath);
+  if (existsSync10(dir) && statSync3(dir).isDirectory())
+    return dir;
+  return null;
+}
+function resolveImportPath(specifier, fromFile, scanRoot) {
+  const fileExt = extname9(fromFile).toLowerCase();
+  if (fileExt === ".py") {
+    return resolvePythonImport(specifier, fromFile);
+  }
+  if (fileExt === ".rs" && scanRoot) {
+    return resolveRustImport(specifier, fromFile, scanRoot);
+  }
+  if (fileExt === ".go" && scanRoot) {
+    return resolveGoImport(specifier, scanRoot);
+  }
+  const dir = dirname5(fromFile);
+  const raw = resolve4(dir, specifier);
+  if (existsSync10(raw) && statSync3(raw).isFile())
+    return raw;
+  for (const ext of [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]) {
+    const withExt = `${raw}${ext}`;
+    if (existsSync10(withExt))
+      return withExt;
+  }
+  for (const ext of [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]) {
+    const index = join5(raw, `index${ext}`);
+    if (existsSync10(index))
+      return index;
+  }
+  return null;
+}
+function collectFiles(dir) {
+  const files = [];
+  let capped = false;
+  function walk(current, depth) {
+    if (files.length >= MAX_FILES || depth > MAX_DEPTH)
+      return;
+    let entries;
+    try {
+      entries = readdirSync4(current);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (files.length >= MAX_FILES) {
+        capped = true;
+        return;
+      }
+      if (SKIP_DIRS.has(entry))
+        continue;
+      const full = join5(current, entry);
+      try {
+        const stat = lstatSync(full);
+        if (stat.isSymbolicLink())
+          continue;
+        if (stat.isDirectory()) {
+          walk(full, depth + 1);
+        } else if (stat.isFile() && SCAN_EXTS.has(extname9(full))) {
+          if (stat.size <= MAX_FILE_SIZE) {
+            files.push(full);
+          }
+        }
+      } catch {}
+    }
+  }
+  walk(dir, 0);
+  if (capped) {
+    process.stderr.write(`[qult] import-graph: file scan capped at ${MAX_FILES} files, results may be incomplete
+`);
+  }
+  return files;
+}
+function findImporters(targetFile, scanRoot, depth = 1) {
+  if (!existsSync10(scanRoot))
+    return [];
+  const clampedDepth = Math.min(Math.max(depth, 1), 3);
+  const files = collectFiles(scanRoot);
+  const visited = new Set;
+  const allImporters = [];
+  function findDirectImporters(targetAbs) {
+    const direct = [];
+    const targetDir = dirname5(targetAbs);
+    const targetExt = extname9(targetAbs).toLowerCase();
+    for (const file of files) {
+      const fileAbs = resolve4(file);
+      if (fileAbs === targetAbs)
+        continue;
+      if (targetExt === ".go" && extname9(file).toLowerCase() === ".go" && dirname5(fileAbs) === targetDir) {
+        direct.push(file);
+        continue;
+      }
+      try {
+        const content = readFileSync9(file, "utf-8");
+        const specifiers = extractRelativeImports(content, file);
+        for (const spec of specifiers) {
+          const resolved = resolveImportPath(spec, file, scanRoot);
+          if (!resolved)
+            continue;
+          if (extname9(file).toLowerCase() === ".go") {
+            if (resolve4(resolved) === targetDir) {
+              direct.push(file);
+              break;
+            }
+          } else if (resolve4(resolved) === targetAbs) {
+            direct.push(file);
+            break;
+          }
+        }
+      } catch {}
+    }
+    if (targetExt === ".py") {
+      const targetName = targetAbs.replace(/\.py$/, "").split("/").pop();
+      for (const file of files) {
+        const fileAbs = resolve4(file);
+        if (fileAbs === targetAbs || direct.includes(file))
+          continue;
+        if (extname9(file).toLowerCase() !== ".py")
+          continue;
+        try {
+          const content = readFileSync9(file, "utf-8");
+          const bareImport = new RegExp(`from\\s+\\.\\s+import\\s+(?:.*\\b${targetName}\\b)`, "m");
+          if (bareImport.test(content) && dirname5(fileAbs) === targetDir) {
+            direct.push(file);
+          }
+        } catch {}
+      }
+    }
+    return direct;
+  }
+  let currentTargets = [resolve4(targetFile)];
+  for (let d = 0;d < clampedDepth; d++) {
+    const nextTargets = [];
+    for (const target of currentTargets) {
+      if (visited.has(target))
+        continue;
+      visited.add(target);
+      const direct = findDirectImporters(target);
+      for (const imp of direct) {
+        const impAbs = resolve4(imp);
+        if (!visited.has(impAbs) && impAbs !== resolve4(targetFile)) {
+          allImporters.push(imp);
+          nextTargets.push(impAbs);
+        }
+      }
+    }
+    currentTargets = nextTargets;
+    if (!currentTargets.length)
+      break;
+  }
+  return [...new Set(allImporters)];
+}
+
+// src/hooks/detectors/spec-trace-check.ts
+import { existsSync as existsSync11, readFileSync as readFileSync10 } from "fs";
+import { basename as basename6, dirname as dirname6, relative } from "path";
+function validateTestCoversImpl(testFile, _testFunction, implFile, _projectRoot) {
+  if (!existsSync11(testFile))
+    return false;
+  try {
+    const content = readFileSync10(testFile, "utf-8");
+    const implBasename = basename6(implFile).replace(/\.[^.]+$/, "");
+    const implRelative = relative(dirname6(testFile), implFile).replace(/\\/g, "/").replace(/\.[^.]+$/, "");
+    const importPatterns = [
+      new RegExp(`(?:import|require).*['"].*${escapeRegex2(implRelative)}(?:\\.[^'"]*)?['"]`, "m"),
+      new RegExp(`(?:import|require).*['"].*/${escapeRegex2(implBasename)}(?:\\.[^'"]*)?['"]`, "m")
+    ];
+    return importPatterns.some((pattern) => pattern.test(content));
+  } catch {
+    return false;
+  }
+}
+function escapeRegex2(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // src/metrics-dashboard.ts
@@ -3269,6 +3672,38 @@ var TOOL_DEFS = [
       },
       required: ["gates"]
     }
+  },
+  {
+    name: "get_impact_analysis",
+    description: "Analyze the impact of changes to a file. Returns a list of consumer files (importers) that may be affected, using the import graph. When LSP is available, also includes findReferences results for changed symbols.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: {
+          type: "string",
+          description: "Absolute path to the changed file"
+        }
+      },
+      required: ["file"]
+    }
+  },
+  {
+    name: "get_call_coverage",
+    description: "Check whether a test file covers (imports from) an implementation file. Uses import graph to verify the test\u2192impl dependency path exists.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        test_file: {
+          type: "string",
+          description: "Absolute path to the test file"
+        },
+        impl_file: {
+          type: "string",
+          description: "Absolute path to the implementation file"
+        }
+      },
+      required: ["test_file", "impl_file"]
+    }
   }
 ];
 function handleTool(name, cwd, args) {
@@ -3519,7 +3954,7 @@ function handleTool(name, cwd, args) {
           ]
         };
       }
-      const resolvedHealth = resolve4(filePath);
+      const resolvedHealth = resolve5(filePath);
       if (!resolvedHealth.startsWith(`${cwd}/`)) {
         return {
           content: [
@@ -3677,14 +4112,14 @@ function handleTool(name, cwd, args) {
       if (!planPath) {
         return { content: [{ type: "text", text: "Error: plan_path is required." }] };
       }
-      const resolvedPath = resolve4(cwd, planPath);
+      const resolvedPath = resolve5(cwd, planPath);
       const allowedBases = [
-        resolve4(join5(cwd, ".claude", "plans")),
-        resolve4(join5(homedir3(), ".claude", "plans"))
+        resolve5(join6(cwd, ".claude", "plans")),
+        resolve5(join6(homedir3(), ".claude", "plans"))
       ];
       const envPlansDir = process.env.CLAUDE_PLANS_DIR;
       if (envPlansDir)
-        allowedBases.push(resolve4(envPlansDir));
+        allowedBases.push(resolve5(envPlansDir));
       const isAllowed = allowedBases.some((base) => resolvedPath.startsWith(`${base}/`)) && resolvedPath.endsWith(".md");
       if (!isAllowed) {
         return {
@@ -3693,7 +4128,7 @@ function handleTool(name, cwd, args) {
           ]
         };
       }
-      if (!existsSync10(resolvedPath)) {
+      if (!existsSync12(resolvedPath)) {
         return {
           content: [{ type: "text", text: "Plan not found (already archived or path incorrect)." }]
         };
@@ -3785,6 +4220,61 @@ function handleTool(name, cwd, args) {
       });
       return { content: [{ type: "text", text: "All escalation counters reset to zero." }] };
     }
+    case "get_impact_analysis": {
+      const file = typeof args?.file === "string" ? args.file : "";
+      if (!file) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "Missing file parameter." }]
+        };
+      }
+      try {
+        const config = loadConfig();
+        const consumers = findImporters(file, cwd, config.gates.import_graph_depth);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ file, consumers, count: consumers.length })
+            }
+          ]
+        };
+      } catch {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ file, consumers: [], count: 0 }) }]
+        };
+      }
+    }
+    case "get_call_coverage": {
+      const testFile = typeof args?.test_file === "string" ? args.test_file : "";
+      const implFile = typeof args?.impl_file === "string" ? args.impl_file : "";
+      if (!testFile || !implFile) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "Missing test_file or impl_file parameter." }]
+        };
+      }
+      try {
+        const covered = validateTestCoversImpl(testFile, "", implFile, cwd);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ test_file: testFile, impl_file: implFile, covered })
+            }
+          ]
+        };
+      } catch {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ test_file: testFile, impl_file: implFile, covered: false })
+            }
+          ]
+        };
+      }
+    }
     default:
       return { isError: true, content: [{ type: "text", text: `Unknown tool: ${name}` }] };
   }
@@ -3839,7 +4329,11 @@ function handleRequest(parsed, cwd) {
             "- Pass detector findings as context to each reviewer stage \u2014 reviewers must not contradict detector results.",
             "",
             "## Human Approval",
-            "- If review.require_human_approval is enabled, call record_human_approval after the architect has reviewed and approved the changes."
+            "- If review.require_human_approval is enabled, call record_human_approval after the architect has reviewed and approved the changes.",
+            "",
+            "## Impact Analysis",
+            "- After modifying types or exported interfaces, call get_impact_analysis to check which consumer files are affected.",
+            "- Use get_call_coverage to verify that test files actually import and exercise the implementation under test."
           ].join(`
 `)
         }

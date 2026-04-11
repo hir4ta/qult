@@ -123,10 +123,7 @@ describe("validateTestFunctionExists", () => {
 
 	it("finds describe() block by name", () => {
 		const testFile = join(TEST_DIR, "src", "__tests__", "baz.test.ts");
-		writeFileSync(
-			testFile,
-			`describe("MyModule", () => { it("works", () => {}); });`,
-		);
+		writeFileSync(testFile, `describe("MyModule", () => { it("works", () => {}); });`);
 		expect(validateTestFunctionExists(testFile, "MyModule")).toBe(true);
 	});
 

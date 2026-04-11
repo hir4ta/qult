@@ -8,7 +8,7 @@ import { basename, dirname, relative } from "node:path";
 export function parseVerifyField(
 	verify: string,
 ): { testFile: string; testFunction: string } | null {
-	if (!verify || !verify.includes(":")) return null;
+	if (!verify?.includes(":")) return null;
 	const lastColon = verify.lastIndexOf(":");
 	const testFile = verify.slice(0, lastColon).trim();
 	const testFunction = verify.slice(lastColon + 1).trim();

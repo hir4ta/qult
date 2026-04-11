@@ -381,6 +381,10 @@ function applyConfigLayer(config, raw) {
       config.gates.extra_path = g.extra_path.filter((p) => typeof p === "string" && p.trim().length > 0);
     if (typeof g.coverage_threshold === "number")
       config.gates.coverage_threshold = Math.max(0, Math.min(100, g.coverage_threshold));
+    if (typeof g.consumer_typecheck === "boolean")
+      config.gates.consumer_typecheck = g.consumer_typecheck;
+    if (typeof g.import_graph_depth === "number")
+      config.gates.import_graph_depth = Math.max(1, Math.min(3, g.import_graph_depth));
   }
   if (raw.security && typeof raw.security === "object") {
     const s = raw.security;
@@ -489,6 +493,14 @@ function loadConfig() {
   const covThreshold = envInt("QULT_COVERAGE_THRESHOLD");
   if (covThreshold !== undefined)
     config.gates.coverage_threshold = Math.max(0, Math.min(100, covThreshold));
+  const consumerTcEnv = process.env.QULT_CONSUMER_TYPECHECK;
+  if (consumerTcEnv === "1" || consumerTcEnv === "true")
+    config.gates.consumer_typecheck = true;
+  else if (consumerTcEnv === "0" || consumerTcEnv === "false")
+    config.gates.consumer_typecheck = false;
+  const igDepth = envInt("QULT_IMPORT_GRAPH_DEPTH");
+  if (igDepth !== undefined)
+    config.gates.import_graph_depth = Math.max(1, Math.min(3, igDepth));
   const secEsc = envInt("QULT_ESCALATION_SECURITY");
   if (secEsc !== undefined)
     config.escalation.security_threshold = Math.max(1, secEsc);
@@ -571,7 +583,9 @@ var init_config = __esm(() => {
       test_on_edit: false,
       test_on_edit_timeout: 15000,
       extra_path: [],
-      coverage_threshold: 0
+      coverage_threshold: 0,
+      consumer_typecheck: false,
+      import_graph_depth: 1
     },
     security: {
       require_semgrep: true
@@ -1357,6 +1371,182 @@ var init_lazy_init = __esm(() => {
   init_pending_fixes();
 });
 
+// src/hooks/detectors/diagnostic-classifier.ts
+function parseTscOutput(raw) {
+  if (!raw)
+    return [];
+  const results = [];
+  for (const line of raw.split(`
+`)) {
+    const m = line.match(TSC_LINE_RE);
+    if (!m)
+      continue;
+    const [, file, lineStr, code, message] = m;
+    results.push({
+      code,
+      category: DIAGNOSTIC_MAP[code] ?? "unknown",
+      message,
+      file,
+      line: Number(lineStr)
+    });
+  }
+  return results;
+}
+function parsePyrightOutput(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    const diagnostics = parsed?.generalDiagnostics;
+    if (!Array.isArray(diagnostics))
+      return [];
+    return diagnostics.filter((d) => d.rule).map((d) => ({
+      code: d.rule,
+      category: DIAGNOSTIC_MAP[d.rule] ?? "type-error",
+      message: d.message,
+      file: d.file,
+      line: d.range.start.line
+    }));
+  } catch {
+    return [];
+  }
+}
+function parseCargoOutput(raw) {
+  if (!raw)
+    return [];
+  const results = [];
+  for (const line of raw.split(`
+`)) {
+    if (!line.trim())
+      continue;
+    try {
+      const parsed = JSON.parse(line);
+      if (parsed.reason !== "compiler-message")
+        continue;
+      const msg = parsed.message;
+      if (!msg?.code?.code || !msg.spans.length)
+        continue;
+      const span = msg.spans[0];
+      results.push({
+        code: msg.code.code,
+        category: DIAGNOSTIC_MAP[msg.code.code] ?? "unknown",
+        message: msg.message,
+        file: span.file_name,
+        line: span.line_start
+      });
+    } catch {}
+  }
+  return results;
+}
+function parseMypyOutput(raw) {
+  if (!raw)
+    return [];
+  const results = [];
+  for (const line of raw.split(`
+`)) {
+    const m = line.match(MYPY_LINE_RE);
+    if (!m)
+      continue;
+    const [, file, lineStr, message, code] = m;
+    results.push({
+      code,
+      category: DIAGNOSTIC_MAP[code] ?? "type-error",
+      message,
+      file,
+      line: Number(lineStr)
+    });
+  }
+  return results;
+}
+function parseGoVetOutput(raw) {
+  if (!raw)
+    return [];
+  const results = [];
+  for (const line of raw.split(`
+`)) {
+    const m = line.match(GO_VET_LINE_RE);
+    if (!m)
+      continue;
+    const [, file, lineStr, message] = m;
+    let category = "type-error";
+    if (/undefined:|undeclared name:/.test(message)) {
+      category = "hallucinated-symbol";
+    } else if (/could not import|cannot find package/.test(message)) {
+      category = "hallucinated-import";
+    } else if (/has no field or method/.test(message)) {
+      category = "hallucinated-api";
+    }
+    results.push({
+      code: "go-vet",
+      category,
+      message,
+      file,
+      line: Number(lineStr)
+    });
+  }
+  return results;
+}
+function classifiedToPendingFixes(diagnostics) {
+  const actionable = diagnostics.filter((d) => d.category !== "unknown");
+  if (!actionable.length)
+    return [];
+  const byFile = new Map;
+  for (const d of actionable) {
+    const errors = byFile.get(d.file) ?? [];
+    errors.push(`[${d.category}] ${d.message}`);
+    byFile.set(d.file, errors);
+  }
+  return [...byFile.entries()].map(([file, errors]) => ({
+    file,
+    errors,
+    gate: "typecheck"
+  }));
+}
+var DIAGNOSTIC_MAP, TSC_LINE_RE, MYPY_LINE_RE, GO_VET_LINE_RE;
+var init_diagnostic_classifier = __esm(() => {
+  DIAGNOSTIC_MAP = {
+    TS2339: "hallucinated-api",
+    TS2551: "hallucinated-api",
+    TS2459: "hallucinated-api",
+    TS2694: "hallucinated-api",
+    TS2304: "hallucinated-symbol",
+    TS2552: "hallucinated-symbol",
+    TS2580: "hallucinated-symbol",
+    TS2307: "hallucinated-import",
+    TS2792: "hallucinated-import",
+    TS2322: "type-error",
+    TS2345: "type-error",
+    TS2741: "type-error",
+    TS2769: "type-error",
+    reportAttributeAccessIssue: "hallucinated-api",
+    reportFunctionMemberAccess: "hallucinated-api",
+    reportUndefinedVariable: "hallucinated-symbol",
+    reportMissingTypeStubs: "hallucinated-symbol",
+    reportMissingImports: "hallucinated-import",
+    reportMissingModuleSource: "hallucinated-import",
+    reportArgumentType: "type-error",
+    reportReturnType: "type-error",
+    reportAssignmentType: "type-error",
+    reportIndexIssue: "type-error",
+    E0599: "hallucinated-api",
+    E0425: "hallucinated-symbol",
+    E0412: "hallucinated-symbol",
+    E0432: "hallucinated-import",
+    E0433: "hallucinated-import",
+    E0308: "type-error",
+    E0277: "type-error",
+    "name-defined": "hallucinated-symbol",
+    import: "hallucinated-import",
+    "import-untyped": "hallucinated-import",
+    "attr-defined": "hallucinated-api",
+    "arg-type": "type-error",
+    assignment: "type-error",
+    "return-value": "type-error",
+    override: "type-error"
+  };
+  TSC_LINE_RE = /^(.+)\((\d+),\d+\):\s*error\s+(TS\d+):\s*(.+)$/;
+  MYPY_LINE_RE = /^(.+):(\d+):\s*error:\s*(.+?)\s*\[([^\]]+)\]$/;
+  GO_VET_LINE_RE = /^\.?\/?([\w/.]+\.go):(\d+):\d+:\s*(.+)$/;
+});
+
 // src/gates/coverage-parser.ts
 function parseCoveragePercent(output) {
   if (!output)
@@ -1464,7 +1654,8 @@ function buildPath(extraPaths) {
 }
 function runGateAsync(name, gate, file) {
   const config = loadConfig();
-  const command = file ? gate.command.replace("{file}", shellEscape(file)) : gate.command;
+  const baseCmd = gate.structured_command ?? gate.command;
+  const command = file ? baseCmd.replace("{file}", shellEscape(file)) : baseCmd;
   const timeout = gate.timeout ?? config.gates.default_timeout;
   const maxChars = config.gates.output_max_chars;
   const start = Date.now();
@@ -1485,7 +1676,8 @@ function runGateAsync(name, gate, file) {
         const prefix = isTimeout ? `TIMEOUT after ${timeout}ms
 ` : "";
         const output = prefix + (smartTruncate(deduplicateErrors(raw), maxChars) || `Exit code ${err.code ?? 1}`);
-        resolve({ name, passed: false, output, duration_ms });
+        const classified = classifyTypecheckOutput(name, command, raw);
+        resolve({ name, passed: false, output, duration_ms, ...classified });
       } else {
         const output = smartTruncate(stdout ?? "", maxChars);
         resolve({ name, passed: true, output, duration_ms });
@@ -1530,6 +1722,30 @@ function runGate(name, gate, file) {
     };
   }
 }
+function classifyTypecheckOutput(gateName, _command, raw) {
+  if (gateName !== "typecheck" || !raw)
+    return {};
+  try {
+    let diagnostics = [];
+    if (raw.includes('"generalDiagnostics"')) {
+      diagnostics = parsePyrightOutput(raw);
+    } else if (raw.includes('"compiler-message"')) {
+      diagnostics = parseCargoOutput(raw);
+    }
+    if (diagnostics.length === 0 && raw.includes(": error: ") && raw.includes("[")) {
+      diagnostics = parseMypyOutput(raw);
+    }
+    if (diagnostics.length === 0 && /\.go:\d+:\d+:/.test(raw)) {
+      diagnostics = parseGoVetOutput(raw);
+    }
+    if (diagnostics.length === 0) {
+      diagnostics = parseTscOutput(raw);
+    }
+    return diagnostics.length > 0 ? { classifiedDiagnostics: diagnostics } : {};
+  } catch {
+    return {};
+  }
+}
 function runCoverageGate(name, gate, threshold) {
   if (threshold <= 0) {
     return { name, passed: true, output: "coverage check skipped (threshold=0)", duration_ms: 0 };
@@ -1553,6 +1769,7 @@ function runCoverageGate(name, gate, threshold) {
 var ERROR_CODE_RE;
 var init_runner = __esm(() => {
   init_config();
+  init_diagnostic_classifier();
   init_coverage_parser();
   ERROR_CODE_RE = /\b([A-Z]{1,4}\d{1,5}|ERR_[A-Z_]+|E\d{3,5})\b/;
 });
@@ -1981,21 +2198,54 @@ function detectExportBreakingChanges(file) {
     newExports.add(match[1]);
   }
   const removed = [...oldExports].filter((name) => !newExports.has(name));
-  if (removed.length === 0)
-    return [];
-  return [
-    {
-      file,
-      errors: removed.map((name) => `Breaking change: export "${sanitizeForStderr(name)}" was removed`),
-      gate: "export-check"
+  const oldSigs = new Map;
+  for (const match of oldContent.matchAll(FUNC_SIG_RE)) {
+    const params = match[2].trim();
+    oldSigs.set(match[1], params ? params.split(",").length : 0);
+  }
+  const signatureChanges = [];
+  for (const match of newContent.matchAll(FUNC_SIG_RE)) {
+    const name = match[1];
+    const newParamCount = match[2].trim() ? match[2].trim().split(",").length : 0;
+    const oldParamCount = oldSigs.get(name);
+    if (oldParamCount !== undefined && oldParamCount !== newParamCount) {
+      signatureChanges.push(`Signature change: "${sanitizeForStderr(name)}" params ${oldParamCount}\u2192${newParamCount}. Consumers may break.`);
     }
+  }
+  const typeChanges = detectTypeFieldChanges(oldContent, newContent);
+  const errors = [
+    ...removed.map((name) => `Breaking change: export "${sanitizeForStderr(name)}" was removed`),
+    ...signatureChanges,
+    ...typeChanges
   ];
+  if (errors.length === 0)
+    return [];
+  return [{ file, errors, gate: "export-check" }];
 }
-var TS_JS_EXTS2, EXPORT_RE;
+function detectTypeFieldChanges(oldContent, newContent) {
+  const TYPE_DEF_RE = /\bexport\s+(?:type|interface)\s+(\w+)\s*(?:=\s*)?{([^}]*)}/g;
+  const countFields = (body) => body.split(/[;\n]/).map((s) => s.trim()).filter((s) => s && !s.startsWith("//")).length;
+  const oldTypes = new Map;
+  for (const m of oldContent.matchAll(TYPE_DEF_RE)) {
+    oldTypes.set(m[1], countFields(m[2]));
+  }
+  const changes = [];
+  for (const m of newContent.matchAll(TYPE_DEF_RE)) {
+    const name = m[1];
+    const newFields = countFields(m[2]);
+    const oldFields = oldTypes.get(name);
+    if (oldFields !== undefined && oldFields !== newFields) {
+      changes.push(`Type change: "${sanitizeForStderr(name)}" fields ${oldFields}\u2192${newFields}. Consumers may need updates.`);
+    }
+  }
+  return changes;
+}
+var TS_JS_EXTS2, EXPORT_RE, FUNC_SIG_RE;
 var init_export_check = __esm(() => {
   init_session_state();
   TS_JS_EXTS2 = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
   EXPORT_RE = /\bexport\s+(?:default\s+)?(?:function|class|const|let|var|type|interface|enum)\s+(\w+)/g;
+  FUNC_SIG_RE = /\bexport\s+(?:default\s+)?function\s+(\w+)\s*\(([^)]*)\)/g;
 });
 
 // src/hooks/detectors/import-check.ts
@@ -2442,20 +2692,360 @@ var init_import_check = __esm(() => {
   ]);
 });
 
+// src/hooks/detectors/test-file-resolver.ts
+import { existsSync as existsSync6 } from "fs";
+import { basename as basename4, dirname as dirname4, extname as extname6, join as join5 } from "path";
+function resolveTestFile(sourceFile) {
+  const ext = extname6(sourceFile);
+  const base = basename4(sourceFile, ext);
+  const dir = dirname4(sourceFile);
+  if (isTestFile2(sourceFile))
+    return null;
+  for (const pattern of TEST_PATTERNS) {
+    const candidate = pattern(dir, base, ext);
+    if (candidate && existsSync6(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+function isTestFile2(file) {
+  const base = basename4(file);
+  return /\.(test|spec)\.\w+$/.test(base) || /^test_\w+\.py$/.test(base) || /_test\.go$/.test(base) || /\/(__tests__|tests)\//.test(file);
+}
+var TEST_PATTERNS;
+var init_test_file_resolver = __esm(() => {
+  TEST_PATTERNS = [
+    (dir, name, ext) => join5(dir, `${name}.test${ext}`),
+    (dir, name, ext) => join5(dir, `${name}.spec${ext}`),
+    (dir, name, ext) => join5(dir, "__tests__", `${name}.test${ext}`),
+    (dir, name, ext) => join5(dir, "__tests__", `${name}.spec${ext}`),
+    (dir, name, ext) => join5(dir, "tests", `${name}.test${ext}`),
+    (dir, name, ext) => ext === ".py" ? join5(dir, `test_${name}${ext}`) : null,
+    (dir, name, ext) => ext === ".py" ? join5(dir, "tests", `test_${name}${ext}`) : null,
+    (dir, name, ext) => ext === ".go" ? join5(dir, `${name}_test${ext}`) : null,
+    (dir, name, ext) => ext === ".rs" ? join5(dir, "tests", `${name}${ext}`) : null
+  ];
+});
+
+// src/hooks/detectors/import-graph.ts
+import { existsSync as existsSync7, lstatSync, readdirSync as readdirSync4, readFileSync as readFileSync6, statSync as statSync3 } from "fs";
+import { dirname as dirname5, extname as extname7, join as join6, resolve as resolve3 } from "path";
+function stripComments(content) {
+  return content.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+}
+function extractRelativeImports(content, filePath) {
+  const stripped = stripComments(content);
+  const specifiers = [];
+  const ext = filePath ? extname7(filePath).toLowerCase() : "";
+  if (ext === ".py") {
+    const pyRel = /from\s+(\.[\w.]*)\s+import/g;
+    for (const match of stripped.matchAll(pyRel)) {
+      specifiers.push(match[1]);
+    }
+    return specifiers;
+  }
+  if (ext === ".go") {
+    const goSingle = /import\s+"([^"]+)"/g;
+    for (const match of stripped.matchAll(goSingle)) {
+      specifiers.push(match[1]);
+    }
+    const goBlock = /import\s*\(([\s\S]*?)\)/g;
+    for (const block of stripped.matchAll(goBlock)) {
+      const lines = block[1];
+      const lineRe = /\s*(?:\w+\s+)?"([^"]+)"/g;
+      for (const m of lines.matchAll(lineRe)) {
+        specifiers.push(m[1]);
+      }
+    }
+    return specifiers;
+  }
+  if (ext === ".rs") {
+    const modDecl = /\bmod\s+(\w+)\s*;/g;
+    for (const match of stripped.matchAll(modDecl)) {
+      specifiers.push(`mod:${match[1]}`);
+    }
+    const useCrate = /\buse\s+crate::(\w+)/g;
+    for (const match of stripped.matchAll(useCrate)) {
+      specifiers.push(`crate:${match[1]}`);
+    }
+    return specifiers;
+  }
+  const esm = /(?:import|export)\s+(?:[\s\S]*?\s+from\s+)?['"](\.[^'"]+)['"]/g;
+  const cjs = /require\(\s*['"](\.[^'"]+)['"]\s*\)/g;
+  const dynamic = /import\(\s*['"](\.[^'"]+)['"]\s*\)/g;
+  for (const match of stripped.matchAll(esm)) {
+    specifiers.push(match[1]);
+  }
+  for (const match of stripped.matchAll(cjs)) {
+    specifiers.push(match[1]);
+  }
+  for (const match of stripped.matchAll(dynamic)) {
+    specifiers.push(match[1]);
+  }
+  return specifiers;
+}
+function resolvePythonImport(specifier, fromFile) {
+  const dir = dirname5(fromFile);
+  const dotMatch = specifier.match(/^(\.+)(.*)/);
+  if (!dotMatch)
+    return null;
+  const dots = dotMatch[1].length;
+  const modulePart = dotMatch[2];
+  let base = dir;
+  for (let i = 1;i < dots; i++) {
+    base = dirname5(base);
+  }
+  if (!modulePart) {
+    return null;
+  }
+  const parts = modulePart.split(".");
+  const candidate = join6(base, ...parts);
+  if (existsSync7(`${candidate}.py`))
+    return `${candidate}.py`;
+  if (existsSync7(join6(candidate, "__init__.py")))
+    return join6(candidate, "__init__.py");
+  return null;
+}
+function resolveRustImport(specifier, fromFile, scanRoot) {
+  const dir = dirname5(fromFile);
+  if (specifier.startsWith("mod:")) {
+    const name = specifier.slice(4);
+    const asFile = join6(dir, `${name}.rs`);
+    if (existsSync7(asFile))
+      return asFile;
+    const asDir = join6(dir, name, "mod.rs");
+    if (existsSync7(asDir))
+      return asDir;
+  } else if (specifier.startsWith("crate:")) {
+    const name = specifier.slice(6);
+    const srcDir = join6(scanRoot, "src");
+    const asFile = join6(srcDir, `${name}.rs`);
+    if (existsSync7(asFile))
+      return asFile;
+    const asDir = join6(srcDir, name, "mod.rs");
+    if (existsSync7(asDir))
+      return asDir;
+  }
+  return null;
+}
+function getGoModulePath(scanRoot) {
+  if (_goModuleCache !== undefined)
+    return _goModuleCache;
+  try {
+    const goMod = readFileSync6(join6(scanRoot, "go.mod"), "utf-8");
+    const match = goMod.match(/^module\s+(\S+)/m);
+    _goModuleCache = match ? match[1] : null;
+  } catch {
+    _goModuleCache = null;
+  }
+  return _goModuleCache;
+}
+function resolveGoImport(specifier, scanRoot) {
+  const modulePath = getGoModulePath(scanRoot);
+  if (!modulePath || !specifier.startsWith(modulePath))
+    return null;
+  const relPath = specifier.slice(modulePath.length + 1);
+  const dir = join6(scanRoot, relPath);
+  if (existsSync7(dir) && statSync3(dir).isDirectory())
+    return dir;
+  return null;
+}
+function resolveImportPath(specifier, fromFile, scanRoot) {
+  const fileExt = extname7(fromFile).toLowerCase();
+  if (fileExt === ".py") {
+    return resolvePythonImport(specifier, fromFile);
+  }
+  if (fileExt === ".rs" && scanRoot) {
+    return resolveRustImport(specifier, fromFile, scanRoot);
+  }
+  if (fileExt === ".go" && scanRoot) {
+    return resolveGoImport(specifier, scanRoot);
+  }
+  const dir = dirname5(fromFile);
+  const raw = resolve3(dir, specifier);
+  if (existsSync7(raw) && statSync3(raw).isFile())
+    return raw;
+  for (const ext of [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]) {
+    const withExt = `${raw}${ext}`;
+    if (existsSync7(withExt))
+      return withExt;
+  }
+  for (const ext of [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]) {
+    const index = join6(raw, `index${ext}`);
+    if (existsSync7(index))
+      return index;
+  }
+  return null;
+}
+function collectFiles(dir) {
+  const files = [];
+  let capped = false;
+  function walk(current, depth) {
+    if (files.length >= MAX_FILES || depth > MAX_DEPTH)
+      return;
+    let entries;
+    try {
+      entries = readdirSync4(current);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (files.length >= MAX_FILES) {
+        capped = true;
+        return;
+      }
+      if (SKIP_DIRS.has(entry))
+        continue;
+      const full = join6(current, entry);
+      try {
+        const stat = lstatSync(full);
+        if (stat.isSymbolicLink())
+          continue;
+        if (stat.isDirectory()) {
+          walk(full, depth + 1);
+        } else if (stat.isFile() && SCAN_EXTS.has(extname7(full))) {
+          if (stat.size <= MAX_FILE_SIZE) {
+            files.push(full);
+          }
+        }
+      } catch {}
+    }
+  }
+  walk(dir, 0);
+  if (capped) {
+    process.stderr.write(`[qult] import-graph: file scan capped at ${MAX_FILES} files, results may be incomplete
+`);
+  }
+  return files;
+}
+function findImporters(targetFile, scanRoot, depth = 1) {
+  if (!existsSync7(scanRoot))
+    return [];
+  const clampedDepth = Math.min(Math.max(depth, 1), 3);
+  const files = collectFiles(scanRoot);
+  const visited = new Set;
+  const allImporters = [];
+  function findDirectImporters(targetAbs) {
+    const direct = [];
+    const targetDir = dirname5(targetAbs);
+    const targetExt = extname7(targetAbs).toLowerCase();
+    for (const file of files) {
+      const fileAbs = resolve3(file);
+      if (fileAbs === targetAbs)
+        continue;
+      if (targetExt === ".go" && extname7(file).toLowerCase() === ".go" && dirname5(fileAbs) === targetDir) {
+        direct.push(file);
+        continue;
+      }
+      try {
+        const content = readFileSync6(file, "utf-8");
+        const specifiers = extractRelativeImports(content, file);
+        for (const spec of specifiers) {
+          const resolved = resolveImportPath(spec, file, scanRoot);
+          if (!resolved)
+            continue;
+          if (extname7(file).toLowerCase() === ".go") {
+            if (resolve3(resolved) === targetDir) {
+              direct.push(file);
+              break;
+            }
+          } else if (resolve3(resolved) === targetAbs) {
+            direct.push(file);
+            break;
+          }
+        }
+      } catch {}
+    }
+    if (targetExt === ".py") {
+      const targetName = targetAbs.replace(/\.py$/, "").split("/").pop();
+      for (const file of files) {
+        const fileAbs = resolve3(file);
+        if (fileAbs === targetAbs || direct.includes(file))
+          continue;
+        if (extname7(file).toLowerCase() !== ".py")
+          continue;
+        try {
+          const content = readFileSync6(file, "utf-8");
+          const bareImport = new RegExp(`from\\s+\\.\\s+import\\s+(?:.*\\b${targetName}\\b)`, "m");
+          if (bareImport.test(content) && dirname5(fileAbs) === targetDir) {
+            direct.push(file);
+          }
+        } catch {}
+      }
+    }
+    return direct;
+  }
+  let currentTargets = [resolve3(targetFile)];
+  for (let d = 0;d < clampedDepth; d++) {
+    const nextTargets = [];
+    for (const target of currentTargets) {
+      if (visited.has(target))
+        continue;
+      visited.add(target);
+      const direct = findDirectImporters(target);
+      for (const imp of direct) {
+        const impAbs = resolve3(imp);
+        if (!visited.has(impAbs) && impAbs !== resolve3(targetFile)) {
+          allImporters.push(imp);
+          nextTargets.push(impAbs);
+        }
+      }
+    }
+    currentTargets = nextTargets;
+    if (!currentTargets.length)
+      break;
+  }
+  return [...new Set(allImporters)];
+}
+var SCAN_EXTS, SKIP_DIRS, MAX_FILE_SIZE, MAX_FILES = 2000, MAX_DEPTH = 50, _goModuleCache;
+var init_import_graph = __esm(() => {
+  init_test_file_resolver();
+  SCAN_EXTS = new Set([
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mts",
+    ".cts",
+    ".mjs",
+    ".cjs",
+    ".py",
+    ".go",
+    ".rs"
+  ]);
+  SKIP_DIRS = new Set([
+    "node_modules",
+    "dist",
+    "build",
+    ".next",
+    ".nuxt",
+    "coverage",
+    ".git",
+    ".qult",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "target",
+    "vendor"
+  ]);
+  MAX_FILE_SIZE = 256 * 1024;
+});
+
 // src/hooks/detectors/security-check.ts
-import { existsSync as existsSync6, readFileSync as readFileSync6 } from "fs";
-import { basename as basename4, extname as extname6 } from "path";
+import { existsSync as existsSync8, readFileSync as readFileSync7 } from "fs";
+import { basename as basename5, extname as extname8 } from "path";
 function detectSecurityPatterns(file) {
   if (isGateDisabled("security-check"))
     return [];
-  const ext = extname6(file).toLowerCase();
+  const ext = extname8(file).toLowerCase();
   if (!CHECKABLE_EXTS2.has(ext))
     return [];
-  if (!existsSync6(file))
+  if (!existsSync8(file))
     return [];
   let content;
   try {
-    content = readFileSync6(file, "utf-8");
+    content = readFileSync7(file, "utf-8");
   } catch {
     return [];
   }
@@ -2465,7 +3055,7 @@ function detectSecurityPatterns(file) {
   const lines = content.split(`
 `);
   const fileName = file.split("/").pop() ?? "";
-  const isTestFile2 = fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_") || fileName.includes("_test.");
+  const isTestFile3 = fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_") || fileName.includes("_test.");
   const starIsComment = JS_TS_EXTS.has(ext) || ext === ".java" || ext === ".kt" || ext === ".cs";
   const hasBlockComments = JS_TS_EXTS.has(ext) || ext === ".java" || ext === ".kt" || ext === ".cs" || ext === ".go" || ext === ".rs";
   let inBlockComment = false;
@@ -2501,7 +3091,7 @@ function detectSecurityPatterns(file) {
       continue;
     if (starIsComment && scanTrimmed.startsWith("*"))
       continue;
-    if (!isTestFile2) {
+    if (!isTestFile3) {
       for (const { re, desc } of SECRET_PATTERNS) {
         if (re.test(scanLine)) {
           if (/process\.env\b/.test(scanLine))
@@ -2521,7 +3111,7 @@ function detectSecurityPatterns(file) {
       if (re.test(scanLine)) {
         if (suppress?.test(scanLine))
           continue;
-        if (suppressFile?.test(basename4(file)))
+        if (suppressFile?.test(basename5(file)))
           continue;
         errors.push(`L${i + 1}: ${desc}`);
       }
@@ -2539,7 +3129,7 @@ function detectSecurityPatterns(file) {
   ];
 }
 function matchAdvisoryPatterns(file, content) {
-  const ext = extname6(file).toLowerCase();
+  const ext = extname8(file).toLowerCase();
   if (!CHECKABLE_EXTS2.has(ext))
     return [];
   if (content.length > MAX_CHECK_SIZE3)
@@ -2830,8 +3420,8 @@ var init_security_check = __esm(() => {
 });
 
 // src/hooks/detectors/semantic-check.ts
-import { existsSync as existsSync7, readFileSync as readFileSync7 } from "fs";
-import { extname as extname7 } from "path";
+import { existsSync as existsSync9, readFileSync as readFileSync8 } from "fs";
+import { extname as extname9 } from "path";
 function detectEmptyCatch(lines) {
   const errors = [];
   for (let i = 0;i < lines.length; i++) {
@@ -3013,8 +3603,8 @@ function detectSwitchFallthrough(lines) {
 function emitPbtAdvisory(file, content) {
   try {
     const fileName = file.split("/").pop() ?? "";
-    const isTestFile2 = fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_");
-    if (!isTestFile2)
+    const isTestFile3 = fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_");
+    if (!isTestFile3)
       return;
     const testCases = content.match(TEST_CASE_RE);
     if (!testCases || testCases.length < 5)
@@ -3029,14 +3619,14 @@ function emitPbtAdvisory(file, content) {
 function detectSemanticPatterns(file) {
   if (isGateDisabled("semantic-check"))
     return [];
-  const ext = extname7(file).toLowerCase();
+  const ext = extname9(file).toLowerCase();
   if (!CHECKABLE_EXTS3.has(ext))
     return [];
-  if (!existsSync7(file))
+  if (!existsSync9(file))
     return [];
   let content;
   try {
-    content = readFileSync7(file, "utf-8");
+    content = readFileSync8(file, "utf-8");
   } catch {
     return [];
   }
@@ -3088,45 +3678,70 @@ var init_semantic_check = __esm(() => {
   PBT_IMPORT_RE = /(?:fast-check|@fast-check|fc\.|property\s*\(|forAll\s*\(|arbitrary)/;
 });
 
-// src/hooks/detectors/test-file-resolver.ts
-import { existsSync as existsSync8 } from "fs";
-import { basename as basename5, dirname as dirname4, extname as extname8, join as join5 } from "path";
-function resolveTestFile(sourceFile) {
-  const ext = extname8(sourceFile);
-  const base = basename5(sourceFile, ext);
-  const dir = dirname4(sourceFile);
-  if (isTestFile2(sourceFile))
+// src/hooks/detectors/spec-trace-check.ts
+import { existsSync as existsSync10, readFileSync as readFileSync9 } from "fs";
+import { basename as basename6, dirname as dirname6, relative } from "path";
+function parseVerifyField2(verify) {
+  if (!verify?.includes(":"))
     return null;
-  for (const pattern of TEST_PATTERNS) {
-    const candidate = pattern(dir, base, ext);
-    if (candidate && existsSync8(candidate)) {
-      return candidate;
-    }
+  const lastColon = verify.lastIndexOf(":");
+  const testFile = verify.slice(0, lastColon).trim();
+  const testFunction = verify.slice(lastColon + 1).trim();
+  if (!testFile || !testFunction)
+    return null;
+  return { testFile, testFunction };
+}
+function validateTestFileExists(testFilePath) {
+  return existsSync10(testFilePath);
+}
+function validateTestCoversImpl(testFile, _testFunction, implFile, _projectRoot) {
+  if (!existsSync10(testFile))
+    return false;
+  try {
+    const content = readFileSync9(testFile, "utf-8");
+    const implBasename = basename6(implFile).replace(/\.[^.]+$/, "");
+    const implRelative = relative(dirname6(testFile), implFile).replace(/\\/g, "/").replace(/\.[^.]+$/, "");
+    const importPatterns = [
+      new RegExp(`(?:import|require).*['"].*${escapeRegex2(implRelative)}(?:\\.[^'"]*)?['"]`, "m"),
+      new RegExp(`(?:import|require).*['"].*/${escapeRegex2(implBasename)}(?:\\.[^'"]*)?['"]`, "m")
+    ];
+    return importPatterns.some((pattern) => pattern.test(content));
+  } catch {
+    return false;
   }
-  return null;
 }
-function isTestFile2(file) {
-  const base = basename5(file);
-  return /\.(test|spec)\.\w+$/.test(base) || /^test_\w+\.py$/.test(base) || /_test\.go$/.test(base) || /\/(__tests__|tests)\//.test(file);
+function validateTestFunctionExists(testFile, functionName) {
+  if (!existsSync10(testFile))
+    return false;
+  try {
+    const content = readFileSync9(testFile, "utf-8");
+    const ext = testFile.split(".").pop()?.toLowerCase() ?? "";
+    if (ext === "py") {
+      const pyRe = /\bdef\s+(\w+)\s*\(/g;
+      for (const m of content.matchAll(pyRe)) {
+        if (m[1] === functionName)
+          return true;
+      }
+      return false;
+    }
+    const jsRe = /\b(?:it|test|describe)\s*\(\s*["'`]([^"'`]*)["'`]/g;
+    for (const m of content.matchAll(jsRe)) {
+      if (m[1] === functionName || m[1]?.includes(functionName))
+        return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
-var TEST_PATTERNS;
-var init_test_file_resolver = __esm(() => {
-  TEST_PATTERNS = [
-    (dir, name, ext) => join5(dir, `${name}.test${ext}`),
-    (dir, name, ext) => join5(dir, `${name}.spec${ext}`),
-    (dir, name, ext) => join5(dir, "__tests__", `${name}.test${ext}`),
-    (dir, name, ext) => join5(dir, "__tests__", `${name}.spec${ext}`),
-    (dir, name, ext) => join5(dir, "tests", `${name}.test${ext}`),
-    (dir, name, ext) => ext === ".py" ? join5(dir, `test_${name}${ext}`) : null,
-    (dir, name, ext) => ext === ".py" ? join5(dir, "tests", `test_${name}${ext}`) : null,
-    (dir, name, ext) => ext === ".go" ? join5(dir, `${name}_test${ext}`) : null,
-    (dir, name, ext) => ext === ".rs" ? join5(dir, "tests", `${name}${ext}`) : null
-  ];
-});
+function escapeRegex2(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+var init_spec_trace_check = () => {};
 
 // src/hooks/detectors/test-quality-check.ts
-import { existsSync as existsSync9, readFileSync as readFileSync8 } from "fs";
-import { basename as basename6, dirname as dirname5, extname as extname9, resolve as resolve3 } from "path";
+import { existsSync as existsSync11, readFileSync as readFileSync10 } from "fs";
+import { basename as basename7, dirname as dirname7, extname as extname10, resolve as resolve4 } from "path";
 function countAssertionsOutsideSetup(code) {
   const lines = code.split(`
 `);
@@ -3158,15 +3773,15 @@ function countAssertionsOutsideSetup(code) {
   return count;
 }
 function analyzeTestQuality(file) {
-  const cwd = resolve3(process.cwd());
-  const absPath = resolve3(cwd, file);
+  const cwd = resolve4(process.cwd());
+  const absPath = resolve4(cwd, file);
   if (!absPath.startsWith(cwd))
     return null;
-  if (!existsSync9(absPath))
+  if (!existsSync11(absPath))
     return null;
   let content;
   try {
-    content = readFileSync8(absPath, "utf-8");
+    content = readFileSync10(absPath, "utf-8");
   } catch {
     return null;
   }
@@ -3348,10 +3963,10 @@ function analyzeTestQuality(file) {
     });
   }
   try {
-    const snapDir = `${dirname5(absPath)}/__snapshots__/`;
-    const snapFile = `${snapDir}${basename6(absPath)}.snap`;
-    if (existsSync9(snapFile)) {
-      const snapContent = readFileSync8(snapFile, "utf-8");
+    const snapDir = `${dirname7(absPath)}/__snapshots__/`;
+    const snapFile = `${snapDir}${basename7(absPath)}.snap`;
+    if (existsSync11(snapFile)) {
+      const snapContent = readFileSync10(snapFile, "utf-8");
       if (snapContent.length > LARGE_SNAPSHOT_CHARS) {
         smells.push({
           type: "snapshot-bloat",
@@ -3367,7 +3982,7 @@ function analyzeTestQuality(file) {
       try {
         const implFile = findImplFile(absPath);
         if (implFile) {
-          const implContent = readFileSync8(implFile, "utf-8");
+          const implContent = readFileSync10(implFile, "utf-8");
           if (/\bthrow\b|\breject\b|Promise\.reject/m.test(implContent)) {
             smells.push({
               type: "no-error-path",
@@ -3410,6 +4025,36 @@ function analyzeTestQuality(file) {
       });
     }
   }
+  if (testCount >= 2) {
+    const testBodyRe = /\b(?:it|test)\s*\(\s*["'`]([^"'`]*)["'`]/g;
+    const assertRe = /\b(?:expect|assert|should)\s*[.(]/g;
+    const testBodies = [];
+    for (const match of codeOnly.matchAll(testBodyRe)) {
+      if (testBodies.length > 0) {
+        const prev = testBodies[testBodies.length - 1];
+        const body = codeOnly.slice(prev.start, match.index);
+        prev.assertions = (body.match(assertRe) ?? []).length;
+      }
+      testBodies.push({ name: match[1], start: match.index, assertions: 0 });
+    }
+    if (testBodies.length > 0) {
+      const last = testBodies[testBodies.length - 1];
+      const body = codeOnly.slice(last.start);
+      last.assertions = (body.match(assertRe) ?? []).length;
+    }
+    for (const tb of testBodies) {
+      if (tb.assertions === 0) {
+        continue;
+      }
+      if (tb.assertions === 1 && testCount >= 3) {
+        smells.push({
+          type: "thin-test",
+          line: 0,
+          message: `Test "${tb.name}" has only 1 assertion \u2014 consider adding edge case/boundary assertions`
+        });
+      }
+    }
+  }
   if (testCount >= 5 && assertionCount >= 5) {
     const matcherNameRe = /\.(toBe|toEqual|toStrictEqual|toThrow|toMatch|toContain)\s*\(/g;
     const matcherCounts = new Map;
@@ -3449,18 +4094,18 @@ function getBlockingTestSmells(file, result) {
 }
 function findImplFile(testPath) {
   try {
-    const dir = dirname5(testPath);
-    const base = basename6(testPath);
+    const dir = dirname7(testPath);
+    const base = basename7(testPath);
     const implName = base.replace(/\.(?:test|spec)(\.[^.]+)$/, "$1");
-    const sameDirPath = resolve3(dir, implName);
-    if (existsSync9(sameDirPath))
+    const sameDirPath = resolve4(dir, implName);
+    if (existsSync11(sameDirPath))
       return sameDirPath;
-    const parentDir = dirname5(dir);
-    const parentPath = resolve3(parentDir, implName);
-    if (existsSync9(parentPath))
+    const parentDir = dirname7(dir);
+    const parentPath = resolve4(parentDir, implName);
+    if (existsSync11(parentPath))
       return parentPath;
-    const srcPath = resolve3(parentDir, "src", implName);
-    if (existsSync9(srcPath))
+    const srcPath = resolve4(parentDir, "src", implName);
+    if (existsSync11(srcPath))
       return srcPath;
     return null;
   } catch {
@@ -3491,7 +4136,7 @@ function formatTestQualityWarnings(file, result, taskKey) {
   if (!result.isPbt) {
     const hasPbtSmell = result.smells.some((s) => s.type === "happy-path-only" || s.type === "missing-boundary");
     if (hasPbtSmell) {
-      const ext = extname9(file).toLowerCase();
+      const ext = extname10(file).toLowerCase();
       const JS_TS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
       const PY = new Set([".py", ".pyi"]);
       if (JS_TS.has(ext)) {
@@ -3506,24 +4151,24 @@ function formatTestQualityWarnings(file, result, taskKey) {
   return warnings;
 }
 function suggestPbt(implFile) {
-  const name = basename6(implFile);
+  const name = basename7(implFile);
   if (!PBT_CANDIDATE_RE.test(name))
     return null;
   const testFile = resolveTestFile(implFile);
-  if (!testFile || !existsSync9(testFile))
+  if (!testFile || !existsSync11(testFile))
     return null;
   try {
     const stats = __require("fs").statSync(testFile);
     if (stats.size > MAX_CHECK_SIZE5)
       return null;
-    const content = readFileSync8(testFile, "utf-8");
+    const content = readFileSync10(testFile, "utf-8");
     if (PBT_RE.test(content))
       return null;
   } catch {
     return null;
   }
-  const relative = implFile.split("/").slice(-3).join("/");
-  return `${relative}: Consider property-based testing (fast-check/hypothesis) for validation/serialization logic`;
+  const relative2 = implFile.split("/").slice(-3).join("/");
+  return `${relative2}: Consider property-based testing (fast-check/hypothesis) for validation/serialization logic`;
 }
 var MAX_CHECK_SIZE5 = 500000, BLOCKING_SMELL_TYPES, ASSERTION_RE, TEST_CASE_RE2, WEAK_MATCHERS, TRIVIAL_ASSERTION_RE, EMPTY_TEST_RE, MOCK_RE, ALWAYS_TRUE_RE, CONSTANT_SELF_RE, SNAPSHOT_RE, IMPL_COUPLED_RE, ASYNC_TEST_RE, AWAIT_RE, MODULE_LET_RE, LARGE_TEST_FILE_LINES = 500, LARGE_SNAPSHOT_CHARS = 5000, PBT_RE, PBT_DEGENERATE_RUNS_RE, PBT_CONSTRAINED_GEN_RE, SETUP_BLOCK_RE, PBT_CANDIDATE_RE;
 var init_test_quality_check = __esm(() => {
@@ -3608,8 +4253,8 @@ var exports_post_tool = {};
 __export(exports_post_tool, {
   default: () => postTool
 });
-import { readFileSync as readFileSync9 } from "fs";
-import { dirname as dirname6, extname as extname10, resolve as resolve4 } from "path";
+import { readFileSync as readFileSync11 } from "fs";
+import { dirname as dirname8, extname as extname11, resolve as resolve5 } from "path";
 async function postTool(ev) {
   const tool = ev.tool_name;
   if (!tool)
@@ -3624,10 +4269,10 @@ async function handleEditWrite(ev) {
   const rawFile = typeof ev.tool_input?.file_path === "string" ? ev.tool_input.file_path : null;
   if (!rawFile)
     return;
-  const file = resolve4(rawFile);
+  const file = resolve5(rawFile);
   try {
     const existingFixes = readPendingFixes();
-    if (existingFixes.length > 0 && !existingFixes.some((f) => resolve4(f.file) === file)) {
+    if (existingFixes.length > 0 && !existingFixes.some((f) => resolve5(f.file) === file)) {
       deny(`Fix existing errors before editing other files (PostToolUse fallback):
 ${existingFixes.map((f) => `  ${f.file}`).join(`
 `)}`);
@@ -3639,7 +4284,7 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
   const config = loadConfig();
   const gates = loadGates();
   const hasWriteGates = !!gates?.on_write;
-  const fileExt = extname10(file).toLowerCase();
+  const fileExt = extname11(file).toLowerCase();
   const gatedExts = getGatedExtensions();
   const gateEntries = [];
   if (hasWriteGates && gates?.on_write) {
@@ -3665,7 +4310,12 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
           markGateRan(entry.name);
         }
         if (!settled.value.passed) {
-          newFixes.push({ file, errors: [settled.value.output], gate: entry.name });
+          const classified = settled.value.classifiedDiagnostics;
+          if (classified?.length) {
+            newFixes.push(...classifiedToPendingFixes(classified));
+          } else {
+            newFixes.push({ file, errors: [settled.value.output], gate: entry.name });
+          }
           try {
             const count = incrementGateFailure(file, entry.name);
             if (count >= 3) {
@@ -3687,9 +4337,65 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
   } catch {}
   try {
     const exportFixes = detectExportBreakingChanges(file);
-    newFixes.push(...exportFixes);
+    if (exportFixes.length > 0) {
+      newFixes.push(...exportFixes);
+      try {
+        const consumers = findImporters(file, process.cwd());
+        for (const consumer of consumers) {
+          const removedNames = exportFixes.flatMap((f) => f.errors.map((e) => {
+            const m = e.match(/export "(\w+)" was removed/);
+            return m ? m[1] : null;
+          }).filter(Boolean));
+          newFixes.push({
+            file: consumer,
+            errors: [
+              `Consumer may be broken: ${file} removed exports [${removedNames.join(", ")}]. Update imports.`
+            ],
+            gate: "export-check"
+          });
+        }
+      } catch {}
+    }
   } catch {}
-  const existingFixKeys = new Set(readPendingFixes().map((f) => `${resolve4(f.file)}:${f.gate}`));
+  try {
+    const plan = getActivePlan();
+    if (plan?.tasks) {
+      for (const task of plan.tasks) {
+        if (!task.verify || !task.file)
+          continue;
+        if (resolve5(task.file) !== resolve5(file))
+          continue;
+        const parsed = parseVerifyField2(task.verify);
+        if (!parsed)
+          continue;
+        const absTestFile = resolve5(parsed.testFile);
+        if (!validateTestFileExists(absTestFile)) {
+          newFixes.push({
+            file,
+            errors: [`Verify test not found: ${parsed.testFile}. Create the test file first.`],
+            gate: "spec-trace-check"
+          });
+        } else if (!validateTestFunctionExists(absTestFile, parsed.testFunction)) {
+          newFixes.push({
+            file,
+            errors: [
+              `Verify test function "${parsed.testFunction}" not found in ${parsed.testFile}. Create the test first.`
+            ],
+            gate: "spec-trace-check"
+          });
+        } else if (!validateTestCoversImpl(absTestFile, parsed.testFunction, file, process.cwd())) {
+          newFixes.push({
+            file,
+            errors: [
+              `Verify test ${parsed.testFile} does not import ${file}. Test must cover the implementation.`
+            ],
+            gate: "spec-trace-check"
+          });
+        }
+      }
+    }
+  } catch {}
+  const existingFixKeys = new Set(readPendingFixes().map((f) => `${resolve5(f.file)}:${f.gate}`));
   const fileName = file.split("/").pop() ?? "";
   const isTestFile3 = fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_") || fileName.includes("_test.");
   try {
@@ -3816,17 +4522,48 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
     }
   } catch {}
   try {
+    if (!isTestFile3 && !isGateDisabled("missing-test-warning")) {
+      const testFile = resolveTestFile(file);
+      if (!testFile) {
+        process.stderr.write(`[qult] missing-test-warning: No test file for ${file}
+`);
+      }
+    }
+  } catch {}
+  try {
     if (!isGateDisabled("security-check-advisory")) {
       const editCount = incrementFileEditCount(file);
-      const projectRoot = resolve4(process.cwd());
+      const projectRoot = resolve5(process.cwd());
       if (editCount >= config.escalation.security_iterative_threshold && file.startsWith(`${projectRoot}/`)) {
-        const fileContent = readFileSync9(file, "utf-8");
+        const fileContent = readFileSync11(file, "utf-8");
         const advisoryFixes = getAdvisoryAsPendingFixes(file, fileContent);
         if (advisoryFixes.length > 0) {
           newFixes.push(...advisoryFixes);
-          const relative = file.split("/").slice(-3).join("/");
-          process.stderr.write(`[qult] Iterative security escalation: ${relative} edited ${editCount} times \u2014 advisory patterns promoted to blocking
+          const relative2 = file.split("/").slice(-3).join("/");
+          process.stderr.write(`[qult] Iterative security escalation: ${relative2} edited ${editCount} times \u2014 advisory patterns promoted to blocking
 `);
+        }
+      }
+    }
+  } catch {}
+  try {
+    const config2 = loadConfig();
+    if (config2.gates.consumer_typecheck) {
+      const gates2 = loadGates();
+      const typecheckGate = gates2?.on_write?.typecheck;
+      if (typecheckGate?.run_once_per_batch) {} else if (typecheckGate) {
+        const importers = findImporters(file, process.cwd(), config2.gates.import_graph_depth);
+        const consumerResults = await Promise.allSettled(importers.map((imp) => runGateAsync("typecheck", typecheckGate, imp)));
+        for (let ci = 0;ci < consumerResults.length; ci++) {
+          const cr = consumerResults[ci];
+          if (cr.status === "fulfilled" && !cr.value.passed) {
+            const classified = cr.value.classifiedDiagnostics;
+            if (classified?.length) {
+              newFixes.push(...classifiedToPendingFixes(classified));
+            } else {
+              newFixes.push({ file: importers[ci], errors: [cr.value.output], gate: "typecheck" });
+            }
+          }
         }
       }
     }
@@ -3878,7 +4615,7 @@ function checkOverEngineering() {
   const changed = state.changed_file_paths ?? [];
   const totalChanged = changed.length;
   const cwd = process.cwd();
-  const planFiles = new Set(plan.tasks.filter((t) => t.file).map((t) => resolve4(cwd, t.file)));
+  const planFiles = new Set(plan.tasks.filter((t) => t.file).map((t) => resolve5(cwd, t.file)));
   const unplannedCount = changed.filter((f) => !planFiles.has(f)).length;
   const planTaskCount = plan.tasks.filter((t) => t.file).length;
   const overEngThreshold = loadConfig().review.required_changed_files;
@@ -3915,7 +4652,7 @@ function buildTestFileCommand(testCommand, testFile) {
     return `${testCommand} ${escaped}`;
   }
   if (/\bgo\s+test\b/.test(testCommand)) {
-    return `go test -v -run . ${shellEscape(dirname6(testFile))}`;
+    return `go test -v -run . ${shellEscape(dirname8(testFile))}`;
   }
   if (/\bmocha\b/.test(testCommand)) {
     return `${testCommand} ${escaped}`;
@@ -4045,11 +4782,14 @@ var init_post_tool = __esm(() => {
   init_session_state();
   init_convention_check();
   init_dead_import_check();
+  init_diagnostic_classifier();
   init_duplication_check();
   init_export_check();
   init_import_check();
+  init_import_graph();
   init_security_check();
   init_semantic_check();
+  init_spec_trace_check();
   init_test_file_resolver();
   init_test_quality_check();
   init_respond();
@@ -4064,7 +4804,7 @@ var exports_pre_tool = {};
 __export(exports_pre_tool, {
   default: () => preTool
 });
-import { resolve as resolve5 } from "path";
+import { resolve as resolve6 } from "path";
 async function preTool(ev) {
   const tool = ev.tool_name;
   if (tool === "EnterPlanMode") {
@@ -4096,10 +4836,10 @@ function checkEditWrite(ev) {
   const targetFile = typeof ev.tool_input?.file_path === "string" ? ev.tool_input.file_path : null;
   if (!targetFile)
     return;
-  const resolvedTarget = resolve5(targetFile);
+  const resolvedTarget = resolve6(targetFile);
   const fixes = readPendingFixes();
   if (fixes.length > 0) {
-    const isFixingPendingFile = fixes.some((f) => resolve5(f.file) === resolvedTarget);
+    const isFixingPendingFile = fixes.some((f) => resolve6(f.file) === resolvedTarget);
     if (!isFixingPendingFile) {
       const fileList = fixes.map((f) => {
         const totalErrors = f.errors.length;
@@ -4142,7 +4882,7 @@ function suggestTaskCreate(resolvedTarget) {
   for (const task of plan.tasks) {
     if (!task.file)
       continue;
-    const taskFile = resolve5(cwd, task.file);
+    const taskFile = resolve6(cwd, task.file);
     if (resolvedTarget === taskFile) {
       process.stderr.write(`[qult] Plan task detected for ${task.file}. Use TaskCreate to track progress and enable Verify test execution.
 `);
@@ -4157,11 +4897,11 @@ function checkTaskDrift(resolvedTarget) {
   if (driftWarnedFiles.has(resolvedTarget))
     return;
   const cwd = process.cwd();
-  const planFiles = new Set(plan.tasks.filter((t) => t.file).map((t) => resolve5(cwd, t.file)));
+  const planFiles = new Set(plan.tasks.filter((t) => t.file).map((t) => resolve6(cwd, t.file)));
   if (planFiles.has(resolvedTarget))
     return;
-  const relative = resolvedTarget.startsWith(cwd) ? resolvedTarget.slice(cwd.length + 1) : resolvedTarget;
-  process.stderr.write(`[qult] Task drift: ${sanitizeForStderr(relative)} is not in the current plan scope.
+  const relative2 = resolvedTarget.startsWith(cwd) ? resolvedTarget.slice(cwd.length + 1) : resolvedTarget;
+  process.stderr.write(`[qult] Task drift: ${sanitizeForStderr(relative2)} is not in the current plan scope.
 `);
   driftWarnedFiles.add(resolvedTarget);
 }
@@ -4177,10 +4917,10 @@ function checkTddOrder(resolvedTarget) {
     const parsed = parseVerifyField(task.verify);
     if (!parsed)
       continue;
-    const implFile = resolve5(cwd, task.file);
+    const implFile = resolve6(cwd, task.file);
     if (resolvedTarget !== implFile)
       continue;
-    const testFile = resolve5(cwd, parsed.file);
+    const testFile = resolve6(cwd, parsed.file);
     if (resolvedTarget === testFile)
       return;
     if (!changed.includes(testFile)) {
@@ -4420,8 +5160,8 @@ var init_stop = __esm(() => {
 });
 
 // src/hooks/subagent-stop/claim-grounding.ts
-import { existsSync as existsSync10, readFileSync as readFileSync10, statSync as statSync3 } from "fs";
-import { join as join6 } from "path";
+import { existsSync as existsSync12, readFileSync as readFileSync12, statSync as statSync4 } from "fs";
+import { join as join7 } from "path";
 function groundClaims(output, cwd) {
   try {
     const ungrounded = [];
@@ -4430,13 +5170,13 @@ function groundClaims(output, cwd) {
       total++;
       const filePath = match[2];
       const description = match[4] ?? "";
-      const absPath = join6(cwd, filePath);
+      const absPath = join7(cwd, filePath);
       const normalizedCwd = cwd.replace(/\/+$/, "");
       if (!absPath.startsWith(`${normalizedCwd}/`)) {
         ungrounded.push(`Path traversal rejected: ${filePath}`);
         continue;
       }
-      if (!existsSync10(absPath)) {
+      if (!existsSync12(absPath)) {
         ungrounded.push(`File not found: ${filePath}`);
         continue;
       }
@@ -4445,10 +5185,10 @@ function groundClaims(output, cwd) {
         const funcName = funcMatch[1];
         if (!fileContent) {
           try {
-            const size = statSync3(absPath).size;
-            if (size > MAX_FILE_SIZE)
+            const size = statSync4(absPath).size;
+            if (size > MAX_FILE_SIZE2)
               break;
-            fileContent = readFileSync10(absPath, "utf-8");
+            fileContent = readFileSync12(absPath, "utf-8");
           } catch {
             break;
           }
@@ -4465,7 +5205,7 @@ function groundClaims(output, cwd) {
     return { total: 0, ungrounded: [] };
   }
 }
-var FINDING_FILE_RE, FUNC_REF_RE, MAX_FILE_SIZE = 500000;
+var FINDING_FILE_RE, FUNC_REF_RE, MAX_FILE_SIZE2 = 500000;
 var init_claim_grounding = __esm(() => {
   FINDING_FILE_RE = /\[(critical|high|medium|low)\]\s+((?:[^\s:]+\/[^\s:]+|[^\s:]+\.\w{1,5}))(?::(\d+))?\s+[\u2014\u2013]\s+(.+?)(?:\n|$)/gi;
   FUNC_REF_RE = /`([a-zA-Z_$][a-zA-Z0-9_$]*)`/g;
@@ -4781,11 +5521,11 @@ var init_plan_validators = __esm(() => {
 });
 
 // src/hooks/subagent-stop/score-parsers.ts
-function escapeRegex2(s) {
+function escapeRegex3(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function parseDimensionScore(output, name) {
-  const re = new RegExp(`${escapeRegex2(name)}[=:]\\s*(\\d+)`, "i");
+  const re = new RegExp(`${escapeRegex3(name)}[=:]\\s*(\\d+)`, "i");
   const m = re.exec(output);
   if (!m)
     return null;
@@ -4845,8 +5585,8 @@ var init_score_parsers = __esm(() => {
 
 // src/hooks/subagent-stop/agent-validators.ts
 import { execSync as execSync3 } from "child_process";
-import { existsSync as existsSync11, readdirSync as readdirSync4, readFileSync as readFileSync11, statSync as statSync4 } from "fs";
-import { join as join7, normalize } from "path";
+import { existsSync as existsSync13, readdirSync as readdirSync5, readFileSync as readFileSync13, statSync as statSync5 } from "fs";
+import { join as join8, normalize } from "path";
 function checkReadOnlyViolation(normalized) {
   if (!READ_ONLY_REVIEWERS.has(normalized))
     return;
@@ -4940,16 +5680,16 @@ async function subagentStop(ev) {
 }
 function validatePlan() {
   try {
-    const planDir = join7(process.cwd(), ".claude", "plans");
-    if (!existsSync11(planDir))
+    const planDir = join8(process.cwd(), ".claude", "plans");
+    if (!existsSync13(planDir))
       return;
-    const files = readdirSync4(planDir).filter((f) => f.endsWith(".md")).map((f) => ({
+    const files = readdirSync5(planDir).filter((f) => f.endsWith(".md")).map((f) => ({
       name: f,
-      mtime: statSync4(join7(planDir, f)).mtimeMs
+      mtime: statSync5(join8(planDir, f)).mtimeMs
     })).sort((a, b) => b.mtime - a.mtime);
     if (files.length === 0)
       return;
-    const content = readFileSync11(join7(planDir, files[0].name), "utf-8");
+    const content = readFileSync13(join8(planDir, files[0].name), "utf-8");
     const structErrors = validatePlanStructure(content);
     if (structErrors.length > 0) {
       block(`Plan structural issues:
@@ -5389,13 +6129,13 @@ var init_task_completed = __esm(() => {
 });
 
 // src/gates/detect.ts
-import { existsSync as existsSync12, readFileSync as readFileSync12 } from "fs";
-import { join as join8 } from "path";
+import { existsSync as existsSync14, readFileSync as readFileSync14 } from "fs";
+import { join as join9 } from "path";
 function isReachable(exe, root) {
   if (!/^[a-zA-Z0-9_-]+$/.test(exe))
     return false;
-  const nodeModulesBin = join8(root, "node_modules", ".bin", exe);
-  if (existsSync12(nodeModulesBin))
+  const nodeModulesBin = join9(root, "node_modules", ".bin", exe);
+  if (existsSync14(nodeModulesBin))
     return true;
   try {
     const { execFileSync } = __require("child_process");
@@ -5570,14 +6310,14 @@ var exports_session_start = {};
 __export(exports_session_start, {
   default: () => sessionStart
 });
-import { existsSync as existsSync13 } from "fs";
-import { join as join9 } from "path";
+import { existsSync as existsSync15 } from "fs";
+import { join as join10 } from "path";
 async function sessionStart(ev) {
   try {
     if (!_legacyWarned) {
       _legacyWarned = true;
       const cwd = ev.cwd ?? process.cwd();
-      if (existsSync13(join9(cwd, ".qult"))) {
+      if (existsSync15(join10(cwd, ".qult"))) {
         process.stderr.write(`[qult] Legacy .qult/ directory detected. State is now stored in ~/.qult/qult.db. You can safely delete .qult/ from this project.
 `);
       }
@@ -5655,8 +6395,8 @@ var exports_post_compact = {};
 __export(exports_post_compact, {
   default: () => postCompact
 });
-import { existsSync as existsSync14, readdirSync as readdirSync5, readFileSync as readFileSync13, statSync as statSync5 } from "fs";
-import { join as join10 } from "path";
+import { existsSync as existsSync16, readdirSync as readdirSync6, readFileSync as readFileSync15, statSync as statSync6 } from "fs";
+import { join as join11 } from "path";
 async function postCompact(_ev) {
   try {
     const parts = [];
@@ -5703,11 +6443,11 @@ async function postCompact(_ev) {
       parts.push(`[qult] Session: ${summary.join(", ")}`);
     }
     try {
-      const planDir = join10(process.cwd(), ".claude", "plans");
-      if (existsSync14(planDir)) {
-        const planFiles = readdirSync5(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync5(join10(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
+      const planDir = join11(process.cwd(), ".claude", "plans");
+      if (existsSync16(planDir)) {
+        const planFiles = readdirSync6(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync6(join11(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
         if (planFiles.length > 0) {
-          const content = readFileSync13(join10(planDir, planFiles[0].name), "utf-8");
+          const content = readFileSync15(join11(planDir, planFiles[0].name), "utf-8");
           const taskCount = (content.match(/^###\s+Task\s+\d+/gim) ?? []).length;
           const doneCount = (content.match(/^###\s+Task\s+\d+.*\[done\]/gim) ?? []).length;
           if (taskCount > 0) {
@@ -5781,13 +6521,13 @@ async function dispatch(event) {
   }
   let input;
   try {
-    input = await new Promise((resolve6, reject) => {
+    input = await new Promise((resolve7, reject) => {
       let data = "";
       process.stdin.setEncoding("utf-8");
       process.stdin.on("data", (chunk) => {
         data += chunk;
       });
-      process.stdin.on("end", () => resolve6(data));
+      process.stdin.on("end", () => resolve7(data));
       process.stdin.on("error", reject);
     });
   } catch {

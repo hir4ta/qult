@@ -96,7 +96,8 @@ describe("runGateAsync", () => {
 	});
 
 	it("classifies typecheck output when gate name is typecheck", async () => {
-		const tscOutput = "src/foo.ts(10,5): error TS2339: Property 'bar' does not exist on type 'Foo'.";
+		const tscOutput =
+			"src/foo.ts(10,5): error TS2339: Property 'bar' does not exist on type 'Foo'.";
 		const result = await runGateAsync("typecheck", {
 			command: `echo '${tscOutput}' >&2 && exit 1`,
 			timeout: 3000,

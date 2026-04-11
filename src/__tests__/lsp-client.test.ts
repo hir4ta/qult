@@ -1,5 +1,5 @@
-import { type ChildProcess, spawn } from "node:child_process";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { spawn } from "node:child_process";
+import { describe, expect, it } from "vitest";
 import { LspClient } from "../lsp/client.ts";
 
 describe("LspClient", () => {
