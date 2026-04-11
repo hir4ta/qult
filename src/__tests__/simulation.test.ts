@@ -2803,6 +2803,55 @@ describe("dep-vuln-check simulation", () => {
 });
 
 // ============================================================
+// Flywheel auto-apply — raises threshold after stable low-frequency pattern
+// ============================================================
+
+describe("Scenario: Flywheel auto-apply raises threshold for stable low-frequency metric", () => {
+	it("inserts 20 low-frequency sessions and auto-applies raised threshold", async () => {
+		const db = getDb();
+		const projectId = getProjectId();
+
+		// Insert 20 sessions with security_warnings=0 (stable, low frequency)
+		for (let i = 0; i < 20; i++) {
+			db.prepare(
+				`INSERT INTO session_metrics (session_id, project_id, gate_failure_count, security_warning_count, review_aggregate, files_changed, test_quality_warning_count, duplication_warning_count, semantic_warning_count, drift_warning_count, escalation_hit)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			).run(`flywheel-session-${i}`, projectId, 0, 0, null, 1, 0, 0, 0, 0, 0);
+		}
+
+		const { DEFAULTS } = await import("../config.ts");
+		const cfg = structuredClone(DEFAULTS);
+		cfg.flywheel.enabled = true;
+		cfg.flywheel.auto_apply = true;
+		cfg.flywheel.min_sessions = 10;
+
+		const {
+			readMetricsHistory,
+			getFlywheelRecommendations,
+			applyFlywheelRecommendations,
+		} = await import("../state/metrics.ts");
+
+		const hist = readMetricsHistory();
+		expect(hist.length).toBeGreaterThanOrEqual(20);
+
+		const recs = getFlywheelRecommendations(hist, cfg);
+		const securityRec = recs.find((r) => r.metric === "security");
+		expect(securityRec).toBeDefined();
+		expect(securityRec!.direction).toBe("raise");
+
+		const result = applyFlywheelRecommendations(recs, cfg);
+		expect(result.applied.length).toBeGreaterThan(0);
+
+		// Verify written to global_configs
+		const row = db
+			.prepare("SELECT value FROM global_configs WHERE key = ?")
+			.get("escalation.security_threshold") as { value: string } | null;
+		expect(row).not.toBeNull();
+		expect(JSON.parse(row!.value)).toBeGreaterThan(cfg.escalation.security_threshold);
+	});
+});
+
+// ============================================================
 // AST Dataflow detection — detects tainted variable flow to eval
 // ============================================================
 

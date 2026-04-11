@@ -53,6 +53,20 @@ function resolveWasmPath(filename: string): string | null {
 	return null;
 }
 
+/** Shared Tree-sitter AST node interface used by all detectors. */
+export interface TSNode {
+	type: string;
+	text: string;
+	startPosition: { row: number; column: number };
+	endPosition: { row: number; column: number };
+	childCount: number;
+	children: TSNode[];
+	child(index: number): TSNode | null;
+	namedChildren: TSNode[];
+	namedChild(index: number): TSNode | null;
+	childForFieldName(name: string): TSNode | null;
+}
+
 export interface ParserResult {
 	parser: import("web-tree-sitter").Parser;
 	language: import("web-tree-sitter").Language;

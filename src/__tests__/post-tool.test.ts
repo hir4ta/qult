@@ -1131,3 +1131,56 @@ describe("classified diagnostics integration", () => {
 		expect(hasClassified).toBe(true);
 	});
 });
+
+describe("postTool: dataflow integration", () => {
+	it("creates pending-fix with dataflow-check gate for tainted eval", async () => {
+		saveGates({
+			on_write: {
+				lint: { command: "echo 'OK' && exit 0", timeout: 3000 },
+			},
+		} as GatesConfig);
+		resetAllCaches();
+
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		const file = join(TEST_DIR, "src/tainted.ts");
+		writeFileSync(file, "const x = req.body;\neval(x);\n");
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: file },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const fixes = readPendingFixes();
+		expect(fixes.some((f) => f.gate === "dataflow-check")).toBe(true);
+		expect(fixes.some((f) => f.errors.some((e) => e.includes("eval")))).toBe(true);
+	});
+});
+
+describe("postTool: complexity advisory", () => {
+	it("writes complexity advisory to stderr for high-complexity function", async () => {
+		saveGates({
+			on_write: {
+				lint: { command: "echo 'OK' && exit 0", timeout: 3000 },
+			},
+		} as GatesConfig);
+		resetAllCaches();
+
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		const file = join(TEST_DIR, "src/complex.ts");
+		// Generate a function with 20+ if statements for high cyclomatic complexity
+		const ifs = Array.from({ length: 22 }, (_, i) => `  if (x === ${i}) return ${i};`).join("\n");
+		writeFileSync(file, `function complexFn(x: number): number {\n${ifs}\n  return -1;\n}\n`);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Edit",
+			tool_input: { file_path: file },
+		});
+
+		const stderr = stderrCapture.join("");
+		expect(stderr).toContain("Complexity advisory");
+		expect(stderr).toContain("complexFn");
+	});
+});

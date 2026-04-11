@@ -302,6 +302,33 @@ describe("handleTool: disable_gate / enable_gate", () => {
 		expect(r3.content[0]!.text).toContain("disabled");
 	});
 
+	it("disable_gate accepts dataflow-check, complexity-check, and mutation-test gate names", () => {
+		const r1 = handleTool("disable_gate", TEST_DIR, {
+			gate_name: "dataflow-check",
+			reason: "Dataflow check causing false positives",
+		});
+		expect(r1.isError).toBeUndefined();
+		expect(r1.content[0]!.text).toContain("disabled");
+
+		handleTool("enable_gate", TEST_DIR, { gate_name: "dataflow-check" });
+
+		const r2 = handleTool("disable_gate", TEST_DIR, {
+			gate_name: "complexity-check",
+			reason: "Complexity check not needed for this task",
+		});
+		expect(r2.isError).toBeUndefined();
+		expect(r2.content[0]!.text).toContain("disabled");
+
+		handleTool("enable_gate", TEST_DIR, { gate_name: "complexity-check" });
+
+		const r3 = handleTool("disable_gate", TEST_DIR, {
+			gate_name: "mutation-test",
+			reason: "Mutation testing too slow for quick fix",
+		});
+		expect(r3.isError).toBeUndefined();
+		expect(r3.content[0]!.text).toContain("disabled");
+	});
+
 	it("disable_gate accepts coverage gate name", () => {
 		const result = handleTool("disable_gate", TEST_DIR, {
 			gate_name: "coverage",

@@ -2,7 +2,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { extname } from "node:path";
 import { loadConfig } from "../../config.ts";
 import { isGateDisabled } from "../../state/session-state.ts";
-import { extToLanguage, initParser, type SupportedLanguage } from "./tree-sitter-init.ts";
+import {
+	extToLanguage,
+	initParser,
+	type SupportedLanguage,
+	type TSNode,
+} from "./tree-sitter-init.ts";
 
 const MAX_CHECK_SIZE = 500_000;
 
@@ -132,19 +137,6 @@ function getLanguageNodes(lang: SupportedLanguage): LanguageNodes {
 	}
 }
 
-// ── Tree-sitter node interface ──────────────────────────────
-
-interface TSNode {
-	type: string;
-	text: string;
-	startPosition: { row: number };
-	endPosition: { row: number };
-	childCount: number;
-	children: TSNode[];
-	namedChildren: TSNode[];
-	childForFieldName(name: string): TSNode | null;
-}
-
 /**
  * Compute cyclomatic and cognitive complexity for all functions in a file.
  * Uses Tree-sitter AST for accurate function boundary and control flow detection.
@@ -232,7 +224,7 @@ function findFunctions(
 
 		// Cyclomatic complexity: count decision points + 1
 		let cyclomatic = 1;
-		countBranches(node, langNodes, { count: 0 }, (_n) => {
+		countBranches(node, langNodes, (_n) => {
 			cyclomatic++;
 		});
 
@@ -251,7 +243,6 @@ function findFunctions(
 function countBranches(
 	node: TSNode,
 	langNodes: LanguageNodes,
-	_ctx: { count: number },
 	onBranch: (n: TSNode) => void,
 ): void {
 	// Count branch nodes
@@ -283,7 +274,7 @@ function countBranches(
 	for (const child of node.children) {
 		// Don't recurse into nested functions
 		if (!langNodes.functionTypes.includes(child.type)) {
-			countBranches(child, langNodes, _ctx, onBranch);
+			countBranches(child, langNodes, onBranch);
 		}
 	}
 }

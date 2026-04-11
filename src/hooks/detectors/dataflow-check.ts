@@ -4,7 +4,12 @@ import { isGateDisabled } from "../../state/session-state.ts";
 import type { PendingFix } from "../../types.ts";
 import { sanitizeForStderr } from "../sanitize.ts";
 import { getPatternsForLanguage } from "./dataflow-patterns.ts";
-import { extToLanguage, initParser, type SupportedLanguage } from "./tree-sitter-init.ts";
+import {
+	extToLanguage,
+	initParser,
+	type SupportedLanguage,
+	type TSNode,
+} from "./tree-sitter-init.ts";
 
 const MAX_CHECK_SIZE = 500_000;
 const MAX_HOPS = 3;
@@ -46,24 +51,24 @@ export async function detectDataflowIssues(file: string): Promise<PendingFix[]> 
 		if (!tree) return [];
 
 		const errors: string[] = [];
-		const rootNode = (tree as { rootNode: TreeSitterNode }).rootNode;
+		const rootNode = (tree as { rootNode: TSNode }).rootNode;
 
 		// Phase 1: Collect tainted variables and function definitions
 		const globalTainted = new Map<string, TaintedVar>();
-		const functionDefs = new Map<string, { params: string[]; bodyNode: TreeSitterNode }>();
+		const functionDefs = new Map<string, { params: string[]; bodyNode: TSNode }>();
 
-		collectTaintsAndFunctions(rootNode, patterns, lang, globalTainted, functionDefs, 0, content);
+		collectTaintsAndFunctions(rootNode, patterns, lang, globalTainted, functionDefs, 0);
 
 		// Phase 2: Propagate taint through assignments (multi-hop)
 		for (let hop = 1; hop <= MAX_HOPS; hop++) {
-			propagateTaint(rootNode, globalTainted, patterns, hop, content);
+			propagateTaint(rootNode, globalTainted, patterns, hop);
 		}
 
 		// Phase 3: Propagate through function calls
-		propagateThroughCalls(rootNode, globalTainted, functionDefs, patterns, content);
+		propagateThroughCalls(rootNode, globalTainted, functionDefs, patterns);
 
 		// Phase 4: Check sinks for tainted arguments
-		checkSinks(rootNode, globalTainted, patterns, errors, content);
+		checkSinks(rootNode, globalTainted, patterns, errors);
 
 		if (errors.length === 0) return [];
 
@@ -79,37 +84,22 @@ export async function detectDataflowIssues(file: string): Promise<PendingFix[]> 
 	}
 }
 
-// ── Internal types ──────────────────────────────────────────
-
-interface TreeSitterNode {
-	type: string;
-	text: string;
-	startPosition: { row: number; column: number };
-	childCount: number;
-	children: TreeSitterNode[];
-	child(index: number): TreeSitterNode | null;
-	namedChildren: TreeSitterNode[];
-	namedChild(index: number): TreeSitterNode | null;
-	childForFieldName(name: string): TreeSitterNode | null;
-}
-
 // ── Phase 1: Collect initial taint sources and function defs ──
 
 function collectTaintsAndFunctions(
-	node: TreeSitterNode,
+	node: TSNode,
 	patterns: ReturnType<typeof getPatternsForLanguage>,
 	lang: SupportedLanguage,
 	tainted: Map<string, TaintedVar>,
-	functions: Map<string, { params: string[]; bodyNode: TreeSitterNode }>,
+	functions: Map<string, { params: string[]; bodyNode: TSNode }>,
 	scopeDepth: number,
-	source: string,
 ): void {
 	if (!patterns) return;
 
 	// Check if this node is a variable declaration with a taint source
 	if (isVariableDeclaration(node, patterns, lang)) {
-		const varName = extractVarName(node, lang);
-		const initializer = extractInitializer(node, lang);
+		const varName = extractAssignTarget(node);
+		const initializer = extractAssignSource(node);
 		if (varName && initializer) {
 			for (const src of patterns.sources) {
 				if (src.textPattern.test(initializer.text)) {
@@ -135,18 +125,17 @@ function collectTaintsAndFunctions(
 	// Recurse into children
 	const newDepth = patterns.scopeNodes.includes(node.type) ? scopeDepth + 1 : scopeDepth;
 	for (const child of node.children) {
-		collectTaintsAndFunctions(child, patterns, lang, tainted, functions, newDepth, source);
+		collectTaintsAndFunctions(child, patterns, lang, tainted, functions, newDepth);
 	}
 }
 
 // ── Phase 2: Propagate taint through assignments ──
 
 function propagateTaint(
-	node: TreeSitterNode,
+	node: TSNode,
 	tainted: Map<string, TaintedVar>,
 	patterns: ReturnType<typeof getPatternsForLanguage>,
 	hop: number,
-	source: string,
 ): void {
 	if (!patterns) return;
 
@@ -181,23 +170,22 @@ function propagateTaint(
 	}
 
 	for (const child of node.children) {
-		propagateTaint(child, tainted, patterns, hop, source);
+		propagateTaint(child, tainted, patterns, hop);
 	}
 }
 
 // ── Phase 3: Propagate through function calls ──
 
 function propagateThroughCalls(
-	node: TreeSitterNode,
+	node: TSNode,
 	tainted: Map<string, TaintedVar>,
-	functions: Map<string, { params: string[]; bodyNode: TreeSitterNode }>,
+	functions: Map<string, { params: string[]; bodyNode: TSNode }>,
 	patterns: ReturnType<typeof getPatternsForLanguage>,
-	source: string,
 ): void {
 	if (!patterns) return;
 	if (!patterns.callNodes.includes(node.type)) {
 		for (const child of node.children) {
-			propagateThroughCalls(child, tainted, functions, patterns, source);
+			propagateThroughCalls(child, tainted, functions, patterns);
 		}
 		return;
 	}
@@ -242,18 +230,17 @@ function propagateThroughCalls(
 	}
 
 	for (const child of node.children) {
-		propagateThroughCalls(child, tainted, functions, patterns, source);
+		propagateThroughCalls(child, tainted, functions, patterns);
 	}
 }
 
 // ── Phase 4: Check sinks ──
 
 function checkSinks(
-	node: TreeSitterNode,
+	node: TSNode,
 	tainted: Map<string, TaintedVar>,
 	patterns: ReturnType<typeof getPatternsForLanguage>,
 	errors: string[],
-	source: string,
 ): void {
 	if (!patterns) return;
 
@@ -277,14 +264,14 @@ function checkSinks(
 	}
 
 	for (const child of node.children) {
-		checkSinks(child, tainted, patterns, errors, source);
+		checkSinks(child, tainted, patterns, errors);
 	}
 }
 
 // ── Helper functions ──────────────────────────────────────────
 
 function isVariableDeclaration(
-	node: TreeSitterNode,
+	node: TSNode,
 	patterns: ReturnType<typeof getPatternsForLanguage>,
 	lang: SupportedLanguage,
 ): boolean {
@@ -299,54 +286,8 @@ function isVariableDeclaration(
 	return false;
 }
 
-function extractVarName(node: TreeSitterNode, lang: SupportedLanguage): string | null {
-	// JS/TS: variable_declarator → name field
-	if (node.type === "variable_declarator") {
-		const nameNode = node.childForFieldName("name");
-		return nameNode?.text ?? null;
-	}
-	// Lexical declaration → first declarator
-	if (node.type === "lexical_declaration") {
-		const declarator = node.namedChildren.find((c) => c.type === "variable_declarator");
-		if (declarator) return extractVarName(declarator, lang);
-	}
-	// Python: assignment → left side
-	if (node.type === "assignment" || node.type === "expression_statement") {
-		const assignment = node.type === "assignment" ? node : node.namedChild(0);
-		if (assignment?.type === "assignment") {
-			const left = assignment.childForFieldName("left");
-			return left?.text ?? null;
-		}
-	}
-	// Go: short_var_declaration
-	if (node.type === "short_var_declaration") {
-		const left = node.childForFieldName("left");
-		return left?.text ?? null;
-	}
-	return null;
-}
-
-function extractInitializer(node: TreeSitterNode, lang: SupportedLanguage): TreeSitterNode | null {
-	if (node.type === "variable_declarator") {
-		return node.childForFieldName("value");
-	}
-	if (node.type === "lexical_declaration") {
-		const declarator = node.namedChildren.find((c) => c.type === "variable_declarator");
-		if (declarator) return extractInitializer(declarator, lang);
-	}
-	if (node.type === "assignment" || node.type === "expression_statement") {
-		const assignment = node.type === "assignment" ? node : node.namedChild(0);
-		if (assignment?.type === "assignment") {
-			return assignment.childForFieldName("right");
-		}
-	}
-	if (node.type === "short_var_declaration") {
-		return node.childForFieldName("right");
-	}
-	return null;
-}
-
-function extractAssignTarget(node: TreeSitterNode): string | null {
+/** Extract the target variable name from any assignment-like node. */
+function extractAssignTarget(node: TSNode): string | null {
 	if (node.type === "variable_declarator") {
 		return node.childForFieldName("name")?.text ?? null;
 	}
@@ -364,10 +305,15 @@ function extractAssignTarget(node: TreeSitterNode): string | null {
 	if (node.type === "short_var_declaration") {
 		return node.childForFieldName("left")?.text ?? null;
 	}
+	// Python: expression_statement wrapping assignment
+	if (node.type === "expression_statement") {
+		const child = node.namedChild(0);
+		if (child?.type === "assignment") return extractAssignTarget(child);
+	}
 	return null;
 }
 
-function extractAssignSource(node: TreeSitterNode): TreeSitterNode | null {
+function extractAssignSource(node: TSNode): TSNode | null {
 	if (node.type === "variable_declarator") {
 		return node.childForFieldName("value");
 	}
@@ -385,15 +331,20 @@ function extractAssignSource(node: TreeSitterNode): TreeSitterNode | null {
 	if (node.type === "short_var_declaration") {
 		return node.childForFieldName("right");
 	}
+	// Python: expression_statement wrapping assignment
+	if (node.type === "expression_statement") {
+		const child = node.namedChild(0);
+		if (child?.type === "assignment") return extractAssignSource(child);
+	}
 	return null;
 }
 
-function extractFunctionName(node: TreeSitterNode, _lang: SupportedLanguage): string | null {
+function extractFunctionName(node: TSNode, _lang: SupportedLanguage): string | null {
 	const nameNode = node.childForFieldName("name");
 	return nameNode?.text ?? null;
 }
 
-function extractParams(node: TreeSitterNode, _lang: SupportedLanguage): string[] {
+function extractParams(node: TSNode, _lang: SupportedLanguage): string[] {
 	const paramsNode = node.childForFieldName("parameters");
 	if (!paramsNode) return [];
 	return paramsNode.namedChildren
@@ -409,17 +360,17 @@ function extractParams(node: TreeSitterNode, _lang: SupportedLanguage): string[]
 		.filter((name) => name.length > 0);
 }
 
-function findBody(node: TreeSitterNode, _lang: SupportedLanguage): TreeSitterNode | null {
+function findBody(node: TSNode, _lang: SupportedLanguage): TSNode | null {
 	return node.childForFieldName("body");
 }
 
-function extractCallName(node: TreeSitterNode): string | null {
+function extractCallName(node: TSNode): string | null {
 	const funcNode = node.childForFieldName("function");
 	if (funcNode?.type === "identifier") return funcNode.text;
 	return null;
 }
 
-function extractCallArgs(node: TreeSitterNode): string[] {
+function extractCallArgs(node: TSNode): string[] {
 	const argsNode = node.childForFieldName("arguments");
 	if (!argsNode) {
 		// Fallback: look for argument_list or similar

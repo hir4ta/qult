@@ -6666,7 +6666,7 @@ function findFunctions(node, langNodes, results) {
     const line = node.startPosition.row + 1;
     const lineCount = node.endPosition.row - node.startPosition.row + 1;
     let cyclomatic = 1;
-    countBranches(node, langNodes, { count: 0 }, (_n) => {
+    countBranches(node, langNodes, (_n) => {
       cyclomatic++;
     });
     const cognitive = computeCognitive(node, langNodes, 0);
@@ -6676,7 +6676,7 @@ function findFunctions(node, langNodes, results) {
     findFunctions(child, langNodes, results);
   }
 }
-function countBranches(node, langNodes, _ctx, onBranch) {
+function countBranches(node, langNodes, onBranch) {
   if (langNodes.branchTypes.includes(node.type)) {
     onBranch(node);
   }
@@ -6692,7 +6692,7 @@ function countBranches(node, langNodes, _ctx, onBranch) {
   }
   for (const child of node.children) {
     if (!langNodes.functionTypes.includes(child.type)) {
-      countBranches(child, langNodes, _ctx, onBranch);
+      countBranches(child, langNodes, onBranch);
     }
   }
 }
@@ -7072,12 +7072,12 @@ async function detectDataflowIssues(file) {
     const rootNode = tree.rootNode;
     const globalTainted = new Map;
     const functionDefs = new Map;
-    collectTaintsAndFunctions(rootNode, patterns, lang, globalTainted, functionDefs, 0, content);
+    collectTaintsAndFunctions(rootNode, patterns, lang, globalTainted, functionDefs, 0);
     for (let hop = 1;hop <= MAX_HOPS; hop++) {
-      propagateTaint(rootNode, globalTainted, patterns, hop, content);
+      propagateTaint(rootNode, globalTainted, patterns, hop);
     }
-    propagateThroughCalls(rootNode, globalTainted, functionDefs, patterns, content);
-    checkSinks(rootNode, globalTainted, patterns, errors, content);
+    propagateThroughCalls(rootNode, globalTainted, functionDefs, patterns);
+    checkSinks(rootNode, globalTainted, patterns, errors);
     if (errors.length === 0)
       return [];
     return [
@@ -7091,12 +7091,12 @@ async function detectDataflowIssues(file) {
     return [];
   }
 }
-function collectTaintsAndFunctions(node, patterns, lang, tainted, functions, scopeDepth, source) {
+function collectTaintsAndFunctions(node, patterns, lang, tainted, functions, scopeDepth) {
   if (!patterns)
     return;
   if (isVariableDeclaration(node, patterns, lang)) {
-    const varName = extractVarName(node, lang);
-    const initializer = extractInitializer(node, lang);
+    const varName = extractAssignTarget(node);
+    const initializer = extractAssignSource(node);
     if (varName && initializer) {
       for (const src of patterns.sources) {
         if (src.textPattern.test(initializer.text)) {
@@ -7118,10 +7118,10 @@ function collectTaintsAndFunctions(node, patterns, lang, tainted, functions, sco
   }
   const newDepth = patterns.scopeNodes.includes(node.type) ? scopeDepth + 1 : scopeDepth;
   for (const child of node.children) {
-    collectTaintsAndFunctions(child, patterns, lang, tainted, functions, newDepth, source);
+    collectTaintsAndFunctions(child, patterns, lang, tainted, functions, newDepth);
   }
 }
-function propagateTaint(node, tainted, patterns, hop, source) {
+function propagateTaint(node, tainted, patterns, hop) {
   if (!patterns)
     return;
   const isDecl = node.type === "variable_declarator" || patterns.assignmentNodes.includes(node.type) || node.type === "assignment" || node.type === "short_var_declaration";
@@ -7148,15 +7148,15 @@ function propagateTaint(node, tainted, patterns, hop, source) {
     }
   }
   for (const child of node.children) {
-    propagateTaint(child, tainted, patterns, hop, source);
+    propagateTaint(child, tainted, patterns, hop);
   }
 }
-function propagateThroughCalls(node, tainted, functions, patterns, source) {
+function propagateThroughCalls(node, tainted, functions, patterns) {
   if (!patterns)
     return;
   if (!patterns.callNodes.includes(node.type)) {
     for (const child of node.children) {
-      propagateThroughCalls(child, tainted, functions, patterns, source);
+      propagateThroughCalls(child, tainted, functions, patterns);
     }
     return;
   }
@@ -7194,10 +7194,10 @@ function propagateThroughCalls(node, tainted, functions, patterns, source) {
     }
   }
   for (const child of node.children) {
-    propagateThroughCalls(child, tainted, functions, patterns, source);
+    propagateThroughCalls(child, tainted, functions, patterns);
   }
 }
-function checkSinks(node, tainted, patterns, errors, source) {
+function checkSinks(node, tainted, patterns, errors) {
   if (!patterns)
     return;
   for (const sink of patterns.sinks) {
@@ -7216,7 +7216,7 @@ function checkSinks(node, tainted, patterns, errors, source) {
     }
   }
   for (const child of node.children) {
-    checkSinks(child, tainted, patterns, errors, source);
+    checkSinks(child, tainted, patterns, errors);
   }
 }
 function isVariableDeclaration(node, patterns, lang) {
@@ -7233,49 +7233,6 @@ function isVariableDeclaration(node, patterns, lang) {
   }
   return false;
 }
-function extractVarName(node, lang) {
-  if (node.type === "variable_declarator") {
-    const nameNode = node.childForFieldName("name");
-    return nameNode?.text ?? null;
-  }
-  if (node.type === "lexical_declaration") {
-    const declarator = node.namedChildren.find((c) => c.type === "variable_declarator");
-    if (declarator)
-      return extractVarName(declarator, lang);
-  }
-  if (node.type === "assignment" || node.type === "expression_statement") {
-    const assignment = node.type === "assignment" ? node : node.namedChild(0);
-    if (assignment?.type === "assignment") {
-      const left = assignment.childForFieldName("left");
-      return left?.text ?? null;
-    }
-  }
-  if (node.type === "short_var_declaration") {
-    const left = node.childForFieldName("left");
-    return left?.text ?? null;
-  }
-  return null;
-}
-function extractInitializer(node, lang) {
-  if (node.type === "variable_declarator") {
-    return node.childForFieldName("value");
-  }
-  if (node.type === "lexical_declaration") {
-    const declarator = node.namedChildren.find((c) => c.type === "variable_declarator");
-    if (declarator)
-      return extractInitializer(declarator, lang);
-  }
-  if (node.type === "assignment" || node.type === "expression_statement") {
-    const assignment = node.type === "assignment" ? node : node.namedChild(0);
-    if (assignment?.type === "assignment") {
-      return assignment.childForFieldName("right");
-    }
-  }
-  if (node.type === "short_var_declaration") {
-    return node.childForFieldName("right");
-  }
-  return null;
-}
 function extractAssignTarget(node) {
   if (node.type === "variable_declarator") {
     return node.childForFieldName("name")?.text ?? null;
@@ -7289,6 +7246,11 @@ function extractAssignTarget(node) {
   }
   if (node.type === "short_var_declaration") {
     return node.childForFieldName("left")?.text ?? null;
+  }
+  if (node.type === "expression_statement") {
+    const child = node.namedChild(0);
+    if (child?.type === "assignment")
+      return extractAssignTarget(child);
   }
   return null;
 }
@@ -7305,6 +7267,11 @@ function extractAssignSource(node) {
   }
   if (node.type === "short_var_declaration") {
     return node.childForFieldName("right");
+  }
+  if (node.type === "expression_statement") {
+    const child = node.namedChild(0);
+    if (child?.type === "assignment")
+      return extractAssignSource(child);
   }
   return null;
 }
