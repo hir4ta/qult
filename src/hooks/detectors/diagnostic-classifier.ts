@@ -79,6 +79,20 @@ export const DIAGNOSTIC_MAP: Record<string, DiagnosticCategory> = {
 	// Cargo — type errors
 	E0308: "type-error", // mismatched types
 	E0277: "type-error", // the trait bound is not satisfied
+
+	// Mypy — hallucinated symbol/import
+	"name-defined": "hallucinated-symbol", // Name "X" is not defined
+	import: "hallucinated-import", // Cannot find implementation or library stub for module "X"
+	"import-untyped": "hallucinated-import", // Library stubs not installed for "X"
+	"attr-defined": "hallucinated-api", // "Foo" has no attribute "bar"
+
+	// Mypy — type errors
+	"arg-type": "type-error", // Argument of type "X" is not assignable
+	assignment: "type-error", // Incompatible types in assignment
+	"return-value": "type-error", // Incompatible return value type
+	override: "type-error", // Return type incompatible with supertype
+
+	// Go vet — not code-based but message-based (handled in parseGoVetOutput)
 };
 
 // tsc output format: file(line,col): error TSxxxx: message
@@ -161,6 +175,59 @@ export function parseCargoOutput(raw: string): ClassifiedDiagnostic[] {
 		} catch {
 			// skip malformed lines
 		}
+	}
+	return results;
+}
+
+// mypy output format: file:line: error: message [code]
+const MYPY_LINE_RE = /^(.+):(\d+):\s*error:\s*(.+?)\s*\[([^\]]+)\]$/;
+
+/** Parse mypy text output into classified diagnostics. */
+export function parseMypyOutput(raw: string): ClassifiedDiagnostic[] {
+	if (!raw) return [];
+	const results: ClassifiedDiagnostic[] = [];
+	for (const line of raw.split("\n")) {
+		const m = line.match(MYPY_LINE_RE);
+		if (!m) continue;
+		const [, file, lineStr, message, code] = m;
+		results.push({
+			code: code!,
+			category: (DIAGNOSTIC_MAP[code!] ?? "type-error") as DiagnosticCategory,
+			message: message!,
+			file: file!,
+			line: Number(lineStr),
+		});
+	}
+	return results;
+}
+
+// go vet output format: ./file.go:line:col: message
+const GO_VET_LINE_RE = /^\.?\/?([\w/.]+\.go):(\d+):\d+:\s*(.+)$/;
+
+/** Parse go vet text output into classified diagnostics.
+ *  Go vet doesn't use error codes — classify by message patterns. */
+export function parseGoVetOutput(raw: string): ClassifiedDiagnostic[] {
+	if (!raw) return [];
+	const results: ClassifiedDiagnostic[] = [];
+	for (const line of raw.split("\n")) {
+		const m = line.match(GO_VET_LINE_RE);
+		if (!m) continue;
+		const [, file, lineStr, message] = m;
+		let category: DiagnosticCategory = "type-error";
+		if (/undefined:|undeclared name:/.test(message!)) {
+			category = "hallucinated-symbol";
+		} else if (/could not import|cannot find package/.test(message!)) {
+			category = "hallucinated-import";
+		} else if (/has no field or method/.test(message!)) {
+			category = "hallucinated-api";
+		}
+		results.push({
+			code: "go-vet",
+			category,
+			message: message!,
+			file: file!,
+			line: Number(lineStr),
+		});
 	}
 	return results;
 }

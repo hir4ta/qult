@@ -3,6 +3,8 @@ import { loadConfig } from "../config.ts";
 import {
 	type ClassifiedDiagnostic,
 	parseCargoOutput,
+	parseGoVetOutput,
+	parseMypyOutput,
 	parsePyrightOutput,
 	parseTscOutput,
 } from "../hooks/detectors/diagnostic-classifier.ts";
@@ -195,12 +197,19 @@ function classifyTypecheckOutput(
 	try {
 		let diagnostics: ClassifiedDiagnostic[] = [];
 
-		// Try structured JSON parsers first (pyright, cargo)
-		// pyright JSON has generalDiagnostics, cargo JSONL has reason: "compiler-message"
+		// Try structured JSON parsers first
 		if (raw.includes('"generalDiagnostics"')) {
 			diagnostics = parsePyrightOutput(raw);
 		} else if (raw.includes('"compiler-message"')) {
 			diagnostics = parseCargoOutput(raw);
+		}
+
+		// Try language-specific text parsers
+		if (diagnostics.length === 0 && raw.includes(": error: ") && raw.includes("[")) {
+			diagnostics = parseMypyOutput(raw);
+		}
+		if (diagnostics.length === 0 && /\.go:\d+:\d+:/.test(raw)) {
+			diagnostics = parseGoVetOutput(raw);
 		}
 
 		// Fallback: tsc text output

@@ -447,6 +447,43 @@ export function analyzeTestQuality(file: string): TestQualityResult | null {
 		}
 	}
 
+	// ── New smell: thin-test (per-function assertion density) ──
+	// Extract individual test bodies and check assertion count
+	if (testCount >= 2) {
+		const testBodyRe = /\b(?:it|test)\s*\(\s*["'`]([^"'`]*)["'`]/g;
+		const assertRe = /\b(?:expect|assert|should)\s*[.(]/g;
+		const testBodies: { name: string; start: number; assertions: number }[] = [];
+
+		for (const match of codeOnly.matchAll(testBodyRe)) {
+			if (testBodies.length > 0) {
+				const prev = testBodies[testBodies.length - 1]!;
+				const body = codeOnly.slice(prev.start, match.index);
+				prev.assertions = (body.match(assertRe) ?? []).length;
+			}
+			testBodies.push({ name: match[1]!, start: match.index!, assertions: 0 });
+		}
+		// Last test body extends to end
+		if (testBodies.length > 0) {
+			const last = testBodies[testBodies.length - 1]!;
+			const body = codeOnly.slice(last.start);
+			last.assertions = (body.match(assertRe) ?? []).length;
+		}
+
+		for (const tb of testBodies) {
+			if (tb.assertions === 0) {
+				// empty-test is already caught separately
+				continue;
+			}
+			if (tb.assertions === 1 && testCount >= 3) {
+				smells.push({
+					type: "thin-test",
+					line: 0,
+					message: `Test "${tb.name}" has only 1 assertion — consider adding edge case/boundary assertions`,
+				});
+			}
+		}
+	}
+
 	// ── New smell: concentrated-pattern ──────────────────────
 	// If 80%+ of assertions use the same matcher name (e.g., all use .toBe)
 	if (testCount >= 5 && assertionCount >= 5) {

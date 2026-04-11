@@ -38,6 +38,7 @@ import {
 	parseVerifyField,
 	validateTestCoversImpl,
 	validateTestFileExists,
+	validateTestFunctionExists,
 } from "./detectors/spec-trace-check.ts";
 import { resolveTestFile } from "./detectors/test-file-resolver.ts";
 import {
@@ -203,6 +204,14 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 					newFixes.push({
 						file,
 						errors: [`Verify test not found: ${parsed.testFile}. Create the test file first.`],
+						gate: "spec-trace-check",
+					});
+				} else if (!validateTestFunctionExists(absTestFile, parsed.testFunction)) {
+					newFixes.push({
+						file,
+						errors: [
+							`Verify test function "${parsed.testFunction}" not found in ${parsed.testFile}. Create the test first.`,
+						],
 						gate: "spec-trace-check",
 					});
 				} else if (!validateTestCoversImpl(absTestFile, parsed.testFunction, file, process.cwd())) {
@@ -377,6 +386,18 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 						process.stderr.write(`[qult] test-on-edit: ${testFile} PASS\n`);
 					}
 				}
+			}
+		}
+	} catch {
+		/* fail-open */
+	}
+
+	// Missing test file warning: flag implementation files without corresponding tests
+	try {
+		if (!isTestFile && !isGateDisabled("missing-test-warning")) {
+			const testFile = resolveTestFile(file);
+			if (!testFile) {
+				process.stderr.write(`[qult] missing-test-warning: No test file for ${file}\n`);
 			}
 		}
 	} catch {

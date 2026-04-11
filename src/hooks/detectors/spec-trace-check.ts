@@ -58,6 +58,36 @@ export function validateTestCoversImpl(
 	}
 }
 
+/**
+ * Validate that a specific test function/describe block exists in the test file.
+ * Searches for it('name'), test('name'), describe('name'), or def test_name() patterns.
+ */
+export function validateTestFunctionExists(testFile: string, functionName: string): boolean {
+	if (!existsSync(testFile)) return false;
+	try {
+		const content = readFileSync(testFile, "utf-8");
+		const ext = testFile.split(".").pop()?.toLowerCase() ?? "";
+
+		if (ext === "py") {
+			// Python: def test_xxx() or def xxx()
+			const pyRe = /\bdef\s+(\w+)\s*\(/g;
+			for (const m of content.matchAll(pyRe)) {
+				if (m[1] === functionName) return true;
+			}
+			return false;
+		}
+
+		// TS/JS: it('...'), test('...'), describe('...')
+		const jsRe = /\b(?:it|test|describe)\s*\(\s*["'`]([^"'`]*)["'`]/g;
+		for (const m of content.matchAll(jsRe)) {
+			if (m[1] === functionName || m[1]?.includes(functionName)) return true;
+		}
+		return false;
+	} catch {
+		return false;
+	}
+}
+
 function escapeRegex(s: string): string {
 	return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

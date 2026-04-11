@@ -6,6 +6,7 @@ import {
 	parseVerifyField,
 	validateTestCoversImpl,
 	validateTestFileExists,
+	validateTestFunctionExists,
 } from "../hooks/detectors/spec-trace-check.ts";
 
 const TEST_DIR = join(tmpdir(), ".qult-spec-trace-test");
@@ -100,5 +101,43 @@ describe("validateTestCoversImpl", () => {
 		writeFileSync(testFile, 'import { foo } from "../utils.ts";\nit("testFoo", () => { foo(); });');
 
 		expect(validateTestCoversImpl(testFile, "testFoo", implFile, TEST_DIR)).toBe(true);
+	});
+});
+
+describe("validateTestFunctionExists", () => {
+	it("finds it() test function by name", () => {
+		const testFile = join(TEST_DIR, "src", "__tests__", "foo.test.ts");
+		writeFileSync(
+			testFile,
+			`it("handles edge case", () => { expect(1).toBe(1); });\nit("normal case", () => {});`,
+		);
+		expect(validateTestFunctionExists(testFile, "handles edge case")).toBe(true);
+		expect(validateTestFunctionExists(testFile, "nonexistent")).toBe(false);
+	});
+
+	it("finds test() function by name", () => {
+		const testFile = join(TEST_DIR, "src", "__tests__", "bar.test.ts");
+		writeFileSync(testFile, `test("should work", () => { expect(true).toBe(true); });`);
+		expect(validateTestFunctionExists(testFile, "should work")).toBe(true);
+	});
+
+	it("finds describe() block by name", () => {
+		const testFile = join(TEST_DIR, "src", "__tests__", "baz.test.ts");
+		writeFileSync(
+			testFile,
+			`describe("MyModule", () => { it("works", () => {}); });`,
+		);
+		expect(validateTestFunctionExists(testFile, "MyModule")).toBe(true);
+	});
+
+	it("finds Python test functions", () => {
+		const testFile = join(TEST_DIR, "src", "__tests__", "test_foo.py");
+		writeFileSync(testFile, `def test_handles_edge_case():\n    assert True`);
+		expect(validateTestFunctionExists(testFile, "test_handles_edge_case")).toBe(true);
+		expect(validateTestFunctionExists(testFile, "nonexistent")).toBe(false);
+	});
+
+	it("returns false for nonexistent file", () => {
+		expect(validateTestFunctionExists(join(TEST_DIR, "nope.test.ts"), "test")).toBe(false);
 	});
 });
