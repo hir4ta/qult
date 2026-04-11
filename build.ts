@@ -45,3 +45,38 @@ if (!mcpResult.success) {
 
 const total = hookResult.outputs.length + mcpResult.outputs.length;
 console.log(`Built ${total} file(s) to plugin/dist/`);
+
+// Copy WASM files for Tree-sitter (external assets, not bundled)
+import { cpSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+
+const wasmDir = "./plugin/wasm";
+mkdirSync(wasmDir, { recursive: true });
+
+let wasmCount = 0;
+
+// Copy web-tree-sitter engine WASM
+const treeSitterWasm = "./node_modules/web-tree-sitter/web-tree-sitter.wasm";
+if (existsSync(treeSitterWasm)) {
+	cpSync(treeSitterWasm, join(wasmDir, "web-tree-sitter.wasm"));
+	wasmCount++;
+}
+
+// Copy language grammar WASMs from @lumis-sh/wasm-*
+const lumisDir = "./node_modules/@lumis-sh";
+if (existsSync(lumisDir)) {
+	for (const pkg of readdirSync(lumisDir)) {
+		if (!pkg.startsWith("wasm-")) continue;
+		const pkgDir = join(lumisDir, pkg);
+		for (const file of readdirSync(pkgDir)) {
+			if (file.endsWith(".wasm")) {
+				cpSync(join(pkgDir, file), join(wasmDir, file));
+				wasmCount++;
+			}
+		}
+	}
+}
+
+if (wasmCount > 0) {
+	console.log(`Copied ${wasmCount} WASM file(s) to plugin/wasm/`);
+}

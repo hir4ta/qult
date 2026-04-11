@@ -344,7 +344,10 @@ var DEFAULTS = {
     extra_path: [],
     coverage_threshold: 0,
     consumer_typecheck: false,
-    import_graph_depth: 1
+    import_graph_depth: 1,
+    complexity_threshold: 15,
+    function_size_limit: 50,
+    mutation_score_threshold: 0
   },
   security: {
     require_semgrep: true,
@@ -361,7 +364,8 @@ var DEFAULTS = {
   },
   flywheel: {
     enabled: true,
-    min_sessions: 10
+    min_sessions: 10,
+    auto_apply: false
   }
 };
 function applyConfigLayer(config, raw) {
@@ -423,6 +427,12 @@ function applyConfigLayer(config, raw) {
       config.gates.consumer_typecheck = g.consumer_typecheck;
     if (typeof g.import_graph_depth === "number")
       config.gates.import_graph_depth = Math.max(1, Math.min(3, g.import_graph_depth));
+    if (typeof g.complexity_threshold === "number")
+      config.gates.complexity_threshold = Math.max(1, g.complexity_threshold);
+    if (typeof g.function_size_limit === "number")
+      config.gates.function_size_limit = Math.max(1, g.function_size_limit);
+    if (typeof g.mutation_score_threshold === "number")
+      config.gates.mutation_score_threshold = Math.max(0, Math.min(100, g.mutation_score_threshold));
   }
   if (raw.security && typeof raw.security === "object") {
     const s = raw.security;
@@ -454,6 +464,8 @@ function applyConfigLayer(config, raw) {
       config.flywheel.enabled = f.enabled;
     if (typeof f.min_sessions === "number")
       config.flywheel.min_sessions = Math.max(1, f.min_sessions);
+    if (typeof f.auto_apply === "boolean")
+      config.flywheel.auto_apply = f.auto_apply;
   }
 }
 function kvRowsToRaw(rows) {
@@ -542,6 +554,15 @@ function loadConfig() {
   const igDepth = envInt("QULT_IMPORT_GRAPH_DEPTH");
   if (igDepth !== undefined)
     config.gates.import_graph_depth = Math.max(1, Math.min(3, igDepth));
+  const complexityThreshold = envInt("QULT_COMPLEXITY_THRESHOLD");
+  if (complexityThreshold !== undefined)
+    config.gates.complexity_threshold = Math.max(1, complexityThreshold);
+  const funcSizeLimit = envInt("QULT_FUNCTION_SIZE_LIMIT");
+  if (funcSizeLimit !== undefined)
+    config.gates.function_size_limit = Math.max(1, funcSizeLimit);
+  const mutationScore = envInt("QULT_MUTATION_SCORE_THRESHOLD");
+  if (mutationScore !== undefined)
+    config.gates.mutation_score_threshold = Math.max(0, Math.min(100, mutationScore));
   const secEsc = envInt("QULT_ESCALATION_SECURITY");
   if (secEsc !== undefined)
     config.escalation.security_threshold = Math.max(1, secEsc);
@@ -591,6 +612,11 @@ function loadConfig() {
   const flywheelMin = envInt("QULT_FLYWHEEL_MIN_SESSIONS");
   if (flywheelMin !== undefined)
     config.flywheel.min_sessions = Math.max(1, flywheelMin);
+  const flywheelAutoApplyEnv = process.env.QULT_FLYWHEEL_AUTO_APPLY;
+  if (flywheelAutoApplyEnv === "1" || flywheelAutoApplyEnv === "true")
+    config.flywheel.auto_apply = true;
+  else if (flywheelAutoApplyEnv === "0" || flywheelAutoApplyEnv === "false")
+    config.flywheel.auto_apply = false;
   _cache = config;
   return config;
 }
@@ -820,6 +846,135 @@ function getFlywheelRecommendations(history, config) {
     }
   }
   return recs;
+}
+var METRIC_NAME_TO_CONFIG_KEY = {
+  security: "escalation.security_threshold",
+  "test quality": "escalation.test_quality_threshold",
+  duplication: "escalation.duplication_threshold",
+  semantic: "escalation.semantic_threshold",
+  drift: "escalation.drift_threshold"
+};
+function applyFlywheelRecommendations(recs, config) {
+  const applied = [];
+  const deferred = [];
+  if (!config.flywheel.auto_apply) {
+    return { applied: [], deferred: recs };
+  }
+  try {
+    const db = getDb();
+    for (const rec of recs) {
+      if (rec.direction !== "raise") {
+        deferred.push(rec);
+        continue;
+      }
+      const configKey = METRIC_NAME_TO_CONFIG_KEY[rec.metric];
+      if (!configKey) {
+        deferred.push(rec);
+        continue;
+      }
+      const existing = db.prepare("SELECT value FROM global_configs WHERE key = ?").get(configKey);
+      if (existing) {
+        deferred.push(rec);
+        continue;
+      }
+      db.prepare("INSERT INTO global_configs (key, value) VALUES (?, ?)").run(configKey, JSON.stringify(rec.suggested_threshold));
+      applied.push(rec);
+    }
+  } catch {
+    return { applied: [], deferred: recs };
+  }
+  return { applied, deferred };
+}
+var METRIC_SESSION_KEYS = {
+  security_warning_count: "security",
+  test_quality_warning_count: "test_quality",
+  duplication_warning_count: "duplication",
+  semantic_warning_count: "semantic",
+  drift_warning_count: "drift"
+};
+var RULE_TEMPLATES = {
+  security: {
+    filename: "security-recurring.md",
+    content: [
+      "# Security Recurring Patterns",
+      "",
+      "Security warnings are frequent across multiple projects.",
+      "Review common patterns: input validation, XSS prevention, SQL injection, SSRF.",
+      "Consider adding project-specific security rules in .claude/rules/security.md."
+    ].join(`
+`)
+  },
+  test_quality: {
+    filename: "test-quality-recurring.md",
+    content: [
+      "# Test Quality Recurring Patterns",
+      "",
+      "Test quality warnings are frequent across multiple projects.",
+      "Review: empty tests, always-true assertions, trivial assertions.",
+      "Consider enforcing minimum assertion counts per test."
+    ].join(`
+`)
+  },
+  duplication: {
+    filename: "duplication-recurring.md",
+    content: [
+      "# Duplication Recurring Patterns",
+      "",
+      "Code duplication warnings are frequent across multiple projects.",
+      "Review: copy-pasted code blocks, similar function signatures.",
+      "Consider extracting shared utilities when 3+ duplicates exist."
+    ].join(`
+`)
+  }
+};
+function transferKnowledge() {
+  const patterns = [];
+  const templates = [];
+  try {
+    const db = getDb();
+    const projects = db.prepare("SELECT DISTINCT project_id FROM session_metrics GROUP BY project_id HAVING COUNT(*) >= 5").all();
+    if (projects.length < 3) {
+      return { patterns, templates };
+    }
+    const metricColumns = [
+      "security_warning_count",
+      "test_quality_warning_count",
+      "duplication_warning_count",
+      "semantic_warning_count",
+      "drift_warning_count"
+    ];
+    for (const col of metricColumns) {
+      let projectsWithHighFreq = 0;
+      for (const project of projects) {
+        const rows = db.prepare(`SELECT ${col} as val FROM session_metrics WHERE project_id = ? ORDER BY id DESC LIMIT 10`).all(project.project_id);
+        if (rows.length < 5)
+          continue;
+        const nonZero = rows.filter((r) => r.val > 0).length;
+        const frequency = nonZero / rows.length;
+        if (frequency > 0.6) {
+          projectsWithHighFreq++;
+        }
+      }
+      if (projectsWithHighFreq >= 3) {
+        const metricName = METRIC_SESSION_KEYS[col] ?? col;
+        patterns.push(`${metricName}: high frequency across ${projectsWithHighFreq} projects`);
+        const configKey = METRIC_NAME_TO_CONFIG_KEY[metricName];
+        if (configKey) {
+          const existing = db.prepare("SELECT value FROM global_configs WHERE key = ?").get(configKey);
+          if (!existing) {
+            const currentDefault = metricName === "security" ? 10 : metricName === "drift" ? 8 : 8;
+            const newVal = Math.max(1, Math.floor(currentDefault * 0.7));
+            db.prepare("INSERT INTO global_configs (key, value) VALUES (?, ?)").run(configKey, JSON.stringify(newVal));
+          }
+        }
+        const template = RULE_TEMPLATES[metricName];
+        if (template) {
+          templates.push(template);
+        }
+      }
+    }
+  } catch {}
+  return { patterns, templates };
 }
 
 // src/harness-report.ts
@@ -2609,6 +2764,19 @@ function detectSemanticPatterns(file) {
   ];
 }
 
+// src/hooks/detectors/tree-sitter-init.ts
+var __dirname = "/Users/shunichi/Projects/qult/src/hooks/detectors";
+var _languageCache = new Map;
+
+// src/hooks/detectors/complexity-check.ts
+var _lastFile = null;
+var _lastResult = null;
+function computeComplexitySync(file) {
+  if (_lastFile === file && _lastResult)
+    return _lastResult;
+  return null;
+}
+
 // src/hooks/detectors/test-quality-check.ts
 import { existsSync as existsSync8, readFileSync as readFileSync8 } from "fs";
 import { basename as basename5, dirname as dirname4, extname as extname8, resolve as resolve3 } from "path";
@@ -3010,8 +3178,10 @@ var WEIGHTS = {
   security: -2,
   hallucinated_imports: -2,
   export_breaking: -2,
+  dataflow: -2.5,
   duplication: -1.5,
   semantic: -1,
+  complexity: -1,
   dead_imports: -1,
   convention: -0.5,
   test_quality: -1.5
@@ -3069,6 +3239,11 @@ function computeFileHealthScore(file) {
     const tqResult = analyzeTestQuality(file);
     if (tqResult !== null && tqResult.smells.length > 0)
       breakdown.test_quality = (WEIGHTS.test_quality ?? DEFAULT_WEIGHT) * tqResult.smells.length;
+  } catch {}
+  try {
+    const complexityResult = computeComplexitySync(file);
+    if (complexityResult !== null && complexityResult.warnings.length > 0)
+      breakdown.complexity = (WEIGHTS.complexity ?? DEFAULT_WEIGHT) * complexityResult.warnings.length;
   } catch {}
   const totalPenalty = Object.values(breakdown).reduce((sum, v) => sum + v, 0);
   const score = Math.max(0, Math.round((10 + totalPenalty) * 10) / 10);
@@ -3484,7 +3659,10 @@ function getValidGateNames() {
     "security-check-advisory",
     "coverage",
     "dep-vuln-check",
-    "hallucinated-package-check"
+    "hallucinated-package-check",
+    "dataflow-check",
+    "complexity-check",
+    "mutation-test"
   ]);
   if (gates) {
     for (const category of [gates.on_write, gates.on_commit, gates.on_review]) {
@@ -3669,6 +3847,16 @@ var TOOL_DEFS = [
   {
     name: "get_flywheel_recommendations",
     description: "Returns threshold adjustment recommendations based on cross-session pattern analysis.",
+    inputSchema: { type: "object", properties: {} }
+  },
+  {
+    name: "apply_flywheel_recommendations",
+    description: "Apply flywheel recommendations: safe (raise) recommendations are auto-applied to global_configs, lower recommendations are deferred for manual review.",
+    inputSchema: { type: "object", properties: {} }
+  },
+  {
+    name: "transfer_knowledge",
+    description: "Cross-project session analysis. Detects common patterns across 3+ projects and writes shared thresholds to global_configs. Returns patterns found and rule templates.",
     inputSchema: { type: "object", properties: {} }
   },
   {
@@ -4142,6 +4330,34 @@ function handleTool(name, cwd, args) {
         return { content: [{ type: "text", text: JSON.stringify(recs, null, 2) }] };
       } catch {
         return { content: [{ type: "text", text: "No flywheel data available yet." }] };
+      }
+    }
+    case "apply_flywheel_recommendations": {
+      try {
+        const config = loadConfig();
+        const metrics = readMetricsHistory();
+        const recs = getFlywheelRecommendations(metrics, config);
+        if (recs.length === 0) {
+          return {
+            content: [
+              { type: "text", text: "No recommendations. Insufficient data or flywheel disabled." }
+            ]
+          };
+        }
+        const result = applyFlywheelRecommendations(recs, config);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch {
+        return { content: [{ type: "text", text: "No flywheel data available yet." }] };
+      }
+    }
+    case "transfer_knowledge": {
+      try {
+        const result = transferKnowledge();
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ patterns: [], templates: [] }) }]
+        };
       }
     }
     case "record_finish_started": {

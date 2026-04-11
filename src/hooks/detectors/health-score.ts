@@ -7,6 +7,7 @@ import { detectExportBreakingChanges } from "./export-check.ts";
 import { detectHallucinatedImports } from "./import-check.ts";
 import { detectSecurityPatterns } from "./security-check.ts";
 import { detectSemanticPatterns } from "./semantic-check.ts";
+import { computeComplexitySync } from "./complexity-check.ts";
 import { analyzeTestQuality } from "./test-quality-check.ts";
 
 interface HealthResult {
@@ -19,8 +20,10 @@ const WEIGHTS: Record<string, number> = {
 	security: -2,
 	hallucinated_imports: -2,
 	export_breaking: -2,
+	dataflow: -2.5,
 	duplication: -1.5,
 	semantic: -1,
+	complexity: -1,
 	dead_imports: -1,
 	convention: -0.5,
 	test_quality: -1.5,
@@ -101,6 +104,15 @@ export function computeFileHealthScore(file: string): HealthResult {
 		const tqResult = analyzeTestQuality(file);
 		if (tqResult !== null && tqResult.smells.length > 0)
 			breakdown.test_quality = (WEIGHTS.test_quality ?? DEFAULT_WEIGHT) * tqResult.smells.length;
+	} catch {
+		/* fail-open */
+	}
+
+	try {
+		const complexityResult = computeComplexitySync(file);
+		if (complexityResult !== null && complexityResult.warnings.length > 0)
+			breakdown.complexity =
+				(WEIGHTS.complexity ?? DEFAULT_WEIGHT) * complexityResult.warnings.length;
 	} catch {
 		/* fail-open */
 	}

@@ -327,6 +327,24 @@ const PROBE_RULES: ProbeRule[] = [
 		timeout: 120000,
 		executable: "wdio",
 	},
+
+	// --- on_review: mutation testing (priority order) ---
+	{
+		configs: ["stryker.conf.js", "stryker.conf.mjs", "stryker.config.mjs"],
+		name: "mutation-test",
+		category: "on_review",
+		command: (pm) => (pm === "bun" ? "bun stryker run" : "npx stryker run"),
+		timeout: 120000,
+		executable: "stryker",
+	},
+	{
+		configs: [],
+		name: "mutation-test",
+		category: "on_review",
+		command: "mutmut run",
+		timeout: 120000,
+		executable: "mutmut",
+	},
 ];
 
 /** Check if an executable is reachable via PATH or node_modules/.bin */
@@ -412,6 +430,9 @@ export function detectGates(root: string): GatesConfig {
 		if (!configFound && rule.executable === "bandit") {
 			configFound = hasPyprojectSection(root, "bandit");
 		}
+		if (!configFound && rule.executable === "mutmut") {
+			configFound = hasPyprojectSection(root, "mutmut");
+		}
 
 		// Fallback: check package.json devDependencies for JS tools
 		if (
@@ -421,6 +442,13 @@ export function detectGates(root: string): GatesConfig {
 			["vitest", "jest", "mocha", "eslint", "biome"].includes(rule.executable)
 		) {
 			if (pkg.devDeps.has(rule.executable) || pkg.devDeps.has(`@biomejs/${rule.executable}`)) {
+				configFound = true;
+			}
+		}
+
+		// Fallback: check package.json devDependencies for stryker
+		if (!configFound && rule.executable === "stryker" && pkg) {
+			if (pkg.devDeps.has("@stryker-mutator/core")) {
 				configFound = true;
 			}
 		}

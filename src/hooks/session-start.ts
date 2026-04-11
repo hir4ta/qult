@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { loadConfig } from "../config.ts";
 import { isReachable } from "../gates/detect.ts";
 import {
+	applyFlywheelRecommendations,
 	detectRecurringPatterns,
 	getFlywheelRecommendations,
 	readMetricsHistory,
@@ -85,6 +86,23 @@ export default async function sessionStart(ev: HookEvent): Promise<void> {
 						process.stderr.write(
 							`[qult] Flywheel: ${rec.metric} — suggest ${rec.direction === "lower" ? "lowering" : "raising"} threshold from ${rec.current_threshold} to ${rec.suggested_threshold} (${rec.confidence} confidence). ${rec.reason}\n`,
 						);
+					}
+					if (cfg.flywheel.auto_apply && recs.length > 0) {
+						try {
+							const { applied, deferred } = applyFlywheelRecommendations(recs, cfg);
+							for (const rec of applied) {
+								process.stderr.write(
+									`[qult] Flywheel auto-applied: ${rec.metric} threshold raised to ${rec.suggested_threshold}\n`,
+								);
+							}
+							if (deferred.length > 0) {
+								process.stderr.write(
+									`[qult] Flywheel deferred: ${deferred.length} recommendation(s) require manual review\n`,
+								);
+							}
+						} catch {
+							/* fail-open */
+						}
 					}
 				}
 			} catch {

@@ -245,6 +245,203 @@ export function getFlywheelRecommendations(
 	return recs;
 }
 
+// ── Flywheel auto-apply ──────────────────────────────────
+
+export interface ApplyResult {
+	metric: string;
+	applied: boolean;
+	reason: string;
+	old_value: number;
+	new_value: number;
+}
+
+export interface RuleTemplate {
+	filename: string;
+	content: string;
+}
+
+const METRIC_NAME_TO_CONFIG_KEY: Record<string, string> = {
+	security: "escalation.security_threshold",
+	"test quality": "escalation.test_quality_threshold",
+	duplication: "escalation.duplication_threshold",
+	semantic: "escalation.semantic_threshold",
+	drift: "escalation.drift_threshold",
+};
+
+/** Apply flywheel recommendations: raise → auto-apply to global_configs, lower → defer. */
+export function applyFlywheelRecommendations(
+	recs: FlywheelRecommendation[],
+	config: QultConfig,
+): { applied: FlywheelRecommendation[]; deferred: FlywheelRecommendation[] } {
+	const applied: FlywheelRecommendation[] = [];
+	const deferred: FlywheelRecommendation[] = [];
+
+	if (!config.flywheel.auto_apply) {
+		return { applied: [], deferred: recs };
+	}
+
+	try {
+		const db = getDb();
+		for (const rec of recs) {
+			if (rec.direction !== "raise") {
+				deferred.push(rec);
+				continue;
+			}
+
+			const configKey = METRIC_NAME_TO_CONFIG_KEY[rec.metric];
+			if (!configKey) {
+				deferred.push(rec);
+				continue;
+			}
+
+			// Don't overwrite existing global_configs values
+			const existing = db
+				.prepare("SELECT value FROM global_configs WHERE key = ?")
+				.get(configKey) as { value: string } | null;
+			if (existing) {
+				deferred.push(rec);
+				continue;
+			}
+
+			db.prepare("INSERT INTO global_configs (key, value) VALUES (?, ?)").run(
+				configKey,
+				JSON.stringify(rec.suggested_threshold),
+			);
+			applied.push(rec);
+		}
+	} catch {
+		// fail-open: return all as deferred
+		return { applied: [], deferred: recs };
+	}
+
+	return { applied, deferred };
+}
+
+const METRIC_SESSION_KEYS: Record<string, string> = {
+	security_warning_count: "security",
+	test_quality_warning_count: "test_quality",
+	duplication_warning_count: "duplication",
+	semantic_warning_count: "semantic",
+	drift_warning_count: "drift",
+};
+
+const RULE_TEMPLATES: Record<string, RuleTemplate> = {
+	security: {
+		filename: "security-recurring.md",
+		content: [
+			"# Security Recurring Patterns",
+			"",
+			"Security warnings are frequent across multiple projects.",
+			"Review common patterns: input validation, XSS prevention, SQL injection, SSRF.",
+			"Consider adding project-specific security rules in .claude/rules/security.md.",
+		].join("\n"),
+	},
+	test_quality: {
+		filename: "test-quality-recurring.md",
+		content: [
+			"# Test Quality Recurring Patterns",
+			"",
+			"Test quality warnings are frequent across multiple projects.",
+			"Review: empty tests, always-true assertions, trivial assertions.",
+			"Consider enforcing minimum assertion counts per test.",
+		].join("\n"),
+	},
+	duplication: {
+		filename: "duplication-recurring.md",
+		content: [
+			"# Duplication Recurring Patterns",
+			"",
+			"Code duplication warnings are frequent across multiple projects.",
+			"Review: copy-pasted code blocks, similar function signatures.",
+			"Consider extracting shared utilities when 3+ duplicates exist.",
+		].join("\n"),
+	},
+};
+
+/** Cross-project session_metrics analysis. 3+ projects with common pattern → global_configs. */
+export function transferKnowledge(): {
+	patterns: string[];
+	templates: RuleTemplate[];
+} {
+	const patterns: string[] = [];
+	const templates: RuleTemplate[] = [];
+
+	try {
+		const db = getDb();
+
+		// Get all projects with session_metrics
+		const projects = db
+			.prepare(
+				"SELECT DISTINCT project_id FROM session_metrics GROUP BY project_id HAVING COUNT(*) >= 5",
+			)
+			.all() as { project_id: number }[];
+
+		if (projects.length < 3) {
+			return { patterns, templates };
+		}
+
+		// For each metric, check cross-project frequency
+		const metricColumns = [
+			"security_warning_count",
+			"test_quality_warning_count",
+			"duplication_warning_count",
+			"semantic_warning_count",
+			"drift_warning_count",
+		];
+
+		for (const col of metricColumns) {
+			let projectsWithHighFreq = 0;
+
+			for (const project of projects) {
+				const rows = db
+					.prepare(
+						`SELECT ${col} as val FROM session_metrics WHERE project_id = ? ORDER BY id DESC LIMIT 10`,
+					)
+					.all(project.project_id) as { val: number }[];
+
+				if (rows.length < 5) continue;
+				const nonZero = rows.filter((r) => r.val > 0).length;
+				const frequency = nonZero / rows.length;
+				if (frequency > 0.6) {
+					projectsWithHighFreq++;
+				}
+			}
+
+			if (projectsWithHighFreq >= 3) {
+				const metricName = METRIC_SESSION_KEYS[col] ?? col;
+				patterns.push(`${metricName}: high frequency across ${projectsWithHighFreq} projects`);
+
+				// Write to global_configs if not already set
+				const configKey = METRIC_NAME_TO_CONFIG_KEY[metricName];
+				if (configKey) {
+					const existing = db
+						.prepare("SELECT value FROM global_configs WHERE key = ?")
+						.get(configKey) as { value: string } | null;
+					if (!existing) {
+						// Lower the threshold since it's a common problem
+						const currentDefault = metricName === "security" ? 10 : metricName === "drift" ? 8 : 8;
+						const newVal = Math.max(1, Math.floor(currentDefault * 0.7));
+						db.prepare("INSERT INTO global_configs (key, value) VALUES (?, ?)").run(
+							configKey,
+							JSON.stringify(newVal),
+						);
+					}
+				}
+
+				// Generate rule template
+				const template = RULE_TEMPLATES[metricName];
+				if (template) {
+					templates.push(template);
+				}
+			}
+		}
+	} catch {
+		/* fail-open */
+	}
+
+	return { patterns, templates };
+}
+
 /** Detect recurring patterns across last 5 sessions. Emits stderr warnings. Fail-open. */
 export function detectRecurringPatterns(): void {
 	try {

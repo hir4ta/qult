@@ -291,3 +291,38 @@ describe("detects structured typecheck commands", () => {
 		}
 	});
 });
+
+describe("mutation-test gate detection", () => {
+	it("detects Stryker from stryker.conf.js", () => {
+		writeFileSync(join(TEST_DIR, "stryker.conf.js"), "module.exports = {};");
+		mkdirSync(join(TEST_DIR, "node_modules", ".bin"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "node_modules", ".bin", "stryker"), "");
+		writeFileSync(join(TEST_DIR, "package-lock.json"), "{}");
+		const gates = detectGates(TEST_DIR);
+		expect(gates.on_review?.["mutation-test"]).toBeDefined();
+		expect(gates.on_review!["mutation-test"]!.command).toContain("stryker");
+		expect(gates.on_review!["mutation-test"]!.timeout).toBe(120000);
+	});
+
+	it("detects Stryker from stryker.conf.mjs", () => {
+		writeFileSync(join(TEST_DIR, "stryker.conf.mjs"), "export default {};");
+		mkdirSync(join(TEST_DIR, "node_modules", ".bin"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "node_modules", ".bin", "stryker"), "");
+		const gates = detectGates(TEST_DIR);
+		expect(gates.on_review?.["mutation-test"]).toBeDefined();
+	});
+
+	it("detects mutmut from pyproject.toml [tool.mutmut] section", () => {
+		writeFileSync(join(TEST_DIR, "pyproject.toml"), "[tool.mutmut]\npaths_to_mutate = 'src'");
+		mkdirSync(join(TEST_DIR, "node_modules", ".bin"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "node_modules", ".bin", "mutmut"), "");
+		const gates = detectGates(TEST_DIR);
+		expect(gates.on_review?.["mutation-test"]).toBeDefined();
+		expect(gates.on_review!["mutation-test"]!.command).toContain("mutmut");
+	});
+
+	it("does not detect mutation-test without config or executable", () => {
+		const gates = detectGates(TEST_DIR);
+		expect(gates.on_review?.["mutation-test"]).toBeUndefined();
+	});
+});

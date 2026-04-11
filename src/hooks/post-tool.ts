@@ -34,6 +34,8 @@ import { detectExportBreakingChanges } from "./detectors/export-check.ts";
 import { checkInstalledPackages } from "./detectors/hallucinated-package-check.ts";
 import { detectHallucinatedImports } from "./detectors/import-check.ts";
 import { findImporters } from "./detectors/import-graph.ts";
+import { cacheComplexityResult, computeComplexity } from "./detectors/complexity-check.ts";
+import { detectDataflowIssues } from "./detectors/dataflow-check.ts";
 import { detectSecurityPatterns, getAdvisoryAsPendingFixes } from "./detectors/security-check.ts";
 import { detectSemanticPatterns } from "./detectors/semantic-check.ts";
 import {
@@ -252,6 +254,35 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 					process.stderr.write(
 						`[qult] Security escalation: ${count} security warnings this session. Review security posture.\n`,
 					);
+				}
+			}
+		}
+	} catch {
+		/* fail-open */
+	}
+
+	// AST dataflow analysis (taint tracking from user input to dangerous sinks)
+	try {
+		const dataflowFixes = await detectDataflowIssues(file);
+		if (dataflowFixes.length > 0) {
+			newFixes.push(...dataflowFixes);
+			if (!isTestFile && !existingFixKeys.has(`${resolve(file)}:dataflow-check`)) {
+				incrementEscalation("security_warning_count");
+			}
+		}
+	} catch {
+		/* fail-open */
+	}
+
+	// AST complexity advisory (non-blocking)
+	try {
+		if (!isGateDisabled("complexity-check")) {
+			const complexityResult = await computeComplexity(file);
+			if (complexityResult) {
+				cacheComplexityResult(file, complexityResult);
+				const relPath = file.split("/").slice(-3).join("/");
+				for (const w of complexityResult.warnings) {
+					process.stderr.write(`[qult] Complexity advisory: ${relPath}:${w}\n`);
 				}
 			}
 		}

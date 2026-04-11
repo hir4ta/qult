@@ -125,7 +125,7 @@ describe("handleRequest (JSON-RPC)", () => {
 	it("tools/list returns all tool definitions", () => {
 		const response = handleRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" }, TEST_DIR);
 		const result = response!.result as { tools: { name: string }[] };
-		expect(result.tools).toHaveLength(25);
+		expect(result.tools).toHaveLength(27);
 		expect(result.tools.map((t) => t.name)).toEqual([
 			"get_pending_fixes",
 			"get_session_status",
@@ -145,6 +145,8 @@ describe("handleRequest (JSON-RPC)", () => {
 			"get_handoff_document",
 			"get_metrics_dashboard",
 			"get_flywheel_recommendations",
+			"apply_flywheel_recommendations",
+			"transfer_knowledge",
 			"record_finish_started",
 			"archive_plan",
 			"save_gates",
@@ -195,8 +197,8 @@ describe("handleRequest (JSON-RPC)", () => {
 });
 
 describe("TOOL_DEFS", () => {
-	it("has 25 tool definitions", () => {
-		expect(TOOL_DEFS).toHaveLength(25);
+	it("has 27 tool definitions", () => {
+		expect(TOOL_DEFS).toHaveLength(27);
 	});
 
 	it("includes generate_sbom and get_dependency_summary tools", () => {
@@ -886,5 +888,49 @@ describe("dep-vuln-check and hallucinated-package-check gate names", () => {
 			reason: "Not needed for this testing session",
 		});
 		expect(result.content[0]!.text).toContain("disabled");
+	});
+});
+
+describe("apply_flywheel_recommendations", () => {
+	it("returns applied and deferred recommendations", () => {
+		// Insert enough session_metrics to generate recommendations
+		const db = getDb();
+		const pid = getProjectId();
+		// 20 sessions with zero security warnings → should trigger raise recommendation
+		for (let i = 0; i < 20; i++) {
+			db.prepare(
+				`INSERT INTO session_metrics (session_id, project_id, gate_failure_count, security_warning_count, review_aggregate, files_changed, test_quality_warning_count, duplication_warning_count, semantic_warning_count, drift_warning_count, escalation_hit)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			).run(`s${i}`, pid, 0, 0, null, 1, 0, 0, 0, 0, 0);
+		}
+
+		const result = handleTool("apply_flywheel_recommendations", TEST_DIR);
+		expect(result.isError).toBeUndefined();
+		const parsed = JSON.parse(result.content[0]!.text);
+		expect(parsed).toHaveProperty("applied");
+		expect(parsed).toHaveProperty("deferred");
+	});
+
+	it("returns message when no recommendations available", () => {
+		const result = handleTool("apply_flywheel_recommendations", TEST_DIR);
+		expect(result.content[0]!.text).toContain("No recommendations");
+		expect(result.isError).toBeUndefined();
+	});
+});
+
+describe("transfer_knowledge", () => {
+	it("returns patterns and templates structure", () => {
+		const result = handleTool("transfer_knowledge", TEST_DIR);
+		expect(result.isError).toBeUndefined();
+		const parsed = JSON.parse(result.content[0]!.text);
+		expect(parsed).toHaveProperty("patterns");
+		expect(parsed).toHaveProperty("templates");
+	});
+
+	it("returns empty patterns when insufficient projects", () => {
+		const result = handleTool("transfer_knowledge", TEST_DIR);
+		const parsed = JSON.parse(result.content[0]!.text);
+		expect(Array.isArray(parsed.patterns)).toBe(true);
+		expect(parsed.patterns).toHaveLength(0);
 	});
 });

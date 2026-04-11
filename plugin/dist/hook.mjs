@@ -1,16 +1,16 @@
 // @bun
 var __defProp = Object.defineProperty;
 var __returnValue = (v) => v;
-function __exportSetter(name, newValue) {
-  this[name] = __returnValue.bind(null, newValue);
+function __exportSetter(name2, newValue) {
+  this[name2] = __returnValue.bind(null, newValue);
 }
 var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, {
-      get: all[name],
+  for (var name2 in all)
+    __defProp(target, name2, {
+      get: all[name2],
       enumerable: true,
       configurable: true,
-      set: __exportSetter.bind(all, name)
+      set: __exportSetter.bind(all, name2)
     });
 };
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
@@ -385,6 +385,12 @@ function applyConfigLayer(config, raw) {
       config.gates.consumer_typecheck = g.consumer_typecheck;
     if (typeof g.import_graph_depth === "number")
       config.gates.import_graph_depth = Math.max(1, Math.min(3, g.import_graph_depth));
+    if (typeof g.complexity_threshold === "number")
+      config.gates.complexity_threshold = Math.max(1, g.complexity_threshold);
+    if (typeof g.function_size_limit === "number")
+      config.gates.function_size_limit = Math.max(1, g.function_size_limit);
+    if (typeof g.mutation_score_threshold === "number")
+      config.gates.mutation_score_threshold = Math.max(0, Math.min(100, g.mutation_score_threshold));
   }
   if (raw.security && typeof raw.security === "object") {
     const s = raw.security;
@@ -416,15 +422,17 @@ function applyConfigLayer(config, raw) {
       config.flywheel.enabled = f.enabled;
     if (typeof f.min_sessions === "number")
       config.flywheel.min_sessions = Math.max(1, f.min_sessions);
+    if (typeof f.auto_apply === "boolean")
+      config.flywheel.auto_apply = f.auto_apply;
   }
 }
 function kvRowsToRaw(rows) {
   const raw = {};
   for (const row of rows) {
-    const parts = row.key.split(".");
-    if (parts.length < 2)
+    const parts2 = row.key.split(".");
+    if (parts2.length < 2)
       continue;
-    const section = parts[0];
+    const section = parts2[0];
     if (!raw[section])
       raw[section] = {};
     let parsed;
@@ -433,14 +441,14 @@ function kvRowsToRaw(rows) {
     } catch {
       parsed = row.value;
     }
-    if (parts.length === 2) {
-      raw[section][parts[1]] = parsed;
-    } else if (parts.length === 3) {
-      const sub = parts[1];
+    if (parts2.length === 2) {
+      raw[section][parts2[1]] = parsed;
+    } else if (parts2.length === 3) {
+      const sub = parts2[1];
       if (!raw[section][sub] || typeof raw[section][sub] !== "object") {
         raw[section][sub] = {};
       }
-      raw[section][sub][parts[2]] = parsed;
+      raw[section][sub][parts2[2]] = parsed;
     }
   }
   return raw;
@@ -503,6 +511,15 @@ function loadConfig() {
   const igDepth = envInt("QULT_IMPORT_GRAPH_DEPTH");
   if (igDepth !== undefined)
     config.gates.import_graph_depth = Math.max(1, Math.min(3, igDepth));
+  const complexityThreshold = envInt("QULT_COMPLEXITY_THRESHOLD");
+  if (complexityThreshold !== undefined)
+    config.gates.complexity_threshold = Math.max(1, complexityThreshold);
+  const funcSizeLimit = envInt("QULT_FUNCTION_SIZE_LIMIT");
+  if (funcSizeLimit !== undefined)
+    config.gates.function_size_limit = Math.max(1, funcSizeLimit);
+  const mutationScore = envInt("QULT_MUTATION_SCORE_THRESHOLD");
+  if (mutationScore !== undefined)
+    config.gates.mutation_score_threshold = Math.max(0, Math.min(100, mutationScore));
   const secEsc = envInt("QULT_ESCALATION_SECURITY");
   if (secEsc !== undefined)
     config.escalation.security_threshold = Math.max(1, secEsc);
@@ -552,6 +569,11 @@ function loadConfig() {
   const flywheelMin = envInt("QULT_FLYWHEEL_MIN_SESSIONS");
   if (flywheelMin !== undefined)
     config.flywheel.min_sessions = Math.max(1, flywheelMin);
+  const flywheelAutoApplyEnv = process.env.QULT_FLYWHEEL_AUTO_APPLY;
+  if (flywheelAutoApplyEnv === "1" || flywheelAutoApplyEnv === "true")
+    config.flywheel.auto_apply = true;
+  else if (flywheelAutoApplyEnv === "0" || flywheelAutoApplyEnv === "false")
+    config.flywheel.auto_apply = false;
   _cache = config;
   return config;
 }
@@ -592,7 +614,10 @@ var init_config = __esm(() => {
       extra_path: [],
       coverage_threshold: 0,
       consumer_typecheck: false,
-      import_graph_depth: 1
+      import_graph_depth: 1,
+      complexity_threshold: 15,
+      function_size_limit: 50,
+      mutation_score_threshold: 0
     },
     security: {
       require_semgrep: true,
@@ -609,7 +634,8 @@ var init_config = __esm(() => {
     },
     flywheel: {
       enabled: true,
-      min_sessions: 10
+      min_sessions: 10,
+      auto_apply: false
     }
   };
 });
@@ -703,9 +729,9 @@ function flush() {
         insert.run(pid, fix.file, fix.gate, JSON.stringify(fix.errors));
       }
       db.exec("COMMIT");
-    } catch (err) {
+    } catch (err2) {
       db.exec("ROLLBACK");
-      throw err;
+      throw err2;
     }
   } catch (e) {
     if (e instanceof Error)
@@ -737,16 +763,16 @@ function parsePlanTasks(content) {
   const tasks = [];
   const lines = content.split(`
 `);
-  for (let i = 0;i < lines.length; i++) {
-    const trimmed = lines[i].trim();
+  for (let i2 = 0;i2 < lines.length; i2++) {
+    const trimmed = lines[i2].trim();
     const taskMatch = trimmed.match(TASK_RE);
     if (taskMatch) {
       const taskNumber = Number(taskMatch[1]);
-      const name = taskMatch[2].trim();
+      const name2 = taskMatch[2].trim();
       const status = normalizeStatus(taskMatch[3]);
       let file;
       let verify;
-      for (let j = i + 1;j < lines.length; j++) {
+      for (let j = i2 + 1;j < lines.length; j++) {
         const nextTrimmed = lines[j].trim();
         if (/^###?\s/.test(nextTrimmed))
           break;
@@ -760,14 +786,14 @@ function parsePlanTasks(content) {
           verify = verifyMatch[1].trim();
         }
       }
-      tasks.push({ name, status, taskNumber, file, verify });
+      tasks.push({ name: name2, status, taskNumber, file, verify });
       continue;
     }
     const checkMatch = trimmed.match(CHECKBOX_RE);
     if (checkMatch) {
       const checked = checkMatch[1] !== " ";
-      const name = checkMatch[2].trim();
-      tasks.push({ name, status: checked ? "done" : "pending" });
+      const name2 = checkMatch[2].trim();
+      tasks.push({ name: name2, status: checked ? "done" : "pending" });
     }
   }
   return tasks;
@@ -1030,8 +1056,8 @@ function flush2() {
       }
       db.prepare("DELETE FROM ran_gates WHERE project_id = ?").run(pid);
       const insertRan = db.prepare("INSERT INTO ran_gates (project_id, gate_name, ran_at) VALUES (?, ?, ?)");
-      for (const [name, entry] of Object.entries(state.ran_gates)) {
-        insertRan.run(pid, name, entry.ran_at);
+      for (const [name2, entry] of Object.entries(state.ran_gates)) {
+        insertRan.run(pid, name2, entry.ran_at);
       }
       db.prepare("DELETE FROM task_verify_results WHERE project_id = ?").run(pid);
       const insertTask = db.prepare("INSERT INTO task_verify_results (project_id, task_key, passed, ran_at) VALUES (?, ?, ?, ?)");
@@ -1050,8 +1076,8 @@ function flush2() {
       }
       db.prepare("DELETE FROM review_scores WHERE project_id = ?").run(pid);
       const insertReview = db.prepare("INSERT INTO review_scores (project_id, iteration, aggregate_score) VALUES (?, ?, ?)");
-      for (let i = 0;i < state.review_score_history.length; i++) {
-        insertReview.run(pid, i + 1, state.review_score_history[i]);
+      for (let i2 = 0;i2 < state.review_score_history.length; i2++) {
+        insertReview.run(pid, i2 + 1, state.review_score_history[i2]);
       }
       db.prepare("DELETE FROM review_stage_scores WHERE project_id = ?").run(pid);
       const insertStage = db.prepare("INSERT INTO review_stage_scores (project_id, stage, dimension, score) VALUES (?, ?, ?, ?)");
@@ -1062,13 +1088,13 @@ function flush2() {
       }
       db.prepare("DELETE FROM plan_eval_scores WHERE project_id = ?").run(pid);
       const insertPlan = db.prepare("INSERT INTO plan_eval_scores (project_id, iteration, aggregate_score) VALUES (?, ?, ?)");
-      for (let i = 0;i < state.plan_eval_score_history.length; i++) {
-        insertPlan.run(pid, i + 1, state.plan_eval_score_history[i]);
+      for (let i2 = 0;i2 < state.plan_eval_score_history.length; i2++) {
+        insertPlan.run(pid, i2 + 1, state.plan_eval_score_history[i2]);
       }
       db.exec("COMMIT");
-    } catch (err) {
+    } catch (err2) {
       db.exec("ROLLBACK");
-      throw err;
+      throw err2;
     }
     _dirty2 = false;
   } catch (e) {
@@ -1160,8 +1186,8 @@ function incrementFileEditCount(file) {
     db.prepare("INSERT INTO file_edit_counts (project_id, file, count) VALUES (?, ?, 1) ON CONFLICT(project_id, file) DO UPDATE SET count = count + 1").run(pid, file);
     const row = db.prepare("SELECT count FROM file_edit_counts WHERE project_id = ? AND file = ?").get(pid, file);
     return row?.count ?? 1;
-  } catch (err) {
-    process.stderr.write(`[qult] file_edit_counts error: ${err instanceof Error ? err.message : "unknown"} \u2014 iterative escalation may be degraded
+  } catch (err2) {
+    process.stderr.write(`[qult] file_edit_counts error: ${err2 instanceof Error ? err2.message : "unknown"} \u2014 iterative escalation may be degraded
 `);
     return 1;
   }
@@ -1604,8 +1630,8 @@ function deduplicateErrors(text) {
 `);
   const codeGroups = new Map;
   const lineCodes = [];
-  for (let i = 0;i < lines.length; i++) {
-    const match = lines[i].match(ERROR_CODE_RE);
+  for (let i2 = 0;i2 < lines.length; i2++) {
+    const match = lines[i2].match(ERROR_CODE_RE);
     const code = match ? match[1] : null;
     lineCodes.push(code);
     if (code) {
@@ -1613,7 +1639,7 @@ function deduplicateErrors(text) {
       if (existing) {
         existing.count++;
       } else {
-        codeGroups.set(code, { first: i, count: 1 });
+        codeGroups.set(code, { first: i2, count: 1 });
       }
     }
   }
@@ -1622,17 +1648,17 @@ function deduplicateErrors(text) {
     return text;
   const result = [];
   const emittedSummary = new Set;
-  for (let i = 0;i < lines.length; i++) {
-    const code = lineCodes[i];
+  for (let i2 = 0;i2 < lines.length; i2++) {
+    const code = lineCodes[i2];
     if (!code) {
-      result.push(lines[i]);
+      result.push(lines[i2]);
       continue;
     }
     const group = codeGroups.get(code);
     if (group.count === 1) {
-      result.push(lines[i]);
-    } else if (i === group.first) {
-      result.push(lines[i]);
+      result.push(lines[i2]);
+    } else if (i2 === group.first) {
+      result.push(lines[i2]);
       if (!emittedSummary.has(code)) {
         result.push(`... and ${group.count - 1} more ${code} errors`);
         emittedSummary.add(code);
@@ -1660,13 +1686,13 @@ function buildPath(extraPaths) {
   const prefix = extra ? `${extra}:` : "";
   return `${prefix}${cwd}/node_modules/.bin:${process.env.PATH}`;
 }
-function runGateAsync(name, gate, file) {
+function runGateAsync(name2, gate, file) {
   const config = loadConfig();
   const baseCmd = gate.structured_command ?? gate.command;
   const command = file ? baseCmd.replace("{file}", shellEscape(file)) : baseCmd;
   const timeout = gate.timeout ?? config.gates.default_timeout;
   const maxChars = config.gates.output_max_chars;
-  const start = Date.now();
+  const start2 = Date.now();
   return new Promise((resolve) => {
     exec(command, {
       cwd: process.cwd(),
@@ -1676,29 +1702,29 @@ function runGateAsync(name, gate, file) {
         PATH: buildPath(config.gates.extra_path)
       },
       encoding: "utf-8"
-    }, (err, stdout, stderr) => {
-      const duration_ms = Date.now() - start;
-      if (err) {
+    }, (err2, stdout, stderr) => {
+      const duration_ms = Date.now() - start2;
+      if (err2) {
         const raw = (stdout ?? "") + (stderr ?? "");
-        const isTimeout = "killed" in err && err.killed && duration_ms >= timeout - 100;
+        const isTimeout = "killed" in err2 && err2.killed && duration_ms >= timeout - 100;
         const prefix = isTimeout ? `TIMEOUT after ${timeout}ms
 ` : "";
-        const output = prefix + (smartTruncate(deduplicateErrors(raw), maxChars) || `Exit code ${err.code ?? 1}`);
-        const classified = classifyTypecheckOutput(name, command, raw);
-        resolve({ name, passed: false, output, duration_ms, ...classified });
+        const output = prefix + (smartTruncate(deduplicateErrors(raw), maxChars) || `Exit code ${err2.code ?? 1}`);
+        const classified = classifyTypecheckOutput(name2, command, raw);
+        resolve({ name: name2, passed: false, output, duration_ms, ...classified });
       } else {
         const output = smartTruncate(stdout ?? "", maxChars);
-        resolve({ name, passed: true, output, duration_ms });
+        resolve({ name: name2, passed: true, output, duration_ms });
       }
     });
   });
 }
-function runGate(name, gate, file) {
+function runGate(name2, gate, file) {
   const config = loadConfig();
   const command = file ? gate.command.replace("{file}", shellEscape(file)) : gate.command;
   const timeout = gate.timeout ?? config.gates.default_timeout;
   const maxChars = config.gates.output_max_chars;
-  const start = Date.now();
+  const start2 = Date.now();
   try {
     const stdout = execSync(command, {
       cwd: process.cwd(),
@@ -1711,10 +1737,10 @@ function runGate(name, gate, file) {
       encoding: "utf-8"
     });
     const output = smartTruncate(stdout ?? "", maxChars);
-    return { name, passed: true, output, duration_ms: Date.now() - start };
-  } catch (err) {
-    const duration_ms = Date.now() - start;
-    const e = err != null && typeof err === "object" ? err : {};
+    return { name: name2, passed: true, output, duration_ms: Date.now() - start2 };
+  } catch (err2) {
+    const duration_ms = Date.now() - start2;
+    const e = err2 != null && typeof err2 === "object" ? err2 : {};
     const stdout = "stdout" in e && typeof e.stdout === "string" ? e.stdout : "";
     const stderr = "stderr" in e && typeof e.stderr === "string" ? e.stderr : "";
     const status = "status" in e && typeof e.status === "number" ? e.status : 1;
@@ -1723,7 +1749,7 @@ function runGate(name, gate, file) {
 ` : "";
     const output = prefix + (smartTruncate(deduplicateErrors(stdout + stderr), maxChars) || `Exit code ${status}`);
     return {
-      name,
+      name: name2,
       passed: false,
       output,
       duration_ms
@@ -1754,11 +1780,11 @@ function classifyTypecheckOutput(gateName, _command, raw) {
     return {};
   }
 }
-function runCoverageGate(name, gate, threshold) {
+function runCoverageGate(name2, gate, threshold) {
   if (threshold <= 0) {
-    return { name, passed: true, output: "coverage check skipped (threshold=0)", duration_ms: 0 };
+    return { name: name2, passed: true, output: "coverage check skipped (threshold=0)", duration_ms: 0 };
   }
-  const result = runGate(name, gate);
+  const result = runGate(name2, gate);
   if (!result.passed)
     return result;
   const coverage = parseCoveragePercent(result.output);
@@ -1766,7 +1792,7 @@ function runCoverageGate(name, gate, threshold) {
     return result;
   if (coverage < threshold) {
     return {
-      name,
+      name: name2,
       passed: false,
       output: `Coverage ${coverage}% is below threshold ${threshold}%`,
       duration_ms: result.duration_ms
@@ -1791,14 +1817,14 @@ function sanitizeForStderr(input) {
 // src/hooks/detectors/convention-check.ts
 import { readdirSync as readdirSync2, statSync as statSync2 } from "fs";
 import { basename as basename2, dirname as dirname2, extname, join as join3 } from "path";
-function classify(name) {
-  if (KEBAB_RE.test(name))
+function classify(name2) {
+  if (KEBAB_RE.test(name2))
     return "kebab-case";
-  if (SNAKE_RE.test(name))
+  if (SNAKE_RE.test(name2))
     return "snake_case";
-  if (PASCAL_RE.test(name))
+  if (PASCAL_RE.test(name2))
     return "PascalCase";
-  if (CAMEL_RE.test(name))
+  if (CAMEL_RE.test(name2))
     return "camelCase";
   return "other";
 }
@@ -1879,8 +1905,8 @@ function detectDeadTsJsImports(content) {
   const lines = content.split(`
 `);
   const imports = [];
-  for (let i = 0;i < lines.length; i++) {
-    const line = lines[i];
+  for (let i2 = 0;i2 < lines.length; i2++) {
+    const line = lines[i2];
     if (SIDE_EFFECT_RE.test(line) && !DEFAULT_IMPORT_RE.test(line) && !NAMED_IMPORT_RE.test(line) && !NAMESPACE_IMPORT_RE.test(line))
       continue;
     if (REEXPORT_RE.test(line))
@@ -1888,32 +1914,32 @@ function detectDeadTsJsImports(content) {
     const typeMatch = line.match(TYPE_IMPORT_RE);
     if (typeMatch) {
       for (const imp of parseNamedImports(typeMatch[1])) {
-        imports.push({ name: imp.alias, line: i + 1 });
+        imports.push({ name: imp.alias, line: i2 + 1 });
       }
       continue;
     }
     const defaultMatch = line.match(DEFAULT_IMPORT_RE);
     if (defaultMatch) {
-      imports.push({ name: defaultMatch[1], line: i + 1 });
+      imports.push({ name: defaultMatch[1], line: i2 + 1 });
     }
     const namedMatch = line.match(NAMED_IMPORT_RE);
     if (namedMatch) {
       for (const imp of parseNamedImports(namedMatch[1])) {
-        imports.push({ name: imp.alias, line: i + 1 });
+        imports.push({ name: imp.alias, line: i2 + 1 });
       }
     }
     const nsMatch = line.match(NAMESPACE_IMPORT_RE);
     if (nsMatch) {
-      imports.push({ name: nsMatch[1], line: i + 1 });
+      imports.push({ name: nsMatch[1], line: i2 + 1 });
     }
   }
   const codeWithoutImports = lines.filter((line) => !line.trimStart().startsWith("import ")).map((line) => line.replace(/\/\/.*$/, "")).join(`
 `).replace(/\/\*[\s\S]*?\*\//g, "");
   const warnings = [];
-  for (const { name, line } of imports) {
-    const usageRe = new RegExp(`\\b${escapeRegex(name)}\\b`);
+  for (const { name: name2, line } of imports) {
+    const usageRe = new RegExp(`\\b${escapeRegex(name2)}\\b`);
     if (!usageRe.test(codeWithoutImports)) {
-      warnings.push(sanitizeForStderr(`L${line}: unused import "${name}" \u2014 consider removing`));
+      warnings.push(sanitizeForStderr(`L${line}: unused import "${name2}" \u2014 consider removing`));
     }
   }
   return warnings;
@@ -1922,20 +1948,20 @@ function detectDeadPythonImports(content) {
   const lines = content.split(`
 `);
   const imports = [];
-  for (let i = 0;i < lines.length; i++) {
-    const line = lines[i];
+  for (let i2 = 0;i2 < lines.length; i2++) {
+    const line = lines[i2];
     if (line.trimStart().startsWith("#"))
       continue;
     const fromMatch = line.match(PY_FROM_IMPORT_RE);
     if (fromMatch) {
       const names = fromMatch[1].split(",").map((s) => s.trim()).filter((s) => s.length > 0);
       for (const n of names) {
-        const parts = n.split(/\s+as\s+/);
-        const alias = (parts.length > 1 ? parts[1] : parts[0]).trim();
+        const parts2 = n.split(/\s+as\s+/);
+        const alias = (parts2.length > 1 ? parts2[1] : parts2[0]).trim();
         if (alias === "*")
           continue;
         if (/^\w+$/.test(alias)) {
-          imports.push({ name: alias, line: i + 1 });
+          imports.push({ name: alias, line: i2 + 1 });
         }
       }
       continue;
@@ -1944,11 +1970,11 @@ function detectDeadPythonImports(content) {
     if (importMatch) {
       const names = importMatch[1].split(",").map((s) => s.trim()).filter((s) => s.length > 0);
       for (const n of names) {
-        const parts = n.split(/\s+as\s+/);
-        const alias = (parts.length > 1 ? parts[1] : parts[0]).trim();
+        const parts2 = n.split(/\s+as\s+/);
+        const alias = (parts2.length > 1 ? parts2[1] : parts2[0]).trim();
         const topName = alias.split(".")[0];
         if (/^\w+$/.test(topName)) {
-          imports.push({ name: topName, line: i + 1 });
+          imports.push({ name: topName, line: i2 + 1 });
         }
       }
     }
@@ -1956,10 +1982,10 @@ function detectDeadPythonImports(content) {
   const codeWithoutImports = lines.filter((line) => !line.trimStart().startsWith("import ") && !line.trimStart().startsWith("from ")).map((line) => line.replace(/#.*$/, "")).join(`
 `);
   const warnings = [];
-  for (const { name, line } of imports) {
-    const usageRe = new RegExp(`\\b${escapeRegex(name)}\\b`);
+  for (const { name: name2, line } of imports) {
+    const usageRe = new RegExp(`\\b${escapeRegex(name2)}\\b`);
     if (!usageRe.test(codeWithoutImports)) {
-      warnings.push(sanitizeForStderr(`L${line}: unused import "${name}" \u2014 consider removing`));
+      warnings.push(sanitizeForStderr(`L${line}: unused import "${name2}" \u2014 consider removing`));
     }
   }
   return warnings;
@@ -1967,10 +1993,10 @@ function detectDeadPythonImports(content) {
 function parseNamedImports(raw) {
   return raw.split(",").map((s) => s.trim()).filter((s) => s.length > 0).map((s) => {
     const withoutType = s.replace(/^type\s+/, "");
-    const parts = withoutType.split(/\s+as\s+/);
+    const parts2 = withoutType.split(/\s+as\s+/);
     return {
-      name: parts[0].trim(),
-      alias: (parts.length > 1 ? parts[1] : parts[0]).trim()
+      name: parts2[0].trim(),
+      alias: (parts2.length > 1 ? parts2[1] : parts2[0]).trim()
     };
   }).filter(({ alias }) => /^\w+$/.test(alias));
 }
@@ -2074,18 +2100,18 @@ function getSeverity(vuln) {
   }
   return "UNKNOWN";
 }
-function runOsvScanner(args, cwd, timeout) {
+function runOsvScanner(args2, cwd, timeout) {
   try {
-    const output = execFileSync("osv-scanner", args, {
+    const output = execFileSync("osv-scanner", args2, {
       cwd,
       timeout,
       stdio: ["pipe", "pipe", "pipe"],
       encoding: "utf-8"
     });
     return typeof output === "string" ? output : String(output);
-  } catch (err) {
-    if (err && typeof err === "object" && "stdout" in err && typeof err.stdout === "string" && err.stdout.length > 0) {
-      return err.stdout;
+  } catch (err2) {
+    if (err2 && typeof err2 === "object" && "stdout" in err2 && typeof err2.stdout === "string" && err2.stdout.length > 0) {
+      return err2.stdout;
     }
     return null;
   }
@@ -2110,13 +2136,13 @@ function parseOsvOutput(raw) {
   for (const result of data.results) {
     const sourceFile = result.source?.path ?? "(unknown)";
     for (const pkg of result.packages ?? []) {
-      const name = pkg.package?.name ?? "unknown";
+      const name2 = pkg.package?.name ?? "unknown";
       const version = pkg.package?.version ?? "?";
       for (const vuln of pkg.vulnerabilities ?? []) {
         const severity = getSeverity(vuln);
         const id = vuln.id ?? "unknown";
         const summary = vuln.summary ?? "";
-        const desc = `[${severity}] ${name}@${version} \u2014 ${id}: ${summary}`.slice(0, 300);
+        const desc = `[${severity}] ${name2}@${version} \u2014 ${id}: ${summary}`.slice(0, 300);
         if (BLOCKING_SEVERITIES.has(severity)) {
           const existing = blockingFixes.find((f) => f.file === sourceFile);
           if (existing) {
@@ -2158,8 +2184,8 @@ var init_dep_vuln_check = __esm(() => {
 import { existsSync as existsSync3, readFileSync as readFileSync3 } from "fs";
 import { basename as basename3, dirname as dirname3, extname as extname3, resolve } from "path";
 function isTestFile(filePath) {
-  const name = basename3(filePath);
-  if (/\.(test|spec)\.[^.]+$/.test(name))
+  const name2 = basename3(filePath);
+  if (/\.(test|spec)\.[^.]+$/.test(name2))
     return true;
   const parent = basename3(dirname3(filePath));
   return parent === "__tests__";
@@ -2182,17 +2208,17 @@ function buildHashWindows(content) {
   const lines = content.split(`
 `);
   const normalized = [];
-  for (let i = 0;i < lines.length; i++) {
-    const norm = normalizeLine(lines[i]);
+  for (let i2 = 0;i2 < lines.length; i2++) {
+    const norm = normalizeLine(lines[i2]);
     if (norm !== null) {
-      normalized.push({ line: i + 1, text: norm });
+      normalized.push({ line: i2 + 1, text: norm });
     }
   }
   const windows = new Map;
-  for (let i = 0;i <= normalized.length - MIN_BLOCK_LINES; i++) {
-    const key = normalized.slice(i, i + MIN_BLOCK_LINES).map((n) => n.text).join(`
+  for (let i2 = 0;i2 <= normalized.length - MIN_BLOCK_LINES; i2++) {
+    const key = normalized.slice(i2, i2 + MIN_BLOCK_LINES).map((n) => n.text).join(`
 `);
-    const startLine = normalized[i].line;
+    const startLine = normalized[i2].line;
     const existing = windows.get(key);
     if (existing) {
       existing.push(startLine);
@@ -2367,7 +2393,7 @@ function detectExportBreakingChanges(file) {
   for (const match of newContent.matchAll(EXPORT_RE)) {
     newExports.add(match[1]);
   }
-  const removed = [...oldExports].filter((name) => !newExports.has(name));
+  const removed = [...oldExports].filter((name2) => !newExports.has(name2));
   const oldSigs = new Map;
   for (const match of oldContent.matchAll(FUNC_SIG_RE)) {
     const params = match[2].trim();
@@ -2375,16 +2401,16 @@ function detectExportBreakingChanges(file) {
   }
   const signatureChanges = [];
   for (const match of newContent.matchAll(FUNC_SIG_RE)) {
-    const name = match[1];
+    const name2 = match[1];
     const newParamCount = match[2].trim() ? match[2].trim().split(",").length : 0;
-    const oldParamCount = oldSigs.get(name);
+    const oldParamCount = oldSigs.get(name2);
     if (oldParamCount !== undefined && oldParamCount !== newParamCount) {
-      signatureChanges.push(`Signature change: "${sanitizeForStderr(name)}" params ${oldParamCount}\u2192${newParamCount}. Consumers may break.`);
+      signatureChanges.push(`Signature change: "${sanitizeForStderr(name2)}" params ${oldParamCount}\u2192${newParamCount}. Consumers may break.`);
     }
   }
   const typeChanges = detectTypeFieldChanges(oldContent, newContent);
   const errors = [
-    ...removed.map((name) => `Breaking change: export "${sanitizeForStderr(name)}" was removed`),
+    ...removed.map((name2) => `Breaking change: export "${sanitizeForStderr(name2)}" was removed`),
     ...signatureChanges,
     ...typeChanges
   ];
@@ -2394,18 +2420,18 @@ function detectExportBreakingChanges(file) {
 }
 function detectTypeFieldChanges(oldContent, newContent) {
   const TYPE_DEF_RE = /\bexport\s+(?:type|interface)\s+(\w+)\s*(?:=\s*)?{([^}]*)}/g;
-  const countFields = (body) => body.split(/[;\n]/).map((s) => s.trim()).filter((s) => s && !s.startsWith("//")).length;
+  const countFields = (body2) => body2.split(/[;\n]/).map((s) => s.trim()).filter((s) => s && !s.startsWith("//")).length;
   const oldTypes = new Map;
   for (const m of oldContent.matchAll(TYPE_DEF_RE)) {
     oldTypes.set(m[1], countFields(m[2]));
   }
   const changes = [];
   for (const m of newContent.matchAll(TYPE_DEF_RE)) {
-    const name = m[1];
+    const name2 = m[1];
     const newFields = countFields(m[2]);
-    const oldFields = oldTypes.get(name);
+    const oldFields = oldTypes.get(name2);
     if (oldFields !== undefined && oldFields !== newFields) {
-      changes.push(`Type change: "${sanitizeForStderr(name)}" fields ${oldFields}\u2192${newFields}. Consumers may need updates.`);
+      changes.push(`Type change: "${sanitizeForStderr(name2)}" fields ${oldFields}\u2192${newFields}. Consumers may need updates.`);
     }
   }
   return changes;
@@ -2949,15 +2975,15 @@ function isTestFile2(file) {
 var TEST_PATTERNS;
 var init_test_file_resolver = __esm(() => {
   TEST_PATTERNS = [
-    (dir, name, ext) => join5(dir, `${name}.test${ext}`),
-    (dir, name, ext) => join5(dir, `${name}.spec${ext}`),
-    (dir, name, ext) => join5(dir, "__tests__", `${name}.test${ext}`),
-    (dir, name, ext) => join5(dir, "__tests__", `${name}.spec${ext}`),
-    (dir, name, ext) => join5(dir, "tests", `${name}.test${ext}`),
-    (dir, name, ext) => ext === ".py" ? join5(dir, `test_${name}${ext}`) : null,
-    (dir, name, ext) => ext === ".py" ? join5(dir, "tests", `test_${name}${ext}`) : null,
-    (dir, name, ext) => ext === ".go" ? join5(dir, `${name}_test${ext}`) : null,
-    (dir, name, ext) => ext === ".rs" ? join5(dir, "tests", `${name}${ext}`) : null
+    (dir, name2, ext) => join5(dir, `${name2}.test${ext}`),
+    (dir, name2, ext) => join5(dir, `${name2}.spec${ext}`),
+    (dir, name2, ext) => join5(dir, "__tests__", `${name2}.test${ext}`),
+    (dir, name2, ext) => join5(dir, "__tests__", `${name2}.spec${ext}`),
+    (dir, name2, ext) => join5(dir, "tests", `${name2}.test${ext}`),
+    (dir, name2, ext) => ext === ".py" ? join5(dir, `test_${name2}${ext}`) : null,
+    (dir, name2, ext) => ext === ".py" ? join5(dir, "tests", `test_${name2}${ext}`) : null,
+    (dir, name2, ext) => ext === ".go" ? join5(dir, `${name2}_test${ext}`) : null,
+    (dir, name2, ext) => ext === ".rs" ? join5(dir, "tests", `${name2}${ext}`) : null
   ];
 });
 
@@ -3026,14 +3052,14 @@ function resolvePythonImport(specifier, fromFile) {
   const dots = dotMatch[1].length;
   const modulePart = dotMatch[2];
   let base = dir;
-  for (let i = 1;i < dots; i++) {
+  for (let i2 = 1;i2 < dots; i2++) {
     base = dirname5(base);
   }
   if (!modulePart) {
     return null;
   }
-  const parts = modulePart.split(".");
-  const candidate = join6(base, ...parts);
+  const parts2 = modulePart.split(".");
+  const candidate = join6(base, ...parts2);
   if (existsSync7(`${candidate}.py`))
     return `${candidate}.py`;
   if (existsSync7(join6(candidate, "__init__.py")))
@@ -3043,20 +3069,20 @@ function resolvePythonImport(specifier, fromFile) {
 function resolveRustImport(specifier, fromFile, scanRoot) {
   const dir = dirname5(fromFile);
   if (specifier.startsWith("mod:")) {
-    const name = specifier.slice(4);
-    const asFile = join6(dir, `${name}.rs`);
+    const name2 = specifier.slice(4);
+    const asFile = join6(dir, `${name2}.rs`);
     if (existsSync7(asFile))
       return asFile;
-    const asDir = join6(dir, name, "mod.rs");
+    const asDir = join6(dir, name2, "mod.rs");
     if (existsSync7(asDir))
       return asDir;
   } else if (specifier.startsWith("crate:")) {
-    const name = specifier.slice(6);
+    const name2 = specifier.slice(6);
     const srcDir = join6(scanRoot, "src");
-    const asFile = join6(srcDir, `${name}.rs`);
+    const asFile = join6(srcDir, `${name2}.rs`);
     if (existsSync7(asFile))
       return asFile;
-    const asDir = join6(srcDir, name, "mod.rs");
+    const asDir = join6(srcDir, name2, "mod.rs");
     if (existsSync7(asDir))
       return asDir;
   }
@@ -3265,24 +3291,4086 @@ var init_import_graph = __esm(() => {
   MAX_FILE_SIZE = 256 * 1024;
 });
 
-// src/hooks/detectors/security-check.ts
-import { existsSync as existsSync8, readFileSync as readFileSync7 } from "fs";
-import { basename as basename5, extname as extname8 } from "path";
-function detectSecurityPatterns(file) {
-  if (isGateDisabled("security-check"))
-    return [];
-  const ext = extname8(file).toLowerCase();
-  if (!CHECKABLE_EXTS2.has(ext))
-    return [];
-  if (!existsSync8(file))
-    return [];
-  let content;
+// node_modules/web-tree-sitter/web-tree-sitter.js
+var exports_web_tree_sitter = {};
+__export(exports_web_tree_sitter, {
+  TreeCursor: () => TreeCursor,
+  Tree: () => Tree,
+  Query: () => Query,
+  Parser: () => Parser,
+  Node: () => Node,
+  MIN_COMPATIBLE_VERSION: () => MIN_COMPATIBLE_VERSION,
+  LookaheadIterator: () => LookaheadIterator,
+  Language: () => Language,
+  LANGUAGE_VERSION: () => LANGUAGE_VERSION,
+  Edit: () => Edit,
+  CaptureQuantifier: () => CaptureQuantifier
+});
+function assertInternal(x) {
+  if (x !== INTERNAL)
+    throw new Error("Illegal constructor");
+}
+function isPoint(point) {
+  return !!point && typeof point.row === "number" && typeof point.column === "number";
+}
+function setModule(module2) {
+  C = module2;
+}
+function getText(tree, startIndex, endIndex, startPosition) {
+  const length = endIndex - startIndex;
+  let result = tree.textCallback(startIndex, startPosition);
+  if (result) {
+    startIndex += result.length;
+    while (startIndex < endIndex) {
+      const string = tree.textCallback(startIndex, startPosition);
+      if (string && string.length > 0) {
+        startIndex += string.length;
+        result += string;
+      } else {
+        break;
+      }
+    }
+    if (startIndex > endIndex) {
+      result = result.slice(0, length);
+    }
+  }
+  return result ?? "";
+}
+function unmarshalCaptures(query, tree, address, patternIndex, result) {
+  for (let i2 = 0, n = result.length;i2 < n; i2++) {
+    const captureIndex = C.getValue(address, "i32");
+    address += SIZE_OF_INT;
+    const node = unmarshalNode(tree, address);
+    address += SIZE_OF_NODE;
+    result[i2] = { patternIndex, name: query.captureNames[captureIndex], node };
+  }
+  return address;
+}
+function marshalNode(node, index = 0) {
+  let address = TRANSFER_BUFFER + index * SIZE_OF_NODE;
+  C.setValue(address, node.id, "i32");
+  address += SIZE_OF_INT;
+  C.setValue(address, node.startIndex, "i32");
+  address += SIZE_OF_INT;
+  C.setValue(address, node.startPosition.row, "i32");
+  address += SIZE_OF_INT;
+  C.setValue(address, node.startPosition.column, "i32");
+  address += SIZE_OF_INT;
+  C.setValue(address, node[0], "i32");
+}
+function unmarshalNode(tree, address = TRANSFER_BUFFER) {
+  const id = C.getValue(address, "i32");
+  address += SIZE_OF_INT;
+  if (id === 0)
+    return null;
+  const index = C.getValue(address, "i32");
+  address += SIZE_OF_INT;
+  const row = C.getValue(address, "i32");
+  address += SIZE_OF_INT;
+  const column = C.getValue(address, "i32");
+  address += SIZE_OF_INT;
+  const other = C.getValue(address, "i32");
+  const result = new Node(INTERNAL, {
+    id,
+    tree,
+    startIndex: index,
+    startPosition: { row, column },
+    other
+  });
+  return result;
+}
+function marshalTreeCursor(cursor, address = TRANSFER_BUFFER) {
+  C.setValue(address + 0 * SIZE_OF_INT, cursor[0], "i32");
+  C.setValue(address + 1 * SIZE_OF_INT, cursor[1], "i32");
+  C.setValue(address + 2 * SIZE_OF_INT, cursor[2], "i32");
+  C.setValue(address + 3 * SIZE_OF_INT, cursor[3], "i32");
+}
+function unmarshalTreeCursor(cursor) {
+  cursor[0] = C.getValue(TRANSFER_BUFFER + 0 * SIZE_OF_INT, "i32");
+  cursor[1] = C.getValue(TRANSFER_BUFFER + 1 * SIZE_OF_INT, "i32");
+  cursor[2] = C.getValue(TRANSFER_BUFFER + 2 * SIZE_OF_INT, "i32");
+  cursor[3] = C.getValue(TRANSFER_BUFFER + 3 * SIZE_OF_INT, "i32");
+}
+function marshalPoint(address, point) {
+  C.setValue(address, point.row, "i32");
+  C.setValue(address + SIZE_OF_INT, point.column, "i32");
+}
+function unmarshalPoint(address) {
+  const result = {
+    row: C.getValue(address, "i32") >>> 0,
+    column: C.getValue(address + SIZE_OF_INT, "i32") >>> 0
+  };
+  return result;
+}
+function marshalRange(address, range) {
+  marshalPoint(address, range.startPosition);
+  address += SIZE_OF_POINT;
+  marshalPoint(address, range.endPosition);
+  address += SIZE_OF_POINT;
+  C.setValue(address, range.startIndex, "i32");
+  address += SIZE_OF_INT;
+  C.setValue(address, range.endIndex, "i32");
+  address += SIZE_OF_INT;
+}
+function unmarshalRange(address) {
+  const result = {};
+  result.startPosition = unmarshalPoint(address);
+  address += SIZE_OF_POINT;
+  result.endPosition = unmarshalPoint(address);
+  address += SIZE_OF_POINT;
+  result.startIndex = C.getValue(address, "i32") >>> 0;
+  address += SIZE_OF_INT;
+  result.endIndex = C.getValue(address, "i32") >>> 0;
+  return result;
+}
+function marshalEdit(edit, address = TRANSFER_BUFFER) {
+  marshalPoint(address, edit.startPosition);
+  address += SIZE_OF_POINT;
+  marshalPoint(address, edit.oldEndPosition);
+  address += SIZE_OF_POINT;
+  marshalPoint(address, edit.newEndPosition);
+  address += SIZE_OF_POINT;
+  C.setValue(address, edit.startIndex, "i32");
+  address += SIZE_OF_INT;
+  C.setValue(address, edit.oldEndIndex, "i32");
+  address += SIZE_OF_INT;
+  C.setValue(address, edit.newEndIndex, "i32");
+  address += SIZE_OF_INT;
+}
+function unmarshalLanguageMetadata(address) {
+  const major_version = C.getValue(address, "i32");
+  const minor_version = C.getValue(address += SIZE_OF_INT, "i32");
+  const patch_version = C.getValue(address += SIZE_OF_INT, "i32");
+  return { major_version, minor_version, patch_version };
+}
+async function Module2(moduleArg = {}) {
+  var moduleRtn;
+  var Module = moduleArg;
+  var ENVIRONMENT_IS_WEB = typeof window == "object";
+  var ENVIRONMENT_IS_WORKER = typeof WorkerGlobalScope != "undefined";
+  var ENVIRONMENT_IS_NODE = typeof process == "object" && process.versions?.node && process.type != "renderer";
+  if (ENVIRONMENT_IS_NODE) {
+    const { createRequire } = await import("module");
+    var require = createRequire(import.meta.url);
+  }
+  Module.currentQueryProgressCallback = null;
+  Module.currentProgressCallback = null;
+  Module.currentLogCallback = null;
+  Module.currentParseCallback = null;
+  var arguments_ = [];
+  var thisProgram = "./this.program";
+  var quit_ = /* @__PURE__ */ __name((status, toThrow) => {
+    throw toThrow;
+  }, "quit_");
+  var _scriptName = import.meta.url;
+  var scriptDirectory = "";
+  function locateFile(path) {
+    if (Module["locateFile"]) {
+      return Module["locateFile"](path, scriptDirectory);
+    }
+    return scriptDirectory + path;
+  }
+  __name(locateFile, "locateFile");
+  var readAsync, readBinary;
+  if (ENVIRONMENT_IS_NODE) {
+    var fs = require("fs");
+    if (_scriptName.startsWith("file:")) {
+      scriptDirectory = require("path").dirname(require("url").fileURLToPath(_scriptName)) + "/";
+    }
+    readBinary = /* @__PURE__ */ __name((filename) => {
+      filename = isFileURI(filename) ? new URL(filename) : filename;
+      var ret = fs.readFileSync(filename);
+      return ret;
+    }, "readBinary");
+    readAsync = /* @__PURE__ */ __name(async (filename, binary2 = true) => {
+      filename = isFileURI(filename) ? new URL(filename) : filename;
+      var ret = fs.readFileSync(filename, binary2 ? undefined : "utf8");
+      return ret;
+    }, "readAsync");
+    if (process.argv.length > 1) {
+      thisProgram = process.argv[1].replace(/\\/g, "/");
+    }
+    arguments_ = process.argv.slice(2);
+    quit_ = /* @__PURE__ */ __name((status, toThrow) => {
+      process.exitCode = status;
+      throw toThrow;
+    }, "quit_");
+  } else if (ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER) {
+    try {
+      scriptDirectory = new URL(".", _scriptName).href;
+    } catch {}
+    {
+      if (ENVIRONMENT_IS_WORKER) {
+        readBinary = /* @__PURE__ */ __name((url) => {
+          var xhr = new XMLHttpRequest;
+          xhr.open("GET", url, false);
+          xhr.responseType = "arraybuffer";
+          xhr.send(null);
+          return new Uint8Array(xhr.response);
+        }, "readBinary");
+      }
+      readAsync = /* @__PURE__ */ __name(async (url) => {
+        if (isFileURI(url)) {
+          return new Promise((resolve4, reject) => {
+            var xhr = new XMLHttpRequest;
+            xhr.open("GET", url, true);
+            xhr.responseType = "arraybuffer";
+            xhr.onload = () => {
+              if (xhr.status == 200 || xhr.status == 0 && xhr.response) {
+                resolve4(xhr.response);
+                return;
+              }
+              reject(xhr.status);
+            };
+            xhr.onerror = reject;
+            xhr.send(null);
+          });
+        }
+        var response = await fetch(url, {
+          credentials: "same-origin"
+        });
+        if (response.ok) {
+          return response.arrayBuffer();
+        }
+        throw new Error(response.status + " : " + response.url);
+      }, "readAsync");
+    }
+  } else {}
+  var out = console.log.bind(console);
+  var err = console.error.bind(console);
+  var dynamicLibraries = [];
+  var wasmBinary;
+  var ABORT = false;
+  var EXITSTATUS;
+  var isFileURI = /* @__PURE__ */ __name((filename) => filename.startsWith("file://"), "isFileURI");
+  var readyPromiseResolve, readyPromiseReject;
+  var wasmMemory;
+  var HEAP8, HEAPU8, HEAP16, HEAPU16, HEAP32, HEAPU32, HEAPF32, HEAPF64;
+  var HEAP64, HEAPU64;
+  var HEAP_DATA_VIEW;
+  var runtimeInitialized = false;
+  function updateMemoryViews() {
+    var b = wasmMemory.buffer;
+    Module["HEAP8"] = HEAP8 = new Int8Array(b);
+    Module["HEAP16"] = HEAP16 = new Int16Array(b);
+    Module["HEAPU8"] = HEAPU8 = new Uint8Array(b);
+    Module["HEAPU16"] = HEAPU16 = new Uint16Array(b);
+    Module["HEAP32"] = HEAP32 = new Int32Array(b);
+    Module["HEAPU32"] = HEAPU32 = new Uint32Array(b);
+    Module["HEAPF32"] = HEAPF32 = new Float32Array(b);
+    Module["HEAPF64"] = HEAPF64 = new Float64Array(b);
+    Module["HEAP64"] = HEAP64 = new BigInt64Array(b);
+    Module["HEAPU64"] = HEAPU64 = new BigUint64Array(b);
+    Module["HEAP_DATA_VIEW"] = HEAP_DATA_VIEW = new DataView(b);
+    LE_HEAP_UPDATE();
+  }
+  __name(updateMemoryViews, "updateMemoryViews");
+  function initMemory() {
+    if (Module["wasmMemory"]) {
+      wasmMemory = Module["wasmMemory"];
+    } else {
+      var INITIAL_MEMORY = Module["INITIAL_MEMORY"] || 33554432;
+      wasmMemory = new WebAssembly.Memory({
+        initial: INITIAL_MEMORY / 65536,
+        maximum: 32768
+      });
+    }
+    updateMemoryViews();
+  }
+  __name(initMemory, "initMemory");
+  var __RELOC_FUNCS__ = [];
+  function preRun() {
+    if (Module["preRun"]) {
+      if (typeof Module["preRun"] == "function")
+        Module["preRun"] = [Module["preRun"]];
+      while (Module["preRun"].length) {
+        addOnPreRun(Module["preRun"].shift());
+      }
+    }
+    callRuntimeCallbacks(onPreRuns);
+  }
+  __name(preRun, "preRun");
+  function initRuntime() {
+    runtimeInitialized = true;
+    callRuntimeCallbacks(__RELOC_FUNCS__);
+    wasmExports["__wasm_call_ctors"]();
+    callRuntimeCallbacks(onPostCtors);
+  }
+  __name(initRuntime, "initRuntime");
+  function preMain() {}
+  __name(preMain, "preMain");
+  function postRun() {
+    if (Module["postRun"]) {
+      if (typeof Module["postRun"] == "function")
+        Module["postRun"] = [Module["postRun"]];
+      while (Module["postRun"].length) {
+        addOnPostRun(Module["postRun"].shift());
+      }
+    }
+    callRuntimeCallbacks(onPostRuns);
+  }
+  __name(postRun, "postRun");
+  function abort(what) {
+    Module["onAbort"]?.(what);
+    what = "Aborted(" + what + ")";
+    err(what);
+    ABORT = true;
+    what += ". Build with -sASSERTIONS for more info.";
+    var e = new WebAssembly.RuntimeError(what);
+    readyPromiseReject?.(e);
+    throw e;
+  }
+  __name(abort, "abort");
+  var wasmBinaryFile;
+  function findWasmBinary() {
+    if (Module["locateFile"]) {
+      return locateFile("web-tree-sitter.wasm");
+    }
+    return new URL("web-tree-sitter.wasm", import.meta.url).href;
+  }
+  __name(findWasmBinary, "findWasmBinary");
+  function getBinarySync(file) {
+    if (file == wasmBinaryFile && wasmBinary) {
+      return new Uint8Array(wasmBinary);
+    }
+    if (readBinary) {
+      return readBinary(file);
+    }
+    throw "both async and sync fetching of the wasm failed";
+  }
+  __name(getBinarySync, "getBinarySync");
+  async function getWasmBinary(binaryFile) {
+    if (!wasmBinary) {
+      try {
+        var response = await readAsync(binaryFile);
+        return new Uint8Array(response);
+      } catch {}
+    }
+    return getBinarySync(binaryFile);
+  }
+  __name(getWasmBinary, "getWasmBinary");
+  async function instantiateArrayBuffer(binaryFile, imports) {
+    try {
+      var binary2 = await getWasmBinary(binaryFile);
+      var instance2 = await WebAssembly.instantiate(binary2, imports);
+      return instance2;
+    } catch (reason) {
+      err(`failed to asynchronously prepare wasm: ${reason}`);
+      abort(reason);
+    }
+  }
+  __name(instantiateArrayBuffer, "instantiateArrayBuffer");
+  async function instantiateAsync(binary2, binaryFile, imports) {
+    if (!binary2 && !isFileURI(binaryFile) && !ENVIRONMENT_IS_NODE) {
+      try {
+        var response = fetch(binaryFile, {
+          credentials: "same-origin"
+        });
+        var instantiationResult = await WebAssembly.instantiateStreaming(response, imports);
+        return instantiationResult;
+      } catch (reason) {
+        err(`wasm streaming compile failed: ${reason}`);
+        err("falling back to ArrayBuffer instantiation");
+      }
+    }
+    return instantiateArrayBuffer(binaryFile, imports);
+  }
+  __name(instantiateAsync, "instantiateAsync");
+  function getWasmImports() {
+    return {
+      env: wasmImports,
+      wasi_snapshot_preview1: wasmImports,
+      "GOT.mem": new Proxy(wasmImports, GOTHandler),
+      "GOT.func": new Proxy(wasmImports, GOTHandler)
+    };
+  }
+  __name(getWasmImports, "getWasmImports");
+  async function createWasm() {
+    function receiveInstance(instance2, module2) {
+      wasmExports = instance2.exports;
+      wasmExports = relocateExports(wasmExports, 1024);
+      var metadata2 = getDylinkMetadata(module2);
+      if (metadata2.neededDynlibs) {
+        dynamicLibraries = metadata2.neededDynlibs.concat(dynamicLibraries);
+      }
+      mergeLibSymbols(wasmExports, "main");
+      LDSO.init();
+      loadDylibs();
+      __RELOC_FUNCS__.push(wasmExports["__wasm_apply_data_relocs"]);
+      assignWasmExports(wasmExports);
+      return wasmExports;
+    }
+    __name(receiveInstance, "receiveInstance");
+    function receiveInstantiationResult(result2) {
+      return receiveInstance(result2["instance"], result2["module"]);
+    }
+    __name(receiveInstantiationResult, "receiveInstantiationResult");
+    var info2 = getWasmImports();
+    if (Module["instantiateWasm"]) {
+      return new Promise((resolve4, reject) => {
+        Module["instantiateWasm"](info2, (mod, inst) => {
+          resolve4(receiveInstance(mod, inst));
+        });
+      });
+    }
+    wasmBinaryFile ??= findWasmBinary();
+    var result = await instantiateAsync(wasmBinary, wasmBinaryFile, info2);
+    var exports = receiveInstantiationResult(result);
+    return exports;
+  }
+  __name(createWasm, "createWasm");
+
+  class ExitStatus {
+    static {
+      __name(this, "ExitStatus");
+    }
+    name = "ExitStatus";
+    constructor(status) {
+      this.message = `Program terminated with exit(${status})`;
+      this.status = status;
+    }
+  }
+  var GOT = {};
+  var currentModuleWeakSymbols = /* @__PURE__ */ new Set([]);
+  var GOTHandler = {
+    get(obj, symName) {
+      var rtn = GOT[symName];
+      if (!rtn) {
+        rtn = GOT[symName] = new WebAssembly.Global({
+          value: "i32",
+          mutable: true
+        });
+      }
+      if (!currentModuleWeakSymbols.has(symName)) {
+        rtn.required = true;
+      }
+      return rtn;
+    }
+  };
+  var LE_ATOMICS_NATIVE_BYTE_ORDER = [];
+  var LE_HEAP_LOAD_F32 = /* @__PURE__ */ __name((byteOffset) => HEAP_DATA_VIEW.getFloat32(byteOffset, true), "LE_HEAP_LOAD_F32");
+  var LE_HEAP_LOAD_F64 = /* @__PURE__ */ __name((byteOffset) => HEAP_DATA_VIEW.getFloat64(byteOffset, true), "LE_HEAP_LOAD_F64");
+  var LE_HEAP_LOAD_I16 = /* @__PURE__ */ __name((byteOffset) => HEAP_DATA_VIEW.getInt16(byteOffset, true), "LE_HEAP_LOAD_I16");
+  var LE_HEAP_LOAD_I32 = /* @__PURE__ */ __name((byteOffset) => HEAP_DATA_VIEW.getInt32(byteOffset, true), "LE_HEAP_LOAD_I32");
+  var LE_HEAP_LOAD_I64 = /* @__PURE__ */ __name((byteOffset) => HEAP_DATA_VIEW.getBigInt64(byteOffset, true), "LE_HEAP_LOAD_I64");
+  var LE_HEAP_LOAD_U32 = /* @__PURE__ */ __name((byteOffset) => HEAP_DATA_VIEW.getUint32(byteOffset, true), "LE_HEAP_LOAD_U32");
+  var LE_HEAP_STORE_F32 = /* @__PURE__ */ __name((byteOffset, value) => HEAP_DATA_VIEW.setFloat32(byteOffset, value, true), "LE_HEAP_STORE_F32");
+  var LE_HEAP_STORE_F64 = /* @__PURE__ */ __name((byteOffset, value) => HEAP_DATA_VIEW.setFloat64(byteOffset, value, true), "LE_HEAP_STORE_F64");
+  var LE_HEAP_STORE_I16 = /* @__PURE__ */ __name((byteOffset, value) => HEAP_DATA_VIEW.setInt16(byteOffset, value, true), "LE_HEAP_STORE_I16");
+  var LE_HEAP_STORE_I32 = /* @__PURE__ */ __name((byteOffset, value) => HEAP_DATA_VIEW.setInt32(byteOffset, value, true), "LE_HEAP_STORE_I32");
+  var LE_HEAP_STORE_I64 = /* @__PURE__ */ __name((byteOffset, value) => HEAP_DATA_VIEW.setBigInt64(byteOffset, value, true), "LE_HEAP_STORE_I64");
+  var LE_HEAP_STORE_U32 = /* @__PURE__ */ __name((byteOffset, value) => HEAP_DATA_VIEW.setUint32(byteOffset, value, true), "LE_HEAP_STORE_U32");
+  var callRuntimeCallbacks = /* @__PURE__ */ __name((callbacks) => {
+    while (callbacks.length > 0) {
+      callbacks.shift()(Module);
+    }
+  }, "callRuntimeCallbacks");
+  var onPostRuns = [];
+  var addOnPostRun = /* @__PURE__ */ __name((cb) => onPostRuns.push(cb), "addOnPostRun");
+  var onPreRuns = [];
+  var addOnPreRun = /* @__PURE__ */ __name((cb) => onPreRuns.push(cb), "addOnPreRun");
+  var UTF8Decoder = typeof TextDecoder != "undefined" ? new TextDecoder : undefined;
+  var findStringEnd = /* @__PURE__ */ __name((heapOrArray, idx, maxBytesToRead, ignoreNul) => {
+    var maxIdx = idx + maxBytesToRead;
+    if (ignoreNul)
+      return maxIdx;
+    while (heapOrArray[idx] && !(idx >= maxIdx))
+      ++idx;
+    return idx;
+  }, "findStringEnd");
+  var UTF8ArrayToString = /* @__PURE__ */ __name((heapOrArray, idx = 0, maxBytesToRead, ignoreNul) => {
+    var endPtr = findStringEnd(heapOrArray, idx, maxBytesToRead, ignoreNul);
+    if (endPtr - idx > 16 && heapOrArray.buffer && UTF8Decoder) {
+      return UTF8Decoder.decode(heapOrArray.subarray(idx, endPtr));
+    }
+    var str = "";
+    while (idx < endPtr) {
+      var u0 = heapOrArray[idx++];
+      if (!(u0 & 128)) {
+        str += String.fromCharCode(u0);
+        continue;
+      }
+      var u1 = heapOrArray[idx++] & 63;
+      if ((u0 & 224) == 192) {
+        str += String.fromCharCode((u0 & 31) << 6 | u1);
+        continue;
+      }
+      var u2 = heapOrArray[idx++] & 63;
+      if ((u0 & 240) == 224) {
+        u0 = (u0 & 15) << 12 | u1 << 6 | u2;
+      } else {
+        u0 = (u0 & 7) << 18 | u1 << 12 | u2 << 6 | heapOrArray[idx++] & 63;
+      }
+      if (u0 < 65536) {
+        str += String.fromCharCode(u0);
+      } else {
+        var ch = u0 - 65536;
+        str += String.fromCharCode(55296 | ch >> 10, 56320 | ch & 1023);
+      }
+    }
+    return str;
+  }, "UTF8ArrayToString");
+  var getDylinkMetadata = /* @__PURE__ */ __name((binary2) => {
+    var offset = 0;
+    var end = 0;
+    function getU8() {
+      return binary2[offset++];
+    }
+    __name(getU8, "getU8");
+    function getLEB() {
+      var ret = 0;
+      var mul = 1;
+      while (true) {
+        var byte = binary2[offset++];
+        ret += (byte & 127) * mul;
+        mul *= 128;
+        if (!(byte & 128))
+          break;
+      }
+      return ret;
+    }
+    __name(getLEB, "getLEB");
+    function getString() {
+      var len = getLEB();
+      offset += len;
+      return UTF8ArrayToString(binary2, offset - len, len);
+    }
+    __name(getString, "getString");
+    function getStringList() {
+      var count2 = getLEB();
+      var rtn = [];
+      while (count2--)
+        rtn.push(getString());
+      return rtn;
+    }
+    __name(getStringList, "getStringList");
+    function failIf(condition, message) {
+      if (condition)
+        throw new Error(message);
+    }
+    __name(failIf, "failIf");
+    if (binary2 instanceof WebAssembly.Module) {
+      var dylinkSection = WebAssembly.Module.customSections(binary2, "dylink.0");
+      failIf(dylinkSection.length === 0, "need dylink section");
+      binary2 = new Uint8Array(dylinkSection[0]);
+      end = binary2.length;
+    } else {
+      var int32View = new Uint32Array(new Uint8Array(binary2.subarray(0, 24)).buffer);
+      var magicNumberFound = int32View[0] == 1836278016 || int32View[0] == 6386541;
+      failIf(!magicNumberFound, "need to see wasm magic number");
+      failIf(binary2[8] !== 0, "need the dylink section to be first");
+      offset = 9;
+      var section_size = getLEB();
+      end = offset + section_size;
+      var name2 = getString();
+      failIf(name2 !== "dylink.0");
+    }
+    var customSection = {
+      neededDynlibs: [],
+      tlsExports: /* @__PURE__ */ new Set,
+      weakImports: /* @__PURE__ */ new Set,
+      runtimePaths: []
+    };
+    var WASM_DYLINK_MEM_INFO = 1;
+    var WASM_DYLINK_NEEDED = 2;
+    var WASM_DYLINK_EXPORT_INFO = 3;
+    var WASM_DYLINK_IMPORT_INFO = 4;
+    var WASM_DYLINK_RUNTIME_PATH = 5;
+    var WASM_SYMBOL_TLS = 256;
+    var WASM_SYMBOL_BINDING_MASK = 3;
+    var WASM_SYMBOL_BINDING_WEAK = 1;
+    while (offset < end) {
+      var subsectionType = getU8();
+      var subsectionSize = getLEB();
+      if (subsectionType === WASM_DYLINK_MEM_INFO) {
+        customSection.memorySize = getLEB();
+        customSection.memoryAlign = getLEB();
+        customSection.tableSize = getLEB();
+        customSection.tableAlign = getLEB();
+      } else if (subsectionType === WASM_DYLINK_NEEDED) {
+        customSection.neededDynlibs = getStringList();
+      } else if (subsectionType === WASM_DYLINK_EXPORT_INFO) {
+        var count = getLEB();
+        while (count--) {
+          var symname = getString();
+          var flags2 = getLEB();
+          if (flags2 & WASM_SYMBOL_TLS) {
+            customSection.tlsExports.add(symname);
+          }
+        }
+      } else if (subsectionType === WASM_DYLINK_IMPORT_INFO) {
+        var count = getLEB();
+        while (count--) {
+          var modname = getString();
+          var symname = getString();
+          var flags2 = getLEB();
+          if ((flags2 & WASM_SYMBOL_BINDING_MASK) == WASM_SYMBOL_BINDING_WEAK) {
+            customSection.weakImports.add(symname);
+          }
+        }
+      } else if (subsectionType === WASM_DYLINK_RUNTIME_PATH) {
+        customSection.runtimePaths = getStringList();
+      } else {
+        offset += subsectionSize;
+      }
+    }
+    return customSection;
+  }, "getDylinkMetadata");
+  function getValue(ptr, type = "i8") {
+    if (type.endsWith("*"))
+      type = "*";
+    switch (type) {
+      case "i1":
+        return HEAP8[ptr];
+      case "i8":
+        return HEAP8[ptr];
+      case "i16":
+        return LE_HEAP_LOAD_I16((ptr >> 1) * 2);
+      case "i32":
+        return LE_HEAP_LOAD_I32((ptr >> 2) * 4);
+      case "i64":
+        return LE_HEAP_LOAD_I64((ptr >> 3) * 8);
+      case "float":
+        return LE_HEAP_LOAD_F32((ptr >> 2) * 4);
+      case "double":
+        return LE_HEAP_LOAD_F64((ptr >> 3) * 8);
+      case "*":
+        return LE_HEAP_LOAD_U32((ptr >> 2) * 4);
+      default:
+        abort(`invalid type for getValue: ${type}`);
+    }
+  }
+  __name(getValue, "getValue");
+  var newDSO = /* @__PURE__ */ __name((name2, handle2, syms) => {
+    var dso = {
+      refcount: Infinity,
+      name: name2,
+      exports: syms,
+      global: true
+    };
+    LDSO.loadedLibsByName[name2] = dso;
+    if (handle2 != null) {
+      LDSO.loadedLibsByHandle[handle2] = dso;
+    }
+    return dso;
+  }, "newDSO");
+  var LDSO = {
+    loadedLibsByName: {},
+    loadedLibsByHandle: {},
+    init() {
+      newDSO("__main__", 0, wasmImports);
+    }
+  };
+  var ___heap_base = 78240;
+  var alignMemory = /* @__PURE__ */ __name((size, alignment) => Math.ceil(size / alignment) * alignment, "alignMemory");
+  var getMemory = /* @__PURE__ */ __name((size) => {
+    if (runtimeInitialized) {
+      return _calloc(size, 1);
+    }
+    var ret = ___heap_base;
+    var end = ret + alignMemory(size, 16);
+    ___heap_base = end;
+    GOT["__heap_base"].value = end;
+    return ret;
+  }, "getMemory");
+  var isInternalSym = /* @__PURE__ */ __name((symName) => ["__cpp_exception", "__c_longjmp", "__wasm_apply_data_relocs", "__dso_handle", "__tls_size", "__tls_align", "__set_stack_limits", "_emscripten_tls_init", "__wasm_init_tls", "__wasm_call_ctors", "__start_em_asm", "__stop_em_asm", "__start_em_js", "__stop_em_js"].includes(symName) || symName.startsWith("__em_js__"), "isInternalSym");
+  var uleb128EncodeWithLen = /* @__PURE__ */ __name((arr) => {
+    const n = arr.length;
+    return [n % 128 | 128, n >> 7, ...arr];
+  }, "uleb128EncodeWithLen");
+  var wasmTypeCodes = {
+    i: 127,
+    p: 127,
+    j: 126,
+    f: 125,
+    d: 124,
+    e: 111
+  };
+  var generateTypePack = /* @__PURE__ */ __name((types) => uleb128EncodeWithLen(Array.from(types, (type) => {
+    var code = wasmTypeCodes[type];
+    return code;
+  })), "generateTypePack");
+  var convertJsFunctionToWasm = /* @__PURE__ */ __name((func2, sig) => {
+    var bytes = Uint8Array.of(0, 97, 115, 109, 1, 0, 0, 0, 1, ...uleb128EncodeWithLen([
+      1,
+      96,
+      ...generateTypePack(sig.slice(1)),
+      ...generateTypePack(sig[0] === "v" ? "" : sig[0])
+    ]), 2, 7, 1, 1, 101, 1, 102, 0, 0, 7, 5, 1, 1, 102, 0, 0);
+    var module2 = new WebAssembly.Module(bytes);
+    var instance2 = new WebAssembly.Instance(module2, {
+      e: {
+        f: func2
+      }
+    });
+    var wrappedFunc = instance2.exports["f"];
+    return wrappedFunc;
+  }, "convertJsFunctionToWasm");
+  var wasmTableMirror = [];
+  var wasmTable = new WebAssembly.Table({
+    initial: 31,
+    element: "anyfunc"
+  });
+  var getWasmTableEntry = /* @__PURE__ */ __name((funcPtr) => {
+    var func2 = wasmTableMirror[funcPtr];
+    if (!func2) {
+      wasmTableMirror[funcPtr] = func2 = wasmTable.get(funcPtr);
+    }
+    return func2;
+  }, "getWasmTableEntry");
+  var updateTableMap = /* @__PURE__ */ __name((offset, count) => {
+    if (functionsInTableMap) {
+      for (var i2 = offset;i2 < offset + count; i2++) {
+        var item = getWasmTableEntry(i2);
+        if (item) {
+          functionsInTableMap.set(item, i2);
+        }
+      }
+    }
+  }, "updateTableMap");
+  var functionsInTableMap;
+  var getFunctionAddress = /* @__PURE__ */ __name((func2) => {
+    if (!functionsInTableMap) {
+      functionsInTableMap = /* @__PURE__ */ new WeakMap;
+      updateTableMap(0, wasmTable.length);
+    }
+    return functionsInTableMap.get(func2) || 0;
+  }, "getFunctionAddress");
+  var freeTableIndexes = [];
+  var getEmptyTableSlot = /* @__PURE__ */ __name(() => {
+    if (freeTableIndexes.length) {
+      return freeTableIndexes.pop();
+    }
+    return wasmTable["grow"](1);
+  }, "getEmptyTableSlot");
+  var setWasmTableEntry = /* @__PURE__ */ __name((idx, func2) => {
+    wasmTable.set(idx, func2);
+    wasmTableMirror[idx] = wasmTable.get(idx);
+  }, "setWasmTableEntry");
+  var addFunction = /* @__PURE__ */ __name((func2, sig) => {
+    var rtn = getFunctionAddress(func2);
+    if (rtn) {
+      return rtn;
+    }
+    var ret = getEmptyTableSlot();
+    try {
+      setWasmTableEntry(ret, func2);
+    } catch (err2) {
+      if (!(err2 instanceof TypeError)) {
+        throw err2;
+      }
+      var wrapped = convertJsFunctionToWasm(func2, sig);
+      setWasmTableEntry(ret, wrapped);
+    }
+    functionsInTableMap.set(func2, ret);
+    return ret;
+  }, "addFunction");
+  var updateGOT = /* @__PURE__ */ __name((exports, replace) => {
+    for (var symName in exports) {
+      if (isInternalSym(symName)) {
+        continue;
+      }
+      var value = exports[symName];
+      GOT[symName] ||= new WebAssembly.Global({
+        value: "i32",
+        mutable: true
+      });
+      if (replace || GOT[symName].value == 0) {
+        if (typeof value == "function") {
+          GOT[symName].value = addFunction(value);
+        } else if (typeof value == "number") {
+          GOT[symName].value = value;
+        } else {
+          err(`unhandled export type for '${symName}': ${typeof value}`);
+        }
+      }
+    }
+  }, "updateGOT");
+  var relocateExports = /* @__PURE__ */ __name((exports, memoryBase2, replace) => {
+    var relocated = {};
+    for (var e in exports) {
+      var value = exports[e];
+      if (typeof value == "object") {
+        value = value.value;
+      }
+      if (typeof value == "number") {
+        value += memoryBase2;
+      }
+      relocated[e] = value;
+    }
+    updateGOT(relocated, replace);
+    return relocated;
+  }, "relocateExports");
+  var isSymbolDefined = /* @__PURE__ */ __name((symName) => {
+    var existing = wasmImports[symName];
+    if (!existing || existing.stub) {
+      return false;
+    }
+    return true;
+  }, "isSymbolDefined");
+  var dynCall = /* @__PURE__ */ __name((sig, ptr, args2 = [], promising = false) => {
+    var func2 = getWasmTableEntry(ptr);
+    var rtn = func2(...args2);
+    function convert(rtn2) {
+      return rtn2;
+    }
+    __name(convert, "convert");
+    return convert(rtn);
+  }, "dynCall");
+  var stackSave = /* @__PURE__ */ __name(() => _emscripten_stack_get_current(), "stackSave");
+  var stackRestore = /* @__PURE__ */ __name((val) => __emscripten_stack_restore(val), "stackRestore");
+  var createInvokeFunction = /* @__PURE__ */ __name((sig) => (ptr, ...args2) => {
+    var sp = stackSave();
+    try {
+      return dynCall(sig, ptr, args2);
+    } catch (e) {
+      stackRestore(sp);
+      if (e !== e + 0)
+        throw e;
+      _setThrew(1, 0);
+      if (sig[0] == "j")
+        return 0n;
+    }
+  }, "createInvokeFunction");
+  var resolveGlobalSymbol = /* @__PURE__ */ __name((symName, direct = false) => {
+    var sym;
+    if (isSymbolDefined(symName)) {
+      sym = wasmImports[symName];
+    } else if (symName.startsWith("invoke_")) {
+      sym = wasmImports[symName] = createInvokeFunction(symName.split("_")[1]);
+    }
+    return {
+      sym,
+      name: symName
+    };
+  }, "resolveGlobalSymbol");
+  var onPostCtors = [];
+  var addOnPostCtor = /* @__PURE__ */ __name((cb) => onPostCtors.push(cb), "addOnPostCtor");
+  var UTF8ToString = /* @__PURE__ */ __name((ptr, maxBytesToRead, ignoreNul) => ptr ? UTF8ArrayToString(HEAPU8, ptr, maxBytesToRead, ignoreNul) : "", "UTF8ToString");
+  var loadWebAssemblyModule = /* @__PURE__ */ __name((binary, flags, libName, localScope, handle) => {
+    var metadata = getDylinkMetadata(binary);
+    function loadModule() {
+      var memAlign = Math.pow(2, metadata.memoryAlign);
+      var memoryBase = metadata.memorySize ? alignMemory(getMemory(metadata.memorySize + memAlign), memAlign) : 0;
+      var tableBase = metadata.tableSize ? wasmTable.length : 0;
+      if (handle) {
+        HEAP8[handle + 8] = 1;
+        LE_HEAP_STORE_U32((handle + 12 >> 2) * 4, memoryBase);
+        LE_HEAP_STORE_I32((handle + 16 >> 2) * 4, metadata.memorySize);
+        LE_HEAP_STORE_U32((handle + 20 >> 2) * 4, tableBase);
+        LE_HEAP_STORE_I32((handle + 24 >> 2) * 4, metadata.tableSize);
+      }
+      if (metadata.tableSize) {
+        wasmTable.grow(metadata.tableSize);
+      }
+      var moduleExports;
+      function resolveSymbol(sym) {
+        var resolved = resolveGlobalSymbol(sym).sym;
+        if (!resolved && localScope) {
+          resolved = localScope[sym];
+        }
+        if (!resolved) {
+          resolved = moduleExports[sym];
+        }
+        return resolved;
+      }
+      __name(resolveSymbol, "resolveSymbol");
+      var proxyHandler = {
+        get(stubs, prop) {
+          switch (prop) {
+            case "__memory_base":
+              return memoryBase;
+            case "__table_base":
+              return tableBase;
+          }
+          if (prop in wasmImports && !wasmImports[prop].stub) {
+            var res = wasmImports[prop];
+            return res;
+          }
+          if (!(prop in stubs)) {
+            var resolved;
+            stubs[prop] = (...args2) => {
+              resolved ||= resolveSymbol(prop);
+              return resolved(...args2);
+            };
+          }
+          return stubs[prop];
+        }
+      };
+      var proxy = new Proxy({}, proxyHandler);
+      currentModuleWeakSymbols = metadata.weakImports;
+      var info = {
+        "GOT.mem": new Proxy({}, GOTHandler),
+        "GOT.func": new Proxy({}, GOTHandler),
+        env: proxy,
+        wasi_snapshot_preview1: proxy
+      };
+      function postInstantiation(module, instance) {
+        updateTableMap(tableBase, metadata.tableSize);
+        moduleExports = relocateExports(instance.exports, memoryBase);
+        if (!flags.allowUndefined) {
+          reportUndefinedSymbols();
+        }
+        function addEmAsm(addr, body) {
+          var args = [];
+          var arity = 0;
+          for (;arity < 16; arity++) {
+            if (body.indexOf("$" + arity) != -1) {
+              args.push("$" + arity);
+            } else {
+              break;
+            }
+          }
+          args = args.join(",");
+          var func = `(${args}) => { ${body} };`;
+          ASM_CONSTS[start] = eval(func);
+        }
+        __name(addEmAsm, "addEmAsm");
+        if ("__start_em_asm" in moduleExports) {
+          var start = moduleExports["__start_em_asm"];
+          var stop = moduleExports["__stop_em_asm"];
+          while (start < stop) {
+            var jsString = UTF8ToString(start);
+            addEmAsm(start, jsString);
+            start = HEAPU8.indexOf(0, start) + 1;
+          }
+        }
+        function addEmJs(name, cSig, body) {
+          var jsArgs = [];
+          cSig = cSig.slice(1, -1);
+          if (cSig != "void") {
+            cSig = cSig.split(",");
+            for (var i in cSig) {
+              var jsArg = cSig[i].split(" ").pop();
+              jsArgs.push(jsArg.replace("*", ""));
+            }
+          }
+          var func = `(${jsArgs}) => ${body};`;
+          moduleExports[name] = eval(func);
+        }
+        __name(addEmJs, "addEmJs");
+        for (var name in moduleExports) {
+          if (name.startsWith("__em_js__")) {
+            var start = moduleExports[name];
+            var jsString = UTF8ToString(start);
+            var parts = jsString.split("<::>");
+            addEmJs(name.replace("__em_js__", ""), parts[0], parts[1]);
+            delete moduleExports[name];
+          }
+        }
+        var applyRelocs = moduleExports["__wasm_apply_data_relocs"];
+        if (applyRelocs) {
+          if (runtimeInitialized) {
+            applyRelocs();
+          } else {
+            __RELOC_FUNCS__.push(applyRelocs);
+          }
+        }
+        var init = moduleExports["__wasm_call_ctors"];
+        if (init) {
+          if (runtimeInitialized) {
+            init();
+          } else {
+            addOnPostCtor(init);
+          }
+        }
+        return moduleExports;
+      }
+      __name(postInstantiation, "postInstantiation");
+      if (flags.loadAsync) {
+        return (async () => {
+          var instance2;
+          if (binary instanceof WebAssembly.Module) {
+            instance2 = new WebAssembly.Instance(binary, info);
+          } else {
+            ({ module: binary, instance: instance2 } = await WebAssembly.instantiate(binary, info));
+          }
+          return postInstantiation(binary, instance2);
+        })();
+      }
+      var module = binary instanceof WebAssembly.Module ? binary : new WebAssembly.Module(binary);
+      var instance = new WebAssembly.Instance(module, info);
+      return postInstantiation(module, instance);
+    }
+    __name(loadModule, "loadModule");
+    flags = {
+      ...flags,
+      rpath: {
+        parentLibPath: libName,
+        paths: metadata.runtimePaths
+      }
+    };
+    if (flags.loadAsync) {
+      return metadata.neededDynlibs.reduce((chain, dynNeeded) => chain.then(() => loadDynamicLibrary(dynNeeded, flags, localScope)), Promise.resolve()).then(loadModule);
+    }
+    metadata.neededDynlibs.forEach((needed) => loadDynamicLibrary(needed, flags, localScope));
+    return loadModule();
+  }, "loadWebAssemblyModule");
+  var mergeLibSymbols = /* @__PURE__ */ __name((exports, libName2) => {
+    for (var [sym, exp] of Object.entries(exports)) {
+      const setImport = /* @__PURE__ */ __name((target) => {
+        if (!isSymbolDefined(target)) {
+          wasmImports[target] = exp;
+        }
+      }, "setImport");
+      setImport(sym);
+      const main_alias = "__main_argc_argv";
+      if (sym == "main") {
+        setImport(main_alias);
+      }
+      if (sym == main_alias) {
+        setImport("main");
+      }
+    }
+  }, "mergeLibSymbols");
+  var asyncLoad = /* @__PURE__ */ __name(async (url) => {
+    var arrayBuffer = await readAsync(url);
+    return new Uint8Array(arrayBuffer);
+  }, "asyncLoad");
+  function loadDynamicLibrary(libName2, flags2 = {
+    global: true,
+    nodelete: true
+  }, localScope2, handle2) {
+    var dso = LDSO.loadedLibsByName[libName2];
+    if (dso) {
+      if (!flags2.global) {
+        if (localScope2) {
+          Object.assign(localScope2, dso.exports);
+        }
+      } else if (!dso.global) {
+        dso.global = true;
+        mergeLibSymbols(dso.exports, libName2);
+      }
+      if (flags2.nodelete && dso.refcount !== Infinity) {
+        dso.refcount = Infinity;
+      }
+      dso.refcount++;
+      if (handle2) {
+        LDSO.loadedLibsByHandle[handle2] = dso;
+      }
+      return flags2.loadAsync ? Promise.resolve(true) : true;
+    }
+    dso = newDSO(libName2, handle2, "loading");
+    dso.refcount = flags2.nodelete ? Infinity : 1;
+    dso.global = flags2.global;
+    function loadLibData() {
+      if (handle2) {
+        var data = LE_HEAP_LOAD_U32((handle2 + 28 >> 2) * 4);
+        var dataSize = LE_HEAP_LOAD_U32((handle2 + 32 >> 2) * 4);
+        if (data && dataSize) {
+          var libData = HEAP8.slice(data, data + dataSize);
+          return flags2.loadAsync ? Promise.resolve(libData) : libData;
+        }
+      }
+      var libFile = locateFile(libName2);
+      if (flags2.loadAsync) {
+        return asyncLoad(libFile);
+      }
+      if (!readBinary) {
+        throw new Error(`${libFile}: file not found, and synchronous loading of external files is not available`);
+      }
+      return readBinary(libFile);
+    }
+    __name(loadLibData, "loadLibData");
+    function getExports() {
+      if (flags2.loadAsync) {
+        return loadLibData().then((libData) => loadWebAssemblyModule(libData, flags2, libName2, localScope2, handle2));
+      }
+      return loadWebAssemblyModule(loadLibData(), flags2, libName2, localScope2, handle2);
+    }
+    __name(getExports, "getExports");
+    function moduleLoaded(exports) {
+      if (dso.global) {
+        mergeLibSymbols(exports, libName2);
+      } else if (localScope2) {
+        Object.assign(localScope2, exports);
+      }
+      dso.exports = exports;
+    }
+    __name(moduleLoaded, "moduleLoaded");
+    if (flags2.loadAsync) {
+      return getExports().then((exports) => {
+        moduleLoaded(exports);
+        return true;
+      });
+    }
+    moduleLoaded(getExports());
+    return true;
+  }
+  __name(loadDynamicLibrary, "loadDynamicLibrary");
+  var reportUndefinedSymbols = /* @__PURE__ */ __name(() => {
+    for (var [symName, entry] of Object.entries(GOT)) {
+      if (entry.value == 0) {
+        var value = resolveGlobalSymbol(symName, true).sym;
+        if (!value && !entry.required) {
+          continue;
+        }
+        if (typeof value == "function") {
+          entry.value = addFunction(value, value.sig);
+        } else if (typeof value == "number") {
+          entry.value = value;
+        } else {
+          throw new Error(`bad export type for '${symName}': ${typeof value}`);
+        }
+      }
+    }
+  }, "reportUndefinedSymbols");
+  var runDependencies = 0;
+  var dependenciesFulfilled = null;
+  var removeRunDependency = /* @__PURE__ */ __name((id) => {
+    runDependencies--;
+    Module["monitorRunDependencies"]?.(runDependencies);
+    if (runDependencies == 0) {
+      if (dependenciesFulfilled) {
+        var callback = dependenciesFulfilled;
+        dependenciesFulfilled = null;
+        callback();
+      }
+    }
+  }, "removeRunDependency");
+  var addRunDependency = /* @__PURE__ */ __name((id) => {
+    runDependencies++;
+    Module["monitorRunDependencies"]?.(runDependencies);
+  }, "addRunDependency");
+  var loadDylibs = /* @__PURE__ */ __name(async () => {
+    if (!dynamicLibraries.length) {
+      reportUndefinedSymbols();
+      return;
+    }
+    addRunDependency("loadDylibs");
+    for (var lib of dynamicLibraries) {
+      await loadDynamicLibrary(lib, {
+        loadAsync: true,
+        global: true,
+        nodelete: true,
+        allowUndefined: true
+      });
+    }
+    reportUndefinedSymbols();
+    removeRunDependency("loadDylibs");
+  }, "loadDylibs");
+  var noExitRuntime = true;
+  function setValue(ptr, value, type = "i8") {
+    if (type.endsWith("*"))
+      type = "*";
+    switch (type) {
+      case "i1":
+        HEAP8[ptr] = value;
+        break;
+      case "i8":
+        HEAP8[ptr] = value;
+        break;
+      case "i16":
+        LE_HEAP_STORE_I16((ptr >> 1) * 2, value);
+        break;
+      case "i32":
+        LE_HEAP_STORE_I32((ptr >> 2) * 4, value);
+        break;
+      case "i64":
+        LE_HEAP_STORE_I64((ptr >> 3) * 8, BigInt(value));
+        break;
+      case "float":
+        LE_HEAP_STORE_F32((ptr >> 2) * 4, value);
+        break;
+      case "double":
+        LE_HEAP_STORE_F64((ptr >> 3) * 8, value);
+        break;
+      case "*":
+        LE_HEAP_STORE_U32((ptr >> 2) * 4, value);
+        break;
+      default:
+        abort(`invalid type for setValue: ${type}`);
+    }
+  }
+  __name(setValue, "setValue");
+  var ___memory_base = new WebAssembly.Global({
+    value: "i32",
+    mutable: false
+  }, 1024);
+  var ___stack_high = 78240;
+  var ___stack_low = 12704;
+  var ___stack_pointer = new WebAssembly.Global({
+    value: "i32",
+    mutable: true
+  }, 78240);
+  var ___table_base = new WebAssembly.Global({
+    value: "i32",
+    mutable: false
+  }, 1);
+  var __abort_js = /* @__PURE__ */ __name(() => abort(""), "__abort_js");
+  __abort_js.sig = "v";
+  var getHeapMax = /* @__PURE__ */ __name(() => 2147483648, "getHeapMax");
+  var growMemory = /* @__PURE__ */ __name((size) => {
+    var oldHeapSize = wasmMemory.buffer.byteLength;
+    var pages = (size - oldHeapSize + 65535) / 65536 | 0;
+    try {
+      wasmMemory.grow(pages);
+      updateMemoryViews();
+      return 1;
+    } catch (e) {}
+  }, "growMemory");
+  var _emscripten_resize_heap = /* @__PURE__ */ __name((requestedSize) => {
+    var oldSize = HEAPU8.length;
+    requestedSize >>>= 0;
+    var maxHeapSize = getHeapMax();
+    if (requestedSize > maxHeapSize) {
+      return false;
+    }
+    for (var cutDown = 1;cutDown <= 4; cutDown *= 2) {
+      var overGrownHeapSize = oldSize * (1 + 0.2 / cutDown);
+      overGrownHeapSize = Math.min(overGrownHeapSize, requestedSize + 100663296);
+      var newSize = Math.min(maxHeapSize, alignMemory(Math.max(requestedSize, overGrownHeapSize), 65536));
+      var replacement = growMemory(newSize);
+      if (replacement) {
+        return true;
+      }
+    }
+    return false;
+  }, "_emscripten_resize_heap");
+  _emscripten_resize_heap.sig = "ip";
+  var _fd_close = /* @__PURE__ */ __name((fd) => 52, "_fd_close");
+  _fd_close.sig = "ii";
+  var INT53_MAX = 9007199254740992;
+  var INT53_MIN = -9007199254740992;
+  var bigintToI53Checked = /* @__PURE__ */ __name((num) => num < INT53_MIN || num > INT53_MAX ? NaN : Number(num), "bigintToI53Checked");
+  function _fd_seek(fd, offset, whence, newOffset) {
+    offset = bigintToI53Checked(offset);
+    return 70;
+  }
+  __name(_fd_seek, "_fd_seek");
+  _fd_seek.sig = "iijip";
+  var printCharBuffers = [null, [], []];
+  var printChar = /* @__PURE__ */ __name((stream, curr) => {
+    var buffer = printCharBuffers[stream];
+    if (curr === 0 || curr === 10) {
+      (stream === 1 ? out : err)(UTF8ArrayToString(buffer));
+      buffer.length = 0;
+    } else {
+      buffer.push(curr);
+    }
+  }, "printChar");
+  var _fd_write = /* @__PURE__ */ __name((fd, iov, iovcnt, pnum) => {
+    var num = 0;
+    for (var i2 = 0;i2 < iovcnt; i2++) {
+      var ptr = LE_HEAP_LOAD_U32((iov >> 2) * 4);
+      var len = LE_HEAP_LOAD_U32((iov + 4 >> 2) * 4);
+      iov += 8;
+      for (var j = 0;j < len; j++) {
+        printChar(fd, HEAPU8[ptr + j]);
+      }
+      num += len;
+    }
+    LE_HEAP_STORE_U32((pnum >> 2) * 4, num);
+    return 0;
+  }, "_fd_write");
+  _fd_write.sig = "iippp";
+  function _tree_sitter_log_callback(isLexMessage, messageAddress) {
+    if (Module.currentLogCallback) {
+      const message = UTF8ToString(messageAddress);
+      Module.currentLogCallback(message, isLexMessage !== 0);
+    }
+  }
+  __name(_tree_sitter_log_callback, "_tree_sitter_log_callback");
+  function _tree_sitter_parse_callback(inputBufferAddress, index, row, column, lengthAddress) {
+    const INPUT_BUFFER_SIZE = 10240;
+    const string = Module.currentParseCallback(index, {
+      row,
+      column
+    });
+    if (typeof string === "string") {
+      setValue(lengthAddress, string.length, "i32");
+      stringToUTF16(string, inputBufferAddress, INPUT_BUFFER_SIZE);
+    } else {
+      setValue(lengthAddress, 0, "i32");
+    }
+  }
+  __name(_tree_sitter_parse_callback, "_tree_sitter_parse_callback");
+  function _tree_sitter_progress_callback(currentOffset, hasError) {
+    if (Module.currentProgressCallback) {
+      return Module.currentProgressCallback({
+        currentOffset,
+        hasError
+      });
+    }
+    return false;
+  }
+  __name(_tree_sitter_progress_callback, "_tree_sitter_progress_callback");
+  function _tree_sitter_query_progress_callback(currentOffset) {
+    if (Module.currentQueryProgressCallback) {
+      return Module.currentQueryProgressCallback({
+        currentOffset
+      });
+    }
+    return false;
+  }
+  __name(_tree_sitter_query_progress_callback, "_tree_sitter_query_progress_callback");
+  var runtimeKeepaliveCounter = 0;
+  var keepRuntimeAlive = /* @__PURE__ */ __name(() => noExitRuntime || runtimeKeepaliveCounter > 0, "keepRuntimeAlive");
+  var _proc_exit = /* @__PURE__ */ __name((code) => {
+    EXITSTATUS = code;
+    if (!keepRuntimeAlive()) {
+      Module["onExit"]?.(code);
+      ABORT = true;
+    }
+    quit_(code, new ExitStatus(code));
+  }, "_proc_exit");
+  _proc_exit.sig = "vi";
+  var exitJS = /* @__PURE__ */ __name((status, implicit) => {
+    EXITSTATUS = status;
+    _proc_exit(status);
+  }, "exitJS");
+  var handleException = /* @__PURE__ */ __name((e) => {
+    if (e instanceof ExitStatus || e == "unwind") {
+      return EXITSTATUS;
+    }
+    quit_(1, e);
+  }, "handleException");
+  var lengthBytesUTF8 = /* @__PURE__ */ __name((str) => {
+    var len = 0;
+    for (var i2 = 0;i2 < str.length; ++i2) {
+      var c = str.charCodeAt(i2);
+      if (c <= 127) {
+        len++;
+      } else if (c <= 2047) {
+        len += 2;
+      } else if (c >= 55296 && c <= 57343) {
+        len += 4;
+        ++i2;
+      } else {
+        len += 3;
+      }
+    }
+    return len;
+  }, "lengthBytesUTF8");
+  var stringToUTF8Array = /* @__PURE__ */ __name((str, heap, outIdx, maxBytesToWrite) => {
+    if (!(maxBytesToWrite > 0))
+      return 0;
+    var startIdx = outIdx;
+    var endIdx = outIdx + maxBytesToWrite - 1;
+    for (var i2 = 0;i2 < str.length; ++i2) {
+      var u = str.codePointAt(i2);
+      if (u <= 127) {
+        if (outIdx >= endIdx)
+          break;
+        heap[outIdx++] = u;
+      } else if (u <= 2047) {
+        if (outIdx + 1 >= endIdx)
+          break;
+        heap[outIdx++] = 192 | u >> 6;
+        heap[outIdx++] = 128 | u & 63;
+      } else if (u <= 65535) {
+        if (outIdx + 2 >= endIdx)
+          break;
+        heap[outIdx++] = 224 | u >> 12;
+        heap[outIdx++] = 128 | u >> 6 & 63;
+        heap[outIdx++] = 128 | u & 63;
+      } else {
+        if (outIdx + 3 >= endIdx)
+          break;
+        heap[outIdx++] = 240 | u >> 18;
+        heap[outIdx++] = 128 | u >> 12 & 63;
+        heap[outIdx++] = 128 | u >> 6 & 63;
+        heap[outIdx++] = 128 | u & 63;
+        i2++;
+      }
+    }
+    heap[outIdx] = 0;
+    return outIdx - startIdx;
+  }, "stringToUTF8Array");
+  var stringToUTF8 = /* @__PURE__ */ __name((str, outPtr, maxBytesToWrite) => stringToUTF8Array(str, HEAPU8, outPtr, maxBytesToWrite), "stringToUTF8");
+  var stackAlloc = /* @__PURE__ */ __name((sz) => __emscripten_stack_alloc(sz), "stackAlloc");
+  var stringToUTF8OnStack = /* @__PURE__ */ __name((str) => {
+    var size = lengthBytesUTF8(str) + 1;
+    var ret = stackAlloc(size);
+    stringToUTF8(str, ret, size);
+    return ret;
+  }, "stringToUTF8OnStack");
+  var AsciiToString = /* @__PURE__ */ __name((ptr) => {
+    var str = "";
+    while (true) {
+      var ch = HEAPU8[ptr++];
+      if (!ch)
+        return str;
+      str += String.fromCharCode(ch);
+    }
+  }, "AsciiToString");
+  var stringToUTF16 = /* @__PURE__ */ __name((str, outPtr, maxBytesToWrite) => {
+    maxBytesToWrite ??= 2147483647;
+    if (maxBytesToWrite < 2)
+      return 0;
+    maxBytesToWrite -= 2;
+    var startPtr = outPtr;
+    var numCharsToWrite = maxBytesToWrite < str.length * 2 ? maxBytesToWrite / 2 : str.length;
+    for (var i2 = 0;i2 < numCharsToWrite; ++i2) {
+      var codeUnit = str.charCodeAt(i2);
+      LE_HEAP_STORE_I16((outPtr >> 1) * 2, codeUnit);
+      outPtr += 2;
+    }
+    LE_HEAP_STORE_I16((outPtr >> 1) * 2, 0);
+    return outPtr - startPtr;
+  }, "stringToUTF16");
+  LE_ATOMICS_NATIVE_BYTE_ORDER = new Int8Array(new Int16Array([1]).buffer)[0] === 1 ? [
+    (x) => x,
+    (x) => x,
+    undefined,
+    (x) => x
+  ] : [
+    (x) => x,
+    (x) => ((x & 65280) << 8 | (x & 255) << 24) >> 16,
+    undefined,
+    (x) => x >> 24 & 255 | x >> 8 & 65280 | (x & 65280) << 8 | (x & 255) << 24
+  ];
+  function LE_HEAP_UPDATE() {
+    HEAPU16.unsigned = (x) => x & 65535;
+    HEAPU32.unsigned = (x) => x >>> 0;
+  }
+  __name(LE_HEAP_UPDATE, "LE_HEAP_UPDATE");
+  {
+    initMemory();
+    if (Module["noExitRuntime"])
+      noExitRuntime = Module["noExitRuntime"];
+    if (Module["print"])
+      out = Module["print"];
+    if (Module["printErr"])
+      err = Module["printErr"];
+    if (Module["dynamicLibraries"])
+      dynamicLibraries = Module["dynamicLibraries"];
+    if (Module["wasmBinary"])
+      wasmBinary = Module["wasmBinary"];
+    if (Module["arguments"])
+      arguments_ = Module["arguments"];
+    if (Module["thisProgram"])
+      thisProgram = Module["thisProgram"];
+    if (Module["preInit"]) {
+      if (typeof Module["preInit"] == "function")
+        Module["preInit"] = [Module["preInit"]];
+      while (Module["preInit"].length > 0) {
+        Module["preInit"].shift()();
+      }
+    }
+  }
+  Module["setValue"] = setValue;
+  Module["getValue"] = getValue;
+  Module["UTF8ToString"] = UTF8ToString;
+  Module["stringToUTF8"] = stringToUTF8;
+  Module["lengthBytesUTF8"] = lengthBytesUTF8;
+  Module["AsciiToString"] = AsciiToString;
+  Module["stringToUTF16"] = stringToUTF16;
+  Module["loadWebAssemblyModule"] = loadWebAssemblyModule;
+  Module["LE_HEAP_STORE_I64"] = LE_HEAP_STORE_I64;
+  var ASM_CONSTS = {};
+  var _malloc, _calloc, _realloc, _free, _ts_range_edit, _memcmp, _ts_language_symbol_count, _ts_language_state_count, _ts_language_abi_version, _ts_language_name, _ts_language_field_count, _ts_language_next_state, _ts_language_symbol_name, _ts_language_symbol_for_name, _strncmp, _ts_language_symbol_type, _ts_language_field_name_for_id, _ts_lookahead_iterator_new, _ts_lookahead_iterator_delete, _ts_lookahead_iterator_reset_state, _ts_lookahead_iterator_reset, _ts_lookahead_iterator_next, _ts_lookahead_iterator_current_symbol, _ts_point_edit, _ts_parser_delete, _ts_parser_reset, _ts_parser_set_language, _ts_parser_set_included_ranges, _ts_query_new, _ts_query_delete, _iswspace, _iswalnum, _ts_query_pattern_count, _ts_query_capture_count, _ts_query_string_count, _ts_query_capture_name_for_id, _ts_query_capture_quantifier_for_id, _ts_query_string_value_for_id, _ts_query_predicates_for_pattern, _ts_query_start_byte_for_pattern, _ts_query_end_byte_for_pattern, _ts_query_is_pattern_rooted, _ts_query_is_pattern_non_local, _ts_query_is_pattern_guaranteed_at_step, _ts_query_disable_capture, _ts_query_disable_pattern, _ts_tree_copy, _ts_tree_delete, _ts_init, _ts_parser_new_wasm, _ts_parser_enable_logger_wasm, _ts_parser_parse_wasm, _ts_parser_included_ranges_wasm, _ts_language_type_is_named_wasm, _ts_language_type_is_visible_wasm, _ts_language_metadata_wasm, _ts_language_supertypes_wasm, _ts_language_subtypes_wasm, _ts_tree_root_node_wasm, _ts_tree_root_node_with_offset_wasm, _ts_tree_edit_wasm, _ts_tree_included_ranges_wasm, _ts_tree_get_changed_ranges_wasm, _ts_tree_cursor_new_wasm, _ts_tree_cursor_copy_wasm, _ts_tree_cursor_delete_wasm, _ts_tree_cursor_reset_wasm, _ts_tree_cursor_reset_to_wasm, _ts_tree_cursor_goto_first_child_wasm, _ts_tree_cursor_goto_last_child_wasm, _ts_tree_cursor_goto_first_child_for_index_wasm, _ts_tree_cursor_goto_first_child_for_position_wasm, _ts_tree_cursor_goto_next_sibling_wasm, _ts_tree_cursor_goto_previous_sibling_wasm, _ts_tree_cursor_goto_descendant_wasm, _ts_tree_cursor_goto_parent_wasm, _ts_tree_cursor_current_node_type_id_wasm, _ts_tree_cursor_current_node_state_id_wasm, _ts_tree_cursor_current_node_is_named_wasm, _ts_tree_cursor_current_node_is_missing_wasm, _ts_tree_cursor_current_node_id_wasm, _ts_tree_cursor_start_position_wasm, _ts_tree_cursor_end_position_wasm, _ts_tree_cursor_start_index_wasm, _ts_tree_cursor_end_index_wasm, _ts_tree_cursor_current_field_id_wasm, _ts_tree_cursor_current_depth_wasm, _ts_tree_cursor_current_descendant_index_wasm, _ts_tree_cursor_current_node_wasm, _ts_node_symbol_wasm, _ts_node_field_name_for_child_wasm, _ts_node_field_name_for_named_child_wasm, _ts_node_children_by_field_id_wasm, _ts_node_first_child_for_byte_wasm, _ts_node_first_named_child_for_byte_wasm, _ts_node_grammar_symbol_wasm, _ts_node_child_count_wasm, _ts_node_named_child_count_wasm, _ts_node_child_wasm, _ts_node_named_child_wasm, _ts_node_child_by_field_id_wasm, _ts_node_next_sibling_wasm, _ts_node_prev_sibling_wasm, _ts_node_next_named_sibling_wasm, _ts_node_prev_named_sibling_wasm, _ts_node_descendant_count_wasm, _ts_node_parent_wasm, _ts_node_child_with_descendant_wasm, _ts_node_descendant_for_index_wasm, _ts_node_named_descendant_for_index_wasm, _ts_node_descendant_for_position_wasm, _ts_node_named_descendant_for_position_wasm, _ts_node_start_point_wasm, _ts_node_end_point_wasm, _ts_node_start_index_wasm, _ts_node_end_index_wasm, _ts_node_to_string_wasm, _ts_node_children_wasm, _ts_node_named_children_wasm, _ts_node_descendants_of_type_wasm, _ts_node_is_named_wasm, _ts_node_has_changes_wasm, _ts_node_has_error_wasm, _ts_node_is_error_wasm, _ts_node_is_missing_wasm, _ts_node_is_extra_wasm, _ts_node_parse_state_wasm, _ts_node_next_parse_state_wasm, _ts_query_matches_wasm, _ts_query_captures_wasm, _memset, _memcpy, _memmove, _iswalpha, _iswblank, _iswdigit, _iswlower, _iswupper, _iswxdigit, _memchr, _strlen, _strcmp, _strncat, _strncpy, _towlower, _towupper, _setThrew, __emscripten_stack_restore, __emscripten_stack_alloc, _emscripten_stack_get_current, ___wasm_apply_data_relocs;
+  function assignWasmExports(wasmExports2) {
+    Module["_malloc"] = _malloc = wasmExports2["malloc"];
+    Module["_calloc"] = _calloc = wasmExports2["calloc"];
+    Module["_realloc"] = _realloc = wasmExports2["realloc"];
+    Module["_free"] = _free = wasmExports2["free"];
+    Module["_ts_range_edit"] = _ts_range_edit = wasmExports2["ts_range_edit"];
+    Module["_memcmp"] = _memcmp = wasmExports2["memcmp"];
+    Module["_ts_language_symbol_count"] = _ts_language_symbol_count = wasmExports2["ts_language_symbol_count"];
+    Module["_ts_language_state_count"] = _ts_language_state_count = wasmExports2["ts_language_state_count"];
+    Module["_ts_language_abi_version"] = _ts_language_abi_version = wasmExports2["ts_language_abi_version"];
+    Module["_ts_language_name"] = _ts_language_name = wasmExports2["ts_language_name"];
+    Module["_ts_language_field_count"] = _ts_language_field_count = wasmExports2["ts_language_field_count"];
+    Module["_ts_language_next_state"] = _ts_language_next_state = wasmExports2["ts_language_next_state"];
+    Module["_ts_language_symbol_name"] = _ts_language_symbol_name = wasmExports2["ts_language_symbol_name"];
+    Module["_ts_language_symbol_for_name"] = _ts_language_symbol_for_name = wasmExports2["ts_language_symbol_for_name"];
+    Module["_strncmp"] = _strncmp = wasmExports2["strncmp"];
+    Module["_ts_language_symbol_type"] = _ts_language_symbol_type = wasmExports2["ts_language_symbol_type"];
+    Module["_ts_language_field_name_for_id"] = _ts_language_field_name_for_id = wasmExports2["ts_language_field_name_for_id"];
+    Module["_ts_lookahead_iterator_new"] = _ts_lookahead_iterator_new = wasmExports2["ts_lookahead_iterator_new"];
+    Module["_ts_lookahead_iterator_delete"] = _ts_lookahead_iterator_delete = wasmExports2["ts_lookahead_iterator_delete"];
+    Module["_ts_lookahead_iterator_reset_state"] = _ts_lookahead_iterator_reset_state = wasmExports2["ts_lookahead_iterator_reset_state"];
+    Module["_ts_lookahead_iterator_reset"] = _ts_lookahead_iterator_reset = wasmExports2["ts_lookahead_iterator_reset"];
+    Module["_ts_lookahead_iterator_next"] = _ts_lookahead_iterator_next = wasmExports2["ts_lookahead_iterator_next"];
+    Module["_ts_lookahead_iterator_current_symbol"] = _ts_lookahead_iterator_current_symbol = wasmExports2["ts_lookahead_iterator_current_symbol"];
+    Module["_ts_point_edit"] = _ts_point_edit = wasmExports2["ts_point_edit"];
+    Module["_ts_parser_delete"] = _ts_parser_delete = wasmExports2["ts_parser_delete"];
+    Module["_ts_parser_reset"] = _ts_parser_reset = wasmExports2["ts_parser_reset"];
+    Module["_ts_parser_set_language"] = _ts_parser_set_language = wasmExports2["ts_parser_set_language"];
+    Module["_ts_parser_set_included_ranges"] = _ts_parser_set_included_ranges = wasmExports2["ts_parser_set_included_ranges"];
+    Module["_ts_query_new"] = _ts_query_new = wasmExports2["ts_query_new"];
+    Module["_ts_query_delete"] = _ts_query_delete = wasmExports2["ts_query_delete"];
+    Module["_iswspace"] = _iswspace = wasmExports2["iswspace"];
+    Module["_iswalnum"] = _iswalnum = wasmExports2["iswalnum"];
+    Module["_ts_query_pattern_count"] = _ts_query_pattern_count = wasmExports2["ts_query_pattern_count"];
+    Module["_ts_query_capture_count"] = _ts_query_capture_count = wasmExports2["ts_query_capture_count"];
+    Module["_ts_query_string_count"] = _ts_query_string_count = wasmExports2["ts_query_string_count"];
+    Module["_ts_query_capture_name_for_id"] = _ts_query_capture_name_for_id = wasmExports2["ts_query_capture_name_for_id"];
+    Module["_ts_query_capture_quantifier_for_id"] = _ts_query_capture_quantifier_for_id = wasmExports2["ts_query_capture_quantifier_for_id"];
+    Module["_ts_query_string_value_for_id"] = _ts_query_string_value_for_id = wasmExports2["ts_query_string_value_for_id"];
+    Module["_ts_query_predicates_for_pattern"] = _ts_query_predicates_for_pattern = wasmExports2["ts_query_predicates_for_pattern"];
+    Module["_ts_query_start_byte_for_pattern"] = _ts_query_start_byte_for_pattern = wasmExports2["ts_query_start_byte_for_pattern"];
+    Module["_ts_query_end_byte_for_pattern"] = _ts_query_end_byte_for_pattern = wasmExports2["ts_query_end_byte_for_pattern"];
+    Module["_ts_query_is_pattern_rooted"] = _ts_query_is_pattern_rooted = wasmExports2["ts_query_is_pattern_rooted"];
+    Module["_ts_query_is_pattern_non_local"] = _ts_query_is_pattern_non_local = wasmExports2["ts_query_is_pattern_non_local"];
+    Module["_ts_query_is_pattern_guaranteed_at_step"] = _ts_query_is_pattern_guaranteed_at_step = wasmExports2["ts_query_is_pattern_guaranteed_at_step"];
+    Module["_ts_query_disable_capture"] = _ts_query_disable_capture = wasmExports2["ts_query_disable_capture"];
+    Module["_ts_query_disable_pattern"] = _ts_query_disable_pattern = wasmExports2["ts_query_disable_pattern"];
+    Module["_ts_tree_copy"] = _ts_tree_copy = wasmExports2["ts_tree_copy"];
+    Module["_ts_tree_delete"] = _ts_tree_delete = wasmExports2["ts_tree_delete"];
+    Module["_ts_init"] = _ts_init = wasmExports2["ts_init"];
+    Module["_ts_parser_new_wasm"] = _ts_parser_new_wasm = wasmExports2["ts_parser_new_wasm"];
+    Module["_ts_parser_enable_logger_wasm"] = _ts_parser_enable_logger_wasm = wasmExports2["ts_parser_enable_logger_wasm"];
+    Module["_ts_parser_parse_wasm"] = _ts_parser_parse_wasm = wasmExports2["ts_parser_parse_wasm"];
+    Module["_ts_parser_included_ranges_wasm"] = _ts_parser_included_ranges_wasm = wasmExports2["ts_parser_included_ranges_wasm"];
+    Module["_ts_language_type_is_named_wasm"] = _ts_language_type_is_named_wasm = wasmExports2["ts_language_type_is_named_wasm"];
+    Module["_ts_language_type_is_visible_wasm"] = _ts_language_type_is_visible_wasm = wasmExports2["ts_language_type_is_visible_wasm"];
+    Module["_ts_language_metadata_wasm"] = _ts_language_metadata_wasm = wasmExports2["ts_language_metadata_wasm"];
+    Module["_ts_language_supertypes_wasm"] = _ts_language_supertypes_wasm = wasmExports2["ts_language_supertypes_wasm"];
+    Module["_ts_language_subtypes_wasm"] = _ts_language_subtypes_wasm = wasmExports2["ts_language_subtypes_wasm"];
+    Module["_ts_tree_root_node_wasm"] = _ts_tree_root_node_wasm = wasmExports2["ts_tree_root_node_wasm"];
+    Module["_ts_tree_root_node_with_offset_wasm"] = _ts_tree_root_node_with_offset_wasm = wasmExports2["ts_tree_root_node_with_offset_wasm"];
+    Module["_ts_tree_edit_wasm"] = _ts_tree_edit_wasm = wasmExports2["ts_tree_edit_wasm"];
+    Module["_ts_tree_included_ranges_wasm"] = _ts_tree_included_ranges_wasm = wasmExports2["ts_tree_included_ranges_wasm"];
+    Module["_ts_tree_get_changed_ranges_wasm"] = _ts_tree_get_changed_ranges_wasm = wasmExports2["ts_tree_get_changed_ranges_wasm"];
+    Module["_ts_tree_cursor_new_wasm"] = _ts_tree_cursor_new_wasm = wasmExports2["ts_tree_cursor_new_wasm"];
+    Module["_ts_tree_cursor_copy_wasm"] = _ts_tree_cursor_copy_wasm = wasmExports2["ts_tree_cursor_copy_wasm"];
+    Module["_ts_tree_cursor_delete_wasm"] = _ts_tree_cursor_delete_wasm = wasmExports2["ts_tree_cursor_delete_wasm"];
+    Module["_ts_tree_cursor_reset_wasm"] = _ts_tree_cursor_reset_wasm = wasmExports2["ts_tree_cursor_reset_wasm"];
+    Module["_ts_tree_cursor_reset_to_wasm"] = _ts_tree_cursor_reset_to_wasm = wasmExports2["ts_tree_cursor_reset_to_wasm"];
+    Module["_ts_tree_cursor_goto_first_child_wasm"] = _ts_tree_cursor_goto_first_child_wasm = wasmExports2["ts_tree_cursor_goto_first_child_wasm"];
+    Module["_ts_tree_cursor_goto_last_child_wasm"] = _ts_tree_cursor_goto_last_child_wasm = wasmExports2["ts_tree_cursor_goto_last_child_wasm"];
+    Module["_ts_tree_cursor_goto_first_child_for_index_wasm"] = _ts_tree_cursor_goto_first_child_for_index_wasm = wasmExports2["ts_tree_cursor_goto_first_child_for_index_wasm"];
+    Module["_ts_tree_cursor_goto_first_child_for_position_wasm"] = _ts_tree_cursor_goto_first_child_for_position_wasm = wasmExports2["ts_tree_cursor_goto_first_child_for_position_wasm"];
+    Module["_ts_tree_cursor_goto_next_sibling_wasm"] = _ts_tree_cursor_goto_next_sibling_wasm = wasmExports2["ts_tree_cursor_goto_next_sibling_wasm"];
+    Module["_ts_tree_cursor_goto_previous_sibling_wasm"] = _ts_tree_cursor_goto_previous_sibling_wasm = wasmExports2["ts_tree_cursor_goto_previous_sibling_wasm"];
+    Module["_ts_tree_cursor_goto_descendant_wasm"] = _ts_tree_cursor_goto_descendant_wasm = wasmExports2["ts_tree_cursor_goto_descendant_wasm"];
+    Module["_ts_tree_cursor_goto_parent_wasm"] = _ts_tree_cursor_goto_parent_wasm = wasmExports2["ts_tree_cursor_goto_parent_wasm"];
+    Module["_ts_tree_cursor_current_node_type_id_wasm"] = _ts_tree_cursor_current_node_type_id_wasm = wasmExports2["ts_tree_cursor_current_node_type_id_wasm"];
+    Module["_ts_tree_cursor_current_node_state_id_wasm"] = _ts_tree_cursor_current_node_state_id_wasm = wasmExports2["ts_tree_cursor_current_node_state_id_wasm"];
+    Module["_ts_tree_cursor_current_node_is_named_wasm"] = _ts_tree_cursor_current_node_is_named_wasm = wasmExports2["ts_tree_cursor_current_node_is_named_wasm"];
+    Module["_ts_tree_cursor_current_node_is_missing_wasm"] = _ts_tree_cursor_current_node_is_missing_wasm = wasmExports2["ts_tree_cursor_current_node_is_missing_wasm"];
+    Module["_ts_tree_cursor_current_node_id_wasm"] = _ts_tree_cursor_current_node_id_wasm = wasmExports2["ts_tree_cursor_current_node_id_wasm"];
+    Module["_ts_tree_cursor_start_position_wasm"] = _ts_tree_cursor_start_position_wasm = wasmExports2["ts_tree_cursor_start_position_wasm"];
+    Module["_ts_tree_cursor_end_position_wasm"] = _ts_tree_cursor_end_position_wasm = wasmExports2["ts_tree_cursor_end_position_wasm"];
+    Module["_ts_tree_cursor_start_index_wasm"] = _ts_tree_cursor_start_index_wasm = wasmExports2["ts_tree_cursor_start_index_wasm"];
+    Module["_ts_tree_cursor_end_index_wasm"] = _ts_tree_cursor_end_index_wasm = wasmExports2["ts_tree_cursor_end_index_wasm"];
+    Module["_ts_tree_cursor_current_field_id_wasm"] = _ts_tree_cursor_current_field_id_wasm = wasmExports2["ts_tree_cursor_current_field_id_wasm"];
+    Module["_ts_tree_cursor_current_depth_wasm"] = _ts_tree_cursor_current_depth_wasm = wasmExports2["ts_tree_cursor_current_depth_wasm"];
+    Module["_ts_tree_cursor_current_descendant_index_wasm"] = _ts_tree_cursor_current_descendant_index_wasm = wasmExports2["ts_tree_cursor_current_descendant_index_wasm"];
+    Module["_ts_tree_cursor_current_node_wasm"] = _ts_tree_cursor_current_node_wasm = wasmExports2["ts_tree_cursor_current_node_wasm"];
+    Module["_ts_node_symbol_wasm"] = _ts_node_symbol_wasm = wasmExports2["ts_node_symbol_wasm"];
+    Module["_ts_node_field_name_for_child_wasm"] = _ts_node_field_name_for_child_wasm = wasmExports2["ts_node_field_name_for_child_wasm"];
+    Module["_ts_node_field_name_for_named_child_wasm"] = _ts_node_field_name_for_named_child_wasm = wasmExports2["ts_node_field_name_for_named_child_wasm"];
+    Module["_ts_node_children_by_field_id_wasm"] = _ts_node_children_by_field_id_wasm = wasmExports2["ts_node_children_by_field_id_wasm"];
+    Module["_ts_node_first_child_for_byte_wasm"] = _ts_node_first_child_for_byte_wasm = wasmExports2["ts_node_first_child_for_byte_wasm"];
+    Module["_ts_node_first_named_child_for_byte_wasm"] = _ts_node_first_named_child_for_byte_wasm = wasmExports2["ts_node_first_named_child_for_byte_wasm"];
+    Module["_ts_node_grammar_symbol_wasm"] = _ts_node_grammar_symbol_wasm = wasmExports2["ts_node_grammar_symbol_wasm"];
+    Module["_ts_node_child_count_wasm"] = _ts_node_child_count_wasm = wasmExports2["ts_node_child_count_wasm"];
+    Module["_ts_node_named_child_count_wasm"] = _ts_node_named_child_count_wasm = wasmExports2["ts_node_named_child_count_wasm"];
+    Module["_ts_node_child_wasm"] = _ts_node_child_wasm = wasmExports2["ts_node_child_wasm"];
+    Module["_ts_node_named_child_wasm"] = _ts_node_named_child_wasm = wasmExports2["ts_node_named_child_wasm"];
+    Module["_ts_node_child_by_field_id_wasm"] = _ts_node_child_by_field_id_wasm = wasmExports2["ts_node_child_by_field_id_wasm"];
+    Module["_ts_node_next_sibling_wasm"] = _ts_node_next_sibling_wasm = wasmExports2["ts_node_next_sibling_wasm"];
+    Module["_ts_node_prev_sibling_wasm"] = _ts_node_prev_sibling_wasm = wasmExports2["ts_node_prev_sibling_wasm"];
+    Module["_ts_node_next_named_sibling_wasm"] = _ts_node_next_named_sibling_wasm = wasmExports2["ts_node_next_named_sibling_wasm"];
+    Module["_ts_node_prev_named_sibling_wasm"] = _ts_node_prev_named_sibling_wasm = wasmExports2["ts_node_prev_named_sibling_wasm"];
+    Module["_ts_node_descendant_count_wasm"] = _ts_node_descendant_count_wasm = wasmExports2["ts_node_descendant_count_wasm"];
+    Module["_ts_node_parent_wasm"] = _ts_node_parent_wasm = wasmExports2["ts_node_parent_wasm"];
+    Module["_ts_node_child_with_descendant_wasm"] = _ts_node_child_with_descendant_wasm = wasmExports2["ts_node_child_with_descendant_wasm"];
+    Module["_ts_node_descendant_for_index_wasm"] = _ts_node_descendant_for_index_wasm = wasmExports2["ts_node_descendant_for_index_wasm"];
+    Module["_ts_node_named_descendant_for_index_wasm"] = _ts_node_named_descendant_for_index_wasm = wasmExports2["ts_node_named_descendant_for_index_wasm"];
+    Module["_ts_node_descendant_for_position_wasm"] = _ts_node_descendant_for_position_wasm = wasmExports2["ts_node_descendant_for_position_wasm"];
+    Module["_ts_node_named_descendant_for_position_wasm"] = _ts_node_named_descendant_for_position_wasm = wasmExports2["ts_node_named_descendant_for_position_wasm"];
+    Module["_ts_node_start_point_wasm"] = _ts_node_start_point_wasm = wasmExports2["ts_node_start_point_wasm"];
+    Module["_ts_node_end_point_wasm"] = _ts_node_end_point_wasm = wasmExports2["ts_node_end_point_wasm"];
+    Module["_ts_node_start_index_wasm"] = _ts_node_start_index_wasm = wasmExports2["ts_node_start_index_wasm"];
+    Module["_ts_node_end_index_wasm"] = _ts_node_end_index_wasm = wasmExports2["ts_node_end_index_wasm"];
+    Module["_ts_node_to_string_wasm"] = _ts_node_to_string_wasm = wasmExports2["ts_node_to_string_wasm"];
+    Module["_ts_node_children_wasm"] = _ts_node_children_wasm = wasmExports2["ts_node_children_wasm"];
+    Module["_ts_node_named_children_wasm"] = _ts_node_named_children_wasm = wasmExports2["ts_node_named_children_wasm"];
+    Module["_ts_node_descendants_of_type_wasm"] = _ts_node_descendants_of_type_wasm = wasmExports2["ts_node_descendants_of_type_wasm"];
+    Module["_ts_node_is_named_wasm"] = _ts_node_is_named_wasm = wasmExports2["ts_node_is_named_wasm"];
+    Module["_ts_node_has_changes_wasm"] = _ts_node_has_changes_wasm = wasmExports2["ts_node_has_changes_wasm"];
+    Module["_ts_node_has_error_wasm"] = _ts_node_has_error_wasm = wasmExports2["ts_node_has_error_wasm"];
+    Module["_ts_node_is_error_wasm"] = _ts_node_is_error_wasm = wasmExports2["ts_node_is_error_wasm"];
+    Module["_ts_node_is_missing_wasm"] = _ts_node_is_missing_wasm = wasmExports2["ts_node_is_missing_wasm"];
+    Module["_ts_node_is_extra_wasm"] = _ts_node_is_extra_wasm = wasmExports2["ts_node_is_extra_wasm"];
+    Module["_ts_node_parse_state_wasm"] = _ts_node_parse_state_wasm = wasmExports2["ts_node_parse_state_wasm"];
+    Module["_ts_node_next_parse_state_wasm"] = _ts_node_next_parse_state_wasm = wasmExports2["ts_node_next_parse_state_wasm"];
+    Module["_ts_query_matches_wasm"] = _ts_query_matches_wasm = wasmExports2["ts_query_matches_wasm"];
+    Module["_ts_query_captures_wasm"] = _ts_query_captures_wasm = wasmExports2["ts_query_captures_wasm"];
+    Module["_memset"] = _memset = wasmExports2["memset"];
+    Module["_memcpy"] = _memcpy = wasmExports2["memcpy"];
+    Module["_memmove"] = _memmove = wasmExports2["memmove"];
+    Module["_iswalpha"] = _iswalpha = wasmExports2["iswalpha"];
+    Module["_iswblank"] = _iswblank = wasmExports2["iswblank"];
+    Module["_iswdigit"] = _iswdigit = wasmExports2["iswdigit"];
+    Module["_iswlower"] = _iswlower = wasmExports2["iswlower"];
+    Module["_iswupper"] = _iswupper = wasmExports2["iswupper"];
+    Module["_iswxdigit"] = _iswxdigit = wasmExports2["iswxdigit"];
+    Module["_memchr"] = _memchr = wasmExports2["memchr"];
+    Module["_strlen"] = _strlen = wasmExports2["strlen"];
+    Module["_strcmp"] = _strcmp = wasmExports2["strcmp"];
+    Module["_strncat"] = _strncat = wasmExports2["strncat"];
+    Module["_strncpy"] = _strncpy = wasmExports2["strncpy"];
+    Module["_towlower"] = _towlower = wasmExports2["towlower"];
+    Module["_towupper"] = _towupper = wasmExports2["towupper"];
+    _setThrew = wasmExports2["setThrew"];
+    __emscripten_stack_restore = wasmExports2["_emscripten_stack_restore"];
+    __emscripten_stack_alloc = wasmExports2["_emscripten_stack_alloc"];
+    _emscripten_stack_get_current = wasmExports2["emscripten_stack_get_current"];
+    ___wasm_apply_data_relocs = wasmExports2["__wasm_apply_data_relocs"];
+  }
+  __name(assignWasmExports, "assignWasmExports");
+  var wasmImports = {
+    __heap_base: ___heap_base,
+    __indirect_function_table: wasmTable,
+    __memory_base: ___memory_base,
+    __stack_high: ___stack_high,
+    __stack_low: ___stack_low,
+    __stack_pointer: ___stack_pointer,
+    __table_base: ___table_base,
+    _abort_js: __abort_js,
+    emscripten_resize_heap: _emscripten_resize_heap,
+    fd_close: _fd_close,
+    fd_seek: _fd_seek,
+    fd_write: _fd_write,
+    memory: wasmMemory,
+    tree_sitter_log_callback: _tree_sitter_log_callback,
+    tree_sitter_parse_callback: _tree_sitter_parse_callback,
+    tree_sitter_progress_callback: _tree_sitter_progress_callback,
+    tree_sitter_query_progress_callback: _tree_sitter_query_progress_callback
+  };
+  function callMain(args2 = []) {
+    var entryFunction = resolveGlobalSymbol("main").sym;
+    if (!entryFunction)
+      return;
+    args2.unshift(thisProgram);
+    var argc = args2.length;
+    var argv = stackAlloc((argc + 1) * 4);
+    var argv_ptr = argv;
+    args2.forEach((arg) => {
+      LE_HEAP_STORE_U32((argv_ptr >> 2) * 4, stringToUTF8OnStack(arg));
+      argv_ptr += 4;
+    });
+    LE_HEAP_STORE_U32((argv_ptr >> 2) * 4, 0);
+    try {
+      var ret = entryFunction(argc, argv);
+      exitJS(ret, true);
+      return ret;
+    } catch (e) {
+      return handleException(e);
+    }
+  }
+  __name(callMain, "callMain");
+  function run(args2 = arguments_) {
+    if (runDependencies > 0) {
+      dependenciesFulfilled = run;
+      return;
+    }
+    preRun();
+    if (runDependencies > 0) {
+      dependenciesFulfilled = run;
+      return;
+    }
+    function doRun() {
+      Module["calledRun"] = true;
+      if (ABORT)
+        return;
+      initRuntime();
+      preMain();
+      readyPromiseResolve?.(Module);
+      Module["onRuntimeInitialized"]?.();
+      var noInitialRun = Module["noInitialRun"] || false;
+      if (!noInitialRun)
+        callMain(args2);
+      postRun();
+    }
+    __name(doRun, "doRun");
+    if (Module["setStatus"]) {
+      Module["setStatus"]("Running...");
+      setTimeout(() => {
+        setTimeout(() => Module["setStatus"](""), 1);
+        doRun();
+      }, 1);
+    } else {
+      doRun();
+    }
+  }
+  __name(run, "run");
+  var wasmExports;
+  wasmExports = await createWasm();
+  run();
+  if (runtimeInitialized) {
+    moduleRtn = Module;
+  } else {
+    moduleRtn = new Promise((resolve4, reject) => {
+      readyPromiseResolve = resolve4;
+      readyPromiseReject = reject;
+    });
+  }
+  return moduleRtn;
+}
+async function initializeBinding(moduleOptions) {
+  return Module3 ??= await web_tree_sitter_default(moduleOptions);
+}
+function checkModule() {
+  return !!Module3;
+}
+function parseAnyPredicate(steps, index, operator, textPredicates) {
+  if (steps.length !== 3) {
+    throw new Error(`Wrong number of arguments to \`#${operator}\` predicate. Expected 2, got ${steps.length - 1}`);
+  }
+  if (!isCaptureStep(steps[1])) {
+    throw new Error(`First argument of \`#${operator}\` predicate must be a capture. Got "${steps[1].value}"`);
+  }
+  const isPositive = operator === "eq?" || operator === "any-eq?";
+  const matchAll = !operator.startsWith("any-");
+  if (isCaptureStep(steps[2])) {
+    const captureName1 = steps[1].name;
+    const captureName2 = steps[2].name;
+    textPredicates[index].push((captures) => {
+      const nodes1 = [];
+      const nodes2 = [];
+      for (const c of captures) {
+        if (c.name === captureName1)
+          nodes1.push(c.node);
+        if (c.name === captureName2)
+          nodes2.push(c.node);
+      }
+      const compare = /* @__PURE__ */ __name((n1, n2, positive) => {
+        return positive ? n1.text === n2.text : n1.text !== n2.text;
+      }, "compare");
+      return matchAll ? nodes1.every((n1) => nodes2.some((n2) => compare(n1, n2, isPositive))) : nodes1.some((n1) => nodes2.some((n2) => compare(n1, n2, isPositive)));
+    });
+  } else {
+    const captureName = steps[1].name;
+    const stringValue = steps[2].value;
+    const matches = /* @__PURE__ */ __name((n) => n.text === stringValue, "matches");
+    const doesNotMatch = /* @__PURE__ */ __name((n) => n.text !== stringValue, "doesNotMatch");
+    textPredicates[index].push((captures) => {
+      const nodes = [];
+      for (const c of captures) {
+        if (c.name === captureName)
+          nodes.push(c.node);
+      }
+      const test = isPositive ? matches : doesNotMatch;
+      return matchAll ? nodes.every(test) : nodes.some(test);
+    });
+  }
+}
+function parseMatchPredicate(steps, index, operator, textPredicates) {
+  if (steps.length !== 3) {
+    throw new Error(`Wrong number of arguments to \`#${operator}\` predicate. Expected 2, got ${steps.length - 1}.`);
+  }
+  if (steps[1].type !== "capture") {
+    throw new Error(`First argument of \`#${operator}\` predicate must be a capture. Got "${steps[1].value}".`);
+  }
+  if (steps[2].type !== "string") {
+    throw new Error(`Second argument of \`#${operator}\` predicate must be a string. Got @${steps[2].name}.`);
+  }
+  const isPositive = operator === "match?" || operator === "any-match?";
+  const matchAll = !operator.startsWith("any-");
+  const captureName = steps[1].name;
+  const regex = new RegExp(steps[2].value);
+  textPredicates[index].push((captures) => {
+    const nodes = [];
+    for (const c of captures) {
+      if (c.name === captureName)
+        nodes.push(c.node.text);
+    }
+    const test = /* @__PURE__ */ __name((text, positive) => {
+      return positive ? regex.test(text) : !regex.test(text);
+    }, "test");
+    if (nodes.length === 0)
+      return !isPositive;
+    return matchAll ? nodes.every((text) => test(text, isPositive)) : nodes.some((text) => test(text, isPositive));
+  });
+}
+function parseAnyOfPredicate(steps, index, operator, textPredicates) {
+  if (steps.length < 2) {
+    throw new Error(`Wrong number of arguments to \`#${operator}\` predicate. Expected at least 1. Got ${steps.length - 1}.`);
+  }
+  if (steps[1].type !== "capture") {
+    throw new Error(`First argument of \`#${operator}\` predicate must be a capture. Got "${steps[1].value}".`);
+  }
+  const isPositive = operator === "any-of?";
+  const captureName = steps[1].name;
+  const stringSteps = steps.slice(2);
+  if (!stringSteps.every(isStringStep)) {
+    throw new Error(`Arguments to \`#${operator}\` predicate must be strings.".`);
+  }
+  const values = stringSteps.map((s) => s.value);
+  textPredicates[index].push((captures) => {
+    const nodes = [];
+    for (const c of captures) {
+      if (c.name === captureName)
+        nodes.push(c.node.text);
+    }
+    if (nodes.length === 0)
+      return !isPositive;
+    return nodes.every((text) => values.includes(text)) === isPositive;
+  });
+}
+function parseIsPredicate(steps, index, operator, assertedProperties, refutedProperties) {
+  if (steps.length < 2 || steps.length > 3) {
+    throw new Error(`Wrong number of arguments to \`#${operator}\` predicate. Expected 1 or 2. Got ${steps.length - 1}.`);
+  }
+  if (!steps.every(isStringStep)) {
+    throw new Error(`Arguments to \`#${operator}\` predicate must be strings.".`);
+  }
+  const properties = operator === "is?" ? assertedProperties : refutedProperties;
+  if (!properties[index])
+    properties[index] = {};
+  properties[index][steps[1].value] = steps[2]?.value ?? null;
+}
+function parseSetDirective(steps, index, setProperties) {
+  if (steps.length < 2 || steps.length > 3) {
+    throw new Error(`Wrong number of arguments to \`#set!\` predicate. Expected 1 or 2. Got ${steps.length - 1}.`);
+  }
+  if (!steps.every(isStringStep)) {
+    throw new Error(`Arguments to \`#set!\` predicate must be strings.".`);
+  }
+  if (!setProperties[index])
+    setProperties[index] = {};
+  setProperties[index][steps[1].value] = steps[2]?.value ?? null;
+}
+function parsePattern(index, stepType, stepValueId, captureNames, stringValues, steps, textPredicates, predicates, setProperties, assertedProperties, refutedProperties) {
+  if (stepType === PREDICATE_STEP_TYPE_CAPTURE) {
+    const name2 = captureNames[stepValueId];
+    steps.push({ type: "capture", name: name2 });
+  } else if (stepType === PREDICATE_STEP_TYPE_STRING) {
+    steps.push({ type: "string", value: stringValues[stepValueId] });
+  } else if (steps.length > 0) {
+    if (steps[0].type !== "string") {
+      throw new Error("Predicates must begin with a literal value");
+    }
+    const operator = steps[0].value;
+    switch (operator) {
+      case "any-not-eq?":
+      case "not-eq?":
+      case "any-eq?":
+      case "eq?":
+        parseAnyPredicate(steps, index, operator, textPredicates);
+        break;
+      case "any-not-match?":
+      case "not-match?":
+      case "any-match?":
+      case "match?":
+        parseMatchPredicate(steps, index, operator, textPredicates);
+        break;
+      case "not-any-of?":
+      case "any-of?":
+        parseAnyOfPredicate(steps, index, operator, textPredicates);
+        break;
+      case "is?":
+      case "is-not?":
+        parseIsPredicate(steps, index, operator, assertedProperties, refutedProperties);
+        break;
+      case "set!":
+        parseSetDirective(steps, index, setProperties);
+        break;
+      default:
+        predicates[index].push({ operator, operands: steps.slice(1) });
+    }
+    steps.length = 0;
+  }
+}
+var __defProp2, __name = (target, value) => __defProp2(target, "name", { value, configurable: true }), Edit, SIZE_OF_SHORT = 2, SIZE_OF_INT = 4, SIZE_OF_CURSOR, SIZE_OF_NODE, SIZE_OF_POINT, SIZE_OF_RANGE, ZERO_POINT, INTERNAL, C, LookaheadIterator, Tree, TreeCursor, Node, LANGUAGE_FUNCTION_REGEX, Language, web_tree_sitter_default, Module3 = null, TRANSFER_BUFFER, LANGUAGE_VERSION, MIN_COMPATIBLE_VERSION, Parser, PREDICATE_STEP_TYPE_CAPTURE = 1, PREDICATE_STEP_TYPE_STRING = 2, QUERY_WORD_REGEX, CaptureQuantifier, isCaptureStep, isStringStep, QueryErrorKind, QueryError, Query;
+var init_web_tree_sitter = __esm(() => {
+  __defProp2 = Object.defineProperty;
+  Edit = class {
+    static {
+      __name(this, "Edit");
+    }
+    startPosition;
+    oldEndPosition;
+    newEndPosition;
+    startIndex;
+    oldEndIndex;
+    newEndIndex;
+    constructor({
+      startIndex,
+      oldEndIndex,
+      newEndIndex,
+      startPosition,
+      oldEndPosition,
+      newEndPosition
+    }) {
+      this.startIndex = startIndex >>> 0;
+      this.oldEndIndex = oldEndIndex >>> 0;
+      this.newEndIndex = newEndIndex >>> 0;
+      this.startPosition = startPosition;
+      this.oldEndPosition = oldEndPosition;
+      this.newEndPosition = newEndPosition;
+    }
+    editPoint(point, index) {
+      let newIndex = index;
+      const newPoint = { ...point };
+      if (index >= this.oldEndIndex) {
+        newIndex = this.newEndIndex + (index - this.oldEndIndex);
+        const originalRow = point.row;
+        newPoint.row = this.newEndPosition.row + (point.row - this.oldEndPosition.row);
+        newPoint.column = originalRow === this.oldEndPosition.row ? this.newEndPosition.column + (point.column - this.oldEndPosition.column) : point.column;
+      } else if (index > this.startIndex) {
+        newIndex = this.newEndIndex;
+        newPoint.row = this.newEndPosition.row;
+        newPoint.column = this.newEndPosition.column;
+      }
+      return { point: newPoint, index: newIndex };
+    }
+    editRange(range) {
+      const newRange = {
+        startIndex: range.startIndex,
+        startPosition: { ...range.startPosition },
+        endIndex: range.endIndex,
+        endPosition: { ...range.endPosition }
+      };
+      if (range.endIndex >= this.oldEndIndex) {
+        if (range.endIndex !== Number.MAX_SAFE_INTEGER) {
+          newRange.endIndex = this.newEndIndex + (range.endIndex - this.oldEndIndex);
+          newRange.endPosition = {
+            row: this.newEndPosition.row + (range.endPosition.row - this.oldEndPosition.row),
+            column: range.endPosition.row === this.oldEndPosition.row ? this.newEndPosition.column + (range.endPosition.column - this.oldEndPosition.column) : range.endPosition.column
+          };
+          if (newRange.endIndex < this.newEndIndex) {
+            newRange.endIndex = Number.MAX_SAFE_INTEGER;
+            newRange.endPosition = { row: Number.MAX_SAFE_INTEGER, column: Number.MAX_SAFE_INTEGER };
+          }
+        }
+      } else if (range.endIndex > this.startIndex) {
+        newRange.endIndex = this.startIndex;
+        newRange.endPosition = { ...this.startPosition };
+      }
+      if (range.startIndex >= this.oldEndIndex) {
+        newRange.startIndex = this.newEndIndex + (range.startIndex - this.oldEndIndex);
+        newRange.startPosition = {
+          row: this.newEndPosition.row + (range.startPosition.row - this.oldEndPosition.row),
+          column: range.startPosition.row === this.oldEndPosition.row ? this.newEndPosition.column + (range.startPosition.column - this.oldEndPosition.column) : range.startPosition.column
+        };
+        if (newRange.startIndex < this.newEndIndex) {
+          newRange.startIndex = Number.MAX_SAFE_INTEGER;
+          newRange.startPosition = { row: Number.MAX_SAFE_INTEGER, column: Number.MAX_SAFE_INTEGER };
+        }
+      } else if (range.startIndex > this.startIndex) {
+        newRange.startIndex = this.startIndex;
+        newRange.startPosition = { ...this.startPosition };
+      }
+      return newRange;
+    }
+  };
+  SIZE_OF_CURSOR = 4 * SIZE_OF_INT;
+  SIZE_OF_NODE = 5 * SIZE_OF_INT;
+  SIZE_OF_POINT = 2 * SIZE_OF_INT;
+  SIZE_OF_RANGE = 2 * SIZE_OF_INT + 2 * SIZE_OF_POINT;
+  ZERO_POINT = { row: 0, column: 0 };
+  INTERNAL = /* @__PURE__ */ Symbol("INTERNAL");
+  __name(assertInternal, "assertInternal");
+  __name(isPoint, "isPoint");
+  __name(setModule, "setModule");
+  LookaheadIterator = class {
+    static {
+      __name(this, "LookaheadIterator");
+    }
+    [0] = 0;
+    language;
+    constructor(internal, address, language) {
+      assertInternal(internal);
+      this[0] = address;
+      this.language = language;
+    }
+    get currentTypeId() {
+      return C._ts_lookahead_iterator_current_symbol(this[0]);
+    }
+    get currentType() {
+      return this.language.types[this.currentTypeId] || "ERROR";
+    }
+    delete() {
+      C._ts_lookahead_iterator_delete(this[0]);
+      this[0] = 0;
+    }
+    reset(language, stateId) {
+      if (C._ts_lookahead_iterator_reset(this[0], language[0], stateId)) {
+        this.language = language;
+        return true;
+      }
+      return false;
+    }
+    resetState(stateId) {
+      return Boolean(C._ts_lookahead_iterator_reset_state(this[0], stateId));
+    }
+    [Symbol.iterator]() {
+      return {
+        next: /* @__PURE__ */ __name(() => {
+          if (C._ts_lookahead_iterator_next(this[0])) {
+            return { done: false, value: this.currentType };
+          }
+          return { done: true, value: "" };
+        }, "next")
+      };
+    }
+  };
+  __name(getText, "getText");
+  Tree = class _Tree {
+    static {
+      __name(this, "Tree");
+    }
+    [0] = 0;
+    textCallback;
+    language;
+    constructor(internal, address, language, textCallback) {
+      assertInternal(internal);
+      this[0] = address;
+      this.language = language;
+      this.textCallback = textCallback;
+    }
+    copy() {
+      const address = C._ts_tree_copy(this[0]);
+      return new _Tree(INTERNAL, address, this.language, this.textCallback);
+    }
+    delete() {
+      C._ts_tree_delete(this[0]);
+      this[0] = 0;
+    }
+    get rootNode() {
+      C._ts_tree_root_node_wasm(this[0]);
+      return unmarshalNode(this);
+    }
+    rootNodeWithOffset(offsetBytes, offsetExtent) {
+      const address = TRANSFER_BUFFER + SIZE_OF_NODE;
+      C.setValue(address, offsetBytes, "i32");
+      marshalPoint(address + SIZE_OF_INT, offsetExtent);
+      C._ts_tree_root_node_with_offset_wasm(this[0]);
+      return unmarshalNode(this);
+    }
+    edit(edit) {
+      marshalEdit(edit);
+      C._ts_tree_edit_wasm(this[0]);
+    }
+    walk() {
+      return this.rootNode.walk();
+    }
+    getChangedRanges(other) {
+      if (!(other instanceof _Tree)) {
+        throw new TypeError("Argument must be a Tree");
+      }
+      C._ts_tree_get_changed_ranges_wasm(this[0], other[0]);
+      const count = C.getValue(TRANSFER_BUFFER, "i32");
+      const buffer = C.getValue(TRANSFER_BUFFER + SIZE_OF_INT, "i32");
+      const result = new Array(count);
+      if (count > 0) {
+        let address = buffer;
+        for (let i2 = 0;i2 < count; i2++) {
+          result[i2] = unmarshalRange(address);
+          address += SIZE_OF_RANGE;
+        }
+        C._free(buffer);
+      }
+      return result;
+    }
+    getIncludedRanges() {
+      C._ts_tree_included_ranges_wasm(this[0]);
+      const count = C.getValue(TRANSFER_BUFFER, "i32");
+      const buffer = C.getValue(TRANSFER_BUFFER + SIZE_OF_INT, "i32");
+      const result = new Array(count);
+      if (count > 0) {
+        let address = buffer;
+        for (let i2 = 0;i2 < count; i2++) {
+          result[i2] = unmarshalRange(address);
+          address += SIZE_OF_RANGE;
+        }
+        C._free(buffer);
+      }
+      return result;
+    }
+  };
+  TreeCursor = class _TreeCursor {
+    static {
+      __name(this, "TreeCursor");
+    }
+    [0] = 0;
+    [1] = 0;
+    [2] = 0;
+    [3] = 0;
+    tree;
+    constructor(internal, tree) {
+      assertInternal(internal);
+      this.tree = tree;
+      unmarshalTreeCursor(this);
+    }
+    copy() {
+      const copy = new _TreeCursor(INTERNAL, this.tree);
+      C._ts_tree_cursor_copy_wasm(this.tree[0]);
+      unmarshalTreeCursor(copy);
+      return copy;
+    }
+    delete() {
+      marshalTreeCursor(this);
+      C._ts_tree_cursor_delete_wasm(this.tree[0]);
+      this[0] = this[1] = this[2] = 0;
+    }
+    get currentNode() {
+      marshalTreeCursor(this);
+      C._ts_tree_cursor_current_node_wasm(this.tree[0]);
+      return unmarshalNode(this.tree);
+    }
+    get currentFieldId() {
+      marshalTreeCursor(this);
+      return C._ts_tree_cursor_current_field_id_wasm(this.tree[0]);
+    }
+    get currentFieldName() {
+      return this.tree.language.fields[this.currentFieldId];
+    }
+    get currentDepth() {
+      marshalTreeCursor(this);
+      return C._ts_tree_cursor_current_depth_wasm(this.tree[0]);
+    }
+    get currentDescendantIndex() {
+      marshalTreeCursor(this);
+      return C._ts_tree_cursor_current_descendant_index_wasm(this.tree[0]);
+    }
+    get nodeType() {
+      return this.tree.language.types[this.nodeTypeId] || "ERROR";
+    }
+    get nodeTypeId() {
+      marshalTreeCursor(this);
+      return C._ts_tree_cursor_current_node_type_id_wasm(this.tree[0]);
+    }
+    get nodeStateId() {
+      marshalTreeCursor(this);
+      return C._ts_tree_cursor_current_node_state_id_wasm(this.tree[0]);
+    }
+    get nodeId() {
+      marshalTreeCursor(this);
+      return C._ts_tree_cursor_current_node_id_wasm(this.tree[0]);
+    }
+    get nodeIsNamed() {
+      marshalTreeCursor(this);
+      return C._ts_tree_cursor_current_node_is_named_wasm(this.tree[0]) === 1;
+    }
+    get nodeIsMissing() {
+      marshalTreeCursor(this);
+      return C._ts_tree_cursor_current_node_is_missing_wasm(this.tree[0]) === 1;
+    }
+    get nodeText() {
+      marshalTreeCursor(this);
+      const startIndex = C._ts_tree_cursor_start_index_wasm(this.tree[0]);
+      const endIndex = C._ts_tree_cursor_end_index_wasm(this.tree[0]);
+      C._ts_tree_cursor_start_position_wasm(this.tree[0]);
+      const startPosition = unmarshalPoint(TRANSFER_BUFFER);
+      return getText(this.tree, startIndex, endIndex, startPosition);
+    }
+    get startPosition() {
+      marshalTreeCursor(this);
+      C._ts_tree_cursor_start_position_wasm(this.tree[0]);
+      return unmarshalPoint(TRANSFER_BUFFER);
+    }
+    get endPosition() {
+      marshalTreeCursor(this);
+      C._ts_tree_cursor_end_position_wasm(this.tree[0]);
+      return unmarshalPoint(TRANSFER_BUFFER);
+    }
+    get startIndex() {
+      marshalTreeCursor(this);
+      return C._ts_tree_cursor_start_index_wasm(this.tree[0]);
+    }
+    get endIndex() {
+      marshalTreeCursor(this);
+      return C._ts_tree_cursor_end_index_wasm(this.tree[0]);
+    }
+    gotoFirstChild() {
+      marshalTreeCursor(this);
+      const result = C._ts_tree_cursor_goto_first_child_wasm(this.tree[0]);
+      unmarshalTreeCursor(this);
+      return result === 1;
+    }
+    gotoLastChild() {
+      marshalTreeCursor(this);
+      const result = C._ts_tree_cursor_goto_last_child_wasm(this.tree[0]);
+      unmarshalTreeCursor(this);
+      return result === 1;
+    }
+    gotoParent() {
+      marshalTreeCursor(this);
+      const result = C._ts_tree_cursor_goto_parent_wasm(this.tree[0]);
+      unmarshalTreeCursor(this);
+      return result === 1;
+    }
+    gotoNextSibling() {
+      marshalTreeCursor(this);
+      const result = C._ts_tree_cursor_goto_next_sibling_wasm(this.tree[0]);
+      unmarshalTreeCursor(this);
+      return result === 1;
+    }
+    gotoPreviousSibling() {
+      marshalTreeCursor(this);
+      const result = C._ts_tree_cursor_goto_previous_sibling_wasm(this.tree[0]);
+      unmarshalTreeCursor(this);
+      return result === 1;
+    }
+    gotoDescendant(goalDescendantIndex) {
+      marshalTreeCursor(this);
+      C._ts_tree_cursor_goto_descendant_wasm(this.tree[0], goalDescendantIndex);
+      unmarshalTreeCursor(this);
+    }
+    gotoFirstChildForIndex(goalIndex) {
+      marshalTreeCursor(this);
+      C.setValue(TRANSFER_BUFFER + SIZE_OF_CURSOR, goalIndex, "i32");
+      const result = C._ts_tree_cursor_goto_first_child_for_index_wasm(this.tree[0]);
+      unmarshalTreeCursor(this);
+      return result === 1;
+    }
+    gotoFirstChildForPosition(goalPosition) {
+      marshalTreeCursor(this);
+      marshalPoint(TRANSFER_BUFFER + SIZE_OF_CURSOR, goalPosition);
+      const result = C._ts_tree_cursor_goto_first_child_for_position_wasm(this.tree[0]);
+      unmarshalTreeCursor(this);
+      return result === 1;
+    }
+    reset(node) {
+      marshalNode(node);
+      marshalTreeCursor(this, TRANSFER_BUFFER + SIZE_OF_NODE);
+      C._ts_tree_cursor_reset_wasm(this.tree[0]);
+      unmarshalTreeCursor(this);
+    }
+    resetTo(cursor) {
+      marshalTreeCursor(this, TRANSFER_BUFFER);
+      marshalTreeCursor(cursor, TRANSFER_BUFFER + SIZE_OF_CURSOR);
+      C._ts_tree_cursor_reset_to_wasm(this.tree[0], cursor.tree[0]);
+      unmarshalTreeCursor(this);
+    }
+  };
+  Node = class {
+    static {
+      __name(this, "Node");
+    }
+    [0] = 0;
+    _children;
+    _namedChildren;
+    constructor(internal, {
+      id,
+      tree,
+      startIndex,
+      startPosition,
+      other
+    }) {
+      assertInternal(internal);
+      this[0] = other;
+      this.id = id;
+      this.tree = tree;
+      this.startIndex = startIndex;
+      this.startPosition = startPosition;
+    }
+    id;
+    startIndex;
+    startPosition;
+    tree;
+    get typeId() {
+      marshalNode(this);
+      return C._ts_node_symbol_wasm(this.tree[0]);
+    }
+    get grammarId() {
+      marshalNode(this);
+      return C._ts_node_grammar_symbol_wasm(this.tree[0]);
+    }
+    get type() {
+      return this.tree.language.types[this.typeId] || "ERROR";
+    }
+    get grammarType() {
+      return this.tree.language.types[this.grammarId] || "ERROR";
+    }
+    get isNamed() {
+      marshalNode(this);
+      return C._ts_node_is_named_wasm(this.tree[0]) === 1;
+    }
+    get isExtra() {
+      marshalNode(this);
+      return C._ts_node_is_extra_wasm(this.tree[0]) === 1;
+    }
+    get isError() {
+      marshalNode(this);
+      return C._ts_node_is_error_wasm(this.tree[0]) === 1;
+    }
+    get isMissing() {
+      marshalNode(this);
+      return C._ts_node_is_missing_wasm(this.tree[0]) === 1;
+    }
+    get hasChanges() {
+      marshalNode(this);
+      return C._ts_node_has_changes_wasm(this.tree[0]) === 1;
+    }
+    get hasError() {
+      marshalNode(this);
+      return C._ts_node_has_error_wasm(this.tree[0]) === 1;
+    }
+    get endIndex() {
+      marshalNode(this);
+      return C._ts_node_end_index_wasm(this.tree[0]);
+    }
+    get endPosition() {
+      marshalNode(this);
+      C._ts_node_end_point_wasm(this.tree[0]);
+      return unmarshalPoint(TRANSFER_BUFFER);
+    }
+    get text() {
+      return getText(this.tree, this.startIndex, this.endIndex, this.startPosition);
+    }
+    get parseState() {
+      marshalNode(this);
+      return C._ts_node_parse_state_wasm(this.tree[0]);
+    }
+    get nextParseState() {
+      marshalNode(this);
+      return C._ts_node_next_parse_state_wasm(this.tree[0]);
+    }
+    equals(other) {
+      return this.tree === other.tree && this.id === other.id;
+    }
+    child(index) {
+      marshalNode(this);
+      C._ts_node_child_wasm(this.tree[0], index);
+      return unmarshalNode(this.tree);
+    }
+    namedChild(index) {
+      marshalNode(this);
+      C._ts_node_named_child_wasm(this.tree[0], index);
+      return unmarshalNode(this.tree);
+    }
+    childForFieldId(fieldId) {
+      marshalNode(this);
+      C._ts_node_child_by_field_id_wasm(this.tree[0], fieldId);
+      return unmarshalNode(this.tree);
+    }
+    childForFieldName(fieldName) {
+      const fieldId = this.tree.language.fields.indexOf(fieldName);
+      if (fieldId !== -1)
+        return this.childForFieldId(fieldId);
+      return null;
+    }
+    fieldNameForChild(index) {
+      marshalNode(this);
+      const address = C._ts_node_field_name_for_child_wasm(this.tree[0], index);
+      if (!address)
+        return null;
+      return C.AsciiToString(address);
+    }
+    fieldNameForNamedChild(index) {
+      marshalNode(this);
+      const address = C._ts_node_field_name_for_named_child_wasm(this.tree[0], index);
+      if (!address)
+        return null;
+      return C.AsciiToString(address);
+    }
+    childrenForFieldName(fieldName) {
+      const fieldId = this.tree.language.fields.indexOf(fieldName);
+      if (fieldId !== -1 && fieldId !== 0)
+        return this.childrenForFieldId(fieldId);
+      return [];
+    }
+    childrenForFieldId(fieldId) {
+      marshalNode(this);
+      C._ts_node_children_by_field_id_wasm(this.tree[0], fieldId);
+      const count = C.getValue(TRANSFER_BUFFER, "i32");
+      const buffer = C.getValue(TRANSFER_BUFFER + SIZE_OF_INT, "i32");
+      const result = new Array(count);
+      if (count > 0) {
+        let address = buffer;
+        for (let i2 = 0;i2 < count; i2++) {
+          result[i2] = unmarshalNode(this.tree, address);
+          address += SIZE_OF_NODE;
+        }
+        C._free(buffer);
+      }
+      return result;
+    }
+    firstChildForIndex(index) {
+      marshalNode(this);
+      const address = TRANSFER_BUFFER + SIZE_OF_NODE;
+      C.setValue(address, index, "i32");
+      C._ts_node_first_child_for_byte_wasm(this.tree[0]);
+      return unmarshalNode(this.tree);
+    }
+    firstNamedChildForIndex(index) {
+      marshalNode(this);
+      const address = TRANSFER_BUFFER + SIZE_OF_NODE;
+      C.setValue(address, index, "i32");
+      C._ts_node_first_named_child_for_byte_wasm(this.tree[0]);
+      return unmarshalNode(this.tree);
+    }
+    get childCount() {
+      marshalNode(this);
+      return C._ts_node_child_count_wasm(this.tree[0]);
+    }
+    get namedChildCount() {
+      marshalNode(this);
+      return C._ts_node_named_child_count_wasm(this.tree[0]);
+    }
+    get firstChild() {
+      return this.child(0);
+    }
+    get firstNamedChild() {
+      return this.namedChild(0);
+    }
+    get lastChild() {
+      return this.child(this.childCount - 1);
+    }
+    get lastNamedChild() {
+      return this.namedChild(this.namedChildCount - 1);
+    }
+    get children() {
+      if (!this._children) {
+        marshalNode(this);
+        C._ts_node_children_wasm(this.tree[0]);
+        const count = C.getValue(TRANSFER_BUFFER, "i32");
+        const buffer = C.getValue(TRANSFER_BUFFER + SIZE_OF_INT, "i32");
+        this._children = new Array(count);
+        if (count > 0) {
+          let address = buffer;
+          for (let i2 = 0;i2 < count; i2++) {
+            this._children[i2] = unmarshalNode(this.tree, address);
+            address += SIZE_OF_NODE;
+          }
+          C._free(buffer);
+        }
+      }
+      return this._children;
+    }
+    get namedChildren() {
+      if (!this._namedChildren) {
+        marshalNode(this);
+        C._ts_node_named_children_wasm(this.tree[0]);
+        const count = C.getValue(TRANSFER_BUFFER, "i32");
+        const buffer = C.getValue(TRANSFER_BUFFER + SIZE_OF_INT, "i32");
+        this._namedChildren = new Array(count);
+        if (count > 0) {
+          let address = buffer;
+          for (let i2 = 0;i2 < count; i2++) {
+            this._namedChildren[i2] = unmarshalNode(this.tree, address);
+            address += SIZE_OF_NODE;
+          }
+          C._free(buffer);
+        }
+      }
+      return this._namedChildren;
+    }
+    descendantsOfType(types, startPosition = ZERO_POINT, endPosition = ZERO_POINT) {
+      if (!Array.isArray(types))
+        types = [types];
+      const symbols = [];
+      const typesBySymbol = this.tree.language.types;
+      for (const node_type of types) {
+        if (node_type == "ERROR") {
+          symbols.push(65535);
+        }
+      }
+      for (let i2 = 0, n = typesBySymbol.length;i2 < n; i2++) {
+        if (types.includes(typesBySymbol[i2])) {
+          symbols.push(i2);
+        }
+      }
+      const symbolsAddress = C._malloc(SIZE_OF_INT * symbols.length);
+      for (let i2 = 0, n = symbols.length;i2 < n; i2++) {
+        C.setValue(symbolsAddress + i2 * SIZE_OF_INT, symbols[i2], "i32");
+      }
+      marshalNode(this);
+      C._ts_node_descendants_of_type_wasm(this.tree[0], symbolsAddress, symbols.length, startPosition.row, startPosition.column, endPosition.row, endPosition.column);
+      const descendantCount = C.getValue(TRANSFER_BUFFER, "i32");
+      const descendantAddress = C.getValue(TRANSFER_BUFFER + SIZE_OF_INT, "i32");
+      const result = new Array(descendantCount);
+      if (descendantCount > 0) {
+        let address = descendantAddress;
+        for (let i2 = 0;i2 < descendantCount; i2++) {
+          result[i2] = unmarshalNode(this.tree, address);
+          address += SIZE_OF_NODE;
+        }
+      }
+      C._free(descendantAddress);
+      C._free(symbolsAddress);
+      return result;
+    }
+    get nextSibling() {
+      marshalNode(this);
+      C._ts_node_next_sibling_wasm(this.tree[0]);
+      return unmarshalNode(this.tree);
+    }
+    get previousSibling() {
+      marshalNode(this);
+      C._ts_node_prev_sibling_wasm(this.tree[0]);
+      return unmarshalNode(this.tree);
+    }
+    get nextNamedSibling() {
+      marshalNode(this);
+      C._ts_node_next_named_sibling_wasm(this.tree[0]);
+      return unmarshalNode(this.tree);
+    }
+    get previousNamedSibling() {
+      marshalNode(this);
+      C._ts_node_prev_named_sibling_wasm(this.tree[0]);
+      return unmarshalNode(this.tree);
+    }
+    get descendantCount() {
+      marshalNode(this);
+      return C._ts_node_descendant_count_wasm(this.tree[0]);
+    }
+    get parent() {
+      marshalNode(this);
+      C._ts_node_parent_wasm(this.tree[0]);
+      return unmarshalNode(this.tree);
+    }
+    childWithDescendant(descendant) {
+      marshalNode(this);
+      marshalNode(descendant, 1);
+      C._ts_node_child_with_descendant_wasm(this.tree[0]);
+      return unmarshalNode(this.tree);
+    }
+    descendantForIndex(start2, end = start2) {
+      if (typeof start2 !== "number" || typeof end !== "number") {
+        throw new Error("Arguments must be numbers");
+      }
+      marshalNode(this);
+      const address = TRANSFER_BUFFER + SIZE_OF_NODE;
+      C.setValue(address, start2, "i32");
+      C.setValue(address + SIZE_OF_INT, end, "i32");
+      C._ts_node_descendant_for_index_wasm(this.tree[0]);
+      return unmarshalNode(this.tree);
+    }
+    namedDescendantForIndex(start2, end = start2) {
+      if (typeof start2 !== "number" || typeof end !== "number") {
+        throw new Error("Arguments must be numbers");
+      }
+      marshalNode(this);
+      const address = TRANSFER_BUFFER + SIZE_OF_NODE;
+      C.setValue(address, start2, "i32");
+      C.setValue(address + SIZE_OF_INT, end, "i32");
+      C._ts_node_named_descendant_for_index_wasm(this.tree[0]);
+      return unmarshalNode(this.tree);
+    }
+    descendantForPosition(start2, end = start2) {
+      if (!isPoint(start2) || !isPoint(end)) {
+        throw new Error("Arguments must be {row, column} objects");
+      }
+      marshalNode(this);
+      const address = TRANSFER_BUFFER + SIZE_OF_NODE;
+      marshalPoint(address, start2);
+      marshalPoint(address + SIZE_OF_POINT, end);
+      C._ts_node_descendant_for_position_wasm(this.tree[0]);
+      return unmarshalNode(this.tree);
+    }
+    namedDescendantForPosition(start2, end = start2) {
+      if (!isPoint(start2) || !isPoint(end)) {
+        throw new Error("Arguments must be {row, column} objects");
+      }
+      marshalNode(this);
+      const address = TRANSFER_BUFFER + SIZE_OF_NODE;
+      marshalPoint(address, start2);
+      marshalPoint(address + SIZE_OF_POINT, end);
+      C._ts_node_named_descendant_for_position_wasm(this.tree[0]);
+      return unmarshalNode(this.tree);
+    }
+    walk() {
+      marshalNode(this);
+      C._ts_tree_cursor_new_wasm(this.tree[0]);
+      return new TreeCursor(INTERNAL, this.tree);
+    }
+    edit(edit) {
+      if (this.startIndex >= edit.oldEndIndex) {
+        this.startIndex = edit.newEndIndex + (this.startIndex - edit.oldEndIndex);
+        let subbedPointRow;
+        let subbedPointColumn;
+        if (this.startPosition.row > edit.oldEndPosition.row) {
+          subbedPointRow = this.startPosition.row - edit.oldEndPosition.row;
+          subbedPointColumn = this.startPosition.column;
+        } else {
+          subbedPointRow = 0;
+          subbedPointColumn = this.startPosition.column;
+          if (this.startPosition.column >= edit.oldEndPosition.column) {
+            subbedPointColumn = this.startPosition.column - edit.oldEndPosition.column;
+          }
+        }
+        if (subbedPointRow > 0) {
+          this.startPosition.row += subbedPointRow;
+          this.startPosition.column = subbedPointColumn;
+        } else {
+          this.startPosition.column += subbedPointColumn;
+        }
+      } else if (this.startIndex > edit.startIndex) {
+        this.startIndex = edit.newEndIndex;
+        this.startPosition.row = edit.newEndPosition.row;
+        this.startPosition.column = edit.newEndPosition.column;
+      }
+    }
+    toString() {
+      marshalNode(this);
+      const address = C._ts_node_to_string_wasm(this.tree[0]);
+      const result = C.AsciiToString(address);
+      C._free(address);
+      return result;
+    }
+  };
+  __name(unmarshalCaptures, "unmarshalCaptures");
+  __name(marshalNode, "marshalNode");
+  __name(unmarshalNode, "unmarshalNode");
+  __name(marshalTreeCursor, "marshalTreeCursor");
+  __name(unmarshalTreeCursor, "unmarshalTreeCursor");
+  __name(marshalPoint, "marshalPoint");
+  __name(unmarshalPoint, "unmarshalPoint");
+  __name(marshalRange, "marshalRange");
+  __name(unmarshalRange, "unmarshalRange");
+  __name(marshalEdit, "marshalEdit");
+  __name(unmarshalLanguageMetadata, "unmarshalLanguageMetadata");
+  LANGUAGE_FUNCTION_REGEX = /^tree_sitter_\w+$/;
+  Language = class _Language {
+    static {
+      __name(this, "Language");
+    }
+    [0] = 0;
+    types;
+    fields;
+    constructor(internal, address) {
+      assertInternal(internal);
+      this[0] = address;
+      this.types = new Array(C._ts_language_symbol_count(this[0]));
+      for (let i2 = 0, n = this.types.length;i2 < n; i2++) {
+        if (C._ts_language_symbol_type(this[0], i2) < 2) {
+          this.types[i2] = C.UTF8ToString(C._ts_language_symbol_name(this[0], i2));
+        }
+      }
+      this.fields = new Array(C._ts_language_field_count(this[0]) + 1);
+      for (let i2 = 0, n = this.fields.length;i2 < n; i2++) {
+        const fieldName = C._ts_language_field_name_for_id(this[0], i2);
+        if (fieldName !== 0) {
+          this.fields[i2] = C.UTF8ToString(fieldName);
+        } else {
+          this.fields[i2] = null;
+        }
+      }
+    }
+    get name() {
+      const ptr = C._ts_language_name(this[0]);
+      if (ptr === 0)
+        return null;
+      return C.UTF8ToString(ptr);
+    }
+    get abiVersion() {
+      return C._ts_language_abi_version(this[0]);
+    }
+    get metadata() {
+      C._ts_language_metadata_wasm(this[0]);
+      const length = C.getValue(TRANSFER_BUFFER, "i32");
+      if (length === 0)
+        return null;
+      return unmarshalLanguageMetadata(TRANSFER_BUFFER + SIZE_OF_INT);
+    }
+    get fieldCount() {
+      return this.fields.length - 1;
+    }
+    get stateCount() {
+      return C._ts_language_state_count(this[0]);
+    }
+    fieldIdForName(fieldName) {
+      const result = this.fields.indexOf(fieldName);
+      return result !== -1 ? result : null;
+    }
+    fieldNameForId(fieldId) {
+      return this.fields[fieldId] ?? null;
+    }
+    idForNodeType(type, named) {
+      const typeLength = C.lengthBytesUTF8(type);
+      const typeAddress = C._malloc(typeLength + 1);
+      C.stringToUTF8(type, typeAddress, typeLength + 1);
+      const result = C._ts_language_symbol_for_name(this[0], typeAddress, typeLength, named ? 1 : 0);
+      C._free(typeAddress);
+      return result || null;
+    }
+    get nodeTypeCount() {
+      return C._ts_language_symbol_count(this[0]);
+    }
+    nodeTypeForId(typeId) {
+      const name2 = C._ts_language_symbol_name(this[0], typeId);
+      return name2 ? C.UTF8ToString(name2) : null;
+    }
+    nodeTypeIsNamed(typeId) {
+      return C._ts_language_type_is_named_wasm(this[0], typeId) ? true : false;
+    }
+    nodeTypeIsVisible(typeId) {
+      return C._ts_language_type_is_visible_wasm(this[0], typeId) ? true : false;
+    }
+    get supertypes() {
+      C._ts_language_supertypes_wasm(this[0]);
+      const count = C.getValue(TRANSFER_BUFFER, "i32");
+      const buffer = C.getValue(TRANSFER_BUFFER + SIZE_OF_INT, "i32");
+      const result = new Array(count);
+      if (count > 0) {
+        let address = buffer;
+        for (let i2 = 0;i2 < count; i2++) {
+          result[i2] = C.getValue(address, "i16");
+          address += SIZE_OF_SHORT;
+        }
+      }
+      return result;
+    }
+    subtypes(supertype) {
+      C._ts_language_subtypes_wasm(this[0], supertype);
+      const count = C.getValue(TRANSFER_BUFFER, "i32");
+      const buffer = C.getValue(TRANSFER_BUFFER + SIZE_OF_INT, "i32");
+      const result = new Array(count);
+      if (count > 0) {
+        let address = buffer;
+        for (let i2 = 0;i2 < count; i2++) {
+          result[i2] = C.getValue(address, "i16");
+          address += SIZE_OF_SHORT;
+        }
+      }
+      return result;
+    }
+    nextState(stateId, typeId) {
+      return C._ts_language_next_state(this[0], stateId, typeId);
+    }
+    lookaheadIterator(stateId) {
+      const address = C._ts_lookahead_iterator_new(this[0], stateId);
+      if (address)
+        return new LookaheadIterator(INTERNAL, address, this);
+      return null;
+    }
+    static async load(input) {
+      let binary2;
+      if (input instanceof Uint8Array) {
+        binary2 = input;
+      } else if (globalThis.process?.versions.node) {
+        const fs2 = await import("fs/promises");
+        binary2 = await fs2.readFile(input);
+      } else {
+        const response = await fetch(input);
+        if (!response.ok) {
+          const body2 = await response.text();
+          throw new Error(`Language.load failed with status ${response.status}.
+
+${body2}`);
+        }
+        const retryResp = response.clone();
+        try {
+          binary2 = await WebAssembly.compileStreaming(response);
+        } catch (reason) {
+          console.error("wasm streaming compile failed:", reason);
+          console.error("falling back to ArrayBuffer instantiation");
+          binary2 = new Uint8Array(await retryResp.arrayBuffer());
+        }
+      }
+      const mod = await C.loadWebAssemblyModule(binary2, { loadAsync: true });
+      const symbolNames = Object.keys(mod);
+      const functionName = symbolNames.find((key) => LANGUAGE_FUNCTION_REGEX.test(key) && !key.includes("external_scanner_"));
+      if (!functionName) {
+        console.log(`Couldn't find language function in Wasm file. Symbols:
+${JSON.stringify(symbolNames, null, 2)}`);
+        throw new Error("Language.load failed: no language function found in Wasm file");
+      }
+      const languageAddress = mod[functionName]();
+      return new _Language(INTERNAL, languageAddress);
+    }
+  };
+  __name(Module2, "Module");
+  web_tree_sitter_default = Module2;
+  __name(initializeBinding, "initializeBinding");
+  __name(checkModule, "checkModule");
+  Parser = class {
+    static {
+      __name(this, "Parser");
+    }
+    [0] = 0;
+    [1] = 0;
+    logCallback = null;
+    language = null;
+    static async init(moduleOptions) {
+      setModule(await initializeBinding(moduleOptions));
+      TRANSFER_BUFFER = C._ts_init();
+      LANGUAGE_VERSION = C.getValue(TRANSFER_BUFFER, "i32");
+      MIN_COMPATIBLE_VERSION = C.getValue(TRANSFER_BUFFER + SIZE_OF_INT, "i32");
+    }
+    constructor() {
+      this.initialize();
+    }
+    initialize() {
+      if (!checkModule()) {
+        throw new Error("cannot construct a Parser before calling `init()`");
+      }
+      C._ts_parser_new_wasm();
+      this[0] = C.getValue(TRANSFER_BUFFER, "i32");
+      this[1] = C.getValue(TRANSFER_BUFFER + SIZE_OF_INT, "i32");
+    }
+    delete() {
+      C._ts_parser_delete(this[0]);
+      C._free(this[1]);
+      this[0] = 0;
+      this[1] = 0;
+    }
+    setLanguage(language) {
+      let address;
+      if (!language) {
+        address = 0;
+        this.language = null;
+      } else if (language.constructor === Language) {
+        address = language[0];
+        const version = C._ts_language_abi_version(address);
+        if (version < MIN_COMPATIBLE_VERSION || LANGUAGE_VERSION < version) {
+          throw new Error(`Incompatible language version ${version}. Compatibility range ${MIN_COMPATIBLE_VERSION} through ${LANGUAGE_VERSION}.`);
+        }
+        this.language = language;
+      } else {
+        throw new Error("Argument must be a Language");
+      }
+      C._ts_parser_set_language(this[0], address);
+      return this;
+    }
+    parse(callback, oldTree, options) {
+      if (typeof callback === "string") {
+        C.currentParseCallback = (index) => callback.slice(index);
+      } else if (typeof callback === "function") {
+        C.currentParseCallback = callback;
+      } else {
+        throw new Error("Argument must be a string or a function");
+      }
+      if (options?.progressCallback) {
+        C.currentProgressCallback = options.progressCallback;
+      } else {
+        C.currentProgressCallback = null;
+      }
+      if (this.logCallback) {
+        C.currentLogCallback = this.logCallback;
+        C._ts_parser_enable_logger_wasm(this[0], 1);
+      } else {
+        C.currentLogCallback = null;
+        C._ts_parser_enable_logger_wasm(this[0], 0);
+      }
+      let rangeCount = 0;
+      let rangeAddress = 0;
+      if (options?.includedRanges) {
+        rangeCount = options.includedRanges.length;
+        rangeAddress = C._calloc(rangeCount, SIZE_OF_RANGE);
+        let address = rangeAddress;
+        for (let i2 = 0;i2 < rangeCount; i2++) {
+          marshalRange(address, options.includedRanges[i2]);
+          address += SIZE_OF_RANGE;
+        }
+      }
+      const treeAddress = C._ts_parser_parse_wasm(this[0], this[1], oldTree ? oldTree[0] : 0, rangeAddress, rangeCount);
+      if (!treeAddress) {
+        C.currentParseCallback = null;
+        C.currentLogCallback = null;
+        C.currentProgressCallback = null;
+        return null;
+      }
+      if (!this.language) {
+        throw new Error("Parser must have a language to parse");
+      }
+      const result = new Tree(INTERNAL, treeAddress, this.language, C.currentParseCallback);
+      C.currentParseCallback = null;
+      C.currentLogCallback = null;
+      C.currentProgressCallback = null;
+      return result;
+    }
+    reset() {
+      C._ts_parser_reset(this[0]);
+    }
+    getIncludedRanges() {
+      C._ts_parser_included_ranges_wasm(this[0]);
+      const count = C.getValue(TRANSFER_BUFFER, "i32");
+      const buffer = C.getValue(TRANSFER_BUFFER + SIZE_OF_INT, "i32");
+      const result = new Array(count);
+      if (count > 0) {
+        let address = buffer;
+        for (let i2 = 0;i2 < count; i2++) {
+          result[i2] = unmarshalRange(address);
+          address += SIZE_OF_RANGE;
+        }
+        C._free(buffer);
+      }
+      return result;
+    }
+    setLogger(callback) {
+      if (!callback) {
+        this.logCallback = null;
+      } else if (typeof callback !== "function") {
+        throw new Error("Logger callback must be a function");
+      } else {
+        this.logCallback = callback;
+      }
+      return this;
+    }
+    getLogger() {
+      return this.logCallback;
+    }
+  };
+  QUERY_WORD_REGEX = /[\w-]+/g;
+  CaptureQuantifier = {
+    Zero: 0,
+    ZeroOrOne: 1,
+    ZeroOrMore: 2,
+    One: 3,
+    OneOrMore: 4
+  };
+  isCaptureStep = /* @__PURE__ */ __name((step) => step.type === "capture", "isCaptureStep");
+  isStringStep = /* @__PURE__ */ __name((step) => step.type === "string", "isStringStep");
+  QueryErrorKind = {
+    Syntax: 1,
+    NodeName: 2,
+    FieldName: 3,
+    CaptureName: 4,
+    PatternStructure: 5
+  };
+  QueryError = class _QueryError extends Error {
+    constructor(kind, info2, index, length) {
+      super(_QueryError.formatMessage(kind, info2));
+      this.kind = kind;
+      this.info = info2;
+      this.index = index;
+      this.length = length;
+      this.name = "QueryError";
+    }
+    static {
+      __name(this, "QueryError");
+    }
+    static formatMessage(kind, info2) {
+      switch (kind) {
+        case QueryErrorKind.NodeName:
+          return `Bad node name '${info2.word}'`;
+        case QueryErrorKind.FieldName:
+          return `Bad field name '${info2.word}'`;
+        case QueryErrorKind.CaptureName:
+          return `Bad capture name @${info2.word}`;
+        case QueryErrorKind.PatternStructure:
+          return `Bad pattern structure at offset ${info2.suffix}`;
+        case QueryErrorKind.Syntax:
+          return `Bad syntax at offset ${info2.suffix}`;
+      }
+    }
+  };
+  __name(parseAnyPredicate, "parseAnyPredicate");
+  __name(parseMatchPredicate, "parseMatchPredicate");
+  __name(parseAnyOfPredicate, "parseAnyOfPredicate");
+  __name(parseIsPredicate, "parseIsPredicate");
+  __name(parseSetDirective, "parseSetDirective");
+  __name(parsePattern, "parsePattern");
+  Query = class {
+    static {
+      __name(this, "Query");
+    }
+    [0] = 0;
+    exceededMatchLimit;
+    textPredicates;
+    captureNames;
+    captureQuantifiers;
+    predicates;
+    setProperties;
+    assertedProperties;
+    refutedProperties;
+    matchLimit;
+    constructor(language, source) {
+      const sourceLength = C.lengthBytesUTF8(source);
+      const sourceAddress = C._malloc(sourceLength + 1);
+      C.stringToUTF8(source, sourceAddress, sourceLength + 1);
+      const address = C._ts_query_new(language[0], sourceAddress, sourceLength, TRANSFER_BUFFER, TRANSFER_BUFFER + SIZE_OF_INT);
+      if (!address) {
+        const errorId = C.getValue(TRANSFER_BUFFER + SIZE_OF_INT, "i32");
+        const errorByte = C.getValue(TRANSFER_BUFFER, "i32");
+        const errorIndex = C.UTF8ToString(sourceAddress, errorByte).length;
+        const suffix = source.slice(errorIndex, errorIndex + 100).split(`
+`)[0];
+        const word = suffix.match(QUERY_WORD_REGEX)?.[0] ?? "";
+        C._free(sourceAddress);
+        switch (errorId) {
+          case QueryErrorKind.Syntax:
+            throw new QueryError(QueryErrorKind.Syntax, { suffix: `${errorIndex}: '${suffix}'...` }, errorIndex, 0);
+          case QueryErrorKind.NodeName:
+            throw new QueryError(errorId, { word }, errorIndex, word.length);
+          case QueryErrorKind.FieldName:
+            throw new QueryError(errorId, { word }, errorIndex, word.length);
+          case QueryErrorKind.CaptureName:
+            throw new QueryError(errorId, { word }, errorIndex, word.length);
+          case QueryErrorKind.PatternStructure:
+            throw new QueryError(errorId, { suffix: `${errorIndex}: '${suffix}'...` }, errorIndex, 0);
+        }
+      }
+      const stringCount = C._ts_query_string_count(address);
+      const captureCount = C._ts_query_capture_count(address);
+      const patternCount = C._ts_query_pattern_count(address);
+      const captureNames = new Array(captureCount);
+      const captureQuantifiers = new Array(patternCount);
+      const stringValues = new Array(stringCount);
+      for (let i2 = 0;i2 < captureCount; i2++) {
+        const nameAddress = C._ts_query_capture_name_for_id(address, i2, TRANSFER_BUFFER);
+        const nameLength = C.getValue(TRANSFER_BUFFER, "i32");
+        captureNames[i2] = C.UTF8ToString(nameAddress, nameLength);
+      }
+      for (let i2 = 0;i2 < patternCount; i2++) {
+        const captureQuantifiersArray = new Array(captureCount);
+        for (let j = 0;j < captureCount; j++) {
+          const quantifier = C._ts_query_capture_quantifier_for_id(address, i2, j);
+          captureQuantifiersArray[j] = quantifier;
+        }
+        captureQuantifiers[i2] = captureQuantifiersArray;
+      }
+      for (let i2 = 0;i2 < stringCount; i2++) {
+        const valueAddress = C._ts_query_string_value_for_id(address, i2, TRANSFER_BUFFER);
+        const nameLength = C.getValue(TRANSFER_BUFFER, "i32");
+        stringValues[i2] = C.UTF8ToString(valueAddress, nameLength);
+      }
+      const setProperties = new Array(patternCount);
+      const assertedProperties = new Array(patternCount);
+      const refutedProperties = new Array(patternCount);
+      const predicates = new Array(patternCount);
+      const textPredicates = new Array(patternCount);
+      for (let i2 = 0;i2 < patternCount; i2++) {
+        const predicatesAddress = C._ts_query_predicates_for_pattern(address, i2, TRANSFER_BUFFER);
+        const stepCount = C.getValue(TRANSFER_BUFFER, "i32");
+        predicates[i2] = [];
+        textPredicates[i2] = [];
+        const steps = new Array;
+        let stepAddress = predicatesAddress;
+        for (let j = 0;j < stepCount; j++) {
+          const stepType = C.getValue(stepAddress, "i32");
+          stepAddress += SIZE_OF_INT;
+          const stepValueId = C.getValue(stepAddress, "i32");
+          stepAddress += SIZE_OF_INT;
+          parsePattern(i2, stepType, stepValueId, captureNames, stringValues, steps, textPredicates, predicates, setProperties, assertedProperties, refutedProperties);
+        }
+        Object.freeze(textPredicates[i2]);
+        Object.freeze(predicates[i2]);
+        Object.freeze(setProperties[i2]);
+        Object.freeze(assertedProperties[i2]);
+        Object.freeze(refutedProperties[i2]);
+      }
+      C._free(sourceAddress);
+      this[0] = address;
+      this.captureNames = captureNames;
+      this.captureQuantifiers = captureQuantifiers;
+      this.textPredicates = textPredicates;
+      this.predicates = predicates;
+      this.setProperties = setProperties;
+      this.assertedProperties = assertedProperties;
+      this.refutedProperties = refutedProperties;
+      this.exceededMatchLimit = false;
+    }
+    delete() {
+      C._ts_query_delete(this[0]);
+      this[0] = 0;
+    }
+    matches(node, options = {}) {
+      const startPosition = options.startPosition ?? ZERO_POINT;
+      const endPosition = options.endPosition ?? ZERO_POINT;
+      const startIndex = options.startIndex ?? 0;
+      const endIndex = options.endIndex ?? 0;
+      const startContainingPosition = options.startContainingPosition ?? ZERO_POINT;
+      const endContainingPosition = options.endContainingPosition ?? ZERO_POINT;
+      const startContainingIndex = options.startContainingIndex ?? 0;
+      const endContainingIndex = options.endContainingIndex ?? 0;
+      const matchLimit = options.matchLimit ?? 4294967295;
+      const maxStartDepth = options.maxStartDepth ?? 4294967295;
+      const progressCallback = options.progressCallback;
+      if (typeof matchLimit !== "number") {
+        throw new Error("Arguments must be numbers");
+      }
+      this.matchLimit = matchLimit;
+      if (endIndex !== 0 && startIndex > endIndex) {
+        throw new Error("`startIndex` cannot be greater than `endIndex`");
+      }
+      if (endPosition !== ZERO_POINT && (startPosition.row > endPosition.row || startPosition.row === endPosition.row && startPosition.column > endPosition.column)) {
+        throw new Error("`startPosition` cannot be greater than `endPosition`");
+      }
+      if (endContainingIndex !== 0 && startContainingIndex > endContainingIndex) {
+        throw new Error("`startContainingIndex` cannot be greater than `endContainingIndex`");
+      }
+      if (endContainingPosition !== ZERO_POINT && (startContainingPosition.row > endContainingPosition.row || startContainingPosition.row === endContainingPosition.row && startContainingPosition.column > endContainingPosition.column)) {
+        throw new Error("`startContainingPosition` cannot be greater than `endContainingPosition`");
+      }
+      if (progressCallback) {
+        C.currentQueryProgressCallback = progressCallback;
+      }
+      marshalNode(node);
+      C._ts_query_matches_wasm(this[0], node.tree[0], startPosition.row, startPosition.column, endPosition.row, endPosition.column, startIndex, endIndex, startContainingPosition.row, startContainingPosition.column, endContainingPosition.row, endContainingPosition.column, startContainingIndex, endContainingIndex, matchLimit, maxStartDepth);
+      const rawCount = C.getValue(TRANSFER_BUFFER, "i32");
+      const startAddress = C.getValue(TRANSFER_BUFFER + SIZE_OF_INT, "i32");
+      const didExceedMatchLimit = C.getValue(TRANSFER_BUFFER + 2 * SIZE_OF_INT, "i32");
+      const result = new Array(rawCount);
+      this.exceededMatchLimit = Boolean(didExceedMatchLimit);
+      let filteredCount = 0;
+      let address = startAddress;
+      for (let i2 = 0;i2 < rawCount; i2++) {
+        const patternIndex = C.getValue(address, "i32");
+        address += SIZE_OF_INT;
+        const captureCount = C.getValue(address, "i32");
+        address += SIZE_OF_INT;
+        const captures = new Array(captureCount);
+        address = unmarshalCaptures(this, node.tree, address, patternIndex, captures);
+        if (this.textPredicates[patternIndex].every((p) => p(captures))) {
+          result[filteredCount] = { patternIndex, captures };
+          const setProperties = this.setProperties[patternIndex];
+          result[filteredCount].setProperties = setProperties;
+          const assertedProperties = this.assertedProperties[patternIndex];
+          result[filteredCount].assertedProperties = assertedProperties;
+          const refutedProperties = this.refutedProperties[patternIndex];
+          result[filteredCount].refutedProperties = refutedProperties;
+          filteredCount++;
+        }
+      }
+      result.length = filteredCount;
+      C._free(startAddress);
+      C.currentQueryProgressCallback = null;
+      return result;
+    }
+    captures(node, options = {}) {
+      const startPosition = options.startPosition ?? ZERO_POINT;
+      const endPosition = options.endPosition ?? ZERO_POINT;
+      const startIndex = options.startIndex ?? 0;
+      const endIndex = options.endIndex ?? 0;
+      const startContainingPosition = options.startContainingPosition ?? ZERO_POINT;
+      const endContainingPosition = options.endContainingPosition ?? ZERO_POINT;
+      const startContainingIndex = options.startContainingIndex ?? 0;
+      const endContainingIndex = options.endContainingIndex ?? 0;
+      const matchLimit = options.matchLimit ?? 4294967295;
+      const maxStartDepth = options.maxStartDepth ?? 4294967295;
+      const progressCallback = options.progressCallback;
+      if (typeof matchLimit !== "number") {
+        throw new Error("Arguments must be numbers");
+      }
+      this.matchLimit = matchLimit;
+      if (endIndex !== 0 && startIndex > endIndex) {
+        throw new Error("`startIndex` cannot be greater than `endIndex`");
+      }
+      if (endPosition !== ZERO_POINT && (startPosition.row > endPosition.row || startPosition.row === endPosition.row && startPosition.column > endPosition.column)) {
+        throw new Error("`startPosition` cannot be greater than `endPosition`");
+      }
+      if (endContainingIndex !== 0 && startContainingIndex > endContainingIndex) {
+        throw new Error("`startContainingIndex` cannot be greater than `endContainingIndex`");
+      }
+      if (endContainingPosition !== ZERO_POINT && (startContainingPosition.row > endContainingPosition.row || startContainingPosition.row === endContainingPosition.row && startContainingPosition.column > endContainingPosition.column)) {
+        throw new Error("`startContainingPosition` cannot be greater than `endContainingPosition`");
+      }
+      if (progressCallback) {
+        C.currentQueryProgressCallback = progressCallback;
+      }
+      marshalNode(node);
+      C._ts_query_captures_wasm(this[0], node.tree[0], startPosition.row, startPosition.column, endPosition.row, endPosition.column, startIndex, endIndex, startContainingPosition.row, startContainingPosition.column, endContainingPosition.row, endContainingPosition.column, startContainingIndex, endContainingIndex, matchLimit, maxStartDepth);
+      const count = C.getValue(TRANSFER_BUFFER, "i32");
+      const startAddress = C.getValue(TRANSFER_BUFFER + SIZE_OF_INT, "i32");
+      const didExceedMatchLimit = C.getValue(TRANSFER_BUFFER + 2 * SIZE_OF_INT, "i32");
+      const result = new Array;
+      this.exceededMatchLimit = Boolean(didExceedMatchLimit);
+      const captures = new Array;
+      let address = startAddress;
+      for (let i2 = 0;i2 < count; i2++) {
+        const patternIndex = C.getValue(address, "i32");
+        address += SIZE_OF_INT;
+        const captureCount = C.getValue(address, "i32");
+        address += SIZE_OF_INT;
+        const captureIndex = C.getValue(address, "i32");
+        address += SIZE_OF_INT;
+        captures.length = captureCount;
+        address = unmarshalCaptures(this, node.tree, address, patternIndex, captures);
+        if (this.textPredicates[patternIndex].every((p) => p(captures))) {
+          const capture = captures[captureIndex];
+          const setProperties = this.setProperties[patternIndex];
+          capture.setProperties = setProperties;
+          const assertedProperties = this.assertedProperties[patternIndex];
+          capture.assertedProperties = assertedProperties;
+          const refutedProperties = this.refutedProperties[patternIndex];
+          capture.refutedProperties = refutedProperties;
+          result.push(capture);
+        }
+      }
+      C._free(startAddress);
+      C.currentQueryProgressCallback = null;
+      return result;
+    }
+    predicatesForPattern(patternIndex) {
+      return this.predicates[patternIndex];
+    }
+    disableCapture(captureName) {
+      const captureNameLength = C.lengthBytesUTF8(captureName);
+      const captureNameAddress = C._malloc(captureNameLength + 1);
+      C.stringToUTF8(captureName, captureNameAddress, captureNameLength + 1);
+      C._ts_query_disable_capture(this[0], captureNameAddress, captureNameLength);
+      C._free(captureNameAddress);
+    }
+    disablePattern(patternIndex) {
+      if (patternIndex >= this.predicates.length) {
+        throw new Error(`Pattern index is ${patternIndex} but the pattern count is ${this.predicates.length}`);
+      }
+      C._ts_query_disable_pattern(this[0], patternIndex);
+    }
+    didExceedMatchLimit() {
+      return this.exceededMatchLimit;
+    }
+    startIndexForPattern(patternIndex) {
+      if (patternIndex >= this.predicates.length) {
+        throw new Error(`Pattern index is ${patternIndex} but the pattern count is ${this.predicates.length}`);
+      }
+      return C._ts_query_start_byte_for_pattern(this[0], patternIndex);
+    }
+    endIndexForPattern(patternIndex) {
+      if (patternIndex >= this.predicates.length) {
+        throw new Error(`Pattern index is ${patternIndex} but the pattern count is ${this.predicates.length}`);
+      }
+      return C._ts_query_end_byte_for_pattern(this[0], patternIndex);
+    }
+    patternCount() {
+      return C._ts_query_pattern_count(this[0]);
+    }
+    captureIndexForName(captureName) {
+      return this.captureNames.indexOf(captureName);
+    }
+    isPatternRooted(patternIndex) {
+      return C._ts_query_is_pattern_rooted(this[0], patternIndex) === 1;
+    }
+    isPatternNonLocal(patternIndex) {
+      return C._ts_query_is_pattern_non_local(this[0], patternIndex) === 1;
+    }
+    isPatternGuaranteedAtStep(byteIndex) {
+      return C._ts_query_is_pattern_guaranteed_at_step(this[0], byteIndex) === 1;
+    }
+  };
+});
+
+// src/hooks/detectors/tree-sitter-init.ts
+import { existsSync as existsSync8 } from "fs";
+import { dirname as dirname6, join as join7 } from "path";
+function extToLanguage(ext) {
+  const map = {
+    ".ts": "typescript",
+    ".mts": "typescript",
+    ".cts": "typescript",
+    ".tsx": "tsx",
+    ".js": "typescript",
+    ".jsx": "tsx",
+    ".mjs": "typescript",
+    ".cjs": "typescript",
+    ".py": "python",
+    ".pyi": "python",
+    ".go": "go",
+    ".rs": "rust",
+    ".rb": "ruby",
+    ".java": "java",
+    ".kt": "java"
+  };
+  return map[ext.toLowerCase()] ?? null;
+}
+function resolveWasmPath(filename) {
+  const cwd = process.cwd();
+  const candidates = [
+    join7(cwd, "plugin", "wasm", filename),
+    join7(dirname6(dirname6(dirname6(__dirname))), "plugin", "wasm", filename)
+  ];
+  if (filename.startsWith("tree-sitter-") && filename.endsWith(".wasm")) {
+    const lang = filename.replace("tree-sitter-", "").replace(".wasm", "");
+    candidates.push(join7(cwd, "node_modules", "@lumis-sh", `wasm-${lang}`, filename));
+  }
+  if (filename === "web-tree-sitter.wasm") {
+    candidates.push(join7(cwd, "node_modules", "web-tree-sitter", filename));
+  }
+  for (const p of candidates) {
+    if (existsSync8(p))
+      return p;
+  }
+  return null;
+}
+async function initParser(lang) {
   try {
-    content = readFileSync7(file, "utf-8");
+    const { Parser: Parser2, Language: Language2 } = await Promise.resolve().then(() => (init_web_tree_sitter(), exports_web_tree_sitter));
+    if (!_initDone) {
+      const enginePath = resolveWasmPath("web-tree-sitter.wasm");
+      if (!enginePath)
+        return null;
+      await Parser2.init({ locateFile: () => enginePath });
+      _initDone = true;
+    }
+    let language = _languageCache.get(lang);
+    if (!language) {
+      const grammarPath = resolveWasmPath(`tree-sitter-${lang}.wasm`);
+      if (!grammarPath)
+        return null;
+      language = await Language2.load(grammarPath);
+      _languageCache.set(lang, language);
+    }
+    const parser = new Parser2;
+    parser.setLanguage(language);
+    return {
+      parser,
+      language,
+      parse: (code) => parser.parse(code)
+    };
+  } catch {
+    return null;
+  }
+}
+var __dirname = "/Users/shunichi/Projects/qult/src/hooks/detectors", _initDone = false, _languageCache;
+var init_tree_sitter_init = __esm(() => {
+  _languageCache = new Map;
+});
+
+// src/hooks/detectors/complexity-check.ts
+import { existsSync as existsSync9, readFileSync as readFileSync7 } from "fs";
+import { extname as extname8 } from "path";
+function getLanguageNodes(lang) {
+  switch (lang) {
+    case "typescript":
+    case "tsx":
+      return TS_NODES;
+    case "python":
+      return PYTHON_NODES;
+    case "go":
+      return GO_NODES;
+    case "rust":
+      return RUST_NODES;
+    case "ruby":
+      return RUBY_NODES;
+    case "java":
+      return JAVA_NODES;
+  }
+}
+async function computeComplexity(file) {
+  if (isGateDisabled("complexity-check"))
+    return null;
+  try {
+    const ext = extname8(file).toLowerCase();
+    const lang = extToLanguage(ext);
+    if (!lang)
+      return null;
+    if (!existsSync9(file))
+      return null;
+    const content = readFileSync7(file, "utf-8");
+    if (content.length > MAX_CHECK_SIZE3)
+      return null;
+    const result = await initParser(lang);
+    if (!result)
+      return null;
+    const tree = result.parse(content);
+    if (!tree)
+      return null;
+    const rootNode = tree.rootNode;
+    const langNodes = getLanguageNodes(lang);
+    const config = loadConfig();
+    const functions = [];
+    const warnings = [];
+    findFunctions(rootNode, langNodes, functions);
+    for (const fn of functions) {
+      if (fn.cyclomatic > config.gates.complexity_threshold) {
+        warnings.push(`L${fn.line}: function "${fn.name}" has cyclomatic complexity ${fn.cyclomatic} (threshold: ${config.gates.complexity_threshold})`);
+      }
+      if (fn.lineCount > config.gates.function_size_limit) {
+        warnings.push(`L${fn.line}: function "${fn.name}" has ${fn.lineCount} lines (limit: ${config.gates.function_size_limit})`);
+      }
+    }
+    return { functions, warnings };
+  } catch {
+    return null;
+  }
+}
+function cacheComplexityResult(file, result) {
+  _lastFile = file;
+  _lastResult = result;
+}
+function findFunctions(node, langNodes, results) {
+  if (langNodes.functionTypes.includes(node.type)) {
+    const name2 = extractFuncName(node) ?? "<anonymous>";
+    const line = node.startPosition.row + 1;
+    const lineCount = node.endPosition.row - node.startPosition.row + 1;
+    let cyclomatic = 1;
+    countBranches(node, langNodes, { count: 0 }, (_n) => {
+      cyclomatic++;
+    });
+    const cognitive = computeCognitive(node, langNodes, 0);
+    results.push({ name: name2, line, cyclomatic, cognitive, lineCount });
+  }
+  for (const child of node.children) {
+    findFunctions(child, langNodes, results);
+  }
+}
+function countBranches(node, langNodes, _ctx, onBranch) {
+  if (langNodes.branchTypes.includes(node.type)) {
+    onBranch(node);
+  }
+  if (node.type === "binary_expression" || node.type === "boolean_operator" || node.type === "binary_operator") {
+    for (const child of node.children) {
+      if (langNodes.logicalOperatorTypes.includes(child.type) || langNodes.logicalOperatorTypes.includes(child.text)) {
+        onBranch(child);
+      }
+    }
+  }
+  if (langNodes.ternaryType && node.type === langNodes.ternaryType) {
+    onBranch(node);
+  }
+  for (const child of node.children) {
+    if (!langNodes.functionTypes.includes(child.type)) {
+      countBranches(child, langNodes, _ctx, onBranch);
+    }
+  }
+}
+function computeCognitive(node, langNodes, nestingLevel) {
+  let score = 0;
+  for (const child of node.children) {
+    if (langNodes.functionTypes.includes(child.type))
+      continue;
+    if (langNodes.nestingTypes.includes(child.type)) {
+      score += 1 + nestingLevel;
+      score += computeCognitive(child, langNodes, nestingLevel + 1);
+      continue;
+    }
+    if (child.type === "binary_expression" || child.type === "boolean_operator" || child.type === "binary_operator") {
+      for (const grandchild of child.children) {
+        if (langNodes.logicalOperatorTypes.includes(grandchild.type) || langNodes.logicalOperatorTypes.includes(grandchild.text)) {
+          score += 1;
+        }
+      }
+    }
+    if (langNodes.ternaryType && child.type === langNodes.ternaryType) {
+      score += 1 + nestingLevel;
+    }
+    score += computeCognitive(child, langNodes, nestingLevel);
+  }
+  return score;
+}
+function extractFuncName(node) {
+  const nameNode = node.childForFieldName("name");
+  if (nameNode)
+    return nameNode.text;
+  return null;
+}
+var MAX_CHECK_SIZE3 = 500000, TS_NODES, PYTHON_NODES, GO_NODES, RUST_NODES, RUBY_NODES, JAVA_NODES, _lastFile = null, _lastResult = null;
+var init_complexity_check = __esm(() => {
+  init_config();
+  init_session_state();
+  init_tree_sitter_init();
+  TS_NODES = {
+    functionTypes: [
+      "function_declaration",
+      "arrow_function",
+      "method_definition",
+      "function_expression"
+    ],
+    branchTypes: [
+      "if_statement",
+      "for_statement",
+      "for_in_statement",
+      "while_statement",
+      "do_statement",
+      "catch_clause",
+      "switch_case"
+    ],
+    logicalOperatorTypes: ["&&", "||", "??"],
+    nestingTypes: [
+      "if_statement",
+      "for_statement",
+      "for_in_statement",
+      "while_statement",
+      "do_statement",
+      "switch_statement",
+      "catch_clause"
+    ],
+    ternaryType: "ternary_expression"
+  };
+  PYTHON_NODES = {
+    functionTypes: ["function_definition"],
+    branchTypes: ["if_statement", "elif_clause", "for_statement", "while_statement", "except_clause"],
+    logicalOperatorTypes: ["and", "or"],
+    nestingTypes: ["if_statement", "for_statement", "while_statement", "except_clause"],
+    ternaryType: "conditional_expression"
+  };
+  GO_NODES = {
+    functionTypes: ["function_declaration", "method_declaration", "func_literal"],
+    branchTypes: ["if_statement", "for_statement", "expression_case", "type_case", "default_case"],
+    logicalOperatorTypes: ["&&", "||"],
+    nestingTypes: ["if_statement", "for_statement", "select_statement"],
+    ternaryType: null
+  };
+  RUST_NODES = {
+    functionTypes: ["function_item"],
+    branchTypes: ["if_expression", "for_expression", "while_expression", "match_arm"],
+    logicalOperatorTypes: ["&&", "||"],
+    nestingTypes: ["if_expression", "for_expression", "while_expression", "match_expression"],
+    ternaryType: null
+  };
+  RUBY_NODES = {
+    functionTypes: ["method", "singleton_method"],
+    branchTypes: ["if", "elsif", "unless", "for", "while", "until", "when", "rescue"],
+    logicalOperatorTypes: ["and", "or", "&&", "||"],
+    nestingTypes: ["if", "unless", "for", "while", "until", "case"],
+    ternaryType: "conditional"
+  };
+  JAVA_NODES = {
+    functionTypes: ["method_declaration", "constructor_declaration"],
+    branchTypes: [
+      "if_statement",
+      "for_statement",
+      "enhanced_for_statement",
+      "while_statement",
+      "do_statement",
+      "catch_clause",
+      "switch_block_statement_group"
+    ],
+    logicalOperatorTypes: ["&&", "||"],
+    nestingTypes: [
+      "if_statement",
+      "for_statement",
+      "enhanced_for_statement",
+      "while_statement",
+      "do_statement",
+      "switch_expression",
+      "catch_clause"
+    ],
+    ternaryType: "ternary_expression"
+  };
+});
+
+// src/hooks/detectors/dataflow-patterns.ts
+function getPatternsForLanguage(lang) {
+  switch (lang) {
+    case "typescript":
+    case "tsx":
+      return TS_JS_PATTERN;
+    case "python":
+      return PYTHON_PATTERN;
+    case "go":
+      return GO_PATTERN;
+    case "rust":
+      return RUST_PATTERN;
+    case "ruby":
+      return RUBY_PATTERN;
+    case "java":
+      return JAVA_PATTERN;
+    default:
+      return null;
+  }
+}
+var TS_JS_PATTERN, PYTHON_PATTERN, GO_PATTERN, RUST_PATTERN, RUBY_PATTERN, JAVA_PATTERN;
+var init_dataflow_patterns = __esm(() => {
+  TS_JS_PATTERN = {
+    sources: [
+      { nodeType: "member_expression", textPattern: /req(?:uest)?\.body/, desc: "HTTP request body" },
+      {
+        nodeType: "member_expression",
+        textPattern: /req(?:uest)?\.params/,
+        desc: "HTTP request params"
+      },
+      {
+        nodeType: "member_expression",
+        textPattern: /req(?:uest)?\.query/,
+        desc: "HTTP request query"
+      },
+      {
+        nodeType: "member_expression",
+        textPattern: /req(?:uest)?\.headers/,
+        desc: "HTTP request headers"
+      },
+      { nodeType: "member_expression", textPattern: /process\.argv/, desc: "process.argv" },
+      { nodeType: "member_expression", textPattern: /process\.stdin/, desc: "process.stdin" }
+    ],
+    sinks: [
+      {
+        nodeType: "call_expression",
+        textPattern: /\beval\s*\(/,
+        desc: "eval() \u2014 code injection risk"
+      },
+      {
+        nodeType: "call_expression",
+        textPattern: /\bexec\s*\(/,
+        desc: "exec() \u2014 command injection risk"
+      },
+      {
+        nodeType: "call_expression",
+        textPattern: /\bexecSync\s*\(/,
+        desc: "execSync() \u2014 command injection risk"
+      },
+      {
+        nodeType: "call_expression",
+        textPattern: /\bFunction\s*\(/,
+        desc: "Function() \u2014 code injection risk"
+      },
+      {
+        nodeType: "assignment_expression",
+        textPattern: /\.innerHTML\s*=/,
+        desc: "innerHTML \u2014 XSS risk"
+      },
+      {
+        nodeType: "call_expression",
+        textPattern: /document\.write\s*\(/,
+        desc: "document.write() \u2014 XSS risk"
+      }
+    ],
+    scopeNodes: ["statement_block", "arrow_function", "function_declaration", "method_definition"],
+    functionNodes: [
+      "function_declaration",
+      "arrow_function",
+      "method_definition",
+      "function_expression"
+    ],
+    parameterNodes: ["formal_parameters", "required_parameter", "optional_parameter"],
+    variableDeclarationNodes: ["variable_declarator", "lexical_declaration"],
+    assignmentNodes: ["assignment_expression"],
+    callNodes: ["call_expression"]
+  };
+  PYTHON_PATTERN = {
+    sources: [
+      { nodeType: "attribute", textPattern: /request\.form/, desc: "Flask request.form" },
+      { nodeType: "attribute", textPattern: /request\.args/, desc: "Flask request.args" },
+      { nodeType: "attribute", textPattern: /request\.json/, desc: "Flask request.json" },
+      { nodeType: "attribute", textPattern: /request\.data/, desc: "Flask request.data" },
+      { nodeType: "attribute", textPattern: /sys\.argv/, desc: "sys.argv" },
+      { nodeType: "call", textPattern: /\binput\s*\(/, desc: "input()" }
+    ],
+    sinks: [
+      { nodeType: "call", textPattern: /\beval\s*\(/, desc: "eval() \u2014 code injection risk" },
+      { nodeType: "call", textPattern: /\bexec\s*\(/, desc: "exec() \u2014 code injection risk" },
+      {
+        nodeType: "call",
+        textPattern: /os\.system\s*\(/,
+        desc: "os.system() \u2014 command injection risk"
+      },
+      {
+        nodeType: "call",
+        textPattern: /subprocess\.(?:call|run|Popen)\s*\(/,
+        desc: "subprocess \u2014 command injection risk"
+      },
+      {
+        nodeType: "call",
+        textPattern: /cursor\.execute\s*\(/,
+        desc: "cursor.execute() \u2014 SQL injection risk"
+      }
+    ],
+    scopeNodes: ["block", "function_definition", "class_definition"],
+    functionNodes: ["function_definition"],
+    parameterNodes: ["parameters", "default_parameter", "typed_parameter"],
+    variableDeclarationNodes: [],
+    assignmentNodes: ["assignment", "augmented_assignment"],
+    callNodes: ["call"]
+  };
+  GO_PATTERN = {
+    sources: [
+      { nodeType: "call_expression", textPattern: /\.FormValue\s*\(/, desc: "HTTP FormValue" },
+      { nodeType: "selector_expression", textPattern: /\.URL\.Query/, desc: "URL.Query" },
+      { nodeType: "selector_expression", textPattern: /os\.Args/, desc: "os.Args" }
+    ],
+    sinks: [
+      {
+        nodeType: "call_expression",
+        textPattern: /exec\.Command\s*\(/,
+        desc: "exec.Command() \u2014 command injection risk"
+      },
+      {
+        nodeType: "call_expression",
+        textPattern: /template\.HTML\s*\(/,
+        desc: "template.HTML() \u2014 XSS risk"
+      },
+      {
+        nodeType: "call_expression",
+        textPattern: /db\.(?:Exec|Query)\s*\(/,
+        desc: "db.Exec/Query() \u2014 SQL injection risk"
+      }
+    ],
+    scopeNodes: ["block", "function_declaration", "method_declaration"],
+    functionNodes: ["function_declaration", "method_declaration", "func_literal"],
+    parameterNodes: ["parameter_list", "parameter_declaration"],
+    variableDeclarationNodes: ["short_var_declaration", "var_declaration"],
+    assignmentNodes: ["assignment_statement"],
+    callNodes: ["call_expression"]
+  };
+  RUST_PATTERN = {
+    sources: [
+      { nodeType: "call_expression", textPattern: /std::io::stdin/, desc: "stdin" },
+      { nodeType: "call_expression", textPattern: /env::args/, desc: "env::args" }
+    ],
+    sinks: [
+      { nodeType: "macro_invocation", textPattern: /format!/, desc: "format! with user input" }
+    ],
+    scopeNodes: ["block", "function_item", "impl_item"],
+    functionNodes: ["function_item"],
+    parameterNodes: ["parameters", "parameter"],
+    variableDeclarationNodes: ["let_declaration"],
+    assignmentNodes: ["assignment_expression"],
+    callNodes: ["call_expression", "macro_invocation"]
+  };
+  RUBY_PATTERN = {
+    sources: [
+      { nodeType: "element_reference", textPattern: /params\[/, desc: "params[] \u2014 user input" },
+      { nodeType: "call", textPattern: /request\.env/, desc: "request.env" },
+      { nodeType: "call", textPattern: /\bgets\b/, desc: "gets \u2014 stdin" }
+    ],
+    sinks: [
+      { nodeType: "call", textPattern: /\bsystem\s*\(/, desc: "system() \u2014 command injection risk" },
+      { nodeType: "call", textPattern: /\beval\s*\(/, desc: "eval() \u2014 code injection risk" },
+      { nodeType: "call", textPattern: /\bexec\s*\(/, desc: "exec() \u2014 command injection risk" },
+      { nodeType: "subshell", textPattern: /`/, desc: "backtick command \u2014 command injection risk" }
+    ],
+    scopeNodes: ["body_statement", "method", "do_block", "block"],
+    functionNodes: ["method", "singleton_method"],
+    parameterNodes: ["method_parameters", "block_parameters"],
+    variableDeclarationNodes: [],
+    assignmentNodes: ["assignment"],
+    callNodes: ["call", "method_call"]
+  };
+  JAVA_PATTERN = {
+    sources: [
+      {
+        nodeType: "method_invocation",
+        textPattern: /\.getParameter\s*\(/,
+        desc: "request.getParameter"
+      },
+      {
+        nodeType: "method_invocation",
+        textPattern: /\.getInputStream\s*\(/,
+        desc: "request.getInputStream"
+      },
+      { nodeType: "method_invocation", textPattern: /\.getHeader\s*\(/, desc: "request.getHeader" }
+    ],
+    sinks: [
+      {
+        nodeType: "method_invocation",
+        textPattern: /Runtime.*\.exec\s*\(/,
+        desc: "Runtime.exec() \u2014 command injection"
+      },
+      {
+        nodeType: "object_creation_expression",
+        textPattern: /new\s+ProcessBuilder/,
+        desc: "ProcessBuilder \u2014 command injection"
+      },
+      {
+        nodeType: "method_invocation",
+        textPattern: /\.execute\s*\(/,
+        desc: "Statement.execute() \u2014 SQL injection"
+      },
+      {
+        nodeType: "method_invocation",
+        textPattern: /\.executeQuery\s*\(/,
+        desc: "executeQuery() \u2014 SQL injection"
+      }
+    ],
+    scopeNodes: ["block", "method_declaration", "constructor_declaration"],
+    functionNodes: ["method_declaration", "constructor_declaration"],
+    parameterNodes: ["formal_parameters", "formal_parameter"],
+    variableDeclarationNodes: ["local_variable_declaration"],
+    assignmentNodes: ["assignment_expression"],
+    callNodes: ["method_invocation"]
+  };
+});
+
+// src/hooks/detectors/dataflow-check.ts
+import { existsSync as existsSync10, readFileSync as readFileSync8 } from "fs";
+import { extname as extname9 } from "path";
+async function detectDataflowIssues(file) {
+  if (isGateDisabled("dataflow-check"))
+    return [];
+  try {
+    const ext = extname9(file).toLowerCase();
+    const lang = extToLanguage(ext);
+    if (!lang)
+      return [];
+    if (!existsSync10(file))
+      return [];
+    const content = readFileSync8(file, "utf-8");
+    if (content.length > MAX_CHECK_SIZE4)
+      return [];
+    const patterns = getPatternsForLanguage(lang);
+    if (!patterns)
+      return [];
+    const result = await initParser(lang);
+    if (!result)
+      return [];
+    const tree = result.parse(content);
+    if (!tree)
+      return [];
+    const errors = [];
+    const rootNode = tree.rootNode;
+    const globalTainted = new Map;
+    const functionDefs = new Map;
+    collectTaintsAndFunctions(rootNode, patterns, lang, globalTainted, functionDefs, 0, content);
+    for (let hop = 1;hop <= MAX_HOPS; hop++) {
+      propagateTaint(rootNode, globalTainted, patterns, hop, content);
+    }
+    propagateThroughCalls(rootNode, globalTainted, functionDefs, patterns, content);
+    checkSinks(rootNode, globalTainted, patterns, errors, content);
+    if (errors.length === 0)
+      return [];
+    return [
+      {
+        file,
+        errors: errors.map((e) => sanitizeForStderr(e.slice(0, 300))),
+        gate: "dataflow-check"
+      }
+    ];
   } catch {
     return [];
   }
-  if (content.length > MAX_CHECK_SIZE3)
+}
+function collectTaintsAndFunctions(node, patterns, lang, tainted, functions, scopeDepth, source) {
+  if (!patterns)
+    return;
+  if (isVariableDeclaration(node, patterns, lang)) {
+    const varName = extractVarName(node, lang);
+    const initializer = extractInitializer(node, lang);
+    if (varName && initializer) {
+      for (const src of patterns.sources) {
+        if (src.textPattern.test(initializer.text)) {
+          tainted.set(varName, { name: varName, scopeDepth, hop: 0, sourceDesc: src.desc });
+          break;
+        }
+      }
+    }
+  }
+  if (patterns.functionNodes.includes(node.type)) {
+    const funcName = extractFunctionName(node, lang);
+    if (funcName) {
+      const params = extractParams(node, lang);
+      const body2 = findBody(node, lang);
+      if (body2) {
+        functions.set(funcName, { params, bodyNode: body2 });
+      }
+    }
+  }
+  const newDepth = patterns.scopeNodes.includes(node.type) ? scopeDepth + 1 : scopeDepth;
+  for (const child of node.children) {
+    collectTaintsAndFunctions(child, patterns, lang, tainted, functions, newDepth, source);
+  }
+}
+function propagateTaint(node, tainted, patterns, hop, source) {
+  if (!patterns)
+    return;
+  const isDecl = node.type === "variable_declarator" || patterns.assignmentNodes.includes(node.type) || node.type === "assignment" || node.type === "short_var_declaration";
+  if (isDecl) {
+    const varName = extractAssignTarget(node);
+    const rhs = extractAssignSource(node);
+    if (varName && rhs) {
+      const rhsText = rhs.text.trim();
+      const tv = tainted.get(rhsText);
+      if (tv) {
+        const newHop = tv.hop + 1;
+        if (newHop <= MAX_HOPS) {
+          const existing = tainted.get(varName);
+          if (!existing || existing.hop > newHop) {
+            tainted.set(varName, {
+              name: varName,
+              scopeDepth: 0,
+              hop: newHop,
+              sourceDesc: tv.sourceDesc
+            });
+          }
+        }
+      }
+    }
+  }
+  for (const child of node.children) {
+    propagateTaint(child, tainted, patterns, hop, source);
+  }
+}
+function propagateThroughCalls(node, tainted, functions, patterns, source) {
+  if (!patterns)
+    return;
+  if (!patterns.callNodes.includes(node.type)) {
+    for (const child of node.children) {
+      propagateThroughCalls(child, tainted, functions, patterns, source);
+    }
+    return;
+  }
+  const funcName = extractCallName(node);
+  const funcDef = funcName ? functions.get(funcName) : null;
+  if (funcDef) {
+    const argsNode = node.childForFieldName("arguments");
+    const argNodes = argsNode ? argsNode.namedChildren : [];
+    for (let i2 = 0;i2 < argNodes.length && i2 < funcDef.params.length; i2++) {
+      const argNode = argNodes[i2];
+      const argText = argNode.text.trim();
+      const tv = tainted.get(argText);
+      if (tv && tv.hop < MAX_HOPS) {
+        tainted.set(funcDef.params[i2], {
+          name: funcDef.params[i2],
+          scopeDepth: 0,
+          hop: tv.hop + 1,
+          sourceDesc: tv.sourceDesc
+        });
+        continue;
+      }
+      if (patterns) {
+        for (const src of patterns.sources) {
+          if (src.textPattern.test(argText)) {
+            tainted.set(funcDef.params[i2], {
+              name: funcDef.params[i2],
+              scopeDepth: 0,
+              hop: 1,
+              sourceDesc: src.desc
+            });
+            break;
+          }
+        }
+      }
+    }
+  }
+  for (const child of node.children) {
+    propagateThroughCalls(child, tainted, functions, patterns, source);
+  }
+}
+function checkSinks(node, tainted, patterns, errors, source) {
+  if (!patterns)
+    return;
+  for (const sink of patterns.sinks) {
+    if (node.type === sink.nodeType || patterns.callNodes.includes(node.type)) {
+      if (sink.textPattern.test(node.text)) {
+        const args2 = extractCallArgs(node);
+        for (const arg of args2) {
+          const tv = tainted.get(arg.trim());
+          if (tv) {
+            const line = node.startPosition.row + 1;
+            errors.push(`L${line}: ${sink.desc} \u2014 tainted by ${tv.sourceDesc} (${tv.hop + 1} hop${tv.hop > 0 ? "s" : ""})`);
+            break;
+          }
+        }
+      }
+    }
+  }
+  for (const child of node.children) {
+    checkSinks(child, tainted, patterns, errors, source);
+  }
+}
+function isVariableDeclaration(node, patterns, lang) {
+  if (!patterns)
+    return false;
+  if (patterns.variableDeclarationNodes.includes(node.type))
+    return true;
+  if (patterns.assignmentNodes.includes(node.type))
+    return true;
+  if (lang === "python" && node.type === "expression_statement") {
+    const child = node.namedChild(0);
+    if (child && child.type === "assignment")
+      return true;
+  }
+  return false;
+}
+function extractVarName(node, lang) {
+  if (node.type === "variable_declarator") {
+    const nameNode = node.childForFieldName("name");
+    return nameNode?.text ?? null;
+  }
+  if (node.type === "lexical_declaration") {
+    const declarator = node.namedChildren.find((c) => c.type === "variable_declarator");
+    if (declarator)
+      return extractVarName(declarator, lang);
+  }
+  if (node.type === "assignment" || node.type === "expression_statement") {
+    const assignment = node.type === "assignment" ? node : node.namedChild(0);
+    if (assignment?.type === "assignment") {
+      const left = assignment.childForFieldName("left");
+      return left?.text ?? null;
+    }
+  }
+  if (node.type === "short_var_declaration") {
+    const left = node.childForFieldName("left");
+    return left?.text ?? null;
+  }
+  return null;
+}
+function extractInitializer(node, lang) {
+  if (node.type === "variable_declarator") {
+    return node.childForFieldName("value");
+  }
+  if (node.type === "lexical_declaration") {
+    const declarator = node.namedChildren.find((c) => c.type === "variable_declarator");
+    if (declarator)
+      return extractInitializer(declarator, lang);
+  }
+  if (node.type === "assignment" || node.type === "expression_statement") {
+    const assignment = node.type === "assignment" ? node : node.namedChild(0);
+    if (assignment?.type === "assignment") {
+      return assignment.childForFieldName("right");
+    }
+  }
+  if (node.type === "short_var_declaration") {
+    return node.childForFieldName("right");
+  }
+  return null;
+}
+function extractAssignTarget(node) {
+  if (node.type === "variable_declarator") {
+    return node.childForFieldName("name")?.text ?? null;
+  }
+  if (node.type === "lexical_declaration") {
+    const declarator = node.namedChildren.find((c) => c.type === "variable_declarator");
+    return declarator ? extractAssignTarget(declarator) : null;
+  }
+  if (node.type === "assignment" || node.type === "assignment_expression" || node.type === "assignment_statement") {
+    return node.childForFieldName("left")?.text ?? null;
+  }
+  if (node.type === "short_var_declaration") {
+    return node.childForFieldName("left")?.text ?? null;
+  }
+  return null;
+}
+function extractAssignSource(node) {
+  if (node.type === "variable_declarator") {
+    return node.childForFieldName("value");
+  }
+  if (node.type === "lexical_declaration") {
+    const declarator = node.namedChildren.find((c) => c.type === "variable_declarator");
+    return declarator ? extractAssignSource(declarator) : null;
+  }
+  if (node.type === "assignment" || node.type === "assignment_expression" || node.type === "assignment_statement") {
+    return node.childForFieldName("right");
+  }
+  if (node.type === "short_var_declaration") {
+    return node.childForFieldName("right");
+  }
+  return null;
+}
+function extractFunctionName(node, _lang) {
+  const nameNode = node.childForFieldName("name");
+  return nameNode?.text ?? null;
+}
+function extractParams(node, _lang) {
+  const paramsNode = node.childForFieldName("parameters");
+  if (!paramsNode)
+    return [];
+  return paramsNode.namedChildren.map((p) => {
+    const nameField = p.childForFieldName("name") ?? p.childForFieldName("pattern");
+    if (nameField)
+      return nameField.text;
+    if (p.type === "identifier")
+      return p.text;
+    const firstIdent = p.namedChildren.find((c) => c.type === "identifier");
+    return firstIdent?.text ?? p.text;
+  }).filter((name2) => name2.length > 0);
+}
+function findBody(node, _lang) {
+  return node.childForFieldName("body");
+}
+function extractCallName(node) {
+  const funcNode = node.childForFieldName("function");
+  if (funcNode?.type === "identifier")
+    return funcNode.text;
+  return null;
+}
+function extractCallArgs(node) {
+  const argsNode = node.childForFieldName("arguments");
+  if (!argsNode) {
+    const argList = node.namedChildren.find((c) => c.type === "arguments" || c.type === "argument_list");
+    if (argList) {
+      return argList.namedChildren.map((c) => c.text);
+    }
+    return [];
+  }
+  return argsNode.namedChildren.map((c) => c.text);
+}
+var MAX_CHECK_SIZE4 = 500000, MAX_HOPS = 3;
+var init_dataflow_check = __esm(() => {
+  init_session_state();
+  init_dataflow_patterns();
+  init_tree_sitter_init();
+});
+
+// src/hooks/detectors/security-check.ts
+import { existsSync as existsSync11, readFileSync as readFileSync9 } from "fs";
+import { basename as basename5, extname as extname10 } from "path";
+function detectSecurityPatterns(file) {
+  if (isGateDisabled("security-check"))
+    return [];
+  const ext = extname10(file).toLowerCase();
+  if (!CHECKABLE_EXTS2.has(ext))
+    return [];
+  if (!existsSync11(file))
+    return [];
+  let content;
+  try {
+    content = readFileSync9(file, "utf-8");
+  } catch {
+    return [];
+  }
+  if (content.length > MAX_CHECK_SIZE5)
     return [];
   const errors = [];
   const lines = content.split(`
@@ -3292,8 +7380,8 @@ function detectSecurityPatterns(file) {
   const starIsComment = JS_TS_EXTS.has(ext) || ext === ".java" || ext === ".kt" || ext === ".cs";
   const hasBlockComments = JS_TS_EXTS.has(ext) || ext === ".java" || ext === ".kt" || ext === ".cs" || ext === ".go" || ext === ".rs";
   let inBlockComment = false;
-  for (let i = 0;i < lines.length; i++) {
-    const line = lines[i];
+  for (let i2 = 0;i2 < lines.length; i2++) {
+    const line = lines[i2];
     const trimmed = line.trimStart();
     let scanLine = line;
     if (hasBlockComments) {
@@ -3333,7 +7421,7 @@ function detectSecurityPatterns(file) {
             continue;
           if (/\$\{?\w*ENV\w*\}?/.test(scanLine))
             continue;
-          errors.push(`L${i + 1}: ${desc}`);
+          errors.push(`L${i2 + 1}: ${desc}`);
           break;
         }
       }
@@ -3346,7 +7434,7 @@ function detectSecurityPatterns(file) {
           continue;
         if (suppressFile?.test(basename5(file)))
           continue;
-        errors.push(`L${i + 1}: ${desc}`);
+        errors.push(`L${i2 + 1}: ${desc}`);
       }
     }
   }
@@ -3362,23 +7450,23 @@ function detectSecurityPatterns(file) {
   ];
 }
 function matchAdvisoryPatterns(file, content) {
-  const ext = extname8(file).toLowerCase();
+  const ext = extname10(file).toLowerCase();
   if (!CHECKABLE_EXTS2.has(ext))
     return [];
-  if (content.length > MAX_CHECK_SIZE3)
+  if (content.length > MAX_CHECK_SIZE5)
     return [];
   const lines = content.split(`
 `);
   const matches = [];
-  for (let i = 0;i < lines.length; i++) {
-    const trimmed = lines[i].trimStart();
+  for (let i2 = 0;i2 < lines.length; i2++) {
+    const trimmed = lines[i2].trimStart();
     if (trimmed.startsWith("//") || trimmed.startsWith("#") || trimmed.startsWith("*"))
       continue;
     for (const { re, suppress, desc, exts } of ADVISORY_PATTERNS) {
       if (exts && !exts.has(ext))
         continue;
-      if (re.test(lines[i]) && !suppress?.test(lines[i])) {
-        matches.push({ line: i + 1, desc });
+      if (re.test(lines[i2]) && !suppress?.test(lines[i2])) {
+        matches.push({ line: i2 + 1, desc });
       }
     }
   }
@@ -3409,7 +7497,7 @@ function emitAdvisoryWarnings(file, content) {
     }
   } catch {}
 }
-var CHECKABLE_EXTS2, MAX_CHECK_SIZE3 = 500000, SECRET_PATTERNS, JS_TS_EXTS, PY_EXTS3, GO_EXTS2, RB_EXTS, JAVA_EXTS, DANGEROUS_PATTERNS, ADVISORY_PATTERNS;
+var CHECKABLE_EXTS2, MAX_CHECK_SIZE5 = 500000, SECRET_PATTERNS, JS_TS_EXTS, PY_EXTS3, GO_EXTS2, RB_EXTS, JAVA_EXTS, DANGEROUS_PATTERNS, ADVISORY_PATTERNS;
 var init_security_check = __esm(() => {
   init_session_state();
   CHECKABLE_EXTS2 = new Set([
@@ -3653,12 +7741,12 @@ var init_security_check = __esm(() => {
 });
 
 // src/hooks/detectors/semantic-check.ts
-import { existsSync as existsSync9, readFileSync as readFileSync8 } from "fs";
-import { extname as extname9 } from "path";
+import { existsSync as existsSync12, readFileSync as readFileSync10 } from "fs";
+import { extname as extname11 } from "path";
 function detectEmptyCatch(lines) {
   const errors = [];
-  for (let i = 0;i < lines.length; i++) {
-    const line = lines[i];
+  for (let i2 = 0;i2 < lines.length; i2++) {
+    const line = lines[i2];
     const trimmed = line.trimStart();
     if (trimmed.startsWith("//") || trimmed.startsWith("#") || trimmed.startsWith("*"))
       continue;
@@ -3668,19 +7756,19 @@ function detectEmptyCatch(lines) {
       continue;
     if (INTENTIONAL_RE.test(line))
       continue;
-    if (i > 0 && INTENTIONAL_RE.test(lines[i - 1]))
+    if (i2 > 0 && INTENTIONAL_RE.test(lines[i2 - 1]))
       continue;
     const afterBrace = trimmed.slice(trimmed.indexOf("{") + 1);
     if (/^\s*\}/.test(afterBrace)) {
-      errors.push(`L${i + 1}: Empty catch block \u2014 errors silently swallowed`);
+      errors.push(`L${i2 + 1}: Empty catch block \u2014 errors silently swallowed`);
       continue;
     }
     if (afterBrace.trim() === "") {
-      const next = lines[i + 1]?.trimStart() ?? "";
-      if (INTENTIONAL_RE.test(lines[i + 1] ?? ""))
+      const next = lines[i2 + 1]?.trimStart() ?? "";
+      if (INTENTIONAL_RE.test(lines[i2 + 1] ?? ""))
         continue;
       if (/^\}/.test(next)) {
-        errors.push(`L${i + 1}: Empty catch block \u2014 errors silently swallowed`);
+        errors.push(`L${i2 + 1}: Empty catch block \u2014 errors silently swallowed`);
       }
     }
   }
@@ -3688,8 +7776,8 @@ function detectEmptyCatch(lines) {
 }
 function detectIgnoredReturn(lines) {
   const errors = [];
-  for (let i = 0;i < lines.length; i++) {
-    const line = lines[i];
+  for (let i2 = 0;i2 < lines.length; i2++) {
+    const line = lines[i2];
     const trimmed = line.trimStart();
     if (trimmed.startsWith("//") || trimmed.startsWith("#") || trimmed.startsWith("*"))
       continue;
@@ -3701,19 +7789,19 @@ function detectIgnoredReturn(lines) {
       continue;
     if (CHAIN_CONTINUATION_RE.test(line))
       continue;
-    const nextLine = lines[i + 1]?.trimStart() ?? "";
+    const nextLine = lines[i2 + 1]?.trimStart() ?? "";
     if (nextLine.startsWith("."))
       continue;
     if (INTENTIONAL_RE.test(line))
       continue;
-    errors.push(`L${i + 1}: Return value of pure method discarded \u2014 probable no-op (assign or remove)`);
+    errors.push(`L${i2 + 1}: Return value of pure method discarded \u2014 probable no-op (assign or remove)`);
   }
   return errors;
 }
 function detectConditionAssignment(lines) {
   const errors = [];
-  for (let i = 0;i < lines.length; i++) {
-    const line = lines[i];
+  for (let i2 = 0;i2 < lines.length; i2++) {
+    const line = lines[i2];
     const trimmed = line.trimStart();
     if (trimmed.startsWith("//") || trimmed.startsWith("*"))
       continue;
@@ -3723,7 +7811,7 @@ function detectConditionAssignment(lines) {
       continue;
     if (INTENTIONAL_RE.test(line))
       continue;
-    if (i > 0 && INTENTIONAL_RE.test(lines[i - 1]))
+    if (i2 > 0 && INTENTIONAL_RE.test(lines[i2 - 1]))
       continue;
     const condMatch = trimmed.match(/\b(?:if|while)\s*\((.+)\)/);
     if (!condMatch)
@@ -3732,14 +7820,14 @@ function detectConditionAssignment(lines) {
     const stripped = cond.replace(/(?:[!=<>]=|=>|===|!==)/g, "");
     if (!stripped.includes("="))
       continue;
-    errors.push(`L${i + 1}: Assignment (=) inside condition \u2014 use === for comparison`);
+    errors.push(`L${i2 + 1}: Assignment (=) inside condition \u2014 use === for comparison`);
   }
   return errors;
 }
 function detectUnreachableCode(lines) {
   const errors = [];
-  for (let i = 0;i < lines.length; i++) {
-    const line = lines[i];
+  for (let i2 = 0;i2 < lines.length; i2++) {
+    const line = lines[i2];
     const trimmed = line.trimStart();
     if (trimmed.startsWith("//") || trimmed.startsWith("*"))
       continue;
@@ -3749,7 +7837,7 @@ function detectUnreachableCode(lines) {
     const closeBraces = (trimmed.match(/\}/g) ?? []).length;
     if (openBraces > closeBraces)
       continue;
-    for (let j = i + 1;j < lines.length; j++) {
+    for (let j = i2 + 1;j < lines.length; j++) {
       const nextTrimmed = lines[j].trimStart();
       if (nextTrimmed === "")
         continue;
@@ -3761,7 +7849,7 @@ function detectUnreachableCode(lines) {
         break;
       if (INTENTIONAL_RE.test(line))
         break;
-      errors.push(`L${j + 1}: Unreachable code after return/throw at L${i + 1}`);
+      errors.push(`L${j + 1}: Unreachable code after return/throw at L${i2 + 1}`);
       break;
     }
   }
@@ -3769,8 +7857,8 @@ function detectUnreachableCode(lines) {
 }
 function detectLooseEquality(lines) {
   const errors = [];
-  for (let i = 0;i < lines.length; i++) {
-    const line = lines[i];
+  for (let i2 = 0;i2 < lines.length; i2++) {
+    const line = lines[i2];
     const trimmed = line.trimStart();
     if (trimmed.startsWith("//") || trimmed.startsWith("*"))
       continue;
@@ -3781,7 +7869,7 @@ function detectLooseEquality(lines) {
       continue;
     if (INTENTIONAL_RE.test(line))
       continue;
-    errors.push(`L${i + 1}: Loose equality (== or !=) \u2014 use === or !== for strict comparison`);
+    errors.push(`L${i2 + 1}: Loose equality (== or !=) \u2014 use === or !== for strict comparison`);
   }
   return errors;
 }
@@ -3794,15 +7882,15 @@ function detectSwitchFallthrough(lines) {
   let hasIntentional = false;
   let hasCode = false;
   let braceDepth = 0;
-  for (let i = 0;i < lines.length; i++) {
-    const line = lines[i];
+  for (let i2 = 0;i2 < lines.length; i2++) {
+    const line = lines[i2];
     const trimmed = line.trimStart();
     if (CASE_OR_DEFAULT_RE.test(trimmed)) {
       if (inCase && hasCode && !hasBreak && !hasFallthroughComment && !hasIntentional) {
-        errors.push(`L${i + 1}: Switch case fallthrough from case at L${caseStartLine} \u2014 add break, return, or // fallthrough comment`);
+        errors.push(`L${i2 + 1}: Switch case fallthrough from case at L${caseStartLine} \u2014 add break, return, or // fallthrough comment`);
       }
       inCase = true;
-      caseStartLine = i + 1;
+      caseStartLine = i2 + 1;
       hasBreak = false;
       hasFallthroughComment = false;
       hasIntentional = false;
@@ -3852,18 +7940,18 @@ function emitPbtAdvisory(file, content) {
 function detectSemanticPatterns(file) {
   if (isGateDisabled("semantic-check"))
     return [];
-  const ext = extname9(file).toLowerCase();
+  const ext = extname11(file).toLowerCase();
   if (!CHECKABLE_EXTS3.has(ext))
     return [];
-  if (!existsSync9(file))
+  if (!existsSync12(file))
     return [];
   let content;
   try {
-    content = readFileSync8(file, "utf-8");
+    content = readFileSync10(file, "utf-8");
   } catch {
     return [];
   }
-  if (content.length > MAX_CHECK_SIZE4)
+  if (content.length > MAX_CHECK_SIZE6)
     return [];
   const lines = content.split(`
 `);
@@ -3890,7 +7978,7 @@ function detectSemanticPatterns(file) {
     }
   ];
 }
-var JS_TS_EXTS2, PY_EXTS4, CHECKABLE_EXTS3, MAX_CHECK_SIZE4 = 500000, INTENTIONAL_RE, PURE_METHODS_RE, CHAIN_CONTINUATION_RE, CONDITION_ASSIGNMENT_RE, DESTRUCTURE_RE, LOOSE_EQ_RE, NULL_COALESCE_RE, STRING_LITERAL_RE, CASE_OR_DEFAULT_RE, BREAK_RE, FALLTHROUGH_COMMENT_RE, TEST_CASE_RE, PBT_IMPORT_RE;
+var JS_TS_EXTS2, PY_EXTS4, CHECKABLE_EXTS3, MAX_CHECK_SIZE6 = 500000, INTENTIONAL_RE, PURE_METHODS_RE, CHAIN_CONTINUATION_RE, CONDITION_ASSIGNMENT_RE, DESTRUCTURE_RE, LOOSE_EQ_RE, NULL_COALESCE_RE, STRING_LITERAL_RE, CASE_OR_DEFAULT_RE, BREAK_RE, FALLTHROUGH_COMMENT_RE, TEST_CASE_RE, PBT_IMPORT_RE;
 var init_semantic_check = __esm(() => {
   init_session_state();
   JS_TS_EXTS2 = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
@@ -3912,8 +8000,8 @@ var init_semantic_check = __esm(() => {
 });
 
 // src/hooks/detectors/spec-trace-check.ts
-import { existsSync as existsSync10, readFileSync as readFileSync9 } from "fs";
-import { basename as basename6, dirname as dirname6, relative } from "path";
+import { existsSync as existsSync13, readFileSync as readFileSync11 } from "fs";
+import { basename as basename6, dirname as dirname7, relative } from "path";
 function parseVerifyField2(verify) {
   if (!verify?.includes(":"))
     return null;
@@ -3925,15 +8013,15 @@ function parseVerifyField2(verify) {
   return { testFile, testFunction };
 }
 function validateTestFileExists(testFilePath) {
-  return existsSync10(testFilePath);
+  return existsSync13(testFilePath);
 }
 function validateTestCoversImpl(testFile, _testFunction, implFile, _projectRoot) {
-  if (!existsSync10(testFile))
+  if (!existsSync13(testFile))
     return false;
   try {
-    const content = readFileSync9(testFile, "utf-8");
+    const content = readFileSync11(testFile, "utf-8");
     const implBasename = basename6(implFile).replace(/\.[^.]+$/, "");
-    const implRelative = relative(dirname6(testFile), implFile).replace(/\\/g, "/").replace(/\.[^.]+$/, "");
+    const implRelative = relative(dirname7(testFile), implFile).replace(/\\/g, "/").replace(/\.[^.]+$/, "");
     const importPatterns = [
       new RegExp(`(?:import|require).*['"].*${escapeRegex2(implRelative)}(?:\\.[^'"]*)?['"]`, "m"),
       new RegExp(`(?:import|require).*['"].*/${escapeRegex2(implBasename)}(?:\\.[^'"]*)?['"]`, "m")
@@ -3944,10 +8032,10 @@ function validateTestCoversImpl(testFile, _testFunction, implFile, _projectRoot)
   }
 }
 function validateTestFunctionExists(testFile, functionName) {
-  if (!existsSync10(testFile))
+  if (!existsSync13(testFile))
     return false;
   try {
-    const content = readFileSync9(testFile, "utf-8");
+    const content = readFileSync11(testFile, "utf-8");
     const ext = testFile.split(".").pop()?.toLowerCase() ?? "";
     if (ext === "py") {
       const pyRe = /\bdef\s+(\w+)\s*\(/g;
@@ -3973,8 +8061,8 @@ function escapeRegex2(s) {
 var init_spec_trace_check = () => {};
 
 // src/hooks/detectors/test-quality-check.ts
-import { existsSync as existsSync11, readFileSync as readFileSync10 } from "fs";
-import { basename as basename7, dirname as dirname7, extname as extname10, resolve as resolve4 } from "path";
+import { existsSync as existsSync14, readFileSync as readFileSync12 } from "fs";
+import { basename as basename7, dirname as dirname8, extname as extname12, resolve as resolve4 } from "path";
 function countAssertionsOutsideSetup(code) {
   const lines = code.split(`
 `);
@@ -4010,15 +8098,15 @@ function analyzeTestQuality(file) {
   const absPath = resolve4(cwd, file);
   if (!absPath.startsWith(cwd))
     return null;
-  if (!existsSync11(absPath))
+  if (!existsSync14(absPath))
     return null;
   let content;
   try {
-    content = readFileSync10(absPath, "utf-8");
+    content = readFileSync12(absPath, "utf-8");
   } catch {
     return null;
   }
-  if (content.length > MAX_CHECK_SIZE5)
+  if (content.length > MAX_CHECK_SIZE7)
     return null;
   const codeOnly = content.split(`
 `).filter((line) => !line.trimStart().startsWith("//")).join(`
@@ -4033,36 +8121,36 @@ function analyzeTestQuality(file) {
   const isPbt = PBT_RE.test(content);
   const smells = [];
   if (isPbt) {
-    for (let i = 0;i < lines.length; i++) {
-      const line = lines[i];
+    for (let i2 = 0;i2 < lines.length; i2++) {
+      const line = lines[i2];
       if (PBT_DEGENERATE_RUNS_RE.test(line)) {
         smells.push({
           type: "pbt-degenerate-runs",
-          line: i + 1,
+          line: i2 + 1,
           message: "numRuns: 1 defeats the purpose of property-based testing \u2014 increase run count"
         });
       }
       if (PBT_CONSTRAINED_GEN_RE.test(line)) {
         smells.push({
           type: "pbt-constrained-generator",
-          line: i + 1,
+          line: i2 + 1,
           message: "Generator min equals max \u2014 produces a single constant value, not random input"
         });
       }
     }
   }
-  for (let i = 0;i < lines.length; i++) {
-    const line = lines[i];
+  for (let i2 = 0;i2 < lines.length; i2++) {
+    const line = lines[i2];
     const trimmed = line.trimStart();
     if (trimmed.startsWith("//"))
       continue;
     if (!isPbt) {
-      for (const { re, name } of WEAK_MATCHERS) {
+      for (const { re, name: name2 } of WEAK_MATCHERS) {
         if (re.test(line)) {
           smells.push({
             type: "weak-matcher",
-            line: i + 1,
-            message: `Weak matcher ${name} \u2014 consider asserting a specific value`
+            line: i2 + 1,
+            message: `Weak matcher ${name2} \u2014 consider asserting a specific value`
           });
           break;
         }
@@ -4071,35 +8159,35 @@ function analyzeTestQuality(file) {
     if (TRIVIAL_ASSERTION_RE.test(line)) {
       smells.push({
         type: "trivial-assertion",
-        line: i + 1,
+        line: i2 + 1,
         message: "Trivial assertion: comparing variable to itself"
       });
     }
     if (EMPTY_TEST_RE.test(line)) {
       smells.push({
         type: "empty-test",
-        line: i + 1,
+        line: i2 + 1,
         message: "Empty test body \u2014 no assertions"
       });
     }
     if (ALWAYS_TRUE_RE.test(line)) {
       smells.push({
         type: "always-true",
-        line: i + 1,
+        line: i2 + 1,
         message: "Always-true assertion \u2014 tests a literal, not computed behavior"
       });
     }
     if (CONSTANT_SELF_RE.test(line)) {
       smells.push({
         type: "constant-self",
-        line: i + 1,
+        line: i2 + 1,
         message: "Constant-to-constant assertion: literal compared to itself"
       });
     }
     if (IMPL_COUPLED_RE.test(line)) {
       smells.push({
         type: "impl-coupled",
-        line: i + 1,
+        line: i2 + 1,
         message: "Tests mock calls instead of behavior \u2014 consider asserting outputs"
       });
     }
@@ -4125,11 +8213,11 @@ function analyzeTestQuality(file) {
   let asyncTestLine = 0;
   let asyncTestHasAwait = false;
   let asyncBraceDepth = 0;
-  for (let i = 0;i < lines.length; i++) {
-    const line = lines[i];
+  for (let i2 = 0;i2 < lines.length; i2++) {
+    const line = lines[i2];
     if (!inAsyncTest && ASYNC_TEST_RE.test(line)) {
       inAsyncTest = true;
-      asyncTestLine = i + 1;
+      asyncTestLine = i2 + 1;
       asyncTestHasAwait = false;
       asyncBraceDepth = 0;
     }
@@ -4175,14 +8263,14 @@ function analyzeTestQuality(file) {
     }
   }
   let moduleLetCount = 0;
-  for (let i = 0;i < lines.length; i++) {
-    const line = lines[i];
+  for (let i2 = 0;i2 < lines.length; i2++) {
+    const line = lines[i2];
     if (MODULE_LET_RE.test(line)) {
       moduleLetCount++;
       if (moduleLetCount === 1) {
         smells.push({
           type: "shared-mutable-state",
-          line: i + 1,
+          line: i2 + 1,
           message: "Module-level `let` in test file \u2014 shared mutable state may cause test isolation issues"
         });
       }
@@ -4196,10 +8284,10 @@ function analyzeTestQuality(file) {
     });
   }
   try {
-    const snapDir = `${dirname7(absPath)}/__snapshots__/`;
+    const snapDir = `${dirname8(absPath)}/__snapshots__/`;
     const snapFile = `${snapDir}${basename7(absPath)}.snap`;
-    if (existsSync11(snapFile)) {
-      const snapContent = readFileSync10(snapFile, "utf-8");
+    if (existsSync14(snapFile)) {
+      const snapContent = readFileSync12(snapFile, "utf-8");
       if (snapContent.length > LARGE_SNAPSHOT_CHARS) {
         smells.push({
           type: "snapshot-bloat",
@@ -4215,7 +8303,7 @@ function analyzeTestQuality(file) {
       try {
         const implFile = findImplFile(absPath);
         if (implFile) {
-          const implContent = readFileSync10(implFile, "utf-8");
+          const implContent = readFileSync12(implFile, "utf-8");
           if (/\bthrow\b|\breject\b|Promise\.reject/m.test(implContent)) {
             smells.push({
               type: "no-error-path",
@@ -4265,15 +8353,15 @@ function analyzeTestQuality(file) {
     for (const match of codeOnly.matchAll(testBodyRe)) {
       if (testBodies.length > 0) {
         const prev = testBodies[testBodies.length - 1];
-        const body = codeOnly.slice(prev.start, match.index);
-        prev.assertions = (body.match(assertRe) ?? []).length;
+        const body2 = codeOnly.slice(prev.start, match.index);
+        prev.assertions = (body2.match(assertRe) ?? []).length;
       }
       testBodies.push({ name: match[1], start: match.index, assertions: 0 });
     }
     if (testBodies.length > 0) {
       const last = testBodies[testBodies.length - 1];
-      const body = codeOnly.slice(last.start);
-      last.assertions = (body.match(assertRe) ?? []).length;
+      const body2 = codeOnly.slice(last.start);
+      last.assertions = (body2.match(assertRe) ?? []).length;
     }
     for (const tb of testBodies) {
       if (tb.assertions === 0) {
@@ -4327,18 +8415,18 @@ function getBlockingTestSmells(file, result) {
 }
 function findImplFile(testPath) {
   try {
-    const dir = dirname7(testPath);
+    const dir = dirname8(testPath);
     const base = basename7(testPath);
     const implName = base.replace(/\.(?:test|spec)(\.[^.]+)$/, "$1");
     const sameDirPath = resolve4(dir, implName);
-    if (existsSync11(sameDirPath))
+    if (existsSync14(sameDirPath))
       return sameDirPath;
-    const parentDir = dirname7(dir);
+    const parentDir = dirname8(dir);
     const parentPath = resolve4(parentDir, implName);
-    if (existsSync11(parentPath))
+    if (existsSync14(parentPath))
       return parentPath;
     const srcPath = resolve4(parentDir, "src", implName);
-    if (existsSync11(srcPath))
+    if (existsSync14(srcPath))
       return srcPath;
     return null;
   } catch {
@@ -4369,7 +8457,7 @@ function formatTestQualityWarnings(file, result, taskKey) {
   if (!result.isPbt) {
     const hasPbtSmell = result.smells.some((s) => s.type === "happy-path-only" || s.type === "missing-boundary");
     if (hasPbtSmell) {
-      const ext = extname10(file).toLowerCase();
+      const ext = extname12(file).toLowerCase();
       const JS_TS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
       const PY = new Set([".py", ".pyi"]);
       if (JS_TS.has(ext)) {
@@ -4384,17 +8472,17 @@ function formatTestQualityWarnings(file, result, taskKey) {
   return warnings;
 }
 function suggestPbt(implFile) {
-  const name = basename7(implFile);
-  if (!PBT_CANDIDATE_RE.test(name))
+  const name2 = basename7(implFile);
+  if (!PBT_CANDIDATE_RE.test(name2))
     return null;
   const testFile = resolveTestFile(implFile);
-  if (!testFile || !existsSync11(testFile))
+  if (!testFile || !existsSync14(testFile))
     return null;
   try {
     const stats = __require("fs").statSync(testFile);
-    if (stats.size > MAX_CHECK_SIZE5)
+    if (stats.size > MAX_CHECK_SIZE7)
       return null;
-    const content = readFileSync10(testFile, "utf-8");
+    const content = readFileSync12(testFile, "utf-8");
     if (PBT_RE.test(content))
       return null;
   } catch {
@@ -4403,7 +8491,7 @@ function suggestPbt(implFile) {
   const relative2 = implFile.split("/").slice(-3).join("/");
   return `${relative2}: Consider property-based testing (fast-check/hypothesis) for validation/serialization logic`;
 }
-var MAX_CHECK_SIZE5 = 500000, BLOCKING_SMELL_TYPES, ASSERTION_RE, TEST_CASE_RE2, WEAK_MATCHERS, TRIVIAL_ASSERTION_RE, EMPTY_TEST_RE, MOCK_RE, ALWAYS_TRUE_RE, CONSTANT_SELF_RE, SNAPSHOT_RE, IMPL_COUPLED_RE, ASYNC_TEST_RE, AWAIT_RE, MODULE_LET_RE, LARGE_TEST_FILE_LINES = 500, LARGE_SNAPSHOT_CHARS = 5000, PBT_RE, PBT_DEGENERATE_RUNS_RE, PBT_CONSTRAINED_GEN_RE, SETUP_BLOCK_RE, PBT_CANDIDATE_RE;
+var MAX_CHECK_SIZE7 = 500000, BLOCKING_SMELL_TYPES, ASSERTION_RE, TEST_CASE_RE2, WEAK_MATCHERS, TRIVIAL_ASSERTION_RE, EMPTY_TEST_RE, MOCK_RE, ALWAYS_TRUE_RE, CONSTANT_SELF_RE, SNAPSHOT_RE, IMPL_COUPLED_RE, ASYNC_TEST_RE, AWAIT_RE, MODULE_LET_RE, LARGE_TEST_FILE_LINES = 500, LARGE_SNAPSHOT_CHARS = 5000, PBT_RE, PBT_DEGENERATE_RUNS_RE, PBT_CONSTRAINED_GEN_RE, SETUP_BLOCK_RE, PBT_CANDIDATE_RE;
 var init_test_quality_check = __esm(() => {
   init_test_file_resolver();
   BLOCKING_SMELL_TYPES = new Set([
@@ -4444,19 +8532,19 @@ function compactStateSummary() {
   try {
     const state = readSessionState();
     const fixes = readPendingFixes();
-    const parts = [];
+    const parts2 = [];
     if (fixes.length > 0)
-      parts.push(`${fixes.length} pending fix(es)`);
-    parts.push(state.test_passed_at ? "tests: PASS" : "tests: NOT PASSED");
-    parts.push(state.review_completed_at ? "review: DONE" : "review: NOT DONE");
+      parts2.push(`${fixes.length} pending fix(es)`);
+    parts2.push(state.test_passed_at ? "tests: PASS" : "tests: NOT PASSED");
+    parts2.push(state.review_completed_at ? "review: DONE" : "review: NOT DONE");
     const changed = state.changed_file_paths?.length ?? 0;
     if (changed > 0)
-      parts.push(`${changed} file(s) changed`);
+      parts2.push(`${changed} file(s) changed`);
     const disabled = state.disabled_gates ?? [];
     if (disabled.length > 0)
-      parts.push(`disabled: ${disabled.map((g) => sanitizeForStderr(g)).join(",")}`);
+      parts2.push(`disabled: ${disabled.map((g) => sanitizeForStderr(g)).join(",")}`);
     return `
-[qult state] ${parts.join(" | ")}`;
+[qult state] ${parts2.join(" | ")}`;
   } catch {
     return "";
   }
@@ -4486,8 +8574,8 @@ var exports_post_tool = {};
 __export(exports_post_tool, {
   default: () => postTool
 });
-import { readFileSync as readFileSync11 } from "fs";
-import { dirname as dirname8, extname as extname11, resolve as resolve5 } from "path";
+import { readFileSync as readFileSync13 } from "fs";
+import { dirname as dirname9, extname as extname13, resolve as resolve5 } from "path";
 async function postTool(ev) {
   const tool = ev.tool_name;
   if (!tool)
@@ -4510,33 +8598,33 @@ async function handleEditWrite(ev) {
 ${existingFixes.map((f) => `  ${f.file}`).join(`
 `)}`);
     }
-  } catch (err) {
-    if (err instanceof Error && err.message.startsWith("process.exit"))
-      throw err;
+  } catch (err2) {
+    if (err2 instanceof Error && err2.message.startsWith("process.exit"))
+      throw err2;
   }
   const config = loadConfig();
   const gates = loadGates();
   const hasWriteGates = !!gates?.on_write;
-  const fileExt = extname11(file).toLowerCase();
+  const fileExt = extname13(file).toLowerCase();
   const gatedExts = getGatedExtensions();
   const gateEntries = [];
   if (hasWriteGates && gates?.on_write) {
-    for (const [name, gate] of Object.entries(gates.on_write)) {
-      if (isGateDisabled(name))
+    for (const [name2, gate] of Object.entries(gates.on_write)) {
+      if (isGateDisabled(name2))
         continue;
-      if (gate.run_once_per_batch && shouldSkipGate(name, file))
+      if (gate.run_once_per_batch && shouldSkipGate(name2, file))
         continue;
       const hasPlaceholder = gate.command.includes("{file}");
       if (hasPlaceholder && gatedExts.size > 0 && !gatedExts.has(fileExt))
         continue;
-      gateEntries.push({ name, gate, fileArg: hasPlaceholder ? file : undefined });
+      gateEntries.push({ name: name2, gate, fileArg: hasPlaceholder ? file : undefined });
     }
   }
   const results = await Promise.allSettled(gateEntries.map((entry) => runGateAsync(entry.name, entry.gate, entry.fileArg)));
   const newFixes = [];
-  for (let i = 0;i < results.length; i++) {
-    const settled = results[i];
-    const entry = gateEntries[i];
+  for (let i2 = 0;i2 < results.length; i2++) {
+    const settled = results[i2];
+    const entry = gateEntries[i2];
     try {
       if (settled.status === "fulfilled") {
         if (entry.gate.run_once_per_batch) {
@@ -4639,6 +8727,28 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
         const count = incrementEscalation("security_warning_count");
         if (count >= 10) {
           process.stderr.write(`[qult] Security escalation: ${count} security warnings this session. Review security posture.
+`);
+        }
+      }
+    }
+  } catch {}
+  try {
+    const dataflowFixes = await detectDataflowIssues(file);
+    if (dataflowFixes.length > 0) {
+      newFixes.push(...dataflowFixes);
+      if (!isTestFile3 && !existingFixKeys.has(`${resolve5(file)}:dataflow-check`)) {
+        incrementEscalation("security_warning_count");
+      }
+    }
+  } catch {}
+  try {
+    if (!isGateDisabled("complexity-check")) {
+      const complexityResult = await computeComplexity(file);
+      if (complexityResult) {
+        cacheComplexityResult(file, complexityResult);
+        const relPath = file.split("/").slice(-3).join("/");
+        for (const w of complexityResult.warnings) {
+          process.stderr.write(`[qult] Complexity advisory: ${relPath}:${w}
 `);
         }
       }
@@ -4768,7 +8878,7 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
       const editCount = incrementFileEditCount(file);
       const projectRoot = resolve5(process.cwd());
       if (editCount >= config.escalation.security_iterative_threshold && file.startsWith(`${projectRoot}/`)) {
-        const fileContent = readFileSync11(file, "utf-8");
+        const fileContent = readFileSync13(file, "utf-8");
         const advisoryFixes = getAdvisoryAsPendingFixes(file, fileContent);
         if (advisoryFixes.length > 0) {
           newFixes.push(...advisoryFixes);
@@ -4808,8 +8918,8 @@ ${existingFixes.map((f) => `  ${f.file}`).join(`
   }
   try {
     if (gateEntries.length > 0 || newFixes.some((f) => f.gate === "import-check")) {
-      const gateParts = gateEntries.map((entry, i) => {
-        const settled = results[i];
+      const gateParts = gateEntries.map((entry, i2) => {
+        const settled = results[i2];
         if (settled.status === "fulfilled") {
           return `${entry.name} ${settled.value.passed ? "PASS" : "FAIL"}`;
         }
@@ -4885,7 +8995,7 @@ function buildTestFileCommand(testCommand, testFile) {
     return `${testCommand} ${escaped}`;
   }
   if (/\bgo\s+test\b/.test(testCommand)) {
-    return `go test -v -run . ${shellEscape(dirname8(testFile))}`;
+    return `go test -v -run . ${shellEscape(dirname9(testFile))}`;
   }
   if (/\bmocha\b/.test(testCommand)) {
     return `${testCommand} ${escaped}`;
@@ -4941,20 +9051,20 @@ function onGitCommit() {
     return;
   const config = loadConfig();
   const coverageThreshold = config.gates.coverage_threshold;
-  for (const [name, gate] of Object.entries(gates.on_commit)) {
+  for (const [name2, gate] of Object.entries(gates.on_commit)) {
     try {
-      if (isGateDisabled(name))
+      if (isGateDisabled(name2))
         continue;
-      if (name === "coverage" && coverageThreshold > 0) {
-        const result = runCoverageGate(name, gate, coverageThreshold);
+      if (name2 === "coverage" && coverageThreshold > 0) {
+        const result = runCoverageGate(name2, gate, coverageThreshold);
         if (!result.passed) {
           addPendingFixes("__commit__", [
-            { file: "__commit__", errors: [result.output], gate: name }
+            { file: "__commit__", errors: [result.output], gate: name2 }
           ]);
         }
         continue;
       }
-      runGate(name, gate);
+      runGate(name2, gate);
     } catch {}
   }
 }
@@ -4967,14 +9077,14 @@ function onLintFix() {
     if (!gates?.on_write)
       return;
     const remaining = fixes.filter((fix) => {
-      for (const [name, gate] of Object.entries(gates.on_write)) {
-        if (isGateDisabled(name))
+      for (const [name2, gate] of Object.entries(gates.on_write)) {
+        if (isGateDisabled(name2))
           continue;
         const hasPlaceholder = gate.command.includes("{file}");
         if (!hasPlaceholder)
           continue;
         try {
-          const result = runGate(name, gate, fix.file);
+          const result = runGate(name2, gate, fix.file);
           if (!result.passed)
             return true;
         } catch {
@@ -5049,6 +9159,8 @@ var init_post_tool = __esm(() => {
   init_hallucinated_package_check();
   init_import_check();
   init_import_graph();
+  init_complexity_check();
+  init_dataflow_check();
   init_security_check();
   init_semantic_check();
   init_spec_trace_check();
@@ -5275,9 +9387,9 @@ var init_pre_tool = __esm(() => {
 // src/hooks/stop.ts
 var exports_stop = {};
 __export(exports_stop, {
-  default: () => stop
+  default: () => stop2
 });
-async function stop(ev) {
+async function stop2(ev) {
   if (ev.stop_hook_active)
     return;
   const fixes = readPendingFixes();
@@ -5423,8 +9535,8 @@ var init_stop = __esm(() => {
 });
 
 // src/hooks/subagent-stop/claim-grounding.ts
-import { existsSync as existsSync12, readFileSync as readFileSync12, statSync as statSync4 } from "fs";
-import { join as join7 } from "path";
+import { existsSync as existsSync15, readFileSync as readFileSync14, statSync as statSync4 } from "fs";
+import { join as join8 } from "path";
 function groundClaims(output, cwd) {
   try {
     const ungrounded = [];
@@ -5433,13 +9545,13 @@ function groundClaims(output, cwd) {
       total++;
       const filePath = match[2];
       const description = match[4] ?? "";
-      const absPath = join7(cwd, filePath);
+      const absPath = join8(cwd, filePath);
       const normalizedCwd = cwd.replace(/\/+$/, "");
       if (!absPath.startsWith(`${normalizedCwd}/`)) {
         ungrounded.push(`Path traversal rejected: ${filePath}`);
         continue;
       }
-      if (!existsSync12(absPath)) {
+      if (!existsSync15(absPath)) {
         ungrounded.push(`File not found: ${filePath}`);
         continue;
       }
@@ -5451,7 +9563,7 @@ function groundClaims(output, cwd) {
             const size = statSync4(absPath).size;
             if (size > MAX_FILE_SIZE2)
               break;
-            fileContent = readFileSync12(absPath, "utf-8");
+            fileContent = readFileSync14(absPath, "utf-8");
           } catch {
             break;
           }
@@ -5602,9 +9714,9 @@ function detectTrend(history) {
 }
 function findWeakestDimension(dimensions) {
   let weakest = null;
-  for (const [name, score] of Object.entries(dimensions)) {
+  for (const [name2, score] of Object.entries(dimensions)) {
     if (!weakest || score < weakest.score) {
-      weakest = { name, score };
+      weakest = { name: name2, score };
     }
   }
   return weakest;
@@ -5692,11 +9804,11 @@ function validatePlanStructure(content) {
   if (!tasksContent)
     return errors;
   const taskHeaders = [...tasksContent.matchAll(TASK_BLOCK_RE)];
-  for (let i = 0;i < taskHeaders.length; i++) {
-    const start = taskHeaders[i].index;
-    const end = i + 1 < taskHeaders.length ? taskHeaders[i + 1].index : tasksContent.length;
-    const block2 = tasksContent.slice(start, end);
-    const taskNum = taskHeaders[i][1];
+  for (let i2 = 0;i2 < taskHeaders.length; i2++) {
+    const start2 = taskHeaders[i2].index;
+    const end = i2 + 1 < taskHeaders.length ? taskHeaders[i2 + 1].index : tasksContent.length;
+    const block2 = tasksContent.slice(start2, end);
+    const taskNum = taskHeaders[i2][1];
     for (const [field, re] of Object.entries(FIELD_RES)) {
       if (!re.test(block2)) {
         errors.push(`Task ${taskNum}: missing required field **${field}**`);
@@ -5721,10 +9833,10 @@ function validatePlanHeuristics(content) {
     return warnings;
   const taskHeaders = [...tasksContent.matchAll(TASK_BLOCK_RE)];
   const taskBlocks = [];
-  for (let i = 0;i < taskHeaders.length; i++) {
-    const start = taskHeaders[i].index;
-    const end = i + 1 < taskHeaders.length ? taskHeaders[i + 1].index : tasksContent.length;
-    taskBlocks.push({ num: taskHeaders[i][1], block: tasksContent.slice(start, end) });
+  for (let i2 = 0;i2 < taskHeaders.length; i2++) {
+    const start2 = taskHeaders[i2].index;
+    const end = i2 + 1 < taskHeaders.length ? taskHeaders[i2 + 1].index : tasksContent.length;
+    taskBlocks.push({ num: taskHeaders[i2][1], block: tasksContent.slice(start2, end) });
   }
   const registryFiles = loadConfig().plan_eval.registry_files;
   const allFiles = [];
@@ -5787,8 +9899,8 @@ var init_plan_validators = __esm(() => {
 function escapeRegex3(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
-function parseDimensionScore(output, name) {
-  const re = new RegExp(`${escapeRegex3(name)}[=:]\\s*(\\d+)`, "i");
+function parseDimensionScore(output, name2) {
+  const re = new RegExp(`${escapeRegex3(name2)}[=:]\\s*(\\d+)`, "i");
   const m = re.exec(output);
   if (!m)
     return null;
@@ -5848,8 +9960,8 @@ var init_score_parsers = __esm(() => {
 
 // src/hooks/subagent-stop/agent-validators.ts
 import { execSync as execSync3 } from "child_process";
-import { existsSync as existsSync13, readdirSync as readdirSync5, readFileSync as readFileSync13, statSync as statSync5 } from "fs";
-import { join as join8, normalize } from "path";
+import { existsSync as existsSync16, readdirSync as readdirSync5, readFileSync as readFileSync15, statSync as statSync5 } from "fs";
+import { join as join9, normalize } from "path";
 function checkReadOnlyViolation(normalized) {
   if (!READ_ONLY_REVIEWERS.has(normalized))
     return;
@@ -5896,9 +10008,9 @@ function checkReadOnlyViolation(normalized) {
         }
       }
     }
-  } catch (err) {
-    if (err instanceof Error && err.message.startsWith("process.exit"))
-      throw err;
+  } catch (err2) {
+    if (err2 instanceof Error && err2.message.startsWith("process.exit"))
+      throw err2;
   }
 }
 async function subagentStop(ev) {
@@ -5911,9 +10023,9 @@ async function subagentStop(ev) {
   const normalized = agentType.replace(/:/g, "-");
   try {
     checkReadOnlyViolation(normalized);
-  } catch (err) {
-    if (err instanceof Error && err.message.startsWith("process.exit"))
-      throw err;
+  } catch (err2) {
+    if (err2 instanceof Error && err2.message.startsWith("process.exit"))
+      throw err2;
   }
   const KNOWN_REVIEWERS = new Set([
     "qult-spec-reviewer",
@@ -5943,16 +10055,16 @@ async function subagentStop(ev) {
 }
 function validatePlan() {
   try {
-    const planDir = join8(process.cwd(), ".claude", "plans");
-    if (!existsSync13(planDir))
+    const planDir = join9(process.cwd(), ".claude", "plans");
+    if (!existsSync16(planDir))
       return;
     const files = readdirSync5(planDir).filter((f) => f.endsWith(".md")).map((f) => ({
       name: f,
-      mtime: statSync5(join8(planDir, f)).mtimeMs
+      mtime: statSync5(join9(planDir, f)).mtimeMs
     })).sort((a, b) => b.mtime - a.mtime);
     if (files.length === 0)
       return;
-    const content = readFileSync13(join8(planDir, files[0].name), "utf-8");
+    const content = readFileSync15(join9(planDir, files[0].name), "utf-8");
     const structErrors = validatePlanStructure(content);
     if (structErrors.length > 0) {
       block(`Plan structural issues:
@@ -5968,9 +10080,9 @@ ${heuristicWarnings.map((w) => `  - ${w}`).join(`
     if (getPlanEvalIteration() === 0) {
       block("Plan has not been evaluated. Run /qult:plan-generator with plan-evaluator, or run the plan-evaluator manually before proceeding.");
     }
-  } catch (err) {
-    if (err instanceof Error && err.message.startsWith("process.exit"))
-      throw err;
+  } catch (err2) {
+    if (err2 instanceof Error && err2.message.startsWith("process.exit"))
+      throw err2;
   }
 }
 function validatePlanEvaluator(output) {
@@ -6017,7 +10129,7 @@ function validateStageReviewer(output, passRe, failRe, scoreParser, stageName) {
     const belowFloor = Object.entries(scoreEntries).filter(([, v]) => typeof v === "number" && v < floor);
     if (belowFloor.length > 0) {
       const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-      const dims = belowFloor.map(([name, score]) => `${capitalize(name)} (${score}/5)`).join(", ");
+      const dims = belowFloor.map(([name2, score]) => `${capitalize(name2)} (${score}/5)`).join(", ");
       block(`${stageName}: PASS but ${dims} below minimum ${floor}/5. Fix these dimensions and re-run /qult:review.`);
     }
     try {
@@ -6035,9 +10147,9 @@ ${grounding.ungrounded.map((c) => `  - ${c}`).join(`
 `)}
 Fix references and re-run /qult:review.`);
       }
-    } catch (err) {
-      if (err instanceof Error && err.message.startsWith("process.exit"))
-        throw err;
+    } catch (err2) {
+      if (err2 instanceof Error && err2.message.startsWith("process.exit"))
+        throw err2;
     }
     try {
       const cv = crossValidate(output, stageName);
@@ -6047,9 +10159,9 @@ ${cv.contradictions.map((c) => `  - ${c}`).join(`
 `)}
 Reconcile findings and re-run /qult:review.`);
       }
-    } catch (err) {
-      if (err instanceof Error && err.message.startsWith("process.exit"))
-        throw err;
+    } catch (err2) {
+      if (err2 instanceof Error && err2.message.startsWith("process.exit"))
+        throw err2;
     }
     tryAggregateCheck();
   }
@@ -6066,9 +10178,9 @@ function tryAggregateCheck() {
       process.stderr.write(`[qult] Review warning: only ${completedStages.length}/4 stages completed. Adversarial reviewer has not run yet. All 4 stages are required for a complete review. Waiting for Adversarial stage...
 `);
     }
-  } catch (err) {
-    if (err instanceof Error && err.message.startsWith("process.exit"))
-      throw err;
+  } catch (err2) {
+    if (err2 instanceof Error && err2.message.startsWith("process.exit"))
+      throw err2;
   }
 }
 function checkScoreFindingsConsistency(output, scores, stageName) {
@@ -6082,7 +10194,7 @@ function checkScoreFindingsConsistency(output, scores, stageName) {
   }
   const belowThreshold = Object.entries(scores).filter(([, v]) => v < 4);
   if (belowThreshold.length > 0 && !hasFindings) {
-    const dims = belowThreshold.map(([name, score]) => `${name} (${score}/5)`).join(", ");
+    const dims = belowThreshold.map(([name2, score]) => `${name2} (${score}/5)`).join(", ");
     block(`${stageName}: ${dims} scored below 4/5 but no findings cited. Low scores must include at least one [severity] file \u2014 description finding as evidence. Rerun the review with concrete findings.`);
   }
   if (allPerfect && !hasFindings && !hasNoIssuesDeclaration) {
@@ -6156,9 +10268,9 @@ function checkAggregateScore(stages) {
 `);
     resetReviewIteration();
     recordReview();
-  } catch (err) {
-    if (err instanceof Error && err.message.startsWith("process.exit"))
-      throw err;
+  } catch (err2) {
+    if (err2 instanceof Error && err2.message.startsWith("process.exit"))
+      throw err2;
   }
 }
 function extractFindings(output, stageName) {
@@ -6320,14 +10432,14 @@ async function taskCompleted(ev) {
   const argsBuilder = detectTestRunner();
   if (!argsBuilder)
     return;
-  const args = argsBuilder(parsed.file, parsed.testName);
+  const args2 = argsBuilder(parsed.file, parsed.testName);
   const taskKey = task.taskNumber != null ? `Task ${task.taskNumber}` : task.name;
   try {
     const config = loadConfig();
     const verifyTimeout = config.gates.test_on_edit_timeout ?? DEFAULT_VERIFY_TIMEOUT;
     const extraPath = config.gates.extra_path.filter((p) => !p.includes(":")).map((p) => p.startsWith("/") ? p : `${process.cwd()}/${p}`).join(":");
     const pathPrefix = extraPath ? `${extraPath}:` : "";
-    const result = spawnSync(args[0], args.slice(1), {
+    const result = spawnSync(args2[0], args2.slice(1), {
       cwd: process.cwd(),
       timeout: verifyTimeout,
       stdio: ["ignore", "pipe", "pipe"],
@@ -6392,13 +10504,13 @@ var init_task_completed = __esm(() => {
 });
 
 // src/gates/detect.ts
-import { existsSync as existsSync14, readFileSync as readFileSync14 } from "fs";
-import { join as join9 } from "path";
+import { existsSync as existsSync17, readFileSync as readFileSync16 } from "fs";
+import { join as join10 } from "path";
 function isReachable(exe, root) {
   if (!/^[a-zA-Z0-9_-]+$/.test(exe))
     return false;
-  const nodeModulesBin = join9(root, "node_modules", ".bin", exe);
-  if (existsSync14(nodeModulesBin))
+  const nodeModulesBin = join10(root, "node_modules", ".bin", exe);
+  if (existsSync17(nodeModulesBin))
     return true;
   try {
     const { execFileSync: execFileSync2 } = __require("child_process");
@@ -6526,6 +10638,37 @@ function getFlywheelRecommendations(history, config) {
   }
   return recs;
 }
+function applyFlywheelRecommendations(recs, config) {
+  const applied = [];
+  const deferred = [];
+  if (!config.flywheel.auto_apply) {
+    return { applied: [], deferred: recs };
+  }
+  try {
+    const db = getDb();
+    for (const rec of recs) {
+      if (rec.direction !== "raise") {
+        deferred.push(rec);
+        continue;
+      }
+      const configKey = METRIC_NAME_TO_CONFIG_KEY[rec.metric];
+      if (!configKey) {
+        deferred.push(rec);
+        continue;
+      }
+      const existing = db.prepare("SELECT value FROM global_configs WHERE key = ?").get(configKey);
+      if (existing) {
+        deferred.push(rec);
+        continue;
+      }
+      db.prepare("INSERT INTO global_configs (key, value) VALUES (?, ?)").run(configKey, JSON.stringify(rec.suggested_threshold));
+      applied.push(rec);
+    }
+  } catch {
+    return { applied: [], deferred: recs };
+  }
+  return { applied, deferred };
+}
 function detectRecurringPatterns() {
   try {
     const history = readMetricsHistory();
@@ -6547,7 +10690,7 @@ function detectRecurringPatterns() {
     }
   } catch {}
 }
-var MAX_ENTRIES = 50, METRIC_KEYS, WINDOW_SIZES, METRIC_TO_THRESHOLD;
+var MAX_ENTRIES = 50, METRIC_KEYS, WINDOW_SIZES, METRIC_TO_THRESHOLD, METRIC_NAME_TO_CONFIG_KEY, RULE_TEMPLATES;
 var init_metrics = __esm(() => {
   init_db();
   METRIC_KEYS = [
@@ -6566,6 +10709,48 @@ var init_metrics = __esm(() => {
     semantic_warnings: { key: "semantic_threshold", name: "semantic" },
     drift_warnings: { key: "drift_threshold", name: "drift" }
   };
+  METRIC_NAME_TO_CONFIG_KEY = {
+    security: "escalation.security_threshold",
+    "test quality": "escalation.test_quality_threshold",
+    duplication: "escalation.duplication_threshold",
+    semantic: "escalation.semantic_threshold",
+    drift: "escalation.drift_threshold"
+  };
+  RULE_TEMPLATES = {
+    security: {
+      filename: "security-recurring.md",
+      content: [
+        "# Security Recurring Patterns",
+        "",
+        "Security warnings are frequent across multiple projects.",
+        "Review common patterns: input validation, XSS prevention, SQL injection, SSRF.",
+        "Consider adding project-specific security rules in .claude/rules/security.md."
+      ].join(`
+`)
+    },
+    test_quality: {
+      filename: "test-quality-recurring.md",
+      content: [
+        "# Test Quality Recurring Patterns",
+        "",
+        "Test quality warnings are frequent across multiple projects.",
+        "Review: empty tests, always-true assertions, trivial assertions.",
+        "Consider enforcing minimum assertion counts per test."
+      ].join(`
+`)
+    },
+    duplication: {
+      filename: "duplication-recurring.md",
+      content: [
+        "# Duplication Recurring Patterns",
+        "",
+        "Code duplication warnings are frequent across multiple projects.",
+        "Review: copy-pasted code blocks, similar function signatures.",
+        "Consider extracting shared utilities when 3+ duplicates exist."
+      ].join(`
+`)
+    }
+  };
 });
 
 // src/hooks/session-start.ts
@@ -6573,14 +10758,14 @@ var exports_session_start = {};
 __export(exports_session_start, {
   default: () => sessionStart
 });
-import { existsSync as existsSync15 } from "fs";
-import { join as join10 } from "path";
+import { existsSync as existsSync18 } from "fs";
+import { join as join11 } from "path";
 async function sessionStart(ev) {
   try {
     if (!_legacyWarned) {
       _legacyWarned = true;
       const cwd = ev.cwd ?? process.cwd();
-      if (existsSync15(join10(cwd, ".qult"))) {
+      if (existsSync18(join11(cwd, ".qult"))) {
         process.stderr.write(`[qult] Legacy .qult/ directory detected. State is now stored in ~/.qult/qult.db. You can safely delete .qult/ from this project.
 `);
       }
@@ -6614,6 +10799,19 @@ async function sessionStart(ev) {
           for (const rec of recs) {
             process.stderr.write(`[qult] Flywheel: ${rec.metric} \u2014 suggest ${rec.direction === "lower" ? "lowering" : "raising"} threshold from ${rec.current_threshold} to ${rec.suggested_threshold} (${rec.confidence} confidence). ${rec.reason}
 `);
+          }
+          if (cfg.flywheel.auto_apply && recs.length > 0) {
+            try {
+              const { applied, deferred } = applyFlywheelRecommendations(recs, cfg);
+              for (const rec of applied) {
+                process.stderr.write(`[qult] Flywheel auto-applied: ${rec.metric} threshold raised to ${rec.suggested_threshold}
+`);
+              }
+              if (deferred.length > 0) {
+                process.stderr.write(`[qult] Flywheel deferred: ${deferred.length} recommendation(s) require manual review
+`);
+              }
+            } catch {}
           }
         }
       } catch {}
@@ -6687,21 +10885,21 @@ var exports_post_compact = {};
 __export(exports_post_compact, {
   default: () => postCompact
 });
-import { existsSync as existsSync16, readdirSync as readdirSync6, readFileSync as readFileSync15, statSync as statSync6 } from "fs";
-import { join as join11 } from "path";
+import { existsSync as existsSync19, readdirSync as readdirSync6, readFileSync as readFileSync17, statSync as statSync6 } from "fs";
+import { join as join12 } from "path";
 async function postCompact(_ev) {
   try {
-    const parts = [];
+    const parts2 = [];
     const fixes = readPendingFixes();
     if (fixes.length > 0) {
-      parts.push(`[qult] ${fixes.length} pending fix(es):`);
+      parts2.push(`[qult] ${fixes.length} pending fix(es):`);
       for (const fix of fixes) {
-        parts.push(`  [${fix.gate}] ${fix.file}`);
+        parts2.push(`  [${fix.gate}] ${fix.file}`);
         if (fix.errors?.length > 0) {
           const shown = fix.errors.slice(0, 3).map((e) => `    ${sanitizeForStderr(e.slice(0, 200))}`);
-          parts.push(...shown);
+          parts2.push(...shown);
           if (fix.errors.length > 3) {
-            parts.push(`    ... and ${fix.errors.length - 3} more error(s)`);
+            parts2.push(`    ... and ${fix.errors.length - 3} more error(s)`);
           }
         }
       }
@@ -6732,18 +10930,18 @@ async function postCompact(_ev) {
     if (state.dead_import_warning_count > 0)
       summary.push(`dead import warnings: ${state.dead_import_warning_count}`);
     if (summary.length > 0) {
-      parts.push(`[qult] Session: ${summary.join(", ")}`);
+      parts2.push(`[qult] Session: ${summary.join(", ")}`);
     }
     try {
-      const planDir = join11(process.cwd(), ".claude", "plans");
-      if (existsSync16(planDir)) {
-        const planFiles = readdirSync6(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync6(join11(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
+      const planDir = join12(process.cwd(), ".claude", "plans");
+      if (existsSync19(planDir)) {
+        const planFiles = readdirSync6(planDir).filter((f) => f.endsWith(".md")).map((f) => ({ name: f, mtime: statSync6(join12(planDir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
         if (planFiles.length > 0) {
-          const content = readFileSync15(join11(planDir, planFiles[0].name), "utf-8");
+          const content = readFileSync17(join12(planDir, planFiles[0].name), "utf-8");
           const taskCount = (content.match(/^###\s+Task\s+\d+/gim) ?? []).length;
           const doneCount = (content.match(/^###\s+Task\s+\d+.*\[done\]/gim) ?? []).length;
           if (taskCount > 0) {
-            parts.push(`[qult] Plan: ${doneCount}/${taskCount} tasks done`);
+            parts2.push(`[qult] Plan: ${doneCount}/${taskCount} tasks done`);
           }
         }
       }
@@ -6753,9 +10951,9 @@ async function postCompact(_ev) {
       const pid = getProjectId();
       const findings = db.prepare("SELECT file, severity, description FROM review_findings WHERE project_id = ? ORDER BY id DESC LIMIT 5").all(pid);
       if (findings.length > 0) {
-        parts.push("[qult] Recent review findings:");
+        parts2.push("[qult] Recent review findings:");
         for (const f of findings) {
-          parts.push(`  [${sanitizeForStderr(f.severity)}] ${sanitizeForStderr(f.file)} \u2014 ${sanitizeForStderr(f.description.slice(0, 150))}`);
+          parts2.push(`  [${sanitizeForStderr(f.severity)}] ${sanitizeForStderr(f.file)} \u2014 ${sanitizeForStderr(f.description.slice(0, 150))}`);
         }
       }
     } catch {}
@@ -6775,11 +10973,11 @@ async function postCompact(_ev) {
       if (config.gates.test_on_edit)
         overrides.push("test_on_edit=true");
       if (overrides.length > 0) {
-        parts.push(`[qult] Config overrides: ${overrides.join(", ")}`);
+        parts2.push(`[qult] Config overrides: ${overrides.join(", ")}`);
       }
     } catch {}
-    if (parts.length > 0) {
-      process.stdout.write(parts.join(`
+    if (parts2.length > 0) {
+      process.stdout.write(parts2.join(`
 `));
     }
   } catch {}
@@ -6842,15 +11040,15 @@ async function dispatch(event) {
     if (debug)
       process.stderr.write(`[qult:debug] event=${event} input=${input.length}b
 `);
-    const start = Date.now();
+    const start2 = Date.now();
     const handler = await loader();
     await handler.default(ev);
     if (debug)
-      process.stderr.write(`[qult:debug] ${event} done in ${Date.now() - start}ms
+      process.stderr.write(`[qult:debug] ${event} done in ${Date.now() - start2}ms
 `);
-  } catch (err) {
-    if (err instanceof Error && !err.message.startsWith("process.exit")) {
-      process.stderr.write(`[qult] ${event}: ${err.message}
+  } catch (err2) {
+    if (err2 instanceof Error && !err2.message.startsWith("process.exit")) {
+      process.stderr.write(`[qult] ${event}: ${err2.message}
 `);
     }
   } finally {
@@ -6867,9 +11065,9 @@ if (!event) {
 `);
   process.exit(1);
 }
-dispatch(event).catch((err) => {
-  if (err instanceof Error) {
-    process.stderr.write(`[qult] ${err.message}
+dispatch(event).catch((err2) => {
+  if (err2 instanceof Error) {
+    process.stderr.write(`[qult] ${err2.message}
 `);
   }
 });

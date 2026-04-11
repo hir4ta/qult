@@ -42,6 +42,12 @@ export interface QultConfig {
 		consumer_typecheck: boolean;
 		/** Import graph traversal depth for consumer detection (1-3). */
 		import_graph_depth: number;
+		/** Cyclomatic complexity threshold for code quality gate. */
+		complexity_threshold: number;
+		/** Maximum function size in lines for code quality gate. */
+		function_size_limit: number;
+		/** Minimum mutation score percentage to pass. 0 = disabled (opt-in). */
+		mutation_score_threshold: number;
 	};
 	/** Security enforcement */
 	security: {
@@ -65,6 +71,8 @@ export interface QultConfig {
 	flywheel: {
 		enabled: boolean;
 		min_sessions: number;
+		/** Automatically apply safe (raise) recommendations to global_configs */
+		auto_apply: boolean;
 	};
 }
 
@@ -100,6 +108,9 @@ export const DEFAULTS: QultConfig = {
 		coverage_threshold: 0,
 		consumer_typecheck: false,
 		import_graph_depth: 1,
+		complexity_threshold: 15,
+		function_size_limit: 50,
+		mutation_score_threshold: 0,
 	},
 	security: {
 		require_semgrep: true,
@@ -117,6 +128,7 @@ export const DEFAULTS: QultConfig = {
 	flywheel: {
 		enabled: true,
 		min_sessions: 10,
+		auto_apply: false,
 	},
 };
 
@@ -174,6 +186,15 @@ function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): voi
 			config.gates.consumer_typecheck = g.consumer_typecheck;
 		if (typeof g.import_graph_depth === "number")
 			config.gates.import_graph_depth = Math.max(1, Math.min(3, g.import_graph_depth));
+		if (typeof g.complexity_threshold === "number")
+			config.gates.complexity_threshold = Math.max(1, g.complexity_threshold);
+		if (typeof g.function_size_limit === "number")
+			config.gates.function_size_limit = Math.max(1, g.function_size_limit);
+		if (typeof g.mutation_score_threshold === "number")
+			config.gates.mutation_score_threshold = Math.max(
+				0,
+				Math.min(100, g.mutation_score_threshold),
+			);
 	}
 	if (raw.security && typeof raw.security === "object") {
 		const s = raw.security as Record<string, unknown>;
@@ -206,6 +227,7 @@ function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): voi
 		if (typeof f.enabled === "boolean") config.flywheel.enabled = f.enabled;
 		if (typeof f.min_sessions === "number")
 			config.flywheel.min_sessions = Math.max(1, f.min_sessions);
+		if (typeof f.auto_apply === "boolean") config.flywheel.auto_apply = f.auto_apply;
 	}
 }
 
@@ -317,6 +339,14 @@ export function loadConfig(): QultConfig {
 		config.gates.consumer_typecheck = false;
 	const igDepth = envInt("QULT_IMPORT_GRAPH_DEPTH");
 	if (igDepth !== undefined) config.gates.import_graph_depth = Math.max(1, Math.min(3, igDepth));
+	const complexityThreshold = envInt("QULT_COMPLEXITY_THRESHOLD");
+	if (complexityThreshold !== undefined)
+		config.gates.complexity_threshold = Math.max(1, complexityThreshold);
+	const funcSizeLimit = envInt("QULT_FUNCTION_SIZE_LIMIT");
+	if (funcSizeLimit !== undefined) config.gates.function_size_limit = Math.max(1, funcSizeLimit);
+	const mutationScore = envInt("QULT_MUTATION_SCORE_THRESHOLD");
+	if (mutationScore !== undefined)
+		config.gates.mutation_score_threshold = Math.max(0, Math.min(100, mutationScore));
 	const secEsc = envInt("QULT_ESCALATION_SECURITY");
 	if (secEsc !== undefined) config.escalation.security_threshold = Math.max(1, secEsc);
 	const driftEsc = envInt("QULT_ESCALATION_DRIFT");
@@ -369,6 +399,11 @@ export function loadConfig(): QultConfig {
 	else if (flywheelEnv === "0" || flywheelEnv === "false") config.flywheel.enabled = false;
 	const flywheelMin = envInt("QULT_FLYWHEEL_MIN_SESSIONS");
 	if (flywheelMin !== undefined) config.flywheel.min_sessions = Math.max(1, flywheelMin);
+	const flywheelAutoApplyEnv = process.env.QULT_FLYWHEEL_AUTO_APPLY;
+	if (flywheelAutoApplyEnv === "1" || flywheelAutoApplyEnv === "true")
+		config.flywheel.auto_apply = true;
+	else if (flywheelAutoApplyEnv === "0" || flywheelAutoApplyEnv === "false")
+		config.flywheel.auto_apply = false;
 
 	_cache = config;
 	return config;

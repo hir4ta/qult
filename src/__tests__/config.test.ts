@@ -265,6 +265,7 @@ describe("flywheel config", () => {
 		expect(config.flywheel).toEqual({
 			enabled: true,
 			min_sessions: 10,
+			auto_apply: false,
 		});
 	});
 

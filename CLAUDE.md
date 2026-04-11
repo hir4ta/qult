@@ -65,7 +65,7 @@ qult/
 - exit 2 = DENY/block (唯一の強制手段)。stderr に理由を出力
 - **enforcement hooks は stdout 不使用** — plugin hook output bug (#16538) を回避
 - SessionStart: DB セッション初期化、startup/clear 時のみ pending-fixes クリア
-- PostToolUse: gate 並列実行 (Promise.allSettled) → state 書き込み (pending-fixes)。Bash install コマンド検出時は dep-vuln-check (osv-scanner) + hallucinated-package-check (レジストリ存在確認) を実行
+- PostToolUse: gate 並列実行 (Promise.allSettled) → state 書き込み (pending-fixes)。Bash install コマンド検出時は dep-vuln-check (osv-scanner) + hallucinated-package-check (レジストリ存在確認) を実行。Edit/Write 時は AST データフロー解析 (web-tree-sitter, 7言語対応, 3ホップ汚染追跡) + 複雑度メトリクス (cyclomatic/cognitive, advisory のみ) も実行
 - PreToolUse: pending-fixes チェック → exit 2 (DENY)。Bash は `if: "Bash(git commit*)"` で絞り込み
 - Stop/SubagentStop: 完了条件チェック → exit 2 (block)
 - TaskCompleted: Verify テスト実行 → state 書き込み
@@ -84,7 +84,8 @@ qult/
 - 依存: generate_sbom (CycloneDX SBOM 生成, osv-scanner/syft), get_dependency_summary (エコシステム別パッケージ・脆弱性集計)
 - 記録: record_review, record_test_pass, record_stage_scores, record_human_approval
 - get_flywheel_recommendations: セッション横断パターン分析に基づく閾値調整推奨を返す
-- disable_gate は gate 名をバリデーション（gate_configs テーブルのキー + "review", "security-check", "dead-import-check", "duplication-check", "dep-vuln-check", "hallucinated-package-check"）
+- 操作（追加）: apply_flywheel_recommendations (raise 方向自動適用), transfer_knowledge (プロジェクト間知識転移 + rules テンプレート生成)
+- disable_gate は gate 名をバリデーション（gate_configs テーブルのキー + "review", "security-check", "dead-import-check", "duplication-check", "dep-vuln-check", "hallucinated-package-check", "dataflow-check", "complexity-check", "mutation-test"）
 - MCP tool の呼び出しルールは MCP server instructions で注入（プロジェクトにファイル配置しない）
 
 ### Config 優先順位
@@ -92,7 +93,10 @@ qult/
 - DEFAULTS < `global_configs` テーブル < `project_configs` テーブル < `QULT_*` env
 - review.models.*: ステージ別レビュアーモデル (`QULT_REVIEW_MODEL_SPEC/QUALITY/SECURITY/ADVERSARIAL`)
 - plan_eval.models.*: プランエージェントモデル (`QULT_PLAN_EVAL_MODEL_GENERATOR/EVALUATOR`)
-- flywheel.*: セッション横断学習 (`QULT_FLYWHEEL_ENABLED`, `QULT_FLYWHEEL_MIN_SESSIONS`)
+- flywheel.*: セッション横断学習 (`QULT_FLYWHEEL_ENABLED`, `QULT_FLYWHEEL_MIN_SESSIONS`, `QULT_FLYWHEEL_AUTO_APPLY`)
+- gates.complexity_threshold: 循環的複雑度閾値（デフォルト 15、`QULT_COMPLEXITY_THRESHOLD`）
+- gates.function_size_limit: 関数サイズ制限（デフォルト 50行、`QULT_FUNCTION_SIZE_LIMIT`）
+- gates.mutation_score_threshold: ミューテーションスコア閾値（デフォルト 0 = 無効、`QULT_MUTATION_SCORE_THRESHOLD`）
 
 ### 反復セキュリティカウンター
 

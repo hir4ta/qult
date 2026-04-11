@@ -25,7 +25,12 @@ import { validateTestCoversImpl } from "./hooks/detectors/spec-trace-check.ts";
 import { generateMetricsDashboard } from "./metrics-dashboard.ts";
 import { appendAuditLog, readAuditLog } from "./state/audit-log.ts";
 import { getDb, getProjectId, setProjectPath } from "./state/db.ts";
-import { getFlywheelRecommendations, readMetricsHistory } from "./state/metrics.ts";
+import {
+	applyFlywheelRecommendations,
+	getFlywheelRecommendations,
+	readMetricsHistory,
+	transferKnowledge,
+} from "./state/metrics.ts";
 import { archivePlanFile, getActivePlan, resetPlanCache } from "./state/plan-status.ts";
 import type { PendingFix } from "./types.ts";
 
@@ -51,6 +56,9 @@ function getValidGateNames(): string[] {
 		"coverage",
 		"dep-vuln-check",
 		"hallucinated-package-check",
+		"dataflow-check",
+		"complexity-check",
+		"mutation-test",
 	]);
 	if (gates) {
 		for (const category of [gates.on_write, gates.on_commit, gates.on_review]) {
@@ -271,6 +279,18 @@ const TOOL_DEFS: ToolDef[] = [
 		name: "get_flywheel_recommendations",
 		description:
 			"Returns threshold adjustment recommendations based on cross-session pattern analysis.",
+		inputSchema: { type: "object", properties: {} },
+	},
+	{
+		name: "apply_flywheel_recommendations",
+		description:
+			"Apply flywheel recommendations: safe (raise) recommendations are auto-applied to global_configs, lower recommendations are deferred for manual review.",
+		inputSchema: { type: "object", properties: {} },
+	},
+	{
+		name: "transfer_knowledge",
+		description:
+			"Cross-project session analysis. Detects common patterns across 3+ projects and writes shared thresholds to global_configs. Returns patterns found and rule templates.",
 		inputSchema: { type: "object", properties: {} },
 	},
 	{
@@ -805,6 +825,34 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 				return { content: [{ type: "text", text: JSON.stringify(recs, null, 2) }] };
 			} catch {
 				return { content: [{ type: "text", text: "No flywheel data available yet." }] };
+			}
+		}
+		case "apply_flywheel_recommendations": {
+			try {
+				const config = loadConfig();
+				const metrics = readMetricsHistory();
+				const recs = getFlywheelRecommendations(metrics, config);
+				if (recs.length === 0) {
+					return {
+						content: [
+							{ type: "text", text: "No recommendations. Insufficient data or flywheel disabled." },
+						],
+					};
+				}
+				const result = applyFlywheelRecommendations(recs, config);
+				return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+			} catch {
+				return { content: [{ type: "text", text: "No flywheel data available yet." }] };
+			}
+		}
+		case "transfer_knowledge": {
+			try {
+				const result = transferKnowledge();
+				return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+			} catch {
+				return {
+					content: [{ type: "text", text: JSON.stringify({ patterns: [], templates: [] }) }],
+				};
 			}
 		}
 		case "record_finish_started": {

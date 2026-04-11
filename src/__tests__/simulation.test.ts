@@ -2801,3 +2801,25 @@ describe("dep-vuln-check simulation", () => {
 		expect(fixes.some((f) => f.gate === "hallucinated-package-check")).toBe(false);
 	});
 });
+
+// ============================================================
+// AST Dataflow detection — detects tainted variable flow to eval
+// ============================================================
+
+describe("Scenario: AST dataflow injection detected", () => {
+	it("generates PendingFix for tainted eval", async () => {
+		setupPassingGates();
+		const file = join(TEST_DIR, "src/tainted.ts");
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(file, `const x = req.body;\neval(x);\n`);
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({ tool_name: "Edit", tool_input: { file_path: file } });
+
+		flushAll();
+		resetAllCaches();
+		const fixes = readPendingFixes();
+		expect(fixes.some((f) => f.gate === "dataflow-check")).toBe(true);
+		expect(fixes.some((f) => f.errors.some((e) => e.includes("eval")))).toBe(true);
+	});
+});
