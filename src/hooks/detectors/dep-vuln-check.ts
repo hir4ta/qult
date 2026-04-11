@@ -74,7 +74,12 @@ export function extractInstalledPackages(command: string): InstalledPackages | n
 				continue;
 			}
 			// Skip path-like tokens (., ./, /, ~, file paths)
-			if (token === "." || token.startsWith("./") || token.startsWith("/") || token.startsWith("~")) {
+			if (
+				token === "." ||
+				token.startsWith("./") ||
+				token.startsWith("/") ||
+				token.startsWith("~")
+			) {
 				continue;
 			}
 			// Handle version specifiers: django>=4.0 → django
@@ -135,8 +140,7 @@ function getSeverity(vuln: OsvVuln): string {
 			if ((s.type === "CVSS_V3" || s.type === "CVSS_V4") && s.score) {
 				const vec = s.score;
 				const isNetwork = vec.includes("AV:N");
-				const hasHighImpact =
-					vec.includes("C:H") || vec.includes("I:H") || vec.includes("A:H");
+				const hasHighImpact = vec.includes("C:H") || vec.includes("I:H") || vec.includes("A:H");
 				// Conservative: any high-impact network vector → HIGH (blocking)
 				if (isNetwork && hasHighImpact) return "HIGH";
 				if (hasHighImpact) return "HIGH";
@@ -150,11 +154,7 @@ function getSeverity(vuln: OsvVuln): string {
 /** Run osv-scanner with given args. Handles exit code 1 (vuln found → stdout has results).
  *  Returns stdout string on success, null on error (not installed, timeout, etc.).
  *  Shared by scanDependencyVulns, generate_sbom, and get_dependency_summary. */
-export function runOsvScanner(
-	args: string[],
-	cwd: string,
-	timeout: number,
-): string | null {
+export function runOsvScanner(args: string[], cwd: string, timeout: number): string | null {
 	try {
 		const output = execFileSync("osv-scanner", args, {
 			cwd,

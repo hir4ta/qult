@@ -4329,7 +4329,14 @@ function handleTool(name, cwd, args) {
             encoding: "utf-8",
             stdio: ["pipe", "pipe", "pipe"]
           });
-          return { content: [{ type: "text", text: typeof syftOutput === "string" ? syftOutput : String(syftOutput) }] };
+          return {
+            content: [
+              {
+                type: "text",
+                text: typeof syftOutput === "string" ? syftOutput : String(syftOutput)
+              }
+            ]
+          };
         } catch {
           return {
             isError: true,
