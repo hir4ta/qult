@@ -245,6 +245,55 @@ describe("postTool: Bash handling", () => {
 	});
 });
 
+describe("postTool: install command detection", () => {
+	it("detects npm install and runs hallucinated-package-check", async () => {
+		// Use the real modules — mock at the network/CLI level instead
+		// The hallucinated-package-check uses fetch, which we can stub globally
+		vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404 }));
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Bash",
+			tool_input: { command: "npm install totally-nonexistent-pkg-12345" },
+		});
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const fixes = readPendingFixes();
+		expect(fixes.some((f) => f.gate === "hallucinated-package-check")).toBe(true);
+	});
+
+	it("does not trigger install detection for git commit", async () => {
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Bash",
+			tool_input: { command: 'git commit -m "test"' },
+		});
+
+		// git commit triggers onGitCommit and returns early — no install detection
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const fixes = readPendingFixes();
+		expect(fixes.some((f) => f.gate === "hallucinated-package-check")).toBe(false);
+	});
+
+	it("skips dep-vuln-check when gate is disabled", async () => {
+		const { disableGate } = await import("../state/session-state.ts");
+		disableGate("dep-vuln-check");
+
+		vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Bash",
+			tool_input: { command: "npm install some-pkg" },
+		});
+
+		// No dep-vuln-check fixes should be generated (gate disabled)
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const fixes = readPendingFixes();
+		expect(fixes.some((f) => f.gate === "dep-vuln-check")).toBe(false);
+	});
+});
+
 describe("postTool: disabled gate skip", () => {
 	it("skips disabled gate — no pending-fixes created", async () => {
 		saveGates({

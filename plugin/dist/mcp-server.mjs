@@ -2,6 +2,7 @@
 var __require = import.meta.require;
 
 // src/mcp-server.ts
+import { execFileSync as execFileSync2 } from "child_process";
 import { existsSync as existsSync12 } from "fs";
 import { homedir as homedir3 } from "os";
 import { join as join6, resolve as resolve5 } from "path";
@@ -346,7 +347,8 @@ var DEFAULTS = {
     import_graph_depth: 1
   },
   security: {
-    require_semgrep: true
+    require_semgrep: true,
+    require_osv_scanner: false
   },
   escalation: {
     security_threshold: 10,
@@ -426,6 +428,8 @@ function applyConfigLayer(config, raw) {
     const s = raw.security;
     if (typeof s.require_semgrep === "boolean")
       config.security.require_semgrep = s.require_semgrep;
+    if (typeof s.require_osv_scanner === "boolean")
+      config.security.require_osv_scanner = s.require_osv_scanner;
   }
   if (raw.escalation && typeof raw.escalation === "object") {
     const e = raw.escalation;
@@ -564,6 +568,11 @@ function loadConfig() {
     config.security.require_semgrep = true;
   else if (requireSemgrepEnv === "0" || requireSemgrepEnv === "false")
     config.security.require_semgrep = false;
+  const requireOsvScannerEnv = process.env.QULT_REQUIRE_OSV_SCANNER;
+  if (requireOsvScannerEnv === "1" || requireOsvScannerEnv === "true")
+    config.security.require_osv_scanner = true;
+  else if (requireOsvScannerEnv === "0" || requireOsvScannerEnv === "false")
+    config.security.require_osv_scanner = false;
   const envStr = (key) => {
     const val = process.env[key];
     return val?.trim() ? val.trim() : undefined;
@@ -884,86 +893,13 @@ function computeReviewTrend(scores) {
   return "stable";
 }
 
-// src/hooks/detectors/health-score.ts
-import { existsSync as existsSync9 } from "fs";
-
-// src/hooks/detectors/convention-check.ts
-import { readdirSync, statSync } from "fs";
-import { basename, dirname, extname, join as join2 } from "path";
-
-// src/hooks/sanitize.ts
-function sanitizeForStderr(input) {
-  const noAnsi = input.replace(/\x1B\[[0-9;]*[A-Za-z]/g, "");
-  return noAnsi.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
-}
-
-// src/hooks/detectors/convention-check.ts
-var KEBAB_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)+$/;
-var CAMEL_RE = /^[a-z][a-z0-9]*[A-Z][a-zA-Z0-9]*$/;
-var SNAKE_RE = /^[a-z][a-z0-9]*(_[a-z0-9]+)+$/;
-var PASCAL_RE = /^[A-Z][a-zA-Z0-9]*$/;
-function classify(name) {
-  if (KEBAB_RE.test(name))
-    return "kebab-case";
-  if (SNAKE_RE.test(name))
-    return "snake_case";
-  if (PASCAL_RE.test(name))
-    return "PascalCase";
-  if (CAMEL_RE.test(name))
-    return "camelCase";
-  return "other";
-}
-function detectConventionDrift(file) {
-  const dir = dirname(file);
-  const fileName = basename(file);
-  const stem = basename(fileName, extname(fileName));
-  let siblings;
-  try {
-    siblings = readdirSync(dir).filter((f) => {
-      try {
-        return f !== fileName && statSync(join2(dir, f)).isFile();
-      } catch {
-        return false;
-      }
-    }).map((f) => basename(f, extname(f)));
-  } catch {
-    return [];
-  }
-  if (siblings.length < 3)
-    return [];
-  const counts = new Map;
-  for (const s of siblings) {
-    const c = classify(s);
-    if (c !== "other")
-      counts.set(c, (counts.get(c) ?? 0) + 1);
-  }
-  let dominant = null;
-  let dominantCount = 0;
-  for (const [conv, count] of counts) {
-    if (count > dominantCount) {
-      dominant = conv;
-      dominantCount = count;
-    }
-  }
-  const classifiableCount = [...counts.values()].reduce((a, b) => a + b, 0);
-  if (!dominant || classifiableCount === 0 || dominantCount <= classifiableCount * 0.5)
-    return [];
-  const fileConvention = classify(stem);
-  if (fileConvention === dominant || fileConvention === "other")
-    return [];
-  return [
-    sanitizeForStderr(`${fileName} uses ${fileConvention} but siblings use ${dominant} (${dominantCount}/${classifiableCount})`)
-  ];
-}
-
-// src/hooks/detectors/dead-import-check.ts
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
-import { extname as extname2 } from "path";
+// src/hooks/detectors/dep-vuln-check.ts
+import { execFileSync } from "child_process";
 
 // src/state/plan-status.ts
-import { existsSync, mkdirSync as mkdirSync2, readdirSync as readdirSync2, readFileSync, renameSync, statSync as statSync2 } from "fs";
+import { existsSync, mkdirSync as mkdirSync2, readdirSync, readFileSync, renameSync, statSync } from "fs";
 import { homedir as homedir2 } from "os";
-import { basename as basename2, dirname as dirname2, join as join3 } from "path";
+import { basename, dirname, join as join2 } from "path";
 var TASK_RE = /^###\s+Task\s+(\d+)[\s:\-\u2013\u2014]+(.+?)(?:\s*\[([^\]]+)\])?\s*$/i;
 function normalizeStatus(raw) {
   if (!raw)
@@ -1021,9 +957,9 @@ function scanPlanDir(dir) {
   try {
     if (!existsSync(dir))
       return [];
-    return readdirSync2(dir).filter((f) => f.endsWith(".md")).map((f) => ({
-      path: join3(dir, f),
-      mtime: statSync2(join3(dir, f)).mtimeMs
+    return readdirSync(dir).filter((f) => f.endsWith(".md")).map((f) => ({
+      path: join2(dir, f),
+      mtime: statSync(join2(dir, f)).mtimeMs
     })).sort((a, b) => b.mtime - a.mtime);
   } catch {
     return [];
@@ -1032,7 +968,7 @@ function scanPlanDir(dir) {
 function getLatestPlanPath() {
   try {
     const candidates = [];
-    const projectDir = join3(process.cwd(), ".claude", "plans");
+    const projectDir = join2(process.cwd(), ".claude", "plans");
     const projectPlans = scanPlanDir(projectDir);
     candidates.push(...projectPlans);
     const envDir = process.env.CLAUDE_PLANS_DIR;
@@ -1041,7 +977,7 @@ function getLatestPlanPath() {
     }
     if (!_disableHomeFallback && projectPlans.length === 0 && candidates.length === 0) {
       try {
-        const homeDir = join3(homedir2(), ".claude", "plans");
+        const homeDir = join2(homedir2(), ".claude", "plans");
         const homeFiles = scanPlanDir(homeDir);
         const recentCutoff = Date.now() - 24 * 60 * 60 * 1000;
         candidates.push(...homeFiles.filter((f) => f.mtime > recentCutoff));
@@ -1065,7 +1001,7 @@ function getActivePlan() {
     return null;
   let mtime = null;
   try {
-    mtime = statSync2(path).mtimeMs;
+    mtime = statSync(path).mtimeMs;
     if (_planCache && _planCachePath === path && _planCacheMtime === mtime)
       return _planCache;
   } catch {}
@@ -1093,10 +1029,10 @@ function archivePlanFile(planPath) {
       return;
     if (!existsSync(planPath))
       return;
-    const dir = dirname2(planPath);
-    const archiveDir = join3(dir, "archive");
+    const dir = dirname(planPath);
+    const archiveDir = join2(dir, "archive");
     mkdirSync2(archiveDir, { recursive: true });
-    renameSync(planPath, join3(archiveDir, basename2(planPath)));
+    renameSync(planPath, join2(archiveDir, basename(planPath)));
     resetPlanCache();
   } catch {}
 }
@@ -1193,7 +1129,100 @@ function isGateDisabled(gateName) {
   return (state.disabled_gates ?? []).includes(gateName);
 }
 
+// src/hooks/detectors/dep-vuln-check.ts
+var BLOCKING_SEVERITIES = new Set(["CRITICAL", "HIGH"]);
+function runOsvScanner(args, cwd, timeout) {
+  try {
+    const output = execFileSync("osv-scanner", args, {
+      cwd,
+      timeout,
+      stdio: ["pipe", "pipe", "pipe"],
+      encoding: "utf-8"
+    });
+    return typeof output === "string" ? output : String(output);
+  } catch (err) {
+    if (err && typeof err === "object" && "stdout" in err && typeof err.stdout === "string" && err.stdout.length > 0) {
+      return err.stdout;
+    }
+    return null;
+  }
+}
+
+// src/hooks/detectors/health-score.ts
+import { existsSync as existsSync9 } from "fs";
+
+// src/hooks/detectors/convention-check.ts
+import { readdirSync as readdirSync2, statSync as statSync2 } from "fs";
+import { basename as basename2, dirname as dirname2, extname, join as join3 } from "path";
+
+// src/hooks/sanitize.ts
+function sanitizeForStderr(input) {
+  const noAnsi = input.replace(/\x1B\[[0-9;]*[A-Za-z]/g, "");
+  return noAnsi.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+}
+
+// src/hooks/detectors/convention-check.ts
+var KEBAB_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)+$/;
+var CAMEL_RE = /^[a-z][a-z0-9]*[A-Z][a-zA-Z0-9]*$/;
+var SNAKE_RE = /^[a-z][a-z0-9]*(_[a-z0-9]+)+$/;
+var PASCAL_RE = /^[A-Z][a-zA-Z0-9]*$/;
+function classify(name) {
+  if (KEBAB_RE.test(name))
+    return "kebab-case";
+  if (SNAKE_RE.test(name))
+    return "snake_case";
+  if (PASCAL_RE.test(name))
+    return "PascalCase";
+  if (CAMEL_RE.test(name))
+    return "camelCase";
+  return "other";
+}
+function detectConventionDrift(file) {
+  const dir = dirname2(file);
+  const fileName = basename2(file);
+  const stem = basename2(fileName, extname(fileName));
+  let siblings;
+  try {
+    siblings = readdirSync2(dir).filter((f) => {
+      try {
+        return f !== fileName && statSync2(join3(dir, f)).isFile();
+      } catch {
+        return false;
+      }
+    }).map((f) => basename2(f, extname(f)));
+  } catch {
+    return [];
+  }
+  if (siblings.length < 3)
+    return [];
+  const counts = new Map;
+  for (const s of siblings) {
+    const c = classify(s);
+    if (c !== "other")
+      counts.set(c, (counts.get(c) ?? 0) + 1);
+  }
+  let dominant = null;
+  let dominantCount = 0;
+  for (const [conv, count] of counts) {
+    if (count > dominantCount) {
+      dominant = conv;
+      dominantCount = count;
+    }
+  }
+  const classifiableCount = [...counts.values()].reduce((a, b) => a + b, 0);
+  if (!dominant || classifiableCount === 0 || dominantCount <= classifiableCount * 0.5)
+    return [];
+  const fileConvention = classify(stem);
+  if (fileConvention === dominant || fileConvention === "other")
+    return [];
+  return [
+    sanitizeForStderr(`${fileName} uses ${fileConvention} but siblings use ${dominant} (${dominantCount}/${classifiableCount})`)
+  ];
+}
+
 // src/hooks/detectors/dead-import-check.ts
+import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
+import { extname as extname2 } from "path";
 var TS_JS_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
 var PY_EXTS = new Set([".py", ".pyi"]);
 var MAX_CHECK_SIZE = 500000;
@@ -3453,7 +3482,9 @@ function getValidGateNames() {
     "semgrep-required",
     "test-quality-check",
     "security-check-advisory",
-    "coverage"
+    "coverage",
+    "dep-vuln-check",
+    "hallucinated-package-check"
   ]);
   if (gates) {
     for (const category of [gates.on_write, gates.on_commit, gates.on_review]) {
@@ -3704,6 +3735,16 @@ var TOOL_DEFS = [
       },
       required: ["test_file", "impl_file"]
     }
+  },
+  {
+    name: "generate_sbom",
+    description: "Generate a Software Bill of Materials (SBOM) for the project in CycloneDX JSON format. Uses osv-scanner or syft. Slower than other tools (up to 30s).",
+    inputSchema: { type: "object", properties: {} }
+  },
+  {
+    name: "get_dependency_summary",
+    description: "Get a summary of project dependencies: package count by ecosystem and known vulnerability count. Uses osv-scanner.",
+    inputSchema: { type: "object", properties: {} }
   }
 ];
 function handleTool(name, cwd, args) {
@@ -4272,6 +4313,78 @@ function handleTool(name, cwd, args) {
               text: JSON.stringify({ test_file: testFile, impl_file: implFile, covered: false })
             }
           ]
+        };
+      }
+    }
+    case "generate_sbom": {
+      try {
+        const output = runOsvScanner(["--format", "cyclonedx-1-5", "-r", "."], cwd, 30000);
+        if (output) {
+          return { content: [{ type: "text", text: output }] };
+        }
+        try {
+          const syftOutput = execFileSync2("syft", [".", "-o", "cyclonedx-json"], {
+            cwd,
+            timeout: 30000,
+            encoding: "utf-8",
+            stdio: ["pipe", "pipe", "pipe"]
+          });
+          return { content: [{ type: "text", text: typeof syftOutput === "string" ? syftOutput : String(syftOutput) }] };
+        } catch {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: "Neither osv-scanner nor syft is installed. Install one: `brew install osv-scanner` or `brew install syft`."
+              }
+            ]
+          };
+        }
+      } catch {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "Failed to generate SBOM." }]
+        };
+      }
+    }
+    case "get_dependency_summary": {
+      try {
+        const raw = runOsvScanner(["--format", "json", "-r", "."], cwd, 15000);
+        if (!raw) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: "osv-scanner is not installed. Install: `brew install osv-scanner`."
+              }
+            ]
+          };
+        }
+        const data = JSON.parse(raw);
+        const ecosystems = {};
+        for (const result of data.results ?? []) {
+          for (const pkg of result.packages ?? []) {
+            const eco = pkg.package?.ecosystem ?? "unknown";
+            if (!ecosystems[eco])
+              ecosystems[eco] = { packages: 0, vulns: 0 };
+            ecosystems[eco].packages++;
+            ecosystems[eco].vulns += (pkg.vulnerabilities ?? []).length;
+          }
+        }
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ ecosystems, total_sources: (data.results ?? []).length })
+            }
+          ]
+        };
+      } catch {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "Failed to get dependency summary." }]
         };
       }
     }

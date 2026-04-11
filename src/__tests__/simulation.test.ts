@@ -2767,3 +2767,37 @@ describe("Scenario: Coverage gate", () => {
 		expect(fixes.some((f) => f.gate === "coverage")).toBe(false);
 	});
 });
+
+describe("dep-vuln-check simulation", () => {
+	it("install command detects hallucinated package and creates pending fix", async () => {
+		// Stub fetch to return 404 (package doesn't exist)
+		vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404 }));
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Bash",
+			tool_input: { command: "npm install totally-fake-pkg-hallucination" },
+		});
+
+		flushAll();
+		resetAllCaches();
+		const fixes = readPendingFixes();
+		expect(fixes.some((f) => f.gate === "hallucinated-package-check")).toBe(true);
+		expect(fixes.some((f) => f.errors.some((e) => e.includes("does not exist")))).toBe(true);
+	});
+
+	it("existing packages do not create pending fixes", async () => {
+		vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			tool_name: "Bash",
+			tool_input: { command: "npm install lodash" },
+		});
+
+		flushAll();
+		resetAllCaches();
+		const fixes = readPendingFixes();
+		expect(fixes.some((f) => f.gate === "hallucinated-package-check")).toBe(false);
+	});
+});

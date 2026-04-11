@@ -27,9 +27,11 @@ import {
 import type { GateDefinition, HookEvent, PendingFix } from "../types.ts";
 import { detectConventionDrift } from "./detectors/convention-check.ts";
 import { detectDeadImports } from "./detectors/dead-import-check.ts";
+import { extractInstalledPackages, scanDependencyVulns } from "./detectors/dep-vuln-check.ts";
 import { classifiedToPendingFixes } from "./detectors/diagnostic-classifier.ts";
 import { detectCrossFileDuplication, detectDuplication } from "./detectors/duplication-check.ts";
 import { detectExportBreakingChanges } from "./detectors/export-check.ts";
+import { checkInstalledPackages } from "./detectors/hallucinated-package-check.ts";
 import { detectHallucinatedImports } from "./detectors/import-check.ts";
 import { findImporters } from "./detectors/import-graph.ts";
 import { detectSecurityPatterns, getAdvisoryAsPendingFixes } from "./detectors/security-check.ts";
@@ -56,7 +58,7 @@ export default async function postTool(ev: HookEvent): Promise<void> {
 	if (tool === "Edit" || tool === "Write") {
 		await handleEditWrite(ev);
 	} else if (tool === "Bash") {
-		handleBash(ev);
+		await handleBash(ev);
 	}
 }
 
@@ -594,7 +596,10 @@ const LINT_FIX_RE =
  *  Includes bun/npx/pnpm prefixed variants. */
 const TEST_CMD_RE = /\b(bun\s+)?(vitest|jest|mocha|pytest|go\s+test|cargo\s+test)\b/;
 
-function handleBash(ev: HookEvent): void {
+const INSTALL_CMD_RE =
+	/\b(npm\s+(?:install|i|add)|pip\s+install|cargo\s+add|go\s+get|bun\s+add|yarn\s+add|pnpm\s+add|gem\s+install|composer\s+require)\b/;
+
+async function handleBash(ev: HookEvent): Promise<void> {
 	const command = typeof ev.tool_input?.command === "string" ? ev.tool_input.command : null;
 	if (!command) return;
 
@@ -609,6 +614,47 @@ function handleBash(ev: HookEvent): void {
 
 	if (isTestCommand(command)) {
 		onTestCommand(ev, command);
+	}
+
+	// Install command detection: dep-vuln-check + hallucinated-package-check
+	if (INSTALL_CMD_RE.test(command)) {
+		try {
+			await onInstallCommand(command);
+		} catch {
+			/* fail-open */
+		}
+	}
+}
+
+/** Package install detected: check for hallucinated packages and known vulnerabilities */
+async function onInstallCommand(command: string): Promise<void> {
+	const parsed = extractInstalledPackages(command);
+	if (!parsed) return;
+
+	const cwd = process.cwd();
+
+	// Hallucinated package check (async)
+	if (!isGateDisabled("hallucinated-package-check") && parsed.packages.length > 0) {
+		try {
+			const hallucinationFixes = await checkInstalledPackages(parsed.pm, parsed.packages);
+			if (hallucinationFixes.length > 0) {
+				addPendingFixes("(install-command)", hallucinationFixes);
+			}
+		} catch {
+			/* fail-open */
+		}
+	}
+
+	// Dependency vulnerability scan (sync — osv-scanner CLI)
+	if (!isGateDisabled("dep-vuln-check")) {
+		try {
+			const vulnFixes = scanDependencyVulns(cwd);
+			if (vulnFixes.length > 0) {
+				addPendingFixes("(dep-vuln)", vulnFixes);
+			}
+		} catch {
+			/* fail-open */
+		}
 	}
 }
 

@@ -15,6 +15,7 @@ import {
 } from "../state/pending-fixes.ts";
 import { isGateDisabled, readSessionState } from "../state/session-state.ts";
 import type { HookEvent } from "../types.ts";
+import { scanDependencyVulns } from "./detectors/dep-vuln-check.ts";
 import { markSessionStartCompleted } from "./lazy-init.ts";
 
 let _legacyWarned = false;
@@ -118,6 +119,50 @@ export default async function sessionStart(ev: HookEvent): Promise<void> {
 							flushPendingFixes();
 						} catch {
 							/* fail-open */
+						}
+					}
+				} catch {
+					/* fail-open */
+				}
+
+				// osv-scanner mandatory check (when require_osv_scanner is true)
+				try {
+					if (
+						cfg.security.require_osv_scanner &&
+						!isGateDisabled("dep-vuln-check") &&
+						!isReachable("osv-scanner", ev.cwd ?? process.cwd())
+					) {
+						addPendingFixes("(global)", [
+							{
+								file: "(global)",
+								gate: "dep-vuln-check",
+								errors: [
+									"osv-scanner is required but not installed. Install: `brew install osv-scanner`. To skip: /qult:skip dep-vuln-check",
+								],
+							},
+						]);
+						try {
+							flushPendingFixes();
+						} catch {
+							/* fail-open */
+						}
+					}
+				} catch {
+					/* fail-open */
+				}
+
+				// Dependency vulnerability scan (once per startup)
+				try {
+					if (!isGateDisabled("dep-vuln-check")) {
+						const cwd = ev.cwd ?? process.cwd();
+						const vulnFixes = scanDependencyVulns(cwd);
+						if (vulnFixes.length > 0) {
+							addPendingFixes("(dep-vuln)", vulnFixes);
+							try {
+								flushPendingFixes();
+							} catch {
+								/* fail-open */
+							}
 						}
 					}
 				} catch {

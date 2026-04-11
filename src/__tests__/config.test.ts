@@ -55,6 +55,7 @@ afterEach(() => {
 	delete process.env.QULT_COVERAGE_THRESHOLD;
 	delete process.env.QULT_CONSUMER_TYPECHECK;
 	delete process.env.QULT_IMPORT_GRAPH_DEPTH;
+	delete process.env.QULT_REQUIRE_OSV_SCANNER;
 });
 
 describe("loadConfig", () => {
@@ -381,6 +382,37 @@ describe("security config", () => {
 		process.env.QULT_REQUIRE_SEMGREP = "1";
 		const config2 = loadConfig();
 		expect(config2.security.require_semgrep).toBe(true);
+	});
+});
+
+describe("require_osv_scanner config", () => {
+	it("defaults to false", () => {
+		const config = loadConfig();
+		expect(config.security.require_osv_scanner).toBe(false);
+	});
+
+	it("env var QULT_REQUIRE_OSV_SCANNER=true enables it", () => {
+		process.env.QULT_REQUIRE_OSV_SCANNER = "true";
+		const config = loadConfig();
+		expect(config.security.require_osv_scanner).toBe(true);
+	});
+
+	it("env var QULT_REQUIRE_OSV_SCANNER=1 enables it", () => {
+		process.env.QULT_REQUIRE_OSV_SCANNER = "1";
+		const config = loadConfig();
+		expect(config.security.require_osv_scanner).toBe(true);
+	});
+
+	it("env var QULT_REQUIRE_OSV_SCANNER=false disables it", () => {
+		process.env.QULT_REQUIRE_OSV_SCANNER = "false";
+		const config = loadConfig();
+		expect(config.security.require_osv_scanner).toBe(false);
+	});
+
+	it("not set leaves default", () => {
+		delete process.env.QULT_REQUIRE_OSV_SCANNER;
+		const config = loadConfig();
+		expect(config.security.require_osv_scanner).toBe(false);
 	});
 });
 

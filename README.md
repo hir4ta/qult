@@ -107,11 +107,15 @@ flowchart LR
 | Detects hallucinated imports | Checks imports against installed packages |
 | Detects export breaking changes | Compares with git HEAD |
 | Detects security patterns (25+ rules) | Secrets, injection, XSS, SSRF, weak crypto |
+| Dependency vulnerability scanning | osv-scanner (all ecosystems: npm, pip, cargo, go, gem, composer, etc.) |
+| Hallucinated package detection | Blocks install of packages that don't exist in registry (AI-specific) |
+| SBOM generation (MCP tool) | CycloneDX JSON via osv-scanner or syft |
 | Detects semantic bugs (6+ patterns) | Empty catch, unreachable code, loose equality, switch fallthrough |
 | Detects code duplication | Intra-file blocking, cross-file advisory |
 | PBT-aware test quality checks | Relaxes weak-matcher warnings for PBT files; suggests PBT for validation/serialization |
 | Test coverage gate (opt-in) | Blocks commit when coverage falls below threshold |
 | SAST integration (Semgrep required) | Semgrep mandatory; blocks commit when not installed |
+| Dependency summary (MCP tool) | Ecosystem-level package count and vulnerability overview |
 | Iterative security escalation | Advisory patterns promoted to blocking after N edits to same file |
 | Test quality blocking | Empty tests, always-true, trivial assertions blocked as pending-fixes |
 | Dead import escalation | Advisory dead imports promoted to blocking after warning threshold |
@@ -124,10 +128,13 @@ flowchart LR
 
 **Required: [Semgrep](https://semgrep.dev)** for SAST analysis. qult blocks commits when Semgrep is not installed (`/qult:skip semgrep-required` to temporarily bypass).
 
+**Recommended: [osv-scanner](https://google.github.io/osv-scanner/)** for dependency vulnerability scanning across all ecosystems (npm, pip, cargo, go, gem, composer, etc.). Also supports SBOM generation.
+
 ```bash
-brew install semgrep  # macOS
+brew install semgrep    # macOS
+brew install osv-scanner  # optional: dependency scanning
 # or
-pip install semgrep   # pip
+pip install semgrep     # pip
 ```
 
 ### Install

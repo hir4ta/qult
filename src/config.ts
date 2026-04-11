@@ -47,6 +47,8 @@ export interface QultConfig {
 	security: {
 		/** Require Semgrep to be installed. Blocks commit when missing. */
 		require_semgrep: boolean;
+		/** Require osv-scanner to be installed. Advisory when missing (default: false). */
+		require_osv_scanner: boolean;
 	};
 	escalation: {
 		security_threshold: number;
@@ -101,6 +103,7 @@ export const DEFAULTS: QultConfig = {
 	},
 	security: {
 		require_semgrep: true,
+		require_osv_scanner: false,
 	},
 	escalation: {
 		security_threshold: 10,
@@ -175,6 +178,8 @@ function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): voi
 	if (raw.security && typeof raw.security === "object") {
 		const s = raw.security as Record<string, unknown>;
 		if (typeof s.require_semgrep === "boolean") config.security.require_semgrep = s.require_semgrep;
+		if (typeof s.require_osv_scanner === "boolean")
+			config.security.require_osv_scanner = s.require_osv_scanner;
 	}
 	if (raw.escalation && typeof raw.escalation === "object") {
 		const e = raw.escalation as Record<string, unknown>;
@@ -335,6 +340,11 @@ export function loadConfig(): QultConfig {
 		config.security.require_semgrep = true;
 	else if (requireSemgrepEnv === "0" || requireSemgrepEnv === "false")
 		config.security.require_semgrep = false;
+	const requireOsvScannerEnv = process.env.QULT_REQUIRE_OSV_SCANNER;
+	if (requireOsvScannerEnv === "1" || requireOsvScannerEnv === "true")
+		config.security.require_osv_scanner = true;
+	else if (requireOsvScannerEnv === "0" || requireOsvScannerEnv === "false")
+		config.security.require_osv_scanner = false;
 
 	// Model env var overrides (non-empty string)
 	const envStr = (key: string): string | undefined => {

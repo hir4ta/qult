@@ -65,7 +65,7 @@ qult/
 - exit 2 = DENY/block (唯一の強制手段)。stderr に理由を出力
 - **enforcement hooks は stdout 不使用** — plugin hook output bug (#16538) を回避
 - SessionStart: DB セッション初期化、startup/clear 時のみ pending-fixes クリア
-- PostToolUse: gate 並列実行 (Promise.allSettled) → state 書き込み (pending-fixes)
+- PostToolUse: gate 並列実行 (Promise.allSettled) → state 書き込み (pending-fixes)。Bash install コマンド検出時は dep-vuln-check (osv-scanner) + hallucinated-package-check (レジストリ存在確認) を実行
 - PreToolUse: pending-fixes チェック → exit 2 (DENY)。Bash は `if: "Bash(git commit*)"` で絞り込み
 - Stop/SubagentStop: 完了条件チェック → exit 2 (block)
 - TaskCompleted: Verify テスト実行 → state 書き込み
@@ -81,9 +81,10 @@ qult/
 - 読み取り: get_pending_fixes, get_session_status, get_gate_config, get_detector_summary
 - 分析: get_harness_report, get_handoff_document, get_metrics_dashboard, get_flywheel_recommendations
 - 操作: disable_gate, enable_gate, clear_pending_fixes, set_config, save_gates
+- 依存: generate_sbom (CycloneDX SBOM 生成, osv-scanner/syft), get_dependency_summary (エコシステム別パッケージ・脆弱性集計)
 - 記録: record_review, record_test_pass, record_stage_scores, record_human_approval
 - get_flywheel_recommendations: セッション横断パターン分析に基づく閾値調整推奨を返す
-- disable_gate は gate 名をバリデーション（gate_configs テーブルのキー + "review", "security-check", "dead-import-check", "duplication-check"）
+- disable_gate は gate 名をバリデーション（gate_configs テーブルのキー + "review", "security-check", "dead-import-check", "duplication-check", "dep-vuln-check", "hallucinated-package-check"）
 - MCP tool の呼び出しルールは MCP server instructions で注入（プロジェクトにファイル配置しない）
 
 ### Config 優先順位

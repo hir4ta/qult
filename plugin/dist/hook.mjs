@@ -390,6 +390,8 @@ function applyConfigLayer(config, raw) {
     const s = raw.security;
     if (typeof s.require_semgrep === "boolean")
       config.security.require_semgrep = s.require_semgrep;
+    if (typeof s.require_osv_scanner === "boolean")
+      config.security.require_osv_scanner = s.require_osv_scanner;
   }
   if (raw.escalation && typeof raw.escalation === "object") {
     const e = raw.escalation;
@@ -527,6 +529,11 @@ function loadConfig() {
     config.security.require_semgrep = true;
   else if (requireSemgrepEnv === "0" || requireSemgrepEnv === "false")
     config.security.require_semgrep = false;
+  const requireOsvScannerEnv = process.env.QULT_REQUIRE_OSV_SCANNER;
+  if (requireOsvScannerEnv === "1" || requireOsvScannerEnv === "true")
+    config.security.require_osv_scanner = true;
+  else if (requireOsvScannerEnv === "0" || requireOsvScannerEnv === "false")
+    config.security.require_osv_scanner = false;
   const envStr = (key) => {
     const val = process.env[key];
     return val?.trim() ? val.trim() : undefined;
@@ -588,7 +595,8 @@ var init_config = __esm(() => {
       import_graph_depth: 1
     },
     security: {
-      require_semgrep: true
+      require_semgrep: true,
+      require_osv_scanner: false
     },
     escalation: {
       security_threshold: 10,
@@ -1984,6 +1992,168 @@ var init_dead_import_check = __esm(() => {
   PY_IMPORT_RE = /^\s*import\s+(.+)/;
 });
 
+// src/hooks/detectors/dep-vuln-check.ts
+import { execFileSync } from "child_process";
+function extractInstalledPackages(command) {
+  const sanitized = command.replace(/\s*(?:&&|\|\||[;|]).*$/, "");
+  for (const { re, pm } of PM_PATTERNS) {
+    if (!re.test(sanitized))
+      continue;
+    const match = sanitized.match(re);
+    if (!match)
+      continue;
+    const afterCmd = sanitized.slice(match.index + match[0].length).trim();
+    const FLAGS_WITH_ARGS = new Set([
+      "-r",
+      "-e",
+      "-c",
+      "-f",
+      "--requirement",
+      "--editable",
+      "--constraint",
+      "--config",
+      "--features",
+      "--path",
+      "--prefix",
+      "--target",
+      "--registry"
+    ]);
+    const tokens = afterCmd.split(/\s+/).filter((t) => t.length > 0);
+    const packages = [];
+    let skipNext = false;
+    for (const token of tokens) {
+      if (skipNext) {
+        skipNext = false;
+        continue;
+      }
+      if (token.startsWith("-")) {
+        if (FLAGS_WITH_ARGS.has(token)) {
+          skipNext = true;
+        }
+        continue;
+      }
+      if (token === "." || token.startsWith("./") || token.startsWith("/") || token.startsWith("~")) {
+        continue;
+      }
+      if (pm === "pip") {
+        packages.push(token.replace(/[><=!~;].*/, ""));
+      } else if (pm === "npm" || pm === "yarn" || pm === "pnpm" || pm === "bun") {
+        let cleaned = token;
+        const lastAt = token.lastIndexOf("@");
+        if (lastAt > 0) {
+          cleaned = token.slice(0, lastAt);
+        }
+        packages.push(cleaned);
+      } else {
+        packages.push(token);
+      }
+    }
+    if (packages.length === 0)
+      return null;
+    return { pm, packages };
+  }
+  return null;
+}
+function getSeverity(vuln) {
+  if (vuln.database_specific?.severity) {
+    return vuln.database_specific.severity.toUpperCase();
+  }
+  if (vuln.severity) {
+    for (const s of vuln.severity) {
+      if ((s.type === "CVSS_V3" || s.type === "CVSS_V4") && s.score) {
+        const vec = s.score;
+        const isNetwork = vec.includes("AV:N");
+        const hasHighImpact = vec.includes("C:H") || vec.includes("I:H") || vec.includes("A:H");
+        if (isNetwork && hasHighImpact)
+          return "HIGH";
+        if (hasHighImpact)
+          return "HIGH";
+        return "MODERATE";
+      }
+    }
+  }
+  return "UNKNOWN";
+}
+function runOsvScanner(args, cwd, timeout) {
+  try {
+    const output = execFileSync("osv-scanner", args, {
+      cwd,
+      timeout,
+      stdio: ["pipe", "pipe", "pipe"],
+      encoding: "utf-8"
+    });
+    return typeof output === "string" ? output : String(output);
+  } catch (err) {
+    if (err && typeof err === "object" && "stdout" in err && typeof err.stdout === "string" && err.stdout.length > 0) {
+      return err.stdout;
+    }
+    return null;
+  }
+}
+function scanDependencyVulns(cwd) {
+  if (isGateDisabled("dep-vuln-check"))
+    return [];
+  const raw = runOsvScanner(["--format", "json", "-r", "."], cwd, SCAN_TIMEOUT);
+  if (!raw)
+    return [];
+  try {
+    return parseOsvOutput(raw);
+  } catch {
+    return [];
+  }
+}
+function parseOsvOutput(raw) {
+  const data = JSON.parse(raw);
+  if (!data.results || !Array.isArray(data.results))
+    return [];
+  const blockingFixes = [];
+  for (const result of data.results) {
+    const sourceFile = result.source?.path ?? "(unknown)";
+    for (const pkg of result.packages ?? []) {
+      const name = pkg.package?.name ?? "unknown";
+      const version = pkg.package?.version ?? "?";
+      for (const vuln of pkg.vulnerabilities ?? []) {
+        const severity = getSeverity(vuln);
+        const id = vuln.id ?? "unknown";
+        const summary = vuln.summary ?? "";
+        const desc = `[${severity}] ${name}@${version} \u2014 ${id}: ${summary}`.slice(0, 300);
+        if (BLOCKING_SEVERITIES.has(severity)) {
+          const existing = blockingFixes.find((f) => f.file === sourceFile);
+          if (existing) {
+            existing.errors.push(desc);
+          } else {
+            blockingFixes.push({
+              file: sourceFile,
+              gate: "dep-vuln-check",
+              errors: [desc]
+            });
+          }
+        } else {
+          process.stderr.write(`[qult] dep-vuln advisory: ${desc}
+`);
+        }
+      }
+    }
+  }
+  return blockingFixes;
+}
+var SCAN_TIMEOUT = 8000, BLOCKING_SEVERITIES, PM_PATTERNS;
+var init_dep_vuln_check = __esm(() => {
+  init_session_state();
+  BLOCKING_SEVERITIES = new Set(["CRITICAL", "HIGH"]);
+  PM_PATTERNS = [
+    { re: /\bnpm\s+(?:install|i|add)\b/, pm: "npm" },
+    { re: /\byarn\s+add\b/, pm: "yarn" },
+    { re: /\bpnpm\s+add\b/, pm: "pnpm" },
+    { re: /\bbun\s+add\b/, pm: "bun" },
+    { re: /\bpip\s+install\b/, pm: "pip" },
+    { re: /\bcargo\s+add\b/, pm: "cargo" },
+    { re: /\bgo\s+get\b/, pm: "go" },
+    { re: /\bgem\s+install\b/, pm: "gem" },
+    { re: /\bcomposer\s+require\b/, pm: "composer" }
+  ];
+});
+
 // src/hooks/detectors/duplication-check.ts
 import { existsSync as existsSync3, readFileSync as readFileSync3 } from "fs";
 import { basename as basename3, dirname as dirname3, extname as extname3, resolve } from "path";
@@ -2246,6 +2416,69 @@ var init_export_check = __esm(() => {
   TS_JS_EXTS2 = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
   EXPORT_RE = /\bexport\s+(?:default\s+)?(?:function|class|const|let|var|type|interface|enum)\s+(\w+)/g;
   FUNC_SIG_RE = /\bexport\s+(?:default\s+)?function\s+(\w+)\s*\(([^)]*)\)/g;
+});
+
+// src/hooks/detectors/hallucinated-package-check.ts
+async function checkPackageExists(pm, packageName) {
+  const urlBuilder = REGISTRY_URLS[pm];
+  if (!urlBuilder)
+    return true;
+  const url = urlBuilder(packageName);
+  const controller = new AbortController;
+  const timeout = setTimeout(() => controller.abort(), CHECK_TIMEOUT);
+  try {
+    const response = await fetch(url, {
+      method: "HEAD",
+      signal: controller.signal
+    });
+    if (response.status === 404)
+      return false;
+    return true;
+  } catch {
+    return true;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+async function checkInstalledPackages(pm, packages) {
+  if (isGateDisabled("hallucinated-package-check"))
+    return [];
+  if (packages.length === 0)
+    return [];
+  const results = await Promise.allSettled(packages.map(async (pkg) => {
+    const exists = await checkPackageExists(pm, pkg);
+    return { pkg, exists };
+  }));
+  const nonExistent = [];
+  for (const result of results) {
+    if (result.status === "fulfilled" && !result.value.exists) {
+      nonExistent.push(result.value.pkg);
+    }
+  }
+  if (nonExistent.length === 0)
+    return [];
+  return [
+    {
+      file: "(install-command)",
+      gate: "hallucinated-package-check",
+      errors: nonExistent.map((pkg) => `Package "${pkg}" does not exist in ${pm} registry \u2014 possible hallucination. Remove or replace with a real package.`)
+    }
+  ];
+}
+var CHECK_TIMEOUT = 3000, REGISTRY_URLS;
+var init_hallucinated_package_check = __esm(() => {
+  init_session_state();
+  REGISTRY_URLS = {
+    npm: (pkg) => `https://registry.npmjs.org/${pkg}`,
+    yarn: (pkg) => `https://registry.npmjs.org/${pkg}`,
+    pnpm: (pkg) => `https://registry.npmjs.org/${pkg}`,
+    bun: (pkg) => `https://registry.npmjs.org/${pkg}`,
+    pip: (pkg) => `https://pypi.org/pypi/${pkg}/json`,
+    cargo: (pkg) => `https://crates.io/api/v1/crates/${pkg}`,
+    gem: (pkg) => `https://rubygems.org/api/v1/gems/${pkg}.json`,
+    go: (pkg) => `https://proxy.golang.org/${pkg}/@v/list`,
+    composer: (pkg) => `https://repo.packagist.org/p2/${pkg}.json`
+  };
 });
 
 // src/hooks/detectors/import-check.ts
@@ -4262,7 +4495,7 @@ async function postTool(ev) {
   if (tool === "Edit" || tool === "Write") {
     await handleEditWrite(ev);
   } else if (tool === "Bash") {
-    handleBash(ev);
+    await handleBash(ev);
   }
 }
 async function handleEditWrite(ev) {
@@ -4659,7 +4892,7 @@ function buildTestFileCommand(testCommand, testFile) {
   }
   return null;
 }
-function handleBash(ev) {
+async function handleBash(ev) {
   const command = typeof ev.tool_input?.command === "string" ? ev.tool_input.command : null;
   if (!command)
     return;
@@ -4672,6 +4905,33 @@ function handleBash(ev) {
   }
   if (isTestCommand(command)) {
     onTestCommand(ev, command);
+  }
+  if (INSTALL_CMD_RE.test(command)) {
+    try {
+      await onInstallCommand(command);
+    } catch {}
+  }
+}
+async function onInstallCommand(command) {
+  const parsed = extractInstalledPackages(command);
+  if (!parsed)
+    return;
+  const cwd = process.cwd();
+  if (!isGateDisabled("hallucinated-package-check") && parsed.packages.length > 0) {
+    try {
+      const hallucinationFixes = await checkInstalledPackages(parsed.pm, parsed.packages);
+      if (hallucinationFixes.length > 0) {
+        addPendingFixes("(install-command)", hallucinationFixes);
+      }
+    } catch {}
+  }
+  if (!isGateDisabled("dep-vuln-check")) {
+    try {
+      const vulnFixes = scanDependencyVulns(cwd);
+      if (vulnFixes.length > 0) {
+        addPendingFixes("(dep-vuln)", vulnFixes);
+      }
+    } catch {}
   }
 }
 function onGitCommit() {
@@ -4772,7 +5032,7 @@ function getToolOutput(ev) {
     return ev.tool_output;
   return "";
 }
-var planWarnedAt, GIT_COMMIT_RE, LINT_FIX_RE, TEST_CMD_RE;
+var planWarnedAt, GIT_COMMIT_RE, LINT_FIX_RE, TEST_CMD_RE, INSTALL_CMD_RE;
 var init_post_tool = __esm(() => {
   init_config();
   init_load();
@@ -4782,9 +5042,11 @@ var init_post_tool = __esm(() => {
   init_session_state();
   init_convention_check();
   init_dead_import_check();
+  init_dep_vuln_check();
   init_diagnostic_classifier();
   init_duplication_check();
   init_export_check();
+  init_hallucinated_package_check();
   init_import_check();
   init_import_graph();
   init_security_check();
@@ -4797,6 +5059,7 @@ var init_post_tool = __esm(() => {
   GIT_COMMIT_RE = /\bgit\s+(?:-\S+(?:\s+\S+)?\s+)*commit\b/i;
   LINT_FIX_RE = /\b(biome\s+(check|lint).*--(fix|write)|biome\s+format|eslint.*--fix|prettier.*--write|ruff\s+check.*--fix|ruff\s+format|gofmt|go\s+fmt|cargo\s+fmt|autopep8|black)\b/;
   TEST_CMD_RE = /\b(bun\s+)?(vitest|jest|mocha|pytest|go\s+test|cargo\s+test)\b/;
+  INSTALL_CMD_RE = /\b(npm\s+(?:install|i|add)|pip\s+install|cargo\s+add|go\s+get|bun\s+add|yarn\s+add|pnpm\s+add|gem\s+install|composer\s+require)\b/;
 });
 
 // src/hooks/pre-tool.ts
@@ -6138,8 +6401,8 @@ function isReachable(exe, root) {
   if (existsSync14(nodeModulesBin))
     return true;
   try {
-    const { execFileSync } = __require("child_process");
-    execFileSync("/bin/sh", ["-c", `command -v ${exe}`], {
+    const { execFileSync: execFileSync2 } = __require("child_process");
+    execFileSync2("/bin/sh", ["-c", `command -v ${exe}`], {
       encoding: "utf-8",
       stdio: "pipe"
     });
@@ -6375,6 +6638,34 @@ async function sessionStart(ev) {
             } catch {}
           }
         } catch {}
+        try {
+          if (cfg.security.require_osv_scanner && !isGateDisabled("dep-vuln-check") && !isReachable("osv-scanner", ev.cwd ?? process.cwd())) {
+            addPendingFixes("(global)", [
+              {
+                file: "(global)",
+                gate: "dep-vuln-check",
+                errors: [
+                  "osv-scanner is required but not installed. Install: `brew install osv-scanner`. To skip: /qult:skip dep-vuln-check"
+                ]
+              }
+            ]);
+            try {
+              flush();
+            } catch {}
+          }
+        } catch {}
+        try {
+          if (!isGateDisabled("dep-vuln-check")) {
+            const cwd = ev.cwd ?? process.cwd();
+            const vulnFixes = scanDependencyVulns(cwd);
+            if (vulnFixes.length > 0) {
+              addPendingFixes("(dep-vuln)", vulnFixes);
+              try {
+                flush();
+              } catch {}
+            }
+          }
+        } catch {}
       }
     }
     markSessionStartCompleted();
@@ -6387,6 +6678,7 @@ var init_session_start = __esm(() => {
   init_metrics();
   init_pending_fixes();
   init_session_state();
+  init_dep_vuln_check();
   init_lazy_init();
 });
 

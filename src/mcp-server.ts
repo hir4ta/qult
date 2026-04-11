@@ -9,6 +9,7 @@
  * to eliminate the 660KB SDK dependency and reduce coupling to SDK releases.
  */
 
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -17,6 +18,7 @@ import { loadConfig, resetConfigCache } from "./config.ts";
 import { loadGates, saveGates } from "./gates/load.ts";
 import { generateHandoffDocument } from "./handoff.ts";
 import { generateHarnessReport } from "./harness-report.ts";
+import { runOsvScanner } from "./hooks/detectors/dep-vuln-check.ts";
 import { computeFileHealthScore } from "./hooks/detectors/health-score.ts";
 import { findImporters } from "./hooks/detectors/import-graph.ts";
 import { validateTestCoversImpl } from "./hooks/detectors/spec-trace-check.ts";
@@ -47,6 +49,8 @@ function getValidGateNames(): string[] {
 		"test-quality-check",
 		"security-check-advisory",
 		"coverage",
+		"dep-vuln-check",
+		"hallucinated-package-check",
 	]);
 	if (gates) {
 		for (const category of [gates.on_write, gates.on_commit, gates.on_review]) {
@@ -339,6 +343,18 @@ const TOOL_DEFS: ToolDef[] = [
 			},
 			required: ["test_file", "impl_file"],
 		},
+	},
+	{
+		name: "generate_sbom",
+		description:
+			"Generate a Software Bill of Materials (SBOM) for the project in CycloneDX JSON format. Uses osv-scanner or syft. Slower than other tools (up to 30s).",
+		inputSchema: { type: "object", properties: {} },
+	},
+	{
+		name: "get_dependency_summary",
+		description:
+			"Get a summary of project dependencies: package count by ecosystem and known vulnerability count. Uses osv-scanner.",
+		inputSchema: { type: "object", properties: {} },
 	},
 ];
 
@@ -978,6 +994,78 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 							text: JSON.stringify({ test_file: testFile, impl_file: implFile, covered: false }),
 						},
 					],
+				};
+			}
+		}
+		case "generate_sbom": {
+			try {
+				const output = runOsvScanner(["--format", "cyclonedx-1-5", "-r", "."], cwd, 30_000);
+				if (output) {
+					return { content: [{ type: "text", text: output }] };
+				}
+				// osv-scanner not available — try syft as fallback
+				try {
+					const syftOutput = execFileSync("syft", [".", "-o", "cyclonedx-json"], {
+						cwd,
+						timeout: 30_000,
+						encoding: "utf-8",
+						stdio: ["pipe", "pipe", "pipe"],
+					});
+					return { content: [{ type: "text", text: typeof syftOutput === "string" ? syftOutput : String(syftOutput) }] };
+				} catch {
+					return {
+						isError: true,
+						content: [
+							{
+								type: "text",
+								text: "Neither osv-scanner nor syft is installed. Install one: `brew install osv-scanner` or `brew install syft`.",
+							},
+						],
+					};
+				}
+			} catch {
+				return {
+					isError: true,
+					content: [{ type: "text", text: "Failed to generate SBOM." }],
+				};
+			}
+		}
+		case "get_dependency_summary": {
+			try {
+				const raw = runOsvScanner(["--format", "json", "-r", "."], cwd, 15_000);
+				if (!raw) {
+					return {
+						isError: true,
+						content: [
+							{
+								type: "text",
+								text: "osv-scanner is not installed. Install: `brew install osv-scanner`.",
+							},
+						],
+					};
+				}
+				const data = JSON.parse(raw);
+				const ecosystems: Record<string, { packages: number; vulns: number }> = {};
+				for (const result of data.results ?? []) {
+					for (const pkg of result.packages ?? []) {
+						const eco = pkg.package?.ecosystem ?? "unknown";
+						if (!ecosystems[eco]) ecosystems[eco] = { packages: 0, vulns: 0 };
+						ecosystems[eco].packages++;
+						ecosystems[eco].vulns += (pkg.vulnerabilities ?? []).length;
+					}
+				}
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({ ecosystems, total_sources: (data.results ?? []).length }),
+						},
+					],
+				};
+			} catch {
+				return {
+					isError: true,
+					content: [{ type: "text", text: "Failed to get dependency summary." }],
 				};
 			}
 		}

@@ -107,11 +107,15 @@ flowchart LR
 | ハルシネーション import 検出 | インストール済みパッケージと照合 |
 | export 破壊的変更検出 | git HEAD と比較 |
 | セキュリティパターン検出 (25+ ルール) | シークレット、インジェクション、XSS、弱い暗号 |
+| 依存パッケージ脆弱性スキャン | osv-scanner による全エコシステム対応 (npm, pip, cargo, go, gem, composer 等) |
+| 幻覚パッケージ検出 | レジストリに存在しないパッケージのインストールをブロック（AI 特有） |
+| SBOM 生成 (MCP ツール) | osv-scanner/syft による CycloneDX JSON 出力 |
 | セマンティックバグ検出 (6+ パターン) | 空 catch、到達不能コード、switch fallthrough |
 | コード重複検出 | ファイル内はブロック、ファイル間は警告 |
 | PBT 対応テスト品質チェック | PBT ファイルの weak-matcher 緩和 + バリデーション系ファイルで PBT 推奨 |
 | テストカバレッジゲート (opt-in) | カバレッジが閾値未満ならコミットをブロック |
 | SAST 統合 (Semgrep 必須) | Semgrep 必須化。未インストール時はコミットをブロック |
+| 依存サマリー (MCP ツール) | エコシステム別パッケージ数・脆弱性数の概要 |
 | 反復セキュリティ昇格 | 同一ファイル N 回編集で advisory パターンを blocking に昇格 |
 | テスト品質 blocking | 空テスト・always-true・trivial assertion をブロック |
 | dead import エスカレーション | 警告閾値超過で blocking に昇格 |
@@ -124,8 +128,11 @@ flowchart LR
 
 **必須: [Semgrep](https://semgrep.dev)** — SAST 解析。未インストール時はコミットをブロック（`/qult:skip semgrep-required` で一時的に回避可能）。
 
+**推奨: [osv-scanner](https://google.github.io/osv-scanner/)** — 依存パッケージ脆弱性スキャン。全エコシステム対応（npm, pip, cargo, go, gem, composer 等）。SBOM 生成にも使用。
+
 ```bash
-brew install semgrep  # macOS
+brew install semgrep      # macOS
+brew install osv-scanner  # 推奨: 依存スキャン
 # or
 pip install semgrep   # pip
 ```

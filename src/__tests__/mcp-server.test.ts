@@ -125,7 +125,7 @@ describe("handleRequest (JSON-RPC)", () => {
 	it("tools/list returns all tool definitions", () => {
 		const response = handleRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" }, TEST_DIR);
 		const result = response!.result as { tools: { name: string }[] };
-		expect(result.tools).toHaveLength(23);
+		expect(result.tools).toHaveLength(25);
 		expect(result.tools.map((t) => t.name)).toEqual([
 			"get_pending_fixes",
 			"get_session_status",
@@ -150,6 +150,8 @@ describe("handleRequest (JSON-RPC)", () => {
 			"save_gates",
 			"get_impact_analysis",
 			"get_call_coverage",
+			"generate_sbom",
+			"get_dependency_summary",
 		]);
 	});
 
@@ -193,8 +195,14 @@ describe("handleRequest (JSON-RPC)", () => {
 });
 
 describe("TOOL_DEFS", () => {
-	it("has 23 tool definitions", () => {
-		expect(TOOL_DEFS).toHaveLength(23);
+	it("has 25 tool definitions", () => {
+		expect(TOOL_DEFS).toHaveLength(25);
+	});
+
+	it("includes generate_sbom and get_dependency_summary tools", () => {
+		const names = TOOL_DEFS.map((t) => t.name);
+		expect(names).toContain("generate_sbom");
+		expect(names).toContain("get_dependency_summary");
 	});
 
 	it("each tool has name, description, and inputSchema", () => {
@@ -860,5 +868,23 @@ describe("instructions include impact analysis guidance", () => {
 		);
 		const result = req as { result?: { instructions?: string } };
 		expect(result.result?.instructions).toContain("get_impact_analysis");
+	});
+});
+
+describe("dep-vuln-check and hallucinated-package-check gate names", () => {
+	it("disable_gate accepts dep-vuln-check", () => {
+		const result = handleTool("disable_gate", TEST_DIR, {
+			gate_name: "dep-vuln-check",
+			reason: "Not needed for this testing session",
+		});
+		expect(result.content[0]!.text).toContain("disabled");
+	});
+
+	it("disable_gate accepts hallucinated-package-check", () => {
+		const result = handleTool("disable_gate", TEST_DIR, {
+			gate_name: "hallucinated-package-check",
+			reason: "Not needed for this testing session",
+		});
+		expect(result.content[0]!.text).toContain("disabled");
 	});
 });
