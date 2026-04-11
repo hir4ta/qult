@@ -105,7 +105,8 @@ export function runGateAsync(
 	file?: string,
 ): Promise<GateResult> {
 	const config = loadConfig();
-	const command = file ? gate.command.replace("{file}", shellEscape(file)) : gate.command;
+	const baseCmd = gate.structured_command ?? gate.command;
+	const command = file ? baseCmd.replace("{file}", shellEscape(file)) : baseCmd;
 	const timeout = gate.timeout ?? config.gates.default_timeout;
 	const maxChars = config.gates.output_max_chars;
 	const start = Date.now();
@@ -131,7 +132,7 @@ export function runGateAsync(
 					const output =
 						prefix +
 						(smartTruncate(deduplicateErrors(raw), maxChars) || `Exit code ${err.code ?? 1}`);
-					const classified = classifyTypecheckOutput(name, gate.command, raw);
+					const classified = classifyTypecheckOutput(name, command, raw);
 					resolve({ name, passed: false, output, duration_ms, ...classified });
 				} else {
 					const output = smartTruncate(stdout ?? "", maxChars);
@@ -187,20 +188,26 @@ export function runGate(name: string, gate: GateDefinition, file?: string): Gate
  *  Only runs for gates named "typecheck". Returns partial GateResult with classifiedDiagnostics. */
 function classifyTypecheckOutput(
 	gateName: string,
-	command: string,
+	_command: string,
 	raw: string,
 ): { classifiedDiagnostics?: ClassifiedDiagnostic[] } {
 	if (gateName !== "typecheck" || !raw) return {};
 	try {
-		let diagnostics: ClassifiedDiagnostic[];
-		if (command.includes("pyright") && command.includes("--outputjson")) {
+		let diagnostics: ClassifiedDiagnostic[] = [];
+
+		// Try structured JSON parsers first (pyright, cargo)
+		// pyright JSON has generalDiagnostics, cargo JSONL has reason: "compiler-message"
+		if (raw.includes('"generalDiagnostics"')) {
 			diagnostics = parsePyrightOutput(raw);
-		} else if (command.includes("cargo") && command.includes("--message-format=json")) {
+		} else if (raw.includes('"compiler-message"')) {
 			diagnostics = parseCargoOutput(raw);
-		} else {
-			// Default: tsc text output
+		}
+
+		// Fallback: tsc text output
+		if (diagnostics.length === 0) {
 			diagnostics = parseTscOutput(raw);
 		}
+
 		return diagnostics.length > 0 ? { classifiedDiagnostics: diagnostics } : {};
 	} catch {
 		return {}; // fail-open

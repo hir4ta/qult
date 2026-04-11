@@ -34,6 +34,11 @@ import { detectHallucinatedImports } from "./detectors/import-check.ts";
 import { findImporters } from "./detectors/import-graph.ts";
 import { detectSecurityPatterns, getAdvisoryAsPendingFixes } from "./detectors/security-check.ts";
 import { detectSemanticPatterns } from "./detectors/semantic-check.ts";
+import {
+	parseVerifyField,
+	validateTestCoversImpl,
+	validateTestFileExists,
+} from "./detectors/spec-trace-check.ts";
 import { resolveTestFile } from "./detectors/test-file-resolver.ts";
 import {
 	analyzeTestQuality,
@@ -154,7 +159,63 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 	// Export breaking change detection (L4)
 	try {
 		const exportFixes = detectExportBreakingChanges(file);
-		newFixes.push(...exportFixes);
+		if (exportFixes.length > 0) {
+			newFixes.push(...exportFixes);
+			// Find consumers of this file and flag them as needing updates
+			try {
+				const consumers = findImporters(file, process.cwd());
+				for (const consumer of consumers) {
+					const removedNames = exportFixes.flatMap((f) =>
+						f.errors
+							.map((e) => {
+								const m = e.match(/export "(\w+)" was removed/);
+								return m ? m[1] : null;
+							})
+							.filter(Boolean),
+					);
+					newFixes.push({
+						file: consumer,
+						errors: [
+							`Consumer may be broken: ${file} removed exports [${removedNames.join(", ")}]. Update imports.`,
+						],
+						gate: "export-check",
+					});
+				}
+			} catch {
+				/* fail-open */
+			}
+		}
+	} catch {
+		/* fail-open */
+	}
+
+	// Spec-trace validation: when plan is active, check Verify tests cover this file
+	try {
+		const plan = getActivePlan();
+		if (plan?.tasks) {
+			for (const task of plan.tasks) {
+				if (!task.verify || !task.file) continue;
+				if (resolve(task.file) !== resolve(file)) continue;
+				const parsed = parseVerifyField(task.verify);
+				if (!parsed) continue;
+				const absTestFile = resolve(parsed.testFile);
+				if (!validateTestFileExists(absTestFile)) {
+					newFixes.push({
+						file,
+						errors: [`Verify test not found: ${parsed.testFile}. Create the test file first.`],
+						gate: "spec-trace-check",
+					});
+				} else if (!validateTestCoversImpl(absTestFile, parsed.testFunction, file, process.cwd())) {
+					newFixes.push({
+						file,
+						errors: [
+							`Verify test ${parsed.testFile} does not import ${file}. Test must cover the implementation.`,
+						],
+						gate: "spec-trace-check",
+					});
+				}
+			}
+		}
 	} catch {
 		/* fail-open */
 	}

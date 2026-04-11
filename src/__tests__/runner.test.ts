@@ -116,6 +116,29 @@ describe("runGateAsync", () => {
 		expect(result.classifiedDiagnostics).toBeUndefined();
 	});
 
+	it("uses structured_command when available for typecheck", async () => {
+		// Simulate pyright --outputjson output
+		const pyrightJson = JSON.stringify({
+			generalDiagnostics: [
+				{
+					file: "src/main.py",
+					range: { start: { line: 5 } },
+					rule: "reportMissingImports",
+					message: 'Import "nonexistent" could not be resolved',
+				},
+			],
+		});
+		const result = await runGateAsync("typecheck", {
+			command: "exit 1",
+			structured_command: `echo '${pyrightJson}' && exit 1`,
+			timeout: 3000,
+		});
+		expect(result.passed).toBe(false);
+		expect(result.classifiedDiagnostics).toBeDefined();
+		expect(result.classifiedDiagnostics).toHaveLength(1);
+		expect(result.classifiedDiagnostics![0]!.category).toBe("hallucinated-import");
+	});
+
 	it("leaves classifiedDiagnostics undefined when output has no parseable errors", async () => {
 		const result = await runGateAsync("typecheck", {
 			command: "echo 'some non-error output' && exit 1",
