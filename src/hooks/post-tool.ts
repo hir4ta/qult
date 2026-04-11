@@ -27,9 +27,11 @@ import {
 import type { GateDefinition, HookEvent, PendingFix } from "../types.ts";
 import { detectConventionDrift } from "./detectors/convention-check.ts";
 import { detectDeadImports } from "./detectors/dead-import-check.ts";
+import { classifiedToPendingFixes } from "./detectors/diagnostic-classifier.ts";
 import { detectCrossFileDuplication, detectDuplication } from "./detectors/duplication-check.ts";
 import { detectExportBreakingChanges } from "./detectors/export-check.ts";
 import { detectHallucinatedImports } from "./detectors/import-check.ts";
+import { findImporters } from "./detectors/import-graph.ts";
 import { detectSecurityPatterns, getAdvisoryAsPendingFixes } from "./detectors/security-check.ts";
 import { detectSemanticPatterns } from "./detectors/semantic-check.ts";
 import { resolveTestFile } from "./detectors/test-file-resolver.ts";
@@ -110,7 +112,13 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 					markGateRan(entry.name);
 				}
 				if (!settled.value.passed) {
-					newFixes.push({ file, errors: [settled.value.output], gate: entry.name });
+					// Use classified diagnostics if available (typecheck gates), otherwise fallback
+					const classified = settled.value.classifiedDiagnostics;
+					if (classified?.length) {
+						newFixes.push(...classifiedToPendingFixes(classified));
+					} else {
+						newFixes.push({ file, errors: [settled.value.output], gate: entry.name });
+					}
 					// 3-Strike escalation: track repeated failures
 					try {
 						const count = incrementGateFailure(file, entry.name);
@@ -331,6 +339,36 @@ async function handleEditWrite(ev: HookEvent): Promise<void> {
 					process.stderr.write(
 						`[qult] Iterative security escalation: ${relative} edited ${editCount} times — advisory patterns promoted to blocking\n`,
 					);
+				}
+			}
+		}
+	} catch {
+		/* fail-open */
+	}
+
+	// Consumer typecheck: re-run typecheck on files that import the changed file
+	try {
+		const config = loadConfig();
+		if (config.gates.consumer_typecheck) {
+			const gates = loadGates();
+			const typecheckGate = gates?.on_write?.typecheck;
+			if (typecheckGate?.run_once_per_batch) {
+				// typecheck is whole-project, already covers consumers
+			} else if (typecheckGate) {
+				const importers = findImporters(file, process.cwd(), config.gates.import_graph_depth);
+				const consumerResults = await Promise.allSettled(
+					importers.map((imp) => runGateAsync("typecheck", typecheckGate, imp)),
+				);
+				for (let ci = 0; ci < consumerResults.length; ci++) {
+					const cr = consumerResults[ci]!;
+					if (cr.status === "fulfilled" && !cr.value.passed) {
+						const classified = cr.value.classifiedDiagnostics;
+						if (classified?.length) {
+							newFixes.push(...classifiedToPendingFixes(classified));
+						} else {
+							newFixes.push({ file: importers[ci]!, errors: [cr.value.output], gate: "typecheck" });
+						}
+					}
 				}
 			}
 		}

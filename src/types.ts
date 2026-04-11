@@ -57,4 +57,6 @@ export interface GateDefinition {
 	timeout?: number;
 	run_once_per_batch?: boolean;
 	extensions?: string[];
+	/** Alternative command that produces structured (JSON) output for diagnostic classification. */
+	structured_command?: string;
 }

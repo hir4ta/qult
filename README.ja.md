@@ -155,6 +155,30 @@ pip install semgrep   # pip
 /qult:doctor
 ```
 
+### オプション: LSP 連携
+
+言語サーバーをインストールすると、qult の検出精度が向上します:
+
+- **ハルシネーション検出**: 型チェッカーのエラーを分類（未定義メソッド、存在しないシンボル等）
+- **クロスファイル影響分析**: Python、Go、Rust でも変更ファイルの消費者を検出（TypeScript/JavaScript に加えて）
+- **未使用インポート検出**: LSP が利用可能な場合、正規表現ベースのヒューリスティックに代わってセマンティック分析を使用
+
+```bash
+# TypeScript/JavaScript
+npm install -g typescript-language-server typescript
+
+# Python
+pip install pyright
+
+# Go
+go install golang.org/x/tools/gopls@latest
+
+# Rust
+rustup component add rust-analyzer
+```
+
+`/qult:init` がインストール済みの言語サーバーを自動検出します。LSP は**オプション** — サーバーが未インストールの場合は正規表現ベースの検出にフォールバックします（fail-open）。
+
 ### アンインストール
 
 ```

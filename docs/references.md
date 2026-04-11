@@ -20,6 +20,11 @@ qult の設計は以下の論文・記事に基づいている。機能追加や
 - [Anthropic: Infrastructure Noise in Evals](https://www.anthropic.com/engineering/infrastructure-noise) — インフラ設定だけで 6pp の差。リーダーボード差 3pp 未満は懐疑的に
 - [Anthropic: Writing Effective Tools](https://www.anthropic.com/engineering/writing-tools-for-agents) — エージェントはツールの品質に制約される。Claude で自身のツールを最適化するメタエンジニアリング
 - [CodeScene: Agentic AI Best Practice Patterns](https://codescene.com/blog/agentic-ai-coding-best-practice-patterns-for-speed-with-quality) — AI 向けコードヘルス閾値 9.5+（人間向け 9.0）。MCP ガイド付きで 2-5x 改善。6 運用パターン
+- [OpenAI: Harness Engineering](https://openai.com/index/harness-engineering/) — OpenAI の公式ハーネスエンジニアリング採用。「制約を機械的に強制」。カスタムリンター + 構造テストによる品質保証。~1/10 の開発時間
+- [OpenAI: Unlocking the Codex Harness](https://openai.com/index/unlocking-the-codex-harness/) — Codex App Server の内部アーキテクチャ詳解
+- [Harness Engineering: Control, Agency, Runtime](https://www.preprints.org/manuscript/202603.1756) — ハーネスを 3 層に形式化: Control（行動前の永続的成果物）/ Agency（行動の許可範囲）/ Runtime（実行時ガバナンス）
+- [Natural-Language Agent Harnesses](https://arxiv.org/abs/2603.25723) — ハーネスエンジニアリング概念の arXiv 形式化
+- [Simon Willison: Agentic Engineering Patterns](https://simonwillison.net/2026/Feb/23/agentic-engineering-patterns/) — Gang of Four 風のエージェントコーディングパターン集。TDD パターンを超えた包括的ガイド
 
 ## TDD・仕様駆動開発
 
@@ -40,6 +45,9 @@ qult の設計は以下の論文・記事に基づいている。機能追加や
 - [Security Degradation in Iterative AI Code](https://arxiv.org/abs/2506.11022) — 反復改善で重大脆弱性 37.6% 増加。セキュリティプロンプトは初期 1-3 回のみ有効
 - [AI Code Vulnerabilities at Scale (GitHub)](https://arxiv.org/abs/2510.26103) — 7,703 ファイル、4,241 CWE。Python 脆弱性率 16-18.5%
 - [Veracode 2025: GenAI Code Security](https://www.veracode.com/blog/genai-code-security-report/) — 45% のタスクでセキュリティ脆弱性。Java 72% 失敗。XSS 86% 失敗
+- [Veracode: AI-Generated Code Security Risks](https://www.veracode.com/blog/ai-generated-code-security-risks/) — 45% 脆弱性率は複数テストサイクルで**改善せず**。XSS 防御 86% 失敗、ログインジェクション 88% 脆弱。構造的ゲートは一時的ではなく恒久的に必要
+- [CSA: AI-Generated CVE Surge](https://labs.cloudsecurityalliance.org/research/csa-research-note-ai-generated-code-vulnerability-surge-2026/) — AI 起因 CVE が 3 ヶ月で 6 倍 (6→35)。真の件数は検出の 5-10 倍 (Georgia Tech 推定)
+- [CSA: Vibe Coding Security Crisis](https://labs.cloudsecurityalliance.org/research/csa-research-note-ai-generated-code-security-vibe-coding-202/) — Fortune 50 データ: AI 支援開発者はコミット 3-4x だがセキュリティ所見 10x。セキュリティ負債の蓄積速度が改善速度を超過
 - [AI Code Security Crisis 2026](https://www.growexx.com/blog/ai-code-security-crisis-2026-cto-guide/) — AI 生成コードが 5 件に 1 件のセキュリティ侵害の原因
 - [AI Code Vulnerabilities 2.74x](https://www.softwareseni.com/ai-generated-code-security-risks-why-vulnerabilities-increase-2-74x-and-how-to-prevent-them/) — AI 生成コードの脆弱性は人間の 2.74 倍
 - [GitGuardian: Shifting Security Left for AI Agents](https://blog.gitguardian.com/shifting-security-left-for-ai-agents-enforcing-ai-generated-code-security-with-gitguardian-mcp/) — MCP 経由で AI エージェントにシークレット検出を統合
@@ -91,6 +99,15 @@ qult の設計は以下の論文・記事に基づいている。機能追加や
 - [Governance Architecture for Autonomous Agent Systems (LGA)](https://arxiv.org/abs/2603.07191) — 4 層ガバナンス: L1 実行サンドボックス / L2 意図検証 / L3 ゼロトラスト認可 / L4 不変監査ログ
 - [Aegis: Cryptographic Runtime Governance](https://arxiv.org/abs/2603.16938) — ポリシー違反アクションを暗号的に実行不能に。ポリシーを「助言」ではなく「実行条件」として扱う究極形
 - [Enforcing Company Policy in Agentic Workflows (ToolGuard)](https://arxiv.org/abs/2507.16459) — オフラインビルド時にポリシーを検証可能なガードコードにコンパイル → ランタイムで各アクション前に遵守チェック
+- [Reward Hacking as Equilibrium](https://arxiv.org/abs/2603.28063) — 有限評価下で AI は評価されない品質次元に投資しない。報酬ハッキングは修正可能なバグではなく構造的均衡。決定論的強制が唯一の解であることの数学的証明
+- [TRACE: Benchmarking Reward Hack Detection](https://arxiv.org/abs/2601.20103) — 517 テスト軌跡、54 カテゴリの報酬エクスプロイト。最高検出率 63%（GPT-5.2）。仕様ゲーミング・報酬改竄・プロキシ最適化の分類学
+- [Specification Self-Correction (SSC)](https://arxiv.org/abs/2507.18742) — モデルは汚染された仕様を 50-70% ゲーミング。SSC プロセスで 90%+ 低減。仕様の自己修正フレームワーク
+- [Demonstrating Specification Gaming](https://arxiv.org/abs/2502.13295) — フロンティアエージェントが指示に従わずチートする機会をどう悪用するか評価
+- [Microsoft Agent Governance Toolkit](https://opensource.microsoft.com/blog/2026/04/02/introducing-the-agent-governance-toolkit-open-source-runtime-security-for-ai-agents/) — OWASP Agentic AI Top 10 全対応。サブミリ秒の決定論的ポリシー強制。Python/Rust/TypeScript/Go/.NET 対応
+- [Runtime Governance: Policies on Paths](https://arxiv.org/abs/2603.16586) — コンプライアンスポリシーを決定論的関数として形式化。フリートレベルガバナンス
+- [AgentGuardian: Learning Access Control](https://arxiv.org/abs/2601.10440) — ステージング環境で正当な行動を学習 → 適応的ポリシー導出。実行トレースからのアクセス制御
+- [Faramesh: Execution Control Plane](https://arxiv.org/abs/2601.17744) — MCP ツール呼び出しにミドルウェアを注入。IDE エージェントのガバナンス
+- [Towards a Science of AI Agent Reliability](https://arxiv.org/abs/2602.16666) — エージェント信頼性の 12 指標: 一貫性・堅牢性・予測可能性・安全性の 4 次元。Replit の本番 DB 削除、OpenAI Operator の無断購入等の実インシデント
 
 ## エージェント障害パターン・バグ分類
 
@@ -98,6 +115,9 @@ qult の設計は以下の論文・記事に基づいている。機能追加や
 - [Why Multi-Agent LLM Systems Fail (MAST)](https://arxiv.org/abs/2503.13657) — 初の Multi-Agent System Failure Taxonomy: 3 カテゴリ 14 障害モード。1,600+ トレース、κ=0.88
 - [A Survey of Bugs in AI-Generated Code](https://arxiv.org/abs/2512.05239) — AI コードバグの 3 分類: Best Practices 違反 / Code Style 違反 / Error Prone 違反。10 パターン分類学
 - [Multi-Agent Teams Hold Experts Back](https://arxiv.org/abs/2602.01011) — LLM チームは最良エージェント単体に安定して劣る（最大 37.6% の性能低下）。ナイーブなマルチエージェントスケーリングへの警告
+- [Systematic Failures in Collective Reasoning](https://arxiv.org/abs/2505.11556) — 敵対的エージェント 1 体で議論後精度がほぼ 2 倍 (0.233→0.492)。早すぎる合意の破壊が有効。qult の Adversarial Reviewer の根拠
+- [LLMs Miss the Multi-Agent Mark](https://arxiv.org/abs/2505.21298) — エージェント間障害の 37% が相互不整合。自然言語の曖昧性が根本原因。構造化プロトコルの必要性
+- [Large-Scale Study on MAS Development](https://arxiv.org/abs/2601.07136) — 42K+ コミット、4.7K+ 解決 Issue の実証分析。エージェント協調が全 Issue の 10%
 - [Columbia DAPLab: 9 Critical Failure Patterns](https://daplab.cs.columbia.edu/general/2026/01/08/9-critical-failure-patterns-of-coding-agents.html) — サイレント障害・ビジネスロジック不一致・コードベース認識劣化
 - [Columbia DAPLab: Policy Enforcement](https://daplab.cs.columbia.edu/general/2026/01/10/vibe-coding-needs-policy-enforcement.html) — エージェントは要件を「好み」として扱う。ポリシーの構造的強制が必要
 - [Columbia DAPLab: Agent README Problem](https://daplab.cs.columbia.edu/general/2026/03/31/your-ai-agent-doesnt-care-about-your-readme.html) — 人間向けドキュメントはエージェントに機能しない
@@ -108,6 +128,7 @@ qult の設計は以下の論文・記事に基づいている。機能追加や
 - [AgentFixer](https://arxiv.org/abs/2603.29848) — LLM エージェントシステムの障害検出から修正推奨へ
 - [Policy-as-Prompt: Governance → Guardrails](https://arxiv.org/abs/2509.23994) — ポリシーツリー → ランタイム分類器
 - [Failed Agentic PRs in GitHub](https://arxiv.org/abs/2601.15195) — 33K エージェント PR 分析。バグ修正・パフォーマンスタスクが最低成績
+- [Codified Context Infrastructure](https://arxiv.org/abs/2602.20478) — 108K 行 C# システム、283 セッションで開発。永続メモリ欠如とクロスセッション一貫性喪失への対処
 
 ## コンテキストドリフト・マルチエージェント
 
@@ -115,6 +136,7 @@ qult の設計は以下の論文・記事に基づいている。機能追加や
 - [Google DeepMind: Scaling Agent Systems](https://arxiv.org/abs/2512.08296) — 独立エージェントはエラーを 17.2 倍に増幅。4 エージェント超で協調オーバーヘッドが利益を消費
 - [Detecting Silent Failures in Multi-Agent Systems](https://arxiv.org/abs/2511.04032) — drift/cycle/missing-detail/tool-failure の分類。96-98% の検出精度
 - [Context Drift Kills Agents](https://zylos.ai/research/2026-02-28-ai-agent-context-compression-strategies) — 企業 AI 障害の 65% がコンテキストドリフトまたはメモリ喪失。35 分超で性能劣化
+- [Context Drift Causes 65% of Failures](https://memu.pro/blog/ai-context-drift-enterprise-agent-memory) — 初期 2% のズレが会話チェーン終盤で 40% の失敗に複合。永続メモリはインフラであり機能ではない
 - [AGENTS.md Impact on Agent Efficiency](https://arxiv.org/abs/2601.20404) — AGENTS.md でランタイム 28.64% 短縮、トークン消費 16.58% 減
 - [AI Agents Need Memory Control](https://arxiv.org/abs/2601.11653) — メモリをインフラとして形式化。10 ターン超で永続メモリ必須
 - [Code Agent Success/Failure Trajectories](https://arxiv.org/abs/2511.00197) — 失敗トラジェクトリは一貫して長く高分散
@@ -136,6 +158,10 @@ qult の設計は以下の論文・記事に基づいている。機能追加や
 - [Nonstandard Errors in AI Agents](https://arxiv.org/abs/2603.16744) — 異なるモデルファミリーは安定して異なる分析スタイル。レビュアーモデル多様性の根拠
 - [Automated Code Review at Ericsson](https://arxiv.org/abs/2507.19115) — 企業規模での LLM コードレビュー。採用率: 月 1 で 4% → 月 6 で 83% ピーク → 60% に安定
 - [LLM Code Review: 67.83% Correction Rate](https://arxiv.org/abs/2505.20206) — LLM は不正コードの 67.83% を修正可能。ただし正しいコードの 24.80% に誤提案（偽陽性率）
+- [AI Code Review Fails to Catch AI-Generated Vulnerabilities](https://www.augmentedswe.com/p/ai-code-review-security) — 自己エラーの 64.5% を修正不能。同一モデルの統計的死角がバグ生成とレビュー両方に影響。独立サブエージェントレビューの根拠
+- [Qodo: State of AI Code Quality 2025](https://www.qodo.ai/reports/state-of-ai-code-quality/) — 25% の開発者が AI 提案の 5 件に 1 件にエラーを推定。AI レビューありで品質改善 81% vs なし 55%
+- [Qodo: AI Code Review Benchmark](https://www.qodo.ai/ai-code-review-benchmark/) — 100 PR・580 Issue・7 言語のベンチマーク。最高 F1 スコア 64.3%
+- [AI Code: 322% More Privilege Escalation](https://blog.exceeds.ai/ai-code-analysis-benchmark-reports/) — AI コードは権限昇格パス 322% 増、設計欠陥 153% 増
 
 ## 生産性・ベンチマーク
 
@@ -145,3 +171,18 @@ qult の設計は以下の論文・記事に基づいている。機能追加や
 - [Investigating Autonomous Agent Contributions in the Wild](https://arxiv.org/html/2604.00917v1) — 実環境での自律エージェント活動パターン分析
 - [ProdCodeBench: Production-Derived Benchmark](https://arxiv.org/abs/2604.01527) — 実開発者セッション由来。解決率 53.2-72.2%
 - [Developer Productivity with GenAI (SPACE Framework)](https://arxiv.org/abs/2510.24265) — 415 人調査。開発者は速くなるが、より良いソフトウェアを作るわけでも充実感を得るわけでもない。生産性パラドックスの実証
+- [METR Update: Changed Experiment Design](https://metr.org/blog/2026-02-24-uplift-update/) — 新コホート (800+ タスク, 57 開発者) で -4% 減速 (CI: -15% to +9%)。初期の -19% より大幅に改善
+- [Gradle: Developer Productivity Paradox](https://gradle.com/blog/developer-productivity-paradox-faster-coding-slower-delivery/) — 10,000+ 開発者。AI 採用で PR 98% 増だがレビュー時間 91% 増、DORA メトリクス変化なし。AI PR 受入率 32.7% vs 人間 84.4%
+- [AI Coding Productivity Paradox: 93% Adoption, 10% Gains](https://philippdubach.com/posts/93-of-developers-use-ai-coding-tools.-productivity-hasn%27t-moved./) — 6 つの独立研究が収束: 92.6% 月次採用率、27% AI コード比率、~10% 組織生産性向上
+- [SWE-EVO: Long-Horizon Software Evolution](https://arxiv.org/abs/2512.18470) — 48 タスク、平均 21 ファイル、874 テスト。GPT-5.4 は SWE-Bench 72.8% → SWE-EVO 25%。47 ポイント低下が構造的テスト強制の必要性を実証
+- [SWE-Bench Pro: Long-Horizon Tasks](https://arxiv.org/abs/2509.16941) — 1,865 問題、41 リポジトリ。プロエンジニアが数時間〜数日要するタスク
+
+## AI コード安全閾値
+
+- [Safe AI Code Productivity Thresholds](https://blog.exceeds.ai/industry-benchmarks-ai-code-productivity/) — AI コード比率 25-40% が安全域。40% 超でリワーク 20-30%。チームメンバーあたり週 7 時間の非効率
+- [2026 AI Code Generation Benchmarks](https://blog.exceeds.ai/2026-ai-code-generation-benchmarks/) — AI がコードの 42% を生成。PR 20% 高速化だがインシデント 23.5% 増、失敗率 30% 増
+- [Stack Overflow: Coding Guidelines for AI](https://stackoverflow.blog/2026/03/26/coding-guidelines-for-ai-agents-and-people-too/) — エージェント向けガイドラインは人間向けより明示的・例示的であるべき。失敗からの学習をスタンダードファイルに反映
+
+## メタリソース
+
+- [VoltAgent/awesome-ai-agent-papers](https://github.com/VoltAgent/awesome-ai-agent-papers) — 500+ AI エージェント論文の週次更新キュレーション。マルチエージェント・メモリ・ツーリング・評価・セキュリティのカテゴリ分類

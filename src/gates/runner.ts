@@ -1,5 +1,11 @@
 import { exec, execSync } from "node:child_process";
 import { loadConfig } from "../config.ts";
+import {
+	type ClassifiedDiagnostic,
+	parseCargoOutput,
+	parsePyrightOutput,
+	parseTscOutput,
+} from "../hooks/detectors/diagnostic-classifier.ts";
 import type { GateDefinition } from "../types.ts";
 import { parseCoveragePercent } from "./coverage-parser.ts";
 
@@ -16,6 +22,7 @@ export interface GateResult {
 	passed: boolean;
 	output: string;
 	duration_ms: number;
+	classifiedDiagnostics?: ClassifiedDiagnostic[];
 }
 
 const ERROR_CODE_RE = /\b([A-Z]{1,4}\d{1,5}|ERR_[A-Z_]+|E\d{3,5})\b/;
@@ -124,7 +131,8 @@ export function runGateAsync(
 					const output =
 						prefix +
 						(smartTruncate(deduplicateErrors(raw), maxChars) || `Exit code ${err.code ?? 1}`);
-					resolve({ name, passed: false, output, duration_ms });
+					const classified = classifyTypecheckOutput(name, gate.command, raw);
+					resolve({ name, passed: false, output, duration_ms, ...classified });
 				} else {
 					const output = smartTruncate(stdout ?? "", maxChars);
 					resolve({ name, passed: true, output, duration_ms });
@@ -172,6 +180,30 @@ export function runGate(name: string, gate: GateDefinition, file?: string): Gate
 			output,
 			duration_ms,
 		};
+	}
+}
+
+/** Classify typecheck gate output into diagnostic categories.
+ *  Only runs for gates named "typecheck". Returns partial GateResult with classifiedDiagnostics. */
+function classifyTypecheckOutput(
+	gateName: string,
+	command: string,
+	raw: string,
+): { classifiedDiagnostics?: ClassifiedDiagnostic[] } {
+	if (gateName !== "typecheck" || !raw) return {};
+	try {
+		let diagnostics: ClassifiedDiagnostic[];
+		if (command.includes("pyright") && command.includes("--outputjson")) {
+			diagnostics = parsePyrightOutput(raw);
+		} else if (command.includes("cargo") && command.includes("--message-format=json")) {
+			diagnostics = parseCargoOutput(raw);
+		} else {
+			// Default: tsc text output
+			diagnostics = parseTscOutput(raw);
+		}
+		return diagnostics.length > 0 ? { classifiedDiagnostics: diagnostics } : {};
+	} catch {
+		return {}; // fail-open
 	}
 }
 

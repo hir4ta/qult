@@ -990,3 +990,95 @@ describe("postTool: dead-import escalation blocking", () => {
 		expect(stderrCapture.join("")).toContain("Dead import escalation");
 	});
 });
+
+describe("consumer typecheck", () => {
+	it("consumer typecheck reruns on importers when enabled", async () => {
+		// Enable consumer_typecheck via DB
+		const db = getDb();
+		const projectId = getProjectId();
+		db.prepare(
+			"INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)",
+		).run(projectId, "gates.consumer_typecheck", JSON.stringify(true));
+		const { resetConfigCache } = await import("../config.ts");
+		resetConfigCache();
+		resetAllCaches();
+
+		// Set up typecheck gate that always passes
+		const gates: GatesConfig = {
+			on_write: {
+				typecheck: { command: "echo ok", run_once_per_batch: true },
+			},
+		};
+		saveGates(gates);
+		resetAllCaches();
+
+		// Create importer that imports the target
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		const target = join(TEST_DIR, "src", "utils.ts");
+		const consumer = join(TEST_DIR, "src", "app.ts");
+		writeFileSync(target, "export const foo = 1;");
+		writeFileSync(consumer, 'import { foo } from "./utils";');
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			hook_event_name: "PostToolUse",
+			tool_name: "Edit",
+			tool_input: { file_path: target, new_string: "export const foo = 2;", old_string: "" },
+			cwd: TEST_DIR,
+		});
+
+		// Verify no errors (typecheck passes for consumer)
+		const { flushAll } = await import("../state/flush.ts");
+		flushAll();
+		resetAllCaches();
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const fixes = readPendingFixes();
+		// Should not have pending fixes since typecheck passes
+		expect(fixes.filter((f) => f.file === consumer)).toHaveLength(0);
+	});
+});
+
+describe("classified diagnostics integration", () => {
+	it("records classified diagnostics as pending fixes", async () => {
+		// Set up a typecheck gate that outputs a tsc-style error
+		const tscError = "src/foo.ts(10,5): error TS2339: Property 'bar' does not exist on type 'Foo'.";
+		const gates: GatesConfig = {
+			on_write: {
+				typecheck: {
+					command: `echo '${tscError}' >&2 && exit 1`,
+					run_once_per_batch: true,
+				},
+			},
+		};
+		saveGates(gates);
+		resetAllCaches();
+
+		const file = join(TEST_DIR, "src", "foo.ts");
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(file, "const x: Foo = {}; x.bar;");
+
+		const postTool = (await import("../hooks/post-tool.ts")).default;
+		await postTool({
+			hook_event_name: "PostToolUse",
+			tool_name: "Edit",
+			tool_input: { file_path: file, new_string: "x.bar", old_string: "" },
+			cwd: TEST_DIR,
+		});
+
+		const { flushAll } = await import("../state/flush.ts");
+		flushAll();
+		resetAllCaches();
+
+		const { readPendingFixes } = await import("../state/pending-fixes.ts");
+		const fixes = readPendingFixes();
+		const typecheckFixes = fixes.filter((f) => f.gate === "typecheck");
+		expect(typecheckFixes.length).toBeGreaterThanOrEqual(1);
+
+		// Check that the error message contains the classified category prefix
+		const hasClassified = typecheckFixes.some((f) =>
+			f.errors.some((e) => e.includes("[hallucinated-api]")),
+		);
+		expect(hasClassified).toBe(true);
+	});
+});

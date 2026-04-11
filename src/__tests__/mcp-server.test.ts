@@ -125,7 +125,7 @@ describe("handleRequest (JSON-RPC)", () => {
 	it("tools/list returns all tool definitions", () => {
 		const response = handleRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" }, TEST_DIR);
 		const result = response!.result as { tools: { name: string }[] };
-		expect(result.tools).toHaveLength(21);
+		expect(result.tools).toHaveLength(23);
 		expect(result.tools.map((t) => t.name)).toEqual([
 			"get_pending_fixes",
 			"get_session_status",
@@ -148,6 +148,8 @@ describe("handleRequest (JSON-RPC)", () => {
 			"record_finish_started",
 			"archive_plan",
 			"save_gates",
+			"get_impact_analysis",
+			"get_call_coverage",
 		]);
 	});
 
@@ -191,8 +193,8 @@ describe("handleRequest (JSON-RPC)", () => {
 });
 
 describe("TOOL_DEFS", () => {
-	it("has 21 tool definitions", () => {
-		expect(TOOL_DEFS).toHaveLength(21);
+	it("has 23 tool definitions", () => {
+		expect(TOOL_DEFS).toHaveLength(23);
 	});
 
 	it("each tool has name, description, and inputSchema", () => {
@@ -789,5 +791,74 @@ describe("record_finish_started", () => {
 		// wasFinishStarted reads from DB via readSessionState — must see the marker
 		const { wasFinishStarted } = await import("../state/session-state.ts");
 		expect(wasFinishStarted()).toBe(true);
+	});
+});
+
+describe("get_impact_analysis", () => {
+	it("returns consumer list", () => {
+		// Create files with import relationship
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		const target = join(TEST_DIR, "src", "utils.ts");
+		const consumer = join(TEST_DIR, "src", "app.ts");
+		writeFileSync(target, "export const foo = 1;");
+		writeFileSync(consumer, 'import { foo } from "./utils";');
+
+		const result = handleTool("get_impact_analysis", TEST_DIR, { file: target });
+		const text = result.content[0]!.text;
+		const parsed = JSON.parse(text);
+		expect(parsed.consumers).toContain(consumer);
+	});
+
+	it("returns empty consumers when no importers", () => {
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		const target = join(TEST_DIR, "src", "lonely.ts");
+		writeFileSync(target, "export const x = 1;");
+
+		const result = handleTool("get_impact_analysis", TEST_DIR, { file: target });
+		const parsed = JSON.parse(result.content[0]!.text);
+		expect(parsed.consumers).toEqual([]);
+	});
+});
+
+describe("get_call_coverage", () => {
+	it("checks test-to-impl path", () => {
+		mkdirSync(join(TEST_DIR, "src", "__tests__"), { recursive: true });
+		const impl = join(TEST_DIR, "src", "utils.ts");
+		const test = join(TEST_DIR, "src", "__tests__", "utils.test.ts");
+		writeFileSync(impl, "export function doStuff() {}");
+		writeFileSync(test, 'import { doStuff } from "../utils";\nit("works", () => { doStuff(); });');
+
+		const result = handleTool("get_call_coverage", TEST_DIR, {
+			test_file: test,
+			impl_file: impl,
+		});
+		const parsed = JSON.parse(result.content[0]!.text);
+		expect(parsed.covered).toBe(true);
+	});
+
+	it("returns false when test does not import impl", () => {
+		mkdirSync(join(TEST_DIR, "src", "__tests__"), { recursive: true });
+		const impl = join(TEST_DIR, "src", "utils.ts");
+		const test = join(TEST_DIR, "src", "__tests__", "other.test.ts");
+		writeFileSync(impl, "export function doStuff() {}");
+		writeFileSync(test, 'it("works", () => { expect(1).toBe(1); });');
+
+		const result = handleTool("get_call_coverage", TEST_DIR, {
+			test_file: test,
+			impl_file: impl,
+		});
+		const parsed = JSON.parse(result.content[0]!.text);
+		expect(parsed.covered).toBe(false);
+	});
+});
+
+describe("instructions include impact analysis guidance", () => {
+	it("instructions mention get_impact_analysis", () => {
+		const req = handleRequest(
+			{ jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
+			TEST_DIR,
+		);
+		const result = req as { result?: { instructions?: string } };
+		expect(result.result?.instructions).toContain("get_impact_analysis");
 	});
 });

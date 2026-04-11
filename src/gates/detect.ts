@@ -41,6 +41,8 @@ interface ProbeRule {
 	run_once_per_batch?: boolean;
 	/** If set, only probe if this executable is reachable */
 	executable?: string;
+	/** Alternative command producing structured (JSON) output for diagnostic classification */
+	structured_command?: string;
 }
 
 const PROBE_RULES: ProbeRule[] = [
@@ -132,6 +134,7 @@ const PROBE_RULES: ProbeRule[] = [
 		timeout: 15000,
 		run_once_per_batch: true,
 		executable: "pyright",
+		structured_command: "pyright --outputjson",
 	},
 	{
 		configs: ["mypy.ini"],
@@ -441,6 +444,7 @@ export function detectGates(root: string): GatesConfig {
 		const gate: GateDefinition = { command };
 		if (rule.timeout) gate.timeout = rule.timeout;
 		if (rule.run_once_per_batch) gate.run_once_per_batch = true;
+		if (rule.structured_command) gate.structured_command = rule.structured_command;
 
 		gates.push({ name: rule.name, category: rule.category, gate });
 		found.add(key);

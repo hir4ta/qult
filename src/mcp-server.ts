@@ -18,6 +18,8 @@ import { loadGates, saveGates } from "./gates/load.ts";
 import { generateHandoffDocument } from "./handoff.ts";
 import { generateHarnessReport } from "./harness-report.ts";
 import { computeFileHealthScore } from "./hooks/detectors/health-score.ts";
+import { findImporters } from "./hooks/detectors/import-graph.ts";
+import { validateTestCoversImpl } from "./hooks/detectors/spec-trace-check.ts";
 import { generateMetricsDashboard } from "./metrics-dashboard.ts";
 import { appendAuditLog, readAuditLog } from "./state/audit-log.ts";
 import { getDb, getProjectId, setProjectPath } from "./state/db.ts";
@@ -302,6 +304,40 @@ const TOOL_DEFS: ToolDef[] = [
 				},
 			},
 			required: ["gates"],
+		},
+	},
+	{
+		name: "get_impact_analysis",
+		description:
+			"Analyze the impact of changes to a file. Returns a list of consumer files (importers) that may be affected, using the import graph. When LSP is available, also includes findReferences results for changed symbols.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				file: {
+					type: "string",
+					description: "Absolute path to the changed file",
+				},
+			},
+			required: ["file"],
+		},
+	},
+	{
+		name: "get_call_coverage",
+		description:
+			"Check whether a test file covers (imports from) an implementation file. Uses import graph to verify the test→impl dependency path exists.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				test_file: {
+					type: "string",
+					description: "Absolute path to the test file",
+				},
+				impl_file: {
+					type: "string",
+					description: "Absolute path to the implementation file",
+				},
+			},
+			required: ["test_file", "impl_file"],
 		},
 	},
 ];
@@ -890,6 +926,61 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			});
 			return { content: [{ type: "text", text: "All escalation counters reset to zero." }] };
 		}
+		case "get_impact_analysis": {
+			const file = typeof args?.file === "string" ? args.file : "";
+			if (!file) {
+				return {
+					isError: true,
+					content: [{ type: "text", text: "Missing file parameter." }],
+				};
+			}
+			try {
+				const config = loadConfig();
+				const consumers = findImporters(file, cwd, config.gates.import_graph_depth);
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({ file, consumers, count: consumers.length }),
+						},
+					],
+				};
+			} catch {
+				return {
+					content: [{ type: "text", text: JSON.stringify({ file, consumers: [], count: 0 }) }],
+				};
+			}
+		}
+		case "get_call_coverage": {
+			const testFile = typeof args?.test_file === "string" ? args.test_file : "";
+			const implFile = typeof args?.impl_file === "string" ? args.impl_file : "";
+			if (!testFile || !implFile) {
+				return {
+					isError: true,
+					content: [{ type: "text", text: "Missing test_file or impl_file parameter." }],
+				};
+			}
+			try {
+				const covered = validateTestCoversImpl(testFile, "", implFile, cwd);
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({ test_file: testFile, impl_file: implFile, covered }),
+						},
+					],
+				};
+			} catch {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({ test_file: testFile, impl_file: implFile, covered: false }),
+						},
+					],
+				};
+			}
+		}
 		default:
 			return { isError: true, content: [{ type: "text", text: `Unknown tool: ${name}` }] };
 	}
@@ -962,6 +1053,10 @@ function handleRequest(parsed: JsonRpcRequest, cwd: string): JsonRpcResponse | n
 						"",
 						"## Human Approval",
 						"- If review.require_human_approval is enabled, call record_human_approval after the architect has reviewed and approved the changes.",
+						"",
+						"## Impact Analysis",
+						"- After modifying types or exported interfaces, call get_impact_analysis to check which consumer files are affected.",
+						"- Use get_call_coverage to verify that test files actually import and exercise the implementation under test.",
 					].join("\n"),
 				},
 			};

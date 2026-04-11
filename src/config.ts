@@ -38,6 +38,10 @@ export interface QultConfig {
 		extra_path: string[];
 		/** Minimum test coverage percentage to pass. 0 = disabled (opt-in). */
 		coverage_threshold: number;
+		/** Re-run typecheck on consumer files when a dependency changes (opt-in). */
+		consumer_typecheck: boolean;
+		/** Import graph traversal depth for consumer detection (1-3). */
+		import_graph_depth: number;
 	};
 	/** Security enforcement */
 	security: {
@@ -92,6 +96,8 @@ export const DEFAULTS: QultConfig = {
 		test_on_edit_timeout: 15000,
 		extra_path: [],
 		coverage_threshold: 0,
+		consumer_typecheck: false,
+		import_graph_depth: 1,
 	},
 	security: {
 		require_semgrep: true,
@@ -161,6 +167,10 @@ function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): voi
 			);
 		if (typeof g.coverage_threshold === "number")
 			config.gates.coverage_threshold = Math.max(0, Math.min(100, g.coverage_threshold));
+		if (typeof g.consumer_typecheck === "boolean")
+			config.gates.consumer_typecheck = g.consumer_typecheck;
+		if (typeof g.import_graph_depth === "number")
+			config.gates.import_graph_depth = Math.max(1, Math.min(3, g.import_graph_depth));
 	}
 	if (raw.security && typeof raw.security === "object") {
 		const s = raw.security as Record<string, unknown>;
@@ -296,6 +306,12 @@ export function loadConfig(): QultConfig {
 	const covThreshold = envInt("QULT_COVERAGE_THRESHOLD");
 	if (covThreshold !== undefined)
 		config.gates.coverage_threshold = Math.max(0, Math.min(100, covThreshold));
+	const consumerTcEnv = process.env.QULT_CONSUMER_TYPECHECK;
+	if (consumerTcEnv === "1" || consumerTcEnv === "true") config.gates.consumer_typecheck = true;
+	else if (consumerTcEnv === "0" || consumerTcEnv === "false")
+		config.gates.consumer_typecheck = false;
+	const igDepth = envInt("QULT_IMPORT_GRAPH_DEPTH");
+	if (igDepth !== undefined) config.gates.import_graph_depth = Math.max(1, Math.min(3, igDepth));
 	const secEsc = envInt("QULT_ESCALATION_SECURITY");
 	if (secEsc !== undefined) config.escalation.security_threshold = Math.max(1, secEsc);
 	const driftEsc = envInt("QULT_ESCALATION_DRIFT");

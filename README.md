@@ -155,6 +155,30 @@ No files are created in your project directory. All state is stored in `~/.qult/
 /qult:doctor
 ```
 
+### Optional: LSP Integration
+
+Installing language servers enhances qult's detection capabilities:
+
+- **Hallucination detection**: Classify type checker errors (undefined methods, non-existent symbols) beyond import-level checks
+- **Cross-file impact analysis**: Find all consumers of changed files across Python, Go, Rust (in addition to TypeScript/JavaScript)
+- **Unused import detection**: Semantic analysis replaces regex-based heuristics when LSP is available
+
+```bash
+# TypeScript/JavaScript
+npm install -g typescript-language-server typescript
+
+# Python
+pip install pyright
+
+# Go
+go install golang.org/x/tools/gopls@latest
+
+# Rust
+rustup component add rust-analyzer
+```
+
+`/qult:init` auto-detects installed language servers. LSP is **optional** — qult falls back to regex-based detection when servers are not available (fail-open).
+
 ### Uninstall
 
 ```

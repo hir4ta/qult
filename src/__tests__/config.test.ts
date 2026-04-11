@@ -53,6 +53,8 @@ afterEach(() => {
 	delete process.env.QULT_ESCALATION_SECURITY_ITERATIVE;
 	delete process.env.QULT_ESCALATION_DEAD_IMPORT_BLOCKING;
 	delete process.env.QULT_COVERAGE_THRESHOLD;
+	delete process.env.QULT_CONSUMER_TYPECHECK;
+	delete process.env.QULT_IMPORT_GRAPH_DEPTH;
 });
 
 describe("loadConfig", () => {
@@ -411,5 +413,42 @@ describe("coverage_threshold config", () => {
 		process.env.QULT_COVERAGE_THRESHOLD = "150";
 		const config = loadConfig();
 		expect(config.gates.coverage_threshold).toBe(100);
+	});
+});
+
+describe("consumer_typecheck config", () => {
+	it("defaults to false", () => {
+		const config = loadConfig();
+		expect(config.gates.consumer_typecheck).toBe(false);
+	});
+
+	it("loads consumer_typecheck from env", () => {
+		process.env.QULT_CONSUMER_TYPECHECK = "1";
+		const config = loadConfig();
+		expect(config.gates.consumer_typecheck).toBe(true);
+	});
+
+	it("loads import_graph_depth from env", () => {
+		process.env.QULT_IMPORT_GRAPH_DEPTH = "2";
+		const config = loadConfig();
+		expect(config.gates.import_graph_depth).toBe(2);
+	});
+
+	it("clamps import_graph_depth to max 3", () => {
+		process.env.QULT_IMPORT_GRAPH_DEPTH = "10";
+		const config = loadConfig();
+		expect(config.gates.import_graph_depth).toBe(3);
+	});
+
+	it("defaults import_graph_depth to 1", () => {
+		const config = loadConfig();
+		expect(config.gates.import_graph_depth).toBe(1);
+	});
+
+	it("loads from project DB config", () => {
+		setProjectConfig("gates.consumer_typecheck", true);
+		resetConfigCache();
+		const config = loadConfig();
+		expect(config.gates.consumer_typecheck).toBe(true);
 	});
 });

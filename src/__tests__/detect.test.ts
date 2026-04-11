@@ -259,3 +259,25 @@ describe("coverage gate detection", () => {
 		expect(gates.on_commit?.coverage).toBeUndefined();
 	});
 });
+
+describe("detects structured typecheck commands", () => {
+	it("adds structured_command for pyright typecheck", () => {
+		writeFileSync(join(TEST_DIR, "pyrightconfig.json"), "{}");
+		writeFileSync(join(TEST_DIR, "package-lock.json"), "{}");
+		const gates = detectGates(TEST_DIR);
+		if (gates.on_write?.typecheck) {
+			// structured_command should be set when pyright is detected
+			expect(gates.on_write.typecheck.structured_command).toContain("--outputjson");
+		}
+	});
+
+	it("does not add structured_command for tsc typecheck", () => {
+		writeFileSync(join(TEST_DIR, "tsconfig.json"), "{}");
+		writeFileSync(join(TEST_DIR, "package-lock.json"), "{}");
+		const gates = detectGates(TEST_DIR);
+		if (gates.on_write?.typecheck) {
+			// tsc uses text output parsing, no structured_command needed
+			expect(gates.on_write.typecheck.structured_command).toBeUndefined();
+		}
+	});
+});

@@ -94,6 +94,37 @@ describe("runGateAsync", () => {
 		expect(result.passed).toBe(true);
 		expect(result.output).toContain("ok");
 	});
+
+	it("classifies typecheck output when gate name is typecheck", async () => {
+		const tscOutput = "src/foo.ts(10,5): error TS2339: Property 'bar' does not exist on type 'Foo'.";
+		const result = await runGateAsync("typecheck", {
+			command: `echo '${tscOutput}' >&2 && exit 1`,
+			timeout: 3000,
+		});
+		expect(result.passed).toBe(false);
+		expect(result.classifiedDiagnostics).toBeDefined();
+		expect(result.classifiedDiagnostics).toHaveLength(1);
+		expect(result.classifiedDiagnostics![0]!.category).toBe("hallucinated-api");
+		expect(result.classifiedDiagnostics![0]!.code).toBe("TS2339");
+	});
+
+	it("does not classify for non-typecheck gates", async () => {
+		const result = await runGateAsync("lint", {
+			command: "echo 'lint error' && exit 1",
+			timeout: 3000,
+		});
+		expect(result.classifiedDiagnostics).toBeUndefined();
+	});
+
+	it("leaves classifiedDiagnostics undefined when output has no parseable errors", async () => {
+		const result = await runGateAsync("typecheck", {
+			command: "echo 'some non-error output' && exit 1",
+			timeout: 3000,
+		});
+		// Should still fail, but no classified diagnostics since nothing parsed
+		expect(result.passed).toBe(false);
+		expect(result.classifiedDiagnostics).toBeUndefined();
+	});
 });
 
 describe("smartTruncate", () => {
