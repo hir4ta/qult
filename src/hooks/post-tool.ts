@@ -25,7 +25,9 @@ import {
 	shouldSkipGate,
 } from "../state/session-state.ts";
 import type { GateDefinition, HookEvent, PendingFix } from "../types.ts";
+import { cacheComplexityResult, computeComplexity } from "./detectors/complexity-check.ts";
 import { detectConventionDrift } from "./detectors/convention-check.ts";
+import { detectDataflowIssues } from "./detectors/dataflow-check.ts";
 import { detectDeadImports } from "./detectors/dead-import-check.ts";
 import { extractInstalledPackages, scanDependencyVulns } from "./detectors/dep-vuln-check.ts";
 import { classifiedToPendingFixes } from "./detectors/diagnostic-classifier.ts";
@@ -34,8 +36,6 @@ import { detectExportBreakingChanges } from "./detectors/export-check.ts";
 import { checkInstalledPackages } from "./detectors/hallucinated-package-check.ts";
 import { detectHallucinatedImports } from "./detectors/import-check.ts";
 import { findImporters } from "./detectors/import-graph.ts";
-import { cacheComplexityResult, computeComplexity } from "./detectors/complexity-check.ts";
-import { detectDataflowIssues } from "./detectors/dataflow-check.ts";
 import { detectSecurityPatterns, getAdvisoryAsPendingFixes } from "./detectors/security-check.ts";
 import { detectSemanticPatterns } from "./detectors/semantic-check.ts";
 import {

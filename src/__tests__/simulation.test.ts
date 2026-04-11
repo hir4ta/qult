@@ -2825,11 +2825,8 @@ describe("Scenario: Flywheel auto-apply raises threshold for stable low-frequenc
 		cfg.flywheel.auto_apply = true;
 		cfg.flywheel.min_sessions = 10;
 
-		const {
-			readMetricsHistory,
-			getFlywheelRecommendations,
-			applyFlywheelRecommendations,
-		} = await import("../state/metrics.ts");
+		const { readMetricsHistory, getFlywheelRecommendations, applyFlywheelRecommendations } =
+			await import("../state/metrics.ts");
 
 		const hist = readMetricsHistory();
 		expect(hist.length).toBeGreaterThanOrEqual(20);

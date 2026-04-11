@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import type { PendingFix } from "../../types.ts";
+import { computeComplexitySync } from "./complexity-check.ts";
 import { detectConventionDrift } from "./convention-check.ts";
 import { detectDeadImports } from "./dead-import-check.ts";
 import { detectDuplication } from "./duplication-check.ts";
@@ -7,7 +8,6 @@ import { detectExportBreakingChanges } from "./export-check.ts";
 import { detectHallucinatedImports } from "./import-check.ts";
 import { detectSecurityPatterns } from "./security-check.ts";
 import { detectSemanticPatterns } from "./semantic-check.ts";
-import { computeComplexitySync } from "./complexity-check.ts";
 import { analyzeTestQuality } from "./test-quality-check.ts";
 
 interface HealthResult {

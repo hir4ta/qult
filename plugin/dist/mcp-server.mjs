@@ -1306,6 +1306,19 @@ function runOsvScanner(args, cwd, timeout) {
 // src/hooks/detectors/health-score.ts
 import { existsSync as existsSync9 } from "fs";
 
+// src/hooks/detectors/tree-sitter-init.ts
+var __dirname = "/Users/shunichi/Projects/qult/src/hooks/detectors";
+var _languageCache = new Map;
+
+// src/hooks/detectors/complexity-check.ts
+var _lastFile = null;
+var _lastResult = null;
+function computeComplexitySync(file) {
+  if (_lastFile === file && _lastResult)
+    return _lastResult;
+  return null;
+}
+
 // src/hooks/detectors/convention-check.ts
 import { readdirSync as readdirSync2, statSync as statSync2 } from "fs";
 import { basename as basename2, dirname as dirname2, extname, join as join3 } from "path";
@@ -2762,19 +2775,6 @@ function detectSemanticPatterns(file) {
       gate: "semantic-check"
     }
   ];
-}
-
-// src/hooks/detectors/tree-sitter-init.ts
-var __dirname = "/Users/shunichi/Projects/qult/src/hooks/detectors";
-var _languageCache = new Map;
-
-// src/hooks/detectors/complexity-check.ts
-var _lastFile = null;
-var _lastResult = null;
-function computeComplexitySync(file) {
-  if (_lastFile === file && _lastResult)
-    return _lastResult;
-  return null;
 }
 
 // src/hooks/detectors/test-quality-check.ts

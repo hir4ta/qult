@@ -21,10 +21,7 @@ function writeTmp(name: string, content: string): string {
 
 describe("computeComplexity", () => {
 	it("simple function has cyclomatic 1", async () => {
-		const file = writeTmp(
-			"simple.ts",
-			`function foo() { return 1; }`,
-		);
+		const file = writeTmp("simple.ts", `function foo() { return 1; }`);
 		const result = await computeComplexity(file);
 		expect(result).not.toBeNull();
 		expect(result!.functions.length).toBe(1);
@@ -95,11 +92,10 @@ describe("computeComplexity", () => {
 
 	it("warns for functions exceeding complexity threshold", async () => {
 		// Build a function with many branches
-		const branches = Array.from({ length: 20 }, (_, i) => `  if (x === ${i}) return ${i};`).join("\n");
-		const file = writeTmp(
-			"complex.ts",
-			`function big(x) {\n${branches}\n  return -1;\n}`,
+		const branches = Array.from({ length: 20 }, (_, i) => `  if (x === ${i}) return ${i};`).join(
+			"\n",
 		);
+		const file = writeTmp("complex.ts", `function big(x) {\n${branches}\n  return -1;\n}`);
 		const result = await computeComplexity(file);
 		expect(result).not.toBeNull();
 		expect(result!.warnings.length).toBeGreaterThan(0);
@@ -108,10 +104,7 @@ describe("computeComplexity", () => {
 
 	it("warns for large functions", async () => {
 		const lines = Array.from({ length: 60 }, (_, i) => `  const x${i} = ${i};`).join("\n");
-		const file = writeTmp(
-			"large.ts",
-			`function large() {\n${lines}\n}`,
-		);
+		const file = writeTmp("large.ts", `function large() {\n${lines}\n}`);
 		const result = await computeComplexity(file);
 		expect(result).not.toBeNull();
 		expect(result!.warnings.some((w) => w.includes("lines"))).toBe(true);

@@ -70,9 +70,7 @@ describe("computeFileHealthScore", () => {
 		writeFileSync(file, "function foo(x: number) { return x; }\n");
 
 		cacheComplexityResult(file, {
-			functions: [
-				{ name: "foo", line: 1, cyclomatic: 20, cognitive: 15, lineCount: 50 },
-			],
+			functions: [{ name: "foo", line: 1, cyclomatic: 20, cognitive: 15, lineCount: 50 }],
 			warnings: ["L1: function foo has cyclomatic complexity 20"],
 		});
 
