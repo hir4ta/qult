@@ -1,5 +1,5 @@
 {
 	"name": "qult",
-	"version": "0.31.0",
+	"version": "0.32.0",
 	"description": "Claude Code 向け品質補助プラグイン。workflow rules + 独立 4 段レビュー + Tier 1 detectors。"
 }
