@@ -1,9 +1,8 @@
 // @bun
 // src/mcp-server.ts
-import { execFileSync as execFileSync2 } from "child_process";
-import { existsSync as existsSync11 } from "fs";
-import { homedir as homedir3 } from "os";
-import { join as join4, resolve as resolve4 } from "path";
+import { existsSync as existsSync9 } from "fs";
+import { homedir as homedir2 } from "os";
+import { join as join4, resolve as resolve3 } from "path";
 import { createInterface } from "readline";
 
 // src/state/db.ts
@@ -337,33 +336,12 @@ var DEFAULTS = {
   gates: {
     output_max_chars: 3500,
     default_timeout: 1e4,
-    test_on_edit: false,
-    test_on_edit_timeout: 15000,
     extra_path: [],
     coverage_threshold: 0,
-    consumer_typecheck: false,
-    import_graph_depth: 1,
-    complexity_threshold: 15,
-    function_size_limit: 50,
-    mutation_score_threshold: 0
+    import_graph_depth: 1
   },
   security: {
-    require_semgrep: true,
-    require_osv_scanner: false
-  },
-  escalation: {
-    security_threshold: 10,
-    drift_threshold: 8,
-    test_quality_threshold: 8,
-    duplication_threshold: 8,
-    semantic_threshold: 8,
-    security_iterative_threshold: 5,
-    dead_import_blocking_threshold: 5
-  },
-  flywheel: {
-    enabled: true,
-    min_sessions: 10,
-    auto_apply: false
+    require_semgrep: true
   }
 };
 function applyConfigLayer(config, raw) {
@@ -413,57 +391,17 @@ function applyConfigLayer(config, raw) {
       config.gates.output_max_chars = g.output_max_chars;
     if (typeof g.default_timeout === "number")
       config.gates.default_timeout = g.default_timeout;
-    if (typeof g.test_on_edit === "boolean")
-      config.gates.test_on_edit = g.test_on_edit;
-    if (typeof g.test_on_edit_timeout === "number")
-      config.gates.test_on_edit_timeout = g.test_on_edit_timeout;
     if (Array.isArray(g.extra_path))
       config.gates.extra_path = g.extra_path.filter((p) => typeof p === "string" && p.trim().length > 0);
     if (typeof g.coverage_threshold === "number")
       config.gates.coverage_threshold = Math.max(0, Math.min(100, g.coverage_threshold));
-    if (typeof g.consumer_typecheck === "boolean")
-      config.gates.consumer_typecheck = g.consumer_typecheck;
     if (typeof g.import_graph_depth === "number")
       config.gates.import_graph_depth = Math.max(1, Math.min(3, g.import_graph_depth));
-    if (typeof g.complexity_threshold === "number")
-      config.gates.complexity_threshold = Math.max(1, g.complexity_threshold);
-    if (typeof g.function_size_limit === "number")
-      config.gates.function_size_limit = Math.max(1, g.function_size_limit);
-    if (typeof g.mutation_score_threshold === "number")
-      config.gates.mutation_score_threshold = Math.max(0, Math.min(100, g.mutation_score_threshold));
   }
   if (raw.security && typeof raw.security === "object") {
     const s = raw.security;
     if (typeof s.require_semgrep === "boolean")
       config.security.require_semgrep = s.require_semgrep;
-    if (typeof s.require_osv_scanner === "boolean")
-      config.security.require_osv_scanner = s.require_osv_scanner;
-  }
-  if (raw.escalation && typeof raw.escalation === "object") {
-    const e = raw.escalation;
-    if (typeof e.security_threshold === "number")
-      config.escalation.security_threshold = Math.max(1, e.security_threshold);
-    if (typeof e.drift_threshold === "number")
-      config.escalation.drift_threshold = Math.max(1, e.drift_threshold);
-    if (typeof e.test_quality_threshold === "number")
-      config.escalation.test_quality_threshold = Math.max(1, e.test_quality_threshold);
-    if (typeof e.duplication_threshold === "number")
-      config.escalation.duplication_threshold = Math.max(1, e.duplication_threshold);
-    if (typeof e.semantic_threshold === "number")
-      config.escalation.semantic_threshold = Math.max(1, e.semantic_threshold);
-    if (typeof e.security_iterative_threshold === "number")
-      config.escalation.security_iterative_threshold = Math.max(1, e.security_iterative_threshold);
-    if (typeof e.dead_import_blocking_threshold === "number")
-      config.escalation.dead_import_blocking_threshold = Math.max(1, e.dead_import_blocking_threshold);
-  }
-  if (raw.flywheel && typeof raw.flywheel === "object") {
-    const f = raw.flywheel;
-    if (typeof f.enabled === "boolean")
-      config.flywheel.enabled = f.enabled;
-    if (typeof f.min_sessions === "number")
-      config.flywheel.min_sessions = Math.max(1, f.min_sessions);
-    if (typeof f.auto_apply === "boolean")
-      config.flywheel.auto_apply = f.auto_apply;
   }
 }
 function kvRowsToRaw(rows) {
@@ -535,63 +473,17 @@ function loadConfig() {
     config.review.require_human_approval = true;
   else if (humanApprovalEnv === "0" || humanApprovalEnv === "false")
     config.review.require_human_approval = false;
-  const testOnEditEnv = process.env.QULT_TEST_ON_EDIT;
-  if (testOnEditEnv === "1" || testOnEditEnv === "true")
-    config.gates.test_on_edit = true;
-  else if (testOnEditEnv === "0" || testOnEditEnv === "false")
-    config.gates.test_on_edit = false;
-  config.gates.test_on_edit_timeout = envInt("QULT_TEST_ON_EDIT_TIMEOUT") ?? config.gates.test_on_edit_timeout;
   const covThreshold = envInt("QULT_COVERAGE_THRESHOLD");
   if (covThreshold !== undefined)
     config.gates.coverage_threshold = Math.max(0, Math.min(100, covThreshold));
-  const consumerTcEnv = process.env.QULT_CONSUMER_TYPECHECK;
-  if (consumerTcEnv === "1" || consumerTcEnv === "true")
-    config.gates.consumer_typecheck = true;
-  else if (consumerTcEnv === "0" || consumerTcEnv === "false")
-    config.gates.consumer_typecheck = false;
   const igDepth = envInt("QULT_IMPORT_GRAPH_DEPTH");
   if (igDepth !== undefined)
     config.gates.import_graph_depth = Math.max(1, Math.min(3, igDepth));
-  const complexityThreshold = envInt("QULT_COMPLEXITY_THRESHOLD");
-  if (complexityThreshold !== undefined)
-    config.gates.complexity_threshold = Math.max(1, complexityThreshold);
-  const funcSizeLimit = envInt("QULT_FUNCTION_SIZE_LIMIT");
-  if (funcSizeLimit !== undefined)
-    config.gates.function_size_limit = Math.max(1, funcSizeLimit);
-  const mutationScore = envInt("QULT_MUTATION_SCORE_THRESHOLD");
-  if (mutationScore !== undefined)
-    config.gates.mutation_score_threshold = Math.max(0, Math.min(100, mutationScore));
-  const secEsc = envInt("QULT_ESCALATION_SECURITY");
-  if (secEsc !== undefined)
-    config.escalation.security_threshold = Math.max(1, secEsc);
-  const driftEsc = envInt("QULT_ESCALATION_DRIFT");
-  if (driftEsc !== undefined)
-    config.escalation.drift_threshold = Math.max(1, driftEsc);
-  const tqEsc = envInt("QULT_ESCALATION_TEST_QUALITY");
-  if (tqEsc !== undefined)
-    config.escalation.test_quality_threshold = Math.max(1, tqEsc);
-  const dupEsc = envInt("QULT_ESCALATION_DUPLICATION");
-  if (dupEsc !== undefined)
-    config.escalation.duplication_threshold = Math.max(1, dupEsc);
-  const semEsc = envInt("QULT_ESCALATION_SEMANTIC");
-  if (semEsc !== undefined)
-    config.escalation.semantic_threshold = Math.max(1, semEsc);
-  const secIterEsc = envInt("QULT_ESCALATION_SECURITY_ITERATIVE");
-  if (secIterEsc !== undefined)
-    config.escalation.security_iterative_threshold = Math.max(1, secIterEsc);
-  const deadImportEsc = envInt("QULT_ESCALATION_DEAD_IMPORT_BLOCKING");
-  if (deadImportEsc !== undefined)
-    config.escalation.dead_import_blocking_threshold = Math.max(1, deadImportEsc);
   const requireSemgrepEnv = process.env.QULT_REQUIRE_SEMGREP;
   if (requireSemgrepEnv === "1" || requireSemgrepEnv === "true")
     config.security.require_semgrep = true;
   else if (requireSemgrepEnv === "0" || requireSemgrepEnv === "false")
     config.security.require_semgrep = false;
-  const requireOsvScannerEnv = process.env.QULT_REQUIRE_OSV_SCANNER;
-  if (requireOsvScannerEnv === "1" || requireOsvScannerEnv === "true")
-    config.security.require_osv_scanner = true;
-  else if (requireOsvScannerEnv === "0" || requireOsvScannerEnv === "false")
-    config.security.require_osv_scanner = false;
   const envStr = (key) => {
     const val = process.env[key];
     return val?.trim() ? val.trim() : undefined;
@@ -602,19 +494,6 @@ function loadConfig() {
   config.review.models.adversarial = envStr("QULT_REVIEW_MODEL_ADVERSARIAL") ?? config.review.models.adversarial;
   config.plan_eval.models.generator = envStr("QULT_PLAN_EVAL_MODEL_GENERATOR") ?? config.plan_eval.models.generator;
   config.plan_eval.models.evaluator = envStr("QULT_PLAN_EVAL_MODEL_EVALUATOR") ?? config.plan_eval.models.evaluator;
-  const flywheelEnv = process.env.QULT_FLYWHEEL_ENABLED;
-  if (flywheelEnv === "1" || flywheelEnv === "true")
-    config.flywheel.enabled = true;
-  else if (flywheelEnv === "0" || flywheelEnv === "false")
-    config.flywheel.enabled = false;
-  const flywheelMin = envInt("QULT_FLYWHEEL_MIN_SESSIONS");
-  if (flywheelMin !== undefined)
-    config.flywheel.min_sessions = Math.max(1, flywheelMin);
-  const flywheelAutoApplyEnv = process.env.QULT_FLYWHEEL_AUTO_APPLY;
-  if (flywheelAutoApplyEnv === "1" || flywheelAutoApplyEnv === "true")
-    config.flywheel.auto_apply = true;
-  else if (flywheelAutoApplyEnv === "0" || flywheelAutoApplyEnv === "false")
-    config.flywheel.auto_apply = false;
   _cache = config;
   return config;
 }
@@ -681,496 +560,19 @@ function saveGates(gates) {
   _cache2 = undefined;
 }
 
-// src/handoff.ts
-function generateHandoffDocument(input) {
-  const { changedFiles, pendingFixes, planTasks, testPassed, reviewDone, disabledGates } = input;
-  if (changedFiles.length === 0 && !planTasks && pendingFixes.length === 0) {
-    return "No active session data to hand off.";
-  }
-  const sections = [];
-  sections.push(`## Session Handoff
-`);
-  const gateLines = [];
-  gateLines.push(`- Tests: ${testPassed ? "PASSED" : "NOT PASSED"}`);
-  gateLines.push(`- Review: ${reviewDone ? "DONE" : "NOT DONE"}`);
-  if (disabledGates.length > 0) {
-    gateLines.push(`- Disabled gates: ${disabledGates.join(", ")}`);
-  }
-  sections.push(`## Gate Status
-${gateLines.join(`
-`)}
-`);
-  if (changedFiles.length > 0) {
-    const fileList = changedFiles.map((f) => `- ${f}`).join(`
-`);
-    sections.push(`## Files Changed (${changedFiles.length})
-${fileList}
-`);
-  }
-  if (pendingFixes.length > 0) {
-    const fixLines = pendingFixes.map((f) => `- [${f.gate}] ${f.file}: ${f.errors[0]?.slice(0, 150) ?? "error"}`).join(`
-`);
-    sections.push(`## Pending Fixes
-${fixLines}
-`);
-  }
-  if (planTasks && planTasks.length > 0) {
-    const done = planTasks.filter((t) => t.status === "done").length;
-    const taskLines = planTasks.map((t) => `- [${t.status}] ${t.taskNumber ? `Task ${t.taskNumber}: ` : ""}${t.name}`).join(`
-`);
-    sections.push(`## Plan Progress (${done}/${planTasks.length} done)
-${taskLines}
-`);
-  }
-  return sections.join(`
-`);
-}
+// src/hooks/detectors/health-score.ts
+import { existsSync as existsSync6 } from "fs";
 
-// src/state/metrics.ts
-var MAX_ENTRIES = 50;
-function readMetricsHistory() {
-  try {
-    const db = getDb();
-    const projectId = getProjectId();
-    const rows = db.prepare(`SELECT session_id, recorded_at, gate_failure_count, security_warning_count, review_aggregate, files_changed, test_quality_warning_count, duplication_warning_count, semantic_warning_count, drift_warning_count, escalation_hit
-				 FROM session_metrics WHERE project_id = ? ORDER BY id DESC LIMIT ?`).all(projectId, MAX_ENTRIES);
-    return rows.map((r) => ({
-      session_id: r.session_id,
-      timestamp: r.recorded_at,
-      gate_failures: r.gate_failure_count,
-      security_warnings: r.security_warning_count,
-      review_score: r.review_aggregate,
-      files_changed: r.files_changed,
-      test_quality_warnings: r.test_quality_warning_count ?? 0,
-      duplication_warnings: r.duplication_warning_count ?? 0,
-      semantic_warnings: r.semantic_warning_count ?? 0,
-      drift_warnings: r.drift_warning_count ?? 0,
-      escalation_hit: !!(r.escalation_hit ?? 0)
-    }));
-  } catch {
-    return [];
-  }
-}
-var METRIC_KEYS = [
-  "gate_failures",
-  "security_warnings",
-  "test_quality_warnings",
-  "duplication_warnings",
-  "semantic_warnings",
-  "drift_warnings"
-];
-var WINDOW_SIZES = [5, 10, 20];
-function computeWindowStats(values) {
-  const total = values.length;
-  const nonZero = values.filter((v) => v > 0);
-  const frequency = nonZero.length / total;
-  const intensity = nonZero.length > 0 ? nonZero.reduce((sum, v) => sum + v, 0) / nonZero.length : 0;
-  const mid = Math.floor(total / 2);
-  const firstHalf = values.slice(0, mid);
-  const secondHalf = values.slice(mid);
-  const avgFirst = firstHalf.reduce((s, v) => s + v, 0) / firstHalf.length;
-  const avgSecond = secondHalf.reduce((s, v) => s + v, 0) / secondHalf.length;
-  const diff = avgSecond - avgFirst;
-  const threshold = Math.max(0.1, avgFirst * 0.1);
-  const trend = diff > threshold ? "worsening" : diff < -threshold ? "improving" : "stable";
-  return { frequency, intensity, trend, sessionCount: total };
-}
-function analyzePatterns(history) {
-  const chronological = [...history].reverse();
-  return METRIC_KEYS.map((metric) => {
-    const windows = { short: null, medium: null, long: null };
-    const windowEntries = [
-      ["short", WINDOW_SIZES[0]],
-      ["medium", WINDOW_SIZES[1]],
-      ["long", WINDOW_SIZES[2]]
-    ];
-    for (const [key, size] of windowEntries) {
-      if (chronological.length >= size) {
-        const slice = chronological.slice(-size);
-        const values = slice.map((s) => s[metric] ?? 0);
-        windows[key] = computeWindowStats(values);
-      }
-    }
-    return { metric, windows };
-  });
-}
-var METRIC_TO_THRESHOLD = {
-  security_warnings: { key: "security_threshold", name: "security" },
-  test_quality_warnings: { key: "test_quality_threshold", name: "test quality" },
-  duplication_warnings: { key: "duplication_threshold", name: "duplication" },
-  semantic_warnings: { key: "semantic_threshold", name: "semantic" },
-  drift_warnings: { key: "drift_threshold", name: "drift" }
-};
-function getFlywheelRecommendations(history, config) {
-  if (!config.flywheel.enabled)
-    return [];
-  if (history.length < config.flywheel.min_sessions)
-    return [];
-  const analyses = analyzePatterns(history);
-  const recs = [];
-  for (const analysis of analyses) {
-    const mapping = METRIC_TO_THRESHOLD[analysis.metric];
-    if (!mapping)
-      continue;
-    const currentThreshold = config.escalation[mapping.key];
-    const stats = analysis.windows.medium ?? analysis.windows.short;
-    if (!stats)
-      continue;
-    const confidence = analysis.windows.long ? "high" : analysis.windows.medium ? "medium" : "low";
-    if (stats.frequency > 0.8 && stats.trend === "worsening") {
-      const suggested = Math.max(1, Math.floor(currentThreshold * 0.7));
-      if (suggested < currentThreshold) {
-        recs.push({
-          metric: mapping.name,
-          current_threshold: currentThreshold,
-          suggested_threshold: suggested,
-          direction: "lower",
-          confidence,
-          reason: `${mapping.name} warnings in ${(stats.frequency * 100).toFixed(0)}% of sessions with worsening trend`
-        });
-      }
-    } else if (stats.frequency < 0.2 && stats.trend === "stable" && analysis.windows.long && analysis.windows.long.frequency < 0.2) {
-      const suggested = Math.min(currentThreshold + 3, currentThreshold * 2, 100);
-      if (suggested > currentThreshold) {
-        recs.push({
-          metric: mapping.name,
-          current_threshold: currentThreshold,
-          suggested_threshold: Math.floor(suggested),
-          direction: "raise",
-          confidence,
-          reason: `${mapping.name} warnings in only ${(stats.frequency * 100).toFixed(0)}% of sessions, stable over ${stats.sessionCount} sessions`
-        });
-      }
-    }
-  }
-  return recs;
-}
-var METRIC_NAME_TO_CONFIG_KEY = {
-  security: "escalation.security_threshold",
-  "test quality": "escalation.test_quality_threshold",
-  duplication: "escalation.duplication_threshold",
-  semantic: "escalation.semantic_threshold",
-  drift: "escalation.drift_threshold"
-};
-function applyFlywheelRecommendations(recs, config) {
-  const applied = [];
-  const deferred = [];
-  if (!config.flywheel.auto_apply) {
-    return { applied: [], deferred: recs };
-  }
-  try {
-    const db = getDb();
-    for (const rec of recs) {
-      if (rec.direction !== "raise") {
-        deferred.push(rec);
-        continue;
-      }
-      const configKey = METRIC_NAME_TO_CONFIG_KEY[rec.metric];
-      if (!configKey) {
-        deferred.push(rec);
-        continue;
-      }
-      const existing = db.prepare("SELECT value FROM global_configs WHERE key = ?").get(configKey);
-      if (existing) {
-        deferred.push(rec);
-        continue;
-      }
-      db.prepare("INSERT INTO global_configs (key, value) VALUES (?, ?)").run(configKey, JSON.stringify(rec.suggested_threshold));
-      applied.push(rec);
-    }
-  } catch {
-    return { applied: [], deferred: recs };
-  }
-  return { applied, deferred };
-}
-var METRIC_SESSION_KEYS = {
-  security_warning_count: "security",
-  test_quality_warning_count: "test_quality",
-  duplication_warning_count: "duplication",
-  semantic_warning_count: "semantic",
-  drift_warning_count: "drift"
-};
-var RULE_TEMPLATES = {
-  security: {
-    filename: "security-recurring.md",
-    content: [
-      "# Security Recurring Patterns",
-      "",
-      "Security warnings are frequent across multiple projects.",
-      "Review common patterns: input validation, XSS prevention, SQL injection, SSRF.",
-      "Consider adding project-specific security rules in .claude/rules/security.md."
-    ].join(`
-`)
-  },
-  test_quality: {
-    filename: "test-quality-recurring.md",
-    content: [
-      "# Test Quality Recurring Patterns",
-      "",
-      "Test quality warnings are frequent across multiple projects.",
-      "Review: empty tests, always-true assertions, trivial assertions.",
-      "Consider enforcing minimum assertion counts per test."
-    ].join(`
-`)
-  },
-  duplication: {
-    filename: "duplication-recurring.md",
-    content: [
-      "# Duplication Recurring Patterns",
-      "",
-      "Code duplication warnings are frequent across multiple projects.",
-      "Review: copy-pasted code blocks, similar function signatures.",
-      "Consider extracting shared utilities when 3+ duplicates exist."
-    ].join(`
-`)
-  }
-};
-function transferKnowledge() {
-  const patterns = [];
-  const templates = [];
-  try {
-    const db = getDb();
-    const projects = db.prepare("SELECT DISTINCT project_id FROM session_metrics GROUP BY project_id HAVING COUNT(*) >= 5").all();
-    if (projects.length < 3) {
-      return { patterns, templates };
-    }
-    const metricColumns = [
-      "security_warning_count",
-      "test_quality_warning_count",
-      "duplication_warning_count",
-      "semantic_warning_count",
-      "drift_warning_count"
-    ];
-    for (const col of metricColumns) {
-      let projectsWithHighFreq = 0;
-      for (const project of projects) {
-        const rows = db.prepare(`SELECT ${col} as val FROM session_metrics WHERE project_id = ? ORDER BY id DESC LIMIT 10`).all(project.project_id);
-        if (rows.length < 5)
-          continue;
-        const nonZero = rows.filter((r) => r.val > 0).length;
-        const frequency = nonZero / rows.length;
-        if (frequency > 0.6) {
-          projectsWithHighFreq++;
-        }
-      }
-      if (projectsWithHighFreq >= 3) {
-        const metricName = METRIC_SESSION_KEYS[col] ?? col;
-        patterns.push(`${metricName}: high frequency across ${projectsWithHighFreq} projects`);
-        const configKey = METRIC_NAME_TO_CONFIG_KEY[metricName];
-        if (configKey) {
-          const existing = db.prepare("SELECT value FROM global_configs WHERE key = ?").get(configKey);
-          if (!existing) {
-            const currentDefault = metricName === "security" ? 10 : metricName === "drift" ? 8 : 8;
-            const newVal = Math.max(1, Math.floor(currentDefault * 0.7));
-            db.prepare("INSERT INTO global_configs (key, value) VALUES (?, ?)").run(configKey, JSON.stringify(newVal));
-          }
-        }
-        const template = RULE_TEMPLATES[metricName];
-        if (template) {
-          templates.push(template);
-        }
-      }
-    }
-  } catch {}
-  return { patterns, templates };
-}
-
-// src/harness-report.ts
-var MIN_TREND_SESSIONS = 3;
-var IDLE_GATE_THRESHOLD = 10;
-function generateHarnessReport(metrics, auditLog, config) {
-  const recommendations = [];
-  const gateFailureSessions = metrics.filter((m) => m.gate_failures > 0).length;
-  const securityWarningSessions = metrics.filter((m) => m.security_warnings > 0).length;
-  const reviewScores = metrics.filter((m) => m.review_score !== null).map((m) => m.review_score);
-  const averageReviewScore = reviewScores.length > 0 ? reviewScores.reduce((a, b) => a + b, 0) / reviewScores.length : null;
-  const reviewTrend = computeReviewTrend(reviewScores);
-  const disableEntries = auditLog.filter((e) => e.action === "disable_gate");
-  const disablesByGate = {};
-  for (const entry of disableEntries) {
-    const gate = entry.gate_name ?? "unknown";
-    disablesByGate[gate] = (disablesByGate[gate] ?? 0) + 1;
-  }
-  if (metrics.length >= IDLE_GATE_THRESHOLD && gateFailureSessions === 0) {
-    recommendations.push({
-      type: "idle_gate",
-      message: `No gate failures in ${metrics.length} sessions. Consider reviewing if all gates are still necessary.`
-    });
-  }
-  if (metrics.length >= 5 && securityWarningSessions >= Math.ceil(metrics.length * 0.6)) {
-    recommendations.push({
-      type: "security_recurring",
-      message: `Security warnings in ${securityWarningSessions}/${metrics.length} sessions. Consider adding .claude/rules/ for security patterns.`
-    });
-  }
-  let flywheel_recommendations = [];
-  const metricTrends = {};
-  if (config) {
-    try {
-      const analyses = analyzePatterns(metrics);
-      for (const a of analyses) {
-        metricTrends[a.metric] = a.windows;
-      }
-      flywheel_recommendations = getFlywheelRecommendations(metrics, config);
-    } catch {}
-  }
-  return {
-    totalSessions: metrics.length,
-    gateFailureSessions,
-    securityWarningSessions,
-    averageReviewScore,
-    reviewTrend,
-    gateDisableCount: disableEntries.length,
-    disablesByGate,
-    recommendations,
-    flywheel_recommendations,
-    metricTrends
-  };
-}
-function computeReviewTrend(scores) {
-  if (scores.length < MIN_TREND_SESSIONS)
-    return "insufficient_data";
-  const recent = scores.slice(-MIN_TREND_SESSIONS);
-  let improving = 0;
-  let declining = 0;
-  for (let i = 1;i < recent.length; i++) {
-    if (recent[i] > recent[i - 1])
-      improving++;
-    else if (recent[i] < recent[i - 1])
-      declining++;
-  }
-  if (improving > declining)
-    return "improving";
-  if (declining > improving)
-    return "declining";
-  return "stable";
-}
-
-// src/hooks/detectors/dep-vuln-check.ts
-import { execFileSync } from "child_process";
+// src/hooks/detectors/dead-import-check.ts
+import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
+import { extname } from "path";
 
 // src/state/plan-status.ts
 import { existsSync, mkdirSync as mkdirSync2, readdirSync, readFileSync, renameSync, statSync } from "fs";
-import { homedir as homedir2 } from "os";
 import { basename, dirname, join as join2 } from "path";
-var TASK_RE = /^###\s+Task\s+(\d+)[\s:\-\u2013\u2014]+(.+?)(?:\s*\[([^\]]+)\])?\s*$/i;
-function normalizeStatus(raw) {
-  if (!raw)
-    return "pending";
-  const s = raw.toLowerCase().trim();
-  if (s === "done" || s === "complete" || s === "completed" || s === "finished")
-    return "done";
-  if (s === "in-progress" || s === "wip" || s === "started" || s === "working")
-    return "in-progress";
-  return "pending";
-}
-var CHECKBOX_RE = /^-\s+\[([ xX])\]\s*(.+)$/;
-var FILE_LINE_RE = /^\s*-\s*\*\*File\*\*:\s*(.+)$/;
-var VERIFY_LINE_RE = /^\s*-\s*\*\*Verify\*\*:\s*(.+)$/;
-function parsePlanTasks(content) {
-  const tasks = [];
-  const lines = content.split(`
-`);
-  for (let i = 0;i < lines.length; i++) {
-    const trimmed = lines[i].trim();
-    const taskMatch = trimmed.match(TASK_RE);
-    if (taskMatch) {
-      const taskNumber = Number(taskMatch[1]);
-      const name = taskMatch[2].trim();
-      const status = normalizeStatus(taskMatch[3]);
-      let file;
-      let verify;
-      for (let j = i + 1;j < lines.length; j++) {
-        const nextTrimmed = lines[j].trim();
-        if (/^###?\s/.test(nextTrimmed))
-          break;
-        const fileMatch = nextTrimmed.match(FILE_LINE_RE);
-        if (fileMatch) {
-          file = fileMatch[1].trim().replace(/[`"']/g, "");
-          continue;
-        }
-        const verifyMatch = nextTrimmed.match(VERIFY_LINE_RE);
-        if (verifyMatch) {
-          verify = verifyMatch[1].trim();
-        }
-      }
-      tasks.push({ name, status, taskNumber, file, verify });
-      continue;
-    }
-    const checkMatch = trimmed.match(CHECKBOX_RE);
-    if (checkMatch) {
-      const checked = checkMatch[1] !== " ";
-      const name = checkMatch[2].trim();
-      tasks.push({ name, status: checked ? "done" : "pending" });
-    }
-  }
-  return tasks;
-}
-function scanPlanDir(dir) {
-  try {
-    if (!existsSync(dir))
-      return [];
-    return readdirSync(dir).filter((f) => f.endsWith(".md")).map((f) => ({
-      path: join2(dir, f),
-      mtime: statSync(join2(dir, f)).mtimeMs
-    })).sort((a, b) => b.mtime - a.mtime);
-  } catch {
-    return [];
-  }
-}
-function getLatestPlanPath() {
-  try {
-    const candidates = [];
-    const projectDir = join2(process.cwd(), ".claude", "plans");
-    const projectPlans = scanPlanDir(projectDir);
-    candidates.push(...projectPlans);
-    const envDir = process.env.CLAUDE_PLANS_DIR;
-    if (envDir) {
-      candidates.push(...scanPlanDir(envDir));
-    }
-    if (!_disableHomeFallback && projectPlans.length === 0 && candidates.length === 0) {
-      try {
-        const homeDir = join2(homedir2(), ".claude", "plans");
-        const homeFiles = scanPlanDir(homeDir);
-        const recentCutoff = Date.now() - 24 * 60 * 60 * 1000;
-        candidates.push(...homeFiles.filter((f) => f.mtime > recentCutoff));
-      } catch {}
-    }
-    if (candidates.length === 0)
-      return null;
-    candidates.sort((a, b) => b.mtime - a.mtime);
-    return candidates[0].path;
-  } catch {
-    return null;
-  }
-}
 var _planCache = null;
 var _planCachePath = null;
 var _planCacheMtime = null;
-var _disableHomeFallback = false;
-function getActivePlan() {
-  const path = getLatestPlanPath();
-  if (!path)
-    return null;
-  let mtime = null;
-  try {
-    mtime = statSync(path).mtimeMs;
-    if (_planCache && _planCachePath === path && _planCacheMtime === mtime)
-      return _planCache;
-  } catch {}
-  try {
-    const content = readFileSync(path, "utf-8");
-    const tasks = parsePlanTasks(content);
-    if (tasks.length === 0)
-      return null;
-    _planCache = { tasks, path };
-    _planCachePath = path;
-    _planCacheMtime = mtime;
-    return _planCache;
-  } catch {
-    return null;
-  }
-}
 function resetPlanCache() {
   _planCache = null;
   _planCachePath = null;
@@ -1281,45 +683,6 @@ function isGateDisabled(gateName) {
   const state = readSessionState();
   return (state.disabled_gates ?? []).includes(gateName);
 }
-
-// src/hooks/detectors/dep-vuln-check.ts
-var BLOCKING_SEVERITIES = new Set(["CRITICAL", "HIGH"]);
-function runOsvScanner(args, cwd, timeout) {
-  try {
-    const output = execFileSync("osv-scanner", args, {
-      cwd,
-      timeout,
-      stdio: ["pipe", "pipe", "pipe"],
-      encoding: "utf-8"
-    });
-    return typeof output === "string" ? output : String(output);
-  } catch (err) {
-    if (err && typeof err === "object" && "stdout" in err && typeof err.stdout === "string" && err.stdout.length > 0) {
-      return err.stdout;
-    }
-    return null;
-  }
-}
-
-// src/hooks/detectors/health-score.ts
-import { existsSync as existsSync8 } from "fs";
-
-// src/hooks/detectors/tree-sitter-init.ts
-var __dirname = "/Users/shunichi/Projects/qult/src/hooks/detectors";
-var _languageCache = new Map;
-
-// src/hooks/detectors/complexity-check.ts
-var _lastFile = null;
-var _lastResult = null;
-function computeComplexitySync(file) {
-  if (_lastFile === file && _lastResult)
-    return _lastResult;
-  return null;
-}
-
-// src/hooks/detectors/dead-import-check.ts
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
-import { extname } from "path";
 
 // src/hooks/sanitize.ts
 function sanitizeForStderr(input) {
@@ -1462,124 +825,20 @@ function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// src/hooks/detectors/duplication-check.ts
-import { existsSync as existsSync3, readFileSync as readFileSync3 } from "fs";
-import { basename as basename2, dirname as dirname2, extname as extname2, resolve } from "path";
-var CHECKABLE_EXTS = new Set([
-  ".ts",
-  ".tsx",
-  ".js",
-  ".jsx",
-  ".mts",
-  ".cts",
-  ".mjs",
-  ".cjs",
-  ".py",
-  ".pyi",
-  ".go",
-  ".rs",
-  ".rb",
-  ".java",
-  ".kt"
-]);
-var MAX_CHECK_SIZE2 = 500000;
-var MIN_BLOCK_LINES = 4;
-function isTestFile(filePath) {
-  const name = basename2(filePath);
-  if (/\.(test|spec)\.[^.]+$/.test(name))
-    return true;
-  const parent = basename2(dirname2(filePath));
-  return parent === "__tests__";
-}
-function normalizeLine(line) {
-  const trimmed = line.trim();
-  if (trimmed === "")
-    return null;
-  if (trimmed.startsWith("//") || trimmed.startsWith("#"))
-    return null;
-  if (trimmed.startsWith("* ") || trimmed.startsWith("*/") || trimmed === "*")
-    return null;
-  if (trimmed.startsWith("/*"))
-    return null;
-  if (/^\s*(import\b|from\b|require\b|export\b)/.test(line))
-    return null;
-  return trimmed;
-}
-function buildHashWindows(content) {
-  const lines = content.split(`
-`);
-  const normalized = [];
-  for (let i = 0;i < lines.length; i++) {
-    const norm = normalizeLine(lines[i]);
-    if (norm !== null) {
-      normalized.push({ line: i + 1, text: norm });
-    }
-  }
-  const windows = new Map;
-  for (let i = 0;i <= normalized.length - MIN_BLOCK_LINES; i++) {
-    const key = normalized.slice(i, i + MIN_BLOCK_LINES).map((n) => n.text).join(`
-`);
-    const startLine = normalized[i].line;
-    const existing = windows.get(key);
-    if (existing) {
-      existing.push(startLine);
-    } else {
-      windows.set(key, [startLine]);
-    }
-  }
-  return windows;
-}
-function detectDuplication(file) {
-  if (isTestFile(file))
-    return [];
-  if (isGateDisabled("duplication-check"))
-    return [];
-  const ext = extname2(file).toLowerCase();
-  if (!CHECKABLE_EXTS.has(ext))
-    return [];
-  if (!existsSync3(file))
-    return [];
-  let content;
-  try {
-    content = readFileSync3(file, "utf-8");
-  } catch {
-    return [];
-  }
-  if (content.length > MAX_CHECK_SIZE2)
-    return [];
-  const windows = buildHashWindows(content);
-  const errors = [];
-  const reported = new Set;
-  for (const [hash, positions] of windows) {
-    if (positions.length < 2)
-      continue;
-    const key = `${positions[0]}-${positions[1]}`;
-    if (reported.has(key))
-      continue;
-    reported.add(key);
-    const preview = hash.split(`
-`)[0].slice(0, 80);
-    errors.push(`Intra-file duplicate (${MIN_BLOCK_LINES}+ lines) at L${positions[0]} and L${positions[1]}: "${preview}..."`);
-  }
-  if (errors.length === 0)
-    return [];
-  return [{ file, errors, gate: "duplication-check" }];
-}
-
 // src/hooks/detectors/export-check.ts
 import { execSync } from "child_process";
-import { existsSync as existsSync4, readFileSync as readFileSync4 } from "fs";
-import { extname as extname3 } from "path";
+import { existsSync as existsSync3, readFileSync as readFileSync3 } from "fs";
+import { extname as extname2 } from "path";
 var TS_JS_EXTS2 = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
 var EXPORT_RE = /\bexport\s+(?:default\s+)?(?:function|class|const|let|var|type|interface|enum)\s+(\w+)/g;
 var FUNC_SIG_RE = /\bexport\s+(?:default\s+)?function\s+(\w+)\s*\(([^)]*)\)/g;
 function detectExportBreakingChanges(file) {
   if (isGateDisabled("export-check"))
     return [];
-  const ext = extname3(file).toLowerCase();
+  const ext = extname2(file).toLowerCase();
   if (!TS_JS_EXTS2.has(ext))
     return [];
-  if (!existsSync4(file))
+  if (!existsSync3(file))
     return [];
   let oldContent;
   try {
@@ -1596,7 +855,7 @@ function detectExportBreakingChanges(file) {
   } catch {
     return [];
   }
-  const newContent = readFileSync4(file, "utf-8");
+  const newContent = readFileSync3(file, "utf-8");
   const oldExports = new Set;
   for (const match of oldContent.matchAll(EXPORT_RE)) {
     oldExports.add(match[1]);
@@ -1650,9 +909,9 @@ function detectTypeFieldChanges(oldContent, newContent) {
 }
 
 // src/hooks/detectors/security-check.ts
-import { existsSync as existsSync5, readFileSync as readFileSync5 } from "fs";
-import { basename as basename3, extname as extname4 } from "path";
-var CHECKABLE_EXTS2 = new Set([
+import { existsSync as existsSync4, readFileSync as readFileSync4 } from "fs";
+import { basename as basename2, extname as extname3 } from "path";
+var CHECKABLE_EXTS = new Set([
   ".ts",
   ".tsx",
   ".js",
@@ -1671,7 +930,7 @@ var CHECKABLE_EXTS2 = new Set([
   ".php",
   ".cs"
 ]);
-var MAX_CHECK_SIZE3 = 500000;
+var MAX_CHECK_SIZE2 = 500000;
 var SECRET_PATTERNS = [
   { re: /(?:AKIA|ASIA)[A-Z0-9]{16,}/, desc: "AWS access key" },
   { re: /(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,}/, desc: "GitHub token" },
@@ -1857,24 +1116,24 @@ var DANGEROUS_PATTERNS = [
 function detectSecurityPatterns(file) {
   if (isGateDisabled("security-check"))
     return [];
-  const ext = extname4(file).toLowerCase();
-  if (!CHECKABLE_EXTS2.has(ext))
+  const ext = extname3(file).toLowerCase();
+  if (!CHECKABLE_EXTS.has(ext))
     return [];
-  if (!existsSync5(file))
+  if (!existsSync4(file))
     return [];
   let content;
   try {
-    content = readFileSync5(file, "utf-8");
+    content = readFileSync4(file, "utf-8");
   } catch {
     return [];
   }
-  if (content.length > MAX_CHECK_SIZE3)
+  if (content.length > MAX_CHECK_SIZE2)
     return [];
   const errors = [];
   const lines = content.split(`
 `);
   const fileName = file.split("/").pop() ?? "";
-  const isTestFile2 = fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_") || fileName.includes("_test.");
+  const isTestFile = fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_") || fileName.includes("_test.");
   const starIsComment = JS_TS_EXTS.has(ext) || ext === ".java" || ext === ".kt" || ext === ".cs";
   const hasBlockComments = JS_TS_EXTS.has(ext) || ext === ".java" || ext === ".kt" || ext === ".cs" || ext === ".go" || ext === ".rs";
   let inBlockComment = false;
@@ -1910,7 +1169,7 @@ function detectSecurityPatterns(file) {
       continue;
     if (starIsComment && scanTrimmed.startsWith("*"))
       continue;
-    if (!isTestFile2) {
+    if (!isTestFile) {
       for (const { re, desc } of SECRET_PATTERNS) {
         if (re.test(scanLine)) {
           if (/process\.env\b/.test(scanLine))
@@ -1930,7 +1189,7 @@ function detectSecurityPatterns(file) {
       if (re.test(scanLine)) {
         if (suppress?.test(scanLine))
           continue;
-        if (suppressFile?.test(basename3(file)))
+        if (suppressFile?.test(basename2(file)))
           continue;
         errors.push(`L${i + 1}: ${desc}`);
       }
@@ -1985,10 +1244,10 @@ var ADVISORY_PATTERNS = [
   }
 ];
 function matchAdvisoryPatterns(file, content) {
-  const ext = extname4(file).toLowerCase();
-  if (!CHECKABLE_EXTS2.has(ext))
+  const ext = extname3(file).toLowerCase();
+  if (!CHECKABLE_EXTS.has(ext))
     return [];
-  if (content.length > MAX_CHECK_SIZE3)
+  if (content.length > MAX_CHECK_SIZE2)
     return [];
   const lines = content.split(`
 `);
@@ -2017,266 +1276,10 @@ function emitAdvisoryWarnings(file, content) {
   } catch {}
 }
 
-// src/hooks/detectors/semantic-check.ts
-import { existsSync as existsSync6, readFileSync as readFileSync6 } from "fs";
-import { extname as extname5 } from "path";
-var JS_TS_EXTS2 = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
-var PY_EXTS3 = new Set([".py", ".pyi"]);
-var CHECKABLE_EXTS3 = new Set([...JS_TS_EXTS2, ...PY_EXTS3, ".go", ".rs", ".rb", ".java", ".kt"]);
-var MAX_CHECK_SIZE4 = 500000;
-var INTENTIONAL_RE = /(?:\/\/|\/\*|#)\s*(?:fail-open|intentional|deliberate|nolint|noqa|NOLINT)/i;
-function detectEmptyCatch(lines) {
-  const errors = [];
-  for (let i = 0;i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trimStart();
-    if (trimmed.startsWith("//") || trimmed.startsWith("#") || trimmed.startsWith("*"))
-      continue;
-    if (!/\bcatch\b/.test(trimmed))
-      continue;
-    if (!trimmed.includes("{"))
-      continue;
-    if (INTENTIONAL_RE.test(line))
-      continue;
-    if (i > 0 && INTENTIONAL_RE.test(lines[i - 1]))
-      continue;
-    const afterBrace = trimmed.slice(trimmed.indexOf("{") + 1);
-    if (/^\s*\}/.test(afterBrace)) {
-      errors.push(`L${i + 1}: Empty catch block \u2014 errors silently swallowed`);
-      continue;
-    }
-    if (afterBrace.trim() === "") {
-      const next = lines[i + 1]?.trimStart() ?? "";
-      if (INTENTIONAL_RE.test(lines[i + 1] ?? ""))
-        continue;
-      if (/^\}/.test(next)) {
-        errors.push(`L${i + 1}: Empty catch block \u2014 errors silently swallowed`);
-      }
-    }
-  }
-  return errors;
-}
-var PURE_METHODS_RE = /^\s*(?:[a-zA-Z_$][\w$.]*\s*\.\s*)?(?:map|filter|reduce|flatMap|flat|slice|concat|toSorted|toReversed|toSpliced|replace|replaceAll|trim|trimStart|trimEnd|padStart|padEnd|substring|toLowerCase|toUpperCase)\s*\(/;
-var CHAIN_CONTINUATION_RE = /\)\s*\./;
-function detectIgnoredReturn(lines) {
-  const errors = [];
-  for (let i = 0;i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trimStart();
-    if (trimmed.startsWith("//") || trimmed.startsWith("#") || trimmed.startsWith("*"))
-      continue;
-    if (!PURE_METHODS_RE.test(trimmed))
-      continue;
-    if (/(?:^|[\s(,=])\b(?:return|const|let|var|yield|await)\s/.test(trimmed))
-      continue;
-    if (/=\s*(?:[a-zA-Z_$][\w$.]*\s*\.\s*)?(?:map|filter|reduce)/.test(trimmed))
-      continue;
-    if (CHAIN_CONTINUATION_RE.test(line))
-      continue;
-    const nextLine = lines[i + 1]?.trimStart() ?? "";
-    if (nextLine.startsWith("."))
-      continue;
-    if (INTENTIONAL_RE.test(line))
-      continue;
-    errors.push(`L${i + 1}: Return value of pure method discarded \u2014 probable no-op (assign or remove)`);
-  }
-  return errors;
-}
-var CONDITION_ASSIGNMENT_RE = /\b(?:if|while)\s*\(.*[^!=<>]=(?!=)[^=]/;
-var DESTRUCTURE_RE = /\b(?:const|let|var)\s/;
-function detectConditionAssignment(lines) {
-  const errors = [];
-  for (let i = 0;i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trimStart();
-    if (trimmed.startsWith("//") || trimmed.startsWith("*"))
-      continue;
-    if (!CONDITION_ASSIGNMENT_RE.test(trimmed))
-      continue;
-    if (DESTRUCTURE_RE.test(trimmed))
-      continue;
-    if (INTENTIONAL_RE.test(line))
-      continue;
-    if (i > 0 && INTENTIONAL_RE.test(lines[i - 1]))
-      continue;
-    const condMatch = trimmed.match(/\b(?:if|while)\s*\((.+)\)/);
-    if (!condMatch)
-      continue;
-    const cond = condMatch[1];
-    const stripped = cond.replace(/(?:[!=<>]=|=>|===|!==)/g, "");
-    if (!stripped.includes("="))
-      continue;
-    errors.push(`L${i + 1}: Assignment (=) inside condition \u2014 use === for comparison`);
-  }
-  return errors;
-}
-function detectUnreachableCode(lines) {
-  const errors = [];
-  for (let i = 0;i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trimStart();
-    if (trimmed.startsWith("//") || trimmed.startsWith("*"))
-      continue;
-    if (!/^\s*(?:return\b|throw\b)/.test(line))
-      continue;
-    const openBraces = (trimmed.match(/\{/g) ?? []).length;
-    const closeBraces = (trimmed.match(/\}/g) ?? []).length;
-    if (openBraces > closeBraces)
-      continue;
-    for (let j = i + 1;j < lines.length; j++) {
-      const nextTrimmed = lines[j].trimStart();
-      if (nextTrimmed === "")
-        continue;
-      if (nextTrimmed.startsWith("//") || nextTrimmed.startsWith("*"))
-        continue;
-      if (nextTrimmed.startsWith("}"))
-        break;
-      if (INTENTIONAL_RE.test(lines[j]))
-        break;
-      if (INTENTIONAL_RE.test(line))
-        break;
-      errors.push(`L${j + 1}: Unreachable code after return/throw at L${i + 1}`);
-      break;
-    }
-  }
-  return errors;
-}
-var LOOSE_EQ_RE = /(?<![!=])(?:==|!=)(?!=)/;
-var NULL_COALESCE_RE = /(?:==|!=)\s*null\b/;
-var STRING_LITERAL_RE = /(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|\/(?:[^/\\\n]|\\.)+\/[gimsuy]*)/g;
-function detectLooseEquality(lines) {
-  const errors = [];
-  for (let i = 0;i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trimStart();
-    if (trimmed.startsWith("//") || trimmed.startsWith("*"))
-      continue;
-    const stripped = trimmed.replace(STRING_LITERAL_RE, '""');
-    if (!LOOSE_EQ_RE.test(stripped))
-      continue;
-    if (NULL_COALESCE_RE.test(stripped))
-      continue;
-    if (INTENTIONAL_RE.test(line))
-      continue;
-    errors.push(`L${i + 1}: Loose equality (== or !=) \u2014 use === or !== for strict comparison`);
-  }
-  return errors;
-}
-var CASE_OR_DEFAULT_RE = /^\s*(?:case\b|default\s*:)/;
-var BREAK_RE = /^\s*(?:break|return|throw|continue)\b/;
-var FALLTHROUGH_COMMENT_RE = /(?:\/\/|\/\*)\s*fall\s*-?\s*through/i;
-function detectSwitchFallthrough(lines) {
-  const errors = [];
-  let inCase = false;
-  let caseStartLine = 0;
-  let hasBreak = false;
-  let hasFallthroughComment = false;
-  let hasIntentional = false;
-  let hasCode = false;
-  let braceDepth = 0;
-  for (let i = 0;i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trimStart();
-    if (CASE_OR_DEFAULT_RE.test(trimmed)) {
-      if (inCase && hasCode && !hasBreak && !hasFallthroughComment && !hasIntentional) {
-        errors.push(`L${i + 1}: Switch case fallthrough from case at L${caseStartLine} \u2014 add break, return, or // fallthrough comment`);
-      }
-      inCase = true;
-      caseStartLine = i + 1;
-      hasBreak = false;
-      hasFallthroughComment = false;
-      hasIntentional = false;
-      hasCode = false;
-      braceDepth = 0;
-      continue;
-    }
-    if (!inCase)
-      continue;
-    const opens = (line.match(/\{/g) ?? []).length;
-    const closes = (line.match(/\}/g) ?? []).length;
-    braceDepth += opens - closes;
-    if (braceDepth <= 0 && BREAK_RE.test(trimmed)) {
-      hasBreak = true;
-    }
-    if (FALLTHROUGH_COMMENT_RE.test(line)) {
-      hasFallthroughComment = true;
-    }
-    if (INTENTIONAL_RE.test(line)) {
-      hasIntentional = true;
-    }
-    if (trimmed !== "" && !trimmed.startsWith("//") && !trimmed.startsWith("*")) {
-      hasCode = true;
-    }
-    if (braceDepth < 0) {
-      inCase = false;
-    }
-  }
-  return errors;
-}
-var TEST_CASE_RE = /\b(?:it|test)\s*\(/g;
-var PBT_IMPORT_RE = /(?:fast-check|@fast-check|fc\.|property\s*\(|forAll\s*\(|arbitrary)/;
-function emitPbtAdvisory(file, content) {
-  try {
-    const fileName = file.split("/").pop() ?? "";
-    const isTestFile2 = fileName.includes(".test.") || fileName.includes(".spec.") || fileName.startsWith("test_");
-    if (!isTestFile2)
-      return;
-    const testCases = content.match(TEST_CASE_RE);
-    if (!testCases || testCases.length < 5)
-      return;
-    if (PBT_IMPORT_RE.test(content))
-      return;
-    const relative = file.split("/").slice(-3).join("/");
-    process.stderr.write(`[qult] Advisory: ${relative} has ${testCases.length} test cases \u2014 consider property-based testing for broader coverage
-`);
-  } catch {}
-}
-function detectSemanticPatterns(file) {
-  if (isGateDisabled("semantic-check"))
-    return [];
-  const ext = extname5(file).toLowerCase();
-  if (!CHECKABLE_EXTS3.has(ext))
-    return [];
-  if (!existsSync6(file))
-    return [];
-  let content;
-  try {
-    content = readFileSync6(file, "utf-8");
-  } catch {
-    return [];
-  }
-  if (content.length > MAX_CHECK_SIZE4)
-    return [];
-  const lines = content.split(`
-`);
-  const errors = [];
-  if (JS_TS_EXTS2.has(ext)) {
-    errors.push(...detectEmptyCatch(lines));
-    errors.push(...detectIgnoredReturn(lines));
-    errors.push(...detectConditionAssignment(lines));
-    errors.push(...detectUnreachableCode(lines));
-    errors.push(...detectLooseEquality(lines));
-    errors.push(...detectSwitchFallthrough(lines));
-  }
-  if (PY_EXTS3.has(ext)) {
-    errors.push(...detectEmptyCatch(lines));
-  }
-  emitPbtAdvisory(file, content);
-  if (errors.length === 0)
-    return [];
-  return [
-    {
-      file,
-      errors: errors.map((e) => sanitizeForStderr(e.slice(0, 300))),
-      gate: "semantic-check"
-    }
-  ];
-}
-
 // src/hooks/detectors/test-quality-check.ts
-import { existsSync as existsSync7, readFileSync as readFileSync7 } from "fs";
-import { basename as basename4, dirname as dirname3, extname as extname6, resolve as resolve2 } from "path";
-var MAX_CHECK_SIZE5 = 500000;
+import { existsSync as existsSync5, readFileSync as readFileSync5 } from "fs";
+import { basename as basename3, dirname as dirname2, extname as extname4, resolve } from "path";
+var MAX_CHECK_SIZE3 = 500000;
 var BLOCKING_SMELL_TYPES = new Set([
   "empty-test",
   "always-true",
@@ -2284,7 +1287,7 @@ var BLOCKING_SMELL_TYPES = new Set([
   "constant-self"
 ]);
 var ASSERTION_RE = /\b(expect|assert|should)\s*[.(]/g;
-var TEST_CASE_RE2 = /\b(it|test)\s*\(/g;
+var TEST_CASE_RE = /\b(it|test)\s*\(/g;
 var WEAK_MATCHERS = [
   { re: /\.toBeTruthy\s*\(\s*\)/, name: "toBeTruthy()" },
   { re: /\.toBeFalsy\s*\(\s*\)/, name: "toBeFalsy()" },
@@ -2340,26 +1343,26 @@ function countAssertionsOutsideSetup(code) {
   return count;
 }
 function analyzeTestQuality(file) {
-  const cwd = resolve2(process.cwd());
-  const absPath = resolve2(cwd, file);
+  const cwd = resolve(process.cwd());
+  const absPath = resolve(cwd, file);
   if (!absPath.startsWith(cwd))
     return null;
-  if (!existsSync7(absPath))
+  if (!existsSync5(absPath))
     return null;
   let content;
   try {
-    content = readFileSync7(absPath, "utf-8");
+    content = readFileSync5(absPath, "utf-8");
   } catch {
     return null;
   }
-  if (content.length > MAX_CHECK_SIZE5)
+  if (content.length > MAX_CHECK_SIZE3)
     return null;
   const codeOnly = content.split(`
 `).filter((line) => !line.trimStart().startsWith("//")).join(`
 `);
   const lines = content.split(`
 `);
-  const testCount = (codeOnly.match(TEST_CASE_RE2) ?? []).length;
+  const testCount = (codeOnly.match(TEST_CASE_RE) ?? []).length;
   if (testCount === 0)
     return null;
   const assertionCount = countAssertionsOutsideSetup(codeOnly);
@@ -2530,10 +1533,10 @@ function analyzeTestQuality(file) {
     });
   }
   try {
-    const snapDir = `${dirname3(absPath)}/__snapshots__/`;
-    const snapFile = `${snapDir}${basename4(absPath)}.snap`;
-    if (existsSync7(snapFile)) {
-      const snapContent = readFileSync7(snapFile, "utf-8");
+    const snapDir = `${dirname2(absPath)}/__snapshots__/`;
+    const snapFile = `${snapDir}${basename3(absPath)}.snap`;
+    if (existsSync5(snapFile)) {
+      const snapContent = readFileSync5(snapFile, "utf-8");
       if (snapContent.length > LARGE_SNAPSHOT_CHARS) {
         smells.push({
           type: "snapshot-bloat",
@@ -2549,7 +1552,7 @@ function analyzeTestQuality(file) {
       try {
         const implFile = findImplFile(absPath);
         if (implFile) {
-          const implContent = readFileSync7(implFile, "utf-8");
+          const implContent = readFileSync5(implFile, "utf-8");
           if (/\bthrow\b|\breject\b|Promise\.reject/m.test(implContent)) {
             smells.push({
               type: "no-error-path",
@@ -2650,18 +1653,18 @@ function analyzeTestQuality(file) {
 }
 function findImplFile(testPath) {
   try {
-    const dir = dirname3(testPath);
-    const base = basename4(testPath);
+    const dir = dirname2(testPath);
+    const base = basename3(testPath);
     const implName = base.replace(/\.(?:test|spec)(\.[^.]+)$/, "$1");
-    const sameDirPath = resolve2(dir, implName);
-    if (existsSync7(sameDirPath))
+    const sameDirPath = resolve(dir, implName);
+    if (existsSync5(sameDirPath))
       return sameDirPath;
-    const parentDir = dirname3(dir);
-    const parentPath = resolve2(parentDir, implName);
-    if (existsSync7(parentPath))
+    const parentDir = dirname2(dir);
+    const parentPath = resolve(parentDir, implName);
+    if (existsSync5(parentPath))
       return parentPath;
-    const srcPath = resolve2(parentDir, "src", implName);
-    if (existsSync7(srcPath))
+    const srcPath = resolve(parentDir, "src", implName);
+    if (existsSync5(srcPath))
       return srcPath;
     return null;
   } catch {
@@ -2673,10 +1676,6 @@ function findImplFile(testPath) {
 var WEIGHTS = {
   security: -2,
   export_breaking: -2,
-  dataflow: -2.5,
-  duplication: -1.5,
-  semantic: -1,
-  complexity: -1,
   dead_imports: -1,
   test_quality: -1.5
 };
@@ -2685,7 +1684,7 @@ function countFindings(fixes) {
   return fixes.reduce((sum, f) => sum + f.errors.length, 0);
 }
 function computeFileHealthScore(file) {
-  if (!existsSync8(file)) {
+  if (!existsSync6(file)) {
     return { score: 10, breakdown: {} };
   }
   const breakdown = {};
@@ -2694,18 +1693,6 @@ function computeFileHealthScore(file) {
     const count = countFindings(securityFixes);
     if (count > 0)
       breakdown.security = (WEIGHTS.security ?? DEFAULT_WEIGHT) * count;
-  } catch {}
-  try {
-    const semanticFixes = detectSemanticPatterns(file);
-    const count = countFindings(semanticFixes);
-    if (count > 0)
-      breakdown.semantic = (WEIGHTS.semantic ?? DEFAULT_WEIGHT) * count;
-  } catch {}
-  try {
-    const dupFixes = detectDuplication(file);
-    const count = countFindings(dupFixes);
-    if (count > 0)
-      breakdown.duplication = (WEIGHTS.duplication ?? DEFAULT_WEIGHT) * count;
   } catch {}
   try {
     const deadImports = detectDeadImports(file);
@@ -2723,19 +1710,14 @@ function computeFileHealthScore(file) {
     if (tqResult !== null && tqResult.smells.length > 0)
       breakdown.test_quality = (WEIGHTS.test_quality ?? DEFAULT_WEIGHT) * tqResult.smells.length;
   } catch {}
-  try {
-    const complexityResult = computeComplexitySync(file);
-    if (complexityResult !== null && complexityResult.warnings.length > 0)
-      breakdown.complexity = (WEIGHTS.complexity ?? DEFAULT_WEIGHT) * complexityResult.warnings.length;
-  } catch {}
   const totalPenalty = Object.values(breakdown).reduce((sum, v) => sum + v, 0);
   const score = Math.max(0, Math.round((10 + totalPenalty) * 10) / 10);
   return { score, breakdown };
 }
 
 // src/hooks/detectors/import-graph.ts
-import { existsSync as existsSync9, lstatSync, readdirSync as readdirSync2, readFileSync as readFileSync8, statSync as statSync2 } from "fs";
-import { dirname as dirname4, extname as extname7, join as join3, resolve as resolve3 } from "path";
+import { existsSync as existsSync7, lstatSync, readdirSync as readdirSync2, readFileSync as readFileSync6, statSync as statSync2 } from "fs";
+import { dirname as dirname3, extname as extname5, join as join3, resolve as resolve2 } from "path";
 var SCAN_EXTS = new Set([
   ".ts",
   ".tsx",
@@ -2773,7 +1755,7 @@ function stripComments(content) {
 function extractRelativeImports(content, filePath) {
   const stripped = stripComments(content);
   const specifiers = [];
-  const ext = filePath ? extname7(filePath).toLowerCase() : "";
+  const ext = filePath ? extname5(filePath).toLowerCase() : "";
   if (ext === ".py") {
     const pyRel = /from\s+(\.[\w.]*)\s+import/g;
     for (const match of stripped.matchAll(pyRel)) {
@@ -2822,7 +1804,7 @@ function extractRelativeImports(content, filePath) {
   return specifiers;
 }
 function resolvePythonImport(specifier, fromFile) {
-  const dir = dirname4(fromFile);
+  const dir = dirname3(fromFile);
   const dotMatch = specifier.match(/^(\.+)(.*)/);
   if (!dotMatch)
     return null;
@@ -2830,37 +1812,37 @@ function resolvePythonImport(specifier, fromFile) {
   const modulePart = dotMatch[2];
   let base = dir;
   for (let i = 1;i < dots; i++) {
-    base = dirname4(base);
+    base = dirname3(base);
   }
   if (!modulePart) {
     return null;
   }
   const parts = modulePart.split(".");
   const candidate = join3(base, ...parts);
-  if (existsSync9(`${candidate}.py`))
+  if (existsSync7(`${candidate}.py`))
     return `${candidate}.py`;
-  if (existsSync9(join3(candidate, "__init__.py")))
+  if (existsSync7(join3(candidate, "__init__.py")))
     return join3(candidate, "__init__.py");
   return null;
 }
 function resolveRustImport(specifier, fromFile, scanRoot) {
-  const dir = dirname4(fromFile);
+  const dir = dirname3(fromFile);
   if (specifier.startsWith("mod:")) {
     const name = specifier.slice(4);
     const asFile = join3(dir, `${name}.rs`);
-    if (existsSync9(asFile))
+    if (existsSync7(asFile))
       return asFile;
     const asDir = join3(dir, name, "mod.rs");
-    if (existsSync9(asDir))
+    if (existsSync7(asDir))
       return asDir;
   } else if (specifier.startsWith("crate:")) {
     const name = specifier.slice(6);
     const srcDir = join3(scanRoot, "src");
     const asFile = join3(srcDir, `${name}.rs`);
-    if (existsSync9(asFile))
+    if (existsSync7(asFile))
       return asFile;
     const asDir = join3(srcDir, name, "mod.rs");
-    if (existsSync9(asDir))
+    if (existsSync7(asDir))
       return asDir;
   }
   return null;
@@ -2870,7 +1852,7 @@ function getGoModulePath(scanRoot) {
   if (_goModuleCache !== undefined)
     return _goModuleCache;
   try {
-    const goMod = readFileSync8(join3(scanRoot, "go.mod"), "utf-8");
+    const goMod = readFileSync6(join3(scanRoot, "go.mod"), "utf-8");
     const match = goMod.match(/^module\s+(\S+)/m);
     _goModuleCache = match ? match[1] : null;
   } catch {
@@ -2884,12 +1866,12 @@ function resolveGoImport(specifier, scanRoot) {
     return null;
   const relPath = specifier.slice(modulePath.length + 1);
   const dir = join3(scanRoot, relPath);
-  if (existsSync9(dir) && statSync2(dir).isDirectory())
+  if (existsSync7(dir) && statSync2(dir).isDirectory())
     return dir;
   return null;
 }
 function resolveImportPath(specifier, fromFile, scanRoot) {
-  const fileExt = extname7(fromFile).toLowerCase();
+  const fileExt = extname5(fromFile).toLowerCase();
   if (fileExt === ".py") {
     return resolvePythonImport(specifier, fromFile);
   }
@@ -2899,18 +1881,18 @@ function resolveImportPath(specifier, fromFile, scanRoot) {
   if (fileExt === ".go" && scanRoot) {
     return resolveGoImport(specifier, scanRoot);
   }
-  const dir = dirname4(fromFile);
-  const raw = resolve3(dir, specifier);
-  if (existsSync9(raw) && statSync2(raw).isFile())
+  const dir = dirname3(fromFile);
+  const raw = resolve2(dir, specifier);
+  if (existsSync7(raw) && statSync2(raw).isFile())
     return raw;
   for (const ext of [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]) {
     const withExt = `${raw}${ext}`;
-    if (existsSync9(withExt))
+    if (existsSync7(withExt))
       return withExt;
   }
   for (const ext of [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]) {
     const index = join3(raw, `index${ext}`);
-    if (existsSync9(index))
+    if (existsSync7(index))
       return index;
   }
   return null;
@@ -2941,7 +1923,7 @@ function collectFiles(dir) {
           continue;
         if (stat.isDirectory()) {
           walk(full, depth + 1);
-        } else if (stat.isFile() && SCAN_EXTS.has(extname7(full))) {
+        } else if (stat.isFile() && SCAN_EXTS.has(extname5(full))) {
           if (stat.size <= MAX_FILE_SIZE) {
             files.push(full);
           }
@@ -2957,7 +1939,7 @@ function collectFiles(dir) {
   return files;
 }
 function findImporters(targetFile, scanRoot, depth = 1) {
-  if (!existsSync9(scanRoot))
+  if (!existsSync7(scanRoot))
     return [];
   const clampedDepth = Math.min(Math.max(depth, 1), 3);
   const files = collectFiles(scanRoot);
@@ -2965,29 +1947,29 @@ function findImporters(targetFile, scanRoot, depth = 1) {
   const allImporters = [];
   function findDirectImporters(targetAbs) {
     const direct = [];
-    const targetDir = dirname4(targetAbs);
-    const targetExt = extname7(targetAbs).toLowerCase();
+    const targetDir = dirname3(targetAbs);
+    const targetExt = extname5(targetAbs).toLowerCase();
     for (const file of files) {
-      const fileAbs = resolve3(file);
+      const fileAbs = resolve2(file);
       if (fileAbs === targetAbs)
         continue;
-      if (targetExt === ".go" && extname7(file).toLowerCase() === ".go" && dirname4(fileAbs) === targetDir) {
+      if (targetExt === ".go" && extname5(file).toLowerCase() === ".go" && dirname3(fileAbs) === targetDir) {
         direct.push(file);
         continue;
       }
       try {
-        const content = readFileSync8(file, "utf-8");
+        const content = readFileSync6(file, "utf-8");
         const specifiers = extractRelativeImports(content, file);
         for (const spec of specifiers) {
           const resolved = resolveImportPath(spec, file, scanRoot);
           if (!resolved)
             continue;
-          if (extname7(file).toLowerCase() === ".go") {
-            if (resolve3(resolved) === targetDir) {
+          if (extname5(file).toLowerCase() === ".go") {
+            if (resolve2(resolved) === targetDir) {
               direct.push(file);
               break;
             }
-          } else if (resolve3(resolved) === targetAbs) {
+          } else if (resolve2(resolved) === targetAbs) {
             direct.push(file);
             break;
           }
@@ -2997,15 +1979,15 @@ function findImporters(targetFile, scanRoot, depth = 1) {
     if (targetExt === ".py") {
       const targetName = targetAbs.replace(/\.py$/, "").split("/").pop();
       for (const file of files) {
-        const fileAbs = resolve3(file);
+        const fileAbs = resolve2(file);
         if (fileAbs === targetAbs || direct.includes(file))
           continue;
-        if (extname7(file).toLowerCase() !== ".py")
+        if (extname5(file).toLowerCase() !== ".py")
           continue;
         try {
-          const content = readFileSync8(file, "utf-8");
+          const content = readFileSync6(file, "utf-8");
           const bareImport = new RegExp(`from\\s+\\.\\s+import\\s+(?:.*\\b${targetName}\\b)`, "m");
-          if (bareImport.test(content) && dirname4(fileAbs) === targetDir) {
+          if (bareImport.test(content) && dirname3(fileAbs) === targetDir) {
             direct.push(file);
           }
         } catch {}
@@ -3013,7 +1995,7 @@ function findImporters(targetFile, scanRoot, depth = 1) {
     }
     return direct;
   }
-  let currentTargets = [resolve3(targetFile)];
+  let currentTargets = [resolve2(targetFile)];
   for (let d = 0;d < clampedDepth; d++) {
     const nextTargets = [];
     for (const target of currentTargets) {
@@ -3022,8 +2004,8 @@ function findImporters(targetFile, scanRoot, depth = 1) {
       visited.add(target);
       const direct = findDirectImporters(target);
       for (const imp of direct) {
-        const impAbs = resolve3(imp);
-        if (!visited.has(impAbs) && impAbs !== resolve3(targetFile)) {
+        const impAbs = resolve2(imp);
+        if (!visited.has(impAbs) && impAbs !== resolve2(targetFile)) {
           allImporters.push(imp);
           nextTargets.push(impAbs);
         }
@@ -3037,15 +2019,15 @@ function findImporters(targetFile, scanRoot, depth = 1) {
 }
 
 // src/hooks/detectors/spec-trace-check.ts
-import { existsSync as existsSync10, readFileSync as readFileSync9 } from "fs";
-import { basename as basename5, dirname as dirname5, relative } from "path";
+import { existsSync as existsSync8, readFileSync as readFileSync7 } from "fs";
+import { basename as basename4, dirname as dirname4, relative } from "path";
 function validateTestCoversImpl(testFile, _testFunction, implFile, _projectRoot) {
-  if (!existsSync10(testFile))
+  if (!existsSync8(testFile))
     return false;
   try {
-    const content = readFileSync9(testFile, "utf-8");
-    const implBasename = basename5(implFile).replace(/\.[^.]+$/, "");
-    const implRelative = relative(dirname5(testFile), implFile).replace(/\\/g, "/").replace(/\.[^.]+$/, "");
+    const content = readFileSync7(testFile, "utf-8");
+    const implBasename = basename4(implFile).replace(/\.[^.]+$/, "");
+    const implRelative = relative(dirname4(testFile), implFile).replace(/\\/g, "/").replace(/\.[^.]+$/, "");
     const importPatterns = [
       new RegExp(`(?:import|require).*['"].*${escapeRegex2(implRelative)}(?:\\.[^'"]*)?['"]`, "m"),
       new RegExp(`(?:import|require).*['"].*/${escapeRegex2(implBasename)}(?:\\.[^'"]*)?['"]`, "m")
@@ -3059,46 +2041,8 @@ function escapeRegex2(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// src/metrics-dashboard.ts
-function generateMetricsDashboard(metrics) {
-  if (metrics.length === 0) {
-    return "No metrics data available yet. Metrics are recorded after each session.";
-  }
-  const lines = [];
-  lines.push(`## Metrics Dashboard (${metrics.length} sessions)
-`);
-  const totalGateFailures = metrics.reduce((sum, m) => sum + m.gate_failures, 0);
-  const totalSecurityWarnings = metrics.reduce((sum, m) => sum + m.security_warnings, 0);
-  const reviewScores = metrics.filter((m) => m.review_score !== null).map((m) => m.review_score);
-  const avgGateFailures = totalGateFailures / metrics.length;
-  const avgReviewScore = reviewScores.length > 0 ? reviewScores.reduce((a, b) => a + b, 0) / reviewScores.length : null;
-  lines.push("### Summary");
-  lines.push(`- Gate failures: ${totalGateFailures} total, avg ${avgGateFailures.toFixed(1)} gate failures/session`);
-  lines.push(`- Security warnings: ${totalSecurityWarnings} total`);
-  if (avgReviewScore !== null) {
-    lines.push(`- Review scores: avg ${avgReviewScore.toFixed(1)}/40 across ${reviewScores.length} reviews`);
-  }
-  lines.push("");
-  lines.push("### Recent Sessions");
-  const recent = metrics.slice(-10).reverse();
-  for (const m of recent) {
-    const date = m.timestamp.slice(0, 10);
-    const parts = [];
-    if (m.gate_failures > 0)
-      parts.push(`${m.gate_failures} gate failure(s)`);
-    if (m.security_warnings > 0)
-      parts.push(`${m.security_warnings} security warning(s)`);
-    if (m.review_score !== null)
-      parts.push(`${m.review_score}/40`);
-    parts.push(`${m.files_changed} files`);
-    lines.push(`- ${date}: ${parts.join(", ")}`);
-  }
-  return lines.join(`
-`);
-}
-
 // src/state/audit-log.ts
-var MAX_ENTRIES2 = 200;
+var MAX_ENTRIES = 200;
 function appendAuditLog(entry) {
   try {
     const db = getDb();
@@ -3106,23 +2050,8 @@ function appendAuditLog(entry) {
     db.prepare("INSERT INTO audit_log (project_id, session_id, action, gate_name, reason) VALUES (?, ?, ?, ?, ?)").run(projectId, null, entry.action, entry.gate_name ?? null, entry.reason);
     db.prepare(`DELETE FROM audit_log WHERE project_id = ? AND id NOT IN (
 				SELECT id FROM audit_log WHERE project_id = ? ORDER BY id DESC LIMIT ?
-			)`).run(projectId, projectId, MAX_ENTRIES2);
+			)`).run(projectId, projectId, MAX_ENTRIES);
   } catch {}
-}
-function readAuditLog() {
-  try {
-    const db = getDb();
-    const projectId = getProjectId();
-    const rows = db.prepare("SELECT action, reason, gate_name, created_at FROM audit_log WHERE project_id = ? ORDER BY id DESC LIMIT ?").all(projectId, MAX_ENTRIES2);
-    return rows.map((r) => ({
-      action: r.action,
-      reason: r.reason ?? "",
-      gate_name: r.gate_name ?? undefined,
-      timestamp: r.created_at
-    }));
-  } catch {
-    return [];
-  }
 }
 
 // src/mcp-server.ts
@@ -3134,18 +2063,11 @@ function getValidGateNames() {
   const names = new Set([
     "review",
     "security-check",
-    "dead-import-check",
-    "duplication-check",
-    "semantic-check",
     "semgrep-required",
     "test-quality-check",
-    "security-check-advisory",
     "coverage",
     "dep-vuln-check",
-    "hallucinated-package-check",
-    "dataflow-check",
-    "complexity-check",
-    "mutation-test"
+    "hallucinated-package-check"
   ]);
   if (gates) {
     for (const category of [gates.on_write, gates.on_commit, gates.on_review]) {
@@ -3205,7 +2127,7 @@ var TOOL_DEFS = [
   },
   {
     name: "set_config",
-    description: "Set a qult config value. Allowed keys: review.score_threshold, review.max_iterations, review.required_changed_files, review.dimension_floor, plan_eval.score_threshold, plan_eval.max_iterations.",
+    description: "Set a qult config value. Allowed keys: review.score_threshold, review.max_iterations, review.required_changed_files, review.dimension_floor, review.models.{spec|quality|security|adversarial}, plan_eval.score_threshold, plan_eval.max_iterations, plan_eval.models.{generator|evaluator}, review.require_human_approval.",
     inputSchema: {
       type: "object",
       properties: {
@@ -3299,50 +2221,6 @@ var TOOL_DEFS = [
     }
   },
   {
-    name: "reset_escalation_counters",
-    description: "Reset all escalation counters (security, dead-import, drift, test-quality, duplication) to zero. Use during large refactors when accumulated warnings are no longer relevant.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        reason: {
-          type: "string",
-          description: "Why counters should be reset (min 10 chars). Required for audit trail."
-        }
-      },
-      required: ["reason"]
-    }
-  },
-  {
-    name: "get_harness_report",
-    description: "Returns a harness effectiveness report analyzing which gates catch issues and review score trends.",
-    inputSchema: { type: "object", properties: {} }
-  },
-  {
-    name: "get_handoff_document",
-    description: "Returns a structured handoff document for starting a fresh session. Call before ending a long session.",
-    inputSchema: { type: "object", properties: {} }
-  },
-  {
-    name: "get_metrics_dashboard",
-    description: "Returns a formatted metrics dashboard showing gate failure trends and review score history.",
-    inputSchema: { type: "object", properties: {} }
-  },
-  {
-    name: "get_flywheel_recommendations",
-    description: "Returns threshold adjustment recommendations based on cross-session pattern analysis.",
-    inputSchema: { type: "object", properties: {} }
-  },
-  {
-    name: "apply_flywheel_recommendations",
-    description: "Apply flywheel recommendations: safe (raise) recommendations are auto-applied to global_configs, lower recommendations are deferred for manual review.",
-    inputSchema: { type: "object", properties: {} }
-  },
-  {
-    name: "transfer_knowledge",
-    description: "Cross-project session analysis. Detects common patterns across 3+ projects and writes shared thresholds to global_configs. Returns patterns found and rule templates.",
-    inputSchema: { type: "object", properties: {} }
-  },
-  {
     name: "record_finish_started",
     description: "Record that /qult:finish has been started. Call at the beginning of /qult:finish skill. Required for the commit gate to allow commits when a plan is active.",
     inputSchema: { type: "object", properties: {} }
@@ -3406,16 +2284,6 @@ var TOOL_DEFS = [
       },
       required: ["test_file", "impl_file"]
     }
-  },
-  {
-    name: "generate_sbom",
-    description: "Generate a Software Bill of Materials (SBOM) for the project in CycloneDX JSON format. Uses osv-scanner or syft. Slower than other tools (up to 30s).",
-    inputSchema: { type: "object", properties: {} }
-  },
-  {
-    name: "get_dependency_summary",
-    description: "Get a summary of project dependencies: package count by ecosystem and known vulnerability count. Uses osv-scanner.",
-    inputSchema: { type: "object", properties: {} }
   }
 ];
 function handleTool(name, cwd, args) {
@@ -3538,13 +2406,7 @@ function handleTool(name, cwd, args) {
         "review.required_changed_files",
         "review.dimension_floor",
         "plan_eval.score_threshold",
-        "plan_eval.max_iterations",
-        "flywheel.min_sessions",
-        "escalation.security_threshold",
-        "escalation.drift_threshold",
-        "escalation.test_quality_threshold",
-        "escalation.duplication_threshold",
-        "escalation.semantic_threshold"
+        "plan_eval.max_iterations"
       ];
       const ALLOWED_MODEL_KEYS = [
         "review.models.spec",
@@ -3554,7 +2416,7 @@ function handleTool(name, cwd, args) {
         "plan_eval.models.generator",
         "plan_eval.models.evaluator"
       ];
-      const ALLOWED_BOOLEAN_KEYS = ["flywheel.enabled", "review.require_human_approval"];
+      const ALLOWED_BOOLEAN_KEYS = ["review.require_human_approval"];
       const ALL_ALLOWED = [...ALLOWED_NUMBER_KEYS, ...ALLOWED_MODEL_KEYS, ...ALLOWED_BOOLEAN_KEYS];
       if (!ALL_ALLOWED.includes(key)) {
         return {
@@ -3666,7 +2528,7 @@ function handleTool(name, cwd, args) {
           ]
         };
       }
-      const resolvedHealth = resolve4(filePath);
+      const resolvedHealth = resolve3(filePath);
       if (!resolvedHealth.startsWith(`${cwd}/`)) {
         return {
           content: [
@@ -3749,100 +2611,6 @@ function handleTool(name, cwd, args) {
         ]
       };
     }
-    case "get_harness_report": {
-      try {
-        const metrics = readMetricsHistory();
-        const auditLog = readAuditLog();
-        const cfg = loadConfig();
-        const report = generateHarnessReport(metrics, auditLog, cfg);
-        return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
-      } catch {
-        return { content: [{ type: "text", text: "No harness data available yet." }] };
-      }
-    }
-    case "get_handoff_document": {
-      try {
-        const session = db.prepare("SELECT * FROM projects WHERE id = ?").get(pid);
-        const fixes = db.prepare("SELECT file, gate, errors FROM pending_fixes WHERE project_id = ?").all(pid);
-        const changedFiles = db.prepare("SELECT file_path FROM changed_files WHERE project_id = ?").all(pid);
-        const disabledGates = db.prepare("SELECT gate_name FROM disabled_gates WHERE project_id = ?").all(pid);
-        const plan = getActivePlan();
-        return {
-          content: [
-            {
-              type: "text",
-              text: generateHandoffDocument({
-                changedFiles: changedFiles.map((r) => r.file_path),
-                pendingFixes: fixes.map((r) => ({
-                  file: r.file,
-                  gate: r.gate,
-                  errors: JSON.parse(r.errors)
-                })),
-                planTasks: plan?.tasks ?? null,
-                testPassed: !!session?.test_passed_at,
-                reviewDone: !!session?.review_completed_at,
-                disabledGates: disabledGates.map((r) => r.gate_name)
-              })
-            }
-          ]
-        };
-      } catch {
-        return { content: [{ type: "text", text: "No active session data to hand off." }] };
-      }
-    }
-    case "get_metrics_dashboard": {
-      try {
-        const metrics = readMetricsHistory();
-        return { content: [{ type: "text", text: generateMetricsDashboard(metrics) }] };
-      } catch {
-        return { content: [{ type: "text", text: "No metrics data available yet." }] };
-      }
-    }
-    case "get_flywheel_recommendations": {
-      try {
-        const config = loadConfig();
-        const metrics = readMetricsHistory();
-        const recs = getFlywheelRecommendations(metrics, config);
-        if (recs.length === 0) {
-          return {
-            content: [
-              { type: "text", text: "No recommendations. Insufficient data or flywheel disabled." }
-            ]
-          };
-        }
-        return { content: [{ type: "text", text: JSON.stringify(recs, null, 2) }] };
-      } catch {
-        return { content: [{ type: "text", text: "No flywheel data available yet." }] };
-      }
-    }
-    case "apply_flywheel_recommendations": {
-      try {
-        const config = loadConfig();
-        const metrics = readMetricsHistory();
-        const recs = getFlywheelRecommendations(metrics, config);
-        if (recs.length === 0) {
-          return {
-            content: [
-              { type: "text", text: "No recommendations. Insufficient data or flywheel disabled." }
-            ]
-          };
-        }
-        const result = applyFlywheelRecommendations(recs, config);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-      } catch {
-        return { content: [{ type: "text", text: "No flywheel data available yet." }] };
-      }
-    }
-    case "transfer_knowledge": {
-      try {
-        const result = transferKnowledge();
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-      } catch {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ patterns: [], templates: [] }) }]
-        };
-      }
-    }
     case "record_finish_started": {
       db.prepare("INSERT OR REPLACE INTO ran_gates (project_id, gate_name, ran_at) VALUES (?, ?, ?)").run(pid, "__finish_started__", new Date().toISOString());
       return { content: [{ type: "text", text: "Finish started recorded." }] };
@@ -3852,14 +2620,14 @@ function handleTool(name, cwd, args) {
       if (!planPath) {
         return { content: [{ type: "text", text: "Error: plan_path is required." }] };
       }
-      const resolvedPath = resolve4(cwd, planPath);
+      const resolvedPath = resolve3(cwd, planPath);
       const allowedBases = [
-        resolve4(join4(cwd, ".claude", "plans")),
-        resolve4(join4(homedir3(), ".claude", "plans"))
+        resolve3(join4(cwd, ".claude", "plans")),
+        resolve3(join4(homedir2(), ".claude", "plans"))
       ];
       const envPlansDir = process.env.CLAUDE_PLANS_DIR;
       if (envPlansDir)
-        allowedBases.push(resolve4(envPlansDir));
+        allowedBases.push(resolve3(envPlansDir));
       const isAllowed = allowedBases.some((base) => resolvedPath.startsWith(`${base}/`)) && resolvedPath.endsWith(".md");
       if (!isAllowed) {
         return {
@@ -3868,7 +2636,7 @@ function handleTool(name, cwd, args) {
           ]
         };
       }
-      if (!existsSync11(resolvedPath)) {
+      if (!existsSync9(resolvedPath)) {
         return {
           content: [{ type: "text", text: "Plan not found (already archived or path incorrect)." }]
         };
@@ -3935,31 +2703,6 @@ function handleTool(name, cwd, args) {
       }).filter((s) => !s.startsWith("0 "));
       return { content: [{ type: "text", text: `Gates saved: ${counts.join(", ")}.` }] };
     }
-    case "reset_escalation_counters": {
-      const reason = typeof args?.reason === "string" ? args.reason : null;
-      if (!reason || reason.length < 10 || new Set(reason).size < 5) {
-        return {
-          isError: true,
-          content: [
-            { type: "text", text: "Missing or insufficient reason (min 10 chars, min 5 unique)." }
-          ]
-        };
-      }
-      db.prepare(`UPDATE projects SET
-				security_warning_count = 0,
-				test_quality_warning_count = 0,
-				drift_warning_count = 0,
-				dead_import_warning_count = 0,
-				duplication_warning_count = 0,
-				semantic_warning_count = 0
-				WHERE id = ?`).run(pid);
-      appendAuditLog({
-        action: "reset_escalation_counters",
-        reason,
-        timestamp: new Date().toISOString()
-      });
-      return { content: [{ type: "text", text: "All escalation counters reset to zero." }] };
-    }
     case "get_impact_analysis": {
       const file = typeof args?.file === "string" ? args.file : "";
       if (!file) {
@@ -4012,85 +2755,6 @@ function handleTool(name, cwd, args) {
               text: JSON.stringify({ test_file: testFile, impl_file: implFile, covered: false })
             }
           ]
-        };
-      }
-    }
-    case "generate_sbom": {
-      try {
-        const output = runOsvScanner(["--format", "cyclonedx-1-5", "-r", "."], cwd, 30000);
-        if (output) {
-          return { content: [{ type: "text", text: output }] };
-        }
-        try {
-          const syftOutput = execFileSync2("syft", [".", "-o", "cyclonedx-json"], {
-            cwd,
-            timeout: 30000,
-            encoding: "utf-8",
-            stdio: ["pipe", "pipe", "pipe"]
-          });
-          return {
-            content: [
-              {
-                type: "text",
-                text: typeof syftOutput === "string" ? syftOutput : String(syftOutput)
-              }
-            ]
-          };
-        } catch {
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text",
-                text: "Neither osv-scanner nor syft is installed. Install one: `brew install osv-scanner` or `brew install syft`."
-              }
-            ]
-          };
-        }
-      } catch {
-        return {
-          isError: true,
-          content: [{ type: "text", text: "Failed to generate SBOM." }]
-        };
-      }
-    }
-    case "get_dependency_summary": {
-      try {
-        const raw = runOsvScanner(["--format", "json", "-r", "."], cwd, 15000);
-        if (!raw) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text",
-                text: "osv-scanner is not installed. Install: `brew install osv-scanner`."
-              }
-            ]
-          };
-        }
-        const data = JSON.parse(raw);
-        const ecosystems = {};
-        for (const result of data.results ?? []) {
-          for (const pkg of result.packages ?? []) {
-            const eco = pkg.package?.ecosystem ?? "unknown";
-            if (!ecosystems[eco])
-              ecosystems[eco] = { packages: 0, vulns: 0 };
-            ecosystems[eco].packages++;
-            ecosystems[eco].vulns += (pkg.vulnerabilities ?? []).length;
-          }
-        }
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({ ecosystems, total_sources: (data.results ?? []).length })
-            }
-          ]
-        };
-      } catch {
-        return {
-          isError: true,
-          content: [{ type: "text", text: "Failed to get dependency summary." }]
         };
       }
     }

@@ -669,39 +669,6 @@ export function recordFinishStarted(): void {
 	}
 }
 
-// ── Quality escalation counters ────────────────────────────
-
-type EscalationCounter =
-	| "security_warning_count"
-	| "test_quality_warning_count"
-	| "drift_warning_count"
-	| "dead_import_warning_count"
-	| "duplication_warning_count"
-	| "semantic_warning_count";
-
-export function incrementEscalation(counter: EscalationCounter): number {
-	const state = readSessionState();
-	const count = (state[counter] ?? 0) + 1;
-	state[counter] = count;
-	writeState(state);
-	return count;
-}
-
-export function readEscalation(counter: EscalationCounter): number {
-	return readSessionState()[counter] ?? 0;
-}
-
-export function resetEscalationCounters(): void {
-	const state = readSessionState();
-	state.security_warning_count = 0;
-	state.test_quality_warning_count = 0;
-	state.drift_warning_count = 0;
-	state.dead_import_warning_count = 0;
-	state.duplication_warning_count = 0;
-	state.semantic_warning_count = 0;
-	writeState(state);
-}
-
 // ── Human review approval ─────────────────────────────────
 
 export function recordHumanApproval(): void {

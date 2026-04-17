@@ -122,39 +122,19 @@ describe("handleRequest (JSON-RPC)", () => {
 		expect(serverInfo.name).toBe("qult");
 	});
 
-	it("tools/list returns all tool definitions", () => {
+	it("tools/list returns tool definitions", () => {
 		const response = handleRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" }, TEST_DIR);
 		const result = response!.result as { tools: { name: string }[] };
-		expect(result.tools).toHaveLength(27);
-		expect(result.tools.map((t) => t.name)).toEqual([
-			"get_pending_fixes",
-			"get_session_status",
-			"get_gate_config",
-			"disable_gate",
-			"enable_gate",
-			"set_config",
-			"clear_pending_fixes",
-			"record_review",
-			"record_test_pass",
-			"get_detector_summary",
-			"get_file_health_score",
-			"record_human_approval",
-			"record_stage_scores",
-			"reset_escalation_counters",
-			"get_harness_report",
-			"get_handoff_document",
-			"get_metrics_dashboard",
-			"get_flywheel_recommendations",
-			"apply_flywheel_recommendations",
-			"transfer_knowledge",
-			"record_finish_started",
-			"archive_plan",
-			"save_gates",
-			"get_impact_analysis",
-			"get_call_coverage",
-			"generate_sbom",
-			"get_dependency_summary",
-		]);
+		const names = result.tools.map((t) => t.name);
+		expect(names).toContain("get_pending_fixes");
+		expect(names).toContain("get_session_status");
+		expect(names).toContain("get_gate_config");
+		expect(names).toContain("disable_gate");
+		expect(names).toContain("record_test_pass");
+		expect(names).toContain("record_review");
+		expect(names).not.toContain("get_harness_report");
+		expect(names).not.toContain("transfer_knowledge");
+		expect(names).not.toContain("generate_sbom");
 	});
 
 	it("tools/call dispatches to correct handler", () => {
@@ -197,14 +177,8 @@ describe("handleRequest (JSON-RPC)", () => {
 });
 
 describe("TOOL_DEFS", () => {
-	it("has 27 tool definitions", () => {
-		expect(TOOL_DEFS).toHaveLength(27);
-	});
-
-	it("includes generate_sbom and get_dependency_summary tools", () => {
-		const names = TOOL_DEFS.map((t) => t.name);
-		expect(names).toContain("generate_sbom");
-		expect(names).toContain("get_dependency_summary");
+	it("has at least one tool definition", () => {
+		expect(TOOL_DEFS.length).toBeGreaterThan(0);
 	});
 
 	it("each tool has name, description, and inputSchema", () => {
@@ -261,72 +235,12 @@ describe("handleTool: disable_gate / enable_gate", () => {
 		expect(result.content[0]!.text).toContain("disabled");
 	});
 
-	it("disable_gate accepts computational detector names (security-check, dead-import-check)", () => {
+	it("disable_gate accepts security-check gate name", () => {
 		const secResult = handleTool("disable_gate", TEST_DIR, {
 			gate_name: "security-check",
 			reason: "Security patterns causing false positives",
 		});
 		expect(secResult.content[0]!.text).toContain("disabled");
-
-		// Re-enable security-check before disabling dead-import to stay under limit
-		handleTool("enable_gate", TEST_DIR, { gate_name: "security-check" });
-
-		const deadResult = handleTool("disable_gate", TEST_DIR, {
-			gate_name: "dead-import-check",
-			reason: "Dead import check causing false positives",
-		});
-		expect(deadResult.content[0]!.text).toContain("disabled");
-	});
-
-	it("disable_gate accepts new gate names (semgrep-required, test-quality-check, security-check-advisory)", () => {
-		const r1 = handleTool("disable_gate", TEST_DIR, {
-			gate_name: "semgrep-required",
-			reason: "Semgrep not available in CI",
-		});
-		expect(r1.content[0]!.text).toContain("disabled");
-
-		handleTool("enable_gate", TEST_DIR, { gate_name: "semgrep-required" });
-
-		const r2 = handleTool("disable_gate", TEST_DIR, {
-			gate_name: "test-quality-check",
-			reason: "Temporarily skip test quality",
-		});
-		expect(r2.content[0]!.text).toContain("disabled");
-
-		handleTool("enable_gate", TEST_DIR, { gate_name: "test-quality-check" });
-
-		const r3 = handleTool("disable_gate", TEST_DIR, {
-			gate_name: "security-check-advisory",
-			reason: "Advisory patterns not relevant",
-		});
-		expect(r3.content[0]!.text).toContain("disabled");
-	});
-
-	it("disable_gate accepts dataflow-check, complexity-check, and mutation-test gate names", () => {
-		const r1 = handleTool("disable_gate", TEST_DIR, {
-			gate_name: "dataflow-check",
-			reason: "Dataflow check causing false positives",
-		});
-		expect(r1.isError).toBeUndefined();
-		expect(r1.content[0]!.text).toContain("disabled");
-
-		handleTool("enable_gate", TEST_DIR, { gate_name: "dataflow-check" });
-
-		const r2 = handleTool("disable_gate", TEST_DIR, {
-			gate_name: "complexity-check",
-			reason: "Complexity check not needed for this task",
-		});
-		expect(r2.isError).toBeUndefined();
-		expect(r2.content[0]!.text).toContain("disabled");
-
-		handleTool("enable_gate", TEST_DIR, { gate_name: "complexity-check" });
-
-		const r3 = handleTool("disable_gate", TEST_DIR, {
-			gate_name: "mutation-test",
-			reason: "Mutation testing too slow for quick fix",
-		});
-		expect(r3.isError).toBeUndefined();
-		expect(r3.content[0]!.text).toContain("disabled");
 	});
 
 	it("disable_gate accepts coverage gate name", () => {
@@ -363,7 +277,7 @@ describe("handleTool: disable_gate / enable_gate", () => {
 		);
 
 		const result = handleTool("disable_gate", TEST_DIR, {
-			gate_name: "dead-import-check",
+			gate_name: "test-quality-check",
 			reason: "Need to disable a third gate",
 		});
 		expect(result.isError).toBe(true);
@@ -915,49 +829,5 @@ describe("dep-vuln-check and hallucinated-package-check gate names", () => {
 			reason: "Not needed for this testing session",
 		});
 		expect(result.content[0]!.text).toContain("disabled");
-	});
-});
-
-describe("apply_flywheel_recommendations", () => {
-	it("returns applied and deferred recommendations", () => {
-		// Insert enough session_metrics to generate recommendations
-		const db = getDb();
-		const pid = getProjectId();
-		// 20 sessions with zero security warnings → should trigger raise recommendation
-		for (let i = 0; i < 20; i++) {
-			db.prepare(
-				`INSERT INTO session_metrics (session_id, project_id, gate_failure_count, security_warning_count, review_aggregate, files_changed, test_quality_warning_count, duplication_warning_count, semantic_warning_count, drift_warning_count, escalation_hit)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			).run(`s${i}`, pid, 0, 0, null, 1, 0, 0, 0, 0, 0);
-		}
-
-		const result = handleTool("apply_flywheel_recommendations", TEST_DIR);
-		expect(result.isError).toBeUndefined();
-		const parsed = JSON.parse(result.content[0]!.text);
-		expect(parsed).toHaveProperty("applied");
-		expect(parsed).toHaveProperty("deferred");
-	});
-
-	it("returns message when no recommendations available", () => {
-		const result = handleTool("apply_flywheel_recommendations", TEST_DIR);
-		expect(result.content[0]!.text).toContain("No recommendations");
-		expect(result.isError).toBeUndefined();
-	});
-});
-
-describe("transfer_knowledge", () => {
-	it("returns patterns and templates structure", () => {
-		const result = handleTool("transfer_knowledge", TEST_DIR);
-		expect(result.isError).toBeUndefined();
-		const parsed = JSON.parse(result.content[0]!.text);
-		expect(parsed).toHaveProperty("patterns");
-		expect(parsed).toHaveProperty("templates");
-	});
-
-	it("returns empty patterns when insufficient projects", () => {
-		const result = handleTool("transfer_knowledge", TEST_DIR);
-		const parsed = JSON.parse(result.content[0]!.text);
-		expect(Array.isArray(parsed.patterns)).toBe(true);
-		expect(parsed.patterns).toHaveLength(0);
 	});
 });

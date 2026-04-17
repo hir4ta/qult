@@ -1,6 +1,6 @@
 ---
 name: init
-description: "Set up or re-initialize qult for the current project. Registers project in DB, detects gates, and stores config. Idempotent — safe to run multiple times. Use for initial setup or after changing toolchain. NOT for config changes (use /qult:config)."
+description: "Set up or re-initialize qult for the current project. Detects toolchain via Claude's judgment (any language), registers gates in DB, and installs workflow rules. Idempotent — safe to run multiple times."
 user-invocable: true
 allowed-tools:
   - Read
@@ -21,87 +21,79 @@ Set up or re-initialize qult for this project. Idempotent — safe to run anytim
 
 Call `mcp__plugin_qult_qult__get_session_status` to verify the qult MCP server is running and the DB is accessible. If it fails, check that Bun is installed and the qult plugin is loaded.
 
-## Step 2: Detect gates
+## Step 2: Detect gates — LLM-driven, language-agnostic
 
-Analyze the project toolchain and generate gate configuration.
+Use your own judgment to detect lint / typecheck / test / e2e commands for this project. qult does NOT maintain a hardcoded list of tools or languages — you are expected to figure it out from the project files.
 
-### 2a: Discover toolchain
+### 2a: Discover config files (root-only)
 
-Check which config files exist **in the project root only** (not recursive). Use Glob with root-only patterns like `biome.json`, `tsconfig.json`, `package.json` — never `**/*` patterns.
+List config files **in the project root only** (not recursive). Use Bash: `ls -1 | head -50`. Then Read any file that looks like a toolchain config (package.json, Cargo.toml, go.mod, pyproject.toml, composer.json, Gemfile, pom.xml, build.gradle, deno.json, mix.exs, stack.yaml, *.nimble, Package.swift, CMakeLists.txt, etc.).
 
-Look for:
+Do NOT use recursive Glob patterns like `**/*` — they are slow and usually match node_modules.
 
-- **Lint**: biome.json, .eslintrc*, eslint.config.*, ruff.toml, .rubocop.yml, .golangci.yml, deno.json, stylelint.config.*
-- **Typecheck**: tsconfig.json, pyrightconfig.json, mypy.ini, go.mod (go vet), Cargo.toml (cargo check)
-- **Test**: package.json (check scripts/devDependencies for vitest/jest/mocha), pytest.ini, setup.cfg, go.mod, Cargo.toml, Gemfile, mix.exs, deno.json
-- **E2E**: playwright.config.*, cypress.config.*, wdio.conf.*
+### 2b: Build gates config using judgment
 
-Read the relevant config files to confirm which tools are actually configured.
-
-If no toolchain config files are found, report "No tools detected".
-
-### 2b: Build gates config
-
-Build the gate config using this structure:
+Based on what you found, construct a gate config:
 
 ```json
 {
   "on_write": {
     "lint": { "command": "...", "timeout": 3000 },
-    "typecheck": { "command": "...", "timeout": 10000, "run_once_per_batch": true }
+    "typecheck": { "command": "...", "timeout": 15000, "run_once_per_batch": true }
   },
   "on_commit": {
-    "test": { "command": "...", "timeout": 30000 }
+    "test": { "command": "...", "timeout": 60000 }
   },
   "on_review": {
-    "e2e": { "command": "...", "timeout": 60000 }
+    "e2e": { "command": "...", "timeout": 120000 }
   }
 }
 ```
 
-Rules:
-- `on_write` commands use `{file}` placeholder for the edited file path (e.g. `biome check {file}`)
-- `run_once_per_batch: true` for expensive commands that check the whole project (typecheck, full lint)
-- `on_commit` commands run before each commit (unit/integration tests)
-- `on_review` commands run during code review (e2e, browser tests)
-- Omit empty categories
-- Prefer fast tools (biome > eslint, ruff > flake8, pyright > mypy)
-- Use the project's package manager (bun/pnpm/yarn/npm, uv/poetry, cargo, go)
+Principles:
+- `on_write` commands use `{file}` placeholder for the edited file path when the tool supports per-file linting (e.g. `biome check {file}`, `eslint {file}`, `ruff check {file}`)
+- `run_once_per_batch: true` for whole-project commands (tsc, cargo check, go vet)
+- `on_commit` commands run the full test suite
+- `on_review` commands run e2e / integration tests that are slower
+- Omit any category you cannot find a command for
+- Prefer **fast, modern tools** when multiple options exist (biome > eslint, ruff > flake8, pyright > mypy, clippy > default, gotestsum > go test)
+- Use the project's actual package manager and invocation style (bun/pnpm/yarn/npm, uv/poetry/pip, cargo, go, mvn/gradle, composer, mix, stack, swift)
+- If the project has npm scripts that wrap commands (e.g. `"test": "bun vitest run"`), prefer the wrapper script so conventions match
 
-### 2c: Verify
+### 2c: Verify tools are available
 
-For each gate command, confirm the tool is available (e.g. `which biome`, `cargo --version`). Do NOT run full test suites or commands that modify state. If a tool is not installed, remove that gate.
+For each gate command, run a lightweight availability check — typically `which <tool>` or `<tool> --version`. Do NOT run the full test suite or any command that modifies state. If a tool is not installed, omit that gate rather than failing.
 
-### 2d: Store gates via MCP
+### 2d: Report what you decided
 
-Call `mcp__plugin_qult_qult__save_gates` with the gates object built in 2b. This atomically replaces all existing gates and invalidates the MCP server's cache.
+Before saving, show the architect the gate config you plan to save and why you chose each command. One line per gate. Give them a chance to override.
 
-Then call `mcp__plugin_qult_qult__get_gate_config` to verify the gates were stored correctly.
+### 2e: Save via MCP
 
-**Note**: The gate config is stored in `~/.qult/qult.db`, NOT in a project file. No project directory is modified.
+Call `mcp__plugin_qult_qult__save_gates` with the gates object. This atomically replaces all existing gates.
+
+Then call `mcp__plugin_qult_qult__get_gate_config` to confirm the save succeeded.
+
+**Note**: Gate config is stored in `~/.qult/qult.db`, NOT in a project file. No project directory is modified.
 
 ## Step 3: Install user-level rules
 
-qult ships workflow rules in `${CLAUDE_PLUGIN_ROOT}/rules/qult-*.md`. Copy them to `~/.claude/rules/` so Claude loads them in every session.
+qult ships workflow rules in `${CLAUDE_PLUGIN_ROOT}/rules/qult-*.md`. Copy them to `~/.claude/rules/` so Claude loads them in every session:
 
-Steps:
-1. `mkdir -p ~/.claude/rules`
-2. For each file matching `${CLAUDE_PLUGIN_ROOT}/rules/qult-*.md`, copy to `~/.claude/rules/` with the same basename. **Always overwrite** — qult may have updated the rule contents in a new version.
+```bash
+mkdir -p ~/.claude/rules
+cp -f "${CLAUDE_PLUGIN_ROOT}/rules/"qult-*.md ~/.claude/rules/
+```
 
-Use `cp -f "${CLAUDE_PLUGIN_ROOT}/rules/"qult-*.md ~/.claude/rules/`.
-
-Report each rule installed (e.g. `installed: ~/.claude/rules/qult-workflow.md`).
+**Always overwrite** — qult may have updated rule contents in a new version.
 
 ## Step 4: Clean up legacy files
 
-Remove if they exist (from older qult versions that used hooks):
-- `.qult/` directory (entire directory — state lives in `~/.qult/qult.db`)
-- `.claude/rules/qult.md` (old single rule file from pre-rules-migration)
-- `.claude/rules/qult-gates.md` (replaced by user-level rules)
-- `.claude/rules/qult-quality.md` (now at `~/.claude/rules/qult-quality.md`)
-- `.claude/rules/qult-plan.md` (now at `~/.claude/rules/qult-plan-mode.md`)
-- Old qult entries in `.claude/settings.local.json` referencing `.qult/hook.mjs` or `bun ${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs`
-- Remove `.qult/` from `.gitignore` if present
+Remove if they exist (from older qult versions):
+- `.qult/` directory (state lives in `~/.qult/qult.db`)
+- `.claude/rules/qult*.md` (rules moved to user level)
+- Old settings.local.json hook entries referencing `.qult/hook.mjs` or `dist/hook.mjs`
+- `.qult/` from `.gitignore`
 
 ## Output
 

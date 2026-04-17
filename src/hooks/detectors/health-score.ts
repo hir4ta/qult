@@ -1,11 +1,8 @@
 import { existsSync } from "node:fs";
 import type { PendingFix } from "../../types.ts";
-import { computeComplexitySync } from "./complexity-check.ts";
 import { detectDeadImports } from "./dead-import-check.ts";
-import { detectDuplication } from "./duplication-check.ts";
 import { detectExportBreakingChanges } from "./export-check.ts";
 import { detectSecurityPatterns } from "./security-check.ts";
-import { detectSemanticPatterns } from "./semantic-check.ts";
 import { analyzeTestQuality } from "./test-quality-check.ts";
 
 interface HealthResult {
@@ -17,10 +14,6 @@ interface HealthResult {
 const WEIGHTS: Record<string, number> = {
 	security: -2,
 	export_breaking: -2,
-	dataflow: -2.5,
-	duplication: -1.5,
-	semantic: -1,
-	complexity: -1,
 	dead_imports: -1,
 	test_quality: -1.5,
 };
@@ -31,7 +24,7 @@ function countFindings(fixes: PendingFix[]): number {
 	return fixes.reduce((sum, f) => sum + f.errors.length, 0);
 }
 
-/** Compute a 0-10 health score for a file by aggregating detector findings. */
+/** Compute a 0-10 health score for a file by aggregating Tier 1 detector findings. */
 export function computeFileHealthScore(file: string): HealthResult {
 	if (!existsSync(file)) {
 		return { score: 10, breakdown: {} };
@@ -43,22 +36,6 @@ export function computeFileHealthScore(file: string): HealthResult {
 		const securityFixes = detectSecurityPatterns(file);
 		const count = countFindings(securityFixes);
 		if (count > 0) breakdown.security = (WEIGHTS.security ?? DEFAULT_WEIGHT) * count;
-	} catch {
-		/* fail-open */
-	}
-
-	try {
-		const semanticFixes = detectSemanticPatterns(file);
-		const count = countFindings(semanticFixes);
-		if (count > 0) breakdown.semantic = (WEIGHTS.semantic ?? DEFAULT_WEIGHT) * count;
-	} catch {
-		/* fail-open */
-	}
-
-	try {
-		const dupFixes = detectDuplication(file);
-		const count = countFindings(dupFixes);
-		if (count > 0) breakdown.duplication = (WEIGHTS.duplication ?? DEFAULT_WEIGHT) * count;
 	} catch {
 		/* fail-open */
 	}
@@ -83,15 +60,6 @@ export function computeFileHealthScore(file: string): HealthResult {
 		const tqResult = analyzeTestQuality(file);
 		if (tqResult !== null && tqResult.smells.length > 0)
 			breakdown.test_quality = (WEIGHTS.test_quality ?? DEFAULT_WEIGHT) * tqResult.smells.length;
-	} catch {
-		/* fail-open */
-	}
-
-	try {
-		const complexityResult = computeComplexitySync(file);
-		if (complexityResult !== null && complexityResult.warnings.length > 0)
-			breakdown.complexity =
-				(WEIGHTS.complexity ?? DEFAULT_WEIGHT) * complexityResult.warnings.length;
 	} catch {
 		/* fail-open */
 	}

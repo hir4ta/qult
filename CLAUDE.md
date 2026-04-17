@@ -1,12 +1,39 @@
 # qult
 
-**Quality by Convention, Not by Coercion.** Claude Code の品質を rules + agents + MCP で支える evaluator harness。Claude Code Plugin として配布。v0.29 で hooks 全廃止。
+**Claude を補助する品質エイド.** Claude Code 単体より、漏れなく品質高い設計・実装を実現するための補助プラグイン。Claude Code Plugin として配布。v0.29 で hooks 全廃止、v0.30 で過剰機能を大量削除（flywheel/dataflow/complexity/mutation/SBOM/LSP 等）。
+
+## ミッション (最重要)
+
+**qult の目的は Claude Code を補助すること。完璧なハーネスエンジニアリング実装ではない。**
+
+ハーネスエンジニアリング論文 (`docs/references.md`) は **設計の参考** であり、完全再現が目的ではない。理論的純度より、ユーザーが日常で使えて鬱陶しくない補助を優先する。
+
+### qult が**やること**
+- Claude が判断・推論で見落としやすい点を rules + agents + MCP で補強
+- 独立レビュー (reviewer モデル多様性) で AI の自己評価バイアスを軽減
+- 品質判断に必要なコンテキスト (state, gate config, detector findings) を MCP 経由で提供
+- セキュリティ・依存関係など Claude が知らない情報源 (Semgrep, osv-scanner, npm registry) を統合
+
+### qult が**やらないこと**
+- 厳密な policy compiler / reference monitor の実装 (v0.28 までの hooks 思想は撤回)
+- ハーネスエンジニアリング論文の完全再現 (理論的純度の追求はしない)
+- ユーザーの作業を構造的に中断するシステム (Edit/Write 中の DENY、Stop hook ブロック等は v0.29 で撤廃)
+- Claude が自分でできる判断の機械的代替 (複雑度計算、convention 検出 等は reviewer に任せる)
+
+### 設計判断のスタンス
+**迷ったら軽い方を選ぶ。**
+
+- 「研究的に完璧か」より「ユーザーが日常で使うか」
+- 「全言語に独自 detector」より「Claude に判断させて簡素化」
+- 「全自動」より「必要な時だけ skill で能動起動」
+- 「あらゆる metric を計測」より「Claude が読めば分かる事は計測しない」
+
+新機能を追加する前に問う: **これは Claude が自分でできない事か？** Yes なら追加。No なら不要。
 
 ## 哲学
 
-- **架構より教化** — Claude Code 公式 hooks の不安定性 (#16538 等) と中断による生産性低下を踏まえ、強制ではなく合意による品質維持にシフト
 - **architect が設計し、agent が実装する** — 人間は何を作るかを決める。AI はどう作るかを実行する
-- **Independent Review Required** — 大きな変更は必ず 4-stage 独立レビュー (Spec → Quality → Security → Adversarial)
+- **Independent Review Required** — 大きな変更は必ず 4-stage 独立レビュー (Spec → Quality → Security → Adversarial)。AI の自己評価は機能しない (研究: self-review は自己バグの 64.5% を見逃す)
 - **fail-open** — qult の障害で開発を止めない
 
 ## スタック
@@ -73,13 +100,9 @@ qult/
 
 - Claude が状態を取得・操作する経路
 - raw stdio JSON-RPC 実装 (SDK 依存なし)
-- 読み取り: get_pending_fixes, get_session_status, get_gate_config, get_detector_summary, get_file_health_score
-- 分析: get_harness_report, get_handoff_document, get_metrics_dashboard, get_flywheel_recommendations
-- 操作: disable_gate, enable_gate, clear_pending_fixes, set_config, save_gates
-- 依存: generate_sbom (CycloneDX SBOM 生成, osv-scanner/syft), get_dependency_summary
-- 記録: record_review, record_test_pass, record_stage_scores, record_human_approval
-- get_flywheel_recommendations: セッション横断パターン分析に基づく閾値調整推奨を返す
-- 操作（追加）: apply_flywheel_recommendations (raise 方向自動適用), transfer_knowledge (プロジェクト間知識転移 + rules テンプレート生成)
+- 読み取り: get_pending_fixes, get_session_status, get_gate_config, get_detector_summary, get_file_health_score, get_impact_analysis, get_call_coverage
+- 操作: disable_gate, enable_gate, clear_pending_fixes, set_config, save_gates, archive_plan
+- 記録: record_review, record_test_pass, record_stage_scores, record_human_approval, record_finish_started
 - MCP tool の呼び出しルールは MCP server instructions で注入（プロジェクトにファイル配置しない）
 
 ### Reviewer モデル
@@ -93,22 +116,30 @@ qult/
 | plan-generator | sonnet | 生成タスク、sonnet で十分 |
 | **plan-evaluator** | **opus** | 仕様品質ゲート。プランの腐敗が下流全体に波及するため |
 
-### Detector triage (v0.29)
+### Detector triage (v0.30)
 
-- **Tier 1 (常時、`/qult:review` 推奨)**: security-check, dep-vuln-check, hallucinated-package-check, test-quality-check, export-check
-- **Opt-in (`enable_gate` で起動)**: dataflow-check, complexity-check, duplication-check, semantic-check, mutation-test
-- **削除済み**: convention-check, import-check (v0.29)
-- **ユーティリティ維持** (auto-fire しない、MCP/LSP からのみ参照): dead-import-check (LSP fallback), spec-trace-check (`get_call_coverage` MCP tool)
+**Tier 1 のみ維持** — reviewer が読んで判断できない / 自動化が必要なもの:
+
+- **security-check** — OWASP Top 10 パターン、ハードコードシークレット
+- **dep-vuln-check** — osv-scanner 統合
+- **hallucinated-package-check** — npm registry 存在確認
+- **test-quality-check** — empty test, always-true, trivial assertion
+- **export-check** — 破壊的 export 変更
+
+**削除済み** (v0.30):
+- dataflow-check, complexity-check, duplication-check, semantic-check, mutation-check (opt-in 全廃)
+- convention-check, import-check (v0.29 削除済み)
+- dead-import-check, spec-trace-check (v0.30 削除 — reviewer で十分)
+
+**方針**: Claude がコードを読んで判断できる領域は detector 化しない。reviewer 判断に委ねる。
 
 ### Config 優先順位
 
 - DEFAULTS < `global_configs` テーブル < `project_configs` テーブル < `QULT_*` env
-- review.models.*: ステージ別レビュアーモデル (`QULT_REVIEW_MODEL_SPEC/QUALITY/SECURITY/ADVERSARIAL`)
-- plan_eval.models.*: プランエージェントモデル (`QULT_PLAN_EVAL_MODEL_GENERATOR/EVALUATOR`)
-- flywheel.*: セッション横断学習 (`QULT_FLYWHEEL_ENABLED`, `QULT_FLYWHEEL_MIN_SESSIONS`, `QULT_FLYWHEEL_AUTO_APPLY`)
-- gates.complexity_threshold: 循環的複雑度閾値（デフォルト 15、`QULT_COMPLEXITY_THRESHOLD`）
-- gates.function_size_limit: 関数サイズ制限（デフォルト 50行、`QULT_FUNCTION_SIZE_LIMIT`）
-- gates.mutation_score_threshold: ミューテーションスコア閾値（デフォルト 0 = 無効、`QULT_MUTATION_SCORE_THRESHOLD`）
+- review.*: スコア閾値、iteration、次元フロア、モデル選択
+- plan_eval.*: プラン評価スコア閾値、モデル
+- gates.*: coverage_threshold (opt-in), import_graph_depth (impact analysis 用), output_max_chars, default_timeout
+- security.require_semgrep: Semgrep 必須化
 
 ### State
 

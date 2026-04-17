@@ -127,7 +127,7 @@ This is a style comment. You are NOT a style reviewer. Find bugs.
 
 ## Computational Detector Integration
 
-Before starting your review, check the detector findings provided in your prompt context. These are deterministic (computational) results from qult's detectors — security patterns, hallucinated imports, code duplication. Use these as starting points for adversarial analysis: if a security detector flagged a pattern, can you construct an input that exploits it? If duplication was detected, could the duplicated code paths diverge silently?
+Before starting your review, check the detector findings provided in your prompt context. These are deterministic (computational) results from qult's Tier 1 detectors — security patterns, hallucinated imports, dependency vulnerabilities, test quality smells, breaking export changes. Use these as starting points for adversarial analysis: if a security detector flagged a pattern, can you construct an input that exploits it? If an export change was detected, could consumers break silently?
 
 ## What NOT to do
 

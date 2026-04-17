@@ -9,29 +9,18 @@
  * to eliminate the 660KB SDK dependency and reduce coupling to SDK releases.
  */
 
-import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { loadConfig, resetConfigCache } from "./config.ts";
 import { loadGates, saveGates } from "./gates/load.ts";
-import { generateHandoffDocument } from "./handoff.ts";
-import { generateHarnessReport } from "./harness-report.ts";
-import { runOsvScanner } from "./hooks/detectors/dep-vuln-check.ts";
 import { computeFileHealthScore } from "./hooks/detectors/health-score.ts";
 import { findImporters } from "./hooks/detectors/import-graph.ts";
 import { validateTestCoversImpl } from "./hooks/detectors/spec-trace-check.ts";
-import { generateMetricsDashboard } from "./metrics-dashboard.ts";
-import { appendAuditLog, readAuditLog } from "./state/audit-log.ts";
+import { appendAuditLog } from "./state/audit-log.ts";
 import { getDb, getProjectId, setProjectPath } from "./state/db.ts";
-import {
-	applyFlywheelRecommendations,
-	getFlywheelRecommendations,
-	readMetricsHistory,
-	transferKnowledge,
-} from "./state/metrics.ts";
-import { archivePlanFile, getActivePlan, resetPlanCache } from "./state/plan-status.ts";
+import { archivePlanFile, resetPlanCache } from "./state/plan-status.ts";
 import type { PendingFix } from "./types.ts";
 
 const PROTOCOL_VERSION = "2024-11-05";
@@ -47,18 +36,11 @@ function getValidGateNames(): string[] {
 	const names = new Set<string>([
 		"review",
 		"security-check",
-		"dead-import-check",
-		"duplication-check",
-		"semantic-check",
 		"semgrep-required",
 		"test-quality-check",
-		"security-check-advisory",
 		"coverage",
 		"dep-vuln-check",
 		"hallucinated-package-check",
-		"dataflow-check",
-		"complexity-check",
-		"mutation-test",
 	]);
 	if (gates) {
 		for (const category of [gates.on_write, gates.on_commit, gates.on_review]) {
@@ -141,7 +123,7 @@ const TOOL_DEFS: ToolDef[] = [
 	{
 		name: "set_config",
 		description:
-			"Set a qult config value. Allowed keys: review.score_threshold, review.max_iterations, review.required_changed_files, review.dimension_floor, plan_eval.score_threshold, plan_eval.max_iterations.",
+			"Set a qult config value. Allowed keys: review.score_threshold, review.max_iterations, review.required_changed_files, review.dimension_floor, review.models.{spec|quality|security|adversarial}, plan_eval.score_threshold, plan_eval.max_iterations, plan_eval.models.{generator|evaluator}, review.require_human_approval.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -243,57 +225,6 @@ const TOOL_DEFS: ToolDef[] = [
 		},
 	},
 	{
-		name: "reset_escalation_counters",
-		description:
-			"Reset all escalation counters (security, dead-import, drift, test-quality, duplication) to zero. Use during large refactors when accumulated warnings are no longer relevant.",
-		inputSchema: {
-			type: "object",
-			properties: {
-				reason: {
-					type: "string",
-					description: "Why counters should be reset (min 10 chars). Required for audit trail.",
-				},
-			},
-			required: ["reason"],
-		},
-	},
-	{
-		name: "get_harness_report",
-		description:
-			"Returns a harness effectiveness report analyzing which gates catch issues and review score trends.",
-		inputSchema: { type: "object", properties: {} },
-	},
-	{
-		name: "get_handoff_document",
-		description:
-			"Returns a structured handoff document for starting a fresh session. Call before ending a long session.",
-		inputSchema: { type: "object", properties: {} },
-	},
-	{
-		name: "get_metrics_dashboard",
-		description:
-			"Returns a formatted metrics dashboard showing gate failure trends and review score history.",
-		inputSchema: { type: "object", properties: {} },
-	},
-	{
-		name: "get_flywheel_recommendations",
-		description:
-			"Returns threshold adjustment recommendations based on cross-session pattern analysis.",
-		inputSchema: { type: "object", properties: {} },
-	},
-	{
-		name: "apply_flywheel_recommendations",
-		description:
-			"Apply flywheel recommendations: safe (raise) recommendations are auto-applied to global_configs, lower recommendations are deferred for manual review.",
-		inputSchema: { type: "object", properties: {} },
-	},
-	{
-		name: "transfer_knowledge",
-		description:
-			"Cross-project session analysis. Detects common patterns across 3+ projects and writes shared thresholds to global_configs. Returns patterns found and rule templates.",
-		inputSchema: { type: "object", properties: {} },
-	},
-	{
 		name: "record_finish_started",
 		description:
 			"Record that /qult:finish has been started. Call at the beginning of /qult:finish skill. Required for the commit gate to allow commits when a plan is active.",
@@ -363,18 +294,6 @@ const TOOL_DEFS: ToolDef[] = [
 			},
 			required: ["test_file", "impl_file"],
 		},
-	},
-	{
-		name: "generate_sbom",
-		description:
-			"Generate a Software Bill of Materials (SBOM) for the project in CycloneDX JSON format. Uses osv-scanner or syft. Slower than other tools (up to 30s).",
-		inputSchema: { type: "object", properties: {} },
-	},
-	{
-		name: "get_dependency_summary",
-		description:
-			"Get a summary of project dependencies: package count by ecosystem and known vulnerability count. Uses osv-scanner.",
-		inputSchema: { type: "object", properties: {} },
 	},
 ];
 
@@ -514,12 +433,6 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 				"review.dimension_floor",
 				"plan_eval.score_threshold",
 				"plan_eval.max_iterations",
-				"flywheel.min_sessions",
-				"escalation.security_threshold",
-				"escalation.drift_threshold",
-				"escalation.test_quality_threshold",
-				"escalation.duplication_threshold",
-				"escalation.semantic_threshold",
 			];
 			const ALLOWED_MODEL_KEYS = [
 				"review.models.spec",
@@ -529,7 +442,7 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 				"plan_eval.models.generator",
 				"plan_eval.models.evaluator",
 			];
-			const ALLOWED_BOOLEAN_KEYS = ["flywheel.enabled", "review.require_human_approval"];
+			const ALLOWED_BOOLEAN_KEYS = ["review.require_human_approval"];
 			const ALL_ALLOWED = [...ALLOWED_NUMBER_KEYS, ...ALLOWED_MODEL_KEYS, ...ALLOWED_BOOLEAN_KEYS];
 			if (!ALL_ALLOWED.includes(key)) {
 				return {
@@ -752,109 +665,6 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 				],
 			};
 		}
-		case "get_harness_report": {
-			try {
-				const metrics = readMetricsHistory();
-				const auditLog = readAuditLog();
-				const cfg = loadConfig();
-				const report = generateHarnessReport(metrics, auditLog, cfg);
-				return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
-			} catch {
-				return { content: [{ type: "text", text: "No harness data available yet." }] };
-			}
-		}
-		case "get_handoff_document": {
-			try {
-				const session = db.prepare("SELECT * FROM projects WHERE id = ?").get(pid) as Record<
-					string,
-					unknown
-				> | null;
-				const fixes = db
-					.prepare("SELECT file, gate, errors FROM pending_fixes WHERE project_id = ?")
-					.all(pid) as { file: string; gate: string; errors: string }[];
-				const changedFiles = db
-					.prepare("SELECT file_path FROM changed_files WHERE project_id = ?")
-					.all(pid) as { file_path: string }[];
-				const disabledGates = db
-					.prepare("SELECT gate_name FROM disabled_gates WHERE project_id = ?")
-					.all(pid) as { gate_name: string }[];
-				const plan = getActivePlan();
-				return {
-					content: [
-						{
-							type: "text",
-							text: generateHandoffDocument({
-								changedFiles: changedFiles.map((r) => r.file_path),
-								pendingFixes: fixes.map((r) => ({
-									file: r.file,
-									gate: r.gate,
-									errors: JSON.parse(r.errors),
-								})),
-								planTasks: plan?.tasks ?? null,
-								testPassed: !!session?.test_passed_at,
-								reviewDone: !!session?.review_completed_at,
-								disabledGates: disabledGates.map((r) => r.gate_name),
-							}),
-						},
-					],
-				};
-			} catch {
-				return { content: [{ type: "text", text: "No active session data to hand off." }] };
-			}
-		}
-		case "get_metrics_dashboard": {
-			try {
-				const metrics = readMetricsHistory();
-				return { content: [{ type: "text", text: generateMetricsDashboard(metrics) }] };
-			} catch {
-				return { content: [{ type: "text", text: "No metrics data available yet." }] };
-			}
-		}
-		case "get_flywheel_recommendations": {
-			try {
-				const config = loadConfig();
-				const metrics = readMetricsHistory();
-				const recs = getFlywheelRecommendations(metrics, config);
-				if (recs.length === 0) {
-					return {
-						content: [
-							{ type: "text", text: "No recommendations. Insufficient data or flywheel disabled." },
-						],
-					};
-				}
-				return { content: [{ type: "text", text: JSON.stringify(recs, null, 2) }] };
-			} catch {
-				return { content: [{ type: "text", text: "No flywheel data available yet." }] };
-			}
-		}
-		case "apply_flywheel_recommendations": {
-			try {
-				const config = loadConfig();
-				const metrics = readMetricsHistory();
-				const recs = getFlywheelRecommendations(metrics, config);
-				if (recs.length === 0) {
-					return {
-						content: [
-							{ type: "text", text: "No recommendations. Insufficient data or flywheel disabled." },
-						],
-					};
-				}
-				const result = applyFlywheelRecommendations(recs, config);
-				return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-			} catch {
-				return { content: [{ type: "text", text: "No flywheel data available yet." }] };
-			}
-		}
-		case "transfer_knowledge": {
-			try {
-				const result = transferKnowledge();
-				return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-			} catch {
-				return {
-					content: [{ type: "text", text: JSON.stringify({ patterns: [], templates: [] }) }],
-				};
-			}
-		}
 		case "record_finish_started": {
 			// Write directly to DB (not via writeState cache) so hook processes can read it immediately
 			db.prepare(
@@ -965,31 +775,6 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 				.filter((s) => !s.startsWith("0 "));
 			return { content: [{ type: "text", text: `Gates saved: ${counts.join(", ")}.` }] };
 		}
-		case "reset_escalation_counters": {
-			const reason = typeof args?.reason === "string" ? args.reason : null;
-			if (!reason || reason.length < 10 || new Set(reason).size < 5) {
-				return {
-					isError: true,
-					content: [
-						{ type: "text", text: "Missing or insufficient reason (min 10 chars, min 5 unique)." },
-					],
-				};
-			}
-			db.prepare(`UPDATE projects SET
-				security_warning_count = 0,
-				test_quality_warning_count = 0,
-				drift_warning_count = 0,
-				dead_import_warning_count = 0,
-				duplication_warning_count = 0,
-				semantic_warning_count = 0
-				WHERE id = ?`).run(pid);
-			appendAuditLog({
-				action: "reset_escalation_counters",
-				reason,
-				timestamp: new Date().toISOString(),
-			});
-			return { content: [{ type: "text", text: "All escalation counters reset to zero." }] };
-		}
 		case "get_impact_analysis": {
 			const file = typeof args?.file === "string" ? args.file : "";
 			if (!file) {
@@ -1042,85 +827,6 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 							text: JSON.stringify({ test_file: testFile, impl_file: implFile, covered: false }),
 						},
 					],
-				};
-			}
-		}
-		case "generate_sbom": {
-			try {
-				const output = runOsvScanner(["--format", "cyclonedx-1-5", "-r", "."], cwd, 30_000);
-				if (output) {
-					return { content: [{ type: "text", text: output }] };
-				}
-				// osv-scanner not available — try syft as fallback
-				try {
-					const syftOutput = execFileSync("syft", [".", "-o", "cyclonedx-json"], {
-						cwd,
-						timeout: 30_000,
-						encoding: "utf-8",
-						stdio: ["pipe", "pipe", "pipe"],
-					});
-					return {
-						content: [
-							{
-								type: "text",
-								text: typeof syftOutput === "string" ? syftOutput : String(syftOutput),
-							},
-						],
-					};
-				} catch {
-					return {
-						isError: true,
-						content: [
-							{
-								type: "text",
-								text: "Neither osv-scanner nor syft is installed. Install one: `brew install osv-scanner` or `brew install syft`.",
-							},
-						],
-					};
-				}
-			} catch {
-				return {
-					isError: true,
-					content: [{ type: "text", text: "Failed to generate SBOM." }],
-				};
-			}
-		}
-		case "get_dependency_summary": {
-			try {
-				const raw = runOsvScanner(["--format", "json", "-r", "."], cwd, 15_000);
-				if (!raw) {
-					return {
-						isError: true,
-						content: [
-							{
-								type: "text",
-								text: "osv-scanner is not installed. Install: `brew install osv-scanner`.",
-							},
-						],
-					};
-				}
-				const data = JSON.parse(raw);
-				const ecosystems: Record<string, { packages: number; vulns: number }> = {};
-				for (const result of data.results ?? []) {
-					for (const pkg of result.packages ?? []) {
-						const eco = pkg.package?.ecosystem ?? "unknown";
-						if (!ecosystems[eco]) ecosystems[eco] = { packages: 0, vulns: 0 };
-						ecosystems[eco].packages++;
-						ecosystems[eco].vulns += (pkg.vulnerabilities ?? []).length;
-					}
-				}
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({ ecosystems, total_sources: (data.results ?? []).length }),
-						},
-					],
-				};
-			} catch {
-				return {
-					isError: true,
-					content: [{ type: "text", text: "Failed to get dependency summary." }],
 				};
 			}
 		}

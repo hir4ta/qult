@@ -67,8 +67,6 @@ describe("loadConfig", () => {
 		expect(config.review.dimension_floor).toBe(4);
 		expect(config.gates.output_max_chars).toBe(3500);
 		expect(config.gates.default_timeout).toBe(10000);
-		expect(config.escalation.security_threshold).toBe(10);
-		expect(config.escalation.drift_threshold).toBe(8);
 	});
 
 	it("reads from project_configs DB", () => {
@@ -259,109 +257,6 @@ describe("plan_eval.models config", () => {
 	});
 });
 
-describe("flywheel config", () => {
-	it("returns default flywheel values", () => {
-		const config = loadConfig();
-		expect(config.flywheel).toEqual({
-			enabled: true,
-			min_sessions: 10,
-			auto_apply: false,
-		});
-	});
-
-	it("reads flywheel from project config", () => {
-		setProjectConfig("flywheel.enabled", false);
-		setProjectConfig("flywheel.min_sessions", 20);
-		const config = loadConfig();
-		expect(config.flywheel.enabled).toBe(false);
-		expect(config.flywheel.min_sessions).toBe(20);
-	});
-
-	it("env vars override flywheel config", () => {
-		process.env.QULT_FLYWHEEL_ENABLED = "false";
-		process.env.QULT_FLYWHEEL_MIN_SESSIONS = "5";
-		const config = loadConfig();
-		expect(config.flywheel.enabled).toBe(false);
-		expect(config.flywheel.min_sessions).toBe(5);
-	});
-
-	it("handles boolean env var variations", () => {
-		process.env.QULT_FLYWHEEL_ENABLED = "0";
-		const config = loadConfig();
-		expect(config.flywheel.enabled).toBe(false);
-
-		resetConfigCache();
-		process.env.QULT_FLYWHEEL_ENABLED = "1";
-		const config2 = loadConfig();
-		expect(config2.flywheel.enabled).toBe(true);
-	});
-
-	it("enforces minimum of 1 for min_sessions", () => {
-		setProjectConfig("flywheel.min_sessions", 0);
-		const config = loadConfig();
-		expect(config.flywheel.min_sessions).toBe(1);
-	});
-});
-
-describe("escalation config", () => {
-	it("reads escalation from project config", () => {
-		setProjectConfig("escalation.security_threshold", 5);
-		setProjectConfig("escalation.drift_threshold", 3);
-		const config = loadConfig();
-		expect(config.escalation.security_threshold).toBe(5);
-		expect(config.escalation.drift_threshold).toBe(3);
-		expect(config.escalation.test_quality_threshold).toBe(8);
-	});
-
-	it("env vars override escalation config", () => {
-		process.env.QULT_ESCALATION_SECURITY = "15";
-		const config = loadConfig();
-		expect(config.escalation.security_threshold).toBe(15);
-	});
-
-	it("enforces minimum of 1 for escalation thresholds", () => {
-		setProjectConfig("escalation.security_threshold", 0);
-		setProjectConfig("escalation.drift_threshold", -5);
-		const config = loadConfig();
-		expect(config.escalation.security_threshold).toBe(1);
-		expect(config.escalation.drift_threshold).toBe(1);
-	});
-
-	it("returns default security_iterative_threshold", () => {
-		const config = loadConfig();
-		expect(config.escalation.security_iterative_threshold).toBe(5);
-	});
-
-	it("reads security_iterative_threshold from project config", () => {
-		setProjectConfig("escalation.security_iterative_threshold", 3);
-		const config = loadConfig();
-		expect(config.escalation.security_iterative_threshold).toBe(3);
-	});
-
-	it("env var overrides security_iterative_threshold", () => {
-		process.env.QULT_ESCALATION_SECURITY_ITERATIVE = "7";
-		const config = loadConfig();
-		expect(config.escalation.security_iterative_threshold).toBe(7);
-	});
-
-	it("returns default dead_import_blocking_threshold", () => {
-		const config = loadConfig();
-		expect(config.escalation.dead_import_blocking_threshold).toBe(5);
-	});
-
-	it("reads dead_import_blocking_threshold from project config", () => {
-		setProjectConfig("escalation.dead_import_blocking_threshold", 10);
-		const config = loadConfig();
-		expect(config.escalation.dead_import_blocking_threshold).toBe(10);
-	});
-
-	it("env var overrides dead_import_blocking_threshold", () => {
-		process.env.QULT_ESCALATION_DEAD_IMPORT_BLOCKING = "3";
-		const config = loadConfig();
-		expect(config.escalation.dead_import_blocking_threshold).toBe(3);
-	});
-});
-
 describe("security config", () => {
 	it("returns default require_semgrep as true", () => {
 		const config = loadConfig();
@@ -383,37 +278,6 @@ describe("security config", () => {
 		process.env.QULT_REQUIRE_SEMGREP = "1";
 		const config2 = loadConfig();
 		expect(config2.security.require_semgrep).toBe(true);
-	});
-});
-
-describe("require_osv_scanner config", () => {
-	it("defaults to false", () => {
-		const config = loadConfig();
-		expect(config.security.require_osv_scanner).toBe(false);
-	});
-
-	it("env var QULT_REQUIRE_OSV_SCANNER=true enables it", () => {
-		process.env.QULT_REQUIRE_OSV_SCANNER = "true";
-		const config = loadConfig();
-		expect(config.security.require_osv_scanner).toBe(true);
-	});
-
-	it("env var QULT_REQUIRE_OSV_SCANNER=1 enables it", () => {
-		process.env.QULT_REQUIRE_OSV_SCANNER = "1";
-		const config = loadConfig();
-		expect(config.security.require_osv_scanner).toBe(true);
-	});
-
-	it("env var QULT_REQUIRE_OSV_SCANNER=false disables it", () => {
-		process.env.QULT_REQUIRE_OSV_SCANNER = "false";
-		const config = loadConfig();
-		expect(config.security.require_osv_scanner).toBe(false);
-	});
-
-	it("not set leaves default", () => {
-		delete process.env.QULT_REQUIRE_OSV_SCANNER;
-		const config = loadConfig();
-		expect(config.security.require_osv_scanner).toBe(false);
 	});
 });
 
@@ -449,18 +313,7 @@ describe("coverage_threshold config", () => {
 	});
 });
 
-describe("consumer_typecheck config", () => {
-	it("defaults to false", () => {
-		const config = loadConfig();
-		expect(config.gates.consumer_typecheck).toBe(false);
-	});
-
-	it("loads consumer_typecheck from env", () => {
-		process.env.QULT_CONSUMER_TYPECHECK = "1";
-		const config = loadConfig();
-		expect(config.gates.consumer_typecheck).toBe(true);
-	});
-
+describe("import_graph_depth config", () => {
 	it("loads import_graph_depth from env", () => {
 		process.env.QULT_IMPORT_GRAPH_DEPTH = "2";
 		const config = loadConfig();
@@ -476,12 +329,5 @@ describe("consumer_typecheck config", () => {
 	it("defaults import_graph_depth to 1", () => {
 		const config = loadConfig();
 		expect(config.gates.import_graph_depth).toBe(1);
-	});
-
-	it("loads from project DB config", () => {
-		setProjectConfig("gates.consumer_typecheck", true);
-		resetConfigCache();
-		const config = loadConfig();
-		expect(config.gates.consumer_typecheck).toBe(true);
 	});
 });

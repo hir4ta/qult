@@ -63,19 +63,4 @@ describe("computeFileHealthScore", () => {
 		const result = await score("/nonexistent/path/foo.ts");
 		expect(result.score).toBe(10);
 	});
-
-	it("reduces score for cached complexity warnings", async () => {
-		const { cacheComplexityResult } = await import("../hooks/detectors/complexity-check.ts");
-		const file = join(TEST_DIR, "complex.ts");
-		writeFileSync(file, "function foo(x: number) { return x; }\n");
-
-		cacheComplexityResult(file, {
-			functions: [{ name: "foo", line: 1, cyclomatic: 20, cognitive: 15, lineCount: 50 }],
-			warnings: ["L1: function foo has cyclomatic complexity 20"],
-		});
-
-		const result = await score(file);
-		expect(result.score).toBeLessThan(10);
-		expect(result.breakdown.complexity).toBeLessThan(0);
-	});
 });

@@ -30,49 +30,17 @@ export interface QultConfig {
 	gates: {
 		output_max_chars: number;
 		default_timeout: number;
-		/** Run related test file on edit (opt-in). Requires on_commit.test gate. */
-		test_on_edit: boolean;
-		/** Timeout for test-on-edit gate in ms (default: 15000) */
-		test_on_edit_timeout: number;
 		/** Additional PATH directories for gate command execution */
 		extra_path: string[];
 		/** Minimum test coverage percentage to pass. 0 = disabled (opt-in). */
 		coverage_threshold: number;
-		/** Re-run typecheck on consumer files when a dependency changes (opt-in). */
-		consumer_typecheck: boolean;
-		/** Import graph traversal depth for consumer detection (1-3). */
+		/** Import graph traversal depth for consumer detection (1-3). Used by get_impact_analysis MCP tool. */
 		import_graph_depth: number;
-		/** Cyclomatic complexity threshold for code quality gate. */
-		complexity_threshold: number;
-		/** Maximum function size in lines for code quality gate. */
-		function_size_limit: number;
-		/** Minimum mutation score percentage to pass. 0 = disabled (opt-in). */
-		mutation_score_threshold: number;
 	};
 	/** Security enforcement */
 	security: {
-		/** Require Semgrep to be installed. Blocks commit when missing. */
+		/** Require Semgrep to be installed. Used by security-reviewer for SAST. */
 		require_semgrep: boolean;
-		/** Require osv-scanner to be installed. Advisory when missing (default: false). */
-		require_osv_scanner: boolean;
-	};
-	escalation: {
-		security_threshold: number;
-		drift_threshold: number;
-		test_quality_threshold: number;
-		duplication_threshold: number;
-		semantic_threshold: number;
-		/** Same-file edit count before promoting security advisories to blocking */
-		security_iterative_threshold: number;
-		/** Dead-import warning count before promoting to blocking */
-		dead_import_blocking_threshold: number;
-	};
-	/** Cross-session learning: threshold adjustment recommendations */
-	flywheel: {
-		enabled: boolean;
-		min_sessions: number;
-		/** Automatically apply safe (raise) recommendations to global_configs */
-		auto_apply: boolean;
 	};
 }
 
@@ -102,33 +70,12 @@ export const DEFAULTS: QultConfig = {
 	gates: {
 		output_max_chars: 3500,
 		default_timeout: 10000,
-		test_on_edit: false,
-		test_on_edit_timeout: 15000,
 		extra_path: [],
 		coverage_threshold: 0,
-		consumer_typecheck: false,
 		import_graph_depth: 1,
-		complexity_threshold: 15,
-		function_size_limit: 50,
-		mutation_score_threshold: 0,
 	},
 	security: {
 		require_semgrep: true,
-		require_osv_scanner: false,
-	},
-	escalation: {
-		security_threshold: 10,
-		drift_threshold: 8,
-		test_quality_threshold: 8,
-		duplication_threshold: 8,
-		semantic_threshold: 8,
-		security_iterative_threshold: 5,
-		dead_import_blocking_threshold: 5,
-	},
-	flywheel: {
-		enabled: true,
-		min_sessions: 10,
-		auto_apply: false,
 	},
 };
 
@@ -173,61 +120,18 @@ function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): voi
 		const g = raw.gates as Record<string, unknown>;
 		if (typeof g.output_max_chars === "number") config.gates.output_max_chars = g.output_max_chars;
 		if (typeof g.default_timeout === "number") config.gates.default_timeout = g.default_timeout;
-		if (typeof g.test_on_edit === "boolean") config.gates.test_on_edit = g.test_on_edit;
-		if (typeof g.test_on_edit_timeout === "number")
-			config.gates.test_on_edit_timeout = g.test_on_edit_timeout;
 		if (Array.isArray(g.extra_path))
 			config.gates.extra_path = g.extra_path.filter(
 				(p: unknown) => typeof p === "string" && p.trim().length > 0,
 			);
 		if (typeof g.coverage_threshold === "number")
 			config.gates.coverage_threshold = Math.max(0, Math.min(100, g.coverage_threshold));
-		if (typeof g.consumer_typecheck === "boolean")
-			config.gates.consumer_typecheck = g.consumer_typecheck;
 		if (typeof g.import_graph_depth === "number")
 			config.gates.import_graph_depth = Math.max(1, Math.min(3, g.import_graph_depth));
-		if (typeof g.complexity_threshold === "number")
-			config.gates.complexity_threshold = Math.max(1, g.complexity_threshold);
-		if (typeof g.function_size_limit === "number")
-			config.gates.function_size_limit = Math.max(1, g.function_size_limit);
-		if (typeof g.mutation_score_threshold === "number")
-			config.gates.mutation_score_threshold = Math.max(
-				0,
-				Math.min(100, g.mutation_score_threshold),
-			);
 	}
 	if (raw.security && typeof raw.security === "object") {
 		const s = raw.security as Record<string, unknown>;
 		if (typeof s.require_semgrep === "boolean") config.security.require_semgrep = s.require_semgrep;
-		if (typeof s.require_osv_scanner === "boolean")
-			config.security.require_osv_scanner = s.require_osv_scanner;
-	}
-	if (raw.escalation && typeof raw.escalation === "object") {
-		const e = raw.escalation as Record<string, unknown>;
-		if (typeof e.security_threshold === "number")
-			config.escalation.security_threshold = Math.max(1, e.security_threshold);
-		if (typeof e.drift_threshold === "number")
-			config.escalation.drift_threshold = Math.max(1, e.drift_threshold);
-		if (typeof e.test_quality_threshold === "number")
-			config.escalation.test_quality_threshold = Math.max(1, e.test_quality_threshold);
-		if (typeof e.duplication_threshold === "number")
-			config.escalation.duplication_threshold = Math.max(1, e.duplication_threshold);
-		if (typeof e.semantic_threshold === "number")
-			config.escalation.semantic_threshold = Math.max(1, e.semantic_threshold);
-		if (typeof e.security_iterative_threshold === "number")
-			config.escalation.security_iterative_threshold = Math.max(1, e.security_iterative_threshold);
-		if (typeof e.dead_import_blocking_threshold === "number")
-			config.escalation.dead_import_blocking_threshold = Math.max(
-				1,
-				e.dead_import_blocking_threshold,
-			);
-	}
-	if (raw.flywheel && typeof raw.flywheel === "object") {
-		const f = raw.flywheel as Record<string, unknown>;
-		if (typeof f.enabled === "boolean") config.flywheel.enabled = f.enabled;
-		if (typeof f.min_sessions === "number")
-			config.flywheel.min_sessions = Math.max(1, f.min_sessions);
-		if (typeof f.auto_apply === "boolean") config.flywheel.auto_apply = f.auto_apply;
 	}
 }
 
@@ -269,7 +173,7 @@ export function loadConfig(): QultConfig {
 
 	const config = structuredClone(DEFAULTS);
 
-	// Layer 1: global_configs (user-level cross-project, replaces preferences.json)
+	// Layer 1: global_configs (user-level cross-project)
 	try {
 		const db = getDb();
 		const globalRows = db.prepare("SELECT key, value FROM global_configs").all() as {
@@ -283,7 +187,7 @@ export function loadConfig(): QultConfig {
 		/* fail-open */
 	}
 
-	// Layer 2: project_configs (project-level, replaces .qult/config.json)
+	// Layer 2: project_configs (project-level)
 	try {
 		const db = getDb();
 		const projectId = getProjectId();
@@ -325,44 +229,11 @@ export function loadConfig(): QultConfig {
 		config.review.require_human_approval = true;
 	else if (humanApprovalEnv === "0" || humanApprovalEnv === "false")
 		config.review.require_human_approval = false;
-	const testOnEditEnv = process.env.QULT_TEST_ON_EDIT;
-	if (testOnEditEnv === "1" || testOnEditEnv === "true") config.gates.test_on_edit = true;
-	else if (testOnEditEnv === "0" || testOnEditEnv === "false") config.gates.test_on_edit = false;
-	config.gates.test_on_edit_timeout =
-		envInt("QULT_TEST_ON_EDIT_TIMEOUT") ?? config.gates.test_on_edit_timeout;
 	const covThreshold = envInt("QULT_COVERAGE_THRESHOLD");
 	if (covThreshold !== undefined)
 		config.gates.coverage_threshold = Math.max(0, Math.min(100, covThreshold));
-	const consumerTcEnv = process.env.QULT_CONSUMER_TYPECHECK;
-	if (consumerTcEnv === "1" || consumerTcEnv === "true") config.gates.consumer_typecheck = true;
-	else if (consumerTcEnv === "0" || consumerTcEnv === "false")
-		config.gates.consumer_typecheck = false;
 	const igDepth = envInt("QULT_IMPORT_GRAPH_DEPTH");
 	if (igDepth !== undefined) config.gates.import_graph_depth = Math.max(1, Math.min(3, igDepth));
-	const complexityThreshold = envInt("QULT_COMPLEXITY_THRESHOLD");
-	if (complexityThreshold !== undefined)
-		config.gates.complexity_threshold = Math.max(1, complexityThreshold);
-	const funcSizeLimit = envInt("QULT_FUNCTION_SIZE_LIMIT");
-	if (funcSizeLimit !== undefined) config.gates.function_size_limit = Math.max(1, funcSizeLimit);
-	const mutationScore = envInt("QULT_MUTATION_SCORE_THRESHOLD");
-	if (mutationScore !== undefined)
-		config.gates.mutation_score_threshold = Math.max(0, Math.min(100, mutationScore));
-	const secEsc = envInt("QULT_ESCALATION_SECURITY");
-	if (secEsc !== undefined) config.escalation.security_threshold = Math.max(1, secEsc);
-	const driftEsc = envInt("QULT_ESCALATION_DRIFT");
-	if (driftEsc !== undefined) config.escalation.drift_threshold = Math.max(1, driftEsc);
-	const tqEsc = envInt("QULT_ESCALATION_TEST_QUALITY");
-	if (tqEsc !== undefined) config.escalation.test_quality_threshold = Math.max(1, tqEsc);
-	const dupEsc = envInt("QULT_ESCALATION_DUPLICATION");
-	if (dupEsc !== undefined) config.escalation.duplication_threshold = Math.max(1, dupEsc);
-	const semEsc = envInt("QULT_ESCALATION_SEMANTIC");
-	if (semEsc !== undefined) config.escalation.semantic_threshold = Math.max(1, semEsc);
-	const secIterEsc = envInt("QULT_ESCALATION_SECURITY_ITERATIVE");
-	if (secIterEsc !== undefined)
-		config.escalation.security_iterative_threshold = Math.max(1, secIterEsc);
-	const deadImportEsc = envInt("QULT_ESCALATION_DEAD_IMPORT_BLOCKING");
-	if (deadImportEsc !== undefined)
-		config.escalation.dead_import_blocking_threshold = Math.max(1, deadImportEsc);
 
 	// Security env var overrides
 	const requireSemgrepEnv = process.env.QULT_REQUIRE_SEMGREP;
@@ -370,11 +241,6 @@ export function loadConfig(): QultConfig {
 		config.security.require_semgrep = true;
 	else if (requireSemgrepEnv === "0" || requireSemgrepEnv === "false")
 		config.security.require_semgrep = false;
-	const requireOsvScannerEnv = process.env.QULT_REQUIRE_OSV_SCANNER;
-	if (requireOsvScannerEnv === "1" || requireOsvScannerEnv === "true")
-		config.security.require_osv_scanner = true;
-	else if (requireOsvScannerEnv === "0" || requireOsvScannerEnv === "false")
-		config.security.require_osv_scanner = false;
 
 	// Model env var overrides (non-empty string)
 	const envStr = (key: string): string | undefined => {
@@ -393,23 +259,11 @@ export function loadConfig(): QultConfig {
 	config.plan_eval.models.evaluator =
 		envStr("QULT_PLAN_EVAL_MODEL_EVALUATOR") ?? config.plan_eval.models.evaluator;
 
-	// Flywheel env var overrides
-	const flywheelEnv = process.env.QULT_FLYWHEEL_ENABLED;
-	if (flywheelEnv === "1" || flywheelEnv === "true") config.flywheel.enabled = true;
-	else if (flywheelEnv === "0" || flywheelEnv === "false") config.flywheel.enabled = false;
-	const flywheelMin = envInt("QULT_FLYWHEEL_MIN_SESSIONS");
-	if (flywheelMin !== undefined) config.flywheel.min_sessions = Math.max(1, flywheelMin);
-	const flywheelAutoApplyEnv = process.env.QULT_FLYWHEEL_AUTO_APPLY;
-	if (flywheelAutoApplyEnv === "1" || flywheelAutoApplyEnv === "true")
-		config.flywheel.auto_apply = true;
-	else if (flywheelAutoApplyEnv === "0" || flywheelAutoApplyEnv === "false")
-		config.flywheel.auto_apply = false;
-
 	_cache = config;
 	return config;
 }
 
-/** Reset cache (for tests). */
+/** Reset cache. Call between tests or when env changes. */
 export function resetConfigCache(): void {
 	_cache = null;
 }

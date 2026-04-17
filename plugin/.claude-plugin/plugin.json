@@ -1,5 +1,5 @@
 {
 	"name": "qult",
-	"version": "0.29.0",
-	"description": "Quality evaluator harness — workflow rules + on-demand independent review via MCP, agents, and skills"
+	"version": "0.30.0",
+	"description": "Claude Code 向け品質補助プラグイン。workflow rules + 独立 4 段レビュー + Tier 1 detectors。"
 }
