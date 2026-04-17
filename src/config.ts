@@ -8,6 +8,8 @@ export interface QultConfig {
 		required_changed_files: number;
 		dimension_floor: number;
 		require_human_approval: boolean;
+		/** If true, when all review findings are severity `low` only, accept the review as PASS without further iteration. */
+		low_only_passes: boolean;
 		/** Per-stage reviewer model override. Values: "sonnet", "opus", "haiku", "inherit" */
 		models: {
 			spec: string;
@@ -51,6 +53,7 @@ export const DEFAULTS: QultConfig = {
 		required_changed_files: 5,
 		dimension_floor: 4,
 		require_human_approval: false,
+		low_only_passes: false,
 		models: {
 			spec: "sonnet",
 			quality: "sonnet",
@@ -91,6 +94,7 @@ function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): voi
 			config.review.dimension_floor = Math.max(1, Math.min(5, r.dimension_floor));
 		if (typeof r.require_human_approval === "boolean")
 			config.review.require_human_approval = r.require_human_approval;
+		if (typeof r.low_only_passes === "boolean") config.review.low_only_passes = r.low_only_passes;
 		if (r.models && typeof r.models === "object") {
 			const m = r.models as Record<string, unknown>;
 			if (typeof m.spec === "string" && m.spec) config.review.models.spec = m.spec;
@@ -229,6 +233,10 @@ export function loadConfig(): QultConfig {
 		config.review.require_human_approval = true;
 	else if (humanApprovalEnv === "0" || humanApprovalEnv === "false")
 		config.review.require_human_approval = false;
+	const lowOnlyPassesEnv = process.env.QULT_REVIEW_LOW_ONLY_PASSES;
+	if (lowOnlyPassesEnv === "1" || lowOnlyPassesEnv === "true") config.review.low_only_passes = true;
+	else if (lowOnlyPassesEnv === "0" || lowOnlyPassesEnv === "false")
+		config.review.low_only_passes = false;
 	const covThreshold = envInt("QULT_COVERAGE_THRESHOLD");
 	if (covThreshold !== undefined)
 		config.gates.coverage_threshold = Math.max(0, Math.min(100, covThreshold));

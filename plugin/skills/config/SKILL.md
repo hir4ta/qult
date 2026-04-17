@@ -19,18 +19,18 @@ The user will specify what they want:
 
 ### Show current config
 
-1. Call `mcp__plugin_qult_qult__get_session_status()` for current session state
-2. Call `mcp__plugin_qult_qult__get_gate_config()` for current config values (stored in DB)
-3. Present current values with defaults noted
+1. Call `mcp__plugin_qult_qult__get_session_status()` — response includes `review_config` field with all current review settings (score_threshold, dimension_floor, max_iterations, require_human_approval, low_only_passes, models)
+2. Present current values with defaults noted. For `plan_eval.*` and other non-review keys, display defaults since they are not yet enriched; mention that `set_config` is required to change them
 
 ### Change a config value
 
 Allowed keys:
-- `review.score_threshold` (default: 26) — minimum aggregate review score across 3 stages (6-30). 6 dimensions: Completeness, Accuracy, Design, Maintainability, Vulnerability, Hardening.
+- `review.score_threshold` (default: 30) — minimum aggregate review score across 4 stages (8-40). 8 dimensions: Completeness, Accuracy, Design, Maintainability, Vulnerability, Hardening, EdgeCases, LogicCorrectness.
 - `review.max_iterations` (default: 3) — max review retry cycles
 - `review.required_changed_files` (default: 5) — file count triggering review requirement
 - `review.dimension_floor` (default: 4) — minimum score per individual dimension (1-5). Any dimension below this floor blocks regardless of aggregate score.
-- `plan_eval.score_threshold` (default: 10) — minimum aggregate plan eval score (3-15)
+- `review.low_only_passes` (default: false) — if true, when all findings are low severity only, accept review as PASS without further iteration
+- `plan_eval.score_threshold` (default: 12) — minimum aggregate plan eval score (3-15)
 - `plan_eval.max_iterations` (default: 2) — max plan eval retry cycles
 
 1. Call `mcp__plugin_qult_qult__set_config({ key: "<key>", value: <number> })`

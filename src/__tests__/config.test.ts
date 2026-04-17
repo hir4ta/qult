@@ -56,6 +56,8 @@ afterEach(() => {
 	delete process.env.QULT_CONSUMER_TYPECHECK;
 	delete process.env.QULT_IMPORT_GRAPH_DEPTH;
 	delete process.env.QULT_REQUIRE_OSV_SCANNER;
+	delete process.env.QULT_REVIEW_LOW_ONLY_PASSES;
+	delete process.env.QULT_REQUIRE_HUMAN_APPROVAL;
 });
 
 describe("loadConfig", () => {
@@ -254,6 +256,47 @@ describe("plan_eval.models config", () => {
 		const config = loadConfig();
 		expect(config.plan_eval.models.generator).toBe("haiku");
 		expect(config.plan_eval.models.evaluator).toBe("sonnet");
+	});
+});
+
+describe("review.low_only_passes config", () => {
+	it("returns default low_only_passes as false", () => {
+		const config = loadConfig();
+		expect(config.review.low_only_passes).toBe(false);
+	});
+
+	it("reads low_only_passes from project config", () => {
+		setProjectConfig("review.low_only_passes", true);
+		const config = loadConfig();
+		expect(config.review.low_only_passes).toBe(true);
+	});
+
+	it("env var QULT_REVIEW_LOW_ONLY_PASSES overrides with true/1/false/0", () => {
+		process.env.QULT_REVIEW_LOW_ONLY_PASSES = "true";
+		const config = loadConfig();
+		expect(config.review.low_only_passes).toBe(true);
+
+		resetConfigCache();
+		process.env.QULT_REVIEW_LOW_ONLY_PASSES = "1";
+		const config2 = loadConfig();
+		expect(config2.review.low_only_passes).toBe(true);
+
+		resetConfigCache();
+		process.env.QULT_REVIEW_LOW_ONLY_PASSES = "0";
+		const config3 = loadConfig();
+		expect(config3.review.low_only_passes).toBe(false);
+
+		resetConfigCache();
+		process.env.QULT_REVIEW_LOW_ONLY_PASSES = "false";
+		const config4 = loadConfig();
+		expect(config4.review.low_only_passes).toBe(false);
+	});
+
+	it("env var overrides project config (env wins)", () => {
+		setProjectConfig("review.low_only_passes", true);
+		process.env.QULT_REVIEW_LOW_ONLY_PASSES = "0";
+		const config = loadConfig();
+		expect(config.review.low_only_passes).toBe(false);
 	});
 });
 

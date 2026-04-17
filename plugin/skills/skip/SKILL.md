@@ -37,7 +37,7 @@ The user will specify what they want:
 
 - Disabled gates reset automatically on new sessions
 - `review` is a special gate name that skips the independent review requirement
-- Valid gate names: any key from gate_configs in DB (lint, typecheck, test, etc.) plus `review`
+- Valid gate names: `review`, `security-check`, `semgrep-required`, `test-quality-check`, `dep-vuln-check`, `hallucinated-package-check`
 - To see current gate status, use `/qult:status`
 - To change thresholds, use `/qult:config`
 - To permanently change gates, re-run `/qult:init` to reconfigure

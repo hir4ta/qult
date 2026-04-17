@@ -160,19 +160,20 @@ Before spawning reviewers, collect the full diff to pass directly in reviewer pr
 
 This is critical for efficiency: without diff prefetch, each reviewer independently runs `git diff` and file discovery, multiplying token consumption by 4x.
 
-## Stage 0.8: Resolve reviewer models
+## Stage 0.8: Resolve reviewer models and cache review config
 
-Before spawning reviewers, resolve the model for each stage:
+Before spawning reviewers, resolve the model for each stage and **capture the full review config for later stages**:
 
-1. Call `mcp__plugin_qult_qult__get_session_status()` — the response includes `review_models` with per-stage model configuration
+1. Call `mcp__plugin_qult_qult__get_session_status()` — the response includes `review_models` (per-stage model configuration) AND `review_config` (full review settings: score_threshold, dimension_floor, max_iterations, require_human_approval, low_only_passes, models)
 2. Extract the model for each reviewer:
    - `review_models.spec` → spec-reviewer model
    - `review_models.quality` → quality-reviewer model
    - `review_models.security` → security-reviewer model
    - `review_models.adversarial` → adversarial-reviewer model
-3. When spawning each Agent, pass the `model` parameter to override the agent frontmatter default:
+3. **Also cache `review_config.low_only_passes` (boolean, default false) for Stage 6**. Other `review_config` fields (`score_threshold`, `dimension_floor`, `max_iterations`) are also used by Stage 6's threshold check, so keep the entire `review_config` object accessible to later stages — this avoids a second `get_session_status()` call.
+4. When spawning each Agent, pass the `model` parameter to override the agent frontmatter default:
    - Example: `Agent({ subagent_type: "qult:spec-reviewer", model: "sonnet", ... })`
-4. If a model value matches the agent's frontmatter default (spec=sonnet, quality=sonnet, security=opus, adversarial=opus), you may omit the `model` parameter
+5. If a model value matches the agent's frontmatter default (spec=sonnet, quality=sonnet, security=opus, adversarial=opus), you may omit the `model` parameter
 
 ## Stage 0.9: Scope Label Coverage Check (shared across reviewers)
 
@@ -180,7 +181,7 @@ Defined here **before** the reviewer stages so each stage's Post-validation can 
 
 1. **Zero-guard**: if the reviewer returned 0 findings, SKIP this check entirely. Coverage is undefined when there are no findings.
 2. **Small-finding-count guard**: if total findings < 3, skip the threshold check. For 1-2 findings, a single unlabeled line would force an always-re-spawn loop without meaningful signal; tolerate omission at this size and post-hoc tag the unlabeled finding as `UNKNOWN` in the Stage 6 breakdown.
-3. **Count label hits**: count findings whose first line matches the **strict regex** `^- \[(critical|high|medium|low)\] (INTRODUCED|PRE_EXISTING|REFACTOR_CARRIED|UNKNOWN) ` (trailing space required). Unlabeled count = total findings − labeled count.
+3. **Count label hits**: count findings whose first line matches the regex `^- \[([Cc][Rr][Ii][Tt][Ii][Cc][Aa][Ll]|[Hh][Ii][Gg][Hh]|[Mm][Ee][Dd][Ii][Uu][Mm]|[Ll][Oo][Ww])\] (INTRODUCED|PRE_EXISTING|REFACTOR_CARRIED|UNKNOWN) ` (trailing space required). The severity bracket is explicitly case-insensitive via character classes — `[Low]`, `[LOW]`, `[low]`, `[Critical]` all match. The scope_label (INTRODUCED etc.) remains case-sensitive uppercase. Unlabeled count = total findings − labeled count.
 4. **Threshold test**: use the fractional comparison `3 * unlabeled > total` (equivalent to `unlabeled / total > 1/3` in exact arithmetic, avoiding floating-point interpretation ambiguity). This means 1-unlabeled-of-3 does NOT trigger re-spawn (3 × 1 = 3, not > 3); 2-of-5 does trigger (3 × 2 = 6 > 5); 1-of-2 is already skipped by step 2. If the test passes, re-spawn the reviewer **once** with an explicit reminder: "Every finding's first line MUST start with `- [severity] scope_label ` per the rules in your prompt. Re-emit your findings with labels applied."
 5. **After re-spawn**: if the new output still satisfies `3 * unlabeled > total`, accept it but **flag the drift** in the Stage 6 Review Summary so the architect sees which reviewer is under-tagging. Do NOT re-spawn a second time.
 
@@ -207,10 +208,11 @@ Collect output: `Spec: PASS/FAIL`, `Score: Completeness=N Accuracy=N`, findings.
 
 **Post-validation**: Verify the agent output contains verdict and scores. If missing, re-spawn. Do NOT fabricate scores. Then apply the **Scope Label Coverage Check** per Stage 0.9 (above).
 
-If Spec: PASS, record the scores:
+After Post-validation completes and verdict is PASS, the skill (orchestrator) MUST call immediately (orchestrator-side action, not an architect task):
 ```
 mcp__plugin_qult_qult__record_stage_scores({ stage: "Spec", scores: { completeness: N, accuracy: N } })
 ```
+If verdict is FAIL, SKIP the record call and proceed to iteration.
 
 ### Stage 3: Security Reviewer
 
@@ -224,10 +226,11 @@ Collect output: `Security: PASS/FAIL`, `Score: Vulnerability=N Hardening=N`, fin
 
 **Post-validation**: Verify verdict, scores, and that the agent did not modify files (read-only). Then apply the **Scope Label Coverage Check** per Stage 0.9 (above).
 
-If Security: PASS, record the scores:
+After Post-validation completes and verdict is PASS, the skill (orchestrator) MUST call immediately (orchestrator-side action, not an architect task):
 ```
 mcp__plugin_qult_qult__record_stage_scores({ stage: "Security", scores: { vulnerability: N, hardening: N } })
 ```
+If verdict is FAIL, SKIP the record call and proceed to iteration.
 
 ### Round 1 summary
 
@@ -257,10 +260,11 @@ Collect output: `Quality: PASS/FAIL`, `Score: Design=N Maintainability=N`, findi
 
 **Post-validation**: Verify verdict and scores (do NOT fabricate). Then apply the **Scope Label Coverage Check** per Stage 0.9 (above).
 
-If Quality: PASS, record the scores:
+After Post-validation completes and verdict is PASS, the skill (orchestrator) MUST call immediately (orchestrator-side action, not an architect task):
 ```
 mcp__plugin_qult_qult__record_stage_scores({ stage: "Quality", scores: { design: N, maintainability: N } })
 ```
+If verdict is FAIL, SKIP the record call and proceed to iteration.
 
 ### Stage 4: Adversarial Reviewer
 
@@ -277,10 +281,11 @@ Collect output: `Adversarial: PASS/FAIL`, `Score: EdgeCases=N LogicCorrectness=N
 
 Note: Adversarial stage scores are included in the 4-stage aggregate (/40).
 
-If Adversarial: PASS, record the scores:
+After Post-validation completes and verdict is PASS, the skill (orchestrator) MUST call immediately (orchestrator-side action, not an architect task):
 ```
 mcp__plugin_qult_qult__record_stage_scores({ stage: "Adversarial", scores: { edgeCases: N, logicCorrectness: N } })
 ```
+If verdict is FAIL, SKIP the record call and proceed to iteration.
 
 ## Stage 5: Judge filter
 
@@ -300,12 +305,35 @@ After Stage 5, aggregate all scores:
 Total: Completeness + Accuracy + Design + Maintainability + Vulnerability + Hardening + EdgeCases + LogicCorrectness = N/40
 ```
 
-Score thresholds are enforced within this skill:
+Score thresholds and the decision to stop/iterate/passthrough are evaluated in this order:
+
+### Step 6a: Low-only passthrough check (evaluated BEFORE the stop/iterate decision)
+
+Use `review_config.low_only_passes` cached from Stage 0.8 (avoid re-calling `get_session_status()` — correctness is unaffected either way; this is a cost hint). Default `false`.
+
+If ALL of the following hold, treat the review as PASS immediately — skip step 6b entirely:
+1. `review_config.low_only_passes` is `true`
+2. Aggregate score meets `review.score_threshold`
+3. Every dimension meets `review.dimension_floor`
+4. **At least one finding remains** after the Judge filter (Stage 5) — the check is meaningful only when there is something to classify
+5. Every remaining finding has severity `low` — compared **case-insensitively** to the severity bracket (e.g. `[Low]`, `[LOW]`, `[low]` all count). No `critical`/`high`/`medium` findings present
+
+The passthrough PASSes even if one or more reviewers emitted a FAIL verdict, because a FAIL verdict combined with only-low findings after Judge filtering indicates the architect has already accepted these as tolerable via `low_only_passes=true`.
+
+**0 findings + reviewer FAIL is NOT a passthrough case** — condition 4 requires at least one finding, so this scenario falls through to step 6b and surfaces the reviewer's FAIL verdict to the architect.
+
+If any of conditions 1–5 fail, proceed to step 6b.
+
+### Step 6b: Stop or iterate based on verdict and threshold
+
+Applied only when the passthrough above did not PASS the review.
+
 - Aggregate must meet `review.score_threshold` (default 30/40)
 - Each dimension must meet `review.dimension_floor` (default 4/5)
 - If any reviewer's verdict is FAIL or score is below threshold: stop and surface the findings to the architect
 
-When blocked:
+### When blocked
+
 1. Fix the issues identified by the failing reviewer(s)
 2. Re-run only the failing reviewer(s) on the updated diff
 3. Re-apply Judge filter on new findings
@@ -337,7 +365,7 @@ No issues found.
 INTRODUCED: 1 / PRE_EXISTING: 0 / REFACTOR_CARRIED: 0 / UNKNOWN: 0
 ```
 
-**How to build the Scope breakdown**: after applying the Judge filter (Stage 5), iterate over the remaining findings from all four reviewers. Count each finding's `scope_label` using a **strict match** on the finding's first line only — the line must conform to the regex `^- \[(critical|high|medium|low)\] (INTRODUCED|PRE_EXISTING|REFACTOR_CARRIED|UNKNOWN) ` (note the trailing space separating label from file/location). Do NOT count label tokens that appear anywhere else (inline description text, `Proof:`/`Expected:` lines, quoted code, example content). Findings whose first line does not match the strict regex are counted under `UNKNOWN`. This prevents a diff that merely contains the string `INTRODUCED` in a comment from inflating the counter. The `### Scope breakdown` line MUST appear immediately after `### Aggregate: N/40` in the summary block.
+**How to build the Scope breakdown**: after applying the Judge filter (Stage 5), iterate over the remaining findings from all four reviewers. Count each finding's `scope_label` using a **strict match** on the finding's first line only — the line must conform to the regex `^- \[([Cc][Rr][Ii][Tt][Ii][Cc][Aa][Ll]|[Hh][Ii][Gg][Hh]|[Mm][Ee][Dd][Ii][Uu][Mm]|[Ll][Oo][Ww])\] (INTRODUCED|PRE_EXISTING|REFACTOR_CARRIED|UNKNOWN) ` (note the trailing space separating label from file/location; severity bracket is case-insensitive via explicit character classes). Do NOT count label tokens that appear anywhere else (inline description text, `Proof:`/`Expected:` lines, quoted code, example content). Findings whose first line does not match the strict regex are counted under `UNKNOWN`. This prevents a diff that merely contains the string `INTRODUCED` in a comment from inflating the counter. The `### Scope breakdown` line MUST appear immediately after `### Aggregate: N/40` in the summary block.
 
 Then for each passing finding from the Judge filter, preserve the scope_label in the output:
 ```
@@ -351,9 +379,9 @@ If all four stages pass with no findings: "Review complete. All clear." (no Scop
 
 ## Stage 7: Record review completion
 
-**This step is mandatory.** After all stages pass and the summary is output:
+**This step is mandatory** and is an orchestrator-side action, not an architect task. After all stages pass and the summary is output, the skill automatically records completion:
 
-1. Call `mcp__plugin_qult_qult__record_review({ aggregate_score: <total> })` to record the review completion in session state
+1. The skill (orchestrator) MUST call `mcp__plugin_qult_qult__record_review({ aggregate_score: <total> })` to record the review completion in session state. The architect must NOT be asked to call this manually.
 2. This enables the commit gate to allow commits. Without this call, the commit gate will block.
 
 This is the authoritative signal that review is complete; pre-commit checks rely on it.

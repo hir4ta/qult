@@ -104,7 +104,7 @@ const TOOL_DEFS: ToolDef[] = [
 	{
 		name: "set_config",
 		description:
-			"Set a qult config value. Allowed keys: review.score_threshold, review.max_iterations, review.required_changed_files, review.dimension_floor, review.models.{spec|quality|security|adversarial}, plan_eval.score_threshold, plan_eval.max_iterations, plan_eval.models.{generator|evaluator}, review.require_human_approval.",
+			"Set a qult config value. Allowed keys: review.score_threshold, review.max_iterations, review.required_changed_files, review.dimension_floor, review.models.{spec|quality|security|adversarial}, plan_eval.score_threshold, plan_eval.max_iterations, plan_eval.models.{generator|evaluator}, review.require_human_approval, review.low_only_passes.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -147,7 +147,7 @@ const TOOL_DEFS: ToolDef[] = [
 	{
 		name: "record_test_pass",
 		description:
-			"Record that tests have passed. Call after running tests successfully. Required for the commit gate to allow commits when on_commit gates are configured.",
+			"Record that tests have passed. Call after running tests successfully. Pre-commit checks read test_passed_at to verify test freshness before a commit.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -295,11 +295,12 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 					content: [{ type: "text", text: "No session state. Run /qult:init to set up." }],
 				};
 			}
-			// Include review model config so skills can read it
+			// Include review config so skills can read thresholds, models, and flags
 			const config = loadConfig();
 			const enriched = {
 				...(row as Record<string, unknown>),
-				review_models: config.review.models,
+				review_models: config.review.models, // kept for backward compat
+				review_config: config.review, // full review config (score_threshold, dimension_floor, max_iterations, require_human_approval, low_only_passes, models)
 			};
 			return { content: [{ type: "text", text: JSON.stringify(enriched, null, 2) }] };
 		}
@@ -397,7 +398,7 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 				"plan_eval.models.generator",
 				"plan_eval.models.evaluator",
 			];
-			const ALLOWED_BOOLEAN_KEYS = ["review.require_human_approval"];
+			const ALLOWED_BOOLEAN_KEYS = ["review.require_human_approval", "review.low_only_passes"];
 			const ALL_ALLOWED = [...ALLOWED_NUMBER_KEYS, ...ALLOWED_MODEL_KEYS, ...ALLOWED_BOOLEAN_KEYS];
 			if (!ALL_ALLOWED.includes(key)) {
 				return {
@@ -753,7 +754,7 @@ function handleRequest(parsed: JsonRpcRequest, cwd: string): JsonRpcResponse | n
 					instructions: [
 						"qult is a quality aid for Claude. It provides workflow rules (at ~/.claude/rules/qult-*.md), independent reviewers, and Tier 1 detectors as MCP tools.",
 						"",
-						"If gates are not configured, run /qult:init.",
+						"Run /qult:init once after installing qult to install workflow rules to ~/.claude/rules/.",
 						"",
 						"## Workflow",
 						"- Plan → Implement → Review → Finish",

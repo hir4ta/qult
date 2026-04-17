@@ -311,6 +311,7 @@ var DEFAULTS = {
     required_changed_files: 5,
     dimension_floor: 4,
     require_human_approval: false,
+    low_only_passes: false,
     models: {
       spec: "sonnet",
       quality: "sonnet",
@@ -351,6 +352,8 @@ function applyConfigLayer(config, raw) {
       config.review.dimension_floor = Math.max(1, Math.min(5, r.dimension_floor));
     if (typeof r.require_human_approval === "boolean")
       config.review.require_human_approval = r.require_human_approval;
+    if (typeof r.low_only_passes === "boolean")
+      config.review.low_only_passes = r.low_only_passes;
     if (r.models && typeof r.models === "object") {
       const m = r.models;
       if (typeof m.spec === "string" && m.spec)
@@ -467,6 +470,11 @@ function loadConfig() {
     config.review.require_human_approval = true;
   else if (humanApprovalEnv === "0" || humanApprovalEnv === "false")
     config.review.require_human_approval = false;
+  const lowOnlyPassesEnv = process.env.QULT_REVIEW_LOW_ONLY_PASSES;
+  if (lowOnlyPassesEnv === "1" || lowOnlyPassesEnv === "true")
+    config.review.low_only_passes = true;
+  else if (lowOnlyPassesEnv === "0" || lowOnlyPassesEnv === "false")
+    config.review.low_only_passes = false;
   const covThreshold = envInt("QULT_COVERAGE_THRESHOLD");
   if (covThreshold !== undefined)
     config.gates.coverage_threshold = Math.max(0, Math.min(100, covThreshold));
@@ -2044,7 +2052,7 @@ var TOOL_DEFS = [
   },
   {
     name: "set_config",
-    description: "Set a qult config value. Allowed keys: review.score_threshold, review.max_iterations, review.required_changed_files, review.dimension_floor, review.models.{spec|quality|security|adversarial}, plan_eval.score_threshold, plan_eval.max_iterations, plan_eval.models.{generator|evaluator}, review.require_human_approval.",
+    description: "Set a qult config value. Allowed keys: review.score_threshold, review.max_iterations, review.required_changed_files, review.dimension_floor, review.models.{spec|quality|security|adversarial}, plan_eval.score_threshold, plan_eval.max_iterations, plan_eval.models.{generator|evaluator}, review.require_human_approval, review.low_only_passes.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2083,7 +2091,7 @@ var TOOL_DEFS = [
   },
   {
     name: "record_test_pass",
-    description: "Record that tests have passed. Call after running tests successfully. Required for the commit gate to allow commits when on_commit gates are configured.",
+    description: "Record that tests have passed. Call after running tests successfully. Pre-commit checks read test_passed_at to verify test freshness before a commit.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2225,7 +2233,8 @@ function handleTool(name, cwd, args) {
       const config = loadConfig();
       const enriched = {
         ...row,
-        review_models: config.review.models
+        review_models: config.review.models,
+        review_config: config.review
       };
       return { content: [{ type: "text", text: JSON.stringify(enriched, null, 2) }] };
     }
@@ -2309,7 +2318,7 @@ function handleTool(name, cwd, args) {
         "plan_eval.models.generator",
         "plan_eval.models.evaluator"
       ];
-      const ALLOWED_BOOLEAN_KEYS = ["review.require_human_approval"];
+      const ALLOWED_BOOLEAN_KEYS = ["review.require_human_approval", "review.low_only_passes"];
       const ALL_ALLOWED = [...ALLOWED_NUMBER_KEYS, ...ALLOWED_MODEL_KEYS, ...ALLOWED_BOOLEAN_KEYS];
       if (!ALL_ALLOWED.includes(key)) {
         return {
@@ -2613,7 +2622,7 @@ function handleRequest(parsed, cwd) {
           instructions: [
             "qult is a quality aid for Claude. It provides workflow rules (at ~/.claude/rules/qult-*.md), independent reviewers, and Tier 1 detectors as MCP tools.",
             "",
-            "If gates are not configured, run /qult:init.",
+            "Run /qult:init once after installing qult to install workflow rules to ~/.claude/rules/.",
             "",
             "## Workflow",
             "- Plan \u2192 Implement \u2192 Review \u2192 Finish",
