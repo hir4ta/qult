@@ -25,8 +25,6 @@ describe("db", () => {
 			expect(names).toContain("projects");
 			expect(names).toContain("pending_fixes");
 			expect(names).toContain("changed_files");
-			expect(names).toContain("gate_configs");
-			expect(names).toContain("session_metrics");
 		});
 
 		it("sets schema version", () => {

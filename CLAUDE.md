@@ -1,6 +1,6 @@
 # qult
 
-**Claude を補助する品質エイド.** Claude Code 単体より、漏れなく品質高い設計・実装を実現するための補助プラグイン。Claude Code Plugin として配布。v0.29 で hooks 全廃止、v0.30 で過剰機能を大量削除（flywheel/dataflow/complexity/mutation/SBOM/LSP 等）。
+**Claude を補助する品質エイド.** Claude Code 単体より、漏れなく品質高い設計・実装を実現するための補助プラグイン。Claude Code Plugin として配布。
 
 ## ミッション (最重要)
 
@@ -9,22 +9,22 @@
 ハーネスエンジニアリング論文 (`docs/references.md`) は **設計の参考** であり、完全再現が目的ではない。理論的純度より、ユーザーが日常で使えて鬱陶しくない補助を優先する。
 
 ### qult が**やること**（Claude 単体では確実にできない事）
-- **独立レビュー** (`/qult:review` 4 段) — reviewer モデル多様性で自己評価バイアスを軽減 (self-review は自己バグの 64.5% を見逃す)
-- **独立プラン評価** (`/qult:plan-generator` + `plan-evaluator`) — 4 段レビューと同じアーキテクチャパターン。plan-generator の見落としを fresh context の evaluator が拾う
-- **外部知識統合** — Semgrep (SAST), osv-scanner (CVE), npm registry (hallucinated package 確認)。Claude が内蔵していないデータ
-- **一貫性保証の detector** — test-quality-check は毎回必ず flag する。reviewer の注意リソースを消費しない
+- **独立レビュー** (`/qult:review` 4 段) — reviewer モデル多様性で自己評価バイアスを軽減
+- **独立プラン評価** (`/qult:plan-generator` + `plan-evaluator`) — 4 段レビューと同じアーキテクチャパターン
+- **外部知識統合** — Semgrep (SAST), osv-scanner (CVE), npm registry (hallucinated package 確認)
+- **一貫性保証の detector** — test-quality-check は毎回必ず flag する
 - **永続 state** — MCP 経由で test pass / review 完了 / plan 状態を記録
 
 ### qult が**やらないこと**
-- 厳密な policy compiler / reference monitor の実装 (v0.28 までの hooks 思想は撤回)
-- ハーネスエンジニアリング論文の完全再現 (理論的純度の追求はしない)
-- ユーザーの作業を構造的に中断するシステム (Edit/Write 中の DENY、Stop hook ブロック等は v0.29 で撤廃)
-- Claude が自分でできる判断の機械的代替 (複雑度計算、convention 検出、semantic チェック等は reviewer に任せる)
+- 厳密な policy compiler / reference monitor の実装
+- ハーネスエンジニアリング論文の完全再現
+- ユーザーの作業を構造的に中断するシステム (hooks は使わない)
+- Claude が自分でできる判断の機械的代替 (複雑度計算、convention 検出、toolchain 検出 等は reviewer や Claude 判断に任せる)
 
 ### 既知の限界（正直）
-- **Rules は advisory**: v0.29 で hooks 撤廃後、workflow rules はプロンプトレベルの誘導に留まる。AgentPex 研究: トレースの 83% に少なくとも 1 件の手続き違反。ルールは大抵守られるが信頼できるほどではない。
-- **レビューのトークンコスト**: `/qult:review` は 4 subagent 分で 40-100k トークン追加。小さな修正は `/qult:skip` で回避
-- **Detector の言語バイアス**: pattern/AST ベースで TypeScript 偏り。Python/Go/Rust は精度が落ちる
+- **Rules は advisory**: workflow rules はプロンプトレベルの誘導。AgentPex 研究: トレースの 83% に少なくとも 1 件の手続き違反。ルールは大抵守られるが信頼できるほどではない
+- **レビューのトークンコスト**: `/qult:review` は 4 subagent 分で 40-100k トークン追加。小さな修正はスキップ推奨
+- **Detector の言語バイアス**: pattern/AST ベースで TypeScript 偏り
 
 ### 設計判断のスタンス
 **迷ったら軽い方を選ぶ。**
@@ -46,7 +46,7 @@
 
 TypeScript (Bun 1.3+, ESM) / vitest (テスト) / Biome (lint) / bun:sqlite (状態管理) / raw JSON-RPC MCP (状態公開)
 
-**ランタイム要件**: Bun 必須（MCP server は `bun` で実行）、Semgrep 推奨（security-check で使用、`brew install semgrep` or `pip install semgrep`）
+**ランタイム要件**: Bun 必須（MCP server は `bun` で実行）、Semgrep 推奨（security-check で使用、`brew install semgrep`）
 
 ## コマンド
 
@@ -54,10 +54,8 @@ TypeScript (Bun 1.3+, ESM) / vitest (テスト) / Biome (lint) / bun:sqlite (状
 bun run build    # bun build (mcp-server.mjs のみ)
 bun run typecheck && bun run lint  # tsc --noEmit + Biome lint
 bun run lint:fix # Biome 自動修正
-bun run test     # vitest run
+bun run test     # bunx --bun vitest run
 ```
-
-`bun tsc` / `bun vitest` を使う（`npx` 不要）
 
 ## Plugin 構造
 
@@ -67,22 +65,14 @@ qult/
 ├── plugin/                          # プラグイン本体
 │   ├── .claude-plugin/plugin.json
 │   ├── rules/                       # ~/.claude/rules/ に配布される workflow rules (5 ファイル)
-│   ├── .mcp.json                    # MCP server
-│   ├── skills/                      # 12 skills
-│   ├── agents/                      # 7 agents (4 reviewer + plan-generator/evaluator + quality-guardian)
+│   ├── .mcp.json                    # MCP server 定義
+│   ├── skills/                      # user-invocable skills
+│   ├── agents/                      # reviewer / planner agents
 │   ├── output-styles/               # 出力スタイル
-│   ├── .lsp.json                    # LSP server 設定
 │   ├── settings.json                # デフォルトエージェント設定
 │   └── dist/                        # バンドル (mcp-server.mjs)
 └── src/                             # ソースコード (開発用)
 ```
-
-## 設計原則
-
-1. **Rules > Hooks** — `~/.claude/rules/qult-*.md` で workflow を Claude に教える。hooks は使わない
-2. **fail-open** — qult の障害で Claude を止めない
-3. **Independent Review** — `/qult:review` (4 stage) でレビュー多様性を保証 (sonnet × 3 + opus × 1)
-4. **MCP = 情報伝達 + 状態記録** — DB と Claude をつなぐ唯一の経路
 
 ## ルール
 
@@ -90,24 +80,23 @@ qult/
 
 - `bun build.ts` → `plugin/dist/mcp-server.mjs` (target: bun)
 - **npm dependencies ゼロ** — 全て devDependencies + bun build バンドル。bun:sqlite はランタイム組み込み
-- `better-sqlite3` は devDependency（vitest 用の bun:sqlite 互換 shim）
 
 ### Rules (5 ファイル)
 
-`plugin/rules/` のテンプレートを `/qult:init` で `~/.claude/rules/` に配布（常に上書き）:
+`plugin/rules/` のテンプレートを `/qult:init` / `/qult:update` で `~/.claude/rules/` に配布（常に上書き）:
 
 - `qult-workflow.md` — Plan → Implement → Review → Finish の流れ
 - `qult-pre-commit.md` — コミット前のチェックリスト（test, review, finish）
 - `qult-plan-mode.md` — `/qult:plan-generator` の利用、`EnterPlanMode` 禁止
 - `qult-review.md` — `/qult:review` 4-stage の必要条件と detector context
-- `qult-quality.md` — Tier 1 (常時) / Opt-in detectors の整理、TDD 強制なし
+- `qult-quality.md` — Tier 1 detector の整理、detector にしない境界
 
 ### MCP Server
 
 - Claude が状態を取得・操作する経路
 - raw stdio JSON-RPC 実装 (SDK 依存なし)
-- 読み取り: get_pending_fixes, get_session_status, get_gate_config, get_detector_summary, get_file_health_score, get_impact_analysis, get_call_coverage
-- 操作: disable_gate, enable_gate, clear_pending_fixes, set_config, save_gates, archive_plan
+- 読み取り: get_pending_fixes, get_session_status, get_detector_summary, get_file_health_score, get_impact_analysis, get_call_coverage
+- 操作: disable_gate, enable_gate, clear_pending_fixes, set_config, archive_plan
 - 記録: record_review, record_test_pass, record_stage_scores, record_human_approval, record_finish_started
 - MCP tool の呼び出しルールは MCP server instructions で注入（プロジェクトにファイル配置しない）
 
@@ -115,27 +104,22 @@ qult/
 
 | Stage | Model | 理由 |
 |-------|-------|------|
-| spec-reviewer | sonnet | プランとの機械的照合、sonnet で十分 |
+| spec-reviewer | sonnet | プランとの機械的照合 |
 | quality-reviewer | sonnet | 高速、design smell の主要パターンは捕捉可能 |
 | **security-reviewer** | **opus** | 高リスク。Veracode 45% / CSA AI-CVE 6 倍を踏まえ最強モデル |
 | **adversarial-reviewer** | **opus** | 最終番人。edge case を捕捉 |
-| plan-generator | sonnet | 生成タスク、sonnet で十分 |
-| **plan-evaluator** | **opus** | 仕様品質ゲート。プランの腐敗が下流全体に波及するため |
+| plan-generator | sonnet | 生成タスク |
+| **plan-evaluator** | **opus** | 仕様品質ゲート |
 
-### Detector triage (v0.30)
+### Detector
 
-**Tier 1 のみ維持** — reviewer が読んで判断できない / 自動化が必要なもの:
+**Tier 1 のみ**（reviewer が単独で判断できない / 自動化が必要なもの）:
 
 - **security-check** — OWASP Top 10 パターン、ハードコードシークレット
 - **dep-vuln-check** — osv-scanner 統合
 - **hallucinated-package-check** — npm registry 存在確認
 - **test-quality-check** — empty test, always-true, trivial assertion
 - **export-check** — 破壊的 export 変更
-
-**削除済み** (v0.30):
-- dataflow-check, complexity-check, duplication-check, semantic-check, mutation-check (opt-in 全廃)
-- convention-check, import-check (v0.29 削除済み)
-- dead-import-check, spec-trace-check (v0.30 削除 — reviewer で十分)
 
 **方針**: Claude がコードを読んで判断できる領域は detector 化しない。reviewer 判断に委ねる。
 
@@ -144,21 +128,17 @@ qult/
 - DEFAULTS < `global_configs` テーブル < `project_configs` テーブル < `QULT_*` env
 - review.*: スコア閾値、iteration、次元フロア、モデル選択
 - plan_eval.*: プラン評価スコア閾値、モデル
-- gates.*: coverage_threshold (opt-in), import_graph_depth (impact analysis 用), output_max_chars, default_timeout
+- gates.import_graph_depth: impact analysis 用 (1-3)
 - security.require_semgrep: Semgrep 必須化
 
 ### State
 
 - 全 state は `~/.qult/qult.db` (SQLite WAL mode) に保存。プロジェクト内に `.qult/` は作らない
-
-### Gates
-
-- on_write: 編集時 (lint, typecheck) / on_commit: コミット時 (test) / on_review: レビュー時 (e2e)
-- 自動 fire はしない。`/qult:review` skill が gate コマンドを参照して reviewer に渡す
+- 現プロジェクトは MCP tool 呼び出し時に lazy に auto-register される
 
 ### TDD
 
-- v0.29 で構造的強制を撤廃 (TDAD 論文: プロンプトのみ TDD は品質悪化リスク)
+- プロンプトレベル TDD は品質悪化リスクがあるため強制しない (TDAD 論文)
 - TDD したい場合は plan の `Verify:` フィールドに記述、spec-reviewer が事後検証
 
 ### 消費者チェック

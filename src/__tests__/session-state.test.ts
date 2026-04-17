@@ -1,16 +1,13 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { saveGates } from "../gates/load.ts";
 import { closeDb, setProjectPath, useTestDb } from "../state/db.ts";
 import { resetAllCaches } from "../state/flush.ts";
 import {
 	clearOnCommit,
-	getGatedExtensions,
 	incrementFileEditCount,
 	incrementGateFailure,
 	isReviewRequired,
-	markGateRan,
 	readFileEditCount,
 	readSessionState,
 	recordChangedFile,
@@ -18,7 +15,6 @@ import {
 	recordTestPass,
 	resetFileEditCounts,
 	resetGateFailure,
-	shouldSkipGate,
 } from "../state/session-state.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-session-state");
@@ -69,28 +65,6 @@ describe("session-state: review tracking", () => {
 	});
 });
 
-describe("session-state: gate batch tracking", () => {
-	it("shouldSkipGate returns false when not ran", () => {
-		expect(shouldSkipGate("lint")).toBe(false);
-	});
-
-	it("markGateRan then shouldSkipGate returns true for same session", () => {
-		markGateRan("typecheck");
-		expect(shouldSkipGate("typecheck")).toBe(true);
-	});
-
-	it("shouldSkipGate returns true for same project after markGateRan", () => {
-		markGateRan("typecheck");
-		expect(shouldSkipGate("typecheck")).toBe(true);
-	});
-
-	it("clearOnCommit clears gate batch", () => {
-		markGateRan("typecheck");
-		clearOnCommit();
-		expect(shouldSkipGate("typecheck")).toBe(false);
-	});
-});
-
 describe("session-state: isReviewRequired", () => {
 	it("required when plan is active", () => {
 		const planDir = join(TEST_DIR, ".claude", "plans");
@@ -125,55 +99,6 @@ describe("session-state: isReviewRequired", () => {
 
 	it("not required when no state (fresh session, no plan)", () => {
 		expect(isReviewRequired()).toBe(false);
-	});
-});
-
-describe("session-state: getGatedExtensions with gate.extensions", () => {
-	it("uses gate extensions when provided", () => {
-		saveGates({
-			on_write: {
-				lint: {
-					command: "biome check {file}",
-					extensions: [".ts", ".tsx", ".vue"],
-				},
-			},
-		});
-		resetAllCaches();
-		const exts = getGatedExtensions();
-		expect(exts.has(".ts")).toBe(true);
-		expect(exts.has(".vue")).toBe(true);
-		// .css would come from TOOL_EXTS fallback for biome, but gate.extensions overrides
-		expect(exts.has(".css")).toBe(false);
-	});
-
-	it("falls back to TOOL_EXTS when extensions not provided", () => {
-		saveGates({
-			on_write: { lint: { command: "biome check {file}" } },
-		});
-		resetAllCaches();
-		const exts = getGatedExtensions();
-		expect(exts.has(".ts")).toBe(true);
-		expect(exts.has(".tsx")).toBe(true);
-		expect(exts.has(".css")).toBe(true);
-	});
-
-	it("combines gate.extensions and TOOL_EXTS fallback across gates", () => {
-		saveGates({
-			on_write: {
-				lint: {
-					command: "biome check {file}",
-					extensions: [".ts", ".vue"],
-				},
-				typecheck: { command: "tsc --noEmit" },
-			},
-		});
-		resetAllCaches();
-		const exts = getGatedExtensions();
-		// lint gate: explicit .ts, .vue
-		expect(exts.has(".vue")).toBe(true);
-		// typecheck gate: TOOL_EXTS fallback for tsc
-		expect(exts.has(".tsx")).toBe(true);
-		expect(exts.has(".mts")).toBe(true);
 	});
 });
 

@@ -7,25 +7,22 @@ description: "Independent 4-stage code review: Spec compliance → Code quality 
 
 Four-stage code review: independent specialized reviewers → Judge filter.
 
-> **Quality by Structure, Not by Promise.**
 > Four pairs of eyes, each seeing what the others miss.
-> The Wall blocks completion until all stages pass.
 
-## Stage 0: Run on_review gates (runtime verification)
+## Stage 0: Run e2e / integration tests (if present)
 
-Before spawning reviewers, run any `on_review` gates:
+Before spawning reviewers, check whether the project has long-running tests that reviewers should have the output of:
 
-1. Call `mcp__plugin_qult_qult__get_gate_config()` — if no `on_review` section, skip to Stage 1
-2. For each gate in `on_review`, run the command via Bash with the gate's `timeout` value (in ms) as the Bash tool timeout. If no timeout is specified, default to 60000ms.
+1. Read `package.json` (or `Cargo.toml` / `pyproject.toml`) to find an e2e / integration test command (e.g. `playwright test`, `pytest tests/integration`)
+2. If found, run it via Bash with a generous timeout (120000ms). If the project has none, skip this stage.
 3. Collect results as a summary block:
    ```
-   ## on_review gate results
-   - e2e: PASS (12.3s)
-   - e2e: FAIL (8.1s) — [first 500 chars of stderr]
+   ## e2e gate results
+   - playwright test: PASS (12.3s)
    ```
 4. Pass this block as context when spawning reviewers
 
-If a gate times out or crashes, record it as `ERROR` and continue. Do not block the review.
+If a command times out or crashes, record it as `ERROR` and continue — do not block the review.
 
 ## Stage 0.5: Extract plan acceptance criteria
 
@@ -92,7 +89,7 @@ Spawn `spec-reviewer` and `security-reviewer` **in parallel** (single message, t
 ### Stage 1: Spec Reviewer
 
 In the agent prompt, include:
-- The on_review gate results from Stage 0 (if any)
+- The e2e gate results from Stage 0 (if any)
 - The plan acceptance criteria from Stage 0.5 (if any)
 - The Success Criteria from Stage 0.5 (if any) — these are the human-written ground truth for spec verification
 - The detector findings from Stage 0.7 (if any)
@@ -141,7 +138,7 @@ Spawn `quality-reviewer` and `adversarial-reviewer` **in parallel** (single mess
 ### Stage 2: Quality Reviewer
 
 In the agent prompt, include:
-- The on_review gate results from Stage 0 (if any)
+- The e2e gate results from Stage 0 (if any)
 - The detector findings from Stage 0.7 (if any)
 - The diff from Stage 0.75 — reviewers MUST NOT run git diff themselves
 - The **Prior findings** block from Round 1

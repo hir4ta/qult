@@ -315,12 +315,6 @@ function createTablesV6(db: Database): void {
 			recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
 			UNIQUE(project_id, iteration)
 		);
-		CREATE TABLE IF NOT EXISTS gate_configs (
-			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-			phase TEXT NOT NULL, gate_name TEXT NOT NULL, command TEXT NOT NULL,
-			timeout INTEGER, run_once_per_batch INTEGER NOT NULL DEFAULT 0, extensions TEXT,
-			PRIMARY KEY (project_id, phase, gate_name)
-		);
 		CREATE TABLE IF NOT EXISTS project_configs (
 			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
 			key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (project_id, key)

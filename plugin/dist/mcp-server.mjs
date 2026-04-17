@@ -255,12 +255,6 @@ function createTablesV6(db) {
 			recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
 			UNIQUE(project_id, iteration)
 		);
-		CREATE TABLE IF NOT EXISTS gate_configs (
-			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-			phase TEXT NOT NULL, gate_name TEXT NOT NULL, command TEXT NOT NULL,
-			timeout INTEGER, run_once_per_batch INTEGER NOT NULL DEFAULT 0, extensions TEXT,
-			PRIMARY KEY (project_id, phase, gate_name)
-		);
 		CREATE TABLE IF NOT EXISTS project_configs (
 			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
 			key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (project_id, key)
@@ -501,65 +495,6 @@ function resetConfigCache() {
   _cache = null;
 }
 
-// src/gates/load.ts
-var _cache2;
-function loadGates() {
-  if (_cache2 !== undefined)
-    return _cache2;
-  try {
-    const db = getDb();
-    const projectId = getProjectId();
-    const rows = db.prepare("SELECT phase, gate_name, command, timeout, run_once_per_batch, extensions FROM gate_configs WHERE project_id = ?").all(projectId);
-    if (rows.length === 0) {
-      _cache2 = null;
-      return null;
-    }
-    const config = {};
-    for (const row of rows) {
-      const phase = row.phase;
-      if (!config[phase])
-        config[phase] = {};
-      const gate = { command: row.command };
-      if (row.timeout !== null)
-        gate.timeout = row.timeout;
-      if (row.run_once_per_batch)
-        gate.run_once_per_batch = true;
-      if (row.extensions) {
-        try {
-          gate.extensions = JSON.parse(row.extensions);
-        } catch {}
-      }
-      config[phase][row.gate_name] = gate;
-    }
-    _cache2 = config;
-    return config;
-  } catch {
-    _cache2 = null;
-    return null;
-  }
-}
-function saveGates(gates) {
-  const db = getDb();
-  const projectId = getProjectId();
-  db.exec("BEGIN");
-  try {
-    db.prepare("DELETE FROM gate_configs WHERE project_id = ?").run(projectId);
-    const insert = db.prepare("INSERT INTO gate_configs (project_id, phase, gate_name, command, timeout, run_once_per_batch, extensions) VALUES (?, ?, ?, ?, ?, ?, ?)");
-    for (const [phase, gateMap] of Object.entries(gates)) {
-      if (!gateMap)
-        continue;
-      for (const [name, gate] of Object.entries(gateMap)) {
-        insert.run(projectId, phase, name, gate.command, gate.timeout ?? null, gate.run_once_per_batch ? 1 : 0, gate.extensions ? JSON.stringify(gate.extensions) : null);
-      }
-    }
-    db.exec("COMMIT");
-  } catch (err) {
-    db.exec("ROLLBACK");
-    throw err;
-  }
-  _cache2 = undefined;
-}
-
 // src/hooks/detectors/health-score.ts
 import { existsSync as existsSync6 } from "fs";
 
@@ -593,7 +528,7 @@ function archivePlanFile(planPath) {
 }
 
 // src/state/session-state.ts
-var _cache3 = null;
+var _cache2 = null;
 function defaultState() {
   return {
     last_commit_at: new Date().toISOString(),
@@ -621,15 +556,15 @@ function defaultState() {
   };
 }
 function readSessionState() {
-  if (_cache3)
-    return _cache3;
+  if (_cache2)
+    return _cache2;
   try {
     const db = getDb();
     const pid = getProjectId();
     const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(pid);
     if (!row) {
-      _cache3 = defaultState();
-      return _cache3;
+      _cache2 = defaultState();
+      return _cache2;
     }
     const state = defaultState();
     state.last_commit_at = row.last_commit_at ?? state.last_commit_at;
@@ -672,11 +607,11 @@ function readSessionState() {
     }
     const planScores = db.prepare("SELECT aggregate_score FROM plan_eval_scores WHERE project_id = ? ORDER BY iteration").all(pid);
     state.plan_eval_score_history = planScores.map((r) => r.aggregate_score);
-    _cache3 = state;
+    _cache2 = state;
     return state;
   } catch {
-    _cache3 = defaultState();
-    return _cache3;
+    _cache2 = defaultState();
+    return _cache2;
   }
 }
 function isGateDisabled(gateName) {
@@ -2058,29 +1993,16 @@ function appendAuditLog(entry) {
 var PROTOCOL_VERSION = "2024-11-05";
 var SERVER_NAME = "qult";
 var SERVER_VERSION = "1.0.0";
-function getValidGateNames() {
-  const gates = loadGates();
-  const names = new Set([
-    "review",
-    "security-check",
-    "semgrep-required",
-    "test-quality-check",
-    "coverage",
-    "dep-vuln-check",
-    "hallucinated-package-check"
-  ]);
-  if (gates) {
-    for (const category of [gates.on_write, gates.on_commit, gates.on_review]) {
-      if (category) {
-        for (const name of Object.keys(category))
-          names.add(name);
-      }
-    }
-  }
-  return [...names];
-}
+var VALID_DETECTOR_GATES = [
+  "review",
+  "security-check",
+  "semgrep-required",
+  "test-quality-check",
+  "dep-vuln-check",
+  "hallucinated-package-check"
+];
 function isValidGateName(name) {
-  return getValidGateNames().includes(name);
+  return VALID_DETECTOR_GATES.includes(name);
 }
 var TOOL_DEFS = [
   {
@@ -2091,11 +2013,6 @@ var TOOL_DEFS = [
   {
     name: "get_session_status",
     description: "Returns session state as JSON: test_passed_at, review_completed_at, changed_file_paths, review_iteration. Call before committing to verify gates.",
-    inputSchema: { type: "object", properties: {} }
-  },
-  {
-    name: "get_gate_config",
-    description: "Returns gate definitions as JSON: on_write (lint/typecheck per file), on_commit (test), on_review (e2e). Each gate has command, timeout, optional run_once_per_batch.",
     inputSchema: { type: "object", properties: {} }
   },
   {
@@ -2240,20 +2157,6 @@ var TOOL_DEFS = [
     }
   },
   {
-    name: "save_gates",
-    description: "Save gate configuration for the current project. Use during /qult:init to register detected gates. Replaces all existing gates atomically.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        gates: {
-          type: "object",
-          description: "GatesConfig: { on_write?: { lint: { command, timeout?, run_once_per_batch? }, ... }, on_commit?: { ... }, on_review?: { ... } }"
-        }
-      },
-      required: ["gates"]
-    }
-  },
-  {
     name: "get_impact_analysis",
     description: "Analyze the impact of changes to a file. Returns a list of consumer files (importers) that may be affected, using the import graph.",
     inputSchema: {
@@ -2326,16 +2229,6 @@ function handleTool(name, cwd, args) {
       };
       return { content: [{ type: "text", text: JSON.stringify(enriched, null, 2) }] };
     }
-    case "get_gate_config": {
-      const gates = loadGates();
-      if (!gates) {
-        return {
-          isError: true,
-          content: [{ type: "text", text: "No gates configured. Run /qult:init." }]
-        };
-      }
-      return { content: [{ type: "text", text: JSON.stringify(gates, null, 2) }] };
-    }
     case "disable_gate": {
       const gateName = typeof args?.gate_name === "string" ? args.gate_name : null;
       const reason = typeof args?.reason === "string" ? args.reason : null;
@@ -2356,7 +2249,7 @@ function handleTool(name, cwd, args) {
           content: [
             {
               type: "text",
-              text: `Unknown gate '${gateName}'. Valid: ${getValidGateNames().join(", ")}`
+              text: `Unknown gate '${gateName}'. Valid: ${VALID_DETECTOR_GATES.join(", ")}`
             }
           ]
         };
@@ -2644,64 +2537,6 @@ function handleTool(name, cwd, args) {
       archivePlanFile(resolvedPath);
       resetPlanCache();
       return { content: [{ type: "text", text: "Plan archived." }] };
-    }
-    case "save_gates": {
-      const gates = args?.gates;
-      if (!gates || typeof gates !== "object" || Array.isArray(gates)) {
-        return {
-          isError: true,
-          content: [{ type: "text", text: "Missing or invalid gates parameter." }]
-        };
-      }
-      const validPhases = ["on_write", "on_commit", "on_review"];
-      let totalGates = 0;
-      for (const [phase, gateMap] of Object.entries(gates)) {
-        if (!validPhases.includes(phase)) {
-          return {
-            isError: true,
-            content: [
-              { type: "text", text: `Invalid phase '${phase}'. Valid: ${validPhases.join(", ")}` }
-            ]
-          };
-        }
-        if (typeof gateMap !== "object" || gateMap === null || Array.isArray(gateMap)) {
-          return {
-            isError: true,
-            content: [{ type: "text", text: `Phase '${phase}' must be an object of gates.` }]
-          };
-        }
-        for (const [gateName, gateDef] of Object.entries(gateMap)) {
-          if (typeof gateDef !== "object" || gateDef === null || typeof gateDef.command !== "string" || gateDef.command.trim() === "") {
-            return {
-              isError: true,
-              content: [
-                {
-                  type: "text",
-                  text: `Gate '${phase}.${gateName}' must have a non-empty command string.`
-                }
-              ]
-            };
-          }
-          totalGates++;
-        }
-      }
-      if (totalGates === 0) {
-        return {
-          isError: true,
-          content: [{ type: "text", text: "No gates provided." }]
-        };
-      }
-      saveGates(gates);
-      appendAuditLog({
-        action: "save_gates",
-        reason: "Gates configured via /qult:init",
-        timestamp: new Date().toISOString()
-      });
-      const counts = validPhases.map((p) => {
-        const m = gates[p];
-        return `${m && typeof m === "object" ? Object.keys(m).length : 0} ${p}`;
-      }).filter((s) => !s.startsWith("0 "));
-      return { content: [{ type: "text", text: `Gates saved: ${counts.join(", ")}.` }] };
     }
     case "get_impact_analysis": {
       const file = typeof args?.file === "string" ? args.file : "";

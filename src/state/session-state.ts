@@ -1,5 +1,4 @@
 import { loadConfig } from "../config.ts";
-import { loadGates } from "../gates/load.ts";
 import { computeReviewTier } from "../review-tier.ts";
 import { getDb, getProjectId } from "./db.ts";
 import { getActivePlan } from "./plan-status.ts";
@@ -339,38 +338,6 @@ export function resetCache(): void {
 	_dirty = false;
 }
 
-// ── File extension heuristic (for gated-file filtering) ─────
-
-const TOOL_EXTS: [RegExp, string[]][] = [
-	[/\bbiome\b/, [".js", ".jsx", ".ts", ".tsx", ".css", ".graphql"]],
-	[/\beslint\b/, [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".vue", ".svelte"]],
-	[/\btsc\b/, [".ts", ".tsx", ".mts", ".cts"]],
-	[/\bpyright\b/, [".py", ".pyi"]],
-	[/\bmypy\b/, [".py", ".pyi"]],
-	[/\bruff\b/, [".py", ".pyi"]],
-	[/\bgo\s+(vet|build)\b/, [".go"]],
-	[/\bcargo\s+(clippy|check)\b/, [".rs"]],
-];
-
-export function getGatedExtensions(): Set<string> {
-	const gates = loadGates();
-	if (!gates?.on_write) return new Set();
-
-	const exts = new Set<string>();
-	for (const gate of Object.values(gates.on_write)) {
-		if (gate.extensions && gate.extensions.length > 0) {
-			for (const ext of gate.extensions) exts.add(ext);
-		} else {
-			for (const [pattern, extensions] of TOOL_EXTS) {
-				if (pattern.test(gate.command)) {
-					for (const ext of extensions) exts.add(ext);
-				}
-			}
-		}
-	}
-	return exts;
-}
-
 // ── File tracking ───────────────────────────────────────────
 
 export function recordChangedFile(filePath: string): void {
@@ -419,27 +386,6 @@ export function readLastReview(): { reviewed_at: string } | null {
 export function recordReview(): void {
 	const state = readSessionState();
 	state.review_completed_at = new Date().toISOString();
-	writeState(state);
-}
-
-// ── Gate batch dedup ────────────────────────────────────────
-
-export function shouldSkipGate(gateName: string, currentFile?: string): boolean {
-	const state = readSessionState();
-	const entry = state.ran_gates[gateName];
-	if (!entry) return false;
-	// Invalidate if the current file being edited is NEW (not yet in changed_file_paths).
-	if (currentFile && !(state.changed_file_paths ?? []).includes(currentFile)) {
-		return false;
-	}
-	return true;
-}
-
-export function markGateRan(gateName: string): void {
-	const state = readSessionState();
-	state.ran_gates[gateName] = {
-		ran_at: new Date().toISOString(),
-	};
 	writeState(state);
 }
 

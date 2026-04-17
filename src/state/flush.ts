@@ -1,5 +1,4 @@
 import { resetConfigCache } from "../config.ts";
-import { resetGatesCache } from "../gates/load.ts";
 import { flush as flushPendingFixes, resetCache as resetPendingFixes } from "./pending-fixes.ts";
 import { resetPlanCache, setDisableHomeFallback } from "./plan-status.ts";
 import { flush as flushSessionState, resetCache as resetSessionState } from "./session-state.ts";
@@ -22,7 +21,6 @@ export function flushAll(): void {
 export function resetAllCaches(): void {
 	resetSessionState();
 	resetPendingFixes();
-	resetGatesCache();
 	resetPlanCache();
 	resetConfigCache();
 	setDisableHomeFallback(true);

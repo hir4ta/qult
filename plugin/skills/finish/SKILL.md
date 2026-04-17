@@ -8,23 +8,13 @@ user-invocable: true
 
 Structured branch completion. Present options, execute the architect's choice.
 
-> **Proof or Block.**
-> No completion claims without fresh verification evidence.
-> Tests pass. Review passes. Then — and only then — we finish.
-
-## The Wall
-
-<HARD-GATE>
-NO COMPLETION WITHOUT VERIFICATION.
-Before presenting options, ALL gates must be clear.
-If tests fail, stop. If review is incomplete, stop. The Wall stands.
-</HARD-GATE>
+> **Proof or Block.** No completion claims without fresh verification evidence.
 
 ## Process
 
 ### Step 0: Record Finish Started
 
-**First**, call `mcp__plugin_qult_qult__record_finish_started()` to unlock the commit gate. Without this call, the commit gate will DENY all commits when a plan is active.
+**First**, call `mcp__plugin_qult_qult__record_finish_started()` to mark the finish flow as active. This is used by pre-commit rule guidance.
 
 ### Step 1: Verify All Gates
 

@@ -1,6 +1,6 @@
 # qult review
 
-Independent review is the primary quality gate after hooks were removed. Treat it as required, not optional.
+Independent review is the primary quality gate. Treat it as required, not optional.
 
 ## When /qult:review is required
 

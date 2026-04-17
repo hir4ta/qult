@@ -44,19 +44,3 @@ export interface PendingFix {
 	errors: string[];
 	gate: string;
 }
-
-/** Gate configuration stored in the gate_configs DB table */
-export interface GatesConfig {
-	on_write?: Record<string, GateDefinition>;
-	on_commit?: Record<string, GateDefinition>;
-	on_review?: Record<string, GateDefinition>;
-}
-
-export interface GateDefinition {
-	command: string;
-	timeout?: number;
-	run_once_per_batch?: boolean;
-	extensions?: string[];
-	/** Alternative command that produces structured (JSON) output for diagnostic classification. */
-	structured_command?: string;
-}

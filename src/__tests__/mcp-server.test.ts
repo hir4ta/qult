@@ -77,29 +77,6 @@ describe("handleTool", () => {
 		}
 	});
 
-	it("get_gate_config returns gates from DB", () => {
-		const db = getDb();
-		const projectId = getProjectId();
-		db.prepare(
-			"INSERT INTO gate_configs (project_id, phase, gate_name, command) VALUES (?, ?, ?, ?)",
-		).run(projectId, "on_write", "lint", "bun biome check {file}");
-		db.prepare(
-			"INSERT INTO gate_configs (project_id, phase, gate_name, command) VALUES (?, ?, ?, ?)",
-		).run(projectId, "on_commit", "test", "bun vitest run");
-		resetAllCaches();
-
-		const result = handleTool("get_gate_config", TEST_DIR);
-		const parsed = JSON.parse(result.content[0]!.text);
-		expect(parsed.on_write.lint.command).toBe("bun biome check {file}");
-		expect(parsed.on_commit.test.command).toBe("bun vitest run");
-	});
-
-	it("get_gate_config returns isError when no gates", () => {
-		const result = handleTool("get_gate_config", TEST_DIR);
-		expect(result.content[0]!.text).toContain("No gates configured");
-		expect(result.isError).toBe(true);
-	});
-
 	it("returns error for unknown tool", () => {
 		const result = handleTool("nonexistent_tool", TEST_DIR);
 		expect(result.isError).toBe(true);
@@ -128,13 +105,12 @@ describe("handleRequest (JSON-RPC)", () => {
 		const names = result.tools.map((t) => t.name);
 		expect(names).toContain("get_pending_fixes");
 		expect(names).toContain("get_session_status");
-		expect(names).toContain("get_gate_config");
 		expect(names).toContain("disable_gate");
 		expect(names).toContain("record_test_pass");
 		expect(names).toContain("record_review");
+		expect(names).not.toContain("get_gate_config");
+		expect(names).not.toContain("save_gates");
 		expect(names).not.toContain("get_harness_report");
-		expect(names).not.toContain("transfer_knowledge");
-		expect(names).not.toContain("generate_sbom");
 	});
 
 	it("tools/call dispatches to correct handler", () => {
@@ -191,34 +167,21 @@ describe("TOOL_DEFS", () => {
 });
 
 describe("handleTool: disable_gate / enable_gate", () => {
-	it("disable_gate adds gate to disabled_gates in DB", () => {
+	it("disable_gate adds detector gate to disabled_gates in DB", () => {
 		const db = getDb();
-		const projectId = getProjectId();
-		db.prepare(
-			"INSERT INTO gate_configs (project_id, phase, gate_name, command) VALUES (?, ?, ?, ?)",
-		).run(projectId, "on_write", "lint", "echo ok");
-		resetAllCaches();
-
 		const result = handleTool("disable_gate", TEST_DIR, {
-			gate_name: "lint",
-			reason: "Gate is broken for this test session",
+			gate_name: "security-check",
+			reason: "False positives on this codebase",
 		});
 		expect(result.content[0]!.text).toContain("disabled");
 
 		const rows = db
 			.prepare("SELECT gate_name FROM disabled_gates WHERE project_id = ?")
 			.all(getProjectId()) as { gate_name: string }[];
-		expect(rows.map((r) => r.gate_name)).toContain("lint");
+		expect(rows.map((r) => r.gate_name)).toContain("security-check");
 	});
 
 	it("disable_gate rejects unknown gate name", () => {
-		const db = getDb();
-		const projectId = getProjectId();
-		db.prepare(
-			"INSERT INTO gate_configs (project_id, phase, gate_name, command) VALUES (?, ?, ?, ?)",
-		).run(projectId, "on_write", "lint", "echo ok");
-		resetAllCaches();
-
 		const result = handleTool("disable_gate", TEST_DIR, {
 			gate_name: "typo",
 			reason: "Testing unknown gate rejection",
@@ -241,14 +204,6 @@ describe("handleTool: disable_gate / enable_gate", () => {
 			reason: "Security patterns causing false positives",
 		});
 		expect(secResult.content[0]!.text).toContain("disabled");
-	});
-
-	it("disable_gate accepts coverage gate name", () => {
-		const result = handleTool("disable_gate", TEST_DIR, {
-			gate_name: "coverage",
-			reason: "Coverage gate not configured for this project",
-		});
-		expect(result.content[0]!.text).toContain("disabled");
 	});
 
 	it("disable_gate requires reason parameter", () => {
@@ -572,97 +527,6 @@ describe("get_detector_summary", () => {
 		expect(text).toContain("drift_warning_count: 4");
 		expect(text).toContain("test_quality_warning_count: 1");
 		expect(text).toContain("duplication_warning_count: 3");
-	});
-});
-
-describe("handleTool: save_gates", () => {
-	it("saves gates and returns count summary", () => {
-		const gates = {
-			on_write: {
-				lint: { command: "biome check {file}", timeout: 3000 },
-				typecheck: { command: "tsc --noEmit", timeout: 10000, run_once_per_batch: true },
-			},
-			on_commit: {
-				test: { command: "vitest run", timeout: 30000 },
-			},
-		};
-		const result = handleTool("save_gates", TEST_DIR, { gates });
-		expect(result.isError).toBeUndefined();
-		expect(result.content[0]!.text).toContain("Gates saved");
-		expect(result.content[0]!.text).toContain("2 on_write");
-		expect(result.content[0]!.text).toContain("1 on_commit");
-	});
-
-	it("gates are readable via get_gate_config after save", () => {
-		const gates = {
-			on_write: { lint: { command: "biome check {file}" } },
-		};
-		handleTool("save_gates", TEST_DIR, { gates });
-		const result = handleTool("get_gate_config", TEST_DIR);
-		expect(result.isError).toBeUndefined();
-		const parsed = JSON.parse(result.content[0]!.text);
-		expect(parsed.on_write.lint.command).toBe("biome check {file}");
-	});
-
-	it("rejects missing gates parameter", () => {
-		const result = handleTool("save_gates", TEST_DIR, {});
-		expect(result.isError).toBe(true);
-		expect(result.content[0]!.text).toContain("Missing or invalid");
-	});
-
-	it("rejects array as gates parameter", () => {
-		const result = handleTool("save_gates", TEST_DIR, { gates: [{ on_write: {} }] });
-		expect(result.isError).toBe(true);
-		expect(result.content[0]!.text).toContain("Missing or invalid");
-	});
-
-	it("rejects invalid phase name", () => {
-		const result = handleTool("save_gates", TEST_DIR, {
-			gates: { on_invalid: { lint: { command: "biome" } } },
-		});
-		expect(result.isError).toBe(true);
-		expect(result.content[0]!.text).toContain("Invalid phase");
-	});
-
-	it("rejects non-object gateMap", () => {
-		const result = handleTool("save_gates", TEST_DIR, {
-			gates: { on_write: "not an object" },
-		});
-		expect(result.isError).toBe(true);
-		expect(result.content[0]!.text).toContain("must be an object");
-	});
-
-	it("rejects gate without command", () => {
-		const result = handleTool("save_gates", TEST_DIR, {
-			gates: { on_write: { lint: { timeout: 3000 } } },
-		});
-		expect(result.isError).toBe(true);
-		expect(result.content[0]!.text).toContain("must have a non-empty command");
-	});
-
-	it("rejects gate with empty command string", () => {
-		const result = handleTool("save_gates", TEST_DIR, {
-			gates: { on_write: { lint: { command: "  " } } },
-		});
-		expect(result.isError).toBe(true);
-		expect(result.content[0]!.text).toContain("must have a non-empty command");
-	});
-
-	it("rejects empty gates object", () => {
-		const result = handleTool("save_gates", TEST_DIR, { gates: {} });
-		expect(result.isError).toBe(true);
-		expect(result.content[0]!.text).toContain("No gates provided");
-	});
-
-	it("atomically replaces existing gates", () => {
-		const first = { on_write: { lint: { command: "eslint {file}" } } };
-		const second = { on_commit: { test: { command: "vitest run" } } };
-		handleTool("save_gates", TEST_DIR, { gates: first });
-		handleTool("save_gates", TEST_DIR, { gates: second });
-		const result = handleTool("get_gate_config", TEST_DIR);
-		const parsed = JSON.parse(result.content[0]!.text);
-		expect(parsed.on_write).toBeUndefined();
-		expect(parsed.on_commit.test.command).toBe("vitest run");
 	});
 });
 

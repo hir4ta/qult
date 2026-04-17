@@ -14,7 +14,6 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { loadConfig, resetConfigCache } from "./config.ts";
-import { loadGates, saveGates } from "./gates/load.ts";
 import { computeFileHealthScore } from "./hooks/detectors/health-score.ts";
 import { findImporters } from "./hooks/detectors/import-graph.ts";
 import { validateTestCoversImpl } from "./hooks/detectors/spec-trace-check.ts";
@@ -29,31 +28,19 @@ const SERVER_VERSION = "1.0.0";
 
 /** Resolve the current session for MCP operations. Uses latest session for this project. */
 
-// ── Gate name validation ────────────────────────────────────
+// ── Gate name validation (for disable_gate / enable_gate on detectors) ─
 
-function getValidGateNames(): string[] {
-	const gates = loadGates();
-	const names = new Set<string>([
-		"review",
-		"security-check",
-		"semgrep-required",
-		"test-quality-check",
-		"coverage",
-		"dep-vuln-check",
-		"hallucinated-package-check",
-	]);
-	if (gates) {
-		for (const category of [gates.on_write, gates.on_commit, gates.on_review]) {
-			if (category) {
-				for (const name of Object.keys(category)) names.add(name);
-			}
-		}
-	}
-	return [...names];
-}
+const VALID_DETECTOR_GATES = [
+	"review",
+	"security-check",
+	"semgrep-required",
+	"test-quality-check",
+	"dep-vuln-check",
+	"hallucinated-package-check",
+];
 
 function isValidGateName(name: string): boolean {
-	return getValidGateNames().includes(name);
+	return VALID_DETECTOR_GATES.includes(name);
 }
 
 // ── Tool definitions ────────────────────────────────────────
@@ -84,12 +71,6 @@ const TOOL_DEFS: ToolDef[] = [
 		name: "get_session_status",
 		description:
 			"Returns session state as JSON: test_passed_at, review_completed_at, changed_file_paths, review_iteration. Call before committing to verify gates.",
-		inputSchema: { type: "object", properties: {} },
-	},
-	{
-		name: "get_gate_config",
-		description:
-			"Returns gate definitions as JSON: on_write (lint/typecheck per file), on_commit (test), on_review (e2e). Each gate has command, timeout, optional run_once_per_batch.",
 		inputSchema: { type: "object", properties: {} },
 	},
 	{
@@ -246,22 +227,6 @@ const TOOL_DEFS: ToolDef[] = [
 		},
 	},
 	{
-		name: "save_gates",
-		description:
-			"Save gate configuration for the current project. Use during /qult:init to register detected gates. Replaces all existing gates atomically.",
-		inputSchema: {
-			type: "object",
-			properties: {
-				gates: {
-					type: "object",
-					description:
-						"GatesConfig: { on_write?: { lint: { command, timeout?, run_once_per_batch? }, ... }, on_commit?: { ... }, on_review?: { ... } }",
-				},
-			},
-			required: ["gates"],
-		},
-	},
-	{
 		name: "get_impact_analysis",
 		description:
 			"Analyze the impact of changes to a file. Returns a list of consumer files (importers) that may be affected, using the import graph.",
@@ -338,16 +303,6 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			};
 			return { content: [{ type: "text", text: JSON.stringify(enriched, null, 2) }] };
 		}
-		case "get_gate_config": {
-			const gates = loadGates();
-			if (!gates) {
-				return {
-					isError: true,
-					content: [{ type: "text", text: "No gates configured. Run /qult:init." }],
-				};
-			}
-			return { content: [{ type: "text", text: JSON.stringify(gates, null, 2) }] };
-		}
 		case "disable_gate": {
 			const gateName = typeof args?.gate_name === "string" ? args.gate_name : null;
 			const reason = typeof args?.reason === "string" ? args.reason : null;
@@ -368,7 +323,7 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 					content: [
 						{
 							type: "text",
-							text: `Unknown gate '${gateName}'. Valid: ${getValidGateNames().join(", ")}`,
+							text: `Unknown gate '${gateName}'. Valid: ${VALID_DETECTOR_GATES.join(", ")}`,
 						},
 					],
 				};
@@ -705,75 +660,6 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			archivePlanFile(resolvedPath);
 			resetPlanCache();
 			return { content: [{ type: "text", text: "Plan archived." }] };
-		}
-		// Not in WRITE_TOOLS: save_gates is a project-level operation used during /qult:init,
-		// which may run before any session-creating hook has fired.
-		case "save_gates": {
-			const gates = args?.gates;
-			if (!gates || typeof gates !== "object" || Array.isArray(gates)) {
-				return {
-					isError: true,
-					content: [{ type: "text", text: "Missing or invalid gates parameter." }],
-				};
-			}
-			// Validate structure: only known phases, each gate must have command string
-			const validPhases = ["on_write", "on_commit", "on_review"];
-			let totalGates = 0;
-			for (const [phase, gateMap] of Object.entries(gates)) {
-				if (!validPhases.includes(phase)) {
-					return {
-						isError: true,
-						content: [
-							{ type: "text", text: `Invalid phase '${phase}'. Valid: ${validPhases.join(", ")}` },
-						],
-					};
-				}
-				if (typeof gateMap !== "object" || gateMap === null || Array.isArray(gateMap)) {
-					return {
-						isError: true,
-						content: [{ type: "text", text: `Phase '${phase}' must be an object of gates.` }],
-					};
-				}
-				for (const [gateName, gateDef] of Object.entries(gateMap as Record<string, unknown>)) {
-					if (
-						typeof gateDef !== "object" ||
-						gateDef === null ||
-						typeof (gateDef as Record<string, unknown>).command !== "string" ||
-						((gateDef as Record<string, unknown>).command as string).trim() === ""
-					) {
-						return {
-							isError: true,
-							content: [
-								{
-									type: "text",
-									text: `Gate '${phase}.${gateName}' must have a non-empty command string.`,
-								},
-							],
-						};
-					}
-					totalGates++;
-				}
-			}
-			if (totalGates === 0) {
-				return {
-					isError: true,
-					content: [{ type: "text", text: "No gates provided." }],
-				};
-			}
-			saveGates(gates as import("./types.ts").GatesConfig);
-			appendAuditLog({
-				action: "save_gates",
-				reason: "Gates configured via /qult:init",
-				timestamp: new Date().toISOString(),
-			});
-			// Count gates per phase
-			const counts = validPhases
-				.map((p) => {
-					const m = (gates as Record<string, unknown>)[p];
-					return `${m && typeof m === "object" ? Object.keys(m).length : 0} ${p}`;
-				})
-				.filter((s) => !s.startsWith("0 "));
-			return { content: [{ type: "text", text: `Gates saved: ${counts.join(", ")}.` }] };
 		}
 		case "get_impact_analysis": {
 			const file = typeof args?.file === "string" ? args.file : "";
