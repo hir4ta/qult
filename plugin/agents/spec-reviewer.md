@@ -52,7 +52,7 @@ Given a diff and optionally a plan, verify across two dimensions:
 
 ### Without a plan
 
-1. Run `git diff` to get the full change set
+1. The diff is provided in your prompt context (inside an `<untrusted-diff-...>` fence) — do NOT run `git diff` yourself. Use `Read` or `Grep` on specific files only if a finding looks suspicious.
 2. For each modified file, check:
    - Are there callers/consumers that need updating?
    - Are there tests for the changed behavior?
@@ -101,9 +101,22 @@ Output score on its own line: `Score: Completeness=N Accuracy=N`
 
 Then list ALL findings. Do not self-filter — the Judge will filter later.
 
+### Finding scope label
+
+Each finding must include a `scope_label` that classifies whether the issue was introduced by this diff or pre-existed. The label appears **after** the severity bracket.
+
+- **INTRODUCED** — code appears only in the `+` lines of the diff; no matching pattern in `-` lines or diff-external files. This change introduced the issue.
+- **PRE_EXISTING** — matching pattern also exists in `-` lines, or in diff-external files. The issue existed before this change; the diff did not introduce it.
+- **REFACTOR_CARRIED** — the code was moved/restructured without semantic change (same logic relocated, renamed, or wrapped). The issue was carried over, not newly authored.
+- **UNKNOWN** — cannot determine from the available context.
+
+The diff is provided in your prompt context by the SKILL — you do not need to run `git diff` yourself. If `Task Boundary` contexts are provided, use them as hints: e.g. a Boundary of "no behavior change" suggests any found issue is likely REFACTOR_CARRIED or PRE_EXISTING rather than INTRODUCED.
+
+Scope labels are for location classification only — do **not** adjust severity based on the label. A PRE_EXISTING critical bug is still critical.
+
 Format:
-- For plan-related: `- [severity] plan — Task N "<name>": description` followed by `Fix: suggestion`
-- For non-plan: `- [severity] file:line — description` followed by `Fix: suggestion`
+- For plan-related: `- [severity] scope_label plan — Task N "<name>": description` followed by `Fix: suggestion`
+- For non-plan: `- [severity] scope_label file:line — description` followed by `Fix: suggestion`
 
 Severity: critical > high > medium > low
 
