@@ -9,8 +9,8 @@
 		{
 			"name": "qult",
 			"source": "./plugin",
-			"description": "Enforces lint, typecheck, test, and review gates via hooks + MCP",
-			"version": "0.28.0",
+			"description": "Workflow rules + on-demand independent review (4-stage) + MCP state. v0.29 removed hooks for stability.",
+			"version": "0.29.0",
 			"category": "development"
 		}
 	]
