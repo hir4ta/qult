@@ -15,7 +15,7 @@ Before generating a plan, check if a spec document exists:
 2. If found: read the most recent spec and include it as context for the plan-generator agent
 3. If not found: continue without a spec, but note in the agent prompt that no spec was provided
 
-This ensures that design decisions from `/qult:explore` are carried into the plan.
+This ensures that design decisions discussed with the architect are carried into the plan.
 
 ## Stage 1: Plan generation (independent agent)
 

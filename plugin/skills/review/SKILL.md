@@ -193,12 +193,14 @@ After Stage 5, aggregate all scores:
 Total: Completeness + Accuracy + Design + Maintainability + Vulnerability + Hardening + EdgeCases + LogicCorrectness = N/40
 ```
 
-The SubagentStop hook enforces score thresholds for each reviewer independently.
-When any reviewer's score is below threshold or verdict is FAIL, SubagentStop blocks.
+Score thresholds are enforced within this skill:
+- Aggregate must meet `review.score_threshold` (default 30/40)
+- Each dimension must meet `review.dimension_floor` (default 4/5)
+- If any reviewer's verdict is FAIL or score is below threshold: stop and surface the findings to the architect
 
 When blocked:
 1. Fix the issues identified by the failing reviewer(s)
-2. Re-spawn ONLY the failing reviewer(s) on the updated diff
+2. Re-run only the failing reviewer(s) on the updated diff
 3. Re-apply Judge filter on new findings
 
 Maximum 3 iterations total. After max iterations, the review proceeds regardless.
@@ -240,4 +242,4 @@ If all four stages pass with no findings: "Review complete. All clear."
 1. Call `mcp__plugin_qult_qult__record_review({ aggregate_score: <total> })` to record the review completion in session state
 2. This enables the commit gate to allow commits. Without this call, the commit gate will block.
 
-This is the authoritative signal that review is complete. SubagentStop hooks provide additional enforcement but are not the primary mechanism.
+This is the authoritative signal that review is complete; pre-commit checks rely on it.

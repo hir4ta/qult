@@ -36,7 +36,7 @@ Report each file removed.
 
 ## Step 3: Remove DB (optional)
 
-Ask the architect: "Remove `~/.qult/qult.db` (contains session history, gate config, flywheel metrics)? This is irreversible."
+Ask the architect: "Remove `~/.qult/qult.db` (contains session history, gate config, review scores)? This is irreversible."
 
 If yes:
 

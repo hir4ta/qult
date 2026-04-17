@@ -23,7 +23,6 @@ At the start of each task and before any commit, call `mcp__plugin_qult_qult__ge
 
 Prefer qult skills over ad-hoc shell commands when they apply:
 - `/qult:status` — current state snapshot
-- `/qult:explore` — interview the architect when requirements are unclear
 - `/qult:debug` — structured root-cause analysis on bugs
 - `/qult:review` — 4-stage independent review
 - `/qult:finish` — branch completion checklist

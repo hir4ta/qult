@@ -25,7 +25,7 @@ Reason: manual plan writing bypasses plan-evaluator scoring. Direct commits bypa
 ## Automatic Behaviors
 
 ### When starting new work
-- If the task is non-trivial, suggest `/qult:explore` to interview the architect
+- If the task is non-trivial, suggest `/qult:plan-generator` to produce a structured plan
 - If a plan exists in `.claude/plans/`, read it first
 
 ### Before committing
