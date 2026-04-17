@@ -1,59 +1,73 @@
 # qult
 
 > **qu**ality + c**ult** — fanatical devotion to quality.
-> A Claude Code plugin that helps Claude ship higher-quality, less-omission-prone code.
+> A Claude Code plugin that catches what Claude misses.
 
 [日本語 / README.ja.md](README.ja.md)
 
 ## What qult does
 
-qult is an **aid for Claude**, not a perfect harness engineering implementation. It gives Claude:
+qult is a **quality aid for Claude** — it adds five capabilities Claude cannot reliably do alone:
 
-- **Workflow rules** at `~/.claude/rules/qult-*.md` — Plan → Implement → Review → Finish
-- **Independent 4-stage review** (`/qult:review`) — spec, quality, security, adversarial reviewers run in separate subagent contexts (sonnet × 2 + opus × 2). The implementing model never reviews its own work.
-- **Structured planning** (`/qult:plan-generator` + `plan-evaluator`) — plans are scored before implementation begins.
-- **Tier 1 detectors** surfaced through MCP — security patterns, dep vulnerabilities, hallucinated packages, test quality, breaking export changes. Ground truth for reviewers.
+1. **Independent review** (`/qult:review`) — 4 reviewers (spec / quality / security / adversarial) run in **separate subagent contexts** with reviewer model diversity (sonnet × 2 + opus × 2). The implementing model never grades itself. Research: self-review misses **64.5% of self-introduced bugs**¹; family-diverse reviewers reduce correlated errors.
+2. **Independent plan evaluation** (`/qult:plan-generator` + `plan-evaluator`) — same architectural pattern as independent review: `plan-generator` produces a plan, then `plan-evaluator` scores it against Feasibility / Completeness / Clarity **in a fresh context**. Iterates until the score passes. Catches the omissions the generator didn't see.
+3. **External SAST + CVE knowledge** — `security-check` integrates Semgrep rulesets; `dep-vuln-check` queries osv-scanner against installed packages. Claude alone does not run SAST and does not know CVE data.
+4. **Hallucinated package detection** — before an install command runs, `hallucinated-package-check` verifies the package actually exists in the registry. AI-assisted commits leak bad package names at **2× the baseline rate**².
+5. **Consistency-guaranteed test quality checks** — `test-quality-check` always flags empty tests, always-true assertions, and trivial assertions. Reviewers can spot these when they happen to read the test file, but the detector flags them *every time* — the reviewer's attention budget is not required.
 
-That's it. Everything else (complexity metrics, taint tracking, flywheel learning, SBOM generation) was removed in v0.30 because **Claude can judge those by reading the code** — we only automate what Claude cannot do alone.
+That's it. No automatic hooks, no workflow hijacking, no gate walls. qult is a **toolbox**, not a guardrail — it provides sharp tools for you to reach for.
 
-## Why install qult
+¹ [AI Code Review Self-Review Failure](https://www.augmentedswe.com/p/ai-code-review-security) · ² [GitGuardian 2026](https://blog.gitguardian.com/state-of-secrets-sprawl-2026/)
 
-| Without qult | With qult |
-|---|---|
-| Claude reviews its own code (self-review misses 64.5% of self-bugs¹) | Independent reviewers in separate contexts |
-| Plans scope-creep or miss consumers | plan-evaluator scores against Feasibility / Completeness / Clarity |
-| Secrets, OWASP patterns, vulnerable deps slip in | Detectors flag them as reviewer ground truth |
-| "tests passed, shipping it" | `/qult:status` + `/qult:finish` checklist |
-| Knowledge about each project lives in chat | State is durable in `~/.qult/qult.db` |
+## Measured quality uplift
 
-¹ [AI Code Review Self-Review Failure](https://www.augmentedswe.com/p/ai-code-review-security)
+| Gap (Claude alone) | What qult adds | Observable outcome |
+|---|---|---|
+| Self-review blind spots | Independent 4-stage review | Bugs caught that the author missed |
+| Plan-author blind spots | plan-evaluator in fresh context | Missing files / edge cases / consumer updates flagged before implementation |
+| No SAST | Semgrep integration | OWASP Top 10 patterns surfaced |
+| No CVE data | osv-scanner integration | Vulnerable dependencies flagged before commit |
+| Package-name hallucination | Registry verification | Typosquatting / nonexistent packages blocked |
+| Review attention drift (tests skimmed) | test-quality detector always-on | Empty tests / trivial assertions flagged every time |
+
+**When qult is strongest:**
+- Production code with 5+ file changes
+- Security-sensitive work (auth, input parsing, crypto, external APIs)
+- Dependency-heavy changes (new packages, version bumps)
+- Multi-session features where state continuity matters
+
+**When qult is overkill:**
+- Quick single-file fixes
+- Throwaway prototypes
+- Spikes and experiments
+- → Use `/qult:skip` or just skip the review step. qult is opt-in; no hook will block you.
 
 ## Install
 
 ```bash
 # requires Bun: https://bun.sh
-brew install semgrep         # recommended (security reviewer)
-brew install osv-scanner     # recommended (dep-vuln-check)
+brew install semgrep         # recommended (used by security reviewer)
+brew install osv-scanner     # recommended (used by dep-vuln-check)
 
 /plugin marketplace add hir4ta/qult
 /plugin install qult@qult
-/qult:init                   # detects toolchain (any language), installs rules
+/qult:init                   # detects toolchain via LLM judgment (any language)
 ```
 
-No files are created in your project. State lives in `~/.qult/qult.db`; rules in `~/.claude/rules/qult-*.md`.
+No files are created in your project. State lives in `~/.qult/qult.db`; workflow rules in `~/.claude/rules/qult-*.md`.
 
 ## Commands
 
 | Command | What |
 |---|---|
-| `/qult:init` | Setup / re-init (idempotent) |
+| `/qult:init` | Setup / re-init (idempotent; always overwrites rules) |
 | `/qult:status` | Current state (pending fixes, tests, review) |
-| `/qult:plan-generator` | Generate + evaluate an implementation plan |
+| `/qult:plan-generator` | Generate + score an implementation plan |
 | `/qult:review` | 4-stage independent review |
 | `/qult:finish` | Branch completion checklist |
 | `/qult:debug` | Structured root-cause debugging |
 | `/qult:skip` | Temporarily disable a gate |
-| `/qult:config` | Tweak thresholds |
+| `/qult:config` | Tweak thresholds and reviewer models |
 | `/qult:doctor` | Health check |
 | `/qult:uninstall` | Remove qult cleanly |
 
@@ -62,15 +76,23 @@ No files are created in your project. State lives in `~/.qult/qult.db`; rules in
 | Stage | Model | Why |
 |---|---|---|
 | spec-reviewer | sonnet | Mechanical plan-vs-code check |
-| quality-reviewer | sonnet | Design judgment, fast |
-| **security-reviewer** | **opus** | High-stakes (45% of AI code has vulnerabilities²) |
+| quality-reviewer | sonnet | Design judgment, fast iteration |
+| **security-reviewer** | **opus** | High-stakes — **45% of AI code has vulnerabilities**³ |
 | **adversarial-reviewer** | **opus** | Final guardian — edge cases, silent failures |
 | plan-generator | sonnet | Generation task |
 | **plan-evaluator** | **opus** | Spec quality gate — bad plans poison downstream |
 
 Override via `review.models.*` config or `QULT_REVIEW_MODEL_*` env vars.
 
-² [Veracode GenAI Code Security](https://www.veracode.com/blog/genai-code-security-report/)
+³ [Veracode GenAI Code Security](https://www.veracode.com/blog/genai-code-security-report/)
+
+## Honest limits
+
+- **Advisory, not enforcement**: since v0.29 removed hooks, rules at `~/.claude/rules/qult-*.md` are prompt-level guidance. Research (AgentPex) shows **83% of agent traces contain at least one procedural violation** — rules are usually followed, but not reliably. Opus 4.7 helps but doesn't eliminate drift. If you want qult's value, you (the architect) need to actually invoke the skills — or accept that they may be skipped.
+- **Review has a token cost**: `/qult:review` spawns 4 subagents reading the diff. For medium changes this adds ~40–100k tokens. Worth it for production code; use `/qult:skip` for tweaks.
+- **Detectors are pattern/AST-based, biased toward TypeScript-ish codebases**: security-check and test-quality-check cover multi-language basics, but Python/Go/Rust projects get reduced fidelity.
+
+These are structural trade-offs we accept — the alternative is heavy, intrusive hooks (v0.28 had them; they hurt more than they helped).
 
 ## Uninstall
 
@@ -82,9 +104,9 @@ rm -rf ~/.qult          # optional — drops session history DB
 
 ## v0.29 → v0.30 changes
 
-- Removed: flywheel, tree-sitter dataflow, complexity metrics, mutation-testing, SBOM, LSP integration, escalation counters, `/qult:explore`, `/qult:writing-skills`, 6 MCP tools, 2 detectors
-- `/qult:init` now uses Claude's judgment to detect toolchain (no more hardcoded language list)
-- Net: ~5000 lines removed; plugin install size down 10MB+ (no WASM)
+- Removed: flywheel (cross-session learning), tree-sitter dataflow, complexity metrics, mutation-testing, SBOM, LSP integration, escalation counters, `/qult:explore`, `/qult:writing-skills`, 6 MCP tools, 2 detectors
+- `/qult:init` is now LLM-driven (no hardcoded language list)
+- Net: ~5000 lines removed, plugin install size −10MB (no WASM), devDependencies −9
 
 ## Philosophy
 

@@ -8,17 +8,23 @@
 
 ハーネスエンジニアリング論文 (`docs/references.md`) は **設計の参考** であり、完全再現が目的ではない。理論的純度より、ユーザーが日常で使えて鬱陶しくない補助を優先する。
 
-### qult が**やること**
-- Claude が判断・推論で見落としやすい点を rules + agents + MCP で補強
-- 独立レビュー (reviewer モデル多様性) で AI の自己評価バイアスを軽減
-- 品質判断に必要なコンテキスト (state, gate config, detector findings) を MCP 経由で提供
-- セキュリティ・依存関係など Claude が知らない情報源 (Semgrep, osv-scanner, npm registry) を統合
+### qult が**やること**（Claude 単体では確実にできない事）
+- **独立レビュー** (`/qult:review` 4 段) — reviewer モデル多様性で自己評価バイアスを軽減 (self-review は自己バグの 64.5% を見逃す)
+- **独立プラン評価** (`/qult:plan-generator` + `plan-evaluator`) — 4 段レビューと同じアーキテクチャパターン。plan-generator の見落としを fresh context の evaluator が拾う
+- **外部知識統合** — Semgrep (SAST), osv-scanner (CVE), npm registry (hallucinated package 確認)。Claude が内蔵していないデータ
+- **一貫性保証の detector** — test-quality-check は毎回必ず flag する。reviewer の注意リソースを消費しない
+- **永続 state** — MCP 経由で test pass / review 完了 / plan 状態を記録
 
 ### qult が**やらないこと**
 - 厳密な policy compiler / reference monitor の実装 (v0.28 までの hooks 思想は撤回)
 - ハーネスエンジニアリング論文の完全再現 (理論的純度の追求はしない)
 - ユーザーの作業を構造的に中断するシステム (Edit/Write 中の DENY、Stop hook ブロック等は v0.29 で撤廃)
-- Claude が自分でできる判断の機械的代替 (複雑度計算、convention 検出 等は reviewer に任せる)
+- Claude が自分でできる判断の機械的代替 (複雑度計算、convention 検出、semantic チェック等は reviewer に任せる)
+
+### 既知の限界（正直）
+- **Rules は advisory**: v0.29 で hooks 撤廃後、workflow rules はプロンプトレベルの誘導に留まる。AgentPex 研究: トレースの 83% に少なくとも 1 件の手続き違反。ルールは大抵守られるが信頼できるほどではない。
+- **レビューのトークンコスト**: `/qult:review` は 4 subagent 分で 40-100k トークン追加。小さな修正は `/qult:skip` で回避
+- **Detector の言語バイアス**: pattern/AST ベースで TypeScript 偏り。Python/Go/Rust は精度が落ちる
 
 ### 設計判断のスタンス
 **迷ったら軽い方を選ぶ。**
