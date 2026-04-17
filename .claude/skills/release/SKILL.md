@@ -27,12 +27,13 @@ Arguments: `$ARGUMENTS`
 
 ## Validation Gate
 
-Run in order; **abort release if any fails**:
+Run in order; **abort release if any fails**. Use the project's package.json scripts to ensure the correct Bun runtime (`bunx --bun vitest run` for native `bun:sqlite` resolution):
 
 ```
-bun tsc --noEmit
-bun vitest run
-bun build.ts
+bun run typecheck
+bun run lint
+bun run test
+bun run build
 ```
 
 ## Version Update
@@ -48,7 +49,7 @@ Update `version` in these 2 files only:
 bun build.ts
 ```
 
-Verify `plugin/dist/hook.mjs` and `plugin/dist/mcp-server.mjs` exist.
+Verify `plugin/dist/mcp-server.mjs` exists.
 
 ## Commit & Tag
 

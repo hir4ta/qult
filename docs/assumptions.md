@@ -137,13 +137,15 @@ qult の各コンポーネントが依存する仮定と、仮定が崩れた場
 
 **検証方法**: 同じ diff に対して self-review と独立 review のスコアを比較。差が 1 点以内なら仮定は崩れている。
 
-### スコア閾値 12/15
+### スコア閾値 30/40 (review) / 12/15 (plan_eval)
 
-**仮定**: aggregate 12 未満のコードは改善の余地がある。
+**仮定**: aggregate が下限未満のコードは改善の余地がある。
 
-**根拠**: 3 次元全て 4/5 = 12。「各次元で minor issues あり」が最低合格ライン。
+**根拠**:
+- review: 4 stage × 2 dimension = 8 次元 × 5 段階。30 = 全次元平均 3.75/5 ≈「各次元で minor issues あり」が合格ライン。加えて `review.dimension_floor: 4` で各次元 4 未満を別途 block
+- plan_eval: 3 次元 (Feasibility, Completeness, Clarity) × 5 段階。12 = 全次元平均 4.0/5
 
-**崩れたら**: 実運用でスコア分布を計測し、閾値を調整。全レビューが 13+ なら閾値を上げる。全レビューが 9-11 で停滞するなら閾値を下げる。
+**崩れたら**: 実運用でスコア分布を計測し、閾値を調整。全レビューが上限近傍なら閾値を上げる。下限付近で停滞するなら下げる。
 
 ### 最大 3 イテレーション
 
@@ -169,19 +171,18 @@ qult の各コンポーネントが依存する仮定と、仮定が崩れた場
 
 各閾値の設計根拠を集約する。キャリブレーションデータの蓄積に伴い更新すること。
 
-### review.score_threshold: 12/15
+### review.score_threshold: 30/40 (+ dimension_floor 4)
 
-- 3 次元 (Correctness, Design, Security) x 5 段階
-- 12 = 全次元平均 4.0/5 = 各次元で「minor issues のみ」のライン
-- anchor 基準: 4/5 は「realistic inputs で correct / clear separation / defense-in-depth gap のみ」
-- 11 以下は少なくとも 1 次元が 3/5 以下（＝ reachable な問題あり）なので再修正の価値がある
+- 4 stage (Spec / Quality / Security / Adversarial) × 2 dimension = 8 次元 × 5 段階、満点 40
+- 30 = 全次元平均 3.75/5 — 各次元で minor issues が 1 件許容されるライン
+- 加えて `review.dimension_floor` (default 4) で各次元 4 未満が 1 つでもあれば block（平均に埋もれた低スコア次元を拾う）
+- 29 以下は少なくとも 1 次元が 3/5 以下（reachable な問題あり）なので iteration の価値がある
 
-### plan_eval.score_threshold: 10/15
+### plan_eval.score_threshold: 12/15
 
-- 3 次元 (Feasibility, Completeness, Clarity) x 5 段階
-- 10 = 全次元平均 3.33/5
-- review より低い理由: 計画は実装中に修正可能。コードの品質バグは後発見が高コストだが、計画の不完全さは実装で自然に補完される
-- 10 未満は少なくとも 1 次元が 2/5 以下（＝ unexecutable/missing coverage/ambiguous）
+- 3 次元 (Feasibility, Completeness, Clarity) × 5 段階
+- 12 = 全次元平均 4.0/5 = 「minor issues のみ」のライン
+- 11 以下は少なくとも 1 次元が 3/5 以下（unexecutable / missing coverage / ambiguous のいずれか）
 
 ### review.required_changed_files: 5
 

@@ -295,10 +295,28 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 					content: [{ type: "text", text: "No session state. Run /qult:init to set up." }],
 				};
 			}
-			// Include review config so skills can read thresholds, models, and flags
+			// Explicit allowlist of exposed fields — prevents silent leaks when the projects
+			// table gets new columns. Any new field must be added here to be visible to skills.
+			const r = row as Record<string, unknown>;
 			const config = loadConfig();
 			const enriched = {
-				...(row as Record<string, unknown>),
+				id: r.id,
+				path: r.path,
+				created_at: r.created_at,
+				last_commit_at: r.last_commit_at,
+				test_passed_at: r.test_passed_at,
+				test_command: r.test_command,
+				review_completed_at: r.review_completed_at,
+				review_iteration: r.review_iteration,
+				plan_eval_iteration: r.plan_eval_iteration,
+				plan_selfcheck_blocked_at: r.plan_selfcheck_blocked_at,
+				human_review_approved_at: r.human_review_approved_at,
+				security_warning_count: r.security_warning_count,
+				test_quality_warning_count: r.test_quality_warning_count,
+				drift_warning_count: r.drift_warning_count,
+				dead_import_warning_count: r.dead_import_warning_count,
+				duplication_warning_count: r.duplication_warning_count,
+				semantic_warning_count: r.semantic_warning_count,
 				review_models: config.review.models, // kept for backward compat
 				review_config: config.review, // full review config (score_threshold, dimension_floor, max_iterations, require_human_approval, low_only_passes, models)
 			};
