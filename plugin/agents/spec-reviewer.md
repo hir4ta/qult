@@ -1,7 +1,7 @@
 ---
 name: spec-reviewer
 description: "Independent spec compliance reviewer. Verifies implementation matches the plan — checks task completion, consumer coverage, and implementation gaps. Use as Stage 1 of /qult:review. NOT for code quality or security — those are separate stages."
-model: opus
+model: sonnet
 allowed-tools:
   - Read
   - Glob

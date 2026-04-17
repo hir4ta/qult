@@ -134,42 +134,6 @@ describe("applyFlywheelRecommendations", () => {
 	});
 });
 
-describe("SessionStart flywheel integration", () => {
-	it("SessionStart calls applyFlywheelRecommendations when auto_apply=true", async () => {
-		const db = getDb();
-		const projectId = getProjectId();
-
-		// Insert 20 sessions with security_warnings=0 (stable, low frequency)
-		for (let i = 0; i < 20; i++) {
-			db.prepare(
-				`INSERT INTO session_metrics (session_id, project_id, gate_failure_count, security_warning_count, review_aggregate, files_changed, test_quality_warning_count, duplication_warning_count, semantic_warning_count, drift_warning_count, escalation_hit)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			).run(`session-start-test-${i}`, projectId, 0, 0, null, 1, 0, 0, 0, 0, 0);
-		}
-
-		// Set flywheel config via project_configs
-		db.prepare(
-			"INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)",
-		).run(projectId, "flywheel.enabled", JSON.stringify(true));
-		db.prepare(
-			"INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)",
-		).run(projectId, "flywheel.auto_apply", JSON.stringify(true));
-		db.prepare(
-			"INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)",
-		).run(projectId, "flywheel.min_sessions", JSON.stringify(10));
-
-		const sessionStart = (await import("../hooks/session-start.ts")).default;
-		await sessionStart({ hook_event_name: "SessionStart", source: "startup", cwd: TEST_DIR });
-
-		// Verify that global_configs was written with a raised threshold
-		const row = db
-			.prepare("SELECT value FROM global_configs WHERE key = ?")
-			.get("escalation.security_threshold") as { value: string } | null;
-		expect(row).not.toBeNull();
-		expect(JSON.parse(row!.value)).toBeGreaterThan(DEFAULTS.escalation.security_threshold);
-	});
-});
-
 describe("transferKnowledge", () => {
 	function insertMetricsForProject(
 		projectPath: string,

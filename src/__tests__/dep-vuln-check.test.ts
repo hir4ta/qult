@@ -138,7 +138,7 @@ describe("extractInstalledPackages", () => {
 // ── runOsvScanner ────────────────────────────────────────────
 
 describe("runOsvScanner", () => {
-	async function run(args: string[], cwd: string) {
+	async function run() {
 		vi.resetModules();
 		vi.mock("node:child_process");
 		const cp = await import("node:child_process");
@@ -148,14 +148,14 @@ describe("runOsvScanner", () => {
 	}
 
 	it("returns stdout on success (exit 0)", async () => {
-		const { mockExec, runOsvScanner } = await run([], "/tmp");
+		const { mockExec, runOsvScanner } = await run();
 		mockExec.mockReturnValue('{"results":[]}' as never);
 		const result = runOsvScanner(["--format", "json"], "/tmp", 8000);
 		expect(result).toBe('{"results":[]}');
 	});
 
 	it("returns stdout from exit code 1 (vulns found)", async () => {
-		const { mockExec, runOsvScanner } = await run([], "/tmp");
+		const { mockExec, runOsvScanner } = await run();
 		mockExec.mockImplementation(() => {
 			throw Object.assign(new Error("exit 1"), { stdout: '{"results":[{"packages":[]}]}' });
 		});
@@ -164,7 +164,7 @@ describe("runOsvScanner", () => {
 	});
 
 	it("returns null when not installed", async () => {
-		const { mockExec, runOsvScanner } = await run([], "/tmp");
+		const { mockExec, runOsvScanner } = await run();
 		mockExec.mockImplementation(() => {
 			throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
 		});
@@ -173,7 +173,7 @@ describe("runOsvScanner", () => {
 	});
 
 	it("returns null on timeout", async () => {
-		const { mockExec, runOsvScanner } = await run([], "/tmp");
+		const { mockExec, runOsvScanner } = await run();
 		mockExec.mockImplementation(() => {
 			throw Object.assign(new Error("ETIMEDOUT"), { code: "ETIMEDOUT" });
 		});

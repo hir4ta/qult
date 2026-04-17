@@ -205,7 +205,7 @@ const TOOL_DEFS: ToolDef[] = [
 	{
 		name: "get_file_health_score",
 		description:
-			"Compute a 0-10 health score for a file by aggregating findings from all computational detectors (security, semantic, duplication, dead-imports, hallucinated-imports, export-breaking, convention). 10 = no issues, 0 = critical. Returns score and per-detector breakdown.",
+			"Compute a 0-10 health score for a file by aggregating findings from computational detectors (security, semantic, duplication, dead-imports, export-breaking, complexity, test-quality). 10 = no issues, 0 = critical. Returns score and per-detector breakdown.",
 		inputSchema: {
 			type: "object",
 			properties: {

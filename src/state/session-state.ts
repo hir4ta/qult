@@ -586,20 +586,6 @@ export function resetPlanEvalIteration(): void {
 	writeState(state);
 }
 
-// ── TDD RED verification ────────────────────────────────
-
-export function recordTaskVerifyResult(taskKey: string, passed: boolean): void {
-	const state = readSessionState();
-	if (!state.task_verify_results) state.task_verify_results = {};
-	state.task_verify_results[taskKey] = { passed, ran_at: new Date().toISOString() };
-	writeState(state);
-}
-
-export function readTaskVerifyResult(taskKey: string): { passed: boolean; ran_at: string } | null {
-	const state = readSessionState();
-	return state.task_verify_results?.[taskKey] ?? null;
-}
-
 // ── Gate failure escalation ─────────────────────────────
 
 const MAX_GATE_FAILURE_COUNT = 100;
@@ -656,18 +642,6 @@ export function disableGate(gateName: string): void {
 export function enableGate(gateName: string): void {
 	const state = readSessionState();
 	state.disabled_gates = (state.disabled_gates ?? []).filter((g) => g !== gateName);
-	writeState(state);
-}
-
-// ── Plan selfcheck gate ─────────────────────────────────────
-
-export function wasPlanSelfcheckBlocked(): boolean {
-	return readSessionState().plan_selfcheck_blocked_at != null;
-}
-
-export function recordPlanSelfcheckBlocked(): void {
-	const state = readSessionState();
-	state.plan_selfcheck_blocked_at = new Date().toISOString();
 	writeState(state);
 }
 

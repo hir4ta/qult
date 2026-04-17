@@ -48,7 +48,7 @@ If the evaluator's verdict is `Plan: REVISE`:
 2. Fix the issues in the plan file
 3. Re-spawn the evaluator on the updated plan
 
-The SubagentStop hook enforces the score threshold mechanically (aggregate >= 10/15, max 2 iterations).
+The plan-evaluator score threshold (aggregate >= 10/15, max 2 iterations) is enforced inside this skill — re-spawn until pass or max iterations hit.
 
 ## Output
 

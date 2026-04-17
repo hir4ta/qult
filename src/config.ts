@@ -84,8 +84,8 @@ export const DEFAULTS: QultConfig = {
 		dimension_floor: 4,
 		require_human_approval: false,
 		models: {
-			spec: "opus",
-			quality: "opus",
+			spec: "sonnet",
+			quality: "sonnet",
 			security: "opus",
 			adversarial: "opus",
 		},
@@ -95,7 +95,7 @@ export const DEFAULTS: QultConfig = {
 		max_iterations: 2,
 		registry_files: [],
 		models: {
-			generator: "opus",
+			generator: "sonnet",
 			evaluator: "opus",
 		},
 	},

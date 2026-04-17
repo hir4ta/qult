@@ -3,7 +3,6 @@ import {
 	extToLanguage,
 	initParser,
 	resetParserCache,
-	type SupportedLanguage,
 } from "../hooks/detectors/tree-sitter-init.ts";
 
 afterEach(() => {

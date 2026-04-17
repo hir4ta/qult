@@ -80,16 +80,28 @@ Then call `mcp__plugin_qult_qult__get_gate_config` to verify the gates were stor
 
 **Note**: The gate config is stored in `~/.qult/qult.db`, NOT in a project file. No project directory is modified.
 
-## Step 3: Clean up legacy files
+## Step 3: Install user-level rules
 
-Remove if they exist (from older qult versions):
-- `.qult/` directory (entire directory — no longer needed, state is in `~/.qult/qult.db`)
-- `.claude/rules/qult.md` (old single rule file)
-- `.claude/rules/qult-gates.md` (replaced by MCP instructions)
-- `.claude/rules/qult-quality.md` (replaced by MCP instructions)
-- `.claude/rules/qult-plan.md` (replaced by MCP instructions)
-- Old qult entries in `.claude/settings.local.json` containing `.qult/hook.mjs`
-- Remove `.qult/` from `.gitignore` if present (no longer needed)
+qult ships workflow rules in `${CLAUDE_PLUGIN_ROOT}/rules/qult-*.md`. Copy them to `~/.claude/rules/` so Claude loads them in every session.
+
+Steps:
+1. `mkdir -p ~/.claude/rules`
+2. For each file matching `${CLAUDE_PLUGIN_ROOT}/rules/qult-*.md`, copy to `~/.claude/rules/` with the same basename. **Always overwrite** — qult may have updated the rule contents in a new version.
+
+Use `cp -f "${CLAUDE_PLUGIN_ROOT}/rules/"qult-*.md ~/.claude/rules/`.
+
+Report each rule installed (e.g. `installed: ~/.claude/rules/qult-workflow.md`).
+
+## Step 4: Clean up legacy files
+
+Remove if they exist (from older qult versions that used hooks):
+- `.qult/` directory (entire directory — state lives in `~/.qult/qult.db`)
+- `.claude/rules/qult.md` (old single rule file from pre-rules-migration)
+- `.claude/rules/qult-gates.md` (replaced by user-level rules)
+- `.claude/rules/qult-quality.md` (now at `~/.claude/rules/qult-quality.md`)
+- `.claude/rules/qult-plan.md` (now at `~/.claude/rules/qult-plan-mode.md`)
+- Old qult entries in `.claude/settings.local.json` referencing `.qult/hook.mjs` or `bun ${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs`
+- Remove `.qult/` from `.gitignore` if present
 
 ## Output
 
@@ -97,7 +109,6 @@ Remove if they exist (from older qult versions):
 qult initialized:
   DB: ~/.qult/qult.db — connected
   Gates: N on_write, N on_commit, N on_review
+  Rules: N installed at ~/.claude/rules/qult-*.md
   Legacy cleanup: (list removed items, or "none")
 ```
-
-If hooks don't fire in VS Code or your environment, suggest: `/qult:register-hooks`

@@ -190,8 +190,8 @@ describe("review.models config", () => {
 	it("returns default model values", () => {
 		const config = loadConfig();
 		expect(config.review.models).toEqual({
-			spec: "opus",
-			quality: "opus",
+			spec: "sonnet",
+			quality: "sonnet",
 			security: "opus",
 			adversarial: "opus",
 		});
@@ -204,7 +204,7 @@ describe("review.models config", () => {
 		expect(config.review.models.spec).toBe("opus");
 		expect(config.review.models.adversarial).toBe("haiku");
 		// Unset values keep defaults
-		expect(config.review.models.quality).toBe("opus");
+		expect(config.review.models.quality).toBe("sonnet");
 		expect(config.review.models.security).toBe("opus");
 	});
 
@@ -230,7 +230,7 @@ describe("review.models config", () => {
 	it("ignores empty string env vars for models", () => {
 		process.env.QULT_REVIEW_MODEL_SPEC = "";
 		const config = loadConfig();
-		expect(config.review.models.spec).toBe("opus"); // default
+		expect(config.review.models.spec).toBe("sonnet"); // default
 	});
 });
 
@@ -238,15 +238,15 @@ describe("plan_eval.models config", () => {
 	it("returns default plan_eval model values", () => {
 		const config = loadConfig();
 		expect(config.plan_eval.models).toEqual({
-			generator: "opus",
+			generator: "sonnet",
 			evaluator: "opus",
 		});
 	});
 
 	it("reads plan_eval models from project config", () => {
-		setProjectConfig("plan_eval.models.generator", "sonnet");
+		setProjectConfig("plan_eval.models.generator", "haiku");
 		const config = loadConfig();
-		expect(config.plan_eval.models.generator).toBe("sonnet");
+		expect(config.plan_eval.models.generator).toBe("haiku");
 		expect(config.plan_eval.models.evaluator).toBe("opus");
 	});
 

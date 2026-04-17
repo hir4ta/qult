@@ -80,8 +80,8 @@ Before spawning reviewers, resolve the model for each stage:
    - `review_models.security` → security-reviewer model
    - `review_models.adversarial` → adversarial-reviewer model
 3. When spawning each Agent, pass the `model` parameter to override the agent frontmatter default:
-   - Example: `Agent({ subagent_type: "qult:spec-reviewer", model: "opus", ... })`
-4. If a model value matches the agent's frontmatter default (spec=sonnet, quality=opus, security=opus, adversarial=sonnet), you may omit the `model` parameter
+   - Example: `Agent({ subagent_type: "qult:spec-reviewer", model: "sonnet", ... })`
+4. If a model value matches the agent's frontmatter default (spec=sonnet, quality=sonnet, security=opus, adversarial=opus), you may omit the `model` parameter
 
 ## Round 1: Spec + Security (parallel — no overlap)
 

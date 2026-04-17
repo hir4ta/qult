@@ -7,9 +7,9 @@ describe("smoke test", () => {
 		expect(typeof types).toBe("object");
 	});
 
-	it("dispatcher module exports dispatch function", async () => {
-		const dispatcher = await import("../hooks/dispatcher.ts");
-		expect(dispatcher.dispatch).toBeDefined();
-		expect(typeof dispatcher.dispatch).toBe("function");
+	it("mcp-server module loads without errors", async () => {
+		const mcp = await import("../mcp-server.ts");
+		expect(mcp).toBeDefined();
+		expect(typeof mcp).toBe("object");
 	});
 });

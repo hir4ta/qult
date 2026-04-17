@@ -1,11 +1,9 @@
 // @bun
-var __require = import.meta.require;
-
 // src/mcp-server.ts
 import { execFileSync as execFileSync2 } from "child_process";
-import { existsSync as existsSync12 } from "fs";
+import { existsSync as existsSync11 } from "fs";
 import { homedir as homedir3 } from "os";
-import { join as join6, resolve as resolve5 } from "path";
+import { join as join4, resolve as resolve4 } from "path";
 import { createInterface } from "readline";
 
 // src/state/db.ts
@@ -321,8 +319,8 @@ var DEFAULTS = {
     dimension_floor: 4,
     require_human_approval: false,
     models: {
-      spec: "opus",
-      quality: "opus",
+      spec: "sonnet",
+      quality: "sonnet",
       security: "opus",
       adversarial: "opus"
     }
@@ -332,7 +330,7 @@ var DEFAULTS = {
     max_iterations: 2,
     registry_files: [],
     models: {
-      generator: "opus",
+      generator: "sonnet",
       evaluator: "opus"
     }
   },
@@ -1304,7 +1302,7 @@ function runOsvScanner(args, cwd, timeout) {
 }
 
 // src/hooks/detectors/health-score.ts
-import { existsSync as existsSync9 } from "fs";
+import { existsSync as existsSync8 } from "fs";
 
 // src/hooks/detectors/tree-sitter-init.ts
 var __dirname = "/Users/shunichi/Projects/qult/src/hooks/detectors";
@@ -1319,9 +1317,9 @@ function computeComplexitySync(file) {
   return null;
 }
 
-// src/hooks/detectors/convention-check.ts
-import { readdirSync as readdirSync2, statSync as statSync2 } from "fs";
-import { basename as basename2, dirname as dirname2, extname, join as join3 } from "path";
+// src/hooks/detectors/dead-import-check.ts
+import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
+import { extname } from "path";
 
 // src/hooks/sanitize.ts
 function sanitizeForStderr(input) {
@@ -1329,68 +1327,7 @@ function sanitizeForStderr(input) {
   return noAnsi.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
 }
 
-// src/hooks/detectors/convention-check.ts
-var KEBAB_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)+$/;
-var CAMEL_RE = /^[a-z][a-z0-9]*[A-Z][a-zA-Z0-9]*$/;
-var SNAKE_RE = /^[a-z][a-z0-9]*(_[a-z0-9]+)+$/;
-var PASCAL_RE = /^[A-Z][a-zA-Z0-9]*$/;
-function classify(name) {
-  if (KEBAB_RE.test(name))
-    return "kebab-case";
-  if (SNAKE_RE.test(name))
-    return "snake_case";
-  if (PASCAL_RE.test(name))
-    return "PascalCase";
-  if (CAMEL_RE.test(name))
-    return "camelCase";
-  return "other";
-}
-function detectConventionDrift(file) {
-  const dir = dirname2(file);
-  const fileName = basename2(file);
-  const stem = basename2(fileName, extname(fileName));
-  let siblings;
-  try {
-    siblings = readdirSync2(dir).filter((f) => {
-      try {
-        return f !== fileName && statSync2(join3(dir, f)).isFile();
-      } catch {
-        return false;
-      }
-    }).map((f) => basename2(f, extname(f)));
-  } catch {
-    return [];
-  }
-  if (siblings.length < 3)
-    return [];
-  const counts = new Map;
-  for (const s of siblings) {
-    const c = classify(s);
-    if (c !== "other")
-      counts.set(c, (counts.get(c) ?? 0) + 1);
-  }
-  let dominant = null;
-  let dominantCount = 0;
-  for (const [conv, count] of counts) {
-    if (count > dominantCount) {
-      dominant = conv;
-      dominantCount = count;
-    }
-  }
-  const classifiableCount = [...counts.values()].reduce((a, b) => a + b, 0);
-  if (!dominant || classifiableCount === 0 || dominantCount <= classifiableCount * 0.5)
-    return [];
-  const fileConvention = classify(stem);
-  if (fileConvention === dominant || fileConvention === "other")
-    return [];
-  return [
-    sanitizeForStderr(`${fileName} uses ${fileConvention} but siblings use ${dominant} (${dominantCount}/${classifiableCount})`)
-  ];
-}
-
 // src/hooks/detectors/dead-import-check.ts
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
-import { extname as extname2 } from "path";
 var TS_JS_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
 var PY_EXTS = new Set([".py", ".pyi"]);
 var MAX_CHECK_SIZE = 500000;
@@ -1405,7 +1342,7 @@ var PY_IMPORT_RE = /^\s*import\s+(.+)/;
 function detectDeadImports(file) {
   if (isGateDisabled("dead-import-check"))
     return [];
-  const ext = extname2(file).toLowerCase();
+  const ext = extname(file).toLowerCase();
   if (!TS_JS_EXTS.has(ext) && !PY_EXTS.has(ext))
     return [];
   if (!existsSync2(file))
@@ -1527,7 +1464,7 @@ function escapeRegex(str) {
 
 // src/hooks/detectors/duplication-check.ts
 import { existsSync as existsSync3, readFileSync as readFileSync3 } from "fs";
-import { basename as basename3, dirname as dirname3, extname as extname3, resolve } from "path";
+import { basename as basename2, dirname as dirname2, extname as extname2, resolve } from "path";
 var CHECKABLE_EXTS = new Set([
   ".ts",
   ".tsx",
@@ -1548,10 +1485,10 @@ var CHECKABLE_EXTS = new Set([
 var MAX_CHECK_SIZE2 = 500000;
 var MIN_BLOCK_LINES = 4;
 function isTestFile(filePath) {
-  const name = basename3(filePath);
+  const name = basename2(filePath);
   if (/\.(test|spec)\.[^.]+$/.test(name))
     return true;
-  const parent = basename3(dirname3(filePath));
+  const parent = basename2(dirname2(filePath));
   return parent === "__tests__";
 }
 function normalizeLine(line) {
@@ -1597,7 +1534,7 @@ function detectDuplication(file) {
     return [];
   if (isGateDisabled("duplication-check"))
     return [];
-  const ext = extname3(file).toLowerCase();
+  const ext = extname2(file).toLowerCase();
   if (!CHECKABLE_EXTS.has(ext))
     return [];
   if (!existsSync3(file))
@@ -1632,14 +1569,14 @@ function detectDuplication(file) {
 // src/hooks/detectors/export-check.ts
 import { execSync } from "child_process";
 import { existsSync as existsSync4, readFileSync as readFileSync4 } from "fs";
-import { extname as extname4 } from "path";
+import { extname as extname3 } from "path";
 var TS_JS_EXTS2 = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
 var EXPORT_RE = /\bexport\s+(?:default\s+)?(?:function|class|const|let|var|type|interface|enum)\s+(\w+)/g;
 var FUNC_SIG_RE = /\bexport\s+(?:default\s+)?function\s+(\w+)\s*\(([^)]*)\)/g;
 function detectExportBreakingChanges(file) {
   if (isGateDisabled("export-check"))
     return [];
-  const ext = extname4(file).toLowerCase();
+  const ext = extname3(file).toLowerCase();
   if (!TS_JS_EXTS2.has(ext))
     return [];
   if (!existsSync4(file))
@@ -1712,450 +1649,9 @@ function detectTypeFieldChanges(oldContent, newContent) {
   return changes;
 }
 
-// src/hooks/detectors/import-check.ts
-import { existsSync as existsSync5, readdirSync as readdirSync3, readFileSync as readFileSync5 } from "fs";
-import { extname as extname5, join as join4, resolve as resolve2 } from "path";
-var TS_JS_EXTS3 = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
-var PY_EXTS2 = new Set([".py", ".pyi"]);
-var GO_EXTS = new Set([".go"]);
-var IMPORT_LINE_RE = /^\s*import\s+(?:[^"']*\s+from\s+)?["']([^"'./][^"']*)["']/;
-var PY_IMPORT_RE2 = /^\s*(?:import\s+(\w+)|from\s+(\w+)\s+import)\b/;
-var MAX_IMPORT_CHECK_SIZE = 500000;
-function detectHallucinatedImports(file) {
-  if (isGateDisabled("import-check"))
-    return [];
-  const ext = extname5(file).toLowerCase();
-  if (!TS_JS_EXTS3.has(ext) && !PY_EXTS2.has(ext) && !GO_EXTS.has(ext))
-    return [];
-  if (!existsSync5(file))
-    return [];
-  const content = readFileSync5(file, "utf-8");
-  if (content.length > MAX_IMPORT_CHECK_SIZE)
-    return [];
-  if (PY_EXTS2.has(ext))
-    return detectPythonImports(file, content);
-  if (GO_EXTS.has(ext))
-    return detectGoImports(file, content);
-  return detectTsJsImports(file, content);
-}
-function loadTsConfigPaths(cwd) {
-  const aliases = new Set;
-  try {
-    const tsconfigPath = join4(cwd, "tsconfig.json");
-    if (!existsSync5(tsconfigPath))
-      return aliases;
-    const raw = readFileSync5(tsconfigPath, "utf-8");
-    const cleaned = raw.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
-    const tsconfig = JSON.parse(cleaned);
-    const paths = tsconfig?.compilerOptions?.paths;
-    if (paths && typeof paths === "object") {
-      for (const alias of Object.keys(paths)) {
-        aliases.add(alias.replace(/\/\*$/, ""));
-      }
-    }
-  } catch {}
-  return aliases;
-}
-function detectTsJsImports(file, content) {
-  const cwd = process.cwd();
-  const missingPkgs = [];
-  let builtins;
-  try {
-    builtins = new Set(__require("module").builtinModules);
-  } catch {
-    builtins = FALLBACK_BUILTINS;
-  }
-  const tsPaths = loadTsConfigPaths(cwd);
-  for (const line of content.split(`
-`)) {
-    if (line.trimStart().startsWith("//"))
-      continue;
-    const match = line.match(IMPORT_LINE_RE);
-    if (!match)
-      continue;
-    const specifier = match[1];
-    const pkgName = specifier.startsWith("@") ? specifier.split("/").slice(0, 2).join("/") : specifier.split("/")[0];
-    if (pkgName.startsWith("node:") || builtins.has(pkgName))
-      continue;
-    if (pkgName.includes(".."))
-      continue;
-    if (tsPaths.has(pkgName) || tsPaths.has(specifier.replace(/\/.*$/, "")))
-      continue;
-    if (!existsSync5(join4(cwd, "node_modules", pkgName))) {
-      missingPkgs.push(pkgName);
-    }
-  }
-  if (missingPkgs.length === 0)
-    return [];
-  const unique = [...new Set(missingPkgs)];
-  return [
-    {
-      file,
-      errors: unique.map((pkg) => `Hallucinated import: package "${sanitizeForStderr(pkg.slice(0, 128))}" not found in node_modules`),
-      gate: "import-check"
-    }
-  ];
-}
-function detectPythonImports(file, content) {
-  const cwd = process.cwd();
-  const missingModules = [];
-  const sitePackagesDirs = findPythonSitePackages(cwd);
-  for (const line of content.split(`
-`)) {
-    if (line.trimStart().startsWith("#"))
-      continue;
-    const match = line.match(PY_IMPORT_RE2);
-    if (!match)
-      continue;
-    const moduleName = match[1] ?? match[2];
-    if (PY_STDLIB.has(moduleName))
-      continue;
-    if (moduleName.startsWith("_"))
-      continue;
-    if (existsSync5(join4(cwd, `${moduleName}.py`)) || existsSync5(join4(cwd, moduleName)))
-      continue;
-    if (sitePackagesDirs.some((dir) => existsSync5(join4(dir, moduleName)) || existsSync5(join4(dir, `${moduleName}.py`))))
-      continue;
-    missingModules.push(moduleName);
-  }
-  if (missingModules.length === 0)
-    return [];
-  const unique = [...new Set(missingModules)];
-  return [
-    {
-      file,
-      errors: unique.map((mod) => {
-        const safe = sanitizeForStderr(mod.slice(0, 128));
-        return `Hallucinated import: Python module "${safe}" not found (not stdlib, no ${safe}.py or ${safe}/ in project)`;
-      }),
-      gate: "import-check"
-    }
-  ];
-}
-var GO_IMPORT_RE = /^\s*"([^"]+)"/;
-function detectGoImports(file, content) {
-  const cwd = process.cwd();
-  const missingPkgs = [];
-  let goSum = null;
-  try {
-    goSum = readFileSync5(join4(cwd, "go.sum"), "utf-8");
-  } catch {}
-  const lines = content.split(`
-`);
-  let inBlock = false;
-  for (const line of lines) {
-    if (line.trimStart().startsWith("//"))
-      continue;
-    if (/^\s*import\s*\(/.test(line)) {
-      inBlock = true;
-      continue;
-    }
-    if (inBlock && line.trim() === ")") {
-      inBlock = false;
-      continue;
-    }
-    let importPath;
-    if (inBlock) {
-      const m = line.match(GO_IMPORT_RE);
-      if (m)
-        importPath = m[1];
-    } else {
-      const m = line.match(/^\s*import\s+"([^"]+)"/);
-      if (m)
-        importPath = m[1];
-    }
-    if (!importPath)
-      continue;
-    const topPkg = importPath.split("/")[0];
-    if (GO_STDLIB_PREFIXES.has(topPkg))
-      continue;
-    const vendorDir = resolve2(cwd, "vendor");
-    const vendorPath = resolve2(vendorDir, importPath);
-    if (vendorPath.startsWith(`${vendorDir}/`) && existsSync5(vendorPath))
-      continue;
-    if (goSum?.includes(`${importPath} `))
-      continue;
-    missingPkgs.push(importPath);
-  }
-  if (missingPkgs.length === 0)
-    return [];
-  const unique = [...new Set(missingPkgs)];
-  return [
-    {
-      file,
-      errors: unique.map((pkg) => `Hallucinated import: Go package "${sanitizeForStderr(pkg.slice(0, 128))}" not found (not stdlib, not in vendor/ or go.sum)`),
-      gate: "import-check"
-    }
-  ];
-}
-var GO_STDLIB_PREFIXES = new Set([
-  "archive",
-  "bufio",
-  "bytes",
-  "cmp",
-  "compress",
-  "context",
-  "crypto",
-  "database",
-  "debug",
-  "embed",
-  "encoding",
-  "errors",
-  "flag",
-  "fmt",
-  "go",
-  "hash",
-  "html",
-  "image",
-  "internal",
-  "io",
-  "iter",
-  "log",
-  "maps",
-  "math",
-  "mime",
-  "net",
-  "os",
-  "path",
-  "plugin",
-  "reflect",
-  "regexp",
-  "runtime",
-  "slices",
-  "sort",
-  "strconv",
-  "strings",
-  "structs",
-  "sync",
-  "syscall",
-  "testing",
-  "text",
-  "time",
-  "unicode",
-  "unique",
-  "unsafe",
-  "vendor"
-]);
-var FALLBACK_BUILTINS = new Set([
-  "assert",
-  "async_hooks",
-  "buffer",
-  "child_process",
-  "cluster",
-  "console",
-  "constants",
-  "crypto",
-  "dgram",
-  "diagnostics_channel",
-  "dns",
-  "domain",
-  "events",
-  "fs",
-  "http",
-  "http2",
-  "https",
-  "inspector",
-  "module",
-  "net",
-  "os",
-  "path",
-  "perf_hooks",
-  "process",
-  "punycode",
-  "querystring",
-  "readline",
-  "repl",
-  "stream",
-  "string_decoder",
-  "sys",
-  "test",
-  "timers",
-  "tls",
-  "trace_events",
-  "tty",
-  "url",
-  "util",
-  "v8",
-  "vm",
-  "wasi",
-  "worker_threads",
-  "zlib"
-]);
-var PY_STDLIB = new Set([
-  "abc",
-  "aifc",
-  "argparse",
-  "array",
-  "ast",
-  "asyncio",
-  "atexit",
-  "base64",
-  "binascii",
-  "bisect",
-  "builtins",
-  "bz2",
-  "calendar",
-  "cgi",
-  "cmd",
-  "code",
-  "codecs",
-  "collections",
-  "colorsys",
-  "compileall",
-  "concurrent",
-  "configparser",
-  "contextlib",
-  "copy",
-  "copyreg",
-  "csv",
-  "ctypes",
-  "curses",
-  "dataclasses",
-  "datetime",
-  "dbm",
-  "decimal",
-  "difflib",
-  "dis",
-  "email",
-  "enum",
-  "errno",
-  "faulthandler",
-  "fileinput",
-  "fnmatch",
-  "fractions",
-  "ftplib",
-  "functools",
-  "gc",
-  "getopt",
-  "getpass",
-  "gettext",
-  "glob",
-  "grp",
-  "gzip",
-  "hashlib",
-  "heapq",
-  "hmac",
-  "html",
-  "http",
-  "imaplib",
-  "importlib",
-  "inspect",
-  "io",
-  "ipaddress",
-  "itertools",
-  "json",
-  "keyword",
-  "linecache",
-  "locale",
-  "logging",
-  "lzma",
-  "mailbox",
-  "math",
-  "mimetypes",
-  "mmap",
-  "multiprocessing",
-  "netrc",
-  "numbers",
-  "operator",
-  "optparse",
-  "os",
-  "pathlib",
-  "pdb",
-  "pickle",
-  "pickletools",
-  "pkgutil",
-  "platform",
-  "plistlib",
-  "poplib",
-  "posixpath",
-  "pprint",
-  "queue",
-  "random",
-  "re",
-  "readline",
-  "reprlib",
-  "resource",
-  "rlcompleter",
-  "sched",
-  "secrets",
-  "select",
-  "selectors",
-  "shelve",
-  "shlex",
-  "shutil",
-  "signal",
-  "site",
-  "smtplib",
-  "socket",
-  "socketserver",
-  "sqlite3",
-  "ssl",
-  "stat",
-  "statistics",
-  "string",
-  "struct",
-  "subprocess",
-  "sunau",
-  "symtable",
-  "sys",
-  "sysconfig",
-  "syslog",
-  "tarfile",
-  "tempfile",
-  "termios",
-  "textwrap",
-  "threading",
-  "time",
-  "timeit",
-  "tkinter",
-  "token",
-  "tokenize",
-  "tomllib",
-  "trace",
-  "traceback",
-  "tracemalloc",
-  "tty",
-  "turtle",
-  "types",
-  "typing",
-  "unicodedata",
-  "unittest",
-  "urllib",
-  "uuid",
-  "venv",
-  "warnings",
-  "wave",
-  "weakref",
-  "xml",
-  "xmlrpc",
-  "zipfile",
-  "zipimport",
-  "zlib"
-]);
-function findPythonSitePackages(cwd) {
-  const dirs = [];
-  const venvRoots = [join4(cwd, ".venv"), join4(cwd, "venv")];
-  for (const root of venvRoots) {
-    try {
-      if (!existsSync5(root))
-        continue;
-      const libDir = join4(root, "lib");
-      if (!existsSync5(libDir))
-        continue;
-      const entries = readdirSync3(libDir).filter((e) => e.startsWith("python"));
-      for (const entry of entries) {
-        const sp = join4(libDir, entry, "site-packages");
-        if (existsSync5(sp))
-          dirs.push(sp);
-      }
-    } catch {}
-  }
-  return dirs;
-}
-
 // src/hooks/detectors/security-check.ts
-import { existsSync as existsSync6, readFileSync as readFileSync6 } from "fs";
-import { basename as basename4, extname as extname6 } from "path";
+import { existsSync as existsSync5, readFileSync as readFileSync5 } from "fs";
+import { basename as basename3, extname as extname4 } from "path";
 var CHECKABLE_EXTS2 = new Set([
   ".ts",
   ".tsx",
@@ -2211,8 +1707,8 @@ var SECRET_PATTERNS = [
   }
 ];
 var JS_TS_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
-var PY_EXTS3 = new Set([".py", ".pyi"]);
-var GO_EXTS2 = new Set([".go"]);
+var PY_EXTS2 = new Set([".py", ".pyi"]);
+var GO_EXTS = new Set([".go"]);
 var RB_EXTS = new Set([".rb"]);
 var JAVA_EXTS = new Set([".java", ".kt"]);
 var DANGEROUS_PATTERNS = [
@@ -2247,12 +1743,12 @@ var DANGEROUS_PATTERNS = [
   {
     re: /(?:os\.system|subprocess\.(?:call|run|Popen|check_output))\s*\(\s*f["']/,
     desc: "Shell command with f-string \u2014 command injection risk",
-    exts: PY_EXTS3
+    exts: PY_EXTS2
   },
   {
     re: /\b(?:eval|exec)\s*\(\s*(?!["'])[a-zA-Z_]/,
     desc: "eval/exec with dynamic input \u2014 code injection risk",
-    exts: PY_EXTS3
+    exts: PY_EXTS2
   },
   {
     re: /dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*(?!["'`])[a-zA-Z_$]/,
@@ -2276,7 +1772,7 @@ var DANGEROUS_PATTERNS = [
   {
     re: /(?:pickle\.loads?|yaml\.(?:load|unsafe_load))\s*\(/,
     desc: "Unsafe deserialization (pickle/yaml.load) \u2014 arbitrary code execution risk",
-    exts: PY_EXTS3
+    exts: PY_EXTS2
   },
   {
     re: /(?:res\.(?:json|send|write)|response\.(?:json|send|write))\s*\(.*process\.env/,
@@ -2296,7 +1792,7 @@ var DANGEROUS_PATTERNS = [
   {
     re: /requests\.(?:get|post|put|delete|patch|head)\s*\(\s*(?!["'])[a-zA-Z_]/,
     desc: "HTTP request with dynamic URL \u2014 SSRF risk",
-    exts: PY_EXTS3
+    exts: PY_EXTS2
   },
   {
     re: /(?:__proto__|constructor\s*\.\s*prototype)\s*(?:\[|\.\s*\w+\s*=)/,
@@ -2311,7 +1807,7 @@ var DANGEROUS_PATTERNS = [
   {
     re: /exec\.Command\s*\(.*\+/,
     desc: "exec.Command with string concatenation \u2014 command injection risk",
-    exts: GO_EXTS2
+    exts: GO_EXTS
   },
   {
     re: /\bsystem\s*\(\s*(?!["'])[a-zA-Z_]/,
@@ -2361,14 +1857,14 @@ var DANGEROUS_PATTERNS = [
 function detectSecurityPatterns(file) {
   if (isGateDisabled("security-check"))
     return [];
-  const ext = extname6(file).toLowerCase();
+  const ext = extname4(file).toLowerCase();
   if (!CHECKABLE_EXTS2.has(ext))
     return [];
-  if (!existsSync6(file))
+  if (!existsSync5(file))
     return [];
   let content;
   try {
-    content = readFileSync6(file, "utf-8");
+    content = readFileSync5(file, "utf-8");
   } catch {
     return [];
   }
@@ -2434,7 +1930,7 @@ function detectSecurityPatterns(file) {
       if (re.test(scanLine)) {
         if (suppress?.test(scanLine))
           continue;
-        if (suppressFile?.test(basename4(file)))
+        if (suppressFile?.test(basename3(file)))
           continue;
         errors.push(`L${i + 1}: ${desc}`);
       }
@@ -2489,7 +1985,7 @@ var ADVISORY_PATTERNS = [
   }
 ];
 function matchAdvisoryPatterns(file, content) {
-  const ext = extname6(file).toLowerCase();
+  const ext = extname4(file).toLowerCase();
   if (!CHECKABLE_EXTS2.has(ext))
     return [];
   if (content.length > MAX_CHECK_SIZE3)
@@ -2522,11 +2018,11 @@ function emitAdvisoryWarnings(file, content) {
 }
 
 // src/hooks/detectors/semantic-check.ts
-import { existsSync as existsSync7, readFileSync as readFileSync7 } from "fs";
-import { extname as extname7 } from "path";
+import { existsSync as existsSync6, readFileSync as readFileSync6 } from "fs";
+import { extname as extname5 } from "path";
 var JS_TS_EXTS2 = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
-var PY_EXTS4 = new Set([".py", ".pyi"]);
-var CHECKABLE_EXTS3 = new Set([...JS_TS_EXTS2, ...PY_EXTS4, ".go", ".rs", ".rb", ".java", ".kt"]);
+var PY_EXTS3 = new Set([".py", ".pyi"]);
+var CHECKABLE_EXTS3 = new Set([...JS_TS_EXTS2, ...PY_EXTS3, ".go", ".rs", ".rb", ".java", ".kt"]);
 var MAX_CHECK_SIZE4 = 500000;
 var INTENTIONAL_RE = /(?:\/\/|\/\*|#)\s*(?:fail-open|intentional|deliberate|nolint|noqa|NOLINT)/i;
 function detectEmptyCatch(lines) {
@@ -2738,14 +2234,14 @@ function emitPbtAdvisory(file, content) {
 function detectSemanticPatterns(file) {
   if (isGateDisabled("semantic-check"))
     return [];
-  const ext = extname7(file).toLowerCase();
+  const ext = extname5(file).toLowerCase();
   if (!CHECKABLE_EXTS3.has(ext))
     return [];
-  if (!existsSync7(file))
+  if (!existsSync6(file))
     return [];
   let content;
   try {
-    content = readFileSync7(file, "utf-8");
+    content = readFileSync6(file, "utf-8");
   } catch {
     return [];
   }
@@ -2762,7 +2258,7 @@ function detectSemanticPatterns(file) {
     errors.push(...detectLooseEquality(lines));
     errors.push(...detectSwitchFallthrough(lines));
   }
-  if (PY_EXTS4.has(ext)) {
+  if (PY_EXTS3.has(ext)) {
     errors.push(...detectEmptyCatch(lines));
   }
   emitPbtAdvisory(file, content);
@@ -2778,8 +2274,8 @@ function detectSemanticPatterns(file) {
 }
 
 // src/hooks/detectors/test-quality-check.ts
-import { existsSync as existsSync8, readFileSync as readFileSync8 } from "fs";
-import { basename as basename5, dirname as dirname4, extname as extname8, resolve as resolve3 } from "path";
+import { existsSync as existsSync7, readFileSync as readFileSync7 } from "fs";
+import { basename as basename4, dirname as dirname3, extname as extname6, resolve as resolve2 } from "path";
 var MAX_CHECK_SIZE5 = 500000;
 var BLOCKING_SMELL_TYPES = new Set([
   "empty-test",
@@ -2844,15 +2340,15 @@ function countAssertionsOutsideSetup(code) {
   return count;
 }
 function analyzeTestQuality(file) {
-  const cwd = resolve3(process.cwd());
-  const absPath = resolve3(cwd, file);
+  const cwd = resolve2(process.cwd());
+  const absPath = resolve2(cwd, file);
   if (!absPath.startsWith(cwd))
     return null;
-  if (!existsSync8(absPath))
+  if (!existsSync7(absPath))
     return null;
   let content;
   try {
-    content = readFileSync8(absPath, "utf-8");
+    content = readFileSync7(absPath, "utf-8");
   } catch {
     return null;
   }
@@ -3034,10 +2530,10 @@ function analyzeTestQuality(file) {
     });
   }
   try {
-    const snapDir = `${dirname4(absPath)}/__snapshots__/`;
-    const snapFile = `${snapDir}${basename5(absPath)}.snap`;
-    if (existsSync8(snapFile)) {
-      const snapContent = readFileSync8(snapFile, "utf-8");
+    const snapDir = `${dirname3(absPath)}/__snapshots__/`;
+    const snapFile = `${snapDir}${basename4(absPath)}.snap`;
+    if (existsSync7(snapFile)) {
+      const snapContent = readFileSync7(snapFile, "utf-8");
       if (snapContent.length > LARGE_SNAPSHOT_CHARS) {
         smells.push({
           type: "snapshot-bloat",
@@ -3053,7 +2549,7 @@ function analyzeTestQuality(file) {
       try {
         const implFile = findImplFile(absPath);
         if (implFile) {
-          const implContent = readFileSync8(implFile, "utf-8");
+          const implContent = readFileSync7(implFile, "utf-8");
           if (/\bthrow\b|\breject\b|Promise\.reject/m.test(implContent)) {
             smells.push({
               type: "no-error-path",
@@ -3154,18 +2650,18 @@ function analyzeTestQuality(file) {
 }
 function findImplFile(testPath) {
   try {
-    const dir = dirname4(testPath);
-    const base = basename5(testPath);
+    const dir = dirname3(testPath);
+    const base = basename4(testPath);
     const implName = base.replace(/\.(?:test|spec)(\.[^.]+)$/, "$1");
-    const sameDirPath = resolve3(dir, implName);
-    if (existsSync8(sameDirPath))
+    const sameDirPath = resolve2(dir, implName);
+    if (existsSync7(sameDirPath))
       return sameDirPath;
-    const parentDir = dirname4(dir);
-    const parentPath = resolve3(parentDir, implName);
-    if (existsSync8(parentPath))
+    const parentDir = dirname3(dir);
+    const parentPath = resolve2(parentDir, implName);
+    if (existsSync7(parentPath))
       return parentPath;
-    const srcPath = resolve3(parentDir, "src", implName);
-    if (existsSync8(srcPath))
+    const srcPath = resolve2(parentDir, "src", implName);
+    if (existsSync7(srcPath))
       return srcPath;
     return null;
   } catch {
@@ -3176,14 +2672,12 @@ function findImplFile(testPath) {
 // src/hooks/detectors/health-score.ts
 var WEIGHTS = {
   security: -2,
-  hallucinated_imports: -2,
   export_breaking: -2,
   dataflow: -2.5,
   duplication: -1.5,
   semantic: -1,
   complexity: -1,
   dead_imports: -1,
-  convention: -0.5,
   test_quality: -1.5
 };
 var DEFAULT_WEIGHT = -1;
@@ -3191,7 +2685,7 @@ function countFindings(fixes) {
   return fixes.reduce((sum, f) => sum + f.errors.length, 0);
 }
 function computeFileHealthScore(file) {
-  if (!existsSync9(file)) {
+  if (!existsSync8(file)) {
     return { score: 10, breakdown: {} };
   }
   const breakdown = {};
@@ -3219,21 +2713,10 @@ function computeFileHealthScore(file) {
       breakdown.dead_imports = (WEIGHTS.dead_imports ?? DEFAULT_WEIGHT) * deadImports.length;
   } catch {}
   try {
-    const hallucinatedFixes = detectHallucinatedImports(file);
-    const count = countFindings(hallucinatedFixes);
-    if (count > 0)
-      breakdown.hallucinated_imports = (WEIGHTS.hallucinated_imports ?? DEFAULT_WEIGHT) * count;
-  } catch {}
-  try {
     const exportFixes = detectExportBreakingChanges(file);
     const count = countFindings(exportFixes);
     if (count > 0)
       breakdown.export_breaking = (WEIGHTS.export_breaking ?? DEFAULT_WEIGHT) * count;
-  } catch {}
-  try {
-    const conventions = detectConventionDrift(file);
-    if (conventions.length > 0)
-      breakdown.convention = (WEIGHTS.convention ?? DEFAULT_WEIGHT) * conventions.length;
   } catch {}
   try {
     const tqResult = analyzeTestQuality(file);
@@ -3251,8 +2734,8 @@ function computeFileHealthScore(file) {
 }
 
 // src/hooks/detectors/import-graph.ts
-import { existsSync as existsSync10, lstatSync, readdirSync as readdirSync4, readFileSync as readFileSync9, statSync as statSync3 } from "fs";
-import { dirname as dirname5, extname as extname9, join as join5, resolve as resolve4 } from "path";
+import { existsSync as existsSync9, lstatSync, readdirSync as readdirSync2, readFileSync as readFileSync8, statSync as statSync2 } from "fs";
+import { dirname as dirname4, extname as extname7, join as join3, resolve as resolve3 } from "path";
 var SCAN_EXTS = new Set([
   ".ts",
   ".tsx",
@@ -3290,7 +2773,7 @@ function stripComments(content) {
 function extractRelativeImports(content, filePath) {
   const stripped = stripComments(content);
   const specifiers = [];
-  const ext = filePath ? extname9(filePath).toLowerCase() : "";
+  const ext = filePath ? extname7(filePath).toLowerCase() : "";
   if (ext === ".py") {
     const pyRel = /from\s+(\.[\w.]*)\s+import/g;
     for (const match of stripped.matchAll(pyRel)) {
@@ -3339,7 +2822,7 @@ function extractRelativeImports(content, filePath) {
   return specifiers;
 }
 function resolvePythonImport(specifier, fromFile) {
-  const dir = dirname5(fromFile);
+  const dir = dirname4(fromFile);
   const dotMatch = specifier.match(/^(\.+)(.*)/);
   if (!dotMatch)
     return null;
@@ -3347,37 +2830,37 @@ function resolvePythonImport(specifier, fromFile) {
   const modulePart = dotMatch[2];
   let base = dir;
   for (let i = 1;i < dots; i++) {
-    base = dirname5(base);
+    base = dirname4(base);
   }
   if (!modulePart) {
     return null;
   }
   const parts = modulePart.split(".");
-  const candidate = join5(base, ...parts);
-  if (existsSync10(`${candidate}.py`))
+  const candidate = join3(base, ...parts);
+  if (existsSync9(`${candidate}.py`))
     return `${candidate}.py`;
-  if (existsSync10(join5(candidate, "__init__.py")))
-    return join5(candidate, "__init__.py");
+  if (existsSync9(join3(candidate, "__init__.py")))
+    return join3(candidate, "__init__.py");
   return null;
 }
 function resolveRustImport(specifier, fromFile, scanRoot) {
-  const dir = dirname5(fromFile);
+  const dir = dirname4(fromFile);
   if (specifier.startsWith("mod:")) {
     const name = specifier.slice(4);
-    const asFile = join5(dir, `${name}.rs`);
-    if (existsSync10(asFile))
+    const asFile = join3(dir, `${name}.rs`);
+    if (existsSync9(asFile))
       return asFile;
-    const asDir = join5(dir, name, "mod.rs");
-    if (existsSync10(asDir))
+    const asDir = join3(dir, name, "mod.rs");
+    if (existsSync9(asDir))
       return asDir;
   } else if (specifier.startsWith("crate:")) {
     const name = specifier.slice(6);
-    const srcDir = join5(scanRoot, "src");
-    const asFile = join5(srcDir, `${name}.rs`);
-    if (existsSync10(asFile))
+    const srcDir = join3(scanRoot, "src");
+    const asFile = join3(srcDir, `${name}.rs`);
+    if (existsSync9(asFile))
       return asFile;
-    const asDir = join5(srcDir, name, "mod.rs");
-    if (existsSync10(asDir))
+    const asDir = join3(srcDir, name, "mod.rs");
+    if (existsSync9(asDir))
       return asDir;
   }
   return null;
@@ -3387,7 +2870,7 @@ function getGoModulePath(scanRoot) {
   if (_goModuleCache !== undefined)
     return _goModuleCache;
   try {
-    const goMod = readFileSync9(join5(scanRoot, "go.mod"), "utf-8");
+    const goMod = readFileSync8(join3(scanRoot, "go.mod"), "utf-8");
     const match = goMod.match(/^module\s+(\S+)/m);
     _goModuleCache = match ? match[1] : null;
   } catch {
@@ -3400,13 +2883,13 @@ function resolveGoImport(specifier, scanRoot) {
   if (!modulePath || !specifier.startsWith(modulePath))
     return null;
   const relPath = specifier.slice(modulePath.length + 1);
-  const dir = join5(scanRoot, relPath);
-  if (existsSync10(dir) && statSync3(dir).isDirectory())
+  const dir = join3(scanRoot, relPath);
+  if (existsSync9(dir) && statSync2(dir).isDirectory())
     return dir;
   return null;
 }
 function resolveImportPath(specifier, fromFile, scanRoot) {
-  const fileExt = extname9(fromFile).toLowerCase();
+  const fileExt = extname7(fromFile).toLowerCase();
   if (fileExt === ".py") {
     return resolvePythonImport(specifier, fromFile);
   }
@@ -3416,18 +2899,18 @@ function resolveImportPath(specifier, fromFile, scanRoot) {
   if (fileExt === ".go" && scanRoot) {
     return resolveGoImport(specifier, scanRoot);
   }
-  const dir = dirname5(fromFile);
-  const raw = resolve4(dir, specifier);
-  if (existsSync10(raw) && statSync3(raw).isFile())
+  const dir = dirname4(fromFile);
+  const raw = resolve3(dir, specifier);
+  if (existsSync9(raw) && statSync2(raw).isFile())
     return raw;
   for (const ext of [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]) {
     const withExt = `${raw}${ext}`;
-    if (existsSync10(withExt))
+    if (existsSync9(withExt))
       return withExt;
   }
   for (const ext of [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]) {
-    const index = join5(raw, `index${ext}`);
-    if (existsSync10(index))
+    const index = join3(raw, `index${ext}`);
+    if (existsSync9(index))
       return index;
   }
   return null;
@@ -3440,7 +2923,7 @@ function collectFiles(dir) {
       return;
     let entries;
     try {
-      entries = readdirSync4(current);
+      entries = readdirSync2(current);
     } catch {
       return;
     }
@@ -3451,14 +2934,14 @@ function collectFiles(dir) {
       }
       if (SKIP_DIRS.has(entry))
         continue;
-      const full = join5(current, entry);
+      const full = join3(current, entry);
       try {
         const stat = lstatSync(full);
         if (stat.isSymbolicLink())
           continue;
         if (stat.isDirectory()) {
           walk(full, depth + 1);
-        } else if (stat.isFile() && SCAN_EXTS.has(extname9(full))) {
+        } else if (stat.isFile() && SCAN_EXTS.has(extname7(full))) {
           if (stat.size <= MAX_FILE_SIZE) {
             files.push(full);
           }
@@ -3474,7 +2957,7 @@ function collectFiles(dir) {
   return files;
 }
 function findImporters(targetFile, scanRoot, depth = 1) {
-  if (!existsSync10(scanRoot))
+  if (!existsSync9(scanRoot))
     return [];
   const clampedDepth = Math.min(Math.max(depth, 1), 3);
   const files = collectFiles(scanRoot);
@@ -3482,29 +2965,29 @@ function findImporters(targetFile, scanRoot, depth = 1) {
   const allImporters = [];
   function findDirectImporters(targetAbs) {
     const direct = [];
-    const targetDir = dirname5(targetAbs);
-    const targetExt = extname9(targetAbs).toLowerCase();
+    const targetDir = dirname4(targetAbs);
+    const targetExt = extname7(targetAbs).toLowerCase();
     for (const file of files) {
-      const fileAbs = resolve4(file);
+      const fileAbs = resolve3(file);
       if (fileAbs === targetAbs)
         continue;
-      if (targetExt === ".go" && extname9(file).toLowerCase() === ".go" && dirname5(fileAbs) === targetDir) {
+      if (targetExt === ".go" && extname7(file).toLowerCase() === ".go" && dirname4(fileAbs) === targetDir) {
         direct.push(file);
         continue;
       }
       try {
-        const content = readFileSync9(file, "utf-8");
+        const content = readFileSync8(file, "utf-8");
         const specifiers = extractRelativeImports(content, file);
         for (const spec of specifiers) {
           const resolved = resolveImportPath(spec, file, scanRoot);
           if (!resolved)
             continue;
-          if (extname9(file).toLowerCase() === ".go") {
-            if (resolve4(resolved) === targetDir) {
+          if (extname7(file).toLowerCase() === ".go") {
+            if (resolve3(resolved) === targetDir) {
               direct.push(file);
               break;
             }
-          } else if (resolve4(resolved) === targetAbs) {
+          } else if (resolve3(resolved) === targetAbs) {
             direct.push(file);
             break;
           }
@@ -3514,15 +2997,15 @@ function findImporters(targetFile, scanRoot, depth = 1) {
     if (targetExt === ".py") {
       const targetName = targetAbs.replace(/\.py$/, "").split("/").pop();
       for (const file of files) {
-        const fileAbs = resolve4(file);
+        const fileAbs = resolve3(file);
         if (fileAbs === targetAbs || direct.includes(file))
           continue;
-        if (extname9(file).toLowerCase() !== ".py")
+        if (extname7(file).toLowerCase() !== ".py")
           continue;
         try {
-          const content = readFileSync9(file, "utf-8");
+          const content = readFileSync8(file, "utf-8");
           const bareImport = new RegExp(`from\\s+\\.\\s+import\\s+(?:.*\\b${targetName}\\b)`, "m");
-          if (bareImport.test(content) && dirname5(fileAbs) === targetDir) {
+          if (bareImport.test(content) && dirname4(fileAbs) === targetDir) {
             direct.push(file);
           }
         } catch {}
@@ -3530,7 +3013,7 @@ function findImporters(targetFile, scanRoot, depth = 1) {
     }
     return direct;
   }
-  let currentTargets = [resolve4(targetFile)];
+  let currentTargets = [resolve3(targetFile)];
   for (let d = 0;d < clampedDepth; d++) {
     const nextTargets = [];
     for (const target of currentTargets) {
@@ -3539,8 +3022,8 @@ function findImporters(targetFile, scanRoot, depth = 1) {
       visited.add(target);
       const direct = findDirectImporters(target);
       for (const imp of direct) {
-        const impAbs = resolve4(imp);
-        if (!visited.has(impAbs) && impAbs !== resolve4(targetFile)) {
+        const impAbs = resolve3(imp);
+        if (!visited.has(impAbs) && impAbs !== resolve3(targetFile)) {
           allImporters.push(imp);
           nextTargets.push(impAbs);
         }
@@ -3554,15 +3037,15 @@ function findImporters(targetFile, scanRoot, depth = 1) {
 }
 
 // src/hooks/detectors/spec-trace-check.ts
-import { existsSync as existsSync11, readFileSync as readFileSync10 } from "fs";
-import { basename as basename6, dirname as dirname6, relative } from "path";
+import { existsSync as existsSync10, readFileSync as readFileSync9 } from "fs";
+import { basename as basename5, dirname as dirname5, relative } from "path";
 function validateTestCoversImpl(testFile, _testFunction, implFile, _projectRoot) {
-  if (!existsSync11(testFile))
+  if (!existsSync10(testFile))
     return false;
   try {
-    const content = readFileSync10(testFile, "utf-8");
-    const implBasename = basename6(implFile).replace(/\.[^.]+$/, "");
-    const implRelative = relative(dirname6(testFile), implFile).replace(/\\/g, "/").replace(/\.[^.]+$/, "");
+    const content = readFileSync9(testFile, "utf-8");
+    const implBasename = basename5(implFile).replace(/\.[^.]+$/, "");
+    const implRelative = relative(dirname5(testFile), implFile).replace(/\\/g, "/").replace(/\.[^.]+$/, "");
     const importPatterns = [
       new RegExp(`(?:import|require).*['"].*${escapeRegex2(implRelative)}(?:\\.[^'"]*)?['"]`, "m"),
       new RegExp(`(?:import|require).*['"].*/${escapeRegex2(implBasename)}(?:\\.[^'"]*)?['"]`, "m")
@@ -3780,7 +3263,7 @@ var TOOL_DEFS = [
   },
   {
     name: "get_file_health_score",
-    description: "Compute a 0-10 health score for a file by aggregating findings from all computational detectors (security, semantic, duplication, dead-imports, hallucinated-imports, export-breaking, convention). 10 = no issues, 0 = critical. Returns score and per-detector breakdown.",
+    description: "Compute a 0-10 health score for a file by aggregating findings from computational detectors (security, semantic, duplication, dead-imports, export-breaking, complexity, test-quality). 10 = no issues, 0 = critical. Returns score and per-detector breakdown.",
     inputSchema: {
       type: "object",
       properties: {
@@ -4183,7 +3666,7 @@ function handleTool(name, cwd, args) {
           ]
         };
       }
-      const resolvedHealth = resolve5(filePath);
+      const resolvedHealth = resolve4(filePath);
       if (!resolvedHealth.startsWith(`${cwd}/`)) {
         return {
           content: [
@@ -4369,14 +3852,14 @@ function handleTool(name, cwd, args) {
       if (!planPath) {
         return { content: [{ type: "text", text: "Error: plan_path is required." }] };
       }
-      const resolvedPath = resolve5(cwd, planPath);
+      const resolvedPath = resolve4(cwd, planPath);
       const allowedBases = [
-        resolve5(join6(cwd, ".claude", "plans")),
-        resolve5(join6(homedir3(), ".claude", "plans"))
+        resolve4(join4(cwd, ".claude", "plans")),
+        resolve4(join4(homedir3(), ".claude", "plans"))
       ];
       const envPlansDir = process.env.CLAUDE_PLANS_DIR;
       if (envPlansDir)
-        allowedBases.push(resolve5(envPlansDir));
+        allowedBases.push(resolve4(envPlansDir));
       const isAllowed = allowedBases.some((base) => resolvedPath.startsWith(`${base}/`)) && resolvedPath.endsWith(".md");
       if (!isAllowed) {
         return {
@@ -4385,7 +3868,7 @@ function handleTool(name, cwd, args) {
           ]
         };
       }
-      if (!existsSync12(resolvedPath)) {
+      if (!existsSync11(resolvedPath)) {
         return {
           content: [{ type: "text", text: "Plan not found (already archived or path incorrect)." }]
         };

@@ -84,7 +84,6 @@ describe("db", () => {
 	describe("schema constraints", () => {
 		it("pending_fixes UNIQUE(project_id, file, gate) prevents duplicates", () => {
 			setProjectPath("/tmp/test");
-			const pid = getProjectId();
 			const db = getDb();
 
 			db.prepare(

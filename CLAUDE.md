@@ -1,24 +1,24 @@
 # qult
 
-**Quality by Structure, Not by Promise.** Claude Code の品質を構造で守る evaluator harness。Claude Code Plugin として配布。
+**Quality by Convention, Not by Coercion.** Claude Code の品質を rules + agents + MCP で支える evaluator harness。Claude Code Plugin として配布。v0.29 で hooks 全廃止。
 
 ## 哲学
 
-- **The Wall doesn't negotiate** — プロンプトは提案。hooks は強制。品質を約束に委ねない
-- **architect が設計し、agent が実装する** — 人間は何を作るかを決める。AIはどう作るかを実行する
-- **Proof or Block** — 証拠なき完了宣言は構造的にブロック
-- **fail-open** — qult の障害で開発を止めない。壊れたら道を開ける
+- **架構より教化** — Claude Code 公式 hooks の不安定性 (#16538 等) と中断による生産性低下を踏まえ、強制ではなく合意による品質維持にシフト
+- **architect が設計し、agent が実装する** — 人間は何を作るかを決める。AI はどう作るかを実行する
+- **Independent Review Required** — 大きな変更は必ず 4-stage 独立レビュー (Spec → Quality → Security → Adversarial)
+- **fail-open** — qult の障害で開発を止めない
 
 ## スタック
 
 TypeScript (Bun 1.3+, ESM) / vitest (テスト) / Biome (lint) / bun:sqlite (状態管理) / raw JSON-RPC MCP (状態公開)
 
-**ランタイム要件**: Bun 必須（hooks, MCP server は `bun` で実行）、Semgrep 必須（未インストール時はコミットをブロック。`brew install semgrep` or `pip install semgrep`。`/qult:skip semgrep-required` で一時回避可能）
+**ランタイム要件**: Bun 必須（MCP server は `bun` で実行）、Semgrep 推奨（security-check で使用、`brew install semgrep` or `pip install semgrep`）
 
 ## コマンド
 
 ```bash
-bun run build    # bun build (hook.mjs + mcp-server.mjs)
+bun run build    # bun build (mcp-server.mjs のみ)
 bun run typecheck && bun run lint  # tsc --noEmit + Biome lint
 bun run lint:fix # Biome 自動修正
 bun run test     # vitest run
@@ -33,60 +33,72 @@ qult/
 ├── .claude-plugin/marketplace.json  # マーケットプレイス定義
 ├── plugin/                          # プラグイン本体
 │   ├── .claude-plugin/plugin.json
-│   ├── hooks/hooks.json             # 7 hooks
+│   ├── rules/                       # ~/.claude/rules/ に配布される workflow rules (5 ファイル)
 │   ├── .mcp.json                    # MCP server
 │   ├── skills/                      # 12 skills
-│   ├── agents/                      # 6 agents
+│   ├── agents/                      # 7 agents (4 reviewer + plan-generator/evaluator + quality-guardian)
 │   ├── output-styles/               # 出力スタイル
 │   ├── .lsp.json                    # LSP server 設定
 │   ├── settings.json                # デフォルトエージェント設定
-│   └── dist/                        # バンドル (hook.mjs, mcp-server.mjs)
+│   └── dist/                        # バンドル (mcp-server.mjs)
 └── src/                             # ソースコード (開発用)
 ```
 
 ## 設計原則
 
-1. **The Wall > 情報提示** — DENY (exit 2) が唯一の強制手段
-2. **fail-open** — 全 hook は try-catch で握りつぶす。qult の障害で Claude を止めない
-3. **Proof or Block** — 品質を構造で保証する。仮定を stress-test し、崩れたら削除
-4. **hooks = 検出 + ブロック、MCP = 情報伝達** — stdout 不使用 (#16538 回避)
+1. **Rules > Hooks** — `~/.claude/rules/qult-*.md` で workflow を Claude に教える。hooks は使わない
+2. **fail-open** — qult の障害で Claude を止めない
+3. **Independent Review** — `/qult:review` (4 stage) でレビュー多様性を保証 (sonnet × 3 + opus × 1)
+4. **MCP = 情報伝達 + 状態記録** — DB と Claude をつなぐ唯一の経路
 
 ## ルール
 
 ### ビルド
 
-- `bun build.ts` → `plugin/dist/hook.mjs` + `plugin/dist/mcp-server.mjs` (target: bun)
+- `bun build.ts` → `plugin/dist/mcp-server.mjs` (target: bun)
 - **npm dependencies ゼロ** — 全て devDependencies + bun build バンドル。bun:sqlite はランタイム組み込み
 - `better-sqlite3` は devDependency（vitest 用の bun:sqlite 互換 shim）
 
-### Hook 設計 (7 hooks)
+### Rules (5 ファイル)
 
-- 全 hook は fail-open (try-catch で握りつぶす)
-- exit 2 = DENY/block (唯一の強制手段)。stderr に理由を出力
-- **enforcement hooks は stdout 不使用** — plugin hook output bug (#16538) を回避
-- SessionStart: DB セッション初期化、startup/clear 時のみ pending-fixes クリア
-- PostToolUse: gate 並列実行 (Promise.allSettled) → state 書き込み (pending-fixes)。Bash install コマンド検出時は dep-vuln-check (osv-scanner) + hallucinated-package-check (レジストリ存在確認) を実行。Edit/Write 時は AST データフロー解析 (web-tree-sitter, 7言語対応, 3ホップ汚染追跡) + 複雑度メトリクス (cyclomatic/cognitive, advisory のみ) も実行
-- PreToolUse: pending-fixes チェック → exit 2 (DENY)。Bash は `if: "Bash(git commit*)"` で絞り込み
-- Stop/SubagentStop: 完了条件チェック → exit 2 (block)
-- TaskCompleted: Verify テスト実行 → state 書き込み
-- PostCompact: compaction 後に pending-fixes と session 状態を stdout で再注入
-- PreToolUse (ExitPlanMode): 1回目を DENY してセッション全体の漏れチェックを強制
-- 全 state は `~/.qult/qult.db` (SQLite WAL mode) に保存。プロジェクト内に `.qult/` は作らない
-- lazyInit: SessionStart が発火しない環境向けの fallback
+`plugin/rules/` のテンプレートを `/qult:init` で `~/.claude/rules/` に配布（常に上書き）:
+
+- `qult-workflow.md` — Plan → Implement → Review → Finish の流れ
+- `qult-pre-commit.md` — コミット前のチェックリスト（test, review, finish）
+- `qult-plan-mode.md` — `/qult:plan-generator` の利用、`EnterPlanMode` 禁止
+- `qult-review.md` — `/qult:review` 4-stage の必要条件と detector context
+- `qult-quality.md` — Tier 1 (常時) / Opt-in detectors の整理、TDD 強制なし
 
 ### MCP Server
 
 - Claude が状態を取得・操作する経路
 - raw stdio JSON-RPC 実装 (SDK 依存なし)
-- 読み取り: get_pending_fixes, get_session_status, get_gate_config, get_detector_summary
+- 読み取り: get_pending_fixes, get_session_status, get_gate_config, get_detector_summary, get_file_health_score
 - 分析: get_harness_report, get_handoff_document, get_metrics_dashboard, get_flywheel_recommendations
 - 操作: disable_gate, enable_gate, clear_pending_fixes, set_config, save_gates
-- 依存: generate_sbom (CycloneDX SBOM 生成, osv-scanner/syft), get_dependency_summary (エコシステム別パッケージ・脆弱性集計)
+- 依存: generate_sbom (CycloneDX SBOM 生成, osv-scanner/syft), get_dependency_summary
 - 記録: record_review, record_test_pass, record_stage_scores, record_human_approval
 - get_flywheel_recommendations: セッション横断パターン分析に基づく閾値調整推奨を返す
 - 操作（追加）: apply_flywheel_recommendations (raise 方向自動適用), transfer_knowledge (プロジェクト間知識転移 + rules テンプレート生成)
-- disable_gate は gate 名をバリデーション（gate_configs テーブルのキー + "review", "security-check", "dead-import-check", "duplication-check", "dep-vuln-check", "hallucinated-package-check", "dataflow-check", "complexity-check", "mutation-test"）
 - MCP tool の呼び出しルールは MCP server instructions で注入（プロジェクトにファイル配置しない）
+
+### Reviewer モデル
+
+| Stage | Model | 理由 |
+|-------|-------|------|
+| spec-reviewer | sonnet | プランとの機械的照合、sonnet で十分 |
+| quality-reviewer | sonnet | 高速、design smell の主要パターンは捕捉可能 |
+| **security-reviewer** | **opus** | 高リスク。Veracode 45% / CSA AI-CVE 6 倍を踏まえ最強モデル |
+| **adversarial-reviewer** | **opus** | 最終番人。edge case を捕捉 |
+| plan-generator | sonnet | 生成タスク、sonnet で十分 |
+| **plan-evaluator** | **opus** | 仕様品質ゲート。プランの腐敗が下流全体に波及するため |
+
+### Detector triage (v0.29)
+
+- **Tier 1 (常時、`/qult:review` 推奨)**: security-check, dep-vuln-check, hallucinated-package-check, test-quality-check, export-check
+- **Opt-in (`enable_gate` で起動)**: dataflow-check, complexity-check, duplication-check, semantic-check, mutation-test
+- **削除済み**: convention-check, import-check (v0.29)
+- **ユーティリティ維持** (auto-fire しない、MCP/LSP からのみ参照): dead-import-check (LSP fallback), spec-trace-check (`get_call_coverage` MCP tool)
 
 ### Config 優先順位
 
@@ -98,21 +110,19 @@ qult/
 - gates.function_size_limit: 関数サイズ制限（デフォルト 50行、`QULT_FUNCTION_SIZE_LIMIT`）
 - gates.mutation_score_threshold: ミューテーションスコア閾値（デフォルト 0 = 無効、`QULT_MUTATION_SCORE_THRESHOLD`）
 
-### 反復セキュリティカウンター
+### State
 
-- 同一ファイルの編集回数を追跡（`incrementFileEditCount`、モジュールスコープ Map）
-- 閾値（デフォルト 5 回、`escalation.security_iterative_threshold`）超過で advisory パターンを blocking PendingFix に昇格
-- 根拠: Security Degradation in Iterative AI Code 論文 — 反復改善で脆弱性 37.6% 増加
-
-### advisory → blocking 昇格
-
-- **security-check**: CORS wildcard、hardcoded debug=true、source map exposure を DANGEROUS_PATTERNS に昇格（suppress 付き）
-- **test-quality-check**: empty-test、always-true、trivial-assertion、constant-self を blocking PendingFix 化
-- **dead-import-check**: 警告カウンター ≥ `escalation.dead_import_blocking_threshold`（デフォルト 5）で blocking 化
+- 全 state は `~/.qult/qult.db` (SQLite WAL mode) に保存。プロジェクト内に `.qult/` は作らない
 
 ### Gates
 
 - on_write: 編集時 (lint, typecheck) / on_commit: コミット時 (test) / on_review: レビュー時 (e2e)
+- 自動 fire はしない。`/qult:review` skill が gate コマンドを参照して reviewer に渡す
+
+### TDD
+
+- v0.29 で構造的強制を撤廃 (TDAD 論文: プロンプトのみ TDD は品質悪化リスク)
+- TDD したい場合は plan の `Verify:` フィールドに記述、spec-reviewer が事後検証
 
 ### 消費者チェック
 
@@ -121,19 +131,14 @@ qult/
 ### Phase Gate (各コミット前に必ず実行)
 
 1. `bun vitest run` — 全テスト pass
-2. `bun vitest run src/__tests__/simulation.test.ts` — シミュレーション pass
-3. `bun tsc --noEmit && bun biome check src/` — 型 + lint clean
+2. `bun tsc --noEmit && bun biome check src/` — 型 + lint clean
+3. `bun run build` — ビルド成功
 4. `/qult:review` — 独立レビュー (自己評価は機能しない。必ずサブエージェントで実行)
 5. コミット — Phase Gate 通過後にのみコミット
 
-### シミュレーション
-
-- Hook や状態管理の変更後は simulation.test.ts にシナリオを追加する
-- シミュレーションは本番フロー (Edit→gate→pending-fixes→DENY) を再現する統合テスト
-
 ### Claude Code 公式仕様の調査
 
-- Claude Code の hooks、plugins、skills、agents、MCP 等の公式仕様を調べるときは `claude-code-guide` エージェントを必ず使う
+- Claude Code の rules、plugins、skills、agents、MCP 等の公式仕様を調べるときは `claude-code-guide` エージェントを必ず使う
 - WebSearch や WebFetch で独自にリサーチしに行かないこと
 
 ### 設計の参考文献

@@ -1,11 +1,9 @@
 import { existsSync } from "node:fs";
 import type { PendingFix } from "../../types.ts";
 import { computeComplexitySync } from "./complexity-check.ts";
-import { detectConventionDrift } from "./convention-check.ts";
 import { detectDeadImports } from "./dead-import-check.ts";
 import { detectDuplication } from "./duplication-check.ts";
 import { detectExportBreakingChanges } from "./export-check.ts";
-import { detectHallucinatedImports } from "./import-check.ts";
 import { detectSecurityPatterns } from "./security-check.ts";
 import { detectSemanticPatterns } from "./semantic-check.ts";
 import { analyzeTestQuality } from "./test-quality-check.ts";
@@ -18,14 +16,12 @@ interface HealthResult {
 /** Per-finding penalty weights */
 const WEIGHTS: Record<string, number> = {
 	security: -2,
-	hallucinated_imports: -2,
 	export_breaking: -2,
 	dataflow: -2.5,
 	duplication: -1.5,
 	semantic: -1,
 	complexity: -1,
 	dead_imports: -1,
-	convention: -0.5,
 	test_quality: -1.5,
 };
 
@@ -76,26 +72,9 @@ export function computeFileHealthScore(file: string): HealthResult {
 	}
 
 	try {
-		const hallucinatedFixes = detectHallucinatedImports(file);
-		const count = countFindings(hallucinatedFixes);
-		if (count > 0)
-			breakdown.hallucinated_imports = (WEIGHTS.hallucinated_imports ?? DEFAULT_WEIGHT) * count;
-	} catch {
-		/* fail-open */
-	}
-
-	try {
 		const exportFixes = detectExportBreakingChanges(file);
 		const count = countFindings(exportFixes);
 		if (count > 0) breakdown.export_breaking = (WEIGHTS.export_breaking ?? DEFAULT_WEIGHT) * count;
-	} catch {
-		/* fail-open */
-	}
-
-	try {
-		const conventions = detectConventionDrift(file);
-		if (conventions.length > 0)
-			breakdown.convention = (WEIGHTS.convention ?? DEFAULT_WEIGHT) * conventions.length;
 	} catch {
 		/* fail-open */
 	}

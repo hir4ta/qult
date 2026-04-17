@@ -1,7 +1,7 @@
 ---
 name: quality-reviewer
 description: "Independent code quality reviewer. Evaluates design, maintainability, edge cases, and error handling. Use as Stage 2 of /qult:review. NOT for spec compliance or security — those are separate stages."
-model: opus
+model: sonnet
 allowed-tools:
   - Read
   - Glob
