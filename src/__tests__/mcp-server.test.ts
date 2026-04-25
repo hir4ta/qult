@@ -63,7 +63,7 @@ describe("TOOL_DEFS", () => {
 		expect(names).toContain("enable_gate");
 		expect(names).toContain("record_test_pass");
 		expect(names).toContain("record_review");
-		// New v1.0 spec tools
+		// New spec tools
 		expect(names).toContain("get_active_spec");
 		expect(names).toContain("complete_wave");
 		expect(names).toContain("update_task_status");

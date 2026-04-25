@@ -1,42 +1,62 @@
 ---
 name: config
-description: View or change qult config values (score thresholds, iteration limits, review file threshold). Use to adjust quality gate sensitivity for the current project. NOT for gate management (use /qult:skip instead).
+description: View or change qult config values stored in .qult/config.json. Includes review thresholds, spec_eval phase thresholds, and reviewer model overrides. NOT for gate enable/disable (use /qult:skip).
 user_invocable: true
 ---
 
 # /qult:config
 
-View or change qult configuration values.
+View or change qult configuration values. State lives in `.qult/config.json` (project-local, committed); `~/.qult/` global config is **not used**.
 
-## Usage
+## Show
 
-The user will specify what they want:
-- "show config" / "current settings" -> show current config
-- "set score threshold to 10" / "lower review threshold" -> change a value
-- "reset config" -> use MCP set_config to reset values to defaults
+1. Call `mcp__plugin_qult_qult__get_project_status()` — response includes `review_config` (all review settings + reviewer model overrides).
+2. If `.qult/config.json` exists, also present its raw contents so the architect sees what is project-specific vs default.
 
-## Steps
+## Change
 
-### Show current config
+Allowed keys (depth 2 or 3 — `setConfigKey` rejects anything else):
 
-1. Call `mcp__plugin_qult_qult__get_project_status()` — response includes `review_config` field with all current review settings (score_threshold, dimension_floor, max_iterations, require_human_approval, low_only_passes, models)
-2. Present current values with defaults noted. For `plan_eval.*` and other non-review keys, display defaults since they are not yet enriched; mention that `set_config` is required to change them
+### review (4-stage independent review on changed code)
 
-### Change a config value
+| key | type | default | meaning |
+|---|---|---|---|
+| `review.score_threshold` | number | 30 | aggregate of 8 dimensions (max 40) |
+| `review.max_iterations` | number | 3 | retry cap when reviewers FAIL |
+| `review.required_changed_files` | number | 5 | file-count trigger for /qult:review prompt |
+| `review.dimension_floor` | number | 4 | minimum per-dimension score (1-5) |
+| `review.require_human_approval` | boolean | false | if true, architect must call `record_human_approval` |
+| `review.low_only_passes` | boolean | false | if true, accept reviews where all findings are `[low]` |
+| `review.models.spec` | string | "sonnet" | one of: sonnet / opus / haiku / inherit |
+| `review.models.quality` | string | "sonnet" | |
+| `review.models.security` | string | "opus" | |
+| `review.models.adversarial` | string | "opus" | |
 
-Allowed keys:
-- `review.score_threshold` (default: 30) — minimum aggregate review score across 4 stages (8-40). 8 dimensions: Completeness, Accuracy, Design, Maintainability, Vulnerability, Hardening, EdgeCases, LogicCorrectness.
-- `review.max_iterations` (default: 3) — max review retry cycles
-- `review.required_changed_files` (default: 5) — file count triggering review requirement
-- `review.dimension_floor` (default: 4) — minimum score per individual dimension (1-5). Any dimension below this floor blocks regardless of aggregate score.
-- `review.low_only_passes` (default: false) — if true, when all findings are low severity only, accept review as PASS without further iteration
-- `plan_eval.score_threshold` (default: 12) — minimum aggregate plan eval score (3-15)
-- `plan_eval.max_iterations` (default: 2) — max plan eval retry cycles
+### spec_eval (per-phase gate when /qult:spec runs)
 
-1. Call `mcp__plugin_qult_qult__set_config({ key: "<key>", value: <number> })`
-2. Confirm the change
+These are read directly from `.qult/config.json` by `/qult:spec` (no MCP setter — the architect edits the file directly or via `set_config` on a flat key path):
 
-### Reset config
+| key | type | default | meaning |
+|---|---|---|---|
+| `spec_eval.thresholds.requirements` | number | 18 | of 20 |
+| `spec_eval.thresholds.design` | number | 17 | of 20 |
+| `spec_eval.thresholds.tasks` | number | 16 | of 20 |
+| `spec_eval.dimension_floor` | number | 4 | of 5 |
+| `spec_eval.iteration_limit` | number | 3 | rounds before force-progress prompt |
 
-1. For each config key, call `mcp__plugin_qult_qult__set_config({ key: "<key>", value: <default_value> })` with its default value
-2. Confirm reset to defaults
+### plan_eval (deprecated alias kept for back-compat)
+
+`plan_eval.score_threshold` / `plan_eval.max_iterations` still exist in the loaded config but **are no longer consumed** (replaced by `spec_eval`). Setting them is a no-op for the SDD pipeline; it's kept only to avoid breaking older detectors that read the field.
+
+## Procedure
+
+1. Validate the key is one of the allowed set above.
+2. Call `mcp__plugin_qult_qult__set_config({ key, value })`.
+3. The MCP handler writes to `.qult/config.json` (atomic) and resets the in-process cache.
+4. Confirm the new value via `get_project_status`.
+
+## Reset to defaults
+
+`.qult/config.json` is project-local. To reset:
+- Delete the entire file: `rm .qult/config.json`. Defaults take effect immediately (no migration needed).
+- Or remove a single key by editing the JSON directly.

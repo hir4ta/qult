@@ -177,7 +177,14 @@ How would you like to finish this work? (On base branch [base])
 
 ### Step 5: Cleanup
 
-1. **Archive plan file**: If a plan was active during this session, call `mcp__plugin_qult_qult__archive_spec({ plan_path: "<path>" })` to move the plan file to `archive/` subdirectory. This prevents the plan from being detected in future sessions. Get the plan path from `get_project_status` or the plan file location in `.claude/plans/`.
+1. **Archive the spec**: If `mcp__plugin_qult_qult__get_active_spec()` returns a non-null spec AND the chosen finish option is **Merge / PR / Commit-directly**, call `mcp__plugin_qult_qult__archive_spec({ spec_name: "<name>" })`. The MCP tool moves `.qult/specs/<name>/` → `.qult/specs/archive/<name>[-YYYYMMDD-HHMMSS]/`. Then create a commit recording the rename:
+   ```bash
+   git add -A .qult/specs
+   git commit -m "<conventional-prefix>: archive spec <name>"
+   # ↑ subject follows project conventions; read CLAUDE.md / recent git log to match style
+   ```
+   - For **Hold**: do NOT archive. The spec stays active.
+   - For **Discard**: do NOT archive (the architect chose to abandon).
 
 2. **Worktree cleanup**: If the branch was a git worktree:
    - `git worktree remove [path]` (after merge/discard)

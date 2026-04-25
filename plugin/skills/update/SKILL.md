@@ -40,9 +40,15 @@ Output format:
 qult rules updated to v<VERSION>:
   - qult-workflow.md
   - qult-pre-commit.md
-  - qult-plan-mode.md
+  - qult-spec-mode.md
   - qult-review.md
   - qult-quality.md
+```
+
+If the user previously had `qult-plan-mode.md` (v0.x), remove it during this step:
+
+```bash
+rm -f ~/.claude/rules/qult-plan-mode.md
 ```
 
 Remind the architect to reload Claude Code (or start a new session) so the updated rules take effect.

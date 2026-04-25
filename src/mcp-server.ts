@@ -676,7 +676,7 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			patchCurrent({ finish_started_at: new Date().toISOString() });
 			return { content: [{ type: "text", text: "Finish started recorded." }] };
 		}
-		// archive_plan removed in v1.0 — replaced by archive_spec (handled above).
+		// archive_plan removed — replaced by archive_spec (handled above).
 
 		case "get_impact_analysis": {
 			const file = typeof args?.file === "string" ? args.file : "";

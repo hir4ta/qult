@@ -1,14 +1,14 @@
 /**
  * Cache reset utility for tests.
  *
- * Pre-v1.0 this also flushed session-state and pending-fixes write caches
- * to SQLite. Since v1.0 those modules write directly to JSON files (no
- * batching), so flush is a no-op and we only reset the config cache.
+ * State modules write JSON files synchronously, so there is nothing to
+ * flush at runtime. The exported `flushAll` is a no-op kept for API
+ * compatibility; `resetAllCaches` only resets the in-process config cache.
  */
 
 import { resetConfigCache } from "../config.ts";
 
-/** Flush dirty caches. v1.0 has nothing to flush. */
+/** Flush dirty caches. No-op: state writes are synchronous. */
 export function flushAll(): void {
 	// no-op: file-based state writes synchronously.
 }

@@ -6,7 +6,7 @@ argument-hint: "<spec-name> <feature description>"
 
 # /qult:spec
 
-End-to-end orchestrator for the v1.0 SDD lifecycle. Consumes `$ARGUMENTS` as `<spec-name> <feature description...>`.
+End-to-end orchestrator for the SDD lifecycle. Consumes `$ARGUMENTS` as `<spec-name> <feature description...>`.
 
 > **C-hybrid lifecycle.** Spec drafting is a continuous flow with mandatory gates; Wave implementation is explicit (`/qult:wave-start` etc.).
 
@@ -63,7 +63,7 @@ Next: /qult:wave-start to begin Wave 1
 
 ## Don'ts
 
-- Don't run `EnterPlanMode` — that path was retired in v1.0.
+- Don't run `EnterPlanMode` — that path was retired.
 - Don't skip clarify under any condition; minimum 1 round is mandatory.
 - Don't write spec files in any directory other than `.qult/specs/<name>/`.
 - Don't call `record_spec_evaluator_score` with `forced_progress: true` unless the architect explicitly chose it.

@@ -1,6 +1,6 @@
 ---
 name: spec-generator
-description: "Generates the requirements / design / tasks markdown for a v1.0 spec under .qult/specs/<name>/. Phase-aware via the `phase` argument. Use when /qult:spec orchestrates a step (or /qult:design or /qult:tasks for retries)."
+description: "Generates the requirements / design / tasks markdown for a spec under .qult/specs/<name>/. Phase-aware via the `phase` argument. Use when /qult:spec orchestrates a step (or /qult:design or /qult:tasks for retries)."
 model: sonnet
 allowed-tools:
   - Read

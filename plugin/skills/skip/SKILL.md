@@ -20,24 +20,26 @@ The user will specify what they want:
 
 ### Disable a gate
 
-1. Call `mcp__plugin_qult_qult__disable_gate({ gate_name: "<name>" })`
-2. Confirm: "Gate '<name>' disabled for this session. It will not run on edits or block commits."
+1. Ask the architect for a `reason` (≥10 chars, ≥5 unique chars). Required for the audit log.
+2. Call `mcp__plugin_qult_qult__disable_gate({ gate_name, reason })`.
+3. Maximum 2 gates can be disabled at once — the MCP handler enforces this.
+4. Confirm: "Gate '<name>' disabled. Audit entry written."
 
 ### Re-enable a gate
 
-1. Call `mcp__plugin_qult_qult__enable_gate({ gate_name: "<name>" })`
+1. Call `mcp__plugin_qult_qult__enable_gate({ gate_name })`.
 2. Confirm: "Gate '<name>' re-enabled."
 
 ### Clear pending fixes
 
-1. Call `mcp__plugin_qult_qult__clear_pending_fixes()`
-2. Confirm: "All pending fixes cleared."
+1. Ask the architect for a `reason` explaining why the fixes are false positives.
+2. Call `mcp__plugin_qult_qult__clear_pending_fixes({ reason })`.
+3. Confirm: "All pending fixes cleared. Audit entry written."
 
 ## Notes
 
-- Disabled gates reset automatically on new sessions
-- `review` is a special gate name that skips the independent review requirement
-- Valid gate names: `review`, `security-check`, `semgrep-required`, `test-quality-check`, `dep-vuln-check`, `hallucinated-package-check`
-- To see current gate status, use `/qult:status`
-- To change thresholds, use `/qult:config`
-- To permanently change gates, re-run `/qult:init` to reconfigure
+- disabled gates persist in `.qult/state/gates.json` (project-local). They do **not** auto-reset across sessions — `/qult:skip` then `/qult:skip` to re-enable.
+- `review` is a special gate name that skips the 4-stage independent review requirement.
+- Valid gate names: `review`, `security-check`, `semgrep-required`, `test-quality-check`, `dep-vuln-check`, `hallucinated-package-check`.
+- All three operations (disable / enable / clear) write to `.qult/state/audit-log.ndjson` for traceability.
+- See current state: `/qult:status`. Change thresholds: `/qult:config`.
