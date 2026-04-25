@@ -59,37 +59,29 @@ export function Header({ version, activeSpec, columns }: Props): React.ReactElem
 		);
 	}
 
-	const bannerW = QULT_BANNER[0]?.length ?? 1;
 	const bannerH = QULT_BANNER.length;
+	const bannerW = QULT_BANNER[0]?.length ?? 0;
 
 	return (
 		<Box marginBottom={1} flexDirection="row" gap={2}>
-			<Box flexDirection="column">
-				{QULT_BANNER.map((line, row) => (
-					<Box
-						// biome-ignore lint/suspicious/noArrayIndexKey: banner lines are static
-						key={row}
-					>
-						{[...line].map((ch, col) => {
-							// 2-axis sampling: vertical position contributes 70%
-							// (slow drift through the gradient), horizontal 30%
-							// (subtle shimmer across each row).
-							const t =
-								(row / Math.max(1, bannerH - 1)) * 0.7 + (col / Math.max(1, bannerW - 1)) * 0.3;
-							const color = sampleGradient(GRADIENTS.aurora, t);
-							return (
-								<Text
-									// biome-ignore lint/suspicious/noArrayIndexKey: cells are positional
-									key={col}
-									color={color}
-									bold
-								>
-									{ch}
-								</Text>
-							);
-						})}
-					</Box>
-				))}
+			<Box flexDirection="column" width={bannerW} flexShrink={0}>
+				{QULT_BANNER.map((line, row) => {
+					// One <Text> per line — gradient walks vertically. The
+					// per-character variant flickered on first paint because
+					// Ink reconciled 200+ leaf nodes in a single pass.
+					const t = row / Math.max(1, bannerH - 1);
+					const color = sampleGradient(GRADIENTS.aurora, t);
+					return (
+						<Text
+							// biome-ignore lint/suspicious/noArrayIndexKey: banner lines are static
+							key={row}
+							color={color}
+							bold
+						>
+							{line}
+						</Text>
+					);
+				})}
 			</Box>
 			<Box flexDirection="column" justifyContent="center">
 				<Box gap={1}>
