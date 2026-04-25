@@ -10,6 +10,7 @@ import { ThemeProvider } from "@inkjs/ui";
 import { Box, Text } from "ink";
 import React from "react";
 import { useDashboardState } from "../hooks/useDashboardState.ts";
+import { useDetectorScan } from "../hooks/useDetectorScan.ts";
 import { useExitKeys } from "../hooks/useExitKeys.ts";
 import { useTerminalSize } from "../hooks/useTerminalSize.ts";
 import { COLORS, qultTheme } from "../theme.ts";
@@ -30,6 +31,10 @@ export function App(): React.ReactElement {
 		startedAt: STARTED_AT,
 		terminal: size,
 	});
+	// Live detector status — runs once on mount, in-memory only.
+	// Replaces the snapshot-derived detectors so the panel never sits at
+	// `never-run` when the user just opened the dashboard.
+	const scan = useDetectorScan();
 
 	const showEmpty = state.activeSpec === null;
 	const tier = layout.tier;
@@ -44,7 +49,7 @@ export function App(): React.ReactElement {
 					<Box flexDirection="column" gap={1}>
 						<PanelGrid tier={tier}>
 							<WavePanel waves={state.waves} flexGrow={1} minWidth={28} />
-							<DetectorPanel detectors={state.detectors} flexGrow={1} minWidth={28} />
+							<DetectorPanel detectors={scan.detectors} flexGrow={1} minWidth={28} />
 							<ReviewPanel reviews={state.reviews} flexGrow={1} minWidth={28} />
 						</PanelGrid>
 						{tier !== "narrow" && (

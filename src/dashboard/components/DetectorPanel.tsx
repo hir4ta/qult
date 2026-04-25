@@ -4,7 +4,7 @@
  * to draw the eye even when the panel is small.
  */
 
-import { Alert, Badge } from "@inkjs/ui";
+import { Alert, Badge, Spinner } from "@inkjs/ui";
 import { Box, Text } from "ink";
 import { COLORS } from "../theme.ts";
 import type { DetectorStatus, DetectorSummary } from "../types.ts";
@@ -23,6 +23,7 @@ const STATUS_COLOR: Record<DetectorStatus, string> = {
 	fail: COLORS.error,
 	skipped: COLORS.muted,
 	"never-run": COLORS.muted,
+	running: COLORS.primary,
 };
 
 export function DetectorPanel({
@@ -50,7 +51,11 @@ export function DetectorPanel({
 					<Box width={20}>
 						<Text>{d.id}</Text>
 					</Box>
-					<Badge color={STATUS_COLOR[d.status]}>{d.status}</Badge>
+					{d.status === "running" ? (
+						<Spinner label="scanning" />
+					) : (
+						<Badge color={STATUS_COLOR[d.status]}>{d.status}</Badge>
+					)}
 					{d.pendingFixes > 0 && (
 						<Text color={COLORS.warning}>
 							{d.pendingFixes} fix{d.pendingFixes === 1 ? "" : "es"}

@@ -30,7 +30,7 @@ export type DetectorId =
 	| "test-quality"
 	| "export";
 
-export type DetectorStatus = "pass" | "warn" | "fail" | "skipped" | "never-run";
+export type DetectorStatus = "pass" | "warn" | "fail" | "skipped" | "never-run" | "running";
 
 export interface DetectorSummary {
 	id: DetectorId;
