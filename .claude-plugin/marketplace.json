@@ -9,8 +9,8 @@
 		{
 			"name": "qult",
 			"source": "./plugin",
-			"description": "Claude Code 向け品質補助プラグイン。workflow rules + 独立 4 段レビュー + Tier 1 detectors。",
-			"version": "0.33.1",
+			"description": "Claude Code 向け品質補助プラグイン。Spec-Driven Development + 独立 4 段レビュー + Tier 1 detectors。",
+			"version": "1.0.0",
 			"category": "development"
 		}
 	]

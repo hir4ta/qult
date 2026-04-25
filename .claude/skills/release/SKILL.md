@@ -27,7 +27,7 @@ Arguments: `$ARGUMENTS`
 
 ## Validation Gate
 
-Run in order; **abort release if any fails**. Use the project's package.json scripts to ensure the correct Bun runtime (`bunx --bun vitest run` for native `bun:sqlite` resolution):
+Run in order; **abort release if any fails**. Use the project's package.json scripts to ensure the correct Bun runtime:
 
 ```
 bun run typecheck

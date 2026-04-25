@@ -13,137 +13,123 @@ qult の各コンポーネントが依存する仮定と、仮定が崩れた場
 2. 守れるなら該当コンポーネントを削除候補にする
 3. 守れないなら仮定は維持。このドキュメントを更新する
 
-前回のストレステスト: v0.14.0 (2026-03-27) -- 19機能削除、5 hooks + 8 state fields に簡素化。
-
-## Hook レイヤー
-
-### Plugin hooks の信頼性
-
-**仮定**: plugin/hooks/hooks.json だけでは hooks が発火しない環境がある。
-
-**根拠**: VS Code 拡張で plugin hooks が発火しない (#18547)、plugin hooks がマッチするが実行されない (#10225)。2026-03 時点で未解決。
-
-**対策**: `/qult:register-hooks` で `.claude/settings.local.json` にフォールバック登録できるようにした。plugin hooks と settings hooks が両方存在する場合、同一コマンドは重複排除される。
-
-**崩れたら**: Claude Code 側で plugin hooks の信頼性が修正されれば、register-hooks スキルは不要になる。ただし害はないので残しても良い。
-
-**検証方法**: #18547, #10225 の issue ステータスを定期的に確認。resolved になったら、plugin hooks のみで 5 セッション実行し、全 hooks が発火することを確認。
-
-### PostToolUse: Edit/Write 後の lint/typecheck 実行
-
-**仮定**: Claude は Edit 後に自発的に lint/typecheck を実行しない。実行しても結果を見て修正するとは限らない。
-
-**根拠**: SWE-bench 観察。Claude はテスト実行は比較的するが、lint は指示がない限り省略する傾向がある。
-
-**崩れたら**: on_write ゲートを advisory に格下げ（respond のみ、pending-fixes なし）。
-
-**検証方法**: 10 回の Edit セッションで、qult なしで lint エラーを自発修正する割合を計測。80% 超なら仮定は崩れている。
-
-### PreToolUse: pending-fixes があるファイル以外への Edit をブロック
-
-**仮定**: Claude は lint エラーを放置したまま別ファイルの編集に移る。
-
-**根拠**: 実運用で頻繁に観察。PostToolUse の advisory context (respond) だけでは 50% 以上の確率で無視される。
-
-**崩れたら**: DENY を削除し、respond のみに戻す。PreToolUse hook を advisory に変更。
-
-**検証方法**: respond のみ（DENY なし）で 10 セッション実行。lint エラー放置率を計測。20% 以下なら仮定は崩れている。
-
-### Stop: pending-fixes/incomplete plan/no review でブロック
-
-**仮定**: Claude は lint エラーが残っていても、プランが未完了でも、レビューなしでも停止しようとする。
-
-**根拠**: 長いタスクの終盤で「context anxiety」が発生し、品質チェックをスキップして早期完了を試みる。
-
-**崩れたら**: Stop hook を削除。advisory（respond）に格下げ。
-
-**検証方法**: Stop hook を advisory 化して 5 セッション実行。未完了のまま停止する割合を計測。
-
-### SubagentStop: reviewer 出力の構造検証 + スコア閾値
-
-**仮定**: qult-reviewer は PASS/FAIL verdict やスコアを出力せずに終了することがある。低スコアでも PASS を出す。
-
-**根拠**: LLM の「confident leniency」。評価者も出力フォーマットを省略することがある。
-
-**崩れたら**: 構造検証のみ削除（スコア閾値は残す）。出力フォーマットが 95% 以上正しいなら構造検証は不要。
-
-**検証方法**: SubagentStop の構造検証なしで 10 レビューを実行。不正フォーマット率を計測。
-
-### SessionStart: ゲート未設定時のプロンプト
-
-**仮定**: ユーザーはゲート設定を忘れる。
-
-**根拠**: init 直後は gates.json が空になりうる。
-
-**崩れたら**: v0.19.0 で init にゲート自動検出を統合済み。detect-gates は廃止。
-
-**検証方法**: init で自動検出が安定すれば、session-start のプロンプトは削除。
+主要なアーキテクチャ移行歴:
+- **v0.14.0** (2026-03-27) — 19 機能削除、5 hooks + 8 state fields に簡素化
+- **v1.0** (2026-04-25) — Hook 全廃、SQLite 全廃。markdown spec を single source of truth に、状態は `.qult/state/*.json` に file-based 化。
 
 ## State レイヤー
 
 ### Atomic write (write-to-temp + rename)
 
-**仮定**: hook プロセスが中断されるとファイルが破損する。
+**仮定**: ファイル書き込み中の中断・クラッシュでファイルが破損しうる。
 
-**根拠**: POSIX rename の原子性。hook は timeout 付きで実行され、タイムアウトで SIGTERM される。writeFileSync 途中での kill はファイル破損を引き起こす。
+**根拠**: POSIX rename の原子性は OS 保証。`<file>.tmp` に書いて `rename(2)` する 2 段書きで torn read を回避。
 
 **崩れたら**: この仮定は OS レベルなのでモデル進化では崩れない。削除不可。
 
-### Session-scoped state files
+### `.qult/state/*.json` を project-local の唯一の状態保管場所とする
 
-**仮定**: 複数の Claude Code セッションが同じプロジェクトで同時に実行される。
+**仮定**: 単一マシン・単一 architect 前提なら project-local ファイルで十分。global 設定 / cross-project 状態は不要。
 
-**根拠**: IDE の複数タブ、ターミナルの複数ウィンドウ。
+**根拠**: v0.x の `~/.qult/qult.db` (SQLite) は global テーブル + cross-project 履歴を持っていたが、実運用ではほぼ project-local データのみ参照されていた。global config は未使用機能。
 
-**崩れたら**: session scope を削除し、単一ファイルに戻す。並行セッションが実運用でない場合はオーバーヘッド。
+**崩れたら**: 複数 project 横断のメトリクス収集や、CI 上での履歴可視化が要件になれば cloud 同期 (`qult-cloud-plan.md` 参照) に格上げ。それ以外は project-local で十分。
 
-**検証方法**: registry.json の同時接続パターンを分析。
+**検証方法**: ユーザーが `~/.qult/` を作りたがるシグナル（issue / 機能要望）を観察。
 
-### Process-scoped cache + dirty flag
+### `.qult/specs/` の commit、`.qult/state/` の gitignore
 
-**仮定**: 1 hook 実行中に状態ファイルを複数回読み書きするが、ディスク I/O は 1 回で済ませたい。
+**仮定**: spec markdown はチームと共有すべき真実。state はセッション局所。
 
-**根拠**: PostToolUse は readPendingFixes → writePendingFixes + recordChangedFile と複数の状態操作を行う。毎回ディスクに書くと 3-5ms のレイテンシが追加される。
+**根拠**: spec はレビュアー / 後続セッションが読む。state は test_passed_at 等のローカルタイムスタンプで、commit してもノイズ。
 
-**崩れたら**: hook のレイテンシ要件が緩和されれば、キャッシュなしの直接 I/O に戻す。
+**崩れたら**: チーム機能を作るなら state も部分的に共有可能（例: review_completed_at は共有、test_passed_at はローカル）。spec 共有は必須維持。
 
-## Gate レイヤー
+### 単一 architect 前提（並行 worktree 編集はサポート外）
 
-### on_write / on_commit / on_review の3段ゲート
+**仮定**: 同じ `.qult/` を複数 worktree から同時に書くことはない。
 
-**仮定**: 品質チェックは「編集時」「コミット時」「レビュー時」の3段階で実行すべき。lint は即時、テストはコミット前、E2E はレビュー時。
+**根拠**: 個人開発主体。チーム前提だとロック / etag CAS が必要になりコストが見合わない。
 
-**根拠**: lint は高速 (< 1s) なので毎回実行可能。テストは数秒かかるので毎回は非効率。E2E は数分かかるのでレビュー時のみ。
+**崩れたら**: 並行性が必要になれば file-based mutex（`flock(2)` ベース）を導入。または cloud 同期で集中型ストレージ。
 
-**崩れたら**: テストが十分高速 (< 1s) なら on_write に統合。E2E が十分高速なら on_commit に統合。
+**検証方法**: 並行編集による missed update のレポートが上がるか観察。
 
-### run_once_per_batch
+## SDD パイプライン
 
-**仮定**: typecheck はプロジェクト全体を検査するので、1 ファイル編集ごとに実行する必要がない。
+### 必須 clarify ラウンド
 
-**根拠**: tsc --noEmit は 1-5s かかる。10 ファイル編集で 10 回実行すると 10-50s の遅延。
+**仮定**: Claude が初回に書く requirements には、architect が当たり前と思っている曖昧さが残る。
 
-**崩れたら**: typecheck が十分高速 (< 500ms) になれば、run_once_per_batch を削除。
+**根拠**: Spec Kit / tsumiki の経験則。曖昧な要件は下流の design / tasks の品質を毀損し、実装後に「想定と違う」を生む。
 
-## Evaluator レイヤー
+**崩れたら**: モデルが要件の曖昧さを自己検出して質問できるなら（現状でもある程度できる）、必須化を解除し opt-in に格下げ。
+
+**検証方法**: clarify を skip した spec の design スコアが、必須化したものと有意差なくなれば仮定は弱まっている。
+
+### spec-evaluator の 4 次元採点（threshold 18/17/16）
+
+**仮定**: requirements / design / tasks のそれぞれが、独立した次元（Completeness / Testability / Unambiguity / Feasibility 等）で十分に評価可能。
+
+**根拠**: 4 次元 × 5 段階 = 20 点満点で粒度が ergonomic（粗すぎず細かすぎず）。phase ごとに threshold を下げるのは「上流ほど重要」を反映。
+
+**崩れたら**: 評価次元が増減する設計変更があれば本数値を更新。スコアが常に上限張り付きなら threshold を上げる。
+
+**検証方法**: 実運用での phase ごとの score 分布を分析。中央値が threshold ± 1 を外れたら調整。
+
+### temperature=0 + threshold ± 1 retry
+
+**仮定**: LLM scoring には決定論性が必要。境界値での flap を 1 回 retry + 平均で抑制すれば実用十分。
+
+**根拠**: temperature=0 でも完全決定論ではない（Anthropic API 仕様）が、threshold 直近のスコアを 2 回平均化すれば flap 確率が大きく下がる。
+
+**崩れたら**: モデルが本当に決定論的になれば retry を削除。スコアが安定しないなら 3 サンプル median 等に拡張。
+
+## Wave / コミット紐付け
+
+### Wave 単位 = commit range（複数コミット可）
+
+**仮定**: architect は Wave 中に WIP コミットを刻みたい。1 Wave 1 commit を強制すると編集体験が悪い。
+
+**根拠**: 実装中の試行錯誤。range binding なら squash 不要、`git reset --soft` のリスクもない。
+
+**崩れたら**: 1 commit per Wave を強制する強い理由（外部規約等）が出れば squash モードを追加。
+
+**検証方法**: Wave あたり commit 数の分布を観察。常に 1 なら強制可、5+ なら現行が妥当。
+
+### `[wave-NN]` prefix（2 桁ゼロパディング、上限 99）
+
+**仮定**: prefix は `git log --grep` で検索でき、レビュアーが Wave 単位を識別できる。
+
+**根拠**: regex `\[wave-(\d{2})\]` は単純で堅牢。99 Wave / spec は十分実用的（initial cap 6 + review-fix で延長余地）。
+
+**崩れたら**: 100+ Wave に達する spec が出れば 3 桁化（`[wave-NNN]`）。だがそうなる前に spec を分割すべきサインなのでまず指針見直し。
+
+### Range 整合性検証（rebase / reset --soft で stale 検出）
+
+**仮定**: architect は Wave 完了後に rebase / reset --soft を行うことがあり、その場合古い Range の SHA は unreachable になる。
+
+**根拠**: 個人開発で頻繁。検出して再記録 / 中断を促す方が、嘘の Range が wave-NN.md に残るより安全。
+
+**崩れたら**: 履歴を git で改変しないチームなら検証は overhead。opt-out 可能な config を追加。
+
+## Reviewer / Detector
 
 ### 独立 reviewer エージェント
 
 **仮定**: Claude は自分の書いたコードを客観的に評価できない（confident leniency）。
 
-**根拠**: Anthropic の記事が明示的に述べている。自己評価は一貫して甘い。
+**根拠**: Anthropic 記事が明示。複数研究（self-review は自己バグの 64.5% 見逃し）でも裏付け。
 
-**崩れたら**: この仮定がモデル進化で崩れる可能性は低い。自己評価バイアスは訓練データレベルの問題。ただし将来のモデルで self-critique 能力が劇的に向上すれば、独立 reviewer を self-review に置き換え可能。
+**崩れたら**: モデルが self-critique で人間並みに保守的になれば独立 reviewer を self-review に置換可能。だが訓練データレベルの問題なので近未来は崩れにくい。
 
-**検証方法**: 同じ diff に対して self-review と独立 review のスコアを比較。差が 1 点以内なら仮定は崩れている。
+**検証方法**: 同一 diff に対して self-review と独立 review のスコア差を計測。差が 1 点以内なら仮定は弱まっている。
 
-### スコア閾値 30/40 (review) / 12/15 (plan_eval)
+### スコア閾値 30/40 (review)
 
-**仮定**: aggregate が下限未満のコードは改善の余地がある。
+**仮定**: aggregate < 30 のコードは改善余地がある。
 
-**根拠**:
-- review: 4 stage × 2 dimension = 8 次元 × 5 段階。30 = 全次元平均 3.75/5 ≈「各次元で minor issues あり」が合格ライン。加えて `review.dimension_floor: 4` で各次元 4 未満を別途 block
-- plan_eval: 3 次元 (Feasibility, Completeness, Clarity) × 5 段階。12 = 全次元平均 4.0/5
+**根拠**: 4 stage × 2 dimension = 8 次元 × 5 段階 = 40 点。30 = 全次元平均 3.75/5 ≈「各次元で minor issues あり」が合格ライン。`review.dimension_floor: 4` で各次元 4 未満を別途 block。
 
 **崩れたら**: 実運用でスコア分布を計測し、閾値を調整。全レビューが上限近傍なら閾値を上げる。下限付近で停滞するなら下げる。
 
@@ -151,9 +137,19 @@ qult の各コンポーネントが依存する仮定と、仮定が崩れた場
 
 **仮定**: 3 回の修正ループで改善が頭打ちになる。
 
-**根拠**: Self-Refine 研究: 「3 回以上の反復は収穫逓減」。
+**根拠**: Self-Refine 研究 (Madaan et al., 2023): 「3 回以上の反復は収穫逓減」。
 
-**崩れたら**: 実運用で 3 回目のイテレーションでのスコア改善幅を計測。改善なしが 80% 超なら 2 回に減らす。
+**崩れたら**: 実運用で 3 回目の改善幅が 0-1 点なら 2 回に削減検討。
+
+### Detector severity ベースの commit block
+
+**仮定**: detector が `severity ∈ {high, critical}` を返したら、commit を block するのが正しい。
+
+**根拠**: Tier 1 detector は false positive を抑えるよう設計されている（security-check の Semgrep ルール、osv-scanner の CVE データ等は外部知識ベース）。
+
+**崩れたら**: false positive 率が上がれば severity 判定の signed rule set 等が必要。現状は user-supplied detector の信頼性を out-of-scope と明記。
+
+**検証方法**: `clear_pending_fixes` の reason を分析。「false positive」が多発したら detector ロジック見直し。
 
 ## Review Requirement
 
@@ -163,9 +159,17 @@ qult の各コンポーネントが依存する仮定と、仮定が崩れた場
 
 **根拠**: 経験的な閾値。厳密な根拠はない。
 
-**崩れたら**: 実運用でレビューが価値を生む変更サイズの分布を計測。閾値を調整。
+**崩れたら**: 運用データで要調整。
 
 **注意**: この閾値は最も仮定が弱い。運用データ収集を優先すべき。
+
+### Spec 完了時のみの自動 review（Wave 単位は手動）
+
+**仮定**: Wave 単位で自動 review すると token コストが過大。spec 全体の整合性を見るには spec 完了時 1 回で十分。
+
+**根拠**: `/qult:review` は 40-100k トークン消費。Wave が 6 個ある spec で毎 Wave review すると数十万トークン。spec-evaluator が phase ごとに走っているので、コード review は最後で良い。
+
+**崩れたら**: Wave が破壊的（前 Wave の前提を覆す）ようなパターンが頻発するなら Wave 単位の最低限 review が必要。Wave 設計を見直す方が先。
 
 ## Calibration Rationale
 
@@ -176,13 +180,14 @@ qult の各コンポーネントが依存する仮定と、仮定が崩れた場
 - 4 stage (Spec / Quality / Security / Adversarial) × 2 dimension = 8 次元 × 5 段階、満点 40
 - 30 = 全次元平均 3.75/5 — 各次元で minor issues が 1 件許容されるライン
 - 加えて `review.dimension_floor` (default 4) で各次元 4 未満が 1 つでもあれば block（平均に埋もれた低スコア次元を拾う）
-- 29 以下は少なくとも 1 次元が 3/5 以下（reachable な問題あり）なので iteration の価値がある
 
-### plan_eval.score_threshold: 12/15
+### spec_eval.thresholds.{requirements: 18, design: 17, tasks: 16}
 
-- 3 次元 (Feasibility, Completeness, Clarity) × 5 段階
-- 12 = 全次元平均 4.0/5 = 「minor issues のみ」のライン
-- 11 以下は少なくとも 1 次元が 3/5 以下（unexecutable / missing coverage / ambiguous のいずれか）
+- 各 phase 4 次元 × 5 段階 = 20 点満点
+- requirements 18: 上流 spec の品質 = 下流全体の上限。最も厳しく
+- design 17: requirements を満たす設計が複数あり得るぶん許容幅を取る
+- tasks 16: Wave / task の組み立ては実装中に微調整しうる
+- 各 phase で `dimension_floor: 4` を併用（floor 4 と total 18 の両方を満たす必要）
 
 ### review.required_changed_files: 5
 
@@ -190,8 +195,8 @@ qult の各コンポーネントが依存する仮定と、仮定が崩れた場
 - 根拠: 5 ファイル以上の変更ではファイル間相互作用の見落としが増加する経験則
 - 厳密なデータなし — 最も仮定が弱い閾値。運用データで要調整
 
-### review.max_iterations: 3 / plan_eval.max_iterations: 2
+### review.max_iterations: 3 / spec_eval.iteration_limit: 3
 
 - Self-Refine (Madaan et al., 2023) の知見: 3 回以上の反復は収穫逓減
-- review は 3 回（コードの修正は多段階）、plan_eval は 2 回（計画の修正は比較的単純）
-- 実運用で 3 回目の改善幅が 0-1 点なら 2 回に削減を検討
+- 両方 3 回（review はコード、spec_eval は markdown）
+- 実運用で 3 回目の改善幅が 0-1 点なら 2 回に削減検討
