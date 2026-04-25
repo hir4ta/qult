@@ -7,8 +7,17 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteAt } from "../templates/fs.ts";
 import { assertConfinedToProject, type GenerationContext, type IntegrationBase } from "./base.ts";
+import { writeJsonMcpServer } from "./mcp-util.ts";
 
 const MCP_KEY = "qult";
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function pickPlainObject(value: unknown): Record<string, unknown> {
+	return isPlainObject(value) ? value : {};
+}
 
 const CLAUDE_MD_HEADER = `# CLAUDE.md
 
@@ -27,9 +36,16 @@ export const ClaudeIntegration: IntegrationBase = {
 		const pkg = join(projectRoot, "package.json");
 		if (!existsSync(pkg)) return false;
 		try {
-			const j = JSON.parse(readFileSync(pkg, "utf8")) as Record<string, unknown>;
-			const deps = { ...(j.dependencies as object), ...(j.devDependencies as object) };
-			return "@anthropic-ai/sdk" in deps || "@anthropic-ai/claude-code" in deps;
+			const parsed = JSON.parse(readFileSync(pkg, "utf8")) as unknown;
+			if (!isPlainObject(parsed)) return false;
+			const deps = pickPlainObject(parsed.dependencies);
+			const devDeps = pickPlainObject(parsed.devDependencies);
+			return (
+				"@anthropic-ai/sdk" in deps ||
+				"@anthropic-ai/claude-code" in deps ||
+				"@anthropic-ai/sdk" in devDeps ||
+				"@anthropic-ai/claude-code" in devDeps
+			);
 		} catch {
 			return false;
 		}
@@ -53,16 +69,11 @@ export const ClaudeIntegration: IntegrationBase = {
 	},
 
 	async registerMcpServer(ctx: GenerationContext) {
-		const path = join(ctx.projectRoot, ".mcp.json");
-		assertConfinedToProject(path, ctx.projectRoot);
-		const existing = existsSync(path)
-			? (JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>)
-			: {};
-		const servers =
-			(existing.mcpServers as Record<string, unknown> | undefined) ??
-			({} as Record<string, unknown>);
-		servers[MCP_KEY] = { type: "stdio", command: "npx", args: ["qult", "mcp"] };
-		existing.mcpServers = servers;
-		atomicWriteAt(path, `${JSON.stringify(existing, null, 2)}\n`);
+		writeJsonMcpServer(
+			join(ctx.projectRoot, ".mcp.json"),
+			MCP_KEY,
+			{ type: "stdio", command: "npx", args: ["qult", "mcp"] },
+			ctx.projectRoot,
+		);
 	},
 };

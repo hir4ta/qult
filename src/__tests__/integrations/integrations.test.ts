@@ -39,6 +39,29 @@ describe("assertConfinedToProject", () => {
 	});
 });
 
+describe("ClaudeIntegration.detect (hardened)", () => {
+	it("returns false when package.json has non-object dependencies", () => {
+		writeFileSync(
+			join(projectRoot, "package.json"),
+			JSON.stringify({ dependencies: "not-an-object", devDependencies: 42 }),
+		);
+		expect(ClaudeIntegration.detect(projectRoot)).toBe(false);
+	});
+
+	it("returns false when package.json top-level is an array (malformed)", () => {
+		writeFileSync(join(projectRoot, "package.json"), JSON.stringify(["not", "an", "object"]));
+		expect(ClaudeIntegration.detect(projectRoot)).toBe(false);
+	});
+
+	it("detects @anthropic-ai/sdk in devDependencies", () => {
+		writeFileSync(
+			join(projectRoot, "package.json"),
+			JSON.stringify({ devDependencies: { "@anthropic-ai/sdk": "^1.0" } }),
+		);
+		expect(ClaudeIntegration.detect(projectRoot)).toBe(true);
+	});
+});
+
 describe("ClaudeIntegration", () => {
 	it("writes commands, CLAUDE.md, and .mcp.json", async () => {
 		await ClaudeIntegration.generateConfigFiles(ctx());

@@ -8,6 +8,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteAt } from "../templates/fs.ts";
 import { assertConfinedToProject, type GenerationContext, type IntegrationBase } from "./base.ts";
+import { writeJsonMcpServer } from "./mcp-util.ts";
 
 const MCP_KEY = "qult";
 
@@ -19,10 +20,18 @@ This file imports the qult workflow rules from AGENTS.md. Project-specific
 overrides should go below this line.
 `;
 
-/** Escape a markdown body for embedding inside a TOML triple-quoted string. */
+/**
+ * Escape a body for embedding inside a TOML basic multi-line string
+ * (`"""..."""`). Each `"` in a `"""` triple is replaced by `\"`, expanding
+ * `"""` to `\"\"\"` (six characters representing three literal quotes).
+ *
+ * Why not literal triple-quoted (`'''...'''`)? Literal strings have no
+ * escape semantics, so embedding the close marker `'''` is impossible
+ * without a hack. Basic multi-line + per-quote escape is robust regardless
+ * of body content, including bodies that contain runs of quotes.
+ */
 function tomlEscape(body: string): string {
-	// Triple-quoted basic strings allow newlines; only `"""` needs to be split.
-	return body.replace(/"""/g, '""\\"');
+	return body.replace(/"""/g, '\\"\\"\\"');
 }
 
 export const GeminiIntegration: IntegrationBase = {
@@ -54,16 +63,11 @@ export const GeminiIntegration: IntegrationBase = {
 	},
 
 	async registerMcpServer(ctx: GenerationContext) {
-		const path = join(ctx.projectRoot, ".gemini/settings.json");
-		assertConfinedToProject(path, ctx.projectRoot);
-		const existing = existsSync(path)
-			? (JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>)
-			: {};
-		const servers =
-			(existing.mcpServers as Record<string, unknown> | undefined) ??
-			({} as Record<string, unknown>);
-		servers[MCP_KEY] = { command: "npx", args: ["qult", "mcp"] };
-		existing.mcpServers = servers;
-		atomicWriteAt(path, `${JSON.stringify(existing, null, 2)}\n`);
+		writeJsonMcpServer(
+			join(ctx.projectRoot, ".gemini/settings.json"),
+			MCP_KEY,
+			{ type: "stdio", command: "npx", args: ["qult", "mcp"] },
+			ctx.projectRoot,
+		);
 	},
 };

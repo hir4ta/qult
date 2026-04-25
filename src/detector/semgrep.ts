@@ -14,7 +14,33 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { isAbsolute, resolve } from "node:path";
 import type { PendingFix } from "../types.ts";
+
+const PACK_RE = /^p\/[a-z0-9._-]+$/i;
+const REGISTRY_RE = /^r\/[a-z0-9._/-]+$/i;
+
+/**
+ * Validate `QULT_SEMGREP_CONFIG` against an allowlist:
+ *  - `auto` (semgrep registry default ruleset)
+ *  - `p/<name>` or `r/<rule-id>` (semgrep registry pack / rule reference)
+ *  - a path that resolves under `cwd` (local rule file)
+ *
+ * Rejects http(s):// URLs and absolute paths outside the project to prevent
+ * a hostile env var from pointing semgrep at attacker-controlled rules
+ * (which can suppress findings or burn CPU/network).
+ */
+function resolveConfig(cwd: string): string | null {
+	const raw = process.env.QULT_SEMGREP_CONFIG;
+	if (raw === undefined || raw.length === 0) return "auto";
+	if (raw === "auto") return "auto";
+	if (PACK_RE.test(raw) || REGISTRY_RE.test(raw)) return raw;
+	if (raw.startsWith("http://") || raw.startsWith("https://")) return null;
+	const target = isAbsolute(raw) ? raw : resolve(cwd, raw);
+	const cwdResolved = resolve(cwd);
+	if (target !== cwdResolved && !target.startsWith(`${cwdResolved}/`)) return null;
+	return target;
+}
 
 export interface SemgrepResult {
 	fixes: PendingFix[];
@@ -43,7 +69,15 @@ export function runSemgrepScan(files: string[], cwd: string = process.cwd()): Se
 	if (!isSemgrepAvailable()) {
 		return { fixes: [], skipped: true, skipReason: "semgrep not installed" };
 	}
-	const config = process.env.QULT_SEMGREP_CONFIG ?? "auto";
+	const config = resolveConfig(cwd);
+	if (config === null) {
+		return {
+			fixes: [],
+			skipped: true,
+			skipReason:
+				"QULT_SEMGREP_CONFIG rejected — must be 'auto', 'p/<pack>', or a path inside the project",
+		};
+	}
 	let raw: string;
 	try {
 		raw = execFileSync(

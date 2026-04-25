@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseArgs } from "../../cli/args.ts";
+import { ArgsError, parseArgs } from "../../cli/args.ts";
 
 describe("parseArgs", () => {
 	it("collects positional arguments", () => {
@@ -32,5 +32,17 @@ describe("parseArgs", () => {
 			positionals: ["init", "--not-a-flag"],
 			flags: {},
 		});
+	});
+
+	it("throws ArgsError when a value-flag is followed by another flag", () => {
+		expect(() => parseArgs(["--agent", "--force"], ["agent"])).toThrowError(ArgsError);
+	});
+
+	it("throws ArgsError when a value-flag has no following arg", () => {
+		expect(() => parseArgs(["--agent"], ["agent"])).toThrowError(/requires a value/);
+	});
+
+	it("throws ArgsError when a value-flag uses empty --flag= form", () => {
+		expect(() => parseArgs(["--agent="], ["agent"])).toThrowError(/non-empty value/);
 	});
 });

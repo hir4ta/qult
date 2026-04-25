@@ -7,6 +7,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteAt } from "../templates/fs.ts";
 import { assertConfinedToProject, type GenerationContext, type IntegrationBase } from "./base.ts";
+import { writeJsonMcpServer } from "./mcp-util.ts";
 
 const MCP_KEY = "qult";
 
@@ -35,16 +36,11 @@ export const CursorIntegration: IntegrationBase = {
 	},
 
 	async registerMcpServer(ctx: GenerationContext) {
-		const path = join(ctx.projectRoot, ".cursor/mcp.json");
-		assertConfinedToProject(path, ctx.projectRoot);
-		const existing = existsSync(path)
-			? (JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>)
-			: {};
-		const servers =
-			(existing.mcpServers as Record<string, unknown> | undefined) ??
-			({} as Record<string, unknown>);
-		servers[MCP_KEY] = { type: "stdio", command: "npx", args: ["qult", "mcp"] };
-		existing.mcpServers = servers;
-		atomicWriteAt(path, `${JSON.stringify(existing, null, 2)}\n`);
+		writeJsonMcpServer(
+			join(ctx.projectRoot, ".cursor/mcp.json"),
+			MCP_KEY,
+			{ type: "stdio", command: "npx", args: ["qult", "mcp"] },
+			ctx.projectRoot,
+		);
 	},
 };

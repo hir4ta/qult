@@ -9,7 +9,7 @@
  *  5. Initialize the `.qult/` directory layout (specs/ subdir).
  */
 
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { GenerationContext } from "../../integrations/base.ts";
 import {
@@ -17,8 +17,8 @@ import {
 	listIntegrations,
 	resolveIntegration,
 } from "../../integrations/registry.ts";
-import { atomicWrite } from "../../state/fs.ts";
-import { configJsonPath, qultDir, specsDir } from "../../state/paths.ts";
+import { updateEnabledIntegrations } from "../../state/config-io.ts";
+import { qultDir, specsDir } from "../../state/paths.ts";
 import { writeAgentsMd } from "../../templates/agents-md.ts";
 import { findTemplateRoot } from "../paths.ts";
 import { confirm, isTTY, selectMany } from "../prompt.ts";
@@ -110,7 +110,7 @@ export async function runInit(opts: InitOptions): Promise<number> {
 	// 5. Initialize .qult/ layout and persist integrations.enabled.
 	mkdirSync(qultDir(), { recursive: true });
 	mkdirSync(specsDir(), { recursive: true });
-	persistEnabledIntegrations(chosen);
+	updateEnabledIntegrations(chosen, "set");
 
 	// 6. Report.
 	if (opts.json) {
@@ -134,20 +134,4 @@ function hasExistingConfig(projectRoot: string, integrations: string[]): boolean
 		if (k === "codex" && existsSync(join(projectRoot, ".codex/config.toml"))) return true;
 	}
 	return false;
-}
-
-function persistEnabledIntegrations(enabled: string[]): void {
-	const path = configJsonPath();
-	let raw: Record<string, unknown> = {};
-	if (existsSync(path)) {
-		try {
-			raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-		} catch {
-			raw = {};
-		}
-	}
-	const ints = (raw.integrations as Record<string, unknown> | undefined) ?? {};
-	ints.enabled = enabled;
-	raw.integrations = ints;
-	atomicWrite(path, `${JSON.stringify(raw, null, 2)}\n`);
 }

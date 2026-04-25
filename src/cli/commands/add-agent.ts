@@ -5,12 +5,11 @@
  * Refuses to overwrite existing files unless `--force` is given.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { GenerationContext } from "../../integrations/base.ts";
 import { listIntegrationKeys, resolveIntegration } from "../../integrations/registry.ts";
-import { atomicWrite } from "../../state/fs.ts";
-import { configJsonPath } from "../../state/paths.ts";
+import { updateEnabledIntegrations } from "../../state/config-io.ts";
 import { writeAgentsMd } from "../../templates/agents-md.ts";
 import { findTemplateRoot } from "../paths.ts";
 import { isTTY } from "../prompt.ts";
@@ -59,7 +58,7 @@ export async function runAddAgent(opts: AddAgentOptions): Promise<number> {
 	await writeAgentsMd({ projectRoot, templateRoot, qultVersion: VERSION });
 	await integ.generateConfigFiles(ctx);
 	await integ.registerMcpServer(ctx);
-	appendEnabledIntegration(key);
+	updateEnabledIntegrations([key], "append");
 
 	if (opts.json) {
 		process.stdout.write(`${JSON.stringify({ ok: true, added: key })}\n`);
@@ -82,24 +81,4 @@ function hasIntegrationFiles(projectRoot: string, key: string): boolean {
 		default:
 			return false;
 	}
-}
-
-function appendEnabledIntegration(key: string): void {
-	const path = configJsonPath();
-	let raw: Record<string, unknown> = {};
-	if (existsSync(path)) {
-		try {
-			raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-		} catch {
-			raw = {};
-		}
-	}
-	const ints = (raw.integrations as Record<string, unknown> | undefined) ?? {};
-	const currentEnabled = Array.isArray(ints.enabled)
-		? (ints.enabled as unknown[]).filter((k): k is string => typeof k === "string")
-		: [];
-	if (!currentEnabled.includes(key)) currentEnabled.push(key);
-	ints.enabled = currentEnabled;
-	raw.integrations = ints;
-	atomicWrite(path, `${JSON.stringify(raw, null, 2)}\n`);
 }

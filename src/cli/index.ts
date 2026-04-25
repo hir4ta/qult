@@ -5,7 +5,7 @@
  * Global flags: --version / --help / --json.
  */
 
-import { parseArgs } from "./args.ts";
+import { ArgsError, parseArgs } from "./args.ts";
 import { runAddAgent } from "./commands/add-agent.ts";
 import { runCheck } from "./commands/check.ts";
 import { runInit } from "./commands/init.ts";
@@ -105,6 +105,8 @@ async function main(): Promise<number> {
 main()
 	.then((code) => process.exit(code))
 	.catch((err) => {
-		process.stderr.write(`qult: ${(err as Error).message}\n`);
+		const msg = err instanceof Error ? err.message || err.name : String(err);
+		const prefix = err instanceof ArgsError ? "qult: bad args: " : "qult: ";
+		process.stderr.write(`${prefix}${msg}\n`);
 		process.exit(1);
 	});

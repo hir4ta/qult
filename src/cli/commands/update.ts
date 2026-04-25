@@ -6,10 +6,9 @@
  * Does NOT touch `.qult/specs/` or `.qult/state/`.
  */
 
-import { existsSync, readFileSync } from "node:fs";
 import type { GenerationContext } from "../../integrations/base.ts";
 import { resolveIntegration } from "../../integrations/registry.ts";
-import { configJsonPath } from "../../state/paths.ts";
+import { readEnabledIntegrations } from "../../state/config-io.ts";
 import { writeAgentsMd } from "../../templates/agents-md.ts";
 import { findTemplateRoot } from "../paths.ts";
 import { isTTY } from "../prompt.ts";
@@ -58,19 +57,4 @@ export async function runUpdate(opts: UpdateOptions): Promise<number> {
 		);
 	}
 	return 0;
-}
-
-function readEnabledIntegrations(): string[] {
-	const path = configJsonPath();
-	if (!existsSync(path)) return [];
-	try {
-		const raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-		const ints = raw.integrations as { enabled?: unknown } | undefined;
-		if (ints && Array.isArray(ints.enabled)) {
-			return ints.enabled.filter((k): k is string => typeof k === "string");
-		}
-	} catch {
-		// fall through
-	}
-	return [];
 }

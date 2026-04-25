@@ -11,8 +11,8 @@
  * `..` segments or absolute paths.
  */
 
-import { realpathSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, resolve } from "node:path";
 
 export type IntegrationKey = "claude" | "codex" | "cursor" | "gemini" | string;
 
@@ -51,22 +51,40 @@ export interface IntegrationBase {
  */
 export function assertConfinedToProject(path: string, projectRoot: string): void {
 	const target = resolve(isAbsolute(path) ? path : resolve(projectRoot, path));
-	// Realpath the project root only — the target typically doesn't exist yet
-	// (we're about to create it). Comparing target's `resolve()` against the
-	// realpath of the root catches `..` traversal; symlink-based escapes via
-	// existing parents are out of scope (MVP — we control the templates).
-	let realRoot: string;
-	try {
-		realRoot = realpathSync(projectRoot);
-	} catch {
-		realRoot = resolve(projectRoot);
-	}
+	const realRoot = safeRealpath(projectRoot);
+	// Walk up from the target until we hit an existing ancestor, realpath that,
+	// then re-attach the never-existed leaf segments. This catches symlink
+	// escapes via existing parent directories (e.g. `<projectRoot>/.cursor`
+	// pre-created as a symlink to `/etc`).
+	const realTarget = realpathDeepest(target);
 	if (
-		target !== realRoot &&
-		!target.startsWith(`${realRoot}/`) &&
-		target !== projectRoot &&
-		!target.startsWith(`${resolve(projectRoot)}/`)
+		realTarget !== realRoot &&
+		!realTarget.startsWith(`${realRoot}/`) &&
+		realTarget !== resolve(projectRoot) &&
+		!realTarget.startsWith(`${resolve(projectRoot)}/`)
 	) {
 		throw new Error(`path escape: ${path} resolves outside project root ${projectRoot}`);
 	}
+}
+
+function safeRealpath(p: string): string {
+	try {
+		return realpathSync(p);
+	} catch {
+		return resolve(p);
+	}
+}
+
+/** Realpath the deepest existing ancestor of `path`, then re-attach the missing leaves. */
+function realpathDeepest(path: string): string {
+	const segments: string[] = [];
+	let cursor = path;
+	while (!existsSync(cursor)) {
+		const parent = dirname(cursor);
+		if (parent === cursor) break;
+		segments.unshift(cursor.slice(parent.length).replace(/^\//, ""));
+		cursor = parent;
+	}
+	const realCursor = safeRealpath(cursor);
+	return segments.length === 0 ? realCursor : resolve(realCursor, ...segments);
 }

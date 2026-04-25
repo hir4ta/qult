@@ -12,6 +12,13 @@ import { assertConfinedToProject, type GenerationContext, type IntegrationBase }
 const MCP_BLOCK_BEGIN = "# @qult-mcp-begin (managed by qult)";
 const MCP_BLOCK_END = "# @qult-mcp-end";
 
+// Anchor markers to line start so a comment elsewhere mentioning the marker
+// text (e.g. inside prose / code samples) cannot be misidentified as a real
+// block boundary. Re-built from a string template to preserve exact content.
+// Allow optional \r before line end so CRLF (Windows-edited) configs match.
+const BEGIN_LINE_RE = /^# @qult-mcp-begin \(managed by qult\)\r?$/m;
+const END_LINE_RE = /^# @qult-mcp-end\r?$/m;
+
 const MCP_BLOCK = `${MCP_BLOCK_BEGIN}
 [mcp_servers.qult]
 command = "npx"
@@ -35,20 +42,29 @@ export const CodexIntegration: IntegrationBase = {
 		const path = join(ctx.projectRoot, ".codex/config.toml");
 		assertConfinedToProject(path, ctx.projectRoot);
 		let existing = "";
-		if (existsSync(path)) {
-			existing = readFileSync(path, "utf8");
-			const beginIdx = existing.indexOf(MCP_BLOCK_BEGIN);
-			if (beginIdx !== -1) {
-				const endIdx = existing.indexOf(MCP_BLOCK_END, beginIdx);
-				if (endIdx !== -1) {
-					const after = existing.slice(endIdx + MCP_BLOCK_END.length);
-					existing = `${existing.slice(0, beginIdx)}${MCP_BLOCK}${after}`;
-					atomicWriteAt(path, existing);
-					return;
-				}
+		if (existsSync(path)) existing = readFileSync(path, "utf8");
+
+		// Match the marker only when it appears as a complete line. `m` flag on
+		// the regex anchors `^`/`$` to line boundaries so prose containing the
+		// marker substring can't trigger a slice-and-replace.
+		const beginMatch = BEGIN_LINE_RE.exec(existing);
+		if (beginMatch) {
+			const beginIdx = beginMatch.index;
+			const remainder = existing.slice(beginIdx);
+			const endMatch = END_LINE_RE.exec(remainder);
+			if (endMatch) {
+				const endIdx = beginIdx + endMatch.index + endMatch[0].length;
+				atomicWriteAt(path, `${existing.slice(0, beginIdx)}${MCP_BLOCK}${existing.slice(endIdx)}`);
+				return;
 			}
+			// Truncated: end marker missing. Replace from begin to EOF rather
+			// than appending another block (which would create duplicate begins).
+			atomicWriteAt(path, `${existing.slice(0, beginIdx)}${MCP_BLOCK}\n`);
+			return;
 		}
-		const sep = existing.length === 0 || existing.endsWith("\n") ? "" : "\n";
-		atomicWriteAt(path, `${existing}${sep}${existing.length > 0 ? "\n" : ""}${MCP_BLOCK}\n`);
+		// Append. Normalize trailing newlines to exactly one before the block.
+		const trimmed = existing.replace(/\n+$/, "");
+		const prefix = trimmed.length === 0 ? "" : `${trimmed}\n\n`;
+		atomicWriteAt(path, `${prefix}${MCP_BLOCK}\n`);
 	},
 };
