@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { extname } from "node:path";
-import { isGateDisabled } from "../../state/session-state.ts";
+import { isGateDisabled } from "../../state/gate-state.ts";
 import { sanitizeForStderr } from "../sanitize.ts";
 
 const TS_JS_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
