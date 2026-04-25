@@ -55,13 +55,13 @@
 **Goal**: 既存 9 skill を新フローに合わせて更新し、5 workflow rule を書き換える。
 **Verify**: `bun run test` pass。`/qult:status archive` が機能。`/qult:init` が `.qult/` を生成し `.gitignore` を状態に応じて適切に更新（新規 / 既存 / 広い ignore ルール検出）。`plugin/rules/` に `qult-spec-mode.md` が存在し `qult-plan-mode.md` は削除されている。`/qult:review` skill 内および reviewer agent の plan 言及が完全に spec に置換されている。
 
-- [ ] T5.1: `plugin/skills/init/` を更新。`.qult/specs/`、`.qult/state/`、`.qult/config.json` 生成、`.gitignore` への適切な更新（不在 → 新規作成、`.qult/state/` 既存 → no-op、広い `.qult/` ルール検出 → negation `!.qult/specs/` 追加 + 通知）、ホーム配下 `~/.qult/qult.db` の削除案内を含む。
-- [ ] T5.2: `plugin/skills/status/` を更新。spec 情報統合、`/qult:status archive` で archive/ 配下一覧表示、ブランチ切り替え時の active spec 不一致警告。
-- [ ] T5.3: `plugin/skills/finish/` を更新。spec 完了状態判定、`merge` / `pr` は review pass 必須、`discard` は無条件、archive 移動コミット作成（プロジェクトの commit message 規約は CLAUDE.md / git log から学習）。
-- [ ] T5.4: `plugin/skills/doctor/` / `config/` / `skip/` / `update/` / `uninstall/` を新フローに合わせて更新。SQLite 言及を全削除、ファイルベース操作に置換。`/qult:doctor` は `.qult/state/*.json` が `git ls-files` に出現しないかチェック（誤って force-add された場合の警告）。
-- [ ] T5.5: `plugin/rules/qult-plan-mode.md` を削除し、`plugin/rules/qult-spec-mode.md` を新規作成。EnterPlanMode は調査時のみ、実装は `/qult:spec` を使う旨と、Wave 中の振る舞い（branch 切替警告、commit prefix 規約）を記述。
-- [ ] T5.6: `plugin/rules/qult-workflow.md`、`qult-pre-commit.md`、`qult-review.md`、`qult-quality.md` の plan 言及を spec / wave に書き換え。pre-commit に `[wave-NN]` prefix（2 桁ゼロパディング）と Wave 完了 detector の言及、review は spec 完了時のみ自動の旨を追加。
-- [ ] T5.7: `plugin/skills/review/` の prompt を更新（spec 完了時のみ自動、Wave 中はユーザーが明示的に呼んだ場合のみ）。`bun run test` 全 pass を確認、Wave 5 完了。
+- [x] T5.1: `plugin/skills/init/` を更新。`.qult/specs/`、`.qult/state/`、`.qult/config.json` 生成、`.gitignore` への適切な更新（不在 → 新規作成、`.qult/state/` 既存 → no-op、広い `.qult/` ルール検出 → negation `!.qult/specs/` 追加 + 通知）、ホーム配下 `~/.qult/qult.db` の削除案内を含む。
+- [x] T5.2: `plugin/skills/status/` を更新。spec 情報統合、`/qult:status archive` で archive/ 配下一覧表示、ブランチ切り替え時の active spec 不一致警告。
+- [x] T5.3: `plugin/skills/finish/` を更新。spec 完了状態判定、`merge` / `pr` は review pass 必須、`discard` は無条件、archive 移動コミット作成（プロジェクトの commit message 規約は CLAUDE.md / git log から学習）。
+- [x] T5.4: `plugin/skills/doctor/` / `config/` / `skip/` / `update/` / `uninstall/` を新フローに合わせて更新。SQLite 言及を全削除、ファイルベース操作に置換。`/qult:doctor` は `.qult/state/*.json` が `git ls-files` に出現しないかチェック（誤って force-add された場合の警告）。
+- [x] T5.5: `plugin/rules/qult-plan-mode.md` を削除し、`plugin/rules/qult-spec-mode.md` を新規作成。EnterPlanMode は調査時のみ、実装は `/qult:spec` を使う旨と、Wave 中の振る舞い（branch 切替警告、commit prefix 規約）を記述。
+- [x] T5.6: `plugin/rules/qult-workflow.md`、`qult-pre-commit.md`、`qult-review.md`、`qult-quality.md` の plan 言及を spec / wave に書き換え。pre-commit に `[wave-NN]` prefix（2 桁ゼロパディング）と Wave 完了 detector の言及、review は spec 完了時のみ自動の旨を追加。
+- [x] T5.7: `plugin/skills/review/` の prompt を更新（spec 完了時のみ自動、Wave 中はユーザーが明示的に呼んだ場合のみ）。`bun run test` 全 pass を確認、Wave 5 完了。
 
 ## Wave 6: Documentation, version bump, integration verification
 
