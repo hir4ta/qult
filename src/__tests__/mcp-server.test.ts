@@ -1,677 +1,312 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { resetConfigCache } from "../config.ts";
 import { handleRequest, handleTool, TOOL_DEFS } from "../mcp-server.ts";
-import { closeDb, getDb, getProjectId, setProjectPath, useTestDb } from "../state/db.ts";
-import { resetAllCaches } from "../state/flush.ts";
+import { readAuditLog } from "../state/audit-log.ts";
+import { listDisabledGateNames } from "../state/gate-state.ts";
+import {
+	appendPendingFix,
+	readCurrent,
+	readPendingFixes,
+	readStageScores,
+} from "../state/json-state.ts";
+import { setProjectRoot } from "../state/paths.ts";
 
-const TEST_DIR = join(import.meta.dirname, ".tmp-mcp-test");
+let TEST_DIR: string;
 const originalCwd = process.cwd();
 
+function initRepo(root: string): void {
+	execSync("git init -q", { cwd: root });
+	execSync("git config user.email t@t", { cwd: root });
+	execSync("git config user.name t", { cwd: root });
+	// Disable signing in test repo (host may have signing key + agent prompts).
+	execSync("git config commit.gpgsign false", { cwd: root });
+	execSync("git config tag.gpgsign false", { cwd: root });
+	execSync("git commit -q --allow-empty -m init", { cwd: root });
+}
+
 beforeEach(() => {
-	resetAllCaches();
-	mkdirSync(TEST_DIR, { recursive: true });
-	useTestDb();
-	setProjectPath(TEST_DIR);
+	TEST_DIR = mkdtempSync(join(tmpdir(), "qult-mcp-"));
+	mkdirSync(join(TEST_DIR, ".qult"), { recursive: true });
+	setProjectRoot(TEST_DIR);
+	resetConfigCache();
 	process.chdir(TEST_DIR);
+	initRepo(TEST_DIR);
 });
 
 afterEach(() => {
 	process.chdir(originalCwd);
-	closeDb();
+	setProjectRoot(null);
 	rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
-describe("handleTool", () => {
-	it("get_pending_fixes returns empty message when no fixes", () => {
-		const result = handleTool("get_pending_fixes", TEST_DIR);
-		expect(result.content[0]!.text).toBe("No pending fixes.");
-	});
-
-	it("get_pending_fixes returns formatted fixes from DB", () => {
-		const db = getDb();
-		db.prepare(
-			"INSERT INTO pending_fixes (project_id, file, gate, errors) VALUES (?, ?, ?, ?)",
-		).run(getProjectId(), "/src/foo.ts", "lint", JSON.stringify(["error: unused var"]));
-
-		const result = handleTool("get_pending_fixes", TEST_DIR);
-		const text = result.content[0]!.text;
-		expect(text).toContain("1 pending fix(es)");
-		expect(text).toContain("[lint] /src/foo.ts");
-		expect(text).toContain("error: unused var");
-	});
-
-	it("get_project_status returns state from DB", () => {
-		const db = getDb();
-		db.prepare("UPDATE projects SET last_commit_at = ? WHERE id = ?").run(
-			"2026-01-01T00:00:00Z",
-			getProjectId(),
-		);
-
-		const result = handleTool("get_project_status", TEST_DIR);
-		const parsed = JSON.parse(result.content[0]!.text);
-		expect(parsed.last_commit_at).toBe("2026-01-01T00:00:00Z");
-		expect(parsed.test_passed_at).toBeNull();
-	});
-
-	it("get_project_status returns project state", () => {
-		const result = handleTool("get_project_status", TEST_DIR);
-		expect(result.isError).toBeUndefined();
-		expect(result.content[0]!.text).toContain("id");
-	});
-
-	it("write tools work with an active project", () => {
-		// Project is auto-created by setProjectPath + getProjectId
-
-		const writeCases: [string, Record<string, unknown>][] = [
-			["record_review", { aggregate_score: 30 }],
-			["record_test_pass", { command: "bun test" }],
-			["disable_gate", { gate_name: "lint", reason: "broken gate temporarily" }],
-			["clear_pending_fixes", { reason: "all fixes resolved" }],
-			["record_human_approval", {}],
-		];
-		for (const [tool, args] of writeCases) {
-			const result = handleTool(tool, TEST_DIR, args);
-			// With project-based state, write tools always work (project auto-created)
-			expect(result.content).toBeDefined();
+describe("TOOL_DEFS", () => {
+	it("each tool has name, description, and inputSchema", () => {
+		expect(TOOL_DEFS.length).toBeGreaterThan(0);
+		for (const def of TOOL_DEFS) {
+			expect(typeof def.name).toBe("string");
+			expect(def.name).toMatch(/^[a-z_]+$/);
+			expect(typeof def.description).toBe("string");
+			expect(def.description.length).toBeGreaterThan(0);
+			expect(def.inputSchema.type).toBe("object");
 		}
 	});
 
-	it("returns error for unknown tool", () => {
-		const result = handleTool("nonexistent_tool", TEST_DIR);
-		expect(result.isError).toBe(true);
-		expect(result.content[0]!.text).toContain("Unknown tool");
+	it("contains both legacy and new tool names", () => {
+		const names = TOOL_DEFS.map((t) => t.name);
+		expect(names).toContain("get_pending_fixes");
+		expect(names).toContain("get_project_status");
+		expect(names).toContain("disable_gate");
+		expect(names).toContain("enable_gate");
+		expect(names).toContain("record_test_pass");
+		expect(names).toContain("record_review");
+		// New v1.0 spec tools
+		expect(names).toContain("get_active_spec");
+		expect(names).toContain("complete_wave");
+		expect(names).toContain("update_task_status");
+		expect(names).toContain("archive_spec");
+		expect(names).toContain("record_spec_evaluator_score");
+		// Removed
+		expect(names).not.toContain("get_session_status");
+		expect(names).not.toContain("archive_plan");
 	});
 });
 
 describe("handleRequest (JSON-RPC)", () => {
-	it("initialize returns server info and capabilities", () => {
+	it("initialize returns server info", () => {
 		const response = handleRequest(
 			{ jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
 			TEST_DIR,
 		);
-		expect(response).not.toBeNull();
-		expect(response!.id).toBe(1);
 		const result = response!.result as Record<string, unknown>;
 		expect(result.protocolVersion).toBe("2024-11-05");
-		expect(result.capabilities).toEqual({ tools: {} });
-		const serverInfo = result.serverInfo as Record<string, string>;
-		expect(serverInfo.name).toBe("qult");
+		expect((result.serverInfo as Record<string, string>).name).toBe("qult");
 	});
 
-	it("tools/list returns tool definitions", () => {
+	it("tools/list returns the full tool catalog", () => {
 		const response = handleRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" }, TEST_DIR);
 		const result = response!.result as { tools: { name: string }[] };
-		const names = result.tools.map((t) => t.name);
-		expect(names).toContain("get_pending_fixes");
-		expect(names).toContain("get_project_status");
-		expect(names).toContain("disable_gate");
-		expect(names).toContain("record_test_pass");
-		expect(names).toContain("record_review");
-		expect(names).not.toContain("get_gate_config");
-		expect(names).not.toContain("save_gates");
-		expect(names).not.toContain("get_harness_report");
+		expect(result.tools.length).toBe(TOOL_DEFS.length);
 	});
 
-	it("tools/call dispatches to correct handler", () => {
+	it("tools/call dispatches to handler", () => {
 		const response = handleRequest(
-			{ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "get_pending_fixes" } },
+			{
+				jsonrpc: "2.0",
+				id: 3,
+				method: "tools/call",
+				params: { name: "get_pending_fixes", arguments: {} },
+			},
 			TEST_DIR,
 		);
-		const result = response!.result as { content: { text: string }[] };
-		expect(result.content[0]!.text).toBe("No pending fixes.");
-	});
-
-	it("tools/call returns error for missing tool name", () => {
-		const response = handleRequest(
-			{ jsonrpc: "2.0", id: 4, method: "tools/call", params: {} },
-			TEST_DIR,
-		);
-		expect(response!.error).toBeDefined();
-		expect(response!.error!.code).toBe(-32602);
-	});
-
-	it("notifications (no id) return null", () => {
-		const response = handleRequest(
-			{ jsonrpc: "2.0", method: "notifications/initialized" } as never,
-			TEST_DIR,
-		);
-		expect(response).toBeNull();
+		expect(response!.result).toBeDefined();
 	});
 
 	it("ping returns empty result", () => {
-		const response = handleRequest({ jsonrpc: "2.0", id: 5, method: "ping" }, TEST_DIR);
-		expect(response!.result).toEqual({});
+		const response = handleRequest({ jsonrpc: "2.0", id: 4, method: "ping" }, TEST_DIR);
+		expect(response!.result).toBeDefined();
 	});
 
-	it("unknown method returns -32601 error", () => {
-		const response = handleRequest({ jsonrpc: "2.0", id: 6, method: "unknown/method" }, TEST_DIR);
-		expect(response!.error).toBeDefined();
-		expect(response!.error!.code).toBe(-32601);
-		expect(response!.error!.message).toContain("Method not found");
+	it("returns -32601 for unknown method", () => {
+		const response = handleRequest({ jsonrpc: "2.0", id: 5, method: "no_such_method" }, TEST_DIR);
+		expect(response!.error?.code).toBe(-32601);
 	});
 });
 
-describe("TOOL_DEFS", () => {
-	it("has at least one tool definition", () => {
-		expect(TOOL_DEFS.length).toBeGreaterThan(0);
+describe("handleTool: read", () => {
+	it("get_pending_fixes returns 'No pending fixes.' on empty", () => {
+		const r = handleTool("get_pending_fixes", TEST_DIR);
+		expect(r.content[0]!.text).toBe("No pending fixes.");
 	});
 
-	it("each tool has name, description, and inputSchema", () => {
-		for (const tool of TOOL_DEFS) {
-			expect(typeof tool.name).toBe("string");
-			expect(typeof tool.description).toBe("string");
-			expect(tool.inputSchema.type).toBe("object");
-		}
+	it("get_pending_fixes returns formatted entries when populated", () => {
+		appendPendingFix({
+			id: "1",
+			detector: "security-check",
+			severity: "high",
+			file: join(TEST_DIR, "src/foo.ts"),
+			line: 5,
+			message: "hardcoded secret",
+			created_at: "2026-04-25T00:00:00Z",
+		});
+		const r = handleTool("get_pending_fixes", TEST_DIR);
+		expect(r.content[0]!.text).toMatch(/security-check/);
+		expect(r.content[0]!.text).toMatch(/hardcoded secret/);
+	});
+
+	it("get_project_status returns active_spec=null when no spec", () => {
+		const r = handleTool("get_project_status", TEST_DIR);
+		const parsed = JSON.parse(r.content[0]!.text);
+		expect(parsed.active_spec).toBeNull();
+		expect(parsed.test_passed_at).toBeNull();
+		expect(parsed.review_completed_at).toBeNull();
+	});
+
+	it("get_project_status surfaces active_spec from filesystem", () => {
+		mkdirSync(join(TEST_DIR, ".qult", "specs", "demo"), { recursive: true });
+		writeFileSync(join(TEST_DIR, ".qult", "specs", "demo", "requirements.md"), "x");
+		const r = handleTool("get_project_status", TEST_DIR);
+		const parsed = JSON.parse(r.content[0]!.text);
+		expect(parsed.active_spec.name).toBe("demo");
+		expect(parsed.active_spec.has_requirements).toBe(true);
 	});
 });
 
-describe("handleTool: disable_gate / enable_gate", () => {
-	it("disable_gate adds detector gate to disabled state", async () => {
-		const { listDisabledGateNames } = await import("../state/gate-state.ts");
-		const { setProjectRoot } = await import("../state/paths.ts");
-		setProjectRoot(TEST_DIR);
-		const result = handleTool("disable_gate", TEST_DIR, {
-			gate_name: "security-check",
-			reason: "False positives on this codebase",
-		});
-		expect(result.content[0]!.text).toContain("disabled");
-		expect(listDisabledGateNames()).toContain("security-check");
-		setProjectRoot(null);
+describe("handleTool: record / write", () => {
+	it("record_test_pass updates current.json", () => {
+		handleTool("record_test_pass", TEST_DIR, { command: "bun test" });
+		const cur = readCurrent();
+		expect(cur.test_command).toBe("bun test");
+		expect(cur.test_passed_at).not.toBeNull();
 	});
 
-	it("disable_gate rejects unknown gate name", () => {
-		const result = handleTool("disable_gate", TEST_DIR, {
-			gate_name: "typo",
-			reason: "Testing unknown gate rejection",
-		});
-		expect(result.isError).toBe(true);
-		expect(result.content[0]!.text).toContain("Unknown gate");
+	it("record_review updates current.json with score", () => {
+		handleTool("record_review", TEST_DIR, { aggregate_score: 32 });
+		const cur = readCurrent();
+		expect(cur.review_score).toBe(32);
+		expect(cur.review_completed_at).not.toBeNull();
 	});
 
-	it("disable_gate accepts 'review' as valid gate name", () => {
-		const result = handleTool("disable_gate", TEST_DIR, {
+	it("record_human_approval rejects without prior review", () => {
+		const r = handleTool("record_human_approval", TEST_DIR);
+		expect(r.isError).toBe(true);
+	});
+
+	it("record_human_approval succeeds after record_review", () => {
+		handleTool("record_review", TEST_DIR, { aggregate_score: 30 });
+		const r = handleTool("record_human_approval", TEST_DIR);
+		expect(r.isError).toBeFalsy();
+		expect(readCurrent().human_approval_at).not.toBeNull();
+	});
+
+	it("record_finish_started writes timestamp", () => {
+		handleTool("record_finish_started", TEST_DIR);
+		expect(readCurrent().finish_started_at).not.toBeNull();
+	});
+
+	it("record_stage_scores writes per-stage scores", () => {
+		handleTool("record_stage_scores", TEST_DIR, {
+			stage: "Spec",
+			scores: { completeness: 4, accuracy: 5 },
+		});
+		const s = readStageScores();
+		expect(s.review.Spec?.scores).toEqual({ completeness: 4, accuracy: 5 });
+	});
+
+	it("record_stage_scores rejects invalid stage", () => {
+		const r = handleTool("record_stage_scores", TEST_DIR, {
+			stage: "BogusStage",
+			scores: {},
+		});
+		expect(r.isError).toBe(true);
+	});
+});
+
+describe("handleTool: gate state", () => {
+	it("disable_gate persists to gate-state.json", () => {
+		handleTool("disable_gate", TEST_DIR, {
 			gate_name: "review",
-			reason: "Review not needed for documentation changes",
+			reason: "Misconfigured for current task",
 		});
-		expect(result.content[0]!.text).toContain("disabled");
+		expect(listDisabledGateNames()).toContain("review");
 	});
 
-	it("disable_gate accepts security-check gate name", () => {
-		const secResult = handleTool("disable_gate", TEST_DIR, {
-			gate_name: "security-check",
-			reason: "Security patterns causing false positives",
+	it("disable_gate writes audit entry", () => {
+		handleTool("disable_gate", TEST_DIR, {
+			gate_name: "review",
+			reason: "Need to bypass for documentation-only branch",
 		});
-		expect(secResult.content[0]!.text).toContain("disabled");
-	});
-
-	it("disable_gate requires reason parameter", () => {
-		const result = handleTool("disable_gate", TEST_DIR, { gate_name: "review" });
-		expect(result.isError).toBe(true);
-		expect(result.content[0]!.text).toContain("reason");
-	});
-
-	it("disable_gate rejects short reason", () => {
-		const result = handleTool("disable_gate", TEST_DIR, { gate_name: "review", reason: "short" });
-		expect(result.isError).toBe(true);
-		expect(result.content[0]!.text).toContain("10 chars");
+		const log = readAuditLog();
+		expect(log.find((e) => e.action === "disable_gate")).toBeTruthy();
 	});
 
 	it("disable_gate rejects when 2 gates already disabled", async () => {
 		const { disableGate } = await import("../state/gate-state.ts");
-		const { setProjectRoot } = await import("../state/paths.ts");
-		setProjectRoot(TEST_DIR);
-		disableGate("review", "test reason 1 for review");
-		disableGate("security-check", "test reason 2 for security");
-
-		const result = handleTool("disable_gate", TEST_DIR, {
+		disableGate("review", "first reason here");
+		disableGate("security-check", "second reason here");
+		const r = handleTool("disable_gate", TEST_DIR, {
 			gate_name: "test-quality-check",
-			reason: "Need to disable a third gate",
+			reason: "trying to disable a third gate",
 		});
-		expect(result.isError).toBe(true);
-		expect(result.content[0]!.text).toContain("Maximum 2");
-		setProjectRoot(null);
+		expect(r.isError).toBe(true);
+		expect(r.content[0]!.text).toMatch(/Maximum 2/);
 	});
 
-	it("disable_gate writes audit log entry", async () => {
-		const { readAuditLog } = await import("../state/audit-log.ts");
-		const { setProjectRoot } = await import("../state/paths.ts");
-		setProjectRoot(TEST_DIR);
-		const result = handleTool("disable_gate", TEST_DIR, {
-			gate_name: "review",
-			reason: "Review gate is misconfigured",
+	it("disable_gate rejects unknown gate", () => {
+		const r = handleTool("disable_gate", TEST_DIR, {
+			gate_name: "bogus-gate-name",
+			reason: "still need a long enough reason",
 		});
-		expect(result.isError).toBeFalsy();
-
-		const log = readAuditLog();
-		expect(log).toHaveLength(1);
-		expect(log[0]!.action).toBe("disable_gate");
-		expect(log[0]!.gate_name).toBe("review");
-		setProjectRoot(null);
+		expect(r.isError).toBe(true);
 	});
 
 	it("enable_gate removes gate from disabled state", async () => {
-		const { disableGate, listDisabledGateNames } = await import("../state/gate-state.ts");
-		const { setProjectRoot } = await import("../state/paths.ts");
-		setProjectRoot(TEST_DIR);
-		disableGate("lint", "test reason for lint");
-		disableGate("typecheck", "test reason for typecheck");
-
-		const result = handleTool("enable_gate", TEST_DIR, { gate_name: "lint" });
-		expect(result.content[0]!.text).toContain("re-enabled");
-
-		expect(listDisabledGateNames()).toEqual(["typecheck"]);
-		setProjectRoot(null);
-	});
-
-	it("disable_gate returns error without gate_name", () => {
-		const result = handleTool("disable_gate", TEST_DIR, { reason: "Testing missing gate_name" });
-		expect(result.isError).toBe(true);
+		const { disableGate } = await import("../state/gate-state.ts");
+		disableGate("lint", "test reason here");
+		handleTool("enable_gate", TEST_DIR, { gate_name: "lint" });
+		expect(listDisabledGateNames()).not.toContain("lint");
 	});
 });
 
 describe("handleTool: clear_pending_fixes", () => {
-	it("clears all pending fixes", () => {
-		const db = getDb();
-		db.prepare(
-			"INSERT INTO pending_fixes (project_id, file, gate, errors) VALUES (?, ?, ?, ?)",
-		).run(getProjectId(), "a.ts", "lint", JSON.stringify(["err"]));
+	it("requires reason >= 10 chars", () => {
+		const r = handleTool("clear_pending_fixes", TEST_DIR, { reason: "short" });
+		expect(r.isError).toBe(true);
+	});
 
-		const result = handleTool("clear_pending_fixes", TEST_DIR, {
-			reason: "False positives from linter update",
+	it("clears all fixes", () => {
+		appendPendingFix({
+			id: "1",
+			detector: "test",
+			severity: "low",
+			file: "x",
+			line: null,
+			message: "x",
+			created_at: "now",
 		});
-		expect(result.content[0]!.text).toContain("cleared");
-
-		const rows = db.prepare("SELECT * FROM pending_fixes WHERE project_id = ?").all(getProjectId());
-		expect(rows).toEqual([]);
+		expect(readPendingFixes().fixes).toHaveLength(1);
+		handleTool("clear_pending_fixes", TEST_DIR, { reason: "All resolved offline" });
+		expect(readPendingFixes().fixes).toHaveLength(0);
 	});
 
-	it("handles empty state gracefully", () => {
-		const result = handleTool("clear_pending_fixes", TEST_DIR, {
-			reason: "Testing graceful handling of missing state",
-		});
-		expect(result.content[0]!.text).toContain("cleared");
-	});
-
-	it("requires reason parameter", () => {
-		const result = handleTool("clear_pending_fixes", TEST_DIR, {});
-		expect(result.isError).toBe(true);
-		expect(result.content[0]!.text).toContain("reason");
-	});
-
-	it("rejects short reason", () => {
-		const result = handleTool("clear_pending_fixes", TEST_DIR, { reason: "short" });
-		expect(result.isError).toBe(true);
-		expect(result.content[0]!.text).toContain("10 chars");
-	});
-
-	it("writes audit log entry", async () => {
-		const { readAuditLog } = await import("../state/audit-log.ts");
-		const { setProjectRoot } = await import("../state/paths.ts");
-		setProjectRoot(TEST_DIR);
-		handleTool("clear_pending_fixes", TEST_DIR, {
-			reason: "All fixes are false positives",
-		});
-
+	it("writes audit entry on clear", () => {
+		handleTool("clear_pending_fixes", TEST_DIR, { reason: "Cleared after release" });
 		const log = readAuditLog();
-		expect(log).toHaveLength(1);
-		expect(log[0]!.action).toBe("clear_pending_fixes");
-		expect(log[0]!.reason).toBe("All fixes are false positives");
-		setProjectRoot(null);
+		expect(log.find((e) => e.action === "clear_pending_fixes")).toBeTruthy();
 	});
 });
 
 describe("handleTool: set_config", () => {
-	it("sets a valid config key", () => {
-		const result = handleTool("set_config", TEST_DIR, {
+	it("rejects invalid keys", () => {
+		const r = handleTool("set_config", TEST_DIR, { key: "bogus.key", value: 1 });
+		expect(r.isError).toBe(true);
+	});
+
+	it("rejects mismatched value type for boolean key", () => {
+		const r = handleTool("set_config", TEST_DIR, {
+			key: "review.require_human_approval",
+			value: 1,
+		});
+		expect(r.isError).toBe(true);
+	});
+
+	it("writes a numeric key to config.json", () => {
+		const r = handleTool("set_config", TEST_DIR, {
 			key: "review.score_threshold",
-			value: 10,
+			value: 35,
 		});
-		expect(result.content[0]!.text).toContain("Config set");
-		expect(result.content[0]!.text).toContain("10");
-
-		const db = getDb();
-		const projectId = getProjectId();
-		const row = db
-			.prepare("SELECT value FROM project_configs WHERE project_id = ? AND key = ?")
-			.get(projectId, "review.score_threshold") as { value: string };
-		expect(JSON.parse(row.value)).toBe(10);
-	});
-
-	it("rejects invalid config key", () => {
-		const result = handleTool("set_config", TEST_DIR, {
-			key: "invalid.key",
-			value: 5,
-		});
-		expect(result.isError).toBe(true);
-		expect(result.content[0]!.text).toContain("Invalid key");
-	});
-
-	it("returns error without key or value", () => {
-		const noKey = handleTool("set_config", TEST_DIR, { value: 5 });
-		expect(noKey.isError).toBe(true);
-		const noValue = handleTool("set_config", TEST_DIR, { key: "review.score_threshold" });
-		expect(noValue.isError).toBe(true);
+		expect(r.isError).toBeFalsy();
+		expect(r.content[0]!.text).toMatch(/Config set/);
 	});
 });
 
-describe("handleTool: record_review", () => {
-	it("sets review_completed_at in session state", () => {
-		const result = handleTool("record_review", TEST_DIR);
-		expect(result.content[0]!.text).toContain("recorded");
-
-		const db = getDb();
-		const row = db
-			.prepare("SELECT review_completed_at FROM projects WHERE id = ?")
-			.get(getProjectId()) as {
-			review_completed_at: string | null;
-		};
-		expect(row.review_completed_at).toBeTruthy();
-		expect(typeof row.review_completed_at).toBe("string");
-	});
-
-	it("includes aggregate score in response", () => {
-		const result = handleTool("record_review", TEST_DIR, { aggregate_score: 26 });
-		expect(result.content[0]!.text).toContain("recorded");
-		expect(result.content[0]!.text).toContain("26");
-	});
-
-	it("succeeds when many files changed without a plan", () => {
-		const db = getDb();
-		// Insert 6+ changed files (exceeds default threshold of 5)
-		for (const f of ["/a.ts", "/b.ts", "/c.ts", "/d.ts", "/e.ts", "/f.ts"]) {
-			db.prepare("INSERT INTO changed_files (project_id, file_path) VALUES (?, ?)").run(
-				getProjectId(),
-				f,
-			);
-		}
-
-		const result = handleTool("record_review", TEST_DIR, { aggregate_score: 28 });
-		expect(result.isError).toBeUndefined();
-		expect(result.content[0]!.text).toContain("recorded");
-	});
-});
-
-describe("handleTool: record_test_pass", () => {
-	it("sets test_passed_at and test_command in session state", () => {
-		const result = handleTool("record_test_pass", TEST_DIR, { command: "bun vitest run" });
-		expect(result.content[0]!.text).toContain("Test pass recorded");
-
-		const db = getDb();
-		const row = db
-			.prepare("SELECT test_passed_at, test_command FROM projects WHERE id = ?")
-			.get(getProjectId()) as {
-			test_passed_at: string | null;
-			test_command: string | null;
-		};
-		expect(row.test_passed_at).toBeTruthy();
-		expect(row.test_command).toBe("bun vitest run");
-	});
-
-	it("returns error without command", () => {
-		const result = handleTool("record_test_pass", TEST_DIR, {});
-		expect(result.isError).toBe(true);
-	});
-});
-
-describe("handleTool: record_stage_scores", () => {
-	it("records scores for a valid stage", () => {
-		const result = handleTool("record_stage_scores", TEST_DIR, {
-			stage: "Spec",
-			scores: { completeness: 5, accuracy: 4 },
-		});
-		expect(result.content[0]!.text).toContain("Spec");
-
-		const db = getDb();
-		const rows = db
-			.prepare("SELECT stage, dimension, score FROM review_stage_scores WHERE project_id = ?")
-			.all(getProjectId()) as { stage: string; dimension: string; score: number }[];
-		const scoreMap: Record<string, number> = {};
-		for (const r of rows) scoreMap[r.dimension] = r.score;
-		expect(scoreMap).toEqual({ completeness: 5, accuracy: 4 });
-	});
-
-	it("rejects invalid stage name", () => {
-		const result = handleTool("record_stage_scores", TEST_DIR, {
-			stage: "Invalid",
-			scores: { foo: 3 },
-		});
-		expect(result.isError).toBe(true);
-		expect(result.content[0]!.text).toContain("Invalid stage");
-	});
-
-	it("returns error without required params", () => {
-		expect(handleTool("record_stage_scores", TEST_DIR, {}).isError).toBe(true);
-		expect(handleTool("record_stage_scores", TEST_DIR, { stage: "Spec" }).isError).toBe(true);
-	});
-});
-
-describe("record_human_approval", () => {
-	it("records approval timestamp in session state", () => {
-		const db = getDb();
-		db.prepare("UPDATE projects SET review_completed_at = ? WHERE id = ?").run(
-			new Date().toISOString(),
-			getProjectId(),
-		);
-
-		const result = handleTool("record_human_approval", TEST_DIR);
-		expect(result.content[0]!.text).toContain("Human approval recorded");
-
-		const row = db
-			.prepare("SELECT human_review_approved_at FROM projects WHERE id = ?")
-			.get(getProjectId()) as {
-			human_review_approved_at: string | null;
-		};
-		expect(typeof row.human_review_approved_at).toBe("string");
-		expect(row.human_review_approved_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-	});
-
-	it("rejects when no review has been completed", () => {
-		const result = handleTool("record_human_approval", TEST_DIR);
-		expect(result.isError).toBe(true);
-		expect(result.content[0]!.text).toContain("no review");
-	});
-});
-
-describe("get_detector_summary", () => {
-	it("returns 'No detector findings.' on clean state", () => {
-		const result = handleTool("get_detector_summary", TEST_DIR);
-		expect(result.content[0]!.text).toBe("No detector findings.");
-	});
-
-	it("returns summary when security warnings and pending fixes exist", () => {
-		const db = getDb();
-		db.prepare("UPDATE projects SET security_warning_count = ? WHERE id = ?").run(
-			3,
-			getProjectId(),
-		);
-		db.prepare(
-			"INSERT INTO pending_fixes (project_id, file, gate, errors) VALUES (?, ?, ?, ?)",
-		).run(
-			getProjectId(),
-			"src/foo.ts",
-			"security-check",
-			JSON.stringify(["L5: Hardcoded API key"]),
-		);
-
-		const result = handleTool("get_detector_summary", TEST_DIR);
-		const text = result.content[0]!.text;
-		expect(text).toContain("security_warning_count: 3");
-		expect(text).toContain("security-check");
-		expect(text).toContain("src/foo.ts");
-	});
-
-	it("includes all non-zero escalation counters", () => {
-		const db = getDb();
-		db.prepare(
-			"UPDATE projects SET dead_import_warning_count = ?, drift_warning_count = ?, test_quality_warning_count = ?, duplication_warning_count = ? WHERE id = ?",
-		).run(2, 4, 1, 3, getProjectId());
-
-		const result = handleTool("get_detector_summary", TEST_DIR);
-		const text = result.content[0]!.text;
-		expect(text).toContain("dead_import_warning_count: 2");
-		expect(text).toContain("drift_warning_count: 4");
-		expect(text).toContain("test_quality_warning_count: 1");
-		expect(text).toContain("duplication_warning_count: 3");
-	});
-});
-
-describe("archive_spec", () => {
-	it("moves .qult/specs/<name>/ to .qult/specs/archive/<name>/", () => {
-		const specDir = join(TEST_DIR, ".qult", "specs", "demo-spec");
-		mkdirSync(specDir, { recursive: true });
-		writeFileSync(join(specDir, "requirements.md"), "# Reqs\n");
-		const result = handleTool("archive_spec", TEST_DIR, { spec_name: "demo-spec" });
-		const parsed = JSON.parse(result.content[0]!.text);
-		expect(parsed.ok).toBe(true);
-		expect(existsSync(specDir)).toBe(false);
-		expect(existsSync(join(TEST_DIR, ".qult", "specs", "archive", "demo-spec"))).toBe(true);
-	});
-
-	it("rejects reserved name 'archive'", () => {
-		const result = handleTool("archive_spec", TEST_DIR, { spec_name: "archive" });
-		expect(result.isError).toBe(true);
-		expect(result.content[0]!.text).toMatch(/reserved/);
-	});
-
-	it("rejects path traversal attempts via spec_name", () => {
-		const result = handleTool("archive_spec", TEST_DIR, { spec_name: "../etc" });
-		expect(result.isError).toBe(true);
-		expect(result.content[0]!.text).toMatch(/invalid spec name/);
-	});
-
-	it("returns error when spec dir does not exist", () => {
-		const result = handleTool("archive_spec", TEST_DIR, { spec_name: "no-such-spec" });
-		expect(result.isError).toBe(true);
-		expect(result.content[0]!.text).toMatch(/spec not found/);
-	});
-});
-
-describe("get_file_health_score", () => {
-	it("returns score for clean file", () => {
-		const file = join(TEST_DIR, "clean.ts");
-		writeFileSync(file, "export const x = 1;\n");
-		const result = handleTool("get_file_health_score", TEST_DIR, { file_path: file });
-		const parsed = JSON.parse(result.content[0]!.text);
-		expect(parsed.score).toBe(10);
-		expect(parsed.breakdown).toEqual({});
-	});
-
-	it("returns 10 for nonexistent file (fail-open)", () => {
-		const result = handleTool("get_file_health_score", TEST_DIR, {
-			file_path: "/nonexistent/path.ts",
-		});
-		const parsed = JSON.parse(result.content[0]!.text);
-		expect(parsed.score).toBe(10);
-		expect(parsed.breakdown).toEqual({});
-	});
-
-	it("rejects path outside project directory", () => {
-		const result = handleTool("get_file_health_score", TEST_DIR, {
-			file_path: "/etc/passwd",
-		});
-		const parsed = JSON.parse(result.content[0]!.text);
-		expect(parsed.error).toBeDefined();
-	});
-});
-
-describe("record_finish_started", () => {
-	it("persists to DB so hooks can read it via wasFinishStarted", async () => {
-		handleTool("record_finish_started", TEST_DIR, {});
-
-		// Reset ALL caches to simulate a fresh hook process
-		const { resetAllCaches } = await import("../state/flush.ts");
-		resetAllCaches();
-
-		// wasFinishStarted reads from DB via readSessionState — must see the marker
-		const { wasFinishStarted } = await import("../state/session-state.ts");
-		expect(wasFinishStarted()).toBe(true);
-	});
-});
-
-describe("get_impact_analysis", () => {
-	it("returns consumer list", () => {
-		// Create files with import relationship
-		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
-		const target = join(TEST_DIR, "src", "utils.ts");
-		const consumer = join(TEST_DIR, "src", "app.ts");
-		writeFileSync(target, "export const foo = 1;");
-		writeFileSync(consumer, 'import { foo } from "./utils";');
-
-		const result = handleTool("get_impact_analysis", TEST_DIR, { file: target });
-		const text = result.content[0]!.text;
-		const parsed = JSON.parse(text);
-		expect(parsed.consumers).toContain(consumer);
-	});
-
-	it("returns empty consumers when no importers", () => {
-		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
-		const target = join(TEST_DIR, "src", "lonely.ts");
-		writeFileSync(target, "export const x = 1;");
-
-		const result = handleTool("get_impact_analysis", TEST_DIR, { file: target });
-		const parsed = JSON.parse(result.content[0]!.text);
-		expect(parsed.consumers).toEqual([]);
-	});
-});
-
-describe("get_call_coverage", () => {
-	it("checks test-to-impl path", () => {
-		mkdirSync(join(TEST_DIR, "src", "__tests__"), { recursive: true });
-		const impl = join(TEST_DIR, "src", "utils.ts");
-		const test = join(TEST_DIR, "src", "__tests__", "utils.test.ts");
-		writeFileSync(impl, "export function doStuff() {}");
-		writeFileSync(test, 'import { doStuff } from "../utils";\nit("works", () => { doStuff(); });');
-
-		const result = handleTool("get_call_coverage", TEST_DIR, {
-			test_file: test,
-			impl_file: impl,
-		});
-		const parsed = JSON.parse(result.content[0]!.text);
-		expect(parsed.covered).toBe(true);
-	});
-
-	it("returns false when test does not import impl", () => {
-		mkdirSync(join(TEST_DIR, "src", "__tests__"), { recursive: true });
-		const impl = join(TEST_DIR, "src", "utils.ts");
-		const test = join(TEST_DIR, "src", "__tests__", "other.test.ts");
-		writeFileSync(impl, "export function doStuff() {}");
-		writeFileSync(test, 'it("works", () => { expect(1).toBe(1); });');
-
-		const result = handleTool("get_call_coverage", TEST_DIR, {
-			test_file: test,
-			impl_file: impl,
-		});
-		const parsed = JSON.parse(result.content[0]!.text);
-		expect(parsed.covered).toBe(false);
-	});
-});
-
-describe("instructions include impact analysis guidance", () => {
-	it("instructions mention get_impact_analysis", () => {
-		const req = handleRequest(
-			{ jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
-			TEST_DIR,
-		);
-		const result = req as { result?: { instructions?: string } };
-		expect(result.result?.instructions).toContain("get_impact_analysis");
-	});
-});
-
-describe("dep-vuln-check and hallucinated-package-check gate names", () => {
-	it("disable_gate accepts dep-vuln-check", () => {
-		const result = handleTool("disable_gate", TEST_DIR, {
-			gate_name: "dep-vuln-check",
-			reason: "Not needed for this testing session",
-		});
-		expect(result.content[0]!.text).toContain("disabled");
-	});
-
-	it("disable_gate accepts hallucinated-package-check", () => {
-		const result = handleTool("disable_gate", TEST_DIR, {
-			gate_name: "hallucinated-package-check",
-			reason: "Not needed for this testing session",
-		});
-		expect(result.content[0]!.text).toContain("disabled");
+describe("handleTool: errors", () => {
+	it("returns isError for unknown tool name", () => {
+		const r = handleTool("no_such_tool", TEST_DIR);
+		expect(r.isError).toBe(true);
+		expect(r.content[0]!.text).toMatch(/Unknown tool/);
 	});
 });

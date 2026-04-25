@@ -1,4 +1,5 @@
-import { getDb, getProjectId } from "./state/db.ts";
+import { existsSync, readFileSync } from "node:fs";
+import { configJsonPath } from "./state/paths.ts";
 
 /** User-configurable settings */
 export interface QultConfig {
@@ -139,73 +140,38 @@ function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): voi
 	}
 }
 
-/** Convert DB KV rows to a nested config object for applyConfigLayer.
- *  Supports 2-level (section.field) and 3-level (section.sub.field) keys. */
-function kvRowsToRaw(rows: { key: string; value: string }[]): Record<string, unknown> {
-	const raw: Record<string, Record<string, unknown>> = {};
-	for (const row of rows) {
-		const parts = row.key.split(".");
-		if (parts.length < 2) continue;
-		const section = parts[0]!;
-		if (!raw[section]) raw[section] = {};
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(row.value);
-		} catch {
-			parsed = row.value;
+/** Read raw config object from .qult/config.json (returns {} if missing/malformed). */
+function readConfigJson(): Record<string, unknown> {
+	try {
+		const path = configJsonPath();
+		if (!existsSync(path)) return {};
+		const txt = readFileSync(path, "utf8");
+		const parsed = JSON.parse(txt);
+		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+			return parsed as Record<string, unknown>;
 		}
-		if (parts.length === 2) {
-			raw[section][parts[1]!] = parsed;
-		} else if (parts.length === 3) {
-			// 3-level: e.g. review.models.spec → { review: { models: { spec: value } } }
-			const sub = parts[1]!;
-			if (!raw[section][sub] || typeof raw[section][sub] !== "object") {
-				raw[section][sub] = {};
-			}
-			(raw[section][sub] as Record<string, unknown>)[parts[2]!] = parsed;
-		}
+		return {};
+	} catch {
+		return {};
 	}
-	return raw;
 }
 
 // Process-scoped cache
 let _cache: QultConfig | null = null;
 
-/** Load config with layered precedence: defaults → global_configs → project_configs → QULT_* env vars */
+/** Load config with precedence: defaults → .qult/config.json → QULT_* env vars (no global, no SQLite). */
 export function loadConfig(): QultConfig {
 	if (_cache) return _cache;
 
 	const config = structuredClone(DEFAULTS);
 
-	// Layer 1: global_configs (user-level cross-project)
-	try {
-		const db = getDb();
-		const globalRows = db.prepare("SELECT key, value FROM global_configs").all() as {
-			key: string;
-			value: string;
-		}[];
-		if (globalRows.length > 0) {
-			applyConfigLayer(config, kvRowsToRaw(globalRows));
-		}
-	} catch {
-		/* fail-open */
+	// Layer 1: project-local .qult/config.json
+	const raw = readConfigJson();
+	if (Object.keys(raw).length > 0) {
+		applyConfigLayer(config, raw);
 	}
 
-	// Layer 2: project_configs (project-level)
-	try {
-		const db = getDb();
-		const projectId = getProjectId();
-		const projectRows = db
-			.prepare("SELECT key, value FROM project_configs WHERE project_id = ?")
-			.all(projectId) as { key: string; value: string }[];
-		if (projectRows.length > 0) {
-			applyConfigLayer(config, kvRowsToRaw(projectRows));
-		}
-	} catch {
-		/* fail-open */
-	}
-
-	// Layer 3: QULT_* environment variables
+	// Layer 2: QULT_* environment variables
 	const envInt = (key: string): number | undefined => {
 		const val = process.env[key];
 		if (val === undefined) return undefined;
@@ -274,4 +240,34 @@ export function loadConfig(): QultConfig {
 /** Reset cache. Call between tests or when env changes. */
 export function resetConfigCache(): void {
 	_cache = null;
+}
+
+/** Set a single config key in `.qult/config.json` (dot-path supported, depth 2 or 3). */
+export function setConfigKey(key: string, value: number | string | boolean): void {
+	const parts = key.split(".");
+	if (parts.length < 2 || parts.length > 3) {
+		throw new Error(`unsupported config key depth: ${key}`);
+	}
+	const raw = readConfigJson();
+	const top = parts[0]!;
+	if (!raw[top] || typeof raw[top] !== "object" || Array.isArray(raw[top])) {
+		raw[top] = {};
+	}
+	if (parts.length === 2) {
+		(raw[top] as Record<string, unknown>)[parts[1]!] = value;
+	} else {
+		const sub = parts[1]!;
+		const topObj = raw[top] as Record<string, unknown>;
+		if (!topObj[sub] || typeof topObj[sub] !== "object" || Array.isArray(topObj[sub])) {
+			topObj[sub] = {};
+		}
+		(topObj[sub] as Record<string, unknown>)[parts[2]!] = value;
+	}
+	const path = configJsonPath();
+	// Ensure .qult/ directory exists.
+	const { mkdirSync, writeFileSync, renameSync } = require("node:fs") as typeof import("node:fs");
+	mkdirSync(path.replace(/\/[^/]+$/u, ""), { recursive: true });
+	const tmp = `${path}.tmp`;
+	writeFileSync(tmp, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
+	renameSync(tmp, path);
 }

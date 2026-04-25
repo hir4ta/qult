@@ -11,7 +11,7 @@
 
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
-import { loadConfig, resetConfigCache } from "./config.ts";
+import { loadConfig, resetConfigCache, setConfigKey } from "./config.ts";
 import { computeFileHealthScore } from "./hooks/detectors/health-score.ts";
 import { findImporters } from "./hooks/detectors/import-graph.ts";
 import { validateTestCoversImpl } from "./hooks/detectors/spec-trace-check.ts";
@@ -23,15 +23,20 @@ import {
 	handleUpdateTaskStatus,
 } from "./mcp-tools/spec-tools.ts";
 import { appendAuditLog } from "./state/audit-log.ts";
-import { getDb, getProjectId, setProjectPath } from "./state/db.ts";
 import {
 	disableGate as disableGateFs,
 	enableGate as enableGateFs,
 	listDisabledGateNames,
 } from "./state/gate-state.ts";
+import {
+	clearPendingFixes as clearPendingFixesFs,
+	patchCurrent,
+	readCurrent,
+	readPendingFixes as readPendingFixesFs,
+	recordReviewStage,
+} from "./state/json-state.ts";
 import { setProjectRoot } from "./state/paths.ts";
 import { getActiveSpec as getActiveSpecOnDisk } from "./state/spec.ts";
-import type { PendingFix } from "./types.ts";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_NAME = "qult";
@@ -334,10 +339,7 @@ const TOOL_DEFS: ToolDef[] = [
 ];
 
 function handleTool(name: string, cwd: string, args?: Record<string, unknown>): ToolResult {
-	setProjectPath(cwd);
 	setProjectRoot(cwd);
-	const db = getDb();
-	const pid = getProjectId();
 
 	switch (name) {
 		case "get_active_spec":
@@ -351,63 +353,38 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 		case "archive_spec":
 			return handleArchiveSpec(args);
 		case "get_pending_fixes": {
-			const rows = db
-				.prepare("SELECT file, gate, errors FROM pending_fixes WHERE project_id = ?")
-				.all(pid) as { file: string; gate: string; errors: string }[];
-			if (rows.length === 0) {
+			const state = readPendingFixesFs();
+			if (state.fixes.length === 0) {
 				return { content: [{ type: "text", text: "No pending fixes." }] };
 			}
-			const fixes: PendingFix[] = rows.map((r) => ({
-				file: r.file,
-				gate: r.gate,
-				errors: JSON.parse(r.errors) as string[],
-			}));
-			const lines: string[] = [`${fixes.length} pending fix(es):\n`];
-			for (const fix of fixes) {
-				lines.push(`[${fix.gate}] ${fix.file}`);
-				for (const err of fix.errors) lines.push(`  ${err}`);
+			const lines: string[] = [`${state.fixes.length} pending fix(es):\n`];
+			for (const fix of state.fixes) {
+				lines.push(
+					`[${fix.detector}] (${fix.severity}) ${fix.file}${fix.line ? `:${fix.line}` : ""}`,
+				);
+				lines.push(`  ${fix.message}`);
 			}
 			return { content: [{ type: "text", text: lines.join("\n") }] };
 		}
 		case "get_project_status": {
-			const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(pid);
-			if (!row) {
-				return {
-					isError: true,
-					content: [{ type: "text", text: "No project state. Run /qult:init to set up." }],
-				};
-			}
-			// Explicit allowlist of exposed fields — prevents silent leaks when the projects
-			// table gets new columns. Any new field must be added here to be visible to skills.
-			const r = row as Record<string, unknown>;
+			const cur = readCurrent();
 			const config = loadConfig();
 			let activeSpec: ReturnType<typeof getActiveSpecOnDisk> = null;
 			try {
 				activeSpec = getActiveSpecOnDisk();
 			} catch {
-				// Multiple specs etc. — surface as null and let /qult:status handle the inconsistency.
 				activeSpec = null;
 			}
 			const enriched = {
-				id: r.id,
-				path: r.path,
-				created_at: r.created_at,
-				last_commit_at: r.last_commit_at,
-				test_passed_at: r.test_passed_at,
-				test_command: r.test_command,
-				review_completed_at: r.review_completed_at,
-				review_iteration: r.review_iteration,
-				plan_eval_iteration: r.plan_eval_iteration,
-				plan_selfcheck_blocked_at: r.plan_selfcheck_blocked_at,
-				human_review_approved_at: r.human_review_approved_at,
-				security_warning_count: r.security_warning_count,
-				test_quality_warning_count: r.test_quality_warning_count,
-				drift_warning_count: r.drift_warning_count,
-				dead_import_warning_count: r.dead_import_warning_count,
-				duplication_warning_count: r.duplication_warning_count,
-				semantic_warning_count: r.semantic_warning_count,
-				review_models: config.review.models, // kept for backward compat
-				review_config: config.review, // full review config
+				path: cwd,
+				test_passed_at: cur.test_passed_at,
+				test_command: cur.test_command,
+				review_completed_at: cur.review_completed_at,
+				review_score: cur.review_score,
+				finish_started_at: cur.finish_started_at,
+				human_approval_at: cur.human_approval_at,
+				review_models: config.review.models,
+				review_config: config.review,
 				active_spec: activeSpec
 					? {
 							name: activeSpec.name,
@@ -542,10 +519,7 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			) {
 				return { isError: true, content: [{ type: "text", text: "dimension_floor must be 1-5." }] };
 			}
-			const projectId = getProjectId();
-			db.prepare(
-				"INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)",
-			).run(projectId, key, JSON.stringify(value));
+			setConfigKey(key, value);
 			resetConfigCache();
 			return { content: [{ type: "text", text: `Config set: ${key} = ${value}` }] };
 		}
@@ -559,7 +533,7 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 					],
 				};
 			}
-			db.prepare("DELETE FROM pending_fixes WHERE project_id = ?").run(pid);
+			clearPendingFixesFs();
 			appendAuditLog({
 				action: "clear_pending_fixes",
 				reason,
@@ -568,47 +542,25 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			return { content: [{ type: "text", text: "All pending fixes cleared." }] };
 		}
 		case "get_detector_summary": {
-			const session = db.prepare("SELECT * FROM projects WHERE id = ?").get(pid) as Record<
-				string,
-				unknown
-			> | null;
-			const fixes = db
-				.prepare("SELECT file, gate, errors FROM pending_fixes WHERE project_id = ?")
-				.all(pid) as { file: string; gate: string; errors: string }[];
-
+			const state = readPendingFixesFs();
 			const lines: string[] = [];
-			if (session) {
-				const counters = [
-					"security_warning_count",
-					"dead_import_warning_count",
-					"drift_warning_count",
-					"test_quality_warning_count",
-					"duplication_warning_count",
-					"semantic_warning_count",
-				] as const;
-				for (const key of counters) {
-					const val = typeof session[key] === "number" ? (session[key] as number) : 0;
-					if (val > 0) lines.push(`${key}: ${val}`);
-				}
-			}
 
-			if (fixes.length > 0) {
-				const byGate: Record<string, { file: string; errors: string[] }[]> = {};
-				for (const fix of fixes) {
-					const g = fix.gate ?? "unknown";
-					if (!byGate[g]) byGate[g] = [];
-					byGate[g].push({ file: fix.file, errors: JSON.parse(fix.errors) });
+			if (state.fixes.length > 0) {
+				const byDetector: Record<string, typeof state.fixes> = {};
+				for (const fix of state.fixes) {
+					const d = fix.detector || "unknown";
+					if (!byDetector[d]) byDetector[d] = [];
+					byDetector[d].push(fix);
 				}
-				for (const [gate, gateFixes] of Object.entries(byGate)) {
-					lines.push(`\n[${gate}] ${gateFixes.length} issue(s):`);
-					for (const fix of gateFixes) {
+				for (const [detector, fixes] of Object.entries(byDetector)) {
+					lines.push(`\n[${detector}] ${fixes.length} issue(s):`);
+					for (const fix of fixes) {
 						const relPath = fix.file.startsWith(`${cwd}/`)
 							? fix.file.slice(cwd.length + 1)
 							: fix.file;
-						lines.push(`  ${relPath}`);
-						for (const err of fix.errors.slice(0, 3)) {
-							lines.push(`    ${err.slice(0, 200)}`);
-						}
+						const loc = fix.line ? `:${fix.line}` : "";
+						lines.push(`  (${fix.severity}) ${relPath}${loc}`);
+						lines.push(`    ${fix.message.slice(0, 200)}`);
 					}
 				}
 			}
@@ -653,11 +605,11 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			}
 		}
 		case "record_review": {
-			db.prepare("UPDATE projects SET review_completed_at = ? WHERE id = ?").run(
-				new Date().toISOString(),
-				pid,
-			);
 			const score = typeof args?.aggregate_score === "number" ? args.aggregate_score : null;
+			patchCurrent({
+				review_completed_at: new Date().toISOString(),
+				review_score: score,
+			});
 			const msg = score !== null ? `Review recorded (aggregate: ${score}).` : "Review recorded.";
 			return { content: [{ type: "text", text: msg }] };
 		}
@@ -666,20 +618,15 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			if (!cmd) {
 				return { isError: true, content: [{ type: "text", text: "Missing command parameter." }] };
 			}
-			db.prepare("UPDATE projects SET test_passed_at = ?, test_command = ? WHERE id = ?").run(
-				new Date().toISOString(),
-				cmd,
-				pid,
-			);
+			patchCurrent({
+				test_passed_at: new Date().toISOString(),
+				test_command: cmd,
+			});
 			return { content: [{ type: "text", text: `Test pass recorded: ${cmd}` }] };
 		}
 		case "record_human_approval": {
-			const session = db
-				.prepare("SELECT review_completed_at FROM projects WHERE id = ?")
-				.get(pid) as {
-				review_completed_at: string | null;
-			} | null;
-			if (!session?.review_completed_at) {
+			const cur = readCurrent();
+			if (!cur.review_completed_at) {
 				return {
 					isError: true,
 					content: [
@@ -690,10 +637,7 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 					],
 				};
 			}
-			db.prepare("UPDATE projects SET human_review_approved_at = ? WHERE id = ?").run(
-				new Date().toISOString(),
-				pid,
-			);
+			patchCurrent({ human_approval_at: new Date().toISOString() });
 			appendAuditLog({
 				action: "record_human_approval",
 				reason: "Architect approved changes",
@@ -710,19 +654,18 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 					content: [{ type: "text", text: "Missing stage or scores parameter." }],
 				};
 			}
-			const validStages = ["Spec", "Quality", "Security", "Adversarial"];
-			if (!validStages.includes(stage)) {
+			const validStages = ["Spec", "Quality", "Security", "Adversarial"] as const;
+			if (!validStages.includes(stage as (typeof validStages)[number])) {
 				return {
 					isError: true,
 					content: [{ type: "text", text: `Invalid stage. Must be: ${validStages.join(", ")}` }],
 				};
 			}
-			const insertScore = db.prepare(
-				"INSERT OR REPLACE INTO review_stage_scores (project_id, stage, dimension, score) VALUES (?, ?, ?, ?)",
-			);
-			for (const [dim, score] of Object.entries(scores as Record<string, number>)) {
-				insertScore.run(pid, stage, dim, score);
+			const dimRecord: Record<string, number> = {};
+			for (const [dim, val] of Object.entries(scores as Record<string, unknown>)) {
+				if (typeof val === "number") dimRecord[dim] = val;
 			}
+			recordReviewStage(stage as (typeof validStages)[number], dimRecord);
 			return {
 				content: [
 					{ type: "text", text: `Stage scores recorded: ${stage} = ${JSON.stringify(scores)}` },
@@ -730,13 +673,10 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			};
 		}
 		case "record_finish_started": {
-			// Write directly to DB (not via writeState cache) so hook processes can read it immediately
-			db.prepare(
-				"INSERT OR REPLACE INTO ran_gates (project_id, gate_name, ran_at) VALUES (?, ?, ?)",
-			).run(pid, "__finish_started__", new Date().toISOString());
+			patchCurrent({ finish_started_at: new Date().toISOString() });
 			return { content: [{ type: "text", text: "Finish started recorded." }] };
 		}
-		// archive_spec removed in v1.0 — replaced by archive_spec (handled above).
+		// archive_plan removed in v1.0 — replaced by archive_spec (handled above).
 
 		case "get_impact_analysis": {
 			const file = typeof args?.file === "string" ? args.file : "";

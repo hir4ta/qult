@@ -1,27 +1,19 @@
-import { resetConfigCache } from "../config.ts";
-import { flush as flushPendingFixes, resetCache as resetPendingFixes } from "./pending-fixes.ts";
-import { resetPlanCache, setDisableHomeFallback } from "./plan-status.ts";
-import { flush as flushSessionState, resetCache as resetSessionState } from "./session-state.ts";
+/**
+ * Cache reset utility for tests.
+ *
+ * Pre-v1.0 this also flushed session-state and pending-fixes write caches
+ * to SQLite. Since v1.0 those modules write directly to JSON files (no
+ * batching), so flush is a no-op and we only reset the config cache.
+ */
 
-/** Flush all dirty state caches to DB. Called once at end of hook dispatch. */
+import { resetConfigCache } from "../config.ts";
+
+/** Flush dirty caches. v1.0 has nothing to flush. */
 export function flushAll(): void {
-	try {
-		flushSessionState();
-	} catch {
-		/* fail-open */
-	}
-	try {
-		flushPendingFixes();
-	} catch {
-		/* fail-open */
-	}
+	// no-op: file-based state writes synchronously.
 }
 
-/** Reset all caches (for tests). */
+/** Reset in-process caches (for tests). */
 export function resetAllCaches(): void {
-	resetSessionState();
-	resetPendingFixes();
-	resetPlanCache();
 	resetConfigCache();
-	setDisableHomeFallback(true);
 }

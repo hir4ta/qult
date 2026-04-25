@@ -1,304 +1,114 @@
 // @bun
+var __require = import.meta.require;
+
 // src/mcp-server.ts
-import { resolve as resolve4 } from "path";
+import { resolve as resolve6 } from "path";
 import { createInterface } from "readline";
 
-// src/state/db.ts
-import { Database } from "bun:sqlite";
-import { chmodSync, mkdirSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
-var SCHEMA_VERSION = 6;
-var DB_DIR = join(homedir(), ".qult");
-var DB_PATH = join(DB_DIR, "qult.db");
-var _db = null;
-function getDb() {
-  if (_db)
-    return _db;
-  mkdirSync(DB_DIR, { recursive: true, mode: 448 });
-  try {
-    chmodSync(DB_DIR, 448);
-  } catch {}
-  _db = new Database(DB_PATH);
-  configurePragmas(_db);
-  migrateSchema(_db);
-  return _db;
+// src/config.ts
+import { existsSync, readFileSync } from "fs";
+
+// src/state/paths.ts
+import { realpathSync } from "fs";
+import { resolve } from "path";
+var RESERVED_SPEC_NAMES = new Set(["archive"]);
+var WAVE_NUM_MIN = 1;
+var WAVE_NUM_MAX = 99;
+var SPEC_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+var projectRootOverride = null;
+function setProjectRoot(root) {
+  projectRootOverride = root;
 }
-function configurePragmas(db) {
-  db.exec("PRAGMA journal_mode = WAL");
-  db.exec("PRAGMA busy_timeout = 5000");
-  db.exec("PRAGMA foreign_keys = ON");
+function getProjectRoot() {
+  return projectRootOverride ?? process.cwd();
 }
-function migrateSchema(db) {
-  const version = db.prepare("PRAGMA user_version").get().user_version;
-  if (version >= SCHEMA_VERSION)
-    return;
-  if (version < 1) {
-    createTablesV6(db);
-    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
-    return;
+function qultDir() {
+  return resolve(getProjectRoot(), ".qult");
+}
+function specsDir() {
+  return resolve(qultDir(), "specs");
+}
+function archiveDir() {
+  return resolve(specsDir(), "archive");
+}
+function specDir(name) {
+  assertValidSpecName(name);
+  return resolve(specsDir(), name);
+}
+function requirementsPath(name) {
+  return resolve(specDir(name), "requirements.md");
+}
+function designPath(name) {
+  return resolve(specDir(name), "design.md");
+}
+function tasksPath(name) {
+  return resolve(specDir(name), "tasks.md");
+}
+function wavesDir(name) {
+  return resolve(specDir(name), "waves");
+}
+function wavePath(name, waveNum) {
+  assertValidWaveNum(waveNum);
+  return resolve(wavesDir(name), `wave-${formatWaveNum(waveNum)}.md`);
+}
+function formatWaveNum(waveNum) {
+  assertValidWaveNum(waveNum);
+  return String(waveNum).padStart(2, "0");
+}
+function stateDir() {
+  return resolve(qultDir(), "state");
+}
+function currentJsonPath() {
+  return resolve(stateDir(), "current.json");
+}
+function pendingFixesJsonPath() {
+  return resolve(stateDir(), "pending-fixes.json");
+}
+function stageScoresJsonPath() {
+  return resolve(stateDir(), "stage-scores.json");
+}
+function configJsonPath() {
+  return resolve(qultDir(), "config.json");
+}
+function assertValidSpecName(name) {
+  if (typeof name !== "string" || !SPEC_NAME_RE.test(name)) {
+    throw new Error(`invalid spec name: ${JSON.stringify(name)} (must match ${SPEC_NAME_RE} and be \u226464 chars)`);
   }
-  if (version < 2)
-    db.exec("DROP TABLE IF EXISTS calibration");
-  if (version < 3) {
+  if (RESERVED_SPEC_NAMES.has(name)) {
+    throw new Error(`reserved spec name: ${JSON.stringify(name)}`);
+  }
+  if (name.includes("/") || name.includes("\\") || name.startsWith(".")) {
+    throw new Error(`spec name must not contain path separators or leading dot: ${name}`);
+  }
+}
+function assertValidWaveNum(waveNum) {
+  if (!Number.isInteger(waveNum) || waveNum < WAVE_NUM_MIN || waveNum > WAVE_NUM_MAX) {
+    throw new Error(`invalid wave_num: ${waveNum} (must be integer in [${WAVE_NUM_MIN}, ${WAVE_NUM_MAX}])`);
+  }
+}
+function assertConfinedToQult(targetPath) {
+  const resolved = resolve(targetPath);
+  const qultRealPath = resolveExistingAncestor(qultDir());
+  const targetRealPath = resolveExistingAncestor(resolved);
+  if (targetRealPath !== qultRealPath && !targetRealPath.startsWith(`${qultRealPath}/`)) {
+    throw new Error(`path escape detected: ${targetPath} resolves to ${targetRealPath}, outside ${qultRealPath}`);
+  }
+  return resolved;
+}
+function resolveExistingAncestor(absPath) {
+  let current = absPath;
+  for (let i = 0;i < 64; i++) {
     try {
-      db.exec("ALTER TABLE sessions ADD COLUMN semantic_warning_count INTEGER NOT NULL DEFAULT 0");
-    } catch {}
-  }
-  if (version < 4) {
-    for (const col of [
-      "test_quality_warning_count INTEGER NOT NULL DEFAULT 0",
-      "duplication_warning_count INTEGER NOT NULL DEFAULT 0",
-      "semantic_warning_count INTEGER NOT NULL DEFAULT 0",
-      "drift_warning_count INTEGER NOT NULL DEFAULT 0",
-      "escalation_hit INTEGER NOT NULL DEFAULT 0"
-    ]) {
-      try {
-        db.exec(`ALTER TABLE session_metrics ADD COLUMN ${col}`);
-      } catch {}
+      return realpathSync(current);
+    } catch {
+      const parent = resolve(current, "..");
+      if (parent === current) {
+        return current;
+      }
+      current = parent;
     }
   }
-  if (version < 5) {
-    db.exec(`CREATE TABLE IF NOT EXISTS file_edit_counts (
-			session_id TEXT NOT NULL, file TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 1,
-			PRIMARY KEY (session_id, file)
-		)`);
-  }
-  if (version < 6)
-    migrateToProjectState(db);
-  db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
-}
-function migrateToProjectState(db) {
-  for (const col of [
-    "last_commit_at TEXT",
-    "test_passed_at TEXT",
-    "test_command TEXT",
-    "review_completed_at TEXT",
-    "review_iteration INTEGER NOT NULL DEFAULT 0",
-    "plan_eval_iteration INTEGER NOT NULL DEFAULT 0",
-    "plan_selfcheck_blocked_at TEXT",
-    "human_review_approved_at TEXT",
-    "security_warning_count INTEGER NOT NULL DEFAULT 0",
-    "test_quality_warning_count INTEGER NOT NULL DEFAULT 0",
-    "drift_warning_count INTEGER NOT NULL DEFAULT 0",
-    "dead_import_warning_count INTEGER NOT NULL DEFAULT 0",
-    "duplication_warning_count INTEGER NOT NULL DEFAULT 0",
-    "semantic_warning_count INTEGER NOT NULL DEFAULT 0"
-  ]) {
-    try {
-      db.exec(`ALTER TABLE projects ADD COLUMN ${col}`);
-    } catch {}
-  }
-  try {
-    db.exec(`UPDATE projects SET
-			test_passed_at = (SELECT s.test_passed_at FROM sessions s WHERE s.project_id = projects.id ORDER BY s.rowid DESC LIMIT 1),
-			review_completed_at = (SELECT s.review_completed_at FROM sessions s WHERE s.project_id = projects.id ORDER BY s.rowid DESC LIMIT 1),
-			review_iteration = COALESCE((SELECT s.review_iteration FROM sessions s WHERE s.project_id = projects.id ORDER BY s.rowid DESC LIMIT 1), 0)
-		`);
-  } catch {}
-  const migrations = [
-    {
-      name: "pending_fixes",
-      ddl: `(id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, file TEXT NOT NULL, gate TEXT NOT NULL, errors TEXT NOT NULL, UNIQUE(project_id, file, gate))`,
-      copy: `INSERT OR IGNORE INTO pending_fixes_v6 (project_id, file, gate, errors) SELECT s.project_id, t.file, t.gate, t.errors FROM pending_fixes t JOIN sessions s ON t.session_id = s.id`
-    },
-    {
-      name: "changed_files",
-      ddl: `(project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, file_path TEXT NOT NULL, changed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), PRIMARY KEY (project_id, file_path))`,
-      copy: `INSERT OR IGNORE INTO changed_files_v6 (project_id, file_path) SELECT s.project_id, t.file_path FROM changed_files t JOIN sessions s ON t.session_id = s.id`
-    },
-    {
-      name: "disabled_gates",
-      ddl: `(project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, gate_name TEXT NOT NULL, reason TEXT NOT NULL, disabled_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), PRIMARY KEY (project_id, gate_name))`,
-      copy: `INSERT OR IGNORE INTO disabled_gates_v6 (project_id, gate_name, reason) SELECT s.project_id, t.gate_name, t.reason FROM disabled_gates t JOIN sessions s ON t.session_id = s.id`
-    },
-    {
-      name: "ran_gates",
-      ddl: `(project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, gate_name TEXT NOT NULL, ran_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), PRIMARY KEY (project_id, gate_name))`,
-      copy: `INSERT OR IGNORE INTO ran_gates_v6 (project_id, gate_name, ran_at) SELECT s.project_id, t.gate_name, t.ran_at FROM ran_gates t JOIN sessions s ON t.session_id = s.id`
-    },
-    {
-      name: "task_verify_results",
-      ddl: `(project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, task_key TEXT NOT NULL, passed INTEGER NOT NULL, ran_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), PRIMARY KEY (project_id, task_key))`,
-      copy: `INSERT OR IGNORE INTO task_verify_results_v6 (project_id, task_key, passed, ran_at) SELECT s.project_id, t.task_key, t.passed, t.ran_at FROM task_verify_results t JOIN sessions s ON t.session_id = s.id`
-    },
-    {
-      name: "gate_failure_counts",
-      ddl: `(project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, file TEXT NOT NULL, gate TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (project_id, file, gate))`,
-      copy: `INSERT OR IGNORE INTO gate_failure_counts_v6 (project_id, file, gate, count) SELECT s.project_id, t.file, t.gate, t.count FROM gate_failure_counts t JOIN sessions s ON t.session_id = s.id`
-    },
-    {
-      name: "file_edit_counts",
-      ddl: `(project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, file TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (project_id, file))`,
-      copy: `INSERT OR IGNORE INTO file_edit_counts_v6 (project_id, file, count) SELECT s.project_id, t.file, t.count FROM file_edit_counts t JOIN sessions s ON t.session_id = s.id`
-    },
-    {
-      name: "review_scores",
-      ddl: `(id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, iteration INTEGER NOT NULL, aggregate_score REAL NOT NULL, recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), UNIQUE(project_id, iteration))`,
-      copy: `INSERT OR IGNORE INTO review_scores_v6 (project_id, iteration, aggregate_score, recorded_at) SELECT s.project_id, t.iteration, t.aggregate_score, t.recorded_at FROM review_scores t JOIN sessions s ON t.session_id = s.id`
-    },
-    {
-      name: "review_stage_scores",
-      ddl: `(id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, stage TEXT NOT NULL, dimension TEXT NOT NULL, score REAL NOT NULL, recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), UNIQUE(project_id, stage, dimension))`,
-      copy: `INSERT OR IGNORE INTO review_stage_scores_v6 (project_id, stage, dimension, score, recorded_at) SELECT s.project_id, t.stage, t.dimension, t.score, t.recorded_at FROM review_stage_scores t JOIN sessions s ON t.session_id = s.id`
-    },
-    {
-      name: "plan_eval_scores",
-      ddl: `(id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, iteration INTEGER NOT NULL, aggregate_score REAL NOT NULL, recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), UNIQUE(project_id, iteration))`,
-      copy: `INSERT OR IGNORE INTO plan_eval_scores_v6 (project_id, iteration, aggregate_score, recorded_at) SELECT s.project_id, t.iteration, t.aggregate_score, t.recorded_at FROM plan_eval_scores t JOIN sessions s ON t.session_id = s.id`
-    },
-    {
-      name: "review_findings",
-      ddl: `(id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id), file TEXT NOT NULL, severity TEXT NOT NULL, description TEXT NOT NULL, stage TEXT NOT NULL, recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')))`,
-      copy: `INSERT INTO review_findings_v6 (project_id, file, severity, description, stage, recorded_at) SELECT t.project_id, t.file, t.severity, t.description, t.stage, t.recorded_at FROM review_findings t`
-    }
-  ];
-  db.exec("PRAGMA foreign_keys = OFF");
-  for (const m of migrations) {
-    try {
-      db.exec(`CREATE TABLE ${m.name}_v6 ${m.ddl}`);
-      db.exec(m.copy);
-      db.exec(`DROP TABLE IF EXISTS ${m.name}`);
-      db.exec(`ALTER TABLE ${m.name}_v6 RENAME TO ${m.name}`);
-    } catch {}
-  }
-  try {
-    db.exec(`CREATE TABLE session_metrics_v6 (
-			id INTEGER PRIMARY KEY, session_id TEXT, project_id INTEGER NOT NULL REFERENCES projects(id),
-			gate_failure_count INTEGER NOT NULL DEFAULT 0, security_warning_count INTEGER NOT NULL DEFAULT 0,
-			review_aggregate REAL, files_changed INTEGER NOT NULL DEFAULT 0,
-			test_quality_warning_count INTEGER NOT NULL DEFAULT 0, duplication_warning_count INTEGER NOT NULL DEFAULT 0,
-			semantic_warning_count INTEGER NOT NULL DEFAULT 0, drift_warning_count INTEGER NOT NULL DEFAULT 0,
-			escalation_hit INTEGER NOT NULL DEFAULT 0,
-			recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-		)`);
-    db.exec(`INSERT INTO session_metrics_v6 SELECT * FROM session_metrics`);
-    db.exec("DROP TABLE session_metrics");
-    db.exec("ALTER TABLE session_metrics_v6 RENAME TO session_metrics");
-  } catch {}
-  db.exec("PRAGMA foreign_keys = ON");
-}
-function createTablesV6(db) {
-  db.exec(`
-		CREATE TABLE IF NOT EXISTS projects (
-			id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE,
-			created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			last_commit_at TEXT, test_passed_at TEXT, test_command TEXT,
-			review_completed_at TEXT, review_iteration INTEGER NOT NULL DEFAULT 0,
-			plan_eval_iteration INTEGER NOT NULL DEFAULT 0, plan_selfcheck_blocked_at TEXT,
-			human_review_approved_at TEXT,
-			security_warning_count INTEGER NOT NULL DEFAULT 0,
-			test_quality_warning_count INTEGER NOT NULL DEFAULT 0,
-			drift_warning_count INTEGER NOT NULL DEFAULT 0,
-			dead_import_warning_count INTEGER NOT NULL DEFAULT 0,
-			duplication_warning_count INTEGER NOT NULL DEFAULT 0,
-			semantic_warning_count INTEGER NOT NULL DEFAULT 0
-		);
-		CREATE TABLE IF NOT EXISTS sessions (
-			id TEXT PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id),
-			started_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-		);
-		CREATE TABLE IF NOT EXISTS pending_fixes (
-			id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-			file TEXT NOT NULL, gate TEXT NOT NULL, errors TEXT NOT NULL,
-			UNIQUE(project_id, file, gate)
-		);
-		CREATE TABLE IF NOT EXISTS changed_files (
-			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-			file_path TEXT NOT NULL, changed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			PRIMARY KEY (project_id, file_path)
-		);
-		CREATE TABLE IF NOT EXISTS disabled_gates (
-			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-			gate_name TEXT NOT NULL, reason TEXT NOT NULL,
-			disabled_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			PRIMARY KEY (project_id, gate_name)
-		);
-		CREATE TABLE IF NOT EXISTS ran_gates (
-			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-			gate_name TEXT NOT NULL, ran_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			PRIMARY KEY (project_id, gate_name)
-		);
-		CREATE TABLE IF NOT EXISTS task_verify_results (
-			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-			task_key TEXT NOT NULL, passed INTEGER NOT NULL,
-			ran_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			PRIMARY KEY (project_id, task_key)
-		);
-		CREATE TABLE IF NOT EXISTS gate_failure_counts (
-			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-			file TEXT NOT NULL, gate TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 1,
-			PRIMARY KEY (project_id, file, gate)
-		);
-		CREATE TABLE IF NOT EXISTS file_edit_counts (
-			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-			file TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 1,
-			PRIMARY KEY (project_id, file)
-		);
-		CREATE TABLE IF NOT EXISTS review_scores (
-			id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-			iteration INTEGER NOT NULL, aggregate_score REAL NOT NULL,
-			recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			UNIQUE(project_id, iteration)
-		);
-		CREATE TABLE IF NOT EXISTS review_stage_scores (
-			id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-			stage TEXT NOT NULL, dimension TEXT NOT NULL, score REAL NOT NULL,
-			recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			UNIQUE(project_id, stage, dimension)
-		);
-		CREATE TABLE IF NOT EXISTS plan_eval_scores (
-			id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-			iteration INTEGER NOT NULL, aggregate_score REAL NOT NULL,
-			recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-			UNIQUE(project_id, iteration)
-		);
-		CREATE TABLE IF NOT EXISTS project_configs (
-			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-			key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (project_id, key)
-		);
-		CREATE TABLE IF NOT EXISTS global_configs (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-		CREATE TABLE IF NOT EXISTS audit_log (
-			id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id),
-			session_id TEXT, action TEXT NOT NULL, gate_name TEXT, reason TEXT,
-			created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-		);
-		CREATE TABLE IF NOT EXISTS session_metrics (
-			id INTEGER PRIMARY KEY, session_id TEXT,
-			project_id INTEGER NOT NULL REFERENCES projects(id),
-			gate_failure_count INTEGER NOT NULL DEFAULT 0, security_warning_count INTEGER NOT NULL DEFAULT 0,
-			review_aggregate REAL, files_changed INTEGER NOT NULL DEFAULT 0,
-			test_quality_warning_count INTEGER NOT NULL DEFAULT 0, duplication_warning_count INTEGER NOT NULL DEFAULT 0,
-			semantic_warning_count INTEGER NOT NULL DEFAULT 0, drift_warning_count INTEGER NOT NULL DEFAULT 0,
-			escalation_hit INTEGER NOT NULL DEFAULT 0,
-			recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-		);
-		CREATE TABLE IF NOT EXISTS review_findings (
-			id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id),
-			file TEXT NOT NULL, severity TEXT NOT NULL, description TEXT NOT NULL,
-			stage TEXT NOT NULL, recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-		);
-	`);
-}
-var _projectIdCache = null;
-var _projectPathCache = null;
-function setProjectPath(path) {
-  if (path === _projectPathCache)
-    return;
-  _projectPathCache = path;
-  _projectIdCache = null;
-}
-function getProjectId() {
-  if (_projectIdCache !== null)
-    return _projectIdCache;
-  const path = _projectPathCache ?? process.cwd();
-  const db = getDb();
-  db.prepare("INSERT OR IGNORE INTO projects (path) VALUES (?)").run(path);
-  const row = db.prepare("SELECT id FROM projects WHERE path = ?").get(path);
-  if (!row)
-    throw new Error(`Failed to resolve project: ${path}`);
-  _projectIdCache = row.id;
-  return _projectIdCache;
+  throw new Error(`unable to resolve real path for ${absPath} (parent chain exhausted)`);
 }
 
 // src/config.ts
@@ -399,53 +209,30 @@ function applyConfigLayer(config, raw) {
       config.security.require_semgrep = s.require_semgrep;
   }
 }
-function kvRowsToRaw(rows) {
-  const raw = {};
-  for (const row of rows) {
-    const parts = row.key.split(".");
-    if (parts.length < 2)
-      continue;
-    const section = parts[0];
-    if (!raw[section])
-      raw[section] = {};
-    let parsed;
-    try {
-      parsed = JSON.parse(row.value);
-    } catch {
-      parsed = row.value;
+function readConfigJson() {
+  try {
+    const path = configJsonPath();
+    if (!existsSync(path))
+      return {};
+    const txt = readFileSync(path, "utf8");
+    const parsed = JSON.parse(txt);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed;
     }
-    if (parts.length === 2) {
-      raw[section][parts[1]] = parsed;
-    } else if (parts.length === 3) {
-      const sub = parts[1];
-      if (!raw[section][sub] || typeof raw[section][sub] !== "object") {
-        raw[section][sub] = {};
-      }
-      raw[section][sub][parts[2]] = parsed;
-    }
+    return {};
+  } catch {
+    return {};
   }
-  return raw;
 }
 var _cache = null;
 function loadConfig() {
   if (_cache)
     return _cache;
   const config = structuredClone(DEFAULTS);
-  try {
-    const db = getDb();
-    const globalRows = db.prepare("SELECT key, value FROM global_configs").all();
-    if (globalRows.length > 0) {
-      applyConfigLayer(config, kvRowsToRaw(globalRows));
-    }
-  } catch {}
-  try {
-    const db = getDb();
-    const projectId = getProjectId();
-    const projectRows = db.prepare("SELECT key, value FROM project_configs WHERE project_id = ?").all(projectId);
-    if (projectRows.length > 0) {
-      applyConfigLayer(config, kvRowsToRaw(projectRows));
-    }
-  } catch {}
+  const raw = readConfigJson();
+  if (Object.keys(raw).length > 0) {
+    applyConfigLayer(config, raw);
+  }
   const envInt = (key) => {
     const val = process.env[key];
     if (val === undefined)
@@ -500,104 +287,142 @@ function loadConfig() {
 function resetConfigCache() {
   _cache = null;
 }
+function setConfigKey(key, value) {
+  const parts = key.split(".");
+  if (parts.length < 2 || parts.length > 3) {
+    throw new Error(`unsupported config key depth: ${key}`);
+  }
+  const raw = readConfigJson();
+  const top = parts[0];
+  if (!raw[top] || typeof raw[top] !== "object" || Array.isArray(raw[top])) {
+    raw[top] = {};
+  }
+  if (parts.length === 2) {
+    raw[top][parts[1]] = value;
+  } else {
+    const sub = parts[1];
+    const topObj = raw[top];
+    if (!topObj[sub] || typeof topObj[sub] !== "object" || Array.isArray(topObj[sub])) {
+      topObj[sub] = {};
+    }
+    topObj[sub][parts[2]] = value;
+  }
+  const path = configJsonPath();
+  const { mkdirSync, writeFileSync, renameSync } = __require("fs");
+  mkdirSync(path.replace(/\/[^/]+$/u, ""), { recursive: true });
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(raw, null, 2)}
+`, "utf8");
+  renameSync(tmp, path);
+}
 
 // src/hooks/detectors/health-score.ts
-import { existsSync as existsSync5 } from "fs";
+import { existsSync as existsSync6 } from "fs";
 
 // src/hooks/detectors/dead-import-check.ts
-import { existsSync, readFileSync } from "fs";
+import { existsSync as existsSync2, readFileSync as readFileSync3 } from "fs";
 import { extname } from "path";
 
-// src/state/session-state.ts
-var _cache2 = null;
-function defaultState() {
-  return {
-    last_commit_at: new Date().toISOString(),
-    test_passed_at: null,
-    test_command: null,
-    review_completed_at: null,
-    ran_gates: {},
-    changed_file_paths: [],
-    review_iteration: 0,
-    review_score_history: [],
-    review_stage_scores: {},
-    plan_eval_iteration: 0,
-    plan_eval_score_history: [],
-    plan_selfcheck_blocked_at: null,
-    disabled_gates: [],
-    task_verify_results: {},
-    gate_failure_counts: {},
-    security_warning_count: 0,
-    test_quality_warning_count: 0,
-    drift_warning_count: 0,
-    dead_import_warning_count: 0,
-    duplication_warning_count: 0,
-    semantic_warning_count: 0,
-    human_review_approved_at: null
-  };
+// src/state/gate-state.ts
+import { resolve as resolve2 } from "path";
+
+// src/state/fs.ts
+import { mkdirSync, readFileSync as readFileSync2, renameSync, writeFileSync } from "fs";
+import { dirname } from "path";
+var MAX_READ_BYTES = 1024 * 1024;
+function ensureDir(absPath) {
+  mkdirSync(absPath, { recursive: true });
 }
-function readSessionState() {
-  if (_cache2)
-    return _cache2;
+function atomicWrite(targetPath, content) {
+  assertConfinedToQult(targetPath);
+  ensureDir(dirname(targetPath));
+  const tmp = `${targetPath}.tmp`;
+  writeFileSync(tmp, content, { encoding: "utf8", mode: 420 });
+  renameSync(tmp, targetPath);
+}
+function readTextIfExists(absPath) {
+  assertConfinedToQult(absPath);
   try {
-    const db = getDb();
-    const pid = getProjectId();
-    const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(pid);
-    if (!row) {
-      _cache2 = defaultState();
-      return _cache2;
+    const buf = readFileSync2(absPath);
+    if (buf.byteLength > MAX_READ_BYTES) {
+      throw new Error(`file too large: ${absPath} (${buf.byteLength} bytes > ${MAX_READ_BYTES})`);
     }
-    const state = defaultState();
-    state.last_commit_at = row.last_commit_at ?? state.last_commit_at;
-    state.test_passed_at = row.test_passed_at ?? null;
-    state.test_command = row.test_command ?? null;
-    state.review_completed_at = row.review_completed_at ?? null;
-    state.review_iteration = row.review_iteration ?? 0;
-    state.plan_eval_iteration = row.plan_eval_iteration ?? 0;
-    state.plan_selfcheck_blocked_at = row.plan_selfcheck_blocked_at ?? null;
-    state.human_review_approved_at = row.human_review_approved_at ?? null;
-    state.security_warning_count = row.security_warning_count ?? 0;
-    state.test_quality_warning_count = row.test_quality_warning_count ?? 0;
-    state.drift_warning_count = row.drift_warning_count ?? 0;
-    state.dead_import_warning_count = row.dead_import_warning_count ?? 0;
-    state.duplication_warning_count = row.duplication_warning_count ?? 0;
-    state.semantic_warning_count = row.semantic_warning_count ?? 0;
-    const changedFiles = db.prepare("SELECT file_path FROM changed_files WHERE project_id = ?").all(pid);
-    state.changed_file_paths = changedFiles.map((r) => r.file_path);
-    const disabledGates = db.prepare("SELECT gate_name FROM disabled_gates WHERE project_id = ?").all(pid);
-    state.disabled_gates = disabledGates.map((r) => r.gate_name);
-    const ranGates = db.prepare("SELECT gate_name, ran_at FROM ran_gates WHERE project_id = ?").all(pid);
-    for (const g of ranGates) {
-      state.ran_gates[g.gate_name] = { ran_at: g.ran_at };
-    }
-    const taskResults = db.prepare("SELECT task_key, passed, ran_at FROM task_verify_results WHERE project_id = ?").all(pid);
-    for (const t of taskResults) {
-      state.task_verify_results[t.task_key] = { passed: !!t.passed, ran_at: t.ran_at };
-    }
-    const gateFailures = db.prepare("SELECT file, gate, count FROM gate_failure_counts WHERE project_id = ?").all(pid);
-    for (const f of gateFailures) {
-      state.gate_failure_counts[`${f.file}:${f.gate}`] = f.count;
-    }
-    const reviewScores = db.prepare("SELECT aggregate_score FROM review_scores WHERE project_id = ? ORDER BY iteration").all(pid);
-    state.review_score_history = reviewScores.map((r) => r.aggregate_score);
-    const stageScores = db.prepare("SELECT stage, dimension, score FROM review_stage_scores WHERE project_id = ?").all(pid);
-    for (const s of stageScores) {
-      if (!state.review_stage_scores[s.stage])
-        state.review_stage_scores[s.stage] = {};
-      state.review_stage_scores[s.stage][s.dimension] = s.score;
-    }
-    const planScores = db.prepare("SELECT aggregate_score FROM plan_eval_scores WHERE project_id = ? ORDER BY iteration").all(pid);
-    state.plan_eval_score_history = planScores.map((r) => r.aggregate_score);
-    _cache2 = state;
-    return state;
-  } catch {
-    _cache2 = defaultState();
-    return _cache2;
+    return buf.toString("utf8");
+  } catch (err) {
+    if (err.code === "ENOENT")
+      return null;
+    throw err;
   }
 }
+function readText(absPath) {
+  const txt = readTextIfExists(absPath);
+  if (txt === null)
+    throw new Error(`file not found: ${absPath}`);
+  return txt;
+}
+function readJson(absPath, expectedVersion) {
+  const txt = readTextIfExists(absPath);
+  if (txt === null)
+    return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(txt);
+  } catch (err) {
+    throw new Error(`malformed JSON in ${absPath}: ${err.message}`);
+  }
+  if (!parsed || typeof parsed !== "object" || typeof parsed.schema_version !== "number") {
+    throw new Error(`missing or invalid schema_version in ${absPath}`);
+  }
+  const version = parsed.schema_version;
+  if (version !== expectedVersion) {
+    throw new Error(`schema_version mismatch in ${absPath}: expected ${expectedVersion}, got ${version}`);
+  }
+  return parsed;
+}
+function writeJson(absPath, value) {
+  atomicWrite(absPath, `${JSON.stringify(value, null, 2)}
+`);
+}
+
+// src/state/gate-state.ts
+var SCHEMA_VERSION = 1;
+var DEFAULT_STATE = { schema_version: SCHEMA_VERSION, disabled: [] };
+function gatesJsonPath() {
+  return resolve2(qultDir(), "state", "gates.json");
+}
+function readGateState() {
+  const got = readJson(gatesJsonPath(), SCHEMA_VERSION);
+  return got ?? structuredClone(DEFAULT_STATE);
+}
 function isGateDisabled(gateName) {
-  const state = readSessionState();
-  return (state.disabled_gates ?? []).includes(gateName);
+  try {
+    return readGateState().disabled.some((g) => g.gate === gateName);
+  } catch {
+    return false;
+  }
+}
+function disableGate(gateName, reason, now = new Date().toISOString()) {
+  const cur = readGateState();
+  const idx = cur.disabled.findIndex((g) => g.gate === gateName);
+  if (idx >= 0) {
+    cur.disabled[idx] = { gate: gateName, reason, disabled_at: now };
+  } else {
+    cur.disabled.push({ gate: gateName, reason, disabled_at: now });
+  }
+  writeJson(gatesJsonPath(), cur);
+  return cur;
+}
+function enableGate(gateName) {
+  const cur = readGateState();
+  const next = {
+    schema_version: SCHEMA_VERSION,
+    disabled: cur.disabled.filter((g) => g.gate !== gateName)
+  };
+  writeJson(gatesJsonPath(), next);
+  return next;
+}
+function listDisabledGateNames() {
+  return readGateState().disabled.map((g) => g.gate);
 }
 
 // src/hooks/sanitize.ts
@@ -624,11 +449,11 @@ function detectDeadImports(file) {
   const ext = extname(file).toLowerCase();
   if (!TS_JS_EXTS.has(ext) && !PY_EXTS.has(ext))
     return [];
-  if (!existsSync(file))
+  if (!existsSync2(file))
     return [];
   let content;
   try {
-    content = readFileSync(file, "utf-8");
+    content = readFileSync3(file, "utf-8");
   } catch {
     return [];
   }
@@ -743,7 +568,7 @@ function escapeRegex(str) {
 
 // src/hooks/detectors/export-check.ts
 import { execSync } from "child_process";
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
+import { existsSync as existsSync3, readFileSync as readFileSync4 } from "fs";
 import { extname as extname2 } from "path";
 var TS_JS_EXTS2 = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
 var EXPORT_RE = /\bexport\s+(?:default\s+)?(?:function|class|const|let|var|type|interface|enum)\s+(\w+)/g;
@@ -754,7 +579,7 @@ function detectExportBreakingChanges(file) {
   const ext = extname2(file).toLowerCase();
   if (!TS_JS_EXTS2.has(ext))
     return [];
-  if (!existsSync2(file))
+  if (!existsSync3(file))
     return [];
   let oldContent;
   try {
@@ -771,7 +596,7 @@ function detectExportBreakingChanges(file) {
   } catch {
     return [];
   }
-  const newContent = readFileSync2(file, "utf-8");
+  const newContent = readFileSync4(file, "utf-8");
   const oldExports = new Set;
   for (const match of oldContent.matchAll(EXPORT_RE)) {
     oldExports.add(match[1]);
@@ -825,7 +650,7 @@ function detectTypeFieldChanges(oldContent, newContent) {
 }
 
 // src/hooks/detectors/security-check.ts
-import { existsSync as existsSync3, readFileSync as readFileSync3 } from "fs";
+import { existsSync as existsSync4, readFileSync as readFileSync5 } from "fs";
 import { basename, extname as extname3 } from "path";
 var CHECKABLE_EXTS = new Set([
   ".ts",
@@ -1035,11 +860,11 @@ function detectSecurityPatterns(file) {
   const ext = extname3(file).toLowerCase();
   if (!CHECKABLE_EXTS.has(ext))
     return [];
-  if (!existsSync3(file))
+  if (!existsSync4(file))
     return [];
   let content;
   try {
-    content = readFileSync3(file, "utf-8");
+    content = readFileSync5(file, "utf-8");
   } catch {
     return [];
   }
@@ -1193,8 +1018,8 @@ function emitAdvisoryWarnings(file, content) {
 }
 
 // src/hooks/detectors/test-quality-check.ts
-import { existsSync as existsSync4, readFileSync as readFileSync4 } from "fs";
-import { basename as basename2, dirname, extname as extname4, resolve } from "path";
+import { existsSync as existsSync5, readFileSync as readFileSync6 } from "fs";
+import { basename as basename2, dirname as dirname2, extname as extname4, resolve as resolve3 } from "path";
 var MAX_CHECK_SIZE3 = 500000;
 var BLOCKING_SMELL_TYPES = new Set([
   "empty-test",
@@ -1259,15 +1084,15 @@ function countAssertionsOutsideSetup(code) {
   return count;
 }
 function analyzeTestQuality(file) {
-  const cwd = resolve(process.cwd());
-  const absPath = resolve(cwd, file);
+  const cwd = resolve3(process.cwd());
+  const absPath = resolve3(cwd, file);
   if (!absPath.startsWith(cwd))
     return null;
-  if (!existsSync4(absPath))
+  if (!existsSync5(absPath))
     return null;
   let content;
   try {
-    content = readFileSync4(absPath, "utf-8");
+    content = readFileSync6(absPath, "utf-8");
   } catch {
     return null;
   }
@@ -1449,10 +1274,10 @@ function analyzeTestQuality(file) {
     });
   }
   try {
-    const snapDir = `${dirname(absPath)}/__snapshots__/`;
+    const snapDir = `${dirname2(absPath)}/__snapshots__/`;
     const snapFile = `${snapDir}${basename2(absPath)}.snap`;
-    if (existsSync4(snapFile)) {
-      const snapContent = readFileSync4(snapFile, "utf-8");
+    if (existsSync5(snapFile)) {
+      const snapContent = readFileSync6(snapFile, "utf-8");
       if (snapContent.length > LARGE_SNAPSHOT_CHARS) {
         smells.push({
           type: "snapshot-bloat",
@@ -1468,7 +1293,7 @@ function analyzeTestQuality(file) {
       try {
         const implFile = findImplFile(absPath);
         if (implFile) {
-          const implContent = readFileSync4(implFile, "utf-8");
+          const implContent = readFileSync6(implFile, "utf-8");
           if (/\bthrow\b|\breject\b|Promise\.reject/m.test(implContent)) {
             smells.push({
               type: "no-error-path",
@@ -1569,18 +1394,18 @@ function analyzeTestQuality(file) {
 }
 function findImplFile(testPath) {
   try {
-    const dir = dirname(testPath);
+    const dir = dirname2(testPath);
     const base = basename2(testPath);
     const implName = base.replace(/\.(?:test|spec)(\.[^.]+)$/, "$1");
-    const sameDirPath = resolve(dir, implName);
-    if (existsSync4(sameDirPath))
+    const sameDirPath = resolve3(dir, implName);
+    if (existsSync5(sameDirPath))
       return sameDirPath;
-    const parentDir = dirname(dir);
-    const parentPath = resolve(parentDir, implName);
-    if (existsSync4(parentPath))
+    const parentDir = dirname2(dir);
+    const parentPath = resolve3(parentDir, implName);
+    if (existsSync5(parentPath))
       return parentPath;
-    const srcPath = resolve(parentDir, "src", implName);
-    if (existsSync4(srcPath))
+    const srcPath = resolve3(parentDir, "src", implName);
+    if (existsSync5(srcPath))
       return srcPath;
     return null;
   } catch {
@@ -1600,7 +1425,7 @@ function countFindings(fixes) {
   return fixes.reduce((sum, f) => sum + f.errors.length, 0);
 }
 function computeFileHealthScore(file) {
-  if (!existsSync5(file)) {
+  if (!existsSync6(file)) {
     return { score: 10, breakdown: {} };
   }
   const breakdown = {};
@@ -1632,8 +1457,8 @@ function computeFileHealthScore(file) {
 }
 
 // src/hooks/detectors/import-graph.ts
-import { existsSync as existsSync6, lstatSync, readdirSync, readFileSync as readFileSync5, statSync } from "fs";
-import { dirname as dirname2, extname as extname5, join as join2, resolve as resolve2 } from "path";
+import { existsSync as existsSync7, lstatSync, readdirSync, readFileSync as readFileSync7, statSync } from "fs";
+import { dirname as dirname3, extname as extname5, join, resolve as resolve4 } from "path";
 var SCAN_EXTS = new Set([
   ".ts",
   ".tsx",
@@ -1720,7 +1545,7 @@ function extractRelativeImports(content, filePath) {
   return specifiers;
 }
 function resolvePythonImport(specifier, fromFile) {
-  const dir = dirname2(fromFile);
+  const dir = dirname3(fromFile);
   const dotMatch = specifier.match(/^(\.+)(.*)/);
   if (!dotMatch)
     return null;
@@ -1728,37 +1553,37 @@ function resolvePythonImport(specifier, fromFile) {
   const modulePart = dotMatch[2];
   let base = dir;
   for (let i = 1;i < dots; i++) {
-    base = dirname2(base);
+    base = dirname3(base);
   }
   if (!modulePart) {
     return null;
   }
   const parts = modulePart.split(".");
-  const candidate = join2(base, ...parts);
-  if (existsSync6(`${candidate}.py`))
+  const candidate = join(base, ...parts);
+  if (existsSync7(`${candidate}.py`))
     return `${candidate}.py`;
-  if (existsSync6(join2(candidate, "__init__.py")))
-    return join2(candidate, "__init__.py");
+  if (existsSync7(join(candidate, "__init__.py")))
+    return join(candidate, "__init__.py");
   return null;
 }
 function resolveRustImport(specifier, fromFile, scanRoot) {
-  const dir = dirname2(fromFile);
+  const dir = dirname3(fromFile);
   if (specifier.startsWith("mod:")) {
     const name = specifier.slice(4);
-    const asFile = join2(dir, `${name}.rs`);
-    if (existsSync6(asFile))
+    const asFile = join(dir, `${name}.rs`);
+    if (existsSync7(asFile))
       return asFile;
-    const asDir = join2(dir, name, "mod.rs");
-    if (existsSync6(asDir))
+    const asDir = join(dir, name, "mod.rs");
+    if (existsSync7(asDir))
       return asDir;
   } else if (specifier.startsWith("crate:")) {
     const name = specifier.slice(6);
-    const srcDir = join2(scanRoot, "src");
-    const asFile = join2(srcDir, `${name}.rs`);
-    if (existsSync6(asFile))
+    const srcDir = join(scanRoot, "src");
+    const asFile = join(srcDir, `${name}.rs`);
+    if (existsSync7(asFile))
       return asFile;
-    const asDir = join2(srcDir, name, "mod.rs");
-    if (existsSync6(asDir))
+    const asDir = join(srcDir, name, "mod.rs");
+    if (existsSync7(asDir))
       return asDir;
   }
   return null;
@@ -1768,7 +1593,7 @@ function getGoModulePath(scanRoot) {
   if (_goModuleCache !== undefined)
     return _goModuleCache;
   try {
-    const goMod = readFileSync5(join2(scanRoot, "go.mod"), "utf-8");
+    const goMod = readFileSync7(join(scanRoot, "go.mod"), "utf-8");
     const match = goMod.match(/^module\s+(\S+)/m);
     _goModuleCache = match ? match[1] : null;
   } catch {
@@ -1781,8 +1606,8 @@ function resolveGoImport(specifier, scanRoot) {
   if (!modulePath || !specifier.startsWith(modulePath))
     return null;
   const relPath = specifier.slice(modulePath.length + 1);
-  const dir = join2(scanRoot, relPath);
-  if (existsSync6(dir) && statSync(dir).isDirectory())
+  const dir = join(scanRoot, relPath);
+  if (existsSync7(dir) && statSync(dir).isDirectory())
     return dir;
   return null;
 }
@@ -1797,18 +1622,18 @@ function resolveImportPath(specifier, fromFile, scanRoot) {
   if (fileExt === ".go" && scanRoot) {
     return resolveGoImport(specifier, scanRoot);
   }
-  const dir = dirname2(fromFile);
-  const raw = resolve2(dir, specifier);
-  if (existsSync6(raw) && statSync(raw).isFile())
+  const dir = dirname3(fromFile);
+  const raw = resolve4(dir, specifier);
+  if (existsSync7(raw) && statSync(raw).isFile())
     return raw;
   for (const ext of [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]) {
     const withExt = `${raw}${ext}`;
-    if (existsSync6(withExt))
+    if (existsSync7(withExt))
       return withExt;
   }
   for (const ext of [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]) {
-    const index = join2(raw, `index${ext}`);
-    if (existsSync6(index))
+    const index = join(raw, `index${ext}`);
+    if (existsSync7(index))
       return index;
   }
   return null;
@@ -1832,7 +1657,7 @@ function collectFiles(dir) {
       }
       if (SKIP_DIRS.has(entry))
         continue;
-      const full = join2(current, entry);
+      const full = join(current, entry);
       try {
         const stat = lstatSync(full);
         if (stat.isSymbolicLink())
@@ -1855,7 +1680,7 @@ function collectFiles(dir) {
   return files;
 }
 function findImporters(targetFile, scanRoot, depth = 1) {
-  if (!existsSync6(scanRoot))
+  if (!existsSync7(scanRoot))
     return [];
   const clampedDepth = Math.min(Math.max(depth, 1), 3);
   const files = collectFiles(scanRoot);
@@ -1863,29 +1688,29 @@ function findImporters(targetFile, scanRoot, depth = 1) {
   const allImporters = [];
   function findDirectImporters(targetAbs) {
     const direct = [];
-    const targetDir = dirname2(targetAbs);
+    const targetDir = dirname3(targetAbs);
     const targetExt = extname5(targetAbs).toLowerCase();
     for (const file of files) {
-      const fileAbs = resolve2(file);
+      const fileAbs = resolve4(file);
       if (fileAbs === targetAbs)
         continue;
-      if (targetExt === ".go" && extname5(file).toLowerCase() === ".go" && dirname2(fileAbs) === targetDir) {
+      if (targetExt === ".go" && extname5(file).toLowerCase() === ".go" && dirname3(fileAbs) === targetDir) {
         direct.push(file);
         continue;
       }
       try {
-        const content = readFileSync5(file, "utf-8");
+        const content = readFileSync7(file, "utf-8");
         const specifiers = extractRelativeImports(content, file);
         for (const spec of specifiers) {
           const resolved = resolveImportPath(spec, file, scanRoot);
           if (!resolved)
             continue;
           if (extname5(file).toLowerCase() === ".go") {
-            if (resolve2(resolved) === targetDir) {
+            if (resolve4(resolved) === targetDir) {
               direct.push(file);
               break;
             }
-          } else if (resolve2(resolved) === targetAbs) {
+          } else if (resolve4(resolved) === targetAbs) {
             direct.push(file);
             break;
           }
@@ -1895,15 +1720,15 @@ function findImporters(targetFile, scanRoot, depth = 1) {
     if (targetExt === ".py") {
       const targetName = targetAbs.replace(/\.py$/, "").split("/").pop();
       for (const file of files) {
-        const fileAbs = resolve2(file);
+        const fileAbs = resolve4(file);
         if (fileAbs === targetAbs || direct.includes(file))
           continue;
         if (extname5(file).toLowerCase() !== ".py")
           continue;
         try {
-          const content = readFileSync5(file, "utf-8");
+          const content = readFileSync7(file, "utf-8");
           const bareImport = new RegExp(`from\\s+\\.\\s+import\\s+(?:.*\\b${targetName}\\b)`, "m");
-          if (bareImport.test(content) && dirname2(fileAbs) === targetDir) {
+          if (bareImport.test(content) && dirname3(fileAbs) === targetDir) {
             direct.push(file);
           }
         } catch {}
@@ -1911,7 +1736,7 @@ function findImporters(targetFile, scanRoot, depth = 1) {
     }
     return direct;
   }
-  let currentTargets = [resolve2(targetFile)];
+  let currentTargets = [resolve4(targetFile)];
   for (let d = 0;d < clampedDepth; d++) {
     const nextTargets = [];
     for (const target of currentTargets) {
@@ -1920,8 +1745,8 @@ function findImporters(targetFile, scanRoot, depth = 1) {
       visited.add(target);
       const direct = findDirectImporters(target);
       for (const imp of direct) {
-        const impAbs = resolve2(imp);
-        if (!visited.has(impAbs) && impAbs !== resolve2(targetFile)) {
+        const impAbs = resolve4(imp);
+        if (!visited.has(impAbs) && impAbs !== resolve4(targetFile)) {
           allImporters.push(imp);
           nextTargets.push(impAbs);
         }
@@ -1935,15 +1760,15 @@ function findImporters(targetFile, scanRoot, depth = 1) {
 }
 
 // src/hooks/detectors/spec-trace-check.ts
-import { existsSync as existsSync7, readFileSync as readFileSync6 } from "fs";
-import { basename as basename3, dirname as dirname3, relative } from "path";
+import { existsSync as existsSync8, readFileSync as readFileSync8 } from "fs";
+import { basename as basename3, dirname as dirname4, relative } from "path";
 function validateTestCoversImpl(testFile, _testFunction, implFile, _projectRoot) {
-  if (!existsSync7(testFile))
+  if (!existsSync8(testFile))
     return false;
   try {
-    const content = readFileSync6(testFile, "utf-8");
+    const content = readFileSync8(testFile, "utf-8");
     const implBasename = basename3(implFile).replace(/\.[^.]+$/, "");
-    const implRelative = relative(dirname3(testFile), implFile).replace(/\\/g, "/").replace(/\.[^.]+$/, "");
+    const implRelative = relative(dirname4(testFile), implFile).replace(/\\/g, "/").replace(/\.[^.]+$/, "");
     const importPatterns = [
       new RegExp(`(?:import|require).*['"].*${escapeRegex2(implRelative)}(?:\\.[^'"]*)?['"]`, "m"),
       new RegExp(`(?:import|require).*['"].*/${escapeRegex2(implBasename)}(?:\\.[^'"]*)?['"]`, "m")
@@ -1958,164 +1783,45 @@ function escapeRegex2(s) {
 }
 
 // src/mcp-tools/spec-tools.ts
-import { existsSync as existsSync9 } from "fs";
-
-// src/state/fs.ts
-import { mkdirSync as mkdirSync2, readFileSync as readFileSync7, renameSync, writeFileSync } from "fs";
-import { dirname as dirname4 } from "path";
-
-// src/state/paths.ts
-import { realpathSync } from "fs";
-import { resolve as resolve3 } from "path";
-var RESERVED_SPEC_NAMES = new Set(["archive"]);
-var WAVE_NUM_MIN = 1;
-var WAVE_NUM_MAX = 99;
-var SPEC_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
-var projectRootOverride = null;
-function setProjectRoot(root) {
-  projectRootOverride = root;
-}
-function getProjectRoot() {
-  return projectRootOverride ?? process.cwd();
-}
-function qultDir() {
-  return resolve3(getProjectRoot(), ".qult");
-}
-function specsDir() {
-  return resolve3(qultDir(), "specs");
-}
-function archiveDir() {
-  return resolve3(specsDir(), "archive");
-}
-function specDir(name) {
-  assertValidSpecName(name);
-  return resolve3(specsDir(), name);
-}
-function requirementsPath(name) {
-  return resolve3(specDir(name), "requirements.md");
-}
-function designPath(name) {
-  return resolve3(specDir(name), "design.md");
-}
-function tasksPath(name) {
-  return resolve3(specDir(name), "tasks.md");
-}
-function wavesDir(name) {
-  return resolve3(specDir(name), "waves");
-}
-function wavePath(name, waveNum) {
-  assertValidWaveNum(waveNum);
-  return resolve3(wavesDir(name), `wave-${formatWaveNum(waveNum)}.md`);
-}
-function formatWaveNum(waveNum) {
-  assertValidWaveNum(waveNum);
-  return String(waveNum).padStart(2, "0");
-}
-function stateDir() {
-  return resolve3(qultDir(), "state");
-}
-function stageScoresJsonPath() {
-  return resolve3(stateDir(), "stage-scores.json");
-}
-function assertValidSpecName(name) {
-  if (typeof name !== "string" || !SPEC_NAME_RE.test(name)) {
-    throw new Error(`invalid spec name: ${JSON.stringify(name)} (must match ${SPEC_NAME_RE} and be \u226464 chars)`);
-  }
-  if (RESERVED_SPEC_NAMES.has(name)) {
-    throw new Error(`reserved spec name: ${JSON.stringify(name)}`);
-  }
-  if (name.includes("/") || name.includes("\\") || name.startsWith(".")) {
-    throw new Error(`spec name must not contain path separators or leading dot: ${name}`);
-  }
-}
-function assertValidWaveNum(waveNum) {
-  if (!Number.isInteger(waveNum) || waveNum < WAVE_NUM_MIN || waveNum > WAVE_NUM_MAX) {
-    throw new Error(`invalid wave_num: ${waveNum} (must be integer in [${WAVE_NUM_MIN}, ${WAVE_NUM_MAX}])`);
-  }
-}
-function assertConfinedToQult(targetPath) {
-  const resolved = resolve3(targetPath);
-  const qultRealPath = realpathSync(qultDir());
-  const targetRealPath = resolveExistingAncestor(resolved);
-  if (targetRealPath !== qultRealPath && !targetRealPath.startsWith(`${qultRealPath}/`)) {
-    throw new Error(`path escape detected: ${targetPath} resolves to ${targetRealPath}, outside ${qultRealPath}`);
-  }
-  return resolved;
-}
-function resolveExistingAncestor(absPath) {
-  let current = absPath;
-  for (let i = 0;i < 64; i++) {
-    try {
-      return realpathSync(current);
-    } catch {
-      const parent = resolve3(current, "..");
-      if (parent === current) {
-        return current;
-      }
-      current = parent;
-    }
-  }
-  throw new Error(`unable to resolve real path for ${absPath} (parent chain exhausted)`);
-}
-
-// src/state/fs.ts
-var MAX_READ_BYTES = 1024 * 1024;
-function ensureDir(absPath) {
-  mkdirSync2(absPath, { recursive: true });
-}
-function atomicWrite(targetPath, content) {
-  assertConfinedToQult(targetPath);
-  ensureDir(dirname4(targetPath));
-  const tmp = `${targetPath}.tmp`;
-  writeFileSync(tmp, content, { encoding: "utf8", mode: 420 });
-  renameSync(tmp, targetPath);
-}
-function readTextIfExists(absPath) {
-  assertConfinedToQult(absPath);
-  try {
-    const buf = readFileSync7(absPath);
-    if (buf.byteLength > MAX_READ_BYTES) {
-      throw new Error(`file too large: ${absPath} (${buf.byteLength} bytes > ${MAX_READ_BYTES})`);
-    }
-    return buf.toString("utf8");
-  } catch (err) {
-    if (err.code === "ENOENT")
-      return null;
-    throw err;
-  }
-}
-function readText(absPath) {
-  const txt = readTextIfExists(absPath);
-  if (txt === null)
-    throw new Error(`file not found: ${absPath}`);
-  return txt;
-}
-function readJson(absPath, expectedVersion) {
-  const txt = readTextIfExists(absPath);
-  if (txt === null)
-    return null;
-  let parsed;
-  try {
-    parsed = JSON.parse(txt);
-  } catch (err) {
-    throw new Error(`malformed JSON in ${absPath}: ${err.message}`);
-  }
-  if (!parsed || typeof parsed !== "object" || typeof parsed.schema_version !== "number") {
-    throw new Error(`missing or invalid schema_version in ${absPath}`);
-  }
-  const version = parsed.schema_version;
-  if (version !== expectedVersion) {
-    throw new Error(`schema_version mismatch in ${absPath}: expected ${expectedVersion}, got ${version}`);
-  }
-  return parsed;
-}
-function writeJson(absPath, value) {
-  atomicWrite(absPath, `${JSON.stringify(value, null, 2)}
-`);
-}
+import { existsSync as existsSync10 } from "fs";
 
 // src/state/json-state.ts
 var SCHEMA_VERSION2 = 1;
+var DEFAULT_CURRENT = {
+  schema_version: SCHEMA_VERSION2,
+  test_passed_at: null,
+  test_command: null,
+  review_completed_at: null,
+  review_score: null,
+  finish_started_at: null,
+  human_approval_at: null,
+  last_active_wave: null
+};
+function readCurrent() {
+  const got = readJson(currentJsonPath(), SCHEMA_VERSION2);
+  return got ?? structuredClone(DEFAULT_CURRENT);
+}
+function patchCurrent(patch) {
+  const next = { ...readCurrent(), ...patch, schema_version: SCHEMA_VERSION2 };
+  writeJson(currentJsonPath(), next);
+  return next;
+}
+var DEFAULT_PENDING = {
+  schema_version: SCHEMA_VERSION2,
+  fixes: []
+};
+function readPendingFixes() {
+  const got = readJson(pendingFixesJsonPath(), SCHEMA_VERSION2);
+  return got ?? structuredClone(DEFAULT_PENDING);
+}
+function writePendingFixes(fixes) {
+  const next = { schema_version: SCHEMA_VERSION2, fixes };
+  writeJson(pendingFixesJsonPath(), next);
+  return next;
+}
+function clearPendingFixes() {
+  return writePendingFixes([]);
+}
 var DEFAULT_STAGE_SCORES = {
   schema_version: SCHEMA_VERSION2,
   spec_name: null,
@@ -2125,6 +1831,12 @@ var DEFAULT_STAGE_SCORES = {
 function readStageScores() {
   const got = readJson(stageScoresJsonPath(), SCHEMA_VERSION2);
   return got ?? structuredClone(DEFAULT_STAGE_SCORES);
+}
+function recordReviewStage(stage, scores, now = new Date().toISOString()) {
+  const cur = readStageScores();
+  cur.review[stage] = { scores, recorded_at: now };
+  writeJson(stageScoresJsonPath(), cur);
+  return cur;
 }
 function recordSpecEvalPhase(phase, score) {
   const cur = readStageScores();
@@ -2141,11 +1853,11 @@ function recordSpecEvalPhase(phase, score) {
 
 // src/state/spec.ts
 import { execSync as execSync2 } from "child_process";
-import { existsSync as existsSync8, readdirSync as readdirSync2, renameSync as renameSync2, statSync as statSync2 } from "fs";
+import { existsSync as existsSync9, readdirSync as readdirSync2, renameSync as renameSync2, statSync as statSync2 } from "fs";
 import { dirname as dirname5 } from "path";
 function listSpecNames() {
   const root = specsDir();
-  if (!existsSync8(root))
+  if (!existsSync9(root))
     return [];
   const out = [];
   for (const entry of readdirSync2(root, { withFileTypes: true })) {
@@ -2174,21 +1886,21 @@ function getActiveSpec() {
   return {
     name,
     path,
-    hasRequirements: existsSync8(requirementsPath(name)),
-    hasDesign: existsSync8(designPath(name)),
-    hasTasks: existsSync8(tasksPath(name)),
-    wavesDirExists: existsSync8(wavesDir(name))
+    hasRequirements: existsSync9(requirementsPath(name)),
+    hasDesign: existsSync9(designPath(name)),
+    hasTasks: existsSync9(tasksPath(name)),
+    wavesDirExists: existsSync9(wavesDir(name))
   };
 }
 function archiveSpec(name, now = new Date) {
   assertValidSpecName(name);
   const src = specDir(name);
-  if (!existsSync8(src)) {
+  if (!existsSync9(src)) {
     throw new Error(`spec not found: ${name}`);
   }
   ensureDir(archiveDir());
   let dest = `${archiveDir()}/${name}`;
-  if (existsSync8(dest)) {
+  if (existsSync9(dest)) {
     dest = `${archiveDir()}/${name}-${formatTimestamp(now)}`;
   }
   assertConfinedToQult(dest);
@@ -2207,7 +1919,7 @@ function formatTimestamp(d) {
 }
 function listWaveNumbers(name) {
   const dir = wavesDir(name);
-  if (!existsSync8(dir))
+  if (!existsSync9(dir))
     return [];
   const re = /^wave-(\d{2})\.md$/;
   const nums = [];
@@ -2553,7 +2265,7 @@ function handleGetActiveSpec() {
   }
   const tasksFile = tasksPath(info.name);
   let tasksDoc = null;
-  if (existsSync9(tasksFile)) {
+  if (existsSync10(tasksFile)) {
     try {
       tasksDoc = parseTasksMd(readText(tasksFile));
     } catch {
@@ -2593,7 +2305,7 @@ function handleCompleteWave(args) {
     return errorResult("no active spec");
   }
   const wavePathStr = wavePath(activeSpec.name, waveNum);
-  if (!existsSync9(wavePathStr)) {
+  if (!existsSync10(wavePathStr)) {
     return errorResult(`wave-${pad2(waveNum)}.md not found; run /qult:wave-start first`);
   }
   let waveDoc = parseWaveMd(readText(wavePathStr));
@@ -2609,7 +2321,7 @@ function handleCompleteWave(args) {
     if (prior === waveNum)
       continue;
     const priorPath = wavePath(activeSpec.name, prior);
-    if (!existsSync9(priorPath))
+    if (!existsSync10(priorPath))
       continue;
     const priorDoc = parseWaveMd(readText(priorPath));
     if (!priorDoc.range)
@@ -2649,7 +2361,7 @@ function handleUpdateTaskStatus(args) {
   if (activeSpec === null)
     return errorResult("no active spec");
   const tasksFile = tasksPath(activeSpec.name);
-  if (!existsSync9(tasksFile))
+  if (!existsSync10(tasksFile))
     return errorResult("tasks.md not found");
   let updated;
   try {
@@ -2716,15 +2428,35 @@ function pad2(n) {
 }
 
 // src/state/audit-log.ts
+import { appendFileSync, readFileSync as readFileSync9, renameSync as renameSync3, writeFileSync as writeFileSync2 } from "fs";
+import { resolve as resolve5 } from "path";
 var MAX_ENTRIES = 200;
+function auditLogPath() {
+  return resolve5(qultDir(), "state", "audit-log.ndjson");
+}
 function appendAuditLog(entry) {
   try {
-    const db = getDb();
-    const projectId = getProjectId();
-    db.prepare("INSERT INTO audit_log (project_id, session_id, action, gate_name, reason) VALUES (?, ?, ?, ?, ?)").run(projectId, null, entry.action, entry.gate_name ?? null, entry.reason);
-    db.prepare(`DELETE FROM audit_log WHERE project_id = ? AND id NOT IN (
-				SELECT id FROM audit_log WHERE project_id = ? ORDER BY id DESC LIMIT ?
-			)`).run(projectId, projectId, MAX_ENTRIES);
+    const path = auditLogPath();
+    assertConfinedToQult(path);
+    ensureDir(resolve5(path, ".."));
+    appendFileSync(path, `${JSON.stringify(entry)}
+`, { encoding: "utf8" });
+    trimIfOverflowing(path);
+  } catch {}
+}
+function trimIfOverflowing(path) {
+  try {
+    const txt = readFileSync9(path, "utf8");
+    const lines = txt.split(`
+`).filter((l) => l.trim().length > 0);
+    if (lines.length <= MAX_ENTRIES * 1.5)
+      return;
+    const kept = lines.slice(-MAX_ENTRIES);
+    const tmp = `${path}.tmp`;
+    writeFileSync2(tmp, `${kept.join(`
+`)}
+`, "utf8");
+    renameSync3(tmp, path);
   } catch {}
 }
 
@@ -2985,10 +2717,7 @@ var TOOL_DEFS = [
   }
 ];
 function handleTool(name, cwd, args) {
-  setProjectPath(cwd);
   setProjectRoot(cwd);
-  const db = getDb();
-  const pid = getProjectId();
   switch (name) {
     case "get_active_spec":
       return handleGetActiveSpec();
@@ -3001,34 +2730,21 @@ function handleTool(name, cwd, args) {
     case "archive_spec":
       return handleArchiveSpec(args);
     case "get_pending_fixes": {
-      const rows = db.prepare("SELECT file, gate, errors FROM pending_fixes WHERE project_id = ?").all(pid);
-      if (rows.length === 0) {
+      const state = readPendingFixes();
+      if (state.fixes.length === 0) {
         return { content: [{ type: "text", text: "No pending fixes." }] };
       }
-      const fixes = rows.map((r) => ({
-        file: r.file,
-        gate: r.gate,
-        errors: JSON.parse(r.errors)
-      }));
-      const lines = [`${fixes.length} pending fix(es):
+      const lines = [`${state.fixes.length} pending fix(es):
 `];
-      for (const fix of fixes) {
-        lines.push(`[${fix.gate}] ${fix.file}`);
-        for (const err of fix.errors)
-          lines.push(`  ${err}`);
+      for (const fix of state.fixes) {
+        lines.push(`[${fix.detector}] (${fix.severity}) ${fix.file}${fix.line ? `:${fix.line}` : ""}`);
+        lines.push(`  ${fix.message}`);
       }
       return { content: [{ type: "text", text: lines.join(`
 `) }] };
     }
     case "get_project_status": {
-      const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(pid);
-      if (!row) {
-        return {
-          isError: true,
-          content: [{ type: "text", text: "No project state. Run /qult:init to set up." }]
-        };
-      }
-      const r = row;
+      const cur = readCurrent();
       const config = loadConfig();
       let activeSpec = null;
       try {
@@ -3037,23 +2753,13 @@ function handleTool(name, cwd, args) {
         activeSpec = null;
       }
       const enriched = {
-        id: r.id,
-        path: r.path,
-        created_at: r.created_at,
-        last_commit_at: r.last_commit_at,
-        test_passed_at: r.test_passed_at,
-        test_command: r.test_command,
-        review_completed_at: r.review_completed_at,
-        review_iteration: r.review_iteration,
-        plan_eval_iteration: r.plan_eval_iteration,
-        plan_selfcheck_blocked_at: r.plan_selfcheck_blocked_at,
-        human_review_approved_at: r.human_review_approved_at,
-        security_warning_count: r.security_warning_count,
-        test_quality_warning_count: r.test_quality_warning_count,
-        drift_warning_count: r.drift_warning_count,
-        dead_import_warning_count: r.dead_import_warning_count,
-        duplication_warning_count: r.duplication_warning_count,
-        semantic_warning_count: r.semantic_warning_count,
+        path: cwd,
+        test_passed_at: cur.test_passed_at,
+        test_command: cur.test_command,
+        review_completed_at: cur.review_completed_at,
+        review_score: cur.review_score,
+        finish_started_at: cur.finish_started_at,
+        human_approval_at: cur.human_approval_at,
         review_models: config.review.models,
         review_config: config.review,
         active_spec: activeSpec ? {
@@ -3090,19 +2796,19 @@ function handleTool(name, cwd, args) {
           ]
         };
       }
-      const disabled = db.prepare("SELECT gate_name FROM disabled_gates WHERE project_id = ?").all(pid);
-      if (!disabled.some((d) => d.gate_name === gateName) && disabled.length >= 2) {
+      const disabledNames = listDisabledGateNames();
+      if (!disabledNames.includes(gateName) && disabledNames.length >= 2) {
         return {
           isError: true,
           content: [
             {
               type: "text",
-              text: `Maximum 2 gates disabled. Currently: ${disabled.map((d) => d.gate_name).join(", ")}`
+              text: `Maximum 2 gates disabled. Currently: ${disabledNames.join(", ")}`
             }
           ]
         };
       }
-      db.prepare("INSERT OR REPLACE INTO disabled_gates (project_id, gate_name, reason) VALUES (?, ?, ?)").run(pid, gateName, reason);
+      disableGate(gateName, reason);
       appendAuditLog({
         action: "disable_gate",
         reason,
@@ -3116,7 +2822,7 @@ function handleTool(name, cwd, args) {
       if (!gateName) {
         return { isError: true, content: [{ type: "text", text: "Missing gate_name parameter." }] };
       }
-      db.prepare("DELETE FROM disabled_gates WHERE project_id = ? AND gate_name = ?").run(pid, gateName);
+      enableGate(gateName);
       return { content: [{ type: "text", text: `Gate '${gateName}' re-enabled.` }] };
     }
     case "set_config": {
@@ -3177,8 +2883,7 @@ function handleTool(name, cwd, args) {
       if (key === "review.dimension_floor" && typeof value === "number" && (value < 1 || value > 5)) {
         return { isError: true, content: [{ type: "text", text: "dimension_floor must be 1-5." }] };
       }
-      const projectId = getProjectId();
-      db.prepare("INSERT OR REPLACE INTO project_configs (project_id, key, value) VALUES (?, ?, ?)").run(projectId, key, JSON.stringify(value));
+      setConfigKey(key, value);
       resetConfigCache();
       return { content: [{ type: "text", text: `Config set: ${key} = ${value}` }] };
     }
@@ -3192,7 +2897,7 @@ function handleTool(name, cwd, args) {
           ]
         };
       }
-      db.prepare("DELETE FROM pending_fixes WHERE project_id = ?").run(pid);
+      clearPendingFixes();
       appendAuditLog({
         action: "clear_pending_fixes",
         reason,
@@ -3201,41 +2906,24 @@ function handleTool(name, cwd, args) {
       return { content: [{ type: "text", text: "All pending fixes cleared." }] };
     }
     case "get_detector_summary": {
-      const session = db.prepare("SELECT * FROM projects WHERE id = ?").get(pid);
-      const fixes = db.prepare("SELECT file, gate, errors FROM pending_fixes WHERE project_id = ?").all(pid);
+      const state = readPendingFixes();
       const lines = [];
-      if (session) {
-        const counters = [
-          "security_warning_count",
-          "dead_import_warning_count",
-          "drift_warning_count",
-          "test_quality_warning_count",
-          "duplication_warning_count",
-          "semantic_warning_count"
-        ];
-        for (const key of counters) {
-          const val = typeof session[key] === "number" ? session[key] : 0;
-          if (val > 0)
-            lines.push(`${key}: ${val}`);
+      if (state.fixes.length > 0) {
+        const byDetector = {};
+        for (const fix of state.fixes) {
+          const d = fix.detector || "unknown";
+          if (!byDetector[d])
+            byDetector[d] = [];
+          byDetector[d].push(fix);
         }
-      }
-      if (fixes.length > 0) {
-        const byGate = {};
-        for (const fix of fixes) {
-          const g = fix.gate ?? "unknown";
-          if (!byGate[g])
-            byGate[g] = [];
-          byGate[g].push({ file: fix.file, errors: JSON.parse(fix.errors) });
-        }
-        for (const [gate, gateFixes] of Object.entries(byGate)) {
+        for (const [detector, fixes] of Object.entries(byDetector)) {
           lines.push(`
-[${gate}] ${gateFixes.length} issue(s):`);
-          for (const fix of gateFixes) {
+[${detector}] ${fixes.length} issue(s):`);
+          for (const fix of fixes) {
             const relPath = fix.file.startsWith(`${cwd}/`) ? fix.file.slice(cwd.length + 1) : fix.file;
-            lines.push(`  ${relPath}`);
-            for (const err of fix.errors.slice(0, 3)) {
-              lines.push(`    ${err.slice(0, 200)}`);
-            }
+            const loc = fix.line ? `:${fix.line}` : "";
+            lines.push(`  (${fix.severity}) ${relPath}${loc}`);
+            lines.push(`    ${fix.message.slice(0, 200)}`);
           }
         }
       }
@@ -3257,7 +2945,7 @@ function handleTool(name, cwd, args) {
           ]
         };
       }
-      const resolvedHealth = resolve4(filePath);
+      const resolvedHealth = resolve6(filePath);
       if (!resolvedHealth.startsWith(`${cwd}/`)) {
         return {
           content: [
@@ -3280,8 +2968,11 @@ function handleTool(name, cwd, args) {
       }
     }
     case "record_review": {
-      db.prepare("UPDATE projects SET review_completed_at = ? WHERE id = ?").run(new Date().toISOString(), pid);
       const score = typeof args?.aggregate_score === "number" ? args.aggregate_score : null;
+      patchCurrent({
+        review_completed_at: new Date().toISOString(),
+        review_score: score
+      });
       const msg = score !== null ? `Review recorded (aggregate: ${score}).` : "Review recorded.";
       return { content: [{ type: "text", text: msg }] };
     }
@@ -3290,12 +2981,15 @@ function handleTool(name, cwd, args) {
       if (!cmd) {
         return { isError: true, content: [{ type: "text", text: "Missing command parameter." }] };
       }
-      db.prepare("UPDATE projects SET test_passed_at = ?, test_command = ? WHERE id = ?").run(new Date().toISOString(), cmd, pid);
+      patchCurrent({
+        test_passed_at: new Date().toISOString(),
+        test_command: cmd
+      });
       return { content: [{ type: "text", text: `Test pass recorded: ${cmd}` }] };
     }
     case "record_human_approval": {
-      const session = db.prepare("SELECT review_completed_at FROM projects WHERE id = ?").get(pid);
-      if (!session?.review_completed_at) {
+      const cur = readCurrent();
+      if (!cur.review_completed_at) {
         return {
           isError: true,
           content: [
@@ -3306,7 +3000,7 @@ function handleTool(name, cwd, args) {
           ]
         };
       }
-      db.prepare("UPDATE projects SET human_review_approved_at = ? WHERE id = ?").run(new Date().toISOString(), pid);
+      patchCurrent({ human_approval_at: new Date().toISOString() });
       appendAuditLog({
         action: "record_human_approval",
         reason: "Architect approved changes",
@@ -3330,10 +3024,12 @@ function handleTool(name, cwd, args) {
           content: [{ type: "text", text: `Invalid stage. Must be: ${validStages.join(", ")}` }]
         };
       }
-      const insertScore = db.prepare("INSERT OR REPLACE INTO review_stage_scores (project_id, stage, dimension, score) VALUES (?, ?, ?, ?)");
-      for (const [dim, score] of Object.entries(scores)) {
-        insertScore.run(pid, stage, dim, score);
+      const dimRecord = {};
+      for (const [dim, val] of Object.entries(scores)) {
+        if (typeof val === "number")
+          dimRecord[dim] = val;
       }
+      recordReviewStage(stage, dimRecord);
       return {
         content: [
           { type: "text", text: `Stage scores recorded: ${stage} = ${JSON.stringify(scores)}` }
@@ -3341,7 +3037,7 @@ function handleTool(name, cwd, args) {
       };
     }
     case "record_finish_started": {
-      db.prepare("INSERT OR REPLACE INTO ran_gates (project_id, gate_name, ran_at) VALUES (?, ?, ?)").run(pid, "__finish_started__", new Date().toISOString());
+      patchCurrent({ finish_started_at: new Date().toISOString() });
       return { content: [{ type: "text", text: "Finish started recorded." }] };
     }
     case "get_impact_analysis": {

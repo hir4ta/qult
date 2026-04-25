@@ -19,6 +19,10 @@ function initRepo(root: string): void {
 	execSync("git init -q", { cwd: root });
 	execSync("git config user.email test@test", { cwd: root });
 	execSync("git config user.name test", { cwd: root });
+	// Disable commit signing in this test repo only — host config may have a
+	// signing key that prompts (e.g. 1Password agent), which would hang tests.
+	execSync("git config commit.gpgsign false", { cwd: root });
+	execSync("git config tag.gpgsign false", { cwd: root });
 }
 
 function commit(root: string, message: string): string {
