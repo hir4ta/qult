@@ -17,34 +17,43 @@
 
 import { defaultTheme, extendTheme, type Theme } from "@inkjs/ui";
 
-/** Tokyo Night Storm-flavored palette tuned for a black-ish terminal bg. */
+/** Catppuccin Mocha palette — modern pastels with a warm accent core. */
 export const PALETTE = {
-	fg: "#c0caf5",
-	subtle: "#414868",
-	gray: "#565f89",
-	mid: "#7982a9",
-	blue: "#7aa2f7",
-	cyan: "#7dcfff",
-	teal: "#73daca",
-	mauve: "#bb9af7",
+	fg: "#cdd6f4",
+	subtle: "#313244",
+	gray: "#6c7086",
+	mid: "#7f849c",
+	rosewater: "#f5e0dc",
+	flamingo: "#f2cdcd",
+	pink: "#f5c2e7",
+	mauve: "#cba6f7",
 	lavender: "#b4befe",
-	pink: "#f7768e",
-	green: "#9ece6a",
-	yellow: "#e0af68",
-	orange: "#ff9e64",
-	red: "#f7768e",
-	bg: "#1a1b26",
+	red: "#f38ba8",
+	maroon: "#eba0ac",
+	peach: "#fab387",
+	yellow: "#f9e2af",
+	green: "#a6e3a1",
+	teal: "#94e2d5",
+	sky: "#89dceb",
+	sapphire: "#74c7ec",
+	blue: "#89b4fa",
+	bg: "#1e1e2e",
 } as const;
 
-/** Semantic role colors. Components consume these — never PALETTE directly. */
+/**
+ * Semantic role colors. Components consume these — never PALETTE directly.
+ *
+ * Note: `primary` is mauve (purple) rather than blue to keep the UI from
+ * feeling cold. Blue is reserved for `info` only so it pops when used.
+ */
 export const COLORS = {
-	primary: PALETTE.blue,
-	accent: PALETTE.mauve,
+	primary: PALETTE.mauve,
+	accent: PALETTE.peach,
 	success: PALETTE.green,
 	warning: PALETTE.yellow,
 	error: PALETTE.red,
-	info: PALETTE.cyan,
-	highlight: PALETTE.orange,
+	info: PALETTE.sapphire,
+	highlight: PALETTE.flamingo,
 	muted: PALETTE.gray,
 	dim: PALETTE.subtle,
 	fg: PALETTE.fg,
@@ -81,12 +90,15 @@ export function sampleGradient(stops: readonly string[], t: number): string {
 	return lerpHex(stops[segIdx] ?? COLORS.fg, stops[segIdx + 1] ?? COLORS.fg, segT);
 }
 
-/** Reusable gradient definitions. */
+/** Reusable gradient definitions. Warm-leaning, blue-light. */
 export const GRADIENTS = {
-	/** Aurora — purple → blue → cyan. Used for the qult wordmark. */
-	aurora: [PALETTE.mauve, PALETTE.lavender, PALETTE.blue, PALETTE.cyan] as const,
-	/** Sunset — kept around for accent moments. */
-	sunset: [PALETTE.pink, PALETTE.orange, PALETTE.yellow] as const,
+	/**
+	 * Aurora — peach → pink → mauve → lavender. Default for the qult
+	 * wordmark; warm at the top, cools off without ever turning blue.
+	 */
+	aurora: [PALETTE.peach, PALETTE.pink, PALETTE.mauve, PALETTE.lavender] as const,
+	/** Sunset — saturated warm sweep for occasional accents. */
+	sunset: [PALETTE.red, PALETTE.peach, PALETTE.yellow] as const,
 } as const;
 
 // =====================================================================
