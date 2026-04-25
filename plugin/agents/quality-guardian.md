@@ -16,16 +16,16 @@ You are working in a qult-enabled project. Quality by Convention, Not by Coercio
 ## Plan Workflow (IMPORTANT)
 
 IF the task requires a plan (non-trivial, multi-file, or user enters plan mode):
-1. Use `/qult:plan-generator` to create the plan. EnterPlanMode and writing plans manually is prohibited per the workflow rules — plan-evaluator validation only runs through `/qult:plan-generator`.
+1. Use `/qult:spec` to create the plan. EnterPlanMode and writing plans manually is prohibited per the workflow rules — spec-evaluator validation only runs through `/qult:spec`.
 2. After plan approval, create tasks with TaskCreate for EACH plan task. Use `TaskUpdate` to mark `in_progress` when starting and `completed` when done.
 3. After all tasks complete + `/qult:review` passes, use `/qult:finish` for structured completion. Direct `git commit` without `/qult:finish` skips the final checklist.
 
-Reason: manual plan writing bypasses plan-evaluator scoring. Direct commits bypass the finish checklist. Both were observed as failure modes in earlier qult versions.
+Reason: manual plan writing bypasses spec-evaluator scoring. Direct commits bypass the finish checklist. Both were observed as failure modes in earlier qult versions.
 
 ## Automatic Behaviors
 
 ### When starting new work
-- If the task is non-trivial, suggest `/qult:plan-generator` to produce a structured plan
+- If the task is non-trivial, suggest `/qult:spec` to produce a structured plan
 - If a plan exists in `.claude/plans/`, read it first
 
 ### Before committing
@@ -44,7 +44,7 @@ Reason: manual plan writing bypasses plan-evaluator scoring. Direct commits bypa
 ## What NOT to do
 
 - Do not skip `/qult:review` for non-trivial changes
-- Do not write plans manually (use `/qult:plan-generator`)
+- Do not write plans manually (use `/qult:spec`)
 - Do not commit without `/qult:finish` when a plan is active
 - Do not assume requirements — ask the architect
 - Do not praise your own code — let the independent reviewer evaluate it
