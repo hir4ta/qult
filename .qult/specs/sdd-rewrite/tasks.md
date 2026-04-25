@@ -6,13 +6,13 @@
 **Verify**: `bun run typecheck && bun run lint && bun run test` が pass。新規モジュールの単体テスト（atomic write、markdown parser round-trip、paths 算出、realpath による `.qult/` 配下検証、spec_name 検証）が pass。
 **Scaffold**: true
 
-- [ ] T1.1: `src/state/paths.ts` を新規作成。cwd ベースで `.qult/specs/<name>/{requirements,design,tasks}.md`、`waves/wave-NN.md`（NN は 2 桁ゼロパディング、上限 99）、`state/{current,pending-fixes,stage-scores}.json`、`config.json` の絶対パス算出関数群を export。`spec_name` の正規表現検証（`^[a-z0-9][a-z0-9-]{0,63}$`、`archive` 予約名拒否）と、`realpath` で `.qult/` 配下に閉じることの検証関数も含む。
-- [ ] T1.2: `src/state/fs.ts` を新規作成。atomic write（`<file>.tmp` → `rename`）、JSON read/write（schema_version 検証含む）、ファイル存在確認、ディレクトリ自動作成のユーティリティを実装。
-- [ ] T1.3: `src/state/tasks-md.ts` を新規作成。tasks.md の parser と writer。Wave セクション分割、task 行の status 更新（`[ ]` / `[x]` / `[~]` / `[!]`）。task title の制約検証（改行・制御文字・1024 文字以内）、ファイルサイズ上限 1 MiB。parse 失敗時は例外を投げ元ファイルを破壊しない。`update_task_status` 用に存在しない `task_id` を渡されたら明示的に `task_not_found` エラーを返す。
-- [ ] T1.4: `src/state/wave-md.ts` を新規作成。wave-NN.md の parser と writer（task list は持たない、Goal/Verify/Scaffold/Range/Fixes/Superseded by/Commits/Notes セクションのみ）。`tasks-md.ts` とは grammar が異なるため別モジュールとして実装。
-- [ ] T1.5: `src/state/spec.ts` を新規作成。active spec の判定（`.qult/specs/` 走査、`archive/` 除外）、archive 移動（衝突時タイムスタンプ suffix）、wave-NN.md 生成、spec phase 推定、Range SHA reachability 検証ヘルパー（`git rev-parse --verify <sha>^{commit}`）。
-- [ ] T1.6: `src/state/current.ts` / 新版 `src/state/pending-fixes.ts` / `src/state/stage-scores.ts` を新規作成。各 JSON ファイルの read/write を担当。`stage-scores.ts` は新 spec 確定時に `spec_eval` ブロックを初期化する関数を提供。
-- [ ] T1.7: 上記 6 モジュールに対する単体テストを `src/__tests__/` 配下に追加し、`bun run typecheck && bun run lint && bun run test` が全 pass することを確認、Wave 1 完了。
+- [x] T1.1: `src/state/paths.ts` を新規作成。cwd ベースで `.qult/specs/<name>/{requirements,design,tasks}.md`、`waves/wave-NN.md`（NN は 2 桁ゼロパディング、上限 99）、`state/{current,pending-fixes,stage-scores}.json`、`config.json` の絶対パス算出関数群を export。`spec_name` の正規表現検証（`^[a-z0-9][a-z0-9-]{0,63}$`、`archive` 予約名拒否）と、`realpath` で `.qult/` 配下に閉じることの検証関数も含む。
+- [x] T1.2: `src/state/fs.ts` を新規作成。atomic write（`<file>.tmp` → `rename`）、JSON read/write（schema_version 検証含む）、ファイル存在確認、ディレクトリ自動作成のユーティリティを実装。
+- [x] T1.3: `src/state/tasks-md.ts` を新規作成。tasks.md の parser と writer。Wave セクション分割、task 行の status 更新（`[ ]` / `[x]` / `[~]` / `[!]`）。task title の制約検証（改行・制御文字・1024 文字以内）、ファイルサイズ上限 1 MiB。parse 失敗時は例外を投げ元ファイルを破壊しない。`update_task_status` 用に存在しない `task_id` を渡されたら明示的に `task_not_found` エラーを返す。
+- [x] T1.4: `src/state/wave-md.ts` を新規作成。wave-NN.md の parser と writer（task list は持たない、Goal/Verify/Scaffold/Range/Fixes/Superseded by/Commits/Notes セクションのみ）。`tasks-md.ts` とは grammar が異なるため別モジュールとして実装。
+- [x] T1.5: `src/state/spec.ts` を新規作成。active spec の判定（`.qult/specs/` 走査、`archive/` 除外）、archive 移動（衝突時タイムスタンプ suffix）、wave-NN.md 生成、spec phase 推定、Range SHA reachability 検証ヘルパー（`git rev-parse --verify <sha>^{commit}`）。
+- [x] T1.6: `src/state/current.ts` / 新版 `src/state/pending-fixes.ts` / `src/state/stage-scores.ts` を新規作成。各 JSON ファイルの read/write を担当。`stage-scores.ts` は新 spec 確定時に `spec_eval` ブロックを初期化する関数を提供。
+- [x] T1.7: 上記 6 モジュールに対する単体テストを `src/__tests__/` 配下に追加し、`bun run typecheck && bun run lint && bun run test` が全 pass することを確認、Wave 1 完了。
 
 ## Wave 2: MCP tools migrate to new state modules (no deletes)
 
