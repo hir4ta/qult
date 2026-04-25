@@ -89,7 +89,13 @@ init 後は、AI ツールに `/qult:spec`・`/qult:wave-start`・`/qult:wave-co
 
 - Node.js 20 以降
 - MCP に対応した AI コーディングツール（上記 4 種のいずれか）
-- 任意: `semgrep`（security-check 強化）、`osv-scanner`（dep-vuln-check 強化）
+
+### 推奨（detector のカバレッジを強化）
+
+どちらも未インストール時は自動スキップ。qult 本体が失敗することはない。
+
+- **[osv-scanner](https://github.com/google/osv-scanner)** — Google 製の OSS lockfile 脆弱性スキャナー。`dep-vuln-check` が依存パッケージの既知 CVE を検出可能になる。インストール: `brew install osv-scanner` あるいはリリースバイナリ取得。
+- **[semgrep](https://semgrep.dev)** — オープンソース静的解析ツール。`semgrep` が PATH 上にあり、かつ `.qult/config.json` の `security.enable_semgrep: true`（または `QULT_ENABLE_SEMGREP=1`）の場合、`security-check` が qult 組み込みパターンマッチャーと並行して semgrep を実行する。インストール: `brew install semgrep` または `pip install semgrep`。ルールパック上書き: `QULT_SEMGREP_CONFIG`（デフォルト: `auto`）。
 
 ## ライセンス
 

@@ -99,7 +99,19 @@ across editors.
 
 - Node.js 20 or newer
 - An AI coding tool that supports MCP (any of the four above)
-- Optional: `semgrep` (boosts security-check), `osv-scanner` (boosts dep-vuln-check)
+
+### Recommended (boost detector coverage)
+
+Both are auto-skipped if missing — qult never fails because they're not installed.
+
+- **[osv-scanner](https://github.com/google/osv-scanner)** — Google's OSS lockfile
+  vulnerability scanner. Enables `dep-vuln-check` to find known CVEs in your
+  dependencies. Install: `brew install osv-scanner` or download a release binary.
+- **[semgrep](https://semgrep.dev)** — open-source static analyzer. When `semgrep`
+  is on your PATH AND `security.enable_semgrep` is `true` in `.qult/config.json`
+  (or `QULT_ENABLE_SEMGREP=1`), `security-check` runs semgrep alongside qult's
+  built-in pattern matchers. Install: `brew install semgrep` or `pip install semgrep`.
+  Override the rule pack with `QULT_SEMGREP_CONFIG` (default: `auto`).
 
 ## License
 

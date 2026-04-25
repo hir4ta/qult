@@ -7,12 +7,14 @@
  * unit tests can exercise each detector deterministically.
  */
 
+import { loadConfig } from "../config.ts";
 import type { PendingFix } from "../types.ts";
 import { scanDependencyVulns } from "./dep-vuln-check.ts";
 import { detectExportBreakingChanges } from "./export-check.ts";
 import { checkInstalledPackages } from "./hallucinated-package-check.ts";
 import { isNetworkAvailable } from "./network.ts";
 import { detectSecurityPatterns } from "./security-check.ts";
+import { runSemgrepScan } from "./semgrep.ts";
 import { analyzeTestQuality, getBlockingTestSmells } from "./test-quality-check.ts";
 
 export type DetectorName =
@@ -62,11 +64,16 @@ export async function runAllDetectors(
 
 	const results: DetectorResult[] = [];
 
-	results.push({
-		detector: "security-check",
-		fixes: files.flatMap((f) => detectSecurityPatterns(f)),
-		skipped: false,
-	});
+	const securityFixes: PendingFix[] = files.flatMap((f) => detectSecurityPatterns(f));
+	if (loadConfig().security.enable_semgrep) {
+		const semgrep = runSemgrepScan(files, cwd);
+		if (semgrep.skipped) {
+			process.stderr.write(`[qult] semgrep skipped: ${semgrep.skipReason}\n`);
+		} else {
+			securityFixes.push(...semgrep.fixes);
+		}
+	}
+	results.push({ detector: "security-check", fixes: securityFixes, skipped: false });
 
 	if (!networkOk) {
 		results.push({

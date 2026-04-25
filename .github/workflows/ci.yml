@@ -10,19 +10,23 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
         with:
-          bun-version: "latest"
+          node-version: "20"
+          cache: "npm"
 
-      - run: bun install
+      - run: npm ci
 
       - name: Typecheck
-        run: bun tsc --noEmit
+        run: npm run typecheck
 
       - name: Lint
-        run: bun biome check src/
+        run: npm run lint
 
       - name: Test
-        run: bun run test
+        run: npm test
+
+      - name: Build
+        run: npm run build

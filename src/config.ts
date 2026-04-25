@@ -53,10 +53,14 @@ export interface QultConfig {
 		/** Import graph traversal depth for consumer detection (1-3). Used by get_impact_analysis MCP tool. */
 		import_graph_depth: number;
 	};
-	/** Security enforcement */
+	/** Optional security-check enhancements (off by default). */
 	security: {
-		/** Require Semgrep to be installed. Used by security-reviewer for SAST. */
-		require_semgrep: boolean;
+		/**
+		 * When true, `qult check --detect` runs semgrep as part of security-check.
+		 * Requires `semgrep` on PATH; auto-skipped with a warning if missing.
+		 * Override config: set `QULT_SEMGREP_CONFIG` env var.
+		 */
+		enable_semgrep: boolean;
 	};
 	/** Multi-agent integration registry (Wave 4+). */
 	integrations: {
@@ -104,7 +108,7 @@ export const DEFAULTS: QultConfig = {
 		import_graph_depth: 1,
 	},
 	security: {
-		require_semgrep: true,
+		enable_semgrep: false,
 	},
 	integrations: {
 		enabled: [],
@@ -165,7 +169,7 @@ function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): voi
 	}
 	if (raw.security && typeof raw.security === "object") {
 		const s = raw.security as Record<string, unknown>;
-		if (typeof s.require_semgrep === "boolean") config.security.require_semgrep = s.require_semgrep;
+		if (typeof s.enable_semgrep === "boolean") config.security.enable_semgrep = s.enable_semgrep;
 	}
 	if (raw.integrations && typeof raw.integrations === "object") {
 		const i = raw.integrations as Record<string, unknown>;
@@ -261,12 +265,11 @@ export function loadConfig(): QultConfig {
 	const igDepth = envInt("QULT_IMPORT_GRAPH_DEPTH");
 	if (igDepth !== undefined) config.gates.import_graph_depth = Math.max(1, Math.min(3, igDepth));
 
-	// Security env var overrides
-	const requireSemgrepEnv = process.env.QULT_REQUIRE_SEMGREP;
-	if (requireSemgrepEnv === "1" || requireSemgrepEnv === "true")
-		config.security.require_semgrep = true;
-	else if (requireSemgrepEnv === "0" || requireSemgrepEnv === "false")
-		config.security.require_semgrep = false;
+	const enableSemgrepEnv = process.env.QULT_ENABLE_SEMGREP;
+	if (enableSemgrepEnv === "1" || enableSemgrepEnv === "true")
+		config.security.enable_semgrep = true;
+	else if (enableSemgrepEnv === "0" || enableSemgrepEnv === "false")
+		config.security.enable_semgrep = false;
 
 	// Model env var overrides (non-empty string)
 	const envStr = (key: string): string | undefined => {
