@@ -18,13 +18,17 @@ export async function runDashboard(): Promise<number> {
 		return 0;
 	}
 
-	const [{ render }, { App }, { createElement }] = await Promise.all([
+	// React, when bundled from its CJS source, comes back as `{ default: <module> }`
+	// — there are no named exports on the namespace object. Pull `default` first
+	// then destructure `createElement` off it.
+	const [{ render }, { App }, reactMod] = await Promise.all([
 		import("ink"),
 		import("./components/App.tsx"),
 		import("react"),
 	]);
+	const React = reactMod.default ?? reactMod;
 
-	const { waitUntilExit } = render(createElement(App));
+	const { waitUntilExit } = render(React.createElement(App));
 	await waitUntilExit();
 	return 0;
 }
