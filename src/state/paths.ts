@@ -165,7 +165,11 @@ export function assertValidWaveNum(waveNum: number): void {
  */
 export function assertConfinedToQult(targetPath: string): string {
 	const resolved = resolve(targetPath);
-	const qultRealPath = realpathSync(qultDir());
+	// Use resolveExistingAncestor on both sides so the check works even when
+	// .qult/ has not been created yet (fresh project, audit log written before
+	// any explicit init). Both sides resolve via existing ancestors, so symlinks
+	// anywhere in the chain are still followed and detected.
+	const qultRealPath = resolveExistingAncestor(qultDir());
 	const targetRealPath = resolveExistingAncestor(resolved);
 	if (targetRealPath !== qultRealPath && !targetRealPath.startsWith(`${qultRealPath}/`)) {
 		throw new Error(

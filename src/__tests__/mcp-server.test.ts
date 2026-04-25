@@ -239,21 +239,21 @@ describe("handleTool: disable_gate / enable_gate", () => {
 		expect(result.content[0]!.text).toContain("Maximum 2");
 	});
 
-	it("disable_gate writes audit log entry", () => {
+	it("disable_gate writes audit log entry", async () => {
+		const { readAuditLog } = await import("../state/audit-log.ts");
+		const { setProjectRoot } = await import("../state/paths.ts");
+		setProjectRoot(TEST_DIR);
 		const result = handleTool("disable_gate", TEST_DIR, {
 			gate_name: "review",
 			reason: "Review gate is misconfigured",
 		});
 		expect(result.isError).toBeFalsy();
 
-		const db = getDb();
-		const projectId = getProjectId();
-		const rows = db
-			.prepare("SELECT action, gate_name FROM audit_log WHERE project_id = ?")
-			.all(projectId) as { action: string; gate_name: string }[];
-		expect(rows).toHaveLength(1);
-		expect(rows[0]!.action).toBe("disable_gate");
-		expect(rows[0]!.gate_name).toBe("review");
+		const log = readAuditLog();
+		expect(log).toHaveLength(1);
+		expect(log[0]!.action).toBe("disable_gate");
+		expect(log[0]!.gate_name).toBe("review");
+		setProjectRoot(null);
 	});
 
 	it("enable_gate removes gate from disabled_gates", () => {
@@ -319,19 +319,19 @@ describe("handleTool: clear_pending_fixes", () => {
 		expect(result.content[0]!.text).toContain("10 chars");
 	});
 
-	it("writes audit log entry", () => {
+	it("writes audit log entry", async () => {
+		const { readAuditLog } = await import("../state/audit-log.ts");
+		const { setProjectRoot } = await import("../state/paths.ts");
+		setProjectRoot(TEST_DIR);
 		handleTool("clear_pending_fixes", TEST_DIR, {
 			reason: "All fixes are false positives",
 		});
 
-		const db = getDb();
-		const projectId = getProjectId();
-		const rows = db
-			.prepare("SELECT action, reason FROM audit_log WHERE project_id = ?")
-			.all(projectId) as { action: string; reason: string }[];
-		expect(rows).toHaveLength(1);
-		expect(rows[0]!.action).toBe("clear_pending_fixes");
-		expect(rows[0]!.reason).toBe("All fixes are false positives");
+		const log = readAuditLog();
+		expect(log).toHaveLength(1);
+		expect(log[0]!.action).toBe("clear_pending_fixes");
+		expect(log[0]!.reason).toBe("All fixes are false positives");
+		setProjectRoot(null);
 	});
 });
 

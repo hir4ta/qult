@@ -1,18 +1,22 @@
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { closeDb, setProjectPath, useTestDb } from "../state/db.ts";
+import { appendAuditLog, readAuditLog } from "../state/audit-log.ts";
+import { setProjectRoot } from "../state/paths.ts";
 
-const TEST_DIR = "/tmp/.tmp-audit-log-test";
+let tmpRoot: string;
 
 beforeEach(() => {
-	useTestDb();
-	setProjectPath(TEST_DIR);
+	tmpRoot = mkdtempSync(join(tmpdir(), "qult-audit-log-"));
+	mkdirSync(join(tmpRoot, ".qult"), { recursive: true });
+	setProjectRoot(tmpRoot);
 });
 
 afterEach(() => {
-	closeDb();
+	setProjectRoot(null);
+	rmSync(tmpRoot, { recursive: true, force: true });
 });
-
-import { appendAuditLog, readAuditLog } from "../state/audit-log.ts";
 
 describe("appendAuditLog", () => {
 	it("appends entry to audit log", () => {
@@ -29,25 +33,25 @@ describe("appendAuditLog", () => {
 		expect(log[0]!.reason).toBe("Gate is broken for this session");
 	});
 
-	it("appends to existing audit log", () => {
+	it("appends to existing audit log (most recent first)", () => {
 		appendAuditLog({
 			action: "test",
-			reason: "existing entry",
+			reason: "first entry",
 			timestamp: "2026-01-01T00:00:00Z",
 		});
-
 		appendAuditLog({
 			action: "clear_pending_fixes",
-			reason: "False positive from linter",
+			reason: "second entry",
 			timestamp: "2026-01-02T00:00:00Z",
 		});
-
 		const log = readAuditLog();
 		expect(log).toHaveLength(2);
+		expect(log[0]!.action).toBe("clear_pending_fixes"); // most recent first
+		expect(log[1]!.action).toBe("test");
 	});
 
 	it("trims to 200 entries", () => {
-		for (let i = 0; i < 200; i++) {
+		for (let i = 0; i < 250; i++) {
 			appendAuditLog({
 				action: "test",
 				reason: `entry ${i}`,
@@ -57,7 +61,7 @@ describe("appendAuditLog", () => {
 
 		appendAuditLog({
 			action: "new",
-			reason: "new entry that should cause trim",
+			reason: "new entry after trim threshold",
 			timestamp: "2026-02-01T00:00:00Z",
 		});
 
@@ -68,7 +72,7 @@ describe("appendAuditLog", () => {
 });
 
 describe("readAuditLog", () => {
-	it("returns empty array when no entries", () => {
+	it("returns empty array when file does not exist", () => {
 		const log = readAuditLog();
 		expect(log).toEqual([]);
 	});
