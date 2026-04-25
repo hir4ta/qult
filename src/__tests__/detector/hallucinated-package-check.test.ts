@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetAllCaches } from "../state/flush.ts";
+import { resetAllCaches } from "../../state/flush.ts";
 
 beforeEach(() => {
 	resetAllCaches();
@@ -13,7 +13,7 @@ afterEach(() => {
 describe("checkPackageExists", () => {
 	async function check(pm: string, packageName: string) {
 		vi.resetModules();
-		const mod = await import("../hooks/detectors/hallucinated-package-check.ts");
+		const mod = await import("../../detector/hallucinated-package-check.ts");
 		return mod.checkPackageExists(pm, packageName);
 	}
 
@@ -100,7 +100,7 @@ describe("checkPackageExists", () => {
 describe("checkInstalledPackages", () => {
 	async function checkPkgs(pm: string, packages: string[]) {
 		vi.resetModules();
-		const mod = await import("../hooks/detectors/hallucinated-package-check.ts");
+		const mod = await import("../../detector/hallucinated-package-check.ts");
 		return mod.checkInstalledPackages(pm, packages);
 	}
 
@@ -151,7 +151,7 @@ describe("checkInstalledPackages", () => {
 		// This is handled in the function itself
 		vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404 }));
 
-		const mod = await import("../hooks/detectors/hallucinated-package-check.ts");
+		const mod = await import("../../detector/hallucinated-package-check.ts");
 		// Default state: gate not disabled, so it should check
 		const fixes = await mod.checkInstalledPackages("npm", ["fake"]);
 		expect(fixes.length).toBe(1);

@@ -1,11 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { detectSecurityPatterns } from "../hooks/detectors/security-check.ts";
-import {
-	analyzeTestQuality,
-	getBlockingTestSmells,
-} from "../hooks/detectors/test-quality-check.ts";
+import { detectSecurityPatterns } from "../../detector/security-check.ts";
+import { analyzeTestQuality, getBlockingTestSmells } from "../../detector/test-quality-check.ts";
 
 interface SecurityCase {
 	file: string;
@@ -25,7 +22,7 @@ interface Manifest {
 	"test-quality": TestQualityCase[];
 }
 
-const FIXTURES_DIR = join(import.meta.dirname, "fixtures/ground-truth");
+const FIXTURES_DIR = join(import.meta.dirname, "../fixtures/ground-truth");
 const manifest: Manifest = JSON.parse(readFileSync(join(FIXTURES_DIR, "manifest.json"), "utf-8"));
 
 describe("detector precision/recall benchmarks", () => {

@@ -6,7 +6,7 @@ import {
 	_resetGoModuleCache,
 	findAffectedTestFiles,
 	findImporters,
-} from "../hooks/detectors/import-graph.ts";
+} from "../../detector/import-graph.ts";
 
 const TEST_DIR = join(tmpdir(), ".qult-import-graph-test");
 

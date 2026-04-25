@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetAllCaches } from "../state/flush.ts";
+import { resetAllCaches } from "../../state/flush.ts";
 
 vi.mock("node:child_process");
 
@@ -16,7 +16,7 @@ afterEach(() => {
 
 describe("extractInstalledPackages", () => {
 	async function extract(command: string) {
-		const { extractInstalledPackages } = await import("../hooks/detectors/dep-vuln-check.ts");
+		const { extractInstalledPackages } = await import("../../detector/dep-vuln-check.ts");
 		return extractInstalledPackages(command);
 	}
 
@@ -143,7 +143,7 @@ describe("runOsvScanner", () => {
 		vi.mock("node:child_process");
 		const cp = await import("node:child_process");
 		const mockExec = vi.mocked(cp.execFileSync);
-		const { runOsvScanner } = await import("../hooks/detectors/dep-vuln-check.ts");
+		const { runOsvScanner } = await import("../../detector/dep-vuln-check.ts");
 		return { mockExec, runOsvScanner };
 	}
 
@@ -196,7 +196,7 @@ describe("scanDependencyVulns", () => {
 	}
 
 	async function runScan(cwd: string) {
-		const { scanDependencyVulns } = await import("../hooks/detectors/dep-vuln-check.ts");
+		const { scanDependencyVulns } = await import("../../detector/dep-vuln-check.ts");
 		return scanDependencyVulns(cwd);
 	}
 

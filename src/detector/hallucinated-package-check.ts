@@ -1,5 +1,5 @@
-import { isGateDisabled } from "../../state/gate-state.ts";
-import type { PendingFix } from "../../types.ts";
+import { isGateDisabled } from "../state/gate-state.ts";
+import type { PendingFix } from "../types.ts";
 
 const CHECK_TIMEOUT = 3_000;
 

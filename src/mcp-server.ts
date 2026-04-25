@@ -13,9 +13,9 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { loadConfig, resetConfigCache, setConfigKey } from "./config.ts";
-import { computeFileHealthScore } from "./hooks/detectors/health-score.ts";
-import { findImporters } from "./hooks/detectors/import-graph.ts";
-import { validateTestCoversImpl } from "./hooks/detectors/spec-trace-check.ts";
+import { computeFileHealthScore } from "./detector/health-score.ts";
+import { findImporters } from "./detector/import-graph.ts";
+import { validateTestCoversImpl } from "./detector/spec-trace-check.ts";
 import {
 	handleArchiveSpec,
 	handleCompleteWave,

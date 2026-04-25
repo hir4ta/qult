@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, extname } from "node:path";
-import { isGateDisabled } from "../../state/gate-state.ts";
-import type { PendingFix } from "../../types.ts";
-import { sanitizeForStderr } from "../sanitize.ts";
+import { isGateDisabled } from "../state/gate-state.ts";
+import type { PendingFix } from "../types.ts";
+import { sanitizeForStderr } from "./sanitize.ts";
 
 const CHECKABLE_EXTS = new Set([
 	".ts",

@@ -25,12 +25,12 @@
 **Goal**: 5 種の Tier 1 Detector を `src/detector/` に Node.js 対応で移植し、`runAllDetectors` インターフェースを確立する。ネットワーク不可時の自動スキップも動作する状態にする。
 **Verify**: `bun run typecheck && bun run test -- --run __tests__/detector`
 
-- [ ] T2.1: `src/detector/index.ts` を新規作成する（`DetectorResult` 型・`DetectorOptions` 型・`runAllDetectors(files, opts)` の実装。スキップされた Detector は `skipped: true` を返す）
-- [ ] T2.2: `src/detector/security-check.ts` を移植する（`Bun.file` を `readFileSync` に置換、Semgrep 未インストール時の警告出力を `process.stderr` に統一）
-- [ ] T2.3: `src/detector/dep-vuln-check.ts` を移植する（`execFileSync` を `node:child_process` からインポート、実行前に `isNetworkAvailable()` を呼び不可なら skip）
-- [ ] T2.4: `src/detector/hallucinated-package-check.ts` を移植する（`fetch` は Node 20 標準のまま利用、実行前に `isNetworkAvailable()` を呼び不可なら skip）
-- [ ] T2.5: `src/detector/test-quality-check.ts` と `src/detector/export-check.ts` を移植する（`node:fs`・`node:child_process` のみを使用することを確認）
-- [ ] T2.6: 既存の Detector テストを `__tests__/detector/` に移動し Node.js 環境で通るよう修正する（`bunx` 依存の部分を `node:child_process` ベースに差し替え）
+- [x] T2.1: `src/detector/index.ts` を新規作成する（`DetectorResult` 型・`DetectorOptions` 型・`runAllDetectors(files, opts)` の実装。スキップされた Detector は `skipped: true` を返す）
+- [x] T2.2: `src/detector/security-check.ts` を移植する（`Bun.file` を `readFileSync` に置換、Semgrep 未インストール時の警告出力を `process.stderr` に統一）
+- [x] T2.3: `src/detector/dep-vuln-check.ts` を移植する（`execFileSync` を `node:child_process` からインポート、実行前に `isNetworkAvailable()` を呼び不可なら skip）
+- [x] T2.4: `src/detector/hallucinated-package-check.ts` を移植する（`fetch` は Node 20 標準のまま利用、実行前に `isNetworkAvailable()` を呼び不可なら skip）
+- [x] T2.5: `src/detector/test-quality-check.ts` と `src/detector/export-check.ts` を移植する（`node:fs`・`node:child_process` のみを使用することを確認）
+- [x] T2.6: 既存の Detector テストを `__tests__/detector/` に移動し Node.js 環境で通るよう修正する（`bunx` 依存の部分を `node:child_process` ベースに差し替え）
 
 **Consumers**: Wave 3（MCP `get_detector_summary` ツール）、Wave 5（`check` サブコマンド）
 

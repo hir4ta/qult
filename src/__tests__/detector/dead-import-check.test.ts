@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resetAllCaches } from "../state/flush.ts";
+import { resetAllCaches } from "../../state/flush.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-dead-import-test");
 const originalCwd = process.cwd();
@@ -19,7 +19,7 @@ afterEach(() => {
 
 describe("detectDeadImports: TypeScript/JavaScript", () => {
 	async function detect(file: string) {
-		const { detectDeadImports } = await import("../hooks/detectors/dead-import-check.ts");
+		const { detectDeadImports } = await import("../../detector/dead-import-check.ts");
 		return detectDeadImports(file);
 	}
 
@@ -155,7 +155,7 @@ writeFileSync("g", content);
 
 describe("detectDeadImports: Python", () => {
 	async function detect(file: string) {
-		const { detectDeadImports } = await import("../hooks/detectors/dead-import-check.ts");
+		const { detectDeadImports } = await import("../../detector/dead-import-check.ts");
 		return detectDeadImports(file);
 	}
 
@@ -220,7 +220,7 @@ if exists(result):
 
 describe("detectDeadImports: edge cases", () => {
 	async function detect(file: string) {
-		const { detectDeadImports } = await import("../hooks/detectors/dead-import-check.ts");
+		const { detectDeadImports } = await import("../../detector/dead-import-check.ts");
 		return detectDeadImports(file);
 	}
 

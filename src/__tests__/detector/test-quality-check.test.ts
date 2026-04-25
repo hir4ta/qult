@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { suggestPbt } from "../hooks/detectors/test-quality-check.ts";
+import { suggestPbt } from "../../detector/test-quality-check.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-test-quality-test");
 const originalCwd = process.cwd();
@@ -18,7 +18,7 @@ afterEach(() => {
 
 describe("analyzeTestQuality", () => {
 	async function analyze(file: string) {
-		const { analyzeTestQuality } = await import("../hooks/detectors/test-quality-check.ts");
+		const { analyzeTestQuality } = await import("../../detector/test-quality-check.ts");
 		return analyzeTestQuality(file);
 	}
 
@@ -379,7 +379,7 @@ it("real", () => {
 
 describe("formatTestQualityWarnings", () => {
 	it("formats shallow test warning", async () => {
-		const { formatTestQualityWarnings } = await import("../hooks/detectors/test-quality-check.ts");
+		const { formatTestQualityWarnings } = await import("../../detector/test-quality-check.ts");
 		const result = {
 			testCount: 3,
 			assertionCount: 2,
@@ -395,7 +395,7 @@ describe("formatTestQualityWarnings", () => {
 	});
 
 	it("groups multiple smells of same type", async () => {
-		const { formatTestQualityWarnings } = await import("../hooks/detectors/test-quality-check.ts");
+		const { formatTestQualityWarnings } = await import("../../detector/test-quality-check.ts");
 		const result = {
 			testCount: 2,
 			assertionCount: 4,
@@ -415,7 +415,7 @@ describe("formatTestQualityWarnings", () => {
 
 describe("new test quality smells", () => {
 	async function analyze(file: string) {
-		const { analyzeTestQuality } = await import("../hooks/detectors/test-quality-check.ts");
+		const { analyzeTestQuality } = await import("../../detector/test-quality-check.ts");
 		return analyzeTestQuality(file);
 	}
 
@@ -522,7 +522,7 @@ describe("new test quality smells", () => {
 
 describe("PBT-aware test quality", () => {
 	async function analyze(file: string) {
-		const { analyzeTestQuality } = await import("../hooks/detectors/test-quality-check.ts");
+		const { analyzeTestQuality } = await import("../../detector/test-quality-check.ts");
 		return analyzeTestQuality(file);
 	}
 
@@ -559,7 +559,7 @@ it("property test", () => {
 		expect(result).not.toBeNull();
 		expect(result!.isPbt).toBe(true);
 		// avgAssertions is 1.0 which would normally trigger warning, but PBT suppresses it
-		const { formatTestQualityWarnings } = await import("../hooks/detectors/test-quality-check.ts");
+		const { formatTestQualityWarnings } = await import("../../detector/test-quality-check.ts");
 		const warnings = formatTestQualityWarnings("pbt-single.test.ts", result!);
 		const fewAssertions = warnings.filter((w) => w.includes("assertions/test"));
 		expect(fewAssertions.length).toBe(0);
@@ -618,7 +618,7 @@ it("test2", () => {
 		const result = await analyze(file);
 		expect(result).not.toBeNull();
 		expect(result!.isPbt).toBe(false);
-		const { formatTestQualityWarnings } = await import("../hooks/detectors/test-quality-check.ts");
+		const { formatTestQualityWarnings } = await import("../../detector/test-quality-check.ts");
 		const warnings = formatTestQualityWarnings("regular.test.ts", result!);
 		const fewAssertions = warnings.filter((w) => w.includes("assertions/test"));
 		expect(fewAssertions.length).toBe(1);
@@ -627,7 +627,7 @@ it("test2", () => {
 
 describe("PBT recommendation in formatTestQualityWarnings", () => {
 	it("includes PBT recommendation for happy-path-only smell in TS file", async () => {
-		const { formatTestQualityWarnings } = await import("../hooks/detectors/test-quality-check.ts");
+		const { formatTestQualityWarnings } = await import("../../detector/test-quality-check.ts");
 		const result = {
 			testCount: 5,
 			assertionCount: 10,
@@ -644,7 +644,7 @@ describe("PBT recommendation in formatTestQualityWarnings", () => {
 	});
 
 	it("includes PBT recommendation for missing-boundary smell in TS file", async () => {
-		const { formatTestQualityWarnings } = await import("../hooks/detectors/test-quality-check.ts");
+		const { formatTestQualityWarnings } = await import("../../detector/test-quality-check.ts");
 		const result = {
 			testCount: 5,
 			assertionCount: 10,
@@ -661,7 +661,7 @@ describe("PBT recommendation in formatTestQualityWarnings", () => {
 	});
 
 	it("includes hypothesis recommendation for Python test file", async () => {
-		const { formatTestQualityWarnings } = await import("../hooks/detectors/test-quality-check.ts");
+		const { formatTestQualityWarnings } = await import("../../detector/test-quality-check.ts");
 		const result = {
 			testCount: 5,
 			assertionCount: 10,
@@ -678,7 +678,7 @@ describe("PBT recommendation in formatTestQualityWarnings", () => {
 	});
 
 	it("does not include PBT recommendation when isPbt is true", async () => {
-		const { formatTestQualityWarnings } = await import("../hooks/detectors/test-quality-check.ts");
+		const { formatTestQualityWarnings } = await import("../../detector/test-quality-check.ts");
 		const result = {
 			testCount: 5,
 			assertionCount: 10,
@@ -700,7 +700,7 @@ describe("getBlockingTestSmells", () => {
 		const file = join(TEST_DIR, "empty.test.ts");
 		writeFileSync(file, `import { it } from "vitest";\nit("does nothing", () => {});\n`);
 		const { analyzeTestQuality, getBlockingTestSmells } = await import(
-			"../hooks/detectors/test-quality-check.ts"
+			"../../detector/test-quality-check.ts"
 		);
 		const result = analyzeTestQuality(file);
 		expect(result).not.toBeNull();
@@ -717,7 +717,7 @@ describe("getBlockingTestSmells", () => {
 			`import { it, expect } from "vitest";\nit("trivial", () => { expect(true).toBe(true); });\n`,
 		);
 		const { analyzeTestQuality, getBlockingTestSmells } = await import(
-			"../hooks/detectors/test-quality-check.ts"
+			"../../detector/test-quality-check.ts"
 		);
 		const result = analyzeTestQuality(file);
 		expect(result).not.toBeNull();
@@ -733,7 +733,7 @@ describe("getBlockingTestSmells", () => {
 			`import { it, expect } from "vitest";\nit("self", () => { const x = 1; expect(x).toBe(x); });\n`,
 		);
 		const { analyzeTestQuality, getBlockingTestSmells } = await import(
-			"../hooks/detectors/test-quality-check.ts"
+			"../../detector/test-quality-check.ts"
 		);
 		const result = analyzeTestQuality(file);
 		expect(result).not.toBeNull();
@@ -749,7 +749,7 @@ describe("getBlockingTestSmells", () => {
 			`import { it, expect } from "vitest";\nit("weak", () => { expect(foo).toBeTruthy(); });\n`,
 		);
 		const { analyzeTestQuality, getBlockingTestSmells } = await import(
-			"../hooks/detectors/test-quality-check.ts"
+			"../../detector/test-quality-check.ts"
 		);
 		const result = analyzeTestQuality(file);
 		expect(result).not.toBeNull();
@@ -765,7 +765,7 @@ describe("PBT weak-matcher relaxation", () => {
 			file,
 			`import fc from "fast-check";\nimport { it, expect } from "vitest";\nit("prop", () => { fc.assert(fc.property(fc.integer(), (n) => { expect(n > 0).toBeTruthy(); })); });\n`,
 		);
-		const { analyzeTestQuality } = await import("../hooks/detectors/test-quality-check.ts");
+		const { analyzeTestQuality } = await import("../../detector/test-quality-check.ts");
 		const result = analyzeTestQuality(file);
 		expect(result).not.toBeNull();
 		expect(result!.isPbt).toBe(true);
@@ -779,7 +779,7 @@ describe("PBT weak-matcher relaxation", () => {
 			file,
 			`import { it, expect } from "vitest";\nit("weak", () => { expect(foo).toBeTruthy(); });\n`,
 		);
-		const { analyzeTestQuality } = await import("../hooks/detectors/test-quality-check.ts");
+		const { analyzeTestQuality } = await import("../../detector/test-quality-check.ts");
 		const result = analyzeTestQuality(file);
 		expect(result).not.toBeNull();
 		expect(result!.isPbt).toBe(false);
@@ -793,7 +793,7 @@ describe("PBT weak-matcher relaxation", () => {
 			file,
 			`import fc from "fast-check";\nimport { it, expect } from "vitest";\nit("empty", () => {});\n`,
 		);
-		const { analyzeTestQuality } = await import("../hooks/detectors/test-quality-check.ts");
+		const { analyzeTestQuality } = await import("../../detector/test-quality-check.ts");
 		const result = analyzeTestQuality(file);
 		expect(result).not.toBeNull();
 		expect(result!.smells.some((s) => s.type === "empty-test")).toBe(true);

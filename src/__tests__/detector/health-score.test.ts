@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resetAllCaches } from "../state/flush.ts";
+import { resetAllCaches } from "../../state/flush.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-health-score-test");
 const originalCwd = process.cwd();
@@ -20,7 +20,7 @@ afterEach(() => {
 
 describe("computeFileHealthScore", () => {
 	async function score(file: string) {
-		const { computeFileHealthScore } = await import("../hooks/detectors/health-score.ts");
+		const { computeFileHealthScore } = await import("../../detector/health-score.ts");
 		return computeFileHealthScore(file);
 	}
 

@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { isGateDisabled } from "../../state/gate-state.ts";
-import type { PendingFix } from "../../types.ts";
+import { isGateDisabled } from "../state/gate-state.ts";
+import type { PendingFix } from "../types.ts";
 
 const SCAN_TIMEOUT = 8_000;
 

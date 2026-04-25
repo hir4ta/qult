@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetAllCaches } from "../state/flush.ts";
+import { resetAllCaches } from "../../state/flush.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".tmp-security-check-test");
 const originalCwd = process.cwd();
@@ -19,7 +19,7 @@ afterEach(() => {
 
 describe("detectSecurityPatterns", () => {
 	async function detect(file: string) {
-		const { detectSecurityPatterns } = await import("../hooks/detectors/security-check.ts");
+		const { detectSecurityPatterns } = await import("../../detector/security-check.ts");
 		return detectSecurityPatterns(file);
 	}
 
@@ -352,7 +352,7 @@ describe("emitAdvisoryWarnings", () => {
 	});
 
 	async function detectWithAdvisory(file: string) {
-		const { detectSecurityPatterns } = await import("../hooks/detectors/security-check.ts");
+		const { detectSecurityPatterns } = await import("../../detector/security-check.ts");
 		detectSecurityPatterns(file);
 		return stderrCapture;
 	}
@@ -405,7 +405,7 @@ describe("promoted advisory → blocking patterns", () => {
 	it("detects CORS wildcard as blocking PendingFix", async () => {
 		const file = join(TEST_DIR, "server.ts");
 		writeFileSync(file, `"Access-Control-Allow-Origin": "*"\n`);
-		const { detectSecurityPatterns } = await import("../hooks/detectors/security-check.ts");
+		const { detectSecurityPatterns } = await import("../../detector/security-check.ts");
 		const fixes = detectSecurityPatterns(file);
 		expect(fixes.length).toBeGreaterThan(0);
 		expect(fixes[0]!.errors.some((e) => e.includes("CORS wildcard"))).toBe(true);
@@ -414,7 +414,7 @@ describe("promoted advisory → blocking patterns", () => {
 	it("suppresses CORS wildcard on localhost lines", async () => {
 		const file = join(TEST_DIR, "dev.ts");
 		writeFileSync(file, `"Access-Control-Allow-Origin": "*" // localhost\n`);
-		const { detectSecurityPatterns } = await import("../hooks/detectors/security-check.ts");
+		const { detectSecurityPatterns } = await import("../../detector/security-check.ts");
 		const fixes = detectSecurityPatterns(file);
 		const corsErrors = fixes.flatMap((f) => f.errors).filter((e) => e.includes("CORS wildcard"));
 		expect(corsErrors).toHaveLength(0);
@@ -423,7 +423,7 @@ describe("promoted advisory → blocking patterns", () => {
 	it("detects hardcoded debug mode as blocking PendingFix", async () => {
 		const file = join(TEST_DIR, "config.ts");
 		writeFileSync(file, `const config = { debug: true };\n`);
-		const { detectSecurityPatterns } = await import("../hooks/detectors/security-check.ts");
+		const { detectSecurityPatterns } = await import("../../detector/security-check.ts");
 		const fixes = detectSecurityPatterns(file);
 		expect(fixes.length).toBeGreaterThan(0);
 		expect(fixes[0]!.errors.some((e) => e.includes("debug=true") || e.includes("debug"))).toBe(
@@ -434,7 +434,7 @@ describe("promoted advisory → blocking patterns", () => {
 	it("suppresses debug mode when line contains test/mock context", async () => {
 		const file = join(TEST_DIR, "config.ts");
 		writeFileSync(file, `const mockConfig = { debug: true }; // test config\n`);
-		const { detectSecurityPatterns } = await import("../hooks/detectors/security-check.ts");
+		const { detectSecurityPatterns } = await import("../../detector/security-check.ts");
 		const fixes = detectSecurityPatterns(file);
 		const debugErrors = fixes.flatMap((f) => f.errors).filter((e) => e.includes("debug"));
 		expect(debugErrors).toHaveLength(0);
@@ -443,7 +443,7 @@ describe("promoted advisory → blocking patterns", () => {
 	it("detects source map exposure as blocking PendingFix", async () => {
 		const file = join(TEST_DIR, "build.ts");
 		writeFileSync(file, `const config = { sourceMap: true };\n`);
-		const { detectSecurityPatterns } = await import("../hooks/detectors/security-check.ts");
+		const { detectSecurityPatterns } = await import("../../detector/security-check.ts");
 		const fixes = detectSecurityPatterns(file);
 		expect(fixes.length).toBeGreaterThan(0);
 		expect(fixes[0]!.errors.some((e) => e.includes("Source map") || e.includes("source"))).toBe(
@@ -454,7 +454,7 @@ describe("promoted advisory → blocking patterns", () => {
 	it("suppresses source map when line contains dev context", async () => {
 		const file = join(TEST_DIR, "webpack.config.ts");
 		writeFileSync(file, `const config = { sourceMap: true }; // development only\n`);
-		const { detectSecurityPatterns } = await import("../hooks/detectors/security-check.ts");
+		const { detectSecurityPatterns } = await import("../../detector/security-check.ts");
 		const fixes = detectSecurityPatterns(file);
 		const srcMapErrors = fixes
 			.flatMap((f) => f.errors)
@@ -468,7 +468,7 @@ describe("getAdvisoryAsPendingFixes", () => {
 		const file = join(TEST_DIR, "routes.ts");
 		const content = `app.get("/api/users", handler);\n`;
 		writeFileSync(file, content);
-		const { getAdvisoryAsPendingFixes } = await import("../hooks/detectors/security-check.ts");
+		const { getAdvisoryAsPendingFixes } = await import("../../detector/security-check.ts");
 		const fixes = getAdvisoryAsPendingFixes(file, content);
 		expect(fixes.length).toBeGreaterThan(0);
 		expect(fixes[0]!.gate).toBe("security-check-advisory");
@@ -479,7 +479,7 @@ describe("getAdvisoryAsPendingFixes", () => {
 		const file = join(TEST_DIR, "clean.ts");
 		const content = `const x = 1;\n`;
 		writeFileSync(file, content);
-		const { getAdvisoryAsPendingFixes } = await import("../hooks/detectors/security-check.ts");
+		const { getAdvisoryAsPendingFixes } = await import("../../detector/security-check.ts");
 		const fixes = getAdvisoryAsPendingFixes(file, content);
 		expect(fixes).toHaveLength(0);
 	});
@@ -487,7 +487,7 @@ describe("getAdvisoryAsPendingFixes", () => {
 
 describe("extended secret patterns", () => {
 	async function detect(file: string) {
-		const { detectSecurityPatterns } = await import("../hooks/detectors/security-check.ts");
+		const { detectSecurityPatterns } = await import("../../detector/security-check.ts");
 		return detectSecurityPatterns(file);
 	}
 

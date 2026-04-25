@@ -1,9 +1,9 @@
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { extname } from "node:path";
-import { isGateDisabled } from "../../state/gate-state.ts";
-import type { PendingFix } from "../../types.ts";
-import { sanitizeForStderr } from "../sanitize.ts";
+import { isGateDisabled } from "../state/gate-state.ts";
+import type { PendingFix } from "../types.ts";
+import { sanitizeForStderr } from "./sanitize.ts";
 
 const TS_JS_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
 const EXPORT_RE =

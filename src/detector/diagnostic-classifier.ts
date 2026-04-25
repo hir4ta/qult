@@ -1,4 +1,4 @@
-import type { PendingFix } from "../../types.ts";
+import type { PendingFix } from "../types.ts";
 
 /** Classified diagnostic category */
 export type DiagnosticCategory =

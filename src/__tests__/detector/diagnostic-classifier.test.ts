@@ -6,7 +6,7 @@ import {
 	parseCargoOutput,
 	parsePyrightOutput,
 	parseTscOutput,
-} from "../hooks/detectors/diagnostic-classifier.ts";
+} from "../../detector/diagnostic-classifier.ts";
 
 describe("diagnostic-classifier", () => {
 	describe("DIAGNOSTIC_MAP", () => {

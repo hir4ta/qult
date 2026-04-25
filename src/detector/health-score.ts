@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import type { PendingFix } from "../../types.ts";
+import type { PendingFix } from "../types.ts";
 import { detectDeadImports } from "./dead-import-check.ts";
 import { detectExportBreakingChanges } from "./export-check.ts";
 import { detectSecurityPatterns } from "./security-check.ts";

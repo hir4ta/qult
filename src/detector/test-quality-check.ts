@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, extname, resolve } from "node:path";
-import type { PendingFix } from "../../types.ts";
+import type { PendingFix } from "../types.ts";
 import { resolveTestFile } from "./test-file-resolver.ts";
 
 const MAX_CHECK_SIZE = 500_000;

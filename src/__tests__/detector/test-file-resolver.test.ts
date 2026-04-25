@@ -2,7 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { isTestFile, resolveTestFile } from "../hooks/detectors/test-file-resolver.ts";
+import { isTestFile, resolveTestFile } from "../../detector/test-file-resolver.ts";
 
 // Use /tmp to avoid __tests__ in path triggering isTestFile
 const TEST_DIR = join(tmpdir(), ".qult-resolver-test");

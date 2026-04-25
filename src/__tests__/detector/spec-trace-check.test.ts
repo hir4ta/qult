@@ -7,7 +7,7 @@ import {
 	validateTestCoversImpl,
 	validateTestFileExists,
 	validateTestFunctionExists,
-} from "../hooks/detectors/spec-trace-check.ts";
+} from "../../detector/spec-trace-check.ts";
 
 const TEST_DIR = join(tmpdir(), ".qult-spec-trace-test");
 
