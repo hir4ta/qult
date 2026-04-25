@@ -103,6 +103,26 @@ across editors.
 └── state/              # gitignored: ephemeral test/review/finish state
 ```
 
+## Upgrading
+
+`npm install -g @hir4ta/qult` (no version) is **not reliable** for upgrades because
+npm's metadata cache and registry CDN propagation can serve stale `latest` info
+for a few minutes. Use the `@latest` tag (or pin a version) to force a refresh:
+
+```bash
+# Recommended — forces npm to re-fetch metadata
+npm i -g @hir4ta/qult@latest
+
+# Or pin a specific version
+npm i -g @hir4ta/qult@1.1.3
+
+# If the upgrade still doesn't take, blow away the cache once
+npm cache clean --force && npm i -g @hir4ta/qult@latest
+```
+
+After upgrading the binary, run `qult update` inside each project to refresh
+the integration config files (skills, MCP registration) from the new templates.
+
 ## Requirements
 
 - Node.js 20 or newer

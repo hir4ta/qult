@@ -92,6 +92,23 @@ init 後は、AI ツールから `/qult-spec`・`/qult-wave-start`・`/qult-wave
 └── state/              # gitignored: 一時的な test/review/finish 状態
 ```
 
+## アップグレード
+
+`npm install -g @hir4ta/qult`（バージョン指定なし）は **アップグレードに使えません**。npm メタデータキャッシュと registry CDN の伝播遅延で、数分間 `latest` の古い情報が返ることがあるためです。`@latest` タグを付ける（あるいはバージョンを明示する）と確実に最新版が取得できます:
+
+```bash
+# 推奨 — npm にメタデータを再取得させる
+npm i -g @hir4ta/qult@latest
+
+# 特定バージョンを固定したい場合
+npm i -g @hir4ta/qult@1.1.3
+
+# それでも上がらない場合はキャッシュをクリア
+npm cache clean --force && npm i -g @hir4ta/qult@latest
+```
+
+CLI 本体をアップグレードした後は、各プロジェクトで `qult update` を実行して、新テンプレートから integration 設定ファイル（skills、MCP 登録）を再生成してください。
+
 ## 動作要件
 
 - Node.js 20 以降
