@@ -8,7 +8,7 @@
 
 import { ThemeProvider } from "@inkjs/ui";
 import { Box, Text } from "ink";
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { useDashboardState } from "../hooks/useDashboardState.ts";
 import { useExitKeys } from "../hooks/useExitKeys.ts";
 import { useTerminalSize } from "../hooks/useTerminalSize.ts";
@@ -25,12 +25,6 @@ const STARTED_AT = Date.now();
 
 export function App(): React.ReactElement {
 	useExitKeys();
-	const [now, setNow] = useState(STARTED_AT);
-	useEffect(() => {
-		const id = setInterval(() => setNow(Date.now()), 1000);
-		return () => clearInterval(id);
-	}, []);
-
 	const { size, layout } = useTerminalSize();
 	const state = useDashboardState({
 		startedAt: STARTED_AT,
@@ -43,12 +37,7 @@ export function App(): React.ReactElement {
 	return (
 		<ThemeProvider theme={qultTheme}>
 			<Box flexDirection="column" padding={1}>
-				<Header
-					version={state.qultVersion}
-					activeSpec={state.activeSpec}
-					startedAt={STARTED_AT}
-					now={now}
-				/>
+				<Header version={state.qultVersion} activeSpec={state.activeSpec} />
 				{showEmpty ? (
 					<EmptyState />
 				) : (

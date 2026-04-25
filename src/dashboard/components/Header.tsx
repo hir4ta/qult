@@ -1,9 +1,9 @@
 /**
  * Top banner: an ASCII-shadow "qult" wordmark on the left and version /
- * spec / elapsed metadata stacked on the right. Single flex row with
- * `marginBottom` so the panels below have air.
+ * spec metadata stacked on the right. Single flex row with `marginBottom`
+ * so the panels below have air.
  *
- * On narrow terminals (< 60 cols) the banner is replaced with a compact
+ * On narrow terminals (< 70 cols) the banner is replaced with a compact
  * single-line title to avoid wrapping the artwork.
  */
 
@@ -15,8 +15,6 @@ import type { ActiveSpec, SpecPhase } from "../types.ts";
 interface Props {
 	version: string;
 	activeSpec: ActiveSpec | null;
-	startedAt: number;
-	now: number;
 }
 
 const PHASE_COLORS: Record<SpecPhase, string> = {
@@ -40,8 +38,7 @@ const QULT_BANNER: readonly string[] = [
 
 const COMPACT_THRESHOLD_COLS = 70;
 
-export function Header({ version, activeSpec, startedAt, now }: Props): React.ReactElement {
-	const elapsed = formatElapsed(Math.max(0, now - startedAt));
+export function Header({ version, activeSpec }: Props): React.ReactElement {
 	const { stdout } = useStdout();
 	const cols = stdout.columns ?? 80;
 	const compact = cols < COMPACT_THRESHOLD_COLS;
@@ -57,7 +54,7 @@ export function Header({ version, activeSpec, startedAt, now }: Props): React.Re
 					dashboard
 				</Text>
 				<Box flexGrow={1} />
-				<MetaCompact activeSpec={activeSpec} elapsed={elapsed} />
+				<SpecMeta activeSpec={activeSpec} />
 			</Box>
 		);
 	}
@@ -83,61 +80,23 @@ export function Header({ version, activeSpec, startedAt, now }: Props): React.Re
 						dashboard
 					</Text>
 				</Box>
-				<Box marginTop={1} gap={1}>
-					{activeSpec ? (
-						<>
-							<Text color={COLORS.muted}>spec</Text>
-							<Text bold>{activeSpec.name}</Text>
-							<Badge color={PHASE_COLORS[activeSpec.phase]}>{activeSpec.phase}</Badge>
-						</>
-					) : (
-						<Text color={COLORS.muted}>no active spec</Text>
-					)}
-				</Box>
 				<Box marginTop={1}>
-					<Text color={COLORS.muted}>elapsed </Text>
-					<Text color={COLORS.warning} bold>
-						{elapsed}
-					</Text>
+					<SpecMeta activeSpec={activeSpec} />
 				</Box>
 			</Box>
 		</Box>
 	);
 }
 
-function MetaCompact({
-	activeSpec,
-	elapsed,
-}: {
-	activeSpec: ActiveSpec | null;
-	elapsed: string;
-}): React.ReactElement {
+function SpecMeta({ activeSpec }: { activeSpec: ActiveSpec | null }): React.ReactElement {
+	if (!activeSpec) {
+		return <Text color={COLORS.muted}>no active spec</Text>;
+	}
 	return (
 		<Box gap={1}>
-			{activeSpec ? (
-				<>
-					<Text color={COLORS.muted}>spec</Text>
-					<Text bold>{activeSpec.name}</Text>
-					<Badge color={PHASE_COLORS[activeSpec.phase]}>{activeSpec.phase}</Badge>
-				</>
-			) : (
-				<Text color={COLORS.muted}>no active spec</Text>
-			)}
-			<Text color={COLORS.muted}>{elapsed}</Text>
+			<Text color={COLORS.muted}>spec</Text>
+			<Text bold>{activeSpec.name}</Text>
+			<Badge color={PHASE_COLORS[activeSpec.phase]}>{activeSpec.phase}</Badge>
 		</Box>
 	);
-}
-
-function formatElapsed(ms: number): string {
-	const totalSec = Math.floor(ms / 1000);
-	const h = Math.floor(totalSec / 3600);
-	const m = Math.floor((totalSec % 3600) / 60);
-	const s = totalSec % 60;
-	if (h > 0) return `${h}h${pad(m)}m${pad(s)}s`;
-	if (m > 0) return `${m}m${pad(s)}s`;
-	return `${s}s`;
-}
-
-function pad(n: number): string {
-	return String(n).padStart(2, "0");
 }
