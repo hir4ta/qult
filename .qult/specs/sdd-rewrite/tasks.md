@@ -32,10 +32,10 @@
 **Goal**: 旧 SQLite 系モジュールを削除し、bun:sqlite 依存をプロジェクトから完全に除去する。
 **Verify**: `bun run typecheck && bun run lint && bun run test && bun run build` 全 pass。`grep -r "bun:sqlite" src/` が空。`src/state/db.ts`、`audit-log.ts`、`flush.ts`、`plan-status.ts`、`session-state.ts`、旧 `pending-fixes.ts`、旧 `src/config.ts` が削除されている。
 
-- [ ] T3.1: `src/state/db.ts`、`audit-log.ts`、`flush.ts`、`plan-status.ts`、`session-state.ts`、旧 `pending-fixes.ts` を削除。
-- [ ] T3.2: 旧 `src/config.ts` の DB 依存ロジックを `src/state/config.ts` に移管し、旧ファイルを削除。import 元（`src/mcp-server.ts` 等）を新パスに更新。
-- [ ] T3.3: `src/__tests__/` 配下の SQLite 依存テストを削除。新 state モジュールのテストでカバレッジが不足する箇所を補完。
-- [ ] T3.4: `bun run typecheck && bun run lint && bun run test && bun run build` 全 pass、`grep -r "bun:sqlite" src/` が空であることを確認、Wave 3 完了。
+- [x] T3.1: `src/state/db.ts`、`audit-log.ts`、`flush.ts`、`plan-status.ts`、`session-state.ts`、旧 `pending-fixes.ts` を削除。
+- [x] T3.2: 旧 `src/config.ts` の DB 依存ロジックを `src/state/config.ts` に移管し、旧ファイルを削除。import 元（`src/mcp-server.ts` 等）を新パスに更新。
+- [x] T3.3: `src/__tests__/` 配下の SQLite 依存テストを削除。新 state モジュールのテストでカバレッジが不足する箇所を補完。
+- [x] T3.4: `bun run typecheck && bun run lint && bun run test && bun run build` 全 pass、`grep -r "bun:sqlite" src/` が空であることを確認、Wave 3 完了。
 
 ## Wave 4: Agents and spec lifecycle skills
 
