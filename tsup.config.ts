@@ -37,4 +37,26 @@ export default defineConfig([
 			__QULT_VERSION__: JSON.stringify(pkg.version),
 		},
 	},
+	{
+		// `qult dashboard` — Ink/React TUI. Loaded via dynamic import from
+		// the CLI entry, so the high-frequency commands (init/update/check)
+		// don't pay the ink/react bundle cost on cold start.
+		entry: { dashboard: "src/dashboard/index.ts" },
+		format: ["esm"],
+		outDir: "dist",
+		bundle: true,
+		minify: false,
+		target: "node20",
+		clean: false,
+		// ink / react ship ESM but pull in transitive CJS (yoga-layout etc.).
+		// esbuild handles the interop when we bundle them in.
+		noExternal: ["ink", "react", "react/jsx-runtime", "@inkjs/ui"],
+		// `react-devtools-core` is an optional dep of Ink, only loaded when
+		// the `DEV` env var is set. Mark it external so the bundler doesn't
+		// try to statically resolve it (it isn't installed in production).
+		external: ["react-devtools-core"],
+		define: {
+			__QULT_VERSION__: JSON.stringify(pkg.version),
+		},
+	},
 ]);

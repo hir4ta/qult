@@ -53,10 +53,14 @@
     "test:watch": "vitest",
     "prepublishOnly": "npm run typecheck && npm run lint && npm test && npm run build"
   },
-  "dependencies": {},
   "devDependencies": {
     "@biomejs/biome": "^2.4.7",
+    "@inkjs/ui": "^2.0.0",
     "@types/node": "^20",
+    "@types/react": "^19.2.14",
+    "ink": "^7.0.1",
+    "ink-testing-library": "^4.0.0",
+    "react": "^19.2.5",
     "tsup": "^8",
     "typescript": "^5.8",
     "vitest": "^3"

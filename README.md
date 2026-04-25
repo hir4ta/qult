@@ -58,6 +58,7 @@ slash commands / skills.
 | `qult check [--detect] [--json]` | print SDD state; `--detect` runs Tier 1 detectors |
 | `qult add-agent <key> [--force]` | add a single integration after init |
 | `qult mcp` | start the MCP server (called by AI tools — you don't run this manually) |
+| `qult dashboard` | live Ink TUI showing spec / wave / detector / review state in real time |
 
 Common flags: `--force` (overwrite without prompt), `--json` (CI-friendly output),
 `--version`, `--help`.

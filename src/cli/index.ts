@@ -9,6 +9,8 @@
  * Global flags: --version / --help / --json.
  */
 
+import { dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { ArgsError, parseArgs } from "./args.ts";
 import { runAddAgent } from "./commands/add-agent.ts";
 import { runCheck } from "./commands/check.ts";
@@ -32,6 +34,7 @@ Commands:
   check [--detect]           print SDD state; --detect runs Tier 1 detectors
   add-agent <key>            add a single integration (claude|codex|cursor|gemini)
   mcp                        start the MCP server (stdio JSON-RPC)
+  dashboard                  launch the live Ink TUI dashboard
 
 Options:
   --agent <key>              for init: restrict to a single integration
@@ -100,6 +103,16 @@ async function main(): Promise<number> {
 		}
 		case "mcp":
 			return runMcp();
+		case "dashboard": {
+			// Lazy-load the Ink TUI so the high-frequency commands stay light.
+			// We compute the dist path at runtime — a literal string would let
+			// esbuild trace into the dashboard module and inline it (~1.5 MB
+			// of ink/react) into cli.js, defeating the isolation.
+			const here = dirname(fileURLToPath(import.meta.url));
+			const dashboardUrl = pathToFileURL(resolve(here, "dashboard.js")).href;
+			const mod = (await import(dashboardUrl)) as { runDashboard: () => Promise<number> };
+			return mod.runDashboard();
+		}
 		default:
 			process.stderr.write(`qult: unknown command "${cmd}". Run 'qult --help' for usage.\n`);
 			return 1;
