@@ -18,13 +18,13 @@ export async function runDashboard(): Promise<number> {
 		return 0;
 	}
 
-	const [{ render }, { App }, React] = await Promise.all([
+	const [{ render }, { App }, { createElement }] = await Promise.all([
 		import("ink"),
 		import("./components/App.tsx"),
 		import("react"),
 	]);
 
-	const { waitUntilExit } = render(React.createElement(App));
+	const { waitUntilExit } = render(createElement(App));
 	await waitUntilExit();
 	return 0;
 }
