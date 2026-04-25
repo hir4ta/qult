@@ -10,12 +10,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-	readCurrent,
 	readPendingFixes,
 	readStageScores,
 	type StageScoresState,
 } from "../../state/json-state.ts";
-import { wavesDir } from "../../state/paths.ts";
+import { assertConfinedToQult, wavesDir } from "../../state/paths.ts";
 import { listWaveNumbers } from "../../state/spec.ts";
 import { parseTasksMd } from "../../state/tasks-md.ts";
 import { parseWaveMd } from "../../state/wave-md.ts";
@@ -73,6 +72,13 @@ function emptyReviews(): ReviewStageSummary {
 
 function readWaveSummaries(specName: string): WaveSummary[] {
 	const dir = wavesDir(specName);
+	// Confine reads to .qult/ — defends against symlink-based path escape
+	// where a malicious spec dir or waves file is symlinked outside .qult/.
+	try {
+		assertConfinedToQult(dir);
+	} catch {
+		return [];
+	}
 	if (!existsSync(dir)) return [];
 	const nums = listWaveNumbers(specName).sort((a, b) => a - b);
 	const tasksDoc = readTasksDoc(specName);
@@ -80,6 +86,11 @@ function readWaveSummaries(specName: string): WaveSummary[] {
 	for (const num of nums) {
 		const file = join(dir, `wave-${String(num).padStart(2, "0")}.md`);
 		if (!existsSync(file)) continue;
+		try {
+			assertConfinedToQult(file);
+		} catch {
+			continue;
+		}
 		let parsed: ReturnType<typeof parseWaveMd> | null = null;
 		try {
 			parsed = parseWaveMd(readFileSync(file, "utf8"));
@@ -112,6 +123,11 @@ interface TasksDocLike {
 function readTasksDoc(specName: string): TasksDocLike | null {
 	const path = join(wavesDir(specName), "..", "tasks.md");
 	if (!existsSync(path)) return null;
+	try {
+		assertConfinedToQult(path);
+	} catch {
+		return null;
+	}
 	try {
 		const text = readFileSync(path, "utf8");
 		const strict = parseTasksMd(text) as TasksDocLike;
@@ -172,7 +188,14 @@ function countWaveTasks(
 }
 
 function readDetectorSummaries(): DetectorSummary[] {
-	const fixes = readPendingFixes();
+	// A corrupt pending-fixes.json must not crash the dashboard — fall back
+	// to empty fix counts and let the watcher surface the parse error.
+	let fixes: ReturnType<typeof readPendingFixes>;
+	try {
+		fixes = readPendingFixes();
+	} catch {
+		fixes = { schema_version: 1, fixes: [] };
+	}
 	const counts = new Map<DetectorId, number>();
 	for (const id of ALL_DETECTOR_IDS) counts.set(id, 0);
 	for (const fix of fixes.fixes) {
@@ -235,10 +258,6 @@ export function collectSnapshot(opts: CollectOptions): Snapshot {
 	} catch {
 		reviews = emptyReviews();
 	}
-	// Touching readCurrent to keep file-watch consistency (its data is part
-	// of "what the dashboard shows" even though we don't surface fields yet
-	// — a Wave 3 component will).
-	readCurrent();
 	return {
 		qultVersion: VERSION,
 		startedAt,

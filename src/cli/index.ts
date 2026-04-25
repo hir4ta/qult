@@ -16,6 +16,8 @@ import { runAddAgent } from "./commands/add-agent.ts";
 import { runCheck } from "./commands/check.ts";
 import { runInit } from "./commands/init.ts";
 import { runMcp } from "./commands/mcp.ts";
+import { runRecordReview } from "./commands/record-review.ts";
+import { runRecordSpecEval } from "./commands/record-spec-eval.ts";
 import { runUpdate } from "./commands/update.ts";
 
 declare const __QULT_VERSION__: string;
@@ -37,6 +39,8 @@ Commands:
   add-agent <key>            add a single integration (claude|codex|cursor|gemini)
   mcp                        start the MCP server (stdio JSON-RPC)
   dashboard                  launch the live Ink TUI dashboard
+  record-review              persist a 4-stage review score to .qult/state/
+  record-spec-eval           persist a spec-evaluator phase score to .qult/state/
 
 Options:
   --agent <key>              for init: restrict to a single integration
@@ -109,6 +113,27 @@ async function main(): Promise<number> {
 		}
 		case "mcp":
 			return runMcp();
+		case "record-review": {
+			const { flags } = parseArgs(rest, ["stage", "scores", "at"]);
+			return runRecordReview({
+				stage: typeof flags.stage === "string" ? flags.stage : undefined,
+				scores: typeof flags.scores === "string" ? flags.scores : undefined,
+				at: typeof flags.at === "string" ? flags.at : undefined,
+				json: flags.json === true,
+			});
+		}
+		case "record-spec-eval": {
+			const { flags } = parseArgs(rest, ["phase", "total", "dim", "iteration", "at"]);
+			return runRecordSpecEval({
+				phase: typeof flags.phase === "string" ? flags.phase : undefined,
+				total: typeof flags.total === "string" ? flags.total : undefined,
+				dim: typeof flags.dim === "string" ? flags.dim : undefined,
+				iteration: typeof flags.iteration === "string" ? flags.iteration : undefined,
+				forcedProgress: flags["forced-progress"] === true,
+				at: typeof flags.at === "string" ? flags.at : undefined,
+				json: flags.json === true,
+			});
+		}
 		case "dashboard": {
 			// Lazy-load the Ink TUI so the high-frequency commands stay light.
 			// We compute the dist path at runtime — a literal string would let

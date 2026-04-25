@@ -3,7 +3,7 @@
  * files present in `.qult/specs/<name>/`. Pure read-only — does not mutate.
  */
 
-import { existsSync, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { wavesDir } from "../../state/paths.ts";
 import { getActiveSpec } from "../../state/spec.ts";
 import type { ActiveSpec, SpecPhase } from "../types.ts";
@@ -25,10 +25,13 @@ export function inferPhase(info: {
 	specName: string;
 }): SpecPhase {
 	if (info.wavesDirExists) {
-		const dir = wavesDir(info.specName);
-		if (existsSync(dir)) {
-			const hasWaveFile = readdirSync(dir).some((f) => /^wave-\d+\.md$/.test(f));
+		try {
+			const hasWaveFile = readdirSync(wavesDir(info.specName)).some((f) =>
+				/^wave-\d+\.md$/.test(f),
+			);
 			if (hasWaveFile) return "implementation";
+		} catch {
+			/* dir vanished between calls — fall through */
 		}
 	}
 	if (info.hasTasks) return "tasks";

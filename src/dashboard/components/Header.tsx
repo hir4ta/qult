@@ -8,13 +8,15 @@
  */
 
 import { Badge } from "@inkjs/ui";
-import { Box, Text, useStdout } from "ink";
+import { Box, Text } from "ink";
 import { COLORS, GRADIENTS, sampleGradient } from "../theme.ts";
 import type { ActiveSpec, SpecPhase } from "../types.ts";
 
 interface Props {
 	version: string;
 	activeSpec: ActiveSpec | null;
+	/** Current terminal width — owned by App via `useTerminalSize`. */
+	columns: number;
 }
 
 const PHASE_COLORS: Record<SpecPhase, string> = {
@@ -38,10 +40,8 @@ const QULT_BANNER: readonly string[] = [
 
 const COMPACT_THRESHOLD_COLS = 70;
 
-export function Header({ version, activeSpec }: Props): React.ReactElement {
-	const { stdout } = useStdout();
-	const cols = stdout.columns ?? 80;
-	const compact = cols < COMPACT_THRESHOLD_COLS;
+export function Header({ version, activeSpec, columns }: Props): React.ReactElement {
+	const compact = columns < COMPACT_THRESHOLD_COLS;
 
 	if (compact) {
 		return (

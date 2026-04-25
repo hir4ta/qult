@@ -39,4 +39,17 @@ describe("computeLayout", () => {
 	it("hysteresis is a no-op when no previous tier is supplied", () => {
 		expect(computeLayout(89, 30).tier).toBe("medium");
 	});
+
+	it("does not stick on medium when crossing fully into wide", () => {
+		// Bug regression: previously the medium-tier hysteresis branch used
+		// `cols < WIDE_THRESHOLD + HYSTERESIS` as its upper bound, which
+		// kept the UI on medium at 91 cols even though we'd already cleared
+		// the wide threshold (90) by more than HYSTERESIS.
+		expect(computeLayout(95, 30, "medium").tier).toBe("wide");
+	});
+
+	it("stays on medium just below the wide boundary (within hysteresis)", () => {
+		// Should still stick on medium right at WIDE_THRESHOLD - 1.
+		expect(computeLayout(89, 30, "medium").tier).toBe("medium");
+	});
 });

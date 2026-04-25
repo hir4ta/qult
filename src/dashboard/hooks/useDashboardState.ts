@@ -13,6 +13,12 @@ import { initialState, reducer } from "../state/store.ts";
 import { startWatcher, type WatcherHandle } from "../state/watcher.ts";
 import type { DashboardState, TerminalSize } from "../types.ts";
 
+// Hoisted to module scope so the seq counter is monotonic for the dashboard's
+// entire lifetime, even if a future refactor remounts the watcher effect.
+// Avoids React-key collisions when the same `id` would otherwise be reissued
+// after a fresh `EventStream()` instantiation.
+const eventStream = new EventStream();
+
 interface Options {
 	startedAt: number;
 	terminal: TerminalSize;
@@ -27,7 +33,6 @@ export function useDashboardState(opts: Options): DashboardState {
 	const handleRef = useRef<WatcherHandle | null>(null);
 
 	useEffect(() => {
-		const events = new EventStream();
 		const handle = startWatcher({
 			startedAt: opts.startedAt,
 			callbacks: {
@@ -36,7 +41,7 @@ export function useDashboardState(opts: Options): DashboardState {
 				onError: (file, message) => dispatch({ type: "parse-error", file, error: message }),
 				sink: {
 					push: (e) => {
-						const event = events.push(e);
+						const event = eventStream.push(e);
 						dispatch({ type: "event-pushed", event });
 					},
 				},

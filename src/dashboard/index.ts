@@ -11,7 +11,10 @@ declare const __QULT_VERSION__: string;
 const VERSION = typeof __QULT_VERSION__ !== "undefined" ? __QULT_VERSION__ : "0.0.0-dev";
 
 export async function runDashboard(): Promise<number> {
-	if (!process.stdout.isTTY) {
+	// Ink calls `process.stdin.setRawMode()` for `useInput`. That throws on
+	// any pipe / redirect / IDE terminal that allocates only a stdout TTY,
+	// so both ends must be a real TTY before we render the interactive UI.
+	if (!process.stdout.isTTY || !process.stdin.isTTY) {
 		const { printPlainSnapshot } = await import("./plain-snapshot.ts");
 		process.stdout.write(`qult dashboard ${VERSION} (non-TTY)\n`);
 		printPlainSnapshot();

@@ -39,12 +39,15 @@ export function computeLayout(cols: number, rows: number, previous?: LayoutTier)
 	const raw = tierFor(cols);
 	let tier = raw;
 	if (previous !== undefined && previous !== raw) {
-		// Stay on the previous tier if we're within ±HYSTERESIS of its boundary.
-		if (previous === "wide" && cols >= WIDE_THRESHOLD - HYSTERESIS) tier = "wide";
-		else if (previous === "medium") {
-			if (cols >= MEDIUM_THRESHOLD - HYSTERESIS && cols < WIDE_THRESHOLD + HYSTERESIS) {
-				tier = "medium";
-			}
+		// Stay on the previous tier if we're within ±HYSTERESIS of the
+		// boundary that separates it from the new raw tier. Each branch
+		// guards exactly one boundary so we can't accidentally stick on
+		// `medium` while crossing fully into `wide` (and vice versa).
+		if (previous === "wide" && cols >= WIDE_THRESHOLD - HYSTERESIS) {
+			tier = "wide";
+		} else if (previous === "medium") {
+			if (raw === "wide" && cols < WIDE_THRESHOLD + HYSTERESIS) tier = "medium";
+			else if (raw === "narrow" && cols >= MEDIUM_THRESHOLD - HYSTERESIS) tier = "medium";
 		} else if (previous === "narrow" && cols < MEDIUM_THRESHOLD + HYSTERESIS) {
 			tier = "narrow";
 		}

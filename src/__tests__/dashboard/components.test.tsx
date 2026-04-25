@@ -23,7 +23,7 @@ import {
 
 describe("Header", () => {
 	it("shows version and 'no active spec' when null", () => {
-		const { lastFrame } = render(<Header version="1.2.3" activeSpec={null} />);
+		const { lastFrame } = render(<Header version="1.2.3" activeSpec={null} columns={120} />);
 		const frame = lastFrame() ?? "";
 		expect(frame).toContain("v1.2.3");
 		expect(frame).toContain("no active spec");
@@ -31,7 +31,11 @@ describe("Header", () => {
 
 	it("shows spec name + phase Badge when active", () => {
 		const { lastFrame } = render(
-			<Header version="1.2.3" activeSpec={{ name: "alpha", phase: "implementation" }} />,
+			<Header
+				version="1.2.3"
+				activeSpec={{ name: "alpha", phase: "implementation" }}
+				columns={120}
+			/>,
 		);
 		const frame = lastFrame() ?? "";
 		expect(frame).toContain("alpha");

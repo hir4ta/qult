@@ -42,7 +42,7 @@ export function App(): React.ReactElement {
 	return (
 		<ThemeProvider theme={qultTheme}>
 			<Box flexDirection="column" padding={1}>
-				<Header version={state.qultVersion} activeSpec={state.activeSpec} />
+				<Header version={state.qultVersion} activeSpec={state.activeSpec} columns={size.columns} />
 				{showEmpty ? (
 					<EmptyState />
 				) : (

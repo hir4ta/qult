@@ -18,6 +18,7 @@
  */
 
 import { execSync } from "node:child_process";
+import { join } from "node:path";
 import { useEffect, useState } from "react";
 import {
 	type DetectorName,
@@ -31,6 +32,14 @@ import {
 	type DetectorStatus,
 	type DetectorSummary,
 } from "../types.ts";
+
+/**
+ * The dashboard's auto-scan defaults to **offline** to avoid silently
+ * leaking package names to npm registry / OSV when the user just opens the
+ * monitor. Set `QULT_DASHBOARD_NETWORK=1` to opt back in (e.g. inside CI
+ * or on a personal box where the egress is acceptable).
+ */
+const NETWORK_ALLOWED = process.env.QULT_DASHBOARD_NETWORK === "1";
 
 const NAME_TO_ID: Record<DetectorName, DetectorId> = {
 	"security-check": "security",
@@ -47,7 +56,7 @@ function listChangedFiles(cwd: string): string[] {
 			.split("\n")
 			.map((l) => l.trim())
 			.filter((l) => l.length > 0)
-			.map((l) => `${cwd}/${l}`);
+			.map((l) => join(cwd, l));
 	} catch {
 		return [];
 	}
@@ -103,7 +112,7 @@ export function useDetectorScan(): DetectorScanState {
 				);
 			};
 			try {
-				await runAllDetectors(files, { cwd, onProgress });
+				await runAllDetectors(files, { cwd, onProgress, offline: !NETWORK_ALLOWED });
 			} catch {
 				if (cancelled) return;
 				// On crash, leave any not-yet-completed rows at `running` →

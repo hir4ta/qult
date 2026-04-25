@@ -30,7 +30,8 @@ export async function runCheck(opts: CheckOptions): Promise<number> {
 	let detectorOutcome: { exitCode: 0 | 1; high: number; results: unknown[] } | null = null;
 	if (opts.detect) {
 		const files = listChangedFiles(cwd);
-		const useInk = process.stdout.isTTY && !opts.noTty && !opts.json;
+		// Ink's useInput requires raw mode on stdin, so both ends must be TTY.
+		const useInk = process.stdout.isTTY && process.stdin.isTTY && !opts.noTty && !opts.json;
 		if (useInk) {
 			// Lazy-load the Ink UI bundle the same way `qult dashboard` does:
 			// runtime path computation defeats esbuild's static analysis so the

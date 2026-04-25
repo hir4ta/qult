@@ -47,8 +47,10 @@ export function startWatcher(opts: StartOptions): WatcherHandle {
 	let lastWatchedSpec: string | null = null;
 	let lastSnapshot: Snapshot | null = null;
 	let timer: NodeJS.Timeout | null = null;
+	let closed = false;
 
 	const refresh = (): void => {
+		if (closed) return;
 		try {
 			const snapshot = collectSnapshot({ startedAt: opts.startedAt, now: now() });
 			if (lastSnapshot !== null) {
@@ -67,9 +69,11 @@ export function startWatcher(opts: StartOptions): WatcherHandle {
 	};
 
 	const scheduleRefresh = (): void => {
+		if (closed) return;
 		if (timer) clearTimeout(timer);
 		timer = setTimeout(() => {
 			timer = null;
+			if (closed) return;
 			refresh();
 		}, debounceMs);
 	};
@@ -80,10 +84,19 @@ export function startWatcher(opts: StartOptions): WatcherHandle {
 			activeWavesWatcher.close();
 			activeWavesWatcher = null;
 		}
-		lastWatchedSpec = specName;
-		if (!specName) return;
+		if (!specName) {
+			lastWatchedSpec = null;
+			return;
+		}
 		const dir = wavesDir(specName);
-		if (!existsSync(dir)) return;
+		if (!existsSync(dir)) {
+			// Don't latch `lastWatchedSpec` until the dir actually exists.
+			// On Linux a brand-new spec's `waves/` dir lands moments after
+			// the spec dir itself; the next top-level event will retry.
+			lastWatchedSpec = null;
+			return;
+		}
+		lastWatchedSpec = specName;
 		try {
 			activeWavesWatcher = watch(dir, scheduleRefresh);
 			activeWavesWatcher.on("error", (e) =>
@@ -121,6 +134,7 @@ export function startWatcher(opts: StartOptions): WatcherHandle {
 	return {
 		refresh,
 		close: () => {
+			closed = true;
 			if (timer) clearTimeout(timer);
 			for (const w of watchers) {
 				try {

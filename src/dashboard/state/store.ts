@@ -42,11 +42,6 @@ export function reducer(state: DashboardState, action: DashboardAction): Dashboa
 				// snapshot will repopulate them. Avoids showing stale data.
 				waves: action.spec === null ? [] : state.waves,
 			};
-		case "terminal-resized":
-			return {
-				...state,
-				terminal: { columns: action.columns, rows: action.rows },
-			};
 		case "event-pushed":
 			return {
 				...state,

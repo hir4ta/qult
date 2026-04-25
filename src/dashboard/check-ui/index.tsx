@@ -8,7 +8,7 @@ import { ThemeProvider } from "@inkjs/ui";
 import { render } from "ink";
 import type { DetectorResult } from "../../detector/index.ts";
 import { qultTheme } from "../theme.ts";
-import { DetectRunner } from "./DetectRunner.tsx";
+import { DetectRunner, type DetectRunSummary } from "./DetectRunner.tsx";
 
 export interface RunDetectUIOptions {
 	files: string[];
@@ -23,8 +23,10 @@ export interface RunDetectUIResult {
 
 export async function runDetectUI(opts: RunDetectUIOptions): Promise<RunDetectUIResult> {
 	let captured: DetectorResult[] = [];
-	const onComplete = (results: DetectorResult[]): void => {
+	let summary: DetectRunSummary = { totalFixes: 0, high: 0 };
+	const onComplete = (results: DetectorResult[], s: DetectRunSummary): void => {
 		captured = results;
+		summary = s;
 	};
 	const { waitUntilExit } = render(
 		<ThemeProvider theme={qultTheme}>
@@ -32,10 +34,5 @@ export async function runDetectUI(opts: RunDetectUIOptions): Promise<RunDetectUI
 		</ThemeProvider>,
 	);
 	await waitUntilExit();
-	const totalFixes = captured.reduce((acc, r) => acc + r.fixes.length, 0);
-	const high = captured.reduce(
-		(acc, r) => acc + r.fixes.filter((f) => (f.errors?.length ?? 0) > 0).length,
-		0,
-	);
-	return { results: captured, totalFixes, high };
+	return { results: captured, totalFixes: summary.totalFixes, high: summary.high };
 }

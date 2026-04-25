@@ -94,7 +94,6 @@ export interface DashboardState {
 export type DashboardAction =
 	| { type: "snapshot-replace"; snapshot: Omit<DashboardState, "events" | "errors" | "terminal"> }
 	| { type: "active-spec-changed"; spec: ActiveSpec | null }
-	| { type: "terminal-resized"; columns: number; rows: number }
 	| { type: "event-pushed"; event: DashboardEvent }
 	| { type: "parse-error"; file: string; error: string }
 	| { type: "tick"; now: number };

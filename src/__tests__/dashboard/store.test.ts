@@ -95,13 +95,6 @@ describe("dashboard reducer", () => {
 		expect(s.errors[0]).toContain("f2:");
 	});
 
-	it("terminal-resized updates the terminal field only", () => {
-		const s = freshState();
-		const next = reducer(s, { type: "terminal-resized", columns: 200, rows: 50 });
-		expect(next.terminal).toEqual({ columns: 200, rows: 50 });
-		expect(next.activeSpec).toBe(s.activeSpec);
-	});
-
 	it("tick advances `now`", () => {
 		const s = freshState();
 		const next = reducer(s, { type: "tick", now: 5555 });

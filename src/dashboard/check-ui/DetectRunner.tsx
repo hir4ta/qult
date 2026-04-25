@@ -36,10 +36,15 @@ interface Row {
 	durationMs?: number;
 }
 
+export interface DetectRunSummary {
+	totalFixes: number;
+	high: number;
+}
+
 interface RunnerProps {
 	files: string[];
 	cwd: string;
-	onComplete: (results: DetectorResult[]) => void;
+	onComplete: (results: DetectorResult[], summary: DetectRunSummary) => void;
 }
 
 export function DetectRunner({ files, cwd, onComplete }: RunnerProps): React.ReactElement {
@@ -99,9 +104,10 @@ export function DetectRunner({ files, cwd, onComplete }: RunnerProps): React.Rea
 					(acc, r) => acc + r.fixes.filter((f) => (f.errors?.length ?? 0) > 0).length,
 					0,
 				);
-				setSummary({ totalFixes, high });
+				const summary = { totalFixes, high };
+				setSummary(summary);
 				setDone(true);
-				onComplete(results);
+				onComplete(results, summary);
 				// Give Ink a tick to flush the final frame before unmounting.
 				setTimeout(() => exit(), 100);
 			} catch (err) {
@@ -109,9 +115,10 @@ export function DetectRunner({ files, cwd, onComplete }: RunnerProps): React.Rea
 				setRows((prev) =>
 					prev.map((r) => ({ ...r, status: r.status === "running" ? "fail" : r.status })),
 				);
-				setSummary({ totalFixes: 0, high: 0 });
+				const summary = { totalFixes: 0, high: 0 };
+				setSummary(summary);
 				setDone(true);
-				onComplete([]);
+				onComplete([], summary);
 				setTimeout(() => exit(err instanceof Error ? err : new Error(String(err))), 100);
 			}
 		})();

@@ -6,8 +6,8 @@
 
 import { StatusMessage } from "@inkjs/ui";
 import { Box, Text } from "ink";
-import { COLORS, severityColor } from "../theme.ts";
-import type { DashboardEvent, EventVariant } from "../types.ts";
+import { COLORS } from "../theme.ts";
+import type { DashboardEvent } from "../types.ts";
 import { PanelFrame } from "./PanelFrame.tsx";
 
 interface Props {
@@ -34,14 +34,7 @@ function EventRow({ event }: { event: DashboardEvent }): React.ReactElement {
 	return (
 		<Box gap={1}>
 			<Text color={COLORS.muted}>{ts}</Text>
-			<StatusMessage variant={inkVariant(event.variant)}>{event.message}</StatusMessage>
+			<StatusMessage variant={event.variant}>{event.message}</StatusMessage>
 		</Box>
 	);
-}
-
-function inkVariant(v: EventVariant): "success" | "warning" | "error" | "info" {
-	// StatusMessage from @inkjs/ui supports the same 4 variants; we just
-	// keep the local alias type so callers don't import their enum.
-	void severityColor; // ensure tree-shaking keeps the helper for theme tests
-	return v;
 }
