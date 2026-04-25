@@ -20,3 +20,6 @@ coverage/
 
 # serena mcp
 .serena
+
+# qult: ephemeral state (specs/ themselves are committed)
+.qult/state/

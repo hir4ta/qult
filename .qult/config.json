@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "review": {
+    "score_threshold": 30,
+    "dimension_floor": 4,
+    "iteration_limit": 3,
+    "required_changed_files": 5
+  },
+  "spec_eval": {
+    "thresholds": {
+      "requirements": 18,
+      "design": 17,
+      "tasks": 16
+    },
+    "dimension_floor": 4,
+    "iteration_limit": 3
+  },
+  "clarify": {
+    "questions_per_round": {
+      "min": 5,
+      "max": 10
+    },
+    "max_rounds": 3
+  },
+  "wave": {
+    "tasks_per_wave": {
+      "min": 3,
+      "max": 7
+    },
+    "waves_per_spec": {
+      "min": 2,
+      "max": 6
+    },
+    "commit_prefix_template": "[wave-{wave_num:02d}]"
+  },
+  "gates": {
+    "lint_enabled": true,
+    "typecheck_enabled": true,
+    "test_enabled": true
+  },
+  "trivial_change": {
+    "warn_changed_files_threshold": 5
+  }
+}
