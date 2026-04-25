@@ -23,3 +23,14 @@ coverage/
 
 # qult: ephemeral state (specs/ themselves are committed)
 .qult/state/
+
+# qult: per-developer init artifacts (run `qult init` locally to dogfood)
+AGENTS.md
+.mcp.json
+.cursor/
+.gemini/
+.codex/
+.agents/
+GEMINI.md
+.claude/commands/qult-*.md
+.claude/skills/qult-*/
