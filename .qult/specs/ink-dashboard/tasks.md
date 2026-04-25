@@ -39,16 +39,16 @@
 - 一時ディレクトリで `.qult/state/*.json` と `waves/wave-NN.md` を変更 → watcher が正しい event を emit する e2e テスト
 
 **Tasks**:
-- [ ] 2.1 `src/dashboard/state/store.ts`: `DashboardState` 型と `reducer(state, action)` を実装 (design.md の型定義に従う)
-- [ ] 2.2 `src/dashboard/state/events.ts`: `EventStream` クラス (ring buffer max 100、push/recent)
-- [ ] 2.3 `src/dashboard/state/active-spec.ts`: `.qult/specs/` を readdir、`archive/` を除外して active spec 名と phase を返す。phase 判定は requirements/design/tasks の存在から推定
-- [ ] 2.4 `src/dashboard/state/watcher.ts`: `fs.watch` で `.qult/state/`, `.qult/specs/` を監視 (Linux 対応で recursive 不可なら手動展開)
-- [ ] 2.5 watcher: 50ms デバウンス → readFile + JSON.parse → 直前スナップショットと diff → 種類判定して event push、reducer に dispatch
-- [ ] 2.6 watcher: パース失敗時は `parse-error` action を emit、直前 state は保持
-- [ ] 2.7 watcher: active spec ディレクトリ集合の差分から `spec-change` action を emit (FR-4 自動追従)
-- [ ] 2.8 `computeLayout(cols, rows)` を `src/dashboard/state/layout.ts` に純粋関数として実装 (tier: wide/medium/narrow + eventLogLines、hysteresis は呼び出し側で管理)
-- [ ] 2.9 単体テスト: `__tests__/dashboard/store.test.ts`, `events.test.ts`, `layout.test.ts`, `active-spec.test.ts`
-- [ ] 2.10 e2e テスト: `__tests__/dashboard/watcher.e2e.test.ts` で tmp dir に状態ファイルを作成→更新→delete し、event 列が期待通りであることを検証
+- [x] 2.1 `src/dashboard/state/store.ts`: `DashboardState` 型と `reducer(state, action)` を実装 (design.md の型定義に従う)
+- [x] 2.2 `src/dashboard/state/events.ts`: `EventStream` クラス (ring buffer max 100、push/recent)
+- [x] 2.3 `src/dashboard/state/active-spec.ts`: `.qult/specs/` を readdir、`archive/` を除外して active spec 名と phase を返す。phase 判定は requirements/design/tasks の存在から推定
+- [x] 2.4 `src/dashboard/state/watcher.ts`: `fs.watch` で `.qult/state/`, `.qult/specs/` を監視 (Linux 対応で recursive 不可なら手動展開)
+- [x] 2.5 watcher: 50ms デバウンス → readFile + JSON.parse → 直前スナップショットと diff → 種類判定して event push、reducer に dispatch
+- [x] 2.6 watcher: パース失敗時は `parse-error` action を emit、直前 state は保持
+- [x] 2.7 watcher: active spec ディレクトリ集合の差分から `spec-change` action を emit (FR-4 自動追従)
+- [x] 2.8 `computeLayout(cols, rows)` を `src/dashboard/state/layout.ts` に純粋関数として実装 (tier: wide/medium/narrow + eventLogLines、hysteresis は呼び出し側で管理)
+- [x] 2.9 単体テスト: `__tests__/dashboard/store.test.ts`, `events.test.ts`, `layout.test.ts`, `active-spec.test.ts`
+- [x] 2.10 e2e テスト: `__tests__/dashboard/watcher.e2e.test.ts` で tmp dir に状態ファイルを作成→更新→delete し、event 列が期待通りであることを検証
 
 **Consumers**: Wave 3 (App.tsx で `useReducer` + watcher 統合)
 
