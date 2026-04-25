@@ -64,17 +64,17 @@
 - 色・Badge・ProgressBar・Spinner・StatusMessage が design.md のテーマ通りに出ている (目視)
 
 **Tasks**:
-- [ ] 3.1 `src/dashboard/theme.ts`: `extendTheme` で qult テーマ定義 (cyan/magenta/yellow/green/gray)
-- [ ] 3.2 `src/dashboard/components/Header.tsx`: qult version + active spec 名 + 経過時間 + Badge (phase) を 1 行で表示
-- [ ] 3.3 `src/dashboard/components/WavePanel.tsx`: 現 Wave の ProgressBar + 全 Wave の OrderedList (各行 Badge: todo/in-progress/done)
-- [ ] 3.4 `src/dashboard/components/DetectorPanel.tsx`: 5 detector の Badge グリッド + pending fixes 件数を Alert で
-- [ ] 3.5 `src/dashboard/components/ReviewPanel.tsx`: 4 stage (Spec/Quality/Security/Adversarial) を個別 Badge + スコア/閾値表示
-- [ ] 3.6 `src/dashboard/components/EventLog.tsx`: `events.recent(maxLines)` を StatusMessage で時系列表示 (variant 別色)
-- [ ] 3.7 `src/dashboard/components/EmptyState.tsx`: active spec なし時 (Spinner + 待機メッセージ) と非 TTY 時 (plain text) の両用途
-- [ ] 3.8 `src/dashboard/components/App.tsx`: `useReducer` + watcher を統合、固定 horizontal layout で全 panel を配置
-- [ ] 3.9 `src/dashboard/hooks/useDashboardState.ts`: store + watcher のライフサイクル管理 hook (mount で start、unmount で close)
-- [ ] 3.10 各コンポーネントの snapshot テスト (`__tests__/dashboard/components/*.test.tsx`)
-- [ ] 3.11 自プロジェクトで実機確認: archive spec の状態が実際に出るか目視
+- [x] 3.1 `src/dashboard/theme.ts`: `extendTheme` で qult テーマ定義 (cyan/magenta/yellow/green/gray)
+- [x] 3.2 `src/dashboard/components/Header.tsx`: qult version + active spec 名 + 経過時間 + Badge (phase) を 1 行で表示
+- [x] 3.3 `src/dashboard/components/WavePanel.tsx`: 現 Wave の ProgressBar + 全 Wave の OrderedList (各行 Badge: todo/in-progress/done)
+- [x] 3.4 `src/dashboard/components/DetectorPanel.tsx`: 5 detector の Badge グリッド + pending fixes 件数を Alert で
+- [x] 3.5 `src/dashboard/components/ReviewPanel.tsx`: 4 stage (Spec/Quality/Security/Adversarial) を個別 Badge + スコア/閾値表示
+- [x] 3.6 `src/dashboard/components/EventLog.tsx`: `events.recent(maxLines)` を StatusMessage で時系列表示 (variant 別色)
+- [x] 3.7 `src/dashboard/components/EmptyState.tsx`: active spec なし時 (Spinner + 待機メッセージ) と非 TTY 時 (plain text) の両用途
+- [x] 3.8 `src/dashboard/components/App.tsx`: `useReducer` + watcher を統合、固定 horizontal layout で全 panel を配置
+- [x] 3.9 `src/dashboard/hooks/useDashboardState.ts`: store + watcher のライフサイクル管理 hook (mount で start、unmount で close)
+- [x] 3.10 各コンポーネントの snapshot テスト (`__tests__/dashboard/components/*.test.tsx`)
+- [x] 3.11 自プロジェクトで実機確認: archive spec の状態が実際に出るか目視
 
 **Consumers**: Wave 4 (App.tsx の layout 切り替えロジック追加)
 

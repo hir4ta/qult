@@ -1,44 +1,78 @@
 /**
- * Wave 1 dashboard skeleton — confirms the Ink pipeline is wired end-to-end.
- *
- * Wave 3 replaces the body with the real Header / WavePanel / DetectorPanel /
- * ReviewPanel / EventLog composition. We keep this file so `qult dashboard`
- * is launchable and exit keys (q / Ctrl+C) are verified before we layer in
- * watcher + reducer plumbing.
+ * Dashboard root. Wraps everything in `ThemeProvider`, runs the watcher /
+ * reducer hook, and lays out the four panels (Wave / Detector / Review /
+ * EventLog) below the Header. Wave 4 will swap the static `flexDirection`
+ * for layout-tier-driven row/column switching.
  */
 
+import { ThemeProvider } from "@inkjs/ui";
 import { Box, Text } from "ink";
+import { useEffect, useState } from "react";
+import { useDashboardState } from "../hooks/useDashboardState.ts";
 import { useExitKeys } from "../hooks/useExitKeys.ts";
+import { COLORS, qultTheme } from "../theme.ts";
+import { DetectorPanel } from "./DetectorPanel.tsx";
+import { EmptyState } from "./EmptyState.tsx";
+import { EventLog } from "./EventLog.tsx";
+import { Header } from "./Header.tsx";
+import { ReviewPanel } from "./ReviewPanel.tsx";
+import { WavePanel } from "./WavePanel.tsx";
 
-declare const __QULT_VERSION__: string;
-const VERSION = typeof __QULT_VERSION__ !== "undefined" ? __QULT_VERSION__ : "0.0.0-dev";
+const STARTED_AT = Date.now();
 
 export function App(): React.ReactElement {
 	useExitKeys();
+	const [now, setNow] = useState(STARTED_AT);
+	useEffect(() => {
+		const id = setInterval(() => setNow(Date.now()), 1000);
+		return () => clearInterval(id);
+	}, []);
+
+	const state = useDashboardState({
+		startedAt: STARTED_AT,
+		terminal: { columns: process.stdout.columns ?? 80, rows: process.stdout.rows ?? 24 },
+	});
+
+	const showEmpty = state.activeSpec === null;
 
 	return (
-		<Box flexDirection="column" padding={1}>
-			<Box>
-				<Text color="cyan" bold>
-					qult
-				</Text>
-				<Text color="gray"> v{VERSION} </Text>
-				<Text color="magenta">dashboard</Text>
+		<ThemeProvider theme={qultTheme}>
+			<Box flexDirection="column" padding={1}>
+				<Header
+					version={state.qultVersion}
+					activeSpec={state.activeSpec}
+					startedAt={STARTED_AT}
+					now={now}
+				/>
+				{showEmpty ? (
+					<EmptyState />
+				) : (
+					<Box flexDirection="column" gap={1}>
+						<Box flexDirection="row" gap={1}>
+							<WavePanel waves={state.waves} flexGrow={1} minWidth={28} />
+							<DetectorPanel detectors={state.detectors} flexGrow={1} minWidth={28} />
+							<ReviewPanel reviews={state.reviews} flexGrow={1} minWidth={28} />
+						</Box>
+						<EventLog events={state.events} maxLines={8} flexGrow={1} />
+					</Box>
+				)}
+				{state.errors.length > 0 && (
+					<Box marginTop={1}>
+						<Text color={COLORS.error}>{state.errors[state.errors.length - 1]}</Text>
+					</Box>
+				)}
+				<Box marginTop={1}>
+					<Text color={COLORS.muted}>press </Text>
+					<Text color={COLORS.warning} bold>
+						q
+					</Text>
+					<Text color={COLORS.muted}> or </Text>
+					<Text color={COLORS.warning} bold>
+						Ctrl+C
+					</Text>
+					<Text color={COLORS.muted}> to exit</Text>
+				</Box>
 			</Box>
-			<Box marginTop={1}>
-				<Text>Hello qult dashboard.</Text>
-			</Box>
-			<Box marginTop={1}>
-				<Text color="gray">Press </Text>
-				<Text color="yellow" bold>
-					q
-				</Text>
-				<Text color="gray"> or </Text>
-				<Text color="yellow" bold>
-					Ctrl+C
-				</Text>
-				<Text color="gray"> to exit.</Text>
-			</Box>
-		</Box>
+		</ThemeProvider>
 	);
 }
