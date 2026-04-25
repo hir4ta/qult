@@ -24,6 +24,11 @@ import {
 } from "./mcp-tools/spec-tools.ts";
 import { appendAuditLog } from "./state/audit-log.ts";
 import { getDb, getProjectId, setProjectPath } from "./state/db.ts";
+import {
+	disableGate as disableGateFs,
+	enableGate as enableGateFs,
+	listDisabledGateNames,
+} from "./state/gate-state.ts";
 import { setProjectRoot } from "./state/paths.ts";
 import { getActiveSpec as getActiveSpecOnDisk } from "./state/spec.ts";
 import type { PendingFix } from "./types.ts";
@@ -439,23 +444,19 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 					],
 				};
 			}
-			const disabled = db
-				.prepare("SELECT gate_name FROM disabled_gates WHERE project_id = ?")
-				.all(pid) as { gate_name: string }[];
-			if (!disabled.some((d) => d.gate_name === gateName) && disabled.length >= 2) {
+			const disabledNames = listDisabledGateNames();
+			if (!disabledNames.includes(gateName) && disabledNames.length >= 2) {
 				return {
 					isError: true,
 					content: [
 						{
 							type: "text",
-							text: `Maximum 2 gates disabled. Currently: ${disabled.map((d) => d.gate_name).join(", ")}`,
+							text: `Maximum 2 gates disabled. Currently: ${disabledNames.join(", ")}`,
 						},
 					],
 				};
 			}
-			db.prepare(
-				"INSERT OR REPLACE INTO disabled_gates (project_id, gate_name, reason) VALUES (?, ?, ?)",
-			).run(pid, gateName, reason);
+			disableGateFs(gateName, reason);
 			appendAuditLog({
 				action: "disable_gate",
 				reason,
@@ -469,10 +470,7 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			if (!gateName) {
 				return { isError: true, content: [{ type: "text", text: "Missing gate_name parameter." }] };
 			}
-			db.prepare("DELETE FROM disabled_gates WHERE project_id = ? AND gate_name = ?").run(
-				pid,
-				gateName,
-			);
+			enableGateFs(gateName);
 			return { content: [{ type: "text", text: `Gate '${gateName}' re-enabled.` }] };
 		}
 		case "set_config": {

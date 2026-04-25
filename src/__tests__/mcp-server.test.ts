@@ -167,18 +167,17 @@ describe("TOOL_DEFS", () => {
 });
 
 describe("handleTool: disable_gate / enable_gate", () => {
-	it("disable_gate adds detector gate to disabled_gates in DB", () => {
-		const db = getDb();
+	it("disable_gate adds detector gate to disabled state", async () => {
+		const { listDisabledGateNames } = await import("../state/gate-state.ts");
+		const { setProjectRoot } = await import("../state/paths.ts");
+		setProjectRoot(TEST_DIR);
 		const result = handleTool("disable_gate", TEST_DIR, {
 			gate_name: "security-check",
 			reason: "False positives on this codebase",
 		});
 		expect(result.content[0]!.text).toContain("disabled");
-
-		const rows = db
-			.prepare("SELECT gate_name FROM disabled_gates WHERE project_id = ?")
-			.all(getProjectId()) as { gate_name: string }[];
-		expect(rows.map((r) => r.gate_name)).toContain("security-check");
+		expect(listDisabledGateNames()).toContain("security-check");
+		setProjectRoot(null);
 	});
 
 	it("disable_gate rejects unknown gate name", () => {
@@ -218,18 +217,12 @@ describe("handleTool: disable_gate / enable_gate", () => {
 		expect(result.content[0]!.text).toContain("10 chars");
 	});
 
-	it("disable_gate rejects when 2 gates already disabled", () => {
-		const db = getDb();
-		db.prepare("INSERT INTO disabled_gates (project_id, gate_name, reason) VALUES (?, ?, ?)").run(
-			getProjectId(),
-			"review",
-			"test reason 1 for review",
-		);
-		db.prepare("INSERT INTO disabled_gates (project_id, gate_name, reason) VALUES (?, ?, ?)").run(
-			getProjectId(),
-			"security-check",
-			"test reason 2 for security",
-		);
+	it("disable_gate rejects when 2 gates already disabled", async () => {
+		const { disableGate } = await import("../state/gate-state.ts");
+		const { setProjectRoot } = await import("../state/paths.ts");
+		setProjectRoot(TEST_DIR);
+		disableGate("review", "test reason 1 for review");
+		disableGate("security-check", "test reason 2 for security");
 
 		const result = handleTool("disable_gate", TEST_DIR, {
 			gate_name: "test-quality-check",
@@ -237,6 +230,7 @@ describe("handleTool: disable_gate / enable_gate", () => {
 		});
 		expect(result.isError).toBe(true);
 		expect(result.content[0]!.text).toContain("Maximum 2");
+		setProjectRoot(null);
 	});
 
 	it("disable_gate writes audit log entry", async () => {
@@ -256,26 +250,18 @@ describe("handleTool: disable_gate / enable_gate", () => {
 		setProjectRoot(null);
 	});
 
-	it("enable_gate removes gate from disabled_gates", () => {
-		const db = getDb();
-		db.prepare("INSERT INTO disabled_gates (project_id, gate_name, reason) VALUES (?, ?, ?)").run(
-			getProjectId(),
-			"lint",
-			"test reason for lint",
-		);
-		db.prepare("INSERT INTO disabled_gates (project_id, gate_name, reason) VALUES (?, ?, ?)").run(
-			getProjectId(),
-			"typecheck",
-			"test reason for typecheck",
-		);
+	it("enable_gate removes gate from disabled state", async () => {
+		const { disableGate, listDisabledGateNames } = await import("../state/gate-state.ts");
+		const { setProjectRoot } = await import("../state/paths.ts");
+		setProjectRoot(TEST_DIR);
+		disableGate("lint", "test reason for lint");
+		disableGate("typecheck", "test reason for typecheck");
 
 		const result = handleTool("enable_gate", TEST_DIR, { gate_name: "lint" });
 		expect(result.content[0]!.text).toContain("re-enabled");
 
-		const rows = db
-			.prepare("SELECT gate_name FROM disabled_gates WHERE project_id = ?")
-			.all(getProjectId()) as { gate_name: string }[];
-		expect(rows.map((r) => r.gate_name)).toEqual(["typecheck"]);
+		expect(listDisabledGateNames()).toEqual(["typecheck"]);
+		setProjectRoot(null);
 	});
 
 	it("disable_gate returns error without gate_name", () => {
