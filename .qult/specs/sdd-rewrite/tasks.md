@@ -42,13 +42,13 @@
 **Goal**: spec 策定・実装フェーズの新 agent と skill を追加し、旧 plan-generator 系を削除する。
 **Verify**: `bun run test` pass。新 skill（spec / clarify / wave-start / wave-complete / wip）が `plugin/skills/` に存在。新 agent（spec-generator / spec-clarifier / spec-evaluator）が `plugin/agents/` に存在し、旧 `plan-generator` / `plan-evaluator` agent ファイルおよび `/qult:plan-generator` skill ディレクトリは削除されている。
 
-- [ ] T4.1: `plugin/agents/spec-generator.md` を作成。phase 引数（requirements / design / tasks）で生成対象を切替えるプロンプト。phase ごとに XML タグで区切り bleed を防ぐ。Wave 分割ルール 5 項目を厳守。
-- [ ] T4.2: `plugin/agents/spec-clarifier.md` を作成。5-10 件の質問生成、選択肢 + 推奨形式、「お任せ」検知（日本語・英語パターン）+ 注記、スコープ大幅変更時の改名提案を含む。
-- [ ] T4.3: `plugin/agents/spec-evaluator.md` を作成。phase 引数で評価基準切替（threshold 18/17/16、floor 4）。Completeness / Testability / Unambiguity / Feasibility 4 次元評価、temperature=0、threshold ± 1 retry、`forced_progress` フラグの伝播ロジックを含む。
-- [ ] T4.4: 旧 `plugin/agents/plan-generator.md` と `plugin/agents/plan-evaluator.md` を削除。
-- [ ] T4.5: `plugin/skills/spec/`、`plugin/skills/clarify/`、`plugin/skills/wave-start/`、`plugin/skills/wave-complete/`、`plugin/skills/wip/` を新規作成。`/qult:wave-complete` は (1) 過去 Wave Range SHA 検証 → (2) test（scaffold は skip）→ (3) detector → (4) commit msg 生成（git log / CLAUDE.md を untrusted-content fence で囲む）→ (5) ユーザー確認 → (6) commit → (7) `complete_wave` 呼び出しの順で実装し、各ステップ失敗時は中間状態を残し再実行可能にする。
-- [ ] T4.6: 旧 `plugin/skills/plan-generator/` ディレクトリを削除。既存 reviewer agent（spec / quality / security / adversarial）の prompt 内 plan 言及を spec に置換。
-- [ ] T4.7: `bun run test` で全 pass を確認、Wave 4 完了。
+- [x] T4.1: `plugin/agents/spec-generator.md` を作成。phase 引数（requirements / design / tasks）で生成対象を切替えるプロンプト。phase ごとに XML タグで区切り bleed を防ぐ。Wave 分割ルール 5 項目を厳守。
+- [x] T4.2: `plugin/agents/spec-clarifier.md` を作成。5-10 件の質問生成、選択肢 + 推奨形式、「お任せ」検知（日本語・英語パターン）+ 注記、スコープ大幅変更時の改名提案を含む。
+- [x] T4.3: `plugin/agents/spec-evaluator.md` を作成。phase 引数で評価基準切替（threshold 18/17/16、floor 4）。Completeness / Testability / Unambiguity / Feasibility 4 次元評価、temperature=0、threshold ± 1 retry、`forced_progress` フラグの伝播ロジックを含む。
+- [x] T4.4: 旧 `plugin/agents/plan-generator.md` と `plugin/agents/plan-evaluator.md` を削除。
+- [x] T4.5: `plugin/skills/spec/`、`plugin/skills/clarify/`、`plugin/skills/wave-start/`、`plugin/skills/wave-complete/`、`plugin/skills/wip/` を新規作成。`/qult:wave-complete` は (1) 過去 Wave Range SHA 検証 → (2) test（scaffold は skip）→ (3) detector → (4) commit msg 生成（git log / CLAUDE.md を untrusted-content fence で囲む）→ (5) ユーザー確認 → (6) commit → (7) `complete_wave` 呼び出しの順で実装し、各ステップ失敗時は中間状態を残し再実行可能にする。
+- [x] T4.6: 旧 `plugin/skills/plan-generator/` ディレクトリを削除。既存 reviewer agent（spec / quality / security / adversarial）の prompt 内 plan 言及を spec に置換。
+- [x] T4.7: `bun run test` で全 pass を確認、Wave 4 完了。
 
 ## Wave 5: Existing skill updates and workflow rules
 
