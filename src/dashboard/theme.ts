@@ -2,15 +2,17 @@
  * Dashboard theme — gruvbox-material palette adapted from
  * https://github.com/sainnhe/gruvbox-material-vscode (Material variant).
  *
- * Ink renders text via `chalk`, which accepts hex strings directly. We expose
- * two surfaces:
+ * Two surfaces:
  *   - `PALETTE`  — raw named colors of the gruvbox-material scheme
  *   - `COLORS`   — semantic role aliases (primary / accent / success / …)
  *     that components should prefer; swap the underlying palette value here
  *     to retheme the whole UI.
  *
- * `extendTheme` over `@inkjs/ui`'s default theme gives us a single hook for
- * future `.qult/config.json`-driven overrides without changing call sites.
+ * The `qultTheme` object overrides the default `@inkjs/ui` styles for
+ * Badge / Alert / StatusMessage / ProgressBar / Spinner so the built-in
+ * components inherit the gruvbox palette automatically (otherwise their
+ * defaults stay on bright ANSI colors and only our local `<Text color>` /
+ * `<Badge color>` props get themed).
  */
 
 import { defaultTheme, extendTheme, type Theme } from "@inkjs/ui";
@@ -27,6 +29,7 @@ export const PALETTE = {
 	purple: "#d3869b",
 	gray: "#928374",
 	subtle: "#5a524c",
+	bg: "#282828",
 } as const;
 
 /** Semantic role colors. Components consume these, never PALETTE directly. */
@@ -43,19 +46,80 @@ export const COLORS = {
 	fg: PALETTE.fg,
 } as const;
 
-export const qultTheme: Theme = extendTheme(defaultTheme, { components: {} });
+const VARIANT_COLOR: Record<"info" | "success" | "error" | "warning", string> = {
+	info: COLORS.info,
+	success: COLORS.success,
+	error: COLORS.error,
+	warning: COLORS.warning,
+};
+
+/**
+ * Override the default ink-ui themes so built-in components (Spinner /
+ * ProgressBar / Alert / StatusMessage / Badge) pick up gruvbox colors.
+ */
+export const qultTheme: Theme = extendTheme(defaultTheme, {
+	components: {
+		Badge: {
+			styles: {
+				container: ({ color }: { color?: string }) => ({
+					backgroundColor: color ?? COLORS.accent,
+				}),
+				label: () => ({ color: PALETTE.bg, bold: true }),
+			},
+		},
+		Spinner: {
+			styles: {
+				container: () => ({ gap: 1 }),
+				frame: () => ({ color: COLORS.primary }),
+				label: () => ({ color: COLORS.muted }),
+			},
+		},
+		ProgressBar: {
+			styles: {
+				container: () => ({ flexGrow: 1, minWidth: 0 }),
+				completed: () => ({ color: COLORS.primary }),
+				remaining: () => ({ color: COLORS.dim, dimColor: true }),
+			},
+		},
+		Alert: {
+			styles: {
+				container: ({ variant }: { variant: keyof typeof VARIANT_COLOR }) => ({
+					flexGrow: 1,
+					borderStyle: "round" as const,
+					borderColor: VARIANT_COLOR[variant],
+					gap: 1,
+					paddingX: 1,
+				}),
+				iconContainer: () => ({ flexShrink: 0 }),
+				icon: ({ variant }: { variant: keyof typeof VARIANT_COLOR }) => ({
+					color: VARIANT_COLOR[variant],
+				}),
+				content: () => ({
+					flexShrink: 1,
+					flexGrow: 1,
+					minWidth: 0,
+					flexDirection: "column" as const,
+					gap: 1,
+				}),
+				title: () => ({ bold: true, color: COLORS.fg }),
+				message: () => ({ color: COLORS.fg }),
+			},
+		},
+		StatusMessage: {
+			styles: {
+				container: () => ({ gap: 1 }),
+				iconContainer: () => ({ flexShrink: 0 }),
+				icon: ({ variant }: { variant: keyof typeof VARIANT_COLOR }) => ({
+					color: VARIANT_COLOR[variant],
+				}),
+				message: () => ({ color: COLORS.fg }),
+			},
+		},
+	},
+});
 
 export type SeverityVariant = "success" | "warning" | "error" | "info";
 
 export function severityColor(v: SeverityVariant): string {
-	switch (v) {
-		case "success":
-			return COLORS.success;
-		case "warning":
-			return COLORS.warning;
-		case "error":
-			return COLORS.error;
-		case "info":
-			return COLORS.info;
-	}
+	return VARIANT_COLOR[v];
 }
