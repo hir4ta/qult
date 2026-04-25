@@ -113,10 +113,50 @@ function readTasksDoc(specName: string): TasksDocLike | null {
 	const path = join(wavesDir(specName), "..", "tasks.md");
 	if (!existsSync(path)) return null;
 	try {
-		return parseTasksMd(readFileSync(path, "utf8")) as TasksDocLike;
+		const text = readFileSync(path, "utf8");
+		const strict = parseTasksMd(text) as TasksDocLike;
+		// The official parser only counts tasks formatted as
+		// `- [x] T1.1: title`. Our spec authors often write looser markdown
+		// (em-dashes in headers, `- [x] 1.1 title` without T-prefix), which
+		// the strict parser silently treats as zero tasks. The dashboard is
+		// display-only, so fall back to a tolerant count when strict yields
+		// nothing.
+		const hasAnyTasks = strict.waves.some((w) => w.tasks.length > 0);
+		if (hasAnyTasks) return strict;
+		return parseTasksLoose(text);
 	} catch {
 		return null;
 	}
+}
+
+const LOOSE_WAVE_RE = /^##\s*Wave\s*(\d+)\b/i;
+const LOOSE_TASK_RE = /^[\s-]*-\s*\[([ xX~!])\]/;
+
+/**
+ * Tolerant pass: walk the file, every `## Wave N` opens a new bucket,
+ * every `- [ ]` / `- [x]` line counts toward the current bucket. Used as
+ * a display-only fallback when `parseTasksMd` returns no tasks.
+ */
+function parseTasksLoose(text: string): TasksDocLike {
+	const waves: TasksDocLike["waves"] = [];
+	let current: TasksDocLike["waves"][number] | null = null;
+	for (const raw of text.split("\n")) {
+		const wm = LOOSE_WAVE_RE.exec(raw);
+		if (wm) {
+			const num = Number.parseInt(wm[1] ?? "0", 10);
+			current = { num, tasks: [] };
+			waves.push(current);
+			continue;
+		}
+		if (!current) continue;
+		const tm = LOOSE_TASK_RE.exec(raw);
+		if (tm) {
+			const ch = tm[1] ?? " ";
+			const status = ch === "x" || ch === "X" ? "done" : "pending";
+			current.tasks.push({ status });
+		}
+	}
+	return { waves };
 }
 
 function countWaveTasks(
