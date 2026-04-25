@@ -36,27 +36,32 @@ export function App(): React.ReactElement {
 	// `never-run` when the user just opened the dashboard.
 	const scan = useDetectorScan();
 
-	const showEmpty = state.activeSpec === null;
+	// We always render the panel grid — even with empty data — so the
+	// frame height is stable across the snapshot transition. An initial
+	// "EmptyState"-only frame is short, and when state arrives the new
+	// taller frame appended below leaving the original banner stuck at
+	// the top of the scrollback.
 	const tier = layout.tier;
 
 	return (
 		<ThemeProvider theme={qultTheme}>
 			<Box flexDirection="column" padding={1}>
 				<Header version={state.qultVersion} activeSpec={state.activeSpec} columns={size.columns} />
-				{showEmpty ? (
-					<EmptyState />
-				) : (
-					<Box flexDirection="column" gap={1}>
-						<PanelGrid tier={tier}>
-							<WavePanel waves={state.waves} flexGrow={1} minWidth={28} />
-							<DetectorPanel detectors={scan.detectors} flexGrow={1} minWidth={28} />
-							<ReviewPanel reviews={state.reviews} flexGrow={1} minWidth={28} />
-						</PanelGrid>
-						{tier !== "narrow" && (
-							<EventLog events={state.events} maxLines={layout.eventLogLines} flexGrow={1} />
-						)}
-					</Box>
-				)}
+				<Box flexDirection="column" gap={1}>
+					<PanelGrid tier={tier}>
+						<WavePanel waves={state.waves} flexGrow={1} minWidth={28} />
+						<DetectorPanel detectors={scan.detectors} flexGrow={1} minWidth={28} />
+						<ReviewPanel reviews={state.reviews} flexGrow={1} minWidth={28} />
+					</PanelGrid>
+					{state.activeSpec === null && (
+						<Box paddingX={2}>
+							<EmptyState />
+						</Box>
+					)}
+					{tier !== "narrow" && (
+						<EventLog events={state.events} maxLines={layout.eventLogLines} flexGrow={1} />
+					)}
+				</Box>
 				<ErrorBanner errors={state.errors} />
 				<Box marginTop={1}>
 					<Text color={COLORS.muted}>press </Text>
