@@ -12,10 +12,12 @@
 **Started at**: 2026-04-25T17:28:00Z
 **Scaffold**: false
 
-## Commits
-(filled after commit)
+**Completed at**: 2026-04-25T17:32:00Z
 
-**Range**:
+## Commits
+- c20403f [wave-04] feat(dashboard): dynamic layout, error banner, plain-text non-TTY fallback
+
+**Range**: f191ced..c20403f
 
 ## Notes
 **Start commit**: f191ced35e9c8b8341d11a0d7d44e9da64b65671

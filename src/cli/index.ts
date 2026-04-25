@@ -31,7 +31,9 @@ Usage:
 Commands:
   init                       initialize qult in the current project
   update                     refresh integration config files from latest templates
-  check [--detect]           print SDD state; --detect runs Tier 1 detectors
+  check [--detect] [--no-tty]
+                             print SDD state; --detect runs Tier 1 detectors
+                             (live Ink UI in a TTY; --no-tty forces plain text)
   add-agent <key>            add a single integration (claude|codex|cursor|gemini)
   mcp                        start the MCP server (stdio JSON-RPC)
   dashboard                  launch the live Ink TUI dashboard
@@ -91,7 +93,11 @@ async function main(): Promise<number> {
 		}
 		case "check": {
 			const { flags } = parseArgs(rest);
-			return runCheck({ detect: flags.detect === true, json: flags.json === true });
+			return runCheck({
+				detect: flags.detect === true,
+				json: flags.json === true,
+				noTty: flags["no-tty"] === true,
+			});
 		}
 		case "add-agent": {
 			const { positionals, flags } = parseArgs(rest);

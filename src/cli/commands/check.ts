@@ -9,6 +9,8 @@
  */
 
 import { execSync } from "node:child_process";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { runAllDetectors } from "../../detector/index.ts";
 import { readCurrent, readPendingFixes } from "../../state/json-state.ts";
 import { getActiveSpec } from "../../state/spec.ts";
@@ -16,6 +18,7 @@ import { getActiveSpec } from "../../state/spec.ts";
 export interface CheckOptions {
 	detect?: boolean;
 	json?: boolean;
+	noTty?: boolean;
 }
 
 export async function runCheck(opts: CheckOptions): Promise<number> {
@@ -27,12 +30,30 @@ export async function runCheck(opts: CheckOptions): Promise<number> {
 	let detectorOutcome: { exitCode: 0 | 1; high: number; results: unknown[] } | null = null;
 	if (opts.detect) {
 		const files = listChangedFiles(cwd);
-		const results = await runAllDetectors(files, { cwd });
-		const high = results.reduce(
-			(n, r) => n + r.fixes.filter((f) => f.errors && f.errors.length > 0).length,
-			0,
-		);
-		detectorOutcome = { exitCode: high > 0 ? 1 : 0, high, results };
+		const useInk = process.stdout.isTTY && !opts.noTty && !opts.json;
+		if (useInk) {
+			// Lazy-load the Ink UI bundle the same way `qult dashboard` does:
+			// runtime path computation defeats esbuild's static analysis so the
+			// 1.5 MB react/ink chunk stays out of the cli.js bundle entirely.
+			const here = dirname(fileURLToPath(import.meta.url));
+			const checkUiUrl = pathToFileURL(resolve(here, "check-detect-ui.js")).href;
+			const mod = (await import(checkUiUrl)) as {
+				runDetectUI: (o: { files: string[]; cwd: string }) => Promise<{
+					results: Array<{ fixes: Array<{ errors?: unknown[] }> }>;
+					totalFixes: number;
+					high: number;
+				}>;
+			};
+			const r = await mod.runDetectUI({ files, cwd });
+			detectorOutcome = { exitCode: r.high > 0 ? 1 : 0, high: r.high, results: r.results };
+		} else {
+			const results = await runAllDetectors(files, { cwd });
+			const high = results.reduce(
+				(n, r) => n + r.fixes.filter((f) => f.errors && f.errors.length > 0).length,
+				0,
+			);
+			detectorOutcome = { exitCode: high > 0 ? 1 : 0, high, results };
+		}
 	}
 
 	if (opts.json) {

@@ -38,10 +38,15 @@ export default defineConfig([
 		},
 	},
 	{
-		// `qult dashboard` — Ink/React TUI. Loaded via dynamic import from
-		// the CLI entry, so the high-frequency commands (init/update/check)
-		// don't pay the ink/react bundle cost on cold start.
-		entry: { dashboard: "src/dashboard/index.ts" },
+		// Ink-based UIs — both `qult dashboard` and the `--detect` runner for
+		// `qult check`. They share React / ink / @inkjs/ui, so we emit them
+		// from a single tsup config block (tsup splits common deps into
+		// shared chunks automatically). The CLI lazy-loads either entry by
+		// runtime URL so cli.js never imports them statically.
+		entry: {
+			dashboard: "src/dashboard/index.ts",
+			"check-detect-ui": "src/dashboard/check-ui/index.tsx",
+		},
 		format: ["esm"],
 		outDir: "dist",
 		bundle: true,

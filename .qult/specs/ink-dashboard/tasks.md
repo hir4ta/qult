@@ -117,14 +117,14 @@
 - `bun test` で `__tests__/dashboard/check-ui.test.tsx` が pass
 
 **Tasks**:
-- [ ] 5.1 `src/dashboard/check-ui/DetectRunner.tsx`: detector 一覧 + 各行に Spinner/Badge を表示するコンポーネント
-- [ ] 5.2 `src/dashboard/check-ui/index.ts`: `runDetectUI()` を export、内部で 5 detector を逐次実行 + state を React に流す
-- [ ] 5.3 全体 ProgressBar (完了 detector 数 / 全 detector 数) を上部に表示
-- [ ] 5.4 完了時 Alert: severity (high/medium/low) 別の pending fixes を集計表示
-- [ ] 5.5 `src/cli/check.ts` (既存) に `--no-tty` フラグ追加。CLI dispatch で TTY && !noTty なら `runDetectUI`、それ以外は従来パス
-- [ ] 5.6 既存 detector 関数のシグネチャ変更を最小化。必要なら `onProgress` コールバックを optional 引数で追加 (consumer 互換維持)
-- [ ] 5.7 snapshot テスト: detector が pass/warn/fail/skipped 各状態のとき UI が期待通り
-- [ ] 5.8 統合テスト: 実 detector を 1 個だけ実行 (security-check の固定入力) して run-to-completion を検証
+- [x] 5.1 `src/dashboard/check-ui/DetectRunner.tsx`: detector 一覧 + 各行に Spinner/Badge を表示するコンポーネント
+- [x] 5.2 `src/dashboard/check-ui/index.ts`: `runDetectUI()` を export、内部で 5 detector を逐次実行 + state を React に流す
+- [x] 5.3 全体 ProgressBar (完了 detector 数 / 全 detector 数) を上部に表示
+- [x] 5.4 完了時 Alert: severity (high/medium/low) 別の pending fixes を集計表示
+- [x] 5.5 `src/cli/check.ts` (既存) に `--no-tty` フラグ追加。CLI dispatch で TTY && !noTty なら `runDetectUI`、それ以外は従来パス
+- [x] 5.6 既存 detector 関数のシグネチャ変更を最小化。必要なら `onProgress` コールバックを optional 引数で追加 (consumer 互換維持)
+- [x] 5.7 snapshot テスト: detector が pass/warn/fail/skipped 各状態のとき UI が期待通り
+- [x] 5.8 統合テスト: 実 detector を 1 個だけ実行 (security-check の固定入力) して run-to-completion を検証
 
 **Consumers**: 既存 `src/cli/check.ts` (フラグ追加と分岐)、既存 detector (optional `onProgress` 追加)
 

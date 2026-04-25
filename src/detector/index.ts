@@ -41,6 +41,18 @@ export interface DetectorOptions {
 	hallucinatedPackages?: { pm: string; packages: string[] };
 	/** Skip detectors that require network access without running probe. */
 	offline?: boolean;
+	/**
+	 * Optional progress sink. Called with `start` before each detector runs
+	 * and `complete` immediately after it finishes (or is skipped). Lets the
+	 * dashboard's `qult check --detect` UI render live spinners / badges.
+	 */
+	onProgress?: (event: DetectorProgressEvent) => void;
+}
+
+export interface DetectorProgressEvent {
+	kind: "start" | "complete";
+	detector: DetectorName;
+	result?: DetectorResult;
 }
 
 const NETWORK_DETECTORS: ReadonlySet<DetectorName> = new Set([
@@ -63,72 +75,82 @@ export async function runAllDetectors(
 	const networkOk = opts.offline ? false : await isNetworkAvailable();
 
 	const results: DetectorResult[] = [];
+	const onProgress = opts.onProgress;
 
-	const securityFixes: PendingFix[] = files.flatMap((f) => detectSecurityPatterns(f));
-	if (loadConfig().security.enable_semgrep) {
-		const semgrep = runSemgrepScan(files, cwd);
-		if (semgrep.skipped) {
-			process.stderr.write(`[qult] semgrep skipped: ${semgrep.skipReason}\n`);
-		} else {
-			securityFixes.push(...semgrep.fixes);
+	const runOne = async (
+		name: DetectorName,
+		fn: () => Promise<DetectorResult> | DetectorResult,
+	): Promise<void> => {
+		onProgress?.({ kind: "start", detector: name });
+		const result = await fn();
+		results.push(result);
+		onProgress?.({ kind: "complete", detector: name, result });
+	};
+
+	await runOne("security-check", () => {
+		const securityFixes: PendingFix[] = files.flatMap((f) => detectSecurityPatterns(f));
+		if (loadConfig().security.enable_semgrep) {
+			const semgrep = runSemgrepScan(files, cwd);
+			if (semgrep.skipped) {
+				process.stderr.write(`[qult] semgrep skipped: ${semgrep.skipReason}\n`);
+			} else {
+				securityFixes.push(...semgrep.fixes);
+			}
 		}
-	}
-	results.push({ detector: "security-check", fixes: securityFixes, skipped: false });
+		return { detector: "security-check", fixes: securityFixes, skipped: false };
+	});
 
-	if (!networkOk) {
-		results.push({
-			detector: "dep-vuln-check",
-			fixes: [],
-			skipped: true,
-			skipReason: "network unavailable",
-		});
-	} else {
-		results.push({
-			detector: "dep-vuln-check",
-			fixes: scanDependencyVulns(cwd),
-			skipped: false,
-		});
-	}
+	await runOne("dep-vuln-check", () => {
+		if (!networkOk) {
+			return {
+				detector: "dep-vuln-check",
+				fixes: [],
+				skipped: true,
+				skipReason: "network unavailable",
+			};
+		}
+		return { detector: "dep-vuln-check", fixes: scanDependencyVulns(cwd), skipped: false };
+	});
 
-	if (!opts.hallucinatedPackages) {
-		results.push({
-			detector: "hallucinated-package-check",
-			fixes: [],
-			skipped: true,
-			skipReason: "no install command provided",
-		});
-	} else if (!networkOk) {
-		results.push({
-			detector: "hallucinated-package-check",
-			fixes: [],
-			skipped: true,
-			skipReason: "network unavailable",
-		});
-	} else {
+	await runOne("hallucinated-package-check", async () => {
+		if (!opts.hallucinatedPackages) {
+			return {
+				detector: "hallucinated-package-check",
+				fixes: [],
+				skipped: true,
+				skipReason: "no install command provided",
+			};
+		}
+		if (!networkOk) {
+			return {
+				detector: "hallucinated-package-check",
+				fixes: [],
+				skipped: true,
+				skipReason: "network unavailable",
+			};
+		}
 		const { pm, packages } = opts.hallucinatedPackages;
-		results.push({
+		return {
 			detector: "hallucinated-package-check",
 			fixes: await checkInstalledPackages(pm, packages),
 			skipped: false,
-		});
-	}
-
-	const testSmells: PendingFix[] = [];
-	for (const f of files) {
-		const analysis = analyzeTestQuality(f);
-		if (analysis) testSmells.push(...getBlockingTestSmells(f, analysis));
-	}
-	results.push({
-		detector: "test-quality-check",
-		fixes: testSmells,
-		skipped: false,
+		};
 	});
 
-	results.push({
+	await runOne("test-quality-check", () => {
+		const testSmells: PendingFix[] = [];
+		for (const f of files) {
+			const analysis = analyzeTestQuality(f);
+			if (analysis) testSmells.push(...getBlockingTestSmells(f, analysis));
+		}
+		return { detector: "test-quality-check", fixes: testSmells, skipped: false };
+	});
+
+	await runOne("export-check", () => ({
 		detector: "export-check",
 		fixes: files.flatMap((f) => detectExportBreakingChanges(f)),
 		skipped: false,
-	});
+	}));
 
 	const networkSkipped = results.filter((r) => r.skipped && NETWORK_DETECTORS.has(r.detector));
 	for (const r of networkSkipped) {
