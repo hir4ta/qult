@@ -1,89 +1,95 @@
 # qult
 
 > **qu**ality + c**ult** — 品質への狂信。
-> マルチエージェント対応の SDD + ハーネスエンジニアリングツール。`npx` コマンドとして配布。
+> AI コーディングツール向け Spec-Driven Development + ハーネスエンジニアリングを `npx` 一発で。
 
 [English / README.md](README.md)
 
-## qult とは
+## qult ができること
 
-qult はプロジェクトに **Spec-Driven Development ワークフロー** と **ステートフル MCP サーバー** をインストールします。MCP に対応した任意の AI コーディングツール — Claude Code・OpenAI Codex・Cursor・Gemini CLI — から同じワークフローで利用できます。
+`qult` はプロジェクトに **構造化された SDD ワークフロー** をインストールします。どの AI コーディングツールを使っても同じ Spec-Driven Development プロセスが回せるようになります — clarify ラウンド必須の spec ドラフト、コミット境界に紐付いた Wave 分割、独立 4 段レビュー、そしてテスト pass / レビュー完了 / detector 検出結果まで含めた状態管理を、すべて `.qult/` 配下のバージョン管理対象ファイルとして追跡します。
 
-各ツール固有の設定ファイルを自動生成し、`AGENTS.md` を single source of truth として維持し、spec / wave / test / review の状態を `.qult/` 配下で追跡します。
+加えて MCP サーバーが同梱されており、AI ツールから状態を監査可能な形で直接読み書きできます。ワークフローは **Claude Code**・**OpenAI Codex CLI**・**Cursor**・**Gemini CLI** のいずれでも同一に動作します。
 
-[GitHub spec-kit](https://github.com/github/spec-kit) と [OpenSpec](https://github.com/Fission-AI/OpenSpec) の影響を受けています。v1.0 までは Claude Code Plugin として配布していましたが、v1.1 からはツール非依存の CLI に作り変えました。
+## 機能
+
+- **5 ステップライフサイクル**: spec → wave-start → 実装 → wave-complete → review → finish
+- **clarify 必須** — spec を確定する前に必ず質疑応答ラウンドを通す
+- **フェーズ別品質ゲート** — requirements / design / tasks をそれぞれ独立に採点
+- **Wave 単位コミット** — `[wave-NN]` プレフィックス付き conventional commit と SHA range 整合性を強制
+- **独立 4 段レビュー** — spec compliance / code quality / security / adversarial
+- **Tier 1 detector** — セキュリティ・依存脆弱性・ハルシネーションパッケージ・テスト品質・破壊的 export 変更
+- **AGENTS.md を single source of truth** に — 各ツール固有ファイルは `@AGENTS.md` で参照
+- **冪等な更新** — `qult update` は `@generated` ブロックのみを更新、ユーザー編集箇所は保持
+- **MCP サーバー** — AI ツールが 20 個の型付きツール経由で SDD 状態を読み書き可能
 
 ## クイックスタート
 
 ```bash
-# プロジェクトディレクトリで
-npx qult init                # .claude/ / .cursor/ / .codex/ / .gemini/ を自動検出
+# プロジェクトルートで
+npx qult init                # 利用中の AI ツールを自動検出
 npx qult init --agent claude # 明示指定
-npx qult check               # SDD 状態のスナップショット
 ```
 
-`init` は以下を生成:
+init 後は、AI ツールに `/qult:spec`・`/qult:wave-start`・`/qult:wave-complete`・`/qult:review`・`/qult:finish` のスラッシュコマンドが追加されます。
 
-- `AGENTS.md`（ワークフローの単一ソース、`<!-- @generated -->` ブロック付き）
-- 各ツール用 context ファイル (`CLAUDE.md`・`GEMINI.md`・`.cursor/rules/qult.mdc`)
-- 各ツール用スラッシュコマンド (`.claude/commands/qult-*.md`・`.gemini/commands/qult-*.toml`)
-- 各ツール用 MCP サーバー登録 (`.mcp.json`・`.cursor/mcp.json`・`.gemini/settings.json`・`.codex/config.toml`)
-- `.qult/config.json`（有効化された integration 一覧）
-
-## サブコマンド
+## コマンド
 
 | コマンド | 内容 |
 |---------|------|
-| `qult init` | qult を初期化、integration を選択 |
-| `qult update` | integration 設定ファイルを最新テンプレートで更新（`@generated` ブロックのみ） |
+| `qult init [--agent <key>] [--force]` | qult を初期化、AI ツール integration を選択 |
+| `qult update` | 設定ファイルを最新テンプレートで更新（`@generated` ブロック以外は保持） |
 | `qult check [--detect] [--json]` | SDD 状態を表示、`--detect` で Tier 1 detector 実行 |
 | `qult add-agent <key> [--force]` | init 後に integration を追加 |
-| `qult mcp` | stdio JSON-RPC MCP サーバー起動（ツールから呼ばれる、通常ユーザーは実行しない） |
+| `qult mcp` | MCP サーバー起動（AI ツールから呼ばれる、手動実行は不要） |
 
-共通フラグ: `--agent <key>`（init のみ）、`--force`、`--json`、`--version`、`--help`。
+共通フラグ: `--force`（プロンプトなしで上書き）、`--json`（CI 向け出力）、`--version`、`--help`。
 
-## SDD ライフサイクル（MCP サーバー駆動）
+## SDD ライフサイクル
 
-1. `/qult:spec <name> <description>` — `.qult/specs/<name>/{requirements,design,tasks}.md` をドラフト。clarify ラウンド必須、各フェーズに品質ゲート。
-2. `/qult:wave-start` → 実装 → `/qult:wave-complete` — Wave 単位、`[wave-NN]` プレフィックス付き conventional commit と range 整合性検証。
-3. `/qult:review` — 独立 4 段階レビュー（spec compliance / code quality / security / adversarial）。5 ファイル以上変更時に commit 前必須。
-4. `/qult:finish` — spec をアーカイブし、merge / PR / hold / discard を選択。
+```
+1. /qult:spec <name> <description>
+   ├── requirements.md ドラフト（clarify 必須、スコア ≥ 18/20）
+   ├── design.md ドラフト（スコア ≥ 17/20）
+   └── tasks.md ドラフト（スコア ≥ 16/20）
+
+2. /qult:wave-start  →  タスク実装  →  /qult:wave-complete
+   （Wave ゲート: range 整合性 → test pass → detector → conventional commit）
+
+3. /qult:review
+   └── 4 つの独立レビュアー: spec / quality / security / adversarial
+
+4. /qult:finish
+   └── spec をアーカイブして merge / PR / hold / discard
+```
 
 ## 対応 AI ツール
 
-- **Claude Code** — `.claude/commands/`・`CLAUDE.md`・`.mcp.json`
-- **OpenAI Codex CLI** — `AGENTS.md`・`.codex/config.toml`
-- **Cursor** — `.cursor/rules/qult.mdc`・`.cursor/mcp.json`
-- **Gemini CLI** — `.gemini/commands/*.toml`・`GEMINI.md`・`.gemini/settings.json`
+| ツール | 生成ファイル |
+|------|-------------|
+| **Claude Code** | `.claude/commands/`・`CLAUDE.md`・`.mcp.json` |
+| **OpenAI Codex CLI** | `AGENTS.md`・`.codex/config.toml` |
+| **Cursor** | `.cursor/rules/qult.mdc`・`.cursor/mcp.json` |
+| **Gemini CLI** | `.gemini/commands/*.toml`・`GEMINI.md`・`.gemini/settings.json` |
 
-4 ツールすべてが同じ `qult` MCP サーバー (`npx qult mcp`) を登録するため、エディタを越えてワークフローツールが同一の挙動になります。
+4 ツールすべてが同一の `qult` MCP サーバーを登録するため、エディタを越えてワークフローツールの挙動が一致します。
 
-## `.qult/` ディレクトリ規約
+## `.qult/` ディレクトリ
 
 ```
 .qult/
-├── config.json         # committed: integrations.enabled / review threshold 等
-├── specs/              # committed: spec markdown
+├── config.json         # committed: 有効化 integration / review 閾値
+├── specs/
 │   ├── <name>/{requirements,design,tasks}.md + waves/wave-NN.md
-│   └── archive/<name>/ # 完了済み spec
+│   └── archive/        # 完了済み spec
 └── state/              # gitignored: 一時的な test/review/finish 状態
 ```
 
 ## 動作要件
 
 - Node.js 20 以降
-- MCP に対応した AI コーディングツール（上記 4 種のいずれか。`generic`（AGENTS.md のみ）フォールバックは将来対応予定）
-- 任意: `semgrep`（security-check 用）、`osv-scanner`（dep-vuln-check 用）
-
-## 開発
-
-```bash
-npm install
-npm test           # vitest run
-npm run typecheck  # tsc --noEmit
-npm run lint       # biome check src/
-npm run build      # tsup → dist/{cli,mcp-server}.js
-```
+- MCP に対応した AI コーディングツール（上記 4 種のいずれか）
+- 任意: `semgrep`（security-check 強化）、`osv-scanner`（dep-vuln-check 強化）
 
 ## ライセンス
 
