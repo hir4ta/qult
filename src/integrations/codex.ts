@@ -35,7 +35,7 @@ const END_LINE_RE = /^# @qult-mcp-end\r?$/m;
 const MCP_BLOCK = `${MCP_BLOCK_BEGIN}
 [mcp_servers.qult]
 command = "npx"
-args = ["@hir4ta/qult", "mcp"]
+args = ["-y", "@hir4ta/qult", "mcp"]
 ${MCP_BLOCK_END}`;
 
 export const CodexIntegration: IntegrationBase = {

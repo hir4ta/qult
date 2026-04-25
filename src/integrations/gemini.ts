@@ -82,7 +82,7 @@ export const GeminiIntegration: IntegrationBase = {
 		writeJsonMcpServer(
 			join(ctx.projectRoot, ".gemini/settings.json"),
 			MCP_KEY,
-			{ type: "stdio", command: "npx", args: ["@hir4ta/qult", "mcp"] },
+			{ type: "stdio", command: "npx", args: ["-y", "@hir4ta/qult", "mcp"] },
 			ctx.projectRoot,
 		);
 	},

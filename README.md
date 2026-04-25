@@ -33,13 +33,21 @@ state. The same workflow runs identically across **Claude Code**, **OpenAI Codex
 ## Quick start
 
 ```bash
-# In your project root
-npx @hir4ta/qult init                # auto-detects which AI tools you use
-npx @hir4ta/qult init --agent claude # or pick one explicitly
+# Quick try (no install) — works in any project
+npx -y @hir4ta/qult init
+
+# Or install globally for faster MCP startup (recommended for daily use)
+npm i -g @hir4ta/qult
+qult init
+
+# pnpm / bun users
+pnpm dlx @hir4ta/qult init
+bunx -y @hir4ta/qult init
 ```
 
-After init, just talk to your AI tool — `/qult:spec`, `/qult:wave-start`,
-`/qult:wave-complete`, `/qult:review`, `/qult:finish` are now available as slash commands.
+After init, just talk to your AI tool — `/qult-spec`, `/qult-wave-start`,
+`/qult-wave-complete`, `/qult-review`, `/qult-finish` are now available as
+slash commands / skills.
 
 ## Commands
 

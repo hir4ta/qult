@@ -79,7 +79,7 @@ export const ClaudeIntegration: IntegrationBase = {
 		writeJsonMcpServer(
 			join(ctx.projectRoot, ".mcp.json"),
 			MCP_KEY,
-			{ type: "stdio", command: "npx", args: ["@hir4ta/qult", "mcp"] },
+			{ type: "stdio", command: "npx", args: ["-y", "@hir4ta/qult", "mcp"] },
 			ctx.projectRoot,
 		);
 	},

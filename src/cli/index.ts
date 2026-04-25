@@ -1,6 +1,10 @@
 /**
  * qult CLI entrypoint — argv parsing, Node version check, subcommand dispatch.
  *
+ * The `#!/usr/bin/env node` shebang is injected by tsup (`banner.js` in
+ * tsup.config.ts) so the published `dist/cli.js` can be spawned directly by
+ * npm/npx via the `bin` field.
+ *
  * Subcommands: init / update / check / add-agent / mcp.
  * Global flags: --version / --help / --json.
  */

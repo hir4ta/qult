@@ -46,7 +46,7 @@ describe("e2e: init + MCP server", () => {
 		expect(mcp.mcpServers.qult).toEqual({
 			type: "stdio",
 			command: "npx",
-			args: ["@hir4ta/qult", "mcp"],
+			args: ["-y", "@hir4ta/qult", "mcp"],
 		});
 	});
 

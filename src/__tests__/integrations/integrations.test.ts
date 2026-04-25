@@ -70,7 +70,7 @@ describe("ClaudeIntegration", () => {
 		expect(existsSync(join(projectRoot, "CLAUDE.md"))).toBe(true);
 		const mcp = JSON.parse(readFileSync(join(projectRoot, ".mcp.json"), "utf8"));
 		expect(mcp.mcpServers.qult.command).toBe("npx");
-		expect(mcp.mcpServers.qult.args).toEqual(["@hir4ta/qult", "mcp"]);
+		expect(mcp.mcpServers.qult.args).toEqual(["-y", "@hir4ta/qult", "mcp"]);
 	});
 
 	it("registerMcpServer is idempotent and preserves other servers", async () => {
@@ -143,7 +143,7 @@ describe("CursorIntegration", () => {
 
 		const mcp = JSON.parse(readFileSync(join(projectRoot, ".cursor/mcp.json"), "utf8"));
 		expect(mcp.mcpServers.qult.type).toBe("stdio");
-		expect(mcp.mcpServers.qult.args).toEqual(["@hir4ta/qult", "mcp"]);
+		expect(mcp.mcpServers.qult.args).toEqual(["-y", "@hir4ta/qult", "mcp"]);
 	});
 });
 

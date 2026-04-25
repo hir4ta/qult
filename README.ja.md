@@ -26,12 +26,19 @@
 ## クイックスタート
 
 ```bash
-# プロジェクトルートで
-npx @hir4ta/qult init                # 利用中の AI ツールを自動検出
-npx @hir4ta/qult init --agent claude # 明示指定
+# 即試す（インストール不要、どのプロジェクトでもOK）
+npx -y @hir4ta/qult init
+
+# 普段使いはグローバルインストール推奨（MCP 起動が高速・オフライン可）
+npm i -g @hir4ta/qult
+qult init
+
+# pnpm / bun ユーザー向け
+pnpm dlx @hir4ta/qult init
+bunx -y @hir4ta/qult init
 ```
 
-init 後は、AI ツールに `/qult:spec`・`/qult:wave-start`・`/qult:wave-complete`・`/qult:review`・`/qult:finish` のスラッシュコマンドが追加されます。
+init 後は、AI ツールから `/qult-spec`・`/qult-wave-start`・`/qult-wave-complete`・`/qult-review`・`/qult-finish` がスキル / スラッシュコマンドとして利用可能になります。
 
 ## コマンド
 
