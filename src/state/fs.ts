@@ -49,9 +49,7 @@ export function readTextIfExists(absPath: string): string | null {
 	try {
 		const buf = readFileSync(absPath);
 		if (buf.byteLength > MAX_READ_BYTES) {
-			throw new Error(
-				`file too large: ${absPath} (${buf.byteLength} bytes > ${MAX_READ_BYTES})`,
-			);
+			throw new Error(`file too large: ${absPath} (${buf.byteLength} bytes > ${MAX_READ_BYTES})`);
 		}
 		return buf.toString("utf8");
 	} catch (err) {

@@ -121,7 +121,7 @@ export function parseWaveMd(content: string): WaveDoc {
 		noteLines.push(line);
 	}
 
-	doc.notes = trimTrailingBlankLines(noteLines).join("\n");
+	doc.notes = trimBlankLines(noteLines).join("\n");
 	return doc;
 }
 
@@ -161,10 +161,12 @@ function parseWaveRef(value: string): number | null {
 	return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-function trimTrailingBlankLines(lines: string[]): string[] {
+function trimBlankLines(lines: string[]): string[] {
+	let start = 0;
 	let end = lines.length;
-	while (end > 0 && (lines[end - 1] ?? "").trim() === "") end--;
-	return lines.slice(0, end);
+	while (start < end && (lines[start] ?? "").trim() === "") start++;
+	while (end > start && (lines[end - 1] ?? "").trim() === "") end--;
+	return lines.slice(start, end);
 }
 
 /** Render a {@link WaveDoc} back to canonical markdown. */
