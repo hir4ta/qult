@@ -1,6 +1,31 @@
 {
   "name": "qult",
   "version": "1.1.0",
+  "description": "Spec-Driven Development + harness engineering toolkit for Claude Code, Codex, Cursor, and Gemini CLI. Installs a workflow MCP server in one npx command.",
+  "keywords": [
+    "spec-driven-development",
+    "sdd",
+    "mcp",
+    "claude",
+    "claude-code",
+    "codex",
+    "cursor",
+    "gemini",
+    "ai-coding",
+    "harness-engineering",
+    "code-review",
+    "agent-tooling"
+  ],
+  "license": "MIT",
+  "author": "hir4ta",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hir4ta/qult.git"
+  },
+  "homepage": "https://github.com/hir4ta/qult",
+  "bugs": {
+    "url": "https://github.com/hir4ta/qult/issues"
+  },
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -22,7 +47,8 @@
     "lint": "biome check src/",
     "lint:fix": "biome check --write src/",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run typecheck && npm run lint && npm test && npm run build"
   },
   "dependencies": {},
   "devDependencies": {
