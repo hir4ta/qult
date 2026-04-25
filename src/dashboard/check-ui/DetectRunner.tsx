@@ -183,11 +183,11 @@ function RowStatusIndicator({ row }: { row: Row }): React.ReactElement {
 		case "running":
 			return <Spinner label="running" />;
 		case "pass":
-			return <Badge color="green">pass</Badge>;
+			return <Badge color={COLORS.success}>pass</Badge>;
 		case "warn":
 			return (
 				<Box gap={1}>
-					<Badge color="yellow">warn</Badge>
+					<Badge color={COLORS.warning}>warn</Badge>
 					<Text color={COLORS.warning}>
 						{row.count} fix{row.count === 1 ? "" : "es"}
 					</Text>
@@ -196,7 +196,7 @@ function RowStatusIndicator({ row }: { row: Row }): React.ReactElement {
 		case "fail":
 			return (
 				<Box gap={1}>
-					<Badge color="magenta">fail</Badge>
+					<Badge color={COLORS.error}>fail</Badge>
 					<Text color={COLORS.error}>
 						{row.count} fix{row.count === 1 ? "" : "es"}
 					</Text>
@@ -205,7 +205,7 @@ function RowStatusIndicator({ row }: { row: Row }): React.ReactElement {
 		case "skipped":
 			return (
 				<Box gap={1}>
-					<Badge color="gray">skipped</Badge>
+					<Badge color={COLORS.muted}>skipped</Badge>
 					{row.skipReason && <Text color={COLORS.muted}>{row.skipReason}</Text>}
 				</Box>
 			);

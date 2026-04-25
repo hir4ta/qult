@@ -18,9 +18,9 @@ interface Props {
 }
 
 const STATUS_COLOR: Record<WaveStatus, string> = {
-	todo: "gray",
-	"in-progress": "cyan",
-	done: "green",
+	todo: COLORS.muted,
+	"in-progress": COLORS.primary,
+	done: COLORS.success,
 };
 
 export function WavePanel({ waves, flexGrow, flexBasis, minWidth }: Props): React.ReactElement {

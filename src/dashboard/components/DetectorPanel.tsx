@@ -18,11 +18,11 @@ interface Props {
 }
 
 const STATUS_COLOR: Record<DetectorStatus, string> = {
-	pass: "green",
-	warn: "yellow",
-	fail: "magenta",
-	skipped: "gray",
-	"never-run": "gray",
+	pass: COLORS.success,
+	warn: COLORS.warning,
+	fail: COLORS.error,
+	skipped: COLORS.muted,
+	"never-run": COLORS.muted,
 };
 
 export function DetectorPanel({

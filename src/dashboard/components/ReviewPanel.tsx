@@ -64,6 +64,8 @@ function ReviewRow({
 }
 
 function badgeFor(entry: ReviewStageEntry): { color: string; text: string } {
-	if (entry.score === null) return { color: "gray", text: "pending" };
-	return entry.passed ? { color: "green", text: "pass" } : { color: "yellow", text: "below" };
+	if (entry.score === null) return { color: COLORS.muted, text: "pending" };
+	return entry.passed
+		? { color: COLORS.success, text: "pass" }
+		: { color: COLORS.warning, text: "below" };
 }

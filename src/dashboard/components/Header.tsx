@@ -18,11 +18,11 @@ interface Props {
 }
 
 const PHASE_COLORS: Record<SpecPhase, string> = {
-	requirements: "yellow",
-	design: "cyan",
-	tasks: "magenta",
-	implementation: "green",
-	archived: "gray",
+	requirements: COLORS.warning,
+	design: COLORS.primary,
+	tasks: COLORS.accent,
+	implementation: COLORS.success,
+	archived: COLORS.muted,
 };
 
 // "ANSI Shadow"-style block lettering for "qult". Pre-rendered so we don't
