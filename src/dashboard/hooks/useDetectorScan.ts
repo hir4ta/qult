@@ -112,7 +112,12 @@ export function useDetectorScan(): DetectorScanState {
 				);
 			};
 			try {
-				await runAllDetectors(files, { cwd, onProgress, offline: !NETWORK_ALLOWED });
+				await runAllDetectors(files, {
+					cwd,
+					onProgress,
+					offline: !NETWORK_ALLOWED,
+					silent: true,
+				});
 			} catch {
 				if (cancelled) return;
 				// On crash, leave any not-yet-completed rows at `running` →

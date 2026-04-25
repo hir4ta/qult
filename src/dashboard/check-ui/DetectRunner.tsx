@@ -97,7 +97,7 @@ export function DetectRunner({ files, cwd, onComplete }: RunnerProps): React.Rea
 
 		(async () => {
 			try {
-				const results = await runAllDetectors(files, { cwd, onProgress });
+				const results = await runAllDetectors(files, { cwd, onProgress, silent: true });
 				if (cancelled) return;
 				const totalFixes = results.reduce((acc, r) => acc + r.fixes.length, 0);
 				const high = results.reduce(

@@ -47,6 +47,13 @@ export interface DetectorOptions {
 	 * dashboard's `qult check --detect` UI render live spinners / badges.
 	 */
 	onProgress?: (event: DetectorProgressEvent) => void;
+	/**
+	 * Suppress the `[qult] detector ... skipped` stderr lines. Required
+	 * when a TUI (Ink) is on stdout: stray stderr output between Ink's
+	 * frame writes throws off its cursor-position math and the previous
+	 * frame stops being overwritten.
+	 */
+	silent?: boolean;
 }
 
 export interface DetectorProgressEvent {
@@ -92,7 +99,9 @@ export async function runAllDetectors(
 		if (loadConfig().security.enable_semgrep) {
 			const semgrep = runSemgrepScan(files, cwd);
 			if (semgrep.skipped) {
-				process.stderr.write(`[qult] semgrep skipped: ${semgrep.skipReason}\n`);
+				if (!opts.silent) {
+					process.stderr.write(`[qult] semgrep skipped: ${semgrep.skipReason}\n`);
+				}
 			} else {
 				securityFixes.push(...semgrep.fixes);
 			}
@@ -152,9 +161,11 @@ export async function runAllDetectors(
 		skipped: false,
 	}));
 
-	const networkSkipped = results.filter((r) => r.skipped && NETWORK_DETECTORS.has(r.detector));
-	for (const r of networkSkipped) {
-		process.stderr.write(`[qult] detector ${r.detector} skipped: ${r.skipReason}\n`);
+	if (!opts.silent) {
+		const networkSkipped = results.filter((r) => r.skipped && NETWORK_DETECTORS.has(r.detector));
+		for (const r of networkSkipped) {
+			process.stderr.write(`[qult] detector ${r.detector} skipped: ${r.skipReason}\n`);
+		}
 	}
 
 	return results;
