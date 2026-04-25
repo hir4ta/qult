@@ -31,7 +31,7 @@
       "min": 2,
       "max": 6
     },
-    "commit_prefix_template": "[wave-{wave_num:02d}]"
+    "wave_num_max": 99
   },
   "gates": {
     "lint_enabled": true,
