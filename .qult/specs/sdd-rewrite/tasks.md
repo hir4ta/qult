@@ -19,13 +19,13 @@
 **Goal**: MCP tool の handler を新 state モジュール群に切り替え、新規 5 tool を追加する。SQLite モジュール群は**まだ削除しない**（共存維持、build / test green を確実にする）。
 **Verify**: `bun run typecheck && bun run lint && bun run test && bun run build` 全 pass。新 MCP tool（`get_active_spec`、`complete_wave`、`update_task_status`、`archive_spec`、`record_spec_evaluator_score`）の単体テスト pass。`get_session_status` → `get_project_status` リネーム済みで rules / skills の呼び出しは新名に統一。
 
-- [ ] T2.1: `src/mcp-tools/` ディレクトリを作成し domain ごとに 4 ファイル（`spec-tools.ts` / `state-tools.ts` / `detector-tools.ts` / `gate-tools.ts`）+ `index.ts` レジストリを設置。既存 16 tool の handler を該当ファイルへ移植し、内部実装を新 state モジュール（Wave 1 で追加分）に切り替え。SQLite 系モジュールへの依存は残してよい。
-- [ ] T2.2: 新規 5 tool（`get_active_spec`、`complete_wave`、`update_task_status`、`archive_spec`、`record_spec_evaluator_score`）を `spec-tools.ts` に追加。`complete_wave` は Range SHA reachability 検証と既完了拒否（`already_completed`）を実装。`update_task_status` は存在しない task_id で `task_not_found` を返す。
-- [ ] T2.3: `get_session_status` を `get_project_status` にリネームし `state-tools.ts` に集約。返却値に active_spec オブジェクトを統合（`get_active_spec` の結果を含める）。`archive_plan` を `archive_spec` にリネーム。古い tool 名は受け付けない（registry から削除）。
-- [ ] T2.4: 全 tool ハンドラの先頭で入力検証を呼ぶ共通関数（`spec_name` regex、`wave_num` 範囲、`realpath` 検証）を `src/mcp-tools/shared.ts` に実装。
-- [ ] T2.5: `src/mcp-server.ts` を再構成。`index.ts` を import して JSON-RPC dispatch のみを担当する形に縮小（〜200 行目標）。`SERVER_VERSION` 定数を `1.0.0` に更新。bun:sqlite 直接 import がここから消えていることを確認（state モジュール経由のみに）。
-- [ ] T2.6: 全 MCP tool の単体テストを更新・追加（fixture は temp ディレクトリベース）。新 5 tool の error semantics（`already_completed` / `task_not_found` / `sha_unreachable`）を網羅。
-- [ ] T2.7: `bun run build` で `plugin/dist/mcp-server.mjs` が生成され、SQLite 系モジュールがまだ存在することを確認しつつ、Wave 2 完了。
+- [x] T2.1: `src/mcp-tools/` ディレクトリを作成し domain ごとに 4 ファイル（`spec-tools.ts` / `state-tools.ts` / `detector-tools.ts` / `gate-tools.ts`）+ `index.ts` レジストリを設置。既存 16 tool の handler を該当ファイルへ移植し、内部実装を新 state モジュール（Wave 1 で追加分）に切り替え。SQLite 系モジュールへの依存は残してよい。
+- [x] T2.2: 新規 5 tool（`get_active_spec`、`complete_wave`、`update_task_status`、`archive_spec`、`record_spec_evaluator_score`）を `spec-tools.ts` に追加。`complete_wave` は Range SHA reachability 検証と既完了拒否（`already_completed`）を実装。`update_task_status` は存在しない task_id で `task_not_found` を返す。
+- [x] T2.3: `get_session_status` を `get_project_status` にリネームし `state-tools.ts` に集約。返却値に active_spec オブジェクトを統合（`get_active_spec` の結果を含める）。`archive_plan` を `archive_spec` にリネーム。古い tool 名は受け付けない（registry から削除）。
+- [x] T2.4: 全 tool ハンドラの先頭で入力検証を呼ぶ共通関数（`spec_name` regex、`wave_num` 範囲、`realpath` 検証）を `src/mcp-tools/shared.ts` に実装。
+- [x] T2.5: `src/mcp-server.ts` を再構成。`index.ts` を import して JSON-RPC dispatch のみを担当する形に縮小（〜200 行目標）。`SERVER_VERSION` 定数を `1.0.0` に更新。bun:sqlite 直接 import がここから消えていることを確認（state モジュール経由のみに）。
+- [x] T2.6: 全 MCP tool の単体テストを更新・追加（fixture は temp ディレクトリベース）。新 5 tool の error semantics（`already_completed` / `task_not_found` / `sha_unreachable`）を網羅。
+- [x] T2.7: `bun run build` で `plugin/dist/mcp-server.mjs` が生成され、SQLite 系モジュールがまだ存在することを確認しつつ、Wave 2 完了。
 
 ## Wave 3: SQLite removal
 

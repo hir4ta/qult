@@ -3,14 +3,17 @@
 **Goal**: MCP tool の handler を registry pattern (`src/mcp-tools/`) へ移行し、新規 5 spec tool を追加する。SQLite モジュール群は **Wave 2 では未削除**かつ既存 16 tool は SQLite path を維持。Wave 3 で SQLite → file-based の内部実装切替を行う（Wave 2 では構造変更 + 純粋追加のみで build green を維持）。
 **Verify**: `bun run typecheck && bun run lint && bun run test && bun run build` 全 pass。新 spec tool（5 個）の単体テスト pass。`get_session_status` → `get_project_status` リネーム済み。`archive_plan` → `archive_spec` リネーム済みかつ実装は新 `spec.ts` ベース。
 **Started at**: 2026-04-25T14:30:00Z
-**Completed at**:
+**Completed at**: 2026-04-25T14:55:00Z
 **Scaffold**: false
 
 ## Commits
 
-(populated on /qult:wave-complete)
+- 7f39938: [wave-02] chore: start Wave 2 (scope narrowed to additions + 2 renames)
+- 6c67418: [wave-02] feat: add mcp-tools/{shared,spec-tools}.ts (5 spec tool handlers)
+- a65e53d: [wave-02] feat: wire 5 spec tools + rename get_session_status → get_project_status, archive_plan → archive_spec
+- d2e19ca: [wave-02] test: add 16 tests for new spec-tools handlers (idempotency, range integrity, validation)
 
-**Range**:
+**Range**: 7f39938..d2e19ca
 
 ## Notes
 
