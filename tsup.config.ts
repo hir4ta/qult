@@ -60,6 +60,17 @@ export default defineConfig([
 		// the `DEV` env var is set. Mark it external so the bundler doesn't
 		// try to statically resolve it (it isn't installed in production).
 		external: ["react-devtools-core"],
+		// Several CJS transitive deps (e.g. cli-truncate / yoga, also some
+		// internal `node:assert` paths) call `require(...)` at runtime. In a
+		// pure-ESM output esbuild leaves those as `__require(...)` which
+		// throws `Dynamic require of "X" is not supported`. Inject a
+		// `createRequire` shim so the bundle can satisfy them at runtime.
+		banner: {
+			js: [
+				"import { createRequire as __qultCreateRequire } from 'node:module';",
+				"const require = __qultCreateRequire(import.meta.url);",
+			].join("\n"),
+		},
 		define: {
 			__QULT_VERSION__: JSON.stringify(pkg.version),
 		},
