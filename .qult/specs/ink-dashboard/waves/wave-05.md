@@ -13,9 +13,9 @@
 **Scaffold**: false
 
 ## Commits
-(filled after commit)
+- 968d6be [wave-05] feat(check): live Ink UI for qult check --detect with spinner/badge/progress
 
-**Range**:
+**Range**: c20403f..968d6be
 
 ## Notes
 **Start commit**: c20403fe4182862d2a29b6e80eee24034f67a88e
