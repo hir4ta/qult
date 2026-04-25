@@ -122,6 +122,9 @@ export function parseWaveMd(content: string): WaveDoc {
 	}
 
 	doc.notes = trimBlankLines(noteLines).join("\n");
+	if (doc.num === 0 || !doc.title) {
+		throw new Error("malformed wave-NN.md: missing or invalid '# Wave N: <title>' header");
+	}
 	return doc;
 }
 

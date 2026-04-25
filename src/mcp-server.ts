@@ -1,14 +1,15 @@
 /**
- * qult MCP Server — exposes quality gate state to Claude via tools.
+ * qult MCP Server — exposes spec / state / detector / gate operations to Claude.
  *
- * Architecture: hooks write state to SQLite DB (~/.qult/qult.db).
- * This server lets Claude query/modify that state via MCP tools.
- * Runs as stdio transport, spawned by Claude Code plugin system.
+ * State lives in `.qult/state/*.json` (JSON files with atomic rename).
+ * Spec markdown lives in `.qult/specs/<name>/`. There is no SQLite, no
+ * `~/.qult/`, no global config — everything is project-local.
  *
  * Uses raw JSON-RPC over stdio (newline-delimited) instead of the MCP SDK
  * to eliminate the 660KB SDK dependency and reduce coupling to SDK releases.
  */
 
+import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { loadConfig, resetConfigCache, setConfigKey } from "./config.ts";
@@ -36,7 +37,6 @@ import {
 	recordReviewStage,
 } from "./state/json-state.ts";
 import { setProjectRoot } from "./state/paths.ts";
-import { getActiveSpec as getActiveSpecOnDisk } from "./state/spec.ts";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_NAME = "qult";
@@ -369,11 +369,19 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 		case "get_project_status": {
 			const cur = readCurrent();
 			const config = loadConfig();
-			let activeSpec: ReturnType<typeof getActiveSpecOnDisk> = null;
+			// Reuse the same shape produced by handleGetActiveSpec so consumers
+			// of get_project_status see total_waves / current_wave / task_summary.
+			let activeSpecBlock: unknown = null;
+			let activeSpecError: string | null = null;
 			try {
-				activeSpec = getActiveSpecOnDisk();
-			} catch {
-				activeSpec = null;
+				const r = handleGetActiveSpec();
+				if (r.isError) {
+					activeSpecError = r.content[0]?.text ?? "active spec error";
+				} else {
+					activeSpecBlock = JSON.parse(r.content[0]?.text ?? "null");
+				}
+			} catch (err) {
+				activeSpecError = (err as Error).message;
 			}
 			const enriched = {
 				path: cwd,
@@ -385,14 +393,8 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 				human_approval_at: cur.human_approval_at,
 				review_models: config.review.models,
 				review_config: config.review,
-				active_spec: activeSpec
-					? {
-							name: activeSpec.name,
-							has_requirements: activeSpec.hasRequirements,
-							has_design: activeSpec.hasDesign,
-							has_tasks: activeSpec.hasTasks,
-						}
-					: null,
+				active_spec: activeSpecBlock,
+				active_spec_error: activeSpecError,
 			};
 			return { content: [{ type: "text", text: JSON.stringify(enriched, null, 2) }] };
 		}
@@ -583,7 +585,21 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 				};
 			}
 			const resolvedHealth = resolve(filePath);
-			if (!resolvedHealth.startsWith(`${cwd}/`)) {
+			// Use realpath to follow symlinks so a symlink under cwd that points outside
+			// the project root cannot escape the boundary.
+			let realHealth: string;
+			try {
+				realHealth = realpathSync(resolvedHealth);
+			} catch {
+				realHealth = resolvedHealth;
+			}
+			let realCwd: string;
+			try {
+				realCwd = realpathSync(cwd);
+			} catch {
+				realCwd = cwd;
+			}
+			if (realHealth !== realCwd && !realHealth.startsWith(`${realCwd}/`)) {
 				return {
 					content: [
 						{
@@ -633,6 +649,17 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 						{
 							type: "text",
 							text: "Cannot record approval: no review completed. Run /qult:review first.",
+						},
+					],
+				};
+			}
+			if (!cur.test_passed_at) {
+				return {
+					isError: true,
+					content: [
+						{
+							type: "text",
+							text: "Cannot record approval: no test pass recorded. Run tests + record_test_pass first.",
 						},
 					],
 				};
@@ -768,26 +795,34 @@ function handleRequest(parsed: JsonRpcRequest, cwd: string): JsonRpcResponse | n
 					capabilities: { tools: {} },
 					serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
 					instructions: [
-						"qult is a quality aid for Claude. It provides workflow rules (at ~/.claude/rules/qult-*.md), independent reviewers, and Tier 1 detectors as MCP tools.",
+						"qult is a quality aid for Claude. It provides Spec-Driven Development orchestration, independent reviewers, and Tier 1 detectors as MCP tools, plus workflow rules at ~/.claude/rules/qult-*.md.",
 						"",
-						"Run /qult:init once after installing qult to install workflow rules to ~/.claude/rules/.",
+						"Run /qult:init once per project to bootstrap .qult/ and install rules.",
 						"",
-						"## Workflow",
-						"- Plan → Implement → Review → Finish",
-						"- For any non-trivial work: use /qult:plan-generator (do NOT use EnterPlanMode directly; it bypasses plan-evaluator).",
-						"- Track each plan task with TaskCreate; mark [done] as you complete them.",
-						"- For changes spanning 5+ files or any commit with an active plan: run /qult:review (4-stage independent review).",
-						"- After implementation completes: use /qult:finish for the structured completion checklist.",
+						"## Workflow: Spec → Wave → Review → Finish",
+						'- For any non-trivial work: /qult:spec <name> "<description>" — runs requirements → clarify → design → tasks with a spec-evaluator gate per phase. Never use EnterPlanMode for implementation work.',
+						"- Implement Wave by Wave: /qult:wave-start (records HEAD) → /qult:wip 'message' for intermediate WIP commits (auto-prefixes [wave-NN]) → /qult:wave-complete to test + run detectors + commit + record Range.",
+						"- At spec completion: /qult:review (4-stage independent review). Per-Wave automatic review is intentionally not run.",
+						"- Closing the spec: /qult:finish — archives .qult/specs/<name>/ to .qult/specs/archive/<name>/ and offers merge / PR / hold / discard.",
+						"- Trivial changes (≤5 files, typo, lockfile bump): commit normally. /qult:status will surface a hint at 5+ files.",
+						"",
+						"## Spec / Wave MCP tools",
+						"- get_active_spec — current spec phase, current Wave, task summary.",
+						"- update_task_status — flip a task in tasks.md. Returns reason='task_not_found' on bad id (NEVER silent no-op).",
+						"- complete_wave — idempotent finalization; returns reason='already_completed' on retry, reason='sha_unreachable' when prior Wave Range SHAs were rebased away.",
+						"- record_spec_evaluator_score — record per-phase evaluator score (auto-resets spec_eval block on new spec).",
+						"- archive_spec — called by /qult:finish.",
 						"",
 						"## State recording (authoritative)",
 						"- After running tests successfully: call record_test_pass with the test command.",
 						"- At the end of /qult:review: record_review with the aggregate score.",
 						"- During /qult:finish: record_finish_started.",
-						"- Before committing: call get_project_status to verify test/review gates.",
+						"- Before committing: call get_project_status to verify active_spec / test_passed_at / review_completed_at.",
 						"",
 						"## Tier 1 detectors (reviewer ground truth)",
 						"- Before /qult:review: call get_detector_summary to collect detector findings (security, dep-vuln, hallucinated-package, test-quality, export-check).",
 						"- Reviewers must NOT contradict detector findings — cross-validation will flag 'No issues found' when detectors reported problems.",
+						"- Severity ∈ {high, critical} blocks /qult:wave-complete until cleared.",
 						"",
 						"## Human approval",
 						"- If review.require_human_approval is enabled, call record_human_approval after the architect has reviewed and approved.",

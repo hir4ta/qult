@@ -9,7 +9,7 @@
  */
 
 import { execSync } from "node:child_process";
-import { existsSync, readdirSync, renameSync, statSync } from "node:fs";
+import { existsSync, readdirSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 import { ensureDir } from "./fs.ts";
 import {
@@ -17,7 +17,6 @@ import {
 	assertConfinedToQult,
 	assertValidSpecName,
 	designPath,
-	formatWaveNum,
 	requirementsPath,
 	specDir,
 	specsDir,
@@ -174,23 +173,3 @@ export function gitHeadSha(cwd?: string): string {
 	});
 	return out.toString("utf8").trim();
 }
-
-/** Convenience: ensure `.qult/specs/<name>/waves/` exists and a wave-NN.md path is returned. */
-export function _waveFilePathFor(name: string, waveNum: number): string {
-	return wavePathEnsured(name, waveNum);
-}
-
-/** Return whether a path inside `.qult/specs/` is currently a regular directory. */
-export function isSpecDir(name: string): boolean {
-	try {
-		assertValidSpecName(name);
-	} catch {
-		return false;
-	}
-	const dir = specDir(name);
-	if (!existsSync(dir)) return false;
-	return statSync(dir).isDirectory();
-}
-
-/** Use the formatWaveNum helper for callers that already imported spec.ts only. */
-export const padWaveNum = formatWaveNum;

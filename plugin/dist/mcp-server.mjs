@@ -2,6 +2,7 @@
 var __require = import.meta.require;
 
 // src/mcp-server.ts
+import { realpathSync as realpathSync2 } from "fs";
 import { resolve as resolve6 } from "path";
 import { createInterface } from "readline";
 
@@ -1832,6 +1833,16 @@ function readStageScores() {
   const got = readJson(stageScoresJsonPath(), SCHEMA_VERSION2);
   return got ?? structuredClone(DEFAULT_STAGE_SCORES);
 }
+function resetSpecEval(specName) {
+  const cur = readStageScores();
+  const next = {
+    ...cur,
+    spec_name: specName,
+    spec_eval: { requirements: null, design: null, tasks: null }
+  };
+  writeJson(stageScoresJsonPath(), next);
+  return next;
+}
 function recordReviewStage(stage, scores, now = new Date().toISOString()) {
   const cur = readStageScores();
   cur.review[stage] = { scores, recorded_at: now };
@@ -1853,7 +1864,7 @@ function recordSpecEvalPhase(phase, score) {
 
 // src/state/spec.ts
 import { execSync as execSync2 } from "child_process";
-import { existsSync as existsSync9, readdirSync as readdirSync2, renameSync as renameSync2, statSync as statSync2 } from "fs";
+import { existsSync as existsSync9, readdirSync as readdirSync2, renameSync as renameSync2 } from "fs";
 import { dirname as dirname5 } from "path";
 function listSpecNames() {
   const root = specsDir();
@@ -2140,6 +2151,9 @@ function parseWaveMd(content) {
   }
   doc.notes = trimBlankLines(noteLines).join(`
 `);
+  if (doc.num === 0 || !doc.title) {
+    throw new Error("malformed wave-NN.md: missing or invalid '# Wave N: <title>' header");
+  }
   return doc;
 }
 function assignMeta(doc, key, value) {
@@ -2308,12 +2322,31 @@ function handleCompleteWave(args) {
   if (!existsSync10(wavePathStr)) {
     return errorResult(`wave-${pad2(waveNum)}.md not found; run /qult:wave-start first`);
   }
-  let waveDoc = parseWaveMd(readText(wavePathStr));
+  let waveDoc;
+  try {
+    waveDoc = parseWaveMd(readText(wavePathStr));
+  } catch (err) {
+    return errorResult(`wave-${pad2(waveNum)}.md is malformed: ${err.message}`);
+  }
+  if (waveDoc.num !== waveNum) {
+    return errorResult(`wave-${pad2(waveNum)}.md header reports Wave ${waveDoc.num}; refusing to mutate a corrupted file`);
+  }
   if (waveDoc.completedAt) {
     return jsonResult({
       ok: false,
       reason: "already_completed",
       completed_at: waveDoc.completedAt
+    });
+  }
+  const rangeMatch = /^([0-9a-f]{4,40})\.\.([0-9a-f]{4,40})$/.exec(commitRange);
+  const requestedStart = rangeMatch?.[1] ?? "";
+  const recordedStart = extractStartCommit(waveDoc.notes);
+  if (recordedStart && !shasEquivalent(recordedStart, requestedStart)) {
+    return jsonResult({
+      ok: false,
+      reason: "range_start_mismatch",
+      recorded_start: recordedStart,
+      requested_start: requestedStart
     });
   }
   const stale = [];
@@ -2323,13 +2356,19 @@ function handleCompleteWave(args) {
     const priorPath = wavePath(activeSpec.name, prior);
     if (!existsSync10(priorPath))
       continue;
-    const priorDoc = parseWaveMd(readText(priorPath));
+    let priorDoc;
+    try {
+      priorDoc = parseWaveMd(readText(priorPath));
+    } catch {
+      stale.push(`wave-${pad2(prior)} (malformed)`);
+      continue;
+    }
     if (!priorDoc.range)
       continue;
     const m = /^([0-9a-f]{4,40})\.\.([0-9a-f]{4,40})$/.exec(priorDoc.range);
     if (!m)
       continue;
-    if (!isCommitReachable(m[1]) || !isCommitReachable(m[2])) {
+    if (!isCommitReachable(m[1], projectRoot()) || !isCommitReachable(m[2], projectRoot())) {
       stale.push(`wave-${pad2(prior)}`);
     }
   }
@@ -2343,6 +2382,21 @@ function handleCompleteWave(args) {
   };
   atomicWrite(wavePathStr, writeWaveMd(waveDoc));
   return jsonResult({ ok: true, range: commitRange });
+}
+function extractStartCommit(notes) {
+  const m = /\*\*Start commit\*\*:\s*([0-9a-f]{4,40})/.exec(notes);
+  return m?.[1] ?? null;
+}
+function shasEquivalent(a, b) {
+  if (!a || !b)
+    return false;
+  const min = Math.min(a.length, b.length);
+  if (min < 4)
+    return false;
+  return a.slice(0, min).toLowerCase() === b.slice(0, min).toLowerCase();
+}
+function projectRoot() {
+  return getProjectRoot();
 }
 function handleUpdateTaskStatus(args) {
   let activeSpec;
@@ -2363,6 +2417,26 @@ function handleUpdateTaskStatus(args) {
   const tasksFile = tasksPath(activeSpec.name);
   if (!existsSync10(tasksFile))
     return errorResult("tasks.md not found");
+  const waveMatch = /^T(\d+)\./.exec(taskId);
+  if (waveMatch?.[1]) {
+    const taskWaveNum = Number.parseInt(waveMatch[1], 10);
+    if (Number.isInteger(taskWaveNum) && taskWaveNum >= 1 && taskWaveNum <= 99) {
+      const taskWavePath = wavePath(activeSpec.name, taskWaveNum);
+      if (existsSync10(taskWavePath)) {
+        try {
+          const taskWaveDoc = parseWaveMd(readText(taskWavePath));
+          if (taskWaveDoc.completedAt) {
+            return jsonResult({
+              ok: false,
+              reason: "wave_completed",
+              wave_num: taskWaveNum,
+              completed_at: taskWaveDoc.completedAt
+            });
+          }
+        } catch {}
+      }
+    }
+  }
   let updated;
   try {
     updated = setTaskStatus(readText(tasksFile), taskId, statusRaw);
@@ -2381,6 +2455,28 @@ function handleArchiveSpec(args) {
     name = requireSpecName(args);
   } catch (err) {
     return errorResult(err.message);
+  }
+  const force = args?.force === true;
+  if (!force) {
+    const pending = [];
+    try {
+      for (const num of listWaveNumbers(name)) {
+        const p = wavePath(name, num);
+        if (!existsSync10(p))
+          continue;
+        const doc = parseWaveMd(readText(p));
+        if (!doc.completedAt)
+          pending.push(`wave-${pad2(num)}`);
+      }
+    } catch {}
+    if (pending.length > 0) {
+      return jsonResult({
+        ok: false,
+        reason: "spec_not_finished",
+        pending_waves: pending,
+        hint: "pass { force: true } to archive anyway"
+      });
+    }
   }
   try {
     const dest = archiveSpec(name);
@@ -2415,13 +2511,28 @@ function handleRecordSpecEvaluatorScore(args) {
   if (typeof forced !== "boolean") {
     return errorResult("forced_progress must be a boolean");
   }
+  let activeName = null;
+  try {
+    activeName = getActiveSpec()?.name ?? null;
+  } catch {
+    activeName = null;
+  }
+  const cur = readStageScores();
+  if (activeName !== null && cur.spec_name !== activeName) {
+    resetSpecEval(activeName);
+  }
   const state = recordSpecEvalPhase(phase, {
     total,
     dim_scores: dimRecord,
     forced_progress: forced,
     iteration: iter
   });
-  return jsonResult({ ok: true, phase, recorded: state.spec_eval[phase] });
+  return jsonResult({
+    ok: true,
+    phase,
+    spec_name: activeName,
+    recorded: state.spec_eval[phase]
+  });
 }
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -2746,11 +2857,17 @@ function handleTool(name, cwd, args) {
     case "get_project_status": {
       const cur = readCurrent();
       const config = loadConfig();
-      let activeSpec = null;
+      let activeSpecBlock = null;
+      let activeSpecError = null;
       try {
-        activeSpec = getActiveSpec();
-      } catch {
-        activeSpec = null;
+        const r = handleGetActiveSpec();
+        if (r.isError) {
+          activeSpecError = r.content[0]?.text ?? "active spec error";
+        } else {
+          activeSpecBlock = JSON.parse(r.content[0]?.text ?? "null");
+        }
+      } catch (err) {
+        activeSpecError = err.message;
       }
       const enriched = {
         path: cwd,
@@ -2762,12 +2879,8 @@ function handleTool(name, cwd, args) {
         human_approval_at: cur.human_approval_at,
         review_models: config.review.models,
         review_config: config.review,
-        active_spec: activeSpec ? {
-          name: activeSpec.name,
-          has_requirements: activeSpec.hasRequirements,
-          has_design: activeSpec.hasDesign,
-          has_tasks: activeSpec.hasTasks
-        } : null
+        active_spec: activeSpecBlock,
+        active_spec_error: activeSpecError
       };
       return { content: [{ type: "text", text: JSON.stringify(enriched, null, 2) }] };
     }
@@ -2946,7 +3059,19 @@ function handleTool(name, cwd, args) {
         };
       }
       const resolvedHealth = resolve6(filePath);
-      if (!resolvedHealth.startsWith(`${cwd}/`)) {
+      let realHealth;
+      try {
+        realHealth = realpathSync2(resolvedHealth);
+      } catch {
+        realHealth = resolvedHealth;
+      }
+      let realCwd;
+      try {
+        realCwd = realpathSync2(cwd);
+      } catch {
+        realCwd = cwd;
+      }
+      if (realHealth !== realCwd && !realHealth.startsWith(`${realCwd}/`)) {
         return {
           content: [
             {
@@ -2996,6 +3121,17 @@ function handleTool(name, cwd, args) {
             {
               type: "text",
               text: "Cannot record approval: no review completed. Run /qult:review first."
+            }
+          ]
+        };
+      }
+      if (!cur.test_passed_at) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: "Cannot record approval: no test pass recorded. Run tests + record_test_pass first."
             }
           ]
         };
@@ -3113,26 +3249,34 @@ function handleRequest(parsed, cwd) {
           capabilities: { tools: {} },
           serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
           instructions: [
-            "qult is a quality aid for Claude. It provides workflow rules (at ~/.claude/rules/qult-*.md), independent reviewers, and Tier 1 detectors as MCP tools.",
+            "qult is a quality aid for Claude. It provides Spec-Driven Development orchestration, independent reviewers, and Tier 1 detectors as MCP tools, plus workflow rules at ~/.claude/rules/qult-*.md.",
             "",
-            "Run /qult:init once after installing qult to install workflow rules to ~/.claude/rules/.",
+            "Run /qult:init once per project to bootstrap .qult/ and install rules.",
             "",
-            "## Workflow",
-            "- Plan \u2192 Implement \u2192 Review \u2192 Finish",
-            "- For any non-trivial work: use /qult:plan-generator (do NOT use EnterPlanMode directly; it bypasses plan-evaluator).",
-            "- Track each plan task with TaskCreate; mark [done] as you complete them.",
-            "- For changes spanning 5+ files or any commit with an active plan: run /qult:review (4-stage independent review).",
-            "- After implementation completes: use /qult:finish for the structured completion checklist.",
+            "## Workflow: Spec \u2192 Wave \u2192 Review \u2192 Finish",
+            '- For any non-trivial work: /qult:spec <name> "<description>" \u2014 runs requirements \u2192 clarify \u2192 design \u2192 tasks with a spec-evaluator gate per phase. Never use EnterPlanMode for implementation work.',
+            "- Implement Wave by Wave: /qult:wave-start (records HEAD) \u2192 /qult:wip 'message' for intermediate WIP commits (auto-prefixes [wave-NN]) \u2192 /qult:wave-complete to test + run detectors + commit + record Range.",
+            "- At spec completion: /qult:review (4-stage independent review). Per-Wave automatic review is intentionally not run.",
+            "- Closing the spec: /qult:finish \u2014 archives .qult/specs/<name>/ to .qult/specs/archive/<name>/ and offers merge / PR / hold / discard.",
+            "- Trivial changes (\u22645 files, typo, lockfile bump): commit normally. /qult:status will surface a hint at 5+ files.",
+            "",
+            "## Spec / Wave MCP tools",
+            "- get_active_spec \u2014 current spec phase, current Wave, task summary.",
+            "- update_task_status \u2014 flip a task in tasks.md. Returns reason='task_not_found' on bad id (NEVER silent no-op).",
+            "- complete_wave \u2014 idempotent finalization; returns reason='already_completed' on retry, reason='sha_unreachable' when prior Wave Range SHAs were rebased away.",
+            "- record_spec_evaluator_score \u2014 record per-phase evaluator score (auto-resets spec_eval block on new spec).",
+            "- archive_spec \u2014 called by /qult:finish.",
             "",
             "## State recording (authoritative)",
             "- After running tests successfully: call record_test_pass with the test command.",
             "- At the end of /qult:review: record_review with the aggregate score.",
             "- During /qult:finish: record_finish_started.",
-            "- Before committing: call get_project_status to verify test/review gates.",
+            "- Before committing: call get_project_status to verify active_spec / test_passed_at / review_completed_at.",
             "",
             "## Tier 1 detectors (reviewer ground truth)",
             "- Before /qult:review: call get_detector_summary to collect detector findings (security, dep-vuln, hallucinated-package, test-quality, export-check).",
             "- Reviewers must NOT contradict detector findings \u2014 cross-validation will flag 'No issues found' when detectors reported problems.",
+            "- Severity \u2208 {high, critical} blocks /qult:wave-complete until cleared.",
             "",
             "## Human approval",
             "- If review.require_human_approval is enabled, call record_human_approval after the architect has reviewed and approved.",

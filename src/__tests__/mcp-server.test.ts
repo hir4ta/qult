@@ -175,7 +175,15 @@ describe("handleTool: record / write", () => {
 		expect(r.isError).toBe(true);
 	});
 
-	it("record_human_approval succeeds after record_review", () => {
+	it("record_human_approval rejects without test pass", () => {
+		handleTool("record_review", TEST_DIR, { aggregate_score: 30 });
+		const r = handleTool("record_human_approval", TEST_DIR);
+		expect(r.isError).toBe(true);
+		expect(r.content[0]!.text).toMatch(/test pass/);
+	});
+
+	it("record_human_approval succeeds after both record_test_pass and record_review", () => {
+		handleTool("record_test_pass", TEST_DIR, { command: "bun test" });
 		handleTool("record_review", TEST_DIR, { aggregate_score: 30 });
 		const r = handleTool("record_human_approval", TEST_DIR);
 		expect(r.isError).toBeFalsy();

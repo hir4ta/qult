@@ -12,8 +12,13 @@
 
 import { existsSync } from "node:fs";
 import { atomicWrite, readText } from "../state/fs.ts";
-import { recordSpecEvalPhase, type SpecEvalPhase } from "../state/json-state.ts";
-import { tasksPath, wavePath } from "../state/paths.ts";
+import {
+	readStageScores,
+	recordSpecEvalPhase,
+	resetSpecEval,
+	type SpecEvalPhase,
+} from "../state/json-state.ts";
+import { getProjectRoot, tasksPath, wavePath } from "../state/paths.ts";
 import {
 	archiveSpec as archiveSpecOnDisk,
 	getActiveSpec as getActiveSpecOnDisk,
@@ -104,12 +109,37 @@ export function handleCompleteWave(args: Record<string, unknown> | undefined): T
 		return errorResult(`wave-${pad(waveNum)}.md not found; run /qult:wave-start first`);
 	}
 
-	let waveDoc = parseWaveMd(readText(wavePathStr));
+	let waveDoc: ReturnType<typeof parseWaveMd>;
+	try {
+		waveDoc = parseWaveMd(readText(wavePathStr));
+	} catch (err) {
+		return errorResult(`wave-${pad(waveNum)}.md is malformed: ${(err as Error).message}`);
+	}
+	if (waveDoc.num !== waveNum) {
+		return errorResult(
+			`wave-${pad(waveNum)}.md header reports Wave ${waveDoc.num}; refusing to mutate a corrupted file`,
+		);
+	}
 	if (waveDoc.completedAt) {
 		return jsonResult({
 			ok: false,
 			reason: "already_completed",
 			completed_at: waveDoc.completedAt,
+		});
+	}
+
+	// Cross-check: the start SHA in commit_range must match the Start commit
+	// recorded by /qult:wave-start (in Notes), so an architect can't paste an
+	// arbitrary range that happens to be reachable.
+	const rangeMatch = /^([0-9a-f]{4,40})\.\.([0-9a-f]{4,40})$/.exec(commitRange);
+	const requestedStart = rangeMatch?.[1] ?? "";
+	const recordedStart = extractStartCommit(waveDoc.notes);
+	if (recordedStart && !shasEquivalent(recordedStart, requestedStart)) {
+		return jsonResult({
+			ok: false,
+			reason: "range_start_mismatch",
+			recorded_start: recordedStart,
+			requested_start: requestedStart,
 		});
 	}
 
@@ -119,11 +149,17 @@ export function handleCompleteWave(args: Record<string, unknown> | undefined): T
 		if (prior === waveNum) continue;
 		const priorPath = wavePath(activeSpec.name, prior);
 		if (!existsSync(priorPath)) continue;
-		const priorDoc = parseWaveMd(readText(priorPath));
+		let priorDoc: ReturnType<typeof parseWaveMd>;
+		try {
+			priorDoc = parseWaveMd(readText(priorPath));
+		} catch {
+			stale.push(`wave-${pad(prior)} (malformed)`);
+			continue;
+		}
 		if (!priorDoc.range) continue;
 		const m = /^([0-9a-f]{4,40})\.\.([0-9a-f]{4,40})$/.exec(priorDoc.range);
 		if (!m) continue;
-		if (!isCommitReachable(m[1]!) || !isCommitReachable(m[2]!)) {
+		if (!isCommitReachable(m[1]!, projectRoot()) || !isCommitReachable(m[2]!, projectRoot())) {
 			stale.push(`wave-${pad(prior)}`);
 		}
 	}
@@ -139,6 +175,22 @@ export function handleCompleteWave(args: Record<string, unknown> | undefined): T
 	};
 	atomicWrite(wavePathStr, writeWaveMd(waveDoc));
 	return jsonResult({ ok: true, range: commitRange });
+}
+
+function extractStartCommit(notes: string): string | null {
+	const m = /\*\*Start commit\*\*:\s*([0-9a-f]{4,40})/.exec(notes);
+	return m?.[1] ?? null;
+}
+
+function shasEquivalent(a: string, b: string): boolean {
+	if (!a || !b) return false;
+	const min = Math.min(a.length, b.length);
+	if (min < 4) return false;
+	return a.slice(0, min).toLowerCase() === b.slice(0, min).toLowerCase();
+}
+
+function projectRoot(): string {
+	return getProjectRoot();
 }
 
 // =====================================================================
@@ -163,6 +215,31 @@ export function handleUpdateTaskStatus(args: Record<string, unknown> | undefined
 	const tasksFile = tasksPath(activeSpec.name);
 	if (!existsSync(tasksFile)) return errorResult("tasks.md not found");
 
+	// Reject status flips on tasks belonging to an already-completed Wave —
+	// Range / wave-NN.md immutability is the basis for reviewer trust.
+	const waveMatch = /^T(\d+)\./.exec(taskId);
+	if (waveMatch?.[1]) {
+		const taskWaveNum = Number.parseInt(waveMatch[1], 10);
+		if (Number.isInteger(taskWaveNum) && taskWaveNum >= 1 && taskWaveNum <= 99) {
+			const taskWavePath = wavePath(activeSpec.name, taskWaveNum);
+			if (existsSync(taskWavePath)) {
+				try {
+					const taskWaveDoc = parseWaveMd(readText(taskWavePath));
+					if (taskWaveDoc.completedAt) {
+						return jsonResult({
+							ok: false,
+							reason: "wave_completed",
+							wave_num: taskWaveNum,
+							completed_at: taskWaveDoc.completedAt,
+						});
+					}
+				} catch {
+					// Treat malformed wave-NN.md as not-completed (architect can fix it manually).
+				}
+			}
+		}
+	}
+
 	let updated: string;
 	try {
 		updated = setTaskStatus(readText(tasksFile), taskId, statusRaw as TaskStatus);
@@ -186,6 +263,31 @@ export function handleArchiveSpec(args: Record<string, unknown> | undefined): To
 		name = requireSpecName(args);
 	} catch (err) {
 		return errorResult((err as Error).message);
+	}
+	const force = args?.force === true;
+	// Refuse to archive a spec with unfinished Waves unless explicitly forced.
+	// Without this guard a buggy/confused caller could silently archive an
+	// in-progress spec, leaving the architect with no active context.
+	if (!force) {
+		const pending: string[] = [];
+		try {
+			for (const num of listWaveNumbers(name)) {
+				const p = wavePath(name, num);
+				if (!existsSync(p)) continue;
+				const doc = parseWaveMd(readText(p));
+				if (!doc.completedAt) pending.push(`wave-${pad(num)}`);
+			}
+		} catch {
+			// If we can't read waves/, fall through and let archiveSpecOnDisk decide.
+		}
+		if (pending.length > 0) {
+			return jsonResult({
+				ok: false,
+				reason: "spec_not_finished",
+				pending_waves: pending,
+				hint: "pass { force: true } to archive anyway",
+			});
+		}
 	}
 	try {
 		const dest = archiveSpecOnDisk(name);
@@ -226,13 +328,30 @@ export function handleRecordSpecEvaluatorScore(
 	if (typeof forced !== "boolean") {
 		return errorResult("forced_progress must be a boolean");
 	}
+	// Auto-reset spec_eval when the active spec name has changed since the last
+	// recorded score, so the previous spec's scores never leak into a new spec.
+	let activeName: string | null = null;
+	try {
+		activeName = getActiveSpecOnDisk()?.name ?? null;
+	} catch {
+		activeName = null;
+	}
+	const cur = readStageScores();
+	if (activeName !== null && cur.spec_name !== activeName) {
+		resetSpecEval(activeName);
+	}
 	const state = recordSpecEvalPhase(phase as SpecEvalPhase, {
 		total,
 		dim_scores: dimRecord,
 		forced_progress: forced,
 		iteration: iter,
 	});
-	return jsonResult({ ok: true, phase, recorded: state.spec_eval[phase as SpecEvalPhase] });
+	return jsonResult({
+		ok: true,
+		phase,
+		spec_name: activeName,
+		recorded: state.spec_eval[phase as SpecEvalPhase],
+	});
 }
 
 // =====================================================================
@@ -251,7 +370,37 @@ export function initWaveFile(opts: {
 	verify: string;
 	scaffold?: boolean;
 	fixes?: number | null;
-}): string {
+	/** When true, overwrite an existing in-progress wave-NN.md instead of refusing. */
+	force?: boolean;
+}): { path: string; reused: boolean } {
+	const file = wavePathEnsured(opts.specName, opts.waveNum);
+	// If wave-NN.md already exists with `Started at` and no `Completed at`,
+	// refuse to overwrite — this would silently lose the recorded start commit
+	// and stale the eventual Range.
+	if (existsSync(file) && !opts.force) {
+		try {
+			const existing = parseWaveMd(readText(file));
+			if (existing.startedAt && !existing.completedAt) {
+				throw new Error(
+					`wave-${pad(opts.waveNum)}.md is already started (start: ${existing.startedAt}); ` +
+						`re-running /qult:wave-start would lose the recorded Start commit. ` +
+						`Pass force=true to overwrite, or use the existing wave file.`,
+				);
+			}
+			if (existing.completedAt) {
+				throw new Error(
+					`wave-${pad(opts.waveNum)}.md is already completed (range: ${existing.range ?? "?"}); ` +
+						`do not re-start a completed Wave.`,
+				);
+			}
+		} catch (err) {
+			if ((err as Error).message.startsWith("malformed wave-NN.md")) {
+				// Malformed: allow overwrite to recover.
+			} else {
+				throw err;
+			}
+		}
+	}
 	const head = gitHeadSha();
 	const now = new Date().toISOString();
 	const doc = newWaveDoc({
@@ -264,9 +413,8 @@ export function initWaveFile(opts: {
 		startedAt: now,
 	});
 	doc.notes = `**Start commit**: ${head}`;
-	const file = wavePathEnsured(opts.specName, opts.waveNum);
 	atomicWrite(file, writeWaveMd(doc));
-	return file;
+	return { path: file, reused: false };
 }
 
 function pad(n: number): string {
