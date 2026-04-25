@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { atomicWriteAt } from "../templates/fs.ts";
 import { assertConfinedToProject, type GenerationContext, type IntegrationBase } from "./base.ts";
 import { writeJsonMcpServer } from "./mcp-util.ts";
+import { buildSkillFile, descriptionFor } from "./skill-builder.ts";
 
 const MCP_KEY = "qult";
 
@@ -43,6 +44,7 @@ export const GeminiIntegration: IntegrationBase = {
 	},
 
 	async generateConfigFiles(ctx: GenerationContext) {
+		// 1. Native Gemini slash commands (TOML).
 		const cmdDir = join(ctx.projectRoot, ".gemini/commands");
 		assertConfinedToProject(cmdDir, ctx.projectRoot);
 		const srcCmdDir = join(ctx.templateRoot, "commands");
@@ -50,12 +52,26 @@ export const GeminiIntegration: IntegrationBase = {
 		for (const f of cmdFiles) {
 			const name = f.replace(/\.md$/, "");
 			const body = readFileSync(join(srcCmdDir, f), "utf8");
-			const description = `qult ${name} workflow command`;
-			const toml = `description = "${description}"\nprompt = """\n${tomlEscape(body)}\n"""\n`;
+			const description = descriptionFor(name);
+			const toml = `description = "${description.replace(/"/g, '\\"')}"\nprompt = """\n${tomlEscape(body)}\n"""\n`;
 			const dest = join(cmdDir, `qult-${name}.toml`);
 			assertConfinedToProject(dest, ctx.projectRoot);
 			atomicWriteAt(dest, toml);
 		}
+
+		// 2. Cross-tool skills (Gemini also reads `.gemini/skills/`; same SKILL.md
+		//    format as Claude/Cursor/Codex).
+		const skillsRoot = join(ctx.projectRoot, ".gemini/skills");
+		assertConfinedToProject(skillsRoot, ctx.projectRoot);
+		for (const f of cmdFiles) {
+			const name = f.replace(/\.md$/, "");
+			const body = readFileSync(join(srcCmdDir, f), "utf8");
+			const dest = join(skillsRoot, `qult-${name}`, "SKILL.md");
+			assertConfinedToProject(dest, ctx.projectRoot);
+			atomicWriteAt(dest, buildSkillFile(name, body));
+		}
+
+		// 3. GEMINI.md context file with `@AGENTS.md` import.
 		const geminiMdPath = join(ctx.projectRoot, "GEMINI.md");
 		if (!existsSync(geminiMdPath) || ctx.force) {
 			atomicWriteAt(geminiMdPath, GEMINI_MD_HEADER);
@@ -66,7 +82,7 @@ export const GeminiIntegration: IntegrationBase = {
 		writeJsonMcpServer(
 			join(ctx.projectRoot, ".gemini/settings.json"),
 			MCP_KEY,
-			{ type: "stdio", command: "npx", args: ["qult", "mcp"] },
+			{ type: "stdio", command: "npx", args: ["@hir4ta/qult", "mcp"] },
 			ctx.projectRoot,
 		);
 	},

@@ -69,7 +69,7 @@ describe("qult CLI", () => {
 		expect(existsSync(join(projectRoot, ".mcp.json"))).toBe(true);
 		expect(existsSync(join(projectRoot, "AGENTS.md"))).toBe(true);
 		expect(existsSync(join(projectRoot, "CLAUDE.md"))).toBe(true);
-		expect(existsSync(join(projectRoot, ".claude/commands/qult-spec.md"))).toBe(true);
+		expect(existsSync(join(projectRoot, ".claude/skills/qult-spec/SKILL.md"))).toBe(true);
 		expect(existsSync(join(projectRoot, ".qult/config.json"))).toBe(true);
 		const cfg = JSON.parse(readFileSync(join(projectRoot, ".qult/config.json"), "utf8"));
 		expect(cfg.integrations.enabled).toEqual(["claude"]);

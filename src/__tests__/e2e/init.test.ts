@@ -36,14 +36,18 @@ describe("e2e: init + MCP server", () => {
 		expect(existsSync(join(projectRoot, ".mcp.json"))).toBe(true);
 		expect(existsSync(join(projectRoot, "AGENTS.md"))).toBe(true);
 		expect(existsSync(join(projectRoot, "CLAUDE.md"))).toBe(true);
-		expect(existsSync(join(projectRoot, ".claude/commands/qult-spec.md"))).toBe(true);
-		expect(existsSync(join(projectRoot, ".claude/commands/qult-wave-start.md"))).toBe(true);
-		expect(existsSync(join(projectRoot, ".claude/commands/qult-wave-complete.md"))).toBe(true);
-		expect(existsSync(join(projectRoot, ".claude/commands/qult-review.md"))).toBe(true);
-		expect(existsSync(join(projectRoot, ".claude/commands/qult-finish.md"))).toBe(true);
+		expect(existsSync(join(projectRoot, ".claude/skills/qult-spec/SKILL.md"))).toBe(true);
+		expect(existsSync(join(projectRoot, ".claude/skills/qult-wave-start/SKILL.md"))).toBe(true);
+		expect(existsSync(join(projectRoot, ".claude/skills/qult-wave-complete/SKILL.md"))).toBe(true);
+		expect(existsSync(join(projectRoot, ".claude/skills/qult-review/SKILL.md"))).toBe(true);
+		expect(existsSync(join(projectRoot, ".claude/skills/qult-finish/SKILL.md"))).toBe(true);
 		expect(existsSync(join(projectRoot, ".qult/config.json"))).toBe(true);
 		const mcp = JSON.parse(readFileSync(join(projectRoot, ".mcp.json"), "utf8"));
-		expect(mcp.mcpServers.qult).toEqual({ type: "stdio", command: "npx", args: ["qult", "mcp"] });
+		expect(mcp.mcpServers.qult).toEqual({
+			type: "stdio",
+			command: "npx",
+			args: ["@hir4ta/qult", "mcp"],
+		});
 	});
 
 	it("MCP server responds to tools/list with 20 tools", async () => {

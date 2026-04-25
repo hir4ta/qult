@@ -34,8 +34,8 @@ state. The same workflow runs identically across **Claude Code**, **OpenAI Codex
 
 ```bash
 # In your project root
-npx qult init                # auto-detects which AI tools you use
-npx qult init --agent claude # or pick one explicitly
+npx @hir4ta/qult init                # auto-detects which AI tools you use
+npx @hir4ta/qult init --agent claude # or pick one explicitly
 ```
 
 After init, just talk to your AI tool — `/qult:spec`, `/qult:wave-start`,

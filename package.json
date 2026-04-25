@@ -1,6 +1,9 @@
 {
-  "name": "qult",
-  "version": "1.1.0",
+  "name": "@hir4ta/qult",
+  "version": "1.1.1",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Spec-Driven Development + harness engineering toolkit for Claude Code, Codex, Cursor, and Gemini CLI. Installs a workflow MCP server in one npx command.",
   "keywords": [
     "spec-driven-development",
@@ -31,7 +34,7 @@
     "node": ">=20"
   },
   "bin": {
-    "qult": "./dist/cli.js"
+    "qult": "dist/cli.js"
   },
   "exports": {
     ".": "./dist/cli.js",

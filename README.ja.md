@@ -27,8 +27,8 @@
 
 ```bash
 # プロジェクトルートで
-npx qult init                # 利用中の AI ツールを自動検出
-npx qult init --agent claude # 明示指定
+npx @hir4ta/qult init                # 利用中の AI ツールを自動検出
+npx @hir4ta/qult init --agent claude # 明示指定
 ```
 
 init 後は、AI ツールに `/qult:spec`・`/qult:wave-start`・`/qult:wave-complete`・`/qult:review`・`/qult:finish` のスラッシュコマンドが追加されます。

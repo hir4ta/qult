@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 describe("writeJsonMcpServer", () => {
-	const ENTRY = { type: "stdio", command: "npx", args: ["qult", "mcp"] };
+	const ENTRY = { type: "stdio", command: "npx", args: ["@hir4ta/qult", "mcp"] };
 
 	it("creates a new file when missing", () => {
 		const path = join(projectRoot, ".mcp.json");

@@ -1,67 +1,65 @@
 ---
 name: release
 description: Release qult. Version can be specified or auto-detected
-allowed-tools: Bash(bun *, git *, gh *), Read, Edit, Glob, Grep
+allowed-tools: Bash(npm *, npx *, git *, gh *), Read, Edit, Glob, Grep
 ---
 
-Release qult.
+Release qult to GitHub (tag + release notes) and prepare for npm publish.
+
+The skill stops just before `npm publish` because npm 2FA requires interactive
+input — the architect runs `! npm publish` themselves after the dry-run passes.
 
 ## Version Detection
 
 Arguments: `$ARGUMENTS`
 
-- If a version is specified (e.g., `0.1.0`, `v0.2.0`) → use it (strip `v` prefix)
+- If a version is specified (e.g., `0.1.0`, `v0.2.0`) → use it (strip `v` prefix).
 - If empty → auto-detect:
-  1. Get latest tag via `git describe --tags --abbrev=0`
-  2. Get commit list via `git log <latest-tag>..HEAD --oneline`
-  3. Analyze commit messages for semver bump:
-     - **minor bump** (0.1.x → 0.2.0): commits contain feature keywords (Add, feat, new feature, implement, etc.)
-     - **patch bump** (0.1.0 → 0.1.1): everything else (fix, refactor, improve, optimize, update, chore, test, etc.)
-  4. Show detected version and reasoning to user, get confirmation before proceeding
+  1. Get latest tag via `git describe --tags --abbrev=0`.
+  2. Get commit list via `git log <latest-tag>..HEAD --oneline`.
+  3. Decide the bump:
+     - **major** (X.0.0): any commit subject contains `!:` (Conventional Commits breaking marker), e.g. `chore!:`, `feat!:`, or `BREAKING CHANGE` in the body.
+     - **minor** (x.Y.0): at least one `feat:` / `feat(scope):` / "Add" / "implement" / "new feature".
+     - **patch** (x.y.Z): everything else (`fix`, `refactor`, `chore`, `docs`, `test`, etc.).
+  4. Show the detected version and reasoning to the architect; get confirmation before proceeding.
 
 ## Pre-checks
 
-1. Check working tree with `git status`
-2. If uncommitted changes exist → ask user whether to include in release commit
-3. If no changes and no commits since last tag → abort (nothing to release)
+1. `git status` must be clean. If uncommitted changes exist → ask the architect whether to include them in the release commit (separate commit before tagging).
+2. If no commits since the last tag → abort with "nothing to release".
+3. Verify `package.json` `version` field matches the target version. If not, update it (single file change, then commit `chore: bump version to v<VERSION>` before tagging).
 
 ## Validation Gate
 
-Run in order; **abort release if any fails**. Use the project's package.json scripts to ensure the correct Bun runtime:
+Run via npm scripts; abort release if any fails.
 
 ```
-bun run typecheck
-bun run lint
-bun run test
-bun run build
+npm run typecheck
+npm run lint
+npm test
+npm run build
 ```
-
-## Version Update
-
-Update `version` in these 2 files only:
-
-1. `plugin/.claude-plugin/plugin.json`
-2. `.claude-plugin/marketplace.json` (`plugins[0].version`)
-
-## Build
-
-```
-bun build.ts
-```
-
-Verify `plugin/dist/mcp-server.mjs` exists.
 
 ## Commit & Tag
 
-1. Stage: `git add plugin/.claude-plugin/ .claude-plugin/ plugin/dist/` (+ other files if agreed with user)
-2. Commit message: `v<VERSION>: <one-line summary of commits>` (in English)
-   - Generate summary from `git log <prev-tag>..HEAD --oneline`
-   - **NEVER add Co-Authored-By** (public repository)
-3. `git tag v<VERSION>`
+If the version field was just bumped, commit it first:
+
+```
+git add package.json package-lock.json
+git commit -m "chore: bump version to v<VERSION>"
+```
+
+Then tag (annotated tag with the same message format):
+
+```
+git tag v<VERSION>
+```
+
+Do NOT add Co-Authored-By (public repository).
 
 ## Push
 
-**NEVER use `--tags`** (pushes all local tags)
+NEVER use `--tags` (pushes all local tags).
 
 ```
 git push origin main
@@ -70,26 +68,50 @@ git push origin v<VERSION>
 
 ## CI Verification
 
-**Push 後、必ず CI の完了を確認する。CI が失敗した場合はリリース未完了として扱う。**
+Push 後、必ず CI の完了を確認する。CI が失敗した場合はリリース未完了として扱う。
 
-1. `gh run watch` で最新の CI run を監視（完了まで待機）
-2. CI が **success** → GitHub Release 作成に進む
-3. CI が **failure** → 以下を実施:
-   a. `gh run view <run-id> --log-failed` でエラー内容を確認
-   b. エラーを修正してコミット
-   c. **タグを打ち直す**: `git tag -d v<VERSION> && git push origin :refs/tags/v<VERSION>`
-   d. 修正コミット後に再タグ: `git tag v<VERSION> && git push origin main && git push origin v<VERSION>`
-   e. 再度 `gh run watch` で CI 成功を確認
-   f. 成功するまでこのループを繰り返す
+1. `gh run watch <run-id> --exit-status` で最新の CI run を監視（完了まで待機）。
+2. CI が **success** → GitHub Release 作成へ。
+3. CI が **failure** →
+   a. `gh run view <run-id> --log-failed` で原因確認。
+   b. 修正コミット。
+   c. タグを打ち直す: `git tag -d v<VERSION> && git push origin :refs/tags/v<VERSION>`。
+   d. 修正後に再タグ: `git tag v<VERSION> && git push origin main && git push origin v<VERSION>`。
+   e. 成功するまで繰り返す。
 
-## Create Release
+## Create GitHub Release
 
-CI 成功を確認した後のみ実行:
+CI 成功確認後のみ:
 
 ```
 gh release create v<VERSION> --generate-notes
 gh release view v<VERSION>
 ```
+
+## npm publish — dry-run only
+
+This skill **does not invoke `npm publish`** because it requires 2FA OTP input.
+After GitHub release succeeds, run the dry-run gate:
+
+```
+npm publish --dry-run
+```
+
+The `prepublishOnly` script (in `package.json`) runs typecheck/lint/test/build
+again as a final guard.
+
+- If dry-run **succeeds**, output:
+
+  ```
+  ✅ npm dry-run OK — package contents look good.
+  
+  Run this yourself to actually publish:
+    ! npm publish
+  
+  (npm 2FA OTP input is required interactively; this skill does not run it.)
+  ```
+
+- If dry-run **fails**, surface the npm error verbatim and stop. Do NOT instruct the architect to publish.
 
 ## Completion Report
 
@@ -98,4 +120,5 @@ gh release view v<VERSION>
 | Version | v<VERSION> |
 | Commit | <hash> |
 | CI | PASSED |
-| Release URL | https://github.com/hir4ta/qult/releases/tag/v<VERSION> |
+| GitHub Release | https://github.com/hir4ta/qult/releases/tag/v<VERSION> |
+| npm dry-run | PASSED — architect to run `! npm publish` |

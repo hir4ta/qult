@@ -1,6 +1,11 @@
 /**
- * Claude Code integration: writes `.claude/commands/*.md`, `CLAUDE.md`,
- * and registers the qult MCP server in `.mcp.json`.
+ * Claude Code integration: writes `.claude/skills/qult-<cmd>/SKILL.md`
+ * (Agent Skills format with frontmatter), `CLAUDE.md`, and registers the
+ * qult MCP server in `.mcp.json`.
+ *
+ * Skills are the modern Claude Code mechanism (replacing `.claude/commands/`).
+ * Each skill lives in its own directory with a frontmatter-bearing SKILL.md
+ * so Claude can auto-invoke based on the description.
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -8,6 +13,7 @@ import { join } from "node:path";
 import { atomicWriteAt } from "../templates/fs.ts";
 import { assertConfinedToProject, type GenerationContext, type IntegrationBase } from "./base.ts";
 import { writeJsonMcpServer } from "./mcp-util.ts";
+import { buildSkillFile } from "./skill-builder.ts";
 
 const MCP_KEY = "qult";
 
@@ -52,15 +58,16 @@ export const ClaudeIntegration: IntegrationBase = {
 	},
 
 	async generateConfigFiles(ctx: GenerationContext) {
-		const cmdDir = join(ctx.projectRoot, ".claude/commands");
-		assertConfinedToProject(cmdDir, ctx.projectRoot);
+		const skillsRoot = join(ctx.projectRoot, ".claude/skills");
+		assertConfinedToProject(skillsRoot, ctx.projectRoot);
 		const srcCmdDir = join(ctx.templateRoot, "commands");
 		const cmdFiles = readdirSync(srcCmdDir).filter((f) => f.endsWith(".md"));
 		for (const f of cmdFiles) {
-			const src = join(srcCmdDir, f);
-			const dest = join(cmdDir, `qult-${f}`);
+			const name = f.replace(/\.md$/, "");
+			const body = readFileSync(join(srcCmdDir, f), "utf8");
+			const dest = join(skillsRoot, `qult-${name}`, "SKILL.md");
 			assertConfinedToProject(dest, ctx.projectRoot);
-			atomicWriteAt(dest, readFileSync(src, "utf8"));
+			atomicWriteAt(dest, buildSkillFile(name, body));
 		}
 		const claudeMdPath = join(ctx.projectRoot, "CLAUDE.md");
 		if (!existsSync(claudeMdPath) || ctx.force) {
@@ -72,7 +79,7 @@ export const ClaudeIntegration: IntegrationBase = {
 		writeJsonMcpServer(
 			join(ctx.projectRoot, ".mcp.json"),
 			MCP_KEY,
-			{ type: "stdio", command: "npx", args: ["qult", "mcp"] },
+			{ type: "stdio", command: "npx", args: ["@hir4ta/qult", "mcp"] },
 			ctx.projectRoot,
 		);
 	},
