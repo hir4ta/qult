@@ -68,7 +68,7 @@
 **Goal**: CLAUDE.md・plugin manifest を v1.0 に更新し、sdd-rewrite spec 自身をドッグフードして e2e 動作確認する。
 **Verify**: `bun run typecheck && bun run lint && bun run test && bun run build` 全 pass。CLAUDE.md / plugin.json / marketplace.json が `1.0.0`。`/qult:status` が active spec=sdd-rewrite を返し、`/qult:status archive` でアーカイブ後に sdd-rewrite が表示される。
 
-- [ ] T6.1: `CLAUDE.md`（プロジェクトルート）を更新。Rules（5 ファイル名変更）、MCP server tool 一覧（20 tool、domain グルーピング）、Reviewer モデル表（spec-evaluator）、TDD（spec の `Verify:` フィールド）、Out of Scope（worktree 並列、O_NOFOLLOW 等）の各セクションを書き換え。
-- [ ] T6.2: `plugin/.claude-plugin/plugin.json` と `.claude-plugin/marketplace.json` のバージョンを `1.0.0` に bump。description / changelog があれば更新。
-- [ ] T6.3: 統合テスト（temp プロジェクトで `/qult:init` → `/qult:spec` → mock clarify 回答 → wave-start → wave-complete × 1 → finish）の e2e テストを追加（CI 自動実行可能な範囲）。本タスクの Verify は CI で完結し、T6.4 の対話ステップとは分離する。
-- [ ] T6.4: 自身（sdd-rewrite spec）の全 Wave 完了後、`/qult:review` で 4-stage review を**手動実施**（このステップは CI ゲートではなく architect の最終受入確認）。pass を確認し、`/qult:finish` で archive 移動、`bun run build` で成果物が安定して生成されることを最終確認、Wave 6 完了。
+- [x] T6.1: `CLAUDE.md`（プロジェクトルート）を更新。Rules（5 ファイル名変更）、MCP server tool 一覧（20 tool、domain グルーピング）、Reviewer モデル表（spec-evaluator）、TDD（spec の `Verify:` フィールド）、Out of Scope（worktree 並列、O_NOFOLLOW 等）の各セクションを書き換え。
+- [x] T6.2: `plugin/.claude-plugin/plugin.json` と `.claude-plugin/marketplace.json` のバージョンを `1.0.0` に bump。description / changelog があれば更新。
+- [x] T6.3: 統合テスト（temp プロジェクトで `/qult:init` → `/qult:spec` → mock clarify 回答 → wave-start → wave-complete × 1 → finish）の e2e テストを追加（CI 自動実行可能な範囲）。本タスクの Verify は CI で完結し、T6.4 の対話ステップとは分離する。
+- [x] T6.4: 自身（sdd-rewrite spec）の全 Wave 完了後、`/qult:review` で 4-stage review を**手動実施**（このステップは CI ゲートではなく architect の最終受入確認）。pass を確認し、`/qult:finish` で archive 移動、`bun run build` で成果物が安定して生成されることを最終確認、Wave 6 完了。
