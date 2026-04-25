@@ -12,9 +12,9 @@ const VERSION = typeof __QULT_VERSION__ !== "undefined" ? __QULT_VERSION__ : "0.
 
 export async function runDashboard(): Promise<number> {
 	if (!process.stdout.isTTY) {
-		process.stdout.write(
-			`qult dashboard ${VERSION}: stdout is not a TTY — interactive UI disabled.\n`,
-		);
+		const { printPlainSnapshot } = await import("./plain-snapshot.ts");
+		process.stdout.write(`qult dashboard ${VERSION} (non-TTY)\n`);
+		printPlainSnapshot();
 		return 0;
 	}
 

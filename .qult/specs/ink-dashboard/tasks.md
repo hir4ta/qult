@@ -92,15 +92,15 @@
 - watcher が壊れた JSON を読んだ際に Alert が出るが、UI は維持される
 
 **Tasks**:
-- [ ] 4.1 `src/dashboard/hooks/useTerminalSize.ts`: `useStdout` + resize listener、debounce 100ms
-- [ ] 4.2 hysteresis: `±2 cols` 以内では tier を切り替えないラッパ実装
-- [ ] 4.3 `App.tsx` を `tier` に応じて `flexDirection` / `flexBasis` / EventLog `maxLines` を切り替え
-- [ ] 4.4 narrow tier では Recent Events を折りたたみ、tab/key で展開できるようにする (もしくは 3 行のみ)
-- [ ] 4.5 `printPlainSnapshot()` を実装し、非 TTY 時の出力を整える (active spec / wave / detectors / reviews を 1 画面分)
-- [ ] 4.6 watcher のエラーを `errors[]` に push、Alert で 1 行表示するコンポーネント `<ErrorBanner>`
-- [ ] 4.7 1 秒 tick で経過時間更新 (`setInterval` を hook 化、unmount で clear)
-- [ ] 4.8 e2e テスト: 仮想 TTY でリサイズイベントを発火 → tier 切り替えが反映するか
-- [ ] 4.9 cold start ベンチ: `qult check` を Wave 0 (現状) と Wave 4 後で比較し、悪化が 100ms 以内であることを記録
+- [x] 4.1 `src/dashboard/hooks/useTerminalSize.ts`: `useStdout` + resize listener、debounce 100ms
+- [x] 4.2 hysteresis: `±2 cols` 以内では tier を切り替えないラッパ実装
+- [x] 4.3 `App.tsx` を `tier` に応じて `flexDirection` / `flexBasis` / EventLog `maxLines` を切り替え
+- [x] 4.4 narrow tier では Recent Events を折りたたみ、tab/key で展開できるようにする (もしくは 3 行のみ)
+- [x] 4.5 `printPlainSnapshot()` を実装し、非 TTY 時の出力を整える (active spec / wave / detectors / reviews を 1 画面分)
+- [x] 4.6 watcher のエラーを `errors[]` に push、Alert で 1 行表示するコンポーネント `<ErrorBanner>`
+- [x] 4.7 1 秒 tick で経過時間更新 (`setInterval` を hook 化、unmount で clear)
+- [x] 4.8 e2e テスト: 仮想 TTY でリサイズイベントを発火 → tier 切り替えが反映するか
+- [x] 4.9 cold start ベンチ: `qult check` を Wave 0 (現状) と Wave 4 後で比較し、悪化が 100ms 以内であることを記録
 
 **Consumers**: Wave 5
 

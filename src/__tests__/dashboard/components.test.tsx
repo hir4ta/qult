@@ -122,8 +122,7 @@ describe("ReviewPanel", () => {
 
 describe("EventLog", () => {
 	it("renders an idle hint when empty", () => {
-		const frame =
-			render(<EventLog events={[]} maxLines={5} />).lastFrame() ?? "";
+		const frame = render(<EventLog events={[]} maxLines={5} />).lastFrame() ?? "";
 		expect(frame).toContain("idle");
 	});
 

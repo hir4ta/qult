@@ -13,9 +13,9 @@
 **Completed at**: 2026-04-25T17:27:00Z
 
 ## Commits
-(filled after commit)
+- f191ced [wave-03] feat(dashboard): rich Ink UI with Header, Wave/Detector/Review panels, EventLog
 
-**Range**:
+**Range**: 2cb3801..f191ced
 
 ## Notes
 **Start commit**: 2cb38018a239db97e09ca585196658b5ae4a2e6c
