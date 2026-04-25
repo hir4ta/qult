@@ -21,7 +21,7 @@ export default defineConfig([
 		},
 	},
 	{
-		entry: { "mcp-server": "src/mcp-server.ts" },
+		entry: { "mcp-server": "src/mcp/server.ts" },
 		format: ["esm"],
 		outDir: "dist",
 		bundle: true,

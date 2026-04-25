@@ -10,8 +10,8 @@ import {
 	handleRecordSpecEvaluatorScore,
 	handleUpdateTaskStatus,
 	initWaveFile,
-} from "../mcp-tools/spec-tools.ts";
-import { setProjectRoot, wavePath } from "../state/paths.ts";
+} from "../../mcp/tools/spec-tools.ts";
+import { setProjectRoot, wavePath } from "../../state/paths.ts";
 
 let tmpRoot: string;
 

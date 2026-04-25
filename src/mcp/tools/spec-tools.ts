@@ -11,14 +11,14 @@
  */
 
 import { existsSync } from "node:fs";
-import { atomicWrite, readText } from "../state/fs.ts";
+import { atomicWrite, readText } from "../../state/fs.ts";
 import {
 	readStageScores,
 	recordSpecEvalPhase,
 	resetSpecEval,
 	type SpecEvalPhase,
-} from "../state/json-state.ts";
-import { getProjectRoot, tasksPath, wavePath } from "../state/paths.ts";
+} from "../../state/json-state.ts";
+import { getProjectRoot, tasksPath, wavePath } from "../../state/paths.ts";
 import {
 	archiveSpec as archiveSpecOnDisk,
 	getActiveSpec as getActiveSpecOnDisk,
@@ -26,15 +26,15 @@ import {
 	isCommitReachable,
 	listWaveNumbers,
 	wavePathEnsured,
-} from "../state/spec.ts";
+} from "../../state/spec.ts";
 import {
 	findNextIncompleteWave,
 	parseTasksMd,
 	setTaskStatus,
 	summarizeTaskStatus,
 	type TaskStatus,
-} from "../state/tasks-md.ts";
-import { newWaveDoc, parseWaveMd, writeWaveMd } from "../state/wave-md.ts";
+} from "../../state/tasks-md.ts";
+import { newWaveDoc, parseWaveMd, writeWaveMd } from "../../state/wave-md.ts";
 import {
 	errorResult,
 	jsonResult,

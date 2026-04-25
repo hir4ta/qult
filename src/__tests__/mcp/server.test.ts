@@ -3,17 +3,17 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resetConfigCache } from "../config.ts";
-import { handleRequest, handleTool, TOOL_DEFS } from "../mcp-server.ts";
-import { readAuditLog } from "../state/audit-log.ts";
-import { listDisabledGateNames } from "../state/gate-state.ts";
+import { resetConfigCache } from "../../config.ts";
+import { handleRequest, handleTool, TOOL_DEFS } from "../../mcp/server.ts";
+import { readAuditLog } from "../../state/audit-log.ts";
+import { listDisabledGateNames } from "../../state/gate-state.ts";
 import {
 	appendPendingFix,
 	readCurrent,
 	readPendingFixes,
 	readStageScores,
-} from "../state/json-state.ts";
-import { setProjectRoot } from "../state/paths.ts";
+} from "../../state/json-state.ts";
+import { setProjectRoot } from "../../state/paths.ts";
 
 let TEST_DIR: string;
 const originalCwd = process.cwd();
@@ -232,7 +232,7 @@ describe("handleTool: gate state", () => {
 	});
 
 	it("disable_gate rejects when 2 gates already disabled", async () => {
-		const { disableGate } = await import("../state/gate-state.ts");
+		const { disableGate } = await import("../../state/gate-state.ts");
 		disableGate("review", "first reason here");
 		disableGate("security-check", "second reason here");
 		const r = handleTool("disable_gate", TEST_DIR, {
@@ -252,7 +252,7 @@ describe("handleTool: gate state", () => {
 	});
 
 	it("enable_gate removes gate from disabled state", async () => {
-		const { disableGate } = await import("../state/gate-state.ts");
+		const { disableGate } = await import("../../state/gate-state.ts");
 		disableGate("lint", "test reason here");
 		handleTool("enable_gate", TEST_DIR, { gate_name: "lint" });
 		expect(listDisabledGateNames()).not.toContain("lint");

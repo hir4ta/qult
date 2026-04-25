@@ -9,55 +9,36 @@
  * to eliminate the 660KB SDK dependency and reduce coupling to SDK releases.
  */
 
-import { realpathSync } from "node:fs";
-import { resolve } from "node:path";
 import { createInterface } from "node:readline";
-import { loadConfig, resetConfigCache, setConfigKey } from "./config.ts";
-import { computeFileHealthScore } from "./detector/health-score.ts";
-import { findImporters } from "./detector/import-graph.ts";
-import { validateTestCoversImpl } from "./detector/spec-trace-check.ts";
+import { setProjectRoot } from "../state/paths.ts";
+import {
+	handleClearPendingFixes,
+	handleGetCallCoverage,
+	handleGetDetectorSummary,
+	handleGetFileHealthScore,
+	handleGetImpactAnalysis,
+	handleGetPendingFixes,
+} from "./tools/detector-tools.ts";
+import { handleDisableGate, handleEnableGate, handleSetConfig } from "./tools/gate-tools.ts";
 import {
 	handleArchiveSpec,
 	handleCompleteWave,
 	handleGetActiveSpec,
 	handleRecordSpecEvaluatorScore,
 	handleUpdateTaskStatus,
-} from "./mcp-tools/spec-tools.ts";
-import { appendAuditLog } from "./state/audit-log.ts";
+} from "./tools/spec-tools.ts";
 import {
-	disableGate as disableGateFs,
-	enableGate as enableGateFs,
-	listDisabledGateNames,
-} from "./state/gate-state.ts";
-import {
-	clearPendingFixes as clearPendingFixesFs,
-	patchCurrent,
-	readCurrent,
-	readPendingFixes as readPendingFixesFs,
-	recordReviewStage,
-} from "./state/json-state.ts";
-import { setProjectRoot } from "./state/paths.ts";
+	handleGetProjectStatus,
+	handleRecordFinishStarted,
+	handleRecordHumanApproval,
+	handleRecordReview,
+	handleRecordStageScores,
+	handleRecordTestPass,
+} from "./tools/state-tools.ts";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_NAME = "qult";
 const SERVER_VERSION = "1.0.0";
-
-/** Resolve the current session for MCP operations. Uses latest session for this project. */
-
-// ── Gate name validation (for disable_gate / enable_gate on detectors) ─
-
-const VALID_DETECTOR_GATES = [
-	"review",
-	"security-check",
-	"semgrep-required",
-	"test-quality-check",
-	"dep-vuln-check",
-	"hallucinated-package-check",
-];
-
-function isValidGateName(name: string): boolean {
-	return VALID_DETECTOR_GATES.includes(name);
-}
 
 // ── Tool definitions ────────────────────────────────────────
 
@@ -340,426 +321,51 @@ const TOOL_DEFS: ToolDef[] = [
 
 function handleTool(name: string, cwd: string, args?: Record<string, unknown>): ToolResult {
 	setProjectRoot(cwd);
-
 	switch (name) {
+		// Spec
 		case "get_active_spec":
 			return handleGetActiveSpec();
 		case "complete_wave":
 			return handleCompleteWave(args);
 		case "update_task_status":
 			return handleUpdateTaskStatus(args);
-		case "record_spec_evaluator_score":
-			return handleRecordSpecEvaluatorScore(args);
 		case "archive_spec":
 			return handleArchiveSpec(args);
-		case "get_pending_fixes": {
-			const state = readPendingFixesFs();
-			if (state.fixes.length === 0) {
-				return { content: [{ type: "text", text: "No pending fixes." }] };
-			}
-			const lines: string[] = [`${state.fixes.length} pending fix(es):\n`];
-			for (const fix of state.fixes) {
-				lines.push(
-					`[${fix.detector}] (${fix.severity}) ${fix.file}${fix.line ? `:${fix.line}` : ""}`,
-				);
-				lines.push(`  ${fix.message}`);
-			}
-			return { content: [{ type: "text", text: lines.join("\n") }] };
-		}
-		case "get_project_status": {
-			const cur = readCurrent();
-			const config = loadConfig();
-			// Reuse the same shape produced by handleGetActiveSpec so consumers
-			// of get_project_status see total_waves / current_wave / task_summary.
-			let activeSpecBlock: unknown = null;
-			let activeSpecError: string | null = null;
-			try {
-				const r = handleGetActiveSpec();
-				if (r.isError) {
-					activeSpecError = r.content[0]?.text ?? "active spec error";
-				} else {
-					activeSpecBlock = JSON.parse(r.content[0]?.text ?? "null");
-				}
-			} catch (err) {
-				activeSpecError = (err as Error).message;
-			}
-			const enriched = {
-				path: cwd,
-				test_passed_at: cur.test_passed_at,
-				test_command: cur.test_command,
-				review_completed_at: cur.review_completed_at,
-				review_score: cur.review_score,
-				finish_started_at: cur.finish_started_at,
-				human_approval_at: cur.human_approval_at,
-				review_models: config.review.models,
-				review_config: config.review,
-				active_spec: activeSpecBlock,
-				active_spec_error: activeSpecError,
-			};
-			return { content: [{ type: "text", text: JSON.stringify(enriched, null, 2) }] };
-		}
-		case "disable_gate": {
-			const gateName = typeof args?.gate_name === "string" ? args.gate_name : null;
-			const reason = typeof args?.reason === "string" ? args.reason : null;
-			if (!gateName) {
-				return { isError: true, content: [{ type: "text", text: "Missing gate_name parameter." }] };
-			}
-			if (!reason || reason.length < 10 || new Set(reason).size < 5) {
-				return {
-					isError: true,
-					content: [
-						{ type: "text", text: "Missing or insufficient reason (min 10 chars, min 5 unique)." },
-					],
-				};
-			}
-			if (!isValidGateName(gateName)) {
-				return {
-					isError: true,
-					content: [
-						{
-							type: "text",
-							text: `Unknown gate '${gateName}'. Valid: ${VALID_DETECTOR_GATES.join(", ")}`,
-						},
-					],
-				};
-			}
-			const disabledNames = listDisabledGateNames();
-			if (!disabledNames.includes(gateName) && disabledNames.length >= 2) {
-				return {
-					isError: true,
-					content: [
-						{
-							type: "text",
-							text: `Maximum 2 gates disabled. Currently: ${disabledNames.join(", ")}`,
-						},
-					],
-				};
-			}
-			disableGateFs(gateName, reason);
-			appendAuditLog({
-				action: "disable_gate",
-				reason,
-				gate_name: gateName,
-				timestamp: new Date().toISOString(),
-			});
-			return { content: [{ type: "text", text: `Gate '${gateName}' disabled for this session.` }] };
-		}
-		case "enable_gate": {
-			const gateName = typeof args?.gate_name === "string" ? args.gate_name : null;
-			if (!gateName) {
-				return { isError: true, content: [{ type: "text", text: "Missing gate_name parameter." }] };
-			}
-			enableGateFs(gateName);
-			return { content: [{ type: "text", text: `Gate '${gateName}' re-enabled.` }] };
-		}
-		case "set_config": {
-			const key = typeof args?.key === "string" ? args.key : null;
-			const rawValue = args?.value;
-			const value =
-				typeof rawValue === "number"
-					? rawValue
-					: typeof rawValue === "string"
-						? rawValue
-						: typeof rawValue === "boolean"
-							? rawValue
-							: null;
-			if (!key || value === null) {
-				return {
-					isError: true,
-					content: [{ type: "text", text: "Missing key or value parameter." }],
-				};
-			}
-			const ALLOWED_NUMBER_KEYS = [
-				"review.score_threshold",
-				"review.max_iterations",
-				"review.required_changed_files",
-				"review.dimension_floor",
-				"plan_eval.score_threshold",
-				"plan_eval.max_iterations",
-			];
-			const ALLOWED_MODEL_KEYS = [
-				"review.models.spec",
-				"review.models.quality",
-				"review.models.security",
-				"review.models.adversarial",
-				"plan_eval.models.generator",
-				"plan_eval.models.evaluator",
-			];
-			const ALLOWED_BOOLEAN_KEYS = ["review.require_human_approval", "review.low_only_passes"];
-			const ALL_ALLOWED = [...ALLOWED_NUMBER_KEYS, ...ALLOWED_MODEL_KEYS, ...ALLOWED_BOOLEAN_KEYS];
-			if (!ALL_ALLOWED.includes(key)) {
-				return {
-					isError: true,
-					content: [{ type: "text", text: `Invalid key. Allowed: ${ALL_ALLOWED.join(", ")}` }],
-				};
-			}
-			if (ALLOWED_NUMBER_KEYS.includes(key) && typeof value !== "number") {
-				return {
-					isError: true,
-					content: [{ type: "text", text: `Key '${key}' requires a number value.` }],
-				};
-			}
-			if (ALLOWED_MODEL_KEYS.includes(key)) {
-				const VALID_MODELS = ["sonnet", "opus", "haiku", "inherit"];
-				if (typeof value !== "string" || !VALID_MODELS.includes(value)) {
-					return {
-						isError: true,
-						content: [{ type: "text", text: `Model must be one of: ${VALID_MODELS.join(", ")}` }],
-					};
-				}
-			}
-			if (ALLOWED_BOOLEAN_KEYS.includes(key) && typeof value !== "boolean") {
-				return {
-					isError: true,
-					content: [{ type: "text", text: `Key '${key}' requires a boolean value.` }],
-				};
-			}
-			if (
-				key === "review.dimension_floor" &&
-				typeof value === "number" &&
-				(value < 1 || value > 5)
-			) {
-				return { isError: true, content: [{ type: "text", text: "dimension_floor must be 1-5." }] };
-			}
-			setConfigKey(key, value);
-			resetConfigCache();
-			return { content: [{ type: "text", text: `Config set: ${key} = ${value}` }] };
-		}
-		case "clear_pending_fixes": {
-			const reason = typeof args?.reason === "string" ? args.reason : null;
-			if (!reason || reason.length < 10 || new Set(reason).size < 5) {
-				return {
-					isError: true,
-					content: [
-						{ type: "text", text: "Missing or insufficient reason (min 10 chars, min 5 unique)." },
-					],
-				};
-			}
-			clearPendingFixesFs();
-			appendAuditLog({
-				action: "clear_pending_fixes",
-				reason,
-				timestamp: new Date().toISOString(),
-			});
-			return { content: [{ type: "text", text: "All pending fixes cleared." }] };
-		}
-		case "get_detector_summary": {
-			const state = readPendingFixesFs();
-			const lines: string[] = [];
-
-			if (state.fixes.length > 0) {
-				const byDetector: Record<string, typeof state.fixes> = {};
-				for (const fix of state.fixes) {
-					const d = fix.detector || "unknown";
-					if (!byDetector[d]) byDetector[d] = [];
-					byDetector[d].push(fix);
-				}
-				for (const [detector, fixes] of Object.entries(byDetector)) {
-					lines.push(`\n[${detector}] ${fixes.length} issue(s):`);
-					for (const fix of fixes) {
-						const relPath = fix.file.startsWith(`${cwd}/`)
-							? fix.file.slice(cwd.length + 1)
-							: fix.file;
-						const loc = fix.line ? `:${fix.line}` : "";
-						lines.push(`  (${fix.severity}) ${relPath}${loc}`);
-						lines.push(`    ${fix.message.slice(0, 200)}`);
-					}
-				}
-			}
-
-			if (lines.length === 0) {
-				return { content: [{ type: "text", text: "No detector findings." }] };
-			}
-			return { content: [{ type: "text", text: lines.join("\n") }] };
-		}
-		case "get_file_health_score": {
-			const filePath = typeof args?.file_path === "string" ? args.file_path : "";
-			if (!filePath) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({ score: 10, breakdown: {}, error: "file_path required" }),
-						},
-					],
-				};
-			}
-			const resolvedHealth = resolve(filePath);
-			// Use realpath to follow symlinks so a symlink under cwd that points outside
-			// the project root cannot escape the boundary.
-			let realHealth: string;
-			try {
-				realHealth = realpathSync(resolvedHealth);
-			} catch {
-				realHealth = resolvedHealth;
-			}
-			let realCwd: string;
-			try {
-				realCwd = realpathSync(cwd);
-			} catch {
-				realCwd = cwd;
-			}
-			if (realHealth !== realCwd && !realHealth.startsWith(`${realCwd}/`)) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({
-								score: 10,
-								breakdown: {},
-								error: "file_path must be within project directory",
-							}),
-						},
-					],
-				};
-			}
-			try {
-				const result = computeFileHealthScore(resolvedHealth);
-				return { content: [{ type: "text", text: JSON.stringify(result) }] };
-			} catch {
-				return { content: [{ type: "text", text: JSON.stringify({ score: 10, breakdown: {} }) }] };
-			}
-		}
-		case "record_review": {
-			const score = typeof args?.aggregate_score === "number" ? args.aggregate_score : null;
-			patchCurrent({
-				review_completed_at: new Date().toISOString(),
-				review_score: score,
-			});
-			const msg = score !== null ? `Review recorded (aggregate: ${score}).` : "Review recorded.";
-			return { content: [{ type: "text", text: msg }] };
-		}
-		case "record_test_pass": {
-			const cmd = typeof args?.command === "string" ? args.command : null;
-			if (!cmd) {
-				return { isError: true, content: [{ type: "text", text: "Missing command parameter." }] };
-			}
-			patchCurrent({
-				test_passed_at: new Date().toISOString(),
-				test_command: cmd,
-			});
-			return { content: [{ type: "text", text: `Test pass recorded: ${cmd}` }] };
-		}
-		case "record_human_approval": {
-			const cur = readCurrent();
-			if (!cur.review_completed_at) {
-				return {
-					isError: true,
-					content: [
-						{
-							type: "text",
-							text: "Cannot record approval: no review completed. Run /qult:review first.",
-						},
-					],
-				};
-			}
-			if (!cur.test_passed_at) {
-				return {
-					isError: true,
-					content: [
-						{
-							type: "text",
-							text: "Cannot record approval: no test pass recorded. Run tests + record_test_pass first.",
-						},
-					],
-				};
-			}
-			patchCurrent({ human_approval_at: new Date().toISOString() });
-			appendAuditLog({
-				action: "record_human_approval",
-				reason: "Architect approved changes",
-				timestamp: new Date().toISOString(),
-			});
-			return { content: [{ type: "text", text: "Human approval recorded." }] };
-		}
-		case "record_stage_scores": {
-			const stage = typeof args?.stage === "string" ? args.stage : null;
-			const scores = args?.scores;
-			if (!stage || !scores || typeof scores !== "object") {
-				return {
-					isError: true,
-					content: [{ type: "text", text: "Missing stage or scores parameter." }],
-				};
-			}
-			const validStages = ["Spec", "Quality", "Security", "Adversarial"] as const;
-			if (!validStages.includes(stage as (typeof validStages)[number])) {
-				return {
-					isError: true,
-					content: [{ type: "text", text: `Invalid stage. Must be: ${validStages.join(", ")}` }],
-				};
-			}
-			const dimRecord: Record<string, number> = {};
-			for (const [dim, val] of Object.entries(scores as Record<string, unknown>)) {
-				if (typeof val === "number") dimRecord[dim] = val;
-			}
-			recordReviewStage(stage as (typeof validStages)[number], dimRecord);
-			return {
-				content: [
-					{ type: "text", text: `Stage scores recorded: ${stage} = ${JSON.stringify(scores)}` },
-				],
-			};
-		}
-		case "record_finish_started": {
-			patchCurrent({ finish_started_at: new Date().toISOString() });
-			return { content: [{ type: "text", text: "Finish started recorded." }] };
-		}
-		// archive_plan removed — replaced by archive_spec (handled above).
-
-		case "get_impact_analysis": {
-			const file = typeof args?.file === "string" ? args.file : "";
-			if (!file) {
-				return {
-					isError: true,
-					content: [{ type: "text", text: "Missing file parameter." }],
-				};
-			}
-			try {
-				const config = loadConfig();
-				const consumers = findImporters(file, cwd, config.gates.import_graph_depth);
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({ file, consumers, count: consumers.length }),
-						},
-					],
-				};
-			} catch {
-				return {
-					content: [{ type: "text", text: JSON.stringify({ file, consumers: [], count: 0 }) }],
-				};
-			}
-		}
-		case "get_call_coverage": {
-			const testFile = typeof args?.test_file === "string" ? args.test_file : "";
-			const implFile = typeof args?.impl_file === "string" ? args.impl_file : "";
-			if (!testFile || !implFile) {
-				return {
-					isError: true,
-					content: [{ type: "text", text: "Missing test_file or impl_file parameter." }],
-				};
-			}
-			try {
-				const covered = validateTestCoversImpl(testFile, "", implFile, cwd);
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({ test_file: testFile, impl_file: implFile, covered }),
-						},
-					],
-				};
-			} catch {
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({ test_file: testFile, impl_file: implFile, covered: false }),
-						},
-					],
-				};
-			}
-		}
+		case "record_spec_evaluator_score":
+			return handleRecordSpecEvaluatorScore(args);
+		// State
+		case "get_project_status":
+			return handleGetProjectStatus(cwd);
+		case "record_test_pass":
+			return handleRecordTestPass(args);
+		case "record_review":
+			return handleRecordReview(args);
+		case "record_stage_scores":
+			return handleRecordStageScores(args);
+		case "record_human_approval":
+			return handleRecordHumanApproval();
+		case "record_finish_started":
+			return handleRecordFinishStarted();
+		// Detector
+		case "get_pending_fixes":
+			return handleGetPendingFixes();
+		case "clear_pending_fixes":
+			return handleClearPendingFixes(args);
+		case "get_detector_summary":
+			return handleGetDetectorSummary(cwd);
+		case "get_file_health_score":
+			return handleGetFileHealthScore(args, cwd);
+		case "get_impact_analysis":
+			return handleGetImpactAnalysis(args, cwd);
+		case "get_call_coverage":
+			return handleGetCallCoverage(args, cwd);
+		// Gate / Config
+		case "disable_gate":
+			return handleDisableGate(args);
+		case "enable_gate":
+			return handleEnableGate(args);
+		case "set_config":
+			return handleSetConfig(args);
 		default:
 			return { isError: true, content: [{ type: "text", text: `Unknown tool: ${name}` }] };
 	}

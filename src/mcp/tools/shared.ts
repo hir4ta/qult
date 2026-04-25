@@ -5,7 +5,11 @@
  * `ToolResult` shape used across all tools.
  */
 
-import { assertConfinedToQult, assertValidSpecName, assertValidWaveNum } from "../state/paths.ts";
+import {
+	assertConfinedToQult,
+	assertValidSpecName,
+	assertValidWaveNum,
+} from "../../state/paths.ts";
 
 /** Standard MCP tool result shape. */
 export interface ToolResult {

@@ -8,7 +8,7 @@ describe("smoke test", () => {
 	});
 
 	it("mcp-server module loads without errors", async () => {
-		const mcp = await import("../mcp-server.ts");
+		const mcp = await import("../mcp/server.ts");
 		expect(mcp).toBeDefined();
 		expect(typeof mcp).toBe("object");
 	});

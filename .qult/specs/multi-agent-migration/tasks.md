@@ -41,12 +41,12 @@
 **Goal**: `src/mcp/server.ts` に stdio JSON-RPC ループを Node.js 版で移植し、全 19 ツールが `npx qult mcp` 経由で動作する状態にする。
 **Verify**: `bun run typecheck && bun run build && echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | node dist/mcp-server.mjs | grep -q '"tools"'`
 
-- [ ] T3.1: `src/mcp/server.ts` を作成する（既存 `src/mcp-server.ts` の `Bun.stdin`/`Bun.stdout` を `process.stdin`/`process.stdout` に置換し、readline ベースの JSON-RPC ループを移植）
-- [ ] T3.2: `src/mcp/tools/spec-tools.ts` を作成する（Spec カテゴリ 5 ツール: `get_active_spec`・`complete_wave`・`update_task_status`・`archive_spec`・`record_spec_evaluator_score` を移植）
-- [ ] T3.3: `src/mcp/tools/state-tools.ts` を作成する（State カテゴリ 6 ツール: `get_project_status`・`record_test_pass`・`record_review`・`record_stage_scores`・`record_human_approval`・`record_finish_started` を移植）
-- [ ] T3.4: `src/mcp/tools/detector-tools.ts` を作成する（Detector カテゴリ 5 ツール: `get_pending_fixes`・`clear_pending_fixes`・`get_detector_summary`・`get_file_health_score`・`get_impact_analysis`・`get_call_coverage` を移植）
-- [ ] T3.5: `src/mcp/tools/gate-tools.ts` を作成する（Gate/Config カテゴリ 3 ツール: `disable_gate`・`enable_gate`・`set_config` を移植）
-- [ ] T3.6: 既存 `src/mcp-server.test.ts` を `__tests__/mcp/server.test.ts` に移植する（JSON-RPC リクエスト/レスポンスの往復・`tools/list` 応答に全 19 ツール名が含まれることを検証）
+- [x] T3.1: `src/mcp/server.ts` を作成する（既存 `src/mcp-server.ts` の `Bun.stdin`/`Bun.stdout` を `process.stdin`/`process.stdout` に置換し、readline ベースの JSON-RPC ループを移植）
+- [x] T3.2: `src/mcp/tools/spec-tools.ts` を作成する（Spec カテゴリ 5 ツール: `get_active_spec`・`complete_wave`・`update_task_status`・`archive_spec`・`record_spec_evaluator_score` を移植）
+- [x] T3.3: `src/mcp/tools/state-tools.ts` を作成する（State カテゴリ 6 ツール: `get_project_status`・`record_test_pass`・`record_review`・`record_stage_scores`・`record_human_approval`・`record_finish_started` を移植）
+- [x] T3.4: `src/mcp/tools/detector-tools.ts` を作成する（Detector カテゴリ 5 ツール: `get_pending_fixes`・`clear_pending_fixes`・`get_detector_summary`・`get_file_health_score`・`get_impact_analysis`・`get_call_coverage` を移植）
+- [x] T3.5: `src/mcp/tools/gate-tools.ts` を作成する（Gate/Config カテゴリ 3 ツール: `disable_gate`・`enable_gate`・`set_config` を移植）
+- [x] T3.6: 既存 `src/mcp-server.test.ts` を `__tests__/mcp/server.test.ts` に移植する（JSON-RPC リクエスト/レスポンスの往復・`tools/list` 応答に全 19 ツール名が含まれることを検証）
 
 **Consumers**: Wave 5（`mcp` サブコマンドが `src/mcp/server.ts` を呼び出す）、全 AI ツールの MCP クライアント
 
