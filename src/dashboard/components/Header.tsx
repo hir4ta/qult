@@ -9,7 +9,7 @@
 
 import { Badge } from "@inkjs/ui";
 import { Box, Text, useStdout } from "ink";
-import { COLORS } from "../theme.ts";
+import { COLORS, GRADIENTS, sampleGradient } from "../theme.ts";
 import type { ActiveSpec, SpecPhase } from "../types.ts";
 
 interface Props {
@@ -59,18 +59,36 @@ export function Header({ version, activeSpec }: Props): React.ReactElement {
 		);
 	}
 
+	const bannerW = QULT_BANNER[0]?.length ?? 1;
+	const bannerH = QULT_BANNER.length;
+
 	return (
 		<Box marginBottom={1} flexDirection="row" gap={2}>
 			<Box flexDirection="column">
-				{QULT_BANNER.map((line, i) => (
-					<Text
+				{QULT_BANNER.map((line, row) => (
+					<Box
 						// biome-ignore lint/suspicious/noArrayIndexKey: banner lines are static
-						key={i}
-						color={i < 3 ? COLORS.primary : COLORS.accent}
-						bold
+						key={row}
 					>
-						{line}
-					</Text>
+						{[...line].map((ch, col) => {
+							// 2-axis sampling: vertical position contributes 70%
+							// (slow drift through the gradient), horizontal 30%
+							// (subtle shimmer across each row).
+							const t =
+								(row / Math.max(1, bannerH - 1)) * 0.7 + (col / Math.max(1, bannerW - 1)) * 0.3;
+							const color = sampleGradient(GRADIENTS.aurora, t);
+							return (
+								<Text
+									// biome-ignore lint/suspicious/noArrayIndexKey: cells are positional
+									key={col}
+									color={color}
+									bold
+								>
+									{ch}
+								</Text>
+							);
+						})}
+					</Box>
 				))}
 			</Box>
 			<Box flexDirection="column" justifyContent="center">
