@@ -20,7 +20,7 @@ Structured branch completion. Present options, execute the architect's choice.
 
 Run verification before anything else:
 
-1. Call `mcp__plugin_qult_qult__get_session_status()` — check test and review status
+1. Call `mcp__plugin_qult_qult__get_project_status()` — check test and review status
 2. Call `mcp__plugin_qult_qult__get_pending_fixes()` — check for unresolved issues
 3. Run the project's test command via Bash
 4. If `review.require_human_approval` is enabled in config (stored in DB, accessible via MCP tools), check `human_review_approved_at` in session status. If null, add `Human approval: not recorded` to the BLOCKED list and instruct the architect to review the changes, then call `mcp__plugin_qult_qult__record_human_approval()` to record their approval
@@ -177,7 +177,7 @@ How would you like to finish this work? (On base branch [base])
 
 ### Step 5: Cleanup
 
-1. **Archive plan file**: If a plan was active during this session, call `mcp__plugin_qult_qult__archive_plan({ plan_path: "<path>" })` to move the plan file to `archive/` subdirectory. This prevents the plan from being detected in future sessions. Get the plan path from `get_session_status` or the plan file location in `.claude/plans/`.
+1. **Archive plan file**: If a plan was active during this session, call `mcp__plugin_qult_qult__archive_spec({ plan_path: "<path>" })` to move the plan file to `archive/` subdirectory. This prevents the plan from being detected in future sessions. Get the plan path from `get_project_status` or the plan file location in `.claude/plans/`.
 
 2. **Worktree cleanup**: If the branch was a git worktree:
    - `git worktree remove [path]` (after merge/discard)

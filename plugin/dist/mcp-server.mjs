@@ -1,8 +1,6 @@
 // @bun
 // src/mcp-server.ts
-import { existsSync as existsSync9 } from "fs";
-import { homedir as homedir2 } from "os";
-import { join as join4, resolve as resolve3 } from "path";
+import { resolve as resolve4 } from "path";
 import { createInterface } from "readline";
 
 // src/state/db.ts
@@ -504,36 +502,11 @@ function resetConfigCache() {
 }
 
 // src/hooks/detectors/health-score.ts
-import { existsSync as existsSync6 } from "fs";
+import { existsSync as existsSync5 } from "fs";
 
 // src/hooks/detectors/dead-import-check.ts
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { extname } from "path";
-
-// src/state/plan-status.ts
-import { existsSync, mkdirSync as mkdirSync2, readdirSync, readFileSync, renameSync, statSync } from "fs";
-import { basename, dirname, join as join2 } from "path";
-var _planCache = null;
-var _planCachePath = null;
-var _planCacheMtime = null;
-function resetPlanCache() {
-  _planCache = null;
-  _planCachePath = null;
-  _planCacheMtime = null;
-}
-function archivePlanFile(planPath) {
-  try {
-    if (!planPath.endsWith(".md"))
-      return;
-    if (!existsSync(planPath))
-      return;
-    const dir = dirname(planPath);
-    const archiveDir = join2(dir, "archive");
-    mkdirSync2(archiveDir, { recursive: true });
-    renameSync(planPath, join2(archiveDir, basename(planPath)));
-    resetPlanCache();
-  } catch {}
-}
 
 // src/state/session-state.ts
 var _cache2 = null;
@@ -651,11 +624,11 @@ function detectDeadImports(file) {
   const ext = extname(file).toLowerCase();
   if (!TS_JS_EXTS.has(ext) && !PY_EXTS.has(ext))
     return [];
-  if (!existsSync2(file))
+  if (!existsSync(file))
     return [];
   let content;
   try {
-    content = readFileSync2(file, "utf-8");
+    content = readFileSync(file, "utf-8");
   } catch {
     return [];
   }
@@ -770,7 +743,7 @@ function escapeRegex(str) {
 
 // src/hooks/detectors/export-check.ts
 import { execSync } from "child_process";
-import { existsSync as existsSync3, readFileSync as readFileSync3 } from "fs";
+import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
 import { extname as extname2 } from "path";
 var TS_JS_EXTS2 = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
 var EXPORT_RE = /\bexport\s+(?:default\s+)?(?:function|class|const|let|var|type|interface|enum)\s+(\w+)/g;
@@ -781,7 +754,7 @@ function detectExportBreakingChanges(file) {
   const ext = extname2(file).toLowerCase();
   if (!TS_JS_EXTS2.has(ext))
     return [];
-  if (!existsSync3(file))
+  if (!existsSync2(file))
     return [];
   let oldContent;
   try {
@@ -798,7 +771,7 @@ function detectExportBreakingChanges(file) {
   } catch {
     return [];
   }
-  const newContent = readFileSync3(file, "utf-8");
+  const newContent = readFileSync2(file, "utf-8");
   const oldExports = new Set;
   for (const match of oldContent.matchAll(EXPORT_RE)) {
     oldExports.add(match[1]);
@@ -852,8 +825,8 @@ function detectTypeFieldChanges(oldContent, newContent) {
 }
 
 // src/hooks/detectors/security-check.ts
-import { existsSync as existsSync4, readFileSync as readFileSync4 } from "fs";
-import { basename as basename2, extname as extname3 } from "path";
+import { existsSync as existsSync3, readFileSync as readFileSync3 } from "fs";
+import { basename, extname as extname3 } from "path";
 var CHECKABLE_EXTS = new Set([
   ".ts",
   ".tsx",
@@ -1062,11 +1035,11 @@ function detectSecurityPatterns(file) {
   const ext = extname3(file).toLowerCase();
   if (!CHECKABLE_EXTS.has(ext))
     return [];
-  if (!existsSync4(file))
+  if (!existsSync3(file))
     return [];
   let content;
   try {
-    content = readFileSync4(file, "utf-8");
+    content = readFileSync3(file, "utf-8");
   } catch {
     return [];
   }
@@ -1132,7 +1105,7 @@ function detectSecurityPatterns(file) {
       if (re.test(scanLine)) {
         if (suppress?.test(scanLine))
           continue;
-        if (suppressFile?.test(basename2(file)))
+        if (suppressFile?.test(basename(file)))
           continue;
         errors.push(`L${i + 1}: ${desc}`);
       }
@@ -1220,8 +1193,8 @@ function emitAdvisoryWarnings(file, content) {
 }
 
 // src/hooks/detectors/test-quality-check.ts
-import { existsSync as existsSync5, readFileSync as readFileSync5 } from "fs";
-import { basename as basename3, dirname as dirname2, extname as extname4, resolve } from "path";
+import { existsSync as existsSync4, readFileSync as readFileSync4 } from "fs";
+import { basename as basename2, dirname, extname as extname4, resolve } from "path";
 var MAX_CHECK_SIZE3 = 500000;
 var BLOCKING_SMELL_TYPES = new Set([
   "empty-test",
@@ -1290,11 +1263,11 @@ function analyzeTestQuality(file) {
   const absPath = resolve(cwd, file);
   if (!absPath.startsWith(cwd))
     return null;
-  if (!existsSync5(absPath))
+  if (!existsSync4(absPath))
     return null;
   let content;
   try {
-    content = readFileSync5(absPath, "utf-8");
+    content = readFileSync4(absPath, "utf-8");
   } catch {
     return null;
   }
@@ -1476,10 +1449,10 @@ function analyzeTestQuality(file) {
     });
   }
   try {
-    const snapDir = `${dirname2(absPath)}/__snapshots__/`;
-    const snapFile = `${snapDir}${basename3(absPath)}.snap`;
-    if (existsSync5(snapFile)) {
-      const snapContent = readFileSync5(snapFile, "utf-8");
+    const snapDir = `${dirname(absPath)}/__snapshots__/`;
+    const snapFile = `${snapDir}${basename2(absPath)}.snap`;
+    if (existsSync4(snapFile)) {
+      const snapContent = readFileSync4(snapFile, "utf-8");
       if (snapContent.length > LARGE_SNAPSHOT_CHARS) {
         smells.push({
           type: "snapshot-bloat",
@@ -1495,7 +1468,7 @@ function analyzeTestQuality(file) {
       try {
         const implFile = findImplFile(absPath);
         if (implFile) {
-          const implContent = readFileSync5(implFile, "utf-8");
+          const implContent = readFileSync4(implFile, "utf-8");
           if (/\bthrow\b|\breject\b|Promise\.reject/m.test(implContent)) {
             smells.push({
               type: "no-error-path",
@@ -1596,18 +1569,18 @@ function analyzeTestQuality(file) {
 }
 function findImplFile(testPath) {
   try {
-    const dir = dirname2(testPath);
-    const base = basename3(testPath);
+    const dir = dirname(testPath);
+    const base = basename2(testPath);
     const implName = base.replace(/\.(?:test|spec)(\.[^.]+)$/, "$1");
     const sameDirPath = resolve(dir, implName);
-    if (existsSync5(sameDirPath))
+    if (existsSync4(sameDirPath))
       return sameDirPath;
-    const parentDir = dirname2(dir);
+    const parentDir = dirname(dir);
     const parentPath = resolve(parentDir, implName);
-    if (existsSync5(parentPath))
+    if (existsSync4(parentPath))
       return parentPath;
     const srcPath = resolve(parentDir, "src", implName);
-    if (existsSync5(srcPath))
+    if (existsSync4(srcPath))
       return srcPath;
     return null;
   } catch {
@@ -1627,7 +1600,7 @@ function countFindings(fixes) {
   return fixes.reduce((sum, f) => sum + f.errors.length, 0);
 }
 function computeFileHealthScore(file) {
-  if (!existsSync6(file)) {
+  if (!existsSync5(file)) {
     return { score: 10, breakdown: {} };
   }
   const breakdown = {};
@@ -1659,8 +1632,8 @@ function computeFileHealthScore(file) {
 }
 
 // src/hooks/detectors/import-graph.ts
-import { existsSync as existsSync7, lstatSync, readdirSync as readdirSync2, readFileSync as readFileSync6, statSync as statSync2 } from "fs";
-import { dirname as dirname3, extname as extname5, join as join3, resolve as resolve2 } from "path";
+import { existsSync as existsSync6, lstatSync, readdirSync, readFileSync as readFileSync5, statSync } from "fs";
+import { dirname as dirname2, extname as extname5, join as join2, resolve as resolve2 } from "path";
 var SCAN_EXTS = new Set([
   ".ts",
   ".tsx",
@@ -1747,7 +1720,7 @@ function extractRelativeImports(content, filePath) {
   return specifiers;
 }
 function resolvePythonImport(specifier, fromFile) {
-  const dir = dirname3(fromFile);
+  const dir = dirname2(fromFile);
   const dotMatch = specifier.match(/^(\.+)(.*)/);
   if (!dotMatch)
     return null;
@@ -1755,37 +1728,37 @@ function resolvePythonImport(specifier, fromFile) {
   const modulePart = dotMatch[2];
   let base = dir;
   for (let i = 1;i < dots; i++) {
-    base = dirname3(base);
+    base = dirname2(base);
   }
   if (!modulePart) {
     return null;
   }
   const parts = modulePart.split(".");
-  const candidate = join3(base, ...parts);
-  if (existsSync7(`${candidate}.py`))
+  const candidate = join2(base, ...parts);
+  if (existsSync6(`${candidate}.py`))
     return `${candidate}.py`;
-  if (existsSync7(join3(candidate, "__init__.py")))
-    return join3(candidate, "__init__.py");
+  if (existsSync6(join2(candidate, "__init__.py")))
+    return join2(candidate, "__init__.py");
   return null;
 }
 function resolveRustImport(specifier, fromFile, scanRoot) {
-  const dir = dirname3(fromFile);
+  const dir = dirname2(fromFile);
   if (specifier.startsWith("mod:")) {
     const name = specifier.slice(4);
-    const asFile = join3(dir, `${name}.rs`);
-    if (existsSync7(asFile))
+    const asFile = join2(dir, `${name}.rs`);
+    if (existsSync6(asFile))
       return asFile;
-    const asDir = join3(dir, name, "mod.rs");
-    if (existsSync7(asDir))
+    const asDir = join2(dir, name, "mod.rs");
+    if (existsSync6(asDir))
       return asDir;
   } else if (specifier.startsWith("crate:")) {
     const name = specifier.slice(6);
-    const srcDir = join3(scanRoot, "src");
-    const asFile = join3(srcDir, `${name}.rs`);
-    if (existsSync7(asFile))
+    const srcDir = join2(scanRoot, "src");
+    const asFile = join2(srcDir, `${name}.rs`);
+    if (existsSync6(asFile))
       return asFile;
-    const asDir = join3(srcDir, name, "mod.rs");
-    if (existsSync7(asDir))
+    const asDir = join2(srcDir, name, "mod.rs");
+    if (existsSync6(asDir))
       return asDir;
   }
   return null;
@@ -1795,7 +1768,7 @@ function getGoModulePath(scanRoot) {
   if (_goModuleCache !== undefined)
     return _goModuleCache;
   try {
-    const goMod = readFileSync6(join3(scanRoot, "go.mod"), "utf-8");
+    const goMod = readFileSync5(join2(scanRoot, "go.mod"), "utf-8");
     const match = goMod.match(/^module\s+(\S+)/m);
     _goModuleCache = match ? match[1] : null;
   } catch {
@@ -1808,8 +1781,8 @@ function resolveGoImport(specifier, scanRoot) {
   if (!modulePath || !specifier.startsWith(modulePath))
     return null;
   const relPath = specifier.slice(modulePath.length + 1);
-  const dir = join3(scanRoot, relPath);
-  if (existsSync7(dir) && statSync2(dir).isDirectory())
+  const dir = join2(scanRoot, relPath);
+  if (existsSync6(dir) && statSync(dir).isDirectory())
     return dir;
   return null;
 }
@@ -1824,18 +1797,18 @@ function resolveImportPath(specifier, fromFile, scanRoot) {
   if (fileExt === ".go" && scanRoot) {
     return resolveGoImport(specifier, scanRoot);
   }
-  const dir = dirname3(fromFile);
+  const dir = dirname2(fromFile);
   const raw = resolve2(dir, specifier);
-  if (existsSync7(raw) && statSync2(raw).isFile())
+  if (existsSync6(raw) && statSync(raw).isFile())
     return raw;
   for (const ext of [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]) {
     const withExt = `${raw}${ext}`;
-    if (existsSync7(withExt))
+    if (existsSync6(withExt))
       return withExt;
   }
   for (const ext of [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]) {
-    const index = join3(raw, `index${ext}`);
-    if (existsSync7(index))
+    const index = join2(raw, `index${ext}`);
+    if (existsSync6(index))
       return index;
   }
   return null;
@@ -1848,7 +1821,7 @@ function collectFiles(dir) {
       return;
     let entries;
     try {
-      entries = readdirSync2(current);
+      entries = readdirSync(current);
     } catch {
       return;
     }
@@ -1859,7 +1832,7 @@ function collectFiles(dir) {
       }
       if (SKIP_DIRS.has(entry))
         continue;
-      const full = join3(current, entry);
+      const full = join2(current, entry);
       try {
         const stat = lstatSync(full);
         if (stat.isSymbolicLink())
@@ -1882,7 +1855,7 @@ function collectFiles(dir) {
   return files;
 }
 function findImporters(targetFile, scanRoot, depth = 1) {
-  if (!existsSync7(scanRoot))
+  if (!existsSync6(scanRoot))
     return [];
   const clampedDepth = Math.min(Math.max(depth, 1), 3);
   const files = collectFiles(scanRoot);
@@ -1890,18 +1863,18 @@ function findImporters(targetFile, scanRoot, depth = 1) {
   const allImporters = [];
   function findDirectImporters(targetAbs) {
     const direct = [];
-    const targetDir = dirname3(targetAbs);
+    const targetDir = dirname2(targetAbs);
     const targetExt = extname5(targetAbs).toLowerCase();
     for (const file of files) {
       const fileAbs = resolve2(file);
       if (fileAbs === targetAbs)
         continue;
-      if (targetExt === ".go" && extname5(file).toLowerCase() === ".go" && dirname3(fileAbs) === targetDir) {
+      if (targetExt === ".go" && extname5(file).toLowerCase() === ".go" && dirname2(fileAbs) === targetDir) {
         direct.push(file);
         continue;
       }
       try {
-        const content = readFileSync6(file, "utf-8");
+        const content = readFileSync5(file, "utf-8");
         const specifiers = extractRelativeImports(content, file);
         for (const spec of specifiers) {
           const resolved = resolveImportPath(spec, file, scanRoot);
@@ -1928,9 +1901,9 @@ function findImporters(targetFile, scanRoot, depth = 1) {
         if (extname5(file).toLowerCase() !== ".py")
           continue;
         try {
-          const content = readFileSync6(file, "utf-8");
+          const content = readFileSync5(file, "utf-8");
           const bareImport = new RegExp(`from\\s+\\.\\s+import\\s+(?:.*\\b${targetName}\\b)`, "m");
-          if (bareImport.test(content) && dirname3(fileAbs) === targetDir) {
+          if (bareImport.test(content) && dirname2(fileAbs) === targetDir) {
             direct.push(file);
           }
         } catch {}
@@ -1962,15 +1935,15 @@ function findImporters(targetFile, scanRoot, depth = 1) {
 }
 
 // src/hooks/detectors/spec-trace-check.ts
-import { existsSync as existsSync8, readFileSync as readFileSync7 } from "fs";
-import { basename as basename4, dirname as dirname4, relative } from "path";
+import { existsSync as existsSync7, readFileSync as readFileSync6 } from "fs";
+import { basename as basename3, dirname as dirname3, relative } from "path";
 function validateTestCoversImpl(testFile, _testFunction, implFile, _projectRoot) {
-  if (!existsSync8(testFile))
+  if (!existsSync7(testFile))
     return false;
   try {
-    const content = readFileSync7(testFile, "utf-8");
-    const implBasename = basename4(implFile).replace(/\.[^.]+$/, "");
-    const implRelative = relative(dirname4(testFile), implFile).replace(/\\/g, "/").replace(/\.[^.]+$/, "");
+    const content = readFileSync6(testFile, "utf-8");
+    const implBasename = basename3(implFile).replace(/\.[^.]+$/, "");
+    const implRelative = relative(dirname3(testFile), implFile).replace(/\\/g, "/").replace(/\.[^.]+$/, "");
     const importPatterns = [
       new RegExp(`(?:import|require).*['"].*${escapeRegex2(implRelative)}(?:\\.[^'"]*)?['"]`, "m"),
       new RegExp(`(?:import|require).*['"].*/${escapeRegex2(implBasename)}(?:\\.[^'"]*)?['"]`, "m")
@@ -1982,6 +1955,764 @@ function validateTestCoversImpl(testFile, _testFunction, implFile, _projectRoot)
 }
 function escapeRegex2(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// src/mcp-tools/spec-tools.ts
+import { existsSync as existsSync9 } from "fs";
+
+// src/state/fs.ts
+import { mkdirSync as mkdirSync2, readFileSync as readFileSync7, renameSync, writeFileSync } from "fs";
+import { dirname as dirname4 } from "path";
+
+// src/state/paths.ts
+import { realpathSync } from "fs";
+import { resolve as resolve3 } from "path";
+var RESERVED_SPEC_NAMES = new Set(["archive"]);
+var WAVE_NUM_MIN = 1;
+var WAVE_NUM_MAX = 99;
+var SPEC_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+var projectRootOverride = null;
+function setProjectRoot(root) {
+  projectRootOverride = root;
+}
+function getProjectRoot() {
+  return projectRootOverride ?? process.cwd();
+}
+function qultDir() {
+  return resolve3(getProjectRoot(), ".qult");
+}
+function specsDir() {
+  return resolve3(qultDir(), "specs");
+}
+function archiveDir() {
+  return resolve3(specsDir(), "archive");
+}
+function specDir(name) {
+  assertValidSpecName(name);
+  return resolve3(specsDir(), name);
+}
+function requirementsPath(name) {
+  return resolve3(specDir(name), "requirements.md");
+}
+function designPath(name) {
+  return resolve3(specDir(name), "design.md");
+}
+function tasksPath(name) {
+  return resolve3(specDir(name), "tasks.md");
+}
+function wavesDir(name) {
+  return resolve3(specDir(name), "waves");
+}
+function wavePath(name, waveNum) {
+  assertValidWaveNum(waveNum);
+  return resolve3(wavesDir(name), `wave-${formatWaveNum(waveNum)}.md`);
+}
+function formatWaveNum(waveNum) {
+  assertValidWaveNum(waveNum);
+  return String(waveNum).padStart(2, "0");
+}
+function stateDir() {
+  return resolve3(qultDir(), "state");
+}
+function stageScoresJsonPath() {
+  return resolve3(stateDir(), "stage-scores.json");
+}
+function assertValidSpecName(name) {
+  if (typeof name !== "string" || !SPEC_NAME_RE.test(name)) {
+    throw new Error(`invalid spec name: ${JSON.stringify(name)} (must match ${SPEC_NAME_RE} and be \u226464 chars)`);
+  }
+  if (RESERVED_SPEC_NAMES.has(name)) {
+    throw new Error(`reserved spec name: ${JSON.stringify(name)}`);
+  }
+  if (name.includes("/") || name.includes("\\") || name.startsWith(".")) {
+    throw new Error(`spec name must not contain path separators or leading dot: ${name}`);
+  }
+}
+function assertValidWaveNum(waveNum) {
+  if (!Number.isInteger(waveNum) || waveNum < WAVE_NUM_MIN || waveNum > WAVE_NUM_MAX) {
+    throw new Error(`invalid wave_num: ${waveNum} (must be integer in [${WAVE_NUM_MIN}, ${WAVE_NUM_MAX}])`);
+  }
+}
+function assertConfinedToQult(targetPath) {
+  const resolved = resolve3(targetPath);
+  const qultRealPath = realpathSync(qultDir());
+  const targetRealPath = resolveExistingAncestor(resolved);
+  if (targetRealPath !== qultRealPath && !targetRealPath.startsWith(`${qultRealPath}/`)) {
+    throw new Error(`path escape detected: ${targetPath} resolves to ${targetRealPath}, outside ${qultRealPath}`);
+  }
+  return resolved;
+}
+function resolveExistingAncestor(absPath) {
+  let current = absPath;
+  for (let i = 0;i < 64; i++) {
+    try {
+      return realpathSync(current);
+    } catch {
+      const parent = resolve3(current, "..");
+      if (parent === current) {
+        return current;
+      }
+      current = parent;
+    }
+  }
+  throw new Error(`unable to resolve real path for ${absPath} (parent chain exhausted)`);
+}
+
+// src/state/fs.ts
+var MAX_READ_BYTES = 1024 * 1024;
+function ensureDir(absPath) {
+  mkdirSync2(absPath, { recursive: true });
+}
+function atomicWrite(targetPath, content) {
+  assertConfinedToQult(targetPath);
+  ensureDir(dirname4(targetPath));
+  const tmp = `${targetPath}.tmp`;
+  writeFileSync(tmp, content, { encoding: "utf8", mode: 420 });
+  renameSync(tmp, targetPath);
+}
+function readTextIfExists(absPath) {
+  assertConfinedToQult(absPath);
+  try {
+    const buf = readFileSync7(absPath);
+    if (buf.byteLength > MAX_READ_BYTES) {
+      throw new Error(`file too large: ${absPath} (${buf.byteLength} bytes > ${MAX_READ_BYTES})`);
+    }
+    return buf.toString("utf8");
+  } catch (err) {
+    if (err.code === "ENOENT")
+      return null;
+    throw err;
+  }
+}
+function readText(absPath) {
+  const txt = readTextIfExists(absPath);
+  if (txt === null)
+    throw new Error(`file not found: ${absPath}`);
+  return txt;
+}
+function readJson(absPath, expectedVersion) {
+  const txt = readTextIfExists(absPath);
+  if (txt === null)
+    return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(txt);
+  } catch (err) {
+    throw new Error(`malformed JSON in ${absPath}: ${err.message}`);
+  }
+  if (!parsed || typeof parsed !== "object" || typeof parsed.schema_version !== "number") {
+    throw new Error(`missing or invalid schema_version in ${absPath}`);
+  }
+  const version = parsed.schema_version;
+  if (version !== expectedVersion) {
+    throw new Error(`schema_version mismatch in ${absPath}: expected ${expectedVersion}, got ${version}`);
+  }
+  return parsed;
+}
+function writeJson(absPath, value) {
+  atomicWrite(absPath, `${JSON.stringify(value, null, 2)}
+`);
+}
+
+// src/state/json-state.ts
+var SCHEMA_VERSION2 = 1;
+var DEFAULT_STAGE_SCORES = {
+  schema_version: SCHEMA_VERSION2,
+  spec_name: null,
+  review: { Spec: null, Quality: null, Security: null, Adversarial: null },
+  spec_eval: { requirements: null, design: null, tasks: null }
+};
+function readStageScores() {
+  const got = readJson(stageScoresJsonPath(), SCHEMA_VERSION2);
+  return got ?? structuredClone(DEFAULT_STAGE_SCORES);
+}
+function recordSpecEvalPhase(phase, score) {
+  const cur = readStageScores();
+  cur.spec_eval[phase] = {
+    total: score.total,
+    dim_scores: score.dim_scores,
+    forced_progress: score.forced_progress,
+    iteration: score.iteration,
+    evaluated_at: score.evaluated_at ?? new Date().toISOString()
+  };
+  writeJson(stageScoresJsonPath(), cur);
+  return cur;
+}
+
+// src/state/spec.ts
+import { execSync as execSync2 } from "child_process";
+import { existsSync as existsSync8, readdirSync as readdirSync2, renameSync as renameSync2, statSync as statSync2 } from "fs";
+import { dirname as dirname5 } from "path";
+function listSpecNames() {
+  const root = specsDir();
+  if (!existsSync8(root))
+    return [];
+  const out = [];
+  for (const entry of readdirSync2(root, { withFileTypes: true })) {
+    if (!entry.isDirectory())
+      continue;
+    if (entry.name === "archive")
+      continue;
+    try {
+      assertValidSpecName(entry.name);
+    } catch {
+      continue;
+    }
+    out.push(entry.name);
+  }
+  return out.sort();
+}
+function getActiveSpec() {
+  const names = listSpecNames();
+  if (names.length === 0)
+    return null;
+  if (names.length > 1) {
+    throw new Error(`multiple active specs detected: ${names.join(", ")} \u2014 only one non-archived spec is allowed`);
+  }
+  const name = names[0];
+  const path = specDir(name);
+  return {
+    name,
+    path,
+    hasRequirements: existsSync8(requirementsPath(name)),
+    hasDesign: existsSync8(designPath(name)),
+    hasTasks: existsSync8(tasksPath(name)),
+    wavesDirExists: existsSync8(wavesDir(name))
+  };
+}
+function archiveSpec(name, now = new Date) {
+  assertValidSpecName(name);
+  const src = specDir(name);
+  if (!existsSync8(src)) {
+    throw new Error(`spec not found: ${name}`);
+  }
+  ensureDir(archiveDir());
+  let dest = `${archiveDir()}/${name}`;
+  if (existsSync8(dest)) {
+    dest = `${archiveDir()}/${name}-${formatTimestamp(now)}`;
+  }
+  assertConfinedToQult(dest);
+  ensureDir(dirname5(dest));
+  renameSync2(src, dest);
+  return dest;
+}
+function formatTimestamp(d) {
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mi = String(d.getUTCMinutes()).padStart(2, "0");
+  const ss = String(d.getUTCSeconds()).padStart(2, "0");
+  return `${yyyy}${mm}${dd}-${hh}${mi}${ss}`;
+}
+function listWaveNumbers(name) {
+  const dir = wavesDir(name);
+  if (!existsSync8(dir))
+    return [];
+  const re = /^wave-(\d{2})\.md$/;
+  const nums = [];
+  for (const entry of readdirSync2(dir)) {
+    const m = re.exec(entry);
+    if (m?.[1]) {
+      nums.push(Number.parseInt(m[1], 10));
+    }
+  }
+  return nums.sort((a, b) => a - b);
+}
+function isCommitReachable(sha, cwd) {
+  if (!/^[0-9a-f]{4,40}$/.test(sha))
+    return false;
+  try {
+    execSync2(`git rev-parse --verify ${sha}^{commit}`, {
+      cwd: cwd ?? process.cwd(),
+      stdio: ["ignore", "ignore", "ignore"]
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// src/state/tasks-md.ts
+var TASK_TITLE_MAX = 1024;
+var STATUS_TO_CHAR = {
+  pending: " ",
+  in_progress: "~",
+  done: "x",
+  blocked: "!"
+};
+var CHAR_TO_STATUS = {
+  " ": "pending",
+  "~": "in_progress",
+  x: "done",
+  X: "done",
+  "!": "blocked"
+};
+var TASK_LINE_RE = /^- \[([ x~!X])\] (T\d+\.\d+): (.*)$/;
+var WAVE_HEADER_RE = /^## Wave (\d+):\s*(.*)$/;
+var TITLE_RE = /^# Tasks:\s*(.+)$/;
+var META_RE = /^\*\*([A-Za-z]+)\*\*:\s*(.*)$/;
+function parseTasksMd(content) {
+  const lines = content.split(`
+`);
+  const doc = { specName: null, waves: [] };
+  let current = null;
+  for (let i = 0;i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    const titleMatch = TITLE_RE.exec(line);
+    if (titleMatch && doc.specName === null) {
+      doc.specName = (titleMatch[1] ?? "").trim();
+      continue;
+    }
+    const waveMatch = WAVE_HEADER_RE.exec(line);
+    if (waveMatch) {
+      const num = Number.parseInt(waveMatch[1] ?? "0", 10);
+      current = {
+        num,
+        title: (waveMatch[2] ?? "").trim(),
+        goal: null,
+        verify: null,
+        scaffold: false,
+        tasks: []
+      };
+      doc.waves.push(current);
+      continue;
+    }
+    if (!current)
+      continue;
+    const metaMatch = META_RE.exec(line);
+    if (metaMatch) {
+      const key = (metaMatch[1] ?? "").toLowerCase();
+      const val = (metaMatch[2] ?? "").trim();
+      if (key === "goal")
+        current.goal = val;
+      else if (key === "verify")
+        current.verify = val;
+      else if (key === "scaffold")
+        current.scaffold = /^true$/i.test(val);
+      continue;
+    }
+    const taskMatch = TASK_LINE_RE.exec(line);
+    if (taskMatch) {
+      const statusChar = taskMatch[1] ?? " ";
+      const id = taskMatch[2] ?? "";
+      const title = taskMatch[3] ?? "";
+      validateTaskTitle(title, id);
+      const status = CHAR_TO_STATUS[statusChar] ?? "pending";
+      current.tasks.push({ id, title, status });
+    }
+  }
+  return doc;
+}
+function setTaskStatus(content, taskId, status) {
+  const lines = content.split(`
+`);
+  const newChar = STATUS_TO_CHAR[status];
+  let updatedLine = -1;
+  for (let i = 0;i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    const m = TASK_LINE_RE.exec(line);
+    if (m && m[2] === taskId) {
+      lines[i] = `- [${newChar}] ${taskId}: ${m[3] ?? ""}`;
+      updatedLine = i;
+      break;
+    }
+  }
+  if (updatedLine < 0) {
+    throw new TaskNotFoundError(taskId);
+  }
+  return lines.join(`
+`);
+}
+function summarizeTaskStatus(doc) {
+  const counts = {
+    pending: 0,
+    in_progress: 0,
+    done: 0,
+    blocked: 0
+  };
+  for (const wave of doc.waves) {
+    for (const t of wave.tasks)
+      counts[t.status]++;
+  }
+  return counts;
+}
+function findNextIncompleteWave(doc) {
+  for (const wave of doc.waves) {
+    if (wave.tasks.some((t) => t.status !== "done"))
+      return wave;
+  }
+  return null;
+}
+function validateTaskTitle(title, id) {
+  if (title.length > TASK_TITLE_MAX) {
+    throw new Error(`task ${id}: title exceeds ${TASK_TITLE_MAX} chars`);
+  }
+  if (/[\u0000-\u001f\u007f]/.test(title)) {
+    throw new Error(`task ${id}: title contains control characters`);
+  }
+}
+
+class TaskNotFoundError extends Error {
+  taskId;
+  constructor(taskId) {
+    super(`task not found: ${taskId}`);
+    this.name = "TaskNotFoundError";
+    this.taskId = taskId;
+  }
+}
+
+// src/state/wave-md.ts
+var TITLE_RE2 = /^# Wave (\d+):\s*(.*)$/;
+var META_RE2 = /^\*\*([A-Za-z][A-Za-z ]*?)\*\*:\s*(.*)$/;
+var COMMIT_LINE_RE = /^- ([0-9a-f]{4,40}):\s*(.+)$/;
+var WAVE_REF_RE = /^wave-(\d+)$/i;
+function parseWaveMd(content) {
+  const lines = content.split(`
+`);
+  const doc = {
+    num: 0,
+    title: "",
+    goal: null,
+    verify: null,
+    scaffold: false,
+    startedAt: null,
+    completedAt: null,
+    fixes: null,
+    supersededBy: null,
+    commits: [],
+    range: null,
+    notes: ""
+  };
+  let section = "header";
+  const noteLines = [];
+  for (const line of lines) {
+    if (section === "header") {
+      const tm = TITLE_RE2.exec(line);
+      if (tm) {
+        doc.num = Number.parseInt(tm[1] ?? "0", 10);
+        doc.title = (tm[2] ?? "").trim();
+        continue;
+      }
+      if (line === "## Commits") {
+        section = "commits";
+        continue;
+      }
+      if (line === "## Notes") {
+        section = "notes";
+        continue;
+      }
+      const mm = META_RE2.exec(line);
+      if (mm) {
+        assignMeta(doc, (mm[1] ?? "").trim().toLowerCase(), (mm[2] ?? "").trim());
+      }
+      continue;
+    }
+    if (section === "commits") {
+      if (line === "## Notes") {
+        section = "notes";
+        continue;
+      }
+      const mm = META_RE2.exec(line);
+      if (mm) {
+        assignMeta(doc, (mm[1] ?? "").trim().toLowerCase(), (mm[2] ?? "").trim());
+        continue;
+      }
+      const cm = COMMIT_LINE_RE.exec(line);
+      if (cm?.[1] && cm[2]) {
+        doc.commits.push({ sha: cm[1], subject: cm[2] });
+      }
+      continue;
+    }
+    noteLines.push(line);
+  }
+  doc.notes = trimBlankLines(noteLines).join(`
+`);
+  return doc;
+}
+function assignMeta(doc, key, value) {
+  switch (key) {
+    case "goal":
+      doc.goal = value || null;
+      break;
+    case "verify":
+      doc.verify = value || null;
+      break;
+    case "scaffold":
+      doc.scaffold = /^true$/i.test(value);
+      break;
+    case "started at":
+      doc.startedAt = value || null;
+      break;
+    case "completed at":
+      doc.completedAt = value || null;
+      break;
+    case "fixes":
+      doc.fixes = parseWaveRef(value);
+      break;
+    case "superseded by":
+      doc.supersededBy = parseWaveRef(value);
+      break;
+    case "range":
+      doc.range = value || null;
+      break;
+  }
+}
+function parseWaveRef(value) {
+  const m = WAVE_REF_RE.exec(value.trim());
+  if (!m)
+    return null;
+  const n = Number.parseInt(m[1] ?? "0", 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+function trimBlankLines(lines) {
+  let start = 0;
+  let end = lines.length;
+  while (start < end && (lines[start] ?? "").trim() === "")
+    start++;
+  while (end > start && (lines[end - 1] ?? "").trim() === "")
+    end--;
+  return lines.slice(start, end);
+}
+function writeWaveMd(doc) {
+  const out = [];
+  out.push(`# Wave ${doc.num}: ${doc.title}`);
+  out.push("");
+  out.push(`**Goal**: ${doc.goal ?? ""}`);
+  out.push(`**Verify**: ${doc.verify ?? ""}`);
+  out.push(`**Started at**: ${doc.startedAt ?? ""}`);
+  out.push(`**Completed at**: ${doc.completedAt ?? ""}`);
+  out.push(`**Scaffold**: ${doc.scaffold ? "true" : "false"}`);
+  if (doc.fixes !== null) {
+    out.push(`**Fixes**: wave-${pad(doc.fixes)}`);
+  }
+  if (doc.supersededBy !== null) {
+    out.push(`**Superseded by**: wave-${pad(doc.supersededBy)}`);
+  }
+  out.push("");
+  out.push("## Commits");
+  if (doc.commits.length === 0) {
+    out.push("");
+    out.push("(populated on /qult:wave-complete)");
+  } else {
+    for (const c of doc.commits) {
+      out.push(`- ${c.sha}: ${c.subject}`);
+    }
+  }
+  out.push("");
+  out.push(`**Range**: ${doc.range ?? ""}`);
+  out.push("");
+  out.push("## Notes");
+  out.push("");
+  if (doc.notes.trim()) {
+    out.push(doc.notes);
+    out.push("");
+  }
+  return `${out.join(`
+`).replace(/\n+$/u, "")}
+`;
+}
+function pad(n) {
+  return String(n).padStart(2, "0");
+}
+
+// src/mcp-tools/shared.ts
+function jsonResult(value) {
+  return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
+}
+function errorResult(text) {
+  return { isError: true, content: [{ type: "text", text }] };
+}
+function requireSpecName(args, key = "spec_name") {
+  const v = args?.[key];
+  if (typeof v !== "string") {
+    throw new Error(`missing or non-string ${key}`);
+  }
+  assertValidSpecName(v);
+  return v;
+}
+function requireWaveNum(args, key = "wave_num") {
+  const v = args?.[key];
+  if (typeof v !== "number") {
+    throw new Error(`missing or non-number ${key}`);
+  }
+  assertValidWaveNum(v);
+  return v;
+}
+
+// src/mcp-tools/spec-tools.ts
+function handleGetActiveSpec() {
+  let info;
+  try {
+    info = getActiveSpec();
+  } catch (err) {
+    return errorResult(err.message);
+  }
+  if (info === null) {
+    return jsonResult(null);
+  }
+  const tasksFile = tasksPath(info.name);
+  let tasksDoc = null;
+  if (existsSync9(tasksFile)) {
+    try {
+      tasksDoc = parseTasksMd(readText(tasksFile));
+    } catch {
+      tasksDoc = null;
+    }
+  }
+  const totalWaves = tasksDoc?.waves.length ?? 0;
+  const nextWave = tasksDoc ? findNextIncompleteWave(tasksDoc) : null;
+  const summary = tasksDoc ? summarizeTaskStatus(tasksDoc) : null;
+  return jsonResult({
+    name: info.name,
+    path: info.path,
+    has_requirements: info.hasRequirements,
+    has_design: info.hasDesign,
+    has_tasks: info.hasTasks,
+    total_waves: totalWaves,
+    current_wave: nextWave?.num ?? null,
+    task_summary: summary
+  });
+}
+function handleCompleteWave(args) {
+  let waveNum;
+  let activeSpec;
+  let commitRange;
+  try {
+    waveNum = requireWaveNum(args);
+    activeSpec = getActiveSpec();
+    const r = args?.commit_range;
+    if (typeof r !== "string" || !/^[0-9a-f]{4,40}\.\.[0-9a-f]{4,40}$/.test(r)) {
+      return errorResult("missing or malformed commit_range (expected 'startSha..endSha')");
+    }
+    commitRange = r;
+  } catch (err) {
+    return errorResult(err.message);
+  }
+  if (activeSpec === null) {
+    return errorResult("no active spec");
+  }
+  const wavePathStr = wavePath(activeSpec.name, waveNum);
+  if (!existsSync9(wavePathStr)) {
+    return errorResult(`wave-${pad2(waveNum)}.md not found; run /qult:wave-start first`);
+  }
+  let waveDoc = parseWaveMd(readText(wavePathStr));
+  if (waveDoc.completedAt) {
+    return jsonResult({
+      ok: false,
+      reason: "already_completed",
+      completed_at: waveDoc.completedAt
+    });
+  }
+  const stale = [];
+  for (const prior of listWaveNumbers(activeSpec.name)) {
+    if (prior === waveNum)
+      continue;
+    const priorPath = wavePath(activeSpec.name, prior);
+    if (!existsSync9(priorPath))
+      continue;
+    const priorDoc = parseWaveMd(readText(priorPath));
+    if (!priorDoc.range)
+      continue;
+    const m = /^([0-9a-f]{4,40})\.\.([0-9a-f]{4,40})$/.exec(priorDoc.range);
+    if (!m)
+      continue;
+    if (!isCommitReachable(m[1]) || !isCommitReachable(m[2])) {
+      stale.push(`wave-${pad2(prior)}`);
+    }
+  }
+  if (stale.length > 0) {
+    return jsonResult({ ok: false, reason: "sha_unreachable", stale });
+  }
+  waveDoc = {
+    ...waveDoc,
+    completedAt: new Date().toISOString(),
+    range: commitRange
+  };
+  atomicWrite(wavePathStr, writeWaveMd(waveDoc));
+  return jsonResult({ ok: true, range: commitRange });
+}
+function handleUpdateTaskStatus(args) {
+  let activeSpec;
+  const taskId = typeof args?.task_id === "string" ? args.task_id : null;
+  const statusRaw = typeof args?.status === "string" ? args.status : null;
+  if (!taskId)
+    return errorResult("missing task_id");
+  if (!statusRaw || !["pending", "in_progress", "done", "blocked"].includes(statusRaw)) {
+    return errorResult("status must be one of: pending | in_progress | done | blocked");
+  }
+  try {
+    activeSpec = getActiveSpec();
+  } catch (err) {
+    return errorResult(err.message);
+  }
+  if (activeSpec === null)
+    return errorResult("no active spec");
+  const tasksFile = tasksPath(activeSpec.name);
+  if (!existsSync9(tasksFile))
+    return errorResult("tasks.md not found");
+  let updated;
+  try {
+    updated = setTaskStatus(readText(tasksFile), taskId, statusRaw);
+  } catch (err) {
+    if (err.name === "TaskNotFoundError") {
+      return jsonResult({ ok: false, reason: "task_not_found", task_id: taskId });
+    }
+    return errorResult(err.message);
+  }
+  atomicWrite(tasksFile, updated);
+  return jsonResult({ ok: true, task_id: taskId, status: statusRaw });
+}
+function handleArchiveSpec(args) {
+  let name;
+  try {
+    name = requireSpecName(args);
+  } catch (err) {
+    return errorResult(err.message);
+  }
+  try {
+    const dest = archiveSpec(name);
+    return jsonResult({ ok: true, archived_to: dest });
+  } catch (err) {
+    return errorResult(err.message);
+  }
+}
+function handleRecordSpecEvaluatorScore(args) {
+  const phase = args?.phase;
+  const total = args?.total;
+  const dim = args?.dim_scores;
+  const forced = args?.forced_progress ?? false;
+  const iter = args?.iteration ?? 1;
+  if (phase !== "requirements" && phase !== "design" && phase !== "tasks") {
+    return errorResult("phase must be one of: requirements | design | tasks");
+  }
+  if (typeof total !== "number" || total < 0 || total > 20) {
+    return errorResult("total must be a number in [0, 20]");
+  }
+  if (!dim || typeof dim !== "object") {
+    return errorResult("dim_scores must be an object");
+  }
+  const dimRecord = {};
+  for (const [k, v] of Object.entries(dim)) {
+    if (typeof v === "number")
+      dimRecord[k] = v;
+  }
+  if (typeof iter !== "number" || iter < 1) {
+    return errorResult("iteration must be a positive integer");
+  }
+  if (typeof forced !== "boolean") {
+    return errorResult("forced_progress must be a boolean");
+  }
+  const state = recordSpecEvalPhase(phase, {
+    total,
+    dim_scores: dimRecord,
+    forced_progress: forced,
+    iteration: iter
+  });
+  return jsonResult({ ok: true, phase, recorded: state.spec_eval[phase] });
+}
+function pad2(n) {
+  return String(n).padStart(2, "0");
 }
 
 // src/state/audit-log.ts
@@ -2019,8 +2750,8 @@ var TOOL_DEFS = [
     inputSchema: { type: "object", properties: {} }
   },
   {
-    name: "get_session_status",
-    description: "Returns session state as JSON: test_passed_at, review_completed_at, changed_file_paths, review_iteration. Call before committing to verify gates.",
+    name: "get_project_status",
+    description: "Returns project state as JSON: test_passed_at, review_completed_at, review_iteration, plus the active_spec block (name, current_wave, total_waves, task_summary) when a spec exists under .qult/specs/. Call before committing to verify gates.",
     inputSchema: { type: "object", properties: {} }
   },
   {
@@ -2151,17 +2882,73 @@ var TOOL_DEFS = [
     inputSchema: { type: "object", properties: {} }
   },
   {
-    name: "archive_plan",
-    description: "Archive a completed plan file to prevent detection in future sessions. Moves the plan to an archive/ subdirectory. Call after /qult:finish completes successfully.",
+    name: "archive_spec",
+    description: "Archive a completed spec by moving .qult/specs/<name>/ to .qult/specs/archive/<name>[-timestamp]/. Call from /qult:finish after the spec is complete and merged. The spec_name must match the active spec; reserved name 'archive' is rejected.",
     inputSchema: {
       type: "object",
       properties: {
-        plan_path: {
+        spec_name: {
           type: "string",
-          description: "Absolute path to the plan file to archive"
+          description: "kebab-case spec name (e.g. 'add-oauth')"
         }
       },
-      required: ["plan_path"]
+      required: ["spec_name"]
+    }
+  },
+  {
+    name: "get_active_spec",
+    description: "Return the unique active spec under .qult/specs/ (excluding archive/). Response: { name, path, has_requirements, has_design, has_tasks, total_waves, current_wave, task_summary } or null when no spec is active.",
+    inputSchema: { type: "object", properties: {} }
+  },
+  {
+    name: "complete_wave",
+    description: "Finalize a Wave by writing completion timestamp and commit range to wave-NN.md. Idempotent: returns reason='already_completed' when called twice. Verifies prior Waves' Range SHAs are still reachable (rejects with reason='sha_unreachable' after rebase/reset).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        wave_num: { type: "number", description: "Wave number (1-99)" },
+        commit_range: {
+          type: "string",
+          description: "Commit range as 'startSha..endSha' (4-40 hex chars each)"
+        }
+      },
+      required: ["wave_num", "commit_range"]
+    }
+  },
+  {
+    name: "update_task_status",
+    description: "Update a single task's status in the active spec's tasks.md. Status: pending | in_progress | done | blocked. Returns reason='task_not_found' when task_id does not exist (NEVER silent no-op).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task_id: { type: "string", description: "Task id like 'T1.3'" },
+        status: {
+          type: "string",
+          description: "pending | in_progress | done | blocked"
+        }
+      },
+      required: ["task_id", "status"]
+    }
+  },
+  {
+    name: "record_spec_evaluator_score",
+    description: "Record a spec-evaluator score for a specific phase (requirements | design | tasks). Used during /qult:spec to gate progression through requirements \u2192 design \u2192 tasks.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        phase: { type: "string", description: "requirements | design | tasks" },
+        total: { type: "number", description: "Total score 0-20" },
+        dim_scores: {
+          type: "object",
+          description: "Per-dimension scores, e.g. { completeness: 5, testability: 4 }"
+        },
+        forced_progress: {
+          type: "boolean",
+          description: "true if user force-progressed past iteration cap"
+        },
+        iteration: { type: "number", description: "Iteration count (1-based)" }
+      },
+      required: ["phase", "total", "dim_scores"]
     }
   },
   {
@@ -2199,9 +2986,20 @@ var TOOL_DEFS = [
 ];
 function handleTool(name, cwd, args) {
   setProjectPath(cwd);
+  setProjectRoot(cwd);
   const db = getDb();
   const pid = getProjectId();
   switch (name) {
+    case "get_active_spec":
+      return handleGetActiveSpec();
+    case "complete_wave":
+      return handleCompleteWave(args);
+    case "update_task_status":
+      return handleUpdateTaskStatus(args);
+    case "record_spec_evaluator_score":
+      return handleRecordSpecEvaluatorScore(args);
+    case "archive_spec":
+      return handleArchiveSpec(args);
     case "get_pending_fixes": {
       const rows = db.prepare("SELECT file, gate, errors FROM pending_fixes WHERE project_id = ?").all(pid);
       if (rows.length === 0) {
@@ -2222,16 +3020,22 @@ function handleTool(name, cwd, args) {
       return { content: [{ type: "text", text: lines.join(`
 `) }] };
     }
-    case "get_session_status": {
+    case "get_project_status": {
       const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(pid);
       if (!row) {
         return {
           isError: true,
-          content: [{ type: "text", text: "No session state. Run /qult:init to set up." }]
+          content: [{ type: "text", text: "No project state. Run /qult:init to set up." }]
         };
       }
       const r = row;
       const config = loadConfig();
+      let activeSpec = null;
+      try {
+        activeSpec = getActiveSpec();
+      } catch {
+        activeSpec = null;
+      }
       const enriched = {
         id: r.id,
         path: r.path,
@@ -2251,7 +3055,13 @@ function handleTool(name, cwd, args) {
         duplication_warning_count: r.duplication_warning_count,
         semantic_warning_count: r.semantic_warning_count,
         review_models: config.review.models,
-        review_config: config.review
+        review_config: config.review,
+        active_spec: activeSpec ? {
+          name: activeSpec.name,
+          has_requirements: activeSpec.hasRequirements,
+          has_design: activeSpec.hasDesign,
+          has_tasks: activeSpec.hasTasks
+        } : null
       };
       return { content: [{ type: "text", text: JSON.stringify(enriched, null, 2) }] };
     }
@@ -2447,7 +3257,7 @@ function handleTool(name, cwd, args) {
           ]
         };
       }
-      const resolvedHealth = resolve3(filePath);
+      const resolvedHealth = resolve4(filePath);
       if (!resolvedHealth.startsWith(`${cwd}/`)) {
         return {
           content: [
@@ -2533,36 +3343,6 @@ function handleTool(name, cwd, args) {
     case "record_finish_started": {
       db.prepare("INSERT OR REPLACE INTO ran_gates (project_id, gate_name, ran_at) VALUES (?, ?, ?)").run(pid, "__finish_started__", new Date().toISOString());
       return { content: [{ type: "text", text: "Finish started recorded." }] };
-    }
-    case "archive_plan": {
-      const planPath = typeof args?.plan_path === "string" ? args.plan_path : null;
-      if (!planPath) {
-        return { content: [{ type: "text", text: "Error: plan_path is required." }] };
-      }
-      const resolvedPath = resolve3(cwd, planPath);
-      const allowedBases = [
-        resolve3(join4(cwd, ".claude", "plans")),
-        resolve3(join4(homedir2(), ".claude", "plans"))
-      ];
-      const envPlansDir = process.env.CLAUDE_PLANS_DIR;
-      if (envPlansDir)
-        allowedBases.push(resolve3(envPlansDir));
-      const isAllowed = allowedBases.some((base) => resolvedPath.startsWith(`${base}/`)) && resolvedPath.endsWith(".md");
-      if (!isAllowed) {
-        return {
-          content: [
-            { type: "text", text: "Error: plan_path must be a .md file under .claude/plans/" }
-          ]
-        };
-      }
-      if (!existsSync9(resolvedPath)) {
-        return {
-          content: [{ type: "text", text: "Plan not found (already archived or path incorrect)." }]
-        };
-      }
-      archivePlanFile(resolvedPath);
-      resetPlanCache();
-      return { content: [{ type: "text", text: "Plan archived." }] };
     }
     case "get_impact_analysis": {
       const file = typeof args?.file === "string" ? args.file : "";
@@ -2652,7 +3432,7 @@ function handleRequest(parsed, cwd) {
             "- After running tests successfully: call record_test_pass with the test command.",
             "- At the end of /qult:review: record_review with the aggregate score.",
             "- During /qult:finish: record_finish_started.",
-            "- Before committing: call get_session_status to verify test/review gates.",
+            "- Before committing: call get_project_status to verify test/review gates.",
             "",
             "## Tier 1 detectors (reviewer ground truth)",
             "- Before /qult:review: call get_detector_summary to collect detector findings (security, dep-vuln, hallucinated-package, test-quality, export-check).",

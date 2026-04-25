@@ -41,21 +41,21 @@ describe("handleTool", () => {
 		expect(text).toContain("error: unused var");
 	});
 
-	it("get_session_status returns state from DB", () => {
+	it("get_project_status returns state from DB", () => {
 		const db = getDb();
 		db.prepare("UPDATE projects SET last_commit_at = ? WHERE id = ?").run(
 			"2026-01-01T00:00:00Z",
 			getProjectId(),
 		);
 
-		const result = handleTool("get_session_status", TEST_DIR);
+		const result = handleTool("get_project_status", TEST_DIR);
 		const parsed = JSON.parse(result.content[0]!.text);
 		expect(parsed.last_commit_at).toBe("2026-01-01T00:00:00Z");
 		expect(parsed.test_passed_at).toBeNull();
 	});
 
-	it("get_session_status returns project state", () => {
-		const result = handleTool("get_session_status", TEST_DIR);
+	it("get_project_status returns project state", () => {
+		const result = handleTool("get_project_status", TEST_DIR);
 		expect(result.isError).toBeUndefined();
 		expect(result.content[0]!.text).toContain("id");
 	});
@@ -104,7 +104,7 @@ describe("handleRequest (JSON-RPC)", () => {
 		const result = response!.result as { tools: { name: string }[] };
 		const names = result.tools.map((t) => t.name);
 		expect(names).toContain("get_pending_fixes");
-		expect(names).toContain("get_session_status");
+		expect(names).toContain("get_project_status");
 		expect(names).toContain("disable_gate");
 		expect(names).toContain("record_test_pass");
 		expect(names).toContain("record_review");
@@ -530,40 +530,34 @@ describe("get_detector_summary", () => {
 	});
 });
 
-describe("archive_plan", () => {
-	it("archive_plan tool moves plan file to archive", () => {
-		const plansDir = join(TEST_DIR, ".claude", "plans");
-		mkdirSync(plansDir, { recursive: true });
-		const planPath = join(plansDir, "test-plan.md");
-		writeFileSync(planPath, "# Plan\n## Tasks\n### Task 1: Test [done]");
-
-		const result = handleTool("archive_plan", TEST_DIR, { plan_path: planPath });
-		expect(result.content[0]!.text).toContain("archived");
-		expect(existsSync(planPath)).toBe(false);
-		expect(existsSync(join(plansDir, "archive", "test-plan.md"))).toBe(true);
+describe("archive_spec", () => {
+	it("moves .qult/specs/<name>/ to .qult/specs/archive/<name>/", () => {
+		const specDir = join(TEST_DIR, ".qult", "specs", "demo-spec");
+		mkdirSync(specDir, { recursive: true });
+		writeFileSync(join(specDir, "requirements.md"), "# Reqs\n");
+		const result = handleTool("archive_spec", TEST_DIR, { spec_name: "demo-spec" });
+		const parsed = JSON.parse(result.content[0]!.text);
+		expect(parsed.ok).toBe(true);
+		expect(existsSync(specDir)).toBe(false);
+		expect(existsSync(join(TEST_DIR, ".qult", "specs", "archive", "demo-spec"))).toBe(true);
 	});
 
-	it("returns 'not found' for non-existent plan path under .claude/plans/", () => {
-		const plansDir = join(TEST_DIR, ".claude", "plans");
-		mkdirSync(plansDir, { recursive: true });
-		const fakePath = join(plansDir, "non-existent.md");
-		const result = handleTool("archive_plan", TEST_DIR, { plan_path: fakePath });
-		expect(result.content[0]!.text).toContain("not found");
+	it("rejects reserved name 'archive'", () => {
+		const result = handleTool("archive_spec", TEST_DIR, { spec_name: "archive" });
+		expect(result.isError).toBe(true);
+		expect(result.content[0]!.text).toMatch(/reserved/);
 	});
 
-	it("rejects path traversal attempts", () => {
-		const maliciousPath = "/etc/passwd";
-		const result = handleTool("archive_plan", TEST_DIR, { plan_path: maliciousPath });
-		expect(result.content[0]!.text).toContain("Error");
+	it("rejects path traversal attempts via spec_name", () => {
+		const result = handleTool("archive_spec", TEST_DIR, { spec_name: "../etc" });
+		expect(result.isError).toBe(true);
+		expect(result.content[0]!.text).toMatch(/invalid spec name/);
 	});
 
-	it("rejects non-.md file paths", () => {
-		const plansDir = join(TEST_DIR, ".claude", "plans");
-		mkdirSync(plansDir, { recursive: true });
-		const nonMdPath = join(plansDir, "malicious.sh");
-		writeFileSync(nonMdPath, "#!/bin/bash");
-		const result = handleTool("archive_plan", TEST_DIR, { plan_path: nonMdPath });
-		expect(result.content[0]!.text).toContain("Error");
+	it("returns error when spec dir does not exist", () => {
+		const result = handleTool("archive_spec", TEST_DIR, { spec_name: "no-such-spec" });
+		expect(result.isError).toBe(true);
+		expect(result.content[0]!.text).toMatch(/spec not found/);
 	});
 });
 

@@ -29,4 +29,4 @@ The model that wrote the code must NOT also be the reviewer. `/qult:review` spaw
 
 ## After review passes
 
-The reviewer skill calls `mcp__plugin_qult_qult__record_review` automatically. Verify via `mcp__plugin_qult_qult__get_session_status` that `review_completed_at` is set before committing.
+The reviewer skill calls `mcp__plugin_qult_qult__record_review` automatically. Verify via `mcp__plugin_qult_qult__get_project_status` that `review_completed_at` is set before committing.

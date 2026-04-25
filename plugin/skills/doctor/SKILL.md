@@ -10,7 +10,7 @@ Diagnose qult setup issues in the current project.
 
 ## Checks
 
-1. **DB connectivity**: Call `mcp__plugin_qult_qult__get_session_status()` to verify SQLite DB at `~/.qult/qult.db` is accessible
+1. **DB connectivity**: Call `mcp__plugin_qult_qult__get_project_status()` to verify SQLite DB at `~/.qult/qult.db` is accessible
 2. **Rules installation**: Verify each rule file exists at `~/.claude/rules/qult-*.md` (workflow, pre-commit, plan-mode, review, quality). If any are missing, suggest re-running `/qult:init`. Check via Bash: `ls ~/.claude/rules/qult-*.md 2>/dev/null | wc -l`
 3. **Plugin assets**: Verify `${CLAUDE_PLUGIN_ROOT}/rules/` exists via Bash: `test -d "${CLAUDE_PLUGIN_ROOT}/rules" && echo OK || echo FAIL`
 4. **Legacy files**: Warn if any of these exist — suggest running `/qult:init` to clean up:
@@ -20,7 +20,7 @@ Diagnose qult setup issues in the current project.
    - `.claude/rules/qult-quality.md` (now at `~/.claude/rules/qult-quality.md` — local copy obsolete)
    - `.claude/rules/qult-plan.md` (now at `~/.claude/rules/qult-plan-mode.md`)
    - Old settings.local.json hook entries containing `.qult/hook.mjs` or `dist/hook.mjs`
-5. **MCP server**: The `get_session_status` call from check 1 doubles as a smoke test. If it returned valid JSON, the MCP server is responding
+5. **MCP server**: The `get_project_status` call from check 1 doubles as a smoke test. If it returned valid JSON, the MCP server is responding
 6. **Pending fixes**: Call `mcp__plugin_qult_qult__get_pending_fixes()` to check for stale errors
 
 ## Output format

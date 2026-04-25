@@ -4,7 +4,7 @@ qult is installed for this user. Follow these workflow rules when working in any
 
 ## Detect qult-enabled project
 
-A project is qult-enabled if `mcp__plugin_qult_qult__get_session_status` returns a valid session. If the MCP tool is unavailable or the project is not registered, treat these rules as inactive and proceed normally.
+A project is qult-enabled if `mcp__plugin_qult_qult__get_project_status` returns a valid session. If the MCP tool is unavailable or the project is not registered, treat these rules as inactive and proceed normally.
 
 ## Top-level workflow
 
@@ -17,7 +17,7 @@ For non-trivial work in a qult-enabled project, follow this sequence:
 
 ## Status awareness
 
-At the start of each task and before any commit, call `mcp__plugin_qult_qult__get_session_status` to check pending fixes, test pass state, and review completion. If `/qult:status` is more convenient, invoke it instead.
+At the start of each task and before any commit, call `mcp__plugin_qult_qult__get_project_status` to check pending fixes, test pass state, and review completion. If `/qult:status` is more convenient, invoke it instead.
 
 ## Skill-first
 

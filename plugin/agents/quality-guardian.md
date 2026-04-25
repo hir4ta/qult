@@ -29,7 +29,7 @@ Reason: manual plan writing bypasses plan-evaluator scoring. Direct commits bypa
 - If a plan exists in `.claude/plans/`, read it first
 
 ### Before committing
-- Call `mcp__plugin_qult_qult__get_session_status()` to check gate status (or run `/qult:status`)
+- Call `mcp__plugin_qult_qult__get_project_status()` to check gate status (or run `/qult:status`)
 - Run the project's test command and confirm tests pass; call `record_test_pass` when they do
 - Ensure `/qult:review` has been run if the change spans 5+ files or a plan is active
 

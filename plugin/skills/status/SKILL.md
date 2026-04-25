@@ -11,7 +11,7 @@ Report the current qult session state.
 ## Steps
 
 1. Call `mcp__plugin_qult_qult__get_pending_fixes()` for detector findings awaiting resolution
-2. Call `mcp__plugin_qult_qult__get_session_status()` for test pass / review completion / changed files
+2. Call `mcp__plugin_qult_qult__get_project_status()` for test pass / review completion / changed files
 
 ## Output format
 

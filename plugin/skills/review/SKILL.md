@@ -164,13 +164,13 @@ This is critical for efficiency: without diff prefetch, each reviewer independen
 
 Before spawning reviewers, resolve the model for each stage and **capture the full review config for later stages**:
 
-1. Call `mcp__plugin_qult_qult__get_session_status()` — the response includes `review_models` (per-stage model configuration) AND `review_config` (full review settings: score_threshold, dimension_floor, max_iterations, require_human_approval, low_only_passes, models)
+1. Call `mcp__plugin_qult_qult__get_project_status()` — the response includes `review_models` (per-stage model configuration) AND `review_config` (full review settings: score_threshold, dimension_floor, max_iterations, require_human_approval, low_only_passes, models)
 2. Extract the model for each reviewer:
    - `review_models.spec` → spec-reviewer model
    - `review_models.quality` → quality-reviewer model
    - `review_models.security` → security-reviewer model
    - `review_models.adversarial` → adversarial-reviewer model
-3. **Also cache `review_config.low_only_passes` (boolean, default false) for Stage 6**. Other `review_config` fields (`score_threshold`, `dimension_floor`, `max_iterations`) are also used by Stage 6's threshold check, so keep the entire `review_config` object accessible to later stages — this avoids a second `get_session_status()` call.
+3. **Also cache `review_config.low_only_passes` (boolean, default false) for Stage 6**. Other `review_config` fields (`score_threshold`, `dimension_floor`, `max_iterations`) are also used by Stage 6's threshold check, so keep the entire `review_config` object accessible to later stages — this avoids a second `get_project_status()` call.
 4. When spawning each Agent, pass the `model` parameter to override the agent frontmatter default:
    - Example: `Agent({ subagent_type: "qult:spec-reviewer", model: "sonnet", ... })`
 5. If a model value matches the agent's frontmatter default (spec=sonnet, quality=sonnet, security=opus, adversarial=opus), you may omit the `model` parameter
@@ -309,7 +309,7 @@ Score thresholds and the decision to stop/iterate/passthrough are evaluated in t
 
 ### Step 6a: Low-only passthrough check (evaluated BEFORE the stop/iterate decision)
 
-Use `review_config.low_only_passes` cached from Stage 0.8 (avoid re-calling `get_session_status()` — correctness is unaffected either way; this is a cost hint). Default `false`.
+Use `review_config.low_only_passes` cached from Stage 0.8 (avoid re-calling `get_project_status()` — correctness is unaffected either way; this is a cost hint). Default `false`.
 
 If ALL of the following hold, treat the review as PASS immediately — skip step 6b entirely:
 1. `review_config.low_only_passes` is `true`

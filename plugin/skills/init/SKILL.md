@@ -4,7 +4,7 @@ description: "Initialize qult for the current user. Installs workflow rules to ~
 user-invocable: true
 allowed-tools:
   - Bash
-  - mcp__plugin_qult_qult__get_session_status
+  - mcp__plugin_qult_qult__get_project_status
 ---
 
 # /qult:init
@@ -13,7 +13,7 @@ Install qult workflow rules and clean up legacy files. Idempotent — safe to re
 
 ## Step 1: Verify plugin + DB are reachable
 
-Check the plugin cache path exists, then call `mcp__plugin_qult_qult__get_session_status` to confirm the MCP server and DB are reachable.
+Check the plugin cache path exists, then call `mcp__plugin_qult_qult__get_project_status` to confirm the MCP server and DB are reachable.
 
 ```bash
 test -d "${CLAUDE_PLUGIN_ROOT}/rules" || { echo "qult plugin rules missing — reinstall the plugin"; exit 1; }

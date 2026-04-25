@@ -9,17 +9,23 @@
  * to eliminate the 660KB SDK dependency and reduce coupling to SDK releases.
  */
 
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { loadConfig, resetConfigCache } from "./config.ts";
 import { computeFileHealthScore } from "./hooks/detectors/health-score.ts";
 import { findImporters } from "./hooks/detectors/import-graph.ts";
 import { validateTestCoversImpl } from "./hooks/detectors/spec-trace-check.ts";
+import {
+	handleArchiveSpec,
+	handleCompleteWave,
+	handleGetActiveSpec,
+	handleRecordSpecEvaluatorScore,
+	handleUpdateTaskStatus,
+} from "./mcp-tools/spec-tools.ts";
 import { appendAuditLog } from "./state/audit-log.ts";
 import { getDb, getProjectId, setProjectPath } from "./state/db.ts";
-import { archivePlanFile, resetPlanCache } from "./state/plan-status.ts";
+import { setProjectRoot } from "./state/paths.ts";
+import { getActiveSpec as getActiveSpecOnDisk } from "./state/spec.ts";
 import type { PendingFix } from "./types.ts";
 
 const PROTOCOL_VERSION = "2024-11-05";
@@ -68,9 +74,9 @@ const TOOL_DEFS: ToolDef[] = [
 		inputSchema: { type: "object", properties: {} },
 	},
 	{
-		name: "get_session_status",
+		name: "get_project_status",
 		description:
-			"Returns session state as JSON: test_passed_at, review_completed_at, changed_file_paths, review_iteration. Call before committing to verify gates.",
+			"Returns project state as JSON: test_passed_at, review_completed_at, review_iteration, plus the active_spec block (name, current_wave, total_waves, task_summary) when a spec exists under .qult/specs/. Call before committing to verify gates.",
 		inputSchema: { type: "object", properties: {} },
 	},
 	{
@@ -212,18 +218,78 @@ const TOOL_DEFS: ToolDef[] = [
 		inputSchema: { type: "object", properties: {} },
 	},
 	{
-		name: "archive_plan",
+		name: "archive_spec",
 		description:
-			"Archive a completed plan file to prevent detection in future sessions. Moves the plan to an archive/ subdirectory. Call after /qult:finish completes successfully.",
+			"Archive a completed spec by moving .qult/specs/<name>/ to .qult/specs/archive/<name>[-timestamp]/. Call from /qult:finish after the spec is complete and merged. The spec_name must match the active spec; reserved name 'archive' is rejected.",
 		inputSchema: {
 			type: "object",
 			properties: {
-				plan_path: {
+				spec_name: {
 					type: "string",
-					description: "Absolute path to the plan file to archive",
+					description: "kebab-case spec name (e.g. 'add-oauth')",
 				},
 			},
-			required: ["plan_path"],
+			required: ["spec_name"],
+		},
+	},
+	{
+		name: "get_active_spec",
+		description:
+			"Return the unique active spec under .qult/specs/ (excluding archive/). Response: { name, path, has_requirements, has_design, has_tasks, total_waves, current_wave, task_summary } or null when no spec is active.",
+		inputSchema: { type: "object", properties: {} },
+	},
+	{
+		name: "complete_wave",
+		description:
+			"Finalize a Wave by writing completion timestamp and commit range to wave-NN.md. Idempotent: returns reason='already_completed' when called twice. Verifies prior Waves' Range SHAs are still reachable (rejects with reason='sha_unreachable' after rebase/reset).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				wave_num: { type: "number", description: "Wave number (1-99)" },
+				commit_range: {
+					type: "string",
+					description: "Commit range as 'startSha..endSha' (4-40 hex chars each)",
+				},
+			},
+			required: ["wave_num", "commit_range"],
+		},
+	},
+	{
+		name: "update_task_status",
+		description:
+			"Update a single task's status in the active spec's tasks.md. Status: pending | in_progress | done | blocked. Returns reason='task_not_found' when task_id does not exist (NEVER silent no-op).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				task_id: { type: "string", description: "Task id like 'T1.3'" },
+				status: {
+					type: "string",
+					description: "pending | in_progress | done | blocked",
+				},
+			},
+			required: ["task_id", "status"],
+		},
+	},
+	{
+		name: "record_spec_evaluator_score",
+		description:
+			"Record a spec-evaluator score for a specific phase (requirements | design | tasks). Used during /qult:spec to gate progression through requirements → design → tasks.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				phase: { type: "string", description: "requirements | design | tasks" },
+				total: { type: "number", description: "Total score 0-20" },
+				dim_scores: {
+					type: "object",
+					description: "Per-dimension scores, e.g. { completeness: 5, testability: 4 }",
+				},
+				forced_progress: {
+					type: "boolean",
+					description: "true if user force-progressed past iteration cap",
+				},
+				iteration: { type: "number", description: "Iteration count (1-based)" },
+			},
+			required: ["phase", "total", "dim_scores"],
 		},
 	},
 	{
@@ -264,10 +330,21 @@ const TOOL_DEFS: ToolDef[] = [
 
 function handleTool(name: string, cwd: string, args?: Record<string, unknown>): ToolResult {
 	setProjectPath(cwd);
+	setProjectRoot(cwd);
 	const db = getDb();
 	const pid = getProjectId();
 
 	switch (name) {
+		case "get_active_spec":
+			return handleGetActiveSpec();
+		case "complete_wave":
+			return handleCompleteWave(args);
+		case "update_task_status":
+			return handleUpdateTaskStatus(args);
+		case "record_spec_evaluator_score":
+			return handleRecordSpecEvaluatorScore(args);
+		case "archive_spec":
+			return handleArchiveSpec(args);
 		case "get_pending_fixes": {
 			const rows = db
 				.prepare("SELECT file, gate, errors FROM pending_fixes WHERE project_id = ?")
@@ -287,18 +364,25 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			}
 			return { content: [{ type: "text", text: lines.join("\n") }] };
 		}
-		case "get_session_status": {
+		case "get_project_status": {
 			const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(pid);
 			if (!row) {
 				return {
 					isError: true,
-					content: [{ type: "text", text: "No session state. Run /qult:init to set up." }],
+					content: [{ type: "text", text: "No project state. Run /qult:init to set up." }],
 				};
 			}
 			// Explicit allowlist of exposed fields — prevents silent leaks when the projects
 			// table gets new columns. Any new field must be added here to be visible to skills.
 			const r = row as Record<string, unknown>;
 			const config = loadConfig();
+			let activeSpec: ReturnType<typeof getActiveSpecOnDisk> = null;
+			try {
+				activeSpec = getActiveSpecOnDisk();
+			} catch {
+				// Multiple specs etc. — surface as null and let /qult:status handle the inconsistency.
+				activeSpec = null;
+			}
 			const enriched = {
 				id: r.id,
 				path: r.path,
@@ -318,7 +402,15 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 				duplication_warning_count: r.duplication_warning_count,
 				semantic_warning_count: r.semantic_warning_count,
 				review_models: config.review.models, // kept for backward compat
-				review_config: config.review, // full review config (score_threshold, dimension_floor, max_iterations, require_human_approval, low_only_passes, models)
+				review_config: config.review, // full review config
+				active_spec: activeSpec
+					? {
+							name: activeSpec.name,
+							has_requirements: activeSpec.hasRequirements,
+							has_design: activeSpec.hasDesign,
+							has_tasks: activeSpec.hasTasks,
+						}
+					: null,
 			};
 			return { content: [{ type: "text", text: JSON.stringify(enriched, null, 2) }] };
 		}
@@ -646,40 +738,8 @@ function handleTool(name: string, cwd: string, args?: Record<string, unknown>): 
 			).run(pid, "__finish_started__", new Date().toISOString());
 			return { content: [{ type: "text", text: "Finish started recorded." }] };
 		}
-		case "archive_plan": {
-			const planPath = typeof args?.plan_path === "string" ? args.plan_path : null;
-			if (!planPath) {
-				return { content: [{ type: "text", text: "Error: plan_path is required." }] };
-			}
-			// Path traversal guard: plan_path must resolve under .claude/plans/
-			const resolvedPath = resolve(cwd, planPath);
-			const allowedBases = [
-				resolve(join(cwd, ".claude", "plans")),
-				resolve(join(homedir(), ".claude", "plans")),
-			];
-			// Support CLAUDE_PLANS_DIR env var (custom plan directory)
-			const envPlansDir = process.env.CLAUDE_PLANS_DIR;
-			if (envPlansDir) allowedBases.push(resolve(envPlansDir));
-			const isAllowed =
-				allowedBases.some((base) => resolvedPath.startsWith(`${base}/`)) &&
-				resolvedPath.endsWith(".md");
-			if (!isAllowed) {
-				return {
-					content: [
-						{ type: "text", text: "Error: plan_path must be a .md file under .claude/plans/" },
-					],
-				};
-			}
-			// Check if file exists before archiving (distinguish no-op from success)
-			if (!existsSync(resolvedPath)) {
-				return {
-					content: [{ type: "text", text: "Plan not found (already archived or path incorrect)." }],
-				};
-			}
-			archivePlanFile(resolvedPath);
-			resetPlanCache();
-			return { content: [{ type: "text", text: "Plan archived." }] };
-		}
+		// archive_spec removed in v1.0 — replaced by archive_spec (handled above).
+
 		case "get_impact_analysis": {
 			const file = typeof args?.file === "string" ? args.file : "";
 			if (!file) {
@@ -785,7 +845,7 @@ function handleRequest(parsed: JsonRpcRequest, cwd: string): JsonRpcResponse | n
 						"- After running tests successfully: call record_test_pass with the test command.",
 						"- At the end of /qult:review: record_review with the aggregate score.",
 						"- During /qult:finish: record_finish_started.",
-						"- Before committing: call get_session_status to verify test/review gates.",
+						"- Before committing: call get_project_status to verify test/review gates.",
 						"",
 						"## Tier 1 detectors (reviewer ground truth)",
 						"- Before /qult:review: call get_detector_summary to collect detector findings (security, dep-vuln, hallucinated-package, test-quality, export-check).",

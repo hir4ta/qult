@@ -19,7 +19,7 @@ The user will specify what they want:
 
 ### Show current config
 
-1. Call `mcp__plugin_qult_qult__get_session_status()` — response includes `review_config` field with all current review settings (score_threshold, dimension_floor, max_iterations, require_human_approval, low_only_passes, models)
+1. Call `mcp__plugin_qult_qult__get_project_status()` — response includes `review_config` field with all current review settings (score_threshold, dimension_floor, max_iterations, require_human_approval, low_only_passes, models)
 2. Present current values with defaults noted. For `plan_eval.*` and other non-review keys, display defaults since they are not yet enriched; mention that `set_config` is required to change them
 
 ### Change a config value
