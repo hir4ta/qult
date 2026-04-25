@@ -1,6 +1,19 @@
 import { existsSync, readFileSync } from "node:fs";
 import { configJsonPath } from "./state/paths.ts";
 
+/** Integration key for AI coding tool (e.g. "claude", "codex", "cursor", "gemini"). */
+export type IntegrationKey = string;
+
+/** Custom integration definition (extends the built-in registry). */
+export interface CustomIntegrationDef {
+	key: string;
+	displayName: string;
+	/** MCP config file path, relative to project root. */
+	mcpConfigPath: string;
+	/** MCP server config snippet (stringified, integration-specific format). */
+	mcpConfigSnippet: string;
+}
+
 /** User-configurable settings */
 export interface QultConfig {
 	review: {
@@ -45,6 +58,18 @@ export interface QultConfig {
 		/** Require Semgrep to be installed. Used by security-reviewer for SAST. */
 		require_semgrep: boolean;
 	};
+	/** Multi-agent integration registry (Wave 4+). */
+	integrations: {
+		/** Enabled integration keys. Written by `qult init`. */
+		enabled: IntegrationKey[];
+		/** Custom integrations to extend the built-in registry. */
+		custom?: CustomIntegrationDef[];
+	};
+	/** Template overrides. */
+	templates: {
+		/** Custom template directory (absolute or project-relative); takes precedence over bundled templates. */
+		dir?: string;
+	};
 }
 
 export const DEFAULTS: QultConfig = {
@@ -81,6 +106,10 @@ export const DEFAULTS: QultConfig = {
 	security: {
 		require_semgrep: true,
 	},
+	integrations: {
+		enabled: [],
+	},
+	templates: {},
 };
 
 /** Apply a raw config object on top of an existing QultConfig (field-by-field type-safe merge). */
@@ -137,6 +166,29 @@ function applyConfigLayer(config: QultConfig, raw: Record<string, unknown>): voi
 	if (raw.security && typeof raw.security === "object") {
 		const s = raw.security as Record<string, unknown>;
 		if (typeof s.require_semgrep === "boolean") config.security.require_semgrep = s.require_semgrep;
+	}
+	if (raw.integrations && typeof raw.integrations === "object") {
+		const i = raw.integrations as Record<string, unknown>;
+		if (Array.isArray(i.enabled)) {
+			config.integrations.enabled = i.enabled.filter(
+				(k: unknown): k is string => typeof k === "string" && k.length > 0,
+			);
+		}
+		if (Array.isArray(i.custom)) {
+			config.integrations.custom = i.custom.filter(
+				(c: unknown): c is CustomIntegrationDef =>
+					typeof c === "object" &&
+					c !== null &&
+					typeof (c as Record<string, unknown>).key === "string" &&
+					typeof (c as Record<string, unknown>).displayName === "string" &&
+					typeof (c as Record<string, unknown>).mcpConfigPath === "string" &&
+					typeof (c as Record<string, unknown>).mcpConfigSnippet === "string",
+			);
+		}
+	}
+	if (raw.templates && typeof raw.templates === "object") {
+		const t = raw.templates as Record<string, unknown>;
+		if (typeof t.dir === "string" && t.dir.length > 0) config.templates.dir = t.dir;
 	}
 }
 

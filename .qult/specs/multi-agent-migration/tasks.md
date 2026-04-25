@@ -6,15 +6,15 @@
 **Verify**: `bun run typecheck && bun run build && node dist/cli.mjs --version`
 **Scaffold**: true
 
-- [ ] T1.1: `package.json` を Node.js 配布用に更新する（`bin.qult: ./dist/cli.mjs`、`exports`、`engines: {node: ">=20"}`、`files: ["dist/", "src/templates/bundled/"]`、`devDependencies` に `tsup` と `@types/node` を追加、`@types/bun` を削除）
-- [ ] T1.2: `tsup.config.ts` を新規作成する（CLI エントリ `src/cli/index.ts` と MCP server エントリ `src/mcp/server.ts` の 2 エントリ、ESM 出力、`.md`/`.toml` を `text` ローダで埋め込む設定）
-- [ ] T1.3: `tsconfig.json` を Node.js 20 向けに更新する（`target: ES2022`、`module: NodeNext`、`moduleResolution: NodeNext`、`lib` から `dom` を除去）
-- [ ] T1.4: `src/types.ts` を移植する（`Bun.*` 参照がないことを確認し、型定義をそのまま `src/types.ts` に配置）
-- [ ] T1.5: `src/state/fs.ts` を Node.js 移植する（`atomicWrite`・`readJson`・`writeJson` を `node:fs/promises` + `node:os` の `tmpdir()` ベースに実装）
-- [ ] T1.6: `src/state/paths.ts`・`json-state.ts`・`gate-state.ts`・`spec.ts`・`tasks-md.ts`・`wave-md.ts`・`audit-log.ts`・`config.ts` を移植する（`Bun.*` 参照を `node:fs`・`node:path` に置換し、`QultConfig` の `integrations`/`templates` セクションの型定義を追加）
-- [ ] T1.7: `src/detector/network.ts` を新規作成する（`isNetworkAvailable(): Promise<boolean>` を `fetch` + `AbortController` で実装）
-- [ ] T1.8: `src/cli/index.ts` の最小スタブを作成する（`--version` のみ応答するエントリポイント。他サブコマンドは後続 Wave で実装）
-- [ ] T1.9: `__tests__/state.test.ts` を作成して smoke test を追加する（`atomicWrite` の読み書き往復・`readJson` の存在しないファイルへの fallback を検証）
+- [x] T1.1: `package.json` を Node.js 配布用に更新する（`bin.qult: ./dist/cli.mjs`、`exports`、`engines: {node: ">=20"}`、`files: ["dist/", "src/templates/bundled/"]`、`devDependencies` に `tsup` と `@types/node` を追加、`@types/bun` を削除）
+- [x] T1.2: `tsup.config.ts` を新規作成する（CLI エントリ `src/cli/index.ts` と MCP server エントリ `src/mcp/server.ts` の 2 エントリ、ESM 出力、`.md`/`.toml` を `text` ローダで埋め込む設定）
+- [x] T1.3: `tsconfig.json` を Node.js 20 向けに更新する（`target: ES2022`、`module: NodeNext`、`moduleResolution: NodeNext`、`lib` から `dom` を除去）
+- [x] T1.4: `src/types.ts` を移植する（`Bun.*` 参照がないことを確認し、型定義をそのまま `src/types.ts` に配置）
+- [x] T1.5: `src/state/fs.ts` を Node.js 移植する（`atomicWrite`・`readJson`・`writeJson` を `node:fs/promises` + `node:os` の `tmpdir()` ベースに実装）
+- [x] T1.6: `src/state/paths.ts`・`json-state.ts`・`gate-state.ts`・`spec.ts`・`tasks-md.ts`・`wave-md.ts`・`audit-log.ts`・`config.ts` を移植する（`Bun.*` 参照を `node:fs`・`node:path` に置換し、`QultConfig` の `integrations`/`templates` セクションの型定義を追加）
+- [x] T1.7: `src/detector/network.ts` を新規作成する（`isNetworkAvailable(): Promise<boolean>` を `fetch` + `AbortController` で実装）
+- [x] T1.8: `src/cli/index.ts` の最小スタブを作成する（`--version` のみ応答するエントリポイント。他サブコマンドは後続 Wave で実装）
+- [x] T1.9: `__tests__/state.test.ts` を作成して smoke test を追加する（`atomicWrite` の読み書き往復・`readJson` の存在しないファイルへの fallback を検証）
 
 **Consumers**: 後続全 Wave（`src/state/` は MCP・Detector・CLI の共通依存）
 
