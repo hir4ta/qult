@@ -1,5 +1,5 @@
-# Build output (dist/ is tracked — required for plugin distribution)
-# dist/
+# Build output — npm publish bundles dist/ from package.json#files; no need to track.
+dist/
 node_modules/
 .task/
 

@@ -63,6 +63,12 @@ async function main(): Promise<number> {
 	const cmd = argv[0];
 	const rest = argv.slice(1);
 
+	// Subcommand-level --help / -h falls back to global help.
+	if (rest.includes("--help") || rest.includes("-h")) {
+		process.stdout.write(HELP);
+		return 0;
+	}
+
 	switch (cmd) {
 		case "init": {
 			const { flags } = parseArgs(rest, ["agent"]);

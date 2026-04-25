@@ -91,11 +91,11 @@
 **Goal**: 旧 `plugin/` ディレクトリ・`build.ts`・`src/hooks/`（存在する場合）を削除し、npm 配布物として完結した状態を確認する。E2E smoke test が全通過することを検証してから削除を実行する。
 **Verify**: `bun run typecheck && bun run test && bun run build && npm pack --dry-run && node dist/cli.mjs init --help`
 
-- [ ] T6.1: E2E smoke test `__tests__/e2e/init.test.ts` を追加する（一時ディレクトリを作成し `node dist/cli.mjs init --agent claude --force` を実行して `.mcp.json`・`AGENTS.md`・`.claude/commands/` の生成を検証。その後 `node dist/cli.mjs mcp` が起動して `tools/list` に応答することを確認）
-- [ ] T6.2: `plugin/` ディレクトリを削除する（`plugin/dist/`・`plugin/rules/`・`plugin/skills/`・`plugin/agents/`・`plugin/.claude-plugin/` を含む全体を削除）
-- [ ] T6.3: `build.ts`（旧 Bun ビルドスクリプト）と `src/hooks/`（存在する場合）を削除する
-- [ ] T6.4: `package.json` の `files`・`bin`・`exports`・`scripts` を最終確認する（`npm pack --dry-run` の出力で `dist/cli.mjs`・`dist/mcp-server.mjs`・`src/templates/bundled/**` が含まれ、`plugin/`・`src/`（`templates/bundled/` 除く）・`__tests__/` が除外されていることを確認）
-- [ ] T6.5: `.gitignore` を更新する（`plugin/dist/` の除外エントリを削除し、`dist/` のみを gitignore に追加。`.qult/state/` の ignore が残っていることを確認）
-- [ ] T6.6: `README.md` を `npx qult` ベースで全面更新する（インストール方法・4 サブコマンドの使用例・4 Integration の対応状況・MCP server の登録方法・`.qult/` ディレクトリ規約を記載）
+- [x] T6.1: E2E smoke test `__tests__/e2e/init.test.ts` を追加する（一時ディレクトリを作成し `node dist/cli.mjs init --agent claude --force` を実行して `.mcp.json`・`AGENTS.md`・`.claude/commands/` の生成を検証。その後 `node dist/cli.mjs mcp` が起動して `tools/list` に応答することを確認）
+- [x] T6.2: `plugin/` ディレクトリを削除する（`plugin/dist/`・`plugin/rules/`・`plugin/skills/`・`plugin/agents/`・`plugin/.claude-plugin/` を含む全体を削除）
+- [x] T6.3: `build.ts`（旧 Bun ビルドスクリプト）と `src/hooks/`（存在する場合）を削除する
+- [x] T6.4: `package.json` の `files`・`bin`・`exports`・`scripts` を最終確認する（`npm pack --dry-run` の出力で `dist/cli.mjs`・`dist/mcp-server.mjs`・`src/templates/bundled/**` が含まれ、`plugin/`・`src/`（`templates/bundled/` 除く）・`__tests__/` が除外されていることを確認）
+- [x] T6.5: `.gitignore` を更新する（`plugin/dist/` の除外エントリを削除し、`dist/` のみを gitignore に追加。`.qult/state/` の ignore が残っていることを確認）
+- [x] T6.6: `README.md` を `npx qult` ベースで全面更新する（インストール方法・4 サブコマンドの使用例・4 Integration の対応状況・MCP server の登録方法・`.qult/` ディレクトリ規約を記載）
 
 **Consumers**: 全 AI ツールユーザー（公開後）

@@ -1,148 +1,100 @@
 # qult
 
 > **qu**ality + c**ult** — fanatical devotion to quality.
-> A Claude Code plugin that catches what Claude misses.
+> A multi-agent SDD + harness engineering toolkit, distributed as an `npx` command.
 
 [日本語 / README.ja.md](README.ja.md)
 
-## What qult does
+## What qult is
 
-qult is a **quality aid for Claude** — it adds capabilities Claude cannot reliably do alone:
+qult installs a structured Spec-Driven Development workflow and a stateful MCP server
+into your project, usable from any AI coding tool that supports MCP — Claude Code,
+OpenAI Codex, Cursor, and Gemini CLI. It writes the right config files for every tool
+you have, keeps a single AGENTS.md as the source of truth, and tracks spec / wave /
+test / review state under `.qult/`.
 
-1. **Spec-Driven Development pipeline** (`/qult:spec`) — drafts `requirements.md` (EARS notation) → mandatory `/qult:clarify` round → `design.md` → `tasks.md` (Wave breakdown), with an independent `spec-evaluator` gate at every phase. Markdown is the single source of truth and is committed alongside the code it describes.
-2. **Wave-based implementation** — Wave = a bounded, individually-test-passing chunk. Implement freely with `/qult:wip` (auto-prefixes `[wave-NN]`), close with `/qult:wave-complete` which runs tests + Tier-1 detectors + records the commit Range. Reviewers can read `git log --grep '\[wave-02\]'` to see exactly what each Wave shipped.
-3. **Independent review** (`/qult:review`) — 4 reviewers (spec / quality / security / adversarial) run in **separate subagent contexts** with reviewer model diversity (sonnet × 2 + opus × 2). The implementing model never grades itself. Research: self-review misses **64.5% of self-introduced bugs**¹; family-diverse reviewers reduce correlated errors.
-4. **External SAST + CVE knowledge** — `security-check` integrates Semgrep rulesets; `dep-vuln-check` queries osv-scanner against installed packages. Claude alone does not run SAST and does not know CVE data.
-5. **Hallucinated package detection** — before an install command runs, `hallucinated-package-check` verifies the package actually exists in the registry. AI-assisted commits leak bad package names at **2× the baseline rate**².
-6. **Consistency-guaranteed test quality checks** — `test-quality-check` always flags empty tests, always-true assertions, and trivial assertions. Reviewers can spot these when they happen to read the test file, but the detector flags them *every time*.
+Inspired by [GitHub spec-kit](https://github.com/github/spec-kit) and
+[OpenSpec](https://github.com/Fission-AI/OpenSpec). The prior version of qult was a
+Claude Code Plugin; v1.1 onwards is a tool-agnostic CLI.
 
-That's it. No hooks, no workflow hijacking. qult is a **toolbox**, not a guardrail — it provides sharp tools for you to reach for.
-
-¹ [AI Code Review Self-Review Failure](https://www.augmentedswe.com/p/ai-code-review-security) · ² [GitGuardian 2026](https://blog.gitguardian.com/state-of-secrets-sprawl-2026/)
-
-## Measured quality uplift
-
-| Gap (Claude alone) | What qult adds | Observable outcome |
-|---|---|---|
-| Plan-as-prompt only, lost on session end | Spec markdown committed to repo | Future sessions / reviewers can read what was promised |
-| Ambiguous requirements slip through | Mandatory `/qult:clarify` (5–10 q × ≤3 rounds) | Open Questions resolved before design starts |
-| Self-review blind spots | Independent 4-stage review | Bugs caught that the author missed |
-| Spec-author blind spots | `spec-evaluator` in fresh context (4 dimensions, threshold 18/17/16) | Missing edge cases / vague AC / scope drift flagged before implementation |
-| No SAST | Semgrep integration | OWASP Top 10 patterns surfaced |
-| No CVE data | osv-scanner integration | Vulnerable dependencies flagged before commit |
-| Package-name hallucination | Registry verification | Typosquatting / nonexistent packages blocked |
-| Review attention drift (tests skimmed) | test-quality detector always-on | Empty tests / trivial assertions flagged every time |
-| "Which commits implement Wave 2?" guesswork | Wave-NN.md records commit range | `git log Range` answers it precisely |
-
-**When qult is strongest:**
-- Multi-Wave features where the spec is non-trivial
-- Production code with 5+ file changes
-- Security-sensitive work (auth, input parsing, crypto, external APIs)
-- Dependency-heavy changes (new packages, version bumps)
-
-**When qult is overkill:**
-- Quick single-file fixes (typo, lockfile bump)
-- Throwaway prototypes
-- Spikes and experiments
-- → Just skip the spec / review steps. qult is opt-in; no hook will block you.
-
-## Install
+## Quick start
 
 ```bash
-# requires Bun: https://bun.sh
-brew install semgrep         # recommended (used by security reviewer)
-brew install osv-scanner     # recommended (used by dep-vuln-check)
-
-/plugin marketplace add hir4ta/qult
-/plugin install qult@qult
-/qult:init                   # bootstrap .qult/ + install rules to ~/.claude/rules/
+# In your project
+npx qult init                # auto-detects .claude/ / .cursor/ / .codex/ / .gemini/
+npx qult init --agent claude # or pick one explicitly
+npx qult check               # snapshot of SDD state
 ```
 
-`/qult:init` creates a `.qult/` directory in your project (`specs/` and `config.json` are committed; `state/` is gitignored). Workflow rules are installed to `~/.claude/rules/qult-*.md`.
+`init` writes:
 
-After updating the qult plugin later, run `/qult:update` to refresh rules.
+- `AGENTS.md` (the workflow source of truth, with a `<!-- @generated -->` block)
+- per-tool context file (`CLAUDE.md`, `GEMINI.md`, `.cursor/rules/qult.mdc`)
+- per-tool slash commands (`.claude/commands/qult-*.md`, `.gemini/commands/qult-*.toml`)
+- per-tool MCP server registration (`.mcp.json`, `.cursor/mcp.json`,
+  `.gemini/settings.json`, `.codex/config.toml`)
+- `.qult/config.json` recording which integrations are enabled
 
-## Lifecycle in 30 seconds
+## Subcommands
+
+| command | what it does |
+|---------|--------------|
+| `qult init` | bootstrap qult; choose integrations |
+| `qult update` | refresh integration files from the latest bundled templates (`@generated` blocks only) |
+| `qult check [--detect] [--json]` | print SDD state; `--detect` runs Tier 1 detectors |
+| `qult add-agent <key> [--force]` | add a single integration after init |
+| `qult mcp` | start the stdio JSON-RPC MCP server (called by tools — you usually do not run this) |
+
+Common flags: `--agent <key>` (init only), `--force`, `--json`, `--version`, `--help`.
+
+## SDD lifecycle (driven by the MCP server)
+
+1. `/qult:spec <name> <description>` — drafts `.qult/specs/<name>/{requirements,design,tasks}.md`
+   with mandatory clarify and per-phase quality gate.
+2. `/qult:wave-start` → implement → `/qult:wave-complete` — per Wave, with a
+   `[wave-NN]`-prefixed conventional commit and verified commit-range integrity.
+3. `/qult:review` — independent 4-stage review (spec compliance / code quality / security /
+   adversarial). Required before commit when 5+ source files changed.
+4. `/qult:finish` — archive the spec, then merge / open a PR / hold / discard.
+
+## Supported AI tools
+
+- **Claude Code** — `.claude/commands/`, `CLAUDE.md`, `.mcp.json`
+- **OpenAI Codex CLI** — `AGENTS.md`, `.codex/config.toml`
+- **Cursor** — `.cursor/rules/qult.mdc`, `.cursor/mcp.json`
+- **Gemini CLI** — `.gemini/commands/*.toml`, `GEMINI.md`, `.gemini/settings.json`
+
+All four register the same `qult` MCP server (`npx qult mcp`) so the workflow tools
+behave identically across editors.
+
+## `.qult/` directory layout
+
+```
+.qult/
+├── config.json         # committed: integrations.enabled, review thresholds, etc.
+├── specs/              # committed: spec markdown
+│   ├── <name>/{requirements,design,tasks}.md + waves/wave-NN.md
+│   └── archive/<name>/ # finished specs
+└── state/              # gitignored: ephemeral test/review/finish state
+```
+
+## Requirements
+
+- Node.js 20 or newer
+- An AI coding tool that speaks MCP (any of the four above; `generic` AGENTS.md-only
+  fallback is planned for a future version)
+- Optional: `semgrep` (for security-check), `osv-scanner` (for dep-vuln-check)
+
+## Development
 
 ```bash
-/qult:spec add-oauth "OAuth login with refresh tokens"
-   → drafts requirements.md, runs /qult:clarify (mandatory),
-     drafts design.md, drafts tasks.md (Wave breakdown).
-     Each phase passes a spec-evaluator gate (threshold 18/17/16).
-
-/qult:wave-start                # records HEAD as Wave start commit
-…implement Wave 1…
-/qult:wip "OAuth handler skeleton"   # `[wave-01] wip: OAuth handler skeleton`
-/qult:wip "tests"
-/qult:wave-complete             # runs tests + detectors, commits, records Range
-
-# repeat /qult:wave-start … /qult:wave-complete per Wave
-
-/qult:review                    # at spec completion, 4-stage independent review
-/qult:finish                    # archive .qult/specs/add-oauth/ → archive/, then merge/PR/hold/discard
+npm install
+npm test           # vitest run
+npm run typecheck  # tsc --noEmit
+npm run lint       # biome check src/
+npm run build      # tsup → dist/{cli,mcp-server}.js
 ```
 
-## Commands
+## License
 
-| Command | What |
-|---|---|
-| `/qult:init` | Bootstrap `.qult/` and install workflow rules (run once per project) |
-| `/qult:update` | Refresh rules from the plugin cache (run after plugin update) |
-| `/qult:status` | Current state (active spec, pending fixes, tests, review). `/qult:status archive` lists archived specs |
-| `/qult:spec` | Start a new spec — runs requirements → clarify → design → tasks |
-| `/qult:clarify` | Re-run clarification on the active spec when scope changes |
-| `/qult:wave-start` | Record the start commit of the next incomplete Wave |
-| `/qult:wave-complete` | Test + detector + commit + record Range. Closes the current Wave |
-| `/qult:wip` | Make a `[wave-NN] wip: …` commit during a Wave |
-| `/qult:review` | 4-stage independent review at spec completion |
-| `/qult:finish` | Archive spec + merge/PR/hold/discard |
-| `/qult:debug` | Structured root-cause debugging |
-| `/qult:skip` | Temporarily disable a detector |
-| `/qult:config` | View / change `.qult/config.json` |
-| `/qult:doctor` | Health check (`.qult/` layout, `.gitignore`, MCP, no legacy state) |
-| `/qult:uninstall` | Remove qult cleanly |
-
-## Reviewer model mix
-
-| Agent | Model | Why |
-|---|---|---|
-| spec-generator | sonnet | Generation across requirements / design / tasks (phase-aware) |
-| spec-clarifier | **opus** | 5–10 question generation + answer-folding |
-| spec-evaluator | **opus** | 3-phase gate — bad spec poisons everything downstream |
-| spec-reviewer | sonnet | Mechanical spec-vs-code check |
-| quality-reviewer | sonnet | Design judgment, fast iteration |
-| **security-reviewer** | **opus** | High-stakes — **45% of AI code has vulnerabilities**³ |
-| **adversarial-reviewer** | **opus** | Final guardian — edge cases, silent failures |
-
-Override via `review.models.*` keys in `.qult/config.json` or `QULT_REVIEW_MODEL_*` env vars.
-
-³ [Veracode GenAI Code Security](https://www.veracode.com/blog/genai-code-security-report/)
-
-## Honest limits
-
-- **Advisory, not enforcement**: rules at `~/.claude/rules/qult-*.md` are prompt-level guidance. Research (AgentPex) shows **83% of agent traces contain at least one procedural violation** — rules are usually followed, but not reliably. You (the architect) need to actually invoke the skills, or accept that they may be skipped.
-- **Review has a token cost**: `/qult:review` spawns 4 subagents reading the diff. Medium changes ≈ 40–100k tokens. qult runs review at **spec completion only** (not per Wave) to keep cost bounded.
-- **Detectors are pattern/AST-based, biased toward TypeScript-ish codebases**: security-check and test-quality-check cover multi-language basics, but Python/Go/Rust projects get reduced fidelity.
-- **Single-architect tool**: state writes use atomic rename without locking. Concurrent worktrees editing the same `.qult/` is out-of-scope (clone the repo per worktree if you need parallelism).
-- **Claude Code only**: not currently usable from Cursor / Gemini CLI / Copilot. Markdown is portable but the orchestration uses Claude-specific subagents.
-
-## Uninstall
-
-```bash
-/qult:uninstall                 # interactive: removes ~/.claude/rules/qult-*.md, optional .qult/
-/plugin → uninstall qult
-```
-
-## Philosophy
-
-```
-qult is a Claude aid, not a perfect harness.
-Harness engineering research inspires the design — it is not the design.
-Markdown is the source of truth.
-When in doubt, pick the lighter option.
-Add a feature only if Claude cannot do it alone.
-```
-
-## Stack
-
-TypeScript / Bun 1.3+ / vitest / Biome / `.qult/state/*.json` (atomic-rename file I/O, zero npm deps)
+MIT
