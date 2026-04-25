@@ -12,6 +12,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteAt } from "../templates/fs.ts";
 import { assertConfinedToProject, type GenerationContext, type IntegrationBase } from "./base.ts";
+import { resolveMcpCommand } from "./mcp-command.ts";
 import { writeJsonMcpServer } from "./mcp-util.ts";
 import { buildSkillFile } from "./skill-builder.ts";
 
@@ -76,10 +77,11 @@ export const ClaudeIntegration: IntegrationBase = {
 	},
 
 	async registerMcpServer(ctx: GenerationContext) {
+		const cmd = resolveMcpCommand();
 		writeJsonMcpServer(
 			join(ctx.projectRoot, ".mcp.json"),
 			MCP_KEY,
-			{ type: "stdio", command: "npx", args: ["-y", "@hir4ta/qult", "mcp"] },
+			{ type: "stdio", command: cmd.command, args: cmd.args },
 			ctx.projectRoot,
 		);
 	},

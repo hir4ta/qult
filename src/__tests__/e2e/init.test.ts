@@ -30,8 +30,11 @@ afterAll(() => {
 
 describe("e2e: init + MCP server", () => {
 	it("init --agent claude --force creates the full file tree", () => {
+		// Force npx-style MCP registration so the assertion below matches the
+		// published-binary behavior regardless of where `dist/cli.js` lives.
 		execFileSync(process.execPath, [CLI, "init", "--agent", "claude", "--force", "--json"], {
 			cwd: projectRoot,
+			env: { ...process.env, QULT_FORCE_NPX_MCP: "1" },
 		});
 		expect(existsSync(join(projectRoot, ".mcp.json"))).toBe(true);
 		expect(existsSync(join(projectRoot, "AGENTS.md"))).toBe(true);

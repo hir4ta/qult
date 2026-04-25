@@ -25,8 +25,14 @@ function ctx(): GenerationContext {
 
 beforeEach(() => {
 	projectRoot = mkdtempSync(join(tmpdir(), "qult-int-"));
+	// Force the npx-style MCP registration during tests so the assertions
+	// match published behavior (the `resolveMcpCommand()` heuristic returns
+	// the "direct qult" form when running from source — which is correct in
+	// production but not what we want to assert against here).
+	process.env.QULT_FORCE_NPX_MCP = "1";
 });
 afterEach(() => {
+	delete process.env.QULT_FORCE_NPX_MCP;
 	rmSync(projectRoot, { recursive: true, force: true });
 });
 

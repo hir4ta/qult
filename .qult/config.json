@@ -40,5 +40,10 @@
   },
   "trivial_change": {
     "warn_changed_files_threshold": 5
+  },
+  "integrations": {
+    "enabled": [
+      "claude"
+    ]
   }
 }

@@ -15,6 +15,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { atomicWriteAt } from "../templates/fs.ts";
 import { assertConfinedToProject, type GenerationContext, type IntegrationBase } from "./base.ts";
+import { resolveMcpCommand } from "./mcp-command.ts";
 import { buildSkillFile } from "./skill-builder.ts";
 
 /**
@@ -32,11 +33,15 @@ const MCP_BLOCK_END = "# @qult-mcp-end";
 const BEGIN_LINE_RE = /^# @qult-mcp-begin \(managed by qult\)\r?$/m;
 const END_LINE_RE = /^# @qult-mcp-end\r?$/m;
 
-const MCP_BLOCK = `${MCP_BLOCK_BEGIN}
+function buildMcpBlock(): string {
+	const cmd = resolveMcpCommand();
+	const argsToml = cmd.args.map((a) => JSON.stringify(a)).join(", ");
+	return `${MCP_BLOCK_BEGIN}
 [mcp_servers.qult]
-command = "npx"
-args = ["-y", "@hir4ta/qult", "mcp"]
+command = ${JSON.stringify(cmd.command)}
+args = [${argsToml}]
 ${MCP_BLOCK_END}`;
+}
 
 export const CodexIntegration: IntegrationBase = {
 	key: "codex",
@@ -77,17 +82,20 @@ export const CodexIntegration: IntegrationBase = {
 			const endMatch = END_LINE_RE.exec(remainder);
 			if (endMatch) {
 				const endIdx = beginIdx + endMatch.index + endMatch[0].length;
-				atomicWriteAt(path, `${existing.slice(0, beginIdx)}${MCP_BLOCK}${existing.slice(endIdx)}`);
+				atomicWriteAt(
+					path,
+					`${existing.slice(0, beginIdx)}${buildMcpBlock()}${existing.slice(endIdx)}`,
+				);
 				process.stderr.write(`[qult] codex MCP updated in ${path}\n`);
 				return;
 			}
-			atomicWriteAt(path, `${existing.slice(0, beginIdx)}${MCP_BLOCK}\n`);
+			atomicWriteAt(path, `${existing.slice(0, beginIdx)}${buildMcpBlock()}\n`);
 			process.stderr.write(`[qult] codex MCP repaired (truncated marker) in ${path}\n`);
 			return;
 		}
 		const trimmed = existing.replace(/\n+$/, "");
 		const prefix = trimmed.length === 0 ? "" : `${trimmed}\n\n`;
-		atomicWriteAt(path, `${prefix}${MCP_BLOCK}\n`);
+		atomicWriteAt(path, `${prefix}${buildMcpBlock()}\n`);
 		process.stderr.write(
 			`[qult] codex MCP registered in ${path} (user-level config — affects all your codex projects)\n`,
 		);
