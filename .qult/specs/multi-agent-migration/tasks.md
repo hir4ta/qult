@@ -74,13 +74,13 @@
 **Goal**: 5 サブコマンド（`init`・`update`・`check`・`add-agent`・`mcp`）を備えた完全な CLI を実装し、冪等性・`@generated` マーカー更新・`--json` 出力・非 TTY フォールバックがすべて動作する状態にする。
 **Verify**: `bun run typecheck && bun run build && node dist/cli.mjs --help && node dist/cli.mjs --version`
 
-- [ ] T5.1: `src/cli/index.ts` を完成させる（`process.argv` 走査の手書きパーサ・サブコマンド dispatch・`--version`/`--help`/`--json` の全グローバルオプション処理・Node.js バージョンチェック（<20 なら exit 1）を実装）
-- [ ] T5.2: `src/cli/prompt.ts` を作成する（`process.stdout.isTTY` 判定・`node:readline` の `question()` を使った手書き select UI を実装。非 TTY 時は呼ばれない前提で設計）
-- [ ] T5.3: `src/cli/commands/init.ts` を作成する（Integration 自動検出 → TTY 選択 / 非 TTY フォールバック → AGENTS.md 生成 → 各 Integration ファイル生成 → `.qult/config.json` の `integrations.enabled` 書き込み → 冪等性チェックを実装。`--force` で確認スキップ）
-- [ ] T5.4: `src/cli/commands/update.ts` を作成する（`config.json` から enabled 読み込み → 各 Integration の `@generated` マーカーブロックのみを最新テンプレートで置換。`.qult/specs/` と `.qult/state/` は変更しない）
-- [ ] T5.5: `src/cli/commands/check.ts` を作成する（`.qult/state/current.json` から `active_spec`・`test_passed_at`・`review_completed_at`・`pending_fixes` を読み込み表示。`--detect` フラグで 5 Detector を実行し HIGH 以上が存在すれば exit 1。`--json` で JSON 出力。読み取り専用（state への書き込み禁止））
-- [ ] T5.6: `src/cli/commands/add-agent.ts` を作成する（単一 Integration を追加。既存ファイルがあれば exit 1・`--force` で上書き。未知の key は利用可能 integration 名リストをエラーに含めて exit 1）
-- [ ] T5.7: `__tests__/cli/` に統合テストを追加する（`--version` の出力文字列が `package.json` の `version` と一致すること・`check` の読み取り専用性・`add-agent` の未知 key エラーメッセージを検証）
+- [x] T5.1: `src/cli/index.ts` を完成させる（`process.argv` 走査の手書きパーサ・サブコマンド dispatch・`--version`/`--help`/`--json` の全グローバルオプション処理・Node.js バージョンチェック（<20 なら exit 1）を実装）
+- [x] T5.2: `src/cli/prompt.ts` を作成する（`process.stdout.isTTY` 判定・`node:readline` の `question()` を使った手書き select UI を実装。非 TTY 時は呼ばれない前提で設計）
+- [x] T5.3: `src/cli/commands/init.ts` を作成する（Integration 自動検出 → TTY 選択 / 非 TTY フォールバック → AGENTS.md 生成 → 各 Integration ファイル生成 → `.qult/config.json` の `integrations.enabled` 書き込み → 冪等性チェックを実装。`--force` で確認スキップ）
+- [x] T5.4: `src/cli/commands/update.ts` を作成する（`config.json` から enabled 読み込み → 各 Integration の `@generated` マーカーブロックのみを最新テンプレートで置換。`.qult/specs/` と `.qult/state/` は変更しない）
+- [x] T5.5: `src/cli/commands/check.ts` を作成する（`.qult/state/current.json` から `active_spec`・`test_passed_at`・`review_completed_at`・`pending_fixes` を読み込み表示。`--detect` フラグで 5 Detector を実行し HIGH 以上が存在すれば exit 1。`--json` で JSON 出力。読み取り専用（state への書き込み禁止））
+- [x] T5.6: `src/cli/commands/add-agent.ts` を作成する（単一 Integration を追加。既存ファイルがあれば exit 1・`--force` で上書き。未知の key は利用可能 integration 名リストをエラーに含めて exit 1）
+- [x] T5.7: `__tests__/cli/` に統合テストを追加する（`--version` の出力文字列が `package.json` の `version` と一致すること・`check` の読み取り専用性・`add-agent` の未知 key エラーメッセージを検証）
 
 **Consumers**: Wave 6（E2E smoke test が CLI を直接呼び出す）
 
