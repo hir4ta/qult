@@ -49,6 +49,7 @@ export function emptySnapshot(now: number): Snapshot {
 			id,
 			status: "never-run" as DetectorStatus,
 			pendingFixes: 0,
+			filesScanned: null,
 			lastRunAt: null,
 		})),
 		reviews: emptyReviews(),
@@ -205,7 +206,7 @@ function readDetectorSummaries(): DetectorSummary[] {
 	return ALL_DETECTOR_IDS.map((id) => {
 		const pendingFixes = counts.get(id) ?? 0;
 		const status: DetectorStatus = pendingFixes > 0 ? "fail" : "never-run";
-		return { id, status, pendingFixes, lastRunAt: null };
+		return { id, status, pendingFixes, filesScanned: null, lastRunAt: null };
 	});
 }
 

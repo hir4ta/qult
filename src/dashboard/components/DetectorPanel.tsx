@@ -24,6 +24,7 @@ const STATUS_COLOR: Record<DetectorStatus, string> = {
 	skipped: COLORS.muted,
 	"never-run": COLORS.muted,
 	running: COLORS.primary,
+	idle: COLORS.muted,
 };
 
 export function DetectorPanel({
@@ -59,6 +60,11 @@ export function DetectorPanel({
 					{d.pendingFixes > 0 && (
 						<Text color={COLORS.warning}>
 							{d.pendingFixes} fix{d.pendingFixes === 1 ? "" : "es"}
+						</Text>
+					)}
+					{d.pendingFixes === 0 && d.filesScanned !== null && d.status !== "running" && (
+						<Text color={COLORS.muted}>
+							({d.filesScanned} file{d.filesScanned === 1 ? "" : "s"})
 						</Text>
 					)}
 				</Box>

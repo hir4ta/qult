@@ -19,6 +19,7 @@ function freshSnapshot(): Snapshot {
 			id,
 			status: "never-run" as const,
 			pendingFixes: 0,
+			filesScanned: null,
 			lastRunAt: null,
 		})),
 		reviews: emptyReviews(),

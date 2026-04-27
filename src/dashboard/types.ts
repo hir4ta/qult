@@ -30,12 +30,22 @@ export type DetectorId =
 	| "test-quality"
 	| "export";
 
-export type DetectorStatus = "pass" | "warn" | "fail" | "skipped" | "never-run" | "running";
+export type DetectorStatus =
+	| "pass"
+	| "warn"
+	| "fail"
+	| "skipped"
+	| "never-run"
+	| "running"
+	/** Ran with zero files to scan — distinguishes from a real `pass`. */
+	| "idle";
 
 export interface DetectorSummary {
 	id: DetectorId;
 	status: DetectorStatus;
 	pendingFixes: number;
+	/** Files fed to the detector. Null when unknown (initial, skipped, etc.). */
+	filesScanned: number | null;
 	lastRunAt: number | null;
 }
 

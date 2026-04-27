@@ -86,6 +86,7 @@ describe("DetectorPanel", () => {
 			id,
 			status: i === 0 ? ("fail" as const) : ("never-run" as const),
 			pendingFixes: i === 0 ? 2 : 0,
+			filesScanned: null,
 			lastRunAt: null,
 		}));
 		const frame = render(<DetectorPanel detectors={detectors} />).lastFrame() ?? "";

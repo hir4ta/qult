@@ -62,12 +62,20 @@ function listChangedFiles(cwd: string): string[] {
 	}
 }
 
-function classify(result: DetectorResult): DetectorStatus {
+function classify(result: DetectorResult, filesScanned: number): DetectorStatus {
 	if (result.skipped) return "skipped";
-	if (result.fixes.length === 0) return "pass";
+	if (result.fixes.length === 0) {
+		// Pure file-based detectors: an empty file list means we didn't
+		// actually look at anything, which is materially different from
+		// "passed". The orchestrator-only detectors (dep-vuln, hallucinated)
+		// don't take per-file input — for those a 0-file pass is real.
+		return filesScanned > 0 ? "pass" : "idle";
+	}
 	if (result.fixes.some((f) => (f.errors?.length ?? 0) > 0)) return "fail";
 	return "warn";
 }
+
+const FILE_BASED_DETECTORS = new Set(["security-check", "test-quality-check", "export-check"]);
 
 export interface DetectorScanState {
 	/** Per-detector summary keyed by DetectorId. */
@@ -82,6 +90,7 @@ export function useDetectorScan(): DetectorScanState {
 			id,
 			status: "running" as DetectorStatus,
 			pendingFixes: 0,
+			filesScanned: null,
 			lastRunAt: null,
 		})),
 	);
@@ -98,13 +107,16 @@ export function useDetectorScan(): DetectorScanState {
 				const result = e.result;
 				if (!result) return;
 				const id = NAME_TO_ID[e.detector];
+				const isFileBased = FILE_BASED_DETECTORS.has(e.detector);
+				const filesScanned = isFileBased ? files.length : 0;
 				setDetectors((prev) =>
 					prev.map((d) =>
 						d.id === id
 							? {
 									...d,
-									status: classify(result),
+									status: classify(result, filesScanned),
 									pendingFixes: result.fixes.length,
+									filesScanned: isFileBased ? files.length : null,
 									lastRunAt: Date.now(),
 								}
 							: d,
